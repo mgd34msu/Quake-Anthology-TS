@@ -10,6 +10,10 @@ import type { LaunchChoice, ProviderReference } from '../../src/contracts/conten
 import { prepareLaunchMountPlan } from '../../src/content/catalog/launch.ts';
 import { selectedWeaponResources } from '../../src/content/catalog/weapons.ts';
 import { serverDefinitionsForRecipe, serverDefinitionsForSelection } from '../../src/settings/server/selection.ts';
+import { prepareInitialConfiguration } from '../../src/app/bootstrap/configuration.ts';
+import { createIdentityOwner, type ClientId } from '../../src/contracts/identity.ts';
+import { EngineSession, type SessionSeat } from '../../src/world/session/index.ts';
+import { ConfigStore } from '../../src/settings/config.ts';
 
 function options(game: string) {
   const parsed = parseApplicationCommand(['--game', game, '--map', 'missing']);
@@ -34,6 +38,36 @@ async function fixture() {
   const catalog = await discoverInstalledContent({ corpusRoot: root, userContentRoot, discoverMods: false, products });
   return { root, catalog };
 }
+
+test('real initial configuration retains actual two-seat owners and mixed movement before a missing BSP', async () => {
+  const { root, catalog } = await fixture();
+  const identity = createIdentityOwner('configuration-before-world');
+  const session = new EngineSession(identity, { kind: 'local' });
+  try {
+    const selected = { ...options('q2-classic-baseq2'), seats: 2, movement: 'q1', userContentRoot: join(root, 'user') } satisfies ReturnType<typeof options>;
+    const product = catalog.require(selected.product);
+    await writeFile(join(root, product.expectation.contentDirectory, 'default.cfg'), 'bind w +forward\n');
+    const preset = applicationConfigurationPreset(catalog, selected);
+    const content = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset, choice: presetChoice(preset.id) });
+    const seats = new Map<ClientId, SessionSeat>();
+    const prepared = await prepareInitialConfiguration(selected, content, session, identity, seats,
+      new ConfigStore(join(root, 'settings')), { print() {} }, [], 1, async () => {});
+    try {
+      expect(prepared.prepared.commands.dialect).toBe('q2-classic');
+      expect(prepared.prepared.movement.dialect).toBe('q1-netquake');
+      expect(seats.size).toBe(2);
+      for (const local of prepared.prepared.seats) {
+        const actual = [...seats.values()].find(seat => seat.id.equals(local.id));
+        if (actual === undefined) throw new Error('Prepared seat did not retain allocated session seat');
+        expect(local.context.origin).toEqual({ kind: 'local-seat', seat: actual.id, client: actual.client.id });
+        expect(local.input.dialect).toBe('q1-netquake');
+      }
+      await expect(resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) })).rejects.toThrow('Required resource is missing');
+      expect(new TextDecoder().decode(await content.mounts.read('default.cfg'))).toBe('bind w +forward\n');
+    } finally { await prepared.image?.close(); await prepared.scripts.close(); }
+    await expect(content.mounts.read('default.cfg')).rejects.toThrow();
+  } finally { session.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test('configuration opens quake.rc/config with a missing map and leaves local resource admission intact', async () => {
   const { root, catalog } = await fixture();

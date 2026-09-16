@@ -1,10 +1,10 @@
+import { openInitialConfigurationContent, prepareInitialConfiguration, configurationDialect, configurationStore } from "./configuration.ts";
 import { readQ1ViewSettings } from "./q1-client-settings.ts";
 import { cloneQ1SourceCvars, registerQ1BotControls } from "./q1-source-cvars.ts";
 import { captureTeamArenaOverrides, readTeamArenaOverrides, saveTeamArenaOverrides, applyTeamArenaOverrides, releaseTeamArenaOverrides, teamArenaArchiveEntries, type TeamArenaOverrides, type OverrideRegistry } from "./team-arena-overrides.ts";
 import { ApplicationConsoleRouting, q1ConsoleServer } from "./console.ts";
-import { PreparedStartup, type PreparedSeatConfiguration } from "./prepared-startup.ts";
-import { createStartupSource, resolveStartupRules } from "./startup-source.ts";
-import { MouseSettings } from "../../input/mouse-settings.ts";
+import { PreparedStartup } from "./prepared-startup.ts";
+import { resolveStartupRules } from "./startup-source.ts";
 import { ConsoleScriptFiles } from "./config-scripts.ts";
 import { consoleConfigRoot } from "./config-scripts.ts";
 import { createStartupScriptReader } from "./startup-config.ts";
@@ -36,7 +36,7 @@ import { ConfigStore } from "../../settings/config.ts";
 import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
-import { parseServerProfile, serverDefinitionsForRecipe, writeServerSetting } from "../../settings/server/index.ts";
+import { parseServerProfile, serverDefinitionsForRecipe, serverDefinitionsForSelection, writeServerSetting } from "../../settings/server/index.ts";
 import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPreferences, readFrontendInput, applyFrontendInput } from "./frontend-preferences.ts";
 import type { FrontendPreferenceOverrides, FrontendPreferenceValues } from "./frontend-preferences.ts";
 import { ApplicationQ2Console, q2OperatorPlayerName } from "./q2-console.ts";
@@ -80,7 +80,7 @@ import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
 import { presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import { applicationPreset, applicationOptionsForRecipe, loadApplicationContent, resolveApplicationTravel } from "./content.ts";
-import type { LoadedApplicationContent } from "./content.ts";
+import type { ApplicationConfigurationContent, LoadedApplicationContent } from "./content.ts";
 import { ApplicationInput, movementDialect } from "./input.ts";
 import type { ApplicationInputCommands, LocalInput, LocalPlayer } from "./input.ts";
 import { mapResourcePath } from "./options.ts";
@@ -93,7 +93,7 @@ import { NativeRenderer } from "./renderer.ts";
 import { GameType, Team, PersistentIndex } from "../../content/q3/base/shared/definitions.ts";
 import { parseTeamArenaPostgame, recordTeamArenaScore, type TeamArenaPostgameStats } from "./team-arena-scores.ts";
 import type { TeamArenaResultService } from "./team-arena-results.ts";
-import { readTeamArenaSkirmish, teamArenaSourceCvars, teamArenaClientCvars, TeamArenaLaunchOverrides, teamArenaServerOverrides, type TeamArenaSkirmish } from "./team-arena-skirmish.ts";
+import { readTeamArenaSkirmish, teamArenaSourceCvars, teamArenaClientCvars, teamArenaServerOverrides, type TeamArenaSkirmish } from "./team-arena-skirmish.ts";
 import { ApplicationSeatUi } from "./ui.ts";
 import { loadMenuArtImage } from "./menu-art.ts";
 import { createSimulation, savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.ts";
@@ -266,6 +266,7 @@ export class Application {
       load: id => queue(() => this.restoreSavedGame(saves.path(id))) };
   }
   private nativeWorldCount = 1;
+  private configurationScripts: ConsoleScriptFiles | null = null;
 
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private worldSimulation: SharedSimulation, private readonly host: ApplicationHost, private readonly identity: IdentityOwner,
@@ -355,126 +356,154 @@ export class Application {
         mode: savedSettings.mode, seed: savedSettings.seed, seats: options.dedicated ? options.seats : humanSlots.length };
       recipe = initialSave.recipe;
     }
-    host.loading?.stage("Loading map...");
-    const content = await loadApplicationContent(options, recipe);
+    host.loading?.stage(initialSave === undefined ? "Preparing configuration..." : "Loading saved world...");
+    const preparation: { readonly kind: "configuration"; readonly content: ApplicationConfigurationContent }
+      | { readonly kind: "restored"; readonly content: LoadedApplicationContent } = initialSave === undefined
+      ? { kind: "configuration", content: await openInitialConfigurationContent(options, recipe) }
+      : { kind: "restored", content: await loadApplicationContent(options, recipe) };
+    const catalog = preparation.content.catalog;
     try {
-      if (recipe !== undefined) options = applicationOptionsForRecipe(options, content);
+      if (recipe !== undefined) options = applicationOptionsForRecipe(options, { catalog, recipe });
+      const definitions = preparation.kind === "configuration" ? serverDefinitionsForSelection(preparation.content.selection)
+        : serverDefinitionsForRecipe(preparation.content.recipe);
       if (options.serverProfilePath !== undefined) {
         const value: unknown = JSON.parse(await Bun.file(options.serverProfilePath).text());
-        options = { ...options, serverProfile: parseServerProfile(value, serverDefinitionsForRecipe(content.recipe)) };
-      } else if (options.serverProfile !== undefined) options = { ...options, serverProfile: parseServerProfile(options.serverProfile, serverDefinitionsForRecipe(content.recipe)) };
-    } catch (error) { await content.close(); throw error; }
-    const product = content.catalog.require(options.product);
-    const inputConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
-    const identity = createIdentityOwner(`quake:${options.product}:${options.map}`);
-    const session = new EngineSession(identity, options.dedicated ? { kind: "headless" } : { kind: "local" });
-    const localSeats = new Map<ClientId, SessionSeat>();
-    let application: Application | null = null;
-    let guestConsole: CommandBuffer | null = null;
-    const restoredClients = new Map<number, SessionClient>();
-    try {
-      host.loading?.stage("Preparing world...");
-      const monsterNavigation = await preloadApplicationMonsterNavigation(content);
-      const sourceArchive = initialSave !== undefined || options.dedicated ? [] : await loadCvarArchive(Application.sourceConfig(options, content),
-        ["source", content.recipe.map.entities.content, content.recipe.map.entities.provider], Application.contentDialect(content));
-      const guestCommands = () => {
-        const commands = guestConsole;
-        if (commands === null) throw new Error("Q3 guest console is unavailable");
-        return commands;
-      };
-      if (savedSettings !== null) {
-        for (const slot of savedSettings.clientSlots) restoredClients.set(slot, session.createClient(slot));
-        if (!options.dedicated) for (const client of restoredClients.values()) {
-          if (savedBots?.transport.connections.some(connection => connection.client.slot === client.id.slot)) continue;
-          client.connect("loopback");
-          localSeats.set(client.id, session.createSeat(localSeats.size, client));
+        options = { ...options, serverProfile: parseServerProfile(value, definitions) };
+      } else if (options.serverProfile !== undefined) options = { ...options, serverProfile: parseServerProfile(options.serverProfile, definitions) };
+      const product = catalog.require(options.product);
+      const inputConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+      const identity = createIdentityOwner(`quake:${options.product}:${options.map}`);
+      const session = new EngineSession(identity, options.dedicated ? { kind: "headless" } : { kind: "local" });
+      const localSeats = new Map<ClientId, SessionSeat>();
+      let application: Application | null = null;
+      let guestConsole: CommandBuffer | null = null;
+      let startup: Awaited<ReturnType<typeof prepareInitialConfiguration>> | null = null;
+      let loadedContent: LoadedApplicationContent | null = null;
+      const restoredClients = new Map<number, SessionClient>();
+      try {
+        const sourceArchive = preparation.kind === "restored" || options.dedicated ? []
+          : await loadCvarArchive(configurationStore(options, preparation.content, preparation.content.selection.source.content),
+            ["source", preparation.content.selection.source.content, preparation.content.selection.source.provider], configurationDialect(preparation.content));
+        const guestCommands = () => {
+          const commands = guestConsole;
+          if (commands === null) throw new Error("Q3 guest console is unavailable");
+          return commands;
+        };
+        if (savedSettings !== null) {
+          for (const slot of savedSettings.clientSlots) restoredClients.set(slot, session.createClient(slot));
+          if (!options.dedicated) for (const client of restoredClients.values()) {
+            if (savedBots?.transport.connections.some(connection => connection.client.slot === client.id.slot)) continue;
+            client.connect("loopback");
+            localSeats.set(client.id, session.createSeat(localSeats.size, client));
+          }
         }
-      }
-      const defaultCapacity = savedSettings?.maxClients ?? (options.product === "q1-quakeworld" ? 8 : options.mode === "singleplayer" ? content.catalog.product(content.recipe.engineBehavior.content).expectation.family === "q3" ? 8 : 1 : 16);
-      const prepare = (nextFrame: () => Promise<void>) => Application.prepareInitialConfiguration(options, content, session, identity, localSeats, inputConfig, host, sourceArchive, defaultCapacity, nextFrame);
-      const startup = initialSave !== undefined ? null : host.loading?.nextFrame === undefined
-        ? await serviceLoading(prepare, () => {}) : await prepare(host.loading.nextFrame);
-      if (startup !== null) options = startup.options;
-      const simulation = createSimulation({ dedicated: options.dedicated, sourceArchive,
-        ...(startup === null ? {} : { sourceRegistry: startup.prepared.source }),
-        ...Application.guestOptions(content, options, host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
-        skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
-        ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
-        maxClients: startup?.maxClients ?? savedSettings?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
-        promptSupported: client => !options.dedicated && localSeats.has(client),
-        playerIdentity: client => ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) });
-      session.attachWorld(simulation);
-      if (options.botSkill !== undefined) {
-        const source = simulation.q3Source();
-        if (source === null) throw new Error("--bot-skill requires the Quake III game provider");
-        source.host.cvars.set("g_spSkill", String(options.botSkill), true);
-      }
-      application = new Application(options, content, session, simulation, host, identity, localSeats, inputConfig);
-      application.preparedStartup = startup?.prepared ?? null;
-      if (initialSave !== undefined) {
-        application.teamArenaOverrides = readTeamArenaOverrides(initialSave, [...localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
-        if (application.isTeamArenaSkirmish() && application.teamArenaOverrides === null) host.print("Legacy Team Arena save has no per-seat timer baseline; current timer preferences will be preserved.\n");
-      }
-      const startupApplication = application;
-      startup?.prepared.forwardCommands((name, args, source) => {
-        let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
-        startupApplication.requestedCommands.push({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source });
-        return undefined;
-      });
-      application.imageSettings = startup?.image ?? null;
-      if (startup !== null) application.requestedCommands.push(...startup.requests);
-      application.frontendOverrides = preferences ?? {};
-      application.elapsed = savedSettings?.hostMilliseconds ?? 0;
-      if (initialSave !== undefined && simulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
-      await application.bindSourceCommands(initialSave !== undefined);
-      guestConsole = application.sourceCommands;
-      if (!options.dedicated && simulation.q3Guest() !== null) {
-        const authority = createQ3ApplicationServerHost({ session, simulation, content, print: text => host.print(text), ...(initialSave === undefined ? {} : { mode: "restore" }) });
-        application.localGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority, seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: [] };
-        await authority.prepare(0, initialSave === undefined ? 1 : simulation.q3Guest()?.state.cvars.variableValue("sv_serverid") ?? 0);
-        if (initialSave === undefined) {
-          await simulation.q3Guest()?.initialize(application.guestOutput());
+        const engine = preparation.kind === "configuration" ? preparation.content.selection.engineBehavior : preparation.content.recipe.engineBehavior;
+        const defaultCapacity = savedSettings?.maxClients ?? (options.product === "q1-quakeworld" ? 8 : options.mode === "singleplayer" ? catalog.product(engine.content).expectation.family === "q3" ? 8 : 1 : 16);
+        if (preparation.kind === "configuration") {
+          const configuration = preparation.content;
+          const prepare = (nextFrame: () => Promise<void>) => prepareInitialConfiguration(options, configuration, session, identity, localSeats, inputConfig, host, sourceArchive, defaultCapacity, nextFrame);
+          startup = host.loading?.nextFrame === undefined ? await serviceLoading(prepare, () => {}) : await prepare(host.loading.nextFrame);
+        }
+        if (startup !== null) options = startup.options;
+        host.loading?.stage("Loading map...");
+        const content = preparation.kind === "restored" ? preparation.content : await loadApplicationContent(options, recipe, undefined, catalog);
+        loadedContent = content;
+        host.loading?.stage("Preparing world...");
+        const monsterNavigation = await preloadApplicationMonsterNavigation(content);
+        const simulation = createSimulation({ dedicated: options.dedicated, sourceArchive,
+          ...(startup === null ? {} : { sourceRegistry: startup.prepared.source }),
+          ...Application.guestOptions(content, options, host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+          skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
+          ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
+          maxClients: startup?.maxClients ?? savedSettings?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
+          promptSupported: client => !options.dedicated && localSeats.has(client),
+          playerIdentity: client => ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) });
+        session.attachWorld(simulation);
+        if (options.botSkill !== undefined) {
+          const source = simulation.q3Source();
+          if (source === null) throw new Error("--bot-skill requires the Quake III game provider");
+          source.host.cvars.set("g_spSkill", String(options.botSkill), true);
+        }
+        application = new Application(options, content, session, simulation, host, identity, localSeats, inputConfig);
+        application.preparedStartup = startup?.prepared ?? null;
+        application.configurationScripts = startup?.scripts ?? null;
+        application.imageSettings = startup?.image ?? null;
+        if (initialSave !== undefined) {
+          application.teamArenaOverrides = readTeamArenaOverrides(initialSave, [...localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
+          if (application.isTeamArenaSkirmish() && application.teamArenaOverrides === null) host.print("Legacy Team Arena save has no per-seat timer baseline; current timer preferences will be preserved.\n");
+        }
+        const startupApplication = application;
+        startup?.prepared.forwardCommands((name, args, source) => {
+          let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+          startupApplication.requestedCommands.push({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source });
+          return undefined;
+        });
+        if (startup !== null) application.requestedCommands.push(...startup.requests);
+        application.frontendOverrides = preferences ?? {};
+        application.elapsed = savedSettings?.hostMilliseconds ?? 0;
+        if (initialSave !== undefined && simulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
+        await application.bindSourceCommands(initialSave !== undefined);
+        guestConsole = application.sourceCommands;
+        if (!options.dedicated && simulation.q3Guest() !== null) {
+          const authority = createQ3ApplicationServerHost({ session, simulation, content, print: text => host.print(text), ...(initialSave === undefined ? {} : { mode: "restore" }) });
+          application.localGuest = { worldSound: createIdentityOwner("local-qvm-world-audio").actor(1022, 0), authority, seats: new Map<SeatId, LocalQ3GuestSeat>(), pendingCommands: [] };
+          await authority.prepare(0, initialSave === undefined ? 1 : simulation.q3Guest()?.state.cvars.variableValue("sv_serverid") ?? 0);
+          if (initialSave === undefined) {
+            await simulation.q3Guest()?.initialize(application.guestOutput());
+            const initialized = application;
+            await initialized.sourceCommands?.executeAsync(() => initialized.commands());
+          }
+        }
+        if (initialSave !== undefined) simulation.q3Guest()?.completeRestore(application.guestOutput());
+        if (options.dedicated) application.openDedicatedConsole();
+        else {
+          if (startup === null) await application.viewSettings.load(application.inputConfig);
+          const frontend = application;
+          application.imageSettings ??= await ApplicationImageSettings.open({ deferPersistence: true, context: { session: session.session, origin: { kind: "local-console" } },
+            dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
+              host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
+            } });
+          application.releaseViewCvars = application.viewSettings.bindCvars(application.imageSettings.cvars);
+          await application.openGraphical(initialSave !== undefined);
+        }
+        host.loading?.stage("Starting game...");
+        if (initialSave === undefined) application.bots = await application.createBots(content, simulation);
+        else if (savedBots !== null) application.bots = await application.createBots(content, simulation, { restore: {
+          image: savedBots, resolveClient: saved => savedBots.transport.connections.some(connection => connection.client.slot === saved.slot && connection.client.generation === saved.generation)
+            ? restoredClients.get(saved.slot) ?? null : null,
+        } });
+        await application.openNetwork();
+        const guest = simulation.q3Guest();
+        if (guest !== null && options.dedicated && initialSave === undefined) {
+          await guest.initialize(application.guestOutput());
           const initialized = application;
           await initialized.sourceCommands?.executeAsync(() => initialized.commands());
         }
+        if (initialSave === undefined) await application.commands();
+        host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
+        application.enableStartupPersistence();
+        if (initialSave === undefined) {
+          if (options.teamArenaSkirmish !== undefined) application.startTeamArenaSkirmish(options.teamArenaSkirmish);
+          await application.autosaveLevel();
+        }
+        else application.requestRestoredScores();
+        return application;
+      } catch (error) {
+        const errors: unknown[] = [error];
+        if (application !== null) {
+          try { if (initialSave !== undefined) application.simulation.q3Guest()?.discard(); await application.close(); }
+          catch (cleanup) { errors.push(cleanup); }
+        } else {
+          for (const close of [() => session.close(), () => startup?.image?.close(), () => startup?.scripts.close(), () => loadedContent?.close()]) {
+            try { await close(); } catch (cleanup) { errors.push(cleanup); }
+          }
+        }
+        if (errors.length > 1) throw new AggregateError(errors, "Application initialization and cleanup failed");
+        throw error;
       }
-      if (initialSave !== undefined) simulation.q3Guest()?.completeRestore(application.guestOutput());
-      if (options.dedicated) application.openDedicatedConsole();
-      else {
-        if (startup === null) await application.viewSettings.load(application.inputConfig);
-        const frontend = application;
-        application.imageSettings ??= await ApplicationImageSettings.open({ deferPersistence: true, context: { session: session.session, origin: { kind: "local-console" } },
-          dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
-            host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
-          } });
-        application.releaseViewCvars = application.viewSettings.bindCvars(application.imageSettings.cvars);
-        await application.openGraphical(initialSave !== undefined);
-      }
-      host.loading?.stage("Starting game...");
-      if (initialSave === undefined) application.bots = await application.createBots(content, simulation);
-      else if (savedBots !== null) application.bots = await application.createBots(content, simulation, { restore: {
-        image: savedBots, resolveClient: saved => savedBots.transport.connections.some(connection => connection.client.slot === saved.slot && connection.client.generation === saved.generation)
-          ? restoredClients.get(saved.slot) ?? null : null,
-      } });
-      await application.openNetwork();
-      const guest = simulation.q3Guest();
-      if (guest !== null && options.dedicated && initialSave === undefined) {
-        await guest.initialize(application.guestOutput());
-        const initialized = application;
-        await initialized.sourceCommands?.executeAsync(() => initialized.commands());
-      }
-      if (initialSave === undefined) await application.commands();
-      host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
-      application.enableStartupPersistence();
-      if (initialSave === undefined) {
-        if (options.teamArenaSkirmish !== undefined) application.startTeamArenaSkirmish(options.teamArenaSkirmish);
-        await application.autosaveLevel();
-      }
-      else application.requestRestoredScores();
-      return application;
     } catch (error) {
-      if (application !== null) { if (initialSave !== undefined) application.simulation.q3Guest()?.discard(); await application.close(); }
-      else { session.close(); await content.close(); }
+      try { await preparation.content.close(); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], "Application preparation and cleanup failed"); }
       throw error;
     }
   }
@@ -1063,77 +1092,6 @@ export class Application {
       user: (name, source) => scripts.read(name, source), baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(options.userContentRoot) });
   }
 
-  private static async prepareInitialConfiguration(options: ApplicationOptions, content: LoadedApplicationContent,
-    session: EngineSession, identity: IdentityOwner, localSeats: Map<ClientId, SessionSeat>, settings: ConfigStore,
-    host: ApplicationHost, sourceArchive: readonly CvarArchiveEntry[], defaultCapacity: number, nextFrame: () => Promise<void>): Promise<{
-      readonly prepared: PreparedStartup; readonly image: ApplicationImageSettings | null; readonly options: ApplicationOptions;
-      readonly maxClients: number; readonly requests: readonly ApplicationCommandRequest[];
-    }> {
-    const dialect = Application.contentDialect(content), movement = movementDialect(options, content.recipe);
-    const context: CommandContext = { session: session.session, origin: { kind: "server-console" } };
-    const source = createStartupSource(options, { source: content.recipe.map.entities, match: content.recipe.match }, dialect, context, defaultCapacity, text => host.print(text));
-    const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
-    const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
-      ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
-    const sharedArchive = [...image?.persistedEntries ?? []];
-    if (image?.cvars.find("volume") !== undefined) {
-      const audio = await loadAudioSettings(settings);
-      if (audio.effectsVolume !== undefined) sharedArchive.push({ name: "volume", value: String(audio.effectsVolume) });
-      if (audio.musicVolume !== undefined) sharedArchive.push({ name: "bgmvolume", value: String(audio.musicVolume) });
-    }
-    if (image !== null) {
-      const view = new ApplicationViewSettings(value => image.cvars.set("fov", String(value)));
-      await view.load(settings);
-      const release = view.bindCvars(image.cvars);
-      if (view.override !== null && !sharedArchive.some(entry => entry.name === "fov")) sharedArchive.push({ name: "fov", value: String(view.fieldOfView) });
-      release();
-    }
-    const seats: PreparedSeatConfiguration[] = [];
-    for (let index = 0; index < (options.dedicated ? 0 : options.seats); index++) {
-      const client = options.dedicated ? null : session.createClient(index);
-      const local = client === null ? null : session.createSeat(index, client);
-      if (client !== null && local !== null) localSeats.set(client.id, local);
-      const id = local?.id ?? identity.seat(index);
-      const seatContext: CommandContext = local === null ? context : { session: session.session, origin: { kind: "local-seat", seat: id, client: local.client.id } };
-      const cvars = new CvarRegistry({ dialect, context: seatContext, print: text => host.print(text), cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
-      if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${index + 1}`, model: options.characterModel });
-      const mouse = new MouseSettings(new CvarRegistry({ dialect, context: seatContext, print: text => host.print(text) }));
-      seats.push({ context: seatContext, id, cvars, mouse,
-        profile: options.dedicated ? null : await settings.loadSeat(`input/seat-${index + 1}.json`),
-        archive: options.dedicated ? [] : await loadCvarArchive(Application.clientConfig(options, content), ["client", content.recipe.engineBehavior.content, content.recipe.engineBehavior.provider, String(index)], dialect),
-        mouseArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["input", dialect, String(index)], dialect) });
-    }
-    const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
-      mounted: name => content.mounts.open(name).then(resource => resource?.bytes) });
-    const requests: ApplicationCommandRequest[] = [];
-    const prepared = new PreparedStartup(source, inputCvars, scripts, { startupCommands: options.startupCommands ?? [], dialect, movementDialect: movement, seats, shared: image?.cvars ?? null,
-      sharedNames: source.snapshots().map(variable => variable.name), print: text => host.print(text),
-      forward: (name, args, sourceContext) => {
-        let origin = sourceContext.origin; while (origin.kind === "script") origin = origin.caller;
-        requests.push({ target: "application", name, arguments_: args, seat: origin.kind === "local-seat" ? origin.seat : null, source: sourceContext });
-        return undefined;
-      } });
-    const product = content.catalog.product(content.recipe.engineBehavior.content);
-    const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
-    const teamArenaLaunch = options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
-    let resolved = { options, maxClients: defaultCapacity };
-    await prepared.execute({ nextFrame, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
-      read: Application.startupScriptReader(content, options, scripts),
-      sourceArchive, sharedArchive,
-      movementArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["movement", movement], movement),
-      fallbackArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["fallback", dialect], dialect),
-      applyLaunchOptions: () => {
-        teamArenaLaunch?.apply(prepared.source, prepared.seats);
-        resolved = resolveStartupRules(options, prepared.source, options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
-          serverDefinitionsForRecipe(content.recipe), options.teamArenaSkirmish === undefined);
-        if (options.teamArenaSkirmish !== undefined) resolved = { ...resolved, options: { ...resolved.options, mode: options.mode } };
-        if (options.displayOverrides?.width !== undefined) image?.cvars.set("r_customwidth", String(options.displayOverrides.width), true);
-        if (options.displayOverrides?.height !== undefined) image?.cvars.set("r_customheight", String(options.displayOverrides.height), true);
-        if (options.displayOverrides?.gamma !== undefined) image?.cvars.set("r_gamma", String(options.displayOverrides.gamma), true);
-      },
-    });
-    return { prepared, image, ...resolved, requests };
-  }
 
   private async openGuestBrowser(): Promise<LocalQ3GuestBrowser> {
     const host = await StartupServerBrowser.open(this.inputConfig);
@@ -2501,6 +2459,8 @@ export class Application {
       try { await close(); } catch (error) { errors.push(error); }
     }
     try { this.releaseSourceCommands(); } catch (error) { errors.push(error); }
+    try { await this.configurationScripts?.close(); } catch (error) { errors.push(error); }
+    this.configurationScripts = null;
     try { await this.content.close(); } catch (error) { errors.push(error); }
     this.localSeats.clear();
     if (errors.length > 0) throw new AggregateError(errors, "Application shutdown failed");

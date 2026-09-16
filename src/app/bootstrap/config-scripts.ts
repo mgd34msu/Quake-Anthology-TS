@@ -39,10 +39,38 @@ export async function readConsoleScript(options: {
 
 export class ConsoleScriptFiles {
   private writes: Promise<void> = Promise.resolve();
-  constructor(private readonly options: Omit<Parameters<typeof readConsoleScript>[0], "name" | "source">) {}
+  private reads = 0;
+  private retiring = false;
+  private retirement: Promise<void> | null = null;
+  private readsSettled: (() => void) | null = null;
+  constructor(private readonly options: Omit<Parameters<typeof readConsoleScript>[0], "name" | "source">,
+    private readonly retireMounted?: () => Promise<void>) {}
   async read(name: string, source: CommandContext): Promise<string | undefined> {
-    await this.writes;
-    return readConsoleScript({ ...this.options, name, source });
+    this.acquireRead();
+    try {
+      await this.writes;
+      return await readConsoleScript({ ...this.options, name, source });
+    } finally { this.releaseRead(); }
+  }
+  async readMounted(name: string): Promise<Uint8Array | undefined> {
+    this.acquireRead();
+    try { return await this.options.mounted?.(name); }
+    finally { this.releaseRead(); }
+  }
+  close(): Promise<void> {
+    if (this.retirement !== null) return this.retirement;
+    this.retiring = true;
+    const settled = this.reads === 0 ? Promise.resolve() : new Promise<void>(resolve => { this.readsSettled = resolve; });
+    this.retirement = settled.then(() => this.retireMounted?.());
+    return this.retirement;
+  }
+  private acquireRead(): void {
+    if (this.retiring) throw new Error("Configuration reader is retired");
+    this.reads++;
+  }
+  private releaseRead(): void {
+    this.reads--;
+    if (this.reads === 0) { this.readsSettled?.(); this.readsSettled = null; }
   }
   write(operation: () => Promise<void>): Promise<void> {
     const pending = this.writes.then(operation);

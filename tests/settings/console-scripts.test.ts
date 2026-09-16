@@ -15,6 +15,37 @@ import { openMountPlan } from "../../src/content/mounts/index.ts";
 const identity = createIdentityOwner("config-scripts");
 function context(index: number): CommandContext { return { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } }; }
 
+test("configuration retirement retains reads from invocation through queued writes and mounted settlement", async () => {
+  const root = await mkdtemp(join(tmpdir(), "console-script-retirement-"));
+  try {
+    const writing = Promise.withResolvers<void>(), reading = Promise.withResolvers<Uint8Array | undefined>();
+    const entered = Promise.withResolvers<void>();
+    let retired = 0;
+    const scripts = new ConsoleScriptFiles({ consoleRoot: root, settings: new ConfigStore(join(root, "product")),
+      mounted: () => { entered.resolve(); return reading.promise; } }, async () => { retired++; });
+    const write = scripts.write(() => writing.promise);
+    const read = scripts.read("pending.cfg", context(0));
+    const close = scripts.close();
+    expect(scripts.close()).toBe(close);
+    await Promise.resolve();
+    expect(retired).toBe(0);
+    await expect(scripts.read("late.cfg", context(0))).rejects.toThrow("retired");
+    writing.resolve(); await write; await entered.promise;
+    expect(retired).toBe(0);
+    reading.resolve(new TextEncoder().encode("echo retained\n"));
+    expect(await read).toBe("echo retained\n");
+    await close; expect(retired).toBe(1);
+
+    const mountedRead = Promise.withResolvers<Uint8Array | undefined>();
+    const mounted = new ConsoleScriptFiles({ consoleRoot: root, settings: new ConfigStore(root), mounted: () => mountedRead.promise }, async () => { retired++; });
+    const pending = mounted.readMounted("default.cfg"), retirement = mounted.close();
+    await Promise.resolve(); expect(retired).toBe(1);
+    mountedRead.reject(new Error("read failed"));
+    await expect(pending).rejects.toThrow("read failed");
+    await retirement; expect(retired).toBe(2);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("exec reads each seat's exported config before product user files and mounted arbitrary scripts", async () => {
   const root = await mkdtemp(join(tmpdir(), "console-scripts-"));
   try {

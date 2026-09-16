@@ -248,7 +248,7 @@ export class LoadedApplicationContent {
   }
 }
 
-export function applicationOptionsForRecipe(options: ApplicationOptions, content: LoadedApplicationContent): ApplicationOptions {
+export function applicationOptionsForRecipe(options: ApplicationOptions, content: Pick<LoadedApplicationContent, "catalog" | "recipe">): ApplicationOptions {
   const recipe = content.recipe;
   const family = (provider: ProviderReference): GameFamily => {
     const prefix = provider.provider.split(":")[0];
@@ -279,14 +279,14 @@ async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecip
     mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
 }
 
-export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy): Promise<LoadedApplicationContent> {
+export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy, installedCatalog?: InstalledCatalog): Promise<LoadedApplicationContent> {
   const remote = options.remoteContent;
   if (remote !== undefined) {
     const network = remote.base === "q1-quakeworld" ? "qw-client" : remote.base === "q2-classic-baseq2" ? "q2-client" : "q3-client";
     if (options.network.kind !== network || options.product !== remoteContentProduct(remote))
       throw new Error("Remote content context requires its matching remote client product");
   }
-  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: options.dedicated || options.network.kind === "offline" && (options.movement === "q3" && options.character === "q3"
+  const catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: options.dedicated || options.network.kind === "offline" && (options.movement === "q3" && options.character === "q3"
       || restoredRecipe?.execution.some(module => module.kind === "qvm" && module.role === "server-game") === true),
     ...(remote === undefined ? {} : { remoteContent: remote }) });
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
