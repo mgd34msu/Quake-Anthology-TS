@@ -1,5 +1,5 @@
 import { prepareDebugShapes } from "../../render/scene/debug-shapes.ts";
-import { q1ViewCamera, q1ViewRectangle, type Q1ViewSettings } from "./q1-client-settings.ts";
+import { q1ChaseCamera, q1ViewCamera, q1ViewRectangle, type Q1ViewSettings } from "./q1-client-settings.ts";
 import type { DebugShapePresentationAccess } from "./simulation/types.ts";
 import { createSourceSceneOrder } from "../../render/scene/submissions.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
@@ -126,8 +126,15 @@ export class WorldSeatPresentation implements SeatPresentation {
     const fovX = player.fieldOfView ?? this.fieldOfView(), fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
     const camera: SceneCamera = { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
       projection: perspectiveProjection(fovX, fovY, 16384), clip: { kind: "none" } };
-    return this.effects.playerView(this.local.player.actor, cameraWithKick(camera, player.kickAngles ?? { x: 0, y: 0, z: 0 })).camera;
+    const firstPerson = this.effects.playerView(this.local.player.actor, cameraWithKick(camera, player.kickAngles ?? { x: 0, y: 0, z: 0 })).camera;
+    const chase = this.chaseSettings;
+    if (chase === null) return firstPerson;
+    const recipe = this.assets.content.recipe, timing = recipe.timing.find(value => value.provider === recipe.engineBehavior.provider);
+    if (timing === undefined) throw new Error("Chase camera requires the selected numeric profile");
+    return q1ChaseCamera(firstPerson, player.angles, chase, this.effects.queries, timing.numeric, this.local.player.actor);
   }
+
+  private get chaseSettings() { return this.q3Client === null && !this.finale.active ? this.viewSize()?.chase ?? null : null; }
 
   private applyViewSize(camera: SceneCamera): SceneCamera {
     const settings = this.viewSize();
@@ -220,12 +227,13 @@ export class WorldSeatPresentation implements SeatPresentation {
       await this.q3Client.prepare(snapshot.frame.frame, viewport, presentations); return;
     }
     await this.finale.prepare();
-    await this.scene.prepare(this.local.player.actor, snapshot, presentations, characters);
+    await this.scene.prepare(this.chaseSettings === null ? this.local.player.actor : null, snapshot, presentations, characters);
   }
 
   frame(snapshot: WorldSnapshot): RenderFrame {
+    const viewer = this.chaseSettings === null ? this.local.player.actor : null;
     const time = snapshot.frame.time, camera = this.camera(), source = this.q3Client === null ? createSourceSceneOrder(this.assets.materialRegistrations) : null,
-      effects = source === null ? null : this.effects.frame(camera, source, this.local.player.actor);
+      effects = source === null ? null : this.effects.frame(camera, source, viewer);
     const playerView = this.effects.playerView(this.local.player.actor, camera);
     const style = (index: number, absent: number): number => this.scene.style(index, absent);
     const input: WorldViewInput = { ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }), camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,

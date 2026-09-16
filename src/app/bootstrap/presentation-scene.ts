@@ -44,6 +44,11 @@ interface BrushPresentation {
   readonly alpha: number;
 }
 
+export function seatModelVisible(viewer: ActorId | null, source: Pick<SimulationPresentation, "actor" | "viewWeapon">): boolean {
+  const firstPerson = viewer?.equals(source.actor) ?? false;
+  return source.viewWeapon ? firstPerson : !firstPerson;
+}
+
 export class ApplicationWorldScene {
   private readonly groups = new Map<ContentId, ModelGroup>();
   private readonly ordered: { readonly group: ModelGroup; readonly pass: ModelPass }[] = [];
@@ -72,7 +77,7 @@ export class ApplicationWorldScene {
     return pattern === undefined || pattern.length === 0 ? absent : pattern.charCodeAt(Math.trunc(this.preparedTime * 10) % pattern.length) - 97;
   }
 
-  async prepare(viewer: ActorId, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
+  async prepare(viewer: ActorId | null, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
     this.objects.clear();
     this.ordered.length = 0;
     this.flares = [];
@@ -107,7 +112,7 @@ export class ApplicationWorldScene {
         continue;
       }
       if (source.path === "") continue;
-      if (source.viewWeapon ? !source.actor.equals(viewer) : source.actor.equals(viewer)) continue;
+      if (!seatModelVisible(viewer, source)) continue;
       if (!source.viewWeapon && characters.some(character => character.actor.equals(source.actor))) continue;
       if (source.q3Weapon !== undefined) {
         const key = `${source.content}/${source.actor.slot}/${source.actor.generation}`;
@@ -154,13 +159,13 @@ export class ApplicationWorldScene {
         const weaponKey = `${equipped.content}/${equipped.actor.slot}/${equipped.actor.generation}`;
         let selected = this.selectedWeapons.get(weaponKey);
         if (selected === undefined) { selected = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets.animation); this.selectedWeapons.set(weaponKey, selected); }
-        weapon = await selected.world(equipped, character, character.actor.equals(viewer));
-      } else if (equipped !== undefined && !character.actor.equals(viewer)) {
+        weapon = await selected.world(equipped, character, viewer?.equals(character.actor) ?? false);
+      } else if (equipped !== undefined && !viewer?.equals(character.actor)) {
         weapon = await this.foreignWeapons.frame(equipped, character);
       }
       const passes = presenter.frame(character, { timeMilliseconds: Math.trunc(this.preparedTime * 1000),
         frameMilliseconds: Math.max(0, Math.trunc(this.preparedTime * 1000) - Math.trunc(this.previousTime * 1000)), shaderTime: { kind: "seconds", value: 0 },
-        swingSpeed: 0.3, noPlayerAnimations: false, personalModel: character.actor.equals(viewer), shadowPlane: null, weapon });
+        swingSpeed: 0.3, noPlayerAnimations: false, personalModel: viewer?.equals(character.actor) ?? false, shadowPlane: null, weapon });
       const object: PresentationObject = { opacity: character.opacity ?? 1, passes: [] };
       for (const pass of passes) await append(pass.content ?? this.assets.content.recipe.character.appearance.content, pass.entity, pass.options, object);
     }

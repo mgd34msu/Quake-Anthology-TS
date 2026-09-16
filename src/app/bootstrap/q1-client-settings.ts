@@ -1,6 +1,12 @@
 import { CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
 import type { Rect, SceneCamera } from "../../contracts/render.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
+import type { ActorId } from "../../contracts/identity.ts";
+import type { Vec3 } from "../../contracts/math.ts";
+import type { NumericProfile } from "../../contracts/numeric.ts";
+import type { SceneQueries } from "../../contracts/scene.ts";
+import { anglesToAxis, donorAngleVectors, mutableVec3 } from "../../core/math.ts";
+import { createNumericOperations } from "../../core/numeric.ts";
 
 export function registerQ1ViewCommands(commands: CommandBuffer): () => void {
   if (commands.dialect !== "q1-netquake" && commands.dialect !== "q1-quakeworld") return () => {};
@@ -22,16 +28,51 @@ export function registerQ1ClientSettings(cvars: CvarRegistry): void {
   if (cvars.dialect === "q1-quakeworld") cvars.register("cl_sbar", "0", CvarFlag.Archive);
   cvars.bindValue("viewsize", { validate: value => value.trim() !== "" && Number.isFinite(Number(value)) ? null : "Expected a finite number", changed: () => undefined });
   cvars.document("viewsize", { summary: "Quake view size. 30 through 100 sizes the scene; 110 removes the inventory margin, 120 hides the status display.", usage: "viewsize <30..120>", examples: ["viewsize 100", "viewsize 120"] });
+  if (cvars.dialect === "q1-netquake") for (const [name, value, summary] of [
+    ["chase_active", "0", "Enable the local chase camera without changing player aim."],
+    ["chase_back", "100", "Chase distance behind the player, in world units."],
+    ["chase_up", "16", "Chase height above the eye, in world units."],
+    ["chase_right", "0", "Q1 lateral chase offset: positive moves opposite the view's right vector."],
+  ] satisfies readonly (readonly [string, string, string])[]) {
+    cvars.register(name, value);
+    cvars.bindValue(name, { validate: input => input.trim() !== "" && Number.isFinite(Number(input)) ? null : "Expected a finite number", changed: () => undefined });
+    cvars.document(name, { summary, usage: `${name} <number>`, examples: [`${name} ${value}`] });
+  }
 }
 
-export interface Q1ViewSettings { readonly size: number; readonly overlayStatus: boolean; }
+export interface Q1ChaseSettings { readonly back: number; readonly up: number; readonly right: number; }
+export interface Q1ViewSettings { readonly size: number; readonly overlayStatus: boolean; readonly chase: Q1ChaseSettings | null; }
 
 export function readQ1ViewSettings(cvars: CvarRegistry | null): Q1ViewSettings | null {
   const current = cvars?.find("viewsize");
   if (cvars === null || current === undefined) return null;
   const size = Math.max(30, Math.min(120, current.numericValue));
   if (size !== current.numericValue) cvars.set("viewsize", String(size));
-  return { size, overlayStatus: cvars.dialect === "q1-quakeworld" && cvars.variableValue("cl_sbar") === 0 };
+  return { size, overlayStatus: cvars.dialect === "q1-quakeworld" && cvars.variableValue("cl_sbar") === 0,
+    chase: cvars.dialect === "q1-netquake" && cvars.variableValue("chase_active") !== 0
+      ? { back: cvars.variableValue("chase_back"), up: cvars.variableValue("chase_up"), right: cvars.variableValue("chase_right") } : null };
+}
+
+/** Q1 offsets, shared obstruction queries, and a drawing-only aim correction. */
+export function q1ChaseCamera(camera: SceneCamera, angles: Vec3, settings: Q1ChaseSettings,
+  scene: Pick<SceneQueries, "trace">, numeric: NumericProfile, actor: ActorId): SceneCamera {
+  const math = createNumericOperations(numeric), forward = mutableVec3(), right = mutableVec3();
+  donorAngleVectors(angles, forward, right, null);
+  const offset = (eye: number, ahead: number, side: number): number => math.store(math.subtract(
+    math.subtract(eye, math.multiply(ahead, settings.back)), math.multiply(side, settings.right)));
+  const desired = { x: offset(camera.origin.x, forward.x, right.x), y: offset(camera.origin.y, forward.y, right.y),
+    z: math.store(math.add(camera.origin.z, settings.up)) };
+  const common = { start: camera.origin, target: { kind: "world" }, policy: { kind: "q1", move: "normal", hull: null }, numeric, passActor: actor } satisfies Omit<Parameters<SceneQueries["trace"]>[0], "end" | "shape">;
+  const rear = scene.trace({ ...common, end: desired, shape: { kind: "box", bounds: { min: { x: -4, y: -4, z: -4 }, max: { x: 4, y: 4, z: 4 } } } });
+  const origin = rear.startSolid || rear.allSolid ? camera.origin : rear.end;
+  const far = { x: math.store(math.add(camera.origin.x, math.multiply(forward.x, 4096))),
+    y: math.store(math.add(camera.origin.y, math.multiply(forward.y, 4096))), z: math.store(math.add(camera.origin.z, math.multiply(forward.z, 4096))) };
+  const aim = scene.trace({ ...common, end: far, shape: { kind: "point" } });
+  const target = aim.fraction === 1 || aim.startSolid || aim.allSolid ? far : aim.end;
+  const delta = { x: target.x - origin.x, y: target.y - origin.y, z: target.z - origin.z }, horizontal = Math.hypot(delta.x, delta.y);
+  const viewAngles = { x: math.store(-Math.atan2(delta.z, horizontal) * 180 / Math.PI),
+    y: horizontal === 0 ? angles.y : math.store(Math.atan2(delta.y, delta.x) * 180 / Math.PI), z: angles.z };
+  return { ...camera, origin, axis: anglesToAxis(viewAngles) };
 }
 
 /** SCR_CalcRefdef's rectangle; split-screen uses each seat's bounds. */
