@@ -72,6 +72,14 @@ function closeCell(faces: CellFace[], cap: Vec3[], plane: Plane): ConvexCell | n
   return faces.length >= 4 ? { faces } : null;
 }
 
+function capContainsPoint(cap: readonly Vec3[], point: Vec3): boolean {
+  for (const vertex of cap) {
+    const x = vertex.x - point.x, y = vertex.y - point.y, z = vertex.z - point.z;
+    if (Math.sqrt(x * x + y * y + z * z) < 1e-7) return true;
+  }
+  return false;
+}
+
 /** Both BSP children share each edge intersection and its cap insertion order. */
 export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: ConvexCell | null; readonly back: ConvexCell | null } {
   let outside = false, inside = false;
@@ -97,8 +105,8 @@ export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: Con
       if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
         const point = lerp(a, b, da / (da - db));
         frontVertices.push(point); backVertices.push(point);
-        if (!cap.some(v => length(sub(v, point)) < 1e-7)) cap.push(point);
-      } else if (da === 0 && !cap.some(v => length(sub(v, a)) < 1e-7)) cap.push(a);
+        if (!capContainsPoint(cap, point)) cap.push(point);
+      } else if (da === 0 && !capContainsPoint(cap, a)) cap.push(a);
     }
     if (frontVertices.length >= 3) front.push({ plane: face.plane, vertices: frontVertices });
     if (backVertices.length >= 3) back.push({ plane: face.plane, vertices: backVertices });
