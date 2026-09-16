@@ -2,7 +2,9 @@
 
 This plan groups remaining work by engine function. Each target defines the shared service, the source behavior that must survive, and the user-visible result needed for completion. It covers Quake, QuakeWorld, both rereleases, Quake II, Quake III Arena, their required expansions, and the already requested mod integrations.
 
-Accepted source at preparation: `a8269fa`. The existing 184 open checklist rows retain assessment cutoff `167bfbf`. They are grouped in [remaining-source-rows.md](remaining-source-rows.md), with exact source IDs in [remaining-source-rows.json](remaining-source-rows.json). Those counts are traceability, not estimates of work or a new completion assessment. Several historical reasons have already been superseded in part; the current remaining scope and evidence must be reconciled before implementing or closing an individual row.
+Current installed source is `142a1826`. Shared client ownership now supports the verified local → Q1 demo → menu → saved-world restore → retained frontend console workflow, including 35.196 seconds of controls and 119 resumed frames. This advances T01/T06/T20; it does not close those targets or the full native matrix. Frontend screenshot/console utility commands and the fix that keeps `--menu` from starting an attract demo are still unshipped. Accepted GL operation reductions have no measured elapsed-time or FPS improvement yet. See [current execution evidence](../execution-status.md#installed-executable-and-recent-fixes).
+
+The existing 184 open checklist rows retain assessment cutoff `167bfbf`; this plan was prepared against `a8269fa`. They remain grouped in [remaining-source-rows.md](remaining-source-rows.md), with exact source IDs in [remaining-source-rows.json](remaining-source-rows.json). These historical counts provide traceability, not a new completion assessment. Reconcile each row's remaining scope and evidence before implementing or closing it.
 
 ## The common/extension boundary
 
@@ -96,7 +98,7 @@ The frame-time budget and reference workload should be explicit before a perform
 
 ## Implementation order
 
-Accepted work through `b098294b` includes isolated local/remote QVM preparation, publication into the retained command/cvar/input owners, and configuration before map loading. Quake III native server travel now retains its source clock; the actual remote UI/cgame transition case passes without relaxing client clock checks. These are completed parts of T01/T06/T10. The menu/local/network/demo join into one retained client lifetime remains in progress, including the audio device and public demo commands.
+Current work follows the installed `142a1826` shared-client workflow: finish command, settings and capture lifetimes across local play, network clients, demos and the frontend, and preserve the intent of an initial `--menu` launch. These are bounded T01/T06/T20 improvements. The verified local/demo/menu/save/console flow does not close those targets or the full source and native matrix. Performance work remains open under T03/T11/T13.
 
 The shared font path now connects TrueType generation and optional font export to the same material registry used by retail DAT fonts. Both appeared correctly in an inspected rendered image. This advances T03/T18; it does not complete international text, captions, or every mod UI workflow.
 
