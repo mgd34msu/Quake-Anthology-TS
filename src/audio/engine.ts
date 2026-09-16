@@ -341,7 +341,13 @@ export class UnifiedAudio {
         for (const bus of this.music.values())
             add(output, bus.player.mix(frames), bus.target.gain * this.audienceGain(bus.target.audience));
         this.frame += frames;
-        return Int16Array.from(output, value => Math.max(-32768, Math.min(32767, Math.trunc(value))));
+        const samples = new Int16Array(output.length);
+        for (let index = 0; index < output.length; index++) {
+            const value = output[index];
+            if (value === undefined) throw new Error("Audio bus length mismatch");
+            samples[index] = Math.max(-32768, Math.min(32767, Math.trunc(value)));
+        }
+        return samples;
     }
     openDevice(options: Omit<SdlAudioOptions, "sampleRate" | "channels" | "sampleBits"> = {}): void {
         this.check();
