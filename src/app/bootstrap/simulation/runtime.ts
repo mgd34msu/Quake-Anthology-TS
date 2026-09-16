@@ -2644,6 +2644,11 @@ export class SharedSimulation implements Simulation {
       if (settlement.kind === "active") mapDeadlines.add(mapStartMilliseconds);
       else if (mapRun && profile.kind === "q3") {
         for (let due = this.timeSeconds * 1000 + profile.serverFrameMilliseconds; due <= this.sourceSchedulingMilliseconds; due += profile.serverFrameMilliseconds) mapDeadlines.add(due);
+      } else if (mapRun && fixed !== null) {
+        // Q2 runs when the current tick is due, one interval ahead of its host clock.
+        // Bound shared-host work, not elapsed time: outstanding debt survives this bundle.
+        const maximumQ2CatchupMilliseconds = 200;
+        for (let due = mapStartMilliseconds; due <= this.sourceSchedulingMilliseconds && due - mapStartMilliseconds < maximumQ2CatchupMilliseconds; due += fixed) mapDeadlines.add(due + fixed);
       } else if (mapRun) mapDeadlines.add(mapStartMilliseconds + elapsed * 1000);
       const mapEndMilliseconds = mapDeadlines.size === 0 ? mapStartMilliseconds : Math.max(...mapDeadlines);
       const deadlines = new Set<number>(mapDeadlines.size === 0 ? [mapEndMilliseconds] : mapDeadlines);
@@ -2701,9 +2706,8 @@ export class SharedSimulation implements Simulation {
           this.checkingQ2Rules = true;
           try { this.source.product.rerelease.players.fadeFrame(this.source.game); } finally { this.checkingQ2Rules = false; }
           this.sourceFrame = this.clock.enter("frame-exit");
-          if (this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000;
-          emitQ2ShadowLights(this.source.game);
-          return { snapshot: this.snapshot(), events: this.events.take() };
+          if (this.transitions.length !== 0) break;
+          continue;
         }
         if (this.source.kind === "q1") this.source.game.beginFrame(this.timeSeconds, elapsed);
         if (preparesQ1Clients) botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
@@ -2741,8 +2745,7 @@ export class SharedSimulation implements Simulation {
         }
       }
       if (this.source.kind === "q2" && this.source.product.rerelease?.players.intermissionFadeUntil != null) {
-        emitQ2ShadowLights(this.source.game);
-        return { snapshot: this.snapshot(), events: this.events.take() };
+        continue;
       }
       if (run && !preparesQ1Clients && settlement.kind !== "active") botCommands = this.botServices.frame(this.sourceFrame.time.kind === "milliseconds" ? this.sourceFrame.time.value : Math.trunc(this.timeSeconds * 1000), elapsed * 1000);
       for (const received of [...(commandTurn ? input.commands : []), ...botCommands]) {
@@ -2952,8 +2955,9 @@ export class SharedSimulation implements Simulation {
           this.sourceFrame = this.clock.advance({ kind: "milliseconds", value: 100 }, "frame-exit");
           settlement.completed++;
         } else if (fixed === null) this.sourceFrame = this.clock.advance({ kind: "seconds", value: elapsed }, "frame-exit");
-        else { this.sourceFrame = this.clock.enter("frame-exit"); if (profile.kind !== "q3" && this.sourceSchedulingMilliseconds > this.timeSeconds * 1000) this.sourceSchedulingMilliseconds = this.timeSeconds * 1000; }
+        else this.sourceFrame = this.clock.enter("frame-exit");
       }
+      if (this.source.kind === "q2" && this.transitions.length !== 0) break;
       }
       if (this.source.kind === "q2") emitQ2ShadowLights(this.source.game);
       return { snapshot: this.snapshot(), events: this.events.take() };
