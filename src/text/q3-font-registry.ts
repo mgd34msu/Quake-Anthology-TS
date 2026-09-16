@@ -187,6 +187,7 @@ export class RendererFontRegistry {
             }
         }
         view.setFloat32(20480, Math.fround(48 / Math.fround(size)), true);
+        this.writeName(record, 20484, 64, `fonts/fontImage_${size}.dat`);
         const data = readFontData(record), glyphs: RegisteredGlyph[] = [];
         for (const [index, glyph] of data.glyphs.entries()) {
             const picture = pictures[index];
@@ -226,6 +227,7 @@ export class RendererFontRegistry {
         bytes[13] = 1;
         bytes[15] = 1;
         bytes[16] = 32;
+        bytes[17] = 0x28;
         bytes.set(rgba, 18);
         return bytes;
     }

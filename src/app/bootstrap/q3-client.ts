@@ -85,6 +85,7 @@ export interface ApplicationQ3ClientSource extends SnapshotSource {
   snapshotPing?(number: number): number | null;
 }
 interface ApplicationQ3ClientCommonOptions {
+  saveFontData(): boolean;
   readonly cvars?: CvarRegistry;
   readonly timeCvars?: CvarRegistry;
   readonly weaponHud?: WeaponHudReader;
@@ -245,7 +246,7 @@ export class ApplicationQ3Client {
   }
   static async create(options: ApplicationQ3ClientOptions): Promise<ApplicationQ3Client> {
     options.assertCurrent?.();
-    const media = await ApplicationQ3Assets.create(options.assets, options.assets.content.recipe.engineBehavior.content, options.commands.print, options.kind === "qvm" ? "guest-async" : "source-sync");
+    const media = await ApplicationQ3Assets.create(options.assets, options.assets.content.recipe.engineBehavior.content, options.commands.print, options.saveFontData, options.kind === "qvm" ? "guest-async" : "source-sync");
     const client = new ApplicationQ3Client(options, media);
     try { options.assertCurrent?.(); await client.initialize(); options.assertCurrent?.(); client.bindFrameTime(); return client; } catch (error) { client.close(); throw error; }
   }

@@ -368,7 +368,7 @@ test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy" || !existsSync("../qfiles
   let now = 0;
   const assets = new ApplicationAssets(content, owner, { sample: () => now });
   const audio = new ApplicationAudio(content, () => now, 1, "sarge", () => undefined);
-  const media = await ApplicationQ3Assets.create(assets, content.recipe.engineBehavior.content, () => undefined);
+  const media = await ApplicationQ3Assets.create(assets, content.recipe.engineBehavior.content, () => undefined, () => false);
   const movies = new ApplicationQ3Cinematics(media, audio, identity.seat(0), () => now);
   const backend = new SoftwareRenderer(8, 8, owner);
   const sources: import("../../src/materials/cinematic.ts").ShaderCinematicSource[] = [];

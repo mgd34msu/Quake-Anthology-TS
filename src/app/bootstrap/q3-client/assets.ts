@@ -15,6 +15,7 @@ import { Q3PresentationSoundBank } from "../../../content/q3/presentation/audio.
 import { MountedFontReader } from "../../../text/mounted.ts";
 import { RendererFontRegistry } from "../../../text/q3-font-registry.ts";
 import { UiAssetRegistry } from "../../../text/q3-font.ts";
+import { UserFileStore } from "../../../platform/files/writable.ts";
 import type { ApplicationAssets, ProviderSceneAssets } from "../assets.ts";
 
 export async function registerQ3ModelRequest(path: string, load: (path: string) => Promise<SceneModel>): Promise<SceneModel> {
@@ -35,14 +36,27 @@ export class ApplicationQ3Assets implements SoundAssetReader {
   readonly fonts: RendererFontRegistry;
   readonly fontRegistry: UiAssetRegistry;
   private readonly fontReader: MountedFontReader;
-  private constructor(readonly assets: ApplicationAssets, readonly content: ContentId, readonly provider: ProviderSceneAssets, readonly print: (text: string) => void) {
+  private constructor(readonly assets: ApplicationAssets, readonly content: ContentId, readonly provider: ProviderSceneAssets, readonly print: (text: string) => void, saveFontData: () => boolean) {
     this.bank = new Q3PresentationSoundBank(new SoundBank(provider.mounts), null, path => this.sound(path));
     this.fontReader = new MountedFontReader(provider.mounts);
-    this.fonts = new RendererFontRegistry(this.fontReader, path => provider.shaders.registerPicture(path), () => undefined);
+    const user = assets.content.catalog.product(content).userContent;
+    const writable = user === null ? null : new UserFileStore(user.root);
+    this.fonts = new RendererFontRegistry(this.fontReader, path => provider.shaders.registerPicture(path), () => undefined, {
+      registerImage: (name, rgba) => provider.shaders.registerGeneratedPicture(name, { kind: "rgba8",
+        levels: [{ width: 256, height: 256, pixels: rgba }], borderColor: { x: 0, y: 0, z: 0, w: 0 } }),
+      saveFontData,
+      writeFile: (name, bytes) => {
+        if (writable === null) throw new Error("Font export requires a content user directory");
+        const file = writable.open(name, "write", print);
+        if (file === null) throw new Error(`Cannot export generated font ${name}`);
+        try { if (file.write(bytes) !== bytes.length) throw new Error(`Incomplete generated font export ${name}`); }
+        finally { file.close(); }
+      },
+    });
     this.fontRegistry = new UiAssetRegistry({ fonts: this.fonts, registerPicture: path => provider.shaders.registerPicture(path) }, print);
   }
-  static async create(assets: ApplicationAssets, content: ContentId, print: (text: string) => void, mode: "source-sync" | "guest-async" = "source-sync"): Promise<ApplicationQ3Assets> {
-    const provider = await assets.provider(content), result = new ApplicationQ3Assets(assets, content, provider, print);
+  static async create(assets: ApplicationAssets, content: ContentId, print: (text: string) => void, saveFontData: () => boolean, mode: "source-sync" | "guest-async" = "source-sync"): Promise<ApplicationQ3Assets> {
+    const provider = await assets.provider(content), result = new ApplicationQ3Assets(assets, content, provider, print, saveFontData);
     const archives = new Set(provider.mounts.plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archivePath] : []));
     for (const product of assets.content.catalog.products) for (const archive of product.archives) if (archives.has(archive.path))
       for (const entry of archive.entries) result.names.add(entry.path.toLowerCase());

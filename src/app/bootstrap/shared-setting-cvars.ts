@@ -24,6 +24,9 @@ export function bindRunCvar(cvars: CvarRegistry, builder: InputCommandBuilder): 
 
 /** Shared aliases exist before source configuration executes in every world dialect. */
 export function registerSharedClientSettings(cvars: CvarRegistry): void {
+  cvars.register("r_saveFontData", "0", CvarFlag.None);
+  cvars.document("r_saveFontData", { summary: "Export generated Q3 font atlases and DAT records to this content's user directory.",
+    usage: "r_saveFontData <0|1>", examples: ["r_saveFontData 1"] });
   cvars.register("volume", cvars.dialect === "q3" ? "0.8" : "0.7", CvarFlag.Archive);
   cvars.register("bgmvolume", cvars.dialect === "q3" ? "0.25" : "1", CvarFlag.Archive);
   const finite = (value: string): string | null => value.trim() !== "" && Number.isFinite(Number(value)) ? null : "Expected a finite number";

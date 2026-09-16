@@ -679,7 +679,7 @@ export class RemoteApplication {
         const remote = q3Scene.remote;
         if (connection === undefined) throw new Error("Q3 guest seat must initialize with its gamestate");
         if (this.q3Browser === null) throw new Error("Q3 guest seat requires its application browser");
-        q3 = await ApplicationQ3Client.create({ kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
+        q3 = await ApplicationQ3Client.create({ saveFontData: () => (controls.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
           commandBuffer: controls.guestCommands, guestCvars: controls.guestCvars(seat.id), guestInput: controls.guestInput(seat.id), cvars: controls.cvars,
           renderer: this.renderer, browser: this.q3Browser, commandRegistration: controls.clientCommandRegistration(seat.id),
           clientState: () => ({ phase: this.network.phase === "active" ? 8 : this.network.phase === "loading" ? 6 : 5,
