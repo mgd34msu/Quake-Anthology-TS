@@ -2204,7 +2204,7 @@ export class Application {
       const carry = this.simulation.captureTravel(decision.spawnPoint);
       if (family === "q2") {
         const original = this.simulation.takeLevelChange()?.map
-          ?? `${decision.map.slice(colon + 1)}${decision.spawnPoint === "" ? "" : `${decision.spawnPoint}`}`;
+          ?? `${decision.map.slice(colon + 1)}${decision.spawnPoint === "" ? "" : `$${decision.spawnPoint}`}`;
         try { await this.advanceQ2Travel(parseQ2Travel(original), carry); }
         catch (error) { this.reportCampaignTravelError(error); }
       } else {
