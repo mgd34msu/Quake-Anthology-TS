@@ -31,7 +31,10 @@ import type { ApplicationQ3Services } from './services.ts';
 import type { SharedSceneQueries } from '../../../world/collision/index.ts';
 import { UserFileStore } from '../../../platform/files/writable.ts';
 
+export type QvmPresentationArtifacts = Readonly<Record<"ui" | "cgame", QvmModuleOptions["artifact"]>>;
+
 export interface ApplicationQvmClientOptions {
+  readonly artifacts?: QvmPresentationArtifacts;
   readonly seat: SeatId;
   readonly commandContext: CommandContext;
   readonly services: ApplicationQ3Services;
@@ -66,6 +69,7 @@ export class ApplicationQvmClient {
   private arguments: readonly string[] = [];
   private retired = false;
   private ready = false;
+  private readonly artifacts = new Map<"ui" | "cgame", QvmModuleOptions["artifact"]>();
   private cgame: QvmCgame | null = null;
   private ui: QvmUi | null = null;
 
@@ -112,12 +116,19 @@ export class ApplicationQvmClient {
       ?? o.scalar(call, this) ?? rejectQvmSyscall(call);
   }
   private async module(role: 'cgame' | 'ui'): Promise<QvmModuleOptions> {
+    const retained = this.options.artifacts?.[role];
+    if (retained !== undefined) {
+      if (retained.role !== role) throw new Error('Retained presentation artifact has the wrong role');
+      this.artifacts.set(role, retained);
+      return { artifact: retained, host: call => this.host(call) };
+    }
     const path = `vm/${role}.qvm`, opened = await this.options.media.provider.mounts.open(path);
     this.assertCurrent();
     if (opened === null) throw new Error(`Missing native module: ${path}`);
     const artifact = resolveQvmArtifact({ module: { id: `q3:${role}`, artifactPath: path, digest: opened.reference.digest,
       revision: `${opened.reference.provenance.mount.identity.id}:${opened.reference.provenance.mount.identity.generation}` }, role, bytes: opened.bytes });
     if (artifact.kind !== 'bytecode' || artifact.known !== null && artifact.known.product !== 'baseq3') throw new Error(`Unsupported native baseq3 module: ${path}`);
+    this.artifacts.set(role, artifact);
     return { artifact, host: call => this.host(call) };
   }
   static async create(options: ApplicationQvmClientOptions): Promise<ApplicationQvmClient> {
@@ -135,6 +146,11 @@ export class ApplicationQvmClient {
       try { owner.close(); } catch (cleanupError) { throw new AggregateError([error, cleanupError], 'QVM initialization and cleanup failed'); }
       throw error;
     }
+  }
+  presentationArtifacts(): QvmPresentationArtifacts {
+    const ui = this.artifacts.get("ui"), cgame = this.artifacts.get("cgame");
+    if (ui === undefined || cgame === undefined) throw new Error("Presentation modules are not initialized");
+    return { ui, cgame };
   }
   async updateScreen(call: QvmHostCall): Promise<void> {
     this.assertCurrent();

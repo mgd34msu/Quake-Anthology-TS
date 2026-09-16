@@ -22,7 +22,7 @@ import { SeatHudMessages, SeatWeaponWheel, hudVitalOccupiedRects, drawCommonHud,
 import { SeatUiPreferences, bindInputSettings, bindAudioSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
 import { registerBindingMenus } from "../../ui/settings/bindings.ts";
 import { sharedBindingActions } from "../../ui/settings/action-catalog.ts";
-import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
+import { bindNativeVideoSettings, bindRendererSettings } from "../../ui/settings/services.ts";
 import type { SettingBinding, SettingsMenus } from "../../ui/settings/index.ts";
 import { UiTextRenderer } from "../../text/ui.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
@@ -136,7 +136,11 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { selected: () => audio.selectedOutput, devices: () => audio.outputDeviceNames(), select: name => audio.selectOutput(name),
         report: text => local.console.print(`${text}\n`) });
     const shared = input.sharedSettings();
-    const display = bindNativeVideoSettings(input.window, shared, message => local.console.print(`${message}\n`));
+    const reportDisplay = (message: string): void => local.console.print(`${message}\n`);
+    const display = [...bindRendererSettings({ current: () => input.window.backend, report: reportDisplay,
+      apply: backend => input.commands.append(`vid_restart ${backend}\n`, { session: seat.session,
+        origin: { kind: "local-seat", seat, client: local.player.seat.client.id } }) }),
+      ...bindNativeVideoSettings(() => input.window, shared, reportDisplay)];
     const images = shared === null ? [] : [...bindImageSettings(shared), ...bindModelSettings(shared), ...bindConsoleSettings(shared)];
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",

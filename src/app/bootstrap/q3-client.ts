@@ -7,6 +7,7 @@ import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { KEY_CHAR_FLAG, KeyCode } from "../../input/key-codes.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
+import type { QvmPresentationArtifacts } from "./q3-client/qvm.ts";
 import { ApplicationQvmClient } from "./q3-client/qvm.ts";
 import type { QvmCvarServices } from "../../compat/qvm/cvar-syscalls.ts";
 import { QvmApplicationScalars } from "./q3-client/qvm-scalars.ts";
@@ -14,7 +15,6 @@ import type { QvmApplicationScalarOptions } from "./q3-client/qvm-scalars.ts";
 import type { Q3ClientState } from "../../compat/qvm/client-state.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
 import type { ClientCommandRegistration } from "../../input/client-commands.ts";
-import type { NativeRenderer } from "./renderer.ts";
 import type { Q3PresentationSession } from "../../content/q3/presentation/client.ts";
 import type { SnapshotSource } from "../../content/q3/presentation/snapshots.ts";
 import type { CommandSource } from "../../content/q3/presentation/prediction.ts";
@@ -111,9 +111,12 @@ export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
       readonly browser: Q3BrowserView;
       readonly guestCvars: QvmCvarServices;
       readonly guestInput: QvmApplicationScalarOptions["input"];
-      readonly queries: SharedSceneQueries; readonly commandBuffer: Pick<CommandBuffer, 'executeNow' | 'insert' | 'append'>; readonly renderer: NativeRenderer;
+      readonly queries: SharedSceneQueries; readonly commandBuffer: Pick<CommandBuffer, 'executeNow' | 'insert' | 'append'>; readonly renderer: QvmApplicationScalarOptions["renderer"];
       readonly clientState: QvmApplicationScalarOptions["clientState"] }
 );
+export type QvmVideoReopenOptions = Pick<Extract<ApplicationQ3ClientOptions, { readonly kind: "qvm" }>,
+  "renderer" | "viewport" | "commandRegistration">;
+
 export interface ApplicationQ3LocalRound {
   readonly actor: ActorId;
   readonly initial: Q3SourcePresentationState;
@@ -138,6 +141,7 @@ export class ApplicationQ3Client {
   private readonly product: Q3SourcePresentationState["product"];
   private cvarOwner: CvarRegistry;
   get cvars(): CvarRegistry { return this.cvarOwner; }
+  get timeCvars(): CvarRegistry | undefined { return this.options.timeCvars; }
   adoptCvars(cvars: CvarRegistry): void {
     if (cvars.dialect !== this.cvars.dialect || cvars.context.session !== this.cvars.context.session) throw new Error("Q3 client cvar owner changed identity");
     this.cvarOwner = cvars;
@@ -163,7 +167,7 @@ export class ApplicationQ3Client {
   private services: ApplicationQ3Services | null = null;
   private readonly sharedCvarNames: ReadonlySet<string>;
   private readonly foreign: ApplicationQ3ForeignModels;
-  private constructor(readonly options: ApplicationQ3ClientOptions, readonly media: ApplicationQ3Assets) {
+  private constructor(readonly options: ApplicationQ3ClientOptions, readonly media: ApplicationQ3Assets, private readonly artifacts?: QvmPresentationArtifacts) {
     this.round = options.kind === "remote" || options.kind === "qvm" ? null : { ...options, actor: options.local.player.actor };
     this.product = (options.kind === "remote" || options.kind === "qvm") ? "baseq3" : options.initial.product;
     this.localSource = (options.kind === "remote" || options.kind === "qvm") ? null : new ApplicationQ3Source(options.local.player.actor, options.initial,
@@ -244,11 +248,25 @@ export class ApplicationQ3Client {
     if (this.timeMirror !== null) this.timeMirror.refresh();
     else if (this.options.timeCvars !== undefined) refreshFrameTimeCvars(this.options.timeCvars, this.cvars);
   }
-  static async create(options: ApplicationQ3ClientOptions): Promise<ApplicationQ3Client> {
+  static async create(options: ApplicationQ3ClientOptions, artifacts?: QvmPresentationArtifacts): Promise<ApplicationQ3Client> {
     options.assertCurrent?.();
     const media = await ApplicationQ3Assets.create(options.assets, options.assets.content.recipe.engineBehavior.content, options.commands.print, options.saveFontData, options.kind === "qvm" ? "guest-async" : "source-sync");
-    const client = new ApplicationQ3Client(options, media);
+    const client = new ApplicationQ3Client(options, media, artifacts);
     try { options.assertCurrent?.(); await client.initialize(); options.assertCurrent?.(); client.bindFrameTime(); return client; } catch (error) { client.close(); throw error; }
+  }
+  captureVideoReopen(): (overrides: QvmVideoReopenOptions) => Promise<ApplicationQ3Client> {
+    const options = this.options, backend = this.requireBackend();
+    if (options.kind !== "qvm" || backend.kind !== "qvm") throw new Error("Video guest reopen requires QVM presentation");
+    const artifacts = backend.game.presentationArtifacts(), cvars = this.cvars, timeCvars = this.timeCvars;
+    const { settings: _settings, serverSettings: _serverSettings, timeCvars: _timeCvars, ...retained } = options;
+    let opened = false;
+    return async overrides => {
+      if (!this.closed) throw new Error("Previous guest presentation must shut down before reopening");
+      if (opened) throw new Error("Video guest reopen was already attempted");
+      opened = true;
+      return ApplicationQ3Client.create({ ...retained, ...overrides, cvars,
+        ...(timeCvars === undefined ? {} : { timeCvars }) }, artifacts);
+    };
   }
   private bindFrameTime(): void {
     this.timeMirror?.close(); this.timeMirror = null;
@@ -292,7 +310,7 @@ export class ApplicationQ3Client {
       const scalar = new QvmApplicationScalars({ renderer: o.renderer, viewport: o.viewport, local: o.local, input: o.guestInput, media, services, now: o.now,
         keyCatcher: { get: () => this.keyCatcher, set: value => { this.keyCatcher = value; } }, clientState: o.clientState,
         lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
-      const game = await ApplicationQvmClient.create({ seat, commandContext: this.commandContext(), services, media, session, connection: o.connection, queries: o.queries,
+      const game = await ApplicationQvmClient.create({ ...(this.artifacts === undefined ? {} : { artifacts: this.artifacts }), seat, commandContext: this.commandContext(), services, media, session, connection: o.connection, queries: o.queries,
         commands: o.commandBuffer, cvars: o.guestCvars, browser: o.browser, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
         removeCommand: name => { this.commandNames.delete(name); o.commandRegistration.remove(name); },
         scalar: (call, owner) => scalar.dispatch(call, () => owner.updateScreen(call)) });

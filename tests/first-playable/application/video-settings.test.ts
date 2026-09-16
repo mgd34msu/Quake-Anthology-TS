@@ -62,7 +62,7 @@ for (const backend of ["cpu", "gl"]) test(`actual ${backend} Display menu previe
     await Bun.write(`/tmp/video-settings-${backend}-custom.png`, encodePng(800, 600, resized));
     setText("ui:video:custom-width", "bad"); key(KeyCode.Enter); await application.step(1);
     expect(window.logicalSize).toEqual({ width: 800, height: 600 });
-    const bindings = bindNativeVideoSettings(window, null, () => undefined), resolution = bindings.find(binding => binding.id === "ui:video:resolution");
+    const bindings = bindNativeVideoSettings(() => window, null, () => undefined), resolution = bindings.find(binding => binding.id === "ui:video:resolution");
     if (resolution?.kind !== "choice") throw new Error("Missing resolution binding");
     for (const mode of window.displayModes) expect(resolution.choices().some(choice => choice.id === `${mode.width}x${mode.height}`)).toBe(true);
     expect(resolution.read()).toBe("800x600"); expect(application.simulation).toBe(simulation); expect(application.window).toBe(window);

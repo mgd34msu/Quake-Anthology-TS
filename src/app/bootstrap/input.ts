@@ -273,12 +273,13 @@ export class ApplicationInput {
     catch (error) { input.close(); throw error; }
   }
 
-  private constructor(staging: ReadonlySet<CvarRegistry> | null, readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
+  private constructor(staging: ReadonlySet<CvarRegistry> | null, private currentWindow: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
     simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
     readonly now: () => number, private readonly settings: ConfigStore, saved: readonly (SeatSettings | null)[],
     routing: { readonly keyboardSeat: number | null } | null,
     private readonly loadedArchives: { readonly movement: readonly CvarArchiveEntry[]; readonly fallback: readonly CvarArchiveEntry[]; readonly input: readonly (readonly CvarArchiveEntry[])[] } | null,
     owner?: ApplicationInputCommandOwner, previous?: ApplicationInput, prepared?: PreparedStartup, client?: ClientBootstrap) {
+    const window = currentWindow;
     this.startup = prepared ?? previous?.startup;
     const configuration = actions.configuration;
     this.externalRouting = owner?.routing;
@@ -424,7 +425,7 @@ export class ApplicationInput {
     this.controllers = client?.controllers ?? previous?.controllers ?? SdlControllers.open();
     this.router = new InputRouter({ seats: locals.map((local, index) => ({ input: local.input,
       controller: saved[index]?.controller ?? (locals.length > 1 && index === 0 ? { kind: "none" } : { kind: "automatic" }) })),
-      deferPlatform: previous !== undefined || staging !== null, keyboardSeat: routing === null ? first.seat.id : routing.keyboardSeat === null ? null : locals[routing.keyboardSeat]?.player.seat.id ?? first.seat.id, controllers: this.controllers, now, ticks: () => window.ticks, subframe: true,
+      deferPlatform: previous !== undefined || staging !== null, keyboardSeat: routing === null ? first.seat.id : routing.keyboardSeat === null ? null : locals[routing.keyboardSeat]?.player.seat.id ?? first.seat.id, controllers: this.controllers, now, ticks: () => this.window.ticks, subframe: true,
       unhandled: event => {
         if (event.kind === "assignment") locals[event.slot]?.haptics.cancel();
         if (event.kind === "quit" || event.kind === "window" && event.event === 14) actions.quit();
@@ -670,6 +671,21 @@ export class ApplicationInput {
   releaseForProfileChange(commands?: Pick<CommandBuffer, "append">): void {
     this.releaseOffhand(true);
     for (const local of this.locals) local.input.release(this.now(), commands);
+  }
+  get window(): SdlWindow { return this.currentWindow; }
+  publishWindow(next: SdlWindow): void {
+    if (next === this.currentWindow) return;
+    const previous = this.currentWindow;
+    this.releaseForProfileChange();
+    this.stopHaptics();
+    this.pendingWindowEvents = [];
+    this.currentWindow = next;
+    try { this.router.attachWindow(next); }
+    catch (error) {
+      this.currentWindow = previous;
+      this.router.attachWindow(previous);
+      throw error;
+    }
   }
   transferPlatformTo(next: ApplicationInput): void {
     next.pendingWindowEvents = this.pendingWindowEvents; this.pendingWindowEvents = [];

@@ -73,7 +73,7 @@ test("ordinary shared browser controls sort and filter received Q1/Q2/Q3 servers
   const art = await loadNativeUiArt("resource:test:browser-sort-font", images, async path => decodePng(await Bun.file(resolve(import.meta.dir, "../..", path)).bytes(), path));
   const menu = new StartupMenu({ seat, model, art, font: typography.body, titleFont: typography.title, browser, now: () => 0,
     play: () => undefined, load: () => undefined, saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined,
-    quit: () => undefined, applyDisplay: () => undefined });
+    quit: () => undefined });
   const renderer = new SoftwareRenderer(640, 480, owner), target = new CpuRenderTarget(renderer);
   const click = (x: number, y: number): void => {
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x, y }, delta: { x: 0, y: 0 } });

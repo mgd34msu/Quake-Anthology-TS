@@ -1,3 +1,4 @@
+import { ApplicationVideoRestart } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { SeatConsole } from "../../console/session.ts";
@@ -46,7 +47,7 @@ import { movementDialect } from "./input.ts";
 import { StartupSaves } from "./startup-saves.ts";
 import { savedSimulationSettings, savedBotCheckpoint } from "./simulation/index.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
-import { bindNativeVideoSettings } from "../../ui/settings/services.ts";
+import { bindNativeVideoSettings, bindRendererSettings } from "../../ui/settings/services.ts";
 import { sharedBindingActions } from "../../ui/settings/action-catalog.ts";
 import { StartupInputProfile } from "./startup-input-profile.ts";
 import { ClientSourcePublicationError, type ClientBootstrap, type ClientSourceLifetime } from "./client-bootstrap.ts";
@@ -94,7 +95,6 @@ export class StartupApplication {
   private refreshSaves = false;
   private readonly saves: StartupSaves;
   readonly preferences: FrontendPreferences;
-  private applyDisplay = false;
   private baselineProduct: string | null = null;
   private baselineInput = "";
   private preferenceStore: ConfigStore | null = null;
@@ -193,6 +193,7 @@ export class StartupApplication {
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");
       art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage);
       renderer = NativeRenderer.open(options, owner, images);
+      const native = renderer;
       await imageSettings.refreshDisplay(renderer);
       controllers = SdlControllers.open();
       const themeProduct = installed.find(candidate => candidate.expectation.family === "q2" && candidate.expectation.edition === "rerelease" && candidate.expectation.campaign === "baseq2");
@@ -213,7 +214,15 @@ export class StartupApplication {
           try { this.pending = { kind: "load", path: this.saves.path(id) }; }
           catch (error) { this.status = error instanceof Error ? error.message : String(error); this.graphics?.menu.setStatus(this.status); }
         },
-        quit: () => this.requestQuit(), settings: [...this.preferences.bindings(), ...bindNativeVideoSettings(renderer.window, imageSettings.cvars, message => this.graphics?.menu.setStatus(message))], applyDisplay: () => { this.applyDisplay = true; }, saves: () => this.saves.list, refreshSaves: () => { this.refreshSaves = true; } });
+        quit: () => this.requestQuit(), settings: [...this.preferences.bindings(),
+          ...bindNativeVideoSettings(() => native.window, imageSettings.cvars, message => this.graphics?.menu.setStatus(message)),
+          ...bindRendererSettings({ current: () => native.window.backend, enabled: () => this.graphics !== null && !this.graphics.menu.isBusy,
+            report: message => this.graphics?.menu.setStatus(message), apply: backend => {
+              const client = this.captureClient(), primary = client.locals[0];
+              if (primary === undefined) throw new Error("Renderer selection requires the retained primary seat");
+              client.prepared.commands.append(`vid_restart ${backend}\n`, { session: client.session.session,
+                origin: { kind: "local-seat", seat: primary.seat.id, client: primary.client.id } });
+            } })], saves: () => this.saves.list, refreshSaves: () => { this.refreshSaves = true; } });
       menu.setStatus(this.status);
       const activeMenu = menu;
       const input = primary.input;
@@ -221,7 +230,6 @@ export class StartupApplication {
 
       activeMenu.bindInput(input, () => sharedBindingActions(movementDialect(this.model.options), this.model.bindingItems(), this.model.bindingCapabilities()));
       input.setFocus({ kind: "menu", menu: activeMenu.controller.activeMenu ?? "menu:startup:main", control: null }, performance.now());
-      const native = renderer;
       router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }], keyboardSeat: seat, controllers,
         now: () => performance.now(), ticks: () => native.window.ticks, subframe: false,
         unhandled: event => { if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit(); } });
@@ -285,7 +293,38 @@ export class StartupApplication {
         print: text => { const client = this.captureClient(), local = this.captureSeats()[0];
           this.host.print(text); if (local !== undefined) client.consoles.get(local.seat)?.print(text); },
       }, native);
-      this.client = { musicControls: this.musicControls, capture, consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, settings,
+      const videoRestart = new ApplicationVideoRestart(native, {
+        capture: () => capture,
+        prepare: async () => await this.client?.source.current?.prepareVideoRestart() ?? null,
+        publishWindow: window => {
+          const platform = this.captureClient().platform.current;
+          if (platform?.kind === "world") { platform.input.publishWindow(window); return; }
+          const previous = native.window;
+          try { this.graphics?.router.attachWindow(window); }
+          catch (error) {
+            try { this.graphics?.router.attachWindow(previous); }
+            catch (rollback) { throw new AggregateError([error, rollback], "Video input rollback failed"); }
+            throw error;
+          }
+        },
+        published: async kind => {
+          this.model.select("renderer", kind);
+          try { await this.preferenceStore?.dump("renderer", `${kind}\n`); }
+          catch (error) { this.print(`Renderer preference could not be saved: ${error instanceof Error ? error.message : String(error)}\n`); }
+        },
+        settled: () => { this.lastFrame = performance.now(); },
+        print: (text, source) => {
+          const client = this.client, platform = client?.platform.current;
+          if (platform?.kind === "world") { platform.input.print(text, source); return; }
+          this.print(text); this.graphics?.menu.setStatus(text.trim());
+        },
+        failed: async error => {
+          this.stopping = true;
+          try { await this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Video restart and client shutdown failed"); }
+          throw error;
+        },
+      });
+      this.client = { videoRestart, musicControls: this.musicControls, capture, consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, settings,
         output: { current: activeAudio.engine }, platform: { current: { kind: "menu", router: activeRouter, controllerSettings,
           retireCommands: () => { this.releaseMenuInput?.(); this.releaseMenuInput = null; } } },
         source: { current: null }, sourceProfile: { current: configuration.selection.source }, configuration: { current: { scripts: initial.scripts, options: initial.options } }, activateFrontend: () => this.activateFrontend(),
@@ -294,6 +333,7 @@ export class StartupApplication {
         get hasPendingSource() { return hasPendingSource(); } };
       this.bindFrontendConsole();
       capture.activate();
+      videoRestart.register(initial.prepared.commands);
       const savedInput = await settings.loadSeat("input/seat-1.json");
       if (savedInput !== null) this.client.consoles.get(primarySeat)?.history.replace(savedInput.history);
       initial.prepared.forwardCommands((name, args, source) => { this.frontendCommand(name, args, source); return undefined; });
@@ -302,6 +342,7 @@ export class StartupApplication {
       if (this.pending === null && this.pendingDemo === null && this.entry === "run") this.pending = { kind: "initial", options: initial.options };
       return this.graphics;
     } catch (error) {
+      this.client?.videoRestart.close();
       await this.client?.capture.close();
       audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); menu?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
       await session.close(); await initial.image.close(); await initial.scripts.close();
@@ -620,7 +661,7 @@ export class StartupApplication {
   }
 
   private async publishPendingSource(): Promise<void> {
-    if (this.client?.capture.pendingReadback) return;
+    if (this.client?.capture.pendingReadback || this.client?.videoRestart.pending) return;
     const action = this.pending; this.pending = null;
     if (action !== null && !this.stopping) await this.launch(action);
     if (!this.stopping) await this.publishDemoIntent();
@@ -662,6 +703,7 @@ export class StartupApplication {
       for (const event of graphics.controllers.pollEvents()) graphics.router.handleController(event);
     } else source?.pumpClientInput();
     const afterDispatch = async (): Promise<void> => {
+      await client.videoRestart.drain();
       await graphics.audio.flushCommands();
       await (this.game ?? this.remote)?.flushClientCommands();
       await this.publishPendingSource();
@@ -672,7 +714,7 @@ export class StartupApplication {
     if (!client.prepared.pending) this.initialConfiguration = false;
     await afterDispatch();
     if (!startupFrame && !client.capture.pendingReadback && !(this.game ?? this.remote)?.clientCommandsBlocked) await client.prepared.commands.executeScriptsAsync(afterDispatch,
-      () => !this.closed && !this.stopping && !client.capture.pendingReadback && !(this.game ?? this.remote)?.clientCommandsBlocked);
+      () => !this.closed && !this.stopping && !client.capture.pendingReadback && !client.videoRestart.pending && !(this.game ?? this.remote)?.clientCommandsBlocked);
     await afterDispatch();
     const active = this.game ?? this.remote;
     if (active !== null && !this.stopping) {
@@ -703,14 +745,6 @@ export class StartupApplication {
     }
     await graphics.imageSettings.refreshDisplay(graphics.renderer);
     this.model.setDisplay({ ...graphics.renderer.window.logicalSize, gamma: graphics.renderer.outputGamma });
-    if (this.applyDisplay) {
-      await graphics.inputProfile.save(this.preferences.values, this.frontendHistory);
-      this.applyDisplay = false;
-      await this.preferenceStore?.dump("renderer", `${this.model.options.renderer}\n`);
-      await graphics.imageSettings.refreshDisplay(graphics.renderer);
-      graphics.menu.setStatus("Renderer selection saved for the next application launch.");
-      graphics.menu.resumeDisplayOptions();
-    }
     graphics.draw();
     await client.capture.drain();
   }
@@ -732,6 +766,7 @@ export class StartupApplication {
     catch (error) { this.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
     const errors: unknown[] = [];
     this.game?.requestQuit(); this.remote?.requestQuit();
+    this.client?.videoRestart.close();
     try { await this.client?.capture.close(); } catch (error) { errors.push(error); }
     try { await this.client?.source.current?.retire(); } catch (error) { errors.push(error); }
     try { await this.browser?.close(); } catch (error) { errors.push(error); }

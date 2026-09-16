@@ -1,3 +1,4 @@
+import { ApplicationVideoRestart, prepareVideoGuests, type PreparedVideoPresentation, type VideoGuestSeat } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
 import { SceneImageRegistry } from "../../render/scene/resources.ts";
 import { openInitialConfigurationContent, prepareInitialConfiguration, prepareProfileConfiguration, configurationDialect, configurationStore, type PreparedProfileConfiguration, type ConfigurationCommandRequest } from "./configuration.ts";
@@ -182,6 +183,7 @@ export class Application {
   });
   private graphical: GraphicalApplication | null = null;
   private capture: ApplicationCapture | null = null;
+  private ownedVideoRestart: ApplicationVideoRestart | null = null;
   private frontendOverrides: FrontendPreferenceOverrides = {};
   private imageSettings: ApplicationImageSettings | null = null;
   private frontendBaseline: FrontendPreferenceValues | null = null;
@@ -661,10 +663,11 @@ export class Application {
   get botClients(): readonly ApplicationBotClient[] { return this.bots?.clients() ?? []; }
   get frameCount(): number { return this.frames; }
   get finished(): boolean { return this.stopping || this.closed || this.options.frameLimit !== null && this.frames >= this.options.frameLimit; }
-  get clientCommandsBlocked(): boolean { return this.captureBlocksTransition(); }
+  get clientCommandsBlocked(): boolean { return this.captureBlocksTransition() || this.videoRestart?.pending === true; }
+  private get videoRestart(): ApplicationVideoRestart | null { return this.ownership.kind === "borrowed" ? this.ownership.client.videoRestart : this.ownedVideoRestart; }
   pumpClientInput(): void { this.graphical?.input.pump(false); }
   advanceClientStartup(): Promise<boolean> {
-    return this.captureBlocksTransition() ? Promise.resolve(true)
+    return this.clientCommandsBlocked ? Promise.resolve(true)
       : this.graphical?.input.advanceStartup() ?? this.preparedStartup?.advanceFrame() ?? Promise.resolve(false);
   }
   flushClientCommands(): Promise<void> { return this.afterCommandDispatch(); }
@@ -1210,7 +1213,16 @@ export class Application {
       }
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease };
       this.capture = client?.capture ?? new ApplicationCapture(inputCaptureServices(input, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text)), renderer);
-      if (client === null) this.capture.activate();
+      if (client === null) {
+        this.capture.activate();
+        const video = new ApplicationVideoRestart(renderer, {
+          capture: () => this.capture, prepare: () => this.prepareVideoRestart(),
+          publishWindow: window => { const current = this.graphical; if (current === null) throw new Error("Video input has retired"); current.input.publishWindow(window); },
+          published: renderer => { this.launchOptions = { ...this.launchOptions, renderer }; },
+          settled: () => {}, print: (text, source) => { if (this.graphical === null) this.host.print(text); else this.graphical.input.print(text, source); }, failed: error => this.closeFailedWorld(error),
+        });
+        video.register(input.commands); this.ownedVideoRestart = video;
+      }
       if (q3.size === 0) await audio.startWorldMusic();
     } catch (error) {
       for (const client of sourceClients) client.close();
@@ -1229,6 +1241,25 @@ export class Application {
   }
 
   get captureMap(): string { return this.content.recipe.map.geometry.requestedPath; }
+
+  async prepareVideoRestart(): Promise<PreparedVideoPresentation | null> {
+    const graphical = this.graphical;
+    if (graphical === null || this.closed) throw new Error("Video source has retired");
+    const seats: VideoGuestSeat[] = [];
+    for (const [id, current] of graphical.q3) {
+      if (current.kind !== "qvm") continue;
+      const presentation = graphical.presentations.find(value => value.local.player.seat.id.equals(id));
+      const guest = this.localGuest?.seats.get(id);
+      if (presentation === undefined || guest === undefined || guest.client !== current.client) throw new Error("Guest video seat has no current presentation");
+      seats.push({ client: current.client,
+        viewport: window => { const size = window.drawableSize; return seatViewport(id.index, this.options.seats, size.width, size.height); },
+        publish: client => { graphical.q3.set(id, { ...current, client }); guest.client = client; presentation.replaceQ3Client(client); this.clientInputs = this.clientInputs.filter(event => !event.seat.equals(id)); } });
+    }
+    return prepareVideoGuests(graphical.input, graphical.renderer, seats, () => {
+      if (this.closed || this.graphical !== graphical || seats.some(seat => ![...graphical.q3.values()].some(value => value.client === seat.client)))
+        throw new Error("Guest video source changed during preparation");
+    });
+  }
 
   async prepareRetirement(): Promise<void> {
     await this.capture?.beforeWorldChange();
@@ -2141,7 +2172,7 @@ export class Application {
   }
 
   private async applyTransition(): Promise<void> {
-    if (this.captureBlocksTransition()) return;
+    if (this.clientCommandsBlocked) return;
     if (this.pendingSave !== null) {
       const image = this.pendingSave, previous = this.content;
       this.pendingSave = null;
@@ -2261,16 +2292,16 @@ export class Application {
   }
 
   private async afterCommandDispatch(): Promise<void> {
-    if (this.closed || this.fatalWorldFailure || this.captureBlocksTransition() || this.pendingShellPublication) return;
+    if (this.closed || this.fatalWorldFailure || this.clientCommandsBlocked || this.pendingShellPublication) return;
     do {
       await this.commands(async () => {
         if (this.closed) return;
         await this.applyTransition();
         if (this.requestedCommands.length !== 0) await this.afterCommandDispatch();
       });
-      if (this.closed || this.pendingShellPublication) return;
+      if (this.closed || this.pendingShellPublication || this.videoRestart?.pending) return;
       await this.applyTransition();
-    } while (this.requestedCommands.length !== 0 && !this.captureBlocksTransition());
+    } while (this.requestedCommands.length !== 0 && !this.clientCommandsBlocked);
   }
 
   async executeApplicationRequest(request: ConfigurationCommandRequest): Promise<void> {
@@ -2292,7 +2323,7 @@ export class Application {
     const pending = direct ?? this.requestedCommands;
     if (direct === undefined) this.requestedCommands = [];
     for (const [index, request] of pending.entries()) {
-      if (this.stepping && this.pendingShellPublication) { this.requestedCommands.unshift(...pending.slice(index)); return; }
+      if (this.stepping && (this.pendingShellPublication || this.videoRestart?.pending)) { this.requestedCommands.unshift(...pending.slice(index)); return; }
       if (routeApplications && request.target === "application" && this.sourcePublished && this.ownership.kind === "borrowed") {
         const source = request.source ?? this.ownership.client.prepared.commands.context;
         if (this.stepping) {
@@ -2496,6 +2527,7 @@ export class Application {
     if (this.stepping) throw new Error("Application step is already in progress");
     if (this.worldOperation !== "idle") throw new Error("A world operation is in progress");
     if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds <= 0) throw new RangeError("Application step requires positive elapsed milliseconds");
+    if (this.ownership.kind === "owned") await this.ownedVideoRestart?.drain();
     this.stepping = true;
     const completion = Promise.withResolvers<void>(); this.stepCompletion = completion.promise;
     const frameStartedAt = performance.now();
@@ -2547,9 +2579,9 @@ export class Application {
       const beforeFrameEvents = q1 === null ? [] : this.simulation.drainPresentationEvents();
       this.appendQ1Commands(beforeFrameEvents);
       if (this.dedicatedCommands !== null) this.dedicatedConsole?.drain(this.dedicatedCommands);
-      await this.sourceCommands?.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition() && !this.pendingShellPublication);
+      await this.sourceCommands?.executeAsync(() => this.afterCommandDispatch(), () => !this.clientCommandsBlocked && !this.pendingShellPublication);
       if (this.dedicatedCommands !== null && this.dedicatedCommands !== this.sourceCommands)
-        await this.dedicatedCommands.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition() && !this.pendingShellPublication);
+        await this.dedicatedCommands.executeAsync(() => this.afterCommandDispatch(), () => !this.clientCommandsBlocked && !this.pendingShellPublication);
       const captureTransitionPending = this.captureBlocksTransition();
       const botConfiguration = this.simulation.q1Source()?.cvars ?? this.q2Console?.cvars;
       if (this.bots === null && this.simulation.q3Source() === null && (botConfiguration?.variableValue("bot_minplayers") ?? 0) > 0) {
@@ -2682,7 +2714,9 @@ export class Application {
       const elapsed = now - previous;
       if (elapsed < 4) { await Bun.sleep(4 - elapsed); continue; }
       previous = now;
+      const generation = this.videoRestart?.generation;
       await this.step(elapsed);
+      if (this.videoRestart?.generation !== generation) previous = performance.now();
       await setImmediate();
     }
   }
@@ -2718,6 +2752,8 @@ export class Application {
     const graphical = this.graphical;
     this.graphical = null;
     const errors: unknown[] = [];
+    try { this.ownedVideoRestart?.close(); } catch (error) { errors.push(error); }
+    this.ownedVideoRestart = null;
     if (this.ownership.kind === "borrowed" && this.ownership.client.source.current === this) {
       try { await this.ownership.client.capture.beforeWorldChange(); } catch (error) { errors.push(error); }
     }

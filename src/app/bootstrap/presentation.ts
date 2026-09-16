@@ -77,7 +77,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText">, private readonly seatCount: number,
     font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
-    private readonly effects: ApplicationEffects, readonly q3Client: ApplicationQ3Client | null = null,
+    private readonly effects: ApplicationEffects, private currentQ3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null,
     private readonly worldTextCullFactor: (() => number) | null = null,
     private readonly fieldOfView: () => number = () => 90,
@@ -137,6 +137,14 @@ export class WorldSeatPresentation implements SeatPresentation {
     return q1ChaseCamera(firstPerson, player.angles, chase, this.effects.queries, timing.numeric, this.local.player.actor);
   }
 
+  get q3Client(): ApplicationQ3Client | null { return this.currentQ3Client; }
+  replaceQ3Client(candidate: ApplicationQ3Client): ApplicationQ3Client | null {
+    if (!candidate.options.local.player.seat.id.equals(this.local.player.seat.id)
+      || !candidate.options.local.player.actor.equals(this.local.player.actor)) throw new Error("Replacement presentation belongs to another local player");
+    const previous = this.currentQ3Client;
+    this.currentQ3Client = candidate;
+    return previous;
+  }
   private get chaseSettings() { return this.q3Client === null && !this.finale.active ? this.viewSize()?.chase ?? null : null; }
 
   private applyViewSize(camera: SceneCamera): SceneCamera {

@@ -1,3 +1,4 @@
+import { ApplicationVideoRestart, prepareVideoGuests, type PreparedVideoPresentation } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
 import type { ConfigurationCommandRequest } from "./configuration.ts";
 import { RecordedRemoteSource } from "./network/recorded-source.ts";
@@ -138,6 +139,7 @@ export class RemoteApplication {
   private readonly retiredFrontends: { readonly frontend: RemoteWorldFrontend; readonly content: LoadedApplicationContent | null }[] = [];
   private controls: ApplicationInput | null = null;
   private capture: ApplicationCapture | null = null;
+  private ownedVideoRestart: ApplicationVideoRestart | null = null;
   private presentation: WorldSeatPresentation | null = null;
   private commands: RemoteCommand[] = [];
   private elapsed = 0;
@@ -373,7 +375,21 @@ export class RemoteApplication {
         ? { kind: "live", family: qw ? "qw" : q1 ? "q1" : q3 ? "q3" : "q2", address, transport } : (() => { throw new Error("Remote transport missing"); })();
       application = new RemoteApplication(options, content, session, renderer, host, imageSettings, launch, identity, browser, ownership);
       application.initializeQ3Browser();
-      if (ownership.kind === "owned") application.activateSourceCommands();
+      if (ownership.kind === "owned") {
+        application.activateSourceCommands();
+        const current = application;
+        const video = new ApplicationVideoRestart(current.renderer, {
+          capture: () => current.capture, prepare: () => current.prepareVideoRestart(),
+          publishWindow: window => { current.controls?.publishWindow(window); },
+          published: renderer => { current.launchOptions = { ...current.launchOptions, renderer }; },
+          settled: () => {}, print: (text, source) => current.print(text, source), failed: async error => {
+            try { await current.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Remote video restart and shutdown failed"); }
+            throw error;
+          },
+        });
+        if (current.clientCommands === null) throw new Error("Remote video restart requires client commands");
+        video.register(current.clientCommands.commands); current.ownedVideoRestart = video;
+      }
       if (ownership.kind === "owned") {
       await application.viewSettings.load(application.inputConfig);
       application.releaseViewCvars = application.viewSettings.bindCvars(application.imageSettings.cvars);
@@ -407,7 +423,8 @@ export class RemoteApplication {
 
   get options(): ApplicationOptions { return this.launchOptions; }
   get finished(): boolean { return this.stopping || this.closed || this.options.frameLimit !== null && this.frames >= this.options.frameLimit; }
-  get clientCommandsBlocked(): boolean { return this.capture?.pendingReadback ?? false; }
+  get clientCommandsBlocked(): boolean { return this.capture?.pendingReadback === true || this.videoRestart?.pending === true; }
+  private get videoRestart(): ApplicationVideoRestart | null { return this.ownership.kind === "borrowed" ? this.ownership.client.videoRestart : this.ownedVideoRestart; }
   pumpClientInput(): void { this.controls?.pump(false); }
   advanceClientStartup(): Promise<boolean> { return this.controls?.advanceStartup() ?? Promise.resolve(false); }
   flushClientCommands(): Promise<void> { return this.dispatchCommands(); }
@@ -491,6 +508,19 @@ export class RemoteApplication {
   }
 
   get captureMap(): string | null { return this.loadedContent?.recipe.map.geometry.requestedPath ?? null; }
+
+  async prepareVideoRestart(): Promise<PreparedVideoPresentation | null> {
+    const presentation = this.presentation, input = this.controls, client = presentation?.q3Client;
+    if (client === undefined || client === null || client.options.kind !== "qvm") return null;
+    if (input === null || presentation === null) throw new Error("Remote guest has no input presentation");
+    return prepareVideoGuests(input, this.renderer, [{ client,
+      viewport: window => { const size = window.drawableSize; return { x: 0, y: 0, width: size.width, height: size.height }; },
+      publish: candidate => { presentation.replaceQ3Client(candidate); this.clientInputs = this.clientInputs.filter(event => event.client !== client); },
+    }], () => {
+      if (this.closed || this.closing || this.presentation !== presentation || this.controls !== input || presentation.q3Client !== client)
+        throw new Error("Remote guest changed during video preparation");
+    });
+  }
 
   async prepareRetirement(): Promise<void> {
     await this.capture?.beforeWorldChange();
@@ -982,7 +1012,8 @@ export class RemoteApplication {
 
   private async dispatchCommands(): Promise<void> {
     const pending = this.commands; this.commands = [];
-    for (const command of pending) {
+    for (const [index, command] of pending.entries()) {
+      if (this.videoRestart?.pending) { this.commands.unshift(...pending.slice(index)); return; }
       const source = command.source ?? { session: this.session.session, origin: { kind: "local-console" } } satisfies CommandContext;
       if (this.ownership.kind === "borrowed") await this.ownership.client.dispatchApplicationRequest({ target: "application", name: command.name, arguments_: command.args, seat: command.seat, source });
       else await this.executeRemoteCommand(command);
@@ -1051,13 +1082,15 @@ export class RemoteApplication {
     if (this.closed || this.closing) throw new Error("Remote application is closed");
     if (this.stepping) throw new Error("Remote application step is already in progress");
     if (!Number.isFinite(elapsedMilliseconds) || elapsedMilliseconds <= 0) throw new RangeError("Remote application step requires positive elapsed milliseconds");
+    if (this.ownership.kind === "owned") await this.ownedVideoRestart?.drain();
     this.stepping = true;
     try {
       this.serverBrowser.poll();
       this.q3Browser?.poll();
       this.sourceEvents = []; this.unhandledEffects = [];
-      if (this.ownership.kind === "owned" && this.controls !== null) this.controls.pump();
+      if (this.ownership.kind === "owned" && this.controls !== null) this.controls.pump(false);
       else if (this.ownership.kind === "owned") for (const event of this.window.pollEvents()) if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit();
+      if (this.ownership.kind === "owned") await this.clientCommands?.commands.executeScriptsAsync(() => this.dispatchCommands(), () => !this.clientCommandsBlocked);
       const timeCvars = this.clientCommands?.cvars;
       const frameMilliseconds = timeCvars === undefined ? elapsedMilliseconds : sourceFrameMilliseconds(timeCvars.dialect, elapsedMilliseconds,
         readFrameTimeControls(timeCvars), { dedicated: false, localServer: false });
@@ -1131,7 +1164,10 @@ export class RemoteApplication {
     while (!this.stopping && !this.closed && (this.options.frameLimit === null || this.frames < this.options.frameLimit)) {
       const now = performance.now(), elapsed = now - previous;
       if (elapsed < 4) { await Bun.sleep(4 - elapsed); continue; }
-      previous = now; await this.step(elapsed);
+      previous = now;
+      const generation = this.videoRestart?.generation;
+      await this.step(elapsed);
+      if (this.videoRestart?.generation !== generation) previous = performance.now();
       await setImmediate();
     }
   }
@@ -1146,6 +1182,8 @@ export class RemoteApplication {
   }
   private async closeOwned(): Promise<void> {
     const errors: unknown[] = [];
+    try { this.ownedVideoRestart?.close(); } catch (error) { errors.push(error); }
+    this.ownedVideoRestart = null;
     if (this.ownership.kind === "owned" || this.ownership.client.source.current === this) {
       try { await this.saveSourceSettings(); } catch (error) { errors.push(error); }
     }

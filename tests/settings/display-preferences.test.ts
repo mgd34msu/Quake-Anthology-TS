@@ -6,7 +6,7 @@ import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { NativeRenderer } from "../../src/app/bootstrap/renderer.ts";
 import { ApplicationImageSettings } from "../../src/app/bootstrap/image-settings.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
-import { bindNativeVideoSettings } from "../../src/ui/settings/services.ts";
+import { bindNativeVideoSettings, bindRendererSettings } from "../../src/ui/settings/services.ts";
 
 test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("saved display state clamps old-monitor sizes, honors explicit gamma 1 and restores fullscreen", async () => {
   const root = await mkdtemp(join(tmpdir(), "quake-display-preferences-"));
@@ -26,7 +26,7 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("saved display state cla
       const desktop = renderer.window.display.bounds;
       expect(desktop.width).toBe(1024);
       expect(renderer.window.logicalSize).toEqual({ width: 1280, height: desktop.height });
-      const bindings = bindNativeVideoSettings(renderer.window, settings.cvars, text => errors.push(text));
+      const bindings = bindNativeVideoSettings(() => renderer.window, settings.cvars, text => errors.push(text));
       const customWidth = bindings.find(binding => binding.id === "ui:video:custom-width"), customHeight = bindings.find(binding => binding.id === "ui:video:custom-height");
       const apply = bindings.find(binding => binding.id === "ui:video:custom-apply");
       if (customWidth?.kind !== "text-entry" || customHeight?.kind !== "text-entry" || apply?.kind !== "button") throw new Error("Missing custom size controls");
@@ -34,6 +34,12 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("saved display state cla
       await settings.refreshDisplay(renderer); expect(renderer.window.logicalSize).toEqual({ width: 1300, height: 800 });
       settings.cvars.set("r_customheight", "801"); await settings.refreshDisplay(renderer);
       expect(renderer.window.logicalSize).toEqual({ width: 1300, height: 801 });
+      const replacement = NativeRenderer.open({ renderer: "cpu", width: 320, height: 240, hidden: true, gamma: 1 },
+        { identity: Symbol("replacement display"), session: identity.session, generation: 1 });
+      try {
+        await settings.refreshDisplay(replacement);
+        expect(replacement.window.logicalSize).toEqual({ width: 1300, height: 801 });
+      } finally { replacement.close(); }
       const fullscreen = bindings.find(binding => binding.id === "ui:video:fullscreen");
       if (fullscreen?.kind !== "toggle") throw new Error("Missing fullscreen setting");
       fullscreen.write(true); await settings.refreshDisplay(renderer); expect(renderer.window.fullscreen).toBe(true);
@@ -51,4 +57,49 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("saved display state cla
       expect(errors).toEqual([]);
     } finally { next.close(); await restored.close(); }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test.skipIf(process.env['SDL_VIDEODRIVER'] !== 'dummy')('retained video bindings operate on the published window', () => {
+  const identity = createIdentityOwner('video-window-publication');
+  const first = NativeRenderer.open({ renderer: 'cpu', width: 640, height: 480, hidden: true, gamma: 1 },
+    { identity: Symbol('first window'), session: identity.session, generation: 0 });
+  const second = NativeRenderer.open({ renderer: 'cpu', width: 800, height: 600, hidden: true, gamma: 1 },
+    { identity: Symbol('second window'), session: identity.session, generation: 1 });
+  let current = first.window;
+  const errors: string[] = [];
+  try {
+    const bindings = bindNativeVideoSettings(() => current, null, message => errors.push(message));
+    const resolution = bindings.find(binding => binding.id === 'ui:video:resolution');
+    const width = bindings.find(binding => binding.id === 'ui:video:custom-width');
+    const height = bindings.find(binding => binding.id === 'ui:video:custom-height');
+    const apply = bindings.find(binding => binding.id === 'ui:video:custom-apply');
+    const vsync = bindings.find(binding => binding.id === 'ui:video:vsync');
+    if (resolution?.kind !== 'choice' || width?.kind !== 'text-entry' || height?.kind !== 'text-entry'
+      || apply?.kind !== 'button' || vsync?.kind !== 'toggle') throw new Error('Missing video bindings');
+    width.write('700'); current = second.window;
+    expect(resolution.read()).toBe('800x600'); expect(width.read()).toBe('800'); expect(height.read()).toBe('600');
+    width.write('900'); height.write('700'); apply.activate();
+    expect(second.window.logicalSize).toEqual({ width: 900, height: 700 });
+    expect(first.window.logicalSize).toEqual({ width: 640, height: 480 });
+    expect(vsync.enabled()).toBe(false); expect(vsync.read()).toBe(false); expect(errors).toEqual([]);
+  } finally { second.close(); first.close(); }
+});
+
+test('renderer choice queues its draft and follows the successfully published backend', () => {
+  let current: 'cpu' | 'gl' = 'cpu', enabled = true, reject = false;
+  const applied: string[] = [], reports: string[] = [];
+  const bindings = bindRendererSettings({ current: () => current, enabled: () => enabled, report: text => reports.push(text),
+    apply: backend => { if (reject) throw new Error('Preparation failed'); applied.push(backend); } });
+  const choice = bindings.find(binding => binding.id === 'ui:video:renderer');
+  const apply = bindings.find(binding => binding.id === 'ui:video:renderer-apply');
+  if (choice?.kind !== 'choice' || apply?.kind !== 'button') throw new Error('Missing renderer controls');
+  expect(choice.read()).toBe('cpu'); expect(apply.enabled()).toBe(false);
+  choice.write('gl'); expect(choice.read()).toBe('gl'); expect(applied).toEqual([]);
+  enabled = false; apply.activate(); expect(applied).toEqual([]);
+  enabled = true; reject = true; apply.activate(); expect(reports.at(-1)).toBe('Preparation failed');
+  expect(choice.read()).toBe('gl'); expect(apply.enabled()).toBe(true);
+  reject = false; apply.activate(); expect(applied).toEqual(['gl']);
+  expect(reports.at(-1)).toBe('Renderer change queued: OpenGL.'); expect(current).toBe('cpu');
+  current = 'gl'; expect(choice.read()).toBe('gl'); expect(apply.enabled()).toBe(false);
+  current = 'cpu'; expect(choice.read()).toBe('cpu'); expect(apply.enabled()).toBe(false);
 });

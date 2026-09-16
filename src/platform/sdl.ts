@@ -23,6 +23,13 @@ function loadSdl() {
     SDL_GetClipboardText: { args: [], returns: "ptr" },
     SDL_free: { args: ["ptr"], returns: "void" },
     SDL_ShowWindow: { args: ["ptr"], returns: "void" },
+    SDL_GetWindowPosition: { args: ["ptr", "buffer", "buffer"], returns: "void" },
+    SDL_SetWindowPosition: { args: ["ptr", "i32", "i32"], returns: "void" },
+    SDL_RaiseWindow: { args: ["ptr"], returns: "void" },
+    SDL_MaximizeWindow: { args: ["ptr"], returns: "void" },
+    SDL_MinimizeWindow: { args: ["ptr"], returns: "void" },
+    SDL_RestoreWindow: { args: ["ptr"], returns: "void" },
+    SDL_GetWindowDisplayMode: { args: ["ptr", "buffer"], returns: "i32" },
     SDL_HideWindow: { args: ["ptr"], returns: "void" },
     SDL_CreateWindow: { args: ["buffer", "i32", "i32", "i32", "i32", "u32"], returns: "ptr" },
     SDL_DestroyWindow: { args: ["ptr"], returns: "void" },
@@ -154,6 +161,18 @@ function initializeSubsystem(subsystem: number, operation: string): void {
   if (api.SDL_SetHint(cString("SDL_NO_SIGNAL_HANDLERS"), cString("1")) !== 1)
     throw new Error("SDL must leave signal handling to the Unix signal owner");
   checked(api.SDL_InitSubSystem(subsystem), operation);
+}
+
+export interface SdlWindowPresentation {
+  readonly size: { readonly width: number; readonly height: number };
+  readonly position: { readonly x: number; readonly y: number };
+  readonly displayIndex: number;
+  readonly displayMode: { readonly format: number; readonly width: number; readonly height: number; readonly refreshRate: number };
+  readonly fullscreen: "windowed" | "desktop" | "exclusive";
+  readonly visible: boolean;
+  readonly maximized: boolean;
+  readonly minimized: boolean;
+  readonly focused: boolean;
 }
 
 interface SdlWindowDimensions {
@@ -568,6 +587,39 @@ export class SdlWindow {
   setVisible(visible: boolean): void {
     const window = this.opened().window;
     if (visible) sdl().SDL_ShowWindow(window); else sdl().SDL_HideWindow(window);
+  }
+
+  capturePresentation(): SdlWindowPresentation {
+    const resources = this.opened(), api = sdl(), flags = this.flags, display = this.display;
+    const x = new Int32Array(1), y = new Int32Array(1), bytes = new Uint8Array(24);
+    api.SDL_GetWindowPosition(resources.window, x, y);
+    checked(api.SDL_GetWindowDisplayMode(resources.window, bytes), "SDL_GetWindowDisplayMode");
+    const left = x[0], top = y[0], mode = new DataView(bytes.buffer);
+    if (left === undefined || top === undefined) throw new Error("SDL returned invalid window position");
+    return { size: this.logicalSize, position: { x: left - display.bounds.x, y: top - display.bounds.y }, displayIndex: display.index,
+      displayMode: { format: mode.getUint32(0, littleEndian), width: mode.getInt32(4, littleEndian), height: mode.getInt32(8, littleEndian), refreshRate: mode.getInt32(12, littleEndian) },
+      fullscreen: (flags & 0x1001) === 0x1001 ? "desktop" : (flags & 1) !== 0 ? "exclusive" : "windowed",
+      visible: (flags & 4) !== 0 && (flags & 8) === 0, maximized: (flags & 0x80) !== 0, minimized: (flags & 0x40) !== 0, focused: (flags & 0x200) !== 0 };
+  }
+
+  restorePresentation(state: SdlWindowPresentation): void {
+    const resources = this.opened(), api = sdl(), bounds = new Int32Array(4);
+    checked(api.SDL_GetDisplayBounds(state.displayIndex, bounds), "SDL_GetDisplayBounds");
+    const left = bounds[0], top = bounds[1];
+    if (left === undefined || top === undefined) throw new Error("SDL returned invalid display origin");
+    api.SDL_RestoreWindow(resources.window);
+    checked(api.SDL_SetWindowFullscreen(resources.window, 0), "SDL_SetWindowFullscreen windowed");
+    api.SDL_SetWindowPosition(resources.window, left + state.position.x, top + state.position.y);
+    this.setSize(state.size.width, state.size.height);
+    const bytes = new Uint8Array(24), mode = new DataView(bytes.buffer);
+    mode.setUint32(0, state.displayMode.format, littleEndian); mode.setInt32(4, state.displayMode.width, littleEndian);
+    mode.setInt32(8, state.displayMode.height, littleEndian); mode.setInt32(12, state.displayMode.refreshRate, littleEndian);
+    checked(api.SDL_SetWindowDisplayMode(resources.window, bytes), "SDL_SetWindowDisplayMode");
+    checked(api.SDL_SetWindowFullscreen(resources.window, state.fullscreen === "exclusive" ? 1 : state.fullscreen === "desktop" ? 0x1001 : 0), "SDL_SetWindowFullscreen restore");
+    if (state.maximized) api.SDL_MaximizeWindow(resources.window);
+    if (state.minimized) api.SDL_MinimizeWindow(resources.window);
+    this.setVisible(state.visible);
+    if (state.visible && state.focused && !state.minimized) api.SDL_RaiseWindow(resources.window);
   }
 
   get flags(): number { return sdl().SDL_GetWindowFlags(this.opened().window); }

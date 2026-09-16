@@ -36,6 +36,7 @@ export class ApplicationImageSettings {
   enablePersistence(): void { this.persistenceEnabled = true; }
   private appliedDebugLineWidth = 2;
   private displayApplied = "";
+  private displayWindow: NativeRenderer["window"] | null = null;
   private restoredSize: { readonly width: number; readonly height: number } | null = null;
   private persisted: readonly { readonly name: string; readonly value: string }[] = [];
   get persistedEntries(): readonly { readonly name: string; readonly value: string }[] { return this.persisted; }
@@ -187,7 +188,7 @@ export class ApplicationImageSettings {
     }
     const window = renderer.window;
     const signature = (): string => ["r_customwidth", "r_customheight", "r_fullscreen", "r_swapInterval"].map(name => this.cvars.variableString(name)).join("/");
-    if (signature() !== this.displayApplied) {
+    if (window !== this.displayWindow || signature() !== this.displayApplied) {
       const current = window.logicalSize, restored = this.displayApplied === "" ? this.restoredSize : null;
       const width = this.cvars.variableValue("r_customwidth") || current.width, height = this.cvars.variableValue("r_customheight") || current.height;
       try {
@@ -215,6 +216,7 @@ export class ApplicationImageSettings {
     this.cvars.set("r_fullscreen", window.fullscreen ? "1" : "0", true);
     if (window.backend === "gl") this.cvars.set("r_swapInterval", String(window.swapInterval === 0 ? 0 : 1), true);
     this.displayApplied = signature();
+    this.displayWindow = window;
   }
   async refreshDisplay(renderer: NativeRenderer): Promise<void> { this.applyDisplay(renderer); await this.save(); }
   async refresh(assets: ApplicationAssets, presentations: readonly WorldSeatPresentation[], rerelease: ApplicationRereleasePresentation | null, renderer?: NativeRenderer): Promise<void> {

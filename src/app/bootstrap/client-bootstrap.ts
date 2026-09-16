@@ -1,3 +1,4 @@
+import type { ApplicationVideoRestart, PreparedVideoPresentation } from "./video-restart.ts";
 import type { MusicControls } from "../../audio/music.ts";
 import type { ApplicationCapture } from "./capture.ts";
 import type { SeatConsole } from "../../console/session.ts";
@@ -36,6 +37,7 @@ export type ClientInputPublication = {
 } | { readonly kind: "world"; readonly input: ApplicationInput };
 
 export interface ClientSourceLifetime {
+  prepareVideoRestart(): Promise<PreparedVideoPresentation | null>;
   readonly captureMap: string | null;
   prepareRetirement(): Promise<void>;
   releaseSettings(): void;
@@ -44,6 +46,7 @@ export interface ClientSourceLifetime {
 
 /** Source borrowers receive the existing client objects without their final close authority. */
 export interface ClientBootstrap {
+  readonly videoRestart: ApplicationVideoRestart;
   readonly musicControls: MusicControls;
   readonly capture: ApplicationCapture;
   readonly consoles: Map<SessionSeat, SeatConsole>;

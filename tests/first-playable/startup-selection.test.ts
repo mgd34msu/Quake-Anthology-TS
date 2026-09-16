@@ -77,7 +77,7 @@ test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup rost
   if (fontSource.kind !== "resource") throw new Error("Missing actual font resource");
   const art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage);
   const menu = new StartupMenu({ seat, model, art, font: font.font, titleFont: font.font, now: () => 0, play: () => undefined, load: () => undefined,
-    saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined, quit: () => undefined, applyDisplay: () => undefined });
+    saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined, quit: () => undefined });
   const click = (row: number) => {
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x: 100, y: 130 + row * 34 }, delta: { x: 0, y: 0 } });
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-button", button: 1, down: true });

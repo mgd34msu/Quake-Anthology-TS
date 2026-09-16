@@ -35,7 +35,7 @@ test("Q2 base1 menu edits every campaign monster slot with Q1 source defaults an
   const menu = new StartupMenu({ seat, model, art, font: typography.body, titleFont: typography.title, now: () => 0,
     playPreset: (id, skill) => { nativeLaunches.push({ id, skill }); },
     play: () => undefined, load: () => undefined, saves: () => ({ rows: [], error: null }), refreshSaves: () => undefined,
-    quit: () => undefined, applyDisplay: () => undefined });
+    quit: () => undefined });
   const renderer = new SoftwareRenderer(640, 480, owner), target = new CpuRenderTarget(renderer);
   const click = (x: number, y: number): void => {
     menu.input({ seat, timeMilliseconds: 0, kind: "mouse-motion", position: { x, y }, delta: { x: 0, y: 0 } });
