@@ -25,7 +25,7 @@ import type { ClientDownloadPermission } from "./network/client-download-policy.
 import { ApplicationCapture, applicationCaptureRoot, inputCaptureServices } from "./capture.ts";
 import type { ClientBootstrap } from "./client-bootstrap.ts";
 import type { SessionConnection } from "../../world/session/session.ts";
-import type { CommandHandler } from "../../core/commands/index.ts";
+import type { CommandCvarRouting, CommandHandler } from "../../core/commands/index.ts";
 import type { CommandDocumentation } from "../../core/commands/documentation.ts";
 import { consoleConfigRoot, ConsoleScriptFiles } from "./config-scripts.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
@@ -117,6 +117,24 @@ interface RemoteConfiguration {
   readonly socks: ClientSocksSettings;
   readonly images: ReturnType<ApplicationImageSettings["prepareClientSettings"]>;
   readonly downloadPermission: ClientDownloadPermission | null;
+  readonly source: CvarRegistry;
+  readonly routing: CommandCvarRouting;
+  validateSource(): void;
+  publishSource(): void;
+}
+interface PeerDirectoryAdmission {
+  readonly content: RemoteContentMounts;
+  readonly options: ApplicationOptions;
+  readonly assertCurrent: () => void;
+  phase: "requested" | "published";
+  resume(): void;
+  cancel(error: Error): void;
+}
+type RemoteAdvanceOutcome = { readonly kind: "complete" } | { readonly kind: "failed"; readonly error: unknown };
+interface PendingRemoteAdvance {
+  readonly completion: Promise<RemoteAdvanceOutcome>;
+  boundary: Promise<{ readonly kind: "boundary" }>;
+  signalBoundary(): void;
 }
 type RemoteBrowser = { readonly kind: "owned" | "borrowed"; readonly browser: StartupServerBrowser };
 
@@ -137,8 +155,8 @@ export class RemoteApplication {
   });
   private releaseViewCvars: (() => void) | null = null;
   private readonly socksSettings: ClientSocksSettings;
-  private readonly clientConfig: ConfigStore | null;
-  private readonly inputConfig: ConfigStore;
+  private clientConfig: ConfigStore | null;
+  private inputConfig: ConfigStore;
   private readonly downloadPermission: ClientDownloadPermission | null;
   readonly remote: QwRemotePresentation | Q2RemotePresentation | Q1RemotePresentation | Q3RemotePresentation;
   private readonly source: RemoteSource;
@@ -167,6 +185,9 @@ export class RemoteApplication {
   private qwDownloads: QwDownloadReceiver | null = null;
   private remoteContent: RemoteContentMounts | null = null;
   private remoteContentGeneration = 0;
+  private peerAdmission: PeerDirectoryAdmission | null = null;
+  private pendingAdvance: PendingRemoteAdvance | null = null;
+  private resetFrameElapsed = false;
   private q3Downloads: Q3ApplicationClientDownloads | null = null;
   private q3InitialViewPending = false;
   private clientInputs: { readonly generation: number; readonly client: ApplicationQ3Client; readonly event: SeatInputEvent }[] = [];
@@ -186,7 +207,7 @@ export class RemoteApplication {
   private constructor(private launchOptions: ApplicationOptions, private readonly mountedContent: MountedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
     private readonly imageSettings: ApplicationImageSettings, launch: RemoteLaunch, identity: ReturnType<typeof createIdentityOwner>,
-    private readonly browser: RemoteBrowser, private readonly ownership: RemoteOwnership, private readonly configuration: RemoteConfiguration) {
+    private readonly browser: RemoteBrowser, private readonly ownership: RemoteOwnership, private configuration: RemoteConfiguration) {
     this.musicControls = ownership.kind === "borrowed" ? ownership.client.musicControls : new MusicControls();
     this.family = launch.kind === "live" ? launch.family : launch.playback.resource.kind;
     this.seatId = configuration.seat.id;
@@ -194,9 +215,9 @@ export class RemoteApplication {
     this.socksSettings = configuration.socks;
     this.downloadPermission = configuration.downloadPermission;
     const family = this.family === "q3" ? "q3" : this.family === "qw" ? "qw" : this.family === "q1" ? "nq" : "q2";
-    const cvars = configuration.profile.source;
+    const cvars = configuration.source;
     const scripts = configuration.profile.scripts;
-    const routing = this.socksSettings.route(configuration.profile.routing);
+    const routing = configuration.routing;
     const commands = configuration.prepared.commands;
       if (family === "qw") {
         for (const name of ["skins", "allskins"]) this.sourceHandlers.set(name, invocation => this.queueCommand(name, invocation.args, null));
@@ -407,7 +428,10 @@ export class RemoteApplication {
   private get videoRestart(): ApplicationVideoRestart | null { return this.ownership.kind === "borrowed" ? this.ownership.client.videoRestart : this.ownedVideoRestart; }
   pumpClientInput(): void { this.controls?.pump(false); }
   advanceClientStartup(): Promise<boolean> { return this.configuration.prepared.advanceFrame(); }
-  flushClientCommands(): Promise<void> { return this.dispatchCommands(); }
+  async flushClientCommands(): Promise<void> {
+    if (this.peerAdmission?.phase === "requested") await this.publishPeerConfiguration(this.peerAdmission);
+    await this.dispatchCommands();
+  }
 
   private ownsPublishedSource(): boolean {
     return !this.closed && !this.closing && (this.ownership.kind === "owned" || this.ownership.client.source.current === this)
@@ -449,13 +473,124 @@ export class RemoteApplication {
       user: (name, source) => scripts.read(name, source), baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(this.options.userContentRoot) });
   }
 
-  private publishConfiguration(): void {
+  private async publishPeerConfiguration(request: PeerDirectoryAdmission): Promise<void> {
+    let mounted: MountedApplicationContent | null = null;
+    let images: ReturnType<ApplicationImageSettings["prepareClientSettings"]> | null = null;
+    let profile: PreparedProfileConfiguration | null = null;
+    let published = false;
+    try {
+      request.assertCurrent();
+      await this.prepareRetirement();
+      request.assertCurrent();
+      const previous = this.configuration, owner = this.clientCommands;
+      if (owner === null) throw new Error("Peer configuration has no retained command owner");
+      mounted = await openRemoteApplicationContent(request.options);
+      request.assertCurrent();
+      images = this.imageSettings.prepareClientSettings();
+      const source = owner.cvars.prepareCandidate(this.host.print);
+      const socks = this.socksSettings.cvars.prepareCandidate(this.host.print);
+      const remap = (registry: CvarRegistry): CvarRegistry => {
+        if (registry === this.socksSettings.cvars) return published ? registry : socks.cvars;
+        return published && registry === source.cvars ? owner.cvars : registry;
+      };
+      const route = (base: CommandCvarRouting): CommandCvarRouting => {
+        const routed = this.socksSettings.route(base);
+        return { owner: (name, context) => remap(routed.owner(name, context)),
+          visible: context => routed.visible(context).map(remap) };
+      };
+      const product = mounted.catalog.require(request.options.product);
+      const settings = new ConfigStore(product.userContent?.root ?? userProductDirectory(request.options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+      const seat = previous.prepared.seats.find(candidate => candidate.id.equals(this.seatId));
+      if (seat === undefined) throw new Error("Peer configuration lost its retained seat");
+      profile = await prepareProfileConfiguration({ prepared: previous.prepared,
+        clientSource: { inputState: "retained", cvars: source.cvars, archive: await settings.loadText("settings/client.cfg"), route },
+        seats: [{ seat: previous.seat, input: seat.input }], options: request.options,
+        content: remoteConfigurationContent(request.options, mounted), settings, shared: images.settings.cvars,
+        host: this.host, sourceArchive: [], defaultCapacity: 1, nextFrame: async () => { await setImmediate(); } });
+      request.assertCurrent();
+      const configuration: RemoteConfiguration = { prepared: previous.prepared, profile, seat: previous.seat,
+        settings, socks: this.socksSettings, images, downloadPermission: previous.downloadPermission,
+        source: owner.cvars, routing: route(profile.routing),
+        validateSource() { source.validatePublication(); socks.validatePublication(); },
+        publishSource() { source.publish(); socks.publish(); published = true; } };
+      profile.program.validatePublication(); images.validatePublication(); configuration.validateSource();
+      this.releaseSettings();
+      const oldContent = this.remoteContent;
+      let oldScripts = owner.scripts;
+      const commit = (): void => {
+        this.publishConfiguration(configuration);
+        this.remoteContent = request.content; this.launchOptions = request.options;
+        if (this.ownership.kind === "borrowed") {
+          oldScripts = this.ownership.client.configuration.current.scripts;
+          this.ownership.client.configuration.current = { scripts: configuration.profile.scripts, options: request.options };
+        }
+        request.phase = "published"; this.resetFrameElapsed = true;
+      };
+      if (this.ownership.kind === "borrowed") this.ownership.client.activateFrontend({ releaseCommands: profile.program.releaseCommands, publish: commit });
+      else {
+        if (this.controls !== null) this.controls.releaseForProfileChange(profile.program.releaseCommands);
+        else seat.input.release(performance.now(), profile.program.releaseCommands);
+        commit();
+      }
+      const retirementErrors: unknown[] = [];
+      for (const retire of [() => {
+        this.viewSettings.setFieldOfView(this.imageSettings.cvars.variableValue("fov"));
+        this.releaseViewCvars = this.viewSettings.bindCvars(this.imageSettings.cvars);
+      }, () => oldContent?.mounts.close(), () => oldScripts.close(), () => previous.images.settings.close()]) {
+        try { await retire(); } catch (error) { retirementErrors.push(error); }
+      }
+      if (retirementErrors.length !== 0) throw new AggregateError(retirementErrors, "Peer configuration retirement failed");
+    } catch (error) {
+      request.cancel(error instanceof Error ? error : new Error("Peer configuration failed", { cause: error }));
+      const failures: unknown[] = [error];
+      if (!published) {
+        try { if (profile === null) await mounted?.close(); else await profile.scripts.close(); }
+        catch (cleanup) { failures.push(cleanup); }
+        try { await images?.settings.close(); } catch (cleanup) { failures.push(cleanup); }
+      }
+      if (failures.length > 1) throw new AggregateError(failures, "Peer configuration preparation failed");
+      throw error;
+    }
+  }
+
+  private async advanceSource(operation: () => Promise<void>): Promise<boolean> {
+    let pending = this.pendingAdvance;
+    if (pending === null) {
+      let signalBoundary = (): void => {};
+      const boundary = new Promise<{ readonly kind: "boundary" }>(resolve => { signalBoundary = () => resolve({ kind: "boundary" }); });
+      const completion = Promise.resolve().then(operation).then<RemoteAdvanceOutcome, RemoteAdvanceOutcome>(
+        () => ({ kind: "complete" }), (error: unknown) => ({ kind: "failed", error }));
+      pending = { completion, boundary, signalBoundary };
+      this.pendingAdvance = pending;
+    } else if (this.peerAdmission !== null) {
+      if (this.peerAdmission.phase === "requested") return false;
+      const admission = this.peerAdmission;
+      this.peerAdmission = null;
+      const current = pending;
+      current.boundary = new Promise(resolve => { current.signalBoundary = () => resolve({ kind: "boundary" }); });
+      admission.resume();
+    }
+    const result = await Promise.race([pending.completion, pending.boundary]);
+    if (result.kind === "boundary") return false;
+    this.pendingAdvance = null;
+    if (result.kind === "failed") throw result.error;
+    return true;
+  }
+
+  private async presentLoadingFrame(): Promise<void> {
+    if (this.ownership.kind !== "owned") return;
+    this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
+      commands: [{ kind: "draw-buffer", buffer: "back", clear: true }, { kind: "swap-buffers" }] });
+    await this.capture?.drain();
+  }
+
+  private publishConfiguration(configuration = this.configuration): void {
     const owner = this.clientCommands;
     if (owner === null) throw new Error("Remote configuration has no command owner");
-    const { prepared, profile, images } = this.configuration;
-    profile.program.validatePublication(); images.validatePublication();
-    images.publish(); profile.program.publish();
-    const seats = [...prepared.seats.filter(seat => !profile.seats.some(next => next.id.equals(seat.id))), ...profile.seats];
+    const { prepared, profile, images } = configuration;
+    profile.program.validatePublication(); images.validatePublication(); configuration.validateSource();
+    configuration.publishSource(); images.publish(); profile.program.publish();
+    const seats = [...prepared.seats.filter(seat => !profile.seats.some(next => next.id.equals(seat.id))), ...profile.seats.map(seat => ({ ...seat, cvars: configuration.source }))];
     seats.sort((a, b) => a.id.index - b.id.index);
     prepared.publishSeats(seats, [this.seatId]);
     for (const choices of profile.bindingChoices) {
@@ -464,13 +599,18 @@ export class RemoteApplication {
       seat.selectedBindings = choices.selectedBindings; seat.allBindingsChosen = choices.allBindingsChosen;
       seat.overriddenKeys.clear(); for (const key of choices.overriddenKeys) seat.overriddenKeys.add(key);
     }
-    prepared.adopt(owner.routing, (name, args, source) => {
+    prepared.adopt(configuration.routing, (name, args, source) => {
       let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
       return this.queueCommand(name, args, origin.kind === "local-seat" ? origin.seat : null, source);
-    }, { source: profile.source, movement: profile.movement, fallback: profile.fallback, scripts: profile.scripts, read: profile.read });
+    }, { source: configuration.source, movement: profile.movement, fallback: configuration.source, scripts: profile.scripts, read: profile.read });
     profile.forwardCommands(request => this.queueCommand(request.name, request.arguments_, request.seat, request.source));
     for (const request of profile.requests) this.queueCommand(request.name, request.arguments_, request.seat, request.source);
     profile.publishContinuation(prepared);
+    this.configuration = configuration;
+    const mouse = prepared.seats.find(seat => seat.id.equals(this.seatId))?.mouse;
+    if (mouse === undefined) throw new Error("Remote publication lost its mouse owner");
+    this.clientCommandOwner = { ...owner, cvars: configuration.source, routing: configuration.routing, scripts: profile.scripts, inputSettings: mouse };
+    this.inputConfig = configuration.settings; this.clientConfig = configuration.settings;
     this.configurationPublished = true;
   }
 
@@ -664,10 +804,20 @@ export class RemoteApplication {
     const prepared = await openRemoteContent(roots, selection, assertCurrent, generation);
     try { assertCurrent(); }
     catch (error) { prepared.mounts.close(); throw error; }
-    const previous = this.remoteContent;
-    this.remoteContent = prepared;
-    this.launchOptions = { ...roots, product: prepared.product.expectation.id, remoteContent: prepared.selection };
-    previous?.mounts.close();
+    const options = { ...roots, product: prepared.product.expectation.id, remoteContent: prepared.selection };
+    if (options.product !== roots.product) {
+      if (this.peerAdmission !== null || this.pendingAdvance === null) { prepared.mounts.close(); throw new Error("Peer directory admission has no active source frame"); }
+      let resume = (): void => {}, cancel = (_error: Error): void => {};
+      const admitted = new Promise<void>((resolve, reject) => { resume = resolve; cancel = reject; });
+      const request: PeerDirectoryAdmission = { content: prepared, options, assertCurrent, phase: "requested", resume, cancel };
+      this.peerAdmission = request; this.pendingAdvance.signalBoundary();
+      try { await admitted; assertCurrent(); }
+      catch (error) { if (this.remoteContent !== prepared) prepared.mounts.close(); throw error; }
+    } else {
+      const previous = this.remoteContent;
+      this.remoteContent = prepared; this.launchOptions = options;
+      previous?.mounts.close();
+    }
     return prepared;
   }
 
@@ -1095,21 +1245,25 @@ export class RemoteApplication {
       if (this.ownership.kind === "owned" && this.controls !== null) this.controls.pump(false);
       else if (this.ownership.kind === "owned") for (const event of this.window.pollEvents()) if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit();
       if (this.ownership.kind === "owned") {
-        await this.dispatchCommands();
+        await this.flushClientCommands();
         if (!this.clientCommandsBlocked) {
           const continued = await this.advanceClientStartup();
           await this.dispatchCommands();
           if (!continued) await this.clientCommands?.commands.executeScriptsAsync(() => this.dispatchCommands(), () => !this.clientCommandsBlocked);
         }
       }
+      if (this.stopping) { await this.presentLoadingFrame(); return null; }
+      if (this.resetFrameElapsed) { elapsedMilliseconds = 1; this.resetFrameElapsed = false; }
       const timeCvars = this.clientCommands?.cvars;
       const frameMilliseconds = timeCvars === undefined ? elapsedMilliseconds : sourceFrameMilliseconds(timeCvars.dialect, elapsedMilliseconds,
         readFrameTimeControls(timeCvars), { dedicated: false, localServer: false });
       this.elapsed += frameMilliseconds;
       const now = performance.now();
       this.presentationTime.advance(now, elapsedMilliseconds, frameMilliseconds);
-      if (this.source.kind === "live") await this.source.network.poll(now);
-      else await this.source.playback.advance(frameMilliseconds, this.frames, Math.trunc(this.presentationTime.milliseconds));
+      if (!await this.advanceSource(async () => {
+        if (this.source.kind === "live") await this.source.network.poll(now);
+        else await this.source.playback.advance(frameMilliseconds, this.frames, Math.trunc(this.presentationTime.milliseconds));
+      })) { await this.presentLoadingFrame(); return null; }
       if (this.remote instanceof QwRemotePresentation) { this.clientCommands?.cvars.takeEffects(); await this.remote.prepareSkins(); }
       this.frames++;
       const clientInputs = this.clientInputs; this.clientInputs = [];
@@ -1121,11 +1275,7 @@ export class RemoteApplication {
         this.controls?.stopHaptics();
         if (this.ownership.kind === "owned") await this.dispatchCommands();
         await this.refreshImages();
-        if (this.ownership.kind === "owned") {
-          this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
-            commands: [{ kind: "draw-buffer", buffer: "back", clear: true }, { kind: "swap-buffers" }] });
-          await this.capture?.drain();
-        }
+        await this.presentLoadingFrame();
         return null;
       }
       if (this.source.kind === "live") this.remote.samplePresentation(now);
@@ -1138,7 +1288,7 @@ export class RemoteApplication {
       }
       if (this.source.kind === "live") this.source.network.submit(this.controls?.build(frameMilliseconds, this.elapsed, this.remote.output.snapshot.frame.frame, elapsedMilliseconds) ?? [], now);
       if (this.ownership.kind === "owned") await this.dispatchCommands();
-      if (this.source.kind === "live") await this.source.network.poll(now);
+      if (this.source.kind === "live" && !await this.advanceSource(async () => { if (this.source.kind === "live") await this.source.network.poll(now); })) { await this.presentLoadingFrame(); return null; }
       if (this.remote instanceof QwRemotePresentation) await this.remote.prepareSkins();
       if (this.networkPhase !== "active") { this.controls?.stopHaptics(); return null; }
       await this.bindSeat();
@@ -1193,6 +1343,13 @@ export class RemoteApplication {
   }
   private async closeOwned(): Promise<void> {
     const errors: unknown[] = [];
+    if (this.peerAdmission !== null) {
+      const canceled = new Error("Remote source retired during peer configuration");
+      this.peerAdmission.cancel(canceled); this.peerAdmission = null;
+      const outcome = await this.pendingAdvance?.completion;
+      this.pendingAdvance = null;
+      if (outcome?.kind === "failed" && outcome.error !== canceled) errors.push(outcome.error);
+    }
     try { this.ownedVideoRestart?.close(); } catch (error) { errors.push(error); }
     this.ownedVideoRestart = null;
     if (this.configurationPublished && (this.ownership.kind === "owned" || this.ownership.client.source.current === this)) {
@@ -1283,7 +1440,8 @@ async function prepareRemoteConfiguration(options: ApplicationOptions, content: 
     const profile = await prepareProfileConfiguration({ prepared, clientSource: { inputState: ownership.kind === "owned" ? "fresh" : "retained", cvars, archive, route: routing => socks.route(routing) },
       seats: [{ seat, input }], options, content: selected, settings, shared: images.settings.cvars, host, sourceArchive: sameProfile ? cvars.archiveEntries() : [], defaultCapacity: 1,
       nextFrame: async () => { await setImmediate(); } });
-    return { prepared, profile, seat, settings, socks, images, downloadPermission };
+    return { prepared, profile, seat, settings, socks, images, downloadPermission, source: profile.source, routing: socks.route(profile.routing),
+      validateSource() {}, publishSource() {} };
   } catch (error) {
     await images.settings.close();
     throw error;
