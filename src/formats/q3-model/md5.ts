@@ -4,7 +4,9 @@ import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { Md5Joint, Md5Model, ModelVertex, SkeletonJointPose } from "../../contracts/scene.ts";
 import { add3, scale3, vec3 } from "../../core/math.ts";
 import { at, indexedRecords, ModelTokens } from "./text.ts";
-import { conjugateQuaternion, md5Quaternion, multiplyQuaternion, normalizeQuaternion, rotateQuaternion, rotateQuaternionAxis, slerpQuaternion } from "./quaternion.ts";
+import { conjugateQuaternion, md5Quaternion, multiplyQuaternion, normalizeQuaternion, rotateQuaternion, quaternionRotationRows, rotateQuaternionRows, slerpQuaternion } from "./quaternion.ts";
+
+import type { QuaternionRotationRows } from "./quaternion.ts";
 
 export type Md5Mesh = Md5Model["meshes"][number];
 export interface Md5MeshFile {
@@ -256,15 +258,18 @@ export function sampleMd5Pose(model: Md5Model, frame: number, previousFrame = fr
 }
 
 export function skinMd5Mesh(mesh: Md5Mesh, joints: readonly SkeletonJointPose[]): readonly ModelVertex[] {
+  const rotations: (QuaternionRotationRows | undefined)[] = [];
   return mesh.vertices.map(vertex => {
     let position = vec3(0, 0, 0);
     let normal = vec3(0, 0, 0);
     for (let i = 0; i < vertex.weights.count; i++) {
       const weight = at(mesh.weights, vertex.weights.first + i, "weight");
       const joint = at(joints, weight.joint, "joint");
-      const rotated = rotateQuaternionAxis(joint.orientation, weight.position);
+      let rows = rotations[weight.joint];
+      if (rows === undefined) { rows = quaternionRotationRows(joint.orientation); rotations[weight.joint] = rows; }
+      const rotated = rotateQuaternionRows(rows, weight.position);
       const point = vec3(joint.position.x + joint.scale * rotated.x, joint.position.y + joint.scale * rotated.y, joint.position.z + joint.scale * rotated.z);
-      const direction = rotateQuaternionAxis(joint.orientation, vertex.normal);
+      const direction = rotateQuaternionRows(rows, vertex.normal);
       position = vec3(position.x + weight.bias * point.x, position.y + weight.bias * point.y, position.z + weight.bias * point.z);
       normal = vec3(normal.x + weight.bias * direction.x, normal.y + weight.bias * direction.y, normal.z + weight.bias * direction.z);
     }

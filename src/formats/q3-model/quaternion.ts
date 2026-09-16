@@ -38,6 +38,23 @@ export function rotateQuaternionAxis(q: Vec4, v: Vec3): Vec3 {
   );
 }
 
+export type QuaternionRotationRows = readonly [number, number, number, number, number, number, number, number, number];
+
+/** The same Quat_ToAxis coefficients, retained only by a skinning call. */
+export function quaternionRotationRows(q: Vec4): QuaternionRotationRows {
+  return [
+    Math.fround(2 * (q.w * q.w + q.x * q.x) - 1), Math.fround(2 * (q.x * q.y - q.w * q.z)), Math.fround(2 * (q.x * q.z + q.w * q.y)),
+    Math.fround(2 * (q.x * q.y + q.w * q.z)), Math.fround(2 * (q.w * q.w + q.y * q.y) - 1), Math.fround(2 * (q.y * q.z - q.w * q.x)),
+    Math.fround(2 * (q.x * q.z - q.w * q.y)), Math.fround(2 * (q.y * q.z + q.w * q.x)), Math.fround(2 * (q.w * q.w + q.z * q.z) - 1),
+  ];
+}
+
+export function rotateQuaternionRows(rows: QuaternionRotationRows, v: Vec3): Vec3 {
+  return vec3(v.x * rows[0] + v.y * rows[1] + v.z * rows[2],
+    v.x * rows[3] + v.y * rows[4] + v.z * rows[5],
+    v.x * rows[6] + v.y * rows[7] + v.z * rows[8]);
+}
+
 export function slerpQuaternion(previous: Vec4, current: Vec4, backLerp: number): Vec4 {
   if (backLerp <= 0) return current;
   if (backLerp >= 1) return previous;

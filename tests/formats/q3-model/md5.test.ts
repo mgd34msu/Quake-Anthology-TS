@@ -1,3 +1,7 @@
+import type { Vec3, Vec4 } from "../../../src/contracts/math.ts";
+import type { Md5Model, ModelVertex, SkeletonJointPose } from "../../../src/contracts/scene.ts";
+import { quaternionRotationRows, rotateQuaternionRows, rotateQuaternionAxis } from "../../../src/formats/q3-model/quaternion.ts";
+import { at } from "../../../src/formats/q3-model/text.ts";
 import { test, expect } from "bun:test";
 import { createMd5Model, md2ReplacementSkinSelection, md5PathsFor, md5ReplacementAllowed, parseMd5Anim, parseMd5Mesh, sampleMd5Pose, skinMd5Mesh } from "../../../src/formats/q3-model/index.ts";
 
@@ -64,4 +68,40 @@ test("replacement conventions preserve independent MD2 skins and source ranks", 
 test("MD5 rejects invalid weight ranges and duplicate frame IDs", () => {
   expect(() => parseMd5Mesh(mesh.replace("0 1\n vert 1", "9 1\n vert 1"))).toThrow();
   expect(() => parseMd5Anim(animation.replace("frame 0", "frame 1"))).toThrow();
+});
+
+test("MD5 prepared joint rows retain exact standalone rotation including signed zeros", () => {
+  const orientations: readonly Vec4[] = [
+    {x:0,y:0,z:0,w:-1}, {x:-0,y:0,z:-0,w:1}, {x:.25,y:-.5,z:.125,w:-.75},
+    {x:1,y:2,z:3,w:4}, {x:0,y:0,z:0,w:0},
+  ];
+  const vectors: readonly Vec3[] = [{x:0,y:-0,z:0},{x:1,y:0,z:-0},{x:-2.5,y:17,z:.125}];
+  for(const orientation of orientations)for(const vector of vectors)
+    expect(rotateQuaternionRows(quaternionRotationRows(orientation),vector)).toEqual(rotateQuaternionAxis(orientation,vector));
+});
+
+test("MD5 joint rows stay per call and retain multi-weight accumulation and validation", () => {
+  const model=createMd5Model(parseMd5Mesh(mesh),parseMd5Anim(animation));
+  const source=model.meshes[0];if(source===undefined)throw Error("Missing mesh");
+  const surface: Md5Model["meshes"][number]={...source,vertices:source.vertices.map(vertex=>({...vertex,weights:{first:0,count:3}}))};
+  function reference(joints:readonly SkeletonJointPose[]):readonly ModelVertex[]{
+    return surface.vertices.map(vertex=>{
+      let position={x:0,y:0,z:0},normal={x:0,y:0,z:0};
+      for(let i=0;i<vertex.weights.count;i++){
+        const weight=at(surface.weights,vertex.weights.first+i,"weight"),joint=at(joints,weight.joint,"joint");
+        const rotated=rotateQuaternionAxis(joint.orientation,weight.position);
+        const point={x:joint.position.x+joint.scale*rotated.x,y:joint.position.y+joint.scale*rotated.y,z:joint.position.z+joint.scale*rotated.z};
+        const direction=rotateQuaternionAxis(joint.orientation,vertex.normal);
+        position={x:position.x+weight.bias*point.x,y:position.y+weight.bias*point.y,z:position.z+weight.bias*point.z};
+        normal={x:normal.x+weight.bias*direction.x,y:normal.y+weight.bias*direction.y,z:normal.z+weight.bias*direction.z};
+      }
+      return{position,normal};
+    });
+  }
+  const first=sampleMd5Pose(model,0),next=sampleMd5Pose(model,1,0,.375);
+  expect(skinMd5Mesh(surface,first)).toEqual(reference(first));
+  expect(skinMd5Mesh(surface,next)).toEqual(reference(next));
+  expect(skinMd5Mesh(surface,next)).not.toEqual(skinMd5Mesh(surface,first));
+  expect(()=>skinMd5Mesh(surface,[])).toThrow("joint");
+  expect(()=>skinMd5Mesh({...surface,weights:[]},[])).toThrow("weight");
 });
