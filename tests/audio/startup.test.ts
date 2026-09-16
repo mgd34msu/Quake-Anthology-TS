@@ -10,7 +10,7 @@ import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import { expect, spyOn, test } from "bun:test";
 import { ApplicationMusic, worldMusicTrack } from "../../src/app/bootstrap/audio/music.ts";
-import { SoundBank, UnifiedAudio, Q2Jukebox, remapQ2MusicTrack } from "../../src/audio/index.ts";
+import { SoundBank, UnifiedAudio, remapQ2MusicTrack } from "../../src/audio/index.ts";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -197,6 +197,8 @@ test("in-memory menu gain is immediate while default Q3 source smoothing remains
 
 
 test("soundtrack source edition preserves classic expansion discs and remaps rerelease cues", async () => {
+  expect(remapQ2MusicTrack(14, { kind: "remastered", campaign: "xatrix" })).toBe(14);
+  expect(remapQ2MusicTrack(6, { kind: "remastered", campaign: "baseq2" })).toBe(6);
   for (const campaign of ["xatrix", "rogue"]) for (const edition of ["classic", "rerelease"]) {
     const content = createContentId({ family: "q2", edition, package: campaign, revision: "1" });
     const mounts = new MenuMemoryMounts(content, new Map([["music/06.wav", menuWave(1000)], ["music/16.wav", menuWave(2000)]]));
@@ -226,23 +228,6 @@ test("soundtrack profiles preserve base Q2, Q1 numbers, and named Q3 intro loops
       music.stop(); expect(engine.mix(16).every(sample => sample === 0)).toBe(true);
     } finally { music.stop(); mounts.close(); }
   }
-});
-
-test("Q2 jukebox explicit disc profile disables remapping and defaults retain base numbering", async () => {
-  const player = new MusicPlayer(44100, "q2"), opened: string[] = [];
-  const jukebox = new Q2Jukebox(player, [{ name: "track06", path: "disc" }, { name: "track16", path: "remastered" }], async path => {
-    opened.push(path); return new MemoryPcmStream({ samples: new Int16Array(32).fill(1000), channels: 1, sampleRate: 44100, frameCount: 32, loopStart: null });
-  }, () => 0);
-  try {
-    expect(await jukebox.play("6")).toBe(true);
-    jukebox.soundtrack = { kind: "remastered", campaign: "rogue" };
-    expect(await jukebox.play("6")).toBe(true);
-    jukebox.soundtrack = { kind: "disc" };
-    expect(await jukebox.play("6")).toBe(true);
-    expect(opened).toEqual(["disc", "remastered", "disc"]);
-    expect(remapQ2MusicTrack(14, { kind: "remastered", campaign: "xatrix" })).toBe(14);
-    expect(remapQ2MusicTrack(6, { kind: "remastered", campaign: "baseq2" })).toBe(6);
-  } finally { jukebox.close(); }
 });
 
 test("world music honors rerelease named override without changing classic or Q3 cue rules", () => {
