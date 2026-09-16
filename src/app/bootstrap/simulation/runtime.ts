@@ -160,7 +160,7 @@ import { captureMovementPlayer, readMovementPlayer, readQ1Travel, readQ2View, re
 import { simulationProviderCheckpoint, simulationSaveReader, savedSimulationSettings, simulationQuakeCCheckpoint, simulationQvmCheckpoint, validateSimulationSave, nativeQ3RuntimeReader, savedSourceCvars } from "./save.ts";
 import { saveQ2Attack, restoreQ2Attack } from "../../../content/q2/foundation/checkpoint.ts";
 import type { PlayerAdmission, PlayerView, PlayerUi, PlayerUiItem, SimulationTravel, SimulationOptions, SimulationPresentation, SimulationPresentationEvent } from "./types.ts";
-import { q2PowerupTimers } from "./powerup-timers.ts";
+import { q1PowerupTimers, q2PowerupTimers, q3PowerupTimers } from "./powerup-timers.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function add(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
@@ -2996,7 +2996,11 @@ export class SharedSimulation implements Simulation {
   private primaryUi(actor: ActorId): PlayerUi {
     const player = this.requirePlayer(actor), combat = this.combat.read(actor);
     if (combat === null) throw new Error("Player has no combat state");
-    const powerups = this.source.kind === "q2" ? q2PowerupTimers(this.source.items.playerPowerups(actor), this.source.product.armory?.items.powerups(actor), this.source.game.host.now()) : [];
+    const source = this.source;
+    const sourceClient = source.kind === "q3" ? source.game.records.nativeByActor(actor)?.client : null;
+    const powerups = source.kind === "q2" ? q2PowerupTimers(source.items.playerPowerups(actor), source.product.armory?.items.powerups(actor), source.game.host.now())
+      : source.kind === "q1" ? q1PowerupTimers(source.game.player(actor)?.powerups ?? new Map<Q1Powerup, number>(), source.game.time)
+      : source.kind === "q3" && sourceClient != null ? q3PowerupTimers(sourceClient, source.game.level.time, clientNumber => source.game.pool.clientAt(clientNumber)) : [];
     if (this.selectedArsenal !== null) return { powerups, health: combat.health, armor: combat.armor, inventory: this.inventory.entries(actor), ...this.selectedArsenal.ui(actor, this.weaponProvider) };
     const arsenal = this.arsenal(player), inventory = this.inventory.entries(actor), items: PlayerUiItem[] = [];
     let ammo: PlayerUi["ammo"] = null, weaponStatus: PlayerUi["weaponStatus"] = null;
