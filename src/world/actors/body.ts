@@ -32,7 +32,8 @@ export function translatedBodyBounds(_actor: OwnedActor, state: BodyState): Boun
     max: { x: state.origin.x + state.bounds.max.x, y: state.origin.y + state.bounds.max.y, z: state.origin.z + state.bounds.max.z } };
 }
 
-interface BodyRecord { readonly actor: OwnedActor; readonly binding: BodyStateBinding; linked: LinkedBody | null; linkCount: number; }
+type BodyStorage = { readonly kind: "local"; state: BodyState } | { readonly kind: "external"; readonly binding: BodyStateBinding };
+interface BodyRecord { readonly actor: OwnedActor; readonly storage: BodyStorage; linked: LinkedBody | null; linkCount: number; }
 
 export class SharedBodyTable implements BodyTable {
   private readonly records = new Map<number, BodyRecord>();
@@ -63,25 +64,30 @@ export class SharedBodyTable implements BodyTable {
   bind(actor: OwnedActor, binding: BodyStateBinding): undefined {
     this.actors.assertOwned(actor);
     if (this.records.has(actor.id.slot)) throw new Error("Actor already has a body binding");
-    this.records.set(actor.id.slot, { actor, binding, linked: null, linkCount: 0 });
+    this.records.set(actor.id.slot, { actor, storage: { kind: "external", binding }, linked: null, linkCount: 0 });
     return undefined;
   }
 
   create(actor: OwnedActor, initial: BodyState): undefined {
-    let state = copyBody(initial);
-    return this.bind(actor, { read: () => state, write: next => { state = copyBody(next); return undefined; } });
+    const state = copyBody(initial);
+    this.actors.assertOwned(actor);
+    if (this.records.has(actor.id.slot)) throw new Error("Actor already has a body binding");
+    this.records.set(actor.id.slot, { actor, storage: { kind: "local", state }, linked: null, linkCount: 0 });
+    return undefined;
   }
 
   read(actor: ActorId): BodyState | null {
     const record = this.record(actor);
-    return record === null ? null : copyBody(record.binding.read());
+    return record === null ? null : record.storage.kind === "local" ? record.storage.state : copyBody(record.storage.binding.read());
   }
 
   write(actor: OwnedActor, state: BodyState): undefined {
     this.actors.assertOwned(actor);
     const record = this.record(actor.id);
     if (record === null) return this.create(actor, state);
-    return record.binding.write(copyBody(state));
+    if (record.storage.kind === "external") return record.storage.binding.write(copyBody(state));
+    record.storage.state = copyBody(state);
+    return undefined;
   }
 
   attach(actor: OwnedActor, attachment: BodyAttachment): undefined {
@@ -155,7 +161,7 @@ export class SharedBodyTable implements BodyTable {
     record.linkCount = saved.linkCount;
     record.linked = saved.linked === null ? null : Object.freeze({ actor: actor.id, state: copyBody(saved.linked.state), absoluteBounds: copyBounds(saved.linked.absoluteBounds), linkCount: saved.linkCount });
     if (record.linked === null) return this.hooks.onUnlink(actor.id);
-    record.binding.linked?.(record.linked);
+    if (record.storage.kind === "external") record.storage.binding.linked?.(record.linked);
     return this.hooks.onLink(record.linked);
   }
 
@@ -163,12 +169,12 @@ export class SharedBodyTable implements BodyTable {
     this.actors.assertOwned(actor);
     const record = this.record(actor.id);
     if (record === null) throw new Error("Cannot link an actor without a body");
-    const current = record.binding.read();
+    const current = record.storage.kind === "local" ? record.storage.state : record.storage.binding.read();
     const state = copyBody(origin === undefined ? current : { ...current, origin });
     const linked: LinkedBody = Object.freeze({ actor: actor.id, state,
       absoluteBounds: copyBounds(this.hooks.absoluteBounds(actor, state)), linkCount: ++record.linkCount });
     record.linked = linked;
-    record.binding.linked?.(linked);
+    if (record.storage.kind === "external") record.storage.binding.linked?.(linked);
     return this.hooks.onLink(linked);
   }
 
