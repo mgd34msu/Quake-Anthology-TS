@@ -14,6 +14,7 @@ import type { ApplicationInput } from "./input.ts";
 import type { ApplicationImageSettings } from "./image-settings.ts";
 import type { PreparedSeat, PreparedStartup } from "./prepared-startup.ts";
 import type { NativeRenderer } from "./renderer.ts";
+import type { CommandBuffer } from "../../core/commands/index.ts";
 import type { CommandContext } from "../../contracts/common.ts";
 import type { ConsoleScriptFiles } from "./config-scripts.ts";
 import type { ConfigurationCommandRequest } from "./configuration.ts";
@@ -63,7 +64,7 @@ export interface ClientBootstrap {
   readonly source: { current: ClientSourceLifetime | null };
   readonly sourceProfile: { current: ProviderReference | null };
   readonly configuration: { current: { readonly scripts: ConsoleScriptFiles; readonly options: ApplicationOptions } };
-  activateFrontend(): void;
+  activateFrontend(configuration?: { readonly releaseCommands: Pick<CommandBuffer, "append">; publish(): void }): void;
   routeCommand(name: string, args: readonly string[], source: CommandContext): boolean;
   dispatchApplicationRequest(request: ConfigurationCommandRequest): Promise<void>;
   readonly hasPendingSource: boolean;

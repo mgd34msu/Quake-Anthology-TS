@@ -343,7 +343,7 @@ export class StartupApplication {
       this.client = { videoRestart, musicControls: this.musicControls, capture, consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, settings,
         output: { current: activeAudio.engine }, platform: { current: { kind: "menu", router: activeRouter, controllerSettings,
           retireCommands: () => { this.releaseMenuInput?.(); this.releaseMenuInput = null; } } },
-        source: { current: null }, sourceProfile: { current: configuration.selection.source }, configuration: { current: { scripts: initial.scripts, options: initial.options } }, activateFrontend: () => this.activateFrontend(),
+        source: { current: null }, sourceProfile: { current: configuration.selection.source }, configuration: { current: { scripts: initial.scripts, options: initial.options } }, activateFrontend: configuration => this.activateFrontend(configuration),
         routeCommand: (name, args, source) => this.routeCommand(name, args, source),
         dispatchApplicationRequest: request => this.dispatchApplicationRequest(request),
         get hasPendingSource() { return hasPendingSource(); } };
@@ -512,7 +512,7 @@ export class StartupApplication {
     this.releaseMenuInput = () => { releaseInput(); releaseOutput(); releaseDiscovery(); };
   }
 
-  private activateFrontend(): void {
+  private activateFrontend(configuration?: Parameters<ClientBootstrap["activateFrontend"]>[0]): void {
     const client = this.client, graphics = this.graphics;
     if (client === null || graphics === null) throw new Error("Retained frontend is unavailable");
     const primary = client.prepared.seats[0];
@@ -531,17 +531,18 @@ export class StartupApplication {
       graphics.menu.bindGyro(graphics.controllerSettings.ui(primary.id));
     }
     const platform = client.platform.current;
-    if (platform?.kind === "world") platform.input.transferPlatformToFrontend(graphics.router);
+    if (platform?.kind === "world") platform.input.transferPlatformToFrontend(graphics.router, configuration?.releaseCommands);
     if (client.output.current !== graphics.audio.engine) {
       client.output.current.prepareOutputTransfer(graphics.audio.engine)(); client.output.current = graphics.audio.engine;
       applyAudioOutputSettings(client.imageSettings.cvars, graphics.audio);
     }
 
+    if (configuration !== undefined) primary.input.release(performance.now(), configuration.releaseCommands);
     primary.input.setFocus({ kind: "menu", menu: graphics.menu.ensureActiveMenu(), control: null }, performance.now());
     client.prepared.setActiveSeats([primary.id]);
     client.platform.current = { kind: "menu", router: graphics.router, controllerSettings: graphics.controllerSettings,
       retireCommands: () => { this.releaseMenuInput?.(); this.releaseMenuInput = null; } };
-    this.publishFrontendRouting(client);
+    if (configuration === undefined) this.publishFrontendRouting(client); else configuration.publish();
     this.bindFrontendConsole();
     graphics.router.updateCapture();
   }

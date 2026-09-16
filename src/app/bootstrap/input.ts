@@ -698,8 +698,8 @@ export class ApplicationInput {
     next.ownsControllers = this.ownsControllers;
     this.ownsControllers = false;
   }
-  transferPlatformToFrontend(next: InputRouter): void {
-    this.releaseForProfileChange();
+  transferPlatformToFrontend(next: InputRouter, commands?: Pick<CommandBuffer, "append">): void {
+    this.releaseForProfileChange(commands);
     this.retireCommands();
     this.router.transferWindowTo(next);
     for (const event of this.pendingWindowEvents.splice(0)) next.handlePlatform(event);

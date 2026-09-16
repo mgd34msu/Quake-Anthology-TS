@@ -81,6 +81,13 @@ export async function openRemoteApplicationContent(options: ApplicationOptions):
   return { catalog, mounts: opened, close: async () => { opened.close(); } };
 }
 
+export function remoteConfigurationContent(options: ApplicationOptions, content: MountedApplicationContent): ApplicationConfigurationContent {
+  const preset = applicationConfigurationPreset(content.catalog, options);
+  return { catalog: content.catalog, mounts: content.mounts, close: () => content.close(),
+    selection: { source: preset.map.entities, engineBehavior: preset.engineBehavior,
+    match: preset.match, combat: preset.combat, movement: preset.movement, timing: preset.timing } };
+}
+
 function baseProduct(family: GameFamily): string {
   switch (family) {
     case "q1": return "q1-classic-id1";
@@ -135,7 +142,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
 export function applicationConfigurationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }): LaunchPreset {
   const product = catalog.require(options.product), family = product.expectation.family;
   const q3Guest = family === "q3" && !expectedProducts.some(builtin => builtin.id === product.expectation.id);
-  const quakeworld = product.expectation.id === "q1-quakeworld";
+  const quakeworld = product.expectation.edition === "quakeworld";
   return selectedApplicationPreset(catalog, options, nativeSources, { quakeworld, q3Guest });
 }
 

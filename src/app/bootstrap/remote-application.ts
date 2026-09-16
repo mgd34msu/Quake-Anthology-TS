@@ -2,7 +2,8 @@ import { defaultAudioOutputFormat } from "../../audio/output.ts";
 import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart, prepareVideoGuests, type PreparedVideoPresentation } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
-import type { ConfigurationCommandRequest } from "./configuration.ts";
+import { prepareProfileConfiguration, type ConfigurationCommandRequest, type PreparedProfileConfiguration } from "./configuration.ts";
+import { PreparedStartup } from "./prepared-startup.ts";
 import { RecordedRemoteSource } from "./network/recorded-source.ts";
 import type { DemoResource, DemoFamily } from "./demo-playback.ts";
 import type { DemoCompletion } from "./demo-commands.ts";
@@ -26,7 +27,6 @@ import type { ClientBootstrap } from "./client-bootstrap.ts";
 import type { SessionConnection } from "../../world/session/session.ts";
 import type { CommandHandler } from "../../core/commands/index.ts";
 import type { CommandDocumentation } from "../../core/commands/documentation.ts";
-import { CommandBuffer } from "../../core/commands/index.ts";
 import { consoleConfigRoot, ConsoleScriptFiles } from "./config-scripts.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
@@ -56,13 +56,13 @@ import { Q2_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS, UdpTransport } from "../..
 import type { TextFontSelection } from "../../text/atlas.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
+import type { SessionSeat } from "../../world/session/index.ts";
 import { EngineSession } from "../../world/session/index.ts";
 import type { ApplicationHost } from "./application.ts";
 import { ApplicationAssets } from "./assets.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
-import { ApplicationConsoleRouting } from "./console.ts";
 import { ApplicationAudio } from "./audio.ts";
-import { loadApplicationContent, openRemoteApplicationContent, openRemoteContent } from "./content.ts";
+import { loadApplicationContent, openRemoteApplicationContent, openRemoteContent, remoteConfigurationContent } from "./content.ts";
 import type { LoadedApplicationContent, MountedApplicationContent, RemoteContentMounts } from "./content.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
@@ -109,6 +109,15 @@ export interface RemoteApplicationHost extends ApplicationHost {
 export interface RemoteDemoApplicationHost extends RemoteApplicationHost { readonly serverBrowser: StartupServerBrowser; }
 type RemoteCommandOwner = ApplicationInputCommandOwner & { readonly scripts: ConsoleScriptFiles };
 type RemoteOwnership = { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly client: ClientBootstrap };
+interface RemoteConfiguration {
+  readonly prepared: PreparedStartup;
+  readonly profile: PreparedProfileConfiguration;
+  readonly seat: SessionSeat;
+  readonly settings: ConfigStore;
+  readonly socks: ClientSocksSettings;
+  readonly images: ReturnType<ApplicationImageSettings["prepareClientSettings"]>;
+  readonly downloadPermission: ClientDownloadPermission | null;
+}
 type RemoteBrowser = { readonly kind: "owned" | "borrowed"; readonly browser: StartupServerBrowser };
 
 type LiveNetwork = QwClientNetwork | Q2ClientNetwork<IpAddress> | Q1ClientNetwork | Q3ClientNetwork;
@@ -167,6 +176,7 @@ export class RemoteApplication {
   private readonly reportedEffectGaps = new Set<string>();
   private sourceConnection: SessionConnection | null = null;
   private publicationStarted = false;
+  private configurationPublished = false;
   private readonly sourceHandlers = new Map<string, CommandHandler>();
   private readonly sourceDocumentation = new Map<string, CommandDocumentation>();
   private readonly seatId: SeatId;
@@ -176,46 +186,18 @@ export class RemoteApplication {
   private constructor(private launchOptions: ApplicationOptions, private readonly mountedContent: MountedApplicationContent,
     readonly session: EngineSession, private readonly renderer: NativeRenderer, private readonly host: ApplicationHost,
     private readonly imageSettings: ApplicationImageSettings, launch: RemoteLaunch, identity: ReturnType<typeof createIdentityOwner>,
-    private readonly browser: RemoteBrowser, private readonly ownership: RemoteOwnership) {
+    private readonly browser: RemoteBrowser, private readonly ownership: RemoteOwnership, private readonly configuration: RemoteConfiguration) {
     this.musicControls = ownership.kind === "borrowed" ? ownership.client.musicControls : new MusicControls();
     this.family = launch.kind === "live" ? launch.family : launch.playback.resource.kind;
-    const retained = ownership.kind === "borrowed" ? ownership.client.locals[0] : undefined;
-    if (ownership.kind === "borrowed" && retained === undefined) throw new Error("Remote source requires a retained primary seat");
-    this.seatId = retained?.seat.id ?? identity.seat(0);
-    const inputProduct = mountedContent.catalog.require(this.family === "qw" ? "q1-quakeworld" : launchOptions.product);
-    this.inputConfig = ownership.kind === "borrowed" ? ownership.client.settings : new ConfigStore(inputProduct.userContent?.root ?? userProductDirectory(launchOptions.userContentRoot ?? defaultUserContentRoot(), inputProduct.expectation.contentDirectory));
-    this.socksSettings = new ClientSocksSettings({ session: session.session, origin: { kind: "local-console" } }, text => this.print(text));
-    if (this.family === "q3" || this.family === "q2" || this.family === "qw" || this.family === "q1") {
-      const family = this.family === "q3" ? "q3" : this.family === "qw" ? "qw" : this.family === "q1" ? "nq" : "q2";
-      const dialect = family === "q3" ? "q3" : family === "qw" ? "q1-quakeworld" : family === "nq" ? "q1-netquake" : "q2-classic";
-      const context = { session: session.session, origin: { kind: "local-console" } } satisfies import("../../contracts/common.ts").CommandContext;
-      const cvars = new CvarRegistry({ dialect, context, print: text => this.print(text),
-        cheatsAllowed: () => this.remote instanceof Q3RemotePresentation && q3InfoValue(this.remote.sourceRecords[1] ?? "", "sv_cheats") === "1" });
-      if (retained?.prepared.cvars.dialect === dialect) cvars.restoreSaveState(retained.prepared.cvars.captureWorldTransferState());
-      registerFrameTimeCvars(cvars);
-      this.downloadPermission = family === "qw" || family === "nq" ? null : createClientDownloadPermission(cvars, family);
-      if (family === "qw") cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
-      if (family === "q3") initializeQ3ClientCvars(cvars, { name: "Player", model: launchOptions.characterModel });
-      if (family === "qw") {
-        cvars.register("noskins", "0", CvarFlag.Archive); cvars.register("baseskin", "base", CvarFlag.Archive);
-        for (const variable of [{ name: "name", value: "unnamed" }, { name: "team", value: "" }, { name: "skin", value: "" },
-          { name: "topcolor", value: "0" }, { name: "bottomcolor", value: "0" }, { name: "noaim", value: "0" }, { name: "msg", value: "1" }]) cvars.register(variable.name, variable.value, CvarFlag.Archive | CvarFlag.UserInfo);
-        cvars.register("password", "", CvarFlag.UserInfo);
-      }
-      const cvarRouting = new ApplicationConsoleRouting({ fallback: cvars, sourceDialect: () => dialect, server: () => null,
-        seat: () => null, input: id => {
-          const settings = this.clientCommands?.inputSettings, origin = settings?.cvars.context.origin;
-          return origin?.kind === "local-seat" && (id === null || origin.seat.equals(id)) ? settings?.cvars ?? null : null;
-        }, shared: () => this.imageSettings.cvars });
-      const mounts = mountedContent.mounts;
-      const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(this.options.userContentRoot), settings: this.inputConfig,
-        mounted: path => mounts.open(path).then(resource => resource?.bytes) }, async () => { mounts.close(); });
-      const routing = this.socksSettings.route(cvarRouting);
-      const commands = ownership.kind === "borrowed" ? ownership.client.prepared.commands : new CommandBuffer({ dialect, context, cvars, cvarRouting: routing, print: (text, source) => this.print(text, source), forwardToServer: invocation => {
-        const name = invocation.argv[0]; if (name === undefined) return undefined;
-        let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
-        this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
-      }, readScript: (name, source) => scripts.read(name, source) });
+    this.seatId = configuration.seat.id;
+    this.inputConfig = configuration.settings;
+    this.socksSettings = configuration.socks;
+    this.downloadPermission = configuration.downloadPermission;
+    const family = this.family === "q3" ? "q3" : this.family === "qw" ? "qw" : this.family === "q1" ? "nq" : "q2";
+    const cvars = configuration.profile.source;
+    const scripts = configuration.profile.scripts;
+    const routing = this.socksSettings.route(configuration.profile.routing);
+    const commands = configuration.prepared.commands;
       if (family === "qw") {
         for (const name of ["skins", "allskins"]) this.sourceHandlers.set(name, invocation => this.queueCommand(name, invocation.args, null));
         this.sourceHandlers.set("color", invocation => {
@@ -226,8 +208,7 @@ export class RemoteApplication {
       }
       this.clientCommandOwner = { cvars, commands, scripts, routing };
       this.clientConfig = this.inputConfig;
-    } else { this.clientCommandOwner = null; this.clientConfig = null; this.downloadPermission = null; }
-    const client = retained?.client ?? session.createClient(0);
+    const client = configuration.seat.client;
     const nextGeneration = (slot: number): number => nextActorGeneration(session.session, slot);
     if (this.family === "qw") {
       const remote = new QwRemotePresentation({ identity, session, client, seat: this.seatId, nextGeneration, content: null,
@@ -297,9 +278,8 @@ export class RemoteApplication {
       this.source = launch.kind === "live" ? { kind: "live", transport: launch.transport, network: new Q2ClientNetwork({ transport: launch.transport, remote: launch.address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 }) } : this.recordedSource(launch, remote);
     }
     if (this.clientCommands !== null) {
-      const context: import("../../contracts/common.ts").CommandContext = { session: session.session,
-        origin: { kind: "local-seat", seat: this.seatId, client: this.remote.client.id } };
-      const inputSettings = retained?.prepared.mouse ?? new MouseSettings(new CvarRegistry({ dialect: this.clientCommands.cvars.dialect, context, print: text => this.print(text) }));
+      const inputSettings = configuration.profile.seats[0]?.mouse;
+      if (inputSettings === undefined) throw new Error("Remote configuration has no primary input owner");
       this.clientCommandOwner = { ...this.clientCommands, inputSettings };
     }
     if (ownership.kind === "owned") {
@@ -358,6 +338,7 @@ export class RemoteApplication {
     const session = ownership.kind === "borrowed" ? ownership.client.session : new EngineSession(identity, { kind: "local" });
     let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null, imageSettings: ApplicationImageSettings | null = null;
     let browser: RemoteBrowser | null = null;
+    let configuration: RemoteConfiguration | null = null;
     try {
       const product = content.catalog.product(options.product);
       if (product.expectation.family !== family || product.expectation.edition === "rerelease" || recording === undefined && q1 && options.product !== "q1-classic-id1" && !(qw && options.product === remoteContentProduct(options.remoteContent ?? remoteContentSelection("q1-quakeworld", "qw"))) || q3 && options.product !== remoteContentProduct(options.remoteContent ?? remoteContentSelection("q3-baseq3", "baseq3")))
@@ -377,7 +358,9 @@ export class RemoteApplication {
         : { kind: "borrowed", browser: host.serverBrowser };
       const launch: RemoteLaunch = recording !== undefined ? recording : address !== null && transport !== null
         ? { kind: "live", family: qw ? "qw" : q1 ? "q1" : q3 ? "q3" : "q2", address, transport } : (() => { throw new Error("Remote transport missing"); })();
-      application = new RemoteApplication(options, content, session, renderer, host, imageSettings, launch, identity, browser, ownership);
+      configuration = await prepareRemoteConfiguration(options, content, session, imageSettings, ownership, host,
+        () => application?.remote instanceof Q3RemotePresentation && q3InfoValue(application.remote.sourceRecords[1] ?? "", "sv_cheats") === "1");
+      application = new RemoteApplication(options, content, session, renderer, host, imageSettings, launch, identity, browser, ownership, configuration);
       application.initializeQ3Browser();
       if (ownership.kind === "owned") {
         application.activateSourceCommands();
@@ -395,16 +378,9 @@ export class RemoteApplication {
         video.register(current.clientCommands.commands); current.ownedVideoRestart = video;
       }
       if (ownership.kind === "owned") {
+      application.publishConfiguration();
       await application.viewSettings.load(application.inputConfig);
       application.releaseViewCvars = application.viewSettings.bindCvars(application.imageSettings.cvars);
-      const inputProfile = await application.inputConfig.loadSeat("input/seat-1.json");
-      if (inputProfile !== null) application.clientCommands?.inputSettings?.write(inputProfile.mouse);
-      const saved = await application.clientConfig?.loadText("settings/client.cfg");
-      const commands = application.clientCommands?.commands;
-      if (saved !== null && saved !== undefined && commands !== undefined) {
-        commands.append(saved, { ...commands.context, origin: { kind: "script", name: "client.cfg", caller: commands.context.origin } });
-        commands.execute();
-      }
       }
       if (transport !== null) await application.socksSettings.connect(transport);
       if (ownership.kind === "borrowed") await application.publishConnecting(ownership.client);
@@ -418,7 +394,7 @@ export class RemoteApplication {
         if (application.publicationStarted) throw new ClientSourcePublicationError(failures);
         if (failures.length > 1) throw new AggregateError(failures, "Remote preparation and cleanup failed");
       } else {
-        try { transport?.close(); if (ownership.kind === "owned") { renderer?.close(); session.close(); await imageSettings?.close(); } await content.close(); }
+        try { transport?.close(); await configuration?.profile.scripts.close(); await configuration?.images.settings.close(); if (ownership.kind === "owned") { renderer?.close(); session.close(); await imageSettings?.close(); } await content.close(); }
         finally { if (browser?.kind === "owned") await browser.browser.close(); }
       }
       throw error;
@@ -430,7 +406,7 @@ export class RemoteApplication {
   get clientCommandsBlocked(): boolean { return this.capture?.pendingReadback === true || this.videoRestart?.pending === true; }
   private get videoRestart(): ApplicationVideoRestart | null { return this.ownership.kind === "borrowed" ? this.ownership.client.videoRestart : this.ownedVideoRestart; }
   pumpClientInput(): void { this.controls?.pump(false); }
-  advanceClientStartup(): Promise<boolean> { return this.controls?.advanceStartup() ?? Promise.resolve(false); }
+  advanceClientStartup(): Promise<boolean> { return this.configuration.prepared.advanceFrame(); }
   flushClientCommands(): Promise<void> { return this.dispatchCommands(); }
 
   private ownsPublishedSource(): boolean {
@@ -473,29 +449,51 @@ export class RemoteApplication {
       user: (name, source) => scripts.read(name, source), baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(this.options.userContentRoot) });
   }
 
+  private publishConfiguration(): void {
+    const owner = this.clientCommands;
+    if (owner === null) throw new Error("Remote configuration has no command owner");
+    const { prepared, profile, images } = this.configuration;
+    profile.program.validatePublication(); images.validatePublication();
+    images.publish(); profile.program.publish();
+    const seats = [...prepared.seats.filter(seat => !profile.seats.some(next => next.id.equals(seat.id))), ...profile.seats];
+    seats.sort((a, b) => a.id.index - b.id.index);
+    prepared.publishSeats(seats, [this.seatId]);
+    for (const choices of profile.bindingChoices) {
+      const seat = prepared.seats.find(candidate => candidate.id.equals(choices.id));
+      if (seat === undefined) throw new Error("Published remote configuration lost its seat");
+      seat.selectedBindings = choices.selectedBindings; seat.allBindingsChosen = choices.allBindingsChosen;
+      seat.overriddenKeys.clear(); for (const key of choices.overriddenKeys) seat.overriddenKeys.add(key);
+    }
+    prepared.adopt(owner.routing, (name, args, source) => {
+      let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+      return this.queueCommand(name, args, origin.kind === "local-seat" ? origin.seat : null, source);
+    }, { source: profile.source, movement: profile.movement, fallback: profile.fallback, scripts: profile.scripts, read: profile.read });
+    profile.forwardCommands(request => this.queueCommand(request.name, request.arguments_, request.seat, request.source));
+    for (const request of profile.requests) this.queueCommand(request.name, request.arguments_, request.seat, request.source);
+    profile.publishContinuation(prepared);
+    this.configurationPublished = true;
+  }
+
   private async publishConnecting(client: ClientBootstrap): Promise<void> {
     const previous = client.source.current, owner = this.clientCommands;
     if (owner === null) throw new Error("Remote source has no command owner");
     await client.capture.beforeWorldChange();
     await previous?.prepareRetirement();
     client.session.resources.assertOpen();
-    client.prepared.validateOwners({ source: owner.cvars, movement: owner.cvars, fallback: owner.cvars });
+    client.prepared.validateOwners(this.configuration.profile);
+    this.configuration.profile.program.validatePublication(); this.configuration.images.validatePublication();
     const failures: unknown[] = [];
     let retired: ReturnType<EngineSession["detachWorld"]> | null = null;
     let oldConnection: SessionConnection | null = null;
     let retiredConfiguration: ConsoleScriptFiles | null = null;
     this.publicationStarted = true;
     try {
-      client.activateFrontend();
       previous?.releaseSettings();
+      client.activateFrontend({ releaseCommands: this.configuration.profile.program.releaseCommands, publish: () => this.publishConfiguration() });
       retired = client.session.detachWorld();
       const replacement = this.remote.client.replaceConnection(this.source.kind === "live" ? "remote" : "demo");
       this.sourceConnection = replacement.connection; oldConnection = replacement.retired;
       client.source.current = this; client.sourceProfile.current = null;
-      client.prepared.adopt(owner.routing, (name, args, source) => {
-        let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
-        return this.queueCommand(name, args, origin.kind === "local-seat" ? origin.seat : null, source);
-      }, { source: owner.cvars, movement: owner.cvars, fallback: owner.cvars, scripts: owner.scripts, read: this.startupReader(owner.scripts) });
       retiredConfiguration = client.configuration.current.scripts;
       client.configuration.current = { scripts: owner.scripts, options: this.options };
       this.viewSettings.setFieldOfView(this.imageSettings.cvars.variableValue("fov"));
@@ -864,8 +862,8 @@ export class RemoteApplication {
     };
     const previousLocal = previous?.locals[0];
     if (previous !== null && previousLocal === undefined) throw new Error("Remote input lost its local seat");
-    const retainedSeat = this.ownership.kind === "borrowed" ? this.ownership.client.locals.find(local => local.seat.id.equals(this.seatId))?.seat : undefined;
-    const seat = previousLocal?.player.seat ?? retainedSeat ?? this.session.createSeat(this.seatId.index, remote.client);
+    const retainedSeat = this.configuration.seat;
+    const seat = previousLocal?.player.seat ?? retainedSeat;
     const context: CommandContext = { session: this.session.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
     let input: ApplicationInput | null = null, ui: ApplicationSeatUi | null = null, q3: ApplicationQ3Client | null = null;
     try {
@@ -906,7 +904,7 @@ export class RemoteApplication {
             if (!published || client === null || client === undefined || !client.options.local.player.seat.id.equals(event.seat) || !client.capturesInput) return false;
             this.clientInputs.push({ generation: this.worldLoadGeneration, client, event }); return true;
           } }, () => performance.now(), this.inputConfig,
-        { ...owner, scripts, cvars: staged(owner.cvars), inputSettings: new MouseSettings(staged(owner.inputSettings.cvars)), routing }, previous ?? undefined);
+        { ...owner, scripts, cvars: staged(owner.cvars), inputSettings: new MouseSettings(staged(owner.inputSettings.cvars)), routing }, previous ?? undefined, this.configuration.prepared);
       assertCurrent();
       const controls = input, local = controls.locals[0];
       if (local === undefined) throw new Error("Remote input has no local seat");
@@ -995,7 +993,7 @@ export class RemoteApplication {
         if (failures.length > 1) throw new AggregateError(failures, "Remote seat publication and shutdown failed");
       } else {
         const failures: unknown[] = [error];
-        for (const discard of [() => q3?.close(), () => ui?.close(), () => input?.close(), () => { if (previous === null && this.ownership.kind === "owned") this.session.closeSeat(seat.id); }]) {
+        for (const discard of [() => q3?.close(), () => ui?.close(), () => input?.close()]) {
           try { discard(); } catch (cleanup) { failures.push(cleanup); }
         }
         try { await candidateScripts?.close(); } catch (cleanup) { failures.push(cleanup); }
@@ -1043,10 +1041,10 @@ export class RemoteApplication {
           if (source.session !== this.session.session) throw new Error("Remote command belongs to another session");
           let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
           if (origin.kind === "remote-client") throw new Error("Remote gameplay commands require a local client");
-          if (origin.kind === "local-seat" && (local === undefined || !origin.seat.equals(local.player.seat.id) || !origin.client.equals(local.player.seat.client.id)))
+          if (origin.kind === "local-seat" && (!origin.seat.equals(this.configuration.seat.id) || !origin.client.equals(this.configuration.seat.client.id)))
             throw new Error("Remote command belongs to a retired local client");
         }
-        if (command.seat !== null && local === undefined) throw new Error("Remote command belongs to an inactive local seat");
+        if (command.seat !== null && !command.seat.equals(this.configuration.seat.id)) throw new Error("Remote command belongs to an inactive local seat");
         if (command.name === "quit" || command.name === "disconnect") { this.requestQuit(); return; }
         if (await this.browserCommand(command.name, command.args, print)) return;
         if (this.network instanceof QwClientNetwork && (command.name === "skins" || command.name === "allskins")) {
@@ -1096,7 +1094,14 @@ export class RemoteApplication {
       this.sourceEvents = []; this.unhandledEffects = [];
       if (this.ownership.kind === "owned" && this.controls !== null) this.controls.pump(false);
       else if (this.ownership.kind === "owned") for (const event of this.window.pollEvents()) if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit();
-      if (this.ownership.kind === "owned") await this.clientCommands?.commands.executeScriptsAsync(() => this.dispatchCommands(), () => !this.clientCommandsBlocked);
+      if (this.ownership.kind === "owned") {
+        await this.dispatchCommands();
+        if (!this.clientCommandsBlocked) {
+          const continued = await this.advanceClientStartup();
+          await this.dispatchCommands();
+          if (!continued) await this.clientCommands?.commands.executeScriptsAsync(() => this.dispatchCommands(), () => !this.clientCommandsBlocked);
+        }
+      }
       const timeCvars = this.clientCommands?.cvars;
       const frameMilliseconds = timeCvars === undefined ? elapsedMilliseconds : sourceFrameMilliseconds(timeCvars.dialect, elapsedMilliseconds,
         readFrameTimeControls(timeCvars), { dedicated: false, localServer: false });
@@ -1190,7 +1195,7 @@ export class RemoteApplication {
     const errors: unknown[] = [];
     try { this.ownedVideoRestart?.close(); } catch (error) { errors.push(error); }
     this.ownedVideoRestart = null;
-    if (this.ownership.kind === "owned" || this.ownership.client.source.current === this) {
+    if (this.configurationPublished && (this.ownership.kind === "owned" || this.ownership.client.source.current === this)) {
       try { await this.saveSourceSettings(); } catch (error) { errors.push(error); }
     }
     if (this.ownership.kind === "borrowed" && this.ownership.client.source.current === this) {
@@ -1228,6 +1233,59 @@ export class RemoteApplication {
     }
     try { if (this.browser.kind === "owned") await this.serverBrowser.close(); } catch (error) { errors.push(error); }
     try { await this.loadedContent?.close(); } catch (error) { errors.push(error); }
+    try { await this.configuration.images.settings.close(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "Remote application shutdown failed");
   }
+}
+
+async function prepareRemoteConfiguration(options: ApplicationOptions, content: MountedApplicationContent, session: EngineSession,
+  imageSettings: ApplicationImageSettings, ownership: RemoteOwnership, host: ApplicationHost, cheatsAllowed: () => boolean): Promise<RemoteConfiguration> {
+  const selected = remoteConfigurationContent(options, content);
+  const dialect = selected.selection.timing.find(timing => timing.provider === selected.selection.engineBehavior.provider)?.clock.kind;
+  if (dialect === undefined) throw new Error("Remote configuration has no source timing");
+  const retained = ownership.kind === "borrowed" ? ownership.client.locals[0] : undefined;
+  if (ownership.kind === "borrowed" && retained === undefined) throw new Error("Remote configuration has no retained primary seat");
+  const seat = retained?.seat ?? session.createSeat(0, session.createClient(0));
+  const context: CommandContext = { session: session.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
+  const sourceContext: CommandContext = { session: session.session, origin: { kind: "local-console" } };
+  const product = content.catalog.require(options.product);
+  const settings = new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
+  const cvars = new CvarRegistry({ dialect, context, print: host.print, cheatsAllowed });
+  if (retained?.prepared.cvars.dialect === dialect) cvars.restoreSaveState(retained.prepared.cvars.captureWorldTransferState());
+  registerFrameTimeCvars(cvars);
+  const downloadPermission = dialect === "q3" ? createClientDownloadPermission(cvars, "q3")
+    : dialect === "q2-classic" ? createClientDownloadPermission(cvars, "q2") : null;
+  if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: "Player", model: options.characterModel });
+  if (dialect === "q1-quakeworld") {
+    cvars.register("rate", "25000", CvarFlag.Archive | CvarFlag.UserInfo);
+    cvars.register("noskins", "0", CvarFlag.Archive); cvars.register("baseskin", "base", CvarFlag.Archive);
+    for (const variable of [{ name: "name", value: "unnamed" }, { name: "team", value: "" }, { name: "skin", value: "" },
+      { name: "topcolor", value: "0" }, { name: "bottomcolor", value: "0" }, { name: "noaim", value: "0" }, { name: "msg", value: "1" }])
+      cvars.register(variable.name, variable.value, CvarFlag.Archive | CvarFlag.UserInfo);
+    cvars.register("password", "", CvarFlag.UserInfo);
+  }
+  const socks = new ClientSocksSettings(sourceContext, host.print);
+  const seedScripts = ownership.kind === "owned" ? new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings, mounted: undefined }) : null;
+  const seed = new CvarRegistry({ dialect, context: sourceContext, print: host.print });
+  const seedSeat = new CvarRegistry({ dialect, context, print: host.print });
+  const prepared = ownership.kind === "borrowed" ? ownership.client.prepared : seedScripts === null
+    ? (() => { throw new Error("Owned remote configuration requires its script owner"); })()
+    : new PreparedStartup(seed, seed, seedScripts, { dialect, movementDialect: dialect,
+      seats: [{ id: seat.id, context, cvars: seedSeat, mouse: new MouseSettings(new CvarRegistry({ dialect, context, print: host.print })), profile: null, archive: [], mouseArchive: [] }],
+      shared: imageSettings.cvars, sharedNames: [], print: host.print, forward: () => undefined });
+  const input = prepared.seats.find(candidate => candidate.id.equals(seat.id))?.input;
+  if (input === undefined) throw new Error("Remote configuration has no actual seat input");
+  const images = imageSettings.prepareClientSettings();
+  try {
+    const sameProfile = ownership.kind === "borrowed" && ownership.client.configuration.current.options.product === options.product
+      && retained?.prepared.cvars.dialect === dialect;
+    const archive = sameProfile ? null : await settings.loadText("settings/client.cfg");
+    const profile = await prepareProfileConfiguration({ prepared, clientSource: { inputState: ownership.kind === "owned" ? "fresh" : "retained", cvars, archive, route: routing => socks.route(routing) },
+      seats: [{ seat, input }], options, content: selected, settings, shared: images.settings.cvars, host, sourceArchive: sameProfile ? cvars.archiveEntries() : [], defaultCapacity: 1,
+      nextFrame: async () => { await setImmediate(); } });
+    return { prepared, profile, seat, settings, socks, images, downloadPermission };
+  } catch (error) {
+    await images.settings.close();
+    throw error;
+  } finally { await seedScripts?.close(); }
 }

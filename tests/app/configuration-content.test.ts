@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { applicationConfigurationPreset, applicationPreset, openApplicationConfigurationContent } from '../../src/app/bootstrap/content.ts';
+import { applicationConfigurationPreset, applicationPreset, openApplicationConfigurationContent, remoteConfigurationContent } from '../../src/app/bootstrap/content.ts';
 import { parseApplicationCommand } from '../../src/app/bootstrap/options.ts';
 import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch } from '../../src/content/catalog/index.ts';
 import type { ProductExpectation } from '../../src/content/catalog/index.ts';
@@ -17,6 +17,10 @@ import { SeatInput } from '../../src/input/seat.ts';
 import { createIdentityOwner, type ClientId } from '../../src/contracts/identity.ts';
 import { EngineSession, type SessionSeat } from '../../src/world/session/index.ts';
 import { ConfigStore } from '../../src/settings/config.ts';
+import { PreparedStartup } from '../../src/app/bootstrap/prepared-startup.ts';
+import { ConsoleScriptFiles } from '../../src/app/bootstrap/config-scripts.ts';
+import { MouseSettings } from '../../src/input/mouse-settings.ts';
+import { defaultGamepadTuning } from '../../src/input/gamepad.ts';
 
 function options(game: string) {
   const parsed = parseApplicationCommand(['--game', game, '--map', 'missing']);
@@ -257,5 +261,117 @@ test('mixed selected launch mount order and artifact overrides match normal reso
         expect(new TextDecoder().decode(await saved.mounts.read('config.cfg'))).toBe('set fixture user-mod\n');
       } finally { await saved.close(); }
     } finally { await config.close(); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('remote profile uses its actual client registry and stages configuration before signon without loading a map', async () => {
+  const { root, catalog } = await fixture();
+  const identity = createIdentityOwner('remote-profile-before-signon'), session = new EngineSession(identity, { kind: 'local' });
+  const settings = new ConfigStore(join(root, 'settings'));
+  try {
+    const initialOptions = { ...options('q2-classic-baseq2'), userContentRoot: join(root, 'user') };
+    const preset = applicationConfigurationPreset(catalog, initialOptions);
+    const content = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset, choice: presetChoice(preset.id) });
+    const actualSeats = new Map<ClientId, SessionSeat>();
+    const initial = await prepareInitialConfiguration(initialOptions, content, session, identity, actualSeats, settings, { print() {} }, [], 1, async () => {});
+    try {
+      const original = initial.prepared.seats[0], actual = [...actualSeats.values()][0], image = initial.image;
+      if (original === undefined || actual === undefined || image === null) throw new Error('Initial owners missing');
+      const selected = { ...options('q3-baseq3'), userContentRoot: join(root, 'user') };
+      const directory = join(root, catalog.require(selected.product).expectation.contentDirectory);
+      await writeFile(join(directory, 'default.cfg'), 'bind w +forward\n');
+      await writeFile(join(directory, 'q3config.cfg'), 'set name config-name\n');
+      await writeFile(join(directory, 'autoexec.cfg'), 'wait\nset name autoexec-name\nbind mouse2 +jump\nconnect example.invalid\nset name after-connect\n');
+      const nextPreset = applicationConfigurationPreset(catalog, selected);
+      const mounted = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset: nextPreset, choice: presetChoice(nextPreset.id) });
+      const client = new CvarRegistry({ dialect: 'q3', context: original.context });
+      client.register('name', 'Player');
+      const images = image.prepareClientSettings();
+      const oldBindings = original.input.bindings, oldSource = initial.prepared.source;
+      initial.prepared.commands.append('echo retained-tail\n', original.context);
+      const profile = await prepareProfileConfiguration({ prepared: initial.prepared,
+        clientSource: { inputState: "retained", cvars: client, archive: 'set name archived-name\n', route: routing => routing },
+        seats: [{ seat: actual, input: original.input }], options: selected, content: remoteConfigurationContent(selected, mounted),
+        settings, shared: images.settings.cvars, host: { print() {} }, sourceArchive: [], defaultCapacity: 1, nextFrame: async () => {} });
+      try {
+        expect(profile.source).toBe(client);
+        expect(profile.seats[0]?.cvars).toBe(client);
+        expect(client.variableString('name')).toBe('archived-name');
+        expect(client.find('sv_maxclients')).toBeUndefined();
+        expect(profile.requests).toEqual([]);
+        expect(initial.prepared.source).toBe(oldSource);
+        expect(initial.prepared.commands.pendingText).toBe('echo retained-tail\n');
+        expect(original.input.bindings).toEqual(oldBindings);
+        expect(profile.program.commands.pendingText).toContain('connect example.invalid');
+        profile.program.validatePublication(); images.validatePublication();
+        images.publish(); profile.program.publish();
+        initial.prepared.publishSeats(profile.seats, [actual.id]);
+        const requests: string[] = [];
+        const forward = (name: string): undefined => { requests.push(name); return undefined; };
+        initial.prepared.adopt(profile.routing, forward, profile);
+        profile.forwardCommands(request => { requests.push(request.name); });
+        profile.publishContinuation(initial.prepared);
+        expect(initial.prepared.seats[0]?.input).toBe(original.input);
+        expect(client.variableString('name')).toBe('archived-name');
+        await initial.prepared.advanceFrame();
+        expect(requests).toEqual(['connect']);
+        expect(client.variableString('name')).toBe('autoexec-name');
+        for (let frame = 0; frame < 10 && initial.prepared.pending; frame++) await initial.prepared.advanceFrame();
+        expect(client.variableString('name')).toBe('after-connect');
+        expect(initial.prepared.pending).toBe(false);
+        await expect(resolveLaunch({ catalog, preset: nextPreset, choice: presetChoice(nextPreset.id) })).rejects.toThrow('Required resource is missing');
+      } finally { profile.routing.close(); await profile.scripts.close(); await images.settings.close(); }
+    } finally { await initial.image?.close(); await initial.scripts.close(); }
+  } finally { session.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('fresh owned remote seed retains selected defaults and saved input settings on the actual seat', async () => {
+  const { root, catalog } = await fixture();
+  try {
+    const selected = { ...options('q3-baseq3'), userContentRoot: join(root, 'user') };
+    const directory = join(root, catalog.require(selected.product).expectation.contentDirectory);
+    await writeFile(join(directory, 'default.cfg'), 'bind w +forward\n');
+    await writeFile(join(directory, 'q3config.cfg'), 'sensitivity 8\nbind x +jump\n');
+    await writeFile(join(directory, 'autoexec.cfg'), '');
+    for (const saved of [false, true]) {
+      const identity = createIdentityOwner(`fresh-remote-${saved}`), session = new EngineSession(identity, { kind: 'local' });
+      const actual = session.createSeat(0, session.createClient(0));
+      const context = { session: session.session, origin: { kind: 'local-seat', seat: actual.id, client: actual.client.id } } satisfies import('../../src/contracts/common.ts').CommandContext;
+      const sourceContext = { session: session.session, origin: { kind: 'local-console' } } satisfies import('../../src/contracts/common.ts').CommandContext;
+      const settings = new ConfigStore(join(root, `fresh-settings-${saved}`));
+      const scripts = new ConsoleScriptFiles({ consoleRoot: join(root, 'console'), settings, mounted: undefined });
+      const mouse = new MouseSettings(new CvarRegistry({ dialect: 'q3', context }));
+      if (saved) await settings.saveSeat('input/seat-1.json', { version: 1, bindings: [{ input: { kind: 'key', code: 101 }, target: { kind: 'command', text: '+use' } }],
+        gamepad: defaultGamepadTuning, mouse: { ...mouse.read(), sensitivity: 11 }, history: [], rumble: false, controller: { kind: 'none' } });
+      const seed = new CvarRegistry({ dialect: 'q3', context: sourceContext });
+      const prepared = new PreparedStartup(seed, seed, scripts, { dialect: 'q3', movementDialect: 'q3',
+        seats: [{ id: actual.id, context, cvars: new CvarRegistry({ dialect: 'q3', context }), mouse, profile: null, archive: [], mouseArchive: [] }],
+        shared: null, sharedNames: [], print() {}, forward: () => undefined });
+      const input = prepared.seats[0]?.input;
+      if (input === undefined) throw new Error('Owned seed did not allocate its input');
+      const preset = applicationConfigurationPreset(catalog, selected);
+      const content = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset, choice: presetChoice(preset.id) });
+      const client = new CvarRegistry({ dialect: 'q3', context });
+      try {
+        const profile = await prepareProfileConfiguration({ prepared, clientSource: { inputState: 'fresh', cvars: client, archive: null, route: routing => routing },
+          seats: [{ seat: actual, input }], options: selected, content, settings, shared: new CvarRegistry({ dialect: 'q3', context: sourceContext }),
+          host: { print() {} }, sourceArchive: [], defaultCapacity: 1, nextFrame: async () => {} });
+        try {
+          expect(profile.seats[0]?.mouse.read().sensitivity).toBe(saved ? 11 : 8);
+          expect(profile.program.input(actual.id)?.binding({ kind: 'key', code: saved ? 101 : 120 })).toEqual({ kind: 'command', text: saved ? '+use' : '+jump' });
+          if (!saved) expect(profile.program.input(actual.id)?.binding({ kind: 'mouse-button', button: 1 })).not.toBeNull();
+          expect(profile.bindingChoices[0]?.allBindingsChosen).toBe(saved);
+          expect(profile.bindingChoices[0]?.overriddenKeys).not.toContain('mouse:1');
+          expect(input.bindings).toEqual([]);
+          profile.program.publish(); prepared.publishSeats(profile.seats, [actual.id]);
+          prepared.adopt(profile.routing, () => undefined, profile); profile.publishContinuation(prepared);
+          expect(prepared.seats[0]?.input).toBe(input);
+          expect(session.clientAt(actual.client.id.slot)).toBe(actual.client);
+          expect(input.binding({ kind: 'key', code: saved ? 101 : 120 })).toEqual({ kind: 'command', text: saved ? '+use' : '+jump' });
+        } finally { profile.routing.close(); await profile.scripts.close(); }
+      } finally { await content.close(); await scripts.close(); session.close(); }
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
