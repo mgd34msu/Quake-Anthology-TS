@@ -135,8 +135,9 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } },
       { selected: () => audio.selectedOutput, devices: () => audio.outputDeviceNames(), select: name => audio.selectOutput(name),
         report: text => local.console.print(`${text}\n`) });
-    const display = bindNativeVideoSettings(input.window, input.sharedCvars, message => local.console.print(`${message}\n`));
-    const images = input.sharedCvars === null ? [] : [...bindImageSettings(input.sharedCvars), ...bindModelSettings(input.sharedCvars), ...bindConsoleSettings(input.sharedCvars)];
+    const shared = input.sharedSettings();
+    const display = bindNativeVideoSettings(input.window, shared, message => local.console.print(`${message}\n`));
+    const images = shared === null ? [] : [...bindImageSettings(shared), ...bindModelSettings(shared), ...bindConsoleSettings(shared)];
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",
       enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];

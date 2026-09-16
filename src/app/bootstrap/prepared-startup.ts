@@ -137,53 +137,12 @@ export class PreparedStartup {
     return false;
   }
   noteWorldAction(): void { if (this.pending) this.worldAction = true; }
-  prepareClientCommands(options: CommandBufferOptions): {
-    readonly commands: CommandBuffer; readonly releaseCommands: Pick<CommandBuffer, "append">;
-    validatePublication(): void; publish(): void;
-  } {
+  prepareClientCommands(options: CommandBufferOptions): PreparedClientCommands {
     const contexts = [this.source.context, this.commands.context, ...this.seats.map(seat => seat.context)];
     const liveRegistries = new Set([this.source, this.movement, this.fallback,
       ...this.seats.flatMap(seat => [seat.cvars, seat.mouse.cvars]),
       ...contexts.flatMap(context => this.routing.visible(context))]);
-    const candidateRegistries = new Set([options.cvars,
-      ...[options.context, ...this.seats.map(seat => seat.context)].flatMap(context => options.cvarRouting?.visible(context) ?? [])]);
-    for (const registry of candidateRegistries) if (registry !== undefined && liveRegistries.has(registry))
-      throw new Error("Candidate client commands require isolated cvar owners");
-    const program = this.commands.prepareProgram(options);
-    const releaseDialect = this.commands.dialect;
-    const seats = this.seats.map(seat => {
-      const original = seat.input.bindings;
-      const bindings = new Map(original.map(binding => [physicalInputKey(binding.input), binding]));
-      const staged: BindingCommandSeat = {
-        get bindings() { return [...bindings.values()]; },
-        binding: input => bindings.get(physicalInputKey(input))?.target ?? null,
-        bind: binding => { bindings.set(physicalInputKey(binding.input), binding); },
-        unbind: input => { bindings.delete(physicalInputKey(input)); },
-        unbindAll: () => { bindings.clear(); },
-      };
-      return { seat, original, staged };
-    });
-    registerBindingCommands(program.commands, id => seats.find(entry => entry.seat.id.equals(id))?.staged ?? null,
-      text => options.print?.(text, program.commands.executionContext));
-    registerQ1ViewCommands(program.commands);
-    const validatePublication = (): void => {
-      program.validatePublication();
-      for (const { seat, original } of seats) {
-        const current = seat.input.bindings;
-        if (current.length !== original.length || current.some((binding, index) => binding !== original[index]))
-          throw new Error("Client bindings changed during preparation");
-      }
-    };
-    return { commands: program.commands,
-      releaseCommands: { append: (text, source) => program.commands.append(text, source, releaseDialect) },
-      validatePublication, publish: () => {
-      validatePublication();
-      program.publish();
-      for (const { seat, staged } of seats) {
-        seat.input.unbindAll();
-        for (const binding of staged.bindings) seat.input.bind(binding);
-      }
-    } };
+    return prepareClientCommands(this.commands, this.seats, liveRegistries, options);
   }
   forwardCommands(forward: PreparedStartup["forward"]): void { this.forward = forward; }
   readScript(name: string, context: CommandContext): Promise<string | undefined> { return this.active?.readScript(name, context) ?? this.scripts.read(name, context); }
@@ -320,4 +279,61 @@ export class PreparedStartup {
     }
     options.applyLaunchOptions();
   }
+}
+
+export type PreparedClientCommands = {
+    readonly commands: CommandBuffer; readonly releaseCommands: Pick<CommandBuffer, "append">;
+    input(seat: SeatId): (BindingCommandSeat & Pick<SeatInput, "isDown"> & { clearStates(): void }) | null;
+    releaseInputs(time: number): void;
+    validatePublication(): void; publish(): void;
+  };
+
+export function prepareClientCommands(commands: CommandBuffer, inputs: readonly Pick<PreparedSeat, "id" | "input" | "context">[],
+  liveRegistries: ReadonlySet<CvarRegistry>, options: CommandBufferOptions): PreparedClientCommands {
+    const candidateRegistries = new Set([options.cvars,
+      ...[options.context, ...inputs.map(seat => seat.context)].flatMap(context => options.cvarRouting?.visible(context) ?? [])]);
+    for (const registry of candidateRegistries) if (registry !== undefined && liveRegistries.has(registry))
+      throw new Error("Candidate client commands require isolated cvar owners");
+    const program = commands.prepareProgram(options);
+    const releaseDialect = commands.dialect;
+    const seats = inputs.map(seat => {
+      const original = seat.input.bindings;
+      const bindings = new Map(original.map(binding => [physicalInputKey(binding.input), binding]));
+      let cleared = false;
+      const staged = {
+        get bindings() { return [...bindings.values()]; },
+        binding: (input: Parameters<BindingCommandSeat["binding"]>[0]) => bindings.get(physicalInputKey(input))?.target ?? null,
+        bind: (binding: Parameters<BindingCommandSeat["bind"]>[0]) => { bindings.set(physicalInputKey(binding.input), binding); },
+        unbind: (input: Parameters<BindingCommandSeat["unbind"]>[0]) => { bindings.delete(physicalInputKey(input)); },
+        unbindAll: () => { bindings.clear(); },
+        isDown: (input: Parameters<SeatInput["isDown"]>[0]) => !cleared && seat.input.isDown(input),
+        clearStates: () => { cleared = true; },
+      };
+      return { seat, original, staged, release: (time: number) => {
+        if (cleared) seat.input.release(time, { append: (text, source) => program.commands.append(text, source, releaseDialect) });
+      } };
+    });
+    registerBindingCommands(program.commands, id => seats.find(entry => entry.seat.id.equals(id))?.staged ?? null,
+      text => options.print?.(text, program.commands.executionContext));
+    registerQ1ViewCommands(program.commands);
+    const validatePublication = (): void => {
+      program.validatePublication();
+      for (const { seat, original } of seats) {
+        const current = seat.input.bindings;
+        if (current.length !== original.length || current.some((binding, index) => binding !== original[index]))
+          throw new Error("Client bindings changed during preparation");
+      }
+    };
+    return { commands: program.commands,
+      input: id => seats.find(entry => entry.seat.id.equals(id))?.staged ?? null,
+      releaseInputs: time => { validatePublication(); for (const entry of seats) entry.release(time); },
+      releaseCommands: { append: (text, source) => program.commands.append(text, source, releaseDialect) },
+      validatePublication, publish: () => {
+      validatePublication();
+      program.publish();
+      for (const { seat, staged } of seats) {
+        seat.input.unbindAll();
+        for (const binding of staged.bindings) seat.input.bind(binding);
+      }
+    } };
 }

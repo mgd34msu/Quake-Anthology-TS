@@ -160,6 +160,7 @@ export class CvarRegistry {
   private readonly aliases = new Map<string, CvarAlias>();
   private readonly aliasReads = new Map<string, CvarRead>();
   private readonly aliasHandles = new Map<number, string>();
+  private mutationRevision = 0;
 
   constructor(private readonly options: CvarRegistryOptions) {
     this.dialect = options.dialect;
@@ -169,6 +170,46 @@ export class CvarRegistry {
   captureSaveState() { return { dialect: this.dialect, ...this.captureRegistryState() }; }
   /** Stage a new world without consuming or replaying the current world's pending effects. */
   captureWorldTransferState() { return { dialect: this.dialect, ...this.snapshotRegistryState() }; }
+  prepareCandidate(print = this.options.print): { readonly cvars: CvarRegistry; validatePublication(): void; publish(): void } {
+    const cvars = new CvarRegistry({ dialect: this.dialect, context: this.context,
+      ...(print === undefined ? {} : { print }),
+      ...(this.options.commandExists === undefined ? {} : { commandExists: this.options.commandExists }),
+      ...(this.options.cheatsAllowed === undefined ? {} : { cheatsAllowed: this.options.cheatsAllowed }),
+      ...(this.options.infoTargets === undefined ? {} : { infoTargets: this.options.infoTargets }) });
+    for (const [name, binding] of this.valueBindings) cvars.valueBindings.set(name, { validate: binding.validate, changed: () => {} });
+    return { cvars, ...this.prepareTransfer(cvars) };
+  }
+  prepareTransfer(candidate: CvarRegistry): { validatePublication(): void; publish(): void } {
+    if (candidate === this || candidate.dialect !== this.dialect || candidate.context.session !== this.context.session)
+      throw new Error("Cvar transfer requires a separate owner in the same session and dialect");
+    const original = JSON.stringify(this.captureWorldTransferState());
+    const revision = this.mutationRevision;
+    const effects = [...this.effects], aliases = [...this.aliases], documents = [...this.documents];
+    candidate.aliases.clear(); for (const [name, alias] of aliases) candidate.aliases.set(name, alias);
+    candidate.aliasReads.clear();
+    candidate.documents.clear(); for (const [name, document] of documents) candidate.documents.set(name, document);
+    candidate.restoreSaveState(this.captureWorldTransferState());
+    let published = false;
+    const validatePublication = (): void => {
+      if (published) throw new Error("Cvar transfer already published");
+      if (revision !== this.mutationRevision || original !== JSON.stringify(this.captureWorldTransferState()) || this.effects.length !== effects.length
+        || this.effects.some((effect, index) => effect !== effects[index]) || this.aliases.size !== aliases.length
+        || aliases.some(([name, alias]) => this.aliases.get(name) !== alias) || this.documents.size !== documents.length
+        || documents.some(([name, document]) => this.documents.get(name) !== document))
+        throw new Error("Cvar owner changed during preparation");
+      this.prepareRegistryRestore(candidate.captureWorldTransferState(), candidate.aliases);
+    };
+    return { validatePublication, publish: () => {
+      validatePublication();
+      const apply = this.prepareRegistryRestore(candidate.captureWorldTransferState(), candidate.aliases);
+      const pending = [...candidate.effects];
+      published = true;
+      this.aliases.clear(); for (const [name, alias] of candidate.aliases) this.aliases.set(name, alias);
+      this.documents.clear(); for (const [name, document] of candidate.documents) this.documents.set(name, document);
+      apply([...effects, ...pending]);
+      for (const effect of pending) this.options.onEffect?.(effect);
+    } };
+  }
   restoreSaveState(value: unknown): void {
     new SaveReader(value, "cvars").field("dialect").literal(this.dialect);
     this.restoreRegistryState(value);
@@ -193,6 +234,9 @@ export class CvarRegistry {
       ...(this.aliasHandles.size === 0 ? {} : { aliasHandles: [...this.aliasHandles].map(([handle, name]) => ({ handle, name })) }) };
   }
   private restoreRegistryState(value: unknown): void {
+    this.prepareRegistryRestore(value)([]);
+  }
+  private prepareRegistryRestore(value: unknown, aliases = this.aliases): (effects: readonly CvarEffect[]) => void {
     const reader = new SaveReader(value, "cvars");
     const states = reader.field("variables").list(entry => entry.nullable(item => ({ name: item.field("name").string(), value: item.field("value").string(),
       resetValue: item.field("resetValue").string(), latchedValue: item.field("latchedValue").nullable(field => field.string()) ?? undefined,
@@ -201,7 +245,7 @@ export class CvarRegistry {
     const variables = new Map<string, CvarState>(), indexes: (CvarState | undefined)[] = [];
     for (const [index, saved] of states.entries()) {
       if (saved === null) { indexes.push(undefined); continue; }
-      if (this.aliases.has(this.key(saved.name))) reader.fail(`saved cvar ${saved.name} conflicts with an alias`);
+      if (aliases.has(this.key(saved.name))) reader.fail(`saved cvar ${saved.name} conflicts with an alias`);
       if (variables.has(this.key(saved.name))) reader.fail("duplicate cvar");
       const state: CvarState = { ...saved, index, next: undefined };
       indexes.push(state); variables.set(this.key(state.name), state);
@@ -222,7 +266,7 @@ export class CvarRegistry {
       handle: item.field("handle").integer(0), name: item.field("name").string() }));
     const aliasHandles = new Map<number, string>();
     for (const { handle, name } of handles) {
-      const alias = this.aliases.get(this.key(name));
+      const alias = aliases.get(this.key(name));
       if (handle >= indexes.length || indexes[handle] !== undefined || aliasHandles.has(handle) || alias === undefined
         || alias.conversion.kind !== "converted" || !variables.has(this.key(alias.target))) reader.fail("invalid cvar alias handle");
       aliasHandles.set(handle, name);
@@ -234,13 +278,16 @@ export class CvarRegistry {
         const error = binding.validate(text); if (error !== null) reader.fail(`${name}: ${error}`);
       }
     }
+    return effects => {
+    this.mutationRevision++;
     this.variables.clear(); for (const [key, state] of variables) this.variables.set(key, state);
     this.aliasHandles.clear(); for (const [handle, name] of aliasHandles) this.aliasHandles.set(handle, name);
-    this.indexes.splice(0, this.indexes.length, ...indexes); this.first = first; this.effects = [];
+    this.indexes.splice(0, this.indexes.length, ...indexes); this.first = first; this.effects = [...effects];
     this.changedFlags = changedFlags; this.cheatsEnabled = cheatsEnabled; this.serverActive = serverActive; this.clientConnected = clientConnected;
     this.highCharacters = highCharacters; this.clientInfo = clientInfo; this.serverInfo = serverInfo; this.userinfoDirty = userinfoDirty;
     this.consoleVariables.clear(); for (const name of consoleVariables) this.consoleVariables.add(name);
     for (const [name, binding] of this.valueBindings) { const state = this.variables.get(name); if (state !== undefined) binding.changed(state.value); }
+    };
   }
 
   get modifiedFlags(): number { return this.changedFlags; }
@@ -263,6 +310,7 @@ export class CvarRegistry {
   }
 
   registerAlias(alias: CvarAlias): void {
+    this.mutationRevision++;
     const key = this.key(alias.name), target = this.key(alias.target);
     if (key === target || this.aliases.has(target)) throw new Error(`Cvar alias ${alias.name} must target a canonical variable, not an alias or itself`);
     if (this.variables.has(key) || this.aliases.has(key) || this.options.commandExists?.(alias.name)) throw new Error(`Cvar alias ${alias.name} is already declared`);
@@ -315,6 +363,7 @@ export class CvarRegistry {
     this.print(`${name}: ${error}\n`); return false;
   }
   document(name: string, documentation: CommandDocumentation): void {
+    this.mutationRevision++;
     if (this.find(name) === undefined) throw new Error(`Cannot document unregistered cvar ${name}`);
     this.documents.set(this.key(name), documentation);
   }
@@ -322,11 +371,12 @@ export class CvarRegistry {
   get(name: string): CvarSnapshot | undefined { const state = this.find(name); return state === undefined ? undefined : snapshot(state); }
   variableString(name: string): string { return this.find(name)?.value ?? ""; }
   variableValue(name: string): number { return this.find(name)?.numericValue ?? 0; }
-  setServerActive(active: boolean): void { this.serverActive = active; }
-  setClientConnected(connected: boolean): void { this.clientConnected = connected; }
-  setServerHighCharacters(enabled: boolean): void { this.highCharacters = enabled; }
+  setServerActive(active: boolean): void { if (this.serverActive !== active) this.mutationRevision++; this.serverActive = active; }
+  setClientConnected(connected: boolean): void { if (this.clientConnected !== connected) this.mutationRevision++; this.clientConnected = connected; }
+  setServerHighCharacters(enabled: boolean): void { if (this.highCharacters !== enabled) this.mutationRevision++; this.highCharacters = enabled; }
 
   register(nameInput: string, defaultInput: string, flags = 0): CvarSnapshot | undefined {
+    this.mutationRevision++;
     let name = sourceCommandText(nameInput);
     // A donor declaration of an alias must not replace the canonical default or policy.
     if (this.aliases.has(this.key(name))) { this.rejectAliasInfoFlags(name, flags); return this.get(name); }
@@ -383,6 +433,7 @@ export class CvarRegistry {
   }
 
   set(nameInput: string, valueInput: string, force = false): CvarSnapshot | undefined {
+    this.mutationRevision++;
     let name = sourceCommandText(nameInput);
     const alias = this.aliases.get(this.key(name));
     if (alias !== undefined) {
@@ -451,6 +502,7 @@ export class CvarRegistry {
   }
 
   setConsole(name: string, value: string): CvarSnapshot | undefined {
+    this.mutationRevision++;
     const alias = this.aliases.get(this.key(name));
     if (alias !== undefined) {
       const converted = this.aliasWrite(alias, sourceCommandText(value));
@@ -467,6 +519,7 @@ export class CvarRegistry {
   }
 
   setCommandFlags(name: string, value: string, kind: "archive" | "userinfo" | "serverinfo"): void {
+    this.mutationRevision++;
     const alias = this.aliases.get(this.key(name));
     if (alias !== undefined) {
       if (kind !== "archive") { this.print(`Cvar alias ${name} requires an explicit protocol info-key mapping\n`); return; }
@@ -515,6 +568,7 @@ export class CvarRegistry {
   }
 
   fullSet(name: string, value: string, flags: number): CvarSnapshot | undefined {
+    this.mutationRevision++;
     if (!isQ2(this.dialect)) throw new Error("Cvar_FullSet belongs to Quake II");
     const alias = this.aliases.get(this.key(name));
     if (alias !== undefined) {
@@ -543,6 +597,7 @@ export class CvarRegistry {
 
   /** Host configuration can defer a value without changing native cvar declaration flags. */
   stage(name: string, input: string): CvarSnapshot {
+    this.mutationRevision++;
     const alias = this.aliases.get(this.key(name));
     if (alias !== undefined) {
       const value = this.aliasWrite(alias, sourceCommandText(input));
@@ -565,6 +620,7 @@ export class CvarRegistry {
   }
 
   applyLatched(name?: string): readonly CvarSnapshot[] {
+    this.mutationRevision++;
     if (name !== undefined) name = this.canonicalName(name);
     const changed: CvarSnapshot[] = [];
     for (let state = this.first; state !== undefined; state = state.next) {
@@ -584,6 +640,7 @@ export class CvarRegistry {
   }
 
   resetAll(): void {
+    this.mutationRevision++;
     if (this.dialect !== "q3") throw new Error("cvar_restart belongs to Quake III");
     let previous: CvarState | undefined;
     while (true) {
@@ -601,6 +658,7 @@ export class CvarRegistry {
   }
 
   setCheatsEnabled(enabled: boolean): void {
+    this.mutationRevision++;
     this.cheatsEnabled = enabled;
     if (enabled || this.dialect !== "q3") return;
     for (let state = this.first; state !== undefined; state = state.next) {
@@ -675,16 +733,17 @@ export class CvarRegistry {
       write(isQ1(this.dialect) ? line : line.slice(0, 1023));
     }
   }
-  takeModifiedFlags(): number { const flags = this.changedFlags; this.changedFlags = 0; return flags; }
-  markModifiedFlags(flags: number): void { this.changedFlags |= flags; }
-  clearModifiedFlags(flags: number): void { this.changedFlags &= ~flags; }
-  clearUserinfoModified(): void { this.userinfoDirty = false; }
+  takeModifiedFlags(): number { const flags = this.changedFlags; if (flags !== 0) this.mutationRevision++; this.changedFlags = 0; return flags; }
+  markModifiedFlags(flags: number): void { if ((this.changedFlags | flags) !== this.changedFlags) this.mutationRevision++; this.changedFlags |= flags; }
+  clearModifiedFlags(flags: number): void { if ((this.changedFlags & flags) !== 0) this.mutationRevision++; this.changedFlags &= ~flags; }
+  clearUserinfoModified(): void { if (this.userinfoDirty) this.mutationRevision++; this.userinfoDirty = false; }
   addFlags(name: string, flags: number): void {
+    this.mutationRevision++;
     if (this.aliases.has(this.key(name))) this.rejectAliasInfoFlags(name, flags);
     const state = this.variables.get(this.key(this.canonicalName(name))); if (state !== undefined) state.flags |= flags;
   }
-  clearModified(name: string): void { const state = this.variables.get(this.key(this.canonicalName(name))); if (state !== undefined) state.modified = false; }
-  takeEffects(): readonly CvarEffect[] { const effects = this.effects; this.effects = []; return Object.freeze(effects); }
+  clearModified(name: string): void { const state = this.variables.get(this.key(this.canonicalName(name))); if (state?.modified) { this.mutationRevision++; state.modified = false; } }
+  takeEffects(): readonly CvarEffect[] { const effects = this.effects; if (effects.length !== 0) this.mutationRevision++; this.effects = []; return Object.freeze(effects); }
 
   createVm(): VmCvar {
     if (this.dialect !== "q3") throw new Error("VM cvar mirrors belong to Quake III");
@@ -699,6 +758,7 @@ export class CvarRegistry {
       for (const [handle, existing] of this.aliasHandles) if (this.key(existing) === this.key(name)) return handle;
       if (this.indexes.length === 1024) throw new RangeError("MAX_CVARS");
       const handle = this.indexes.length;
+      this.mutationRevision++;
       this.indexes.push(undefined); this.aliasHandles.set(handle, alias.name); return handle;
     }
     const registered = this.register(name, defaultValue, flags);

@@ -1,9 +1,9 @@
-import type { CvarRegistry } from "../../core/cvars/index.ts";
+import type { SettingCvars } from "./index.ts";
 import { bindCvarSetting } from "./index.ts";
 import type { SettingBinding } from "./index.ts";
 
 /** The application owns registration and refresh; menus edit its existing controls. */
-export function bindImageSettings(registry: CvarRegistry): readonly SettingBinding[] {
+export function bindImageSettings(registry: SettingCvars): readonly SettingBinding[] {
   const replacement = bindCvarSetting(registry, { name: "r_override_textures", label: "Replacement images", category: "video", restart: null,
     kind: "choice", choices: [{ id: "0", label: "Disabled" }, { id: "1", label: "Replace classic formats" }, { id: "2", label: "Replace all formats" }] }, null);
   const formats = bindCvarSetting(registry, { name: "r_texture_formats", label: "Formats (source = default)", category: "video", restart: null,
@@ -23,7 +23,7 @@ export function bindImageSettings(registry: CvarRegistry): readonly SettingBindi
   }))];
 }
 
-export function bindModelSettings(registry: CvarRegistry): readonly SettingBinding[] {
+export function bindModelSettings(registry: SettingCvars): readonly SettingBinding[] {
   const controls: readonly (readonly [string, string])[] = [
     ["r_enhancedmodels", "Q1 enhanced models"], ["gl_md5_load", "Load Q2 enhanced models"],
     ["gl_md5_use", "Draw Q2 enhanced models"],

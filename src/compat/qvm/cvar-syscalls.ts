@@ -8,7 +8,9 @@ import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { float32ToBits } from "../../core/numeric.ts";
 import type { QvmMemory } from "./memory.ts";
 
-function update(pointer: number, memory: QvmMemory, cvars: CvarRegistry): void {
+export type QvmCvarServices = Pick<CvarRegistry, "bindVm" | "readVm" | "get" | "set" | "setValue" | "reset" | "register" | "infoString">;
+
+function update(pointer: number, memory: QvmMemory, cvars: QvmCvarServices): void {
   const record = memory.view(pointer, 272);
   const source = cvars.readVm(record.getInt32(0, true));
   if (source === undefined || source.modificationCount === record.getInt32(4, true)) return;
@@ -21,7 +23,7 @@ function update(pointer: number, memory: QvmMemory, cvars: CvarRegistry): void {
   record.setInt32(12, source.integerValue, true);
 }
 
-function register(words: DataView, memory: QvmMemory, cvars: CvarRegistry): void {
+function register(words: DataView, memory: QvmMemory, cvars: QvmCvarServices): void {
   const pointer = words.getInt32(4, true);
   const handle = cvars.bindVm(memory.readString(words.getInt32(8, true)),
     memory.readString(words.getInt32(12, true)), words.getInt32(16, true));
@@ -32,14 +34,14 @@ function register(words: DataView, memory: QvmMemory, cvars: CvarRegistry): void
   update(pointer, memory, cvars);
 }
 
-function set(words: DataView, memory: QvmMemory, cvars: CvarRegistry): void {
+function set(words: DataView, memory: QvmMemory, cvars: QvmCvarServices): void {
   const name = memory.readString(words.getInt32(4, true));
   const pointer = words.getInt32(8, true);
   if (memory.pointer(pointer) === null) cvars.reset(name, true);
   else cvars.set(name, memory.readString(pointer), true);
 }
 
-function variableString(words: DataView, memory: QvmMemory, cvars: CvarRegistry): void {
+function variableString(words: DataView, memory: QvmMemory, cvars: QvmCvarServices): void {
   const source = cvars.get(memory.readString(words.getInt32(4, true)));
   const pointer = words.getInt32(8, true);
   // Cvar_VariableStringBuffer's missing-name branch ignores the capacity.
@@ -49,7 +51,7 @@ function variableString(words: DataView, memory: QvmMemory, cvars: CvarRegistry)
 
 /** Trap numbers come from g_public.h, cg_public.h and ui_public.h. */
 export function qvmCvarSyscall(
-  role: "qagame" | "cgame" | "ui", words: DataView, memory: QvmMemory, cvars: CvarRegistry,
+  role: "qagame" | "cgame" | "ui", words: DataView, memory: QvmMemory, cvars: QvmCvarServices,
 ): number | null {
   const trap = words.getInt32(0, true);
   if (role !== "ui") {

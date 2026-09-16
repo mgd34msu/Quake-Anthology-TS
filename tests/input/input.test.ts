@@ -454,6 +454,17 @@ test("detached world input preserves controller assignments and performs no sens
   expect(next.setGyroEnabled(seat, true).kind).toBe("accepted");
   expect(operations).toEqual(["sensor"]);
   next.close();
+  operations.length = 0;
+  const first = make(true);
+  expect(operations).toEqual([]);
+  let leaseClosed = false;
+  first.attachWindow({ beginInput: () => ({ get closed() { return leaseClosed; }, setRelativeMouse: () => {}, close: () => { leaseClosed = true; } }),
+    logicalSize: { width: 640, height: 480 }, drawableSize: { width: 640, height: 480 }, pollEvents: () => [] });
+  expect(operations).toEqual(["assign"]);
+  expect(first.setGyroEnabled(seat, true).kind).toBe("accepted");
+  expect(operations).toEqual(["assign", "sensor"]);
+  first.close();
+  expect(leaseClosed).toBe(true);
 });
 
 

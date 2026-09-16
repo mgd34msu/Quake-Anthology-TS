@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { registerQ1ClientSettings } from "./q1-client-settings.ts";
-import { registerSharedClientSettings } from "./shared-setting-cvars.ts";
+import { registerSharedClientSettings, validateFieldOfView } from "./shared-setting-cvars.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import { CommandBuffer } from "../../core/commands/index.ts";
 import { CvarFlag, CvarRegistry } from "../../core/cvars/index.ts";
@@ -39,6 +39,12 @@ export class ApplicationImageSettings {
   private persisted: readonly { readonly name: string; readonly value: string }[] = [];
   get persistedEntries(): readonly { readonly name: string; readonly value: string }[] { return this.persisted; }
   private appliedValues: readonly { readonly name: string; readonly value: string }[] = [];
+  prepareClientSettings(): { readonly settings: ApplicationImageSettings; validatePublication(): void; publish(): void } {
+    const settings = new ApplicationImageSettings({ ...this.options, deferPersistence: true });
+    settings.cvars.bindValue("fov", { validate: validateFieldOfView, changed: () => {} });
+    const transfer = this.cvars.prepareTransfer(settings.cvars);
+    return { settings, validatePublication: transfer.validatePublication, publish: transfer.publish };
+  }
   private constructor(private readonly options: ImageSettingsOptions) {
     this.persistenceEnabled = !options.deferPersistence;
     this.store = new ConfigStore(join(options.userContentRoot ?? defaultUserContentRoot(), "settings"));

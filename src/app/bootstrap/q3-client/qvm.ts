@@ -5,10 +5,12 @@ import { qvmArguments } from '../../../compat/qvm/module.ts';
 import { worldMarkProjector } from '../../../content/q3/presentation/mark-projector.ts';
 import { qvmClientMarkSyscall } from '../../../compat/qvm/client-mark-syscalls.ts';
 import type { SeatId } from '../../../contracts/identity.ts';
+import type { CommandContext } from '../../../contracts/common.ts';
 import type { Q3PresentationSession } from '../../../content/q3/presentation/client.ts';
 import type { Q3CgameEventHandling } from '../../../contracts/ui.ts';
 import type { Q3ClientState } from '../../../compat/qvm/client-state.ts';
 import type { CommandBuffer } from '../../../core/commands/index.ts';
+import type { QvmCvarServices } from '../../../compat/qvm/cvar-syscalls.ts';
 import { QvmCgame } from '../../../compat/qvm/cgame.ts';
 import { QvmUi } from '../../../compat/qvm/ui.ts';
 import type { Q3BrowserView } from '../../../network/q3/browser-view.ts';
@@ -31,12 +33,14 @@ import { UserFileStore } from '../../../platform/files/writable.ts';
 
 export interface ApplicationQvmClientOptions {
   readonly seat: SeatId;
+  readonly commandContext: CommandContext;
   readonly services: ApplicationQ3Services;
   readonly media: ApplicationQ3Assets;
   readonly session: Q3PresentationSession;
   readonly connection: Q3ClientState;
   readonly queries: SharedSceneQueries;
-  readonly commands: Pick<CommandBuffer, 'executeNow' | 'insert'>;
+  readonly commands: Pick<CommandBuffer, 'executeNow' | 'insert' | 'append'>;
+  readonly cvars: QvmCvarServices;
   readonly browser: Q3BrowserView;
   readonly map: string;
   readonly now: () => number;
@@ -45,8 +49,15 @@ export interface ApplicationQvmClientOptions {
   scalar(call: QvmHostCall, owner: ApplicationQvmClient): QvmHostResult | null;
 }
 
+export function qvmClientCommands(commands: ApplicationQvmClientOptions['commands'], context: CommandContext, role: 'ui' | 'cgame') {
+  const source: CommandContext = { session: context.session, origin: { kind: 'script', name: `q3-${role}`, caller: context.origin } };
+  return { executeNow: (text: string) => { commands.executeNow(text, source); },
+    insert: (text: string) => commands.insert(text, source), append: (text: string) => commands.append(text, source) };
+}
+
 /** The actual guest modules share the same media, scene, input and connection owners as source cgame. */
 export class ApplicationQvmClient {
+  private readonly commandServices: { readonly ui: ReturnType<typeof qvmClientCommands>; readonly cgame: ReturnType<typeof qvmClientCommands> };
   private readonly files: { readonly cgame: QvmFiles; readonly ui: QvmFiles };
   private readonly generation: number;
   private readonly globals = new ScriptGlobalDefines();
@@ -59,6 +70,8 @@ export class ApplicationQvmClient {
   private ui: QvmUi | null = null;
 
   private constructor(readonly options: ApplicationQvmClientOptions) {
+    this.commandServices = { ui: qvmClientCommands(options.commands, options.commandContext, 'ui'),
+      cgame: qvmClientCommands(options.commands, options.commandContext, 'cgame') };
     this.generation = options.connection.generation;
     this.marks = worldMarkProjector(options.media.assets.world);
     const userContent = options.media.assets.content.catalog.product(options.media.content).userContent;
@@ -77,12 +90,12 @@ export class ApplicationQvmClient {
     this.assertCurrent();
     if (call.role !== 'cgame' && call.role !== 'ui') return rejectQvmSyscall(call);
     const o = this.options, session = o.session;
-    const common = { cvars: session.cvars, print: session.print, milliseconds: o.now, arguments: () => this.arguments };
+    const common = { cvars: o.cvars, print: session.print, milliseconds: o.now, arguments: () => this.arguments };
+    const commands = this.commandServices[call.role];
     return qvmCommonSyscall(call, call.role === 'cgame'
-      ? { ...common, role: 'cgame', commands: { append: session.appendConsoleCommand, register: session.registerCgameCommand,
+      ? { ...common, role: 'cgame', commands: { append: commands.append, register: session.registerCgameCommand,
         remove: o.removeCommand, reliable: session.addReliableCommand } }
-      : { ...common, role: 'ui', commands: { executeNow: text => { o.commands.executeNow(text, { ...session.cvars.context, origin: { kind: "script", name: "q3-ui", caller: session.cvars.context.origin } }); },
-        insert: text => o.commands.insert(text, { ...session.cvars.context, origin: { kind: "script", name: "q3-ui", caller: session.cvars.context.origin } }), append: session.appendConsoleCommand } })
+      : { ...common, role: 'ui', commands })
       ?? qvmFileSyscall(call, this.files[call.role])
       ?? qvmClientScriptSyscall(call, this.scripts[call.role])
       ?? qvmClientRenderSyscall(call, o.services.resources, o.services.draw)

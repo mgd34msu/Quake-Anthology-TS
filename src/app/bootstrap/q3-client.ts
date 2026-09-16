@@ -8,6 +8,7 @@ import { KEY_CHAR_FLAG, KeyCode } from "../../input/key-codes.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
 import { ApplicationQvmClient } from "./q3-client/qvm.ts";
+import type { QvmCvarServices } from "../../compat/qvm/cvar-syscalls.ts";
 import { QvmApplicationScalars } from "./q3-client/qvm-scalars.ts";
 import type { QvmApplicationScalarOptions } from "./q3-client/qvm-scalars.ts";
 import type { Q3ClientState } from "../../compat/qvm/client-state.ts";
@@ -107,7 +108,9 @@ export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
   | { readonly kind: "remote"; readonly movement: PresentationMovementHost; readonly source: ApplicationQ3ClientSource; readonly initialPlayer: Snapshot["playerState"] }
   | { readonly kind: "qvm"; readonly localServer?: boolean; readonly source: ApplicationQ3ClientSource; readonly connection: Q3ClientState;
       readonly browser: Q3BrowserView;
-      readonly queries: SharedSceneQueries; readonly commandBuffer: Pick<CommandBuffer, 'executeNow' | 'insert'>; readonly renderer: NativeRenderer;
+      readonly guestCvars: QvmCvarServices;
+      readonly guestInput: QvmApplicationScalarOptions["input"];
+      readonly queries: SharedSceneQueries; readonly commandBuffer: Pick<CommandBuffer, 'executeNow' | 'insert' | 'append'>; readonly renderer: NativeRenderer;
       readonly clientState: QvmApplicationScalarOptions["clientState"] }
 );
 export interface ApplicationQ3LocalRound {
@@ -132,7 +135,13 @@ export class ApplicationQ3Client {
   private round: ApplicationQ3LocalRound | null;
   private readonly localSource: ApplicationQ3Source | null;
   private readonly product: Q3SourcePresentationState["product"];
-  readonly cvars: CvarRegistry;
+  private cvarOwner: CvarRegistry;
+  get cvars(): CvarRegistry { return this.cvarOwner; }
+  adoptCvars(cvars: CvarRegistry): void {
+    if (cvars.dialect !== this.cvars.dialect || cvars.context.session !== this.cvars.context.session) throw new Error("Q3 client cvar owner changed identity");
+    this.cvarOwner = cvars;
+    this.bindFrameTime();
+  }
   readonly commandNames = new Set<string>();
   private backend: { readonly kind: "typescript"; readonly game: Q3ClientPresentation } | { readonly kind: "qvm"; readonly game: ApplicationQvmClient } | null = null;
   private readonly submissions: Submission[] = [];
@@ -176,7 +185,7 @@ export class ApplicationQ3Client {
     this.latestCamera = { origin: player === null ? { x: 0, y: 0, z: 0 } : { ...player.origin, z: player.origin.z + player.viewheight },
       axis: anglesToAxis(player?.viewangles ?? { x: 0, y: 0, z: 0 }), viewport: this.viewportValue,
       projection: perspectiveProjection(90, 73.739795, 16384), clip: { kind: "none" } };
-    this.cvars = options.cvars ?? new CvarRegistry({ dialect: "q3", context: this.commandContext(), print: options.commands.print,
+    this.cvarOwner = options.cvars ?? new CvarRegistry({ dialect: "q3", context: this.commandContext(), print: options.commands.print,
       cheatsAllowed: () => {
         const source = this.serverSettings().find(setting => setting.name.toLowerCase() === "sv_cheats");
         return source === undefined ? this.source.systemInfo === undefined ? undefined : infoValueForKey(this.source.systemInfo(), "sv_cheats") === "1" : source.integerValue !== 0;
@@ -241,6 +250,7 @@ export class ApplicationQ3Client {
     try { options.assertCurrent?.(); await client.initialize(); options.assertCurrent?.(); client.bindFrameTime(); return client; } catch (error) { client.close(); throw error; }
   }
   private bindFrameTime(): void {
+    this.timeMirror?.close(); this.timeMirror = null;
     const owner = this.options.timeCvars;
     if (owner === undefined || owner === this.cvars) return;
     this.refreshSystemInfo();
@@ -256,7 +266,10 @@ export class ApplicationQ3Client {
   private requireGame(): Q3ClientPresentation { const backend = this.requireBackend(); if (backend.kind !== "typescript") throw new Error("This seat runs native guest cgame"); return backend.game; }
   private async initialize(): Promise<void> {
     const o = this.options, seat = o.local.player.seat.id, source = this.source, media = this.media;
-    const collisionSettings = new CollisionMapSettings(o.timeCvars ?? this.cvars);
+    const collisionSettings = new CollisionMapSettings({
+      register: (...args) => (o.timeCvars ?? this.cvars).register(...args),
+      get: name => (o.timeCvars ?? this.cvars).get(name),
+    });
     collisionSettings.registerMap();
     const services = await createApplicationQ3Services({ collisionSettings, media, audio: o.audio, seat, viewport: this.viewportValue, queries: o.queries,
       actorAt: number => source.actorAt(number), clock: { now: o.now, frameNumber: () => this.frameNumber }, output: {
@@ -267,18 +280,19 @@ export class ApplicationQ3Client {
     this.services = services;
     const { scene: recorder, resources, sound, draw, cinematics } = services;
     this.cinematics = cinematics;
+    const cvarClient = this;
     const session: Q3PresentationSession = { product: this.product, clientNumber: source.clientNumber, serverMessageSequence: source.serverMessageSequence ?? 0, lastExecutedServerCommand: source.lastExecutedServerCommand ?? 0,
-        mode: { kind: "live" }, commands: source.commands, snapshots: source, cvars: this.cvars,
+        mode: { kind: "live" }, commands: source.commands, snapshots: source, get cvars() { return cvarClient.cvars; },
         getGameState: () => source.getGameState(), getServerCommand: sequence => source.getServerCommand(sequence), snapshotPing: number => source.snapshotPing?.(number) ?? 0,
         addReliableCommand: o.commands.reliable, appendConsoleCommand: o.commands.console, registerCgameCommand: name => { this.commandNames.add(name); o.commandRegistration.register(name); },
         setUserCommandValue: (weapon, sensitivity) => { this.selection = { weapon, sensitivity }; },
         assertCurrent: () => { o.assertCurrent?.(); if (this.closed) throw new Error("Q3 cgame belongs to a retired world"); }, print: o.commands.print };
     if (o.kind === "qvm") {
-      const scalar = new QvmApplicationScalars({ renderer: o.renderer, viewport: o.viewport, local: o.local, media, services, now: o.now,
+      const scalar = new QvmApplicationScalars({ renderer: o.renderer, viewport: o.viewport, local: o.local, input: o.guestInput, media, services, now: o.now,
         keyCatcher: { get: () => this.keyCatcher, set: value => { this.keyCatcher = value; } }, clientState: o.clientState,
         lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
-      const game = await ApplicationQvmClient.create({ seat, services, media, session, connection: o.connection, queries: o.queries,
-        commands: o.commandBuffer, browser: o.browser, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
+      const game = await ApplicationQvmClient.create({ seat, commandContext: this.commandContext(), services, media, session, connection: o.connection, queries: o.queries,
+        commands: o.commandBuffer, cvars: o.guestCvars, browser: o.browser, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
         removeCommand: name => { this.commandNames.delete(name); o.commandRegistration.remove(name); },
         scalar: (call, owner) => scalar.dispatch(call, () => owner.updateScreen(call)) });
       this.backend = { kind: "qvm", game };

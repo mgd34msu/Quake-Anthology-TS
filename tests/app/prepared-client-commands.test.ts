@@ -10,6 +10,8 @@ import { ConfigStore } from "../../src/settings/config.ts";
 import { QvmUiImport } from "../../src/compat/qvm/abi.ts";
 import { qvmCommonSyscall, type QvmCommonServices } from "../../src/compat/qvm/common-syscalls.ts";
 import { QvmMemory } from "../../src/compat/qvm/memory.ts";
+import { qvmClientInputSyscall } from "../../src/app/bootstrap/q3-client/qvm-scalars.ts";
+import type { QvmHostCall } from "../../src/compat/qvm/syscalls.ts";
 
 function fixture(dialect: CommandDialect = "q1-netquake", movementDialect: CommandDialect = dialect) {
   const identity = createIdentityOwner("prepared-client-candidate");
@@ -36,6 +38,45 @@ function candidate(f: ReturnType<typeof fixture>, dialect: CommandDialect = "q3"
     print: text => f.output.push(text) });
   return { program, cvars, shared, routing };
 }
+
+test("guest key traps and NOW bindings share candidate state without releasing the live seat", () => {
+  const f = fixture();
+  f.input.bind({ input: { kind: "key", code: 119 }, target: { kind: "command", text: "+probe; echo released" } });
+  f.input.input({ kind: "key", seat: f.input.seat, code: 119, down: true, repeat: false, timeMilliseconds: 10 });
+  f.prepared.commands.execute();
+  f.prepared.commands.append("echo original-tail\n", f.context);
+  const pending = f.prepared.commands.pendingText, bindings = f.input.bindings;
+  const next = candidate(f), staged = next.program.input(f.input.seat);
+  if (staged === null) throw new Error("Missing candidate seat");
+  const guest = new QvmMemory(new Uint8Array(2048));
+  const call = (code: QvmUiImport, args: readonly number[]) => {
+    const words = new DataView(new ArrayBuffer(4 * (args.length + 1))); words.setInt32(0, code, true);
+    args.forEach((value, index) => words.setInt32(4 * (index + 1), value, true));
+    const request: QvmHostCall = { kind: "engine", role: "ui", code, guest, words, memory: guest.bytes, commandArguments: null,
+      invoke: () => { throw new Error("Unexpected invocation"); }, invokeAsync: async () => { throw new Error("Unexpected invocation"); } };
+    return qvmClientInputSyscall(request, staged);
+  };
+  expect(call(QvmUiImport.UI_KEY_ISDOWN, [119])).toBe(1);
+  guest.writeString(128, "echo guest binding", 128);
+  expect(call(QvmUiImport.UI_KEY_SETBINDING, [119, 128])).toBe(0);
+  next.program.commands.executeNow("bind w", f.context);
+  expect(f.output.join("")).toContain("echo guest binding");
+  next.program.commands.executeNow('bind w "echo console binding"', f.context);
+  expect(call(QvmUiImport.UI_KEY_GETBINDINGBUF, [119, 512, 128])).toBe(0);
+  expect(guest.readString(512)).toBe("echo console binding");
+  expect(call(QvmUiImport.UI_KEY_CLEARSTATES, [])).toBe(0);
+  expect(call(QvmUiImport.UI_KEY_ISDOWN, [119])).toBe(0);
+  expect(f.input.isDown({ kind: "key", code: 119 })).toBe(true);
+  expect(f.input.bindings).toEqual(bindings);
+  expect(f.prepared.commands.pendingText).toBe(pending);
+  next.program.validatePublication();
+  next.program.releaseInputs(20); next.program.releaseInputs(20);
+  next.program.publish();
+  expect(f.input.isDown({ kind: "key", code: 119 })).toBe(false);
+  expect(f.input.binding({ kind: "key", code: 119 })).toEqual({ kind: "command", text: "echo console binding" });
+  expect(f.prepared.commands.pendingText.match(/-probe/g)).toHaveLength(1);
+  expect(f.prepared.commands.pendingText).toContain("echo original-tail");
+});
 
 test("discarded client preparation preserves live held input, binding, cvars and pending program", () => {
   const f = fixture();

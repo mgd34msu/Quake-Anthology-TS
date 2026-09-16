@@ -1,5 +1,7 @@
 import type { StartupConfigOptions } from "./startup-config.ts";
-import type { PreparedStartup } from "./prepared-startup.ts";
+import { prepareClientCommands, type PreparedStartup } from "./prepared-startup.ts";
+import { Q3ClientCvars } from "./q3-client/cvars.ts";
+import type { QvmClientInput } from "./q3-client/qvm-scalars.ts";
 import { loadCvarArchive, saveCvarArchive } from "./cvar-archives.ts";
 import { bindRunCvar } from "./shared-setting-cvars.ts";
 import { registerQ1ClientCommands } from "./q1-client-commands.ts";
@@ -15,7 +17,7 @@ import type { ActorId, ProviderId, SeatId } from "../../contracts/identity.ts";
 import type { ActorCommand } from "../../contracts/session.ts";
 import type { ArsenalIntent } from "../../contracts/gameplay.ts";
 import type { SeatInputEvent, SeatInputFocus } from "../../contracts/ui.ts";
-import { CommandBuffer } from "../../core/commands/index.ts";
+import { CommandBuffer, type CommandCvarRouting } from "../../core/commands/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { SeatConsole } from "../../console/session.ts";
 import { defaultBindings, registerBindingCommands, registerWheelCommands } from "../../input/bindings.ts";
@@ -101,10 +103,12 @@ export interface ApplicationInputCommandOwner {
   readonly scripts?: ConsoleScriptFiles;
   readonly cvars: CvarRegistry;
   readonly commands: CommandBuffer;
+  readonly routing: CommandCvarRouting;
   readonly inputSettings?: MouseSettings;
 }
 
 export class ApplicationInput {
+  private readonly publishedRegistries = new Map<CvarRegistry, CvarRegistry>();
   readonly scripts: ConsoleScriptFiles;
   get bindingCapabilities(): BindingCapabilities {
     const capabilities = this.actions.bindingCapabilities?.() ?? { chat: this.options.network.kind.endsWith("-client"),
@@ -112,9 +116,64 @@ export class ApplicationInput {
       offhandGrapple: false, offhandGrenades: false } satisfies BindingCapabilities;
     return { ...capabilities, scoreCommand: capabilities.scoreCommand ?? "+scores" };
   }
-  get sharedCvars(): CvarRegistry | null { return this.actions.sharedCvars ?? null; }
+  private sharedOwner: CvarRegistry | null;
+  get sharedCvars(): CvarRegistry | null { return this.sharedOwner; }
+  sharedSettings(): import("../../ui/settings/index.ts").SettingCvars | null {
+    if (this.sharedOwner === null) return null;
+    const current = (): CvarRegistry => {
+      if (this.sharedOwner === null) throw new Error("Shared settings lost their owner");
+      return this.sharedOwner;
+    };
+    return { get dialect() { return current().dialect; }, find: name => current().find(name),
+      set: (...args) => current().set(...args), variableValue: name => current().variableValue(name) };
+  }
+  private candidateProgram: ReturnType<PreparedStartup["prepareClientCommands"]> | null = null;
+  readonly guestCommands: Pick<CommandBuffer, "executeNow" | "insert" | "append"> = {
+    executeNow: (text, source) => (this.candidateProgram?.commands ?? this.commands).executeNow(text, source),
+    insert: (text, source) => (this.candidateProgram?.commands ?? this.commands).insert(text, source),
+    append: (text, source, dialect) => (this.candidateProgram?.commands ?? this.commands).append(text, source, dialect),
+  };
+  guestCvars(seat: SeatId): Q3ClientCvars {
+    const local = this.locals.find(local => local.player.seat.id.equals(seat));
+    const routing = this.consoleRouting ?? this.externalRouting;
+    if (local === undefined || routing === undefined) throw new Error("Guest cvars require a routed local seat");
+    const context: CommandContext = { session: seat.session, origin: { kind: "local-seat", seat, client: local.player.seat.client.id } };
+    return new Q3ClientCvars({ owner: name => routing.owner(name, context), visible: () => routing.visible(context),
+      current: owner => this.publishedRegistries.get(owner) ?? owner, print: text => this.print(text, context) });
+  }
+  publishSharedCvars(registry: CvarRegistry): void {
+    if (this.sharedOwner !== null) this.publishedRegistries.set(this.sharedOwner, registry);
+    this.sharedOwner = registry;
+  }
+  adoptCvarOwner(candidate: CvarRegistry, retained: CvarRegistry): void {
+    this.publishedRegistries.set(candidate, retained);
+    if (this.cvarOwner === candidate) this.cvarOwner = retained;
+    if (this.consoleCvars === candidate) this.consoleCvars = retained;
+  }
+  adoptMouseOwner(seat: SeatId, retained: MouseSettings): void {
+    const candidate = this.mouseSettings.get(seat), local = this.locals.find(local => local.player.seat.id.equals(seat));
+    if (candidate === undefined || local === undefined) throw new Error("Mouse publication lost its seat");
+    this.publishedRegistries.set(candidate.cvars, retained.cvars);
+    this.mouseSettings.set(seat, retained); local.builder.mouse.bindSettings(retained);
+  }
+  guestInput(seat: SeatId): QvmClientInput {
+    const local = this.locals.find(local => local.player.seat.id.equals(seat));
+    if (local === undefined) throw new Error("Guest input requires a local seat");
+    const bindingOwner = () => this.candidateProgram?.input(seat) ?? local.input;
+    return { get bindings() { return bindingOwner().bindings; }, binding: key => bindingOwner().binding(key),
+      bind: binding => bindingOwner().bind(binding), unbind: key => bindingOwner().unbind(key), unbindAll: () => bindingOwner().unbindAll(),
+      isDown: key => this.candidateProgram?.input(seat)?.isDown(key) ?? local.input.isDown(key),
+      clearStates: () => { if (this.candidateProgram === null) local.input.release(this.now()); else this.candidateProgram.input(seat)?.clearStates(); } };
+  }
+  validateCandidateCommands(): void { this.candidateProgram?.validatePublication(); }
+  releaseIntoCandidate(previous: ApplicationInput, worldChanged = false): void {
+    if (worldChanged || this.profileChanged) previous.releaseForProfileChange(this.candidateProgram?.releaseCommands);
+    else this.candidateProgram?.releaseInputs(this.now());
+  }
+  publishCandidateCommands(): void { this.candidateProgram?.publish(); this.candidateProgram = null; }
   readonly commands: CommandBuffer;
-  readonly cvars: CvarRegistry;
+  private cvarOwner: CvarRegistry;
+  get cvars(): CvarRegistry { return this.cvarOwner; }
   readonly locals: readonly LocalInput[];
   readonly controllers: SdlControllers;
   readonly router: InputRouter;
@@ -137,7 +196,8 @@ export class ApplicationInput {
   private readonly stagedCommands: ({ readonly kind: "console"; readonly text: string; readonly source: CommandContext }
     | { readonly kind: "reliable"; readonly text: string; readonly source: CommandContext; readonly dispatch: (text: string, source: CommandContext) => void })[] = [];
   private readonly consoleRouting: ApplicationConsoleRouting | null;
-  private readonly consoleCvars: CvarRegistry;
+  private readonly externalRouting: CommandCvarRouting | undefined;
+  private consoleCvars: CvarRegistry;
   private archivePersistence = false;
   enableArchivePersistence(): void { this.archivePersistence = true; }
 
@@ -168,6 +228,14 @@ export class ApplicationInput {
   static async open(window: SdlWindow, players: readonly LocalPlayer[], options: ApplicationOptions, dialect: CommandDialect,
     simulation: Pick<SimulationPresentationAccess, "playerView">, actions: ApplicationInputCommands,
     now: () => number, settings: ConfigStore, owner?: ApplicationInputCommandOwner, previous?: ApplicationInput, prepared?: PreparedStartup): Promise<ApplicationInput> {
+    return ApplicationInput.create(null, window, players, options, dialect, simulation, actions, now, settings, owner, previous, prepared);
+  }
+  static async prepare(liveRegistries: ReadonlySet<CvarRegistry>, ...args: Parameters<typeof ApplicationInput.open>): Promise<ApplicationInput> {
+    return ApplicationInput.create(liveRegistries, ...args);
+  }
+  private static async create(staging: ReadonlySet<CvarRegistry> | null, window: SdlWindow, players: readonly LocalPlayer[], options: ApplicationOptions, dialect: CommandDialect,
+    simulation: Pick<SimulationPresentationAccess, "playerView">, actions: ApplicationInputCommands,
+    now: () => number, settings: ConfigStore, owner?: ApplicationInputCommandOwner, previous?: ApplicationInput, prepared?: PreparedStartup): Promise<ApplicationInput> {
     const saved = await Promise.all(players.map((_, index) => settings.loadSeat(`input/seat-${index + 1}.json`)));
     const routing = await settings.loadInputRouting("input/routing.json");
     const sourceDialect = actions.console?.dialect() ?? dialect;
@@ -176,18 +244,20 @@ export class ApplicationInput {
       fallback: await loadCvarArchive(settings, ["fallback", sourceDialect], sourceDialect),
       input: await Promise.all(players.map(player => loadCvarArchive(settings, ["input", sourceDialect, String(player.seat.id.index)], sourceDialect))),
     };
-    const input = new ApplicationInput(window, players, options, dialect, simulation, actions, now, settings, saved, routing, archives, owner, previous, prepared);
-    try { await input.controllerSettings.settle(); if (previous === undefined) { input.activateCommands(); input.adoptStartup(); } return input; }
+    const input = new ApplicationInput(staging, window, players, options, dialect, simulation, actions, now, settings, saved, routing, archives, owner, previous, prepared);
+    try { await input.controllerSettings.settle(); if (previous === undefined && staging === null) { input.activateCommands(); input.adoptStartup(); } return input; }
     catch (error) { input.close(); throw error; }
   }
 
-  private constructor(readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
+  private constructor(staging: ReadonlySet<CvarRegistry> | null, readonly window: SdlWindow, players: readonly LocalPlayer[], readonly options: ApplicationOptions, readonly dialect: CommandDialect,
     simulation: Pick<SimulationPresentationAccess, "playerView">, private readonly actions: ApplicationInputCommands,
     readonly now: () => number, private readonly settings: ConfigStore, saved: readonly (SeatSettings | null)[],
     routing: { readonly keyboardSeat: number | null } | null,
     private readonly loadedArchives: { readonly movement: readonly CvarArchiveEntry[]; readonly fallback: readonly CvarArchiveEntry[]; readonly input: readonly (readonly CvarArchiveEntry[])[] } | null,
     owner?: ApplicationInputCommandOwner, previous?: ApplicationInput, prepared?: PreparedStartup) {
     this.startup = prepared ?? previous?.startup;
+    this.externalRouting = owner?.routing;
+    this.sharedOwner = actions.sharedCvars ?? null;
     const archives = this.loadedArchives;
     this.ownsControllers = previous === undefined;
     const first = players[0];
@@ -196,8 +266,8 @@ export class ApplicationInput {
     const print = (text: string, source?: CommandContext): void => this.print(text, source);
     if (owner !== undefined && (owner.cvars.dialect !== dialect || actions.console !== undefined)) throw new Error("Input command owner does not match its console dialect");
     const sourceDialect = actions.console?.dialect() ?? dialect;
-    this.cvars = (this.startup?.movement.dialect === dialect ? this.startup.movement : undefined) ?? owner?.cvars ?? new CvarRegistry({ dialect, context, print });
-    const consoleCvars = (this.startup?.fallback.dialect === sourceDialect ? this.startup.fallback : undefined) ?? (sourceDialect === dialect ? this.cvars : new CvarRegistry({ dialect: sourceDialect, context, print }));
+    this.cvarOwner = (previous === undefined && this.startup?.movement.dialect === dialect ? this.startup.movement : undefined) ?? owner?.cvars ?? new CvarRegistry({ dialect, context, print });
+    const consoleCvars = (previous === undefined && this.startup?.fallback.dialect === sourceDialect ? this.startup.fallback : undefined) ?? (sourceDialect === dialect ? this.cvars : new CvarRegistry({ dialect: sourceDialect, context, print }));
     this.consoleCvars = consoleCvars;
     if (owner === undefined) {
       if (this.startup?.movement !== this.cvars) {
@@ -213,7 +283,7 @@ export class ApplicationInput {
     }
     this.consoleRouting = owner === undefined ? new ApplicationConsoleRouting({ fallback: consoleCvars,
       sourceDialect: () => actions.console?.dialect() ?? sourceDialect, server: () => actions.console?.server() ?? null,
-      seat: id => actions.console?.seat(id) ?? null, input: id => this.inputCvars(id), movement: () => this.cvars, shared: () => actions.sharedCvars ?? null }) : null;
+      seat: id => actions.console?.seat(id) ?? null, input: id => this.inputCvars(id), movement: () => this.cvars, shared: () => this.sharedOwner }) : null;
     this.scripts = prepared?.scripts ?? owner?.scripts ?? new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings, mounted: actions.readScript });
     this.commands = this.startup?.commands ?? owner?.commands ?? new CommandBuffer({ dialect: sourceDialect, context, cvars: consoleCvars,
       readScript: (name, source) => this.startup?.readScript(name, source) ?? this.scripts.read(name, source),
@@ -230,7 +300,7 @@ export class ApplicationInput {
       const seatContext: CommandContext = { session: context.session, origin: { kind: "local-seat", seat: player.seat.id, client: player.seat.client.id } };
       let console: SeatConsole | null = null;
       const preparedSeat = this.startup?.seats.find(seat => seat.id.equals(player.seat.id));
-      const input = preparedSeat?.input ?? new SeatInput({ seat: player.seat.id, dialect, context: seatContext, commands: this.commands,
+      const input = preparedSeat?.input ?? previous?.locals.find(local => local.player.seat.id.equals(player.seat.id))?.input ?? new SeatInput({ seat: player.seat.id, dialect, context: seatContext, commands: this.commands,
         uiEvent: () => false });
       this.uiCallbacks.set(input, (event, focus) => {
           const ui = this.seatUi.get(player.seat.id);
@@ -244,7 +314,7 @@ export class ApplicationInput {
         now, connected: () => true, clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, focus: focus => { input.setFocus(focus, now());
           locals.find(local => local.player.seat.id.equals(player.seat.id))?.haptics.setActive(input.focused && focus.kind === "game"); },
         chat: (text, team, target) => actions.execute(team ? "say_team" : "say", target === null ? [text] : [text, String(target)], player.seat.id) });
-      const preparedMouse = preparedSeat?.mouse.cvars.dialect === sourceDialect ? preparedSeat.mouse : undefined;
+      const preparedMouse = previous === undefined && preparedSeat?.mouse.cvars.dialect === sourceDialect ? preparedSeat.mouse : undefined;
       const mouseSettings = preparedMouse ?? owner?.inputSettings ?? new MouseSettings(new CvarRegistry({ dialect: sourceDialect, context: seatContext, print }));
       const mouseOrigin = mouseSettings.cvars.context.origin;
       if (mouseSettings.cvars.dialect !== sourceDialect || mouseSettings.cvars.context.session !== context.session
@@ -260,15 +330,15 @@ export class ApplicationInput {
       const builder = new InputCommandBuilder(dialect, new MouseInput(mouseSettings));
       builder.setViewAngles(simulation.playerView(player.actor).angles);
       const defaults = defaultBindings(0, dialect, actions.bindingItems?.(player.seat.id) ?? []);
-      if (previous === undefined || preparedSeat === undefined) for (const binding of this.startup?.bindings(player.seat.id, defaults) ?? defaults) input.bind(binding);
+      if (previous === undefined) for (const binding of this.startup?.bindings(player.seat.id, defaults) ?? defaults) input.bind(binding);
       locals.push({ player, input, console, builder, haptics: new SeatHaptics({ seat: player.seat.id,
         controllers: { rumble: (instance, low, high, duration) => this.controllers.rumble(instance, low, high, duration) },
         controller: seat => this.router.controllerFor(seat), load: request => this.hapticLoad(request), now }) });
     }
     for (const [index, local] of locals.entries()) {
       const profile = saved[index]; if (profile === undefined || profile === null) continue;
-      if (this.startup === undefined) { local.input.unbindAll(); for (const binding of profile.bindings) local.input.bind(binding); }
-      if (previous === undefined || this.startup === undefined) local.input.gamepad.tuning = structuredClone(profile.gamepad);
+      if (this.startup === undefined && previous === undefined) { local.input.unbindAll(); for (const binding of profile.bindings) local.input.bind(binding); }
+      if (previous === undefined) local.input.gamepad.tuning = structuredClone(profile.gamepad);
       if (this.startup === undefined && profile.alwaysRun !== undefined) local.builder.tuning = { ...local.builder.tuning, alwaysRun: profile.alwaysRun };
       if (owner?.inputSettings === undefined && this.startup === undefined) local.builder.mouse.tuning = { ...profile.mouse };
       local.console.history.replace(profile.history); local.haptics.setEnabled(profile.rumble); local.haptics.setStrength(profile.rumbleStrength ?? 1);
@@ -281,10 +351,28 @@ export class ApplicationInput {
       local.builder.tuning = { ...local.builder.tuning, alwaysRun: prior.builder.tuning.alwaysRun };
     }
     this.locals = locals;
+    if (previous !== undefined && this.commands !== previous.commands) this.commands.copyPendingFrom(previous.commands);
+    const candidateRouting = this.consoleRouting ?? this.externalRouting;
+    if ((previous !== undefined || staging !== null) && candidateRouting !== undefined && candidateRouting !== null) {
+      const commandOptions = { dialect: sourceDialect, context: this.commands.context,
+        cvars: consoleCvars, cvarRouting: candidateRouting, print,
+        readScript: (name, source) => this.scripts.read(name, source),
+        forwardToServer: invocation => {
+          const name = invocation.argv[0]; if (name === undefined) return undefined;
+          let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
+          return actions.execute(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
+        } } satisfies ConstructorParameters<typeof CommandBuffer>[0];
+      const contexts = locals.map(local => ({ id: local.player.seat.id, input: local.input, context: { session: context.session,
+        origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } } satisfies CommandContext }));
+      const oldRouting = previous?.consoleRouting ?? previous?.externalRouting;
+      const live = staging ?? new Set(contexts.flatMap(local => oldRouting?.visible(local.context) ?? []));
+      this.candidateProgram = this.startup !== undefined ? this.startup.prepareClientCommands(commandOptions)
+        : prepareClientCommands(this.commands, contexts, live, commandOptions);
+    }
     this.controllers = previous?.controllers ?? SdlControllers.open();
     this.router = new InputRouter({ seats: locals.map((local, index) => ({ input: local.input,
       controller: saved[index]?.controller ?? (locals.length > 1 && index === 0 ? { kind: "none" } : { kind: "automatic" }) })),
-      deferPlatform: previous !== undefined, keyboardSeat: routing === null ? first.seat.id : routing.keyboardSeat === null ? null : locals[routing.keyboardSeat]?.player.seat.id ?? first.seat.id, controllers: this.controllers, now, ticks: () => window.ticks, subframe: true,
+      deferPlatform: previous !== undefined || staging !== null, keyboardSeat: routing === null ? first.seat.id : routing.keyboardSeat === null ? null : locals[routing.keyboardSeat]?.player.seat.id ?? first.seat.id, controllers: this.controllers, now, ticks: () => window.ticks, subframe: true,
       unhandled: event => {
         if (event.kind === "assignment") locals[event.slot]?.haptics.cancel();
         if (event.kind === "quit" || event.kind === "window" && event.event === 14) actions.quit();
@@ -293,7 +381,7 @@ export class ApplicationInput {
       (command, seat) => this.actions.execute(command.argv[0] ?? "", command.args, seat, command.source));
     this.controllerSettings = new ControllerSettings(this.router, locals.map(local => local.input.seat), () => this.controllers.devices, settings, actions.print);
     try {
-      if (previous === undefined) this.router.attachWindow(window);
+      if (previous === undefined && staging === null) this.router.attachWindow(window);
       this.router.restart();
       if (previous === undefined) this.controllerSettings.update();
       else this.controllerSettings.copySettledProfilesFrom(previous.controllerSettings);
@@ -517,7 +605,8 @@ export class ApplicationInput {
   }
 
   enqueueClientCommand(text: string, source: CommandContext): void {
-    if (this.commandsActive) this.commands.append(text, source);
+    if (this.candidateProgram !== null) this.candidateProgram.commands.append(text, source);
+    else if (this.commandsActive) this.commands.append(text, source);
     else this.stagedCommands.push({ kind: "console", text, source });
   }
   enqueueClientReliable(text: string, source: CommandContext, dispatch: (text: string, source: CommandContext) => void): void {
@@ -541,6 +630,11 @@ export class ApplicationInput {
     next.router.updateCapture();
     next.ownsControllers = this.ownsControllers;
     this.ownsControllers = false;
+  }
+  activatePreparedPlatform(): void {
+    this.router.attachWindow(this.window);
+    this.activateCommands();
+    this.adoptStartup();
   }
 
   rebindPlayers(players: readonly LocalPlayer[], simulation: Pick<SimulationPresentationAccess, "playerView">, mode: "world" | "source-round" = "world"): void {

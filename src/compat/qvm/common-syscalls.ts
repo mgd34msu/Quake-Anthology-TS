@@ -1,6 +1,6 @@
 /* Q3 sv_game.c/cl_cgame.c/cl_ui.c common traps, adapted from quake-3-ts. GPL-2.0-or-later. */
 import { CommonError } from "../../core/common-error.ts";
-import type { CvarRegistry } from "../../core/cvars/index.ts";
+import type { QvmCvarServices } from "./cvar-syscalls.ts";
 import { QvmCgameImport, QvmGameImport, QvmUiImport } from "./abi.ts";
 import { qvmCvarSyscall } from "./cvar-syscalls.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
@@ -11,7 +11,7 @@ export interface QvmCalendar {
 }
 
 interface CommonServices {
-  readonly cvars: CvarRegistry;
+  readonly cvars: QvmCvarServices;
   print(text: string): void;
   milliseconds(): number;
   arguments(): readonly string[];

@@ -22,6 +22,7 @@ export interface MouseTuningStore {
 export class MouseInput {
   private previous: Vec2 = { x: 0, y: 0 };
   constructor(private settings: MouseTuning | MouseTuningStore = defaultMouseTuning) {}
+  bindSettings(settings: MouseTuningStore): void { this.settings = settings; }
   get tuning(): MouseTuning { return "read" in this.settings ? this.settings.read() : this.settings; }
   set tuning(value: MouseTuning) { if ("read" in this.settings) this.settings.write(value); else this.settings = value; }
   sample(raw: Vec2, frameMilliseconds: number, strafe: boolean, mouseLook: boolean, zoomSensitivity = 1, binary32 = false): MouseMove {

@@ -50,7 +50,8 @@ export type CvarSettingSpec = CvarSettingBase & (
   | { readonly kind: "text-entry"; readonly maximumLength: number; readonly submitOnly?: boolean }
 );
 /** The subsystem registers its cvar and supplies the spec; menus never create unused cvars. */
-export function bindCvarSetting(registry: CvarRegistry, spec: CvarSettingSpec, restarts: RestartControls | null): SettingBinding {
+export type SettingCvars = Pick<CvarRegistry, "dialect" | "find" | "set" | "variableValue">;
+export function bindCvarSetting(registry: SettingCvars, spec: CvarSettingSpec, restarts: RestartControls | null): SettingBinding {
   if (registry.find(spec.name) === undefined) throw new Error(`Settings cvar has no owner: ${spec.name}`);
   if (spec.restart !== null && restarts === null) throw new Error(`Settings cvar needs a ${spec.restart} restart owner: ${spec.name}`);
   const read = (): string => {

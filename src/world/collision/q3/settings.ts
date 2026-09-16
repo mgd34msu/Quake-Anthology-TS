@@ -8,7 +8,7 @@ export const collisionMapCvarDefinitions = [
 
 /** CM_LoadMap registers these common-lived controls before reading or reusing a map. */
 export class CollisionMapSettings {
-  constructor(private readonly cvars: CvarRegistry) {}
+  constructor(private readonly cvars: Pick<CvarRegistry, "register" | "get">) {}
 
   registerMap(): undefined {
     for (const definition of collisionMapCvarDefinitions) this.cvars.register(definition.name, definition.value, definition.flags);

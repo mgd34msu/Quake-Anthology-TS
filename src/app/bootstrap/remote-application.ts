@@ -102,6 +102,7 @@ export class RemoteApplication {
     this.presentation?.q3Client?.cvars.set("cg_fov", String(value));
     if (this.network instanceof Q2ClientNetwork && this.remote instanceof Q2RemotePresentation) this.network.userinfo(this.remote.userinfo());
   });
+  private releaseViewCvars: (() => void) | null = null;
   private readonly socksSettings: ClientSocksSettings;
   private readonly clientConfig: ConfigStore | null;
   private readonly inputConfig: ConfigStore;
@@ -167,7 +168,8 @@ export class RemoteApplication {
         }, shared: () => this.imageSettings.cvars });
       const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(this.options.userContentRoot), settings: this.inputConfig,
         mounted: path => this.mounts.open(path).then(resource => resource?.bytes) });
-      const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting: this.socksSettings.route(cvarRouting), print: (text, source) => this.print(text, source), forwardToServer: invocation => {
+      const routing = this.socksSettings.route(cvarRouting);
+      const commands = new CommandBuffer({ dialect, context, cvars, cvarRouting: routing, print: (text, source) => this.print(text, source), forwardToServer: invocation => {
         const name = invocation.argv[0]; if (name === undefined) return undefined;
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         this.queueCommand(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null); return undefined;
@@ -180,7 +182,7 @@ export class RemoteApplication {
           cvars.set("topcolor", String(top)); cvars.set("bottomcolor", String(bottom));
         });
       }
-      this.clientCommands = { cvars, commands, scripts };
+      this.clientCommands = { cvars, commands, scripts, routing };
       this.clientConfig = this.inputConfig;
     } else { this.clientCommands = null; this.clientConfig = null; this.downloadPermission = null; }
     const client = session.createClient(0);
@@ -291,7 +293,7 @@ export class RemoteApplication {
       application = new RemoteApplication(options, content, session, renderer, host, imageSettings, transport, address, identity, browser);
       application.initializeQ3Browser();
       await application.viewSettings.load(application.inputConfig);
-      application.viewSettings.bindCvars(application.imageSettings.cvars);
+      application.releaseViewCvars = application.viewSettings.bindCvars(application.imageSettings.cvars);
       const inputProfile = await application.inputConfig.loadSeat("input/seat-1.json");
       if (inputProfile !== null) application.clientCommands?.inputSettings?.write(inputProfile.mouse);
       const saved = await application.clientConfig?.loadText("settings/client.cfg");
@@ -600,81 +602,146 @@ export class RemoteApplication {
 
   private async bindSeat(connection?: Q3ClientConnection): Promise<void> {
     const generation = this.worldLoadGeneration;
-    let seatAttached = false;
-    const assertCurrent = (): void => { if (this.closing || this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote seat loading was cancelled"); };
-    const player = connection !== undefined && this.remote instanceof Q3RemotePresentation ? this.remote.admittedPlayer : this.remote.player, frontend = this.frontend;
-    if (connection === undefined && this.q3InitialViewPending && player !== null && this.remote.output !== null && this.controls !== null) {
+    let published = false;
+    const assertCurrent = (): void => { if ((!published && this.closing) || this.closed || generation !== this.worldLoadGeneration) throw new Error("Remote seat loading was cancelled"); };
+    const remote = this.remote, frontend = this.frontend;
+    const player = connection !== undefined && remote instanceof Q3RemotePresentation ? remote.admittedPlayer : remote.player;
+    if (connection === undefined && this.q3InitialViewPending && player !== null && remote.output !== null && this.controls !== null) {
       const local = this.controls.locals[0];
       if (local === undefined) throw new Error("Q3 first snapshot lost its seat");
-      this.controls.rebindPlayers([{ seat: local.player.seat, actor: player.actor }], this.remote);
+      this.controls.rebindPlayers([{ seat: local.player.seat, actor: player.actor }], remote);
       this.q3InitialViewPending = false;
     }
-    if (player === null || (connection === undefined && this.remote.output === null) || frontend === null || this.presentation !== null) return;
-    if (this.controls === null) {
-      const seat = this.session.createSeat(0, this.remote.client);
-      const controls = await ApplicationInput.open(this.window, [{ seat, actor: player.actor }], this.options, movementDialect(this.options), this.remote,
-        { ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => this.requestQuit(), execute: (name, args, seat) => this.queueCommand(name, args, seat), print: text => this.host.print(text), sharedCvars: this.imageSettings.cvars,
-          clientCapturesInput: seat => { const client = this.presentation?.q3Client; return client !== null && client !== undefined && client.options.local.player.seat.id.equals(seat) && client.capturesInput; },
+    if (player === null || (connection === undefined && remote.output === null) || frontend === null || this.presentation !== null) return;
+    const owner = this.clientCommands;
+    if (owner === null || owner.inputSettings === undefined) throw new Error("Remote input has no retained command and mouse owner");
+    const previous = this.controls, previousCapture = this.capture;
+    let retired = false;
+    const retirePrevious = async (): Promise<void> => {
+      if (retired) return;
+      retired = true;
+      const failures: unknown[] = [];
+      try { await previousCapture?.close(); } catch (error) { failures.push(error); }
+      try { previous?.close(); } catch (error) { failures.push(error); }
+      if (failures.length !== 0) throw new AggregateError(failures, "Previous remote input retirement failed");
+    };
+    const previousLocal = previous?.locals[0];
+    if (previous !== null && previousLocal === undefined) throw new Error("Remote input lost its local seat");
+    const seat = previousLocal?.player.seat ?? this.session.createSeat(0, remote.client);
+    const context: CommandContext = { session: this.session.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
+    let input: ApplicationInput | null = null, ui: ApplicationSeatUi | null = null, q3: ApplicationQ3Client | null = null;
+    try {
+      const q3Scene = remote instanceof Q3RemotePresentation ? { remote, queries: remote.scene } : null;
+      const image = this.imageSettings.prepareClientSettings();
+      const live = new Set([...owner.routing.visible(context), owner.cvars, owner.inputSettings.cvars, this.imageSettings.cvars]);
+      const transfers = new Map<CvarRegistry, ReturnType<CvarRegistry["prepareCandidate"]>>();
+      for (const registry of live) if (registry !== this.imageSettings.cvars) transfers.set(registry, registry.prepareCandidate(text => this.host.print(text)));
+      const staged = (registry: CvarRegistry): CvarRegistry => {
+        if (registry === this.imageSettings.cvars) return image.settings.cvars;
+        const transfer = transfers.get(registry);
+        if (transfer === undefined) throw new Error("Remote candidate reached an unstaged cvar owner");
+        return transfer.cvars;
+      };
+      const routing: import("../../core/commands/index.ts").CommandCvarRouting = {
+        owner: (name, source) => { const registry = owner.routing.owner(name, source); return published ? registry : staged(registry); },
+        visible: source => owner.routing.visible(source).map(registry => published ? registry : staged(registry)),
+      };
+      const actions: RemoteCommand[] = [];
+      let quit = false;
+      const execute = (name: string, args: readonly string[], id: SeatId | null): undefined => {
+        if (published) return this.queueCommand(name, args, id);
+        actions.push({ name, args: [...args], seat: id }); return undefined;
+      };
+      const requestQuit = (): undefined => { if (published) return this.requestQuit(); quit = true; return undefined; };
+      input = await ApplicationInput.prepare(live, this.window, [{ seat, actor: player.actor }], this.options, movementDialect(this.options), remote,
+        { ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: requestQuit, execute, print: text => this.host.print(text), sharedCvars: image.settings.cvars,
+          clientCapturesInput: id => { const client = this.presentation?.q3Client; return client !== null && client !== undefined && client.options.local.player.seat.id.equals(id) && client.capturesInput; },
           clientInput: event => {
             const client = this.presentation?.q3Client;
-            if (client === null || client === undefined || !client.options.local.player.seat.id.equals(event.seat) || !client.capturesInput) return false;
+            if (!published || client === null || client === undefined || !client.options.local.player.seat.id.equals(event.seat) || !client.capturesInput) return false;
             this.clientInputs.push({ generation: this.worldLoadGeneration, client, event }); return true;
-          } }, () => performance.now(), this.inputConfig, this.clientCommands ?? undefined);
-      try { assertCurrent(); } catch (error) { controls.close(); throw error; }
-      this.controls = controls;
-      this.capture = new ApplicationCapture(this.controls, this.renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.print(text));
-      this.capture.activate();
-    } else {
-      const local = this.controls.locals[0];
-      if (local === undefined) throw new Error("Remote input lost its local seat");
-      this.controls.rebindPlayers([{ seat: local.player.seat, actor: player.actor }], this.remote);
-    }
-    const input = this.controls, local = input.locals[0];
-    if (local !== undefined && local.builder.dialect === "q3" && connection !== undefined) {
-      const command = connection.commands.read(connection.commands.currentNumber);
-      local.builder.setViewAngles(command === null ? { x: 0, y: 0, z: 0 } : { x: (command.angles[0] << 16 >> 16) * (360 / 65536),
-        y: (command.angles[1] << 16 >> 16) * (360 / 65536), z: (command.angles[2] << 16 >> 16) * (360 / 65536) });
-    }
-    frontend.audio.bindHaptics(input);
-    if (local === undefined) throw new Error("Remote input has no local seat");
-    const typography = await frontend.assets.loadMenuTypography();
-    assertCurrent();
-    const ui = new ApplicationSeatUi(local, frontend.art, input, this.remote, frontend.font, frontend.audio,
-      () => this.requestQuit(), (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, undefined, undefined, undefined, this.viewSettings.binding(), this.host.llm);
-    if (this.uiPreferences !== null) ui.preferences.values = this.uiPreferences;
-    const remote = this.remote;
-    let q3: ApplicationQ3Client | null = null;
-    try {
-      if (remote instanceof Q3RemotePresentation) {
+          } }, () => performance.now(), this.inputConfig,
+        { ...owner, cvars: staged(owner.cvars), inputSettings: new MouseSettings(staged(owner.inputSettings.cvars)), routing }, previous ?? undefined);
+      assertCurrent();
+      const controls = input, local = controls.locals[0];
+      if (local === undefined) throw new Error("Remote input has no local seat");
+      if (local.builder.dialect === "q3" && connection !== undefined) {
+        const command = connection.commands.read(connection.commands.currentNumber);
+        local.builder.setViewAngles(command === null ? { x: 0, y: 0, z: 0 } : { x: (command.angles[0] << 16 >> 16) * (360 / 65536),
+          y: (command.angles[1] << 16 >> 16) * (360 / 65536), z: (command.angles[2] << 16 >> 16) * (360 / 65536) });
+      }
+      const typography = await frontend.assets.loadMenuTypography();
+      assertCurrent();
+      ui = new ApplicationSeatUi(local, frontend.art, controls, remote, frontend.font, frontend.audio,
+        requestQuit, (name, args) => execute(name, args, seat.id), typography, undefined, undefined, undefined, this.viewSettings.binding(), this.host.llm);
+      if (this.uiPreferences !== null) ui.preferences.values = this.uiPreferences;
+      if (q3Scene !== null) {
+        const remote = q3Scene.remote;
         if (connection === undefined) throw new Error("Q3 guest seat must initialize with its gamestate");
         if (this.q3Browser === null) throw new Error("Q3 guest seat requires its application browser");
-        q3 = await ApplicationQ3Client.create({ kind: "qvm", assertCurrent: () => {
-          if (!seatAttached) assertCurrent();
-          else if (this.closed || generation !== this.worldLoadGeneration) throw new Error("Q3 cgame belongs to a retired remote world");
-        }, source: remote.cgameSource, connection,
-          commandBuffer: input.commands, cvars: input.cvars, renderer: this.renderer, browser: this.q3Browser,
-          commandRegistration: input.clientCommandRegistration(local.player.seat.id),
+        q3 = await ApplicationQ3Client.create({ kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
+          commandBuffer: controls.guestCommands, guestCvars: controls.guestCvars(seat.id), guestInput: controls.guestInput(seat.id), cvars: controls.cvars,
+          renderer: this.renderer, browser: this.q3Browser, commandRegistration: controls.clientCommandRegistration(seat.id),
           clientState: () => ({ phase: this.network.phase === "active" ? 8 : this.network.phase === "loading" ? 6 : 5,
-            connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber, serverName: this.options.network.kind === "q3-client" ? this.options.network.remote : "", message: "" }),
-          assets: frontend.assets, queries: remote.scene, local, audio: frontend.audio,
+            connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber,
+            serverName: this.options.network.kind === "q3-client" ? this.options.network.remote : "", message: "" }),
+          assets: frontend.assets, queries: q3Scene.queries, local, audio: frontend.audio,
           viewport: () => { const size = this.window.drawableSize; return { x: 0, y: 0, width: size.width, height: size.height }; }, now: () => performance.now(),
-          commands: { reliable: text => this.network.command(text), console: text => input.commands.append(text, { session: this.session.session, origin: { kind: "script", name: "q3-cgame", caller: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } } }), print: text => this.print(text) } });
+          commands: { reliable: text => controls.enqueueClientReliable(text, context, command => this.network.command(command)),
+            console: text => controls.enqueueClientCommand(text, { session: context.session, origin: { kind: "script", name: "q3-cgame", caller: context.origin } }),
+            print: text => controls.print(text, context) } });
+        assertCurrent();
       }
+      const pure = connection === undefined ? null : this.q3Content?.referencedPureCommand(nativeAtoi(q3InfoValue(connection.gameState.get(1) ?? "", "sv_serverid")));
+      if (connection !== undefined && pure === undefined) throw new Error("Q3 guest initialization has no content owner");
+      const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, remote, 1, frontend.font, null, ui, frontend.effects, q3, null,
+        () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView, null, () => this.imageSettings.cvars.variableValue("con_scale"));
+      const capture = new ApplicationCapture(controls, this.renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.print(text));
       assertCurrent();
-      if (connection !== undefined) {
-        if (this.q3Content === null) throw new Error("Q3 guest initialization has no content owner");
-        connection.reliable.add(this.q3Content.referencedPureCommand(nativeAtoi(q3InfoValue(connection.gameState.get(1) ?? "", "sv_serverid"))));
+      seat.validatePresentation(presentation);
+      controls.validateCandidateCommands(); image.validatePublication();
+      for (const transfer of transfers.values()) transfer.validatePublication();
+      if (previous !== null) controls.releaseIntoCandidate(previous, true);
+      // From this point a failure retires the published source instead of discarding a candidate.
+      published = true;
+      this.controls = controls; this.presentation = presentation; this.capture = capture;
+      {
+        controls.publishCandidateCommands();
+        this.releaseViewCvars?.(); this.releaseViewCvars = null;
+        q3?.adoptCvars(owner.cvars);
+        for (const [registry, transfer] of transfers) { transfer.publish(); controls.adoptCvarOwner(transfer.cvars, registry); }
+        image.publish(); controls.publishSharedCvars(this.imageSettings.cvars);
+        controls.adoptMouseOwner(seat.id, owner.inputSettings);
+        this.viewSettings.setFieldOfView(this.imageSettings.cvars.variableValue("fov"));
+        this.releaseViewCvars = this.viewSettings.bindCvars(this.imageSettings.cvars);
+        if (q3 !== null && this.viewSettings.override !== null) q3.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
+        frontend.audio.bindHaptics(controls); frontend.audio.bindVolumeCvars(this.imageSettings.cvars);
+        seat.attachPresentation(presentation, () => presentation.close());
+        if (previous === null) controls.activatePreparedPlatform(); else previous.transferPlatformTo(controls);
+        await retirePrevious();
+        assertCurrent();
+        capture.activate();
+        if (connection !== undefined && pure !== null && pure !== undefined) connection.reliable.add(pure);
+        this.commands.push(...actions);
+        if (quit) this.requestQuit();
+        this.q3InitialViewPending = connection !== undefined;
+        if (q3 === null) { await frontend.audio.startWorldMusic(); assertCurrent(); }
       }
-    } catch (error) { q3?.close(); ui.close(); throw error; }
-    if (q3 !== null) {
-      if (this.viewSettings.override !== null) q3.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
+    } catch (error) {
+      if (published) {
+        const failures: unknown[] = [error];
+        try { await retirePrevious(); } catch (cleanup) { failures.push(cleanup); }
+        try { await this.close(); } catch (cleanup) { failures.push(cleanup); }
+        if (failures.length > 1) throw new AggregateError(failures, "Remote seat publication and shutdown failed");
+      } else {
+        const failures: unknown[] = [error];
+        for (const discard of [() => q3?.close(), () => ui?.close(), () => input?.close(), () => { if (previous === null) this.session.closeSeat(seat.id); }]) {
+          try { discard(); } catch (cleanup) { failures.push(cleanup); }
+        }
+        if (failures.length > 1) throw new AggregateError(failures, "Remote candidate and cleanup failed");
+      }
+      throw error;
     }
-    const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, this.remote, 1, frontend.font, null, ui, frontend.effects, q3, null, () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView, null, () => this.imageSettings.cvars.variableValue("con_scale"));
-    local.player.seat.attachPresentation(presentation, () => presentation.close());
-    this.presentation = presentation;
-    seatAttached = true;
-    this.q3InitialViewPending = connection !== undefined;
-    if (q3 === null) await frontend.audio.startWorldMusic();
   }
 
   input(event: SeatInputEvent): boolean {

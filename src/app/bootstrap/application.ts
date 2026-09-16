@@ -169,6 +169,7 @@ type LocalQ3GuestWorld = { readonly worldSound: ActorId; readonly authority: Ret
   readonly seats: Map<SeatId, LocalQ3GuestSeat>; readonly pendingCommands: ApplicationCommandRequest[] };
 
 export class Application {
+  private releaseViewCvars: (() => void) | null = null;
   readonly viewSettings = new ApplicationViewSettings(value => {
     for (const presentation of this.graphical?.presentations ?? []) {
       if (presentation.q3Client?.options.kind !== "qvm") this.simulation.setPlayerFieldOfView(presentation.local.player.actor, value);
@@ -446,7 +447,7 @@ export class Application {
           dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
             host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
           } });
-        application.viewSettings.bindCvars(application.imageSettings.cvars);
+        application.releaseViewCvars = application.viewSettings.bindCvars(application.imageSettings.cvars);
         await application.openGraphical(initialSave !== undefined);
       }
       host.loading?.stage("Starting game...");
@@ -557,11 +558,13 @@ export class Application {
     return source.family === "q1" ? source.edition === "quakeworld" ? "q1-quakeworld" : "q1-netquake" : source.family === "q2" ? source.edition === "rerelease" ? "q2-rerelease" : "q2-classic" : "q3";
   }
 
-  private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console, localGuest = this.localGuest, clientCvars = this.clientCvars): ApplicationInputCommands {
+  private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console, localGuest = this.localGuest, clientCvars = this.clientCvars,
+    sharedCvars = this.imageSettings?.cvars, candidateAction?: (request: ApplicationCommandRequest) => undefined): ApplicationInputCommands {
     return { readScript: path => content.mounts.open(path).then(resource => resource?.bytes),
       startupReader: (scripts, options) => Application.startupScriptReader(content, options, scripts),
       ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => { if (localGuest !== null && localGuest !== this.localGuest) throw new Error("Guest candidate requested quit"); return this.requestQuit(); },
-      execute: (name, arguments_, seat, source) => localGuest === null ? this.queueCommand(name, arguments_, seat, source)
+      execute: (name, arguments_, seat, source) => candidateAction !== undefined ? candidateAction({ target: "application", name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) })
+        : localGuest === null ? this.queueCommand(name, arguments_, seat, source)
         : this.queueLocalGuestCommand(localGuest, { target: "application", name, arguments_: [...arguments_], seat }), print: text => this.host.print(text),
       arsenalImpulseProvider: seat => {
         const client = [...this.localSeats].find(([, local]) => local.id.equals(seat))?.[0];
@@ -578,7 +581,7 @@ export class Application {
         scoreCommand: simulation.q2Source() !== null ? "score" : simulation.q3Source() !== null || simulation.q3Guest() !== null ? "+scores" : null,
         offhandGrapple: simulation.recipe.equipment.grapple.kind === "enabled" && simulation.recipe.equipment.grapple.binding === "offhand",
         offhandGrenades: simulation.recipe.equipment.handGrenades.kind === "enabled" }),
-      ...(this.imageSettings === null ? {} : { sharedCvars: this.imageSettings.cvars }),
+      ...(sharedCvars === undefined ? {} : { sharedCvars }),
       console: { dialect: () => this.sourceDialect(content), server: () => {
         const source = simulation.q3Source();
         if (source !== null) return { cvars: source.host.cvars, sharedNames: [...source.settings.definitions.map(definition => definition.name), ...frameTimeCvarNames(source.host.cvars.dialect)] };
@@ -1280,7 +1283,7 @@ export class Application {
       if (localGuest === null || seat === undefined || browser === null) throw new Error("Local guest client services are not prepared");
       const { state, cvars } = seat;
       const client = await ApplicationQ3Client.create({ kind: "qvm", localServer: true, source: state.source, connection: state, cvars,
-        assets, queries: simulation.scene, local, audio, renderer, browser: browser.view, commandBuffer: input.commands,
+        assets, queries: simulation.scene, local, audio, renderer, browser: browser.view, commandBuffer: input.guestCommands, guestCvars: input.guestCvars(local.player.seat.id), guestInput: input.guestInput(local.player.seat.id),
         commandRegistration: input.clientCommandRegistration(local.player.seat.id),
         splitScreen: this.options.seats > 1,
         timeCvars: guest.state.cvars,
@@ -1447,7 +1450,9 @@ export class Application {
     const stagedPresentations: WorldSeatPresentation[] = [];
     const stagedClients: ApplicationQ3Client[] = [];
     let stagedCapture: ApplicationCapture | null = null;
+    let candidateImages: ReturnType<ApplicationImageSettings["prepareClientSettings"]> | null = null;
     try {
+      candidateImages = previous === null ? null : this.imageSettings?.prepareClientSettings() ?? null;
       const q1SourceRegistry = q1CvarsSource === undefined ? undefined : cloneQ1SourceCvars(q1CvarsSource, text => this.host.print(text));
       if (save !== undefined) nextOverrides = readTeamArenaOverrides(save, [...this.localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
       if (settings !== null) {
@@ -1469,11 +1474,15 @@ export class Application {
         return commands;
       };
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
+      const continueQ3Clock = save === undefined && q3 !== null && content.recipe.map.entities.provider.startsWith("q3:")
+        && !content.recipe.execution.some(module => module.kind === "qvm" && module.role === "server-game");
+      const destinationSourceMilliseconds = continueQ3Clock && q3 !== null ? q3.host.now() : initialSourceMilliseconds;
       simulation = createSimulation({ dedicated: options.dedicated, ...Application.guestOptions(content, options, this.host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? skirmish?.maxClients ?? nextRules?.maxClients ?? this.simulation.options.maxClients,
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
-        ...(save === undefined ? { ...(skirmish === undefined ? { serverProfile } : {}), sourceArchive, ...(q1SourceRegistry === undefined ? {} : { sourceRegistry: q1SourceRegistry }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined || skirmish !== undefined ? {} : { q3Session, initialSourceMilliseconds }),
+        ...(save === undefined ? { ...(skirmish === undefined ? { serverProfile } : {}), sourceArchive, ...(q1SourceRegistry === undefined ? {} : { sourceRegistry: q1SourceRegistry }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined || skirmish !== undefined ? {} : { q3Session }),
+          ...(continueQ3Clock || q3Session !== undefined && skirmish === undefined ? { initialSourceMilliseconds: destinationSourceMilliseconds } : {}),
           ...(q3Cvars === undefined ? {} : { q3Cvars: [...q3Cvars, ...(skirmish === undefined ? [] : teamArenaSourceCvars(skirmish, q3Cvars))] }) } : { restore: save, restoredClients: clients }) });
       const nextSimulation = simulation;
       if (save !== undefined && nextSimulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
@@ -1542,10 +1551,9 @@ export class Application {
         await saveAudioSettings(this.inputConfig, previous.audio);
         await previous.input.saveSettings();
         const input = await ApplicationInput.open(previous.renderer.window, players, options, movementDialect(options, simulation.recipe), simulation,
-          this.inputActions(simulation, content, preparedCommands.q2Console, nextLocalGuest, nextClientCvars), () => performance.now(), this.inputConfig, undefined, previous.input);
+          this.inputActions(simulation, content, preparedCommands.q2Console, nextLocalGuest, nextClientCvars, candidateImages?.settings.cvars, candidateAction), () => performance.now(), this.inputConfig, undefined, previous.input);
         nextInput = input;
         this.restoreQ3InputAngles(input, nextSimulation);
-        if (input.commands !== previous.input.commands) input.commands.copyPendingFrom(previous.input.commands);
         input.resumeCommands(Math.max(previous.input.nextCommandSequence,
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
         const audio = new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, text => this.host.print(text),
@@ -1560,7 +1568,7 @@ export class Application {
           progress: message => this.host.loading?.stage(message), print: message => this.host.print(message) });
         audio.effectsVolume = previous.audio.effectsVolume;
         audio.musicVolume = previous.audio.musicVolume;
-        if (this.imageSettings !== null) audio.bindVolumeCvars(this.imageSettings.cvars);
+        if (candidateImages !== null) audio.bindVolumeCvars(candidateImages.settings.cvars);
         if (input !== previous.input) {
           applyFrontendPreferences(frontendOverrides, input, audio);
           for (const local of input.locals) {
@@ -1651,8 +1659,10 @@ export class Application {
       this.sourceCommands?.validateProfile(preparedCommands.options.dialect, undefined);
       preparedCommands.program?.validatePublication();
       nextGraphical?.input.validateStartupAdoption();
+      nextGraphical?.input.validateCandidateCommands();
+      candidateImages?.validatePublication();
       this.session.validateWorldReplacement(nextSimulation, replacementPresentations, replacementClients);
-      if (previous !== null && nextGraphical?.input.profileChanged) previous.input.releaseForProfileChange();
+      if (previous !== null && nextGraphical !== null) nextGraphical.input.releaseIntoCandidate(previous.input);
       const replacement = this.session.replaceWorld(nextSimulation, replacementPresentations, replacementClients);
       committed = true;
       this.worldSimulation = nextSimulation;
@@ -1666,7 +1676,7 @@ export class Application {
       this.guestBrowser = nextGuestBrowser;
       this.frontendOverrides = frontendOverrides;
       this.capture = nextCapture;
-      this.elapsed = initialSourceMilliseconds;
+      this.elapsed = destinationSourceMilliseconds;
       this.sourceEvents = []; this.roundPresentationEvents = []; this.localSnapshotServerBit = 0;
       this.clientInputs = [];
       this.unhandledEffects = [];
@@ -1677,6 +1687,16 @@ export class Application {
         candidatePublished = true;
         candidateCommands = null;
         this.requestedCommands.push(...candidateActions.splice(0));
+        nextGraphical?.input.publishCandidateCommands();
+        if (candidateImages !== null && this.imageSettings !== null) {
+          const fovChanged = candidateImages.settings.cvars.variableString("fov") !== this.imageSettings.cvars.variableString("fov");
+          this.releaseViewCvars?.(); this.releaseViewCvars = null;
+          candidateImages.publish();
+          nextGraphical?.input.publishSharedCvars(this.imageSettings.cvars);
+          nextGraphical?.audio.bindVolumeCvars(this.imageSettings.cvars);
+          if (fovChanged) this.viewSettings.setFieldOfView(Number(this.imageSettings.cvars.variableString("fov")));
+          this.releaseViewCvars = this.viewSettings.bindCvars(this.imageSettings.cvars);
+        }
         if (previous !== null && nextGraphical !== null) previous.input.transferPlatformTo(nextGraphical.input);
         else nextGraphical?.input.adoptStartup();
         publishAudio?.();

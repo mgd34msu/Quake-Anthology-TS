@@ -100,7 +100,9 @@ export class InputRouter {
     if (id !== null && this.keyboard === null) throw new Error("Keyboard route refers to an unregistered seat");
   }
   attachWindow(window: InputWindow): void {
-    this.detachWindow(); this.window = window; this.lease = window.beginInput(); this.updateCapture();
+    this.detachWindow();
+    if (!this.platformActive) { this.platformActive = true; this.restart(); }
+    this.window = window; this.lease = window.beginInput(); this.updateCapture();
   }
   transferWindowTo(next: InputRouter): void {
     next.platformActive = this.platformActive;

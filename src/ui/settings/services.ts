@@ -4,14 +4,14 @@ import type { UiChoice } from "../../contracts/ui.ts";
 import type { SdlWindow } from "../../platform/sdl.ts";
 import type { LocalizationCatalog, LocLoadTier } from "../../text/localization.ts";
 import type { SettingBinding } from "./index.ts";
-import type { CvarRegistry } from "../../core/cvars/index.ts";
+import type { SettingCvars } from "./index.ts";
 
 export function bindEffectsVolume(audio: UnifiedAudio, read: () => number): SettingBinding {
   return { id: "ui:audio:effects", label: "Sound volume", category: "audio", kind: "slider", minimum: 0, maximum: 1, step: 0.05,
     enabled: () => audio.outputState !== "closed", read, write: value => audio.setEffectsVolume(value) };
 }
 /** Display controls use window pixels and the same output gamma on both renderers. */
-export function bindNativeVideoSettings(window: SdlWindow, registry: CvarRegistry | null, report: (message: string) => void): readonly SettingBinding[] {
+export function bindNativeVideoSettings(window: SdlWindow, registry: SettingCvars | null, report: (message: string) => void): readonly SettingBinding[] {
   let width = String(window.logicalSize.width), height = String(window.logicalSize.height);
   const apply = (operation: () => void): void => { try { operation(); } catch (error) { report(error instanceof Error ? error.message : String(error)); } };
   const choices = () => {

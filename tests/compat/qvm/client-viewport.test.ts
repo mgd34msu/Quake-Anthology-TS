@@ -12,7 +12,7 @@ test("cgame and UI GL config use the seat viewport while preserving renderer cap
   const backend = new SoftwareRenderer(16, 8, { identity: Symbol("viewport"), session: createIdentityOwner("viewport").session, generation: 0 });
   let viewport = { width: 8, height: 8 };
   const scalar = new QvmApplicationScalars({ renderer: { backend }, viewport: () => viewport,
-    get local() { return unavailable(); }, get media() { return unavailable(); }, get services() { return unavailable(); },
+    get local() { return unavailable(); }, get input() { return unavailable(); }, get media() { return unavailable(); }, get services() { return unavailable(); },
     now: unavailable, keyCatcher: { get: unavailable, set: unavailable }, clientState: unavailable, lightForPoint: unavailable, assertCurrent() {},
   });
   const guest = new QvmMemory(new Uint8Array(16384));
