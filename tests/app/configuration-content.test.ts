@@ -10,7 +10,9 @@ import type { LaunchChoice, ProviderReference } from '../../src/contracts/conten
 import { prepareLaunchMountPlan } from '../../src/content/catalog/launch.ts';
 import { selectedWeaponResources } from '../../src/content/catalog/weapons.ts';
 import { serverDefinitionsForRecipe, serverDefinitionsForSelection } from '../../src/settings/server/selection.ts';
-import { prepareInitialConfiguration } from '../../src/app/bootstrap/configuration.ts';
+import { prepareInitialConfiguration, prepareProfileConfiguration } from '../../src/app/bootstrap/configuration.ts';
+import { CvarRegistry } from '../../src/core/cvars/index.ts';
+import { SeatInput } from '../../src/input/seat.ts';
 import { createIdentityOwner, type ClientId } from '../../src/contracts/identity.ts';
 import { EngineSession, type SessionSeat } from '../../src/world/session/index.ts';
 import { ConfigStore } from '../../src/settings/config.ts';
@@ -80,6 +82,69 @@ test('configuration opens quake.rc/config with a missing map and leaves local re
     await expect(resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) })).rejects.toThrow('Required resource is missing');
     await content.close(); await expect(content.mounts.read('quake.rc')).rejects.toThrow(); await content.close();
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('profile scripts stage rules bindings and aliases before map admission without consuming the old program', async () => {
+  const { root, catalog } = await fixture();
+  const identity = createIdentityOwner('staged-profile-configuration'), session = new EngineSession(identity, { kind: 'local' });
+  const settings = new ConfigStore(join(root, 'settings'));
+  try {
+    const initialOptions = { ...options('q2-classic-baseq2'), userContentRoot: join(root, 'user') };
+    const initialPreset = applicationConfigurationPreset(catalog, initialOptions);
+    const initialContent = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset: initialPreset, choice: presetChoice(initialPreset.id) });
+    const actualSeats = new Map<ClientId, SessionSeat>();
+    const initial = await prepareInitialConfiguration(initialOptions, initialContent, session, identity, actualSeats, settings, { print() {} }, [], 1, async () => {});
+    try {
+      const selected = { ...options('q1-classic-id1'), userContentRoot: join(root, 'user') };
+      const product = catalog.require(selected.product), directory = join(root, product.expectation.contentDirectory);
+      await writeFile(join(directory, 'quake.rc'), 'exec default.cfg\nexec config.cfg\nexec autoexec.cfg\n');
+      await writeFile(join(directory, 'default.cfg'), 'bind w +forward\n');
+      await writeFile(join(directory, 'config.cfg'), 'sensitivity 8\n');
+      await writeFile(join(directory, 'autoexec.cfg'), 'skill 3\nwait\nsensitivity 9\nbind mouse2 +jump\nalias profile_alias "echo selected"\nmap e1m1\n');
+      const preset = applicationConfigurationPreset(catalog, selected);
+      const content = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset, choice: presetChoice(preset.id) });
+      const original = initial.prepared.seats[0], actual = [...actualSeats.values()][0];
+      if (original === undefined || actual === undefined || initial.image === null) throw new Error('Initial client owners missing');
+      const shared = new CvarRegistry({ dialect: initial.image.cvars.dialect, context: initial.image.cvars.context });
+      shared.restoreSaveState(initial.image.cvars.captureWorldTransferState());
+      const oldBindings = original.input.bindings, oldMouse = original.mouse.read();
+      initial.prepared.commands.append('echo original-tail\n', original.context);
+      const addedClient = session.prepareClient(1), addedSeat = session.prepareSeat(1, addedClient);
+      const addedInput = new SeatInput({ seat: addedSeat.id, dialect: 'q1-netquake', commands: initial.prepared.commands,
+        context: { session: session.session, origin: { kind: 'local-seat', seat: addedSeat.id, client: addedClient.id } }, uiEvent: () => false });
+      let loadingFrames = 0;
+      const profile = await prepareProfileConfiguration({ prepared: initial.prepared, seats: [{ seat: actual, input: original.input },
+        { seat: addedSeat, input: addedInput, selectedBindings: [{ input: { kind: 'key', code: 70 }, target: { kind: 'command', text: 'flashlight' } }] }],
+        options: selected, content, settings, shared, host: { print() {} }, sourceArchive: [], defaultCapacity: 1,
+        nextFrame: async () => { loadingFrames++; } });
+      try {
+        expect(profile.options.skill).toBe(3);
+        expect(profile.seats[0]?.mouse.read().sensitivity).toBe(9);
+        expect(profile.program.input(actual.id)?.binding({ kind: 'mouse-button', button: 3 })).toEqual({ kind: 'command', text: '+jump' });
+        expect(profile.program.input(addedSeat.id)?.binding({ kind: 'key', code: 70 })).toEqual({ kind: 'command', text: 'flashlight' });
+        expect(addedInput.bindings).toEqual([]);
+        profile.applyBindingDefaults(actual.id, [{ input: { kind: 'mouse-button', button: 3 }, target: { kind: 'command', text: '+attack' } },
+          { input: { kind: 'key', code: 55 }, target: { kind: 'command', text: 'weapon 7' } }]);
+        expect(profile.program.input(actual.id)?.binding({ kind: 'mouse-button', button: 3 })).toEqual({ kind: 'command', text: '+jump' });
+        expect(profile.program.input(actual.id)?.binding({ kind: 'key', code: 55 })).toEqual({ kind: 'command', text: 'weapon 7' });
+        const choices = profile.bindingChoices.find(choices => choices.id.equals(actual.id));
+        expect(choices?.overriddenKeys).toContain('mouse:3');
+        expect(choices?.allBindingsChosen).toBe(false);
+        expect(choices?.selectedBindings.some(binding => binding.input.kind === 'key' && binding.input.code === 55)).toBe(true);
+        expect(original.overriddenKeys.has('mouse:3')).toBe(false);
+        expect(profile.program.commands.aliasValue('profile_alias')).toContain('selected');
+        expect(profile.requests.map(request => [request.name, request.arguments_])).toEqual([['map', ['e1m1']]]);
+        expect(loadingFrames).toBeGreaterThan(0);
+        expect(profile.program.commands.pendingText).toBe('echo original-tail\n');
+        expect(initial.prepared.commands.pendingText).toBe('echo original-tail\n');
+        expect(initial.prepared.commands.aliasValue('profile_alias')).toBeUndefined();
+        expect(original.input.bindings).toEqual(oldBindings);
+        expect(original.mouse.read()).toEqual(oldMouse);
+        expect(session.clientAt(actual.client.id.slot)).toBe(actual.client);
+        await expect(resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) })).rejects.toThrow('Required resource is missing');
+      } finally { profile.routing.close(); await profile.scripts.close(); }
+    } finally { await initial.image?.close(); await initial.scripts.close(); }
+  } finally { session.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('QW and custom Q3 client metadata is map independent while local authority restrictions remain', async () => {

@@ -637,6 +637,49 @@ test("same-profile guest retirement restores native exec and preserves another c
   expect(output).toEqual(["execing restored.cfg\n", "custom:restored"]);
 });
 
+test("profile configuration runs separately from an in-flight originating command tail", async () => {
+  const source = context(), output: string[] = [];
+  const live = new CommandBuffer({ dialect: "q2-classic", context: source, print: text => output.push(`live:${text}`) });
+  const cvars = new CvarRegistry({ dialect: "q1-netquake", context: source });
+  cvars.register("profile", "0");
+  live.register("load", () => {});
+  live.append("load; echo tail\n");
+  let configured = false;
+  await live.executeAsync(async () => {
+    if (configured) return;
+    configured = true;
+    const pending = live.pendingText;
+    const program = live.prepareProgram({ dialect: "q1-netquake", context: source, cvars,
+      readScript: async () => 'alias selected "echo configured"; profile 7; wait; selected\n',
+      print: text => output.push(`candidate:${text}`) });
+    await program.executePreparation(async () => {
+      expect(() => program.publish()).toThrow("preparing");
+      program.commands.append("exec profile.cfg\n");
+      while (!program.commands.programComplete) await program.commands.advanceProgramFrame();
+    });
+    expect(live.pendingText).toBe(pending);
+    expect(program.commands.pendingText).toBe(pending);
+    expect(output.join("")).not.toContain("tail");
+    expect(cvars.variableString("profile")).toBe("7");
+    expect(live.aliasValue("selected")).toBeUndefined();
+    expect(program.commands.aliasValue("selected")).toContain("configured");
+    await expect(program.commands.executeScriptsAsync(async () => {})).rejects.toThrow("already executing");
+    program.publish();
+  });
+  expect(output.filter(line => line.includes("tail"))).toEqual(["live:tail \n"]);
+  expect(output.join("")).toContain("candidate:configured");
+  expect(live.aliasValue("selected")).toContain("configured");
+});
+
+test("failed or unfinished prepared configuration cannot publish partial state", async () => {
+  const live = new CommandBuffer({ dialect: "q2-classic", context: context() });
+  live.append("echo retained\n");
+  const program = live.prepareProgram({ dialect: "q2-classic", context: context() });
+  await expect(program.executePreparation(async () => { program.commands.append("echo unexecuted\n"); })).rejects.toThrow("unfinished");
+  expect(program.commands.pendingText).toBe(live.pendingText);
+  expect(() => program.publish()).toThrow("failed");
+});
+
 test("candidate program applies INSERT APPEND and immediate vstr around the inherited tail", () => {
   const source = context(), live = new CommandBuffer({ dialect: "q3", context: source });
   const cvars = new CvarRegistry({ dialect: "q3", context: source }); cvars.register("body", "echo captured\n");

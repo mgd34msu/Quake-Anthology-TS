@@ -2,7 +2,7 @@ import type { ApplicationHost } from "./application.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { ApplicationConfigurationContent } from "./content.ts";
 import { applicationConfigurationPreset, openApplicationConfigurationContent } from "./content.ts";
-import { discoverInstalledContent, presetChoice } from "../../content/catalog/index.ts";
+import { discoverInstalledContent, presetChoice, type InstalledCatalog } from "../../content/catalog/index.ts";
 import type { ExecutableRecipe } from "../../contracts/content.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { ClientId, IdentityOwner, SeatId } from "../../contracts/identity.ts";
@@ -12,7 +12,15 @@ import { CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { serverDefinitionsForSelection } from "../../settings/server/index.ts";
-import { PreparedStartup, type PreparedSeatConfiguration } from "./prepared-startup.ts";
+import { PreparedStartup, allowSeatConfigurationCommand, type PreparedClientCommands, type PreparedSeatConfiguration } from "./prepared-startup.ts";
+import { ApplicationConsoleRouting } from "./console.ts";
+import { StartupConfig, type StartupConfigOptions } from "./startup-config.ts";
+import { defaultBindings, namedPhysicalInput } from "../../input/bindings.ts";
+import { physicalInputKey, type SeatInput } from "../../input/seat.ts";
+import { asciiFold } from "../../core/commands/index.ts";
+import type { InputBinding } from "../../contracts/ui.ts";
+import { registerQ1ClientCommands } from "./q1-client-commands.ts";
+import { registerQ2ClientCommands } from "./q2-client-commands.ts";
 import { createStartupSource, resolveStartupRules } from "./startup-source.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
@@ -24,10 +32,162 @@ import { ConsoleScriptFiles, consoleConfigRoot } from "./config-scripts.ts";
 import { createStartupScriptReader } from "./startup-config.ts";
 import { TeamArenaLaunchOverrides } from "./team-arena-skirmish.ts";
 
-interface ConfigurationCommandRequest { readonly target: "application"; readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source: CommandContext; }
+export interface ConfigurationCommandRequest { readonly target: "application"; readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source: CommandContext; }
 
-export async function openInitialConfigurationContent(options: ApplicationOptions, recipe?: ExecutableRecipe): Promise<ApplicationConfigurationContent> {
-  const catalog = await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
+export interface PreparedProfileConfiguration {
+  readonly source: CvarRegistry;
+  readonly movement: CvarRegistry;
+  readonly fallback: CvarRegistry;
+  readonly seats: readonly (PreparedSeatConfiguration & { readonly input: SeatInput })[];
+  readonly program: PreparedClientCommands;
+  readonly routing: ApplicationConsoleRouting;
+  readonly scripts: ConsoleScriptFiles;
+  readonly read: StartupConfigOptions["read"];
+  readonly options: ApplicationOptions;
+  readonly maxClients: number;
+  readonly requests: readonly ConfigurationCommandRequest[];
+  readonly bindingChoices: readonly { readonly id: SeatId; readonly overriddenKeys: readonly string[]; readonly allBindingsChosen: boolean; readonly selectedBindings: readonly InputBinding[] }[];
+  applyBindingDefaults(seat: SeatId, defaults: readonly InputBinding[]): void;
+  forwardCommands(forward: (request: ConfigurationCommandRequest) => void): void;
+}
+
+export async function prepareProfileConfiguration(args: {
+  readonly prepared: PreparedStartup;
+  readonly seats: readonly { readonly seat: SessionSeat; readonly input: SeatInput; readonly selectedBindings?: readonly InputBinding[] }[];
+  readonly options: ApplicationOptions;
+  readonly content: ApplicationConfigurationContent;
+  readonly settings: ConfigStore;
+  readonly shared: CvarRegistry;
+  readonly host: Pick<ApplicationHost, "print">;
+  readonly sourceArchive: readonly CvarArchiveEntry[];
+  readonly defaultCapacity: number;
+  readonly nextFrame: () => Promise<void>;
+}): Promise<PreparedProfileConfiguration> {
+  const { prepared, options, content, settings, shared, host } = args;
+  const dialect = configurationDialect(content), movementDialect = configurationMovementDialect(content);
+  const source = createStartupSource(options, content.selection, dialect, prepared.source.context, args.defaultCapacity, host.print);
+  const movement = new CvarRegistry({ dialect: movementDialect, context: prepared.movement.context, print: host.print });
+  const fallback = movementDialect === dialect ? movement : new CvarRegistry({ dialect, context: prepared.commands.context, print: host.print });
+  const seats = await Promise.all(args.seats.map(async ({ seat, input }) => {
+    if (!input.seat.equals(seat.id)) throw new Error("Configuration input belongs to another seat");
+    const context: CommandContext = { session: seat.id.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
+    const cvars = new CvarRegistry({ dialect, context, print: host.print, cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
+    if (dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: options.characterModel });
+    const mouse = new MouseSettings(new CvarRegistry({ dialect, context, print: host.print }));
+    const [profile, archive, mouseArchive] = await Promise.all([
+      settings.loadSeat(`input/seat-${seat.id.index + 1}.json`),
+      loadCvarArchive(configurationStore(options, content, content.selection.engineBehavior.content), ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(seat.id.index)], dialect),
+      loadCvarArchive(settings, ["input", dialect, String(seat.id.index)], dialect),
+    ]);
+    return { id: seat.id, context, cvars, mouse, input, profile, archive, mouseArchive };
+  }));
+  const [movementArchive, fallbackArchive] = await Promise.all([
+    loadCvarArchive(settings, ["movement", movementDialect], movementDialect), loadCvarArchive(settings, ["fallback", dialect], dialect),
+  ]);
+  const sharedArchive = shared.archiveEntries();
+  const routing = new ApplicationConsoleRouting({ fallback, sourceDialect: () => dialect,
+    server: () => ({ cvars: source, sharedNames: source.snapshots().map(variable => variable.name) }),
+    seat: id => seats.find(seat => seat.id.equals(id))?.cvars ?? null,
+    input: id => seats.find(seat => id === null || seat.id.equals(id))?.mouse.cvars ?? null,
+    movement: () => movement, shared: () => shared });
+  const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+    mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
+  const read = configurationScriptReader(content, options, scripts);
+  const requests: ConfigurationCommandRequest[] = [];
+  let forward = (request: ConfigurationCommandRequest): void => { requests.push(request); };
+  const dispatch = (name: string, args_: readonly string[], sourceContext: CommandContext): undefined => {
+    let origin = sourceContext.origin; while (origin.kind === "script") origin = origin.caller;
+    forward({ target: "application", name, arguments_: args_, seat: origin.kind === "local-seat" ? origin.seat : null, source: sourceContext });
+    return undefined;
+  };
+  let active: StartupConfig | null = null;
+  try {
+    const program = prepared.prepareClientCommands({ dialect, context: prepared.commands.context, cvars: fallback, cvarRouting: routing,
+      readScript: (name, context) => active?.readScript(name, context) ?? scripts.read(name, context),
+      onScriptComplete: event => active?.onScriptComplete(event), print: host.print,
+      allowCommand: command => !active?.restrictSharedConfiguration || allowSeatConfigurationCommand(command, routing, seats, host.print),
+      forwardToServer: command => dispatch(command.argv[0] ?? "", command.args, command.source),
+    }, seats);
+    for (const name of ["map", "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team", "connect", "disconnect", "quit",
+      "playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : [])])
+      program.commands.register(name, command => dispatch(name, command.args, command.source));
+    registerQ1ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
+    registerQ2ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
+    const product = content.catalog.product(content.selection.engineBehavior.content);
+    const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
+    const bindingChoices = new Map(seats.map((seat, index) => [seat.id, { overridden: new Set<string>(), all: false, selected: args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect) }]));
+    const applyBindingDefaults = (id: SeatId, defaults: readonly InputBinding[]): void => {
+      const choices = bindingChoices.get(id), bindings = program.input(id);
+      if (choices === undefined || bindings === null) throw new Error("Profile defaults belong to another seat");
+      choices.selected = defaults;
+      if (!choices.all) for (const binding of defaults)
+        if (!choices.overridden.has(physicalInputKey(binding.input))) bindings.bind(binding);
+    };
+    await program.executePreparation(async () => {
+      for (const [index, seat] of seats.entries()) {
+        const bindings = program.input(seat.id), choices = bindingChoices.get(seat.id);
+        if (bindings === null || choices === undefined) throw new Error("Prepared configuration has no binding owner");
+        const retained = prepared.seats.find(previous => previous.id.equals(seat.id) && previous.input === seat.input);
+        let collectingBindings = index !== 0;
+        const defaults = args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect);
+        if (index !== 0) applyBindingDefaults(seat.id, defaults);
+        active = new StartupConfig({ dialect, context: seat.context, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
+          scope: index === 0 ? "source" : "seat", read,
+          applySelectedDefaults: () => {
+            for (const binding of bindings.bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) bindings.unbind(binding.input);
+            for (const binding of defaults) bindings.bind(binding);
+            collectingBindings = true;
+          },
+          applyArchive: () => {
+            if (index === 0) { source.applyArchive(args.sourceArchive); movement.applyArchive(movementArchive); fallback.applyArchive(fallbackArchive); shared.applyArchive(sharedArchive); }
+            seat.cvars.applyArchive(seat.archive); seat.mouse.cvars.applyArchive(seat.mouseArchive);
+            if (retained !== undefined) {
+              bindings.unbindAll(); for (const binding of retained.input.bindings) bindings.bind(binding);
+              choices.all = retained.allBindingsChosen;
+              for (const key of retained.overriddenKeys) choices.overridden.add(key);
+              const expected = new Map((retained.selectedBindings ?? defaultBindings(0, prepared.movement.dialect)).map(binding => [physicalInputKey(binding.input), binding.target]));
+              const current = new Map(retained.input.bindings.map(binding => [physicalInputKey(binding.input), binding.target]));
+              for (const key of new Set([...expected.keys(), ...current.keys()]))
+                if (JSON.stringify(expected.get(key)) !== JSON.stringify(current.get(key))) choices.overridden.add(key);
+              seat.mouse.write(retained.mouse.read());
+              const run = retained.mouse.cvars.find("cl_run"); if (run !== undefined) seat.mouse.cvars.setCommandFlags("cl_run", run.value, "archive");
+            } else if (seat.profile !== null) {
+              bindings.unbindAll(); for (const binding of seat.profile.bindings) bindings.bind(binding);
+              choices.all = true;
+              seat.mouse.write(seat.profile.mouse);
+              if (seat.profile.alwaysRun !== undefined) seat.mouse.cvars.setCommandFlags("cl_run", seat.profile.alwaysRun ? "1" : "0", "archive");
+            }
+            collectingBindings = true;
+          }, applyLaunchOptions: () => {},
+        });
+        while (!await active.executeFrame(program.commands, async () => {
+          if (!collectingBindings) return;
+          const [rawName, key] = program.commands.tokenizedArguments, name = asciiFold(rawName ?? "");
+          if (name === "unbindall") choices.all = true;
+          if ((name === "bind" || name === "unbind") && key !== undefined) {
+            const input = namedPhysicalInput(key); if (input !== null) choices.overridden.add(physicalInputKey(input));
+          }
+        })) await args.nextFrame();
+        active = null;
+      }
+      while (!program.commands.programComplete) { await args.nextFrame(); await program.commands.advanceProgramFrame(); }
+    });
+    const launch = options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
+    launch?.apply(source, seats);
+    const resolved = resolveStartupRules(options, source, options.teamArenaSkirmish?.maxClients ?? args.defaultCapacity,
+      serverDefinitionsForSelection(content.selection), launch === null);
+    return { source, movement, fallback, seats, program, routing, scripts, read, ...resolved, requests, applyBindingDefaults,
+      get bindingChoices() { return [...bindingChoices].map(([id, choices]) => ({ id, overriddenKeys: [...choices.overridden], allBindingsChosen: choices.all, selectedBindings: choices.selected })); },
+      forwardCommands: handler => { forward = handler; } };
+  } catch (error) {
+    routing.close();
+    try { await scripts.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Profile configuration and cleanup failed"); }
+    throw error;
+  }
+}
+
+export async function openInitialConfigurationContent(options: ApplicationOptions, recipe?: ExecutableRecipe, installedCatalog?: InstalledCatalog): Promise<ApplicationConfigurationContent> {
+  const catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
     discoverMods: options.dedicated || options.network.kind === "offline" && (options.movement === "q3" && options.character === "q3"
       || recipe?.execution.some(module => module.kind === "qvm" && module.role === "server-game") === true) });
   if (recipe !== undefined) return openApplicationConfigurationContent(catalog, { kind: "recipe", recipe });
@@ -61,7 +221,8 @@ function configurationScriptReader(content: ApplicationConfigurationContent, opt
 
 export async function prepareInitialConfiguration(options: ApplicationOptions, content: ApplicationConfigurationContent,
   session: EngineSession, identity: IdentityOwner, localSeats: Map<ClientId, SessionSeat>, settings: ConfigStore,
-  host: Pick<ApplicationHost, "print">, sourceArchive: readonly CvarArchiveEntry[], defaultCapacity: number, nextFrame: () => Promise<void>): Promise<{
+  host: Pick<ApplicationHost, "print">, sourceArchive: readonly CvarArchiveEntry[], defaultCapacity: number, nextFrame: () => Promise<void>,
+  onPrepared?: (prepared: PreparedStartup) => void): Promise<{
     readonly prepared: PreparedStartup; readonly image: ApplicationImageSettings | null; readonly options: ApplicationOptions;
     readonly maxClients: number; readonly requests: readonly ConfigurationCommandRequest[]; readonly scripts: ConsoleScriptFiles;
   }> {
@@ -114,6 +275,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
     const teamArenaLaunch = options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
     let resolved = { options, maxClients: defaultCapacity };
+    onPrepared?.(prepared);
     await prepared.execute({ nextFrame, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
       read: configurationScriptReader(content, options, scripts),
       sourceArchive, sharedArchive,

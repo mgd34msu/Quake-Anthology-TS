@@ -40,7 +40,10 @@ export class PreparedStartup {
   private readonly registryOutputs = new Map<CvarRegistry, () => void>();
   private releaseView: () => void;
   readonly commands: CommandBuffer;
-  readonly seats: readonly PreparedSeat[];
+  private seatOwners: PreparedSeat[] = [];
+  private activeSeatIds: readonly SeatId[] = [];
+  private get activeSeats(): readonly PreparedSeat[] { return this.seats.filter(seat => this.activeSeatIds.some(id => id.equals(seat.id))); }
+  get seats(): readonly PreparedSeat[] { return this.seatOwners; }
   fallback: CvarRegistry;
   private routing: CommandCvarRouting;
   private active: StartupConfig | undefined;
@@ -71,12 +74,13 @@ export class PreparedStartup {
     const phases = startupCommandPhases(options.startupCommands ?? [], options.dialect);
     this.commands = new CommandBuffer({ startupCommandText: phases.stuffed, dialect: options.dialect, context: source.context, cvars: this.fallback,
       cvarRouting: { owner: (name, context) => this.routing.owner(name, context), visible: context => this.routing.visible(context) },
-      readScript: (name, context) => this.active?.readScript(name, context) ?? this.scripts.read(name, context),
+      readScript: (name, context) => this.readScript(name, context),
       onScriptComplete: event => this.active?.onScriptComplete(event), print: (text, source) => this.print(text, source),
       allowCommand: command => this.allowCommand(command),
       forwardToServer: invocation => { this.worldAction = true; return this.forward(invocation.argv[0] ?? "", invocation.args, invocation.source); } });
-    this.seats = options.seats.map(seat => ({ ...seat, input: new SeatInput({ seat: seat.id, dialect: options.movementDialect,
+    this.seatOwners = options.seats.map(seat => ({ ...seat, input: new SeatInput({ seat: seat.id, dialect: options.movementDialect,
       context: seat.context, commands: this.commands, uiEvent: () => false }), overriddenKeys: new Set<string>(), allBindingsChosen: false, collectingBindings: false, selectedBindings: undefined }));
+    this.activeSeatIds = this.seats.map(seat => seat.id);
     for (const name of this.deferredCommands) this.commands.register(name, invocation => {
       this.worldAction = true; return this.forward(name, invocation.args, invocation.source);
     });
@@ -92,15 +96,24 @@ export class PreparedStartup {
     };
   }
   private print(text: string, source?: CommandContext): void {
+    const context = source ?? this.commands?.executionContext;
+    if (context !== undefined && !this.currentContext(context)) return;
     let output = this.options.print;
     for (const binding of this.outputBindings) output = binding.print;
-    output(text, source ?? this.commands?.executionContext);
+    output(text, context);
+  }
+  private currentContext(context: CommandContext): boolean {
+    let origin = context.origin; while (origin.kind === "script") origin = origin.caller;
+    if (origin.kind !== "local-seat") return true;
+    const source = origin;
+    return this.activeSeatIds.some(id => id.equals(source.seat)) && this.seats.some(seat => seat.id.equals(source.seat) && seat.context.origin.kind === "local-seat"
+      && seat.context.origin.client.equals(source.client));
   }
   private refreshRegistryOutput(): void {
     const registries = new Set<CvarRegistry>();
     if (this.outputBindings.size !== 0) {
       registries.add(this.source); registries.add(this.movement); registries.add(this.fallback);
-      for (const context of [this.source.context, ...this.seats.map(seat => seat.context)])
+      for (const context of [this.source.context, ...this.activeSeats.map(seat => seat.context)].filter(context => this.currentContext(context)))
         for (const registry of this.routing.visible(context)) registries.add(registry);
     }
     for (const [registry, release] of this.registryOutputs) if (!registries.has(registry)) {
@@ -110,42 +123,40 @@ export class PreparedStartup {
       this.registryOutputs.set(registry, registry.bindOutput(text => this.print(text, this.commands.executionContext ?? registry.context)));
   }
   allowCommand(command: CommandInvocation): boolean {
+    if (!this.currentContext(command.source)) {
+      this.options.print("Command ignored because its local client is inactive or has retired.\n"); return false;
+    }
     if (this.pending && this.deferredCommands.includes(asciiFold(command.argv[0] ?? ""))) this.worldAction = true;
     if (!this.active?.restrictSharedConfiguration) return true;
-    let script = command.source.origin, savedConfiguration = false;
-    while (script.kind === "script") {
-      if (script.name === "config.cfg" || script.name === "q3config.cfg") savedConfiguration = true;
-      script = script.caller;
-    }
-    if (!savedConfiguration) return true;
-    const [rawName, argument] = command.argv;
-    if (rawName === undefined) return true;
-    const name = asciiFold(rawName);
-    if (name === "cvar_restart") {
-      this.print("Ignoring shared cvar restart in saved secondary-seat configuration.\n", command.source); return false;
-    }
-    const target = ["set", "seta", "sets", "setu", "toggle", "reset"].includes(name) ? argument : name;
-    if (target === undefined) return true;
-    const owner = this.routing.owner(target, command.source);
-    if (!["set", "seta", "sets", "setu", "toggle", "reset"].includes(name) && owner.find(target) === undefined) return true;
-    let origin = command.source.origin;
-    while (origin.kind === "script") origin = origin.caller;
-    const seatId = origin.kind === "local-seat" ? origin.seat : undefined;
-    const seat = seatId === undefined ? undefined : this.seats.find(seat => seat.id.equals(seatId));
-    if (seat !== undefined && (owner === seat.cvars || owner === seat.mouse.cvars)) return true;
-    this.print(`Ignoring shared cvar ${target} in saved secondary-seat configuration; use autoexec.cfg for intentional shared overrides.\n`, command.source);
-    return false;
+    return allowSeatConfigurationCommand(command, this.routing, this.seats, (text, source) => this.print(text, source));
   }
   noteWorldAction(): void { if (this.pending) this.worldAction = true; }
-  prepareClientCommands(options: CommandBufferOptions): PreparedClientCommands {
-    const contexts = [this.source.context, this.commands.context, ...this.seats.map(seat => seat.context)];
+  prepareClientCommands(options: CommandBufferOptions, inputs: readonly Pick<PreparedSeat, "id" | "input" | "context">[] = this.seats): PreparedClientCommands {
+    const contexts = [this.source.context, this.commands.context, ...this.activeSeats.map(seat => seat.context)].filter(context => this.currentContext(context));
     const liveRegistries = new Set([this.source, this.movement, this.fallback,
       ...this.seats.flatMap(seat => [seat.cvars, seat.mouse.cvars]),
       ...contexts.flatMap(context => this.routing.visible(context))]);
-    return prepareClientCommands(this.commands, this.seats, liveRegistries, options);
+    return prepareClientCommands(this.commands, inputs, liveRegistries, options);
+  }
+  publishSeats(seats: readonly Pick<PreparedSeat, "id" | "input" | "context" | "cvars" | "mouse">[], activeSeatIds: readonly SeatId[] = seats.map(seat => seat.id)): void {
+    for (const id of activeSeatIds) if (!seats.some(seat => seat.id.equals(id))) throw new Error("Active seat is not retained by this client");
+    this.seatOwners = seats.map(seat => {
+      const previous = this.seats.find(prior => prior.id.equals(seat.id) && prior.input === seat.input);
+      if (previous !== undefined) { previous.cvars = seat.cvars; previous.mouse = seat.mouse; return previous; }
+      return { ...seat, overriddenKeys: new Set<string>(), allBindingsChosen: true, collectingBindings: false, selectedBindings: undefined };
+    });
+    this.setActiveSeats(activeSeatIds);
+  }
+  setActiveSeats(ids: readonly SeatId[]): void {
+    for (const id of ids) if (!this.seats.some(seat => seat.id.equals(id))) throw new Error("Active seat is not retained by this client");
+    this.activeSeatIds = [...ids];
+    this.refreshRegistryOutput();
   }
   forwardCommands(forward: PreparedStartup["forward"]): void { this.forward = forward; }
-  readScript(name: string, context: CommandContext): Promise<string | undefined> { return this.active?.readScript(name, context) ?? this.scripts.read(name, context); }
+  readScript(name: string, context: CommandContext): Promise<string | undefined> {
+    if (!this.currentContext(context)) return Promise.resolve(undefined);
+    return this.active?.readScript(name, context) ?? this.scripts.read(name, context);
+  }
   onScriptComplete(event: import("../../core/commands/index.ts").ScriptCompletion): void { this.active?.onScriptComplete(event); }
   adoptReaders(scripts: ConsoleScriptFiles, read: StartupConfigOptions["read"]): void {
     this.scripts = scripts; this.scopedReader = read;
@@ -159,8 +170,8 @@ export class PreparedStartup {
     readonly source: CvarRegistry; readonly movement: CvarRegistry; readonly fallback: CvarRegistry;
     readonly scripts: ConsoleScriptFiles; readonly read: StartupConfigOptions["read"];
   }): void {
-    const profileChanged = owners !== undefined && (this.commands.dialect !== owners.source.dialect || this.seats.some(seat => seat.input.dialect !== owners.movement.dialect));
-    if (profileChanged && this.seats.some(seat => seat.input.hasHeldInput))
+    const profileChanged = owners !== undefined && (this.commands.dialect !== owners.source.dialect || this.activeSeats.some(seat => seat.input.dialect !== owners.movement.dialect));
+    if (profileChanged && this.activeSeats.some(seat => seat.input.hasHeldInput))
       throw new Error("Prepared profile requires released input");
     if (owners !== undefined) this.validateOwners(owners);
     if (profileChanged && owners !== undefined) this.commands.setProfile(owners.source.dialect, owners.fallback);
@@ -170,19 +181,30 @@ export class PreparedStartup {
       this.adoptReaders(owners.scripts, owners.read);
       if (profileChanged) {
         this.releaseView();
-        for (const seat of this.seats) seat.input.setProfile(owners.movement.dialect);
+        for (const seat of this.activeSeats) seat.input.setProfile(owners.movement.dialect);
         this.releaseView = registerQ1ViewCommands(this.commands);
       }
     }
     this.refreshRegistryOutput();
   }
   bindings(id: SeatId, selectedDefaults: readonly InputBinding[]): readonly InputBinding[] {
+    const bindings = this.previewBindings(id, selectedDefaults);
+    this.adoptBindingDefaults(id, selectedDefaults);
+    const seat = this.seats.find(seat => seat.id.equals(id));
+    if (seat !== undefined) for (const binding of bindings) seat.input.bind(binding);
+    return bindings;
+  }
+  adoptBindingDefaults(id: SeatId, selectedDefaults: readonly InputBinding[]): void {
+    const seat = this.seats.find(seat => seat.id.equals(id));
+    if (seat !== undefined) seat.selectedBindings = selectedDefaults;
+  }
+  previewBindings(id: SeatId, selectedDefaults: readonly InputBinding[]): readonly InputBinding[] {
     const seat = this.seats.find(seat => seat.id.equals(id));
     if (seat === undefined) return selectedDefaults;
-    seat.selectedBindings = selectedDefaults;
+    const bindings = new Map(seat.input.bindings.map(binding => [physicalInputKey(binding.input), binding]));
     if (!seat.allBindingsChosen) for (const binding of selectedDefaults)
-      if (!seat.overriddenKeys.has(physicalInputKey(binding.input))) seat.input.bind(binding);
-    return seat.input.bindings;
+      if (!seat.overriddenKeys.has(physicalInputKey(binding.input))) bindings.set(physicalInputKey(binding.input), binding);
+    return [...bindings.values()];
   }
   async execute(options: Parameters<PreparedStartup["run"]>[0]): Promise<void> {
     this.scopedReader = options.read;
@@ -281,8 +303,36 @@ export class PreparedStartup {
   }
 }
 
+export function allowSeatConfigurationCommand(command: CommandInvocation, routing: CommandCvarRouting,
+  seats: readonly Pick<PreparedSeat, "id" | "cvars" | "mouse">[], print: (text: string, source?: CommandContext) => void): boolean {
+  let script = command.source.origin, savedConfiguration = false;
+  while (script.kind === "script") {
+    if (script.name === "config.cfg" || script.name === "q3config.cfg") savedConfiguration = true;
+    script = script.caller;
+  }
+  if (!savedConfiguration) return true;
+  const [rawName, argument] = command.argv;
+  if (rawName === undefined) return true;
+  const name = asciiFold(rawName);
+  if (name === "cvar_restart") {
+    print("Ignoring shared cvar restart in saved secondary-seat configuration.\n", command.source); return false;
+  }
+  const target = ["set", "seta", "sets", "setu", "toggle", "reset"].includes(name) ? argument : name;
+  if (target === undefined) return true;
+  const owner = routing.owner(target, command.source);
+  if (!["set", "seta", "sets", "setu", "toggle", "reset"].includes(name) && owner.find(target) === undefined) return true;
+  let origin = command.source.origin;
+  while (origin.kind === "script") origin = origin.caller;
+  const seatId = origin.kind === "local-seat" ? origin.seat : undefined;
+  const seat = seatId === undefined ? undefined : seats.find(seat => seat.id.equals(seatId));
+  if (seat !== undefined && (owner === seat.cvars || owner === seat.mouse.cvars)) return true;
+  print(`Ignoring shared cvar ${target} in saved secondary-seat configuration; use autoexec.cfg for intentional shared overrides.\n`, command.source);
+  return false;
+}
+
 export type PreparedClientCommands = {
     readonly commands: CommandBuffer; readonly releaseCommands: Pick<CommandBuffer, "append">;
+    executePreparation(run: () => Promise<void>): Promise<void>;
     input(seat: SeatId): (BindingCommandSeat & Pick<SeatInput, "isDown"> & { clearStates(): void }) | null;
     releaseInputs(time: number): void;
     validatePublication(): void; publish(): void;
@@ -324,7 +374,7 @@ export function prepareClientCommands(commands: CommandBuffer, inputs: readonly 
           throw new Error("Client bindings changed during preparation");
       }
     };
-    return { commands: program.commands,
+    return { commands: program.commands, executePreparation: program.executePreparation,
       input: id => seats.find(entry => entry.seat.id.equals(id))?.staged ?? null,
       releaseInputs: time => { validatePublication(); for (const entry of seats) entry.release(time); },
       releaseCommands: { append: (text, source) => program.commands.append(text, source, releaseDialect) },

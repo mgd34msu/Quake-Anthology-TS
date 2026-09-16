@@ -361,6 +361,54 @@ test("registry output bindings restore the latest live sink without changing cva
 
 
 
+test("inactive retained seats neither route commands nor join another source's console owners", async () => {
+  const identity = createIdentityOwner("retained-inactive-seats"), calls: string[] = [], registryOutput: string[] = [];
+  const context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+  const source = new CvarRegistry({ dialect: "q1-netquake", context });
+  const seats = [0, 1].map(index => {
+    const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } };
+    const cvars = new CvarRegistry({ dialect: "q1-netquake", context, print: text => registryOutput.push(text) });
+    return { id: identity.seat(index), context, cvars, mouse: new MouseSettings(cvars), profile: null, archive: [], mouseArchive: [] };
+  });
+  const scripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined });
+  const prepared = new PreparedStartup(source, source, scripts, { dialect: "q1-netquake", movementDialect: "q1-netquake", shared: null, sharedNames: [], seats,
+    print: text => calls.push(text), forward: () => undefined });
+  const [first, second] = prepared.seats;
+  if (first === undefined || second === undefined) throw new Error("Missing retained seats");
+  const release = prepared.bindOutput(text => calls.push(text));
+  prepared.setActiveSeats([first.id]);
+  const next = new CvarRegistry({ dialect: "q3", context });
+  const primary = new CvarRegistry({ dialect: "q3", context: first.context });
+  const routing = new ApplicationConsoleRouting({ fallback: next, sourceDialect: () => "q3", server: () => ({ cvars: next, sharedNames: [] }),
+    seat: id => id.equals(first.id) ? primary : second.cvars, input: id => id === null || id.equals(first.id) ? primary : second.mouse.cvars });
+  prepared.adopt(routing, () => undefined, { source: next, movement: next, fallback: next, scripts, read: async () => undefined });
+  prepared.publishSeats([{ ...first, cvars: primary, mouse: new MouseSettings(primary) }, second], [first.id]);
+  expect(prepared.seats[1]?.input).toBe(second.input);
+  expect(second.input.dialect).toBe("q1-netquake");
+  const nested: CommandContext = { session: identity.session, origin: { kind: "script", name: "inactive.cfg", caller: second.context.origin } };
+  prepared.commands.append("echo inactive\n", nested);
+  prepared.commands.append("echo active\n", first.context);
+  prepared.commands.execute();
+  expect(calls.join("")).not.toContain("inactive \n");
+  expect(calls.join("")).toContain("active \n");
+  expect(calls.join("")).toContain("local client is inactive or has retired");
+  second.cvars.set("absent", "2");
+  expect(registryOutput.join("")).toContain("variable absent not found");
+  expect(await prepared.readScript("inactive.cfg", nested)).toBeUndefined();
+  expect(() => prepared.prepareClientCommands({ dialect: "q1-netquake", context, cvars: second.cvars })).toThrow("isolated cvar owners");
+  expect(() => prepared.setActiveSeats([identity.seat(2)])).toThrow("not retained");
+  const restored = new ApplicationConsoleRouting({ fallback: source, sourceDialect: () => "q1-netquake", server: () => ({ cvars: source, sharedNames: [] }),
+    seat: id => seats.find(seat => seat.id.equals(id))?.cvars ?? null, input: id => seats.find(seat => id === null || seat.id.equals(id))?.mouse.cvars ?? null });
+  prepared.adopt(restored, () => undefined, { source, movement: source, fallback: source, scripts, read: async () => undefined });
+  prepared.publishSeats(seats.map(seat => ({ ...seat, input: seat.id.equals(first.id) ? first.input : second.input })));
+  prepared.commands.append("echo restored\n", second.context); prepared.commands.execute();
+  expect(calls.join("")).toContain("restored \n");
+  const retired: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: second.id, client: identity.client(1, 1) } };
+  prepared.commands.append("echo retired\n", retired); prepared.commands.execute();
+  expect(calls.join("")).not.toContain("retired \n");
+  release(); routing.close(); restored.close(); await scripts.close();
+});
+
 test("prepared profile publication preserves tail order and appended physical releases", async () => {
   const identity = createIdentityOwner("profile-publication"), calls: string[] = [];
   const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } };

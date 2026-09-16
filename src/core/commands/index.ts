@@ -181,7 +181,7 @@ export class CommandBuffer {
   }
 
   prepareProgram(options: CommandBufferOptions): {
-    readonly commands: CommandBuffer; validatePublication(): void; publish(): void;
+    readonly commands: CommandBuffer; executePreparation(run: () => Promise<void>): Promise<void>; validatePublication(): void; publish(): void;
   } {
     this.validateProfile(this.currentDialect, this.fallbackCvars);
     if (options.context.session !== this.context.session || !sameOrigin(options.context.origin, this.context.origin))
@@ -189,16 +189,38 @@ export class CommandBuffer {
     const commands = new CommandBuffer(options), revision = this.programRevision;
     commands.copyProgramState(this);
     commands.inheritedAsyncDrain = this.asyncDraining;
-    let published = false;
+    let phase: "ready" | "preparing" | "failed" | "published" = "ready";
     const validatePublication = (): void => {
-      if (published) throw new Error("Prepared command program already published");
+      if (phase === "published") throw new Error("Prepared command program already published");
+      if (phase !== "ready") throw new Error(`Prepared command program is ${phase}`);
       this.validateProfile(this.currentDialect, this.fallbackCvars);
       if (this.programRevision !== revision) throw new Error("Authority command program changed during preparation");
       if (commands.frame !== undefined || commands.asyncDraining || commands.batchBudget !== undefined)
         throw new Error("Prepared command program is still executing");
     };
-    return { commands, validatePublication, publish: () => {
-      validatePublication(); this.copyProgramState(commands); this.programRevision++; published = true;
+    return { commands, validatePublication, executePreparation: async run => {
+      validatePublication();
+      const pending = { chunks: commands.chunks, deferred: commands.deferred, waitFrames: commands.waitFrames,
+        waitDialect: commands.waitDialect, scriptRead: commands.scriptRead, tokens: commands.tokens,
+        aliasCount: commands.aliasCount, startupCommandText: commands.startupCommandText,
+        inheritedAsyncDrain: commands.inheritedAsyncDrain };
+      phase = "preparing";
+      commands.chunks = []; commands.deferred = []; commands.waitFrames = 0;
+      commands.waitDialect = undefined; commands.scriptRead = undefined; commands.tokens = [];
+      commands.aliasCount = 0; commands.startupCommandText = undefined; commands.inheritedAsyncDrain = false;
+      try {
+        await run();
+        if (!commands.programComplete) throw new Error("Prepared configuration has unfinished commands");
+        phase = "ready";
+      } catch (error) { phase = "failed"; throw error; }
+      finally {
+        commands.chunks = pending.chunks; commands.deferred = pending.deferred; commands.waitFrames = pending.waitFrames;
+        commands.waitDialect = pending.waitDialect; commands.scriptRead = pending.scriptRead; commands.tokens = pending.tokens;
+        commands.aliasCount = pending.aliasCount; commands.startupCommandText = pending.startupCommandText;
+        commands.inheritedAsyncDrain = pending.inheritedAsyncDrain;
+      }
+    }, publish: () => {
+      validatePublication(); this.copyProgramState(commands); this.programRevision++; phase = "published";
     } };
   }
 
