@@ -1,3 +1,5 @@
+import { audioOutputCvarNames, writeAudioOutputCvars } from "./audio/output-settings.ts";
+import { defaultAudioOutputFormat } from "../../audio/output.ts";
 import type { ApplicationHost } from "./application.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { ApplicationConfigurationContent } from "./content.ts";
@@ -285,6 +287,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   const source = createStartupSource(options, { source: content.selection.source, match: content.selection.match }, dialect, context, defaultCapacity, text => host.print(text));
   const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
   const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
+    audioOutputFormat: (await loadAudioSettings(settings)).outputFormat ?? defaultAudioOutputFormat,
     ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
   const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
     mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
@@ -292,6 +295,10 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     const sharedArchive = [...image?.persistedEntries ?? []];
     if (image?.cvars.find("volume") !== undefined) {
       const audio = await loadAudioSettings(settings);
+      if (audio.outputFormat !== undefined) {
+        writeAudioOutputCvars(image.cvars, audio.outputFormat);
+        sharedArchive.push(...audioOutputCvarNames.map(name => ({ name, value: image.cvars.variableString(name) })));
+      }
       if (audio.effectsVolume !== undefined) sharedArchive.push({ name: "volume", value: String(audio.effectsVolume) });
       if (audio.musicVolume !== undefined) sharedArchive.push({ name: "bgmvolume", value: String(audio.musicVolume) });
     }

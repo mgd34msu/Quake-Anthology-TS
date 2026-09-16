@@ -1,3 +1,5 @@
+import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-settings.ts";
+import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
 import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
@@ -203,9 +205,11 @@ export class StartupApplication {
       }
       const activeThemeMounts = themeMounts;
       audio = await StartupAudio.open({ musicControls: this.musicControls, theme: themeProduct === undefined || themeMounts === null ? null : { source: { content: themeProduct.id, ...themeProduct.expectation }, mounts: themeMounts }, mounts: mounted, source: { content: product.id, ...product.expectation }, seat, print: this.host.print,
-        preferences: { ...this.preferences.audioBaseline, ...this.preferences.audioValues } });
+        preferences: { ...this.preferences.audioBaseline, ...this.preferences.audioValues, outputFormat: readAudioOutputCvars(imageSettings.cvars) } });
       audio.openOutput(this.preferences.audioBaseline.deviceName ?? null, this.host.print);
+      audio.bindOutputCvars(imageSettings.cvars);
       const activeAudio = audio;
+      const currentAudio = (): StartupAudio["engine"] => this.client?.output.current ?? activeAudio.engine;
       menu = new StartupMenu({ sound: sound => { const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.sound(sound); }, ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
         clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
         ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
@@ -214,7 +218,16 @@ export class StartupApplication {
           try { this.pending = { kind: "load", path: this.saves.path(id) }; }
           catch (error) { this.status = error instanceof Error ? error.message : String(error); this.graphics?.menu.setStatus(this.status); }
         },
-        quit: () => this.requestQuit(), settings: [...this.preferences.bindings(),
+        quit: () => this.requestQuit(), settings: [...this.preferences.bindings({ selected: () => currentAudio().selectedOutput,
+          devices: () => currentAudio().outputDeviceNames(), select: name => {
+            currentAudio().selectOutput(name); this.graphics?.menu.setStatus("");
+          },
+          format: { read: () => currentAudio().outputFormat, select: format => {
+            const output = currentAudio(); output.selectOutput(output.selectedOutput, format);
+            writeAudioOutputCvars(imageSettings.cvars, output.outputFormat);
+            this.graphics?.menu.setStatus("");
+          } },
+          report: message => this.graphics?.menu.setStatus(message) }),
           ...bindNativeVideoSettings(() => native.window, imageSettings.cvars, message => this.graphics?.menu.setStatus(message)),
           ...bindRendererSettings({ current: () => native.window.backend, enabled: () => this.graphics !== null && !this.graphics.menu.isBusy,
             report: message => this.graphics?.menu.setStatus(message), apply: backend => {
@@ -274,8 +287,8 @@ export class StartupApplication {
           }
           native.execute(builder.finish());
         },
-        close: () => { activeAudio.close(); activeThemeMounts?.close(); (this.graphics?.controllerSettings ?? controllerSettings).close();
-          (this.graphics?.router ?? activeRouter).close(); pads.close(); activeMenu.close(); activeArt.close(); activeTypography.close(); activeFont.close(); images.close(); native.close(); mounted.close(); } };
+        close: () => { activeMenu.close(); activeAudio.close(); activeThemeMounts?.close(); (this.graphics?.controllerSettings ?? controllerSettings).close();
+          (this.graphics?.router ?? activeRouter).close(); pads.close(); activeArt.close(); activeTypography.close(); activeFont.close(); images.close(); native.close(); mounted.close(); } };
       const locals = initial.prepared.seats.map(prepared => {
         const local = [...localSeats.values()].find(candidate => candidate.id.equals(prepared.id));
         if (local === undefined) throw new Error("Prepared startup seat has no session owner");
@@ -344,7 +357,7 @@ export class StartupApplication {
     } catch (error) {
       this.client?.videoRestart.close();
       await this.client?.capture.close();
-      audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); menu?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
+      menu?.close(); audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
       await session.close(); await initial.image.close(); await initial.scripts.close();
       throw error;
     }
@@ -437,6 +450,7 @@ export class StartupApplication {
 
   private frontendCommand(name: string, args: readonly string[], source: CommandContext): void {
     if (this.routeCommand(name, args, source)) return;
+    if (name === "snd_restart" && this.graphics !== null) { this.graphics.audio.restartOutput(); return; }
     if (name === "cd" && this.graphics !== null) {
       this.graphics.audio.queueCdCommand(args, text => this.print(text)); return;
     }
@@ -517,6 +531,7 @@ export class StartupApplication {
     if (platform?.kind === "world") platform.input.transferPlatformToFrontend(graphics.router);
     if (client.output.current !== graphics.audio.engine) {
       client.output.current.prepareOutputTransfer(graphics.audio.engine)(); client.output.current = graphics.audio.engine;
+      applyAudioOutputSettings(client.imageSettings.cvars, graphics.audio);
     }
 
     primary.input.setFocus({ kind: "menu", menu: graphics.menu.controller.activeMenu ?? "menu:startup:main", control: null }, performance.now());
@@ -768,6 +783,7 @@ export class StartupApplication {
     this.game?.requestQuit(); this.remote?.requestQuit();
     this.client?.videoRestart.close();
     try { await this.client?.capture.close(); } catch (error) { errors.push(error); }
+    try { this.graphics?.menu.controller.closeAll(); } catch (error) { errors.push(error); }
     try { await this.client?.source.current?.retire(); } catch (error) { errors.push(error); }
     try { await this.browser?.close(); } catch (error) { errors.push(error); }
     this.browser = null;

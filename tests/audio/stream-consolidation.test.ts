@@ -93,3 +93,20 @@ test("downsampling can cross several decoder chunks without skipping output or r
     expect(player.sourcePosition).toBe(48);
     player.close();
 });
+
+test("output conversion retains fractional source phase and signed PCM channel semantics", async () => {
+    const { encodeOutputPcm, resampleQueuedPcm, audioKhzRate } = await import("../../src/audio/output.ts");
+    const source = new Int16Array([100, -100, 200, -200, 300, -300, 400, -400, 500, -500]);
+    const stream = new RawAudioStream(48000);
+    stream.queue({ samples: source, sampleRate: 44100, channels: 2, sourceSample: 0, resetStream: true });
+    expect([...stream.mix(1)]).toEqual([100, -100]);
+    const changed = stream.withOutputRate(22050);
+    expect([...changed.mix(2)]).toEqual([100, -100, 300, -300]);
+    expect([...stream.mix(1)]).toEqual([100, -100]); // Preparing a new rate does not commit the old stream.
+    expect([...encodeOutputPcm(new Int16Array([-32768, 32767, 256, 768]), { sampleRate: 44100, channels: 1, sampleBits: 16 })]).toEqual([0, 512]);
+    expect([...encodeOutputPcm(new Int16Array([-32768, 32767, 0, 0]), { sampleRate: 44100, channels: 2, sampleBits: 8 })]).toEqual([0, 255, 128, 128]);
+    const converted = resampleQueuedPcm(source, 44100, 48000);
+    expect(converted.length / 2).toBe(6);
+    expect(Math.abs(converted.length / 2 / 48000 - source.length / 2 / 44100)).toBeLessThan(1 / 48000);
+    expect(["11", "22", "44", "48", "0"].map(audioKhzRate)).toEqual([11025, 22050, 44100, 48000, null]);
+});

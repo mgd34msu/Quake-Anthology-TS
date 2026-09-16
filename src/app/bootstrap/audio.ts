@@ -1,3 +1,5 @@
+import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-settings.ts";
+import type { AudioOutputFormat } from "../../audio/output.ts";
 import type { MusicControls } from "../../audio/music.ts";
 import { menuSoundPath } from "./audio/menu.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
@@ -55,6 +57,7 @@ interface StaticAudio {
 export type ApplicationEffectSound = SourceEffectSound;
 export interface ApplicationAudioOptions {
   readonly musicControls?: MusicControls;
+  readonly outputFormat?: AudioOutputFormat;
   readonly deferOutput?: boolean;
   readonly deviceName?: string | null;
   readonly effectsVolume?: number;
@@ -82,13 +85,14 @@ export class ApplicationAudio {
   private readonly environmentSeats: SeatId[] = [];
   private volume = 0.7;
   private volumeCvars: CvarRegistry | null = null;
+  private outputCvars: CvarRegistry | null = null;
   private closed = false;
   private haptics: ApplicationInput | null = null;
 
   constructor(private readonly content: LoadedApplicationContent, now: () => number, seed: number,
     private readonly characterModel: string, private readonly print: (text: string) => undefined, options: ApplicationAudioOptions = {}) {
     this.random = new GameRandom(seed);
-    this.engine = new UnifiedAudio({ milliseconds: () => Math.trunc(now()), random: () => this.random.rand() });
+    this.engine = new UnifiedAudio({ ...(options.outputFormat === undefined ? {} : { outputFormat: options.outputFormat }), milliseconds: () => Math.trunc(now()), random: () => this.random.rand() });
     this.engine.setDopplerEnabled(content.recipe.presentation.doppler.kind === "source");
     this.music = new ApplicationMusic(this.engine, print, "source", options.musicControls);
     this.effectsVolume = options.effectsVolume ?? this.volume;
@@ -105,6 +109,15 @@ export class ApplicationAudio {
 
   prepareOutputTransfer(next: ApplicationAudio): () => void { return this.engine.prepareOutputTransfer(next.engine); }
 
+  get outputFormat(): AudioOutputFormat { return this.engine.outputFormat; }
+  bindOutputCvars(cvars: CvarRegistry): void { this.outputCvars = cvars; }
+  selectOutputFormat(format: AudioOutputFormat): void {
+    this.engine.selectOutput(this.selectedOutput, format);
+    if (this.outputCvars !== null) writeAudioOutputCvars(this.outputCvars, this.outputFormat);
+  }
+  restartOutput(): void {
+    this.engine.selectOutput(this.selectedOutput, this.outputCvars === null ? this.outputFormat : readAudioOutputCvars(this.outputCvars), true);
+  }
   get selectedOutput(): string | null { return this.engine.selectedOutput; }
   outputDeviceNames(): readonly string[] { return this.engine.outputDeviceNames(); }
   selectOutput(deviceName: string | null): void { this.engine.selectOutput(deviceName); }
@@ -162,6 +175,7 @@ export class ApplicationAudio {
     if (!applicationAudioCommands.includes(request.name)) return false;
     if (this.closed) throw new Error("Sound system is closed");
     const print = request.print ?? this.print;
+    if (request.name === "snd_restart") { this.restartOutput(); return true; }
     if (request.name === "cd") { await this.music.cdCommand(request.args, print); return true; }
     if (request.name === "soundinfo" || request.name === "s_info") {
       const output = this.engine.outputConfiguration;

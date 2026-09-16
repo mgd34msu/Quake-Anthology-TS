@@ -1,3 +1,5 @@
+import { defaultAudioOutputFormat } from "../../audio/output.ts";
+import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart, prepareVideoGuests, type PreparedVideoPresentation, type VideoGuestSeat } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
 import { SceneImageRegistry } from "../../render/scene/resources.ts";
@@ -570,7 +572,7 @@ export class Application {
         else {
           if (startup === null && ownership.kind === "owned") await application.viewSettings.load(application.inputConfig);
           const frontend = application;
-          application.imageSettings ??= await ApplicationImageSettings.open({ deferPersistence: true, context: { session: session.session, origin: { kind: "local-console" } },
+          application.imageSettings ??= await ApplicationImageSettings.open({ audioOutputFormat: (await loadAudioSettings(application.inputConfig)).outputFormat ?? defaultAudioOutputFormat, deferPersistence: true, context: { session: session.session, origin: { kind: "local-console" } },
             dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
               host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
             } });
@@ -1179,6 +1181,8 @@ export class Application {
           this.imageSettings.cvars.set("bgmvolume", String(audio.musicVolume));
         }
         audio.bindVolumeCvars(this.imageSettings.cvars);
+        audio.bindOutputCvars(this.imageSettings.cvars);
+        if (client === null) applyAudioOutputSettings(this.imageSettings.cvars, audio);
       }
       audio.bindHaptics(input);
       await audio.prepareEnvironment(this.simulation.scene);
@@ -1313,6 +1317,7 @@ export class Application {
       this.imageSettings = client.imageSettings;
       graphical.input.publishSharedCvars(client.imageSettings.cvars);
       graphical.audio.bindVolumeCvars(client.imageSettings.cvars);
+      graphical.audio.bindOutputCvars(client.imageSettings.cvars);
       this.viewSettings.setFieldOfView(client.imageSettings.cvars.variableValue("fov"));
       this.releaseViewCvars = this.viewSettings.bindCvars(client.imageSettings.cvars);
       graphical.input.publishClientPlatform(client, "replace");
@@ -1322,6 +1327,7 @@ export class Application {
         this.configurationScripts = null;
       }
       publishAudio(); client.output.current = graphical.audio.engine;
+      applyAudioOutputSettings(client.imageSettings.cvars, graphical.audio);
     } catch (error) { failures.push(error); this.fatalWorldFailure = true; }
     finally {
       try { await previous?.retire(); } catch (error) { failures.push(error); }
@@ -1788,7 +1794,10 @@ export class Application {
           progress: message => this.host.loading?.stage(message), print: message => this.host.print(message) });
         audio.effectsVolume = previous.audio.effectsVolume;
         audio.musicVolume = previous.audio.musicVolume;
-        if (candidateImages !== null) audio.bindVolumeCvars(candidateImages.settings.cvars);
+        if (candidateImages !== null) {
+          audio.bindVolumeCvars(candidateImages.settings.cvars);
+          audio.bindOutputCvars(candidateImages.settings.cvars);
+        }
         if (input !== previous.input) {
           applyFrontendPreferences(frontendOverrides, input, audio);
           for (const local of input.locals) {
@@ -1915,6 +1924,7 @@ export class Application {
           candidateImages.publish();
           nextGraphical?.input.publishSharedCvars(this.imageSettings.cvars);
           nextGraphical?.audio.bindVolumeCvars(this.imageSettings.cvars);
+          nextGraphical?.audio.bindOutputCvars(this.imageSettings.cvars);
           if (fovChanged) this.viewSettings.setFieldOfView(Number(this.imageSettings.cvars.variableString("fov")));
           this.releaseViewCvars = this.viewSettings.bindCvars(this.imageSettings.cvars);
         }
@@ -1933,6 +1943,7 @@ export class Application {
           nextScripts = null;
         }
         publishAudio?.();
+        if (nextGraphical !== null && this.imageSettings !== null) applyAudioOutputSettings(this.imageSettings.cvars, nextGraphical.audio);
         if (this.ownership.kind === "borrowed" && nextGraphical !== null) {
           this.ownership.client.platform.current = { kind: "world", input: nextGraphical.input };
           this.ownership.client.output.current = nextGraphical.audio.engine;

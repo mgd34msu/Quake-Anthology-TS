@@ -1,3 +1,4 @@
+import { audioOutputFormat, defaultAudioOutputFormat, encodeOutputPcm, resampleQueuedPcm, type AudioOutputFormat } from "./output.ts";
 import { sourceSoundChannel } from "./types.ts";
 import type { SharedSoundChannel } from "./types.ts";
 import type { ActorId, SeatId } from "../contracts/identity.ts";
@@ -30,6 +31,7 @@ interface MusicBus {
 }
 export interface UnifiedAudioOptions {
     readonly sampleRate?: number;
+    readonly outputFormat?: AudioOutputFormat;
     /** Source allocation clock in signed 32-bit whole milliseconds. */
     readonly milliseconds: () => number;
     /** Session-owned integer random source for Q1 same-frame phase offsets. */
@@ -59,6 +61,9 @@ export class UnifiedAudio {
     private device: SdlAudioDevice | null = null;
     private detachedOutput: { readonly playing: boolean; readonly bufferFrames: number; readonly deviceName: string | null } | null = null;
     private queuedPcm = new Int16Array(0);
+    private format: AudioOutputFormat;
+    private outputStream: RawAudioStream;
+    private outputSourceFrame = 0;
     private closed = false;
     private paused = false;
     private effectsGain = 0.7;
@@ -69,9 +74,12 @@ export class UnifiedAudio {
     private readonly pumpIntervals: number[] = [];
     constructor(private readonly options: UnifiedAudioOptions) {
         this.sampleRate = options.sampleRate ?? 44100;
+        this.format = audioOutputFormat(options.outputFormat ?? { ...defaultAudioOutputFormat, sampleRate: this.sampleRate });
+        this.outputStream = new RawAudioStream(this.format.sampleRate);
         if (!Number.isSafeInteger(this.sampleRate) || this.sampleRate < 8000 || this.sampleRate > 192000)
             throw new RangeError("Invalid audio output rate");
     }
+    get outputFormat(): AudioOutputFormat { return this.format; }
     get sampleClock(): number { return this.frame; }
     get queuedFrames(): number { return this.device?.queuedFrames ?? 0; }
     get selectedOutput(): string | null { return this.device === null ? this.detachedOutput?.deviceName ?? null : this.device.deviceName; }
@@ -339,7 +347,7 @@ export class UnifiedAudio {
         this.check();
         if (this.device !== null)
             throw new Error("Audio output already open");
-        this.device = SdlAudioDevice.open({ ...options, sampleRate: this.sampleRate, channels: 2, sampleBits: 16 });
+        this.device = SdlAudioDevice.open({ ...options, ...this.format });
         this.detachedOutput = null;
     }
     prepareOutputTransfer(next: UnifiedAudio): () => void {
@@ -350,6 +358,7 @@ export class UnifiedAudio {
             next.device = this.device;
             next.detachedOutput = this.detachedOutput;
             next.queuedPcm = this.queuedPcm;
+            next.format = this.format; next.outputStream = this.outputStream; next.outputSourceFrame = this.outputSourceFrame;
             next.paused = this.paused;
             next.outputStarted = this.outputStarted;
             next.previousPumpFrame = null;
@@ -371,42 +380,34 @@ export class UnifiedAudio {
         device.close(); this.device = null;
         this.previousPumpFrame = null; this.pumpIntervals.length = 0;
     }
-    selectOutput(deviceName: string | null): void {
+    selectOutput(deviceName: string | null, requested: AudioOutputFormat = this.format, restart = false): void {
         this.check();
-        const previous = this.device;
-        if (previous === null) {
-            const detached = this.detachedOutput;
-            const device = SdlAudioDevice.open({ deviceName, sampleRate: this.sampleRate, channels: 2, sampleBits: 16,
-                ...(detached === null ? {} : { bufferFrames: detached.bufferFrames }) });
-            try { device.queue(this.queuedPcm); }
-            catch (error) { device.close(); throw error; }
-            this.device = device;
-            if (detached?.playing === true && !this.paused) device.resume();
-            this.detachedOutput = null;
-            this.previousPumpFrame = null; this.pumpIntervals.length = 0;
-            return;
-        }
-        if (previous.deviceName === deviceName) return;
-        const playing = previous.state === "playing";
-        previous.pause();
+        const format = audioOutputFormat(requested), previous = this.device, oldFormat = this.format;
+        if (!restart && previous !== null && previous.deviceName === deviceName && format.sampleRate === oldFormat.sampleRate
+            && format.channels === oldFormat.channels && format.sampleBits === oldFormat.sampleBits) return;
+        const detached = this.detachedOutput;
+        const playing = previous === null ? detached?.playing === true : previous.state === "playing";
+        previous?.pause();
         this.queuedPcm = this.pendingOutput;
-        const open = (name: string | null): SdlAudioDevice => {
-            const device = SdlAudioDevice.open({ deviceName: name, sampleRate: this.sampleRate, channels: 2, sampleBits: 16, bufferFrames: previous.bufferFrames });
-            try { device.queue(this.queuedPcm); return device; }
+        const retained = this.queuedPcm;
+        const converted = resampleQueuedPcm(retained, oldFormat.sampleRate, format.sampleRate);
+        const oldBuffer = previous?.bufferFrames ?? detached?.bufferFrames;
+        const open = (name: string | null, selected: AudioOutputFormat, pcm: Int16Array): SdlAudioDevice => {
+            const device = SdlAudioDevice.open({ deviceName: name, ...selected, ...(oldBuffer === undefined ? {} : { bufferFrames: oldBuffer }) });
+            try { device.queue(encodeOutputPcm(pcm, selected)); return device; }
             catch (error) { device.close(); throw error; }
         };
         let replacement: SdlAudioDevice;
-        try { replacement = open(deviceName); }
+        try { replacement = open(deviceName, format, converted); }
         catch (error) {
-            if (!(error instanceof SdlAudioUnavailableError)) { if (playing) previous.resume(); throw error; }
+            if (!(error instanceof SdlAudioUnavailableError) || previous === null) { if (playing) previous?.resume(); throw error; }
             // Single-output drivers require releasing the old device before retrying.
             previous.close(); this.device = null;
-            try { replacement = open(deviceName); }
+            try { replacement = open(deviceName, format, converted); }
             catch (selectionError) {
                 try {
-                    const restored = open(previous.deviceName);
-                    this.device = restored;
-                    if (playing) restored.resume();
+                    this.device = open(previous.deviceName, oldFormat, retained);
+                    if (playing && !this.paused) this.device.resume();
                 } catch (restoreError) {
                     this.device?.close(); this.device = null;
                     this.detachedOutput = { playing, bufferFrames: previous.bufferFrames, deviceName: previous.deviceName };
@@ -415,10 +416,24 @@ export class UnifiedAudio {
                 throw selectionError;
             }
         }
-        previous.close();
-        this.device = replacement;
+        previous?.close();
+        this.device = replacement; this.detachedOutput = null;
+        this.format = format; this.queuedPcm = converted;
+        if (format.sampleRate !== oldFormat.sampleRate) this.outputStream = this.outputStream.withOutputRate(format.sampleRate);
         this.previousPumpFrame = null; this.pumpIntervals.length = 0;
-        if (playing) replacement.resume();
+        if (playing && !this.paused) replacement.resume();
+    }
+    private mixOutput(frames: number): Int16Array {
+        if (this.format.sampleRate === this.sampleRate && !this.outputStream.initialized) {
+            this.outputSourceFrame += frames;
+            return this.mix(frames);
+        }
+        return Int16Array.from(this.outputStream.mix(frames, 1, () => {
+            const sourceSample = this.outputSourceFrame;
+            const sourceFrames = Math.max(1, Math.ceil(frames * this.sampleRate / this.format.sampleRate));
+            const samples = this.mix(sourceFrames); this.outputSourceFrame += sourceFrames;
+            return { samples, sampleRate: this.sampleRate, channels: 2, sourceSample, resetStream: false };
+        }));
     }
     /** Cover recent frame times plus SDL's block consumption and scheduling jitter. */
     pump(aheadFrames?: number, measuredWorkMilliseconds = 0): number {
@@ -429,7 +444,7 @@ export class UnifiedAudio {
         if (this.paused)
             return 0;
         if (!Number.isFinite(measuredWorkMilliseconds) || measuredWorkMilliseconds < 0) throw new RangeError("Invalid measured audio frame work");
-        const workFrames = Math.ceil(measuredWorkMilliseconds * this.sampleRate / 1000);
+        const workFrames = Math.ceil(measuredWorkMilliseconds * device.sampleRate / 1000);
         const initialFill = this.outputHandoffPending || !this.outputStarted && device.state === "paused" && device.queuedFrames === 0;
         const playbackFrame = device.playbackFrames;
         const interval = this.previousPumpFrame === null ? 0 : playbackFrame - this.previousPumpFrame;
@@ -440,17 +455,17 @@ export class UnifiedAudio {
         }
         // Q3's s_mixahead default supplies the initial horizon; paused loading is not a refill interval.
         const target = aheadFrames ?? Math.min(device.maxQueuedFrames,
-            initialFill ? Math.max(Math.ceil(this.sampleRate * 0.2), device.bufferFrames * 2)
-                : Math.max(Math.ceil(this.sampleRate * 0.08), Math.max(...this.pumpIntervals) + device.bufferFrames * 2));
+            initialFill ? Math.max(Math.ceil(device.sampleRate * 0.2), device.bufferFrames * 2)
+                : Math.max(Math.ceil(device.sampleRate * 0.08), Math.max(...this.pumpIntervals) + device.bufferFrames * 2));
         if (!Number.isSafeInteger(target) || target < 0 || target > device.maxQueuedFrames)
             throw new RangeError("Invalid audio lookahead");
         this.previousPumpFrame = playbackFrame;
         this.queuedPcm = this.queuedPcm.subarray(this.queuedPcm.length - device.queuedFrames * 2);
         const frames = Math.max(0, target - device.queuedFrames);
         if (frames > 0) {
-            const samples = this.mix(frames), queued = new Int16Array(this.queuedPcm.length + samples.length);
+            const samples = this.mixOutput(frames), queued = new Int16Array(this.queuedPcm.length + samples.length);
             queued.set(this.queuedPcm); queued.set(samples, this.queuedPcm.length);
-            device.queue(samples);
+            device.queue(encodeOutputPcm(samples, this.format));
             this.queuedPcm = queued.slice(queued.length - device.queuedFrames * 2);
         }
         device.resume();
@@ -476,6 +491,7 @@ export class UnifiedAudio {
         this.music.clear();
         this.device?.clear();
         this.queuedPcm = new Int16Array(0);
+        this.outputStream = new RawAudioStream(this.format.sampleRate); this.outputSourceFrame = 0;
     }
     resetRound(): void {
         this.check();

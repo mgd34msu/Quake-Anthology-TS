@@ -1,3 +1,5 @@
+import type { AudioOutputFormat } from "../../audio/output.ts";
+import { audioOutputCvarNames } from "./audio/output-settings.ts";
 import { join } from "node:path";
 import { registerQ1ClientSettings } from "./q1-client-settings.ts";
 import { registerSharedClientSettings, validateFieldOfView } from "./shared-setting-cvars.ts";
@@ -17,6 +19,7 @@ import type { ApplicationViewSettings } from "./view-settings.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 interface ImageSettingsOptions {
+  readonly audioOutputFormat?: AudioOutputFormat;
   readonly deferPersistence?: boolean;
   readonly context: CommandContext;
   readonly dialect: CommandDialect;
@@ -70,7 +73,7 @@ export class ApplicationImageSettings {
     this.cvars.document("con_scale", { summary: "Console text size. Auto chooses a readable size; small viewports limit the size to keep text usable.",
       usage: "con_scale <0|1|2|3|4>", examples: ["con_scale 2"], allowedValues: ["0: Auto", "1: 1x", "2: 2x", "3: 3x", "4: 4x"] });
     this.cvars.register("r_gamma", String(options.gamma ?? 1), CvarFlag.Archive);
-    registerSharedClientSettings(this.cvars);
+    registerSharedClientSettings(this.cvars, options.audioOutputFormat);
     registerQ1ClientSettings(this.cvars, "all");
     this.cvars.register("r_customwidth", "0", CvarFlag.Archive);
     this.cvars.register("r_customheight", "0", CvarFlag.Archive);
@@ -178,7 +181,7 @@ export class ApplicationImageSettings {
       q2Load: this.cvars.variableValue("gl_md5_load") !== 0, q2Use: this.cvars.variableValue("gl_md5_use") !== 0,
       q2Distance: this.cvars.variableValue("gl_md5_distance"), distance };
   }
-  private imageSetting(name: string): boolean { return !["gamma", "volume", "bgmvolume"].includes(name); }
+  private imageSetting(name: string): boolean { return !["gamma", "volume", "bgmvolume", ...audioOutputCvarNames].includes(name); }
   private archivedValues() { return this.cvars.canonicalSnapshots().filter(value => this.imageSetting(value.name) && (value.flags & CvarFlag.Archive) !== 0); }
   private signature(): string { return JSON.stringify(this.archivedValues().map(value => [value.name, value.value])); }
   private applyDisplay(renderer: NativeRenderer): void {

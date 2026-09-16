@@ -1,3 +1,6 @@
+import type { AudioOutputFormat } from "../../audio/output.ts";
+import type { CvarRegistry } from "../../core/cvars/index.ts";
+import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-settings.ts";
 import type { MusicControls } from "../../audio/music.ts";
 import { menuSoundPath } from "./audio/menu.ts";
 import { SoundBank, UnifiedAudio } from "../../audio/index.ts";
@@ -12,7 +15,17 @@ import type { AudioPreferences } from "./audio-settings.ts";
 
 /** The frontend uses the same mixer and music decoder as a gameplay session. */
 export class StartupAudio {
-  readonly engine = new UnifiedAudio({ milliseconds: () => Math.trunc(performance.now()), random: () => 0 });
+  readonly engine: UnifiedAudio;
+  private outputCvars: CvarRegistry | null = null;
+  get outputFormat(): AudioOutputFormat { return this.engine.outputFormat; }
+  bindOutputCvars(cvars: CvarRegistry): void { this.outputCvars = cvars; }
+  selectOutputFormat(format: AudioOutputFormat): void {
+    this.engine.selectOutput(this.engine.selectedOutput, format);
+    if (this.outputCvars !== null) writeAudioOutputCvars(this.outputCvars, this.outputFormat);
+  }
+  restartOutput(): void {
+    this.engine.selectOutput(this.engine.selectedOutput, this.outputCvars === null ? this.outputFormat : readAudioOutputCvars(this.outputCvars), true);
+  }
   private readonly music: ApplicationMusic;
   private readonly commands: { readonly args: readonly string[]; readonly print: (text: string) => void }[] = [];
   private readonly bank: SoundBank;
@@ -21,6 +34,8 @@ export class StartupAudio {
 
   private constructor(mounts: MountedContent, private readonly family: GameFamily, private readonly seat: SeatId,
     print: (text: string) => undefined, preferences: Partial<AudioPreferences>, controls?: MusicControls) {
+    this.engine = new UnifiedAudio({ milliseconds: () => Math.trunc(performance.now()), random: () => 0,
+      ...(preferences.outputFormat === undefined ? {} : { outputFormat: preferences.outputFormat }) });
     this.bank = new SoundBank(mounts);
     this.music = new ApplicationMusic(this.engine, print, "immediate", controls);
     this.setVolumes(preferences.effectsVolume ?? 0.7, preferences.musicVolume ?? 0.25);

@@ -1,3 +1,5 @@
+import { defaultAudioOutputFormat, type AudioOutputFormat } from "../../audio/output.ts";
+import { registerAudioOutputCvars, readAudioOutputCvars } from "./audio/output-settings.ts";
 import { CvarFlag, type CvarAlias, type CvarRegistry } from "../../core/cvars/index.ts";
 import { defaultViewInputTuning, type InputCommandBuilder } from "../../input/user-command.ts";
 
@@ -23,7 +25,8 @@ export function bindRunCvar(cvars: CvarRegistry, builder: InputCommandBuilder): 
 }
 
 /** Shared aliases exist before source configuration executes in every world dialect. */
-export function registerSharedClientSettings(cvars: CvarRegistry): void {
+export function registerSharedClientSettings(cvars: CvarRegistry, outputFormat: AudioOutputFormat = defaultAudioOutputFormat): void {
+  registerAudioOutputCvars(cvars, outputFormat);
   cvars.register("r_saveFontData", "0", CvarFlag.None);
   cvars.document("r_saveFontData", { summary: "Export generated Q3 font atlases and DAT records to this content's user directory.",
     usage: "r_saveFontData <0|1>", examples: ["r_saveFontData 1"] });
@@ -48,4 +51,9 @@ export function registerSharedClientSettings(cvars: CvarRegistry): void {
     documentation: { summary: "Quake II music volume. Alias of bgmvolume and the shared music gain.", usage: "ogg_volume <0..1>", examples: ["ogg_volume 0.5"] } });
   cvars.document("volume", { summary: "Effects volume shared with the audio menu. Output clamps to 0 through 1.", usage: "volume <0..1>", examples: ["volume 0.7", "volume 0"] });
   cvars.document("bgmvolume", { summary: "Music volume shared with the audio menu. Output clamps to 0 through 1.", usage: "bgmvolume <0..1>", examples: ["bgmvolume 0.5", "bgmvolume 0"] });
+}
+
+export function applyAudioOutputSettings(cvars: CvarRegistry, audio: { readonly outputFormat: AudioOutputFormat; selectOutputFormat(format: AudioOutputFormat): void }): void {
+  const desired = readAudioOutputCvars(cvars), current = audio.outputFormat;
+  if (desired.sampleRate !== current.sampleRate || desired.sampleBits !== current.sampleBits || desired.channels !== current.channels) audio.selectOutputFormat(desired);
 }

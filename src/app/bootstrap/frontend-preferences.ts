@@ -1,3 +1,5 @@
+import { defaultAudioOutputFormat } from "../../audio/output.ts";
+import type { AudioOutputSettings } from "../../ui/settings/index.ts";
 import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
 import type { AudioPreferences } from "./audio-settings.ts";
 import type { CommandDialect } from "../../contracts/common.ts";
@@ -76,6 +78,7 @@ export function changedFrontendPreferences(before: FrontendPreferenceValues, aft
 export class FrontendPreferences {
   values: FrontendPreferenceOverrides = {};
   audioBaseline: Partial<AudioPreferences> = {};
+  private audioOutput: AudioOutputSettings | undefined;
   get audioValues(): AudioSettings { return { effectsVolume: this.values.effectsVolume ?? this.audioBaseline.effectsVolume ?? 0.7, musicVolume: this.values.musicVolume ?? this.audioBaseline.musicVolume ?? 0.25 }; }
   private alwaysRunBaseline: boolean | undefined;
   private vibrationBaseline = { controllerVibration: true, controllerVibrationStrength: 1 };
@@ -92,18 +95,22 @@ export class FrontendPreferences {
     this.vibrationBaseline = { controllerVibration: saved?.rumble ?? true, controllerVibrationStrength: saved?.rumbleStrength ?? 1 };
   }
   async saveAudioBaseline(settings: ConfigStore): Promise<void> {
-    if (this.values.effectsVolume === undefined && this.values.musicVolume === undefined) return;
-    const volume = this.audioValues;
-    if (volume.effectsVolume === (this.audioBaseline.effectsVolume ?? 0.7) && volume.musicVolume === (this.audioBaseline.musicVolume ?? 0.25)) return;
+    if (this.audioOutput === undefined && this.values.effectsVolume === undefined && this.values.musicVolume === undefined) return;
     const saved = await loadAudioSettings(settings);
-    const deviceName = saved.deviceName ?? null;
-    await saveAudioSettings(settings, { selectedOutput: deviceName, ...volume });
-    this.audioBaseline = { deviceName, ...volume };
+    const volume = { effectsVolume: this.values.effectsVolume ?? saved.effectsVolume ?? this.audioValues.effectsVolume,
+      musicVolume: this.values.musicVolume ?? saved.musicVolume ?? this.audioValues.musicVolume };
+    const deviceName = this.audioOutput === undefined ? saved.deviceName ?? null : this.audioOutput.selected();
+    const outputFormat = this.audioOutput?.format?.read() ?? saved.outputFormat ?? defaultAudioOutputFormat;
+    const values = { deviceName, outputFormat, ...volume };
+    if (saved.deviceName !== deviceName || saved.effectsVolume !== volume.effectsVolume || saved.musicVolume !== volume.musicVolume
+      || saved.outputFormat?.sampleRate !== outputFormat.sampleRate || saved.outputFormat?.sampleBits !== outputFormat.sampleBits || saved.outputFormat?.channels !== outputFormat.channels) await saveAudioSettings(settings, { selectedOutput: deviceName, outputFormat, ...volume });
+    this.audioBaseline = values;
   }
-  bindings(): readonly SettingBinding[] {
+  bindings(output?: AudioOutputSettings): readonly SettingBinding[] {
+    this.audioOutput = output;
     return [...bindControllerVibration({ read: () => ({ controllerVibration: this.values.controllerVibration ?? this.vibrationBaseline.controllerVibration, controllerVibrationStrength: this.values.controllerVibrationStrength ?? this.vibrationBaseline.controllerVibrationStrength }),
       write: values => { this.values = { ...this.values, ...values }; } }), ...bindAudioSettings({ read: () => this.audioValues,
-      write: values => { this.values = { ...this.values, ...values }; } }),
+      write: values => { this.values = { ...this.values, ...values }; } }, output),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: this.values.sensitivity ?? this.mouseBaseline.sensitivity,
       pitch: this.values.pitch ?? this.mouseBaseline.pitch, yaw: this.values.yaw ?? this.mouseBaseline.yaw,
       invertMouse: this.values.invertMouse ?? this.mouseBaseline.invertPitch,

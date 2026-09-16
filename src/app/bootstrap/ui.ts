@@ -133,7 +133,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     const volumes = bindAudioSettings({ read: () => ({ effectsVolume: audio.effectsVolume, musicVolume: audio.musicVolume }),
       write: values => { if (values.effectsVolume !== undefined) audio.effectsVolume = values.effectsVolume;
         if (values.musicVolume !== undefined) audio.musicVolume = values.musicVolume; } },
-      { selected: () => audio.selectedOutput, devices: () => audio.outputDeviceNames(), select: name => audio.selectOutput(name),
+      { format: { read: () => audio.outputFormat, select: format => audio.selectOutputFormat(format) },
+        selected: () => audio.selectedOutput, devices: () => audio.outputDeviceNames(), select: name => audio.selectOutput(name),
         report: text => local.console.print(`${text}\n`) });
     const shared = input.sharedSettings();
     const reportDisplay = (message: string): void => local.console.print(`${message}\n`);

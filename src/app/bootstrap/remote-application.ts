@@ -1,3 +1,5 @@
+import { defaultAudioOutputFormat } from "../../audio/output.ts";
+import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart, prepareVideoGuests, type PreparedVideoPresentation } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
 import type { ConfigurationCommandRequest } from "./configuration.ts";
@@ -360,7 +362,9 @@ export class RemoteApplication {
       const product = content.catalog.product(options.product);
       if (product.expectation.family !== family || product.expectation.edition === "rerelease" || recording === undefined && q1 && options.product !== "q1-classic-id1" && !(qw && options.product === remoteContentProduct(options.remoteContent ?? remoteContentSelection("q1-quakeworld", "qw"))) || q3 && options.product !== remoteContentProduct(options.remoteContent ?? remoteContentSelection("q3-baseq3", "baseq3")))
         throw new Error("Remote application requires classic id1 NetQuake 15 or classic Quake II protocol 34/35 or baseq3 protocol 68 content");
-      imageSettings = ownership.kind === "borrowed" ? ownership.client.imageSettings : await ApplicationImageSettings.open({ context: { session: session.session, origin: { kind: "local-console" } },
+      const audioProduct = content.catalog.require(qw ? "q1-quakeworld" : options.product);
+      const audioSettings = new ConfigStore(audioProduct.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), audioProduct.expectation.contentDirectory));
+      imageSettings = ownership.kind === "borrowed" ? ownership.client.imageSettings : await ApplicationImageSettings.open({ audioOutputFormat: (await loadAudioSettings(audioSettings)).outputFormat ?? defaultAudioOutputFormat, context: { session: session.session, origin: { kind: "local-console" } },
         dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : "q2-classic", gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
         print: text => { if (application === null) host.print(text); else application.print(text); } });
       renderer = ownership.kind === "borrowed" ? ownership.client.renderer : NativeRenderer.open(options, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
@@ -960,11 +964,13 @@ export class RemoteApplication {
         this.releaseViewCvars = this.viewSettings.bindCvars(this.imageSettings.cvars);
         if (q3 !== null && this.viewSettings.override !== null) q3.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
         frontend.audio.bindHaptics(controls); frontend.audio.bindVolumeCvars(this.imageSettings.cvars);
+        frontend.audio.bindOutputCvars(this.imageSettings.cvars);
         seat.attachPresentation(presentation, () => presentation.close());
         if (borrowed !== null) {
           controls.publishClientPlatform(borrowed, "retain");
           publishAudio?.(); borrowed.output.current = frontend.audio.engine;
         } else if (previous === null) controls.activatePreparedPlatform(); else previous.transferPlatformTo(controls);
+        applyAudioOutputSettings(this.imageSettings.cvars, frontend.audio);
         retiredScripts = borrowed === null ? owner.scripts : borrowed.configuration.current.scripts;
         this.clientCommandOwner = { ...owner, scripts };
         if (borrowed !== null) borrowed.configuration.current = { scripts, options: this.options };

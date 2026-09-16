@@ -1,3 +1,4 @@
+import { audioOutputFormat, audioOutputRates, type AudioOutputFormat } from "../../audio/output.ts";
 import { registerLlmSettingsMenu, type LlmSettingsUi } from "./llm.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Live options retain Q1/Q2 named cvars and Q3 archived/latched cvar behavior.
@@ -158,6 +159,7 @@ export function bindMouseMotionSettings(service: SettingsValueService<MouseMotio
     toggle("freelook", "Free look", () => service.read().freeLook, value => service.write({ freeLook: value }))];
 }
 export interface AudioOutputSettings {
+  readonly format?: { read(): AudioOutputFormat; select(format: AudioOutputFormat): void };
   selected(): string | null;
   devices(): readonly string[];
   select(name: string | null): void;
@@ -172,7 +174,20 @@ export function bindAudioSettings(service: SettingsValueService<AudioSettings>, 
       if (value !== "default" && !value.startsWith("device:")) throw new Error("Unknown audio output choice");
       output.select(value === "default" ? null : value.slice(7));
     } catch (error) { output.report(`Audio output selection failed: ${error instanceof Error ? error.message : String(error)}`); } } }];
-  return [...device, { id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
+  const format = output?.format;
+  const formats: SettingBinding[] = format === undefined ? [] : ([
+    { id: "ui:audio:rate", label: "Output sample rate", field: "sampleRate", values: audioOutputRates },
+    { id: "ui:audio:bits", label: "Output sample bits", field: "sampleBits", values: [8, 16] },
+    { id: "ui:audio:channels", label: "Output channels", field: "channels", values: [1, 2] },
+  ] satisfies readonly { readonly id: UiControlId; readonly label: string; readonly field: keyof AudioOutputFormat; readonly values: readonly number[] }[]).map(spec => ({
+    id: spec.id, label: spec.label, category: "audio", kind: "choice", enabled: () => true,
+    read: () => String(format.read()[spec.field]),
+    choices: () => [...new Set([...spec.values, format.read()[spec.field]])].map(value => ({ id: String(value),
+      label: spec.field === "sampleRate" ? `${value} Hz` : spec.field === "sampleBits" ? `${value}-bit` : value === 1 ? "Mono" : "Stereo" })),
+    write: value => { try { format.select(audioOutputFormat({ ...format.read(), [spec.field]: Number(value) })); }
+      catch (error) { output?.report(`Audio format selection failed: ${error instanceof Error ? error.message : String(error)}`); } },
+  }));
+  return [...device, ...formats, { id: "ui:audio:effects", label: "Effects volume", category: "audio", kind: "slider", enabled: () => true,
     minimum: 0, maximum: 1, step: 0.05, read: () => service.read().effectsVolume, write: value => service.write({ effectsVolume: value }) },
   { id: "ui:audio:music", label: "Music volume", category: "audio", kind: "slider", enabled: () => true,
     minimum: 0, maximum: 1, step: 0.05, read: () => service.read().musicVolume, write: value => service.write({ musicVolume: value }) }];

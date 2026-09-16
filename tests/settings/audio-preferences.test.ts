@@ -1,3 +1,4 @@
+import { defaultAudioOutputFormat } from "../../src/audio/output.ts";
 import type { Application as ApplicationInstance } from '../../src/app/bootstrap/application.ts';
 import type { RemoteApplication as RemoteApplicationInstance } from '../../src/app/bootstrap/remote-application.ts';
 import type { SdlAudioDevice as SdlAudioDeviceInstance } from '../../src/platform/audio.ts';
@@ -25,7 +26,7 @@ test('audio menu exposes default and retained named output without claiming fail
   try {
     const store = new ConfigStore(root); expect(await loadAudioSettings(store)).toEqual({});
     await saveAudioSettings(store, state);
-    expect(await loadAudioSettings(new ConfigStore(root))).toEqual({deviceName:'Available',effectsVolume:0.3,musicVolume:0.8});
+    expect(await loadAudioSettings(new ConfigStore(root))).toEqual({deviceName:'Available',effectsVolume:0.3,musicVolume:0.8,outputFormat:defaultAudioOutputFormat});
     state.selectedOutput = null; await saveAudioSettings(store, state);
     expect((await loadAudioSettings(store)).deviceName).toBeNull();
   } finally { await rm(root,{recursive:true,force:true}); }
@@ -128,10 +129,40 @@ test('native remote named audio output and volumes survive travel and close', as
     expect(current.selectedOutput).toBe(named);expect(current.effectsVolume).toBe(0.35);expect(current.musicVolume).toBe(0.65);
     expect(app.localPlayers[0]?.seat).toBe(seat);expect(app.window).toBe(window);expect(app.session.world).toBeNull();
     await app.close();remote=null;
-    expect(await loadAudioSettings(new ConfigStore(join(root,'client/q1/id1')))).toEqual({deviceName:named,effectsVolume:0.35,musicVolume:0.65});
+    expect(await loadAudioSettings(new ConfigStore(join(root,'client/q1/id1')))).toEqual({deviceName:named,effectsVolume:0.35,musicVolume:0.65,outputFormat:defaultAudioOutputFormat});
   } finally {
     try { await remote?.close(); } finally {
       try { await serverOwner?.close(); } finally { prepare.mockRestore();opened.mockRestore();closed.mockRestore();await rm(root,{recursive:true,force:true}); }
     }
   }
 },60000);
+
+test('audio output format menu, canonical aliases and persistence share validated values', async () => {
+  const { CvarRegistry } = await import('../../src/core/cvars/index.ts');
+  const { createIdentityOwner } = await import('../../src/contracts/identity.ts');
+  const { registerAudioOutputCvars, readAudioOutputCvars, writeAudioOutputCvars } = await import('../../src/app/bootstrap/audio/output-settings.ts');
+  const identity = createIdentityOwner('audio-output-settings');
+  const cvars = new CvarRegistry({ dialect: 'q3', context: { session: identity.session, origin: { kind: 'local-seat', seat: identity.seat(0), client: identity.client(0, 0) } } });
+  registerAudioOutputCvars(cvars);
+  cvars.set('s_khz', '22'); expect(readAudioOutputCvars(cvars).sampleRate).toBe(22050);
+  cvars.set('s_outputBits', '8'); cvars.set('s_outputChannels', '1');
+  let selected = readAudioOutputCvars(cvars);
+  const messages: string[] = [];
+  const bindings = bindAudioSettings({ read: () => ({ effectsVolume: 0.7, musicVolume: 1 }), write: () => undefined }, {
+    selected: () => null, devices: () => [], select: () => undefined, report: text => { messages.push(text); },
+    format: { read: () => selected, select: format => { selected = format; writeAudioOutputCvars(cvars, format); } },
+  });
+  const rate = bindings.find(binding => binding.id === 'ui:audio:rate');
+  if (rate?.kind !== 'choice') throw new Error('Missing rate choice');
+  rate.write('48000'); expect(cvars.variableString('s_khz')).toBe('48');
+  rate.write('0'); expect(selected.sampleRate).toBe(48000); expect(messages).toHaveLength(1);
+  expect(cvars.find('s_channels')).toBeUndefined();
+  const root = await mkdtemp(join(tmpdir(), 'audio-output-format-'));
+  try {
+    const store = new ConfigStore(root);
+    await saveAudioSettings(store, { outputFormat: selected, selectedOutput: null, effectsVolume: 0.7, musicVolume: 1 });
+    expect((await loadAudioSettings(store)).outputFormat).toEqual({ sampleRate: 48000, sampleBits: 8, channels: 1 });
+    await store.dump('audio.json', JSON.stringify({ version: 1, deviceName: null, effectsVolume: 0.7, musicVolume: 1 }));
+    expect((await loadAudioSettings(store)).outputFormat).toEqual(defaultAudioOutputFormat);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

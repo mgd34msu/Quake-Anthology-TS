@@ -111,8 +111,17 @@ export class RawAudioStream {
     private end = 0;
     paused = false;
     constructor(readonly outputRate: number) { }
+    get initialized(): boolean { return this.inputRate !== 0; }
     get queuedSourceFrames(): number { return Math.max(0, this.end - this.sourcePosition); }
-    get sourcePosition(): number { return this.origin + Math.floor(this.outputFrames * this.inputRate / this.outputRate); }
+    get sourcePosition(): number { return Math.floor(this.origin + this.outputFrames * this.inputRate / this.outputRate); }
+    /** Retain queued input and fractional phase when only the output device rate changes. */
+    withOutputRate(outputRate: number): RawAudioStream {
+        const next = new RawAudioStream(outputRate);
+        next.segments = [...this.segments]; next.inputRate = this.inputRate; next.channels = this.channels;
+        next.origin = this.origin + this.outputFrames * this.inputRate / this.outputRate;
+        next.end = this.end; next.paused = this.paused;
+        return next;
+    }
     queue(chunk: StreamPcm): void {
         if (!Number.isSafeInteger(chunk.sampleRate) || chunk.sampleRate < 1 || !Number.isSafeInteger(chunk.sourceSample) || chunk.sourceSample < 0 || chunk.samples.length % chunk.channels !== 0)
             throw new RangeError("Invalid streamed PCM");
