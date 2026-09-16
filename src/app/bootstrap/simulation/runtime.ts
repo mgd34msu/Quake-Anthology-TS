@@ -381,7 +381,7 @@ export class SharedSimulation implements Simulation {
         return undefined;
       } });
     this.inventory = new SharedInventoryTable(this.actors);
-    this.events = new SimulationEvents(this.physics.bodies, () => this.sourceFrame.time, actor => this.player(actor)?.client ?? null, actor => this.actors.sourceOf(actor)?.slot ?? null);
+    this.events = new SimulationEvents(this.physics.bodies, () => this.sourceFrame.time, actor => this.player(actor)?.client ?? null, actor => this.actors.sourceOf(actor)?.slot ?? null, options.world.kind === "q1-bsp" ? { content: this.recipe.map.entities.content, entities: options.world.entities, alive: actor => this.actors.resolveOwned(actor) !== null } : null);
     this.combat = new GameplayAuthority(this.actors, this.callbacks, {
       impulse: (actor, impulse, movement) => {
         const body = this.physics.bodies.read(actor.id);
@@ -421,6 +421,7 @@ export class SharedSimulation implements Simulation {
       executionProvider: actor => this.executionProvider(actor),
       resolve: (_provider, callback) => callback === "world:think" ? (actor, frame) => { this.callbacks.think(actor, frame); return undefined; } : null });
     this.actors.onRelease(actor => {
+      this.events.retire(actor.id);
       this.actorExecutions.delete(actor.id);
       this.monsterMissions.delete(actor.id);
       this.selectedArsenal?.remove(actor.id);

@@ -39,6 +39,7 @@ interface ScreenVertex {
   readonly y: number;
   readonly z: number;
   readonly inverseW: number;
+  readonly fogDepthScale: number;
   readonly worldPosition: Vec3;
   readonly worldNormal: Vec3;
   readonly texCoord: Vec2;
@@ -88,14 +89,14 @@ function snapshotBatch(batch: DrawBatch): DrawBatch {
 
 function snapshotSourceBatch(batch: SourceStageData["batch"], state: RenderState): DrawBatch {
   const indices = [...batch.indices];
-  if (batch.texturing === "pair") return { texturing: "pair", primitive: "triangles", state, indices, lighting: batch.lighting,
+  if (batch.texturing === "pair") return { texturing: "pair", primitive: "triangles", state, indices, lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }),
     vertices: batch.vertices.map(vertex => ({ position: { ...vertex.position }, color: { ...vertex.color }, texCoord: { ...vertex.texCoord }, texCoord2: { ...vertex.texCoord2 } })),
     get texture() { return batch.texture; },
     secondTexture: {
       get binding() { return batch.secondTexture.binding; },
       get environment() { return batch.secondTexture.environment; },
     } };
-  return { texturing: "single", primitive: "triangles", state, indices, lighting: batch.lighting,
+  return { texturing: "single", primitive: "triangles", state, indices, lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }),
     vertices: batch.vertices.map(vertex => ({ position: { ...vertex.position }, color: { ...vertex.color }, texCoord: { ...vertex.texCoord } })),
     get texture() { return batch.texture; } };
 }
@@ -211,7 +212,7 @@ function subpixel(value: number, scale: number): number {
   return (fraction < 0.5 || (fraction === 0.5 && lower % 2 === 0) ? lower : lower + 1) / scale;
 }
 
-function project(vertex: CpuVertex, viewport: Rect, wScale: number, subpixelScale: number): ScreenVertex {
+function project(vertex: CpuVertex, viewport: Rect, wScale: number, subpixelScale: number, fogScale = 1): ScreenVertex {
   const p = vertex.position;
   // A common scale preserves all perspective ratios and bounds reciprocals.
   const inverseW = wScale / p.w;
@@ -219,7 +220,7 @@ function project(vertex: CpuVertex, viewport: Rect, wScale: number, subpixelScal
     x: subpixel(viewport.x + (p.x / p.w + 1) * viewport.width * 0.5, subpixelScale),
     y: subpixel(viewport.y + (1 - p.y / p.w) * viewport.height * 0.5, subpixelScale),
     z: p.z / p.w,
-    inverseW,
+    inverseW, fogDepthScale: wScale * fogScale,
     worldPosition: vertex.worldPosition, worldNormal: vertex.worldNormal,
     texCoord: vertex.texCoord,
     texCoord2: vertex.texCoord2,
@@ -892,11 +893,11 @@ export class SoftwareRenderer implements RendererBackend {
           });
           if (this.secondaryEnabled) {
             batch = { texturing: "pair", primitive: "triangles", vertices: sourceVertices, indices: batch.indices,
-              lighting: batch.lighting, texture: { kind: "retain-current-texture" }, secondTexture: {
+              lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }), texture: { kind: "retain-current-texture" }, secondTexture: {
                 binding: { kind: "retain-current-texture" }, environment: this.secondaryEnvironment,
               }, state };
           } else batch = { texturing: "single", primitive: "triangles", vertices: sourceVertices, indices: batch.indices,
-              lighting: batch.lighting, texture: { kind: "retain-current-texture" }, state };
+              lighting: batch.lighting, ...(batch.fog === undefined ? {} : { fog: batch.fog }), texture: { kind: "retain-current-texture" }, state };
         } else batch = { ...batch, state };
         if (batch.indices.length !== 0 && mode !== "none") {
           {
@@ -1035,6 +1036,9 @@ export class SoftwareRenderer implements RendererBackend {
   private drawTriangle(a: CpuVertex, b: CpuVertex, c: CpuVertex,
     batch: DrawBatch, texture: BoundTexture, secondary: BoundTexture): void {
     const original: readonly [CpuVertex, CpuVertex, CpuVertex] = [a, b, c];
+    let magnitude = 0;
+    if (batch.fog !== undefined) for (const { position: p } of original) magnitude = Math.max(magnitude, Math.abs(p.x), Math.abs(p.y), Math.abs(p.z), Math.abs(p.w));
+    const fogScale = magnitude > Number.MAX_VALUE / 4 ? magnitude : 1;
     const polygon = clipPolygon(original, this.clipPlane);
     const first = polygon[0];
     if (first === undefined) return;
@@ -1062,8 +1066,8 @@ export class SoftwareRenderer implements RendererBackend {
       const third = polygon[index + 1];
       if (second === undefined || third === undefined) throw new RangeError("Missing clipped vertex");
       const wScale = Math.min(first.position.w, second.position.w, third.position.w);
-      this.triangle(project(first, this.viewport, wScale, this.subpixelScale),
-        project(second, this.viewport, wScale, this.subpixelScale), project(third, this.viewport, wScale, this.subpixelScale), batch, texture, secondary, interpolation);
+      this.triangle(project(first, this.viewport, wScale, this.subpixelScale, fogScale),
+        project(second, this.viewport, wScale, this.subpixelScale, fogScale), project(third, this.viewport, wScale, this.subpixelScale, fogScale), batch, texture, secondary, interpolation);
     }
   }
 
@@ -1099,6 +1103,16 @@ export class SoftwareRenderer implements RendererBackend {
       r = textureColor(r, this.sampled.r, secondary.environment); g = textureColor(g, this.sampled.g, secondary.environment);
       b = textureColor(b, this.sampled.b, secondary.environment);
       if (textureHasAlpha(secondaryTexture.internalFormat)) alpha = secondary.environment === "replace" ? this.sampled.a : alpha * this.sampled.a;
+    }
+    if (batch.fog !== undefined) {
+      const fog = batch.fog, d = fog.kind === "exp2" ? fog.density * fragment.eyeDepth / 64 : 0;
+      const amount = fog.kind === "constant" ? fog.amount : 1 - Math.exp(-d * d);
+      const effect = fog.kind === "constant" ? "color" : fog.effect ?? "color";
+        if (effect !== "none") { r = clamp(r); g = clamp(g); b = clamp(b); }
+        if (effect === "color") { r += (fog.color.x - r) * amount; g += (fog.color.y - g) * amount; b += (fog.color.z - b) * amount; }
+        if (effect === "rgb" || effect === "rgba") { r *= 1 - amount; g *= 1 - amount; b *= 1 - amount; }
+        if (effect === "alpha" || effect === "rgba") alpha *= 1 - amount;
+        if (effect === "overlay") { r = fog.color.x; g = fog.color.y; b = fog.color.z; alpha *= amount; }
     }
     if (!passesAlpha(alpha, state.alphaTest)) return;
     if (this.stencilEnabled && !stencilFragment(this.stencil, index, depthPassed, this.stencilFunction, this.stencilCompareMask,
@@ -1198,6 +1212,7 @@ export class SoftwareRenderer implements RendererBackend {
     const ar = ia.r, br = ib.r, cr = ic.r, ag = ia.g, bg = ib.g, cg = ic.g;
     const ab = ia.b, bb = ib.b, cb = ic.b, aa = ia.a, ba = ib.a, ca = ic.a;
     const setup: TriangleSetup = {
+      ...(batch.fog === undefined ? {} : { fog: batch.fog, fogDepthScale: ia.fogDepthScale }),
       ...(batch.textureEffect === undefined ? {} : { textureEffect: batch.textureEffect }),
       minX, maxX, minY, maxY, inverseArea, depthNear,
       depthFar, edgeAX, edgeAY, edgeAC, edgeBX, edgeBY,

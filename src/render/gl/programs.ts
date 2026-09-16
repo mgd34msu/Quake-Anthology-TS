@@ -4,7 +4,7 @@
 import { loadGlPrograms } from "../../platform/gl-programs.ts";
 import type { Mat4 } from "../../contracts/math.ts";
 import type { SdlRenderContext } from "../../platform/sdl-render-context.ts";
-import type { BatchLighting, RenderState, TextureBundle } from "../../contracts/render.ts";
+import type { BatchFog, BatchLighting, RenderState, TextureBundle } from "../../contracts/render.ts";
 import { shadowFactorLines } from "./shadow-shader.ts";
 
 export const stageVertexShader = `#version 120
@@ -29,6 +29,9 @@ uniform sampler2D primaryTexture;
 uniform sampler2D secondaryTexture;
 uniform int secondaryMode;
 uniform int alphaMode;
+uniform int u_fog_mode;
+uniform vec3 u_fog_color;
+uniform float u_fog_amount;
 varying vec4 vertexColor;
 varying vec2 coordinates0;
 varying vec2 coordinates1;
@@ -114,6 +117,16 @@ void main() {
     else color = second;
     color = clamp(color, 0.0, 1.0);
   }
+  float fogAmount = u_fog_mode == 2 ? u_fog_amount : 0.0;
+  if (u_fog_mode != 0 && u_fog_mode != 2) {
+    float distance = u_fog_amount / (64.0 * gl_FragCoord.w);
+    fogAmount = 1.0 - exp(-distance * distance);
+  }
+  if (u_fog_mode != 0) color.rgb = clamp(color.rgb, 0.0, 1.0);
+  if (u_fog_mode == 1 || u_fog_mode == 2) color.rgb = mix(color.rgb, u_fog_color, fogAmount);
+  if (u_fog_mode == 3 || u_fog_mode == 5) color.rgb *= 1.0 - fogAmount;
+  if (u_fog_mode == 4 || u_fog_mode == 5) color.a *= 1.0 - fogAmount;
+  if (u_fog_mode == 6) color = vec4(u_fog_color, color.a * fogAmount);
   if (alphaMode == 1 && color.a <= 0.0) discard;
   if (alphaMode == 2 && color.a >= 0.5) discard;
   if (alphaMode == 3 && color.a < 0.5) discard;
@@ -170,7 +183,7 @@ export class StageProgram {
   private readonly program: number;
   private readonly depthProgram: number;
   private readonly uniforms = new Map<string, number>();
-  private readonly locations: Partial<Record<"secondaryMode" | "alphaMode" | "u_luminance_alpha" | "u_lighting_mode" | "u_light_count" | "u_shadow_texel" | "u_shadow_near" | "u_shade_scale", number>> = {};
+  private readonly locations: Partial<Record<"u_fog_mode" | "u_fog_color" | "u_fog_amount" | "secondaryMode" | "alphaMode" | "u_luminance_alpha" | "u_lighting_mode" | "u_light_count" | "u_shadow_texel" | "u_shadow_near" | "u_shade_scale", number>> = {};
   private readonly lightLocations: Partial<Record<"u_light_pos" | "u_light_radius" | "u_light_color" | "u_light_scale" | "u_light_cone_cos" | "u_light_cone_dir" | "u_light_frac" | "u_light_shadow" | "u_light_atlas" | "u_light_matrix", number>>[] = [];
   private readonly integers = new Map<number, number>();
   private readonly scalars = new Map<number, number>();
@@ -193,6 +206,7 @@ void main() { gl_FragColor = vec4(1.0); }
       depthProgram = this.depthProgram;
       const gl = this.library.symbols;
       gl.glUseProgram(this.program);
+
       gl.glUniform1i(this.uniform("primaryTexture"), 0);
       gl.glUniform1i(this.uniform("secondaryTexture"), 1);
       gl.glUniform1i(this.uniform("u_shadow_map"), 2);
@@ -247,10 +261,13 @@ void main() { gl_FragColor = vec4(1.0); }
     this.matrices.set(location, [...value]);
   }
 
-  use(environment: TextureBundle["environment"] | null, alphaTest: RenderState["alphaTest"], lighting: BatchLighting = { kind: "vertex" }, luminanceAlpha = false): void {
+  use(environment: TextureBundle["environment"] | null, alphaTest: RenderState["alphaTest"], lighting: BatchLighting = { kind: "vertex" }, luminanceAlpha = false, fog?: BatchFog): void {
     if (this.closed) throw new Error("OpenGL stage program is closed");
     const gl = this.library.symbols;
     gl.glUseProgram(this.program);
+    this.integer((this.locations.u_fog_mode ??= this.uniform("u_fog_mode")), fog === undefined ? 0 : fog.kind === "constant" ? 2 : fog.effect === "none" ? 0 : fog.effect === "rgb" ? 3 : fog.effect === "alpha" ? 4 : fog.effect === "rgba" ? 5 : fog.effect === "overlay" ? 6 : 1);
+    this.vector3((this.locations.u_fog_color ??= this.uniform("u_fog_color")), fog?.color.x ?? 0, fog?.color.y ?? 0, fog?.color.z ?? 0);
+    this.scalar((this.locations.u_fog_amount ??= this.uniform("u_fog_amount")), fog === undefined ? 0 : fog.kind === "exp2" ? fog.density : fog.amount);
     this.integer((this.locations.secondaryMode ??= this.uniform("secondaryMode")), environment === null ? 0 : secondaryModes[environment]);
     this.integer((this.locations.alphaMode ??= this.uniform("alphaMode")), alphaModes[alphaTest]);
     this.integer((this.locations.u_luminance_alpha ??= this.uniform("u_luminance_alpha")), luminanceAlpha ? 1 : 0);

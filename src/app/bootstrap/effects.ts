@@ -105,6 +105,7 @@ export class ApplicationEffects {
   receive(events: readonly SimulationPresentationEvent[]): void {
     if (this.closed) throw new Error("Effect world is closed");
     for (const event of events) {
+      if (event.kind === "q1-fog") continue;
       if (event.sequence <= this.sequence) continue;
       this.sequence = event.sequence; this.pending.push(event);
     }
@@ -249,7 +250,7 @@ export class ApplicationEffects {
     }
     this.time = now;
   }
-  frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null): ApplicationEffectFrame {
+  frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null, q1Fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): ApplicationEffectFrame {
     if (this.closed) throw new Error("Effect world is closed");
     const time = { kind: "seconds", value: this.time ?? 0 } satisfies WorldSnapshot["frame"]["time"];
     const project = createViewProjector(camera), prepared: SceneOperation[] = [], q3Lights: DynamicLight[] = [];
@@ -271,10 +272,10 @@ export class ApplicationEffects {
     }
     const q1Styles = Array.from({ length: 256 }, (_, index) => { const value = this.styles.find(style => style.kind === "q1" && style.style === index); return value?.kind === "q1" ? value.value : 256; });
     const operations: SceneOperation[] = [...this.staticBrushes.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform,
-      { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, animationFrame: brush.frame })), ...prepared];
+      { camera, time, target: { kind: "preview", id: "effects" }, lights: this.sampledLights, q1Styles, ...(q1Fog === undefined ? {} : { q1Fog }), animationFrame: brush.frame })), ...prepared];
     const sourceLights: SurfaceDynamicLight[] = [], q3Admissions: Q3SceneAdmission[] = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values()]) {
-      const frame = effects.frame(camera, source, viewer); q3Admissions.push(frame.admission); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
+      const frame = effects.frame(camera, source, viewer, q1Fog); q3Admissions.push(frame.admission); operations.push(...frame.operations); q3Lights.push(...frame.q3Lights);
       sourceLights.push(...frame.q3Lights.map(light => ({ ...light, minimum: 0 })));
     }
     for (const light of this.sampledLights) q3Lights.push({ origin: light.origin, radius: light.radius, color: light.color });

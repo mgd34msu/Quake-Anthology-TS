@@ -409,6 +409,8 @@ export interface Framebuffer {
 }
 
 export interface TriangleSetup {
+  readonly fogDepthScale?: number;
+  readonly fog?: import("../../contracts/render.ts").BatchFog;
   readonly textureEffect?: "luminance-alpha";
   readonly lighting: CpuTriangleLighting;
   readonly minX: number;
@@ -609,6 +611,16 @@ function runTriangleRowsInternal(setup: TriangleSetup, framebuffer: Framebuffer,
             if (secondaryAlpha) alpha = sampled.a;
             break;
         }
+      }
+      if (setup.fog !== undefined) {
+        const fog = setup.fog, d = fog.kind === "exp2" ? fog.density * (setup.fogDepthScale ?? 1) * reciprocal / 64 : 0;
+        const amount = fog.kind === "constant" ? fog.amount : 1 - Math.exp(-d * d);
+        const effect = fog.kind === "constant" ? "color" : fog.effect ?? "color";
+        if (effect !== "none") { r = clamp(r); g = clamp(g); blue = clamp(blue); }
+        if (effect === "color") { r += (fog.color.x - r) * amount; g += (fog.color.y - g) * amount; blue += (fog.color.z - blue) * amount; }
+        if (effect === "rgb" || effect === "rgba") { r *= 1 - amount; g *= 1 - amount; blue *= 1 - amount; }
+        if (effect === "alpha" || effect === "rgba") alpha *= 1 - amount;
+        if (effect === "overlay") { r = fog.color.x; g = fog.color.y; blue = fog.color.z; alpha *= amount; }
       }
       if (alphaTest !== "none" && !passesAlpha(alpha, alphaTest)) continue;
       if (stencilEnabled && !stencilFragment(framebuffer.stencil, pixel, depthPassed, stencilFunction, stencilCompareMask, stencilWriteMask, stencilMaximum, stencilDepthFail, stencilDepthPass)) continue;

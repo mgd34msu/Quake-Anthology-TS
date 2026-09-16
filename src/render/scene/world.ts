@@ -15,6 +15,7 @@ import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches, q1Ani
 import type { Q1Material, Q2Material } from "../../materials/legacy.ts";
 import { buildQ1Lightmap, buildQ2Lightmap, directLightmapPixels } from "../../materials/lighting.ts";
 import type { LightmapFace, Q1LightmapEncoding, Q2LightStyle, SurfaceDynamicLight } from "../../materials/lighting.ts";
+import { fogSceneOperations } from "./q1-fog.ts";
 import { createFogTexture, fogCoordinates, prepareFogVolume } from "../../materials/fog.ts";
 import type { FogVolume } from "../../materials/fog.ts";
 import { SKY_FACE_SUFFIXES } from "../../materials/sky.ts";
@@ -81,6 +82,7 @@ export interface WorldViewInput extends WorldVisibilityOptions {
   readonly q2Styles?: readonly Q2LightStyle[];
   readonly lights?: readonly SurfaceDynamicLight[];
   readonly q2FragmentLighting?: { readonly lights: readonly Q2FragmentLight[]; readonly atlas: Q2ShadowAtlas | null };
+  readonly q1Fog?: Extract<SceneFog, { readonly kind: "q1" }>;
   readonly q2Fog?: Extract<SceneFog, { readonly kind: "q2" }>;
   readonly q2Sky?: Q2SkyView;
   readonly q3Lights?: readonly DynamicLight[];
@@ -283,7 +285,7 @@ export class WorldScene {
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     const localViewOrigin = model === undefined ? input.camera.origin : localPoint(input.camera.origin, model);
     const coordinate = fog === null ? null : fogCoordinates(fog, input.camera.origin, input.camera.axis[0]);
-    return { time, timeOffset: 0, refdefTime: Math.trunc(time * 1000), identityLight: input.identityLight ?? 1,
+    return { ...(input.q1Fog === undefined ? {} : { q1Fog: { density: input.q1Fog.density, color: input.q1Fog.color, texture: { kind: "bind-image", image: this.shaders.textures.white.image } } }), time, timeOffset: 0, refdefTime: Math.trunc(time * 1000), identityLight: input.identityLight ?? 1,
       entityRGBA: input.materialContext?.entityRGBA ?? { x: 255, y: 255, z: 255, w: 255 }, lighting: input.materialContext?.lighting ??
         { ambientLight: { x: 0, y: 0, z: 0 }, directedLight: { x: 0, y: 0, z: 0 }, lightDir: { x: 0, y: 0, z: 0 }, ambientLightInt: 0 },
       viewOrigin: input.camera.origin, localViewOrigin, noise: this.noise, shaderTexCoord: { x: 0, y: 0 },
@@ -478,7 +480,7 @@ export class WorldScene {
         : surface.kind === "legacy" && surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0) });
     return { visibility, imageOperations: this.shaders.textures.images.drainOperations(), view: { target: input.target, time: input.time,
       viewport: input.camera.viewport, clear: input.clear === undefined ? { color: null, depth: 1, stencil: false } : input.clear,
-      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: finishSceneOperations(operations) } };
+      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: fogSceneOperations(finishSceneOperations(operations), input.q1Fog) } };
   }
 
   private surfaceOperations(surface: WorldSurface, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform, lighting?: { readonly mask: number; readonly lights: readonly DynamicLight[] }, order?: SourceSurfaceOrder): readonly SceneOperation[] {
@@ -527,6 +529,7 @@ export class WorldScene {
     const batches = prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, entityRGBA: context.entityRGBA, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
       alternateAnimation: input.alternateAnimation ?? false,
       fullbright: material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) ?? null : surface.fullbright,
+      q1FogActive: (input.q1Fog?.density ?? 0) > 0,
       q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
       ...(fragmentLighting === undefined ? {} : { fragmentLighting: { kind: "q2-world",
         worldPositions: surface.geometry.vertices.map(vertex => model === undefined ? vertex.position : worldPoint(vertex.position, model)),
@@ -575,7 +578,7 @@ export class WorldScene {
   }
 
   private q1SkyBatches(surface: WorldSurface, sky: { readonly solid: RendererImage; readonly overlay: RendererImage }, input: WorldViewInput, context: MaterialDrawContext): readonly DrawBatch[] {
-    return (["solid", "overlay"] satisfies readonly ("solid" | "overlay")[]).map(layer => ({ primitive: "triangles", texturing: "single", lighting: { kind: "vertex" },
+    return (["solid", "overlay"] satisfies readonly ("solid" | "overlay")[]).map(layer => ({ ...(input.q1Fog === undefined || input.q1Fog.density <= 0 ? {} : { fog: { kind: "constant", color: input.q1Fog.color, amount: input.q1Fog.skyFactor } satisfies import("../../contracts/render.ts").BatchFog }), primitive: "triangles", texturing: "single", lighting: { kind: "vertex" },
       indices: surface.geometry.indices, texture: { kind: "bind-image", image: sky[layer] },
       vertices: surface.geometry.vertices.map(vertex => ({ position: context.project(vertex.position), texCoord: q1SkyTexCoords(vertex.position, input.camera.origin, context.time, layer), color: { x: 1, y: 1, z: 1, w: 1 } })),
       state: { blend: layer === "solid" ? { source: "one", destination: "zero" } : { source: "src-alpha", destination: "one-minus-src-alpha" },

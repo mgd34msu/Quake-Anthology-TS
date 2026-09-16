@@ -367,8 +367,8 @@ export class Q3ApplicationEffects {
     }
     await this.renderer.preload(this.models.map(model => model.entity), entity => this.options.get(entity) ?? {});
   }
-  frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null): { readonly admission: Q3SceneAdmission; readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
-    const input = { camera, time: { kind: "milliseconds", value: this.state.time }, target: { kind: "preview", id: "effects" } } satisfies Parameters<ApplicationAssets["world"]["materialContext"]>[0];
+  frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null, q1Fog?: import("../../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): { readonly admission: Q3SceneAdmission; readonly operations: readonly SceneOperation[]; readonly q3Lights: readonly DynamicLight[] } {
+    const input = { ...(q1Fog === undefined ? {} : { q1Fog }), camera, time: { kind: "milliseconds", value: this.state.time }, target: { kind: "preview", id: "effects" } } satisfies Parameters<ApplicationAssets["world"]["materialContext"]>[0];
     const world = this.assets.world, operations: SceneOperation[] = [];
     const media = this.readyWeapons;
     if (media !== null) media.view.viewAxis = camera.axis;

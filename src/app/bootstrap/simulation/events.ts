@@ -1,3 +1,4 @@
+import { SimulationQ1Fog, type SimulationQ1FogOptions } from "./q1-fog.ts";
 import type { ContentId, ResolvedResourceReference } from "../../../contracts/content.ts";
 import type { ActorId, ClientId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -27,8 +28,12 @@ export class SimulationEvents {
   private readonly styles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
   private readonly persistent = new Map<string, SimulationPresentationEvent>();
 
+  private readonly fog: SimulationQ1Fog | null;
+
   constructor(private readonly bodies: SharedBodyTable, private readonly now: () => SourceTime,
-    private readonly clientFor: (actor: ActorId) => ClientId | null, private readonly sourceSlot: (actor: ActorId) => number | null) {}
+    private readonly clientFor: (actor: ActorId) => ClientId | null, private readonly sourceSlot: (actor: ActorId) => number | null, fog: SimulationQ1FogOptions | null = null) { this.fog = fog === null ? null : new SimulationQ1Fog(fog); }
+
+  retire(actor: ActorId): void { this.fog?.retire(actor); }
 
   get nextSequence(): number { return this.sequence; }
 
@@ -48,6 +53,8 @@ export class SimulationEvents {
     const actor = reference === null ? null : "id" in reference ? reference.id : reference;
     const presentation = { ...source, sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
     this.source.push(presentation);
+    if (source.kind === "q1-composition" && source.event.kind === "addon" && source.event.event.kind === "fog")
+      this.source.push(...(this.fog?.update(presentation, source.event.event) ?? []));
     if (source.kind === "q1" && source.event.kind === "ambient") this.persistent.set(`ambient:${this.presentationSequence}`, presentation);
     if (source.kind === "q1" && source.event.kind === "static-model") this.persistent.set(`static-model:${this.presentationSequence}`, presentation);
     if (source.kind === "q2" && source.event.kind === "music") this.persistent.set("music", presentation);
@@ -90,7 +97,7 @@ export class SimulationEvents {
   }
 
   capture() {
-    return { sequence: this.sequence, presentationSequence: this.presentationSequence, styles: [...this.styles].map(([style, value]) => ({ style, ...value })),
+    return { q1Fog: this.fog?.capture() ?? null, sequence: this.sequence, presentationSequence: this.presentationSequence, styles: [...this.styles].map(([style, value]) => ({ style, ...value })),
       persistent: [...this.persistent].map(([key, value]) => {
         if (value.kind === "q2" && value.event.kind === "sound") return { key, ...value, event: { ...value.event, actor: value.event.actor === null ? null : savedActorId(value.event.actor) } };
         if (value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && (value.event.kind === "ambient" || value.event.kind === "static-model")) return { key, ...value };
@@ -100,6 +107,11 @@ export class SimulationEvents {
   restore(reader: SaveReader, reference: (actor: SavedActorId) => ActorId): undefined {
     this.sequence = reader.field("sequence").integer(0); this.presentationSequence = reader.field("presentationSequence").integer(0);
     this.source.length = 0; this.emitted.length = 0; this.styles.clear(); this.persistent.clear();
+    const fog = reader.field("q1Fog");
+    if (fog.value !== undefined && fog.value !== null) {
+      if (this.fog === null) return fog.fail("Q1 fog state requires a Q1 map");
+      this.source.push(...this.fog.restore(fog, reference));
+    } else this.fog?.reset();
     reader.field("styles").list(value => this.styles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
     reader.field("persistent").list(value => {
       const event = value.field("event"), family = value.field("kind").choice("q1", "q2"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model");

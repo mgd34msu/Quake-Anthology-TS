@@ -1,3 +1,4 @@
+import type { Q1FogTransition } from "../../../materials/legacy-fog.ts";
 import type { CvarArchiveEntry } from "../../../core/cvars/index.ts";
 import type { DebugLine } from "../../../debug/shapes.ts";
 import type { PreparedQ3Game } from "./q3/guest-artifact.ts";
@@ -139,6 +140,7 @@ export interface SimulationPresentation {
 }
 
 export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1Event }
+  | { readonly kind: "q1-fog"; readonly event: { readonly kind: "transition"; readonly player: ActorId | null; readonly transition: Q1FogTransition; readonly skyFactor: number } }
   | { readonly kind: "music"; readonly event: { readonly kind: "cd-track"; readonly track: number } }
   | { readonly kind: "q1-composition"; readonly event: Q1CompositionEvent }
   | { readonly kind: "q1-level"; readonly event: Q1IntermissionResult }

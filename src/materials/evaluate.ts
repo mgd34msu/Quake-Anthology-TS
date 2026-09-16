@@ -1,7 +1,7 @@
 /* Ordered Q3 stage evaluation adapted from tr_shade.c and tr_shade_calc.c.
  * Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later. */
 import type { Vec2, Vec3, Vec4 } from "../contracts/math.ts";
-import type { DrawBatch, RenderState, TextureBinding, RendererImage } from "../contracts/render.ts";
+import type { BatchFog, DrawBatch, RenderState, TextureBinding, RendererImage } from "../contracts/render.ts";
 import type { CompiledMaterial } from "./compile.ts";
 import { animatedPictureIndex, evaluateStageColor } from "./color.ts";
 import type { StageColorContext } from "./color.ts";
@@ -33,6 +33,7 @@ export interface MaterialDrawContext extends Omit<StageColorContext, "time" | "p
   readonly lightmapLighting?: (geometry: MaterialGeometry) => Extract<BatchLighting, { readonly kind: "q2-world" }>;
   readonly depthRange: RenderState["depthRange"];
   readonly polygonOffset: RenderState["polygonOffset"];
+  readonly q1Fog?: { readonly density: number; readonly color: Vec3; readonly texture: TextureBinding };
   readonly fog: { readonly coordinates: (position: Vec3) => Vec2; readonly texture: TextureBinding; readonly color: Vec4 } | null;
   project(position: Vec3): Vec4;
 }
@@ -113,6 +114,8 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
       polygonOffset: definition.polygonOffset ? context.polygonOffset : null });
     const texture = textureBinding(first, time);
     const adjustment: FogAdjustment = pass.fogAdjustment;
+    const q1Fog = context.q1Fog;
+    const fragmentFog = q1Fog === undefined || q1Fog.density <= 0 ? {} : { fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: adjustment } satisfies BatchFog };
     const vertices = geometry.vertices.map((vertex, index) => {
       const previousColor = previousColors[index] ?? { x: 0, y: 0, z: 0, w: 0 };
       let color = evaluateStageColor(pass.stage, vertex, { ...context, time, previousColor }, pass.alphaGen === "skip", pass.rgbGen);
@@ -123,7 +126,7 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
     if (second === undefined) {
       batches.push({ lighting: first.isLightmap && lightmapLighting !== null ? { ...lightmapLighting, pass: "material-lightmap" }
         : pass.rgbGen === SourceColorGenerator.LightingDiffuse && modelLighting !== null ? modelLighting : { kind: "vertex" },
-        primitive: "triangles", texturing: "single", state: renderState, texture, indices: geometry.indices, vertices });
+        ...fragmentFog, primitive: "triangles", texturing: "single", state: renderState, texture, indices: geometry.indices, vertices });
     } else {
       if (!second.active) throw new Error("Collapsed stage lost its second registered texture");
       const secondTexture = textureBinding(second, time);
@@ -132,7 +135,7 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
         if (source === undefined) throw new Error("Material vertex indexing escaped the source geometry");
         return { ...vertex, texCoord2: coordinates(second, source, time, context) };
       });
-      batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "pair", state: renderState, texture, indices: geometry.indices,
+      batches.push({ ...fragmentFog, lighting: { kind: "vertex" }, primitive: "triangles", texturing: "pair", state: renderState, texture, indices: geometry.indices,
         vertices: paired, secondTexture: { binding: secondTexture,
           environment: iterator.multitextureEnv === "add" ? "add" : "modulate" } });
     }
@@ -151,6 +154,19 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
       state: { ...fogPassState(compiled.finished.fogPass, definition.cull), depthRange: context.depthRange,
         polygonOffset: definition.polygonOffset ? context.polygonOffset : null },
       vertices: geometry.vertices.map(vertex => ({ position: context.project(vertex.position), texCoord: fog.coordinates(vertex.position), color: fog.color })) });
+  }
+  const q1Fog = context.q1Fog;
+  if (q1Fog !== undefined && q1Fog.density > 0) {
+    for (let index = 0; index < batches.length; index++) {
+      const batch = batches[index];
+      if (batch !== undefined && batch.fog === undefined) batches[index] = { ...batch, fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: "none" } };
+    }
+    if (compiled.finished.fogPass !== "none") batches.push({ lighting: { kind: "vertex" }, primitive: "triangles", texturing: "single",
+      texture: q1Fog.texture, indices: geometry.indices,
+      fog: { kind: "exp2", density: q1Fog.density, color: q1Fog.color, effect: "overlay" },
+      state: { ...fogPassState(compiled.finished.fogPass, definition.cull), depthRange: context.depthRange,
+        polygonOffset: definition.polygonOffset ? context.polygonOffset : null },
+      vertices: geometry.vertices.map(vertex => ({ position: context.project(vertex.position), texCoord: { x: 0, y: 0 }, color: { x: 1, y: 1, z: 1, w: 1 } })) });
   }
   return batches;
 }

@@ -104,6 +104,7 @@ export interface LegacyMaterialDrawContext {
   readonly animationFrame: number;
   readonly alternateAnimation: boolean;
   readonly fullbright: RendererImage | null;
+  readonly q1FogActive?: boolean;
   readonly q1LightmapEncoding: Q1LightmapEncoding;
   /** Uploaded directLightmapPixels result for translucent or fragment-lit lightmaps. */
   readonly translucentLightmap?: RendererImage;
@@ -144,7 +145,7 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
     ? { ...fragmentLighting, pass: "texture" } : { kind: "vertex" };
   const batches: DrawBatch[] = [{ lighting: textureLighting, primitive: "triangles", texturing: "single", indices: geometry.indices, vertices, state, texture: { kind: "bind-image", image } }];
   if (lightmap !== null) {
-    if (blended) {
+    if (blended || context.q1FogActive === true) {
       const combinedLightmap = context.translucentLightmap;
       if (combinedLightmap === undefined) throw new Error("Translucent lightmapped surfaces require an uploaded directLightmapPixels image");
       const paired = vertices.map((vertex, index) => {

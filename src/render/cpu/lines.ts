@@ -7,6 +7,7 @@ export interface LineFragment {
   readonly x: number;
   readonly y: number;
   readonly depth: number;
+  readonly eyeDepth: number;
   readonly worldPosition: Vec3;
   readonly worldNormal: Vec3;
   readonly color: Vec4;
@@ -126,7 +127,7 @@ export function rasterizeAliasedLine(first: CpuVertex, second: CpuVertex, width:
       const texCoord2Derivative = { dsPerPixel: derivative(delta2.x, residual2.x), dtPerPixel: derivative(delta2.y, residual2.y) };
       for (let actualMinor = Math.max(minorMin, minor); actualMinor <= Math.min(minorMax, minor + thickness - 1); actualMinor++) {
         const actualX = xMajor ? major : actualMinor, actualY = xMajor ? actualMinor : major;
-        emit({ x: actualX, y: height - 1 - actualY,
+        emit({ x: actualX, y: height - 1 - actualY, eyeDepth: Math.abs(1 / inverseW),
           worldPosition: { x: value(a.worldPosition.x, b.worldPosition.x), y: value(a.worldPosition.y, b.worldPosition.y), z: value(a.worldPosition.z, b.worldPosition.z) },
           worldNormal: { x: value(a.worldNormal.x, b.worldNormal.x), y: value(a.worldNormal.y, b.worldNormal.y), z: value(a.worldNormal.z, b.worldNormal.z) },
           depth: ((1 - t) * a.position.z / a.position.w + t * b.position.z / b.position.w) * 0.5 + 0.5,

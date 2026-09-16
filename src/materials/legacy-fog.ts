@@ -1,10 +1,12 @@
 /* Q1 fog fades and Q2 global/height fog translated from Quakespasm gl_fog.c
  * and q2repro shader.c. Copyright (C) Id Software and contributors.
  * SPDX-License-Identifier: GPL-2.0-or-later */
+import { parseQ1Entities } from "../formats/q1-map/entities.ts";
 import type { SceneFog } from "../contracts/render.ts";
 import type { Vec3 } from "../contracts/math.ts";
 
 export interface Q1Fog { readonly density: number; readonly color: Vec3; }
+export interface Q1FogTransition { readonly previous: Q1Fog; readonly target: Q1Fog; readonly start: number; readonly duration: number; }
 const clamp = (value: number): number => Math.min(1, Math.max(0, value));
 function mix(a: Vec3, b: Vec3, fraction: number): Vec3 {
   return { x: a.x + (b.x - a.x) * fraction, y: a.y + (b.y - a.y) * fraction, z: a.z + (b.z - a.z) * fraction };
@@ -21,11 +23,30 @@ export class Q1FogState {
     this.target = { density: Math.max(0, value.density), color: { x: clamp(value.color.x), y: clamp(value.color.y), z: clamp(value.color.z) } };
     this.start = time; this.duration = Math.max(0, duration);
   }
+  capture(): Q1FogTransition { return { previous: { ...this.previous, color: { ...this.previous.color } }, target: { ...this.target, color: { ...this.target.color } }, start: this.start, duration: this.duration }; }
+  install(value: Q1FogTransition): void {
+    this.previous = { ...value.previous, color: { ...value.previous.color } }; this.target = { ...value.target, color: { ...value.target.color } };
+    this.start = value.start; this.duration = value.duration;
+  }
   sample(time: number): Q1Fog {
     const fraction = this.duration === 0 ? 1 : clamp((time - this.start) / this.duration);
     return { density: this.previous.density + (this.target.density - this.previous.density) * fraction,
       color: mix(this.previous.color, this.target.color, fraction) };
   }
+}
+
+/** One worldspawn parser shared by simulation retention and seat initialization. */
+export function q1WorldFog(entities: string): Q1FogTransition {
+  const state = new Q1FogState(), world = parseQ1Entities(entities)[0];
+  for (const property of world?.properties ?? []) {
+    if (property.key.replace(/^_/, "").trimEnd() !== "fog") continue;
+    const values = property.value.trim().split(/\s+/).map(Number), defaults = [0, 0.3, 0.3, 0.3];
+    for (let index = 0; index < 4; index++) {
+      const value = values[index]; if (value === undefined || !Number.isFinite(value)) break; defaults[index] = value;
+    }
+    state.update({ density: defaults[0] ?? 0, color: { x: defaults[1] ?? 0.3, y: defaults[2] ?? 0.3, z: defaults[3] ?? 0.3 } }, 0);
+  }
+  return state.capture();
 }
 
 export function globalFogAmount(densityScaled: number, fragDepth: number): number {

@@ -1,3 +1,4 @@
+import { Q1MapFog } from "./q1-fog.ts";
 import { prepareDebugShapes } from "../../render/scene/debug-shapes.ts";
 import { q1ChaseCamera, q1ViewCamera, q1ViewRectangle, type Q1ViewSettings } from "./q1-client-settings.ts";
 import type { DebugShapePresentationAccess } from "./simulation/types.ts";
@@ -71,6 +72,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   private worldText: readonly WorldText[] = [];
   private readonly worldFonts = new Map<ContentId, Awaited<ReturnType<typeof loadMenuFont>>>();
   private readonly scene: ApplicationWorldScene;
+  private readonly q1Fog: Q1MapFog | null;
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText">, private readonly seatCount: number,
@@ -82,6 +84,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly debugShapes: DebugShapePresentationAccess | null = null,
     private readonly consoleScale: () => number = () => 0,
     private readonly viewSize: () => Q1ViewSettings | null = () => null) {
+    this.q1Fog = assets.content.world.kind === "q1-bsp" ? new Q1MapFog(assets.content.world.entities, local.player.actor, assets.content.recipe.map.entities.content) : null;
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets, () => this.rerelease?.selectedLanguage(local.player.seat.id) ?? "english");
     this.scene = new ApplicationWorldScene(assets, characterAssets);
     this.frames = new SceneFrameBuilder(assets.images);
@@ -150,6 +153,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   sourceEvents(events: readonly SimulationPresentationEvent[]): void {
+    this.q1Fog?.receive(events);
     for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.push(source);
     if (this.q3Client !== null) {
       if (this.local.builder.dialect === "q3") return;
@@ -233,11 +237,12 @@ export class WorldSeatPresentation implements SeatPresentation {
   frame(snapshot: WorldSnapshot): RenderFrame {
     const viewer = this.chaseSettings === null ? this.local.player.actor : null;
     const time = snapshot.frame.time, camera = this.camera(), source = this.q3Client === null ? createSourceSceneOrder(this.assets.materialRegistrations) : null,
-      effects = source === null ? null : this.effects.frame(camera, source, viewer);
+      effects = source === null ? null : this.effects.frame(camera, source, viewer, this.q1Fog?.current(this.preparedTime));
     const playerView = this.effects.playerView(this.local.player.actor, camera);
     const style = (index: number, absent: number): number => this.scene.style(index, absent);
     const input: WorldViewInput = { ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }), camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
       ...this.rerelease?.view(this.local.player.actor, this.preparedTime),
+      ...(this.q1Fog === null ? {} : { q1Fog: this.q1Fog.current(this.preparedTime) }),
       clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
       lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
       ...this.scene.styles() };

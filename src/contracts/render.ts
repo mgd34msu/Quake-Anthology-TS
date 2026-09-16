@@ -185,7 +185,10 @@ export type BatchLighting = { readonly kind: "vertex" }
       | { readonly pass: "model"; readonly lights: readonly (Q2FragmentLight & { readonly fraction: Vec3 })[]; readonly shadeScale: number | null }))
   | { readonly kind: "q2-model-shadow"; readonly worldPositions: readonly Vec3[];
       readonly lights: readonly Q2ModelShadowLight[]; readonly shadeScale: number; readonly atlas: Q2ShadowAtlas };
+export type BatchFog = { readonly kind: "exp2"; readonly effect?: "color" | "none" | "rgb" | "alpha" | "rgba" | "overlay"; readonly color: Vec3; readonly density: number }
+  | { readonly kind: "constant"; readonly color: Vec3; readonly amount: number };
 interface BatchData {
+  readonly fog?: BatchFog;
   readonly textureEffect?: "luminance-alpha";
   readonly indices: readonly number[]; readonly texture: TextureBinding; readonly state: RenderState;
   readonly lighting: BatchLighting;
@@ -204,6 +207,7 @@ export interface SceneCamera {
   readonly clip: { readonly kind: "none" } | { readonly kind: "portal"; readonly plane: Plane; readonly mirror: boolean };
 }
 export type SceneFog = { readonly kind: "none" }
+  | { readonly kind: "q1"; readonly color: Vec3; readonly density: number; readonly skyFactor: number }
   | { readonly kind: "q2"; readonly color: Vec3; readonly density: number; readonly skyFactor: number;
       readonly height: { readonly start: { readonly color: Vec3; readonly distance: number };
         readonly end: { readonly color: Vec3; readonly distance: number }; readonly density: number; readonly falloff: number } }
@@ -222,6 +226,7 @@ export interface DepthAtlasPass {
 /** Q2 rerelease fog runs once after scene lighting and transparency, before screen blends.
  * The camera uses the source symmetric perspective projection. Far depth includes
  * the source 1e-6 sky threshold; skyDrawn distinguishes a sky view from an empty view. */
+
 export interface Q2FogOperation {
   readonly kind: "q2-fog";
   readonly camera: SceneCamera;

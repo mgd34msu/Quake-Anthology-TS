@@ -253,3 +253,46 @@ test("Q3 model fragment lights bind only to diffuse skin stages and preserve emi
   expect(batches[1]?.lighting).toEqual({ kind: "vertex" });
   expect(batches[1]?.state.blend).toEqual({ source: "one", destination: "one" });
 });
+
+test('Q1 world fog respects authored Q3 filter groups and transparent stage attenuation', async () => {
+  const profile = { ...DEFAULT_SHADER_PROFILE, iterator: { ...DEFAULT_SHADER_PROFILE.iterator, multitexture: false } };
+  const compiled = await compileShaderScript(`fog/opaque { cull none
+    { map base rgbGen identity }
+    { map base blendFunc filter rgbGen identity }
+  }
+  fog/transparent { cull none
+    { map base blendFunc blend rgbGen identity alphaGen const 0.5 }
+    { map base blendFunc add rgbGen identity }
+  }`, host, { profile });
+  const opaque = compiled[0], transparent = compiled[1];
+  if (opaque === undefined || transparent === undefined) throw Error('Missing authored fog fixtures');
+  const fogContext: MaterialDrawContext = { ...context, q1Fog: { density: 0.5, color: { x: 1, y: 0, z: 0 }, texture: { kind: 'bind-image', image: white.frame.image } },
+    project(position) { return { ...position, z: 0, w: 64 }; } };
+  const quad: MaterialGeometry = { indices: [0,1,2,0,2,3], vertices: [{x:-64,y:-64},{x:64,y:-64},{x:64,y:64},{x:-64,y:64}].map(p => ({ ...vertex, position: { ...p, z: 0 } })) };
+  const batches = prepareMaterialBatches(opaque, quad, fogContext);
+  expect(batches.map(batch => batch.fog?.kind === 'exp2' ? batch.fog.effect : undefined)).toEqual(['none', 'none', 'overlay']);
+  expect(prepareMaterialBatches(opaque, quad, context)).toHaveLength(2);
+  const blended = prepareMaterialBatches(transparent, quad, fogContext);
+  expect(blended.map(batch => batch.fog?.kind === 'exp2' ? batch.fog.effect : undefined)).toEqual(['alpha', 'rgb']);
+  const renderer = new SoftwareRenderer(2, 2, owner);
+  try {
+    for (const [image, value] of [[white.frame.image, 255], [base.frame.image, 128]] satisfies readonly (readonly [RendererImage, number])[]) {
+      renderer.applyImageResource({ kind: 'create-image', image, content: { kind: 'rgba8', borderColor: { x:0,y:0,z:0,w:0 }, levels: [{ width: 4, height: 4, pixels: Uint8Array.from({ length: 64 }, (_, index) => index % 4 === 3 ? 255 : value) }] }, sampling: { filter: 'nearest', wrap: 'repeat' } });
+    }
+    renderer.beginView({ viewport: { x:0,y:0,width:2,height:2 }, clipPlane:null, clear:{ color:{x:0,y:0,z:0,w:1},depth:1,stencil:false } });
+    for (const batch of batches) renderer.draw(batch);
+    const factor = Math.exp(-0.25), filtered = Math.round(128*128/255)/255;
+    expect(renderer.pixels[0]).toBeCloseTo(Math.round(255*(filtered*factor+1-factor)), 0);
+    expect(renderer.pixels[1]).toBeCloseTo(Math.round(255*filtered*factor), 0);
+    expect(renderer.readDepthPixel(0,0)).toBe(0.5);
+    renderer.beginView({ viewport: { x:0,y:0,width:2,height:2 }, clipPlane:null, clear:{ color:{x:0,y:0,z:0,w:1},depth:1,stencil:false } });
+    for (const batch of blended) renderer.draw(batch);
+    expect(renderer.pixels[0]).toBeCloseTo(Math.round(128*0.5*factor)+Math.round(128*factor), 0);
+    expect(renderer.pixels[0]).toBe(renderer.pixels[1]);
+    expect(renderer.readDepthPixel(0,0)).toBe(1);
+    renderer.beginView({ viewport: { x:0,y:0,width:2,height:2 }, clipPlane:null, clear:{ color:{x:0,y:0,z:0,w:1},depth:1,stencil:false } });
+    const first = blended[0]; if (first === undefined) throw Error('Missing transparent stage');
+    renderer.draw({ ...first, state: { ...first.state, alphaTest: 'ge128' } });
+    expect(renderer.pixels[0]).toBe(0);
+  } finally { renderer.close(); }
+});
