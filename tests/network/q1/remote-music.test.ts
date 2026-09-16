@@ -72,7 +72,7 @@ function fixture() {
   const content = new MusicContent(catalog, selected, readQ1Bsp(bytes), mounts);
   const identity = createIdentityOwner('remote music'), session = new EngineSession(identity, { kind: 'headless' });
   const options = { identity, session, client: session.createClient(0), nextGeneration: (slot: number) => nextActorGeneration(session.session, slot), content: null,
-    loadContent: async () => content, sendCommand() {}, print() {} };
+    loadContent: async () => content, sendCommand() {}, print() {}, publish: (output: import('../../../src/contracts/session.ts').SimulationOutput) => session.publish(output), disconnected: () => {} };
   return { content, session, options };
 }
 const serverData = (serverCount: number): QwServerData => ({ kind: 'server-data', protocol: { kind: 'q1-quakeworld', version: 28 }, serverCount, gameDirectory: 'musicmod', playerSlot: 0, spectator: false, level: 'fixture',

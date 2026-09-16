@@ -52,7 +52,8 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         loading: (value: boolean): void => { this.skinLoading = value; this.selectedSkins.clear(); if (!value) { this.playerSkins.clear(); this.skinSignature = ''; } },
         prepare: (): Promise<void> => this.prepareSkins(),
     };
-    async prepareSkins(): Promise<void> {
+    async prepareSkins(assertCurrent?: () => void): Promise<void> {
+        assertCurrent?.();
         if (this.skinLoading) return;
         const policy = this.options.skinOptions, policySignature = [policy.noskins(), policy.baseskin(), policy.allskins()].join('\0'), signature = `${policySignature}\0${this.skinRevision}`;
         if (signature === this.skinSignature) return;
@@ -61,6 +62,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         for (const [slot, info] of this.userinfos) {
             if ((info.get('name') ?? '') === '') continue;
             const skin = await this.playerSkins.select(info.get('skin') ?? '');
+            assertCurrent?.();
             if (skin !== null) this.selectedSkins.set(slot, skin);
         }
         this.skinSignature = signature;
@@ -81,7 +83,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     private kick = 0;
     private intermission: Extract<QuakeWorldMessage, { kind: 'intermission' }> | null = null;
     private variables: QwMoveVariables | null = null;
-    constructor(readonly options: QwRemotePresentationOptions) { this.playerSkins = new QwPlayerSkins(options.skinOptions); this.world = new RemoteWorldContent(options.content); this.shared = new Q1RemotePresentation({ ...options, loadContent: async world => { this.world.content = await options.loadContent(world); return this.world.content; } }); if (options.downloads !== undefined) this.downloads = options.downloads; }
+    constructor(readonly options: QwRemotePresentationOptions) { this.playerSkins = new QwPlayerSkins(options.skinOptions); this.world = new RemoteWorldContent(options.content); this.shared = new Q1RemotePresentation({ ...options, loadContent: async (world, assertCurrent) => { const content = await options.loadContent(world, assertCurrent); assertCurrent?.(); this.world.content = content; return content; } }); if (options.downloads !== undefined) this.downloads = options.downloads; }
     get moveVariables(): QwMoveVariables | null { return this.variables; }
     get client() { return this.shared.client; }
     get player() { return this.shared.player; }
@@ -94,19 +96,26 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         this.pendingMusicTrack = null;
         await this.options.prepareServerData(data);
     }
-    async gameState(data: QwServerData, models: readonly string[], sounds: readonly string[]): Promise<number> {
+    async gameState(data: QwServerData, models: readonly string[], sounds: readonly string[], assertCurrent?: () => void): Promise<number> {
+        assertCurrent?.();
         this.playerSkins.clear(); this.userinfos.clear(); this.selectedSkins.clear(); this.skinSignature = ''; this.skinLoading = false; this.skinRevision++; this.predictor = null; this.predicted = null; this.modelNames = models; this.linked.length = 0; this.data = data; this.variables = data.moveVariables; this.stats.clear(); this.ownPlayer = null; this.entities = []; this.kick = 0; this.intermission = null;
         const map = models[0]; if (map === undefined) throw new Error('QW has no world model');
-        await this.shared.receive([{ kind: 'server-info', protocol: { kind: 'q1-netquake', version: 15 }, maxClients: 32, gameType: 1, level: data.level, models, sounds }, { kind: 'set-view', entity: data.playerSlot + 1 }], 0);
+        await this.shared.receive([{ kind: 'server-info', protocol: { kind: 'q1-netquake', version: 15 }, maxClients: 32, gameType: 1, level: data.level, models, sounds }, { kind: 'set-view', entity: data.playerSlot + 1 }], 0, assertCurrent);
         if (this.pendingMusicTrack !== null) {
             await this.shared.receive([{ kind: 'cd-track', track: this.pendingMusicTrack, loopTrack: this.pendingMusicTrack }], 0);
             this.pendingMusicTrack = null;
         }
         this.soundCount = sounds.length; this.availableSounds.clear();
-        for (const [index, sound] of sounds.entries()) if (await this.world.content.mounts.resolve(`sound/${sound}`) !== null) this.availableSounds.add(index + 1);
+        for (const [index, sound] of sounds.entries()) {
+            const resolved = await this.world.content.mounts.resolve(`sound/${sound}`);
+            assertCurrent?.();
+            if (resolved !== null) this.availableSounds.add(index + 1);
+        }
+        assertCurrent?.();
         return this.options.mapChecksum({ map, models, sounds }, data.gameDirectory);
     }
-    async receive(messages: readonly QuakeWorldMessage[], now: number): Promise<void> {
+    async receive(messages: readonly QuakeWorldMessage[], now: number, assertCurrent?: () => void): Promise<void> {
+        assertCurrent?.();
         this.records = messages;
         if (this.data === null) {
             for (const message of messages) if (message.kind === 'cd-track') this.pendingMusicTrack = message.track;
@@ -158,8 +167,10 @@ export class QwRemotePresentation implements QwApplicationClientHost {
             translated.push({ kind: 'client-data', weaponAlpha: 0, data: { viewHeight: (own.flags & 1024) !== 0 ? 8 : (own.flags & 512) !== 0 ? -16 : 22, idealPitch: 0, punchAngles: { ...zero, x: this.kick }, velocity: own.velocity, items: stat(15), onGround: false, inWater: false, weaponFrame: own.weaponFrame, armor: stat(4), weaponModel: stat(2), health: stat(0), ammo: stat(3), shells: stat(6), nails: stat(7), rockets: stat(8), cells: stat(9), activeWeapon: stat(10) } });
             this.kick = 0;
         }
-        await this.shared.receive(translated, now);
-        await this.prepareSkins();
+        await this.shared.receive(translated, now, assertCurrent);
+        assertCurrent?.();
+        await this.prepareSkins(assertCurrent);
+        assertCurrent?.();
         if (frame) this.linkSolids(players, nails);
         if (players.some(player => player.number === this.data?.playerSlot)) this.receivePrediction(now);
     }
@@ -236,7 +247,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         if (output === null || player === null) return output;
         const view = this.playerView(player.actor);
         const sampled = { ...output, snapshot: { ...output.snapshot, bodies: output.snapshot.bodies.map(body => body.actor.equals(player.actor) ? { ...body, body: { ...body.body, origin: view.origin, angles: view.angles } } : body) } };
-        this.options.session.publish({ ...sampled, events: [] });
+        this.options.publish({ ...sampled, events: [] });
         return sampled;
     }
     drainPresentationEvents() { return this.shared.drainPresentationEvents(); }

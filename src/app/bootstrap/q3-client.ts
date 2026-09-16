@@ -71,6 +71,7 @@ import { ApplicationQ3ForeignModels } from "./q3-client/foreign.ts";
 import { q3WeaponCamera } from "./q3-client/view.ts";
 
 export interface ApplicationQ3ClientSource extends SnapshotSource {
+  readonly sourceMode: 'live' | 'demo';
   readonly commands: CommandSource;
   readonly clientNumber: number;
   readonly time: number;
@@ -106,7 +107,7 @@ export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
   | { readonly kind: "remote"; readonly movement: PresentationMovementHost; readonly source: ApplicationQ3ClientSource; readonly initialPlayer: Snapshot["playerState"] }
   | { readonly kind: "qvm"; readonly localServer?: boolean; readonly source: ApplicationQ3ClientSource; readonly connection: Q3ClientState;
       readonly browser: Q3BrowserView;
-      readonly queries: SharedSceneQueries; readonly commandBuffer: CommandBuffer; readonly renderer: NativeRenderer;
+      readonly queries: SharedSceneQueries; readonly commandBuffer: Pick<CommandBuffer, 'executeNow' | 'insert'>; readonly renderer: NativeRenderer;
       readonly clientState: QvmApplicationScalarOptions["clientState"] }
 );
 export interface ApplicationQ3LocalRound {
@@ -345,8 +346,8 @@ export class ApplicationQ3Client {
     }
     if (backend.kind === "typescript") {
       await this.foreign.prepare(presentations);
-      await backend.game.frames.drawActiveFrame({ serverTime: this.source.time, stereo: "center", demoPlayback: false, engineFrameNumber: frameNumber });
-    } else await backend.game.draw(this.source.time);
+      await backend.game.frames.drawActiveFrame({ serverTime: this.source.time, stereo: "center", demoPlayback: this.source.sourceMode === 'demo', engineFrameNumber: frameNumber });
+    } else await backend.game.draw(this.source.time, this.source.sourceMode === 'demo');
     for (const submission of this.submissions) if (submission.kind === "scene") {
       for (const [provider, models] of this.models(submission.scene)) await this.renderer(provider).preload(models.map(model => model.entity), entity => models.find(model => model.entity === entity)?.options ?? {});
     }

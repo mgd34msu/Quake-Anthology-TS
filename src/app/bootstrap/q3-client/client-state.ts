@@ -45,6 +45,7 @@ export class LocalQ3ClientState implements Q3ClientState {
     const snapshots = new HistorySnapshotSource(this.history, () => this.parseEntities.number, text => bindings.print(text));
     const owner = this;
     this.source = {
+      sourceMode: 'live',
       clientNumber: this.clientNumber,
       get time() { owner.assertCurrent(); return snapshots.current().serverTime; },
       get serverMessageSequence() { return owner.serverMessageSequence; },

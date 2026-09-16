@@ -55,9 +55,11 @@ test('remote presenters retain the supplied client and seat across peer replacem
     const options = { identity, session, client, content: null,
         nextGeneration: (slot: number): number => nextActorGeneration(session.session, slot),
         loadContent: async () => { throw new Error('Admission must not load content in this lifecycle test'); },
-        userinfo: () => '', print() {}, sendCommand() {} };
+        userinfo: () => '', print() {}, sendCommand() {}, publish: (output: import('../../../src/contracts/session.ts').SimulationOutput) => session.publish(output), disconnected: () => { disconnects++; } };
+    let disconnects = 0;
     try {
-        const first = new Q3RemotePresentation(options);
+        const first = new Q3RemotePresentation({ ...options, disconnected: () => { client.disconnect(); } });
+        client.connect('remote');
         expect(first.client).toBe(client);
         const firstActor = first.actorAt(0);
         expect(firstActor.equals(oldLocal)).toBe(false);
@@ -72,13 +74,19 @@ test('remote presenters retain the supplied client and seat across peer replacem
         expect(client.isClosed).toBe(false);
         expect(seat.isClosed).toBe(false);
 
+        const retained = client.connect('demo');
         const q1 = new Q1RemotePresentation(options);
+        expect(client.connection).toBe(retained);
+        expect(retained.isClosed).toBe(false);
         await q1.receive([{ kind: 'set-view', entity: 1 }], 0);
         const q1Actor = q1.player?.actor;
         expect(q1.client).toBe(client);
         expect(q1Actor?.slot).toBe(firstActor.slot);
         expect(q1Actor?.generation).toBeGreaterThan(firstActor.generation);
         q1.disconnected('replace');
+        expect(disconnects).toBe(1);
+        expect(client.connection).toBe(retained);
+        expect(retained.isClosed).toBe(false);
 
         const qw = new QwRemotePresentation({ ...options,
             skinOptions: { read: async () => null, noskins: () => 0, baseskin: () => 'base', allskins: () => '' },
@@ -87,17 +95,23 @@ test('remote presenters retain the supplied client and seat across peer replacem
         await qw.shared.receive([{ kind: 'set-view', entity: 1 }], 0);
         expect(qw.player?.actor.generation).toBeGreaterThan(q1Actor?.generation ?? -1);
         qw.disconnected('replace');
+        expect(disconnects).toBe(2);
+        expect(client.connection).toBe(retained);
+        expect(retained.isClosed).toBe(false);
+        client.disconnect();
+        expect(retained.isClosed).toBe(true);
 
         const q2 = new Q2RemotePresentation({ ...options, protocol: { kind: 'q2-classic', version: 34 },
             prepareServerData: async () => { throw new Error('No server data'); } });
         expect(q2.client).toBe(client);
         q2.disconnected('replace');
 
-        const second = new Q3RemotePresentation(options);
+        const second = new Q3RemotePresentation({ ...options, disconnected: () => { client.disconnect(); } });
+        client.connect('remote');
         const secondActor = second.actorAt(0);
         expect(secondActor.equals(firstActor)).toBe(false);
         expect(secondActor.generation).toBeGreaterThan(firstActor.generation);
-        await second.clearActive();
+        await second.clearActive(() => session.resources.assertOpen());
         const afterWorldReset = second.actorAt(0);
         expect(afterWorldReset.slot).toBe(secondActor.slot);
         expect(afterWorldReset.generation).toBeGreaterThan(secondActor.generation);

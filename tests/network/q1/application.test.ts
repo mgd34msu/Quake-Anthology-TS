@@ -324,6 +324,12 @@ test('production NetQuake remote frontend presents retail e1m1, sends input and 
         expect(app.content.recipe.map.geometry.requestedPath).toBe('maps/e1m2.bsp');
         expect(app.networkPhase).toBe('active');expect(app.session.world).toBeNull();
         expect(app.localPlayers[0]?.actor.equals(oldActor)).toBe(false);expect(app.localPlayers[0]?.seat).toBe(seat);expect(app.window).toBe(window);
+        const connection = app.remote.client.connection;
+        if (connection === null) throw new Error('Missing published NetQuake connection');
+        const reason = 'NetQuake owner disconnect reason';
+        app.remote.disconnected(reason);
+        expect(prints.filter(text => text === `${reason}\n`)).toHaveLength(1);
+        expect(connection.isClosed).toBe(true); expect(app.remote.client.connection).toBeNull();
         await app.close();await Bun.sleep(1);await server.step(50);expect(server.networkClients.length).toBe(0);
     } finally {await remote?.close();await server.close();}
 },30000);
@@ -389,7 +395,7 @@ test("NetQuake U_NOLERP snaps and dropped-packet interpolation retains the clamp
 const launch=parseApplicationCommand(['--game','q1-classic-id1','--map','e1m1','--movement','q1','--character','q1']);
 if(launch.kind!=='run')throw Error('launch');
 const content=await loadApplicationContent(launch.options),identity=createIdentityOwner('native-review'),session=new EngineSession(identity,{kind:'local'});
-const remote=new Q1RemotePresentation({identity,session,client:session.createClient(0),nextGeneration:slot=>nextActorGeneration(session.session,slot),content,loadContent:async()=>content,sendCommand:()=>{},print:()=>{}});
+const remote=new Q1RemotePresentation({identity,session,client:session.createClient(0),nextGeneration:slot=>nextActorGeneration(session.session,slot),content,loadContent:async()=>content,sendCommand:()=>{},print:()=>{},publish:output=>session.publish(output),disconnected:()=>{}});
 const zero={x:0,y:0,z:0};
 const state=(x:number,step:boolean):Q1ExtendedEntityState=>({number:1,origin:{x,y:0,z:0},angles:zero,modelIndex:2,frame:0,colorMap:0,skin:0,effects:0,alpha:0,scale:16,lerpFinishSeconds:0,step});
 try {

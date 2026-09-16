@@ -172,7 +172,10 @@ test('production protocol68 remote adapter joins actual baseq3 and submits nativ
   const identity = createIdentityOwner('production-q3-remote'), session = new EngineSession(identity, { kind: 'local' });
   const messages: string[] = [], maps: string[] = [];
   let network: InstanceType<typeof Q3ClientNetwork> | null = null;
-  const remote = new Q3RemotePresentation({ identity, session, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content: app.content,
+  const client = session.createClient(0); client.connect('remote');
+  const remote = new Q3RemotePresentation({ identity, session, client, nextGeneration: slot => nextActorGeneration(session.session, slot), content: app.content,
+    disconnected: () => { client.disconnect(); },
+    publish: output => { session.publish(output); },
     userinfo: () => '\\name\\Production Ranger\\model\\sarge/default\\handicap\\100\\rate\\25000\\snaps\\20',
     loadContent: async world => { maps.push(world.map); return app.content; },
     sendCommand: text => { if (network === null) throw new Error('No connection'); network.command(text); }, print: text => { messages.push(text); } });

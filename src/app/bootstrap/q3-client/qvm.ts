@@ -36,7 +36,7 @@ export interface ApplicationQvmClientOptions {
   readonly session: Q3PresentationSession;
   readonly connection: Q3ClientState;
   readonly queries: SharedSceneQueries;
-  readonly commands: CommandBuffer;
+  readonly commands: Pick<CommandBuffer, 'executeNow' | 'insert'>;
   readonly browser: Q3BrowserView;
   readonly map: string;
   readonly now: () => number;
@@ -128,10 +128,10 @@ export class ApplicationQvmClient {
     if (call.role === 'ui') await call.invokeAsync(qvmArguments([QvmUiExport.UI_DRAW_CONNECT_SCREEN, 1]));
     else await this.ui?.drawConnectScreen(true);
   }
-  async draw(time: number): Promise<void> {
+  async draw(time: number, demoPlayback: boolean): Promise<void> {
     this.assertCurrent();
     if (!this.ready || this.cgame === null) throw new Error('QVM cgame has not initialized');
-    await this.cgame.drawActiveFrame(time, 'center', false);
+    await this.cgame.drawActiveFrame(time, 'center', demoPlayback);
     if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.refresh(Math.trunc(this.options.now()));
   }
   async command(argv: readonly string[]): Promise<boolean> { this.assertCurrent(); if (await this.cgame?.consoleCommand(argv)) return true; return await this.ui?.consoleCommand(Math.trunc(this.options.now()), argv) ?? false; }

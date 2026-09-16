@@ -155,7 +155,20 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
                 const retained = await reopened.content.mounts.open('sound/misc/qw-join-test.wav');
                 expect(retained?.bytes).toEqual(new Uint8Array(sound));
                 expect(retained?.reference.provenance.mount.identity.content).toBe(reopened.content.catalog.require(reopened.options.product).id);
+                const connection = reopened.remote.shared.client.connection;
+                if (connection === null) throw new Error('Missing reopened QW connection');
+                const reason = 'QW reopened owner disconnect reason';
+                reopened.remote.disconnected(reason);
+                expect(prints.filter(text => text === `${reason}\n`)).toHaveLength(1);
+                expect(connection.isClosed).toBe(true); expect(reopened.remote.shared.client.connection).toBeNull();
             } finally { await reopened.close(); }
+        } else {
+            const connection = remote.remote.shared.client.connection;
+            if (connection === null) throw new Error('Missing published QW connection');
+            const reason = 'QW owner disconnect reason';
+            remote.remote.disconnected(reason);
+            expect(prints.filter(text => text === `${reason}\n`)).toHaveLength(1);
+            expect(connection.isClosed).toBe(true); expect(remote.remote.shared.client.connection).toBeNull();
         }
     } finally { await app?.close(); server.close(); await rm(root, { recursive: true, force: true }); }
 }, 30000);

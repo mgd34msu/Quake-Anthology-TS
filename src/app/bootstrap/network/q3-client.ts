@@ -12,13 +12,34 @@ import type { WireUserCommand } from '../../../network/q3/message.ts';
 import { MessageReader } from '../../../network/q3/message.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
-export interface Q3ApplicationClientHost extends Pick<Q3ClientBindings, 'systemInfo' | 'gamestate' | 'snapshot' | 'clearActive' | 'mapRestart' | 'print' | 'downloadSize' | 'download'> {
+export interface Q3ApplicationClientHost extends Pick<Q3ClientBindings, 'systemInfo' | 'snapshot' | 'mapRestart' | 'print' | 'downloadSize' | 'download'> {
+  clearActive(assertCurrent: () => void): void | Promise<void>;
+  gamestate(state: Parameters<Q3ClientBindings['gamestate']>[0], generation: number, assertCurrent: () => void): Promise<void>;
   readonly downloading: boolean;
   readonly identity: Q3ConnectionIdentity;
   readonly userinfo: () => string;
   attach(connection: Q3ClientConnection): void;
   command(command: ActorCommand): WireUserCommand;
   disconnected(reason: string): void;
+}
+export function q3ApplicationClientBindings(host: Q3ApplicationClientHost, lifecycle: {
+  assertCurrent(): void;
+  cleared(): void;
+  primed(): void;
+  snapshot: Q3ClientBindings['snapshot'];
+}): Q3ClientBindings {
+  return {
+    assertCurrent: () => lifecycle.assertCurrent(),
+    print: text => host.print(text),
+    clearActive: async () => { await host.clearActive(() => lifecycle.assertCurrent()); lifecycle.assertCurrent(); lifecycle.cleared(); },
+    systemInfo: info => host.systemInfo(info),
+    gamestate: async (state, generation) => { await host.gamestate(state, generation, () => lifecycle.assertCurrent()); lifecycle.assertCurrent(); lifecycle.primed(); },
+    snapshot: (snapshot, ping) => { host.snapshot(snapshot, ping); lifecycle.snapshot(snapshot, ping); },
+    downloadSize: size => host.downloadSize(size), download: block => host.download(block),
+    mapRestart: () => host.mapRestart(),
+    levelShot: () => { throw new Error('Remote server cannot request a local levelshot'); },
+    localServerRunning: () => false,
+  };
 }
 export interface Q3ClientNetworkOptions {
   readonly transport: DatagramTransport<IpAddress>;
@@ -70,19 +91,12 @@ export class Q3ClientNetwork implements ApplicationNetwork {
         this.peer = result.address; this.state = 'loading'; this.lastReceived = now;
         const host = this.options.host;
         const assertCurrent = (): void => { if (this.connection !== connection || this.state === 'closed' || this.state === 'rejected') throw new Error('Q3 callback belongs to a retired connection'); };
-        const connection = new Q3ClientConnection(host.identity, 'baseq3', { kind: 'network', challenge: result.challenge, qport: result.qport }, {
+        const connection = new Q3ClientConnection(host.identity, 'baseq3', { kind: 'network', challenge: result.challenge, qport: result.qport }, q3ApplicationClientBindings(host, {
           assertCurrent,
-          print: text => host.print(text),
-          clearActive: async () => { await host.clearActive(); assertCurrent(); this.state = 'loading'; this.primed = false; this.entered = false; },
-          systemInfo: info => host.systemInfo(info),
-          gamestate: async (state, generation) => { await host.gamestate(state, generation); assertCurrent(); this.primed = !host.downloading; },
-          snapshot: (snapshot, ping) => { host.snapshot(snapshot, ping); if ((snapshot.flags & 2) === 0 && this.primed) this.state = 'active'; },
-          downloadSize: size => host.downloadSize(size),
-          download: block => host.download(block),
-          mapRestart: () => host.mapRestart(),
-          levelShot: () => { throw new Error('Remote server cannot request a local levelshot'); },
-          localServerRunning: () => false,
-        });
+          cleared: () => { this.state = 'loading'; this.primed = false; this.entered = false; },
+          primed: () => { this.primed = !host.downloading; },
+          snapshot: snapshot => { if ((snapshot.flags & 2) === 0 && this.primed) this.state = 'active'; },
+        }));
         this.connection = connection; host.attach(connection);
       } else if (result.kind === 'sequenced' && this.connection !== null) {
         try { await this.connection.receiveDatagram(result.bytes, now); this.lastReceived = now; }

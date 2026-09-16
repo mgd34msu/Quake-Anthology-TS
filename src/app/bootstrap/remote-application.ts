@@ -187,6 +187,7 @@ export class RemoteApplication {
     const nextGeneration = (slot: number): number => nextActorGeneration(session.session, slot);
     if (launchOptions.network.kind === "qw-client") {
       const remote = new QwRemotePresentation({ identity, session, client, nextGeneration, content: null,
+        publish: output => { session.publish(output); }, disconnected: reason => { this.print(`${reason}\n`); client.disconnect(); },
         presentationTime: () => this.presentationTime.milliseconds,
         skinOptions: { read: async path => (await this.mounts.open(path))?.bytes ?? null,
           noskins: () => this.clientCommands?.cvars.variableValue("noskins") ?? 0,
@@ -200,19 +201,23 @@ export class RemoteApplication {
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: world => this.loadServerWorld(world, undefined, true),
         mapChecksum: async world => quakeWorldMapChecksum2(await this.content.mounts.read(world.map)) });
+      client.connect("remote");
       this.remote = remote;
       this.network = new QwClientNetwork({ transport, remote: address, host: remote, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0, userinfo: () => this.clientCommands?.cvars.propagatedInfo("client-userinfo") ?? "" });
     } else if (launchOptions.network.kind === "q1-client") {
       const remote = new Q1RemotePresentation({ identity, session, client, nextGeneration, content: null,
+        publish: output => { session.publish(output); }, disconnected: reason => { this.print(`${reason}\n`); client.disconnect(); },
         presentationTime: () => this.presentationTime.milliseconds,
         print: text => this.print(text), sendCommand: text => this.network.command(text),
         loadContent: world => this.loadServerWorld(world) });
+      client.connect("remote");
       this.remote = remote;
       this.network = new Q1ClientNetwork({ transport, remote: address, host: remote,
         seat: { name: "Player", color: 0, spawnParameters: "", extensionFlags: null } });
     } else if (launchOptions.network.kind === "q3-client") {
       if (address.kind !== "ipv4") throw new Error("Native Q3 remote requires IPv4");
       const remote = new Q3RemotePresentation({ identity, session, client, nextGeneration, content: null,
+        publish: output => { session.publish(output); }, disconnected: () => { client.disconnect(); },
         presentationTime: () => this.presentationTime.milliseconds,
         timescale: () => this.clientCommands?.cvars.variableValue("timescale") ?? 1,
         timeNudge: () => this.clientCommands?.cvars.get("cl_timeNudge")?.integerValue ?? 0,
@@ -232,6 +237,7 @@ export class RemoteApplication {
         } });
       if (this.clientCommands === null) throw new Error("Q3 remote requires its engine cvar owner");
       remote.bindCollisionSettings(new CollisionMapSettings(this.clientCommands.cvars));
+      client.connect("remote");
       this.remote = remote;
       this.network = new Q3ClientNetwork({ transport, remote: address, host: remote, cvars: this.clientCommands.cvars, qport: crypto.getRandomValues(new Uint16Array(1))[0] ?? 0 });
     } else {

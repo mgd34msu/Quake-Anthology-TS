@@ -52,6 +52,8 @@ export interface Q3RemotePresentationOptions {
   shutdown?(): Promise<void>;
   initialize?(connection: Q3ClientConnection): Promise<void>;
   sendCommand(text: string): void;
+  disconnected(reason: string): void;
+  publish(output: SimulationOutput): void;
   print(text: string): void;
 }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
@@ -74,7 +76,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   private source: ApplicationQ3ClientSource | null = null;
   constructor(readonly options: Q3RemotePresentationOptions) {
     this.world = new RemoteWorldContent(options.content);
-    this.client = options.client; this.client.connect('remote');
+    this.client = options.client;
     this.identity = { client: this.client.id, seat: null }; this.userinfo = options.userinfo;
   }
   get scene() { return this.world.scene; }
@@ -97,6 +99,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     const history = new HistorySnapshotSource(connection.history, () => connection.parseEntities.number, text => this.print(text));
     const remote = this;
     this.source = {
+      get sourceMode() { return connection.mode.kind === 'demo' ? 'demo' : 'live'; },
       get time() { return remote.clock.time; }, get clientNumber() { return connection.clientNumber; },
       get serverMessageSequence() { return remote.gameStateMessage; }, get lastExecutedServerCommand() { return remote.gameStateCommands; },
       current: () => history.current(), read: number => history.read(number), actorAt: number => remote.actorAt(number),
@@ -106,12 +109,17 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
       } },
     };
   }
-  async clearActive(): Promise<void> { await this.options.shutdown?.(); this.options.downloads?.close(); this.loadingDownloads = false; this.actors.clear(); this.current = null; this.published = null; this.prediction = null; this.clock.clear(); }
+  async clearActive(assertCurrent: () => void): Promise<void> {
+    assertCurrent(); await this.options.shutdown?.(); assertCurrent();
+    this.options.downloads?.close(); this.loadingDownloads = false; this.actors.clear(); this.current = null;
+    this.published = null; this.prediction = null; this.clock.clear();
+  }
   async systemInfo(info: string): Promise<void> {
-    if (Number(q3InfoValue(info, 'sv_pure')) !== 0 && this.options.initialize === undefined) throw new Error('This server requires pure verification, which is not supported yet.');
+    if (this.connection?.mode.kind !== 'demo' && Number(q3InfoValue(info, 'sv_pure')) !== 0 && this.options.initialize === undefined) throw new Error('This server requires pure verification, which is not supported yet.');
     remoteContentSelection('q3-baseq3', q3InfoValue(info, 'fs_game'));
   }
-  async gamestate(state: Gamestate, _generation: number): Promise<void> {
+  async gamestate(state: Gamestate, _generation: number, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     const connection = this.connection; if (connection === null) throw new Error('Q3 gamestate has no connection');
     const info = connection.gameState.get(0) ?? '';
     if (q3InfoValue(info, 'protocol') !== '68') throw new Error('Q3 remote requires protocol 68');
@@ -120,17 +128,22 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     const map = q3InfoValue(info, 'mapname'); if (!/^[A-Za-z0-9_/-]+$/.test(map) || map.includes('..')) throw new Error('Invalid Q3 remote map name');
     const names = (first: number, count: number): string[] => Array.from({ length: count }, (_, i) => connection.gameState.get(first + i) ?? '').filter(value => value.length > 0);
     this.gameStateMessage = connection.serverMessageSequence; this.gameStateCommands = state.commandSequence;
-    this.loadingDownloads = await this.options.downloads?.prepare(connection) ?? false;
+    const downloading = connection.mode.kind === 'demo' ? false : await this.options.downloads?.prepare(connection) ?? false;
+    assertCurrent(); this.loadingDownloads = downloading;
     if (this.loadingDownloads) return;
-    this.world.content = await this.options.loadContent({ map: `maps/${map}.bsp`, models: names(32, 256), sounds: names(288, 256) }, connection);
+    const content = await this.options.loadContent({ map: `maps/${map}.bsp`, models: names(32, 256), sounds: names(288, 256) }, connection);
+    assertCurrent(); this.world.content = content;
 
     await this.options.initialize?.(connection);
+    assertCurrent();
   }
   downloadSize(size: number): number {
+    if (this.connection?.mode.kind === 'demo') throw new Error('Q3 demo cannot request package downloads');
     if (this.options.downloads === undefined) throw new Error("Q3 package downloads have no writable content owner");
     return this.options.downloads.publishSize(size);
   }
   async download(block: Download): Promise<void> {
+    if (this.connection?.mode.kind === 'demo') throw new Error('Q3 demo cannot request package downloads');
     if (this.options.downloads === undefined) throw new Error("Q3 package downloads have no writable content owner");
     await this.options.downloads.receive(block);
   }
@@ -181,10 +194,11 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
       actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q3:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }],
       configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }],
       scene: { session: this.options.session.session, time: { kind: 'milliseconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles: [], areaBits: snapshot.areaMask } }, events: [] };
-    this.options.session.publish(this.published);
+    this.options.publish(this.published);
   }
   samplePresentation(now: number): SimulationOutput | null {
-    const time = this.clock.advance(Math.trunc(this.options.presentationTime?.() ?? now), { paused: false, timeNudge: this.options.timeNudge?.() ?? 0, timescale: this.options.timescale?.() ?? 1, demo: false, freezeDemo: false, timedemo: false });
+    const time = this.connection?.mode.kind === 'demo' ? this.current === null ? null : this.clock.time
+      : this.clock.advance(Math.trunc(this.options.presentationTime?.() ?? now), { paused: false, timeNudge: this.options.timeNudge?.() ?? 0, timescale: this.options.timescale?.() ?? 1, demo: false, freezeDemo: false, timedemo: false });
     if (time === null) return null; this.publish(time); return this.published;
   }
   private predictionSnapshot(): MovementPredictionSnapshot {
@@ -208,5 +222,5 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   }
   drainPresentationEvents(): readonly SimulationPresentationEvent[] { return []; }
   print(text: string): void { this.options.print(text); }
-  disconnected(reason: string): void { this.print(`${reason}\n`); this.client.disconnect(); }
+  disconnected(reason: string): void { this.print(`${reason}\n`); this.options.disconnected(reason); }
 }

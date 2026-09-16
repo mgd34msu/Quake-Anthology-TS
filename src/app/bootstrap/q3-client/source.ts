@@ -21,6 +21,7 @@ function transportPlayer(source: SourcePlayerState): PlayerStateRecord<number, n
 
 /** One seat's local server transport retains the same snapshot and command rings as cgame. */
 export class ApplicationQ3Source implements SnapshotSource {
+  readonly sourceMode = 'live';
   readonly commands = new ClientCommandHistory();
   private readonly snapshots = new Map<number, Snapshot>();
   private readonly serverCommands = new Map<number, readonly string[]>();

@@ -27,9 +27,11 @@ export interface Q1RemotePresentationOptions {
     readonly client: SessionClient;
     nextGeneration(slot: number): number;
     readonly content: LoadedApplicationContent | null;
-    loadContent(world: Q1RemoteWorld): Promise<LoadedApplicationContent>;
+    loadContent(world: Q1RemoteWorld, assertCurrent?: () => void): Promise<LoadedApplicationContent>;
     sendCommand(text: string): void;
     print(text: string): void;
+    publish(output: SimulationOutput): void;
+    disconnected(reason: string): void;
 }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const weapons = [
@@ -63,6 +65,8 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
     private maxClients = 0;
     private viewEntity = 0;
     private viewAngles = zero;
+    private demoSeconds: number | null = null;
+    private demoAngles: { readonly previous: Vec3; readonly current: Vec3 } | null = null;
     private data: Q1ClientData | null = null;
     private weaponAlpha = 0;
     private readonly actors = new Map<number, ActorId>();
@@ -86,7 +90,6 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         this.world = new RemoteWorldContent(options.content);
 
         this.client = options.client;
-        this.client.connect('remote');
     }
     get scene() { return this.world.scene; }
     get output(): SimulationOutput | null { return this.published; }
@@ -109,7 +112,8 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
     private emit(event: Q1Event, sourceEntity: number | null = null): void {
         this.events.push({ kind: 'q1', event, content: this.world.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++, sourceEntity });
     }
-    async receive(messages: readonly NetQuakeMessage[], now: number): Promise<void> {
+    async receive(messages: readonly NetQuakeMessage[], now: number, assertCurrent?: () => void): Promise<void> {
+        assertCurrent?.();
         this.records = messages;
         for (const message of messages) {
             switch (message.kind) {
@@ -117,7 +121,9 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     const map = message.models[0];
                     if (map === undefined || !map.startsWith('maps/') || !map.endsWith('.bsp'))
                         throw new Error('NetQuake server has no world model');
-                    this.world.content = await this.options.loadContent({ map, models: message.models, sounds: message.sounds });
+                    const loaded = await this.options.loadContent({ map, models: message.models, sounds: message.sounds }, assertCurrent);
+                    assertCurrent?.();
+                    this.world.content = loaded;
                     this.actors.clear();
                     this.ordinal = 0;
                     this.current.clear();
@@ -133,6 +139,8 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     this.viewEntity = 0;
                 this.pendingImpulse = 0;
                     this.viewAngles = zero;
+                    this.demoAngles = null;
+                    this.demoSeconds = null;
                     this.data = null;
                     this.weaponAlpha = 0;
                     this.published = null;
@@ -336,9 +344,10 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         const recipe = this.world.content.recipe, time = this.previousSeconds + (this.seconds - this.previousSeconds) * this.fraction;
         const bodies = [...this.current.values()].map(state => ({ actor: this.actor(state.number), body: { origin: this.sampled(state).origin, angles: this.sampled(state).angles, velocity: state.number === this.viewEntity ? data.velocity : zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }));
         this.published = { snapshot: { session: this.options.session.session, frame: { frame: this.frameNumber, time: { kind: 'seconds', value: time }, elapsed: { kind: 'seconds', value: Math.max(0, this.seconds - this.previousSeconds) }, phase: 'frame-exit' }, actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q1:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }], configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }], scene: { session: this.options.session.session, time: { kind: 'seconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles: [...this.styles].map(([style, pattern]) => ({ kind: 'q1', style, value: pattern.length === 0 ? 256 : (pattern.charCodeAt(Math.floor(time * 10) % pattern.length) - 97) * 22 })), areaBits: null } }, events: [...this.soundsPending] };
-        this.options.session.publish({ ...this.published, events: [] });
+        this.options.publish({ ...this.published, events: [] });
     }
     samplePresentation(now: number): SimulationOutput | null {
+        if (this.demoSeconds !== null) return this.sampleDemo(this.demoSeconds);
         now = this.options.presentationTime?.() ?? now;
         if (this.seconds - this.previousSeconds > 0.1) this.previousSeconds = this.seconds - 0.1;
         const duration = Math.max(0, this.seconds - this.previousSeconds);
@@ -346,11 +355,24 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         this.publish();
         return this.published;
     }
+    get recordedSeconds(): number { return this.seconds; }
+    setDemoViewAngles(current: Vec3, interpolate: boolean): void {
+        this.demoAngles = { previous: interpolate ? this.demoAngles?.current ?? current : current, current };
+    }
+    sampleDemo(seconds: number): SimulationOutput | null {
+        this.demoSeconds = seconds;
+        if (this.seconds - this.previousSeconds > 0.1) this.previousSeconds = this.seconds - 0.1;
+        const duration = this.seconds - this.previousSeconds;
+        this.fraction = duration <= 0 ? 1 : Math.max(0, Math.min(1, (seconds - this.previousSeconds) / duration));
+        if (this.demoAngles !== null) this.viewAngles = angles(this.demoAngles.previous, this.demoAngles.current, this.fraction);
+        this.publish();
+        return this.published;
+    }
     drainPresentationEvents(): readonly SimulationPresentationEvent[] {
         if (this.published === null) return [];
-        this.options.session.publish({ ...this.published, events: [...this.soundsPending] });
+        this.options.publish({ ...this.published, events: [...this.soundsPending] });
         this.soundsPending.length = 0;
         return this.events.splice(0);
     }
-    disconnected(reason: string): void { this.options.print(`${reason}\n`); this.client.disconnect(); }
+    disconnected(reason: string): void { this.options.disconnected(reason); }
 }
