@@ -14,11 +14,16 @@ export function applicationCaptureRoot(userContentRoot: string | undefined): str
 export class ApplicationCapture {
   private readonly operations = new Set<Promise<void>>();
   private readonly reads = new Set<AbortController>();
-  private readonly unregister: () => void;
+  private unregister: (() => void) | null = null;
   private closed = false;
 
   constructor(private readonly input: ApplicationInput, private readonly renderer: NativeRenderer,
-    readonly root: string, mapName: () => string, private readonly print: (text: string) => void) {
+    readonly root: string, private readonly mapName: () => string, private readonly print: (text: string) => void) {}
+
+  activate(): void {
+    if (this.closed) throw new Error("Cannot activate a closed capture owner");
+    if (this.unregister !== null) return;
+    const { input, root, mapName, print } = this;
     const capture = new FrameCapture(root, { readRgba: () => this.readFrame() });
     this.unregister = registerConsoleCommands({ commands: input.commands,
       config: seat => seatConsoleConfig(root, seat),
@@ -53,6 +58,8 @@ export class ApplicationCapture {
     void pending.then(() => { this.operations.delete(pending); });
   }
 
+  get pendingReadback(): boolean { return this.reads.size !== 0; }
+
   async drain(): Promise<void> { await Promise.all([...this.operations]); }
 
   async beforeWorldChange(): Promise<void> {
@@ -63,7 +70,8 @@ export class ApplicationCapture {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.unregister();
+    this.unregister?.();
+    this.unregister = null;
     await this.beforeWorldChange();
   }
 }

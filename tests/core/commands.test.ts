@@ -690,3 +690,41 @@ test("after-dispatch fork keeps nonempty NOW immediate and empty NOW rejected", 
   expect(live.pendingText).toContain("echo tail"); live.execute(); expect(live.pendingText).toContain("echo tail");
   live.execute(); expect(live.programComplete).toBe(true);
 });
+
+for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
+  test(`async host barrier preserves the ordered command tail for ${dialect}`, async () => {
+    const events: string[] = [], commands = new CommandBuffer({ dialect, context: context() });
+    let readback = false, travel = false;
+    commands.register("captureframe", () => { readback = true; events.push("capture"); });
+    commands.register("travelworld", () => { travel = true; events.push("travel queued"); });
+    commands.register("tail", () => { events.push("tail"); });
+    const publish = async (): Promise<void> => { if (travel && !readback) { travel = false; events.push("world published"); } };
+    commands.append("captureframe; travelworld; tail\n");
+    await commands.executeAsync(publish, () => !(travel && readback));
+    expect(events).toEqual(["capture", "travel queued"]);
+    expect(commands.pendingText).toContain("tail");
+    await commands.executeAsync(publish, () => !(travel && readback));
+    expect(events).toEqual(["capture", "travel queued"]);
+    events.push("old frame presented"); readback = false; await publish();
+    await commands.executeAsync(publish, () => !(travel && readback));
+    expect(events).toEqual(["capture", "travel queued", "old frame presented", "world published", "tail"]);
+    expect(commands.pendingText).toBe("");
+  });
+}
+
+test("async script barrier preserves nested exec and outer tail until publication", async () => {
+  const events: string[] = [];
+  let blocked = false;
+  const commands = new CommandBuffer({ dialect: "q2-classic", context: context(), readScript: async () => "pausehost; note inside\n" });
+  commands.register("pausehost", () => { blocked = true; events.push("queued"); });
+  commands.register("note", command => { events.push(command.args[0] ?? ""); });
+  commands.append("exec barrier.cfg; note outside\n");
+  await commands.executeScriptsAsync(async () => {}, () => !blocked);
+  expect(events).toEqual(["queued"]);
+  await commands.executeScriptsAsync(async () => {}, () => !blocked);
+  expect(events).toEqual(["queued"]);
+  events.push("old frame captured", "new world published"); blocked = false;
+  await commands.executeScriptsAsync(async () => {}, () => !blocked);
+  expect(events).toEqual(["queued", "old frame captured", "new world published", "inside", "outside"]);
+  expect(commands.hasPendingCommands).toBe(false);
+});

@@ -226,7 +226,7 @@ export class Application {
   private pendingRestart: number | null = null;
   private lastRestartFrame = -1;
   private localSnapshotServerBit: 0 | 4 = 0;
-  private fatalRoundFailure = false;
+  private fatalWorldFailure = false;
   private roundPresentationEvents: SimulationPresentationEvent[] = [];
   private pendingSave: SaveImage | null = null;
   private savedGames: StartupSaves | null = null;
@@ -1039,6 +1039,7 @@ export class Application {
       }
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease };
       this.capture = new ApplicationCapture(input, renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text));
+      this.capture.activate();
       if (q3.size === 0) await audio.startWorldMusic();
     } catch (error) {
       for (const client of sourceClients) client.close();
@@ -1370,10 +1371,18 @@ export class Application {
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     this.worldOperation = "travel";
     const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
-    try { await serviceLoading(() => this.prepareAndReplaceWorld(map, carry, initialSourceMilliseconds, save, skirmish), () => {
-      if (!this.closed) this.graphical?.input.pollLoadingEvents();
-    }); }
-    finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
+    try {
+      try { await serviceLoading(() => this.prepareAndReplaceWorld(map, carry, initialSourceMilliseconds, save, skirmish), () => {
+        if (!this.closed) this.graphical?.input.pollLoadingEvents();
+      }); }
+      finally {
+        this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve();
+        if (!this.closed) this.resumeInput();
+      }
+    } catch (error) {
+      if (this.fatalWorldFailure && !this.stepping) await this.closeFailedWorld(error);
+      throw error;
+    }
     if (save === undefined) await this.autosaveLevel();
   }
 
@@ -1676,7 +1685,10 @@ export class Application {
         if (nextLocalGuest !== null) this.requestedCommands.push(...nextLocalGuest.pendingCommands.splice(0));
         if (options.dedicated) this.dedicatedCommands = this.sourceCommands;
         if (save !== undefined) this.requestRestoredScores();
-      } finally { await retirePrevious(replacement.retired); }
+      } finally {
+        await retirePrevious(replacement.retired);
+        nextCapture?.activate();
+      }
       if (nextGraphical !== null) {
         this.frontendBaseline = readFrontendPreferences(nextGraphical.input, nextGraphical.audio);
         const graphical = nextGraphical;
@@ -1687,7 +1699,7 @@ export class Application {
       for (const failure of retirementErrors) this.host.print(`Entered world; ${failure.label} failed: ${String(failure.error)}\n`);
       this.host.print(`Entered ${content.recipe.map.geometry.requestedPath}.\n`);
     } catch (error) {
-      if (committed) throw error;
+      if (committed) { this.fatalWorldFailure = true; this.closed = true; this.stopping = true; throw error; }
       const errors: unknown[] = [error];
       const discard = async (close: () => unknown): Promise<void> => { try { await close(); } catch (failure) { errors.push(failure); } };
       await discard(() => stagedCapture?.close());
@@ -1745,12 +1757,20 @@ export class Application {
     this.worldOperation = "loading";
     const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
     try {
-      await serviceLoading(async () => {
-        const image = await readSaveImage(path);
-        await this.prepareAndReplaceWorld(image.recipe.map.geometry.requestedPath, null, 0, image);
-      }, () => { if (!this.closed) this.graphical?.input.pollLoadingEvents(); });
-      this.pendingTeamArena = null; this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null; this.pendingSave = null;
-    } finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
+      try {
+        await serviceLoading(async () => {
+          const image = await readSaveImage(path);
+          await this.prepareAndReplaceWorld(image.recipe.map.geometry.requestedPath, null, 0, image);
+        }, () => { if (!this.closed) this.graphical?.input.pollLoadingEvents(); });
+        this.pendingTeamArena = null; this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null; this.pendingSave = null;
+      } finally {
+        this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve();
+        if (!this.closed) this.resumeInput();
+      }
+    } catch (error) {
+      if (this.fatalWorldFailure && !this.stepping) await this.closeFailedWorld(error);
+      throw error;
+    }
   }
 
   private async restartSourceRound(): Promise<boolean> {
@@ -1875,7 +1895,7 @@ export class Application {
       await network?.server.publish(final.output, [], performance.now());
       return true;
     } catch (error) {
-      if (mutated) { this.fatalRoundFailure = true; this.closed = true; this.stopping = true; }
+      if (mutated) { this.fatalWorldFailure = true; this.closed = true; this.stopping = true; }
       throw error;
     } finally {
       this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve();
@@ -1883,7 +1903,14 @@ export class Application {
     }
   }
 
+  private captureBlocksTransition(): boolean {
+    return this.capture?.pendingReadback === true && (this.pendingSave !== null || this.pendingTeamArena !== null
+      || this.pendingMap !== null || this.pendingTransition !== null || this.simulation.pendingMatchMap() !== null
+      || this.pendingRestart !== null && this.elapsed >= this.pendingRestart);
+  }
+
   private async applyTransition(): Promise<void> {
+    if (this.captureBlocksTransition()) return;
     if (this.pendingSave !== null) {
       const image = this.pendingSave, previous = this.content;
       this.pendingSave = null;
@@ -1963,6 +1990,7 @@ export class Application {
   }
 
   private reportCampaignTravelError(error: unknown): void {
+    if (this.fatalWorldFailure) throw error;
     const message = `Campaign transition failed: ${error instanceof Error ? error.message : String(error)}\n`;
     this.host.print(message);
     for (const local of this.graphical?.input.locals ?? []) {
@@ -2002,19 +2030,21 @@ export class Application {
   }
 
   private async afterCommandDispatch(): Promise<void> {
+    if (this.fatalWorldFailure || this.captureBlocksTransition()) return;
     do {
       await this.commands(async () => {
         await this.applyTransition();
         if (this.requestedCommands.length !== 0) await this.afterCommandDispatch();
       });
       await this.applyTransition();
-    } while (this.requestedCommands.length !== 0);
+    } while (this.requestedCommands.length !== 0 && !this.captureBlocksTransition());
   }
 
   private async commands(afterRequest?: () => Promise<void>): Promise<void> {
     const pending = this.requestedCommands;
     this.requestedCommands = [];
-    for (const request of pending) {
+    for (const [index, request] of pending.entries()) {
+      if (this.captureBlocksTransition()) { this.requestedCommands.unshift(...pending.slice(index)); return; }
       let command = request;
       const local = this.graphical?.input.locals.find(local => command.seat !== null && local.player.seat.id.equals(command.seat));
       const source: CommandContext | undefined = command.source ?? (local === undefined ? undefined : { session: this.session.session,
@@ -2190,7 +2220,7 @@ export class Application {
         }
         else throw new Error(`Unknown application command: ${command.name}`);
       } catch (error) {
-        if (error instanceof Q3GameCallbackError) throw error;
+        if (this.fatalWorldFailure || error instanceof Q3GameCallbackError) throw error;
         const message = error instanceof Error ? error.message : String(error);
         print(`${message}\n`);
       } finally {
@@ -2210,12 +2240,17 @@ export class Application {
     try {
       const operation = this.saveOperation; this.saveOperation = null;
       if (operation !== null) {
-        try { await operation.run(); operation.resolve(); } catch (error) { operation.reject(error); }
+        try { await operation.run(); operation.resolve(); } catch (error) {
+          operation.reject(error);
+          if (this.fatalWorldFailure) throw error;
+        }
       }
       await this.applyTransition();
-      const startupFrame = await (this.graphical?.input.advanceStartup() ?? this.preparedStartup?.advanceFrame());
+      const startupFrame = this.captureBlocksTransition() ? true
+        : await (this.graphical?.input.advanceStartup() ?? this.preparedStartup?.advanceFrame());
+      await this.afterCommandDispatch();
       this.graphical?.input.pump(false);
-      if (startupFrame !== true) await this.graphical?.input.commands.executeAsync(() => this.afterCommandDispatch());
+      if (startupFrame !== true) await this.graphical?.input.commands.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition());
       this.enableStartupPersistence();
       const movie = this.campaignMovie;
       if (movie !== null) {
@@ -2249,9 +2284,10 @@ export class Application {
       const beforeFrameEvents = q1 === null ? [] : this.simulation.drainPresentationEvents();
       this.appendQ1Commands(beforeFrameEvents);
       if (this.dedicatedCommands !== null) this.dedicatedConsole?.drain(this.dedicatedCommands);
-      await this.sourceCommands?.executeAsync(() => this.afterCommandDispatch());
+      await this.sourceCommands?.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition());
       if (this.dedicatedCommands !== null && this.dedicatedCommands !== this.sourceCommands)
-        await this.dedicatedCommands.executeAsync(() => this.afterCommandDispatch());
+        await this.dedicatedCommands.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition());
+      const captureTransitionPending = this.captureBlocksTransition();
       const botConfiguration = this.simulation.q1Source()?.cvars ?? this.q2Console?.cvars;
       if (this.bots === null && this.simulation.q3Source() === null && (botConfiguration?.variableValue("bot_minplayers") ?? 0) > 0) {
         const unsupported = botAdmissionError(this.simulation);
@@ -2350,22 +2386,28 @@ export class Application {
         await graphical.audio.frame(output.snapshot, listeners, commonEvents, frameStartedAt);
       }
       await this.capture?.drain();
-      await this.commands();
-      await this.sourceActions();
-      await this.commands();
+      if (captureTransitionPending) {
+        const heldRequests = this.requestedCommands;
+        this.requestedCommands = [];
+        try {
+          await this.sourceActions();
+          await this.commands();
+          await this.applyTransition();
+        } finally { this.requestedCommands.push(...heldRequests); }
+        await this.afterCommandDispatch();
+      } else {
+        await this.commands();
+        await this.sourceActions();
+        await this.commands();
+      }
       const currentGraphics = this.graphical;
       if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease, currentGraphics.renderer);
       this.sourceEvents = [...roundEvents, ...this.sourceEvents];
       return output;
     } catch (error) {
-      if (!this.fatalRoundFailure) { await this.capture?.beforeWorldChange(); throw error instanceof Q3GameCallbackError ? error.cause : error; }
-      const original = error instanceof Q3GameCallbackError ? error.cause : error;
-      const errors: unknown[] = [original];
-      try { await this.capture?.beforeWorldChange(); } catch (cleanup) { errors.push(cleanup); }
+      if (!this.fatalWorldFailure) { await this.capture?.beforeWorldChange(); throw error instanceof Q3GameCallbackError ? error.cause : error; }
       this.stepping = false; this.stepCompletion = null; completion.resolve();
-      try { await this.close(); } catch (cleanup) { errors.push(cleanup); }
-      if (errors.length > 1) throw new AggregateError(errors, "Round restart and shutdown failed");
-      throw original;
+      return await this.closeFailedWorld(error);
     }
     finally { this.stepping = false; this.stepCompletion = null; completion.resolve(); }
   }
@@ -2396,6 +2438,14 @@ export class Application {
     if (this.closing !== null) return this.closing;
     this.closed = true; this.stopping = true;
     this.closing = this.closeOwned(); return this.closing;
+  }
+  private async closeFailedWorld(error: unknown): Promise<never> {
+    const original = error instanceof Q3GameCallbackError ? error.cause : error;
+    const errors: unknown[] = [original];
+    try { await this.capture?.beforeWorldChange(); } catch (cleanup) { errors.push(cleanup); }
+    try { await this.close(); } catch (cleanup) { errors.push(cleanup); }
+    if (errors.length > 1) throw new AggregateError(errors, "World publication and shutdown failed");
+    throw original;
   }
   private async closeOwned(): Promise<void> {
     await this.stepCompletion;

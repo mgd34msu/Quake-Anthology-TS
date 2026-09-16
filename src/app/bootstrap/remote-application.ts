@@ -617,6 +617,7 @@ export class RemoteApplication {
       try { assertCurrent(); } catch (error) { controls.close(); throw error; }
       this.controls = controls;
       this.capture = new ApplicationCapture(this.controls, this.renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.print(text));
+      this.capture.activate();
     } else {
       const local = this.controls.locals[0];
       if (local === undefined) throw new Error("Remote input lost its local seat");

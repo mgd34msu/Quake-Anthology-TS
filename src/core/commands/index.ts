@@ -379,8 +379,8 @@ export class CommandBuffer {
     return executed;
   }
 
-  executeAsync(afterDispatch: () => Promise<void>): Promise<number> {
-    return this.drainAsync(afterDispatch, false);
+  executeAsync(afterDispatch: () => Promise<void>, shouldContinue?: () => boolean): Promise<number> {
+    return this.drainAsync(afterDispatch, false, shouldContinue);
   }
 
   /** Await nested script reads, stopping at the same wait boundary as one frame. */
