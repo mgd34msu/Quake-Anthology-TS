@@ -273,7 +273,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         const counts = new Map([['shells', data.shells], ['nails', data.nails], ['rockets', data.rockets], ['cells', data.cells]]);
         const item: ItemId | null = weapon === undefined ? null : `q1:weapon/${weapon.name}`;
         const ammo = weapon?.ammo;
-        return { health: data.health, armor: data.armor === 0 ? { kind: 'none' } : { kind: 'q1', points: data.armor, absorption: (data.items & 32768) !== 0 ? 0.8 : (data.items & 16384) !== 0 ? 0.6 : 0.3, item: 'q1:armor' }, activeWeapon: item,
+        return { powerups: [], health: data.health, armor: data.armor === 0 ? { kind: 'none' } : { kind: 'q1', points: data.armor, absorption: (data.items & 32768) !== 0 ? 0.8 : (data.items & 16384) !== 0 ? 0.6 : 0.3, item: 'q1:armor' }, activeWeapon: item,
             ammo: ammo === undefined || ammo === null ? null : { item: `q1:ammo/${ammo}`, count: data.ammo }, arsenalWarning: 'none',
             weaponStatus: weapon === undefined || source === undefined || item === null ? null : { source, item, label: weapon.name, ammo: ammo === null || ammo === undefined ? { kind: 'unmetered' } : { kind: 'finite', item: `q1:ammo/${ammo}`, count: data.ammo, hasAmmoToStart: data.ammo > 0, low: false } },
             inventory: [...counts].map(([name, count]) => ({ item: `q1:ammo/${name}`, count, capacity: count })),

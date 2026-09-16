@@ -224,7 +224,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       const player = this.simulation.playerUi(this.local.player.actor);
       const armor = player.armor.kind === "none" ? 0 : player.armor.points;
       const base = emptyHudData(this.local.player.seat.id);
-      const hud: CommonHudData = { ...base, prompts: this.match.prompts, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
+      const hud: CommonHudData = { ...base, powerups: player.powerups, prompts: this.match.prompts, ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
         crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeStatus },
         ...(player.weaponStatus === null ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
           weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,

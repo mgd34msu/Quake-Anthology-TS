@@ -1,3 +1,4 @@
+import { q2PowerupTimers } from "../../../src/app/bootstrap/simulation/powerup-timers.ts";
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../src/contracts/identity.ts";
@@ -369,3 +370,27 @@ test("proximity explosion credits live shared owners and falls back after their 
     } finally { scene.actors.close(); }
   }
 });
+
+for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) test(
+  "active HUD timers read " + edition + " source uses, stacking, expiry and actor identity", () => {
+    const scene = fixture(edition);
+    const items = new Q2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined });
+    const armory = registerQ2MissionPackArmory("rogue", { weapons: scene.weapons, items, monster: () => null, playerEffect: () => undefined, hunterCamera: false, intermission: () => false }, "rerelease");
+    items.configurePlayer(scene.player, scene.game);
+    scene.setTime(10);
+    for (const item of ["q2:item_quad", "q2:item_invulnerability", "q2:item_double", "q2:item_quadfire", "q2:item_enviro", "q2:item_breather", "q2:item_ir_goggles"] satisfies readonly import("../../../src/contracts/gameplay.ts").ItemId[]) {
+      scene.inventory.configure(scene.player, { item, count: 2, capacity: 10 });
+      expect(items.use(scene.player, item, scene.game)).toBe(true);
+    }
+    expect(items.use(scene.player, "q2:item_quad", scene.game)).toBe(true);
+    const timers = () => q2PowerupTimers(items.playerPowerups(scene.player.id), armory.items.powerups(scene.player.id), scene.game.host.now());
+    expect(timers().map(timer => [timer.item, timer.remainingSeconds])).toEqual([
+      ["q2:item_quad", 60], ["q2:item_quadfire", 30], ["q2:item_double", 30], ["q2:item_invulnerability", 30], ["q2:item_enviro", 30], ["q2:item_breather", 30], ["q2:item_ir_goggles", 60],
+    ]);
+    const other = scene.target(100).actor.id;
+    expect(q2PowerupTimers(items.playerPowerups(other), armory.items.powerups(other), scene.game.host.now())).toEqual([]);
+    scene.setTime(39.75);
+    expect(timers().map(timer => timer.remainingSeconds)).toEqual([30.25, 0.25, 0.25, 0.25, 0.25, 0.25, 30.25]);
+    scene.setTime(40); expect(timers().map(timer => timer.item)).toEqual(["q2:item_quad", "q2:item_ir_goggles"]);
+    scene.setTime(70); expect(timers()).toEqual([]);
+  });

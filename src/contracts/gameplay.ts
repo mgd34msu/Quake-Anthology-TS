@@ -3,6 +3,11 @@ import type { Vec3 } from "./math.ts";
 import type { SourceTime } from "./time.ts";
 
 export type ItemId = `${string}:${string}`;
+export interface ActivePowerupTimer {
+  readonly item: ItemId;
+  readonly label: string;
+  readonly remainingSeconds: number;
+}
 export type ObjectiveId = `${string}:${string}`;
 
 /** Selected arsenal controls travel with a command independently of its movement dialect. */

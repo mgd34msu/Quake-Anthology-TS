@@ -165,7 +165,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
     const definitions = Q3_WEAPON_ITEMS.filter(value => value.weapon <= 10);
     const count = (item: ItemId): number => { const definition = definitions.find(value => value.item === item || value.ammo === item); return definition === undefined ? 0 : definition.item === item ? (ps.stats.get(2) & (1 << definition.weapon)) !== 0 ? 1 : 0 : ps.ammo.get(definition.weapon); };
     const inventory = definitions.flatMap(value => [{ item: value.item, count: count(value.item), capacity: 1 }, ...(value.ammo === null ? [] : [{ item: value.ammo, count: count(value.ammo), capacity: 200 }])]);
-    return { health: ps.stats.get(0), armor: ps.stats.get(3) === 0 ? { kind: 'none' } : { kind: 'q3', points: ps.stats.get(3), protection: Math.fround(0.66) },
+    return { powerups: [], health: ps.stats.get(0), armor: ps.stats.get(3) === 0 ? { kind: 'none' } : { kind: 'q3', points: ps.stats.get(3), protection: Math.fround(0.66) },
       activeWeapon: weapon?.item ?? null, ammo: weapon?.ammo === null || weapon === null ? null : { item: weapon.ammo, count: ps.ammo.get(weapon.weapon) },
       inventory, weaponStatus: q3WeaponStatus(weapon?.item ?? null, 'baseq3', count, source), arsenalWarning: q3ArsenalWarning('baseq3', count),
       items: definitions.map(value => ({ id: value.item, label: value.item.slice('q3:weapon/'.length), kind: 'weapon', sourceOrdinal: value.weapon, owned: count(value.item) > 0,

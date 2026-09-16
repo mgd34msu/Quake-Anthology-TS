@@ -1,4 +1,5 @@
 import { drawWeaponHud, hudStatusRows } from "./weapon.ts";
+import { drawPowerupTimers } from "./powerups.ts";
 import type { CommonWeaponHud } from "./weapon.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Shared per-seat overlay drawing; gameplay providers retain their source HUD/stat layouts.
@@ -58,6 +59,7 @@ export interface HudPointOfInterest {
   readonly expiresMilliseconds: number;
 }
 export interface CommonHudData {
+  readonly powerups: readonly import("../../contracts/gameplay.ts").ActivePowerupTimer[];
   readonly weapon?: CommonWeaponHud;
   readonly seat: SeatId;
   readonly visible: boolean;
@@ -73,7 +75,7 @@ export interface CommonHudData {
   readonly hitMarker: { readonly damage: number; readonly expiresMilliseconds: number } | null;
 }
 export function emptyHudData(seat: SeatId): CommonHudData {
-  return { seat, visible: true, vitals: [], inventory: null, prompts: [], healthBars: [], help: null, captions: [], wheel: null,
+  return { seat, visible: true, powerups: [], vitals: [], inventory: null, prompts: [], healthBars: [], help: null, captions: [], wheel: null,
     carousel: null, crosshair: { visible: true, color: { x: 1, y: 1, z: 1, w: 1 }, image: null }, hitMarker: null };
 }
 function milliseconds(time: SourceTime): number { return time.kind === "seconds" ? time.value * 1000 : time.value; }
@@ -282,6 +284,10 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   }
   const transform = fitUi(context.binding.safeArea);
   const result: UiDrawCommand[] = [{ kind: "clip", rect: context.binding.safeArea }];
+  const area = context.binding.safeArea;
+  const timerBottom = Math.min(area.y + area.height - 42, ...status.rects.map(rect => status.transform.y + rect.y * status.transform.scale - 4));
+  result.push(...drawPowerupTimers(data.powerups, area, timerBottom, { ...skin, colors: { ...skin.colors, text: color, panel: background } },
+    textScale * transform.scale * preferences.hudScale * context.binding.hudScale, options.measureText, options.localize));
   result.push(...commands.map(item => transformUi(item.command, item.transform ?? { scale: transform.scale * item.scale,
     x: transform.x + item.anchor.x * transform.scale * (1 - item.scale), y: transform.y + item.anchor.y * transform.scale * (1 - item.scale) })));
   if (options.camera !== null) {
