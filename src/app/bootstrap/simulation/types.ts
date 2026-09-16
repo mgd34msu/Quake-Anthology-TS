@@ -138,6 +138,7 @@ export interface SimulationPresentation {
 }
 
 export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1Event }
+  | { readonly kind: "music"; readonly event: { readonly kind: "cd-track"; readonly track: number } }
   | { readonly kind: "q1-composition"; readonly event: Q1CompositionEvent }
   | { readonly kind: "q1-level"; readonly event: Q1IntermissionResult }
   | { readonly kind: "q2"; readonly event: Q2PresentationEvent }

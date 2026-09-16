@@ -30,6 +30,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     readonly shared: Q1RemotePresentation;
     readonly downloads?: QwApplicationDownloads;
     private data: QwServerData | null = null;
+    private pendingMusicTrack: number | null = null;
     private readonly world: RemoteWorldContent;
     private predictor: QuakeWorldPrediction | null = null;
     private predicted: MovementPredictionResult | null = null;
@@ -88,18 +89,29 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     get scene() { return this.shared.scene; }
     get sourceRecords() { return this.records; }
     get scoreboard() { return this.shared.scoreboard; }
-    async serverData(data: QwServerData): Promise<void> { await this.options.prepareServerData(data); }
+    async serverData(data: QwServerData): Promise<void> {
+        this.data = null;
+        this.pendingMusicTrack = null;
+        await this.options.prepareServerData(data);
+    }
     async gameState(data: QwServerData, models: readonly string[], sounds: readonly string[]): Promise<number> {
         this.playerSkins.clear(); this.userinfos.clear(); this.selectedSkins.clear(); this.skinSignature = ''; this.skinLoading = false; this.skinRevision++; this.predictor = null; this.predicted = null; this.modelNames = models; this.linked.length = 0; this.data = data; this.variables = data.moveVariables; this.stats.clear(); this.ownPlayer = null; this.entities = []; this.kick = 0; this.intermission = null;
         const map = models[0]; if (map === undefined) throw new Error('QW has no world model');
         await this.shared.receive([{ kind: 'server-info', protocol: { kind: 'q1-netquake', version: 15 }, maxClients: 32, gameType: 1, level: data.level, models, sounds }, { kind: 'set-view', entity: data.playerSlot + 1 }], 0);
+        if (this.pendingMusicTrack !== null) {
+            await this.shared.receive([{ kind: 'cd-track', track: this.pendingMusicTrack, loopTrack: this.pendingMusicTrack }], 0);
+            this.pendingMusicTrack = null;
+        }
         this.soundCount = sounds.length; this.availableSounds.clear();
         for (const [index, sound] of sounds.entries()) if (await this.world.content.mounts.resolve(`sound/${sound}`) !== null) this.availableSounds.add(index + 1);
         return this.options.mapChecksum({ map, models, sounds }, data.gameDirectory);
     }
     async receive(messages: readonly QuakeWorldMessage[], now: number): Promise<void> {
         this.records = messages;
-        if (this.data === null) return;
+        if (this.data === null) {
+            for (const message of messages) if (message.kind === 'cd-track') this.pendingMusicTrack = message.track;
+            return;
+        }
         const translated: NetQuakeMessage[] = [], players: QwPlayerState[] = [], nails: Q1ExtendedEntityState[] = [];
         let frame = false;
         for (const message of messages) {

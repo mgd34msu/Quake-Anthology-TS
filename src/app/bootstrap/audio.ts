@@ -366,7 +366,9 @@ export class ApplicationAudio {
 
   async receive(events: readonly SimulationPresentationEvent[]): Promise<void> {
     for (const source of events) {
-      if (source.kind === "q1") {
+      if (source.kind === "music") {
+        await this.playMusic(source.content, String(source.event.track));
+      } else if (source.kind === "q1") {
         const event = source.event;
         if (event.kind === "sound") {
           const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;

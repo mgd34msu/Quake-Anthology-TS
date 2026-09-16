@@ -171,6 +171,10 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                 case 'light-style':
                     this.styles.set(message.index, message.value);
                     break;
+                case 'cd-track':
+                    this.events.push({ kind: 'music', event: { kind: 'cd-track', track: message.track },
+                        content: this.world.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++ });
+                    break;
                 case 'name':
                 case 'colors':
                 case 'frags': {
