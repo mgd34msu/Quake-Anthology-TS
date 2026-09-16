@@ -182,10 +182,10 @@ export class ApplicationAudio {
       print(`Sound output: ${this.engine.outputState}\n`);
       if (output !== null) {
         print(`SDL device: ${output.deviceName ?? "system default"}\n`);
-        print(`${output.sampleRate} Hz, ${output.channels} channels, ${output.sampleBits}-bit PCM; buffer ${output.bufferFrames} frames\n`);
+        print(`${output.sampleRate} Hz, ${output.channels} ${output.channels === 1 ? "channel" : "channels"}, ${output.sampleBits}-bit PCM; buffer ${output.bufferFrames} frames\n`);
         print(`${this.engine.queuedFrames} queued frames, maximum ${output.maximumQueuedFrames}; mixed clock ${this.engine.sampleClock}\n`);
       }
-      print(`Effects volume ${this.effectsVolume}; music volume ${this.musicVolume}; listeners ${this.listeners.length}\n`);
+      print(`Effects volume ${Number(this.effectsVolume.toPrecision(6))}; music volume ${Number(this.musicVolume.toPrecision(6))}; listeners ${this.listeners.length}\n`);
       return true;
     }
     if (request.name === "soundlist" || request.name === "s_list") {
