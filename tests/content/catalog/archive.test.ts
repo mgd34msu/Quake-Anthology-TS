@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { decodeArchive, normalizeEntryPath, openArchive, openLooseEntry, readLooseEntry } from "../../../src/content/archive/index.ts";
 
-function duplicatePak(): Uint8Array {
+function duplicatePak(path = "Models\\duplicate.mdl"): Uint8Array {
   const bytes = new Uint8Array(142);
   const view = new DataView(bytes.buffer);
   bytes.set(new TextEncoder().encode("PACK"));
@@ -14,7 +14,7 @@ function duplicatePak(): Uint8Array {
   bytes[13] = 42;
   for (let ordinal = 0; ordinal < 2; ordinal++) {
     const offset = 14 + ordinal * 64;
-    bytes.set(new TextEncoder().encode("Models\\duplicate.mdl"), offset);
+    bytes.set(Uint8Array.from(path, character => character.charCodeAt(0)), offset);
     view.setInt32(offset + 56, 12 + ordinal, true);
     view.setInt32(offset + 60, 1, true);
   }
@@ -41,6 +41,20 @@ test("memory PAK retains duplicate ordinals, source spelling and owned bytes", a
   unsafe.set(new TextEncoder().encode("../escape"), 14);
   expect(() => decodeArchive(unsafe)).toThrow("Unsafe archive member path");
   expect(normalizeEntryPath("models/monsters/tank/../ctank/skin.pcx")).toBe("models/monsters/ctank/skin.pcx");
+});
+
+test("archive name indexes retain duplicate order and distinct case rules", () => {
+  const archive = decodeArchive(duplicatePak("Models/\u00c9lite.mdl"));
+  try {
+    for (let repeat = 0; repeat < 3; repeat++) {
+      expect(archive.findEntries("Models/\u00c9lite.mdl").map(entry => entry.ordinal)).toEqual([0, 1]);
+      expect(archive.findEntries("models/\u00e9lite.mdl", "ascii-insensitive")).toEqual([]);
+      expect(archive.findEntries("models/\u00e9lite.mdl", "case-insensitive").map(entry => entry.ordinal)).toEqual([0, 1]);
+      expect(archive.findEntries("models\\\u00c9LITE.mdl", "ascii-insensitive").map(entry => entry.ordinal)).toEqual([0, 1]);
+      expect(archive.findEntries("missing", "case-insensitive")).toEqual([]);
+    }
+    expect(() => archive.findEntries("../escape", "case-insensitive")).toThrow("Unsafe archive member path");
+  } finally { archive.close(); }
 });
 
 test("loose reads stay within their root and reject changed retained bytes", async () => {

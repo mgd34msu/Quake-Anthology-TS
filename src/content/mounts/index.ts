@@ -193,7 +193,7 @@ export class MountedContent {
   async #readSource(source: MountedSource, memberPath: string): Promise<{ readonly bytes: Uint8Array; readonly provenance: ResourceProvenance } | null> {
     if (!this.#allowed(source, memberPath)) return null;
     if (source.kind === "archive") {
-      const entries = source.archive.entries.filter(entry => !entry.isDirectory && entry.path.toLowerCase() === memberPath.toLowerCase());
+      const entries = source.archive.findEntries(memberPath, "case-insensitive").filter(entry => !entry.isDirectory);
       // PACK walks directory records forward; the Q3 ZIP index replaces duplicate names.
       const entry = source.mount.format === "pak" ? entries[0] : entries.at(-1);
       if (entry === undefined) return null;

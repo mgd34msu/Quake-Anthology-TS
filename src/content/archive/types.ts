@@ -25,7 +25,7 @@ export interface ZipEntry extends EntryMetadata {
 }
 
 export type ArchiveEntry = PakEntry | ZipEntry;
-export type ArchivePathComparison = "exact" | "ascii-insensitive";
+export type ArchivePathComparison = "exact" | "ascii-insensitive" | "case-insensitive";
 
 export interface ArchiveHandle {
   readonly format: ArchiveFormat;
@@ -75,5 +75,6 @@ export function normalizeEntryPath(path: string): string {
 
 export function compareEntryPath(path: string, comparison: ArchivePathComparison): string {
   const normalized = normalizeEntryPath(path);
+  if (comparison === "case-insensitive") return normalized.toLowerCase();
   return comparison === "exact" ? normalized : normalized.replace(/[A-Z]/g, character => character.toLowerCase());
 }

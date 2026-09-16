@@ -15,6 +15,7 @@ export type { ArchiveEntry, ArchiveHandle, ArchivePathComparison, MemoryArchiveH
 class OpenArchive implements ArchiveHandle {
   readonly source: string;
   readonly byteLength: number;
+  private readonly entryIndexes = new Map<ArchivePathComparison, ReadonlyMap<string, readonly ArchiveEntry[]>>();
 
   constructor(protected readonly storage: ArchiveSource, readonly format: ArchiveFormat,
     readonly entries: readonly ArchiveEntry[], protected readonly centralOffset: number) {
@@ -24,7 +25,19 @@ class OpenArchive implements ArchiveHandle {
 
   findEntries(path: string, comparison: ArchivePathComparison = "exact"): readonly ArchiveEntry[] {
     const key = compareEntryPath(path, comparison);
-    return this.entries.filter(entry => compareEntryPath(entry.path, comparison) === key);
+    let index = this.entryIndexes.get(comparison);
+    if (index === undefined) {
+      const created = new Map<string, ArchiveEntry[]>();
+      for (const entry of this.entries) {
+        const name = compareEntryPath(entry.path, comparison), matches = created.get(name);
+        if (matches === undefined) created.set(name, [entry]);
+        else matches.push(entry);
+      }
+      for (const matches of created.values()) Object.freeze(matches);
+      index = created;
+      this.entryIndexes.set(comparison, index);
+    }
+    return index.get(key) ?? [];
   }
 
   protected select(requested: ArchiveEntry | number): ArchiveEntry {
@@ -47,7 +60,7 @@ class OpenArchive implements ArchiveHandle {
     return decodeZipEntry(await this.storage.read(offset, entry.compressedSize), this.source, offset, entry);
   }
 
-  close(): void { this.storage.close(); }
+  close(): void { this.entryIndexes.clear(); this.storage.close(); }
 }
 
 class DecodedArchive extends OpenArchive implements MemoryArchiveHandle {
