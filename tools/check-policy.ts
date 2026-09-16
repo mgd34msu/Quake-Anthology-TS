@@ -306,6 +306,7 @@ function helperLibrary(node: ts.CallExpression, checker: ts.TypeChecker, project
   const kind = call.arguments[0];
   if (kind === undefined || !ts.isStringLiteralLike(kind)) return undefined;
   if (kind.text === "sdl2" && ["src/platform/sdl.ts", "src/platform/audio.ts", "src/platform/controller.ts", "src/platform/sdl-render-context.ts"].includes(projectPath)) return "sdl";
+  if (kind.text === "sdl3" && projectPath === "src/platform/audio.ts") return "sdl";
   if (kind.text === "gl" && projectPath === "src/platform/gl.ts") return "gl";
   if (kind.text === "freetype" && projectPath === "src/platform/freetype.ts") return "freetype";
   if (kind.text === "vorbisfile" && projectPath === "src/platform/vorbis.ts") return "vorbisfile";

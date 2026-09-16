@@ -12,7 +12,7 @@ const fixture = process.env["QUAKE_TEST_OGG"]
 if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
   test("real SDL audio tests use an isolated dummy driver", async () => {
     const child = Bun.spawn([process.execPath, "test", fileURLToPath(import.meta.url)], {
-      env: { ...process.env, SDL_AUDIODRIVER: "dummy", SDL_AUDIO_FREQUENCY: "48000", QUAKE_AUDIO_TEST_CHILD: "1" },
+      env: { ...process.env, SDL_AUDIODRIVER: "dummy", SDL_AUDIO_DRIVER: "dummy", SDL_AUDIO_FREQUENCY: "48000", QUAKE_AUDIO_TEST_CHILD: "1" },
       stdout: "pipe", stderr: "pipe",
     });
     const [code, stdout, stderr] = await Promise.all([
@@ -23,7 +23,7 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
   }, 15000);
   test.skipIf(!existsSync(fixture))("real external Vorbis PCM plays through isolated SDL dummy output", async () => {
     const child = Bun.spawn([process.execPath, "test", fileURLToPath(import.meta.url)], {
-      env: { ...process.env, SDL_AUDIODRIVER: "dummy", QUAKE_AUDIO_TEST_CHILD: "1", QUAKE_AUDIO_OGG_CHILD: "1" },
+      env: { ...process.env, SDL_AUDIODRIVER: "dummy", SDL_AUDIO_DRIVER: "dummy", QUAKE_AUDIO_TEST_CHILD: "1", QUAKE_AUDIO_OGG_CHILD: "1" },
       stdout: "pipe", stderr: "pipe",
     });
     const [code, stdout, stderr] = await Promise.all([
@@ -76,8 +76,8 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
     if (deviceName === undefined) throw new Error("SDL dummy did not enumerate a device");
     const formats: readonly (8 | 16)[] = [8, 16];
     const channelCounts: readonly (1 | 2)[] = [1, 2];
-    for (const sampleBits of formats) for (const channels of channelCounts) {
-      using device = SdlAudioDevice.open({ sampleRate: 48000, channels, sampleBits, deviceName, bufferFrames: 256 });
+    for (const sampleRate of [11025, 22050, 44100, 48000]) for (const sampleBits of formats) for (const channels of channelCounts) {
+      using device = SdlAudioDevice.open({ sampleRate, channels, sampleBits, deviceName, bufferFrames: 256 });
       expect(device.state).toBe("paused");
       const samples = sampleBits === 8 ? new Uint8Array(10 * channels).fill(128) : new Int16Array(10 * channels);
       device.queue(samples.subarray(channels, 6 * channels));
@@ -90,8 +90,14 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
       expect(device.queuedFrames).toBe(0);
       device.queue(sampleBits === 8 ? new Uint8Array(device.maxQueuedFrames * channels).fill(128)
         : new Int16Array(device.maxQueuedFrames * channels));
-      expect(device.queuedFrames).toBe(96000);
+      expect(device.queuedFrames).toBe(sampleRate * 2);
       expect(() => device.queue(samples)).toThrow("two-second limit");
+      const actualFrames = device.bufferFrames;
+      expect(actualFrames).toBeGreaterThan(0);
+      device.close();
+      using reopened = SdlAudioDevice.open({ sampleRate, channels, sampleBits, deviceName, bufferFrames: actualFrames });
+      expect(reopened.state).toBe("paused");
+      expect(reopened.queuedFrames).toBe(0);
     }
   });
 
@@ -140,7 +146,7 @@ if (process.env["QUAKE_AUDIO_TEST_CHILD"] !== "1") {
   test("malformed options fail before a native open", () => {
     for (const sampleRate of [NaN, Infinity, 0, 7999, 192001, 48000.5])
       expect(() => SdlAudioDevice.open({ sampleRate, channels: 2 })).toThrow("sample rate");
-    for (const bufferFrames of [0, 63, 1000, 65536, NaN])
+    for (const bufferFrames of [0, -1, 32769, 1.5, Infinity, NaN])
       expect(() => SdlAudioDevice.open({ sampleRate: 48000, channels: 2, bufferFrames })).toThrow("buffer frames");
     for (const deviceName of ["", "dummy\0suffix"])
       expect(() => SdlAudioDevice.open({ sampleRate: 48000, channels: 2, deviceName })).toThrow("device name");

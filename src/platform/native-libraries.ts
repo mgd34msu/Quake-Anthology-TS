@@ -3,15 +3,16 @@
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 
-export type NativeLibrary = "sdl2" | "gl" | "vorbisfile" | "freetype";
+export type NativeLibrary = "sdl2" | "sdl3" | "gl" | "vorbisfile" | "freetype";
 
 const variables: Readonly<Record<NativeLibrary, string>> = {
-  sdl2: "QUAKE_SDL2_LIBRARY", gl: "QUAKE_GL_LIBRARY",
+  sdl2: "QUAKE_SDL2_LIBRARY", sdl3: "QUAKE_SDL3_LIBRARY", gl: "QUAKE_GL_LIBRARY",
   vorbisfile: "QUAKE_VORBISFILE_LIBRARY", freetype: "QUAKE_FREETYPE_LIBRARY",
 };
 
 const linuxNames: Readonly<Record<NativeLibrary, readonly string[]>> = {
   sdl2: ["libSDL2-2.0.so.0", "libSDL2.so"],
+  sdl3: ["libSDL3.so.0", "libSDL3.so"],
   gl: ["libGL.so.1", "libGL.so"],
   vorbisfile: ["libvorbisfile.so.3", "libvorbisfile.so"],
   freetype: ["libfreetype.so.6", "libfreetype.so"],
@@ -43,18 +44,18 @@ export function nativeLibraryCandidates(kind: NativeLibrary, options: NativeLibr
       names = linuxNames[kind];
       break;
     case "win32":
-      names = kind === "sdl2" ? ["SDL2.dll"] : kind === "gl" ? ["opengl32.dll"]
+      names = kind === "sdl3" ? ["SDL3.dll"] : kind === "sdl2" ? ["SDL2.dll"] : kind === "gl" ? ["opengl32.dll"]
         : kind === "vorbisfile" ? ["libvorbisfile-3.dll", "vorbisfile.dll"] : ["freetype.dll", "libfreetype-6.dll", "freetype6.dll"];
       break;
     case "darwin":
-      names = kind === "sdl2" ? ["libSDL2-2.0.0.dylib", "libSDL2.dylib"] : kind === "gl" ? [defaultOpenGlDriver(platform)]
+      names = kind === "sdl3" ? ["libSDL3.0.dylib", "libSDL3.dylib"] : kind === "sdl2" ? ["libSDL2-2.0.0.dylib", "libSDL2.dylib"] : kind === "gl" ? [defaultOpenGlDriver(platform)]
         : kind === "vorbisfile" ? ["libvorbisfile.3.dylib", "libvorbisfile.dylib"] : ["libfreetype.6.dylib", "libfreetype.dylib"];
       for (const directory of ["/opt/homebrew/lib", "/usr/local/lib"]) {
         for (const name of names) installed.push(posix.join(directory, name));
       }
-      if (kind === "sdl2") {
+      if (kind === "sdl2" || kind === "sdl3") {
         for (const directory of [executableDirectory, posix.join(options.homeDirectory ?? homedir(), "Library/Frameworks"), "/Library/Frameworks"])
-          installed.push(posix.join(directory, "SDL2.framework/SDL2"));
+          installed.push(posix.join(directory, kind === "sdl3" ? "SDL3.framework/SDL3" : "SDL2.framework/SDL2"));
       }
       break;
     default: throw new Error(`Native ${kind} libraries are unsupported on ${platform}`);
