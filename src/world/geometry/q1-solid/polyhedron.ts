@@ -74,16 +74,16 @@ function closeCell(faces: CellFace[], cap: Vec3[], plane: Plane): ConvexCell | n
 
 /** Both BSP children share each edge intersection and its cap insertion order. */
 export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: ConvexCell | null; readonly back: ConvexCell | null } {
-  const opposite = negatePlane(plane);
   let outside = false, inside = false;
   classify: for (const face of cell.faces) for (const point of face.vertices) {
     const distance = dot(point, plane.normal) - plane.distance;
-    if (!Number.isFinite(distance)) return { front: clipCell(cell, opposite), back: clipCell(cell, plane) };
+    if (!Number.isFinite(distance)) return { front: clipCell(cell, negatePlane(plane)), back: clipCell(cell, plane) };
     if (distance > 1e-8) outside = true;
     if (distance < -1e-8) inside = true;
     if (outside && inside) break classify;
   }
   if (!outside || !inside) return { front: inside ? null : cell, back: outside ? null : cell };
+  const opposite = negatePlane(plane);
   const front: CellFace[] = [], back: CellFace[] = [], cap: Vec3[] = [];
   for (const face of cell.faces) {
     const frontVertices: Vec3[] = [], backVertices: Vec3[] = [];
