@@ -96,7 +96,13 @@ The frame-time budget and reference workload should be explicit before a perform
 
 ## Implementation order
 
-Current work continues on **T01/T06/T10**: candidate local/remote QVM initialization must not leak settings, bindings, held-key changes, or commands into the active session. The performance investigation continues across **T03/T11/T13**, using profiles rather than assuming another cache will help.
+Accepted work through `b098294b` includes isolated local/remote QVM preparation, publication into the retained command/cvar/input owners, and configuration before map loading. Quake III native server travel now retains its source clock; the actual remote UI/cgame transition case passes without relaxing client clock checks. These are completed parts of T01/T06/T10. The menu/local/network/demo join into one retained client lifetime remains in progress, including the audio device and public demo commands.
+
+The shared font path now connects TrueType generation and optional font export to the same material registry used by retail DAT fonts. Both appeared correctly in an inspected rendered image. This advances T03/T18; it does not complete international text, captions, or every mod UI workflow.
+
+Performance changes accepted so far include archive-member indexing and reduced redundant GL state calls. Archive lookup measurements preserve the same ordered members. The GL run showed lower render-stage cost, but its wall-clock-driven route does not establish a matching-state FPS improvement. Several collision candidates were rejected because they failed exactness or showed no reliable benefit. Frame rate remains open; none of these prerequisites closes T03 or T11.
+
+The historical checklist counts above remain unchanged pending requirement-level reassessment. Current implementation work also includes active powerup timers in the shared HUD. Each source timer must use its actual expiry and the viewing seat's player.
 
 The next functional units follow dependencies and user impact:
 
