@@ -1,3 +1,4 @@
+import { musicFileCue, shuffledTracks } from "./playlist.ts";
 import { MusicControls } from "../../../audio/music.ts";
 import { CdMusic, MusicPlayer, remapQ2MusicTrack } from "../../../audio/index.ts";
 import type { SoundBank, UnifiedAudio } from "../../../audio/index.ts";
@@ -34,12 +35,13 @@ export class ApplicationMusic {
   private current: {
     readonly source: MusicSource; readonly bank: SoundBank; readonly fallback: OpenMusicTrack | null;
     readonly player: MusicPlayer; readonly cd: CdMusic; readonly opener: { open: OpenMusicTrack };
-    track: string; looping: boolean;
+    track: string; looping: boolean; authoredCue: string;
   } | null = null;
+  private automatic: { readonly cue: string; readonly tracks: readonly string[]; bag: string[]; shuffle: boolean; completed: number } | null = null;
   private request = 0;
   private gain = 0.25;
 
-  constructor(private readonly engine: UnifiedAudio, private readonly print: (text: string) => undefined, private readonly volumeMode: MusicVolumeMode = "source", readonly controls: MusicControls = new MusicControls()) {}
+  constructor(private readonly engine: UnifiedAudio, private readonly print: (text: string) => undefined, private readonly volumeMode: MusicVolumeMode = "source", readonly controls: MusicControls = new MusicControls(), private readonly random: () => number = Math.random) {}
 
   get volume(): number { return this.gain; }
   set volume(value: number) {
@@ -54,7 +56,7 @@ export class ApplicationMusic {
     player.setVolume(this.gain);
     const opener = { open: (path: string) => bank.openMusic(path) };
     const cd = new CdMusic(player, path => opener.open(path));
-    this.current = { source, bank, fallback, player, cd, opener, track: "", looping: false };
+    this.current = { source, bank, fallback, player, cd, opener, track: "", looping: false, authoredCue: "" };
   }
 
   async cdCommand(args: readonly string[], print: (text: string) => void = this.print): Promise<void> {
@@ -73,9 +75,9 @@ export class ApplicationMusic {
       print(`Volume is ${this.gain}\n`); return;
     }
     if (command === "on") { this.controls.enabled = true; return; }
-    if (command === "off") { this.stopPlayback(); this.controls.enabled = false; return; }
-    if (command === "stop") { this.stopPlayback(); return; }
-    if (command === "reset") { this.stopPlayback(); this.controls.reset(); return; }
+    if (command === "off") { this.stopPlayback("manual"); this.controls.enabled = false; return; }
+    if (command === "stop") { this.stopPlayback("manual"); return; }
+    if (command === "reset") { this.stopPlayback("manual"); this.controls.reset(); return; }
     if (command === "remap") {
       if (args.length === 1) {
         this.controls.remappedTracks.forEach((track, index) => { if (track !== index + 1) print(`  ${index + 1} -> ${track}\n`); });
@@ -96,6 +98,7 @@ export class ApplicationMusic {
       if (args.length !== 2 || !Number.isSafeInteger(track) || track < 1 || track > 255) {
         print(`cd ${command} <track 1..255>\n`); return;
       }
+      this.automatic = null;
       await this.startTrack(String(track), command === "loop", true); return;
     }
     if (command === "pause" || command === "resume") {
@@ -106,18 +109,57 @@ export class ApplicationMusic {
     print(`Unknown cd command: ${command}.\n`);
   }
 
-  stopPlayback(): void {
+  stopPlayback(reason: "manual" | "source"): void {
+    this.automatic = null;
+    if (reason === "source" && this.current !== null) this.current.authoredCue = "";
+    this.clearPlayback();
+  }
+
+  private clearPlayback(): void {
     this.request++; this.current?.cd.stop(); this.engine.stopMusic("world");
   }
 
   /** Retire the selected content as well as playback when its application closes. */
-  stop(): void { this.stopPlayback(); this.current = null; }
+  stop(): void { this.stopPlayback("source"); this.current = null; }
 
-  async play(source: MusicSource, bank: SoundBank, track: string, fallback: OpenMusicTrack | null = null): Promise<void> {
+  async play(source: MusicSource, bank: SoundBank, track: string, fallback: OpenMusicTrack | null = null, playlist: { readonly shuffle: boolean; readonly tracks: readonly string[] } | null = null): Promise<void> {
     this.select(source, bank, fallback);
     const selected = track.trim();
-    if (selected === "" || selected === "0") { this.stopPlayback(); return; }
-    await this.startTrack(selected, true, false);
+    if (playlist !== null && this.current?.authoredCue === selected && this.automatic === null) return;
+    if (this.current !== null) this.current.authoredCue = selected;
+    if (selected === "" || selected === "0") { this.automatic = null; this.clearPlayback(); return; }
+    const current = this.current;
+    if (current === null) return;
+    const shuffle = source.family === "q2" && playlist !== null && playlist.shuffle && playlist.tracks.length > 0;
+    if (this.automatic?.cue === selected && this.automatic.shuffle === shuffle && current.player.playing) return;
+    this.automatic = { cue: selected, tracks: playlist?.tracks ?? [], bag: [], shuffle, completed: current.player.completedPlays };
+    if (shuffle) await this.nextAutomaticTrack(); else await this.startTrack(selected, true, false);
+  }
+
+  async updateAutomatic(shuffle: boolean): Promise<void> {
+    const automatic = this.automatic, current = this.current;
+    if (automatic === null || current === null || !this.controls.enabled || current.player.paused) return;
+    const enabled = current.source.family === "q2" && shuffle && automatic.tracks.length > 0;
+    if (enabled !== automatic.shuffle) {
+      automatic.shuffle = enabled;
+      automatic.completed = current.player.completedPlays;
+      if (enabled) await this.nextAutomaticTrack(); else await this.startTrack(automatic.cue, true, false);
+    } else if (enabled && automatic.completed !== current.player.completedPlays) {
+      automatic.completed = current.player.completedPlays;
+      await this.nextAutomaticTrack();
+    }
+  }
+
+  private async nextAutomaticTrack(): Promise<void> {
+    const automatic = this.automatic, current = this.current;
+    if (automatic === null || current === null) return;
+    if (automatic.bag.length === 0) automatic.bag = shuffledTracks(automatic.tracks, current.track, this.random);
+    while (automatic.bag.length > 0 && this.automatic === automatic && this.controls.enabled) {
+      const track = automatic.bag.shift();
+      if (track === undefined) return;
+      await this.startTrack(musicFileCue(track), false, false);
+      if (current.player.playing) return;
+    }
   }
 
   private async startTrack(selected: string, looping: boolean, numbered: boolean): Promise<void> {
@@ -129,7 +171,7 @@ export class ApplicationMusic {
       ? remapQ2MusicTrack(Number(selected), edition === "rerelease" ? { kind: "remastered", campaign } : { kind: "disc" }) : Number(selected);
     if (current.track === selected && current.looping === looping && player.playing
       && (mapped === null || cd.playingTrack === (cd.remappedTracks[mapped - 1] ?? mapped))) return;
-    this.stopPlayback();
+    this.clearPlayback();
     const request = this.request;
     current.track = selected; current.looping = looping;
     opener.open = path => bank.openMusic(path);

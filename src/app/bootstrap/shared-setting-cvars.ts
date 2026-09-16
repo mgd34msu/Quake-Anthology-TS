@@ -1,3 +1,4 @@
+import { registerMusicSettings } from "./audio/playlist-settings.ts";
 import { defaultAudioOutputFormat, type AudioOutputFormat } from "../../audio/output.ts";
 import { registerAudioOutputCvars, readAudioOutputCvars } from "./audio/output-settings.ts";
 import { CvarFlag, type CvarAlias, type CvarRegistry } from "../../core/cvars/index.ts";
@@ -27,6 +28,7 @@ export function bindRunCvar(cvars: CvarRegistry, builder: InputCommandBuilder): 
 /** Shared aliases exist before source configuration executes in every world dialect. */
 export function registerSharedClientSettings(cvars: CvarRegistry, outputFormat: AudioOutputFormat = defaultAudioOutputFormat): void {
   registerAudioOutputCvars(cvars, outputFormat);
+  registerMusicSettings(cvars);
   cvars.register("r_saveFontData", "0", CvarFlag.None);
   cvars.document("r_saveFontData", { summary: "Export generated Q3 font atlases and DAT records to this content's user directory.",
     usage: "r_saveFontData <0|1>", examples: ["r_saveFontData 1"] });

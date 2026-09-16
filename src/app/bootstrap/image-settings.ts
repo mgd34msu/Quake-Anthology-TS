@@ -181,7 +181,7 @@ export class ApplicationImageSettings {
       q2Load: this.cvars.variableValue("gl_md5_load") !== 0, q2Use: this.cvars.variableValue("gl_md5_use") !== 0,
       q2Distance: this.cvars.variableValue("gl_md5_distance"), distance };
   }
-  private imageSetting(name: string): boolean { return !["gamma", "volume", "bgmvolume", ...audioOutputCvarNames].includes(name); }
+  private imageSetting(name: string): boolean { return !["gamma", "volume", "bgmvolume", "music_shuffle", "music_menu_track", ...audioOutputCvarNames].includes(name); }
   private archivedValues() { return this.cvars.canonicalSnapshots().filter(value => this.imageSetting(value.name) && (value.flags & CvarFlag.Archive) !== 0); }
   private signature(): string { return JSON.stringify(this.archivedValues().map(value => [value.name, value.value])); }
   private applyDisplay(renderer: NativeRenderer): void {

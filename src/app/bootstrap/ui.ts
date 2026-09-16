@@ -19,7 +19,7 @@ import type { SeatInputSample } from "../../input/seat.ts";
 import { NativeUiController, menuRow, renderUiCommands } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
 import { SeatHudMessages, SeatWeaponWheel, hudVitalOccupiedRects, drawCommonHud, emptyHudData } from "../../ui/hud/index.ts";
-import { SeatUiPreferences, bindInputSettings, bindAudioSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
+import { SeatUiPreferences, bindInputSettings, bindAudioSettings, bindMusicPlaylistSettings, registerSettingsMenus } from "../../ui/settings/index.ts";
 import { registerBindingMenus } from "../../ui/settings/bindings.ts";
 import { sharedBindingActions } from "../../ui/settings/action-catalog.ts";
 import { bindNativeVideoSettings, bindRendererSettings } from "../../ui/settings/services.ts";
@@ -148,7 +148,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];
     const gyro = this.gyroSettings = registerGyroSettingsMenu(this.controller, input.controllerSettings.ui(local.input.seat));
     this.settings = registerSettingsMenus(this.controller, [...display, ...(viewSetting === undefined ? [] : [viewSetting]), ...images, ...(language === undefined ? [] : [language]), bindingMenu, { id: "ui:settings:gyro", label: "Gyro controls", kind: "button", category: "input", enabled: () => true, activate: () => { this.controller.openMenu(gyro.root); } }, ...serverMenu, ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
-      write: values => { if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength); if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration); } }), ...volumes, ...this.preferences.bindings()], llm);
+      write: values => { if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength); if (values.controllerVibration !== undefined) local.haptics.setEnabled(values.controllerVibration); } }), ...volumes, ...bindMusicPlaylistSettings(shared), ...this.preferences.bindings()], llm);
     const button = (id: string, label: string, row: number, activate: () => undefined): UiControl => ({ id: `ui:application:${id}`, kind: "button", label,
       rect: menuRow(row), enabled: true, visible: true, activate });
     this.saves = registerSavedGameMenus(this.controller, saves);

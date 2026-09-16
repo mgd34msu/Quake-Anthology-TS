@@ -1,3 +1,5 @@
+import { bindMusicPlaylistSettings } from "../../ui/settings/index.ts";
+import { readMusicSettings } from "./audio/playlist-settings.ts";
 import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-settings.ts";
 import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart } from "./video-restart.ts";
@@ -205,7 +207,7 @@ export class StartupApplication {
       }
       const activeThemeMounts = themeMounts;
       audio = await StartupAudio.open({ musicControls: this.musicControls, theme: themeProduct === undefined || themeMounts === null ? null : { source: { content: themeProduct.id, ...themeProduct.expectation }, mounts: themeMounts }, mounts: mounted, source: { content: product.id, ...product.expectation }, seat, print: this.host.print,
-        preferences: { ...this.preferences.audioBaseline, ...this.preferences.audioValues, outputFormat: readAudioOutputCvars(imageSettings.cvars) } });
+        preferences: { ...this.preferences.audioBaseline, ...this.preferences.audioValues, ...readMusicSettings(imageSettings.cvars), outputFormat: readAudioOutputCvars(imageSettings.cvars) } });
       audio.openOutput(this.preferences.audioBaseline.deviceName ?? null, this.host.print);
       audio.bindOutputCvars(imageSettings.cvars);
       const activeAudio = audio;
@@ -227,7 +229,8 @@ export class StartupApplication {
             writeAudioOutputCvars(imageSettings.cvars, output.outputFormat);
             this.graphics?.menu.setStatus("");
           } },
-          report: message => this.graphics?.menu.setStatus(message) }),
+          report: message => this.graphics?.menu.setStatus(message) }, () => readMusicSettings(imageSettings.cvars)),
+          ...bindMusicPlaylistSettings(imageSettings.cvars, () => activeAudio.musicTracks),
           ...bindNativeVideoSettings(() => native.window, imageSettings.cvars, message => this.graphics?.menu.setStatus(message)),
           ...bindRendererSettings({ current: () => native.window.backend, enabled: () => this.graphics !== null && !this.graphics.menu.isBusy,
             report: message => this.graphics?.menu.setStatus(message), apply: backend => {

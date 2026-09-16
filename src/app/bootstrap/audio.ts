@@ -1,3 +1,5 @@
+import { mountedMusicTracks } from "./audio/playlist.ts";
+import { readMusicSettings, type MusicPreferences } from "./audio/playlist-settings.ts";
 import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-settings.ts";
 import type { AudioOutputFormat } from "../../audio/output.ts";
 import type { MusicControls } from "../../audio/music.ts";
@@ -67,6 +69,8 @@ export interface ApplicationAudioOptions {
 /** The output device mixes independent local listeners without advancing the game. */
 export class ApplicationAudio {
   readonly engine: UnifiedAudio;
+  private readonly playlists = new Map<ContentId, Promise<readonly string[]>>();
+  get musicPreferences(): MusicPreferences { return readMusicSettings(this.volumeCvars); }
   private readonly banks = new Map<ContentId, Promise<SoundBank>>();
   private readonly music: ApplicationMusic;
   private readonly random: GameRandom;
@@ -210,7 +214,7 @@ export class ApplicationAudio {
       return true;
     }
     if (request.name === "stopsound" || request.name === "s_stop") {
-      this.music.stopPlayback(); this.engine.stopAll();
+      this.music.stopPlayback("manual"); this.engine.stopAll();
       this.statics.length = 0; this.loops.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
       return true;
     }
@@ -301,8 +305,14 @@ export class ApplicationAudio {
   async playMusic(content: ContentId, track: string): Promise<void> {
     const bank = await this.bank(content), product = this.content.catalog.product(content).expectation;
     const alternate = q1MusicFallback(content, this.content.catalog);
+    let tracks: readonly string[] = [];
+    if (product.family === "q2") {
+      let pending = this.playlists.get(content);
+      if (pending === undefined) { pending = this.content.forContent(content).then(mountedMusicTracks); this.playlists.set(content, pending); }
+      tracks = await pending;
+    }
     if (!this.closed) await this.music.play({ content, ...product }, bank, track,
-      alternate === null ? null : async path => (await this.bank(alternate)).openMusic(path, alternate));
+      alternate === null ? null : async path => (await this.bank(alternate)).openMusic(path, alternate), { shuffle: this.musicPreferences.musicShuffle, tracks });
   }
 
   async startWorldMusic(): Promise<void> {
@@ -512,13 +522,14 @@ export class ApplicationAudio {
       }
     }
     this.engine.endLoopFrame();
+    await this.music.updateAutomatic(this.musicPreferences.musicShuffle);
     this.engine.updateMusic();
     this.engine.pump(undefined, performance.now() - frameStartedAt);
   }
 
   resetRound(): void {
     if (this.closed) throw new Error("Application audio closed");
-    this.music.stopPlayback();
+    this.music.stopPlayback("source");
     this.engine.resetRound();
     this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0;
     this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;

@@ -1,3 +1,5 @@
+import { mountedMusicTracks, musicFileCue } from "./audio/playlist.ts";
+import { readMusicSettings, type MusicPreferences } from "./audio/playlist-settings.ts";
 import type { AudioOutputFormat } from "../../audio/output.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-settings.ts";
@@ -27,13 +29,18 @@ export class StartupAudio {
     this.engine.selectOutput(this.engine.selectedOutput, this.outputCvars === null ? this.outputFormat : readAudioOutputCvars(this.outputCvars), true);
   }
   private readonly music: ApplicationMusic;
+  private readonly candidates: { readonly mounts: MountedContent; readonly source: MusicSource; readonly names: readonly string[]; readonly bank: SoundBank }[] = [];
+  private menuTrack: string | null = null;
+  private tracks: readonly string[] = [];
+  get musicTracks(): readonly string[] { return this.tracks; }
+  get musicPreferences(): MusicPreferences { return this.outputCvars === null ? { musicShuffle: false, menuTrack: this.menuTrack ?? "auto" } : readMusicSettings(this.outputCvars); }
   private readonly commands: { readonly args: readonly string[]; readonly print: (text: string) => void }[] = [];
   private readonly bank: SoundBank;
   private readonly sounds = new Map<UiSound, SoundAsset>();
   private closed = false;
 
   private constructor(mounts: MountedContent, private readonly family: GameFamily, private readonly seat: SeatId,
-    print: (text: string) => undefined, preferences: Partial<AudioPreferences>, controls?: MusicControls) {
+    private readonly print: (text: string) => undefined, preferences: Partial<AudioPreferences>, controls?: MusicControls) {
     this.engine = new UnifiedAudio({ milliseconds: () => Math.trunc(performance.now()), random: () => 0,
       ...(preferences.outputFormat === undefined ? {} : { outputFormat: preferences.outputFormat }) });
     this.bank = new SoundBank(mounts);
@@ -56,16 +63,32 @@ export class StartupAudio {
       audio.music.select(options.source, audio.bank);
       const fallback = options.source.family === "q1" ? ["music/track02", "music/02"]
         : options.source.family === "q2" ? ["music/02", "music/track02"] : ["music/sonic5"];
-      const candidates = [{ mounts: options.mounts, source: options.source, names: fallback }];
-      if (options.theme !== null) candidates.unshift({ ...options.theme, names: ["music/track77"] });
-      music: for (const candidate of candidates) for (const name of candidate.names) for (const extension of ["ogg", "wav"]) {
-        const path = name + "." + extension;
-        if (await candidate.mounts.resolve(path) === null) continue;
-        await audio.music.play(candidate.source, new SoundBank(candidate.mounts), path);
-        break music;
-      }
+      audio.candidates.push({ mounts: options.mounts, source: options.source, names: fallback, bank: audio.bank });
+      if (options.theme !== null) audio.candidates.unshift({ ...options.theme, names: ["music/track77"], bank: new SoundBank(options.theme.mounts) });
+      audio.tracks = [...new Set((await Promise.all(audio.candidates.map(candidate => mountedMusicTracks(candidate.mounts)))).flat())].sort();
+      await audio.selectMenuTrack(options.preferences.menuTrack ?? "auto");
       return audio;
     } catch (error) { audio.close(); throw error; }
+  }
+
+  private async selectMenuTrack(value: string): Promise<void> {
+    if (this.closed || this.menuTrack === value) return;
+    this.menuTrack = value;
+    this.music.stopPlayback("source");
+    if (value === "0") return;
+    for (const candidate of this.candidates) {
+      const number = /^\d+$/.test(value) ? String(Number(value)).padStart(2, "0") : null;
+      const names = value === "auto" ? candidate.names : number !== null ? [`music/${number}`, `music/track${number}`]
+        : [value.startsWith("music/") ? value : `music/${value}`];
+      for (const name of names) for (const path of /\.(?:ogg|wav)$/i.test(name) ? [name] : [`${name}.ogg`, `${name}.wav`]) {
+        const resolved = await candidate.mounts.resolve(path);
+        if (this.closed || this.menuTrack !== value) return;
+        if (resolved === null) continue;
+        await this.music.play(candidate.source, candidate.bank, musicFileCue(path));
+        return;
+      }
+    }
+    if (value !== "auto") this.print(`Menu music unavailable: ${value}\n`);
   }
 
   openOutput(deviceName: string | null, print: (text: string) => undefined): void {
@@ -83,6 +106,7 @@ export class StartupAudio {
     if (!this.closed) this.commands.push({ args: [...args], print });
   }
   async flushCommands(): Promise<void> {
+    if (this.outputCvars !== null) await this.selectMenuTrack(readMusicSettings(this.outputCvars).menuTrack);
     while (!this.closed) {
       const command = this.commands.shift();
       if (command === undefined) return;
@@ -102,6 +126,6 @@ export class StartupAudio {
   pump(): void { if (!this.closed) { this.engine.updateMusic(); this.engine.pump(); } }
   close(): void {
     if (this.closed) return;
-    this.closed = true; this.commands.length = 0; this.music.stop(); this.engine.close(); this.bank.clear(); this.sounds.clear();
+    this.closed = true; this.commands.length = 0; this.music.stop(); this.engine.close(); this.bank.clear(); for (const candidate of this.candidates) candidate.bank.clear(); this.sounds.clear();
   }
 }

@@ -301,6 +301,8 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
       }
       if (audio.effectsVolume !== undefined) sharedArchive.push({ name: "volume", value: String(audio.effectsVolume) });
       if (audio.musicVolume !== undefined) sharedArchive.push({ name: "bgmvolume", value: String(audio.musicVolume) });
+      if (audio.musicShuffle !== undefined) sharedArchive.push({ name: "music_shuffle", value: audio.musicShuffle ? "1" : "0" });
+      if (audio.menuTrack !== undefined) sharedArchive.push({ name: "music_menu_track", value: audio.menuTrack });
     }
     if (image !== null) {
       const view = new ApplicationViewSettings(value => image.cvars.set("fov", String(value)));

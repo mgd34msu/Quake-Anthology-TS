@@ -1,3 +1,9 @@
+import { defaultAudioOutputFormat } from "../../src/audio/output.ts";
+import { bindMusicPlaylistSettings } from "../../src/ui/settings/index.ts";
+import { registerMusicSettings } from "../../src/app/bootstrap/audio/playlist-settings.ts";
+import { readMusicSettings } from "../../src/app/bootstrap/audio/playlist-settings.ts";
+import { mountedMusicTracks } from "../../src/app/bootstrap/audio/playlist.ts";
+import { saveAudioSettings } from "../../src/app/bootstrap/audio-settings.ts";
 import { PreparedStartup } from "../../src/app/bootstrap/prepared-startup.ts";
 import { ConsoleScriptFiles } from "../../src/app/bootstrap/config-scripts.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
@@ -41,12 +47,12 @@ test("frontend audio uses saved gains, preserves selected overrides, and saves t
     await preferences.loadBaseline(second);
     expect(preferences.audioValues).toEqual({ effectsVolume: 0.5, musicVolume: 0.4 });
     await preferences.saveAudioBaseline(second);
-    expect(await loadAudioSettings(first)).toEqual({ deviceName: null, effectsVolume: 0.5, musicVolume: 0.4 });
-    expect(await loadAudioSettings(second)).toEqual({ deviceName: null, effectsVolume: 0.5, musicVolume: 0.4 });
+    expect(await loadAudioSettings(first)).toEqual({ deviceName: null, outputFormat: defaultAudioOutputFormat, effectsVolume: 0.5, musicVolume: 0.4, musicShuffle: false, menuTrack: "auto" });
+    expect(await loadAudioSettings(second)).toEqual({ deviceName: null, outputFormat: defaultAudioOutputFormat, effectsVolume: 0.5, musicVolume: 0.4, musicShuffle: false, menuTrack: "auto" });
     await writeFile(join(second.root, "audio.json"), JSON.stringify({ version: 1, deviceName: "Game-selected output", effectsVolume: 0.5, musicVolume: 0.6 }));
     preferences.values = { effectsVolume: 0.5, musicVolume: 0.6 };
     await preferences.saveAudioBaseline(second);
-    expect(await loadAudioSettings(second)).toEqual({ deviceName: "Game-selected output", effectsVolume: 0.5, musicVolume: 0.6 });
+    expect(await loadAudioSettings(second)).toEqual({ deviceName: "Game-selected output", outputFormat: defaultAudioOutputFormat, effectsVolume: 0.5, musicVolume: 0.6, musicShuffle: false, menuTrack: "auto" });
     await preferences.loadBaseline(second);
     expect(preferences.audioBaseline.deviceName).toBe("Game-selected output");
   } finally { await rm(directory, { recursive: true, force: true }); }
@@ -101,6 +107,9 @@ function menuWave(sample: number): Uint8Array {
 class MenuMemoryMounts extends MountedContent {
   constructor(readonly content: ContentId, private readonly files: ReadonlyMap<string, Uint8Array>) {
     super({ id: createMountPlanId("menu-memory", content.replaceAll(":", "-")), mounts: [], defaultOrder: [], prefixOrders: [] }, []);
+  }
+  override async listFiles(path: string, extension: string): Promise<readonly string[]> {
+    return [...this.files.keys()].filter(name => name.startsWith(path + "/") && name.endsWith(extension)).map(name => name.slice(path.length + 1));
   }
   override async open(path: string): Promise<OpenedResource | null> {
     this.assertOpen();
@@ -561,4 +570,209 @@ test("explicit cd play and loop change the same cue mode and info reports disabl
     await music.cdCommand(["info"]);
     expect(lines.slice(-2)).toEqual(["CD music is disabled.\n", "Volume is 0.25\n"]);
   } finally { music.stop(); }
+});
+
+test("playlist canonical aliases menu choices persisted settings and actual menu PCM share one owner", async () => {
+  const identity = createIdentityOwner("playlist-menu"), content = createContentId({ family: "q2", edition: "test", package: "playlist", revision: "1" });
+  const cvars = new CvarRegistry({ dialect: "q2-classic", context: { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } } });
+  registerMusicSettings(cvars);
+  using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)], ["music/track77.wav", menuWave(2000)], ["music/nested/title theme.wav", menuWave(3000)], ["music/unsupported.mp3", new Uint8Array()]]));
+  const audio = await StartupAudio.open({ mounts, source: { content, family: "q2", edition: "classic", campaign: "baseq2" }, theme: null,
+    seat: identity.seat(0), print: () => undefined, preferences: { effectsVolume: 0, musicVolume: 0.25 } });
+  audio.bindOutputCvars(cvars);
+  try {
+    expect(audio.engine.outputState).toBe("detached");
+    expect([...new Set(audio.engine.mix(64))]).toEqual([250]);
+    const bindings = bindMusicPlaylistSettings(cvars, () => audio.musicTracks), choice = bindings.find(binding => binding.id === "ui:audio:menu-track"), shuffle = bindings.find(binding => binding.id === "ui:audio:shuffle");
+    if (choice?.kind !== "choice" || shuffle?.kind !== "toggle") throw new Error("Music options missing");
+    expect(choice.choices().map(value => value.id)).toEqual(["auto", "0", "music/02.wav", "music/nested/title theme.wav", "music/track77.wav"]);
+    choice.write("music/nested/title theme.wav"); await audio.flushCommands();
+    expect(cvars.variableString("ogg_menu_track")).toBe("music/nested/title theme.wav");
+    expect([...new Set(audio.engine.mix(64))]).toEqual([750]);
+    cvars.set("ogg_menu_track", "77"); await audio.flushCommands();
+    expect([...new Set(audio.engine.mix(64))]).toEqual([500]);
+    expect(choice.choices().some(value => value.id === "77")).toBe(true);
+    cvars.set("ogg_menu_track", "0"); await audio.flushCommands();
+    expect(audio.engine.mix(64).every(value => value === 0)).toBe(true);
+    choice.write("auto"); await audio.flushCommands();
+    expect([...new Set(audio.engine.mix(64))]).toEqual([250]);
+    shuffle.write(true); expect(cvars.variableString("ogg_shuffle")).toBe("1");
+    cvars.set("ogg_menu_track", "music/missing.wav"); await audio.flushCommands();
+    expect(choice.choices().some(value => value.id === "music/missing.wav")).toBe(true);
+    expect(audio.engine.mix(64).every(value => value === 0)).toBe(true);
+    expect(await mountedMusicTracks(mounts)).toEqual(audio.musicTracks);
+    await mkdir(evidence, { recursive: true });
+    const directory = await mkdtemp(join(evidence, "playlist-settings-"));
+    try {
+      const store = new ConfigStore(directory), preferences = new FrontendPreferences(() => "q2-classic");
+      preferences.bindings(undefined, () => readMusicSettings(cvars));
+      await preferences.saveAudioBaseline(store);
+      expect(await loadAudioSettings(store)).toMatchObject({ musicShuffle: true, menuTrack: "music/missing.wav" });
+      await saveAudioSettings(store, { selectedOutput: null, effectsVolume: 0.7, musicVolume: 0.25 });
+      expect(await loadAudioSettings(store)).toMatchObject({ musicShuffle: true, menuTrack: "music/missing.wav" });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally { audio.close(); }
+});
+
+test("playlist gameplay advances on real EOF, avoids repeats, preserves pause mute and manual override", async () => {
+  const content = createContentId({ family: "q2", edition: "test", package: "shuffle", revision: "1" });
+  using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)], ["music/03.wav", menuWave(2000)]]));
+  using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const controls = new MusicControls(), music = new ApplicationMusic(engine, () => undefined, "source", controls, () => 0.99), bank = new SoundBank(mounts);
+  const source = { content, family: "q2", edition: "classic", campaign: "baseq2" } satisfies Parameters<ApplicationMusic["play"]>[0];
+  const playlist = { shuffle: true, tracks: await mountedMusicTracks(mounts) };
+  const started = spyOn(MusicPlayer.prototype, "start");
+  try {
+    await music.play(source, bank, "2", null, playlist);
+    expect(started).toHaveBeenCalledTimes(1);
+    await music.updateAutomatic(true); expect(started).toHaveBeenCalledTimes(1);
+    await music.cdCommand(["pause"]); expect(engine.mix(64).every(value => value === 0)).toBe(true);
+    await music.updateAutomatic(true); expect(started).toHaveBeenCalledTimes(1);
+    await music.cdCommand(["resume"]); music.volume = 0;
+    expect(engine.mix(64).every(value => value === 0)).toBe(true);
+    await music.updateAutomatic(true); expect(started).toHaveBeenCalledTimes(1);
+    music.volume = 0.25;
+    expect(engine.mix(128).some(value => value === 250)).toBe(true);
+    await music.updateAutomatic(true); expect(started).toHaveBeenCalledTimes(2);
+    expect(engine.mix(128).some(value => value === 500)).toBe(true);
+    await music.updateAutomatic(true); expect(started).toHaveBeenCalledTimes(3);
+    expect(engine.mix(128).some(value => value === 250)).toBe(true);
+    await music.cdCommand(["loop", "3"]);
+    const manualStarts = started.mock.calls.length;
+    expect(engine.mix(128).every(value => value === 500)).toBe(true);
+    await music.updateAutomatic(true); await music.play(source, bank, "2", null, playlist);
+    expect(started).toHaveBeenCalledTimes(manualStarts);
+    await music.cdCommand(["off"]); await music.updateAutomatic(true);
+    expect(engine.mix(64).every(value => value === 0)).toBe(true);
+    await music.cdCommand(["on"]); await music.updateAutomatic(true);
+    expect(started).toHaveBeenCalledTimes(manualStarts);
+    await music.play(source, bank, "3", null, playlist);
+    await music.updateAutomatic(false);
+    expect(engine.mix(128).every(value => value === 500)).toBe(true);
+  } finally { music.stop(); bank.clear(); started.mockRestore(); }
+});
+
+test("playlist source policy leaves Q1 Q3 and silent authored maps unchanged", async () => {
+  for (const family of ["q1", "q2", "q3"] satisfies readonly GameFamily[]) {
+    const content = createContentId({ family, edition: "test", package: "shuffle-policy", revision: "1" });
+    using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)], ["music/03.wav", menuWave(2000)]]));
+    using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    const music = new ApplicationMusic(engine, () => undefined, "immediate"), bank = new SoundBank(mounts);
+    const source = { content, family, edition: "classic", campaign: "base" }, playlist = { shuffle: true, tracks: await mountedMusicTracks(mounts) };
+    try {
+      await music.play(source, bank, "0", null, playlist); await music.updateAutomatic(true);
+      expect(engine.mix(128).every(value => value === 0)).toBe(true);
+      if (family === "q2") continue;
+      await music.play(source, bank, "music/02.wav", null, playlist);
+      for (let index = 0; index < 3; index++) { expect(engine.mix(128).every(value => value === 250)).toBe(true); await music.updateAutomatic(true); }
+    } finally { music.stop(); bank.clear(); }
+  }
+});
+
+test("playlist failed tracks are bounded and pending EOF opens obey stop and retirement", async () => {
+  const content = createContentId({ family: "q2", edition: "test", package: "shuffle-cancel", revision: "1" });
+  using mounts = new MenuMemoryMounts(content, new Map<string, Uint8Array>());
+  const source = { content, family: "q2", edition: "classic", campaign: "baseq2" } satisfies Parameters<ApplicationMusic["play"]>[0];
+  for (const action of ["missing", "stop", "off", "retire"]) {
+    using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    let release: ((stream: PcmStream | null) => void) | undefined;
+    const opened: string[] = [];
+    class PendingBank extends SoundBank {
+      override openMusic(path: string): Promise<PcmStream | null> {
+        opened.push(path);
+        if (action === "missing") return Promise.resolve(null);
+        return new Promise(resolve => { release = resolve; });
+      }
+    }
+    const bank = new PendingBank(mounts), music = new ApplicationMusic(engine, () => undefined);
+    const pending = music.play(source, bank, "2", null, { shuffle: true, tracks: ["music/02.wav"] });
+    if (action !== "missing") {
+      if (release === undefined) throw new Error("Missing pending open");
+      if (action === "retire") music.stop(); else await music.cdCommand([action]);
+      const stream = new MemoryPcmStream({ samples: new Int16Array(32).fill(1000), channels: 1, sampleRate: 44100, frameCount: 32, loopStart: null });
+      const closed = spyOn(stream, "close"); release(stream); await pending;
+      expect(closed).toHaveBeenCalledTimes(1); closed.mockRestore();
+    } else await pending;
+    await music.updateAutomatic(true); await music.updateAutomatic(true);
+    expect(opened).toEqual(["music/02.wav"]);
+    expect(engine.mix(128).every(value => value === 0)).toBe(true);
+    music.stop(); bank.clear();
+  }
+});
+
+test("playlist menu off automatic toggle restarts the same title and respects shared cd off", async () => {
+  const identity = createIdentityOwner("playlist-title"), content = createContentId({ family: "q1", edition: "test", package: "title", revision: "1" });
+  const cvars = new CvarRegistry({ dialect: "q1-netquake", context: { session: identity.session, origin: { kind: "local-console" } } });
+  registerMusicSettings(cvars);
+  using mounts = new MenuMemoryMounts(content, new Map([["music/track02.wav", menuWave(1000)]]));
+  const controls = new MusicControls();
+  const audio = await StartupAudio.open({ mounts, source: { content, family: "q1", edition: "classic", campaign: "id1" }, theme: null,
+    musicControls: controls, seat: identity.seat(0), print: () => undefined, preferences: { musicVolume: 0.25 } });
+  audio.bindOutputCvars(cvars);
+  try {
+    for (let index = 0; index < 2; index++) {
+      cvars.set("music_menu_track", "0"); await audio.flushCommands(); expect(audio.engine.mix(64).every(value => value === 0)).toBe(true);
+      cvars.set("music_menu_track", "auto"); await audio.flushCommands(); expect(audio.engine.mix(64).every(value => value === 250)).toBe(true);
+    }
+    await audio.cdCommand(["off"], () => undefined);
+    cvars.set("music_menu_track", "2"); await audio.flushCommands(); expect(audio.engine.mix(64).every(value => value === 0)).toBe(true);
+    await audio.cdCommand(["on"], () => undefined); await audio.flushCommands(); expect(audio.engine.mix(64).every(value => value === 0)).toBe(true);
+  } finally { audio.close(); }
+});
+
+test("playlist aliases execute in all source consoles and reject invalid values atomically", async () => {
+  for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
+    const identity = createIdentityOwner("playlist-console"), context: CommandContext = { session: identity.session, origin: { kind: "local-console" } };
+    const cvars = new CvarRegistry({ dialect, context }); registerMusicSettings(cvars);
+    const scripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined });
+    const prepared = new PreparedStartup(cvars, cvars, scripts, { dialect, movementDialect: dialect, seats: [], shared: null, sharedNames: [], print: () => undefined, forward: () => undefined });
+    prepared.commands.append(`ogg_shuffle 1\n${dialect.startsWith("q1") ? "" : "set "}ogg_menu_track 77\n`, context); prepared.commands.execute();
+    expect(readMusicSettings(cvars)).toEqual({ musicShuffle: true, menuTrack: "77" });
+    prepared.commands.append('music_menu_track auto\nogg_menu_track ../secret.wav\nogg_shuffle potato\n', context); prepared.commands.execute();
+    expect(readMusicSettings(cvars)).toEqual({ musicShuffle: true, menuTrack: "auto" });
+    expect(cvars.canonicalSnapshots().filter(value => value.name.startsWith("ogg_")).length).toBe(0);
+  }
+});
+
+test("playlist discovery uses real mounted nested loose paths and excludes unsupported files", async () => {
+  await mkdir(evidence, { recursive: true });
+  const directory = await mkdtemp(join(evidence, "playlist-mount-"));
+  const content = createContentId({ family: "q2", edition: "test", package: "loose-playlist", revision: "1" });
+  try {
+    await mkdir(join(directory, "music/nested"), { recursive: true });
+    await writeFile(join(directory, "music/02.wav"), menuWave(1000));
+    await writeFile(join(directory, "music/nested/title.wav"), menuWave(2000));
+    await writeFile(join(directory, "music/no.mp3"), new Uint8Array());
+    const mount = { kind: "loose", rootPath: directory, identity: createMountIdentity(createMountId("playlist-test", "loose"), content, 0) } satisfies Parameters<typeof openMountPlan>[0]["mounts"][number];
+    using mounts = await openMountPlan({ id: createMountPlanId("playlist-test", "list"), mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] });
+    expect(await mountedMusicTracks(mounts)).toEqual(["music/02.wav", "music/nested/title.wav"]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("playlist source round reset replays unchanged authored music while manual stop suppresses it", async () => {
+  for (const family of ["q1", "q2", "q3"] satisfies readonly GameFamily[]) {
+    const content = createContentId({ family, edition: "test", package: "round-music", revision: "1" });
+    using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)]]));
+    using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    const controls = new MusicControls(), music = new ApplicationMusic(engine, () => undefined, "immediate", controls), bank = new SoundBank(mounts);
+    const source = { content, family, edition: "classic", campaign: "base" }, playlist = { shuffle: false, tracks: await mountedMusicTracks(mounts) };
+    const cue = family === "q3" ? "music/02.wav" : "2";
+    try {
+      await music.play(source, bank, cue, null, playlist);
+      expect(engine.mix(64).every(value => value === 250)).toBe(true);
+      for (let index = 0; index < 2; index++) {
+        music.stopPlayback("source"); engine.resetRound();
+        expect(engine.mix(64).every(value => value === 0)).toBe(true);
+        await music.play(source, bank, cue, null, playlist);
+        expect(engine.mix(64).every(value => value === 250)).toBe(true);
+      }
+      await music.cdCommand(["stop"]); await music.play(source, bank, cue, null, playlist);
+      expect(engine.mix(64).every(value => value === 0)).toBe(true);
+      music.stopPlayback("source"); await music.play(source, bank, cue, null, playlist);
+      expect(engine.mix(64).every(value => value === 250)).toBe(true);
+      await music.cdCommand(["off"]); music.stopPlayback("source"); await music.play(source, bank, cue, null, playlist);
+      expect(engine.mix(64).every(value => value === 0)).toBe(true);
+      expect(controls.enabled).toBe(false); expect(music.volume).toBe(0.25);
+    } finally { music.stop(); bank.clear(); }
+  }
 });

@@ -23,6 +23,8 @@ export class MusicPlayer {
     private targetVolume = 0.25;
     private smoothedVolume = Math.fround(0.5);
     paused = false;
+    private completions = 0;
+    get completedPlays(): number { return this.completions; }
     constructor(readonly outputRate: number, readonly family: SoundFamily = "q3", private readonly volumeMode: MusicVolumeMode = "source", readonly controls: MusicControls = new MusicControls()) {
         this.pcm = new RawAudioStream(outputRate);
     }
@@ -65,6 +67,7 @@ export class MusicPlayer {
             return { ...chunk, sourceSample, resetStream: false };
         if (this.loop === null) {
             this.stream = null;
+            this.completions++;
             stream.close();
             return null;
         }

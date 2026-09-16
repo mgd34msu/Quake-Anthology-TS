@@ -165,6 +165,17 @@ export interface AudioOutputSettings {
   select(name: string | null): void;
   report(message: string): void;
 }
+export function bindMusicPlaylistSettings(registry: SettingCvars | null, tracks?: () => readonly string[]): readonly SettingBinding[] {
+  if (registry === null) return [];
+  const settings: SettingBinding[] = [{ id: "ui:audio:shuffle", label: "Shuffle Quake II gameplay music", category: "audio", kind: "toggle", enabled: () => true,
+    read: () => registry.variableValue("music_shuffle") !== 0, write: value => { registry.set("music_shuffle", value ? "1" : "0"); } }];
+  if (tracks !== undefined) settings.push({ id: "ui:audio:menu-track", label: "Menu music", category: "audio", kind: "choice", enabled: () => true,
+    read: () => registry.find("music_menu_track")?.value ?? "auto", write: value => { registry.set("music_menu_track", value); },
+    choices: () => { const current = registry.find("music_menu_track")?.value ?? "auto", names = new Set(tracks());
+      if (current !== "auto" && current !== "0") names.add(current);
+      return [{ id: "auto", label: "Automatic" }, { id: "0", label: "Off" }, ...[...names].map(name => ({ id: name, label: name }))]; } });
+  return settings;
+}
 export function bindAudioSettings(service: SettingsValueService<AudioSettings>, output?: AudioOutputSettings): readonly SettingBinding[] {
   const device: SettingBinding[] = output === undefined ? [] : [{ id: "ui:audio:device", label: "Output device", category: "audio", kind: "choice", enabled: () => true,
     read: () => output.selected() === null ? "default" : `device:${output.selected()}`,
