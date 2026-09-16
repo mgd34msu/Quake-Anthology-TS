@@ -121,11 +121,17 @@ export function cellVertices(cell: ConvexCell): readonly Vec3[] {
 /** Full separating axes include edge cross products, not only BSP face planes. */
 export function boxSeparatingPlanes(cell: ConvexCell, axes: readonly Vec3[]): readonly Plane[] {
   const normals: Vec3[] = [];
+  let axialSeen = 0;
   const insert = (normal: Vec3): void => {
     const magnitude = length(normal);
     if (magnitude < 1e-8) return;
     const n = scale(normal, 1 / magnitude);
+    const axial = n.y === 0 && n.z === 0 ? (n.x === 1 ? 1 : n.x === -1 ? 2 : 0)
+      : n.x === 0 && n.z === 0 ? (n.y === 1 ? 4 : n.y === -1 ? 8 : 0)
+      : n.x === 0 && n.y === 0 ? (n.z === 1 ? 16 : n.z === -1 ? 32 : 0) : 0;
+    if ((axialSeen & axial) !== 0) return;
     if (!normals.some(p => dot(p, n) > 1 - 1e-10)) normals.push(n);
+    axialSeen |= axial;
   };
   for (const face of cell.faces) {
     insert(face.plane.normal);
