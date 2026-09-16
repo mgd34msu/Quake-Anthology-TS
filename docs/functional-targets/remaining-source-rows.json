@@ -1,0 +1,3654 @@
+{
+  "retainedLedgerCutoff": "167bfbf19d06625ac2b350120647686e3e0170e9",
+  "input": {
+    "path": "docs/completion-status.json",
+    "sha256": "0aff45642441dff7ffd9010566d39e89a0a32e74bf922215822efd0c4b159231"
+  },
+  "interpretation": "Mechanical grouping of retained open implementation verdicts. No verdict changes or later-acceptance reconciliation. Primary functional placements do not assign common-engine versus source-extension architecture. Secondary dependencies are reported separately and never counted as additional rows. Input provenance is identified by path, assessment cutoff and SHA-256; no repository revision is inferred from an arbitrary input file.",
+  "totals": {
+    "total": 184,
+    "q1": 56,
+    "q2": 75,
+    "q3": 53
+  },
+  "groups": [
+    {
+      "area": "content-assets",
+      "total": 6,
+      "q1": 2,
+      "q2": 1,
+      "q3": 3,
+      "rows": [
+        {
+          "id": "q1.content.quake64",
+          "title": "Identify and launch the required Quake 64 content",
+          "originalRemainingWorkReason": "Quake64 remains explicitly unresolved: no identified content/dependency/program and complete launch path.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/catalog/products.ts"
+          ],
+          "functionalArea": "content-assets",
+          "classification": {
+            "area": "content-assets"
+          }
+        },
+        {
+          "id": "q1.services.addon-discovery",
+          "title": "Local and online add-on browsing",
+          "originalRemainingWorkReason": "Local catalog discovery is implemented, but add-on install/update/remove with progress/error feedback and complete launch management is absent.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/catalog/index.ts",
+            "src/app/bootstrap/startup-selection.ts"
+          ],
+          "functionalArea": "content-assets",
+          "classification": {
+            "area": "content-assets",
+            "secondaryDependencies": [
+              "progression-services",
+              "menus-hud"
+            ],
+            "note": "Local/online add-on discovery includes service/UI joins; assigned to content discovery."
+          }
+        },
+        {
+          "id": "q2.content.discovered-addons",
+          "title": "Discover installed add-on directories",
+          "originalRemainingWorkReason": "Installed source/data discovery does not provide executable gameplay for arbitrary Q2 add-ons; runtime dispatch only admits known Q2 programs.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/catalog/products.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "content-assets",
+          "classification": {
+            "area": "content-assets"
+          }
+        },
+        {
+          "id": "q3.content.demo-product-profiles",
+          "title": "Independent prerelease demo product restrictions",
+          "originalRemainingWorkReason": "Demo-product-specific restrictions and profile/UI behavior are not joined; actual network admission currently sets demoRestricted to false.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q3.ts",
+            "src/content/catalog/launch.ts"
+          ],
+          "functionalArea": "content-assets",
+          "classification": {
+            "area": "content-assets"
+          }
+        },
+        {
+          "id": "q3.formats.ibsp44-compatibility",
+          "title": "Observed IBSP44 map compatibility",
+          "originalRemainingWorkReason": "The Q3 BSP decoder explicitly accepts version 46; the required IBSP44 compatibility path is missing.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/formats/q3-map/decode.ts"
+          ],
+          "functionalArea": "content-assets",
+          "classification": {
+            "area": "content-assets"
+          }
+        },
+        {
+          "id": "q3.progression.catalog",
+          "title": "Arena and bot catalogs",
+          "originalRemainingWorkReason": "Bot catalog loading is joined, but the tier-classified arena selection and authored-opponent launch workflow is not implemented in the common frontend.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/bots/behavior/director.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "content-assets",
+          "classification": {
+            "area": "content-assets",
+            "secondaryDependencies": [
+              "progression-services"
+            ],
+            "note": "Arena/bot catalog discovery supports progression but is a content inventory behavior."
+          }
+        }
+      ]
+    },
+    {
+      "area": "rendering",
+      "total": 7,
+      "q1": 3,
+      "q2": 2,
+      "q3": 2,
+      "rows": [
+        {
+          "id": "q1.render.fog-sky-liquids",
+          "title": "Fog, skyboxes and liquid presentation",
+          "originalRemainingWorkReason": "Q1 addon fog events are emitted as q1-composition events but have no application fog consumer; complete server/map fog transitions therefore remain missing.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q1/addons/effects.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/rerelease-presentation.ts"
+          ],
+          "functionalArea": "rendering",
+          "classification": {
+            "area": "rendering"
+          }
+        },
+        {
+          "id": "q1.render.model-effects-particles",
+          "title": "Model effects, particles, shadows and transparency",
+          "originalRemainingWorkReason": "Q1 native presentation projection does not publish raw actor alpha/scale, and complete Q1 shadow/rerelease effect-bit consumers are not joined; particles and beams alone do not complete this row.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/presentation-scene.ts",
+            "src/app/bootstrap/effects.ts"
+          ],
+          "functionalArea": "rendering",
+          "classification": {
+            "area": "rendering"
+          }
+        },
+        {
+          "id": "q1.video.mode-restart-capture",
+          "title": "Video modes, resize, fullscreen and renderer restart",
+          "originalRemainingWorkReason": "Startup renderer/gamma/resolution choices exist, but changing/restarting the renderer in a live session while retaining input/state is not implemented as a complete application workflow.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-selection.ts",
+            "src/app/bootstrap/renderer.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "rendering",
+          "classification": {
+            "area": "rendering"
+          }
+        },
+        {
+          "id": "q2.config.renderer-restart",
+          "title": "Restart or switch renderer within a live session",
+          "originalRemainingWorkReason": "Startup can recreate display and in-game resizing is supported, but live-session CPU/GL renderer switching with complete world/input/HUD rebuild is not provided.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "rendering",
+          "classification": {
+            "area": "rendering"
+          }
+        },
+        {
+          "id": "q2.world.flashlight",
+          "title": "Toggle the rerelease flashlight under every host profile",
+          "originalRemainingWorkReason": "Rerelease player state emits/restores flashlight events, but no application event consumer produces the requested flashlight light/sound.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/players.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/rerelease-presentation.ts"
+          ],
+          "functionalArea": "rendering",
+          "classification": {
+            "area": "rendering"
+          }
+        },
+        {
+          "id": "q3.presentation.materials-cpu-gl",
+          "title": "Materials and complete CPU/GL rendering",
+          "originalRemainingWorkReason": "CPU/GL implement ordinary animated stages, deformation, fog, sky, portals, lighting, shadows and particles. The compound authored-material requirement is incomplete because the actual application shader registry supplies no cinematic provider, so videoMap material stages remain unresolved.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/assets.ts",
+            "src/render/scene/shaders.ts",
+            "src/materials/material.ts",
+            "src/render/scene/world.ts",
+            "src/render/gl/renderer.ts"
+          ],
+          "functionalArea": "rendering",
+          "classification": {
+            "area": "rendering"
+          }
+        },
+        {
+          "id": "q3.presentation.visual-options-restart",
+          "title": "Visual settings, display lifecycle and source hardware profiles",
+          "originalRemainingWorkReason": "Common graphics options exist, but the complete source hardware-profile/renderer-thread and live restart lifecycle is not joined; Q3 client presentation still receives a generic hardware profile.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/q3-client.ts",
+            "src/ui/settings/index.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "rendering",
+          "classification": {
+            "area": "rendering"
+          }
+        }
+      ]
+    },
+    {
+      "area": "audio-music",
+      "total": 7,
+      "q1": 0,
+      "q2": 4,
+      "q3": 3,
+      "rows": [
+        {
+          "id": "q2.audio.raw-pcm",
+          "title": "Mix cinematic and streamed PCM",
+          "originalRemainingWorkReason": "The common stream mixer works, but the Q2 cinematic soundtrack producer is not joined to application playback; complete cinematic/streamed workflow is not supplied.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/audio/engine.ts",
+            "src/media/audio.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts"
+          ],
+          "functionalArea": "audio-music",
+          "classification": {
+            "area": "audio-music"
+          }
+        },
+        {
+          "id": "q2.media.cin-soundtrack",
+          "title": "Synchronize the CIN soundtrack",
+          "originalRemainingWorkReason": "Shared media decoders exist, but Q2 campaign/remote cinematic presentation and authored continuation are not joined; the only application cinematic owner is Q3 UI RoQ playback, with no Q2 timed subtitle producer.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/media/index.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/app/bootstrap/network/remote.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "audio-music",
+          "classification": {
+            "area": "audio-music",
+            "secondaryDependencies": [
+              "cinematics-media"
+            ],
+            "note": "CIN synchronization remains a cross-media dependency; this row is assigned to its soundtrack behavior."
+          }
+        },
+        {
+          "id": "q2.music.menu-shuffle",
+          "title": "Control menu music and playlist shuffle",
+          "originalRemainingWorkReason": "Startup does not own a menu-music playlist/shuffle service or persisted shuffle selection.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup.ts",
+            "src/app/bootstrap/audio/music.ts"
+          ],
+          "functionalArea": "audio-music",
+          "classification": {
+            "area": "audio-music"
+          }
+        },
+        {
+          "id": "q2.music.pause-resume-gain",
+          "title": "Control music pause, resume, and continuous gain",
+          "originalRemainingWorkReason": "Continuous gain is joined and the music object can pause, but ApplicationAudio.pauseMusic has no application command/menu caller for the requested pause/resume workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/audio/music.ts",
+            "src/app/bootstrap/audio.ts"
+          ],
+          "functionalArea": "audio-music",
+          "classification": {
+            "area": "audio-music"
+          }
+        },
+        {
+          "id": "q3.audio.a3d-geometry-contract",
+          "title": "Legacy A3D geometry behavior account",
+          "originalRemainingWorkReason": "The common replacement samples room size/materials for reverb and underwater filtering, but it does not implement per-source geometry occlusion/obstruction required by the legacy A3D spatial contract. This is an implementation gap, independent of audible qualification.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/audio/environments.ts",
+            "src/audio/mixer.ts",
+            "src/app/bootstrap/audio.ts"
+          ],
+          "functionalArea": "audio-music",
+          "classification": {
+            "area": "audio-music",
+            "note": "The A3D geometry contract remains an audio obligation."
+          }
+        },
+        {
+          "id": "q3.audio.background-music",
+          "title": "Background intro/loop music and continuous gain",
+          "originalRemainingWorkReason": "Actual world/cgame music supports intro/loop, pause, gain and replacement, but the specified menu/postgame music transitions are not joined with those missing product flows.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/audio/music.ts",
+            "src/app/bootstrap/audio.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "audio-music",
+          "classification": {
+            "area": "audio-music"
+          }
+        },
+        {
+          "id": "q3.audio.raw-pcm-output-diagnostics",
+          "title": "Raw PCM, output formats and sound diagnostics",
+          "originalRemainingWorkReason": "PCM ingestion/conversion and application soundinfo/soundlist/play diagnostics are connected. Accepted 0065d73b joins named/default device selection, persisted gains and device restart while retaining queued PCM timing and music. Output remains fixed at 44100 Hz, stereo, 16-bit; selectable output bits/channels/rate and the full source restart/cache workflow remain unqualified. Dummy SDL checks do not qualify physical buffering or audibility.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/audio/engine.ts",
+            "src/app/bootstrap/audio.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "audio-music",
+          "classification": {
+            "area": "audio-music"
+          }
+        }
+      ]
+    },
+    {
+      "area": "input-seats",
+      "total": 10,
+      "q1": 4,
+      "q2": 3,
+      "q3": 3,
+      "rows": [
+        {
+          "id": "q1.input.controller-tuning",
+          "title": "Controller deadzones, curves and per-seat settings UI",
+          "originalRemainingWorkReason": "Accepted 36f395ee joins per-seat controller/mouse tuning persistence and reconnect/device-profile fallback. Full per-seat preview and the complete exposed outer-threshold control workflow remain unqualified; persistent application settings are no longer the missing join.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/settings/index.ts",
+            "src/input/gamepad.ts",
+            "src/settings/config.ts",
+            "src/app/bootstrap/input.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats"
+          }
+        },
+        {
+          "id": "q1.seats.connections-lifecycle",
+          "title": "Two to four independent local player connections",
+          "originalRemainingWorkReason": "Actor/client disconnect and generation reuse work, but local-seat drop currently quits the application and dynamic local join/drop presentation is incomplete.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/input.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats"
+          }
+        },
+        {
+          "id": "q1.seats.presentation-ownership",
+          "title": "Resolve shared effects, audio, menus and recordings for seats",
+          "originalRemainingWorkReason": "Effects, listeners and modal input have seat ownership, but recorded-view ownership has no application demo record/playback consumer.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/presentation.ts",
+            "src/app/bootstrap/audio.ts",
+            "src/network/q1/demos.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats",
+            "secondaryDependencies": [
+              "rendering",
+              "audio-music",
+              "demos-recording",
+              "menus-hud"
+            ],
+            "note": "The row explicitly crosses presentation services; its single organizing behavior is seat ownership."
+          }
+        },
+        {
+          "id": "q1.seats.qw-native-extension",
+          "title": "Local players with QuakeWorld gameplay and native networking",
+          "originalRemainingWorkReason": "Accepted 66e6136 supplies a single-seat native QW remote session; 88f84c10 adds dedicated base-protocol-28 hosting. Local graphical QW hosting, split-screen transport extensions and independent multi-seat prediction remain open.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/remote-application.ts",
+            "src/network/q1/quakeworld.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats",
+            "secondaryDependencies": [
+              "networking"
+            ],
+            "note": "Local seat ownership crosses native wire limits; assigned once to seats."
+          }
+        },
+        {
+          "id": "q2.input.binds-keyboard-mouse",
+          "title": "Bind keyboard and mouse gameplay controls",
+          "originalRemainingWorkReason": "Runtime seat routing/tuning/bindings work, but ConfigStore seat/device persistence is not connected to ApplicationInput startup/shutdown; the required restart persistence is unfinished.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/input.ts",
+            "src/input/router.ts",
+            "src/settings/config.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats"
+          }
+        },
+        {
+          "id": "q2.input.per-player-tuning",
+          "title": "Tune controller axes independently",
+          "originalRemainingWorkReason": "Runtime seat routing/tuning/bindings work, but ConfigStore seat/device persistence is not connected to ApplicationInput startup/shutdown; the required restart persistence is unfinished.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/input.ts",
+            "src/input/router.ts",
+            "src/settings/config.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats"
+          }
+        },
+        {
+          "id": "q2.seats.remote-network",
+          "title": "Use multiple local players on a remote server",
+          "originalRemainingWorkReason": "The native Q2 remote adapter explicitly permits one player per connection; application multi-seat remote admission/prediction is not implemented.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q2.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats"
+          }
+        },
+        {
+          "id": "q3.input.joystick-profiles-hotplug",
+          "title": "Joystick profiles, thresholds and device lifecycle",
+          "originalRemainingWorkReason": "SDL controller routing works, but SourceInputState and its Linux/Windows legacy joystick/POV/ball profiles have no application caller.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/input/source-input.ts",
+            "src/input/source-joystick.ts",
+            "src/app/bootstrap/input.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats"
+          }
+        },
+        {
+          "id": "q3.input.midi-controller",
+          "title": "MIDI note input and device configuration",
+          "originalRemainingWorkReason": "MIDI decoding/device helpers exist without an application-owned MIDI input lifecycle or selected-device configuration.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/input/midi.ts",
+            "src/input/source-midi.ts",
+            "src/app/bootstrap/input.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats",
+            "note": "MIDI device configuration and note input belong to input alongside other controllers."
+          }
+        },
+        {
+          "id": "q3.input.multiple-local-players",
+          "title": "Multiple local seats and remote participation",
+          "originalRemainingWorkReason": "Multiple local seats have independent input/view/audio state, but local seats joining a remote Q3 match are not supported by the current Q2-only remote application.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "input-seats",
+          "classification": {
+            "area": "input-seats"
+          }
+        }
+      ]
+    },
+    {
+      "area": "console-config",
+      "total": 5,
+      "q1": 2,
+      "q2": 1,
+      "q3": 2,
+      "rows": [
+        {
+          "id": "q1.config.commands-console",
+          "title": "Console scripts, aliases, history and completion",
+          "originalRemainingWorkReason": "Command buffering/aliases/exec/wait and console editing are connected. Accepted fc0c15e joins application writeconfig through src/app/bootstrap/capture.ts and src/console/commands.ts, and 36f395ee persists custom bindings across device remaps and restarts. Complete NQ/QW script, history/completion and profile-correct dispatch workflows remain unqualified.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/core/commands/index.ts",
+            "src/console/commands.ts",
+            "src/settings/config.ts",
+            "src/app/bootstrap/input.ts"
+          ],
+          "functionalArea": "console-config",
+          "classification": {
+            "area": "console-config"
+          }
+        },
+        {
+          "id": "q1.config.persistence-migration",
+          "title": "Archived configuration and writable profile migration",
+          "originalRemainingWorkReason": "Config serialization exists, but complete application archived/per-seat setting writes and old home/per-game migration are not connected.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/settings/config.ts",
+            "src/app/bootstrap/input.ts",
+            "src/app/bootstrap/frontend-preferences.ts"
+          ],
+          "functionalArea": "console-config",
+          "classification": {
+            "area": "console-config"
+          }
+        },
+        {
+          "id": "q2.config.archived-state",
+          "title": "Persist binds and archived cvars",
+          "originalRemainingWorkReason": "ConfigStore can persist binds/cvars, but native application startup/shutdown does not load/save that store for active Q2 seats/profile.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/settings/config.ts",
+            "src/app/bootstrap/input.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "console-config",
+          "classification": {
+            "area": "console-config"
+          }
+        },
+        {
+          "id": "q3.configuration.console-scripts",
+          "title": "Console, history, completion and command scripts",
+          "originalRemainingWorkReason": "Console editing/history, quoting and vstr/wait/echo are joined, but neither application Q3 CommandBuffer supplies readScript; exec therefore reports failure rather than reading the requested mounted script.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/input.ts",
+            "src/core/commands/index.ts",
+            "src/console/session.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "console-config",
+          "classification": {
+            "area": "console-config"
+          }
+        },
+        {
+          "id": "q3.configuration.persistence-startup",
+          "title": "Archived cvars, bindings and startup configuration",
+          "originalRemainingWorkReason": "Frontend preferences persist and source cvars survive map changes, but archived source cvar/binding configuration, explicit writeconfig and product/profile startup migration are not fully joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/frontend-preferences.ts",
+            "src/settings/config.ts",
+            "src/console/commands.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "console-config",
+          "classification": {
+            "area": "console-config"
+          }
+        }
+      ]
+    },
+    {
+      "area": "networking",
+      "total": 10,
+      "q1": 6,
+      "q2": 1,
+      "q3": 3,
+      "rows": [
+        {
+          "id": "q1.multiplayer.chat",
+          "title": "Public, team and private messages",
+          "originalRemainingWorkReason": "Application explicitly rejects selected Q1 chat commands; team chat/private tell and their local/remote UI routing are unfinished.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking",
+            "secondaryDependencies": [
+              "menus-hud"
+            ],
+            "note": "Message routing and presentation coexist; assigned to communication behavior."
+          }
+        },
+        {
+          "id": "q1.network.hosting-lifecycle",
+          "title": "Listen and dedicated server lifecycle",
+          "originalRemainingWorkReason": "Native NQ listen/dedicated hosting and accepted 88f84c10 dedicated base-QW protocol-28 hosting are connected, including donor-client movement, firing and travel. Local graphical QW hosting/joins and the complete interactive dedicated-console/operator workflow remain open; command work after this cutoff is excluded.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/network/q1.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking"
+          }
+        },
+        {
+          "id": "q1.network.native-session-negotiation",
+          "title": "Negotiate full native session identity",
+          "originalRemainingWorkReason": "Application native negotiation does not exchange the complete independent gameplay/content/clock/inventory/seat capability schema across Q1 sessions.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/contracts/session.ts",
+            "src/app/bootstrap/network/q1.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking"
+          }
+        },
+        {
+          "id": "q1.network.nq-wire",
+          "title": "NetQuake protocols 15, 666 and 999",
+          "originalRemainingWorkReason": "Accepted 5a0e1848 joins classic id1 host protocol selection and shared-client negotiation of NQ 15/666/999, explicit capacity limits, alpha/scale, movement, travel and svc_version codec flags. Root passed 9 tests/209 assertions, independent donor servers exercised all three protocols with authoritative movement, and entity updates inside actual UDP payloads matched donor codecs at 9/15/21 bytes. Rerelease/expansion/mod admission, private extensions, static visual-field production, nondefault lerpfinish and full bidirectional native-peer qualification remain open.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/network/q1.ts",
+            "src/network/q1/netquake.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking"
+          }
+        },
+        {
+          "id": "q1.network.qw-prediction",
+          "title": "QuakeWorld protocol and prediction",
+          "originalRemainingWorkReason": "Accepted 66e6136 joins native protocol-28 remote admission and shared presentation/prediction; 88f84c10 adds dedicated native QW hosting. An independent donor client exercised authoritative movement, firing and travel. Protocol 29, negotiated extensions, spectator support, other-player two-pass/fractional prediction and full effects remain open.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q1/quakeworld.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking"
+          }
+        },
+        {
+          "id": "q1.network.retail-kex-boundary",
+          "title": "Separate documented Q1 wire compatibility from retail KEX claims",
+          "originalRemainingWorkReason": "Retail service interoperability is explicitly bounded, but required native replacement service workflows are not complete.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q1.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking"
+          }
+        },
+        {
+          "id": "q2.network.classic-protocol",
+          "title": "Preserve stock protocol 34 behavior",
+          "originalRemainingWorkReason": "Stock protocol framing/snapshots/commands are joined, but the stated complete protocol workflow includes downloads, which native Q2 application transfer does not implement.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q2.ts",
+            "src/network/q2/codec.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking"
+          }
+        },
+        {
+          "id": "q3.content.pure-policy",
+          "title": "Pure package checksums and filesystem selection",
+          "originalRemainingWorkReason": "Server checksum/feed and cp proof verification are joined, and generic pure mount ordering exists; Q3 client-side search-path reset/reordering and proof construction are not joined to a remote application.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/network-q3.ts",
+            "src/app/bootstrap/network/q3.ts",
+            "src/content/mounts/index.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking",
+            "secondaryDependencies": [
+              "content-assets",
+              "mods-vms"
+            ],
+            "note": "Pure-policy enforcement belongs to network admission, using package and mod/filesystem identity."
+          }
+        },
+        {
+          "id": "q3.network.ipx-transport",
+          "title": "Historical IPX transport obligation",
+          "originalRemainingWorkReason": "No IPX transport is joined to the current application; the UDP/loopback service does not supply the required IPX behavior.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q3.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking",
+            "note": "Historical IPX remains a transport obligation within networking."
+          }
+        },
+        {
+          "id": "q3.network.snapshots-prediction",
+          "title": "Snapshots, deltas and client prediction",
+          "originalRemainingWorkReason": "The server snapshot path and local-seat prediction run; a Q3 remote-client application path that consumes network snapshots and owns prediction/recovery is not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q3.ts",
+            "src/app/bootstrap/simulation/prediction/presentation.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "networking",
+          "classification": {
+            "area": "networking"
+          }
+        }
+      ]
+    },
+    {
+      "area": "downloads",
+      "total": 1,
+      "q1": 1,
+      "q2": 0,
+      "q3": 0,
+      "rows": [
+        {
+          "id": "q1.network.downloads",
+          "title": "QuakeWorld content download queues and policy",
+          "originalRemainingWorkReason": "Accepted 66e6136 joins QW sound/model transfer queues and contained admission; 066ab042 adds application skin transfer/display, including an independently verified exact 913-byte skin. Scope remains base qw/id1. Arbitrary mod gamedir admission and application server-host per-category denial policy remain unjoined; complete allowed/denied map/model/sound/skin workflows are not established.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q1/quakeworld.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "downloads",
+          "classification": {
+            "area": "downloads"
+          }
+        }
+      ]
+    },
+    {
+      "area": "server-browser-admin",
+      "total": 20,
+      "q1": 5,
+      "q2": 10,
+      "q3": 5,
+      "rows": [
+        {
+          "id": "q1.multiplayer.identity",
+          "title": "Player names, colors and setup",
+          "originalRemainingWorkReason": "Accepted 066ab042 joins saved pre-connect QW name/skin/colors/rate and live color updates with custom-skin display; 0c0499c3 retains indexed MDL colors and proper PCX source cropping. Accepted a8f9e2f forwards local Q1 source colors through two-seat update/save/load. Editable local Q1 setup/color console and cross-source appearance ownership remain unjoined, so the required setup/console and independent-seat identity workflow is incomplete.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/composition/q1/clients.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q1.multiplayer.pause-kick-status",
+          "title": "Pause, kick, ping and player status",
+          "originalRemainingWorkReason": "Kick handling exists, but the complete Q1 authorized pause/ping/status command and operator feedback workflow is not joined.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/console.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q1.multiplayer.setup",
+          "title": "Configure and launch multiplayer matches",
+          "originalRemainingWorkReason": "Startup exposes only singleplayer/coop/deathmatch and lacks the complete Q1 CTF/Horde/Rogue team/protocol setup controls.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-selection.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin",
+            "secondaryDependencies": [
+              "menus-hud",
+              "modes-objectives"
+            ],
+            "note": "Match configuration includes a public setup workflow; assigned to hosting administration."
+          }
+        },
+        {
+          "id": "q1.network.admission-admin",
+          "title": "Passwords, spectators, rcon, filtering and flood control",
+          "originalRemainingWorkReason": "Native Q1 application networking lacks the full player/spectator/password/rcon/IP-filter/flood-protection operator workflow.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q1.ts",
+            "src/app/bootstrap/simulation/network-q1.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin",
+            "secondaryDependencies": [
+              "networking"
+            ],
+            "note": "Admission wire behavior and operator policy share one row; assigned to administration."
+          }
+        },
+        {
+          "id": "q1.network.discovery",
+          "title": "Direct connect, LAN search and server browser",
+          "originalRemainingWorkReason": "Direct NQ transport is connected, but complete LAN/master discovery and a usable server-browser workflow are not application features.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q1/index.ts",
+            "src/app/bootstrap/startup-menu.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q2.admin.masters-heartbeat",
+          "title": "Configure masters and heartbeat publication",
+          "originalRemainingWorkReason": "The live Q2 server adapter does not schedule master registration/heartbeat publication or expose master configuration.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q2.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q2.admin.player-identity",
+          "title": "Configure player names, skins, handedness, and view settings",
+          "originalRemainingWorkReason": "Source userinfo parsing and remote updates exist, but local per-participant name/skin/hand/FOV configuration is not fully bound to active application settings.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/base/player/index.ts",
+            "src/app/bootstrap/input.ts",
+            "src/app/bootstrap/q2-console.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q2.admin.spectator-chase",
+          "title": "Enter spectator mode and chase active players",
+          "originalRemainingWorkReason": "Source chase movement and target selection run, but primaryUi reads the spectator own combat/inventory rather than the chased player; required borrowed HUD statistics are not joined.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/base/player/index.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q2.admin.status-kick",
+          "title": "Inspect clients and remove a player",
+          "originalRemainingWorkReason": "Accepted e06b6ee joins local dedicated status, dumpuser and selected-player kick for classic and rerelease Q2. Complete native transport status columns, UDP kick-reason delivery and required wire/profile qualification remain open.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/q2-console.ts",
+            "src/app/bootstrap/network/q2.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q2.browser.master-lan",
+          "title": "Discover servers from UDP, HTTP, and LAN sources",
+          "originalRemainingWorkReason": "ServerBrowser discovery/state utilities are not constructed by the startup application, which lacks the required browser/favorite/status UI workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/services/discovery.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q2.browser.sort-filter",
+          "title": "Filter and sort server results",
+          "originalRemainingWorkReason": "ServerBrowser discovery/state utilities are not constructed by the startup application, which lacks the required browser/favorite/status UI workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/services/discovery.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q2.browser.status-details",
+          "title": "Inspect server rules and player details",
+          "originalRemainingWorkReason": "ServerBrowser discovery/state utilities are not constructed by the startup application, which lacks the required browser/favorite/status UI workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/services/discovery.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q2.content.rotation-editor",
+          "title": "Edit and persist ordered map rotations",
+          "originalRemainingWorkReason": "LMCTF reads its maplist, but startup has no ordered rotation editor with persisted membership/shuffle and module-specific launch routing.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-menu.ts",
+            "src/app/bootstrap/q2-console.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin",
+            "secondaryDependencies": [
+              "maps-campaigns",
+              "menus-hud"
+            ],
+            "note": "Persisted rotation editing is assigned to server administration."
+          }
+        },
+        {
+          "id": "q2.content.server-map-lists",
+          "title": "Choose maps and inspect mode eligibility",
+          "originalRemainingWorkReason": "Startup lists selected-product maps, but full Q2 spawn/objective-based mode eligibility filtering and authored map titles are not established by those choices.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-selection.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin",
+            "secondaryDependencies": [
+              "maps-campaigns",
+              "modes-objectives"
+            ],
+            "note": "Map eligibility and selection are assigned to server setup."
+          }
+        },
+        {
+          "id": "q2.network.connectionless-rcon",
+          "title": "Process status, ping, challenges, and rcon",
+          "originalRemainingWorkReason": "The application Q2 connectionless switch handles challenge/ping/connect, but does not implement the required status and authorized rcon execution/reply path.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q2.ts",
+            "src/network/q2/connectionless.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin",
+            "secondaryDependencies": [
+              "networking"
+            ],
+            "note": "Connectionless packet support serves status/ping/challenge/rcon administration."
+          }
+        },
+        {
+          "id": "q3.admin.operator-rcon-filters",
+          "title": "Operator controls, rcon, filters and logging",
+          "originalRemainingWorkReason": "Map/restart/kick and game-side filters exist, but the application Q3 endpoint does not join the complete authenticated rcon/operator diagnostics and logging service.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q3.ts",
+            "src/app/bootstrap/application.ts",
+            "src/network/services/admin.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q3.admin.pause-flood-inactivity",
+          "title": "Pause eligibility, command flood control and inactivity",
+          "originalRemainingWorkReason": "Flood and inactivity policies run, but the application does not join source pause eligibility and paused Q3 server-frame handling required by this compound row.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q3.ts",
+            "src/app/bootstrap/simulation/q3/runtime.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q3.admin.permissions-cheats-passwords",
+          "title": "Password admission and developer command permissions",
+          "originalRemainingWorkReason": "Password and ordinary cheat policies are joined, but the compound requirement includes the actual levelshot command; its shared capture registration is not called by the application.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/q3/runtime.ts",
+            "src/content/q3/team-arena/client-admission.ts",
+            "src/console/commands.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q3.discovery.lan-global-favorites",
+          "title": "LAN, master lists and favorites",
+          "originalRemainingWorkReason": "Discovery protocol helpers exist, but LAN/global/favorites listing and refresh are not joined to an application browser.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/services/discovery.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        },
+        {
+          "id": "q3.discovery.ping-status-cache-filters",
+          "title": "Ping/status queues, filtering and persistent cache",
+          "originalRemainingWorkReason": "Ping/status helpers are not connected to the required browser cache, filters, sorting and refresh lifecycle.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/services/discovery.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "server-browser-admin",
+          "classification": {
+            "area": "server-browser-admin"
+          }
+        }
+      ]
+    },
+    {
+      "area": "mods-vms",
+      "total": 6,
+      "q1": 3,
+      "q2": 1,
+      "q3": 2,
+      "rows": [
+        {
+          "id": "q1.content.launch-selection",
+          "title": "Select gameplay separately from content and engine behavior",
+          "originalRemainingWorkReason": "Launch selection cannot independently choose arbitrary Q1 campaign gamecode on another campaign map; selected foreign Q1 arsenals remain id1-only.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-selection.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "mods-vms",
+          "classification": {
+            "area": "mods-vms",
+            "secondaryDependencies": [
+              "content-assets",
+              "menus-hud"
+            ],
+            "note": "Provider/gamecode selection spans discovery and launch UI; assigned once to execution selection."
+          }
+        },
+        {
+          "id": "q1.execution.builtin-typescript-gameplay",
+          "title": "Run first-party Q1 gameplay in strict TypeScript",
+          "originalRemainingWorkReason": "Official TypeScript composition exists, but the stated optional external-mod execution is not complete: only pinned id1 QC admission is available and arbitrary programs remain rejected.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/composition/q1/runtime.ts",
+            "src/app/bootstrap/content.ts",
+            "src/app/bootstrap/simulation/quakec-source.ts"
+          ],
+          "functionalArea": "mods-vms",
+          "classification": {
+            "area": "mods-vms"
+          }
+        },
+        {
+          "id": "q1.execution.nq-qw-host-abi",
+          "title": "Keep NetQuake and QuakeWorld gamecode host contracts distinct",
+          "originalRemainingWorkReason": "Accepted 60bbc638 joins the pinned native QW program through the shared QuakeCSource owner, preserving distinct NQ/QW layouts, callbacks and shared damage authority; NQ retention checks passed. Admission remains restricted to verified programs. The requirement’s external-mod workflow, broader product ABI coverage and QW spectator callbacks remain unqualified.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/content.ts",
+            "src/app/bootstrap/simulation/quakec-source.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "mods-vms",
+          "classification": {
+            "area": "mods-vms"
+          }
+        },
+        {
+          "id": "q2.game.provider-selection",
+          "title": "Select base, expansion, CTF, LMCTF, and KEX game providers",
+          "originalRemainingWorkReason": "Known base/expansion/CTF/LMCTF/RR programs have real dispatch, but unknown native Q2 modules still lack executable guest application integration; rejecting them does not supply that component.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/composition/q2/index.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "mods-vms",
+          "classification": {
+            "area": "mods-vms"
+          }
+        },
+        {
+          "id": "q3.content.mod-selection",
+          "title": "Mod discovery, selection and return to base",
+          "originalRemainingWorkReason": "Installed product selection is available, but arbitrary Q3 fs_game mod selection, restart and role/content reloading are not an implemented application workflow.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/catalog/launch.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "mods-vms",
+          "classification": {
+            "area": "mods-vms"
+          }
+        },
+        {
+          "id": "q3.execution.qvm-roles",
+          "title": "QVM game, cgame and UI execution",
+          "originalRemainingWorkReason": "QVM parsing/interpreting exists, but application game/cgame/UI roles execute native TypeScript controllers; loading and running the required bytecode roles is not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/compat/qvm/index.ts",
+            "src/app/bootstrap/simulation/q3/runtime.ts",
+            "src/content/q3/presentation/client.ts"
+          ],
+          "functionalArea": "mods-vms",
+          "classification": {
+            "area": "mods-vms"
+          }
+        }
+      ]
+    },
+    {
+      "area": "movement-bodies",
+      "total": 2,
+      "q1": 1,
+      "q2": 1,
+      "q3": 0,
+      "rows": [
+        {
+          "id": "q1.physics.rerelease-gibs-corpses",
+          "title": "Rerelease gib and corpse collision semantics",
+          "originalRemainingWorkReason": "Accepted 98074c6 corrects native authored soldier/dog gib and head construction through existing helpers in source order; root passed 14 tests/301 assertions and actual rerelease head flight/persistence plus gib gravity/bounce/removal. Complete independently selected rerelease corpse-extension collision semantics remain unestablished.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/actor-execution.ts",
+            "src/app/bootstrap/simulation/physics.ts",
+            "src/content/q1/base/monsters.ts"
+          ],
+          "functionalArea": "movement-bodies",
+          "classification": {
+            "area": "movement-bodies"
+          }
+        },
+        {
+          "id": "q2.rerelease.q64-movement",
+          "title": "Match Q2 64 server movement and prediction",
+          "originalRemainingWorkReason": "Accepted 3176aee joins selected Q2 movement profiles and source-announced server configuration, including actual authored bio/base travel; root passed 1 test/68 assertions. Rerelease remote-client admission and matching native prediction remain unsupported, so full Q2 64 server/client movement compatibility is not established.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/movement/q2/index.ts",
+            "src/app/bootstrap/simulation/network.ts",
+            "src/app/bootstrap/network/remote.ts"
+          ],
+          "functionalArea": "movement-bodies",
+          "classification": {
+            "area": "movement-bodies"
+          }
+        }
+      ]
+    },
+    {
+      "area": "ai-navigation",
+      "total": 9,
+      "q1": 4,
+      "q2": 3,
+      "q3": 2,
+      "rows": [
+        {
+          "id": "q1.bots.combat-traversal",
+          "title": "Bot combat, swimming, jumps and monster interactions",
+          "originalRemainingWorkReason": "Shared bots execute real movement and attacks, but Q1 admission rejects campaign play, leaving the required campaign-monster combat/traversal workflow unjoined.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/bots.ts",
+            "src/app/bootstrap/simulation/navigation.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation"
+          }
+        },
+        {
+          "id": "q1.bots.ctf-coop-horde",
+          "title": "Bot objectives and campaign participation",
+          "originalRemainingWorkReason": "botAdmissionError explicitly rejects Q1 team and campaign objectives, including CTF, coop and Horde.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/bots.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation",
+            "secondaryDependencies": [
+              "modes-objectives"
+            ],
+            "note": "Bot participation requires mode-specific objective policies; its primary behavior is AI."
+          }
+        },
+        {
+          "id": "q1.bots.knowledge-skill",
+          "title": "Bot personalities, weapon/item knowledge and skill",
+          "originalRemainingWorkReason": "Q1 maps currently load q3-baseq3 bot definitions in createBots rather than the active Q1 retail characters/knowledge/chats/team files.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/bots/behavior/assets.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation"
+          }
+        },
+        {
+          "id": "q1.bots.population",
+          "title": "Manual bots, autofill and eligibility",
+          "originalRemainingWorkReason": "Shared bot population is connected only for standard deathmatch on Q1 id1 and uses Q3 bot definitions; required native Q1 personality and broader mode population workflow remains unfinished.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/simulation/bots.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation"
+          }
+        },
+        {
+          "id": "q2.bots.combat-campaign-goals",
+          "title": "Execute bot combat and campaign decisions",
+          "originalRemainingWorkReason": "Shared bots provide combat/item/movement decisions, but complete Q2 authored campaign objective solving is not established; the rerelease guidance hook still reports no-navigation.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/bots/behavior/index.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation"
+          }
+        },
+        {
+          "id": "q2.navigation.dynamic-obstacles",
+          "title": "Update routes for doors, lifts, hazards, and moving floors",
+          "originalRemainingWorkReason": "Accepted a5fca35 supplies live enabled, locked, destination and hazard observations to shared route validation. Unsupported mover travel is still rejected, so complete dynamic route execution remains unfinished.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/navigation.ts",
+            "src/bots/navigation/runtime.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation"
+          }
+        },
+        {
+          "id": "q2.navigation.foreign-map-construction",
+          "title": "Construct navigation for maps without NAV2",
+          "originalRemainingWorkReason": "Constructed graphs drive real foreign-map movement, combat and item access, but admitted shared bots exclude campaign/team objective play. The stated objective navigation component is not completed by the current application join.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/bots/navigation/construct.ts",
+            "src/app/bootstrap/simulation/navigation.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation"
+          }
+        },
+        {
+          "id": "q3.bots.aas-reachability-clustering",
+          "title": "AAS reachability, clustering, writing and optimization",
+          "originalRemainingWorkReason": "Runtime AAS routing and generated common graphs exist; the distinct source AAS reachability/cluster generation, optimized AAS writer and read-back operation are not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/bots/navigation/construct.ts",
+            "src/bots/navigation/aas.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation"
+          }
+        },
+        {
+          "id": "q3.bots.foreign-map-construction",
+          "title": "Navigation construction for foreign maps and moving geometry",
+          "originalRemainingWorkReason": "Foreign-map navigation construction supports ordinary play, but the application explicitly rejects foreign-map campaign/team objective bot policies; the complete required objective adaptation is missing.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/bots.ts",
+            "src/bots/navigation/construct.ts"
+          ],
+          "functionalArea": "ai-navigation",
+          "classification": {
+            "area": "ai-navigation"
+          }
+        }
+      ]
+    },
+    {
+      "area": "combat-rosters-equipment",
+      "total": 11,
+      "q1": 4,
+      "q2": 7,
+      "q3": 0,
+      "rows": [
+        {
+          "id": "q1.hipnotic.monster-armagon",
+          "title": "Hipnotic armagon encounter",
+          "originalRemainingWorkReason": "Native mission-pack actor behavior is registered, but the requirement also specifies foreign-map integration; the selectable Q1 monster catalog exposes only id1 ordinary species.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q1/missionpacks/monsters/index.ts",
+            "src/content/monsters/q1.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q1.hipnotic.monster-gremlin",
+          "title": "Hipnotic gremlin encounter",
+          "originalRemainingWorkReason": "Native mission-pack actor behavior is registered, but the requirement also specifies foreign-map integration; the selectable Q1 monster catalog exposes only id1 ordinary species.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q1/missionpacks/monsters/index.ts",
+            "src/content/monsters/q1.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q1.hipnotic.monster-scourge",
+          "title": "Hipnotic scourge encounter",
+          "originalRemainingWorkReason": "Native mission-pack actor behavior is registered, but the requirement also specifies foreign-map integration; the selectable Q1 monster catalog exposes only id1 ordinary species.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q1/missionpacks/monsters/index.ts",
+            "src/content/monsters/q1.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q1.mg3.lavasuit",
+          "title": "Dawn of the Machine lava suit",
+          "originalRemainingWorkReason": "item_artifact_lavasuit and its timed environmental immunity are absent from native MG3 pickup/player registration; the ordinary biosuit is not equivalent.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q1/addons/items/pickups.ts",
+            "src/content/q1/addons/items/index.ts",
+            "src/content/q1/base/player.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q2.inventory.power-armor",
+          "title": "Toggle power armor and consume cells on protection",
+          "originalRemainingWorkReason": "Shared screen/shield absorption, facing and cell accounting are joined, but the common Q2 HUD does not expose the required active power-armor indicator.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/content/q2/base/player/index.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q2.powerup.invulnerability",
+          "title": "Activate and expire invulnerability",
+          "originalRemainingWorkReason": "Protection, source damage flags and expiry run; the current common HUD omits the required invulnerability timer.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/base/player/index.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q2.powerup.quad",
+          "title": "Activate and extend quad damage",
+          "originalRemainingWorkReason": "Source multiplier, durations, warning/drop behavior run, but the required active quad HUD timer is not populated by ApplicationSeatUi.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/foundation/items.ts",
+            "src/content/q2/foundation/weapons/index.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q2.rerelease.guardian",
+          "title": "Complete the guardian encounter",
+          "originalRemainingWorkReason": "Boss source attacks/phases/death run, but authored healthbar events are not consumed by the application HUD.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/monsters/guardian.ts",
+            "src/app/bootstrap/rerelease-presentation.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q2.rerelease.instanced-items",
+          "title": "Use coop item instancing",
+          "originalRemainingWorkReason": "Per-player pickup eligibility and checkpoint data exist, but emitted item-visibility events have no application per-seat visibility consumer.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/index.ts",
+            "src/app/bootstrap/rerelease-presentation.ts",
+            "src/app/bootstrap/presentation.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q2.rogue.double-damage",
+          "title": "Activate double damage",
+          "originalRemainingWorkReason": "Damage multiplier and source expiration/warnings run, but the required active HUD timer is absent.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/missionpacks/players.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        },
+        {
+          "id": "q2.xatrix.quadfire",
+          "title": "Activate quad fire",
+          "originalRemainingWorkReason": "The source cadence modifier and expiry are integrated; the required active HUD timer is absent from the common player HUD.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/missionpacks/players.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "combat-rosters-equipment",
+          "classification": {
+            "area": "combat-rosters-equipment"
+          }
+        }
+      ]
+    },
+    {
+      "area": "maps-campaigns",
+      "total": 5,
+      "q1": 1,
+      "q2": 4,
+      "q3": 0,
+      "rows": [
+        {
+          "id": "q1.execution.entity-properties",
+          "title": "Preserve foreign entity classes, fields and target graphs",
+          "originalRemainingWorkReason": "Selected foreign creature admission covers bounded source rosters and rejects unsupported class/placement combinations; every required foreign expansion entity adapter is not provided.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/monsters/q1.ts",
+            "src/app/bootstrap/simulation/monster-placement.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "maps-campaigns",
+          "classification": {
+            "area": "maps-campaigns",
+            "secondaryDependencies": [
+              "mods-vms",
+              "combat-rosters-equipment"
+            ],
+            "note": "Foreign entity fields and target graphs span adapters and roster admission; assigned to authored map behavior."
+          }
+        },
+        {
+          "id": "q2.campaign.hub-endings",
+          "title": "Complete hubs, objectives, secrets, and endings",
+          "originalRemainingWorkReason": "Mission gates/targets run, but complete authored intermission/help statistics and Q2 cinematic ending/nextserver presentation are not joined.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/campaign.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "maps-campaigns",
+          "classification": {
+            "area": "maps-campaigns"
+          }
+        },
+        {
+          "id": "q2.campaign.unit-backtracking",
+          "title": "Restore revisited levels within a unit",
+          "originalRemainingWorkReason": "World travel constructs a fresh simulation and carries player/campaign state; there is no visited-level world checkpoint cache restoring killed monsters/movers/pickups on return.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "maps-campaigns",
+          "classification": {
+            "area": "maps-campaigns"
+          }
+        },
+        {
+          "id": "q2.content.native-starts",
+          "title": "Launch authored campaign starting maps",
+          "originalRemainingWorkReason": "Catalog start maps and skill are wired, but authored mapdb start-item/unit metadata is not loaded by the current catalog/application path.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/catalog/products.ts",
+            "src/app/bootstrap/content.ts",
+            "src/app/bootstrap/startup-selection.ts"
+          ],
+          "functionalArea": "maps-campaigns",
+          "classification": {
+            "area": "maps-campaigns"
+          }
+        },
+        {
+          "id": "q2.content.start-map-discovery",
+          "title": "Resolve mapdb, maplist, and BSP start maps",
+          "originalRemainingWorkReason": "Current launch catalog has fixed product starts and BSP map discovery; no shared mapdb parser/caller preserves authored unit order and start items.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/catalog/products.ts",
+            "src/app/bootstrap/startup-selection.ts"
+          ],
+          "functionalArea": "maps-campaigns",
+          "classification": {
+            "area": "maps-campaigns",
+            "secondaryDependencies": [
+              "content-assets"
+            ],
+            "note": "Map metadata discovery serves campaign-start resolution."
+          }
+        }
+      ]
+    },
+    {
+      "area": "modes-objectives",
+      "total": 11,
+      "q1": 3,
+      "q2": 6,
+      "q3": 2,
+      "rows": [
+        {
+          "id": "q1.ctf.capture-loop",
+          "title": "Rerelease CTF capture, return, drop and scoring",
+          "originalRemainingWorkReason": "CTF source capture/drop/return logic is installed, but its q1-composition ctf-status/capture events have no application HUD consumer.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q1/addons/ctf/index.ts",
+            "src/content/composition/q1/runtime.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q1.ctf.grapple-observer-vote",
+          "title": "Rerelease CTF grappling, observers and exit vote",
+          "originalRemainingWorkReason": "Grapple and observer/vote source callbacks exist, but Q1 targeted prompt/choice events are not consumed by the application UI, leaving the complete observer/vote workflow unfinished.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q1/addons/ctf/index.ts",
+            "src/content/composition/q1/runtime.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives",
+            "secondaryDependencies": [
+              "combat-rosters-equipment",
+              "server-browser-admin"
+            ],
+            "note": "One retained row combines grapple, observer and voting requirements; it is not split or duplicated."
+          }
+        },
+        {
+          "id": "q1.horde.launch-waves",
+          "title": "Horde launch, wave spawning and survivor progression",
+          "originalRemainingWorkReason": "Native MG1 horde maps can schedule waves, but runtime omits the horde cvar so the manager cannot enable horde-dependent lifecycle/travel; dedicated launch controls and campaign/team bot admission are also missing.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q1/addons/horde/index.ts",
+            "src/app/bootstrap/startup-selection.ts",
+            "src/app/bootstrap/simulation/bots.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q2.mode.deathball",
+          "title": "Play rerelease DeathBall",
+          "originalRemainingWorkReason": "The source mode module exists, but application match construction selects only standard/CTF/LMCTF and startup exposes no actual Tag/DeathBall launch.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/missionpacks/modes/index.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/startup-selection.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q2.mode.deathmatch-limits",
+          "title": "End a deathmatch on authored limits",
+          "originalRemainingWorkReason": "Source rules exist, but native application construction supplies deathmatchFlags=0/default player rules and does not bind the complete requested limit/option settings to gameplay.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/q2-console.ts",
+            "src/content/composition/q2/index.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q2.mode.dm-options",
+          "title": "Apply classic deathmatch flags",
+          "originalRemainingWorkReason": "Source rules exist, but native application construction supplies deathmatchFlags=0/default player rules and does not bind the complete requested limit/option settings to gameplay.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/q2-console.ts",
+            "src/content/composition/q2/index.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q2.mode.rerelease-options",
+          "title": "Apply rerelease deathmatch and weapon settings",
+          "originalRemainingWorkReason": "Source rules exist, but native application construction supplies deathmatchFlags=0/default player rules and does not bind the complete requested limit/option settings to gameplay.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/q2-console.ts",
+            "src/content/composition/q2/index.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q2.mode.tag",
+          "title": "Play Rogue Tag",
+          "originalRemainingWorkReason": "The source mode module exists, but application match construction selects only standard/CTF/LMCTF and startup exposes no actual Tag/DeathBall launch.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/missionpacks/modes/index.ts",
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/startup-selection.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q2.rerelease.squad-respawn-lives",
+          "title": "Use squad respawn and cooperative lives",
+          "originalRemainingWorkReason": "Rerelease source implements squad/lives state, but application construction does not bind selectable rerelease coop options; complete configured waiting/restart workflow is not established.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/players.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q3.modes.foreign-objective-adaptation",
+          "title": "Objective and spawn adaptation on foreign maps",
+          "originalRemainingWorkReason": "Foreign-map ordinary movement/combat/bots work, but the application explicitly lacks complete objective-anchor/campaign adaptation for all Q3/TA modes on Q1/Q2 maps.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/bots.ts",
+            "src/content/q3/team-arena/objective-placement.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        },
+        {
+          "id": "q3.modes.single-player-arena",
+          "title": "Single-player arena match flow",
+          "originalRemainingWorkReason": "The game-side single-player mode runs, but arena launch, progression completion and return-to-selection flow are not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/q3/runtime.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "modes-objectives",
+          "classification": {
+            "area": "modes-objectives"
+          }
+        }
+      ]
+    },
+    {
+      "area": "saves-recovery",
+      "total": 7,
+      "q1": 3,
+      "q2": 3,
+      "q3": 1,
+      "rows": [
+        {
+          "id": "q1.saves.autosave",
+          "title": "Timed autosave and recovery",
+          "originalRemainingWorkReason": "Application consumes Q2 autosave events only; Q1 level-start/timed autosave scheduling and its multiplayer/seat policy are not joined.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/content/q1/base/rules.ts"
+          ],
+          "functionalArea": "saves-recovery",
+          "classification": {
+            "area": "saves-recovery"
+          }
+        },
+        {
+          "id": "q1.saves.classic-v5",
+          "title": "Classic version 5 save import and export",
+          "originalRemainingWorkReason": "Classic save syntax exists, but application save/load is native SaveImage and does not import/export complete classic VM globals/edicts/callbacks; QC saved games remain rejected.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/persistence/q1.ts",
+            "src/persistence/q1-quakec.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "saves-recovery",
+          "classification": {
+            "area": "saves-recovery"
+          }
+        },
+        {
+          "id": "q1.saves.kex-v6",
+          "title": "KEX-style version 6 save compatibility",
+          "originalRemainingWorkReason": "KEX container parsing is not an application retail-save import/export path; complete original fixture compatibility is not established.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/persistence/q1.ts",
+            "src/persistence/q1-quakec.ts",
+            "src/app/bootstrap/startup-saves.ts"
+          ],
+          "functionalArea": "saves-recovery",
+          "classification": {
+            "area": "saves-recovery"
+          }
+        },
+        {
+          "id": "q2.save.autosave-transition",
+          "title": "Distinguish autosaves from transition snapshots",
+          "originalRemainingWorkReason": "Autosave events call the common saveGame path, but the full source distinction between transition snapshots and autosave-specific client/field treatment is not implemented.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "saves-recovery",
+          "classification": {
+            "area": "saves-recovery"
+          }
+        },
+        {
+          "id": "q2.save.eligibility-paths",
+          "title": "Enforce save eligibility and contained slot paths",
+          "originalRemainingWorkReason": "Startup slots are contained, but the live save command accepts an arbitrary path and lacks the full source eligibility/reserved-current-state policy.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/startup-saves.ts"
+          ],
+          "functionalArea": "saves-recovery",
+          "classification": {
+            "area": "saves-recovery"
+          }
+        },
+        {
+          "id": "q2.save.poi-health-story",
+          "title": "Restore objective and presentation state",
+          "originalRemainingWorkReason": "Source state is checkpointed and story redraws, but POI and healthbar application consumers are absent so those presentation components cannot resume visibly.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/checkpoint.ts",
+            "src/app/bootstrap/rerelease-presentation.ts"
+          ],
+          "functionalArea": "saves-recovery",
+          "classification": {
+            "area": "saves-recovery"
+          }
+        },
+        {
+          "id": "q3.persistence.complete-world-save",
+          "title": "Complete unified world saves under Q3 gameplay",
+          "originalRemainingWorkReason": "Application/shared save still rejects complete Q3 world restoration; session carry does not save entities, missiles, timers, objectives and bot runtime state.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/runtime.ts",
+            "src/app/bootstrap/simulation/player-checkpoint.ts"
+          ],
+          "functionalArea": "saves-recovery",
+          "classification": {
+            "area": "saves-recovery"
+          }
+        }
+      ]
+    },
+    {
+      "area": "menus-hud",
+      "total": 24,
+      "q1": 6,
+      "q2": 12,
+      "q3": 6,
+      "rows": [
+        {
+          "id": "q1.events.prompts",
+          "title": "Localized prompts and choice impulses",
+          "originalRemainingWorkReason": "Source emits Q1 prompt/clear-prompt events, but Application.sourceActions and the seat UI do not construct/route those dialogs or selection impulses.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/composition/q1/runtime.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud",
+            "secondaryDependencies": [
+              "localization-accessibility"
+            ],
+            "note": "Choice prompts include localized text; assigned to the interactive prompt workflow."
+          }
+        },
+        {
+          "id": "q1.ui.hud-inventory",
+          "title": "Classic, Hipnotic and Rogue HUD/inventory layouts",
+          "originalRemainingWorkReason": "Common health/armor/ammo and expansion weapon metadata are displayed, but Q1 CTF status/capture events are ignored, leaving required source scoreboard/objective HUD state incomplete.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/content/composition/q1/types.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q1.ui.options-and-reset",
+          "title": "Complete options, binding and reset workflows",
+          "originalRemainingWorkReason": "Current options cover a subset; language, sound rate, autosave, pickup switching, lookspring/lookstrafe and complete defaults controls are not all joined.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/frontend-preferences.ts",
+            "src/ui/settings/index.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q1.ui.radial-weapon-wheel",
+          "title": "Rendered radial weapon selection",
+          "originalRemainingWorkReason": "A working common radial selector is connected, but the required authored slot data is not: q1 wheel parsing/adaptation has no application caller and UI uses fixed source weapon-registration order.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/hud/q1-wheel.ts",
+            "src/ui/hud/wheel.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q1.ui.save-load-menus",
+          "title": "Save, load and autosave selection UI",
+          "originalRemainingWorkReason": "Startup lists native saves and console save/load works, but complete in-game manual save-slot/comments menus and Q1 autosave recovery are absent.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-saves.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q1.ui.weapon-quickswitch",
+          "title": "Weapon-wheel data and quickswitch impulses",
+          "originalRemainingWorkReason": "The common wheel selects source item IDs, but no application quickswitch/last-weapon eligibility path or authored Q1 wheel-slot/impulse cache adapter is connected.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/hud/q1-wheel.ts",
+            "src/ui/hud/wheel.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.config.audio-video-input-menus",
+          "title": "Apply video, audio, and input settings",
+          "originalRemainingWorkReason": "Accepted 0065d73b joins named/default audio-device selection and per-product device/effects/music persistence through ConfigStore; 36f395ee joins input assignment, tuning and binding persistence. Actual CPU/GL menu/restart and remote travel checks passed. The complete display/video settings and restart workflow remains unqualified.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup.ts",
+            "src/app/bootstrap/frontend-preferences.ts",
+            "src/ui/settings/index.ts",
+            "src/settings/config.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud",
+            "secondaryDependencies": [
+              "console-config",
+              "audio-music",
+              "rendering",
+              "input-seats"
+            ],
+            "note": "One row covers settings across several services; assigned to the public menu workflow."
+          }
+        },
+        {
+          "id": "q2.hud.boss-health-bars",
+          "title": "Display and clear authored boss health bars",
+          "originalRemainingWorkReason": "Rerelease emits objective/healthbar state, but ApplicationRereleasePresentation does not consume those events; the navigation hook explicitly returns no-navigation.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/types.ts",
+            "src/app/bootstrap/rerelease-presentation.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.centerprints-notifications",
+          "title": "Queue localized centerprints and notifications",
+          "originalRemainingWorkReason": "Per-seat Unicode message drawing is joined, but Q2 application centerprints always use instant=true and do not carry required source typewriter/duration policy.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/index.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.compass-help-path",
+          "title": "Draw the compass route to the active objective",
+          "originalRemainingWorkReason": "Rerelease emits objective/healthbar state, but ApplicationRereleasePresentation does not consume those events; the navigation hook explicitly returns no-navigation.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/types.ts",
+            "src/app/bootstrap/rerelease-presentation.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.damage-feedback",
+          "title": "Display damage direction and pickup feedback",
+          "originalRemainingWorkReason": "Source damage blend/kick exists, but full directional HUD indicators and actual pickup icons/timers are not bound in ApplicationSeatUi.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/effects/q2-view.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.inventory",
+          "title": "Open and use the inventory display",
+          "originalRemainingWorkReason": "The common HUD draws vitals and active weapon status, but does not bind the full Q2 inventory/help/status-layout stream required by this workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/index.ts",
+            "src/app/bootstrap/simulation/events.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.poi-stages",
+          "title": "Activate and advance objective markers",
+          "originalRemainingWorkReason": "Rerelease emits objective/healthbar state, but ApplicationRereleasePresentation does not consume those events; the navigation hook explicitly returns no-navigation.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/types.ts",
+            "src/app/bootstrap/rerelease-presentation.ts",
+            "src/app/bootstrap/simulation/runtime.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.powerup-wheel",
+          "title": "Use powerups through the radial wheel",
+          "originalRemainingWorkReason": "Powerup selection is wired, but required consumable/timer feedback is not populated in the common HUD.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/wheel.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.profile-selection",
+          "title": "Select the correct classic or rerelease HUD",
+          "originalRemainingWorkReason": "The common HUD draws vitals and active weapon status, but does not bind the full Q2 inventory/help/status-layout stream required by this workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/index.ts",
+            "src/app/bootstrap/simulation/events.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.score-help",
+          "title": "Display scoreboards and the help computer",
+          "originalRemainingWorkReason": "The common HUD draws vitals and active weapon status, but does not bind the full Q2 inventory/help/status-layout stream required by this workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/index.ts",
+            "src/app/bootstrap/simulation/events.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.weapon-carousel",
+          "title": "Cycle weapons with the carousel",
+          "originalRemainingWorkReason": "Carousel state exists in SeatWeaponWheel, but application input does not call its cycle path, so the source-style preview/confirmation workflow is unjoined.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/hud/wheel.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q2.hud.weapon-wheel",
+          "title": "Select a weapon with the radial wheel",
+          "originalRemainingWorkReason": "The actual radial wheel is joined to source selection, but ApplicationSeatUi still supplies icon:null for wheel items; required item icons are not finished.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/ui.ts",
+            "src/ui/hud/wheel.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q3.progression.podium-postgame",
+          "title": "Podium, postgame and next-match navigation",
+          "originalRemainingWorkReason": "Native victory-pad entities exist; the ranked postgame UI, award sequence and progression return path remain unjoined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/q3/runtime.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud",
+            "secondaryDependencies": [
+              "progression-services",
+              "modes-objectives"
+            ],
+            "note": "Postgame display/navigation crosses match progression; assigned to its public presentation workflow."
+          }
+        },
+        {
+          "id": "q3.ui.base-demos-cinematics-configs",
+          "title": "Demo, movie and configuration menus",
+          "originalRemainingWorkReason": "The application has no complete base demos/cinematics/config menu workflow; codec and console helpers alone do not provide these menus.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-menu.ts",
+            "src/console/commands.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud",
+            "secondaryDependencies": [
+              "demos-recording",
+              "cinematics-media",
+              "console-config"
+            ],
+            "note": "Retained row explicitly requires menus over multiple services."
+          }
+        },
+        {
+          "id": "q3.ui.base-host-browser-ingame",
+          "title": "Base hosting, browser and in-game menus",
+          "originalRemainingWorkReason": "Source commands support many match operations, but the required host/browser/in-game menu workflows are not implemented by the common frontend.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-menu.ts",
+            "src/content/q3/team-arena/commands.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud",
+            "secondaryDependencies": [
+              "server-browser-admin"
+            ],
+            "note": "Host/browser behavior is represented here by its UI row; no backend row is duplicated."
+          }
+        },
+        {
+          "id": "q3.ui.base-settings",
+          "title": "Base menus for player, controls and settings",
+          "originalRemainingWorkReason": "Common settings provide usable controls, but the full base source settings/player-model/configuration menu workflow and apply/restart behavior are not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/settings/index.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q3.ui.team-arena-scripts-feeders-visibility",
+          "title": "Team Arena scripts, feeders and owner draws",
+          "originalRemainingWorkReason": "The legacy menu engine and mission HUD are joined, but the complete Team Arena front-end scripts/feeders, server refresh and mod/media application services are not.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/common/legacy/runtime.ts",
+            "src/content/q3/presentation/mission-hud.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud"
+          }
+        },
+        {
+          "id": "q3.ui.team-arena-skirmish",
+          "title": "Team Arena skirmish launch and next match",
+          "originalRemainingWorkReason": "Team Arena skirmish selection, team/map/skill setup and its launch/return workflow are not joined to the frontend.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/startup-menu.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "menus-hud",
+          "classification": {
+            "area": "menus-hud",
+            "secondaryDependencies": [
+              "modes-objectives",
+              "progression-services"
+            ],
+            "note": "Skirmish launch/next-match flow is a UI entry point with mode dependencies."
+          }
+        }
+      ]
+    },
+    {
+      "area": "localization-accessibility",
+      "total": 10,
+      "q1": 3,
+      "q2": 4,
+      "q3": 3,
+      "rows": [
+        {
+          "id": "q1.accessibility.contrast-color",
+          "title": "Contrast and color-accessibility settings",
+          "originalRemainingWorkReason": "High-contrast/reduced-flash toggles exist, but alternate typeface/color-accessibility controls and persisted application preferences are incomplete.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/settings/index.ts",
+            "src/settings/config.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility"
+          }
+        },
+        {
+          "id": "q1.accessibility.subtitles-captions",
+          "title": "Timed subtitles and sound captions",
+          "originalRemainingWorkReason": "CaptionTimeline has no application consumer; actual Q2 SRT resources also depend on currently unsupported OGV playback, and no authored Q1 sound-caption mapping was found.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/text/captions.ts",
+            "src/media/playback.ts",
+            "src/app/bootstrap/presentation.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility"
+          }
+        },
+        {
+          "id": "q1.text.localization-overlays",
+          "title": "Localization, fallback and mod overlay precedence",
+          "originalRemainingWorkReason": "Localization supports overlays/formatting, but application Q1 messages are drawn raw and the active language selector is not bound; finales currently load English only.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/text/localization.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/finale.ts",
+            "src/ui/settings/services.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility"
+          }
+        },
+        {
+          "id": "q2.accessibility.color-and-captions",
+          "title": "Complete readable non-color-only and caption workflows",
+          "originalRemainingWorkReason": "Caption data/scheduler and HUD support exist but no application media-event producer supplies timed captions; the common HUD initializes captions empty.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/text/captions.ts",
+            "src/ui/hud/index.ts",
+            "src/app/bootstrap/ui.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility"
+          }
+        },
+        {
+          "id": "q2.accessibility.contrast-typeface",
+          "title": "Choose contrast backgrounds and alternate typefaces",
+          "originalRemainingWorkReason": "High-contrast controls exist, but complete alternate-typeface selection plus persisted preferences is not provided by the current application.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/settings/index.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/frontend-preferences.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility"
+          }
+        },
+        {
+          "id": "q2.accessibility.independent-scales",
+          "title": "Scale menus, HUD, and console independently",
+          "originalRemainingWorkReason": "HUD/text scale controls exist, but independent menu/HUD/console scale ownership on every actual draw path is not fully wired.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/settings/index.ts",
+            "src/app/bootstrap/ui.ts",
+            "src/app/bootstrap/startup-menu.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility"
+          }
+        },
+        {
+          "id": "q2.media.timed-subtitles",
+          "title": "Display timed cinematic subtitles and captions",
+          "originalRemainingWorkReason": "Shared media decoders exist, but Q2 campaign/remote cinematic presentation and authored continuation are not joined; the only application cinematic owner is Q3 UI RoQ playback, with no Q2 timed subtitle producer.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/media/index.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/app/bootstrap/network/remote.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility",
+            "secondaryDependencies": [
+              "cinematics-media"
+            ],
+            "note": "Cinematic scheduling is required, but the visible behavior is subtitles/captions."
+          }
+        },
+        {
+          "id": "q3.media.subtitles-captions",
+          "title": "Timed subtitles and captions for supplied media",
+          "originalRemainingWorkReason": "Caption data/settings helpers are present, but a complete source subtitle/caption event-to-visible-timeline application path is not established.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/settings/index.ts",
+            "src/app/bootstrap/presentation.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility",
+            "secondaryDependencies": [
+              "cinematics-media"
+            ],
+            "note": "Timed media dependency retained; assigned to caption behavior."
+          }
+        },
+        {
+          "id": "q3.presentation.accessibility-scales",
+          "title": "Readable UI, independent scales and accessibility",
+          "originalRemainingWorkReason": "Safe areas, HUD scaling and readable source fonts are implemented; the compound accessibility requirement including complete international text and caption presentation is not established in the actual application.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/ui/hud/index.ts",
+            "src/ui/settings/index.ts",
+            "src/text/q3-font.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility"
+          }
+        },
+        {
+          "id": "q3.presentation.fonts-and-glyphs",
+          "title": "Bitmap, proportional and Team Arena glyph fonts",
+          "originalRemainingWorkReason": "Bitmap/proportional and DAT fonts are joined; the application constructs RendererFontRegistry without generation services, so the required configurable FreeType generation path remains unavailable.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/q3-client/assets.ts",
+            "src/text/q3-font-registry.ts",
+            "src/text/q3-font.ts"
+          ],
+          "functionalArea": "localization-accessibility",
+          "classification": {
+            "area": "localization-accessibility",
+            "secondaryDependencies": [
+              "rendering"
+            ],
+            "note": "Glyph rendering and legibility share this font requirement."
+          }
+        }
+      ]
+    },
+    {
+      "area": "progression-services",
+      "total": 11,
+      "q1": 2,
+      "q2": 2,
+      "q3": 7,
+      "rows": [
+        {
+          "id": "q1.events.achievements",
+          "title": "Achievement persistence and player UI",
+          "originalRemainingWorkReason": "Achievement events are emitted but there is no durable award store/provider identity or readable application achievement consumer.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/composition/q1/runtime.ts",
+            "src/app/bootstrap/simulation/network-q1.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q1.events.level-completed-lobby",
+          "title": "Level-completed events and return-to-lobby lifecycle",
+          "originalRemainingWorkReason": "Source completion/return events have no durable progression plus host/join/leave/start lobby lifecycle consumer.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/startup.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services",
+            "secondaryDependencies": [
+              "maps-campaigns"
+            ],
+            "note": "Level completion and lobby return share one row; assigned to external/session lifecycle."
+          }
+        },
+        {
+          "id": "q2.service.achievements",
+          "title": "Record authored achievement events durably",
+          "originalRemainingWorkReason": "The source emits achievement events, but no application achievement consumer provides durable per-participant recording/display.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/types.ts",
+            "src/app/bootstrap/rerelease-presentation.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q2.service.match-report-lobby",
+          "title": "Complete match reporting and lobby lifecycle",
+          "originalRemainingWorkReason": "Local source match rules are implemented, but durable match-report and lobby membership/next-session service workflow is not integrated.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/content/q2/rerelease/types.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q3.progression.difficulty-records",
+          "title": "Difficulty-specific arena records",
+          "originalRemainingWorkReason": "The application has no joined five-skill best-rank progression store or record-driven arena UI.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q3.progression.medals",
+          "title": "Persistent medals and award thresholds",
+          "originalRemainingWorkReason": "In-match rewards exist, but durable single-player medal accumulation and its progression display are not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/simulation/q3/runtime.ts",
+            "src/content/q3/presentation/hud.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q3.progression.reset-and-unlock-commands",
+          "title": "Progression reset and explicit unlock commands",
+          "originalRemainingWorkReason": "Progression reset/unlock commands do not have an application-owned progression record to update.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q3.progression.team-arena-records",
+          "title": "Team Arena skirmish scores and best times",
+          "originalRemainingWorkReason": "Team Arena campaign score/accuracy/medal persistence and postgame record UI are not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q3.progression.tiers-videos-unlocks",
+          "title": "Tier completion and movie unlocks",
+          "originalRemainingWorkReason": "Tier completion, video unlock and final/training progression rules are not joined to the common frontend.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q3.services.authorization-endpoints",
+          "title": "CD-key authorization and configurable service endpoints",
+          "originalRemainingWorkReason": "The actual Q3 admission adapter supplies authorizeAddress as null and immediately answers authorization challenges; the required authorization endpoint lifecycle is not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/network/q3.ts",
+            "src/network/services/online.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        },
+        {
+          "id": "q3.services.rankings-lifecycle",
+          "title": "Ranking login, match lifecycle and submission",
+          "originalRemainingWorkReason": "Ranking wire codecs exist without a joined ranking account/session/reporting lifecycle.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/services/rank-codec.ts",
+            "src/network/services/online.ts"
+          ],
+          "functionalArea": "progression-services",
+          "classification": {
+            "area": "progression-services"
+          }
+        }
+      ]
+    },
+    {
+      "area": "demos-recording",
+      "total": 10,
+      "q1": 2,
+      "q2": 6,
+      "q3": 2,
+      "rows": [
+        {
+          "id": "q1.demos.nq-record-playback",
+          "title": "NetQuake demo recording, playback and timedemo",
+          "originalRemainingWorkReason": "NQ demo codec/recording library has no application record/playback/timedemo command and camera lifecycle join.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q1/demos.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q1.demos.qw-record-spectate",
+          "title": "QuakeWorld demos, rerecord and spectator cameras",
+          "originalRemainingWorkReason": "Accepted 66e6136 provides a live native QW remote session, but demo recording/playback/rerecord workflows and spectator cameras remain unjoined; spectator connections are rejected.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q1/demos.ts",
+            "src/app/bootstrap/remote-application.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q2.demo.client-recording",
+          "title": "Record and replay ordinary demos",
+          "originalRemainingWorkReason": "Q2 demo/MVD codecs and stream utilities exist without a live application recorder/player/GTV service and corresponding user workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q2/demo.ts",
+            "src/network/q2/codecs/mvd.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/options.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q2.demo.gtv-streaming",
+          "title": "Authenticate and stream GTV spectators",
+          "originalRemainingWorkReason": "Q2 demo/MVD codecs and stream utilities exist without a live application recorder/player/GTV service and corresponding user workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q2/demo.ts",
+            "src/network/q2/codecs/mvd.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/options.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q2.demo.mvd-recording",
+          "title": "Record multi-view demos",
+          "originalRemainingWorkReason": "Q2 demo/MVD codecs and stream utilities exist without a live application recorder/player/GTV service and corresponding user workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q2/demo.ts",
+            "src/network/q2/codecs/mvd.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/options.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q2.demo.protocol-playback",
+          "title": "Play supported classic and rerelease demos",
+          "originalRemainingWorkReason": "Q2 demo/MVD codecs and stream utilities exist without a live application recorder/player/GTV service and corresponding user workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q2/demo.ts",
+            "src/network/q2/codecs/mvd.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/options.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q2.demo.server-recording",
+          "title": "Record server demos",
+          "originalRemainingWorkReason": "Q2 demo/MVD codecs and stream utilities exist without a live application recorder/player/GTV service and corresponding user workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q2/demo.ts",
+            "src/network/q2/codecs/mvd.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/options.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q2.demo.view-controls-seats",
+          "title": "Control playback and recorded local viewpoints",
+          "originalRemainingWorkReason": "Q2 demo/MVD codecs and stream utilities exist without a live application recorder/player/GTV service and corresponding user workflow.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q2/demo.ts",
+            "src/network/q2/codecs/mvd.ts",
+            "src/app/bootstrap/application.ts",
+            "src/app/bootstrap/options.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q3.recording.demo-record-playback",
+          "title": "Demo recording and legacy playback",
+          "originalRemainingWorkReason": "Q3 demo codecs exist, but record/playback, snapshot consumption and demo UI/application lifecycle are not joined.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q3/demo.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        },
+        {
+          "id": "q3.recording.timedemo",
+          "title": "Timedemo clocks and performance reporting",
+          "originalRemainingWorkReason": "There is no joined application timedemo command, playback clock and performance-result workflow.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/network/q3/demo.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "demos-recording",
+          "classification": {
+            "area": "demos-recording"
+          }
+        }
+      ]
+    },
+    {
+      "area": "cinematics-media",
+      "total": 6,
+      "q1": 0,
+      "q2": 4,
+      "q3": 2,
+      "rows": [
+        {
+          "id": "q2.media.cin-video",
+          "title": "Decode and present classic CIN frames",
+          "originalRemainingWorkReason": "Shared media decoders exist, but Q2 campaign/remote cinematic presentation and authored continuation are not joined; the only application cinematic owner is Q3 UI RoQ playback, with no Q2 timed subtitle producer.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/media/index.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/app/bootstrap/network/remote.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "cinematics-media",
+          "classification": {
+            "area": "cinematics-media"
+          }
+        },
+        {
+          "id": "q2.media.pause-skip-transition",
+          "title": "Pause, skip, and finish cinematic transitions",
+          "originalRemainingWorkReason": "Shared media decoders exist, but Q2 campaign/remote cinematic presentation and authored continuation are not joined; the only application cinematic owner is Q3 UI RoQ playback, with no Q2 timed subtitle producer.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/media/index.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/app/bootstrap/network/remote.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "cinematics-media",
+          "classification": {
+            "area": "cinematics-media"
+          }
+        },
+        {
+          "id": "q2.media.rerelease-formats",
+          "title": "Play required rerelease and expansion media formats",
+          "originalRemainingWorkReason": "Shared media decoders exist, but Q2 campaign/remote cinematic presentation and authored continuation are not joined; the only application cinematic owner is Q3 UI RoQ playback, with no Q2 timed subtitle producer.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/media/index.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/app/bootstrap/network/remote.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "cinematics-media",
+          "classification": {
+            "area": "cinematics-media"
+          }
+        },
+        {
+          "id": "q2.media.static-pcx",
+          "title": "Present static PCX intermission images",
+          "originalRemainingWorkReason": "Shared media decoders exist, but Q2 campaign/remote cinematic presentation and authored continuation are not joined; the only application cinematic owner is Q3 UI RoQ playback, with no Q2 timed subtitle producer.",
+          "sourceFamily": "q2",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/media/index.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/app/bootstrap/network/remote.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "cinematics-media",
+          "classification": {
+            "area": "cinematics-media"
+          }
+        },
+        {
+          "id": "q3.media.cinematic-clock-transitions",
+          "title": "Cinematic timing, looping, hold and skip",
+          "originalRemainingWorkReason": "Cgame cinematic slots play actual media, but the full standalone cinematic input/skip/end/nextmap transition workflow is not joined to Application.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "cinematics-media",
+          "classification": {
+            "area": "cinematics-media"
+          }
+        },
+        {
+          "id": "q3.media.world-and-menu-video",
+          "title": "World material and menu cinematics",
+          "originalRemainingWorkReason": "Menu cinematic slots are joined, but ApplicationAssets constructs SceneShaderRegistry without playCinematic, leaving world videoMap stages unresolved. CinematicImage also rejects dimension changes instead of resizing the resource.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/assets.ts",
+            "src/render/scene/shaders.ts",
+            "src/app/bootstrap/q3-client/cinematics.ts",
+            "src/media/presentation.ts"
+          ],
+          "functionalArea": "cinematics-media",
+          "classification": {
+            "area": "cinematics-media"
+          }
+        }
+      ]
+    },
+    {
+      "area": "tools-diagnostics",
+      "total": 6,
+      "q1": 1,
+      "q2": 0,
+      "q3": 5,
+      "rows": [
+        {
+          "id": "q1.tools.chase-camera-diagnostics",
+          "title": "Runtime chase camera and diagnostic commands",
+          "originalRemainingWorkReason": "Diagnostic console exists, but a player-visible traced Q1 chase-camera mode is not joined to the application view owner.",
+          "sourceFamily": "q1",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/presentation.ts",
+            "src/app/bootstrap/console.ts"
+          ],
+          "functionalArea": "tools-diagnostics",
+          "classification": {
+            "area": "tools-diagnostics"
+          }
+        },
+        {
+          "id": "q3.cameras.spline-runtime",
+          "title": "Spline camera evaluation and timed camera events",
+          "originalRemainingWorkReason": "Runtime camera splines and their source-authored load/control/interpolation lifecycle are not joined to the application view.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/q3-client.ts"
+          ],
+          "functionalArea": "tools-diagnostics",
+          "classification": {
+            "area": "tools-diagnostics",
+            "secondaryDependencies": [
+              "rendering"
+            ],
+            "note": "Spline evaluation and timed camera tooling depend on rendered camera presentation."
+          }
+        },
+        {
+          "id": "q3.diagnostics.omnitimer",
+          "title": "OmniTimer initialization, stamps and reporting",
+          "originalRemainingWorkReason": "The required OmniTimer runtime/profiling contract has no established application implementation.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts"
+          ],
+          "functionalArea": "tools-diagnostics",
+          "classification": {
+            "area": "tools-diagnostics"
+          }
+        },
+        {
+          "id": "q3.diagnostics.runtime-tools",
+          "title": "Runtime diagnostic and developer commands",
+          "originalRemainingWorkReason": "Diagnostic primitives exist, but the complete source runtime diagnostic command set is not registered against the actual application owners.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/app/bootstrap/application.ts",
+            "src/console/commands.ts"
+          ],
+          "functionalArea": "tools-diagnostics",
+          "classification": {
+            "area": "tools-diagnostics"
+          }
+        },
+        {
+          "id": "q3.recording.screenshots-levelshots",
+          "title": "Screenshots, levelshots and capture timing",
+          "originalRemainingWorkReason": "Accepted fc0c15e implements automatic/named/silent screenshot commands, TGA/PNG/JPEG output, source-style 128x128 levelshot downsampling and complete-frame readback through the shared application capture path. Recording capture-clock integration with FPS/timescale and restart/timing behavior remains unfinished; screenshot and levelshot helper absence is no longer the gap.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "src/capture/index.ts",
+            "src/console/commands.ts",
+            "src/app/bootstrap/capture.ts",
+            "src/app/bootstrap/renderer.ts",
+            "tests/capture/application.test.ts"
+          ],
+          "functionalArea": "tools-diagnostics",
+          "classification": {
+            "area": "tools-diagnostics",
+            "secondaryDependencies": [
+              "rendering"
+            ],
+            "note": "Screenshot and levelshot capture belongs to tools, with rendered output and frame timing dependencies."
+          }
+        },
+        {
+          "id": "q3.source-applications.role-accounting",
+          "title": "Separate authoring and distribution application roles",
+          "originalRemainingWorkReason": "Comparison documentation enumerates authoring/runtime roles, but complete runtime-derived obligations from all listed tool/SDK/archive inputs have not been established; this row cannot be completed from file inventory alone.",
+          "sourceFamily": "q3",
+          "status": "not-done",
+          "basis": "missing-work",
+          "sourcePaths": [
+            "docs/comparison-q3.md",
+            "verification/features/q3.json"
+          ],
+          "functionalArea": "tools-diagnostics",
+          "classification": {
+            "area": "tools-diagnostics"
+          }
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "q1.bots.ctf-coop-horde",
+      "assigned": "ai-navigation",
+      "secondaryDependencies": [
+        "modes-objectives"
+      ],
+      "note": "Bot participation requires mode-specific objective policies; its primary behavior is AI."
+    },
+    {
+      "id": "q1.content.launch-selection",
+      "assigned": "mods-vms",
+      "secondaryDependencies": [
+        "content-assets",
+        "menus-hud"
+      ],
+      "note": "Provider/gamecode selection spans discovery and launch UI; assigned once to execution selection."
+    },
+    {
+      "id": "q1.ctf.grapple-observer-vote",
+      "assigned": "modes-objectives",
+      "secondaryDependencies": [
+        "combat-rosters-equipment",
+        "server-browser-admin"
+      ],
+      "note": "One retained row combines grapple, observer and voting requirements; it is not split or duplicated."
+    },
+    {
+      "id": "q1.events.level-completed-lobby",
+      "assigned": "progression-services",
+      "secondaryDependencies": [
+        "maps-campaigns"
+      ],
+      "note": "Level completion and lobby return share one row; assigned to external/session lifecycle."
+    },
+    {
+      "id": "q1.events.prompts",
+      "assigned": "menus-hud",
+      "secondaryDependencies": [
+        "localization-accessibility"
+      ],
+      "note": "Choice prompts include localized text; assigned to the interactive prompt workflow."
+    },
+    {
+      "id": "q1.execution.entity-properties",
+      "assigned": "maps-campaigns",
+      "secondaryDependencies": [
+        "mods-vms",
+        "combat-rosters-equipment"
+      ],
+      "note": "Foreign entity fields and target graphs span adapters and roster admission; assigned to authored map behavior."
+    },
+    {
+      "id": "q1.multiplayer.chat",
+      "assigned": "networking",
+      "secondaryDependencies": [
+        "menus-hud"
+      ],
+      "note": "Message routing and presentation coexist; assigned to communication behavior."
+    },
+    {
+      "id": "q1.multiplayer.setup",
+      "assigned": "server-browser-admin",
+      "secondaryDependencies": [
+        "menus-hud",
+        "modes-objectives"
+      ],
+      "note": "Match configuration includes a public setup workflow; assigned to hosting administration."
+    },
+    {
+      "id": "q1.network.admission-admin",
+      "assigned": "server-browser-admin",
+      "secondaryDependencies": [
+        "networking"
+      ],
+      "note": "Admission wire behavior and operator policy share one row; assigned to administration."
+    },
+    {
+      "id": "q1.seats.presentation-ownership",
+      "assigned": "input-seats",
+      "secondaryDependencies": [
+        "rendering",
+        "audio-music",
+        "demos-recording",
+        "menus-hud"
+      ],
+      "note": "The row explicitly crosses presentation services; its single organizing behavior is seat ownership."
+    },
+    {
+      "id": "q1.seats.qw-native-extension",
+      "assigned": "input-seats",
+      "secondaryDependencies": [
+        "networking"
+      ],
+      "note": "Local seat ownership crosses native wire limits; assigned once to seats."
+    },
+    {
+      "id": "q1.services.addon-discovery",
+      "assigned": "content-assets",
+      "secondaryDependencies": [
+        "progression-services",
+        "menus-hud"
+      ],
+      "note": "Local/online add-on discovery includes service/UI joins; assigned to content discovery."
+    },
+    {
+      "id": "q2.config.audio-video-input-menus",
+      "assigned": "menus-hud",
+      "secondaryDependencies": [
+        "console-config",
+        "audio-music",
+        "rendering",
+        "input-seats"
+      ],
+      "note": "One row covers settings across several services; assigned to the public menu workflow."
+    },
+    {
+      "id": "q2.content.rotation-editor",
+      "assigned": "server-browser-admin",
+      "secondaryDependencies": [
+        "maps-campaigns",
+        "menus-hud"
+      ],
+      "note": "Persisted rotation editing is assigned to server administration."
+    },
+    {
+      "id": "q2.content.server-map-lists",
+      "assigned": "server-browser-admin",
+      "secondaryDependencies": [
+        "maps-campaigns",
+        "modes-objectives"
+      ],
+      "note": "Map eligibility and selection are assigned to server setup."
+    },
+    {
+      "id": "q2.content.start-map-discovery",
+      "assigned": "maps-campaigns",
+      "secondaryDependencies": [
+        "content-assets"
+      ],
+      "note": "Map metadata discovery serves campaign-start resolution."
+    },
+    {
+      "id": "q2.media.cin-soundtrack",
+      "assigned": "audio-music",
+      "secondaryDependencies": [
+        "cinematics-media"
+      ],
+      "note": "CIN synchronization remains a cross-media dependency; this row is assigned to its soundtrack behavior."
+    },
+    {
+      "id": "q2.media.timed-subtitles",
+      "assigned": "localization-accessibility",
+      "secondaryDependencies": [
+        "cinematics-media"
+      ],
+      "note": "Cinematic scheduling is required, but the visible behavior is subtitles/captions."
+    },
+    {
+      "id": "q2.network.connectionless-rcon",
+      "assigned": "server-browser-admin",
+      "secondaryDependencies": [
+        "networking"
+      ],
+      "note": "Connectionless packet support serves status/ping/challenge/rcon administration."
+    },
+    {
+      "id": "q3.cameras.spline-runtime",
+      "assigned": "tools-diagnostics",
+      "secondaryDependencies": [
+        "rendering"
+      ],
+      "note": "Spline evaluation and timed camera tooling depend on rendered camera presentation."
+    },
+    {
+      "id": "q3.content.pure-policy",
+      "assigned": "networking",
+      "secondaryDependencies": [
+        "content-assets",
+        "mods-vms"
+      ],
+      "note": "Pure-policy enforcement belongs to network admission, using package and mod/filesystem identity."
+    },
+    {
+      "id": "q3.media.subtitles-captions",
+      "assigned": "localization-accessibility",
+      "secondaryDependencies": [
+        "cinematics-media"
+      ],
+      "note": "Timed media dependency retained; assigned to caption behavior."
+    },
+    {
+      "id": "q3.presentation.fonts-and-glyphs",
+      "assigned": "localization-accessibility",
+      "secondaryDependencies": [
+        "rendering"
+      ],
+      "note": "Glyph rendering and legibility share this font requirement."
+    },
+    {
+      "id": "q3.progression.catalog",
+      "assigned": "content-assets",
+      "secondaryDependencies": [
+        "progression-services"
+      ],
+      "note": "Arena/bot catalog discovery supports progression but is a content inventory behavior."
+    },
+    {
+      "id": "q3.progression.podium-postgame",
+      "assigned": "menus-hud",
+      "secondaryDependencies": [
+        "progression-services",
+        "modes-objectives"
+      ],
+      "note": "Postgame display/navigation crosses match progression; assigned to its public presentation workflow."
+    },
+    {
+      "id": "q3.recording.screenshots-levelshots",
+      "assigned": "tools-diagnostics",
+      "secondaryDependencies": [
+        "rendering"
+      ],
+      "note": "Screenshot and levelshot capture belongs to tools, with rendered output and frame timing dependencies."
+    },
+    {
+      "id": "q3.ui.base-demos-cinematics-configs",
+      "assigned": "menus-hud",
+      "secondaryDependencies": [
+        "demos-recording",
+        "cinematics-media",
+        "console-config"
+      ],
+      "note": "Retained row explicitly requires menus over multiple services."
+    },
+    {
+      "id": "q3.ui.base-host-browser-ingame",
+      "assigned": "menus-hud",
+      "secondaryDependencies": [
+        "server-browser-admin"
+      ],
+      "note": "Host/browser behavior is represented here by its UI row; no backend row is duplicated."
+    },
+    {
+      "id": "q3.ui.team-arena-skirmish",
+      "assigned": "menus-hud",
+      "secondaryDependencies": [
+        "modes-objectives",
+        "progression-services"
+      ],
+      "note": "Skirmish launch/next-match flow is a UI entry point with mode dependencies."
+    }
+  ]
+}
