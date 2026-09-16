@@ -203,7 +203,7 @@ export class StartupMenu {
       })), ...(pages > 1 ? [this.button("older-saves", "Older saves", 7, () => { this.savePage = (this.savePage + 1) % pages; }, true)] : []),
         this.button("refresh-saves", "Refresh", 8, options.refreshSaves, true), this.back()];
     });
-    this.controller.openMenu(main);
+    this.ensureActiveMenu();
   }
   private familyLabel(family: StartupNativePreset["family"]): string {
     return family === "q1" ? "Quake" : family === "q2" ? "Quake II" : "Quake III Arena";
@@ -290,6 +290,12 @@ export class StartupMenu {
     while (end > 0 && this.measure(`${text.slice(0, end)}...`, scale) > width) end--;
     return `${text.slice(0, end)}...`;
   }
+  ensureActiveMenu(): UiMenuId {
+    const active = this.controller.activeMenu;
+    if (active !== null) return active;
+    this.controller.openMenu(main);
+    return main;
+  }
   resumeDisplayOptions(): void { this.controller.openMenu(optionsMenu); this.controller.openMenu(displayMenu); }
   setStatus(text: string, busy = false): void { this.status = text; this.busy = busy; }
   input(event: SeatInputEvent): boolean {
@@ -310,7 +316,7 @@ export class StartupMenu {
     if (this.controller.activeMenu === main && event.kind === "key" && event.code === KeyCode.Escape) return true;
     try {
       const handled = this.controller.input(event);
-      if (this.controller.activeMenu === null) this.controller.openMenu(main);
+      this.ensureActiveMenu();
       return handled;
     }
     catch (error) { this.setStatus(error instanceof Error ? error.message : String(error)); return true; }

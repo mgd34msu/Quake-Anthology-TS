@@ -98,6 +98,18 @@ test("ordinary shared browser controls sort and filter received Q1/Q2/Q3 servers
     await Bun.write(resolve(captureRoot, `${name}.png`), encodePng(640, 480, renderer.pixels));
   };
   try {
+    menu.controller.closeAll();
+    expect(menu.controller.activeMenu).toBeNull();
+    expect(menu.ensureActiveMenu()).toBe("menu:startup:main");
+    expect(menu.controller.state().focus).toMatchObject({ kind: "menu", menu: "menu:startup:main", control: "ui:startup:native" });
+    click(100, 198);
+    expect(menu.controller.activeMenu).toBe("menu:startup:options");
+    key(KeyCode.Down, true); key(KeyCode.Down, false);
+    const submenuState = menu.controller.state();
+    expect(menu.ensureActiveMenu()).toBe("menu:startup:options");
+    expect(menu.controller.state()).toEqual(submenuState);
+    key(KeyCode.Escape, true); key(KeyCode.Escape, false);
+    expect(menu.controller.activeMenu).toBe("menu:startup:main");
     for (let index = 0; index < 5; index++) peers.push(await UdpTransport.bind({ host: "127.0.0.1", port: 0 }));
     click(100, 130); click(100, 300); click(100, 400);
     expect(menu.controller.activeMenu).toBe("menu:startup:servers");

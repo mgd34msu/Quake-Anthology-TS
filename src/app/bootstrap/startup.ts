@@ -534,7 +534,7 @@ export class StartupApplication {
       applyAudioOutputSettings(client.imageSettings.cvars, graphics.audio);
     }
 
-    primary.input.setFocus({ kind: "menu", menu: graphics.menu.controller.activeMenu ?? "menu:startup:main", control: null }, performance.now());
+    primary.input.setFocus({ kind: "menu", menu: graphics.menu.ensureActiveMenu(), control: null }, performance.now());
     client.prepared.setActiveSeats([primary.id]);
     client.platform.current = { kind: "menu", router: graphics.router, controllerSettings: graphics.controllerSettings,
       retireCommands: () => { this.releaseMenuInput?.(); this.releaseMenuInput = null; } };
