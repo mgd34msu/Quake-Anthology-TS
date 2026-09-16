@@ -70,7 +70,7 @@ test("exec reads each seat's exported config before product user files and mount
       const writes: Promise<void>[] = [];
       const unregister = registerConsoleCommands({ commands, config: seat => seatConsoleConfig(consoleRoot, seat),
         configuration: invocation => `${commands.archiveCommands(invocation.source).join("\n")}\n`, console: () => seatConsole,
-        capture: () => null, mapName: () => "test", print() {}, queue: operation => { writes.push(scripts.write(operation)); } });
+        canChat: () => false, capture: () => null, mapName: () => "test", print() {}, queue: operation => { writes.push(scripts.write(operation)); } });
       commands.append("writeconfig roundtrip; seta seat_value changed; exec roundtrip; seta roundtrip_finished yes\n");
       for (let attempts = 0; attempts < 100 && cvars.variableString("roundtrip_finished") !== "yes"; attempts++) { commands.execute(); await Bun.sleep(1); }
       expect(cvars.variableString("seat_value")).toBe(index === 0 ? "zero" : index === 1 ? "one" : "user");

@@ -65,6 +65,24 @@ export class StartupConfig {
     this.callerDepth = scriptDepth(options.context.origin);
   }
 
+  ownsSource(source: CommandContext): boolean {
+    if (this.active === undefined || source.session !== this.options.context.session) return false;
+    let root = source.origin, depth = scriptDepth(root);
+    while (root.kind === "script" && depth > this.callerDepth + 1) { root = root.caller; depth--; }
+    if (root.kind !== "script" || depth !== this.callerDepth + 1 || root.name !== this.active.name) return false;
+    let caller = root.caller, expected = this.options.context.origin;
+    while (caller.kind === "script" && expected.kind === "script") {
+      if (caller.name !== expected.name) return false;
+      caller = caller.caller; expected = expected.caller;
+    }
+    switch (caller.kind) {
+      case "local-console": case "server-console": return caller.kind === expected.kind;
+      case "local-seat": return expected.kind === "local-seat" && caller.seat.equals(expected.seat) && caller.client.equals(expected.client);
+      case "remote-client": return expected.kind === "remote-client" && caller.client.equals(expected.client);
+      case "script": return false;
+    }
+  }
+
   get restrictSharedConfiguration(): boolean {
     return this.options.scope === "seat" && (this.active?.name === "config.cfg" || this.active?.name === "q3config.cfg");
   }

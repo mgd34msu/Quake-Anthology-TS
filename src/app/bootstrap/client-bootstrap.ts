@@ -1,3 +1,4 @@
+import type { ApplicationCapture } from "./capture.ts";
 import type { SeatConsole } from "../../console/session.ts";
 import type { UnifiedAudio } from "../../audio/index.ts";
 import type { IdentityOwner } from "../../contracts/identity.ts";
@@ -34,6 +35,7 @@ export type ClientInputPublication = {
 } | { readonly kind: "world"; readonly input: ApplicationInput };
 
 export interface ClientSourceLifetime {
+  readonly captureMap: string | null;
   prepareRetirement(): Promise<void>;
   releaseSettings(): void;
   retire(): Promise<void>;
@@ -41,6 +43,7 @@ export interface ClientSourceLifetime {
 
 /** Source borrowers receive the existing client objects without their final close authority. */
 export interface ClientBootstrap {
+  readonly capture: ApplicationCapture;
   readonly consoles: Map<SessionSeat, SeatConsole>;
   readonly identity: IdentityOwner;
   readonly session: EngineSession;

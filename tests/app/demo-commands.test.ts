@@ -1,3 +1,4 @@
+import { StartupConfig } from "../../src/app/bootstrap/startup-config.ts";
 import { expect, test } from "bun:test";
 import { ClientDemoCommands, type ClientDemoIntent, type DemoClientState } from "../../src/app/bootstrap/demo-commands.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
@@ -129,4 +130,47 @@ test("typed routing retains timedemo cvar ownership and rejects remote script pl
     expect(f.printed.at(-1)).toBe(`${name} is a local client command.\n`);
   }
   expect(f.staged).toHaveLength(1);
+});
+
+
+test("menu intent suppresses only initial attract scripts, including delayed tails before same-drain manual exec", async () => {
+  const identity = createIdentityOwner('initial attract scope');
+  const context: CommandContext = { session: identity.session, origin: { kind: 'local-seat', seat: identity.seat(0), client: identity.client(0, 0) } };
+  const staged: ClientDemoIntent[] = [], scopes: { name: string; explicit: boolean }[] = [];
+  let initialConfiguration = true;
+  const files = new Map([
+    ['quake.rc', 'exec default.cfg\nexec config.cfg\nwait\nexec attract.cfg\n'],
+    ['default.cfg', ''], ['config.cfg', ''], ['attract.cfg', 'startdemos initial1 initial2\n'],
+    ['manual.cfg', 'startdemos manual1 manual2\ndemos\nplaydemo explicit.dem\n'],
+  ]);
+  const startup = new StartupConfig({ dialect: 'q1-netquake', context, hasMod: false,
+    read: async name => files.get(name), applySelectedDefaults() {}, applyArchive() {}, applyLaunchOptions() {} });
+  const commands = new CommandBuffer({ dialect: 'q1-netquake', context, readScript: startup.readScript, onScriptComplete: startup.onScriptComplete });
+  const service = new ClientDemoCommands({ dedicated: false,
+    current: source => {
+      const explicitStartup = initialConfiguration && source !== undefined && startup.ownsSource(source);
+      if (source !== undefined) scopes.push({ name: source.origin.kind === 'script' ? source.origin.name : source.origin.kind, explicit: explicitStartup });
+      return { kind: 'idle', family: 'q1', explicitStartup };
+    }, stage: intent => { staged.push(intent); }, print() {}, append: (text, source) => commands.append(text, source), takeCompletionCommand: () => '' });
+  const release = service.attach(commands);
+  try {
+    expect(await startup.executeFrame(commands, async () => {})).toBe(false);
+    expect(staged).toHaveLength(0);
+    const nested: CommandContext = { ...context, origin: { kind: 'script', name: 'attract.cfg', caller: { kind: 'script', name: 'quake.rc', caller: context.origin } } };
+    expect(startup.ownsSource(nested)).toBe(true);
+    expect(startup.ownsSource({ ...context, origin: { kind: 'script', name: 'quake.rc', caller: { kind: 'local-seat', seat: identity.seat(1), client: identity.client(1, 0) } } })).toBe(false);
+    expect(startup.ownsSource({ ...context, origin: { kind: 'script', name: 'manual.cfg', caller: context.origin } })).toBe(false);
+    commands.append('exec manual.cfg\n', context);
+    expect(await startup.executeFrame(commands, async () => {})).toBe(true);
+    expect(initialConfiguration).toBe(true);
+    expect(scopes).toEqual([{ name: 'attract.cfg', explicit: true }, { name: 'manual.cfg', explicit: false }]);
+    expect(staged.map(intent => intent.kind === 'start' ? intent.request.name : 'stop')).toEqual(['manual2', 'explicit.dem']);
+    initialConfiguration = false;
+    expect(startup.ownsSource(nested)).toBe(false);
+    service.handle('startdemos', ['later1', 'later2'], nested);
+    service.handle('demos', [], context);
+    service.handle('playdemo', ['later.dem'], context);
+    expect(scopes.at(-1)).toEqual({ name: 'attract.cfg', explicit: false });
+    expect(staged.slice(-2).map(intent => intent.kind === 'start' ? intent.request.name : 'stop')).toEqual(['later2', 'later.dem']);
+  } finally { release(); }
 });

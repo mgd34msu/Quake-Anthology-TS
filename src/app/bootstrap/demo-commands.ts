@@ -13,7 +13,7 @@ export type ClientDemoIntent =
 export type DemoCompletion = "eof" | "terminator" | "disconnected" | "truncated" | "closed";
 export interface ClientDemoCommandHost {
   readonly dedicated: boolean;
-  current(): DemoClientState;
+  current(source?: CommandContext): DemoClientState;
   stage(intent: ClientDemoIntent): void;
   print(text: string): void;
   append(text: string, source: CommandContext): void;
@@ -127,7 +127,7 @@ export class ClientDemoCommands {
   }
 
   private startDemos(command: DemoCommand): void {
-    const current = this.host.current();
+    const current = this.host.current(command.source);
     if (this.host.dedicated) {
       if (current.kind === "idle" && !current.explicitStartup) this.host.append("map start\n", command.source);
       return;

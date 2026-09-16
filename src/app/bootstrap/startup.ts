@@ -1,3 +1,4 @@
+import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
 import { SeatConsole } from "../../console/session.ts";
 import { registerDiscoveryCommands } from "../../console/discovery.ts";
 import { drawConsole } from "../../console/draw.ts";
@@ -103,6 +104,7 @@ export class StartupApplication {
   private demos: ClientDemoCommands | null = null;
   private releaseDemos: (() => void) | null = null;
   private pendingDemo: ClientDemoIntent | null = null;
+  private initialConfiguration = true;
   private activeDemo: DemoRequest | null = null;
   private readonly releaseSourceCommands: (() => void)[] = [];
   private frontendRouting: ApplicationConsoleRouting | null = null;
@@ -158,6 +160,7 @@ export class StartupApplication {
         options.mode === "singleplayer" ? configuration.catalog.product(configuration.selection.engineBehavior.content).expectation.family === "q3" ? 8 : options.seats : 16,
         async () => { await Bun.sleep(0); }, prepared => this.bindDemoCommands(prepared));
     } catch (error) { await session.close(); configuration.close(); throw error; }
+    if (!initial.prepared.pending) this.initialConfiguration = false;
     this.scripts = initial.scripts;
     this.imageSettings = initial.image;
     options = initial.options;
@@ -269,7 +272,18 @@ export class StartupApplication {
         return { client: local.client, seat: local, prepared };
       });
       const hasPendingSource = (): boolean => this.pending !== null || this.pendingDemo !== null;
-      this.client = { consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, settings,
+      const capture = new ApplicationCapture({ commands: initial.prepared.commands,
+        root: () => applicationCaptureRoot(this.captureClient().configuration.current.options.userContentRoot),
+        mapName: () => this.captureClient().source.current?.captureMap ?? "menu",
+        console: seat => { const client = this.captureClient(), local = this.captureSeats().find(local => local.seat.id.equals(seat));
+          return local === undefined ? null : client.consoles.get(local.seat) ?? null; },
+        input: seat => this.captureSeats().find(local => local.seat.id.equals(seat))?.input ?? null,
+        canChat: () => { const platform = this.captureClient().platform.current; return platform?.kind === "world" && platform.input.bindingCapabilities.chat; },
+        write: operation => this.captureClient().configuration.current.scripts.write(operation),
+        print: text => { const client = this.captureClient(), local = this.captureSeats()[0];
+          this.host.print(text); if (local !== undefined) client.consoles.get(local.seat)?.print(text); },
+      }, native);
+      this.client = { capture, consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, settings,
         output: { current: activeAudio.engine }, platform: { current: { kind: "menu", router: activeRouter, controllerSettings,
           retireCommands: () => { this.releaseMenuInput?.(); this.releaseMenuInput = null; } } },
         source: { current: null }, sourceProfile: { current: configuration.selection.source }, configuration: { current: { scripts: initial.scripts, options: initial.options } }, activateFrontend: () => this.activateFrontend(),
@@ -277,6 +291,7 @@ export class StartupApplication {
         dispatchApplicationRequest: request => this.dispatchApplicationRequest(request),
         get hasPendingSource() { return hasPendingSource(); } };
       this.bindFrontendConsole();
+      capture.activate();
       const savedInput = await settings.loadSeat("input/seat-1.json");
       if (savedInput !== null) this.client.consoles.get(primarySeat)?.history.replace(savedInput.history);
       initial.prepared.forwardCommands((name, args, source) => { this.frontendCommand(name, args, source); return undefined; });
@@ -284,6 +299,7 @@ export class StartupApplication {
       if (this.pending === null && this.pendingDemo === null && this.entry === "run") this.pending = { kind: "initial", options: initial.options };
       return this.graphics;
     } catch (error) {
+      await this.client?.capture.close();
       audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); menu?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
       await session.close(); await initial.image.close(); await initial.scripts.close();
       throw error;
@@ -304,9 +320,9 @@ export class StartupApplication {
     const family = (): DemoFamily => prepared.commands.dialect === "q1-netquake" ? "q1" : prepared.commands.dialect === "q1-quakeworld" ? "qw"
       : prepared.commands.dialect === "q3" ? "q3" : "q2";
     const demos = new ClientDemoCommands({ dedicated: false,
-      current: () => this.activeDemo !== null ? { kind: "demo", family: this.activeDemo.family, request: this.activeDemo }
+      current: source => this.activeDemo !== null ? { kind: "demo", family: this.activeDemo.family, request: this.activeDemo }
         : this.game !== null ? { kind: "local", family: family() } : this.remote !== null ? { kind: "network", family: family() }
-        : { kind: "idle", family: family(), explicitStartup: this.entry === "run" },
+        : { kind: "idle", family: family(), explicitStartup: this.initialConfiguration && source !== undefined && prepared.isConfigurationSource(source) },
       stage: intent => { this.pendingDemo = intent; prepared.noteWorldAction(); },
       print: text => this.print(text), append: (text, source) => prepared.commands.append(text, source),
       takeCompletionCommand: source => {
@@ -387,6 +403,18 @@ export class StartupApplication {
     return undefined;
   }
 
+  private captureClient(): ClientBootstrap {
+    if (this.client === null) throw new Error("Client console output has no published owner");
+    return this.client;
+  }
+
+  private captureSeats() {
+    const client = this.captureClient(), platform = client.platform.current;
+    return platform?.kind === "world"
+      ? platform.input.locals.map(local => ({ seat: local.player.seat, input: local.input }))
+      : client.locals.slice(0, 1).map(local => ({ seat: local.seat, input: local.prepared.input }));
+  }
+
   private bindFrontendConsole(): void {
     const client = this.client, graphics = this.graphics, local = client?.locals[0];
     if (client === null || graphics === null || local === undefined) throw new Error("Frontend console has no retained seat");
@@ -417,12 +445,7 @@ export class StartupApplication {
       if (origin?.kind !== "local-seat" || origin.seat.equals(local.seat.id) && origin.client.equals(local.client.id)) console.print(text);
     });
     const releaseDiscovery = registerDiscoveryCommands(prepared.commands, text => console.print(text));
-    const toggle = (): undefined => { console.toggle(); return undefined; };
-    const registered = prepared.commands.register("toggleconsole", toggle);
-    this.releaseMenuInput = () => {
-      releaseInput(); releaseOutput(); releaseDiscovery();
-      if (registered) prepared.commands.unregister("toggleconsole", toggle);
-    };
+    this.releaseMenuInput = () => { releaseInput(); releaseOutput(); releaseDiscovery(); };
   }
 
   private activateFrontend(): void {
@@ -591,6 +614,7 @@ export class StartupApplication {
   }
 
   private async publishPendingSource(): Promise<void> {
+    if (this.client?.capture.pendingReadback) return;
     const action = this.pending; this.pending = null;
     if (action !== null && !this.stopping) await this.launch(action);
     if (!this.stopping) await this.publishDemoIntent();
@@ -634,14 +658,20 @@ export class StartupApplication {
     };
     await afterDispatch();
     const startupSource = this.game ?? this.remote;
-    const startupFrame = startupSource === null ? await client.prepared.advanceFrame() : await startupSource.advanceClientStartup();
+    const startupFrame = client.capture.pendingReadback ? false : startupSource === null ? await client.prepared.advanceFrame() : await startupSource.advanceClientStartup();
+    if (!client.prepared.pending) this.initialConfiguration = false;
     await afterDispatch();
-    if (!startupFrame && !(this.game ?? this.remote)?.clientCommandsBlocked) await client.prepared.commands.executeScriptsAsync(afterDispatch,
-      () => !this.closed && !this.stopping && !(this.game ?? this.remote)?.clientCommandsBlocked);
+    if (!startupFrame && !client.capture.pendingReadback && !(this.game ?? this.remote)?.clientCommandsBlocked) await client.prepared.commands.executeScriptsAsync(afterDispatch,
+      () => !this.closed && !this.stopping && !client.capture.pendingReadback && !(this.game ?? this.remote)?.clientCommandsBlocked);
     await afterDispatch();
     const active = this.game ?? this.remote;
     if (active !== null && !this.stopping) {
-      await active.step(active === source ? elapsed : 4);
+      const output = await active.step(active === source ? elapsed : 4);
+      if (active instanceof RemoteApplication && output === null && active === this.remote
+        && (client.platform.current?.kind === "world" || client.capture.pendingReadback)) {
+        graphics.draw(client.source.current);
+        await client.capture.drain();
+      }
       if (client.hasPendingSource) {
         const remaining = active instanceof Application ? active.takePendingClientCommands() : null;
         await this.publishPendingSource();
@@ -672,6 +702,7 @@ export class StartupApplication {
       graphics.menu.resumeDisplayOptions();
     }
     graphics.draw();
+    await client.capture.drain();
   }
 
   async run(): Promise<void> {
@@ -691,6 +722,7 @@ export class StartupApplication {
     catch (error) { this.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
     const errors: unknown[] = [];
     this.game?.requestQuit(); this.remote?.requestQuit();
+    try { await this.client?.capture.close(); } catch (error) { errors.push(error); }
     try { await this.client?.source.current?.retire(); } catch (error) { errors.push(error); }
     try { await this.browser?.close(); } catch (error) { errors.push(error); }
     this.browser = null;

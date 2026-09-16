@@ -17,7 +17,7 @@ import { ApplicationViewSettings } from "./view-settings.ts";
 import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
 import { createClientDownloadPermission } from "./network/client-download-policy.ts";
 import type { ClientDownloadPermission } from "./network/client-download-policy.ts";
-import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
+import { ApplicationCapture, applicationCaptureRoot, inputCaptureServices } from "./capture.ts";
 import type { ClientBootstrap } from "./client-bootstrap.ts";
 import type { SessionConnection } from "../../world/session/session.ts";
 import type { CommandHandler } from "../../core/commands/index.ts";
@@ -452,6 +452,7 @@ export class RemoteApplication {
   private async publishConnecting(client: ClientBootstrap): Promise<void> {
     const previous = client.source.current, owner = this.clientCommands;
     if (owner === null) throw new Error("Remote source has no command owner");
+    await client.capture.beforeWorldChange();
     await previous?.prepareRetirement();
     client.session.resources.assertOpen();
     client.prepared.validateOwners({ source: owner.cvars, movement: owner.cvars, fallback: owner.cvars });
@@ -485,6 +486,8 @@ export class RemoteApplication {
     if (failures.length !== 0) throw new ClientSourcePublicationError(failures);
     this.activateSourceCommands();
   }
+
+  get captureMap(): string | null { return this.loadedContent?.recipe.map.geometry.requestedPath ?? null; }
 
   async prepareRetirement(): Promise<void> {
     await this.capture?.beforeWorldChange();
@@ -817,7 +820,7 @@ export class RemoteApplication {
       if (retired) return;
       retired = true;
       const failures: unknown[] = [];
-      try { await previousCapture?.close(); } catch (error) { failures.push(error); }
+      try { if (this.ownership.kind === "owned") await previousCapture?.close(); } catch (error) { failures.push(error); }
       try { previous?.close(); } catch (error) { failures.push(error); }
       try { await retiredScripts?.close(); } catch (error) { failures.push(error); }
       if (failures.length !== 0) throw new AggregateError(failures, "Previous remote input retirement failed");
@@ -901,7 +904,8 @@ export class RemoteApplication {
       if (connection !== undefined && pure === undefined) throw new Error("Q3 guest initialization has no content owner");
       const presentation = new WorldSeatPresentation(local, frontend.assets, this.renderer, remote, 1, frontend.font, null, ui, frontend.effects, q3, null,
         () => this.imageSettings.cvars.variableValue("gl_debug_distfrac"), () => this.viewSettings.fieldOfView, null, () => this.imageSettings.cvars.variableValue("con_scale"));
-      const capture = new ApplicationCapture(controls, this.renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.print(text));
+      const capture = this.ownership.kind === "borrowed" ? this.ownership.client.capture
+        : new ApplicationCapture(inputCaptureServices(controls, applicationCaptureRoot(this.options.userContentRoot), () => this.captureMap ?? "menu", text => this.print(text)), this.renderer);
       assertCurrent();
       seat.validatePresentation(presentation);
       controls.validateStartupAdoption(); controls.validateCandidateCommands(); image.validatePublication();
@@ -936,7 +940,7 @@ export class RemoteApplication {
         await this.retireFrontends();
         await retirePrevious();
         assertCurrent();
-        capture.activate();
+        if (this.ownership.kind === "owned") capture.activate();
         if (connection !== undefined && pure !== null && pure !== undefined) connection.reliable.add(pure);
         this.commands.push(...actions);
         if (quit) this.requestQuit();
@@ -1070,9 +1074,11 @@ export class RemoteApplication {
         this.controls?.stopHaptics();
         if (this.ownership.kind === "owned") await this.dispatchCommands();
         await this.refreshImages();
-        if (this.ownership.kind === "owned") this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
-          commands: [{ kind: "draw-buffer", buffer: "back", clear: true }, { kind: "swap-buffers" }] });
-        await this.capture?.drain();
+        if (this.ownership.kind === "owned") {
+          this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames,
+            commands: [{ kind: "draw-buffer", buffer: "back", clear: true }, { kind: "swap-buffers" }] });
+          await this.capture?.drain();
+        }
         return null;
       }
       if (this.source.kind === "live") this.remote.samplePresentation(now);
@@ -1141,12 +1147,13 @@ export class RemoteApplication {
       try { await this.saveSourceSettings(); } catch (error) { errors.push(error); }
     }
     if (this.ownership.kind === "borrowed" && this.ownership.client.source.current === this) {
+      try { await this.ownership.client.capture.beforeWorldChange(); } catch (error) { errors.push(error); }
       try { this.ownership.client.activateFrontend(); } catch (error) { errors.push(error); }
       this.ownership.client.source.current = null;
     }
     const closingDuringStep = this.stepping;
     if (closingDuringStep) { try { this.q3Browser?.close(); } catch (error) { errors.push(error); } }
-    try { await this.capture?.close(); } catch (error) { errors.push(error); }
+    try { if (this.ownership.kind === "owned") await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
     if (!closingDuringStep) {
       try { await this.presentation?.q3Client?.shutdown(); } catch (error) { errors.push(error); }

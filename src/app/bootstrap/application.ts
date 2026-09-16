@@ -34,7 +34,7 @@ import { StartupSaves } from "./startup-saves.ts";
 import type { SavedGameMenuService } from "../../ui/saves/menu.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
 import { loadAudioSettings, saveAudioSettings } from "./audio-settings.ts";
-import { ApplicationCapture, applicationCaptureRoot } from "./capture.ts";
+import { ApplicationCapture, applicationCaptureRoot, inputCaptureServices } from "./capture.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
@@ -1204,7 +1204,7 @@ export class Application {
         presentations.push(presentation);
       }
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease };
-      this.capture = new ApplicationCapture(input, renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text));
+      this.capture = client?.capture ?? new ApplicationCapture(inputCaptureServices(input, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text)), renderer);
       if (client === null) this.capture.activate();
       if (q3.size === 0) await audio.startWorldMusic();
     } catch (error) {
@@ -1222,6 +1222,8 @@ export class Application {
       throw error;
     }
   }
+
+  get captureMap(): string { return this.content.recipe.map.geometry.requestedPath; }
 
   async prepareRetirement(): Promise<void> {
     await this.capture?.beforeWorldChange();
@@ -1244,6 +1246,7 @@ export class Application {
     const graphical = this.graphical;
     if (graphical === null) throw new Error("Borrowed application has no graphical source");
     const previous = client.source.current;
+    await client.capture.beforeWorldChange();
     await previous?.prepareRetirement();
     client.session.resources.assertOpen();
     graphical.input.validateStartupAdoption();
@@ -1283,7 +1286,6 @@ export class Application {
         this.configurationScripts = null;
       }
       publishAudio(); client.output.current = graphical.audio.engine;
-      this.capture?.activate();
     } catch (error) { failures.push(error); this.fatalWorldFailure = true; }
     finally {
       try { await previous?.retire(); } catch (error) { failures.push(error); }
@@ -1780,9 +1782,10 @@ export class Application {
         nextGraphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease };
       }
       const previousCapture = this.capture;
-      const nextCapture = nextGraphical === null ? null : new ApplicationCapture(nextGraphical.input, nextGraphical.renderer,
-        applicationCaptureRoot(options.userContentRoot), () => this.options.map, text => this.host.print(text));
-      stagedCapture = nextCapture;
+      const nextCapture = nextGraphical === null ? null : this.ownership.kind === "borrowed" ? this.ownership.client.capture
+        : new ApplicationCapture(inputCaptureServices(nextGraphical.input, applicationCaptureRoot(options.userContentRoot),
+          () => this.options.map, text => this.host.print(text)), nextGraphical.renderer);
+      stagedCapture = this.ownership.kind === "owned" ? nextCapture : null;
       await this.capture?.beforeWorldChange();
       const publishAudio = previous !== null && nextGraphical !== null ? previous.audio.prepareOutputTransfer(nextGraphical.audio) : null;
       if (this.closed) throw new Error("Application closed during world preparation");
@@ -1797,7 +1800,7 @@ export class Application {
       const retirePrevious = async (retired: ReturnType<EngineSession["replaceWorld"]>["retired"]): Promise<void> => {
         if (this.archivePersistence && !this.preparedStartup?.pending && !sameSourceOwner) await retire("previous source archive", () => this.saveSourceArchive(previousOptions, previousContent, previousSimulation, previousOverrides));
         if (this.archivePersistence && !this.preparedStartup?.pending && !sameClientOwner) await retire("previous client archives", () => this.saveClientArchives(previousOptions, previousContent, previousClientCvars, previousOverrides));
-        await retire("capture retirement", () => previousCapture?.close());
+        if (this.ownership.kind === "owned") await retire("capture retirement", () => previousCapture?.close());
         await retire("bot retirement", () => previousBots?.close(initialSourceMilliseconds !== 0));
         for (const { state } of previousLocalGuest?.seats.values() ?? []) await retire("guest seat retirement", () => state.retire());
         previousLocalGuest?.seats.clear();
@@ -1908,7 +1911,7 @@ export class Application {
         await retirePrevious(replacement.retired);
         await retire("configuration retirement", () => retiredScripts?.close());
         await retire("unpublished configuration retirement", () => nextScripts?.close());
-        nextCapture?.activate();
+        if (this.ownership.kind === "owned") nextCapture?.activate();
       }
       if (nextGraphical !== null) {
         this.frontendBaseline = readFrontendPreferences(nextGraphical.input, nextGraphical.audio);
@@ -2710,9 +2713,12 @@ export class Application {
     const graphical = this.graphical;
     this.graphical = null;
     const errors: unknown[] = [];
+    if (this.ownership.kind === "borrowed" && this.ownership.client.source.current === this) {
+      try { await this.ownership.client.capture.beforeWorldChange(); } catch (error) { errors.push(error); }
+    }
     try { this.campaignMovie?.playback.close(this.frames); } catch (error) { errors.push(error); }
     this.campaignMovie = null;
-    try { await this.capture?.close(); } catch (error) { errors.push(error); }
+    try { if (this.ownership.kind === "owned") await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
     if (this.sourcePublished && this.archivePersistence && !this.preparedStartup?.pending) {
       try { await this.saveSourceArchive(this.options, this.content, this.simulation, this.teamArenaOverrides); } catch (error) { errors.push(error); }

@@ -10,6 +10,7 @@ export interface ConsoleCommandServices {
   readonly config: (seat: SeatId) => ConfigStore;
   readonly configuration: (invocation: CommandInvocation) => string;
   readonly console: (seat: SeatId) => SeatConsole | null;
+  readonly canChat: () => boolean;
   readonly capture: (seat: SeatId) => FrameCapture | null;
   readonly mapName: () => string;
   readonly print: (text: string) => void;
@@ -28,8 +29,11 @@ export function registerConsoleCommands(services: ConsoleCommandServices): () =>
   };
   add("toggleconsole", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.toggle(); });
   add("clear", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.buffer.clear(); }, { summary: "Clear the invoking seat's console output.", usage: "clear", examples: ["clear"] });
-  add("messagemode", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.message(false); });
-  add("messagemode2", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.message(true); });
+  for (const name of ["messagemode", "messagemode2"]) add(name, invocation => {
+    const id = seat(invocation);
+    if (!services.canChat()) { services.print("Chat requires an active connection.\n"); return; }
+    if (id !== null) services.console(id)?.message(name === "messagemode2");
+  });
   add("condump", invocation => {
     const id = seat(invocation), name = invocation.argv[1], console = id === null ? null : services.console(id);
     if (name === undefined || console === null || id === null || invocation.argv.length !== 2) { services.print("condump <filename>\n"); return; }

@@ -469,20 +469,6 @@ export class ApplicationInput {
       registerQ2ClientCommands(this.commands, sourceDialect, (name, args, seat, source) => actions.execute(name, args, seat, source)),
       registerQ1ClientCommands(this.commands, sourceDialect, (name, args, seat, source) => actions.execute(name, args, seat, source)));
     this.registerCommand("quit", () => actions.quit());
-    this.registerCommand("toggleconsole", invocation => {
-      let origin = invocation.source.origin;
-      while (origin.kind === "script") origin = origin.caller;
-      const local = origin.kind === "local-seat" ? locals.find(local => local.player.seat.id.equals(origin.seat)) : locals[0];
-      local?.console.toggle(); return undefined;
-    });
-    for (const name of ["messagemode", "messagemode2"]) this.registerCommand(name, invocation => {
-      let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
-      if (origin.kind === "local-seat" && this.bindingCapabilities.chat) {
-        const seat = origin.seat;
-        locals.find(local => local.player.seat.id.equals(seat))?.console.message(name === "messagemode2");
-      }
-      return undefined;
-    });
     for (const name of ["+grapple", "-grapple", "+grenade", "-grenade"]) this.registerCommand(name, invocation => {
       let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
       if (origin.kind !== "local-seat") return undefined;

@@ -147,6 +147,7 @@ export class PreparedStartup {
     if (!this.currentStartup?.restrictSharedConfiguration) return true;
     return allowSeatConfigurationCommand(command, this.routing, this.seats, (text, source) => this.print(text, source));
   }
+  isConfigurationSource(source: CommandContext): boolean { return this.currentStartup?.ownsSource(source) ?? false; }
   noteWorldAction(): void { if (this.pending) this.worldAction = true; }
   prepareClientCommands(options: CommandBufferOptions, inputs: readonly Pick<PreparedSeat, "id" | "input" | "context">[] = this.seats): PreparedClientCommands {
     const contexts = [this.source.context, this.commands.context, ...this.activeSeats.map(seat => seat.context)].filter(context => this.currentContext(context));
