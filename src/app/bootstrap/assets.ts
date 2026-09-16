@@ -104,8 +104,9 @@ export class ApplicationAssets {
   private retiredImages: (() => void)[] = [];
 
   constructor(readonly content: LoadedApplicationContent, owner: RendererResourceOwner, private readonly mediaClock: MediaClock = { sample: () => performance.now() },
-    options: { readonly imagePolicy?: ImagePolicy; readonly modelPolicy?: ModelReplacementPolicy } = {}) {
-    this.images = new SceneImageRegistry(owner, mediaClock);
+    options: { readonly imagePolicy?: ImagePolicy; readonly modelPolicy?: ModelReplacementPolicy; readonly imageRegistry?: SceneImageRegistry } = {}) {
+    if (options.imageRegistry !== undefined && options.imageRegistry.owner !== owner) throw new Error("Application images belong to another renderer");
+    this.images = options.imageRegistry?.fork(mediaClock) ?? new SceneImageRegistry(owner, mediaClock);
     this.imagePolicyValue = options.imagePolicy;
     this.modelPolicyValue = options.modelPolicy ?? DEFAULT_MODEL_REPLACEMENT_POLICY;
   }

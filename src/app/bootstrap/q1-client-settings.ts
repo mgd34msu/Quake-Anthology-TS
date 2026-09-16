@@ -1,6 +1,7 @@
 import { CvarFlag, type CvarRegistry } from "../../core/cvars/index.ts";
 import type { Rect, SceneCamera } from "../../contracts/render.ts";
 import type { CommandBuffer } from "../../core/commands/index.ts";
+import type { CommandDialect } from "../../contracts/common.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { NumericProfile } from "../../contracts/numeric.ts";
@@ -22,13 +23,13 @@ export function registerQ1ViewCommands(commands: CommandBuffer): () => void {
 }
 
 /** Native Q1 view declarations belong to the client before quake.rc executes. */
-export function registerQ1ClientSettings(cvars: CvarRegistry): void {
-  if (cvars.dialect !== "q1-netquake" && cvars.dialect !== "q1-quakeworld") return;
+export function registerQ1ClientSettings(cvars: CvarRegistry, profile: CommandDialect | "all" = cvars.dialect): void {
+  if (profile !== "all" && profile !== "q1-netquake" && profile !== "q1-quakeworld") return;
   cvars.register("viewsize", "100", CvarFlag.Archive);
-  if (cvars.dialect === "q1-quakeworld") cvars.register("cl_sbar", "0", CvarFlag.Archive);
+  if (profile === "all" || profile === "q1-quakeworld") cvars.register("cl_sbar", "0", CvarFlag.Archive);
   cvars.bindValue("viewsize", { validate: value => value.trim() !== "" && Number.isFinite(Number(value)) ? null : "Expected a finite number", changed: () => undefined });
   cvars.document("viewsize", { summary: "Quake view size. 30 through 100 sizes the scene; 110 removes the inventory margin, 120 hides the status display.", usage: "viewsize <30..120>", examples: ["viewsize 100", "viewsize 120"] });
-  if (cvars.dialect === "q1-netquake") for (const [name, value, summary] of [
+  if (profile === "all" || profile === "q1-netquake") for (const [name, value, summary] of [
     ["chase_active", "0", "Enable the local chase camera without changing player aim."],
     ["chase_back", "100", "Chase distance behind the player, in world units."],
     ["chase_up", "16", "Chase height above the eye, in world units."],
@@ -43,13 +44,14 @@ export function registerQ1ClientSettings(cvars: CvarRegistry): void {
 export interface Q1ChaseSettings { readonly back: number; readonly up: number; readonly right: number; }
 export interface Q1ViewSettings { readonly size: number; readonly overlayStatus: boolean; readonly chase: Q1ChaseSettings | null; }
 
-export function readQ1ViewSettings(cvars: CvarRegistry | null): Q1ViewSettings | null {
+export function readQ1ViewSettings(cvars: CvarRegistry | null, profile: CommandDialect | undefined = cvars?.dialect): Q1ViewSettings | null {
+  if (profile !== "q1-netquake" && profile !== "q1-quakeworld") return null;
   const current = cvars?.find("viewsize");
   if (cvars === null || current === undefined) return null;
   const size = Math.max(30, Math.min(120, current.numericValue));
   if (size !== current.numericValue) cvars.set("viewsize", String(size));
-  return { size, overlayStatus: cvars.dialect === "q1-quakeworld" && cvars.variableValue("cl_sbar") === 0,
-    chase: cvars.dialect === "q1-netquake" && cvars.variableValue("chase_active") !== 0
+  return { size, overlayStatus: profile === "q1-quakeworld" && cvars.variableValue("cl_sbar") === 0,
+    chase: profile === "q1-netquake" && cvars.variableValue("chase_active") !== 0
       ? { back: cvars.variableValue("chase_back"), up: cvars.variableValue("chase_up"), right: cvars.variableValue("chase_right") } : null };
 }
 

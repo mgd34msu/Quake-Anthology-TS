@@ -652,10 +652,11 @@ test("profile configuration runs separately from an in-flight originating comman
     const program = live.prepareProgram({ dialect: "q1-netquake", context: source, cvars,
       readScript: async () => 'alias selected "echo configured"; profile 7; wait; selected\n',
       print: text => output.push(`candidate:${text}`) });
-    await program.executePreparation(async () => {
+    await program.preparePrefix(async () => {
       expect(() => program.publish()).toThrow("preparing");
-      program.commands.append("exec profile.cfg\n");
-      while (!program.commands.programComplete) await program.commands.advanceProgramFrame();
+      program.commands.appendPreparation("exec profile.cfg\n");
+      while (!program.commands.preparationComplete) await program.commands.advanceProgramFrame();
+      return true;
     });
     expect(live.pendingText).toBe(pending);
     expect(program.commands.pendingText).toBe(pending);
@@ -675,7 +676,7 @@ test("failed or unfinished prepared configuration cannot publish partial state",
   const live = new CommandBuffer({ dialect: "q2-classic", context: context() });
   live.append("echo retained\n");
   const program = live.prepareProgram({ dialect: "q2-classic", context: context() });
-  await expect(program.executePreparation(async () => { program.commands.append("echo unexecuted\n"); })).rejects.toThrow("unfinished");
+  await expect(program.preparePrefix(async () => { program.commands.appendPreparation("echo unexecuted\n"); return true; })).rejects.toThrow("unfinished");
   expect(program.commands.pendingText).toBe(live.pendingText);
   expect(() => program.publish()).toThrow("failed");
 });
@@ -770,4 +771,60 @@ test("async script barrier preserves nested exec and outer tail until publicatio
   await commands.executeScriptsAsync(async () => {}, () => !blocked);
   expect(events).toEqual(["queued", "old frame captured", "new world published", "inside", "outside"]);
   expect(commands.hasPendingCommands).toBe(false);
+});
+
+
+test("paused profile prefix publishes at a dispatch boundary ahead of inherited and new input", async () => {
+  const source = context(), effects: string[] = [], completed: string[] = [];
+  const live = new CommandBuffer({ dialect: "q2-classic", context: source,
+    onScriptComplete: event => completed.push(event.name) });
+  live.register("mark", command => { effects.push(command.args[0] ?? ""); });
+  live.register("load", () => {});
+  live.append("load; mark inherited\n");
+  await live.executeAsync(async () => {
+    if (live.tokenizedArguments[0] !== "load") return;
+    const program = live.prepareProgram({ dialect: "q1-netquake", context: source,
+      readScript: async () => 'mark first; map A; wait; mark second\n' });
+    let stopped = false;
+    program.commands.register("mark", command => { effects.push(command.args[0] ?? ""); });
+    program.commands.register("map", () => { stopped = true; });
+    expect(await program.preparePrefix(async () => {
+      program.commands.appendPreparation("exec profile.cfg\n");
+      await program.commands.executeScriptsAsync(async () => {}, () => !stopped);
+      return false;
+    })).toBe(false);
+    expect(effects).toEqual(["first"]);
+    program.publish();
+  });
+  expect(effects).toEqual(["first"]);
+  live.append("mark newly-typed\n");
+  await live.advanceProgramFrame();
+  expect(effects).toEqual(["first"]);
+  await live.advanceProgramFrame();
+  expect(effects).toEqual(["first", "second"]);
+  expect(completed).toEqual(["profile.cfg"]);
+  expect(live.programComplete).toBe(false);
+  live.finishPreparation();
+  await live.advanceProgramFrame();
+  expect(effects).toEqual(["first", "second", "inherited", "newly-typed"]);
+  expect(live.programComplete).toBe(true);
+});
+
+test("nested profile prefixes keep native deferred state and caller append order", async () => {
+  const source = context(), effects: string[] = [];
+  const live = new CommandBuffer({ dialect: "q2-classic", context: source });
+  live.register("mark", command => { effects.push(command.args[0] ?? ""); });
+  live.append("mark inherited\n"); live.copyToDefer();
+  const outer = live.prepareProgram({ dialect: "q2-classic", context: source });
+  await outer.preparePrefix(async () => { outer.commands.appendPreparation("mark outer\n"); return false; });
+  outer.publish();
+  const inner = live.prepareProgram({ dialect: "q2-classic", context: source });
+  await inner.preparePrefix(async () => { inner.commands.appendPreparation("mark inner\n"); return false; });
+  inner.publish(); live.append("mark new\n");
+  live.executeBatch("mark immediate", source);
+  expect(effects).toEqual(["immediate"]);
+  await live.advanceProgramFrame(); live.finishPreparation();
+  await live.advanceProgramFrame(); live.finishPreparation();
+  await live.advanceProgramFrame();
+  expect(effects).toEqual(["immediate", "inner", "outer", "inherited", "new"]);
 });

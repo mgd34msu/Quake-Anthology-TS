@@ -4,7 +4,7 @@ import { nativeAtoi } from "../../../core/numeric.ts";
 import { q3InfoValue } from "../../../network/q3/admission.ts";
 import { PakReferenceFlag, ServerPakSet } from "../../../network/q3/pak-references.ts";
 import { loadApplicationContent } from "../content.ts";
-import type { LoadedApplicationContent } from "../content.ts";
+import type { ApplicationContentSource, LoadedApplicationContent } from "../content.ts";
 import type { ApplicationOptions } from "../options.ts";
 import { Q3ApplicationPackages } from "./q3-downloads.ts";
 import { remoteContentSelection } from "../../../content/catalog/index.ts";
@@ -35,7 +35,7 @@ export class Q3ClientContent {
   get pure(): boolean { return this.settings.pure; }
 
   static async open(options: ApplicationOptions, info: string, checksumFeed: number,
-    catalogContent: Pick<LoadedApplicationContent, "catalog" | "mounts">): Promise<Q3ClientContent> {
+    catalogContent: Pick<LoadedApplicationContent, "catalog" | "mounts">, presentationSource?: ApplicationContentSource): Promise<Q3ClientContent> {
     const settings = systemInfo(info, checksumFeed);
     const product = catalogContent.catalog.require(options.product);
     if (product.expectation.family !== "q3") throw new Error("Q3 client content requires a Q3 product");
@@ -44,7 +44,7 @@ export class Q3ClientContent {
       throw new Error("Server game directory differs from the selected Q3 content");
     const catalog = await Q3ApplicationPackages.open(catalogContent, checksumFeed);
     const policy = settings.checksums.length === 0 ? undefined : catalog.references.pureMountPolicy(settings.checksums);
-    const content = await loadApplicationContent(options, undefined, policy);
+    const content = await loadApplicationContent(options, undefined, policy, presentationSource === undefined ? undefined : catalogContent.catalog, presentationSource);
     try {
       const packages = await Q3ApplicationPackages.open(content, checksumFeed);
       return new Q3ClientContent(content, packages, policy, settings);

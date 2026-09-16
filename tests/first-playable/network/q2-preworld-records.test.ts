@@ -12,7 +12,7 @@ import type { Q2ServerRecord } from '../../../src/network/q2/index.ts';
 test('Q2 connecting records retain server metadata and prints before any world is admitted', () => {
     const identity = createIdentityOwner('Q2 preworld records'), session = new EngineSession(identity, { kind: 'headless' });
     const prints: string[] = [];
-    const remote = new Q2RemotePresentation({ identity, session, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content: null, protocol: { kind: 'q2-classic', version: 34 },
+    const remote = new Q2RemotePresentation({ identity, session, seat: identity.seat(0), publish: output => session.publish(output), disconnected: () => { session.clientAt(0)?.disconnect(); }, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content: null, protocol: { kind: 'q2-classic', version: 34 },
         userinfo: () => '', print: text => { prints.push(text); }, sendCommand() {},
         prepareServerData: async () => { throw new Error('This record projection must not prepare content'); },
         loadContent: async () => { throw new Error('This record projection must not load a map'); } });
@@ -44,7 +44,7 @@ test('Q2 connecting records retain server metadata and prints before any world i
 
 test('remote presenters retain the supplied client and seat across peer replacement', async () => {
     const identity = createIdentityOwner('persistent remote client'), session = new EngineSession(identity, { kind: 'local' });
-    const client = session.createClient(0), seat = session.createSeat(0, client);
+    const client = session.createClient(0), seat = session.createSeat(5, client);
     const local = new SessionActorRegistry(identity);
     const oldLocal = local.allocate('q1:local', 'q1:player').id;
     const checkpoint = local.checkpoint();
@@ -52,7 +52,7 @@ test('remote presenters retain the supplied client and seat across peer replacem
     const rejected = new SessionActorRegistry(identity);
     const rejectedActor = rejected.allocate('q1:local', 'q1:player').id;
     rejected.close();
-    const options = { identity, session, client, content: null,
+    const options = { identity, session, client, seat: seat.id, content: null,
         nextGeneration: (slot: number): number => nextActorGeneration(session.session, slot),
         loadContent: async () => { throw new Error('Admission must not load content in this lifecycle test'); },
         userinfo: () => '', print() {}, sendCommand() {}, publish: (output: import('../../../src/contracts/session.ts').SimulationOutput) => session.publish(output), disconnected: () => { disconnects++; } };
@@ -101,10 +101,15 @@ test('remote presenters retain the supplied client and seat across peer replacem
         client.disconnect();
         expect(retained.isClosed).toBe(true);
 
+        const liveQ2Predecessor = client.connect("demo");
         const q2 = new Q2RemotePresentation({ ...options, protocol: { kind: 'q2-classic', version: 34 },
             prepareServerData: async () => { throw new Error('No server data'); } });
         expect(q2.client).toBe(client);
+        expect(client.connection).toBe(liveQ2Predecessor);
         q2.disconnected('replace');
+        expect(disconnects).toBe(3);
+        expect(client.connection).toBe(liveQ2Predecessor);
+        expect(liveQ2Predecessor.isClosed).toBe(false);
 
         const second = new Q3RemotePresentation({ ...options, disconnected: () => { client.disconnect(); } });
         client.connect('remote');

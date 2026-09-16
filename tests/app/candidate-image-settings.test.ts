@@ -18,12 +18,23 @@ test("image candidate preserves live FOV gamma volume and files until retained-o
   try {
     const owner = images.cvars, before = owner.captureWorldTransferState();
     const candidate = images.prepareClientSettings();
+    const candidateSeen: number[] = [], candidateView = new ApplicationViewSettings(value => { candidateSeen.push(value); });
+    const releaseCandidateView = candidate.settings.bindViewSettings(candidateView);
     const commands = new CommandBuffer({ dialect: "q3", context, cvars: candidate.settings.cvars });
     commands.executeNow("gamma 0.5"); commands.executeNow("s_volume 0.2"); commands.executeNow("fov 120");
     expect(candidate.settings.gamma).toBe(2); expect(candidate.settings.cvars.variableString("volume")).toBe("0.2");
     expect(owner.captureWorldTransferState()).toEqual(before);
     expect(view.fieldOfView).toBe(90); expect(seen).toEqual([]);
     expect(reads).not.toHaveBeenCalled(); expect(writes).not.toHaveBeenCalled();
+    expect(candidateView.fieldOfView).toBe(120); expect(candidateSeen).toEqual([120]);
+    commands.executeNow("fov 15"); expect(candidateView.fieldOfView).toBe(120);
+    releaseCandidateView();
+    commands.executeNow("fov 15"); expect(candidate.settings.cvars.variableString("fov")).toBe("120");
+    const replacement = new ApplicationViewSettings(() => {});
+    const releaseReplacement = candidate.settings.bindViewSettings(replacement);
+    releaseCandidateView();
+    commands.executeNow("fov 125"); expect(replacement.fieldOfView).toBe(125);
+    commands.executeNow("fov 120"); releaseReplacement();
     candidate.validatePublication();
     release(); candidate.publish();
     view.setFieldOfView(Number(owner.variableString("fov"))); release = view.bindCvars(owner);

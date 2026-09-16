@@ -9,6 +9,7 @@ import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { InputCommandBuilder } from "../../src/input/user-command.ts";
 import { bindRunCvar } from "../../src/app/bootstrap/shared-setting-cvars.ts";
 import { ApplicationImageSettings } from "../../src/app/bootstrap/image-settings.ts";
+import { ApplicationConsoleRouting } from "../../src/app/bootstrap/console.ts";
 import { StartupConfig } from "../../src/app/bootstrap/startup-config.ts";
 import { q1ChaseCamera, q1ViewCamera, q1ViewRectangle, readQ1ViewSettings, registerQ1ClientSettings, registerQ1ViewCommands } from "../../src/app/bootstrap/q1-client-settings.ts";
 import { seatModelVisible } from "../../src/app/bootstrap/presentation-scene.ts";
@@ -154,4 +155,27 @@ test("chase uses real shared collision for rear clearance and forward aim withou
   expect(seatModelVisible(null, { actor, viewWeapon: true })).toBe(false);
   expect(seatModelVisible(null, { actor, viewWeapon: false })).toBe(true);
   expect(seatModelVisible(other, { actor: other, viewWeapon: true })).toBe(true);
+});
+
+test("retained Q2 image owner exposes Q1 settings before profile scripts and selects views by source", async () => {
+  const root = await mkdtemp(join(tmpdir(), "q1-retained-view-"));
+  const context: CommandContext = { session: createIdentityOwner("q1-retained-view").session, origin: { kind: "local-console" } };
+  const output: string[] = [];
+  try {
+    const image = await ApplicationImageSettings.open({ dialect: "q2-classic", context, userContentRoot: root, print: text => { output.push(text); }, deferPersistence: true });
+    const candidate = image.prepareClientSettings();
+    const fallback = new CvarRegistry({ dialect: "q1-netquake", context });
+    const routing = new ApplicationConsoleRouting({ fallback, sourceDialect: () => "q1-netquake", server: () => null, seat: () => fallback,
+      shared: () => candidate.settings.cvars });
+    const commands = new CommandBuffer({ dialect: "q1-netquake", context, cvars: fallback, cvarRouting: routing, print: text => { output.push(text); } });
+    commands.executeNow("viewsize 110"); commands.executeNow("chase_active 1"); commands.executeNow("cl_sbar 0");
+    expect(output).toEqual([]);
+    expect(image.cvars.variableValue("viewsize")).toBe(100);
+    candidate.publish();
+    expect(image.cvars.dialect).toBe("q2-classic");
+    expect(readQ1ViewSettings(image.cvars, "q1-netquake")).toEqual({ size: 110, overlayStatus: false, chase: { back: 100, up: 16, right: 0 } });
+    expect(readQ1ViewSettings(image.cvars, "q1-quakeworld")).toEqual({ size: 110, overlayStatus: true, chase: null });
+    expect(readQ1ViewSettings(image.cvars, "q2-classic")).toBeNull();
+    await image.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

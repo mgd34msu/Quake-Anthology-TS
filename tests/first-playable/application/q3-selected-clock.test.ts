@@ -17,12 +17,14 @@ for (const product of ["q2-rerelease-baseq2", "q2-classic-baseq2"]) test(`${prod
     startup = await StartupApplication.open(command.options, { print: value => { prints.push(value); } }, root + "/saves");
     Application.prototype.run = async function () {
       runs++;
-      const local = this.localPlayers[0];
-      if (local === undefined) throw new Error("Missing gameplay player");
-      this.input({ seat: local.seat.id, timeMilliseconds: performance.now(), kind: "mouse-button", button: 1, down: true });
       return run.call(this);
     };
     Application.prototype.step = async function (elapsed) {
+      if (attempts === 0) {
+        const local = this.localPlayers[0];
+        if (local === undefined) throw new Error("Missing gameplay player");
+        this.input({ seat: local.seat.id, timeMilliseconds: performance.now(), kind: "mouse-button", button: 1, down: true });
+      }
       attempts++;
       const output = await step.call(this, elapsed);
       const view = this.simulation.presentations().find(value => value.q3Weapon !== undefined)?.q3Weapon;
@@ -44,7 +46,7 @@ for (const product of ["q2-rerelease-baseq2", "q2-classic-baseq2"]) test(`${prod
     }
     await startup.run();
     expect(prints.some(value => value.includes("clock") || value.includes("already defined"))).toBe(false);
-    expect(runs).toBe(1); expect(attempts).toBe(10); expect(samples).toHaveLength(10);
+    expect(runs).toBe(0); expect(attempts).toBe(10); expect(samples).toHaveLength(10);
     expect(samples.some(sample => !Number.isInteger(sample.elapsed))).toBe(true);
     expect(samples.some(sample => sample.lastFire !== null)).toBe(true);
     let accumulated = 0;

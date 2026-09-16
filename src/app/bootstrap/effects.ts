@@ -1,3 +1,4 @@
+import { addQ2Blend } from "../../content/q2/base/player/view.ts";
 import type { Q3SceneAdmission } from "../../content/q3/presentation/scene.ts";
 import { sequenceDrawGroup, type SourceSceneOrder, type SceneOperation } from "../../render/scene/submissions.ts";
 import type { Q2ShadowLightState } from "../../content/q2/foundation/shadow-lights.ts";
@@ -91,6 +92,7 @@ export class ApplicationEffects {
   private readonly shadowLights = new Map<ActorId, Q2ShadowLightState>();
   private readonly sourceLights = new Map<ActorId, SurfaceDynamicLight>();
   private readonly playerViews = new Q2EffectViews();
+  private readonly bonusFlashes = new Map<ActorId, number>();
   private readonly trackerPain = new Map<ActorId, { readonly content: ContentId; readonly until: number }>();
   private steam: Steam[] = [];
   private readonly sounds: SourceEffectSound[] = [];
@@ -108,7 +110,16 @@ export class ApplicationEffects {
   }
   drainUnhandled(): readonly UnhandledApplicationEffect[] { const result = this.unhandled; this.unhandled = []; return result; }
   drainSounds() { return [...this.sounds.splice(0), ...[...this.q3.values(), ...this.q3Weapons.values()].flatMap(effects => effects.drainSounds())]; }
-  playerView(actor: ActorId, camera: SceneCamera) { return this.playerViews.frame(actor, camera, this.time ?? 0, actor => this.pose(actor)); }
+  playerView(actor: ActorId, camera: SceneCamera) {
+    const seconds = this.time ?? 0, view = this.playerViews.frame(actor, camera, seconds, actor => this.pose(actor));
+    const until = this.bonusFlashes.get(actor);
+    if (until === undefined) return view;
+    // WinQuake view.c V_BonusFlash_f / V_CalcBlend: 50 percent, decaying at 100 per second.
+    const percent = Math.max(0, Math.min(50, (until - seconds) * 100));
+    if (percent === 0) return view;
+    return { ...view, blend: addQ2Blend(view.blend ?? { x: 0, y: 0, z: 0, w: 0 },
+      { x: 215 / 255, y: 186 / 255, z: 69 / 255 }, percent / 255) };
+  }
   private reject(source: SimulationPresentationEvent, reason: string): void { this.unhandled.push({ source, reason }); }
   private pose(actor: ActorId) { return this.poses.find(pose => pose.actor.equals(actor)); }
   private async group(content: ContentId): Promise<Group> {
@@ -198,6 +209,7 @@ export class ApplicationEffects {
     for (const actor of this.sourceLights.keys()) if (!liveActors.has(actor)) this.sourceLights.delete(actor);
     for (const actor of this.trackerPain.keys()) if (!liveActors.has(actor)) this.trackerPain.delete(actor);
     this.playerViews.retain(liveActors);
+    for (const [actor, until] of this.bonusFlashes) if (!liveActors.has(actor) || until <= now) this.bonusFlashes.delete(actor);
     this.steam = this.steam.filter(steam => steam.end >= now);
     if (elapsed > 0 || this.time === null) for (const steam of this.steam) if (steam.next <= now) {
       const event = steam.event, particles = (await this.group(steam.content)).particles;
@@ -345,6 +357,10 @@ export class ApplicationEffects {
     }
     if (source.kind === "q1") {
       const event = source.event;
+      if (event.kind === "effect" && event.effect === "pickup") {
+        if (event.actor !== null) this.bonusFlashes.set(event.actor, source.seconds + 0.5);
+        return;
+      }
       if (event.kind === "static-model") {
         if (event.path === "") return;
         const asset = await this.assets.model(source.content, event.path);
@@ -393,7 +409,6 @@ export class ApplicationEffects {
           const pose = event.actor === null ? undefined : this.pose(event.actor), direction = pose === undefined ? zero : anglesToAxis(pose.angles)[0];
           this.light(add3(add3(event.origin, { x: 0, y: 0, z: 16 }), scale3(direction, 18)), seconds, 200 + (this.random.nextInteger() & 31), 0.1, white, 0, 32, event.actor); break;
         }
-        case "pickup": break;
       }
       return;
     }
@@ -603,7 +618,7 @@ export class ApplicationEffects {
     this.pending = []; this.unhandled = []; this.beams = []; this.explosions = [];
     this.staticBrushes.length = 0; this.styles = []; this.lights = []; this.sampledLights = [];
     this.entityTrails.clear(); this.shadowLights.clear(); this.sourceLights.clear();
-    this.playerViews.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
+    this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
     this.poses = []; this.time = null; this.q3WeaponTimes.clear();
     for (const group of this.groups.values()) {
       group.particles.clear(); group.models = []; group.statics.length = 0; group.beams = []; group.sampled = [];
@@ -618,6 +633,6 @@ export class ApplicationEffects {
     this.preparedQ3Weapons.clear();
     for (const image of this.images.values()) this.assets.images.release(image);
     this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear();
-    this.shadowLights.clear(); this.sourceLights.clear(); this.playerViews.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
+    this.shadowLights.clear(); this.sourceLights.clear(); this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
   }
 }

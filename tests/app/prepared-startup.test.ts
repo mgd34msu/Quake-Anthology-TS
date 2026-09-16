@@ -12,12 +12,37 @@ import { PreparedStartup } from "../../src/app/bootstrap/prepared-startup.ts";
 import { resolveStartupRules } from "../../src/app/bootstrap/startup-source.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { Q3ServerState, registerQ3ServerCvars } from "../../src/app/bootstrap/simulation/q3/server-state.ts";
+import { defaultBindings } from "../../src/input/bindings.ts";
 
 function options(args: readonly string[] = []) {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", ...args]);
   if (command.kind !== "run") throw new Error("Expected launch");
   return command.options;
 }
+
+test("menu binding defaults are previewed without publishing or overwriting explicit bindings", async () => {
+  const identity = createIdentityOwner("menu-candidate-defaults");
+  const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } };
+  const source = new CvarRegistry({ dialect: "q3", context });
+  const prepared = new PreparedStartup(source, new CvarRegistry({ dialect: "q3", context }),
+    new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined }), {
+      dialect: "q3", movementDialect: "q3", shared: null, sharedNames: [],
+      seats: [{ id: identity.seat(0), context, cvars: new CvarRegistry({ dialect: "q3", context }),
+        mouse: new MouseSettings(new CvarRegistry({ dialect: "q3", context })), profile: null, archive: [], mouseArchive: [] }],
+      print: () => {}, forward: () => undefined,
+    });
+  const seat = prepared.seats[0]; if (seat === undefined) throw new Error("Missing prepared seat");
+  await prepared.execute({ nextFrame: async () => {}, hasMod: false, sourceArchive: [], movementArchive: [], fallbackArchive: [], sharedArchive: [],
+    read: async name => name === "autoexec.cfg" ? 'bind w "echo retained"\n' : undefined, applyLaunchOptions: () => {} });
+  const before = seat.input.bindings, selected = seat.selectedBindings;
+  const defaults = defaultBindings(0, "q1-netquake");
+  const preview = prepared.previewBindings(seat.id, defaults);
+  expect(seat.input.bindings).toEqual(before); expect(seat.selectedBindings).toBe(selected);
+  expect(preview.find(binding => binding.input.kind === "key" && binding.input.code === 119)?.target).toEqual({ kind: "command", text: "echo retained" });
+  expect(preview.find(binding => binding.input.kind === "key" && binding.input.code === 32)?.target).toEqual({ kind: "command", text: "+jump" });
+  prepared.adoptBindingDefaults(seat.id, defaults);
+  expect(seat.selectedBindings).toBe(defaults); expect(seat.input.bindings).toEqual(before);
+});
 
 test('prepared adoption retains binding commands and the same pending program owner', async () => {
   const identity = createIdentityOwner('stable-prepared-owner');

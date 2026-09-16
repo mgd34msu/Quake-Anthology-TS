@@ -24,6 +24,7 @@ export interface ApplicationOptions {
   readonly character: GameFamily;
   readonly characterModel: string;
   readonly renderer: "cpu" | "gl";
+  readonly rendererSelection?: "default" | "explicit";
   readonly gamma: number;
   readonly displayOverrides?: { readonly width?: number; readonly height?: number; readonly gamma?: number };
   readonly dedicated: boolean;
@@ -109,7 +110,7 @@ export function mapResourcePath(name: string): string {
 export function parseApplicationCommand(argv: readonly string[]): ApplicationCommand {
   let options: ApplicationOptions = {
     corpusRoot: resolve(homedir(), "Projects/qfiles"), product: "q2-classic-baseq2", map: "maps/base1.bsp",
-    movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", gamma: 1, dedicated: false,
+    movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", rendererSelection: "default", gamma: 1, dedicated: false,
     width: 960, height: 600, seats: 1, skill: 1, mode: "singleplayer", seed: 1, frameLimit: null, hidden: false, network: { kind: "offline" },
   };
   const startupCommands: string[] = [];
@@ -156,7 +157,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         options = { ...options, characterModel: value }; break;
       case "--renderer":
         if (value !== "cpu" && value !== "gl") throw new Error(`Unknown renderer: ${value}`);
-        options = { ...options, renderer: value }; break;
+        options = { ...options, renderer: value, rendererSelection: "explicit" }; break;
       case "--width": {
         const width = integer(value, flag, 64, 16384);
         options = { ...options, width, displayOverrides: { ...options.displayOverrides, width } }; break;

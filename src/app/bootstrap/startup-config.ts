@@ -101,13 +101,13 @@ export class StartupConfig {
   };
 
   /** Use an exclusively owned startup buffer. False means a native wait left work for another frame. */
-  async executeFrame(commands: CommandBuffer, afterDispatch: () => Promise<void>, shouldContinue?: () => boolean): Promise<boolean> {
+  async executeFrame(commands: Pick<CommandBuffer, "append" | "executeScriptsAsync">, afterDispatch: () => Promise<void>, shouldContinue?: () => boolean): Promise<boolean> {
     if (this.failure !== undefined) throw this.failure.error;
     try { return await this.advanceFrame(commands, afterDispatch, shouldContinue); }
     catch (error: unknown) { this.failure = { error }; throw error; }
   }
 
-  private async advanceFrame(commands: CommandBuffer, afterDispatch: () => Promise<void>, shouldContinue?: () => boolean): Promise<boolean> {
+  private async advanceFrame(commands: Pick<CommandBuffer, "append" | "executeScriptsAsync">, afterDispatch: () => Promise<void>, shouldContinue?: () => boolean): Promise<boolean> {
     if (this.completed) return true;
     if (this.dedicatedQuakeWorld && !this.archiveApplied) {
       this.defaultsApplied = true; this.options.applySelectedDefaults();

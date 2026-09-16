@@ -19,10 +19,11 @@ async function captureArtifact(name: string, width: number, height: number, pixe
 }
 
 const corpus = resolve(import.meta.dir, "../../../../qfiles");
-async function until(read: () => boolean, label: string): Promise<void> {
+async function until(read: () => boolean, label: string, step: () => Promise<void>): Promise<void> {
   const deadline = performance.now() + 90000;
   while (!read()) {
     if (performance.now() >= deadline) throw new Error(`Timed out waiting for ${label}`);
+    await step();
     await Bun.sleep(10);
   }
 }
@@ -38,11 +39,12 @@ test.skipIf(!existsSync(join(corpus, "q3a/missionpack/pak0.pk3")))("Team Arena n
   });
   const messages: string[] = [];
   let startup: StartupApplication | null = null;
-  let owningStep: Promise<void> | null = null;
   try {
     startup = await StartupApplication.open(parsed.options, { print: text => { messages.push(text); } }, join(directory, "saves"));
     const owner = startup;
     await owner.step();
+    const retainedSeat = owner.inputSeat;
+    if (retainedSeat === null) throw new Error("Missing retained frontend seat");
     const chooseStartup = async (control: string, dispatch = true): Promise<void> => {
       const seat = owner.inputSeat, controller = observed.controller;
       if (seat === null || controller === null) throw new Error("Missing startup input owner");
@@ -60,12 +62,12 @@ test.skipIf(!existsSync(join(corpus, "q3a/missionpack/pak0.pk3")))("Team Arena n
     await chooseStartup("ui:startup:game:q3:classic");
     await chooseStartup("ui:startup:preset:q3-missionpack");
     await chooseStartup("ui:startup:play-preset", false);
-    const state: { finished: boolean; failure: unknown } = { finished: false, failure: undefined };
-    owningStep = owner.step().then(() => { state.finished = true; }, (error: unknown) => { state.failure = error; state.finished = true; });
-    await until(() => state.finished || owner.activeGame !== null && owner.inputSeat === null && (owner.activeGame.simulation.q3Source()?.level.time ?? 0) > 0, "native preset launch");
+    await owner.step();
+    await until(() => owner.activeGame !== null && owner.inputSeat === null && (owner.activeGame.simulation.q3Source()?.level.time ?? 0) > 0, "native preset launch", () => owner.step());
     const game = owner.activeGame;
-    if (state.failure !== undefined) throw state.failure;
-    if (game === null || state.finished) throw new Error(`Native preset did not stay active: ${messages.join("\n")}`);
+    if (game === null) throw new Error(`Native preset did not stay active: ${messages.join("\n")}`);
+    expect(game.session.session).toBe(retainedSeat.session);
+    expect(game.localPlayers[0]?.seat.id).toBe(retainedSeat);
     expect(game.options.product).toBe("q3-missionpack");
     expect(game.options.map).toBe("maps/mpteam1.bsp");
     const source = game.simulation.q3Source(), setup = game.options.teamArenaSkirmish;
@@ -77,7 +79,7 @@ test.skipIf(!existsSync(join(corpus, "q3a/missionpack/pak0.pk3")))("Team Arena n
     await until(() => {
       const presentation = game.localPlayers[0]?.seat.presentation;
       return presentation instanceof WorldSeatPresentation && presentation.ui.controller.activeMenu === "menu:application:team-arena-results";
-    }, "shared Team Arena result menu");
+    }, "shared Team Arena result menu", () => owner.step());
     const local = game.localPlayers[0];
     if (local === undefined || !(local.seat.presentation instanceof WorldSeatPresentation)) throw new Error("Missing current game controller");
     const controller = local.seat.presentation.ui.controller;
@@ -89,11 +91,10 @@ test.skipIf(!existsSync(join(corpus, "q3a/missionpack/pak0.pk3")))("Team Arena n
     }
     expect(controller.state().focus).toMatchObject({ control: "ui:team-arena:main-menu" });
     key(KeyCode.Enter);
-    await until(() => state.finished, "startup owner to finish the child game");
-    await owningStep; owningStep = null;
-    if (state.failure !== undefined) throw state.failure;
+    await until(() => owner.activeGame === null, "startup owner to retire the game", () => owner.step());
     expect(owner.activeGame).toBeNull();
     expect(owner.inputSeat).not.toBeNull();
+    expect(owner.inputSeat).toBe(retainedSeat);
     await owner.step();
     expect(observed.controller?.activeMenu).toBe("menu:startup:main");
     expect(new Set(owner.readPixels()).size).toBeGreaterThan(16);
@@ -105,7 +106,6 @@ test.skipIf(!existsSync(join(corpus, "q3a/missionpack/pak0.pk3")))("Team Arena n
     console.error(messages.join("\n")); throw error;
   } finally {
     startup?.requestQuit();
-    await owningStep;
     await startup?.close(); observer.mockRestore();
     await rm(directory, { recursive: true, force: true });
   }

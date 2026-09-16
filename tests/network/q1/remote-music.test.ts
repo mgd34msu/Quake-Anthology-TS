@@ -1,3 +1,8 @@
+import { ApplicationAssets } from '../../../src/app/bootstrap/assets.ts';
+import { ApplicationEffects } from '../../../src/app/bootstrap/effects.ts';
+import { createSceneQueries } from '../../../src/world/collision/index.ts';
+import { identityMat4 } from '../../../src/core/math.ts';
+import type { SceneCamera } from '../../../src/contracts/render.ts';
 import { expect, test } from 'bun:test';
 import { NetQuakeDecoder, writeNetQuakeMessage } from '../../../src/network/q1/netquake.ts';
 import { SizeBuf } from '../../../src/network/q1/message.ts';
@@ -65,13 +70,19 @@ class MusicContent extends LoadedApplicationContent {
   }
 }
 function fixture() {
-  const selected = recipe(), bytes = new Uint8Array(124); new DataView(bytes.buffer).setInt32(0, 29, true);
+  const selected = recipe(), bytes = new Uint8Array(216), view = new DataView(bytes.buffer);
+  view.setInt32(0, 29, true);
+  view.setInt32(4 + 10 * 8, 124, true); view.setInt32(8 + 10 * 8, 28, true);
+  view.setInt32(124, -1, true); view.setInt32(128, -1, true);
+  view.setInt32(4 + 14 * 8, 152, true); view.setInt32(8 + 14 * 8, 64, true);
+  for (let axis = 0; axis < 3; axis++) { view.setFloat32(152 + axis * 4, -16, true); view.setFloat32(164 + axis * 4, 16, true); }
+  for (let hull = 0; hull < 4; hull++) view.setInt32(188 + hull * 4, -1, true);
   const owner = selected.map.entities.content;
   const mounts = new MusicMemoryMounts(owner, new Map([['music/06.wav', musicWave(1000)], ['music/09.wav', musicWave(2000)]]));
   const catalog = new InstalledCatalog('/unused', [{ id: owner, expectation: { id: 'musicmod', family: 'q1', edition: 'classic', campaign: 'musicmod', title: 'Music fixture', contentDirectory: 'q1/musicmod', baseProduct: null, requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null }, availability: { kind: 'installed' }, archives: [], looseRoot: null, userContent: null, maps: [], diagnostics: [] }], [], 0);
   const content = new MusicContent(catalog, selected, readQ1Bsp(bytes), mounts);
   const identity = createIdentityOwner('remote music'), session = new EngineSession(identity, { kind: 'headless' });
-  const options = { identity, session, client: session.createClient(0), nextGeneration: (slot: number) => nextActorGeneration(session.session, slot), content: null,
+  const options = { identity, session, seat: identity.seat(5), client: session.createClient(0), nextGeneration: (slot: number) => nextActorGeneration(session.session, slot), content: null,
     loadContent: async () => content, sendCommand() {}, print() {}, publish: (output: import('../../../src/contracts/session.ts').SimulationOutput) => session.publish(output), disconnected: () => {} };
   return { content, session, options };
 }
@@ -144,4 +155,38 @@ test('shared Q1 music repeats the selected track and zero stops the mixer', asyn
     await music.play({ content, family: 'q1', edition: 'classic', campaign: 'musicmod' }, new SoundBank(mounts), '0');
     expect(engine.mix(256).every(sample => sample === 0)).toBe(true);
   } finally { music.stop(); mounts.close(); }
+});
+
+
+test('NQ bf server commands and bonus opcode drive the shared actor blend and decay', async () => {
+  const { content, session, options } = fixture(), printed: string[] = [];
+  const remote = new Q1RemotePresentation({ ...options, print: text => { printed.push(text); } });
+  const assets = new ApplicationAssets(content, { identity: Symbol('bonus'), session: session.session, generation: 0 });
+  const effects = new ApplicationEffects(assets, createSceneQueries(content.world), () => true);
+  const camera: SceneCamera = { origin: { x: 0, y: 0, z: 0 }, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }],
+    projection: identityMat4(), clip: { kind: 'none' }, viewport: { x: 0, y: 0, width: 320, height: 200 } };
+  try {
+    await remote.receive([{ kind: 'server-info', protocol: { kind: 'q1-netquake', version: 15 }, maxClients: 1, gameType: 0, level: 'fixture', models: ['maps/music.bsp'], sounds: [] }, { kind: 'time', seconds: 12 }], 12000);
+    await activate(remote);
+    await remote.receive([{ kind: 'stufftext', text: '  BF ignored;bf\nunknown "bf;bf"\n' }], 12000);
+    const player = remote.player, output = remote.output;
+    if (player === null || output === null) throw new Error('Missing active Q1 player');
+    const events = remote.drainPresentationEvents();
+    expect(events.filter(source => source.kind === 'q1' && source.event.kind === 'effect' && source.event.effect === 'pickup')).toHaveLength(2);
+    expect(printed).toEqual(['Unhandled server command: unknown "bf;bf"\n']);
+    effects.receive(events); await effects.prepare(output.snapshot, []);
+    const blend = effects.playerView(player.actor, camera).blend;
+    expect(blend?.x).toBeCloseTo(215 / 255); expect(blend?.y).toBeCloseTo(186 / 255); expect(blend?.z).toBeCloseTo(69 / 255); expect(blend?.w).toBeCloseTo(50 / 255);
+    expect(effects.playerView(options.identity.actor(999, 0), camera).blend).toBeNull();
+    await effects.prepare({ ...output.snapshot, frame: { ...output.snapshot.frame, time: { kind: 'seconds', value: 12.25 } } }, []);
+    expect(effects.playerView(player.actor, camera).blend?.w).toBeCloseTo(25 / 255);
+    await effects.prepare({ ...output.snapshot, frame: { ...output.snapshot.frame, time: { kind: 'seconds', value: 12.5 } } }, []);
+    expect(effects.playerView(player.actor, camera).blend).toBeNull();
+    await remote.receive([{ kind: 'time', seconds: 13 }, { kind: 'bonus-flash' }], 13000);
+    await activate(remote);
+    const next = remote.sampleDemo(13); if (next === null) throw new Error('Missing next Q1 frame');
+    effects.receive(remote.drainPresentationEvents()); await effects.prepare(next.snapshot, []);
+    expect(effects.playerView(player.actor, camera).blend?.w).toBeCloseTo(50 / 255);
+    effects.resetRound(); expect(effects.playerView(player.actor, camera).blend).toBeNull();
+  } finally { effects.close(); assets.close(); await content.close(); session.close(); }
 });

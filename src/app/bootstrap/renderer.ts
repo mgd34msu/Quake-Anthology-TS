@@ -1,3 +1,4 @@
+import { SceneImageRegistry } from "../../render/scene/resources.ts";
 import { resolveDrawTextures } from "../../render/commands/dynamic-texture.ts";
 import type { Vec4 } from "../../contracts/math.ts";
 import type { DrawBatch, ImageResourceOperation, RenderCommand, RendererBackend, RendererResourceOwner, RenderFrame, RenderOperation } from "../../contracts/render.ts";
@@ -20,11 +21,12 @@ export class NativeRenderer {
   private closed = false;
   private readonly captures: { readonly resolve: (pixels: Uint8Array) => void; readonly reject: (reason: Error) => void }[] = [];
 
-  private constructor(readonly window: SdlWindow, readonly owner: RendererResourceOwner, backend: SoftwareRenderer | GlRenderer, private gamma: number) {
+  private constructor(readonly window: SdlWindow, readonly owner: RendererResourceOwner, backend: SoftwareRenderer | GlRenderer, private gamma: number, readonly images: SceneImageRegistry) {
     this.current = backend;
   }
 
-  static open(options: Pick<ApplicationOptions, "renderer" | "width" | "height" | "hidden" | "gamma">, owner: RendererResourceOwner): NativeRenderer {
+  static open(options: Pick<ApplicationOptions, "renderer" | "width" | "height" | "hidden" | "gamma">, owner: RendererResourceOwner, images: SceneImageRegistry = new SceneImageRegistry(owner)): NativeRenderer {
+    if (images.owner !== owner) throw new Error("Renderer image registry belongs to another owner");
     const window = SdlWindow.open({ title: "Quake", backend: options.renderer, width: options.width, height: options.height,
       hidden: options.hidden, resizable: true });
     let backend: SoftwareRenderer | GlRenderer | null = null;
@@ -32,7 +34,7 @@ export class NativeRenderer {
       backend = options.renderer === "cpu" ? new SoftwareRenderer(window.width, window.height, owner) : new GlRenderer(window, owner);
       backend.setOutputGamma(options.gamma);
       if (options.renderer === "gl") window.setSwapInterval(1);
-      return new NativeRenderer(window, owner, backend, options.gamma);
+      return new NativeRenderer(window, owner, backend, options.gamma, images);
     } catch (error) {
       try { backend?.close(); } finally { window.close(); }
       throw error;
@@ -141,6 +143,7 @@ export class NativeRenderer {
           break;
       }
     }
+    for (const operation of this.images.drainPendingOperations()) this.image(operation);
     return undefined;
   }
 
@@ -172,8 +175,11 @@ export class NativeRenderer {
     if (this.closed) return undefined;
     this.closed = true;
     for (const capture of this.captures.splice(0)) capture.reject(new Error("Renderer closed before the requested frame was presented"));
-    try { this.current.close(); }
-    finally { this.resident.clear(); this.window.close(); }
+    try { this.images.close(); }
+    finally {
+      try { this.current.close(); }
+      finally { this.images.drainPendingOperations(); this.resident.clear(); this.window.close(); }
+    }
     return undefined;
   }
 }

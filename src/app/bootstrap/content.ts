@@ -1,3 +1,5 @@
+import type { DemoFamily } from "./demo-playback.ts";
+export interface ApplicationContentSource { readonly kind: "recorded"; readonly family: DemoFamily; }
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { findContentPath } from "../../content/mounts/paths.ts";
@@ -113,13 +115,13 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   return { source, match, rules };
 }
 
-export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }): LaunchPreset {
+export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }, presentationSource?: ApplicationContentSource): LaunchPreset {
   const product = catalog.require(options.product), family = product.expectation.family;
-  const q3Guest = family === "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === product.expectation.id);
+  const q3Guest = family === "q3" && presentationSource?.family !== "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === product.expectation.id);
   if (q3Guest && (!options.dedicated && options.network.kind !== "offline" || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch"
     || options.movement !== "q3" || options.character !== "q3" || options.botSkill !== undefined))
     throw new Error("Selected Q3 mods require an offline local or dedicated server with native Q3 movement and character, deathmatch and bots disabled");
-  const quakeworld = product.expectation.id === "q1-quakeworld" && options.network.kind !== "qw-client";
+  const quakeworld = product.expectation.id === "q1-quakeworld" && presentationSource?.family !== "qw" && options.network.kind !== "qw-client";
   const nativeProgram = options.quakeCProgram;
   if (nativeProgram !== undefined && (!(product.expectation.id === "q1-classic-id1" || product.expectation.id === "q1-classic-hipnotic")
     || !options.dedicated || options.network.kind !== "offline" || options.movement !== "q1" || options.character !== "q1"))
@@ -293,18 +295,21 @@ async function openMapContent(catalog: InstalledCatalog, recipe: ExecutableRecip
     mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
 }
 
-export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy, installedCatalog?: InstalledCatalog): Promise<LoadedApplicationContent> {
+export async function loadApplicationContent(options: ApplicationOptions, restoredRecipe?: ExecutableRecipe, pure?: PureMountPolicy, installedCatalog?: InstalledCatalog, presentationSource?: ApplicationContentSource): Promise<LoadedApplicationContent> {
   const remote = options.remoteContent;
   if (remote !== undefined) {
     const network = remote.base === "q1-quakeworld" ? "qw-client" : remote.base === "q2-classic-baseq2" ? "q2-client" : "q3-client";
-    if (options.network.kind !== network || options.product !== remoteContentProduct(remote))
+    const recordedFamily = remote.base === "q1-quakeworld" ? "qw" : remote.base === "q2-classic-baseq2" ? "q2" : "q3";
+    if ((presentationSource === undefined ? options.network.kind !== network : presentationSource.family !== recordedFamily) || options.product !== remoteContentProduct(remote))
       throw new Error("Remote content context requires its matching remote client product");
   }
   const catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: options.dedicated || options.network.kind === "offline" && (options.movement === "q3" && options.character === "q3"
       || restoredRecipe?.execution.some(module => module.kind === "qvm" && module.role === "server-game") === true),
     ...(remote === undefined ? {} : { remoteContent: remote }) });
+  if (presentationSource !== undefined && catalog.require(options.product).expectation.family !== (presentationSource.family === "qw" ? "q1" : presentationSource.family))
+    throw new Error("Recorded content family differs from the selected product");
   const resolveRecipe = async (): Promise<ExecutableRecipe> => {
-    const preset = applicationPreset(catalog, options);
+    const preset = applicationPreset(catalog, options, undefined, presentationSource);
     return resolveLaunch({ catalog, preset, choice: presetChoice(preset.id), ...(pure === undefined ? {} : { mounts: { pure } }) });
   };
   let recipe = restoredRecipe ?? await resolveRecipe();

@@ -130,3 +130,31 @@ test("separate input routing prefers world declarations and rejects wrong seats"
   const wrong = new ApplicationConsoleRouting({ fallback, sourceDialect: () => "q3", server: () => null, seat: () => null, input: () => f.otherCvars });
   expect(() => wrong.owner("sensitivity", f.context)).toThrow("another seat");
 });
+
+for (const frame of frames) test(`${frame.kind} cloned mouse owner reuses declarations and preserves canonical freelook`, () => {
+  const f = fixture(frame.kind), printed: string[] = [];
+  f.cvars.set('freelook', '0');
+  const before = f.cvars.get('freelook');
+  const candidate = f.cvars.prepareCandidate(text => { printed.push(text); });
+  const cloned = new MouseSettings(candidate.cvars);
+  expect(printed).toEqual([]);
+  expect(candidate.cvars.get('freelook')).toEqual(before);
+  expect(cloned.read().freeLook).toBe(false);
+  cloned.write({ ...cloned.read(), freeLook: true });
+  expect(candidate.cvars.variableValue('freelook')).toBe(1);
+  expect(f.cvars.variableValue('freelook')).toBe(0);
+});
+
+for (const dialect of ['q1-netquake', 'q1-quakeworld'] satisfies readonly CommandDialect[]) test(`${dialect} mouse declarations adopt console-created values without duplicate warnings`, () => {
+  const f = fixture(dialect), printed: string[] = [];
+  const cvars = new CvarRegistry({ dialect, context: f.context, print: text => { printed.push(text); } });
+  cvars.setCommandFlags('freelook', '0', 'archive');
+  expect(cvars.isConsoleCreated('freelook')).toBe(true);
+  const mouse = new MouseSettings(cvars);
+  expect(cvars.isConsoleCreated('freelook')).toBe(false);
+  expect(cvars.get('freelook')?.resetValue).toBe('1');
+  expect(mouse.read().freeLook).toBe(false);
+  expect(printed).toEqual([]);
+  cvars.register('freelook', '1');
+  expect(printed.join('')).toContain("Can't register variable freelook");
+});

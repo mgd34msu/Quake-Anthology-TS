@@ -11,9 +11,11 @@ export class ConsoleBuffer {
   private writeRow = 0;
   private nextSequence = 1;
   private backscroll = 0;
-  constructor(readonly dialect: CommandDialect, public width = 78, readonly characterCapacity = 32768) {
+  constructor(private currentDialect: CommandDialect, public width = 78, readonly characterCapacity = 32768) {
     if (!Number.isSafeInteger(width) || width < 1 || width > characterCapacity) throw new RangeError("Invalid console width");
   }
+  get dialect(): CommandDialect { return this.currentDialect; }
+  setDialect(dialect: CommandDialect): void { this.currentDialect = dialect; }
   private current(): MutableRow {
     const row = this.rows[this.writeRow];
     if (row === undefined) throw new Error("Console has no current row");

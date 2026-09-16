@@ -1,4 +1,7 @@
-import { openInitialConfigurationContent, prepareInitialConfiguration, configurationDialect, configurationStore } from "./configuration.ts";
+import { SceneImageRegistry } from "../../render/scene/resources.ts";
+import { openInitialConfigurationContent, prepareInitialConfiguration, prepareProfileConfiguration, configurationDialect, configurationStore, type PreparedProfileConfiguration, type ConfigurationCommandRequest } from "./configuration.ts";
+import { SeatInput } from "../../input/seat.ts";
+import { ClientSourcePublicationError, type ClientBootstrap } from "./client-bootstrap.ts";
 import { readQ1ViewSettings } from "./q1-client-settings.ts";
 import { cloneQ1SourceCvars, registerQ1BotControls } from "./q1-source-cvars.ts";
 import { captureTeamArenaOverrides, readTeamArenaOverrides, saveTeamArenaOverrides, applyTeamArenaOverrides, releaseTeamArenaOverrides, teamArenaArchiveEntries, type TeamArenaOverrides, type OverrideRegistry } from "./team-arena-overrides.ts";
@@ -68,7 +71,7 @@ import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
 import { readSaveImage, writeSaveImage } from "../../persistence/save-image.ts";
 import { EngineSession } from "../../world/session/index.ts";
-import type { SessionClient, SessionSeat } from "../../world/session/index.ts";
+import type { SessionClient, SessionConnection, SessionSeat } from "../../world/session/index.ts";
 import { SharedTransitionCoordinator } from "../../world/gameplay/transitions.ts";
 import { parseQ2Travel, type Q2TravelTarget } from "./q2-travel.ts";
 import { CampaignCinematic } from "./campaign-cinematic.ts";
@@ -267,10 +270,17 @@ export class Application {
   }
   private nativeWorldCount = 1;
   private configurationScripts: ConsoleScriptFiles | null = null;
+  private profileConfiguration: PreparedProfileConfiguration | null = null;
+  private sourcePublished = false;
+  private sourceSeatsPublished = false;
+  private readonly sourceConnections = new Map<SessionClient, SessionClient["connection"]>();
+  private readonly sourceClientChanges: { added: SessionClient[]; removed: SessionClient[] } = { added: [], removed: [] };
+  private readonly sourceSeatChanges: { added: SessionSeat[]; removed: SessionSeat[] } = { added: [], removed: [] };
 
   private constructor(private launchOptions: ApplicationOptions, private loadedContent: LoadedApplicationContent,
     readonly session: EngineSession, private worldSimulation: SharedSimulation, private readonly host: ApplicationHost, private readonly identity: IdentityOwner,
-    private readonly localSeats: Map<ClientId, SessionSeat>, inputConfig: ConfigStore) { this.inputConfig = inputConfig; }
+    private readonly localSeats: Map<ClientId, SessionSeat>, inputConfig: ConfigStore,
+    private readonly ownership: { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly client: ClientBootstrap }) { this.inputConfig = inputConfig; }
 
   private static sourceConfig(options: ApplicationOptions, content: LoadedApplicationContent): ConfigStore {
     const product = content.catalog.product(content.recipe.map.entities.content);
@@ -344,6 +354,18 @@ export class Application {
   }
 
   static async open(options: ApplicationOptions, host: ApplicationHost, recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides, initialSave?: SaveImage): Promise<Application> {
+    return Application.openSource({ kind: "owned" }, options, host, recipe, preferences, initialSave);
+  }
+
+  static async openBorrowed(client: ClientBootstrap, options: ApplicationOptions, host: ApplicationHost,
+    recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides, initialSave?: SaveImage): Promise<Application> {
+    if (options.dedicated) throw new Error("Dedicated applications cannot borrow a graphical client");
+    client.session.resources.assertOpen();
+    return Application.openSource({ kind: "borrowed", client }, options, host, recipe, preferences, initialSave);
+  }
+
+  private static async openSource(ownership: Application["ownership"], options: ApplicationOptions, host: ApplicationHost,
+    recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides, initialSave?: SaveImage): Promise<Application> {
     if ((options.network.kind === "qw-client" || options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
     const savedSettings = initialSave === undefined ? null : savedSimulationSettings(initialSave);
     const savedBots = initialSave === undefined ? null : savedBotCheckpoint(initialSave);
@@ -357,48 +379,115 @@ export class Application {
       recipe = initialSave.recipe;
     }
     host.loading?.stage(initialSave === undefined ? "Preparing configuration..." : "Loading saved world...");
-    const preparation: { readonly kind: "configuration"; readonly content: ApplicationConfigurationContent }
+    const preparation: { readonly kind: "configuration" | "borrowed"; readonly content: ApplicationConfigurationContent }
       | { readonly kind: "restored"; readonly content: LoadedApplicationContent } = initialSave === undefined
-      ? { kind: "configuration", content: await openInitialConfigurationContent(options, recipe) }
+      ? { kind: ownership.kind === "borrowed" ? "borrowed" : "configuration", content: await openInitialConfigurationContent(options, recipe) }
       : { kind: "restored", content: await loadApplicationContent(options, recipe) };
     const catalog = preparation.content.catalog;
     try {
       if (recipe !== undefined) options = applicationOptionsForRecipe(options, { catalog, recipe });
-      const definitions = preparation.kind === "configuration" ? serverDefinitionsForSelection(preparation.content.selection)
-        : serverDefinitionsForRecipe(preparation.content.recipe);
+      const definitions = preparation.kind === "restored" ? serverDefinitionsForRecipe(preparation.content.recipe)
+        : serverDefinitionsForSelection(preparation.content.selection);
       if (options.serverProfilePath !== undefined) {
         const value: unknown = JSON.parse(await Bun.file(options.serverProfilePath).text());
         options = { ...options, serverProfile: parseServerProfile(value, definitions) };
       } else if (options.serverProfile !== undefined) options = { ...options, serverProfile: parseServerProfile(options.serverProfile, definitions) };
       const product = catalog.require(options.product);
       const inputConfig = new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
-      const identity = createIdentityOwner(`quake:${options.product}:${options.map}`);
-      const session = new EngineSession(identity, options.dedicated ? { kind: "headless" } : { kind: "local" });
+      const identity = ownership.kind === "borrowed" ? ownership.client.identity : createIdentityOwner(`quake:${options.product}:${options.map}`);
+      const session = ownership.kind === "borrowed" ? ownership.client.session : new EngineSession(identity, options.dedicated ? { kind: "headless" } : { kind: "local" });
       const localSeats = new Map<ClientId, SessionSeat>();
       let application: Application | null = null;
       let guestConsole: CommandBuffer | null = null;
       let startup: Awaited<ReturnType<typeof prepareInitialConfiguration>> | null = null;
       let loadedContent: LoadedApplicationContent | null = null;
+      let profileConfiguration: PreparedProfileConfiguration | null = null;
+      const borrowedImages = ownership.kind === "borrowed" ? ownership.client.imageSettings.prepareClientSettings() : null;
       const restoredClients = new Map<number, SessionClient>();
+      const stagedClients: { added: SessionClient[]; removed: SessionClient[] } = { added: [], removed: [] };
+      const stagedSeats: { added: SessionSeat[]; removed: SessionSeat[] } = { added: [], removed: [] };
       try {
-        const sourceArchive = preparation.kind === "restored" || options.dedicated ? []
-          : await loadCvarArchive(configurationStore(options, preparation.content, preparation.content.selection.source.content),
-            ["source", preparation.content.selection.source.content, preparation.content.selection.source.provider], configurationDialect(preparation.content));
+        if (ownership.kind === "borrowed") {
+          const locals = ownership.client.locals;
+          const slots = savedSettings === null ? locals.slice(0, options.seats).map(local => local.client.id.slot)
+            : savedSettings.clientSlots.filter(slot => !savedBots?.transport.connections.some(connection => connection.client.slot === slot));
+          while (slots.length < options.seats) { let slot = 0; while (slots.includes(slot)) slot++; slots.push(slot); }
+          for (const [index, slot] of slots.entries()) {
+            const retained = locals.find(local => local.client.id.slot === slot);
+            let client = retained?.client;
+            if (client === undefined) {
+              const previous = session.clientAt(slot);
+              client = session.prepareClient(slot, previous ?? undefined); stagedClients.added.push(client);
+              if (previous !== null) stagedClients.removed.push(previous);
+            }
+            const incumbent = locals.find(local => local.seat.id.index === index)?.seat;
+            const seat = retained?.seat.id.index === index ? retained.seat : session.prepareSeat(index, client, incumbent);
+            if (seat !== retained?.seat) stagedSeats.added.push(seat);
+            localSeats.set(client.id, seat);
+          }
+          for (const local of locals) {
+            if (![...localSeats.values()].includes(local.seat)) stagedSeats.removed.push(local.seat);
+            if (!localSeats.has(local.client.id)) stagedClients.removed.push(local.client);
+          }
+        }
+        const sourceArchive = initialSave !== undefined || options.dedicated ? [] : preparation.kind !== "restored" ? await loadCvarArchive(configurationStore(options, preparation.content, preparation.content.selection.source.content),
+            ["source", preparation.content.selection.source.content, preparation.content.selection.source.provider], configurationDialect(preparation.content)) : [];
         const guestCommands = () => {
           const commands = guestConsole;
           if (commands === null) throw new Error("Q3 guest console is unavailable");
           return commands;
         };
         if (savedSettings !== null) {
-          for (const slot of savedSettings.clientSlots) restoredClients.set(slot, session.createClient(slot));
-          if (!options.dedicated) for (const client of restoredClients.values()) {
+          for (const slot of savedSettings.clientSlots) {
+            if (ownership.kind === "owned") restoredClients.set(slot, session.createClient(slot));
+            else {
+              const retained = [...localSeats.values()].find(local => local.client.id.slot === slot)?.client;
+              if (retained !== undefined) restoredClients.set(slot, retained);
+              else {
+                const previous = session.clientAt(slot);
+                const client = session.prepareClient(slot, previous ?? undefined);
+                restoredClients.set(slot, client); stagedClients.added.push(client);
+                if (previous !== null && !stagedClients.removed.includes(previous)) stagedClients.removed.push(previous);
+              }
+            }
+          }
+          if (!options.dedicated && ownership.kind === "owned") for (const client of restoredClients.values()) {
             if (savedBots?.transport.connections.some(connection => connection.client.slot === client.id.slot)) continue;
             client.connect("loopback");
             localSeats.set(client.id, session.createSeat(localSeats.size, client));
           }
         }
-        const engine = preparation.kind === "configuration" ? preparation.content.selection.engineBehavior : preparation.content.recipe.engineBehavior;
+        const engine = preparation.kind === "restored" ? preparation.content.recipe.engineBehavior : preparation.content.selection.engineBehavior;
         const defaultCapacity = savedSettings?.maxClients ?? (options.product === "q1-quakeworld" ? 8 : options.mode === "singleplayer" ? catalog.product(engine.content).expectation.family === "q3" ? 8 : 1 : 16);
+        let borrowedSource: CvarRegistry | null = null;
+        let borrowedCapacity = defaultCapacity;
+        if (ownership.kind === "borrowed" && preparation.kind === "borrowed" && initialSave === undefined) {
+          const profile = ownership.client.sourceProfile.current, destination = preparation.content.selection.source;
+          const movement = preparation.content.selection.timing.find(timing => timing.provider === preparation.content.selection.movement.provider)?.clock.kind;
+          if (movement === undefined || borrowedImages === null) throw new Error("Borrowed configuration has no movement or image owner");
+          if (profile?.content === destination.content && profile.provider === destination.provider
+            && ownership.client.prepared.commands.dialect === configurationDialect(preparation.content)
+            && ownership.client.prepared.movement.dialect === movement) {
+            const source = ownership.client.prepared.source;
+            borrowedSource = new CvarRegistry({ dialect: source.dialect, context: source.context, print: text => host.print(text) });
+            borrowedSource.restoreSaveState(source.captureWorldTransferState());
+            const resolved = resolveStartupRules(options, borrowedSource, defaultCapacity, definitions);
+            options = resolved.options; borrowedCapacity = resolved.maxClients;
+          } else {
+            const prepared = ownership.client.prepared;
+            const seats = [...localSeats.values()].map(seat => {
+              const retained = prepared.seats.find(local => local.id.equals(seat.id) && local.context.origin.kind === "local-seat"
+                && local.context.origin.client.equals(seat.client.id));
+              const input = retained?.input ?? new SeatInput({ seat: seat.id, dialect: movement,
+                context: { session: session.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } }, commands: prepared.commands, uiEvent: () => false });
+              return { seat, input };
+            });
+            profileConfiguration = await prepareProfileConfiguration({ prepared, seats, options, content: preparation.content,
+              settings: inputConfig, shared: borrowedImages.settings.cvars, host, sourceArchive, defaultCapacity,
+              nextFrame: host.loading?.nextFrame ?? (async () => { await Bun.sleep(0); }) });
+            options = profileConfiguration.options; borrowedCapacity = profileConfiguration.maxClients; borrowedSource = profileConfiguration.source;
+          }
+        }
         if (preparation.kind === "configuration") {
           const configuration = preparation.content;
           const prepare = (nextFrame: () => Promise<void>) => prepareInitialConfiguration(options, configuration, session, identity, localSeats, inputConfig, host, sourceArchive, defaultCapacity, nextFrame);
@@ -407,27 +496,41 @@ export class Application {
         if (startup !== null) options = startup.options;
         host.loading?.stage("Loading map...");
         const content = preparation.kind === "restored" ? preparation.content : await loadApplicationContent(options, recipe, undefined, catalog);
+        if (preparation.kind === "borrowed" && profileConfiguration === null) await preparation.content.close();
         loadedContent = content;
         host.loading?.stage("Preparing world...");
         const monsterNavigation = await preloadApplicationMonsterNavigation(content);
+        const maxClients = Math.max(startup?.maxClients ?? savedSettings?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? borrowedCapacity,
+          ...[...localSeats.keys()].map(client => client.slot + 1));
+        if (borrowedSource !== null) borrowedSource.set(borrowedSource.dialect === "q3" ? "sv_maxclients" : "maxclients", String(maxClients), true);
         const simulation = createSimulation({ dedicated: options.dedicated, sourceArchive,
-          ...(startup === null ? {} : { sourceRegistry: startup.prepared.source }),
+          ...(borrowedSource !== null ? { sourceRegistry: borrowedSource } : startup === null ? {} : { sourceRegistry: startup.prepared.source }),
+          ...(ownership.kind !== "borrowed" || initialSave !== undefined || options.teamArenaSkirmish === undefined
+            || options.teamArenaSkirmish.cvars.every(setting => borrowedSource?.variableString(setting.name) === setting.value)
+            ? {} : { q3Cvars: teamArenaSourceCvars(options.teamArenaSkirmish, borrowedSource?.snapshots() ?? sourceArchive) }),
           ...Application.guestOptions(content, options, host, guestCommands), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
           skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
           ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
-          maxClients: startup?.maxClients ?? savedSettings?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
+          maxClients,
           promptSupported: client => !options.dedicated && localSeats.has(client),
           playerIdentity: client => ({ seat: localSeats.get(client)?.id.index ?? 0, socialId: "" }) });
-        session.attachWorld(simulation);
+        if (ownership.kind === "owned") session.attachWorld(simulation);
         if (options.botSkill !== undefined) {
           const source = simulation.q3Source();
           if (source === null) throw new Error("--bot-skill requires the Quake III game provider");
           source.host.cvars.set("g_spSkill", String(options.botSkill), true);
         }
-        application = new Application(options, content, session, simulation, host, identity, localSeats, inputConfig);
-        application.preparedStartup = startup?.prepared ?? null;
-        application.configurationScripts = startup?.scripts ?? null;
-        application.imageSettings = startup?.image ?? null;
+        application = new Application(options, content, session, simulation, host, identity, localSeats, inputConfig, ownership);
+        application.sourceClientChanges.added.push(...stagedClients.added);
+        application.sourceClientChanges.removed.push(...stagedClients.removed);
+        application.sourceSeatChanges.added.push(...stagedSeats.added);
+        application.sourceSeatChanges.removed.push(...stagedSeats.removed);
+        if (ownership.kind === "owned") for (const seat of localSeats.values()) application.sourceConnections.set(seat.client, seat.client.connection);
+        application.preparedStartup = ownership.kind === "borrowed" ? ownership.client.prepared : startup?.prepared ?? null;
+        application.configurationScripts = profileConfiguration?.scripts ?? startup?.scripts
+          ?? (initialSave === undefined ? null : Application.sourceScripts(content, options, inputConfig));
+        application.profileConfiguration = profileConfiguration;
+        application.imageSettings = borrowedImages?.settings ?? startup?.image ?? null;
         if (initialSave !== undefined) {
           application.teamArenaOverrides = readTeamArenaOverrides(initialSave, [...localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
           if (application.isTeamArenaSkirmish() && application.teamArenaOverrides === null) host.print("Legacy Team Arena save has no per-seat timer baseline; current timer preferences will be preserved.\n");
@@ -439,6 +542,7 @@ export class Application {
           return undefined;
         });
         if (startup !== null) application.requestedCommands.push(...startup.requests);
+        if (profileConfiguration !== null) application.requestedCommands.push(...profileConfiguration.requests);
         application.frontendOverrides = preferences ?? {};
         application.elapsed = savedSettings?.hostMilliseconds ?? 0;
         if (initialSave !== undefined && simulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
@@ -457,29 +561,34 @@ export class Application {
         if (initialSave !== undefined) simulation.q3Guest()?.completeRestore(application.guestOutput());
         if (options.dedicated) application.openDedicatedConsole();
         else {
-          if (startup === null) await application.viewSettings.load(application.inputConfig);
+          if (startup === null && ownership.kind === "owned") await application.viewSettings.load(application.inputConfig);
           const frontend = application;
           application.imageSettings ??= await ApplicationImageSettings.open({ deferPersistence: true, context: { session: session.session, origin: { kind: "local-console" } },
             dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
               host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
             } });
-          application.releaseViewCvars = application.viewSettings.bindCvars(application.imageSettings.cvars);
+          application.releaseViewCvars = application.imageSettings.bindViewSettings(application.viewSettings);
           await application.openGraphical(initialSave !== undefined);
         }
+        if (ownership.kind === "borrowed") {
+          if (borrowedImages === null) throw new Error("Borrowed source has no image candidate");
+          await application.openNetwork();
+          await application.publishBorrowed(ownership.client, borrowedImages);
+        } else application.sourcePublished = true;
         host.loading?.stage("Starting game...");
         if (initialSave === undefined) application.bots = await application.createBots(content, simulation);
         else if (savedBots !== null) application.bots = await application.createBots(content, simulation, { restore: {
           image: savedBots, resolveClient: saved => savedBots.transport.connections.some(connection => connection.client.slot === saved.slot && connection.client.generation === saved.generation)
             ? restoredClients.get(saved.slot) ?? null : null,
         } });
-        await application.openNetwork();
+        if (ownership.kind === "owned") await application.openNetwork();
         const guest = simulation.q3Guest();
         if (guest !== null && options.dedicated && initialSave === undefined) {
           await guest.initialize(application.guestOutput());
           const initialized = application;
           await initialized.sourceCommands?.executeAsync(() => initialized.commands());
         }
-        if (initialSave === undefined) await application.commands();
+        if (initialSave === undefined && ownership.kind === "owned") await application.commands();
         host.print(`Loaded ${content.recipe.map.geometry.requestedPath} with ${content.recipe.movement.provider} and ${content.recipe.character.appearance.provider}.\n`);
         application.enableStartupPersistence();
         if (initialSave === undefined) {
@@ -494,16 +603,23 @@ export class Application {
           try { if (initialSave !== undefined) application.simulation.q3Guest()?.discard(); await application.close(); }
           catch (cleanup) { errors.push(cleanup); }
         } else {
-          for (const close of [() => session.close(), () => startup?.image?.close(), () => startup?.scripts.close(), () => loadedContent?.close()]) {
+          for (const close of [() => ownership.kind === "owned" ? session.close() : undefined,
+            ...stagedSeats.added.map(seat => () => seat.close()), ...stagedClients.added.map(client => () => client.close()),
+            () => profileConfiguration?.routing.close(), () => profileConfiguration?.scripts.close(),
+            () => startup?.image?.close(), () => startup?.scripts.close(), () => loadedContent?.close()]) {
             try { await close(); } catch (cleanup) { errors.push(cleanup); }
           }
         }
+        if (ownership.kind === "borrowed" && application?.sourcePublished) throw new ClientSourcePublicationError(errors);
         if (errors.length > 1) throw new AggregateError(errors, "Application initialization and cleanup failed");
         throw error;
       }
     } catch (error) {
       try { await preparation.content.close(); }
-      catch (cleanup) { throw new AggregateError([error, cleanup], "Application preparation and cleanup failed"); }
+      catch (cleanup) {
+        if (error instanceof ClientSourcePublicationError) throw new ClientSourcePublicationError([error, cleanup]);
+        throw new AggregateError([error, cleanup], "Application preparation and cleanup failed");
+      }
       throw error;
     }
   }
@@ -539,6 +655,14 @@ export class Application {
   get frontendValues(): FrontendPreferenceValues | null { return this.graphical === null ? null : readFrontendPreferences(this.graphical.input, this.graphical.audio); }
   get botClients(): readonly ApplicationBotClient[] { return this.bots?.clients() ?? []; }
   get frameCount(): number { return this.frames; }
+  get finished(): boolean { return this.stopping || this.closed || this.options.frameLimit !== null && this.frames >= this.options.frameLimit; }
+  get clientCommandsBlocked(): boolean { return this.captureBlocksTransition(); }
+  pumpClientInput(): void { this.graphical?.input.pump(false); }
+  advanceClientStartup(): Promise<boolean> {
+    return this.captureBlocksTransition() ? Promise.resolve(true)
+      : this.graphical?.input.advanceStartup() ?? this.preparedStartup?.advanceFrame() ?? Promise.resolve(false);
+  }
+  flushClientCommands(): Promise<void> { return this.afterCommandDispatch(); }
   get options(): ApplicationOptions { return this.launchOptions; }
   get content(): LoadedApplicationContent { return this.loadedContent; }
   get simulation(): SharedSimulation { return this.worldSimulation; }
@@ -594,7 +718,7 @@ export class Application {
       ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => { if (localGuest !== null && localGuest !== this.localGuest) throw new Error("Guest candidate requested quit"); return this.requestQuit(); },
       execute: (name, arguments_, seat, source) => candidateAction !== undefined ? candidateAction({ target: "application", name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) })
         : localGuest === null ? this.queueCommand(name, arguments_, seat, source)
-        : this.queueLocalGuestCommand(localGuest, { target: "application", name, arguments_: [...arguments_], seat }), print: text => this.host.print(text),
+        : this.queueLocalGuestCommand(localGuest, { target: "application", name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) }), print: text => this.host.print(text),
       arsenalImpulseProvider: seat => {
         const client = [...this.localSeats].find(([, local]) => local.id.equals(seat))?.[0];
         const actor = client === undefined ? undefined : simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
@@ -963,8 +1087,11 @@ export class Application {
 
 
   private async openGraphical(restoring = false): Promise<void> {
-    const owner = { identity: Symbol("application renderer"), session: this.session.session, generation: 0 };
-    const assets = new ApplicationAssets(this.content, owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy });
+    const client = this.ownership.kind === "borrowed" ? this.ownership.client : null;
+    const owner = client?.renderer.owner ?? { identity: Symbol("application renderer"), session: this.session.session, generation: 0 };
+    const rootImages = client?.renderer.images ?? new SceneImageRegistry(owner);
+    const assets = new ApplicationAssets(this.content, owner, undefined, { imageRegistry: rootImages,
+      ...(this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy }) });
     let renderer: NativeRenderer | null = null, input: ApplicationInput | null = null, audio: ApplicationAudio | null = null;
     let art: NativeUiArt | null = null;
     let effects: ApplicationEffects | null = null;
@@ -976,8 +1103,8 @@ export class Application {
       const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography();
       const characters = this.options.character === "q3" ? await loadQ3Character(await this.content.forContent(this.content.recipe.character.appearance.content),
         { model: this.options.characterModel, skin: "default", headModel: "", headSkin: "default", team: null, teamName: "" }) : null;
-      renderer = NativeRenderer.open(this.host.loading?.deferWindowVisibility ? { ...this.options, hidden: true } : this.options, owner);
-      await this.imageSettings?.refreshDisplay(renderer);
+      renderer = client?.renderer ?? NativeRenderer.open(this.host.loading?.deferWindowVisibility ? { ...this.options, hidden: true } : this.options, owner, rootImages);
+      if (client === null) await this.imageSettings?.refreshDisplay(renderer);
       const players: LocalPlayer[] = [];
       if (restoring) for (const seat of this.localSeats.values()) {
         const archive = await this.loadClientArchive(seat, this.content);
@@ -997,7 +1124,7 @@ export class Application {
       else for (let index = 0; index < this.options.seats; index++) {
         const existingSeat = [...this.localSeats.values()].find(local => local.id.index === index);
         const client = existingSeat?.client ?? this.session.createClient(index);
-        client.connect("loopback");
+        if (this.ownership.kind === "owned") this.sourceConnections.set(client, client.connect("loopback"));
         const seat = existingSeat ?? this.session.createSeat(index, client);
         this.localSeats.set(client.id, seat);
         const cvars = this.createClientCvars(this.simulation, this.content, this.options, seat, null, undefined,
@@ -1020,8 +1147,14 @@ export class Application {
       if (restoring) applyTeamArenaOverrides(this.teamArenaOverrides, this.overrideSeats());
       else if (this.options.teamArenaSkirmish !== undefined) this.teamArenaOverrides = captureTeamArenaOverrides(this.overrideSeats());
       this.host.loading?.stage("Loading sounds...");
-      input = await ApplicationInput.open(renderer.window, players, this.options, movementDialect(this.options, this.simulation.recipe), this.simulation,
-        this.inputActions(), () => performance.now(), this.inputConfig, undefined, undefined, this.preparedStartup ?? undefined);
+      const configuration = this.profileConfiguration;
+      const actions = { ...this.inputActions(), ...(this.configurationScripts === null ? {} : { scripts: this.configurationScripts }) };
+      const inputArguments: Parameters<typeof ApplicationInput.open> = [renderer.window, players, this.options, movementDialect(this.options, this.simulation.recipe), this.simulation,
+        configuration === null ? actions : { ...actions, configuration, startupReader: () => configuration.read },
+        () => performance.now(), this.inputConfig, undefined, undefined, this.preparedStartup ?? undefined];
+      input = client === null ? await ApplicationInput.open(...inputArguments)
+        : await ApplicationInput.prepareForClient(client, new Set([client.imageSettings.cvars, client.prepared.source, client.prepared.movement,
+          client.prepared.fallback, ...client.prepared.seats.flatMap(seat => [seat.cvars, seat.mouse.cvars])]), ...inputArguments);
       this.restoreQ3InputAngles(input, this.simulation);
       if (restoring) {
         input.resumeCommands(Math.max(0, ...players.map(player => (this.simulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
@@ -1030,7 +1163,8 @@ export class Application {
         this.guestBrowser = await this.openGuestBrowser();
         this.publishLocalGuestSnapshots();
       }
-      audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text), await loadAudioSettings(this.inputConfig));
+      audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text),
+        { ...await loadAudioSettings(this.inputConfig), deferOutput: client !== null });
       if (this.imageSettings?.cvars.find("volume") !== undefined) {
         if (this.preparedStartup === null) {
           this.imageSettings.cvars.set("volume", String(audio.effectsVolume));
@@ -1065,31 +1199,113 @@ export class Application {
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
           await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(this.simulation, this.options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(this.simulation, local.player.seat));
-        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null));
-        local.player.seat.attachPresentation(presentation, () => presentation.close());
+        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect()));
+        if (client === null) local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
       }
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease };
       this.capture = new ApplicationCapture(input, renderer, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text));
-      this.capture.activate();
+      if (client === null) this.capture.activate();
       if (q3.size === 0) await audio.startWorldMusic();
     } catch (error) {
       for (const client of sourceClients) client.close();
       if (restoring) this.simulation.q3Guest()?.discard(); else await this.simulation.shutdownQ3Guest();
       for (const { state } of this.localGuest?.seats.values() ?? []) state.retire();
       this.localGuest?.seats.clear(); this.localGuest = null;
-      this.session.close(); audio?.close(); effects?.close(); input?.close(); renderer?.close(); art?.close(); assets.close();
+      audio?.close(); effects?.close(); input?.close(); art?.close(); assets.close();
+      if (client === null) { this.session.close(); if (renderer === null) rootImages.close(); else renderer.close(); }
+      else {
+        try { client.renderer.execute({ owner, sequence: this.frames, commands: [] }); }
+        catch (cleanup) { throw new AggregateError([error, cleanup], "Graphical preparation and image retirement failed"); }
+      }
       this.graphical = null;
       throw error;
     }
+  }
+
+  async prepareRetirement(): Promise<void> {
+    await this.capture?.beforeWorldChange();
+  }
+
+  async readClientResource(path: string): Promise<Uint8Array | undefined> {
+    const content = this.content;
+    if (this.closed) throw new Error("Client source has retired");
+    const resource = await content.mounts.open(path);
+    if (this.closed || this.content !== content) throw new Error("Client source changed during resource read");
+    return resource?.bytes;
+  }
+
+  releaseSettings(): void { this.releaseViewCvars?.(); this.releaseViewCvars = null; }
+
+  retire(): Promise<void> { return this.close(); }
+
+  private async publishBorrowed(client: ClientBootstrap,
+    images: ReturnType<ApplicationImageSettings["prepareClientSettings"]>): Promise<void> {
+    const graphical = this.graphical;
+    if (graphical === null) throw new Error("Borrowed application has no graphical source");
+    const previous = client.source.current;
+    await previous?.prepareRetirement();
+    client.session.resources.assertOpen();
+    graphical.input.validateStartupAdoption();
+    graphical.input.validateCandidateCommands();
+    images.validatePublication();
+    const presentations = graphical.presentations.map(presentation => ({ seat: presentation.local.player.seat,
+      presentation, cleanup: () => presentation.close() }));
+    client.session.validateWorldReplacement(this.simulation, presentations, this.sourceClientChanges, this.sourceSeatChanges);
+    const publishAudio = client.output.current.prepareOutputTransfer(graphical.audio.engine);
+    let retired: ReturnType<EngineSession["replaceWorld"]>["retired"] | null = null;
+    let retiredConfiguration: ConsoleScriptFiles | null = null;
+    const retiredConnections: SessionConnection[] = [];
+    const failures: unknown[] = [];
+    this.sourcePublished = true;
+    client.source.current = this;
+    try {
+      previous?.releaseSettings();
+      for (const local of graphical.input.locals) {
+        const replacement = local.player.seat.client.replaceConnection("loopback");
+        this.sourceConnections.set(local.player.seat.client, replacement.connection);
+        if (replacement.retired !== null) retiredConnections.push(replacement.retired);
+      }
+      retired = client.session.replaceWorld(this.simulation, presentations, this.sourceClientChanges, this.sourceSeatChanges).retired;
+      this.sourceSeatsPublished = true;
+      client.sourceProfile.current = this.content.recipe.map.entities;
+      this.releaseSettings();
+      images.publish();
+      this.imageSettings = client.imageSettings;
+      graphical.input.publishSharedCvars(client.imageSettings.cvars);
+      graphical.audio.bindVolumeCvars(client.imageSettings.cvars);
+      this.viewSettings.setFieldOfView(client.imageSettings.cvars.variableValue("fov"));
+      this.releaseViewCvars = this.viewSettings.bindCvars(client.imageSettings.cvars);
+      graphical.input.publishClientPlatform(client, "replace");
+      if (this.configurationScripts !== null && this.configurationScripts !== client.configuration.current.scripts) {
+        retiredConfiguration = client.configuration.current.scripts;
+        client.configuration.current = { scripts: this.configurationScripts, options: this.options };
+        this.configurationScripts = null;
+      }
+      publishAudio(); client.output.current = graphical.audio.engine;
+      this.capture?.activate();
+    } catch (error) { failures.push(error); this.fatalWorldFailure = true; }
+    finally {
+      try { await previous?.retire(); } catch (error) { failures.push(error); }
+      try { retired?.close(); } catch (error) { failures.push(error); }
+      try { await retiredConfiguration?.close(); } catch (error) { failures.push(error); }
+      for (const connection of retiredConnections) { try { connection.close(); } catch (error) { failures.push(error); } }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, "Client source publication failed after retirement began");
   }
 
   private static startupScriptReader(content: LoadedApplicationContent, options: ApplicationOptions, scripts: ConsoleScriptFiles): ReturnType<typeof createStartupScriptReader> {
     const product = content.catalog.product(content.recipe.engineBehavior.content);
     const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
     const roots = (selected: typeof product): readonly string[] => [selected.userContent?.root, selected.looseRoot].filter((root): root is string => root !== undefined && root !== null);
-    return createStartupScriptReader({ mounted: name => content.mounts.open(name).then(resource => resource?.bytes),
+    return createStartupScriptReader({ mounted: name => scripts.readMounted(name),
       user: (name, source) => scripts.read(name, source), baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(options.userContentRoot) });
+  }
+
+  private static sourceScripts(content: LoadedApplicationContent, options: ApplicationOptions, settings: ConfigStore): ConsoleScriptFiles {
+    const mounts = content.mounts, release = content.retainMainMounts();
+    return new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+      mounted: name => mounts.open(name).then(resource => resource?.bytes) }, async () => { release(); });
   }
 
 
@@ -1131,7 +1347,11 @@ export class Application {
 
   private createClientCvars(simulation: SharedSimulation, content: LoadedApplicationContent, options: ApplicationOptions, seat: SessionSeat,
     userinfo: string | null, previous?: CvarRegistry, archive: readonly CvarArchiveEntry[] = [], selectedIdentity = false): CvarRegistry {
-    const prepared = previous === undefined && this.graphical === null ? this.preparedStartup?.seats.find(local => local.id.equals(seat.id)) : undefined;
+    const startupSeat = previous === undefined && this.graphical === null ? this.preparedStartup?.seats.find(local => local.id.equals(seat.id)
+      && local.context.origin.kind === "local-seat" && local.context.origin.client.equals(seat.client.id)) : undefined;
+    const prepared = this.graphical === null ? this.profileConfiguration?.seats.find(local => local.id.equals(seat.id) && local.context.origin.kind === "local-seat"
+      && local.context.origin.client.equals(seat.client.id)) ?? (this.ownership.kind === "owned" ? startupSeat : undefined) : undefined;
+    previous ??= startupSeat?.cvars;
     const cvars = prepared?.cvars ?? new CvarRegistry({ dialect: this.sourceDialect(content), context: { session: this.session.session,
       origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } }, print: text => this.host.print(text),
       cheatsAllowed: () => this.sourceCvars(simulation)?.variableValue("sv_cheats") === 1 });
@@ -1402,6 +1622,8 @@ export class Application {
     let nextAudio: ApplicationAudio | null = null;
     let nextEffects: ApplicationEffects | null = null;
     let nextInput: ApplicationInput | null = null;
+    let nextScripts: ConsoleScriptFiles | null = null;
+    let retiredScripts: ConsoleScriptFiles | null = null;
     let committed = false;
     let nextGraphical: GraphicalApplication | null = null;
     const nextClientCvars = new Map<SeatId, CvarRegistry>();
@@ -1492,7 +1714,8 @@ export class Application {
       else if (savedBots !== null && savedClients !== null) nextBots = await this.createBots(content, simulation, {
         commands: { insert: text => guestCommands().insert(text) }, restore: { image: savedBots, resolveClient: savedClients.resolveBotClient } });
       if (previous !== null) {
-        assets = new ApplicationAssets(content, previous.renderer.owner, undefined, this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy });
+        assets = new ApplicationAssets(content, previous.renderer.owner, undefined, { imageRegistry: previous.renderer.images,
+          ...(this.imageSettings === null ? {} : { imagePolicy: this.imageSettings.policy, modelPolicy: this.imageSettings.modelPolicy }) });
         await assets.loadWorld();
         const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography(), fontSource = font.classic.picture.image.source;
         if (fontSource.kind !== "resource") throw new Error("Native menu font has no mounted resource identity");
@@ -1508,8 +1731,9 @@ export class Application {
         const preferences = previous.presentations.map(presentation => presentation.ui.preferences.values);
         await saveAudioSettings(this.inputConfig, previous.audio);
         await previous.input.saveSettings();
+        nextScripts = Application.sourceScripts(content, options, this.inputConfig);
         const input = await ApplicationInput.open(previous.renderer.window, players, options, movementDialect(options, simulation.recipe), simulation,
-          this.inputActions(simulation, content, preparedCommands.q2Console, nextLocalGuest, nextClientCvars, candidateImages?.settings.cvars, candidateAction), () => performance.now(), this.inputConfig, undefined, previous.input);
+          { ...this.inputActions(simulation, content, preparedCommands.q2Console, nextLocalGuest, nextClientCvars, candidateImages?.settings.cvars, candidateAction), scripts: nextScripts }, () => performance.now(), this.inputConfig, undefined, previous.input);
         nextInput = input;
         this.restoreQ3InputAngles(input, nextSimulation);
         input.resumeCommands(Math.max(previous.input.nextCommandSequence,
@@ -1549,7 +1773,7 @@ export class Application {
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
             await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(current, options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(current, local.player.seat));
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
-          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null));
+          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect(content)));
           stagedPresentations.push(presentation);
           presentations.push(presentation);
         }
@@ -1655,9 +1879,26 @@ export class Application {
           if (fovChanged) this.viewSettings.setFieldOfView(Number(this.imageSettings.cvars.variableString("fov")));
           this.releaseViewCvars = this.viewSettings.bindCvars(this.imageSettings.cvars);
         }
+        if (this.ownership.kind === "borrowed" && nextGraphical !== null)
+          nextGraphical.input.publishClientSeats(this.ownership.client, "replace");
         if (previous !== null && nextGraphical !== null) previous.input.transferPlatformTo(nextGraphical.input);
         else nextGraphical?.input.adoptStartup();
+        if (nextScripts !== null) {
+          if (this.ownership.kind === "borrowed") {
+            retiredScripts = this.ownership.client.configuration.current.scripts;
+            this.ownership.client.configuration.current = { scripts: nextScripts, options };
+          } else {
+            retiredScripts = this.configurationScripts;
+            this.configurationScripts = nextScripts;
+          }
+          nextScripts = null;
+        }
         publishAudio?.();
+        if (this.ownership.kind === "borrowed" && nextGraphical !== null) {
+          this.ownership.client.platform.current = { kind: "world", input: nextGraphical.input };
+          this.ownership.client.output.current = nextGraphical.audio.engine;
+          this.ownership.client.sourceProfile.current = content.recipe.map.entities;
+        }
         adoptHeadless();
         this.enableStartupPersistence();
         if (nextLocalGuest !== null) this.requestedCommands.push(...nextLocalGuest.pendingCommands.splice(0));
@@ -1665,6 +1906,8 @@ export class Application {
         if (save !== undefined) this.requestRestoredScores();
       } finally {
         await retirePrevious(replacement.retired);
+        await retire("configuration retirement", () => retiredScripts?.close());
+        await retire("unpublished configuration retirement", () => nextScripts?.close());
         nextCapture?.activate();
       }
       if (nextGraphical !== null) {
@@ -1693,12 +1936,14 @@ export class Application {
       await discard(() => nextAudio?.close());
       await discard(() => nextEffects?.close());
       await discard(() => nextInput?.close());
+      await discard(() => nextScripts?.close());
       await discard(() => nextBots?.close());
       await discard(() => simulation?.q3Guest()?.discard());
       await discard(() => simulation?.close());
       for (const client of savedClients?.added ?? []) await discard(() => client.close());
       await discard(() => art?.close());
       await discard(() => assets?.close());
+      if (previous !== null) await discard(() => previous.renderer.execute({ owner: previous.renderer.owner, sequence: this.frames, commands: [] }));
       await discard(() => content.close());
       if (errors.length > 1) throw new AggregateError(errors, "World preparation failed");
       throw error;
@@ -2008,20 +2253,51 @@ export class Application {
   }
 
   private async afterCommandDispatch(): Promise<void> {
-    if (this.fatalWorldFailure || this.captureBlocksTransition()) return;
+    if (this.closed || this.fatalWorldFailure || this.captureBlocksTransition() || this.pendingShellPublication) return;
     do {
       await this.commands(async () => {
+        if (this.closed) return;
         await this.applyTransition();
         if (this.requestedCommands.length !== 0) await this.afterCommandDispatch();
       });
+      if (this.closed || this.pendingShellPublication) return;
       await this.applyTransition();
     } while (this.requestedCommands.length !== 0 && !this.captureBlocksTransition());
   }
 
-  private async commands(afterRequest?: () => Promise<void>): Promise<void> {
-    const pending = this.requestedCommands;
-    this.requestedCommands = [];
+  async executeApplicationRequest(request: ConfigurationCommandRequest): Promise<void> {
+    await this.commands(async () => {
+      if (this.closed) return;
+      await this.applyTransition();
+      if (this.requestedCommands.length !== 0) await this.afterCommandDispatch();
+    }, [request]);
+  }
+
+  private get pendingShellPublication(): boolean { return this.ownership.kind === "borrowed" && this.ownership.client.hasPendingSource; }
+
+  takePendingClientCommands(): () => Promise<void> {
+    const pending = this.requestedCommands; this.requestedCommands = [];
+    return () => this.commands(undefined, pending, true);
+  }
+
+  private async commands(afterRequest?: () => Promise<void>, direct?: readonly ApplicationCommandRequest[], routeApplications = direct === undefined): Promise<void> {
+    const pending = direct ?? this.requestedCommands;
+    if (direct === undefined) this.requestedCommands = [];
     for (const [index, request] of pending.entries()) {
+      if (this.stepping && this.pendingShellPublication) { this.requestedCommands.unshift(...pending.slice(index)); return; }
+      if (routeApplications && request.target === "application" && this.sourcePublished && this.ownership.kind === "borrowed") {
+        const source = request.source ?? this.ownership.client.prepared.commands.context;
+        if (this.stepping) {
+          if (this.ownership.client.routeCommand(request.name, request.arguments_, source)) {
+            this.requestedCommands.unshift(...pending.slice(index + 1));
+            return;
+          }
+        } else {
+          await this.ownership.client.dispatchApplicationRequest({ ...request, target: request.target, source });
+          continue;
+        }
+      }
+      if (this.closed) continue;
       if (this.captureBlocksTransition()) { this.requestedCommands.unshift(...pending.slice(index)); return; }
       let command = request;
       const local = this.graphical?.input.locals.find(local => command.seat !== null && local.player.seat.id.equals(command.seat));
@@ -2198,7 +2474,7 @@ export class Application {
         }
         else throw new Error(`Unknown application command: ${command.name}`);
       } catch (error) {
-        if (this.fatalWorldFailure || error instanceof Q3GameCallbackError) throw error;
+        if (this.fatalWorldFailure || error instanceof Q3GameCallbackError || error instanceof ClientSourcePublicationError) throw error;
         const message = error instanceof Error ? error.message : String(error);
         print(`${message}\n`);
       } finally {
@@ -2224,11 +2500,12 @@ export class Application {
         }
       }
       await this.applyTransition();
-      const startupFrame = this.captureBlocksTransition() ? true
-        : await (this.graphical?.input.advanceStartup() ?? this.preparedStartup?.advanceFrame());
-      await this.afterCommandDispatch();
-      this.graphical?.input.pump(false);
-      if (startupFrame !== true) await this.graphical?.input.commands.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition());
+      if (this.ownership.kind === "owned") {
+        const startupFrame = await this.advanceClientStartup();
+        await this.flushClientCommands();
+        this.pumpClientInput();
+        if (!startupFrame) await this.graphical?.input.commands.executeAsync(() => this.flushClientCommands(), () => !this.clientCommandsBlocked);
+      }
       this.enableStartupPersistence();
       const movie = this.campaignMovie;
       if (movie !== null) {
@@ -2262,9 +2539,9 @@ export class Application {
       const beforeFrameEvents = q1 === null ? [] : this.simulation.drainPresentationEvents();
       this.appendQ1Commands(beforeFrameEvents);
       if (this.dedicatedCommands !== null) this.dedicatedConsole?.drain(this.dedicatedCommands);
-      await this.sourceCommands?.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition());
+      await this.sourceCommands?.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition() && !this.pendingShellPublication);
       if (this.dedicatedCommands !== null && this.dedicatedCommands !== this.sourceCommands)
-        await this.dedicatedCommands.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition());
+        await this.dedicatedCommands.executeAsync(() => this.afterCommandDispatch(), () => !this.captureBlocksTransition() && !this.pendingShellPublication);
       const captureTransitionPending = this.captureBlocksTransition();
       const botConfiguration = this.simulation.q1Source()?.cvars ?? this.q2Console?.cvars;
       if (this.bots === null && this.simulation.q3Source() === null && (botConfiguration?.variableValue("bot_minplayers") ?? 0) > 0) {
@@ -2437,32 +2714,61 @@ export class Application {
     this.campaignMovie = null;
     try { await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
-    if (this.archivePersistence && !this.preparedStartup?.pending) {
+    if (this.sourcePublished && this.archivePersistence && !this.preparedStartup?.pending) {
       try { await this.saveSourceArchive(this.options, this.content, this.simulation, this.teamArenaOverrides); } catch (error) { errors.push(error); }
       try { await this.saveClientArchives(this.options, this.content, this.clientCvars, this.teamArenaOverrides); } catch (error) { errors.push(error); }
     }
-    try { await this.imageSettings?.close(); } catch (error) { errors.push(error); }
-    try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }
-    try { if (graphical !== null && !this.preparedStartup?.pending) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
-    try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
+    try { this.releaseSettings(); } catch (error) { errors.push(error); }
+    try { if (this.ownership.kind === "owned") await this.imageSettings?.close(); } catch (error) { errors.push(error); }
+    if (this.sourcePublished) {
+      try { await graphical?.input.saveSettings(); } catch (error) { errors.push(error); }
+      try { if (graphical !== null && !this.preparedStartup?.pending) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
+      try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
+    }
     for (const source of graphical?.q3.values() ?? []) { try { await source.client.shutdown(); } catch (error) { errors.push(error); } }
-    for (const local of graphical?.input.locals ?? []) {
-      try { local.player.seat.replacePresentation(null)?.close(); } catch (error) { errors.push(error); }
+    for (const presentation of graphical?.presentations ?? []) {
+      try {
+        const seat = presentation.local.player.seat;
+        if (seat.presentation === presentation) seat.replacePresentation(null)?.close();
+        else presentation.close();
+      } catch (error) { errors.push(error); }
     }
     for (const { state } of this.localGuest?.seats.values() ?? []) state.retire();
     this.localGuest?.seats.clear(); this.localGuest = null;
     this.guestBrowser?.view.close();
     try { await this.guestBrowser?.host.close(); } catch (error) { errors.push(error); }
     this.guestBrowser = null;
-    for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.simulation.shutdownQ3Guest(), () => this.session.close(), () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
-      () => graphical?.art.close(), () => graphical?.assets.close(), () => graphical?.renderer.close()]) {
+    for (const close of [() => this.bots?.close(), () => this.network?.server.close(), () => this.simulation.shutdownQ3Guest(),
+      () => this.session.world?.simulation === this.simulation ? this.session.closeWorld() : this.simulation.close(),
+      () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
+      () => graphical?.art.close(), () => graphical?.assets.close(),
+      () => graphical?.renderer.execute({ owner: graphical.renderer.owner, sequence: this.frames, commands: [] })]) {
       try { await close(); } catch (error) { errors.push(error); }
     }
+    for (const [client, connection] of this.sourceConnections) {
+      try { if (client.connection === connection) client.disconnect(); } catch (error) { errors.push(error); }
+    }
+    this.sourceConnections.clear();
+    for (const seat of this.sourceSeatChanges.added) {
+      try { if (!this.sourceSeatsPublished) seat.close(); } catch (error) { errors.push(error); }
+    }
+    for (const client of this.sourceClientChanges.added) {
+      try { if (this.session.clientAt(client.id.slot) !== client) client.close(); } catch (error) { errors.push(error); }
+    }
+    if (this.ownership.kind === "owned") for (const close of [() => this.session.close(), () => graphical?.renderer.close()]) {
+      try { close(); } catch (error) { errors.push(error); }
+    }
     try { this.releaseSourceCommands(); } catch (error) { errors.push(error); }
+    try { this.profileConfiguration?.routing.close(); } catch (error) { errors.push(error); }
+    this.profileConfiguration = null;
     try { await this.configurationScripts?.close(); } catch (error) { errors.push(error); }
     this.configurationScripts = null;
     try { await this.content.close(); } catch (error) { errors.push(error); }
     this.localSeats.clear();
+    if (this.ownership.kind === "borrowed" && this.ownership.client.source.current === this) {
+      this.ownership.client.source.current = null;
+      this.ownership.client.sourceProfile.current = null;
+    }
     if (errors.length > 0) throw new AggregateError(errors, "Application shutdown failed");
   }
 }

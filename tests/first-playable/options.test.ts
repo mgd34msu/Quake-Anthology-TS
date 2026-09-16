@@ -10,8 +10,17 @@ test("mixed launch selections remain independent of the renderer", () => {
   expect(command.options.movement).toBe("q2");
   expect(command.options.character).toBe("q2");
   expect(command.options.renderer).toBe("cpu");
+  expect(command.options.rendererSelection).toBe("explicit");
   expect(command.options.mode).toBe("coop");
   expect(() => parseApplicationCommand(["--map", "../base1"])).toThrow();
+});
+
+test("renderer persistence cannot override an explicit CLI backend", () => {
+  const implicit = parseApplicationCommand([]), explicit = parseApplicationCommand(["--renderer", "gl"]);
+  if (implicit.kind !== "menu" || explicit.kind !== "menu") throw new Error("Expected graphical frontend options");
+  expect(implicit.options.rendererSelection).toBe("default");
+  expect(explicit.options.rendererSelection).toBe("explicit");
+  expect(explicit.options.renderer).toBe("gl");
 });
 
 test("native network selection preserves the requested game composition", () => {

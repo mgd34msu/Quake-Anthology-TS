@@ -13,6 +13,7 @@ import type { ApplicationAssets, PreparedApplicationImages, PreparedApplicationI
 import type { WorldSeatPresentation } from "./presentation.ts";
 import type { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
 import type { NativeRenderer } from "./renderer.ts";
+import type { ApplicationViewSettings } from "./view-settings.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 interface ImageSettingsOptions {
@@ -39,9 +40,23 @@ export class ApplicationImageSettings {
   private persisted: readonly { readonly name: string; readonly value: string }[] = [];
   get persistedEntries(): readonly { readonly name: string; readonly value: string }[] { return this.persisted; }
   private appliedValues: readonly { readonly name: string; readonly value: string }[] = [];
+  private releaseCandidateFovValidation: (() => void) | null = null;
+  bindViewSettings(view: ApplicationViewSettings): () => void {
+    const staged = this.releaseCandidateFovValidation !== null;
+    this.releaseCandidateFovValidation?.();
+    this.releaseCandidateFovValidation = null;
+    const restoreValidation = (): void => {
+      if (staged) this.releaseCandidateFovValidation = this.cvars.bindValue("fov", { validate: validateFieldOfView, changed: () => {} });
+    };
+    try {
+      const release = view.bindCvars(this.cvars);
+      let released = false;
+      return () => { if (released) return; released = true; release(); restoreValidation(); };
+    } catch (error) { restoreValidation(); throw error; }
+  }
   prepareClientSettings(): { readonly settings: ApplicationImageSettings; validatePublication(): void; publish(): void } {
     const settings = new ApplicationImageSettings({ ...this.options, deferPersistence: true });
-    settings.cvars.bindValue("fov", { validate: validateFieldOfView, changed: () => {} });
+    settings.releaseCandidateFovValidation = settings.cvars.bindValue("fov", { validate: validateFieldOfView, changed: () => {} });
     const transfer = this.cvars.prepareTransfer(settings.cvars);
     return { settings, validatePublication: transfer.validatePublication, publish: transfer.publish };
   }
@@ -55,7 +70,7 @@ export class ApplicationImageSettings {
       usage: "con_scale <0|1|2|3|4>", examples: ["con_scale 2"], allowedValues: ["0: Auto", "1: 1x", "2: 2x", "3: 3x", "4: 4x"] });
     this.cvars.register("r_gamma", String(options.gamma ?? 1), CvarFlag.Archive);
     registerSharedClientSettings(this.cvars);
-    registerQ1ClientSettings(this.cvars);
+    registerQ1ClientSettings(this.cvars, "all");
     this.cvars.register("r_customwidth", "0", CvarFlag.Archive);
     this.cvars.register("r_customheight", "0", CvarFlag.Archive);
     this.cvars.register("r_fullscreen", "0", CvarFlag.Archive);

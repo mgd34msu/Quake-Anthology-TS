@@ -9,6 +9,7 @@ import { queryConsoleEntries, type ConsoleDiscoveryEntry } from "./discovery.ts"
 import { ConsoleField, ConsoleHistory } from "./field.ts";
 
 export interface SeatConsoleOptions {
+  readonly staged?: boolean;
   readonly seat: SeatId;
   readonly dialect: CommandDialect;
   readonly context: CommandContext;
@@ -30,15 +31,39 @@ export class SeatConsole {
   private fraction = 0;
   private opened = false;
   private suppressToggleText = false;
-  constructor(private readonly options: SeatConsoleOptions) {
+  private stagedOutput: { text: string; time: number; dialect: CommandDialect }[] | null;
+  constructor(private options: SeatConsoleOptions) {
     if (options.context.session !== options.seat.session) throw new Error("Console belongs to another session");
     this.buffer = new ConsoleBuffer(options.dialect);
+    this.stagedOutput = options.staged ? [] : null;
   }
   get selectedCompletionEntry(): ConsoleDiscoveryEntry | undefined {
     const selected = this.field.selectedCompletion;
     return selected === null ? undefined : queryConsoleEntries(this.options.commands, this.options.context).find(entry => entry.name === selected);
   }
-  print(text: string): void { this.buffer.print(text, this.options.now()); }
+  publish(focus: SeatInputFocus): void {
+    this.stagedOutput = null;
+    this.opened = focus.kind === "console";
+    this.keys.clear(); this.suppressToggleText = false;
+  }
+  adopt(candidate: SeatConsole, focus: SeatInputFocus): void {
+    if (!candidate.options.seat.equals(this.options.seat) || candidate.options.commands !== this.options.commands)
+      throw new Error("Console publication changed retained seat or command owner");
+    if (candidate.stagedOutput === null) throw new Error("Console candidate already published");
+    this.options = candidate.options;
+    for (const output of candidate.stagedOutput) {
+      this.buffer.setDialect(output.dialect);
+      this.buffer.print(output.text, output.time);
+    }
+    this.buffer.setDialect(this.options.dialect);
+    candidate.publish(focus); this.publish(focus);
+  }
+  print(text: string): void {
+    const time = this.options.now(), dialect = this.options.dialect;
+    this.stagedOutput?.push({ text, time, dialect });
+    this.buffer.setDialect(dialect);
+    this.buffer.print(text, time);
+  }
   open(): void { this.opened = true; this.field.clear(); this.buffer.clearNotify(); this.options.focus({ kind: "console" }); }
   close(): void { this.opened = false; this.field.clear(); this.buffer.clearNotify(); this.options.focus({ kind: "game" }); }
   toggle(): void { if (this.opened) this.close(); else this.open(); }

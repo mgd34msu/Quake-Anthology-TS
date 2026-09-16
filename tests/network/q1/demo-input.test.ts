@@ -68,7 +68,7 @@ function fixture() {
   const catalog = new InstalledCatalog('/unused', [{ id: owner, expectation: { id: 'musicmod', family: 'q1', edition: 'classic', campaign: 'musicmod', title: 'Music fixture', contentDirectory: 'q1/musicmod', baseProduct: null, requiredContentArchives: [], requiredPrograms: [], mapWitness: null, unresolvedReason: null }, availability: { kind: 'installed' }, archives: [], looseRoot: null, userContent: null, maps: [], diagnostics: [] }], [], 0);
   const content = new MusicContent(catalog, selected, readQ1Bsp(bytes), mounts);
   const identity = createIdentityOwner('remote music'), session = new EngineSession(identity, { kind: 'headless' });
-  const options = { identity, session, client: session.createClient(0), nextGeneration: (slot: number) => nextActorGeneration(session.session, slot), content: null,
+  const options = { identity, session, seat: identity.seat(5), client: session.createClient(0), nextGeneration: (slot: number) => nextActorGeneration(session.session, slot), content: null,
     loadContent: async () => content, sendCommand() {}, print() {}, publish: (output: import('../../../src/contracts/session.ts').SimulationOutput) => session.publish(output), disconnected: () => {} };
   return { content, session, options };
 }
@@ -210,4 +210,31 @@ test.skipIf(!existsSync(retail))('normal QWD large timestamp gap catches up to o
  const records:import('../../../src/network/q1/demos.ts').QuakeWorldDemoRecord[]=[{kind:'packet',seconds:10,message:qwPacket(1,0,[...qwPreamble,{kind:'stat',index:0,value:100},qwPlayer(0)],true)},{kind:'command',seconds:100,command:qwIdle,viewAngles:zero}];
  const input=new QuakeWorldDemoInput(new QuakeWorldDemoReader(concat(records.map(writeQuakeWorldDemoRecord))),remote);
  try{expect(await input.advance({frame:0,elapsedSeconds:0,timedemo:false})).toMatchObject({phase:'active',recordedSeconds:99,recordsRead:1});expect(await input.advance({frame:1,elapsedSeconds:0.5,timedemo:false})).toMatchObject({phase:'active',recordedSeconds:99.5,recordsRead:0});expect(await input.advance({frame:2,elapsedSeconds:0.5,timedemo:false})).toMatchObject({phase:'ended',reason:'eof',recordedSeconds:100,recordsRead:1});}finally{input.close();archive.close();original.session.close();await content.close();await original.content.close();}
+});
+
+import { RecordedRemoteSource } from '../../../src/app/bootstrap/network/recorded-source.ts';
+import { CvarRegistry } from '../../../src/core/cvars/index.ts';
+import type { DemoCompletion } from '../../../src/app/bootstrap/demo-commands.ts';
+
+test('shared recorded source preserves NQ native interpolation and reports completion once after advancement', async () => {
+ const {content,session,options}=fixture(), remote=new Q1RemotePresentation(options);
+ const bytes=concat([writeNetQuakeDemoHeader(),nqRecord(initial,350),nqRecord([{kind:'time',seconds:10.1},{kind:'entity',state:entity(21)}],10),nqRecord([{kind:'disconnect'}])]);
+ const completions:DemoCompletion[]=[];
+ const cvars=new CvarRegistry({dialect:'q1-netquake',context:{session:session.session,origin:{kind:'local-console'}}});
+ const source=new RecordedRemoteSource({kind:'q1',path:'demo1.dem',bytes},remote,false,cvars,reason=>completions.push(reason));
+ try {
+  expect(completions).toEqual([]);expect(source.phase).toBe('loading');
+  await source.advance(0,0,100000);expect(source.phase).toBe('active');
+  await source.advance(50,1,100050);const actor=remote.player?.actor;if(actor===undefined)throw new Error('Missing recorded actor');
+  expect(remote.playerView(actor).origin.x).toBeCloseTo(11,3);expect(remote.playerView(actor).angles.y).toBeCloseTo(360,3);
+  await source.advance(200,2,100250);expect(completions).toEqual(['disconnected']);expect(source.phase).toBe('closed');
+  await source.advance(200,3,100450);source.close();expect(completions).toEqual(['disconnected']);
+ } finally {source.close();session.close();await content.close();}
+});
+
+test('retained script mounts outlive content retirement until the last idempotent release', async () => {
+ const {content,session}=fixture();const first=content.retainMainMounts(),second=content.retainMainMounts(),mounts=content.mounts;
+ await content.close();expect(()=>content.retainMainMounts()).toThrow('Application content is closed');
+ expect(await mounts.open('music/06.wav')).not.toBeNull();first();first();expect(await mounts.open('music/06.wav')).not.toBeNull();
+ second();second();expect(mounts.open('music/06.wav')).rejects.toThrow();session.close();
 });

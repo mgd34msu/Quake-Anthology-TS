@@ -44,7 +44,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         const owner = await openRemoteContent(parsed.options, remoteContentSelection('q2-classic-baseq2', data.gamedir), assertCurrent);
         downloadOwners.push(owner); return owner;
     };
-    const remote = new Q2RemotePresentation({ identity, session, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content, prepareServerData, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Network Player\\skin\\male/grunt', print: text => { prints.push(text); }, sendCommand: text => { if (client === null)
+    const remote = new Q2RemotePresentation({ identity, session, seat: identity.seat(0), publish: output => session.publish(output), disconnected: () => { session.clientAt(0)?.disconnect(); }, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content, prepareServerData, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Network Player\\skin\\male/grunt', print: text => { prints.push(text); }, sendCommand: text => { if (client === null)
             throw new Error('Client transport unavailable'); client.command(text); }, loadContent: async (state) => {
             const map = state.configStrings.get(33);
             if (map === undefined)
@@ -65,6 +65,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         for (const record of records) if (record.event.kind === 'download') downloads.push(record.event);
         receiveRecords(records);
     };
+    remote.client.connect("remote");
     client = new Q2ClientNetwork({ transport, remote: address, host: remote, qport: 4218 });
     let now = 0;
     const exchange = async (milliseconds = 100): Promise<void> => {
@@ -158,9 +159,10 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         expect(server.simulation.players().some(actor => actor.equals(admitted.actor))).toBe(true);
         expect(admitted.actor.equals(player.actor)).toBe(false);
         expect(remote.isPlayer(player.actor)).toBe(true);
-        const otherRemote = new Q2RemotePresentation({ identity: otherIdentity, session: otherSession, client: otherSession.createClient(0), nextGeneration: slot => nextActorGeneration(otherSession.session, slot), content, prepareServerData,
+        const otherRemote = new Q2RemotePresentation({ identity: otherIdentity, session: otherSession, seat: otherIdentity.seat(0), publish: output => otherSession.publish(output), disconnected: () => { otherSession.clientAt(0)?.disconnect(); }, client: otherSession.createClient(0), nextGeneration: slot => nextActorGeneration(otherSession.session, slot), content, prepareServerData,
             protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\Second Peer\\skin\\male/grunt', print: () => undefined,
             sendCommand: text => otherClient?.command(text), loadContent: async () => content });
+        otherRemote.client.connect("remote");
         otherClient = new Q2ClientNetwork({ transport: await UdpTransport.bind({ host: '127.0.0.1', port: 0 }), remote: address, host: otherRemote, qport: 4219 });
         for (let step = 0; step < 80 && otherRemote.output === null; step++) await exchange();
         const second = server.networkClients.find(candidate => !candidate.client.equals(admitted.client)), otherPlayer = otherRemote.player;

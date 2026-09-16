@@ -1,3 +1,4 @@
+import { asciiFold, commandSeparatorOffset, tokenizeCommand } from "../../../core/commands/text.ts";
 import { RemoteWorldContent } from './remote-world.ts';
 import type { WorldText } from "../../../text/world.ts";
 /* WinQuake cl_parse.c and cl_main.c decoded presentation. GPL-2.0-or-later. */
@@ -236,18 +237,30 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     }
                     break;
                 }
-                case 'stufftext':
-                    for (const line of message.text.split('\n'))
-                        if (line.trim() === 'reconnect') {
-                            this.published = null;
-                        }
-                        else if (line.trim() !== '')
-                            this.options.print(`Unhandled server command: ${line}\n`);
+                case 'bonus-flash':
+                    this.bonusFlash();
                     break;
+                case 'stufftext': {
+                    let pending = message.text;
+                    while (pending.length !== 0) {
+                        const offset = commandSeparatorOffset(pending, 'q1-netquake');
+                        const line = pending.slice(0, offset);
+                        pending = pending.slice(offset + 1);
+                        const name = asciiFold(tokenizeCommand(line, 'q1-netquake').argv[0] ?? '');
+                        if (name === 'bf') this.bonusFlash();
+                        else if (line.trim() === 'reconnect') this.published = null;
+                        else if (name !== '') this.options.print(`Unhandled server command: ${line}\n`);
+                    }
+                    break;
+                }
                 default: break;
             }
         }
         this.publish();
+    }
+    private bonusFlash(): void {
+        const actor = this.actor(this.viewEntity), origin = this.current.get(this.viewEntity)?.origin ?? zero;
+        this.emit({ kind: 'effect', effect: 'pickup', actor, origin, amount: 1 }, this.viewEntity);
     }
     private sampled(state: Q1ExtendedEntityState): Q1ExtendedEntityState {
         const old = this.previous.get(state.number);

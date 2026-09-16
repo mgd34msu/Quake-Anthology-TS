@@ -42,6 +42,7 @@ export class Q2ClientReceiver {
     }
     get phase(): 'loading' | 'active' | 'closed' { return this.state; }
     get acknowledgedFrame(): number { return this.lastFrame; }
+    get worldGeneration(): number { return this.loadingGeneration; }
     get recordedTimeMilliseconds(): number | null { return this.recordedTime; }
     get disconnectedDemo(): boolean { return this.demoDisconnected; }
     async receive(bytes: Uint8Array, nowMilliseconds: number): Promise<void> {

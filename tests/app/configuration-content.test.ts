@@ -11,6 +11,7 @@ import { prepareLaunchMountPlan } from '../../src/content/catalog/launch.ts';
 import { selectedWeaponResources } from '../../src/content/catalog/weapons.ts';
 import { serverDefinitionsForRecipe, serverDefinitionsForSelection } from '../../src/settings/server/selection.ts';
 import { prepareInitialConfiguration, prepareProfileConfiguration } from '../../src/app/bootstrap/configuration.ts';
+import { ApplicationConsoleRouting } from '../../src/app/bootstrap/console.ts';
 import { CvarRegistry } from '../../src/core/cvars/index.ts';
 import { SeatInput } from '../../src/input/seat.ts';
 import { createIdentityOwner, type ClientId } from '../../src/contracts/identity.ts';
@@ -100,7 +101,8 @@ test('profile scripts stage rules bindings and aliases before map admission with
       await writeFile(join(directory, 'quake.rc'), 'exec default.cfg\nexec config.cfg\nexec autoexec.cfg\n');
       await writeFile(join(directory, 'default.cfg'), 'bind w +forward\n');
       await writeFile(join(directory, 'config.cfg'), 'sensitivity 8\n');
-      await writeFile(join(directory, 'autoexec.cfg'), 'skill 3\nwait\nsensitivity 9\nbind mouse2 +jump\nalias profile_alias "echo selected"\nmap e1m1\n');
+      await writeFile(join(directory, 'autoexec.cfg'), 'skill 1\nwait\nsensitivity 9\nbind mouse2 +jump\nalias profile_alias "echo selected"\nmap e1m1\nexec continuation.cfg\n');
+      await writeFile(join(directory, 'continuation.cfg'), 'wait\nskill 3\nmap e1m2\necho profile-finished\n');
       const preset = applicationConfigurationPreset(catalog, selected);
       const content = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset, choice: presetChoice(preset.id) });
       const original = initial.prepared.seats[0], actual = [...actualSeats.values()][0];
@@ -118,10 +120,10 @@ test('profile scripts stage rules bindings and aliases before map admission with
         options: selected, content, settings, shared, host: { print() {} }, sourceArchive: [], defaultCapacity: 1,
         nextFrame: async () => { loadingFrames++; } });
       try {
-        expect(profile.options.skill).toBe(3);
+        expect(profile.options.skill).toBe(1);
         expect(profile.seats[0]?.mouse.read().sensitivity).toBe(9);
         expect(profile.program.input(actual.id)?.binding({ kind: 'mouse-button', button: 3 })).toEqual({ kind: 'command', text: '+jump' });
-        expect(profile.program.input(addedSeat.id)?.binding({ kind: 'key', code: 70 })).toEqual({ kind: 'command', text: 'flashlight' });
+        expect(profile.program.input(addedSeat.id)?.binding({ kind: 'key', code: 70 })).toBeNull();
         expect(addedInput.bindings).toEqual([]);
         profile.applyBindingDefaults(actual.id, [{ input: { kind: 'mouse-button', button: 3 }, target: { kind: 'command', text: '+attack' } },
           { input: { kind: 'key', code: 55 }, target: { kind: 'command', text: 'weapon 7' } }]);
@@ -135,13 +137,55 @@ test('profile scripts stage rules bindings and aliases before map admission with
         expect(profile.program.commands.aliasValue('profile_alias')).toContain('selected');
         expect(profile.requests.map(request => [request.name, request.arguments_])).toEqual([['map', ['e1m1']]]);
         expect(loadingFrames).toBeGreaterThan(0);
-        expect(profile.program.commands.pendingText).toBe('echo original-tail\n');
+        expect(profile.program.commands.pendingText).toContain('exec continuation.cfg');
+        expect(profile.program.commands.pendingText).toContain('echo original-tail\n');
         expect(initial.prepared.commands.pendingText).toBe('echo original-tail\n');
         expect(initial.prepared.commands.aliasValue('profile_alias')).toBeUndefined();
         expect(original.input.bindings).toEqual(oldBindings);
         expect(original.mouse.read()).toEqual(oldMouse);
         expect(session.clientAt(actual.client.id.slot)).toBe(actual.client);
         await expect(resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) })).rejects.toThrow('Required resource is missing');
+        const prepared = initial.prepared;
+        let currentSource = new CvarRegistry({ dialect: profile.source.dialect, context: profile.source.context });
+        currentSource.restoreSaveState(profile.source.captureWorldTransferState());
+        const adoptedRouting = new ApplicationConsoleRouting({ fallback: profile.fallback, sourceDialect: () => currentSource.dialect,
+          server: () => ({ cvars: currentSource, sharedNames: currentSource.snapshots().map(variable => variable.name) }),
+          seat: id => prepared.seats.find(seat => seat.id.equals(id))?.cvars ?? null,
+          input: id => prepared.seats.find(seat => id === null || seat.id.equals(id))?.mouse.cvars ?? null,
+          movement: () => prepared.movement, shared: () => initial.image?.cvars ?? null });
+        const seen: [string, number][] = [['e1m1', currentSource.variableValue('skill')]];
+        const forward = (name: string, args: readonly string[]): undefined => {
+          if (name === 'map') seen.push([args[0] ?? '', currentSource.variableValue('skill')]);
+          return undefined;
+        };
+        const output: string[] = [], release = prepared.bindOutput(text => { output.push(text); });
+        try {
+          profile.program.publish();
+          prepared.publishSeats(profile.seats);
+          prepared.adopt(adoptedRouting, forward, { source: currentSource, movement: profile.movement,
+            fallback: profile.fallback, scripts: profile.scripts, read: profile.read });
+          profile.publishContinuation(prepared);
+          expect(prepared.pending).toBe(true);
+          prepared.commands.append('echo newly-typed\n', original.context);
+          for (let frame = 0; frame < 20 && seen.length < 2; frame++) await prepared.advanceFrame();
+          expect(seen).toEqual([['e1m1', 1], ['e1m2', 3]]);
+          expect(profile.source.variableValue('skill')).toBe(1);
+          expect(output.join('')).not.toContain('profile-finished');
+          const nextSource = new CvarRegistry({ dialect: currentSource.dialect, context: currentSource.context });
+          nextSource.restoreSaveState(currentSource.captureWorldTransferState()); currentSource = nextSource;
+          prepared.adopt(adoptedRouting, forward, { source: currentSource, movement: profile.movement,
+            fallback: profile.fallback, scripts: profile.scripts, read: profile.read });
+          for (let frame = 0; frame < 20 && prepared.pending; frame++) await prepared.advanceFrame();
+          expect(prepared.pending).toBe(false);
+          expect(addedInput.binding({ kind: 'key', code: 70 })).toEqual({ kind: 'command', text: 'flashlight' });
+          expect(output.join('')).toContain('profile-finished');
+          expect(output.join('')).not.toContain('original-tail');
+          await prepared.commands.advanceProgramFrame();
+          expect(output.filter(text => /profile-finished|original-tail|newly-typed/.test(text)).map(text => text.trim())).toEqual([
+            'profile-finished', 'original-tail', 'newly-typed',
+          ]);
+        } finally { release(); adoptedRouting.close(); }
+
       } finally { profile.routing.close(); await profile.scripts.close(); }
     } finally { await initial.image?.close(); await initial.scripts.close(); }
   } finally { session.close(); await rm(root, { recursive: true, force: true }); }

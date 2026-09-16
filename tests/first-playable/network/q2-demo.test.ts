@@ -177,3 +177,12 @@ test.skipIf(!existsSync(retailPak))('bundled protocol26 demo reaches world prepa
         playback.close(); expect(await playback.nextFrame()).toEqual({ kind: 'closed' });
     } finally { await archive.close(); }
 });
+
+test('recorded new world resets its clock before consuming the next map tail', async () => {
+ const playback=new Q2DemoPlayback(demo([preamble(),command('precache\n'),frame(100),preamble(),command('precache\n'),frame(1),frame(2)]),host());
+ try {
+  expect(await playback.nextFrame()).toEqual({kind:'frame',timeMilliseconds:10000});
+  expect(await playback.advance(10050)).toEqual({kind:'frame',timeMilliseconds:100});
+  expect(await playback.advance(150)).toEqual({kind:'frame',timeMilliseconds:200});
+ } finally {playback.close();}
+});

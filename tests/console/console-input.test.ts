@@ -55,3 +55,37 @@ for (const dialect of dialects) test(`${dialect} console toggles suppress only p
     console.message(false); text("hello team"); key(13); expect(chats.at(-1)).toBe("hello team");
   } finally { router.close(); }
 });
+
+test("retained console adopts source callbacks and staged output without replacing history or fields", () => {
+  const identity = createIdentityOwner("retained-console"), seat = identity.seat(0);
+  const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat, client: identity.client(2, 0) } };
+  const cvars = new CvarRegistry({ dialect: "q3", context }), output: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context, cvars, print: text => { output.push(text); } });
+  const focus: string[] = [];
+  const options = { seat, dialect: "q3", context, commands, cvars, now: () => 100, connected: () => false, clipboard: () => null,
+    focus: (value: import("../../src/contracts/ui.ts").SeatInputFocus) => { focus.push(value.kind); }, chat: () => {} } satisfies ConstructorParameters<typeof SeatConsole>[0];
+  const console = new SeatConsole(options), field = console.field, history = console.history, buffer = console.buffer;
+  console.history.add("echo menu"); console.field.setText("unfinished draft");
+  for (let i = 0; i < 20; i++) console.print(`old ${i}\n`);
+  console.buffer.scroll(4);
+  const before = console.buffer.dump(), rows = console.buffer.visible(2);
+  const failed = new SeatConsole({ ...options, staged: true }); failed.print("failed init\n");
+  expect(console.buffer.dump()).toBe(before); expect(console.buffer.visible(2)).toEqual(rows);
+  const candidate = new SeatConsole({ ...options, staged: true, connected: () => true,
+    focus: value => { focus.push(`source:${value.kind}`); } });
+  candidate.print("new init\n"); console.adopt(candidate, { kind: "console" });
+  expect(console.field).toBe(field); expect(console.history).toBe(history); expect(console.buffer).toBe(buffer);
+  expect(console.field.text).toBe("unfinished draft"); expect(console.history.lines).toEqual(["echo menu"]);
+  expect(console.buffer.dump()).toContain("new init"); expect(console.buffer.dump()).not.toContain("failed init");
+  expect(() => console.adopt(candidate, { kind: "console" })).toThrow("already published");
+  console.close(); expect(focus.at(-1)).toBe("source:game");
+  const frontend = new SeatConsole({ ...options, staged: true, focus: value => { focus.push(value.kind === "game" ? "menu" : value.kind); } });
+  console.adopt(frontend, { kind: "menu", menu: "menu:startup:main", control: null });
+  console.toggleFromKey(false); expect(focus.at(-1)).toBe("console");
+  console.input({ kind: "text", seat, timeMilliseconds: 100, text: "`" }, { kind: "console" });
+  expect(console.field.text).toBe("");
+  console.field.setText("echo retained"); console.submit(); commands.execute();
+  expect(output.join("")).toContain("retained"); expect(console.history.lines).toEqual(["echo menu", "echo retained"]);
+  console.input({ kind: "key", seat, timeMilliseconds: 100, code: 27, down: true, repeat: false }, { kind: "console" });
+  expect(focus.at(-1)).toBe("menu");
+});

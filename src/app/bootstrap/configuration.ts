@@ -47,6 +47,7 @@ export interface PreparedProfileConfiguration {
   readonly maxClients: number;
   readonly requests: readonly ConfigurationCommandRequest[];
   readonly bindingChoices: readonly { readonly id: SeatId; readonly overriddenKeys: readonly string[]; readonly allBindingsChosen: boolean; readonly selectedBindings: readonly InputBinding[] }[];
+  publishContinuation(owner: PreparedStartup): void;
   applyBindingDefaults(seat: SeatId, defaults: readonly InputBinding[]): void;
   forwardCommands(forward: (request: ConfigurationCommandRequest) => void): void;
 }
@@ -95,8 +96,11 @@ export async function prepareProfileConfiguration(args: {
   const read = configurationScriptReader(content, options, scripts);
   const requests: ConfigurationCommandRequest[] = [];
   let forward = (request: ConfigurationCommandRequest): void => { requests.push(request); };
+  let stopped = false;
+  let published: PreparedStartup | undefined;
   const dispatch = (name: string, args_: readonly string[], sourceContext: CommandContext): undefined => {
     let origin = sourceContext.origin; while (origin.kind === "script") origin = origin.caller;
+    stopped = true;
     forward({ target: "application", name, arguments_: args_, seat: origin.kind === "local-seat" ? origin.seat : null, source: sourceContext });
     return undefined;
   };
@@ -116,67 +120,117 @@ export async function prepareProfileConfiguration(args: {
     const product = content.catalog.product(content.selection.engineBehavior.content);
     const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
     const bindingChoices = new Map(seats.map((seat, index) => [seat.id, { overridden: new Set<string>(), all: false, selected: args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect) }]));
+    const currentCommands = () => published?.commands ?? program.commands;
+    const currentSeat = (id: SeatId) => {
+      const seat = (published?.seats ?? seats).find(seat => seat.id.equals(id));
+      if (seat === undefined) throw new Error("Configuration seat has retired");
+      return seat;
+    };
+    const currentBindings = (id: SeatId) => published === undefined ? program.input(id) : currentSeat(id).input;
+    const retainedConfigurations = seats.map(seat => {
+      const prior = prepared.seats.find(previous => previous.id.equals(seat.id) && previous.input === seat.input);
+      return prior === undefined ? undefined : { bindings: prior.input.bindings, mouse: prior.mouse.read(), run: prior.mouse.cvars.find("cl_run")?.value,
+        allBindingsChosen: prior.allBindingsChosen, overriddenKeys: [...prior.overriddenKeys],
+        selectedBindings: prior.selectedBindings ?? defaultBindings(0, prepared.movement.dialect) };
+    });
+    const publishChoices = (id: SeatId): void => {
+      const seat = published?.seats.find(seat => seat.id.equals(id)), choices = bindingChoices.get(id);
+      if (seat === undefined || choices === undefined) return;
+      seat.allBindingsChosen = choices.all; seat.selectedBindings = choices.selected;
+      for (const key of choices.overridden) seat.overriddenKeys.add(key);
+    };
     const applyBindingDefaults = (id: SeatId, defaults: readonly InputBinding[]): void => {
-      const choices = bindingChoices.get(id), bindings = program.input(id);
+      const choices = bindingChoices.get(id), bindings = currentBindings(id);
       if (choices === undefined || bindings === null) throw new Error("Profile defaults belong to another seat");
       choices.selected = defaults;
+      publishChoices(id);
       if (!choices.all) for (const binding of defaults)
         if (!choices.overridden.has(physicalInputKey(binding.input))) bindings.bind(binding);
     };
-    await program.executePreparation(async () => {
+    async function* run(): AsyncGenerator<void, void, void> {
       for (const [index, seat] of seats.entries()) {
-        const bindings = program.input(seat.id), choices = bindingChoices.get(seat.id);
-        if (bindings === null || choices === undefined) throw new Error("Prepared configuration has no binding owner");
-        const retained = prepared.seats.find(previous => previous.id.equals(seat.id) && previous.input === seat.input);
+        const bindings = () => {
+          const owner = currentBindings(seat.id);
+          if (owner === null) throw new Error("Prepared configuration has no binding owner");
+          return owner;
+        };
+        const choices = bindingChoices.get(seat.id);
+        if (choices === undefined) throw new Error("Prepared configuration has no binding owner");
+        const retained = retainedConfigurations[index];
         let collectingBindings = index !== 0;
         const defaults = args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect);
         if (index !== 0) applyBindingDefaults(seat.id, defaults);
         active = new StartupConfig({ dialect, context: seat.context, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
-          scope: index === 0 ? "source" : "seat", read,
+          scope: index === 0 ? "source" : "seat", read: (name, context, scope) => published === undefined ? read(name, context, scope) : published.readConfiguration(name, context, scope),
           applySelectedDefaults: () => {
-            for (const binding of bindings.bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) bindings.unbind(binding.input);
-            for (const binding of defaults) bindings.bind(binding);
+            for (const binding of bindings().bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) bindings().unbind(binding.input);
+            for (const binding of defaults) bindings().bind(binding);
             collectingBindings = true;
+            publishChoices(seat.id);
           },
           applyArchive: () => {
-            if (index === 0) { source.applyArchive(args.sourceArchive); movement.applyArchive(movementArchive); fallback.applyArchive(fallbackArchive); shared.applyArchive(sharedArchive); }
-            seat.cvars.applyArchive(seat.archive); seat.mouse.cvars.applyArchive(seat.mouseArchive);
+            if (index === 0) { (published?.source ?? source).applyArchive(args.sourceArchive); (published?.movement ?? movement).applyArchive(movementArchive); (published?.fallback ?? fallback).applyArchive(fallbackArchive); (published === undefined ? shared : published.sharedCvars)?.applyArchive(sharedArchive); }
+            currentSeat(seat.id).cvars.applyArchive(seat.archive); currentSeat(seat.id).mouse.cvars.applyArchive(seat.mouseArchive);
             if (retained !== undefined) {
-              bindings.unbindAll(); for (const binding of retained.input.bindings) bindings.bind(binding);
+              bindings().unbindAll(); for (const binding of retained.bindings) bindings().bind(binding);
               choices.all = retained.allBindingsChosen;
               for (const key of retained.overriddenKeys) choices.overridden.add(key);
-              const expected = new Map((retained.selectedBindings ?? defaultBindings(0, prepared.movement.dialect)).map(binding => [physicalInputKey(binding.input), binding.target]));
-              const current = new Map(retained.input.bindings.map(binding => [physicalInputKey(binding.input), binding.target]));
+              const expected = new Map(retained.selectedBindings.map(binding => [physicalInputKey(binding.input), binding.target]));
+              const current = new Map(retained.bindings.map(binding => [physicalInputKey(binding.input), binding.target]));
               for (const key of new Set([...expected.keys(), ...current.keys()]))
                 if (JSON.stringify(expected.get(key)) !== JSON.stringify(current.get(key))) choices.overridden.add(key);
-              seat.mouse.write(retained.mouse.read());
-              const run = retained.mouse.cvars.find("cl_run"); if (run !== undefined) seat.mouse.cvars.setCommandFlags("cl_run", run.value, "archive");
+              currentSeat(seat.id).mouse.write(retained.mouse);
+              if (retained.run !== undefined) currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", retained.run, "archive");
             } else if (seat.profile !== null) {
-              bindings.unbindAll(); for (const binding of seat.profile.bindings) bindings.bind(binding);
+              bindings().unbindAll(); for (const binding of seat.profile.bindings) bindings().bind(binding);
               choices.all = true;
-              seat.mouse.write(seat.profile.mouse);
-              if (seat.profile.alwaysRun !== undefined) seat.mouse.cvars.setCommandFlags("cl_run", seat.profile.alwaysRun ? "1" : "0", "archive");
+              currentSeat(seat.id).mouse.write(seat.profile.mouse);
+              if (seat.profile.alwaysRun !== undefined) currentSeat(seat.id).mouse.cvars.setCommandFlags("cl_run", seat.profile.alwaysRun ? "1" : "0", "archive");
             }
             collectingBindings = true;
           }, applyLaunchOptions: () => {},
         });
-        while (!await active.executeFrame(program.commands, async () => {
+        while (!await active.executeFrame({
+          append: (text, context) => currentCommands().appendPreparation(text, context, dialect),
+          executeScriptsAsync: (afterDispatch, shouldContinue) => currentCommands().executeScriptsAsync(afterDispatch, shouldContinue),
+        }, async () => {
           if (!collectingBindings) return;
-          const [rawName, key] = program.commands.tokenizedArguments, name = asciiFold(rawName ?? "");
+          const [rawName, key] = currentCommands().tokenizedArguments, name = asciiFold(rawName ?? "");
           if (name === "unbindall") choices.all = true;
           if ((name === "bind" || name === "unbind") && key !== undefined) {
             const input = namedPhysicalInput(key); if (input !== null) choices.overridden.add(physicalInputKey(input));
           }
-        })) await args.nextFrame();
+          publishChoices(seat.id);
+        }, () => published === undefined ? !stopped : published.configurationCanContinue)) yield;
         active = null;
       }
-      while (!program.commands.programComplete) { await args.nextFrame(); await program.commands.advanceProgramFrame(); }
+      while (!currentCommands().preparationComplete) { yield; await currentCommands().advanceProgramFrame(); }
+    }
+    const continuation = run();
+    const complete = await program.preparePrefix(async () => {
+      do {
+        if ((await continuation.next()).done) return true;
+        if (stopped) return false;
+        await args.nextFrame();
+      } while (true);
     });
     const launch = options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
     launch?.apply(source, seats);
     const resolved = resolveStartupRules(options, source, options.teamArenaSkirmish?.maxClients ?? args.defaultCapacity,
       serverDefinitionsForSelection(content.selection), launch === null);
     return { source, movement, fallback, seats, program, routing, scripts, read, ...resolved, requests, applyBindingDefaults,
+      publishContinuation: owner => {
+        if (owner !== prepared) throw new Error("Configuration continuation belongs to another client");
+        if (published !== undefined) throw new Error("Configuration continuation already published");
+        published = owner;
+        if (!complete) owner.adoptConfigurationContinuation({
+          get active() { return active; },
+          advance: async current => {
+            if (current !== owner) throw new Error("Configuration continuation belongs to another client");
+            return (await continuation.next()).done === true;
+          },
+        });
+      },
       get bindingChoices() { return [...bindingChoices].map(([id, choices]) => ({ id, overriddenKeys: [...choices.overridden], allBindingsChosen: choices.all, selectedBindings: choices.selected })); },
       forwardCommands: handler => { forward = handler; } };
   } catch (error) {

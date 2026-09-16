@@ -44,7 +44,9 @@ export class Q2DemoPlayback {
                     return delivered && time !== null ? { kind: 'frame', timeMilliseconds: time } : { kind: 'eof' };
                 }
                 this.offset = next.value.offset + 4 + next.value.bytes.length;
+                const generation = this.receiver.worldGeneration;
                 await this.receiver.receive(next.value.bytes, 0);
+                if (time !== null && this.receiver.worldGeneration !== generation) target = null;
                 if (this.closed) return { kind: 'closed' };
                 if (this.recordedTimeMilliseconds !== time && this.recordedTimeMilliseconds !== null) delivered = true;
                 if (this.receiver.disconnectedDemo) {

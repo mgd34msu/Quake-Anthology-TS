@@ -17,6 +17,21 @@ function input(): SeatInput {
   return new SeatInput({ seat, dialect: "q3", context, commands: new CommandBuffer({ dialect: "q3", context }), uiEvent: () => true });
 }
 
+test("retained frontend profile keeps the actual configured input instead of reloading disk defaults", async () => {
+  const root = await mkdtemp(join(tmpdir(), "retained-startup-bindings-"));
+  try {
+    const settings = new ConfigStore(root), seat = input();
+    seat.bind({ input: { kind: "key", code: 119 }, target: { kind: "command", text: "echo authored" } });
+    const bindings = seat.bindings, tuning = seat.gamepad.tuning;
+    const profile = StartupInputProfile.retained(settings, seat);
+    expect(profile.input).toBe(seat);
+    expect(seat.bindings).toEqual(bindings);
+    expect(seat.gamepad.tuning).toBe(tuning);
+    await profile.save();
+    expect(await settings.loadSeat("input/seat-1.json")).toBeNull();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("startup binding edits persist into the existing profile and reopen after gameplay changes", async () => {
   const root = await mkdtemp(join(tmpdir(), "startup-bindings-"));
   try {
@@ -115,5 +130,24 @@ test("startup control saves preserve fresh disk bindings and unrelated seat fiel
     await profile.save({ filter: false, alwaysRun: false, controllerVibration: false, controllerVibrationStrength: 0 });
     expect(await settings.loadSeat("input/seat-1.json")).toEqual({ ...latest, mouse: { ...latest.mouse, filter: false },
       alwaysRun: false, rumble: false, rumbleStrength: 0 });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("frontend-only console history saves through the existing seat profile and preserves gameplay fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "startup-history-"));
+  try {
+    const settings = new ConfigStore(root), seat = input(), profile = StartupInputProfile.retained(settings, seat);
+    await profile.save({}, ["find gamma", "help map"]);
+    const initial = await settings.loadSeat("input/seat-1.json");
+    if (initial === null) throw new Error("Frontend history was not saved");
+    expect(initial.history).toEqual(["find gamma", "help map"]);
+    const played = { ...initial, bindings: [{ input: { kind: "key", code: 103 }, target: { kind: "command", text: "+attack" } }],
+      mouse: { ...initial.mouse, sensitivity: 8 }, rumble: false } satisfies SeatSettings;
+    await settings.saveSeat("input/seat-1.json", played);
+    await profile.save({}, ["find gamma", "help map", "echo back in menu"]);
+    expect(await settings.loadSeat("input/seat-1.json")).toEqual({ ...played, history: ["find gamma", "help map", "echo back in menu"] });
+    const reopened = await StartupInputProfile.open(settings, input(), "q3");
+    await reopened.save();
+    expect((await settings.loadSeat("input/seat-1.json"))?.history).toEqual(["find gamma", "help map", "echo back in menu"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -27,6 +27,9 @@ import { SelectedMovementPrediction } from '../simulation/prediction.ts';
 import type { MovementPredictionResult, MovementPredictionSnapshot } from '../simulation/prediction.ts';
 import { movementOrigin, movementProfile } from '../simulation/players.ts';
 export interface Q2RemotePresentationOptions {
+    readonly seat: import('../../../contracts/identity.ts').SeatId;
+    publish(output: SimulationOutput): void;
+    disconnected(reason: string): void;
     presentationTime?(): number;
     readonly identity: IdentityOwner;
     readonly session: EngineSession;
@@ -111,7 +114,6 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
             }, options.downloadPermission);
 
         this.client = options.client;
-        this.client.connect('remote');
     }
     get player(): Q2ApplicationPlayer | null { return this.currentPlayer; }
     get output(): SimulationOutput | null { return this.published; }
@@ -292,7 +294,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.published = { snapshot: { session: this.options.session.session, frame: { frame: frame.serverFrame, time: { kind: 'milliseconds', value: time }, elapsed: { kind: 'milliseconds', value: previous === null ? this.frameMilliseconds : (frame.serverFrame - previous.serverFrame) * this.frameMilliseconds }, phase: 'frame-exit' },
                 actors: bodies.map(body => ({ id: body.actor, owner: recipe.map.entities.provider, definition: 'q2:remote-entity' })), bodies, inventories: [{ actor: player.actor, entries: this.playerUi(player.actor).inventory }], configurations: [{ actor: player.actor, movement: recipe.movement, character: recipe.character, weapons: recipe.weapons, inventory: recipe.inventory }],
                 scene: { session: this.options.session.session, time: { kind: 'milliseconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles, areaBits: frame.areaBits } }, events: [] };
-        this.options.session.publish(this.published);
+        this.options.publish(this.published);
         this.linkSolids(frame, bodies);
         this.receivePrediction(frame);
         for (const entity of frame.entities)
@@ -327,7 +329,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
             animation: { provider: recipe.character.definition.provider, state: { kind: 'q2', frame: 0, endFrame: 0, priority: 0, duck: false, run: false } },
             contact: null, q3Arsenal: null };
         if (this.predictionOwner === null) this.predictionOwner = new SelectedMovementPrediction({
-            actor: this.options.identity.ownedActor(player.actor, recipe.map.entities.provider), seat: this.options.identity.seat(this.client.id.slot),
+            actor: this.options.identity.ownedActor(player.actor, recipe.map.entities.provider), seat: this.options.seat,
             recipe, get profile() { return { ...profile, airAccelerate: airAccelerate(), strafejumpHack: strafejumpHack() }; },
             standingBounds: bounds, standingViewHeight: 22, scene: this.world.scene,
             isBrush: hit => hit.kind === 'world' || hit.kind === 'actor' && (this.current?.entities.some(entity => this.actor(entity.number).equals(hit.actor) && entity.solid === 31) ?? false),
@@ -356,10 +358,16 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     /** Remote bodies remain presentation samples; pending moves replay in private player state. */
     samplePresentation(nowMilliseconds: number): SimulationOutput | null {
         nowMilliseconds = this.options.presentationTime?.() ?? nowMilliseconds;
+        return this.sampleFrame((nowMilliseconds - this.receivedAt) / this.frameMilliseconds);
+    }
+    sampleDemo(recordedMilliseconds: number): SimulationOutput | null {
+        this.predicted = null;
+        return this.sampleFrame((recordedMilliseconds - ((this.current?.serverFrame ?? 0) - 1) * this.frameMilliseconds) / this.frameMilliseconds);
+    }
+    private sampleFrame(fraction: number): SimulationOutput | null {
         const current = this.current, output = this.published, player = this.currentPlayer;
-        if (current === null || output === null || player === null)
-            return null;
-        this.fraction = Math.max(0, Math.min(1, (nowMilliseconds - this.receivedAt) / this.frameMilliseconds));
+        if (current === null || output === null || player === null) return null;
+        this.fraction = Math.max(0, Math.min(1, fraction));
         const presentations = this.presentations(), view = this.playerView(player.actor);
         const time = (current.serverFrame - 1 + this.fraction) * this.frameMilliseconds;
         const priorTime = output.snapshot.frame.time.kind === 'milliseconds' ? output.snapshot.frame.time.value : output.snapshot.frame.time.value * 1000;
@@ -373,7 +381,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
                     return presentation === undefined ? body : { ...body, body: { ...body.body, origin: presentation.origin, angles: presentation.angles } };
                 }) } };
         this.published = sampled;
-        this.options.session.publish(sampled);
+        this.options.publish(sampled);
         return sampled;
     }
     records(records: readonly Q2ServerRecord[]): void {
@@ -419,6 +427,6 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         }
     }
     drainPresentationEvents(): readonly SimulationPresentationEvent[] { return this.events.splice(0); }
-    disconnected(reason: string): void { this.options.print(`${reason}\n`); this.client.disconnect(); }
+    disconnected(reason: string): void { this.options.print(`${reason}\n`); this.options.disconnected(reason); }
     print(text: string): void { this.options.print(text); }
 }

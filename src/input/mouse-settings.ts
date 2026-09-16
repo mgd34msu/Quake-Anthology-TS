@@ -17,7 +17,8 @@ export class MouseSettings implements MouseTuningStore {
       { name: "freelook", value: Number(defaults.freeLook), summary: "Mouse vertical motion controls view pitch without holding +mlook. Shared name across games.", example: "freelook 1" },
     ];
     for (const declaration of declarations) {
-      cvars.register(declaration.name, String(declaration.value), CvarFlag.Archive);
+      if (cvars.find(declaration.name) === undefined || cvars.isConsoleCreated(declaration.name))
+        cvars.register(declaration.name, String(declaration.value), CvarFlag.Archive);
       cvars.document(declaration.name, { summary: declaration.summary, usage: `${declaration.name} [value]`, examples: [declaration.example] });
     }
   }

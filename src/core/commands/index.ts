@@ -66,6 +66,16 @@ interface AliasEntry { readonly name: string; value: string; textMode: CommandTe
 interface TextChunk { readonly dialect: CommandDialect; readonly kind: "text"; readonly text: string; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; }
 type CommandChunk = TextChunk | { readonly kind: "completion"; readonly event: ScriptCompletion; readonly dialect: CommandDialect; readonly textMode: CommandTextMode };
 interface ExecutionFrame { readonly dialect: CommandDialect; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; readonly parent: ExecutionFrame | undefined; active: boolean; }
+interface ProgramTail {
+  readonly chunks: CommandChunk[]; readonly deferred: CommandChunk[];
+  readonly waitFrames: number; readonly waitDialect: CommandDialect | undefined;
+  readonly scriptRead: ScriptRead | undefined; readonly tokens: readonly string[];
+  readonly aliasCount: number; readonly startupCommandText: string | undefined;
+  readonly preparationTail: ProgramTail | undefined;
+}
+function cloneProgramTail(tail: ProgramTail | undefined): ProgramTail | undefined {
+  return tail === undefined ? undefined : { ...tail, chunks: [...tail.chunks], deferred: [...tail.deferred], preparationTail: cloneProgramTail(tail.preparationTail) };
+}
 interface ScriptRead {
   readonly dialect: CommandDialect;
   readonly textMode: CommandTextMode;
@@ -117,6 +127,7 @@ export class CommandBuffer {
   private handlers: RegisteredEntry | undefined;
   private readonly aliases: AliasEntry[] = [];
   private chunks: CommandChunk[] = [];
+  private preparationTail: ProgramTail | undefined;
   private deferred: CommandChunk[] = [];
   private waitFrames = 0;
   private startupCommandText: string | undefined;
@@ -142,7 +153,9 @@ export class CommandBuffer {
     if (options.builtins !== false) this.registerBuiltins();
   }
 
-  get programComplete(): boolean {
+  get programComplete(): boolean { return this.preparationTail === undefined && this.preparationComplete; }
+  get hasPreparationPrefix(): boolean { return this.preparationTail !== undefined; }
+  get preparationComplete(): boolean {
     return this.frame === undefined && !this.asyncDraining && this.batchBudget === undefined && this.scriptRead === undefined
       && this.chunks.length === 0 && this.deferred.length === 0 && this.waitFrames === 0;
   }
@@ -181,7 +194,7 @@ export class CommandBuffer {
   }
 
   prepareProgram(options: CommandBufferOptions): {
-    readonly commands: CommandBuffer; executePreparation(run: () => Promise<void>): Promise<void>; validatePublication(): void; publish(): void;
+    readonly commands: CommandBuffer; preparePrefix(run: () => Promise<boolean>): Promise<boolean>; validatePublication(): void; publish(): void;
   } {
     this.validateProfile(this.currentDialect, this.fallbackCvars);
     if (options.context.session !== this.context.session || !sameOrigin(options.context.origin, this.context.origin))
@@ -198,34 +211,44 @@ export class CommandBuffer {
       if (commands.frame !== undefined || commands.asyncDraining || commands.batchBudget !== undefined)
         throw new Error("Prepared command program is still executing");
     };
-    return { commands, validatePublication, executePreparation: async run => {
+    const preparePrefix = async (run: () => Promise<boolean>): Promise<boolean> => {
       validatePublication();
-      const pending = { chunks: commands.chunks, deferred: commands.deferred, waitFrames: commands.waitFrames,
+      const inheritedAsyncDrain = commands.inheritedAsyncDrain;
+      const pending: ProgramTail = { chunks: commands.chunks, deferred: commands.deferred, waitFrames: commands.waitFrames,
         waitDialect: commands.waitDialect, scriptRead: commands.scriptRead, tokens: commands.tokens,
-        aliasCount: commands.aliasCount, startupCommandText: commands.startupCommandText,
-        inheritedAsyncDrain: commands.inheritedAsyncDrain };
+        aliasCount: commands.aliasCount, startupCommandText: commands.startupCommandText, preparationTail: commands.preparationTail };
       phase = "preparing";
+      commands.preparationTail = pending;
       commands.chunks = []; commands.deferred = []; commands.waitFrames = 0;
       commands.waitDialect = undefined; commands.scriptRead = undefined; commands.tokens = [];
       commands.aliasCount = 0; commands.startupCommandText = undefined; commands.inheritedAsyncDrain = false;
       try {
-        await run();
-        if (!commands.programComplete) throw new Error("Prepared configuration has unfinished commands");
+        const complete = await run();
+        if (complete) commands.finishPreparation();
         phase = "ready";
-      } catch (error) { phase = "failed"; throw error; }
-      finally {
-        commands.chunks = pending.chunks; commands.deferred = pending.deferred; commands.waitFrames = pending.waitFrames;
-        commands.waitDialect = pending.waitDialect; commands.scriptRead = pending.scriptRead; commands.tokens = pending.tokens;
-        commands.aliasCount = pending.aliasCount; commands.startupCommandText = pending.startupCommandText;
-        commands.inheritedAsyncDrain = pending.inheritedAsyncDrain;
-      }
-    }, publish: () => {
-      validatePublication(); this.copyProgramState(commands); this.programRevision++; phase = "published";
-    } };
+        return complete;
+      } catch (error) { commands.restoreTail(pending); phase = "failed"; throw error; }
+      finally { commands.inheritedAsyncDrain = inheritedAsyncDrain; }
+    };
+    return { commands, validatePublication, preparePrefix,
+      publish: () => { validatePublication(); this.copyProgramState(commands); this.programRevision++; phase = "published"; } };
+  }
+
+  private restoreTail(tail: ProgramTail): void {
+    this.chunks = tail.chunks; this.deferred = tail.deferred; this.waitFrames = tail.waitFrames;
+    this.waitDialect = tail.waitDialect; this.scriptRead = tail.scriptRead; this.tokens = tail.tokens;
+    this.aliasCount = tail.aliasCount; this.startupCommandText = tail.startupCommandText; this.preparationTail = tail.preparationTail;
+  }
+  finishPreparation(): void {
+    const tail = this.preparationTail;
+    if (tail === undefined) throw new Error("Command program has no preparation prefix");
+    if (!this.preparationComplete) throw new Error("Prepared configuration has unfinished commands");
+    this.restoreTail(tail); this.programRevision++;
   }
 
   private copyProgramState(previous: CommandBuffer): void {
     this.chunks = [...previous.chunks]; this.deferred = [...previous.deferred];
+    this.preparationTail = cloneProgramTail(previous.preparationTail);
     this.waitFrames = previous.waitFrames; this.waitDialect = previous.waitDialect;
     this.aliasCount = previous.aliasCount; this.tokens = previous.tokens;
     this.startupCommandText = previous.startupCommandText; this.scriptRead = previous.scriptRead;
@@ -241,9 +264,14 @@ export class CommandBuffer {
     this.copyProgramState(previous); this.programRevision++;
   }
 
-  get hasPendingCommands(): boolean { return this.chunks.length > 0 || this.scriptRead !== undefined; }
-  get pendingText(): string { return this.chunks.map(chunk => chunk.kind === "text" ? chunk.text : "").join(""); }
-  get deferredText(): string { return this.deferred.map(chunk => chunk.kind === "text" ? chunk.text : "").join(""); }
+  get hasPendingCommands(): boolean { return this.preparationTail !== undefined || this.chunks.length > 0 || this.scriptRead !== undefined; }
+  private programText(kind: "chunks" | "deferred"): string {
+    const parts = [this[kind]];
+    for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail) parts.push(tail[kind]);
+    return parts.flatMap(chunks => chunks.map(chunk => chunk.kind === "text" ? chunk.text : "")).join("");
+  }
+  get pendingText(): string { return this.programText("chunks"); }
+  get deferredText(): string { return this.programText("deferred"); }
   get tokenizedArguments(): readonly string[] { return this.tokens; }
   get maximumCommandLength(): number { return this.maximumCommand; }
   get maximumBufferLength(): number { return this.maximumBuffer; }
@@ -354,6 +382,10 @@ export class CommandBuffer {
   append(text: string, source?: CommandContext, dialect?: CommandDialect): void {
     this.appendFor(text, this.inputContext(source), undefined, undefined, dialect);
   }
+  appendPreparation(text: string, source?: CommandContext, dialect?: CommandDialect): void {
+    if (this.preparationTail === undefined) throw new Error("Command program has no preparation prefix");
+    this.appendFor(text, this.inputContext(source), undefined, undefined, dialect, true);
+  }
   insert(text: string, source?: CommandContext): void { this.insertFor(text, this.inputContext(source)); }
   private inputContext(source: CommandContext | undefined): CommandContext {
     if (source === undefined) return this.frame?.source ?? this.context;
@@ -364,10 +396,13 @@ export class CommandBuffer {
     if (source.origin.kind !== "local-seat" && source.origin.kind !== "local-console") return "source";
     return this.frame?.textMode ?? (direct ? "console" : "source");
   }
-  private appendFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", textMode = this.inputTextMode(source, direct), dialect = this.executionDialect): void {
+  private appendFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", textMode = this.inputTextMode(source, direct), dialect = this.executionDialect, preparation = false): void {
+    let tail = this.preparationTail;
+    while (tail?.preparationTail !== undefined) tail = tail.preparationTail;
+    const target = !preparation && this.frame === undefined && tail !== undefined ? tail.chunks : this.chunks;
     const text = sourceCommandText(input);
     if (this.pendingText.length + text.length >= (this.options.maxBufferLength ?? (dialect === "q3" ? 16384 : 8192))) { this.print("Cbuf_AddText: overflow\n"); return; }
-    if (text.length > 0) { this.chunks.push({ kind: "text", text, source, direct, textMode, dialect }); this.programRevision++; }
+    if (text.length > 0) { target.push({ kind: "text", text, source, direct, textMode, dialect }); this.programRevision++; }
   }
   private insertFor(input: string, source: CommandContext, direct = this.frame === undefined && source.origin.kind !== "script", completion?: ScriptCompletion, textMode = this.inputTextMode(source, direct), dialect = this.executionDialect): void {
     const text = sourceCommandText(input) + (dialect === "q1-quakeworld" || dialect === "q3" ? "\n" : "");
@@ -415,16 +450,18 @@ export class CommandBuffer {
   private async drainAsync(afterDispatch: () => Promise<void>, awaitScripts: boolean, shouldContinue?: () => boolean): Promise<number> {
     if (this.asyncDraining || this.inheritedAsyncDrain || this.frame !== undefined) throw new Error("Command buffer is already executing");
     this.asyncDraining = true;
+    const prefix = this.preparationTail;
+    const canContinue = () => this.preparationTail === prefix && shouldContinue?.() !== false;
     try {
       let executed = 0;
       let firstDrain = true;
       do {
-        for (const count of this.drain(firstDrain, shouldContinue)) {
+        for (const count of this.drain(firstDrain, canContinue)) {
           executed += count; this.afterDispatch = true;
           try { await afterDispatch(); } finally { this.afterDispatch = false; }
         }
         const read = this.scriptRead;
-        if (!awaitScripts || read === undefined || shouldContinue?.() === false) break;
+        if (!awaitScripts || read === undefined || !canContinue()) break;
         await read.settled;
         firstDrain = false;
       } while (true);
@@ -492,7 +529,7 @@ export class CommandBuffer {
     this.chunks = []; this.deferred = []; this.waitFrames = 0; this.aliasCount = 0;
     this.batchBudget = { remaining: 128, signal };
     try {
-      this.appendFor(value, context, false);
+      this.appendFor(value, context, false, undefined, undefined, true);
       const count = this.execute();
       if (this.chunks.length > 0 || this.deferred.length > 0 || this.scriptRead !== undefined) throw new Error("Command batch paused or deferred execution; remaining batch discarded. Use immediate commands.");
       return count;

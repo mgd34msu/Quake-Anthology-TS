@@ -179,7 +179,7 @@ for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode ==
         const clientCvars = new CvarRegistry({ dialect: 'q2-classic', context: { session: identity.session, origin: { kind: 'local-console' } } });
         const downloadPermission = createClientDownloadPermission(clientCvars, 'q2');
         if (mode === 'http-off') clientCvars.set('cl_http_downloads', '0');
-        const remote = new Q2RemotePresentation({ identity, session, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content, prepareServerData: async () => { if (content === null) throw new Error('Missing fixture content'); return downloadOwner(content); }, downloadPermission, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\download-client', print() {},
+        const remote = new Q2RemotePresentation({ identity, session, seat: identity.seat(0), publish: output => session.publish(output), disconnected: () => { session.clientAt(0)?.disconnect(); }, client: session.createClient(0), nextGeneration: slot => nextActorGeneration(session.session, slot), content, prepareServerData: async () => { if (content === null) throw new Error('Missing fixture content'); return downloadOwner(content); }, downloadPermission, protocol: { kind: 'q2-classic', version: 34 }, userinfo: () => '\\name\\download-client', print() {},
             sendCommand: text => { if (client === null) throw new Error('No client'); client.command(text); },
             refreshDownloads: async assertCurrent => { const fresh = await loadApplicationContent({ ...command.options, userContentRoot: temporary }); refreshed.push(fresh); assertCurrent();
                 const remounted = await openMountPlan({ ...fresh.mounts.plan, mounts: [...fresh.mounts.plan.mounts, inherited], defaultOrder: [...fresh.mounts.plan.defaultOrder, inherited.identity.id] });
@@ -192,6 +192,7 @@ for (const mode of ['native', 'http', 'http-off']) { const httpEnabled = mode ==
                 content = new LoadedApplicationContent(content.catalog, { ...installed.recipe, map: { ...installed.recipe.map, geometry: resource } }, toQ2WorldGeometry(readQ2Bsp(map)), content.mounts);
                 loaded = true; return content;
             } });
+        remote.client.connect("remote");
         client = new Q2ClientNetwork({ transport: clientTransport, remote: serverTransport.address, host: remote, qport: 3011 });
         for (let step = 0; step < 6000 && client.phase !== 'active'; step++) {
             await client.poll(step * 10); await Bun.sleep(1); await server.poll(step * 10); await Bun.sleep(1);

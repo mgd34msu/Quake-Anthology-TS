@@ -151,10 +151,10 @@ export class StartupMenu {
       { id: "ui:startup:bindings", category: "input", kind: "button", label: "Bindings (Player 1)", enabled: () => this.bindingMenu !== null,
         activate: () => { if (this.bindingMenu !== null) this.controller.openMenu(this.bindingMenu); } },
       ...(options.settings ?? []).filter(binding => binding.category === "display" || binding.category === "input"),
-      { id: "ui:startup:renderer", category: "display", kind: "choice", label: "Renderer (requires Apply)", enabled: () => !this.busy,
+      { id: "ui:startup:renderer", category: "display", kind: "choice", label: "Renderer (next launch)", enabled: () => !this.busy,
         read: () => options.model.options.renderer, choices: () => [{ id: "gl", label: "OpenGL" }, { id: "cpu", label: "Software" }],
         write: value => options.model.select("renderer", value) },
-      { id: "ui:startup:apply-display", category: "display", kind: "button", label: "Apply renderer change", enabled: () => !this.busy, activate: options.applyDisplay },
+      { id: "ui:startup:apply-display", category: "display", kind: "button", label: "Save renderer for next launch", enabled: () => !this.busy, activate: options.applyDisplay },
       { id: "ui:startup:gyro", category: "input", kind: "button", label: "Gyro controls", enabled: () => this.gyroMenu !== null,
         activate: () => { if (this.gyroMenu !== null) this.controller.openMenu(this.gyroMenu); } }]);
     this.disposers.push(settings.dispose);

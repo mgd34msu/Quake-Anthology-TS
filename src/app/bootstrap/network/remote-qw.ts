@@ -4,7 +4,7 @@ import type { IndexedModelSkin } from '../../../contracts/scene.ts';
 import { QwPlayerSkins } from './qw-skins.ts';
 import type { QwSkinOptions } from './qw-skins.ts';
 import { nativeAtoi } from '../../../core/numeric.ts';
-import type { ActorId } from '../../../contracts/identity.ts';
+import type { ActorId, SeatId } from '../../../contracts/identity.ts';
 import { QuakeWorldPrediction } from '../simulation/prediction/qw-source-state.ts';
 import type { MovementPredictionSnapshot, MovementPredictionResult } from '../simulation/prediction/types.ts';
 import { movementProfile } from '../simulation/players.ts';
@@ -17,6 +17,7 @@ import { Q1RemotePresentation } from './remote-q1.ts';
 import type { Q1RemotePresentationOptions, Q1RemoteWorld } from './remote-q1.ts';
 import type { QwApplicationClientHost, QwApplicationDownloads, QwServerData } from './qw-types.ts';
 export interface QwRemotePresentationOptions extends Q1RemotePresentationOptions {
+    readonly seat: SeatId;
     readonly downloads?: QwApplicationDownloads;
     readonly skinOptions: QwSkinOptions;
     prepareServerData(data: QwServerData): Promise<void>;
@@ -187,7 +188,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
                 state: { kind: 'q1', frame: own.weaponFrame, attackFinishedSeconds: 0, sourceWeapon: this.stats.get(10) ?? 0 } },
             animation: { provider: recipe.character.definition.provider, state: { kind: 'q1', frame: own.frame, nextFrameSeconds: 0 } }, contact: null, q3Arsenal: null };
         if (this.predictor === null) this.predictor = new QuakeWorldPrediction({ actor: this.options.identity.ownedActor(player.actor, recipe.map.entities.provider),
-            seat: this.options.identity.seat(this.client.id.slot), recipe, profile: movementProfile(recipe), standingBounds: bounds, standingViewHeight: 22,
+            seat: this.options.seat, recipe, profile: movementProfile(recipe), standingBounds: bounds, standingViewHeight: 22,
             scene: this.scene, isBrush: hit => hit.kind === 'world' || hit.kind === 'actor' && this.scene.spatial.get(hit.actor)?.collision.shape.kind === 'model' }, base, variables);
         this.predictor.receive(base, own, variables, { health: ui.health, spectator: 0 });
         this.predicted = this.predictor.replay();
