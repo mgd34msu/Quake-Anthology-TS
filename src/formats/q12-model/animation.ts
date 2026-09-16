@@ -37,6 +37,17 @@ export function interpolateAliasFrames(current: ModelFrame, previous: ModelFrame
 export interface AliasMeshVertex extends ModelVertex { readonly texCoord: Vec2; }
 export interface AliasGeometry { readonly vertices: readonly AliasMeshVertex[]; readonly indices: readonly number[]; }
 
+interface AliasTopology {
+  readonly corners: readonly { readonly vertex: number; readonly texCoord: Vec2 }[];
+  readonly indices: readonly number[];
+}
+const md2Topologies = new WeakMap<Q2AliasModel, AliasTopology>();
+function poseGeometry(topology: AliasTopology, pose: readonly ModelVertex[]): AliasGeometry {
+  return { indices: topology.indices, vertices: topology.corners.map(corner => ({
+    ...at(pose, corner.vertex, "pose vertex"), texCoord: corner.texCoord,
+  })) };
+}
+
 /** Expand corners so back-facing seam vertices can use the other half of the skin. */
 export function buildMdlGeometry(model: Q1AliasModel, pose: readonly ModelVertex[]): AliasGeometry {
   const vertices: AliasMeshVertex[] = [];
@@ -54,16 +65,23 @@ export function buildMdlGeometry(model: Q1AliasModel, pose: readonly ModelVertex
 }
 
 export function buildMd2Geometry(model: Q2AliasModel, pose: readonly ModelVertex[]): AliasGeometry {
+  const cached = md2Topologies.get(model);
+  if (cached !== undefined) return poseGeometry(cached, pose);
+  const corners: { readonly vertex: number; readonly texCoord: Vec2 }[] = [];
   const vertices: AliasMeshVertex[] = [];
   const indices: number[] = [];
   for (const triangle of model.triangles) {
     for (let corner = 0; corner < 3; corner++) {
-      const vertex = at(pose, at(triangle.vertices, corner, "triangle vertex"), "pose vertex");
+      const index = at(triangle.vertices, corner, "triangle vertex");
+      const vertex = at(pose, index, "pose vertex");
       const coordinate = at(model.textureCoordinates, at(triangle.texCoords, corner, "triangle coordinate"), "texture coordinate");
       indices.push(vertices.length);
-      vertices.push({ ...vertex, texCoord: { x: (coordinate.x + 0.5) / model.skinWidth, y: (coordinate.y + 0.5) / model.skinHeight } });
+      const texCoord = { x: (coordinate.x + 0.5) / model.skinWidth, y: (coordinate.y + 0.5) / model.skinHeight };
+      vertices.push({ ...vertex, texCoord });
+      corners.push({ vertex: index, texCoord });
     }
   }
+  md2Topologies.set(model, { corners, indices });
   return { vertices, indices };
 }
 

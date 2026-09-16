@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import type { ModelFrame, Q1AliasFrame } from "../../../src/contracts/scene.ts";
+import type { ModelFrame, Q1AliasFrame, Q1AliasModel, Q2AliasModel } from "../../../src/contracts/scene.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { BinaryError, BinaryWriter } from "../../../src/core/binary/index.ts";
 import { buildMd2Geometry, buildMdlGeometry, decodeAliasNormal, decodeMd2Commands, interpolateAliasFrames, parseMd2, parseMdl, parseSp2, parseSpr, sampleTimedFrame } from "../../../src/formats/q12-model/index.ts";
@@ -147,4 +147,58 @@ test("SPR grouped frames preserve orientation, beam length and interval boundari
   expect(model.orientation).toBe(4); expect(model.beamLength).toBe(3);
   expect(sampleTimedFrame(frames, 0.25).pixels[0]).toBe(255);
   expect(sampleTimedFrame(frames, 0.75).pixels[0]).toBe(224);
+});
+
+test("MDL geometry retains fresh topology, seams and per-call pose validation", () => {
+  const decoded = parseMdl(groupedMdl()), frames = decoded.frames[0];
+  if (frames === undefined) throw Error("Missing frames");
+  const model: Q1AliasModel = { ...decoded, triangles: [
+    { front: true, vertices: [0, 1, 2] }, { front: false, vertices: [0, 2, 1] },
+  ] };
+  const first = sampleTimedFrame<Q1AliasFrame>(frames, 0).vertices;
+  const next = sampleTimedFrame<Q1AliasFrame>(frames, .3).vertices;
+  expect(() => buildMdlGeometry(model, [])).toThrow("pose vertex");
+  const cold = buildMdlGeometry(model, first), warm = buildMdlGeometry(model, next);
+  expect(cold.indices).toEqual([0, 1, 2, 3, 4, 5]);
+  expect(warm.indices).not.toBe(cold.indices);
+  const expected = [0, 1, 2, 0, 2, 1].map(index => {
+    const vertex = next[index]; if (vertex === undefined) throw Error("Missing expected pose vertex"); return vertex;
+  });
+  expect(warm.vertices.map(vertex => vertex.position)).toEqual(expected.map(vertex => vertex.position));
+  expect(warm.vertices.map(vertex => vertex.normal)).toEqual(expected.map(vertex => vertex.normal));
+  expect(warm.vertices[0]?.texCoord).not.toBe(cold.vertices[0]?.texCoord);
+  expect(warm.vertices[0]?.texCoord).toEqual({x:.125,y:.5});
+  expect(warm.vertices[3]?.texCoord).toEqual({x:.625,y:.5});
+  expect(cold.vertices[0]?.position).not.toEqual(warm.vertices[0]?.position);
+  expect(() => buildMdlGeometry(model, [])).toThrow("pose vertex");
+  expect(buildMdlGeometry({...model}, first).indices).not.toBe(cold.indices);
+  const malformed = {...model, textureCoordinates: []};
+  expect(() => buildMdlGeometry(malformed, [])).toThrow("pose vertex");
+  expect(() => buildMdlGeometry(malformed, first)).toThrow("texture coordinate");
+});
+
+test("MD2 topology reuse preserves independent UV indices and fresh animated vertices", () => {
+  const position={x:1,y:2,z:3},normal={x:0,y:0,z:1};
+  const pose=[{position,normal},{position:{x:4,y:5,z:6},normal}];
+  const model: Q2AliasModel={kind:"q2-md2",bounds:{min:position,max:position},skinWidth:8,skinHeight:4,
+    skins:[],frames:[],glCommands:new Int32Array(),textureCoordinates:[{x:0,y:0},{x:3,y:2}],
+    triangles:[{vertices:[1,0,1],texCoords:[0,1,1]}]};
+  expect(() => buildMd2Geometry(model, [])).toThrow("pose vertex");
+  const cold=buildMd2Geometry(model,pose);
+  const next=pose.map(vertex=>({position:{...vertex.position,z:9},normal:{x:0,y:1,z:0}}));
+  const warm=buildMd2Geometry(model,next);
+  expect(warm.indices).toBe(cold.indices); expect(warm.indices).toEqual([0,1,2]);
+  expect(warm.vertices.map(vertex=>vertex.texCoord)).toEqual([{x:.0625,y:.125},{x:.4375,y:.625},{x:.4375,y:.625}]);
+  expect(warm.vertices[1]?.texCoord).toBe(cold.vertices[1]?.texCoord);
+  const expected = [1, 0, 1].map(index => {
+    const vertex = next[index]; if (vertex === undefined) throw Error("Missing expected pose vertex"); return vertex.position;
+  });
+  expect(warm.vertices.map(vertex=>vertex.position)).toEqual(expected);
+  expect(warm.vertices[0]?.normal).toEqual({x:0,y:1,z:0});
+  expect(cold.vertices[0]?.position.z).toBe(6);
+  expect(warm.vertices[0]).not.toBe(cold.vertices[0]);
+  expect(() => buildMd2Geometry(model, [])).toThrow("pose vertex");
+  const malformed={...model,textureCoordinates:[]};
+  expect(() => buildMd2Geometry(malformed, [])).toThrow("pose vertex");
+  expect(() => buildMd2Geometry(malformed,pose)).toThrow("texture coordinate");
 });
