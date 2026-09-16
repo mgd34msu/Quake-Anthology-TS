@@ -100,12 +100,13 @@ const q2ExpansionWeaponPaths: Readonly<Record<string, readonly string[]>> = {
   chainfist: ["sound/weapons/sawidle.wav", "sound/weapons/sawhit.wav", "sound/weapons/sawslice.wav"],
   disintegrator: ["models/proj/disintegrator/tris.md2", "sound/weapons/disrupt.wav", "sound/weapons/disint2.wav", "sound/weapons/disrupthit.wav"],
   etf_rifle: ["models/proj/flechette/tris.md2", "sound/weapons/nail1.wav"],
-  heatbeam: ["models/weapons/v_beamer2/tris.md2", "sound/weapons/bfg__l1a.wav"],
+  heatbeam: ["sound/weapons/bfg__l1a.wav"],
 };
 
 export function q2RegisteredWeaponResources(weapons: Pick<Q2Weapons, "registeredDefinitions">, rerelease: boolean): readonly string[] {
   return [...q2BaseWeaponPaths(rerelease), ...weapons.registeredDefinitions().flatMap(weapon => [weapon.viewModel, weapon.worldModel,
-    ...q2ExpansionWeaponPaths[weapon.name] ?? [], ...weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : []]),
+    ...q2ExpansionWeaponPaths[weapon.name] ?? [], ...weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : [],
+    ...weapon.name === "heatbeam" && !rerelease ? ["models/weapons/v_beamer2/tris.md2"] : []]),
     ...rerelease ? ["sound/weapons/railgr1b.wav"] : []];
 }
 
