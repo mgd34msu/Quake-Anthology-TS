@@ -393,6 +393,9 @@ export class StartupApplication {
 
   private frontendCommand(name: string, args: readonly string[], source: CommandContext): void {
     if (this.routeCommand(name, args, source)) return;
+    if (name === "cd" && this.graphics !== null) {
+      this.graphics.audio.cdCommand(args, text => this.print(text)); return;
+    }
     this.print(`Cannot execute ${name} without an active world.\n`);
   }
 

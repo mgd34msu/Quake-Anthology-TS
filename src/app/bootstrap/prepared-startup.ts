@@ -1,3 +1,4 @@
+import { cdCommandDocumentation } from "./audio/commands.ts";
 import { startupCommandPhases } from "./startup-commands.ts";
 import { registerQ1ViewCommands } from "./q1-client-settings.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
@@ -101,6 +102,7 @@ export class PreparedStartup {
     for (const name of this.deferredCommands) this.commands.register(name, invocation => {
       this.worldAction = true; return this.forward(name, invocation.args, invocation.source);
     });
+    this.commands.register("cd", invocation => this.forward("cd", invocation.args, invocation.source), cdCommandDocumentation);
     registerBindingCommands(this.commands, id => this.seats.find(seat => seat.id.equals(id))?.input ?? null, text => this.print(text));
     this.releaseView = registerQ1ViewCommands(this.commands);
   }

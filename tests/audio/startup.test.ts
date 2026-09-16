@@ -1,3 +1,7 @@
+import { PreparedStartup } from "../../src/app/bootstrap/prepared-startup.ts";
+import { ConsoleScriptFiles } from "../../src/app/bootstrap/config-scripts.ts";
+import { CvarRegistry } from "../../src/core/cvars/index.ts";
+import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
 import { expect, spyOn, test } from "bun:test";
 import { ApplicationMusic, worldMusicTrack } from "../../src/app/bootstrap/audio/music.ts";
 import { SoundBank, UnifiedAudio, Q2Jukebox, remapQ2MusicTrack } from "../../src/audio/index.ts";
@@ -243,4 +247,104 @@ test("world music honors rerelease named override without changing classic or Q3
   world.set("music", "0");
   expect(worldMusicTrack(world, { family: "q2", edition: "rerelease" })).toBe("0");
   expect(worldMusicTrack(undefined, { family: "q2", edition: "rerelease" })).toBe("");
+});
+
+test("cd pause resume info preserves authored PCM position, loops and gain", async () => {
+  for (const family of ["q1", "q2", "q3"] satisfies readonly GameFamily[]) {
+    const content = createContentId({ family, edition: "test", package: "cd-command", revision: "1" });
+    const wave = menuWave(1000), view = new DataView(wave.buffer);
+    for (let frame = 0; frame < 32; frame++) view.setInt16(44 + frame * 2, (frame + 1) * 100, true);
+    using mounts = new MenuMemoryMounts(content, new Map([["music/06.wav", wave], ["music/intro.wav", wave], ["music/loop.wav", menuWave(2000)]]));
+    using actual = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    using control = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+    const lines: string[] = [], music = new ApplicationMusic(actual, text => { lines.push(text); });
+    const reference = new ApplicationMusic(control, () => undefined), bank = new SoundBank(mounts);
+    const opening = spyOn(bank, "openMusic");
+    const source = { content, family, edition: "classic", campaign: "base" };
+    const track = family === "q3" ? "music/intro.wav music/loop.wav" : "6";
+    try {
+      music.cdCommand(["pause"]); // An idle command must not pause the next authored track.
+      await music.play(source, bank, track); await reference.play(source, new SoundBank(mounts), track);
+      const opens = opening.mock.calls.length;
+      expect(actual.mix(4)).toEqual(control.mix(4));
+      music.cdCommand(["PAUSE"]); music.cdCommand(["pause"]);
+      music.cdCommand(["info"]);
+      expect(lines.at(-2)).toBe(`Paused looping track ${track}\n`);
+      expect(lines.at(-1)).toBe("Volume is 0.25\n");
+      expect(actual.mix(96).every(sample => sample === 0)).toBe(true);
+      music.volume = 0.5; reference.volume = 0.5;
+      music.cdCommand(["RESUME"]); music.cdCommand(["resume"]);
+      expect(actual.mix(96)).toEqual(control.mix(96));
+      expect(opening.mock.calls.length).toBe(opens);
+      music.cdCommand(["info"]);
+      expect(lines.at(-2)).toBe(`Currently looping track ${track}\n`);
+      expect(lines.at(-1)).toBe("Volume is 0.5\n");
+      music.cdCommand(["pause"]); music.stop();
+      await music.play(source, bank, track);
+      expect(actual.mix(8).some(sample => sample !== 0)).toBe(true);
+      music.stop(); music.cdCommand(["info"]);
+      expect(lines.slice(-2)).toEqual(["Not playing.\n", "Volume is 0.5\n"]);
+    } finally { opening.mockRestore(); music.stop(); reference.stop(); }
+  }
+});
+
+test("frontend cd commands control the existing menu music and retain mute", async () => {
+  const content = createContentId({ family: "q2", edition: "test", package: "menu-cd", revision: "1" });
+  using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)]]));
+  const lines: string[] = [];
+  const audio = await StartupAudio.open({ mounts, source: { content, family: "q2", edition: "classic", campaign: "baseq2" }, theme: null,
+    seat: createIdentityOwner("menu-cd").seat(0), print: () => undefined, preferences: { musicVolume: 0.25 } });
+  try {
+    expect(audio.engine.outputState).toBe("detached");
+    expect([...new Set(audio.engine.mix(16))]).toEqual([250]);
+    audio.cdCommand(["pause"], text => { lines.push(text); });
+    expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
+    audio.setVolumes(0.7, 0);
+    audio.cdCommand(["resume"], text => { lines.push(text); });
+    expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
+    audio.setVolumes(0.7, 0.25);
+    expect([...new Set(audio.engine.mix(64))]).toEqual([250]);
+    audio.cdCommand(["info"], text => { lines.push(text); });
+    expect(lines).toEqual(["Currently looping track music/02.wav\n", "Volume is 0.25\n"]);
+    audio.close(); audio.cdCommand(["info"], text => { lines.push(text); });
+    expect(lines.length).toBe(2);
+  } finally { audio.close(); }
+});
+
+test("retained cd registration routes Q1 QW Q2 Q3 frontend commands and survives owner forwarding", async () => {
+  for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
+    const identity = createIdentityOwner("frontend-cd-registry"), context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+    const cvars = new CvarRegistry({ dialect, context }), output: string[] = [];
+    const scripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined });
+    const prepared = new PreparedStartup(cvars, cvars, scripts, { dialect, movementDialect: dialect, seats: [], shared: null,
+      sharedNames: [], print: text => { output.push(text); }, forward: () => undefined });
+    const content = createContentId({ family: "q2", edition: "test", package: "registered-cd", revision: "1" });
+    using mounts = new MenuMemoryMounts(content, new Map([["music/02.wav", menuWave(1000)]]));
+    const audio = await StartupAudio.open({ mounts, source: { content, family: "q2", edition: "classic", campaign: "baseq2" }, theme: null,
+      seat: identity.seat(0), print: () => undefined, preferences: { musicVolume: 0.25 } });
+    const forwarded: string[] = [];
+    const frontend = (name: string, args: readonly string[]): undefined => {
+      forwarded.push(name); if (name === "cd") audio.cdCommand(args, text => { output.push(text); }); return undefined;
+    };
+    try {
+      prepared.forwardCommands(frontend);
+      expect(prepared.commands.registeredNames().filter(name => name === "cd")).toEqual(["cd"]);
+      expect(prepared.commands.commandDocumentation("cd")?.usage).toBe("cd <pause|resume|info>");
+      prepared.commands.executeNow("cd pause", context);
+      expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
+      prepared.commands.executeNow("cd info", context);
+      expect(output).toContain("Paused looping track music/02.wav\n");
+      const world: string[] = [];
+      prepared.forwardCommands((name, args) => { world.push(`${name} ${args.join(" ")}`); return undefined; });
+      prepared.commands.executeNow("cd resume", context);
+      expect(world).toEqual(["cd resume"]);
+      expect(audio.engine.mix(32).every(sample => sample === 0)).toBe(true);
+      prepared.forwardCommands(frontend);
+      prepared.commands.executeNow("cd resume", context);
+      expect([...new Set(audio.engine.mix(64))]).toEqual([250]);
+      expect(prepared.commands.registeredNames().filter(name => name === "cd")).toEqual(["cd"]);
+      expect(forwarded).toEqual(["cd", "cd", "cd"]);
+      expect(output.some(line => /unknown|already|allready/i.test(line))).toBe(false);
+    } finally { audio.close(); }
+  }
 });

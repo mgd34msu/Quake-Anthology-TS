@@ -58,6 +58,9 @@ export class StartupAudio {
       this.engine.openDevice();
     }
   }
+  cdCommand(args: readonly string[], print: (text: string) => void): void {
+    if (!this.closed) this.music.cdCommand(args, print);
+  }
   setVolumes(effects: number, music: number): void {
     if (this.closed) return;
     this.engine.setEffectsVolume(effects); this.music.volume = music;

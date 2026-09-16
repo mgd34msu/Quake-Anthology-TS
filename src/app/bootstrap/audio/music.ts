@@ -30,10 +30,9 @@ export function q1MusicFallback(content: ContentId, catalog: InstalledCatalog): 
 
 /** One world soundtrack owns the shared engine's intro/loop stream. */
 export class ApplicationMusic {
-  private current: { readonly content: ContentId; readonly player: MusicPlayer; readonly cd: CdMusic; track: string } | null = null;
+  private current: { readonly content: ContentId; readonly player: MusicPlayer; readonly cd: CdMusic; track: string; looping: boolean } | null = null;
   private request = 0;
   private gain = 0.25;
-  private paused = false;
 
   constructor(private readonly engine: UnifiedAudio, private readonly print: (text: string) => undefined, private readonly volumeMode: MusicVolumeMode = "source") {}
 
@@ -44,7 +43,22 @@ export class ApplicationMusic {
     this.current?.player.setVolume(value);
   }
 
-  pause(paused: boolean): void { this.paused = paused; if (this.current !== null) this.current.player.paused = paused; }
+  cdCommand(args: readonly string[], print: (text: string) => void = this.print): void {
+    const command = args[0]?.toLowerCase();
+    if (command === undefined) return;
+    const current = this.current;
+    if (command === "pause" || command === "resume") {
+      if (current?.player.playing) current.player.paused = command === "pause";
+      return;
+    }
+    if (command === "info") {
+      if (current?.player.playing) print(`${current.player.paused ? "Paused" : "Currently"} ${current.looping ? "looping" : "playing"} track ${current.track}\n`);
+      else print("Not playing.\n");
+      print(`Volume is ${this.gain}\n`);
+      return;
+    }
+    print(`cd ${command}: supported commands are pause, resume and info.\n`);
+  }
 
   stop(): void {
     this.request++;
@@ -64,7 +78,7 @@ export class ApplicationMusic {
     player.setVolume(this.gain);
     let openMusic: OpenMusicTrack = path => bank.openMusic(path);
     const cd = new CdMusic(player, path => openMusic(path));
-    this.current = { content, player, cd, track: selected };
+    this.current = { content, player, cd, track: selected, looping: true };
     this.engine.attachMusic({ id: "world", audience: { kind: "world" }, gain: 1 }, player);
     if (/^[0-9]+$/.test(selected) && family !== "q3") {
       const number = Number(selected);
@@ -76,7 +90,6 @@ export class ApplicationMusic {
       }
       if (request !== this.request) return;
       if (!played) this.print(`Music unavailable: ${content}/${selected}\n`);
-      player.paused = this.paused;
       return;
     }
     // CG_StartMusic accepts an intro and an optional loop token; an omitted loop repeats the intro.
@@ -98,7 +111,7 @@ export class ApplicationMusic {
     if (intro === null) { if (request === this.request) this.print(`Music unavailable: ${content}/${introName}\n`); return; }
     const loop = loopName === undefined || loopName === "" || loopName === introName ? intro : await open(loopName);
     if (request !== this.request) { intro.close(); if (loop !== intro) loop?.close(); return; }
+    if (this.current !== null) this.current.looping = loop !== null;
     player.start(intro, loop);
-    player.paused = this.paused;
   }
 }

@@ -152,7 +152,6 @@ export class ApplicationAudio {
   set effectsVolume(value: number) { this.volumeCvars?.set("volume", String(value)); this.engine.setEffectsVolume(value); this.volume = value; }
   get musicVolume(): number { return this.volumeCvars === null ? this.music.volume : Math.max(0, Math.min(1, this.volumeCvars.variableValue("bgmvolume"))); }
   set musicVolume(value: number) { this.volumeCvars?.set("bgmvolume", String(value)); this.music.volume = value; }
-  pauseMusic(paused: boolean): void { this.music.pause(paused); }
   uiSound(sound: UiSound, seat: SeatId): void { this.uiSounds.push({ sound, seat }); }
   receiveEffectSounds(sounds: readonly ApplicationEffectSound[]): void { this.effectSounds.push(...sounds); }
   receiveCgameFrame(frame: Q3SeatAudioFrame): void { this.cgameFrames.push(frame); }
@@ -161,6 +160,7 @@ export class ApplicationAudio {
     if (!applicationAudioCommands.includes(request.name)) return false;
     if (this.closed) throw new Error("Sound system is closed");
     const print = request.print ?? this.print;
+    if (request.name === "cd") { this.music.cdCommand(request.args, print); return true; }
     if (request.name === "soundinfo" || request.name === "s_info") {
       const output = this.engine.outputConfiguration;
       print(`Sound output: ${this.engine.outputState}\n`);
