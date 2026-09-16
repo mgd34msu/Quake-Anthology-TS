@@ -42,6 +42,14 @@ export class GlRenderer implements RendererBackend {
   private gammaFinished = false;
   private drawBuffer = drawBuffers.back;
   private alphaTest: RenderState["alphaTest"] = "none";
+  private textureUnit: 0 | 1 | 2 | 3 | null = null;
+  private matricesIdentity = false;
+  private currentCull: RenderState["cull"] | undefined;
+  private rangeNear: number | undefined;
+  private rangeFar: number | undefined;
+  private offsetEnabled: boolean | undefined;
+  private offsetFactor: number | undefined;
+  private offsetUnits: number | undefined;
   private closed = false;
   readonly stencilBits: number;
   readonly depthBits: number;
@@ -107,13 +115,15 @@ export class GlRenderer implements RendererBackend {
 
   private opened(): void {
     if (this.closed) throw new Error("OpenGL renderer is closed");
-    this.window.makeCurrent();
+    try { this.window.makeCurrent(); }
+    catch (error) { this.invalidateState(); throw error; }
   }
 
   setOutputGamma(gamma: number): undefined {
     const table = outputGammaTable(gamma); this.opened();
     if (gamma === this.gamma) return undefined;
     if (this.activeArrays !== null) throw new Error("OpenGL gamma cannot interrupt a prepared draw");
+    this.invalidateState();
     if (table === null) {
       this.outputGamma?.restore(this.drawBuffer); this.outputGamma?.close(); this.outputGamma = null;
     } else {
@@ -132,7 +142,9 @@ export class GlRenderer implements RendererBackend {
     if (this.objectOpacity?.bind() === true) return;
     if (this.outputGamma !== null) {
       if (this.width > this.maxTextureSize || this.height > this.maxTextureSize) throw new Error("OpenGL gamma target exceeds maximum texture size");
-      const changed = this.outputGamma.bind(this.drawBuffer, this.width, this.height);
+      let changed: boolean;
+      try { changed = this.outputGamma.bind(this.drawBuffer, this.width, this.height); }
+      catch (error) { this.invalidateState(); throw error; }
       if (rendering || changed) this.gammaFinished = false;
     }
   }
@@ -146,31 +158,65 @@ export class GlRenderer implements RendererBackend {
   }
 
   private selectTexture(unit: 0 | 1 | 2 | 3): void {
+    if (this.textureUnit === unit) return;
+    this.textureUnit = null;
     this.gl.glActiveTexture(0x84c0 + unit);
     this.gl.glClientActiveTexture(0x84c0 + unit);
+    this.textureUnit = unit;
   }
 
   private identityMatrices(): void {
+    if (this.matricesIdentity) return;
     for (const matrix of [0x1700, 0x1701]) { this.gl.glMatrixMode(matrix); this.gl.glLoadIdentity(); }
+    this.matricesIdentity = true;
+  }
+
+  private invalidateState(): void {
+    this.textureUnit = null;
+    this.matricesIdentity = false;
+    this.currentCull = undefined;
+    this.rangeNear = undefined;
+    this.rangeFar = undefined;
+    this.offsetEnabled = undefined;
+    this.offsetFactor = undefined;
+    this.offsetUnits = undefined;
   }
 
   private cull(cull: RenderState["cull"]): void {
+    if (this.currentCull === cull) return;
+    this.currentCull = undefined;
     if (cull === "none") this.gl.glDisable(0xb44);
     else { this.gl.glEnable(0xb44); this.gl.glCullFace(cull === "back" ? 0x405 : 0x404); }
+    this.currentCull = cull;
   }
 
   private polygonOffset(value: RenderState["polygonOffset"]): void {
-    if (value === null) this.gl.glDisable(0x8037);
+    if (value === null) {
+      if (this.offsetEnabled === false) return;
+      this.offsetEnabled = undefined;
+      this.gl.glDisable(0x8037);
+      this.offsetEnabled = false;
+    }
     else {
       if (!finite32(value.factor) || !finite32(value.units)) throw new RangeError("OpenGL polygon offset must be finite");
+      if (this.offsetEnabled === true && this.offsetFactor === value.factor && this.offsetUnits === value.units) return;
+      this.offsetEnabled = undefined;
       this.gl.glEnable(0x8037);
       this.gl.glPolygonOffset(value.factor, value.units);
+      this.offsetFactor = value.factor;
+      this.offsetUnits = value.units;
+      this.offsetEnabled = true;
     }
   }
 
   private depthRange(range: RenderState["depthRange"]): void {
     if (!range.every(Number.isFinite)) throw new RangeError("OpenGL depth range must be finite");
+    if (this.rangeNear === range[0] && this.rangeFar === range[1]) return;
+    this.rangeNear = undefined;
+    this.rangeFar = undefined;
     this.gl.glDepthRange(range[0], range[1]);
+    this.rangeNear = range[0];
+    this.rangeFar = range[1];
   }
 
   private state(state: RenderState): void {
@@ -213,6 +259,7 @@ export class GlRenderer implements RendererBackend {
   }
 
   beginView(view: RenderViewState): undefined {
+    this.invalidateState();
     this.opened(); this.drawTarget();
     const { x, y, width, height } = view.viewport;
     const bottom = this.height - y - height;
@@ -344,10 +391,15 @@ export class GlRenderer implements RendererBackend {
     if (this.activeArrays !== null) throw new Error("Object opacity cannot interrupt a prepared draw");
     if (this.width > this.maxTextureSize || this.height > this.maxTextureSize) throw new Error("OpenGL opacity target exceeds maximum texture size");
     this.drawTarget();
+    this.invalidateState();
     this.objectOpacity ??= new GlObjectOpacity(this.window, this.gl, this);
     this.opacityActive = true;
-    try { return this.objectOpacity.draw(opacity, this.width, this.height, draw); }
-    finally { this.opacityActive = false; }
+    try {
+      return this.objectOpacity.draw(opacity, this.width, this.height, () => {
+        this.invalidateState();
+        return draw();
+      });
+    } finally { this.opacityActive = false; this.invalidateState(); }
   }
 
   drawImmediate(operation: Exclude<RenderOperation, { readonly kind: "draw" | "object-opacity" }>): undefined {
@@ -356,6 +408,7 @@ export class GlRenderer implements RendererBackend {
     switch (operation.kind) {
       case "q2-fog": {
         if (this.activeArrays !== null) throw new Error("OpenGL fog cannot interrupt a prepared draw");
+        this.invalidateState();
         this.fog ??= new Q2FogPass(this.window, gl);
         this.fog.draw(operation, this.width, this.height);
         return;
@@ -364,6 +417,7 @@ export class GlRenderer implements RendererBackend {
         if (this.activeArrays !== null) throw new Error("OpenGL depth atlas cannot interrupt a prepared draw");
         const texture = this.textures.registered(operation.image);
         if (texture.content.kind !== "depth32f") throw new Error("OpenGL depth atlas target requires a depth32f image");
+        this.invalidateState();
         this.depthAtlas ??= new DepthAtlasTarget(this.window, gl, this.program);
         this.depthAtlas.draw(texture.name, operation.image.width, operation.image.height, operation.passes);
         return;
@@ -408,6 +462,7 @@ export class GlRenderer implements RendererBackend {
         this.identityMatrices();
         this.program.use(null, "none");
         this.alphaTest = "none";
+        this.invalidateState();
         gl.glEnable(0xb71);
         gl.glDepthFunc(0x203);
         gl.glEnable(0xb90);
@@ -456,6 +511,7 @@ export class GlRenderer implements RendererBackend {
     if (![rect.x, rect.y, width, height, rect.x + width, rect.y + height].every(finite32))
       throw new RangeError("OpenGL image grid rectangle must be finite");
     const gl = this.gl;
+    this.matricesIdentity = false;
     gl.glMatrixMode(0x1701); gl.glLoadIdentity(); gl.glOrtho(0, this.width, this.height, 0, 0, 1);
     gl.glMatrixMode(0x1700); gl.glLoadIdentity();
     this.program.use(null, this.alphaTest);
@@ -530,16 +586,23 @@ export class GlRenderer implements RendererBackend {
     if (this.outputGamma !== null) {
       if (this.activeArrays !== null) throw new Error("OpenGL gamma cannot interrupt a prepared draw");
       this.drawTarget(false);
-      if (!this.gammaFinished) { this.outputGamma.finish(this.drawBuffer); this.gammaFinished = true; }
+      if (!this.gammaFinished) {
+        this.invalidateState();
+        this.outputGamma.finish(this.drawBuffer); this.gammaFinished = true;
+      }
       else this.outputGamma.selectDefault(this.drawBuffer);
     }
   }
   finish(): undefined { this.opened(); this.resolveOutput(); this.gl.glFinish(); }
   getError(): number { this.opened(); return this.gl.glGetError(); }
-  present(): void { this.opened(); this.resolveOutput(); this.window.swap(); }
+  present(): void {
+    try { this.opened(); this.resolveOutput(); this.window.swap(); }
+    finally { this.invalidateState(); }
+  }
 
   close(): undefined {
     if (this.closed) return;
+    this.invalidateState();
     this.window.setRenderingEnabled(true);
     this.window.makeCurrent();
     this.disableArrays();
@@ -548,6 +611,7 @@ export class GlRenderer implements RendererBackend {
     this.objectOpacity?.close(); this.objectOpacity = null;
     this.depthAtlas?.close(); this.depthAtlas = null;
     this.fog?.close(); this.fog = null;
+    this.invalidateState();
     this.textures.close();
     for (const unit of [3, 2, 1, 0] satisfies readonly (0 | 1 | 2 | 3)[]) { this.selectTexture(unit); this.gl.glBindTexture(0xde1, 0); }
     this.program.close();

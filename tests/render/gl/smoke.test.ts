@@ -176,6 +176,14 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GLSL stages, shadow atlases,
   draw(renderer, batch);
   expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
   expect(renderer.readDepthPixel(8, 8)).toBeCloseTo(0.5, 5);
+  renderer.drawShowImage(image, { x: 16, y: 16, width: 1, height: 1 }, false);
+  renderer.clearColorBuffer();
+  draw(renderer, batch);
+  expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
+  renderer.drawImmediate({ kind: "shadow-volume", positions: [], indices: [], mirror: false, whiteImage: image });
+  renderer.clearColorBuffer();
+  draw(renderer, batch);
+  expect(renderer.readPixels()).toEqual(Uint8Array.from({ length: 16 * 16 * 4 }, (_, index) => index % 4 === 1 || index % 4 === 3 ? 255 : 0));
   renderer.applyImageResource({ kind: "update-image", image, level: 0, content: { width: 1, height: 1, pixels: new Uint8Array([255, 0, 0, 255]) } });
   renderer.beginView({ viewport: { x: 0, y: 0, width: 16, height: 16 }, clear, clipPlane: { x: 1, y: 0, z: 0, w: 0 } });
   draw(renderer, batch);
