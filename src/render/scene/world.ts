@@ -528,9 +528,9 @@ export class WorldScene {
       alternateAnimation: input.alternateAnimation ?? false,
       fullbright: material.kind === "q1" ? this.fullbrightByTexture.get(q1AnimatedTexture(material, context.time, input.alternateAnimation ?? false)) ?? null : surface.fullbright,
       q1LightmapEncoding: surface.lightmap?.encoding ?? "rgb",
-      ...(fragmentLighting === undefined || material.kind !== "q2" ? {} : { fragmentLighting: { kind: "q2-world",
+      ...(fragmentLighting === undefined ? {} : { fragmentLighting: { kind: "q2-world",
         worldPositions: surface.geometry.vertices.map(vertex => model === undefined ? vertex.position : worldPoint(vertex.position, model)),
-        normals: surface.geometry.vertices.map(vertex => rotateNormal(vertex.normal)), pass: "texture", lights: fragmentLighting.lights.map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
+        normals: surface.geometry.vertices.map(vertex => rotateNormal(vertex.normal)), pass: "texture", lights: fragmentLighting.lights.filter(light => material.kind !== "q1" || light.cone !== null || light.shadow.kind !== "none").map(light => ({ ...light, scale: light.scale * (this.options.q2LightModulate ?? 1) })), atlas: fragmentLighting.atlas } }),
       ...(surface.lightmap === null ? {} : { translucentLightmap: surface.lightmap.direct }), cull: context.deformView.mirror !== (model !== undefined && modelScale(model) < 0) ? "back" : "front", depthRange: context.depthRange, project: context.project });
     return [sequenceDrawGroup(material.alpha * context.entityRGBA.w / 255 < 1 ? "translucent" : "opaque", batches)];
   }

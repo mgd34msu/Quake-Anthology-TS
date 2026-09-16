@@ -310,3 +310,26 @@ test("detached Q2 character private state survives checked bytes without changin
   expect(game.body(first)).toEqual(body);
   expect(active.inventory.entries(first.actor.id)).toEqual(inventory);
 });
+
+test("flashlight presentation follows source hand and suppresses death/intermission without clearing carried state", () => {
+  const { players, module, game, first, combat, events } = rerelease();
+  const state = players.states.get(first.actor.id);
+  if (state === undefined) throw new Error("Missing source player");
+  state.hand = "left";
+  module.toggleFlashlight(first.actor.id, game, true);
+  expect(events.at(-1)).toEqual({ kind: "flashlight", actor: first.actor.id, enabled: true, hand: "left" });
+  combat.setHealth(first.actor, 0);
+  players.emitFlashlight(first.actor.id, game);
+  expect(events.at(-1)).toMatchObject({ enabled: false });
+  expect(players.extra(first.actor.id).flashlight).toBe(true);
+  combat.setHealth(first.actor, 100);
+  players.intermission = { kind: "intermission", map: "base2", started: 0, exit: false, landmark: null };
+  players.emitFlashlight(first.actor.id, game);
+  expect(events.at(-1)).toMatchObject({ enabled: false });
+  players.intermission = { kind: "playing" }; state.hand = "center";
+  module.spawned(first, game);
+  expect(events.at(-1)).toEqual({ kind: "flashlight", actor: first.actor.id, enabled: true, hand: "center" });
+  module.toggleFlashlight(first.actor.id, game, false);
+  expect(events.at(-1)).toMatchObject({ enabled: false });
+  expect(players.extra(first.actor.id).flashlight).toBe(false);
+});

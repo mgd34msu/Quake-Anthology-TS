@@ -352,7 +352,7 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
   const matrix: [...Mat4] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   let light: import("../../../src/contracts/render.ts").Q2FragmentLight = { origin: { x: 0, y: 1, z: 2 }, radius: 64, color: { x: 1, y: 0.5, z: 0.25 }, scale: 1,
     cone: { direction: { x: 0, y: 0, z: -1 }, cosHalfAngle: 0.5 }, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } };
-  const lighting = (): import("../../../src/contracts/render.ts").BatchLighting => ({ kind: "q2-world", worldPositions: [], normals: [], pass: "lightmap", lights: [light], atlas });
+  const lighting = () => ({ kind: "q2-world", worldPositions: [], normals: [], pass: "lightmap", lights: [light], atlas } satisfies import("../../../src/contracts/render.ts").BatchLighting);
   const reference = new StageProgram(window), cached = new StageProgram(window);
   const referenceTrace = traceUniforms(reference["library"].symbols, reference["uniforms"]), trace = traceUniforms(cached["library"].symbols, cached["uniforms"]);
   const lookup = cached["uniforms"].get;
@@ -397,7 +397,7 @@ test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("stage uniform values preserv
     const world = lighting(); if (world.kind !== "q2-world") throw new Error("Missing world lighting");
     use(null, "none", { ...world, lights: [light, { ...light, radius: 80 }] });
     use(null, "none", { ...world, lights: [] }); use(null, "none", { ...world, lights: [light, { ...light, radius: 90 }] });
-    for (const pass of ["texture", "material-lightmap", "lightmap"] satisfies readonly typeof world.pass[]) use(null, "none", { ...world, pass });
+    for (const pass of ["texture", "material-lightmap", "lightmap"] satisfies readonly Exclude<Extract<import("../../../src/contracts/render.ts").BatchLighting, { readonly kind: "q2-world" }>["pass"], "model">[]) use(null, "none", { ...world, pass });
     light = { ...light, shadow: { kind: "point", atlasRect: { x: 0, y: 0, z: 1, w: 2 / 3 } } }; use(null, "none", lighting());
     light = { ...light, shadow: { kind: "none" } }; use(null, "none", lighting());
     light = { ...light, shadow: { kind: "cone", matrix, atlasRect: { x: 0, y: 0, z: 1, w: 1 } } }; use(null, "none", lighting());

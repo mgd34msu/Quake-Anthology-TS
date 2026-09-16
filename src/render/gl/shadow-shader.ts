@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Shadow receiver sampling ported from quake-2-re-ts/ref_gl/gl_shader.ts.
 // Cone PCF and 3x2 cube faces keep the donor atlas layout and depth biases.
-export function shadowFactorLines(): string[] {
+export function shadowFactorLines(receiver: "world" | "model"): string[] {
   return [
     // 1.0 == unoccluded. Every path below either leaves it there (the
     // fragment is outside this light's depth data, where a guess is what
@@ -28,7 +28,7 @@ export function shadowFactorLines(): string[] {
     `              for (int sx = 0; sx < 2; sx++) {`,
     `                vec2 off = (vec2(float(sx), float(sy)) - 0.5) * u_shadow_texel;`,
     `                float d = texture2D(u_shadow_map, clamp(base + off, tap_lo, tap_hi)).r;`,
-    `                lit += (lproj.z - SHADOW_DEPTH_BIAS) > d ? 0.0 : 1.0;`,
+    `                lit += (lproj.z - ${receiver === "model" ? "0.0025" : "0.0005"}) > d ? 0.0 : 1.0;`,
     `              }`,
     `            }`,
     `            lit *= 0.25;`,
@@ -75,7 +75,7 @@ export function shadowFactorLines(): string[] {
     `          vec2 tap_lo = cell_lo + u_shadow_texel;`,
     `          vec2 tap_hi = cell_lo + cell_size - u_shadow_texel;`,
     `          float face_texels = cell_size.x / u_shadow_texel;`,
-    `          float bias = SHADOW_CUBE_BIAS + axial * (2.0 / face_texels) * SHADOW_CUBE_BIAS_TEXELS;`,
+    `          float bias = ${receiver === "model" ? "5.0" : "1.0"} + axial * (2.0 / face_texels) * ${receiver === "model" ? "6.0" : "2.0"};`,
     `          lit = 0.0;`,
     `          for (int sy = 0; sy < 2; sy++) {`,
     `            for (int sx = 0; sx < 2; sx++) {`,

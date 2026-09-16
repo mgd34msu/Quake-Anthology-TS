@@ -1,7 +1,7 @@
 /* Q2 fragment and shadow equations ported from quake-2-re-ts/ref_gl/gl_shader.ts.
  * Copyright (C) Id Software and contributors. GPL-2.0-or-later. */
 import type { Vec3, Vec4 } from "../../contracts/math.ts";
-import type { BatchLighting, DepthImageLevel, MultitextureVertex, Q2ShadowAtlas, Q2ShadowProjection } from "../../contracts/render.ts";
+import type { Q2ModelShadowLight, BatchLighting, DepthImageLevel, MultitextureVertex, Q2ShadowAtlas, Q2ShadowProjection } from "../../contracts/render.ts";
 import { transformVec4 } from "../../core/math.ts";
 import { calcDynamicLightContribution } from "../../materials/q2-lighting.ts";
 import type { Sample } from "./triangle-kernel.ts";
@@ -78,16 +78,33 @@ export function shadowVisibility(position: Vec3, origin: Vec3, radius: number, s
   return lit * 0.25;
 }
 
+function aliasShade(position: Vec3, vertex: Vec4, scale: number, lights: readonly Q2ModelShadowLight[], atlas: Q2ShadowAtlas, depth: DepthImageLevel): Vec3 {
+  let keepR = 1, keepG = 1, keepB = 1;
+  for (const light of lights) {
+    if (light.fraction.x === 0 && light.fraction.y === 0 && light.fraction.z === 0) continue;
+    const occluded = 1 - shadowVisibility(position, light.origin, light.radius, light.shadow, atlas, depth, true);
+    keepR -= light.fraction.x * occluded; keepG -= light.fraction.y * occluded; keepB -= light.fraction.z * occluded;
+  }
+  return { x: Math.min(vertex.x * scale * Math.max(keepR, 0), 1), y: Math.min(vertex.y * scale * Math.max(keepG, 0), 1),
+    z: Math.min(vertex.z * scale * Math.max(keepB, 0), 1) };
+}
+
 export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: Vec3,
   vertex: Vec4, texel: Readonly<Sample>): Sample {
   const parameters = lighting.parameters;
   if (parameters.kind === "vertex") return { r: vertex.x * texel.r, g: vertex.y * texel.g,
     b: vertex.z * texel.b, a: vertex.w * texel.a };
   if (parameters.kind === "q2-world") {
-    let r = parameters.pass !== "texture" ? texel.r : texel.r * vertex.x;
-    let g = parameters.pass !== "texture" ? texel.g : texel.g * vertex.y;
-    let b = parameters.pass !== "texture" ? texel.b : texel.b * vertex.z;
+    let r = parameters.pass === "model" ? vertex.x : parameters.pass !== "texture" ? texel.r : texel.r * vertex.x;
+    let g = parameters.pass === "model" ? vertex.y : parameters.pass !== "texture" ? texel.g : texel.g * vertex.y;
+    let b = parameters.pass === "model" ? vertex.z : parameters.pass !== "texture" ? texel.b : texel.b * vertex.z;
+    if (parameters.pass === "model" && parameters.shadeScale !== null) {
+      if (parameters.atlas === null || lighting.depth === null) throw new Error("CPU model shadows require their depth atlas");
+      const shade = aliasShade(position, vertex, parameters.shadeScale, parameters.lights, parameters.atlas, lighting.depth);
+      r = shade.x; g = shade.y; b = shade.z;
+    }
     for (const light of parameters.lights) {
+      if (light.scale === 0 || light.color.x === 0 && light.color.y === 0 && light.color.z === 0) continue;
       const contribution = calcDynamicLightContribution(light, position, normal);
       let visibility = 1;
       if (light.shadow.kind !== "none") {
@@ -96,18 +113,13 @@ export function shadeQ2Fragment(lighting: CpuLighting, position: Vec3, normal: V
       }
       r += contribution.x * visibility; g += contribution.y * visibility; b += contribution.z * visibility;
     }
+    if (parameters.pass === "model") { r *= texel.r; g *= texel.g; b *= texel.b; }
     if (parameters.pass === "material-lightmap") { r *= vertex.x; g *= vertex.y; b *= vertex.z; }
     return { r, g, b, a: parameters.pass === "lightmap" ? 1 : texel.a * vertex.w };
   }
   if (lighting.depth === null) throw new Error("CPU model shadows require their depth atlas");
-  let keepR = 1, keepG = 1, keepB = 1;
-  for (const light of parameters.lights) {
-    const occluded = 1 - shadowVisibility(position, light.origin, light.radius, light.shadow, parameters.atlas, lighting.depth, true);
-    keepR -= light.fraction.x * occluded; keepG -= light.fraction.y * occluded; keepB -= light.fraction.z * occluded;
-  }
-  return { r: texel.r * Math.min(vertex.x * parameters.shadeScale * Math.max(keepR, 0), 1),
-    g: texel.g * Math.min(vertex.y * parameters.shadeScale * Math.max(keepG, 0), 1),
-    b: texel.b * Math.min(vertex.z * parameters.shadeScale * Math.max(keepB, 0), 1), a: texel.a * vertex.w };
+  const shade = aliasShade(position, vertex, parameters.shadeScale, parameters.lights, parameters.atlas, lighting.depth);
+  return { r: texel.r * shade.x, g: texel.g * shade.y, b: texel.b * shade.z, a: texel.a * vertex.w };
 }
 
 export function interpolateWorld(a: Vec3, b: Vec3, c: Vec3, wa: number, wb: number, wc: number): Vec3 {

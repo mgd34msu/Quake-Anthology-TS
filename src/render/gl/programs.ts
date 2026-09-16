@@ -51,9 +51,6 @@ uniform vec4 u_light_atlas[8];
 uniform float u_light_shadow[8];
 uniform vec3 u_light_frac[8];
 uniform float u_shade_scale;
-#define SHADOW_DEPTH_BIAS (u_lighting_mode == 3 ? 0.0025 : 0.0005)
-#define SHADOW_CUBE_BIAS (u_lighting_mode == 3 ? 5.0 : 1.0)
-#define SHADOW_CUBE_BIAS_TEXELS (u_lighting_mode == 3 ? 6.0 : 2.0)
 #define SHADOW_NEAR u_shadow_near
 #define SHADOW_CUBE_COLS 3.0
 #define SHADOW_CUBE_ROWS 2.0
@@ -61,6 +58,7 @@ vec3 dynamicLights() {
   vec3 shade = vec3(0.0);
   for (int i = 0; i < 8; i++) {
     if (i >= u_light_count) break;
+    if (u_light_scale[i] == 0.0 || all(equal(u_light_color[i], vec3(0.0)))) continue;
     vec3 lightPosition = u_light_pos[i];
     float cone = u_light_cone_cos[i];
     if (cone == 0.0) lightPosition += worldNormal * 16.0;
@@ -76,7 +74,7 @@ vec3 dynamicLights() {
       result *= cone >= 1.0 ? 0.0 : max(1.0 - (1.0 - magnitude) / (1.0 - cone), 0.0);
     }
     if (u_light_shadow[i] != 0.0) {
-${shadowFactorLines().join("\n")}
+${shadowFactorLines("world").join("\n")}
       result *= lit;
     }
     shade += result;
@@ -88,8 +86,9 @@ vec4 modelShadow(vec4 texel) {
   vec3 keep = vec3(1.0);
   for (int i = 0; i < 8; i++) {
     if (i >= u_light_count) break;
+    if (all(equal(u_light_frac[i], vec3(0.0)))) continue;
     if (u_light_shadow[i] != 0.0) {
-${shadowFactorLines().join("\n")}
+${shadowFactorLines("model").join("\n")}
       keep -= u_light_frac[i] * (1.0 - lit);
     }
   }
@@ -104,6 +103,10 @@ void main() {
   else if (u_lighting_mode == 2) color.rgb += dynamicLights();
   else if (u_lighting_mode == 3) color = modelShadow(texel);
   else if (u_lighting_mode == 4) color = vec4((texel.rgb + dynamicLights()) * vertexColor.rgb, texel.a * vertexColor.a);
+  else if (u_lighting_mode == 5) {
+    color = u_shade_scale > 0.0 ? modelShadow(texel) : texel * vertexColor;
+    color.rgb += texel.rgb * dynamicLights();
+  }
   if (secondaryMode != 0) {
     vec4 second = texture2D(secondaryTexture, coordinates1);
     if (secondaryMode == 1) color *= second;
@@ -251,7 +254,7 @@ void main() { gl_FragColor = vec4(1.0); }
     this.integer((this.locations.secondaryMode ??= this.uniform("secondaryMode")), environment === null ? 0 : secondaryModes[environment]);
     this.integer((this.locations.alphaMode ??= this.uniform("alphaMode")), alphaModes[alphaTest]);
     this.integer((this.locations.u_luminance_alpha ??= this.uniform("u_luminance_alpha")), luminanceAlpha ? 1 : 0);
-    this.integer((this.locations.u_lighting_mode ??= this.uniform("u_lighting_mode")), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : 2);
+    this.integer((this.locations.u_lighting_mode ??= this.uniform("u_lighting_mode")), lighting.kind === "vertex" ? 0 : lighting.kind === "q2-model-shadow" ? 3 : lighting.pass === "lightmap" ? 1 : lighting.pass === "material-lightmap" ? 4 : lighting.pass === "model" ? 5 : 2);
     if (lighting.kind === "vertex") { this.integer((this.locations.u_light_count ??= this.uniform("u_light_count")), 0); return; }
     if (lighting.lights.length > 8) throw new RangeError("Q2 fragment lighting accepts at most eight selected lights per draw");
     this.integer((this.locations.u_light_count ??= this.uniform("u_light_count")), lighting.lights.length);
@@ -262,9 +265,10 @@ void main() { gl_FragColor = vec4(1.0); }
       this.scalar((this.locations.u_shadow_texel ??= this.uniform("u_shadow_texel")), lighting.atlas.texelSize);
       this.scalar((this.locations.u_shadow_near ??= this.uniform("u_shadow_near")), lighting.atlas.nearPlane);
     }
-    if (lighting.kind === "q2-model-shadow") {
-      finiteUniforms([lighting.shadeScale]);
-      this.scalar((this.locations.u_shade_scale ??= this.uniform("u_shade_scale")), lighting.shadeScale);
+    if (lighting.kind === "q2-model-shadow" || lighting.pass === "model") {
+      const scale = lighting.shadeScale ?? 0;
+      finiteUniforms([scale]);
+      this.scalar((this.locations.u_shade_scale ??= this.uniform("u_shade_scale")), scale);
     }
     for (const [index, light] of lighting.lights.entries()) {
       const locations = this.lightLocations[index] ??= {};
@@ -280,10 +284,11 @@ void main() { gl_FragColor = vec4(1.0); }
         this.scalar((locations.u_light_cone_cos ??= this.uniform(`u_light_cone_cos[${index}]`)), light.cone?.cosHalfAngle ?? 0);
         const direction = light.cone?.direction;
         this.vector3((locations.u_light_cone_dir ??= this.uniform(`u_light_cone_dir[${index}]`)), direction?.x ?? 0, direction?.y ?? 0, direction?.z ?? 0);
-      } else {
+      }
+      if ("fraction" in light) {
         finiteUniforms([light.fraction.x, light.fraction.y, light.fraction.z]);
         this.vector3((locations.u_light_frac ??= this.uniform(`u_light_frac[${index}]`)), light.fraction.x, light.fraction.y, light.fraction.z);
-      }
+      } else this.vector3((locations.u_light_frac ??= this.uniform(`u_light_frac[${index}]`)), 0, 0, 0);
       const shadow = light.shadow;
       if (shadow.kind !== "none" && lighting.atlas === null) throw new Error("Q2 shadow receiver is missing its atlas");
       this.scalar((locations.u_light_shadow ??= this.uniform(`u_light_shadow[${index}]`)), shadow.kind === "none" ? 0 : shadow.kind === "cone" ? 1 : 2);

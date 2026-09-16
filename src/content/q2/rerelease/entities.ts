@@ -121,7 +121,7 @@ export class Q2RereleaseEntities implements Q2SpawnModule {
     extra.flashlight = enabled;
     if (entity !== null) { if (enabled) entity.flags |= 0x400000; else entity.flags &= ~0x400000; }
     if (entity !== null) game.sound(entity, enabled ? "items/flashlight_on.wav" : "items/flashlight_off.wav", 0, 1, 3);
-    return this.hooks.emit({ kind: "flashlight", actor, enabled });
+    return this.players.emitFlashlight(actor, game);
   }
 
   private readonly flashlightTouch: Q2Touch = (entity, game, contact) => {

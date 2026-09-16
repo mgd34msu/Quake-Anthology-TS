@@ -254,7 +254,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     if (nativeFrame === undefined) {
       if (effects === null) throw new Error("Shared view lost its prepared effects");
       this.frames.world(this.scene.view(input, effects.operations,
-        this.effects.shadowSceneLights(camera, index => style(index, 12) / 12), playerView.infrared,
+        this.effects.shadowSceneLights(camera, index => style(index, 12) / 12, viewer), playerView.infrared,
         weaponViewCamera(camera, this.ui.weaponOcclusion({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, !this.finale.active))));
     } else for (const command of nativeFrame.commands) {
       if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");

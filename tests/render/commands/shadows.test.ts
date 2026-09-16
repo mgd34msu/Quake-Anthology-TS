@@ -187,3 +187,79 @@ test("static world snapshots preserve digest signatures and isolate mutable sour
     expect(shadows.prepare([light], new StaticShadowWorld([]), []).stats.cachedLights).toBe(1);
   } finally { shadows.close(); images.close(); }
 });
+
+function checkModelConeLighting(renderer: SoftwareRenderer | GlRenderer, images: SceneImageRegistry): void {
+  const shadows = new Q2ShadowScene(images), indices = [0, 1, 2, 0, 2, 3];
+  const skin = images.register("model-cone-skin", rgbaImage({ width: 1, height: 1, pixels: new Uint8Array([128, 64, 32, 128]) }), { wrap: "clamp", filter: "nearest" });
+  const positions = [{ x: -64, y: -64, z: 0 }, { x: 64, y: -64, z: 0 }, { x: 64, y: 64, z: 0 }, { x: -64, y: 64, z: 0 }];
+  const blocker = { positions: [{ x: -4, y: -4, z: 32 }, { x: 4, y: -4, z: 32 }, { x: 4, y: 4, z: 32 }, { x: -4, y: 4, z: 32 }], indices };
+  const point: SceneLight = { origin: { x: 0, y: 0, z: 64 }, radius: 512, color: { x: 1, y: 1, z: 1 }, additive: true,
+    profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "cast", resolution: 128 } } };
+  const cone: SceneLight = { ...point, profile: { kind: "q2", scale: 2, cone: { direction: { x: 0, y: 0, z: -1 }, cosHalfAngle: Math.cos(22 * Math.PI / 180) }, shadow: { kind: "cast", resolution: 128 } } };
+  try {
+    const prepared = shadows.prepare([point, cone], [blocker], []);
+    for (const operation of images.drainOperations()) renderer.applyImageResource(operation);
+    for (const operation of prepared.operations) {
+      if (operation.kind !== "depth-atlas") throw new Error("Expected model-light depth atlas operation");
+      renderer.drawImmediate(operation);
+    }
+    const atlas = prepared.lighting.atlas;
+    if (atlas === null) throw new Error("Missing real model shadow atlas");
+    const outputs: Uint8Array[] = [];
+    for (const blended of [false, true]) for (const enabled of [false, true]) {
+      const batch: DrawBatch = { primitive: "triangles", texturing: "single", indices, texture: { kind: "bind-image", image: skin },
+        state: { ...CPU_OPAQUE_STATE, cull: "none", blend: blended ? { source: "src-alpha", destination: "one-minus-src-alpha" } : CPU_OPAQUE_STATE.blend }, lighting: { kind: "q2-world", pass: "model", shadeScale: 1, worldPositions: positions,
+          normals: positions.map(() => ({ x: 0, y: 0, z: 1 })), atlas,
+          lights: prepared.lighting.lights.map(light => ({ ...light, color: light.cone === null ? { x: 0, y: 0, z: 0 } : light.color,
+            scale: light.cone === null || !enabled ? 0 : light.scale, fraction: light.cone === null ? { x: 0.25, y: 0.25, z: 0.25 } : { x: 0, y: 0, z: 0 } })) },
+        vertices: positions.map(position => ({ position: { x: position.x / 64, y: position.y / 64, z: 0, w: 1 }, texCoord: { x: 0, y: 0 }, color: { x: 0.4, y: 0.4, z: 0.4, w: 0.5 } })) };
+      renderer.beginView({ viewport: { x: 0, y: 0, width: 64, height: 64 }, clipPlane: null, clear: { color: { x: 0.2, y: 0.4, z: 0.6, w: 0 }, depth: 1, stencil: false } });
+      if (renderer instanceof SoftwareRenderer) renderer.draw(batch);
+      else { const draw = renderer.prepareGeometry(batch); draw.begin(); try { draw.applyTexture(0, batch.texture); draw.draw(); } finally { draw.cleanup(); } }
+      outputs.push(new Uint8Array(renderer instanceof SoftwareRenderer ? renderer.pixels : renderer.readPixels()));
+    }
+    const [off, on, blendedOff, blendedOn] = outputs;
+    if (off === undefined || on === undefined || blendedOff === undefined || blendedOn === undefined) throw new Error("Missing model-light pixels");
+    const pixel = (x: number) => (32 * 64 + x) * 4;
+    expect(on[pixel(32)]).toBe(off[pixel(32)]); // Real occluder blocks both contributions.
+    expect(on[pixel(41)] ?? 0).toBeGreaterThan((off[pixel(41)] ?? 0) + 10);
+    expect(on[pixel(59)]).toBe(off[pixel(59)]); // Outside the authored cone.
+    expect(on[pixel(41) + 3]).toBe(off[pixel(41) + 3]);
+    if (renderer instanceof SoftwareRenderer) expect(on[pixel(41) + 3]).toBeCloseTo(64, -1);
+    const sourceAlpha = (128 / 255) * 0.5;
+    for (const [opaque, blended] of [[off, blendedOff], [on, blendedOn]]) {
+      if (opaque === undefined || blended === undefined) throw new Error("Missing blend comparison");
+      for (const [channel, background] of [0.2, 0.4, 0.6].entries()) {
+        const expected = (opaque[pixel(41) + channel] ?? 0) * sourceAlpha + background * 255 * (1 - sourceAlpha);
+        expect(Math.abs((blended[pixel(41) + channel] ?? 0) - expected)).toBeLessThanOrEqual(2);
+      }
+    }
+    if (renderer instanceof GlRenderer) expect(renderer.getError()).toBe(0);
+  } finally { shadows.close(); }
+}
+
+test("CPU model spotlight preserves point shadows, skin modulation and alpha", () => {
+  const owner = { identity: Symbol("model-light-cpu"), session: createIdentityOwner("model-light-cpu").session, generation: 0 };
+  const images = new SceneImageRegistry(owner), renderer = new SoftwareRenderer(64, 64, owner);
+  try { checkModelConeLighting(renderer, images); } finally { renderer.close(); images.close(); }
+});
+test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL model spotlight preserves point shadows, skin modulation and alpha", () => {
+  using window = SdlWindow.open({ title: "Model spotlight", width: 64, height: 64, backend: "gl", hidden: true, stencilBits: 8 });
+  const owner = { identity: Symbol("model-light-gl"), session: createIdentityOwner("model-light-gl").session, generation: 0 };
+  using renderer = new GlRenderer(window, owner);
+  const images = new SceneImageRegistry(owner);
+  try { checkModelConeLighting(renderer, images); } finally { images.close(); }
+});
+
+test("inactive dynamic lights do not require or sample a shadow atlas", async () => {
+  const { shadeQ2Fragment } = await import("../../../src/render/cpu/lighting.ts");
+  const { identityMat4 } = await import("../../../src/core/math.ts");
+  const position = { x: 0, y: 0, z: 0 }, normal = { x: 0, y: 0, z: 1 }, vertex = { x: 0.5, y: 0.25, z: 1, w: 0.5 };
+  for (const inactive of [{ scale: 0, color: { x: 1, y: 1, z: 1 } }, { scale: 2, color: { x: 0, y: 0, z: 0 } }]) {
+    const parameters: DrawBatch["lighting"] = { kind: "q2-world", pass: "texture", worldPositions: [position], normals: [normal], atlas: null,
+      lights: [{ ...inactive, origin: { x: 0, y: 0, z: 64 }, radius: 512, cone: null,
+        shadow: { kind: "cone", matrix: identityMat4(), atlasRect: { x: 0, y: 0, z: 1, w: 1 } } }] };
+    expect(shadeQ2Fragment({ parameters, depth: null }, position, normal, vertex, { r: 0.4, g: 0.8, b: 0.1, a: 0.6 }))
+      .toEqual({ r: 0.2, g: 0.2, b: 0.1, a: 0.3 });
+  }
+});

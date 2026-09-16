@@ -105,7 +105,7 @@ export interface LegacyMaterialDrawContext {
   readonly alternateAnimation: boolean;
   readonly fullbright: RendererImage | null;
   readonly q1LightmapEncoding: Q1LightmapEncoding;
-  /** Uploaded directLightmapPixels result for translucent lightmapped surfaces. */
+  /** Uploaded directLightmapPixels result for translucent or fragment-lit lightmaps. */
   readonly translucentLightmap?: RendererImage;
   readonly fragmentLighting?: Extract<BatchLighting, { readonly kind: "q2-world" }>;
   readonly cull: RenderState["cull"];
@@ -139,7 +139,7 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
     return { position: context.project(vertex.position), texCoord: uv,
       color: { x: color.x * tint.x / 255, y: color.y * tint.y / 255, z: color.z * tint.z / 255, w: color.w } };
   });
-  const fragmentLighting = material.kind === "q2" ? context.fragmentLighting : undefined;
+  const fragmentLighting = context.fragmentLighting;
   const textureLighting: BatchLighting = fragmentLighting !== undefined && lightmap === null
     ? { ...fragmentLighting, pass: "texture" } : { kind: "vertex" };
   const batches: DrawBatch[] = [{ lighting: textureLighting, primitive: "triangles", texturing: "single", indices: geometry.indices, vertices, state, texture: { kind: "bind-image", image } }];
@@ -162,11 +162,13 @@ export function prepareLegacyMaterialBatches(material: Q1Material | Q2Material, 
           texture: { kind: "bind-image", image: combinedLightmap }, secondTexture: { binding: { kind: "bind-image", image }, environment: "modulate" } };
       }
     } else {
-      const blend: RenderState["blend"] = material.kind === "q1" && context.q1LightmapEncoding !== "rgb"
+      const blend: RenderState["blend"] = material.kind === "q1" && context.q1LightmapEncoding !== "rgb" && fragmentLighting === undefined
         ? { source: "zero", destination: context.q1LightmapEncoding === "inverted-alpha" ? "one-minus-src-alpha" : "one-minus-src-color" }
         : { source: "dst-color", destination: "zero" };
       const lighting: BatchLighting = fragmentLighting === undefined ? { kind: "vertex" } : { ...fragmentLighting, pass: "lightmap" };
-      batches.push({ lighting, primitive: "triangles", texturing: "single", texture: { kind: "bind-image", image: lightmap }, indices: geometry.indices,
+      const direct = material.kind === "q1" && fragmentLighting !== undefined ? context.translucentLightmap : lightmap;
+      if (direct === undefined) throw new Error("Fragment-lit lightmap requires uploaded direct RGB pixels");
+      batches.push({ lighting, primitive: "triangles", texturing: "single", texture: { kind: "bind-image", image: direct }, indices: geometry.indices,
         state: { ...state, blend, depthTest: "equal", depthWrite: false, alphaTest: "none" },
         vertices: vertices.map((vertex, index) => {
           const source = geometry.vertices[index];

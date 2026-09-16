@@ -2,7 +2,7 @@ import { compiledDrawGroup, sequenceDrawGroup, sourceDrawGroup } from "../submis
 import type { SceneModelGroup } from "../submissions.ts";
 import type { GameFamily } from "../../../contracts/content.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
-import type { DrawBatch, Palette } from "../../../contracts/render.ts";
+import type { DrawBatch, Palette, Q2FragmentLight } from "../../../contracts/render.ts";
 import type { SceneEntity, TimedFrames } from "../../../contracts/scene.ts";
 import { add3, dot3, normalize3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
 import { q1PlayerTranslation } from "../../../formats/images/index.ts";
@@ -26,7 +26,7 @@ import { prepareSceneEntity, preparedModelGroups } from "./prepare.ts";
 import { replacementEntity } from "./replacements.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
 import { r_avertexnormal_dots } from "./shadedots.ts";
-import { attachSceneEntity, modelAttachmentTag, modelWorldPoint, q3ModelViewOrigin } from "./transform.ts";
+import { attachSceneEntity, modelAttachmentTag, modelWorldPoint, modelWorldDirection, q3ModelViewOrigin } from "./transform.ts";
 import { byteColor, modelImage } from "./types.ts";
 import type { ModelImageSelection, ModelSkinningFrame, ModelSourceOptions, PreparedModelSurface } from "./types.ts";
 
@@ -193,11 +193,13 @@ export class SceneModelRenderer {
       if (value === undefined) { value = sourceOptions(entity); optionCache.set(entity, value); }
       return value;
     };
+    const coneLights = input.q2FragmentLighting?.lights.some(light => light.cone !== null) === true
+      ? input.q2FragmentLighting.lights.filter(light => light.cone !== null) : null;
     const q2Lighting = this.provider.family === "q2" || this.provider.family === "q1" && this.world.map.kind === "q2-bsp";
     const lightingInput = q2Lighting && input.q2FragmentLighting !== undefined
       ? { ...input, lights: input.lights === undefined
-        ? input.q2FragmentLighting.lights.map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))
-        : [...input.lights, ...input.q2FragmentLighting.lights.filter(light => light.shadow.kind !== "none")
+        ? (coneLights === null ? input.q2FragmentLighting.lights : input.q2FragmentLighting.lights.filter(light => light.cone === null)).map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))
+        : [...input.lights, ...input.q2FragmentLighting.lights.filter(light => light.cone === null && light.shadow.kind !== "none")
           .map(light => ({ origin: light.origin, color: light.color, radius: light.radius, minimum: 0 }))] } : input;
     const finalVertexLight = (entity: SceneEntity, normal: Vec3, _position: Vec3, corner: number, source: ModelSourceOptions): Vec3 => {
       if (this.provider.family === "q3") return unit;
@@ -275,7 +277,7 @@ export class SceneModelRenderer {
       ...(skinningFrame === undefined ? {} : { skinningFrame }),
       ...(this.provider.modelPolicy === undefined ? {} : { modelPolicy: this.provider.modelPolicy }),
       frustum: cameraFrustum(input.camera), options, finalVertexLight, paletteColor: (_entity, index) => this.paletteColor(index) }),
-    { draw: surface => this.draw(surface, input, surface.options, lightCache.get(surface.entity)) }));
+    { draw: surface => this.draw(surface, input, surface.options, coneLights, lightCache.get(surface.entity)) }));
   }
 
   /** Light views retain player bodies and off-camera geometry, without inflated powerup shells. */
@@ -358,17 +360,25 @@ export class SceneModelRenderer {
       && center.z - radius < volume.bounds.max.z && center.z + radius > volume.bounds.min.z) ?? null;
   }
 
-  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, shade?: Vec3): readonly SceneModelGroup[] {
+  private draw(surface: PreparedModelSurface, input: WorldViewInput, options: ModelSourceOptions, coneLights: readonly Q2FragmentLight[] | null, shade?: Vec3): readonly SceneModelGroup[] {
     const material = this.materials.get(materialKey(surface.entity, surface.image, options));
     if (material === undefined) throw new Error(`Model material was not preloaded: ${surface.entity.resource.requestedPath}/${surface.name}`);
     const time = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
+    const flags = surface.entity.flags.kind === "q2" ? surface.entity.flags.bits : 0, shadows = input.q2FragmentLighting;
+    const receivesCone = coneLights !== null && shadows !== undefined && !surface.unlit && options.viewModel !== true
+      && (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0 && !(options.infrared === true && (flags & 32768) !== 0);
     if (material.kind === "q3") {
       const axis = surface.transform.axis;
       const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
       const fog = this.fogFor(surface);
       const base = this.world.materialContext(input, transform, fog?.volume ?? null);
       const project = createViewProjector(input.camera);
-      const context = { ...base, entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input, options.noWorldModel),
+      const modelLighting: import("../../../materials/evaluate.ts").MaterialDrawContext["modelLighting"] = receivesCone
+        ? geometry => ({ kind: "q2-world", pass: "model", shadeScale: null, atlas: shadows.atlas,
+          lights: coneLights.map(light => ({ ...light, fraction: { x: 0, y: 0, z: 0 } })),
+          worldPositions: geometry.vertices.map(vertex => modelWorldPoint(surface.transform, vertex.position)),
+          normals: geometry.vertices.map(vertex => normalize3(modelWorldDirection(surface.transform, vertex.normal))) }) : undefined;
+      const context = { ...base, ...(modelLighting === undefined ? {} : { modelLighting }), entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input, options.noWorldModel),
         shaderTexCoord: options.shaderTexCoord ?? base.shaderTexCoord,
         localViewOrigin: q3ModelViewOrigin(transform, input.camera.origin, options.nonNormalizedAxes === true), depthRange: surface.depthRange,
         timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + material.timeOffset,
@@ -387,22 +397,30 @@ export class SceneModelRenderer {
     const batches = prepareLegacyMaterialBatches(definition, surface.geometry, { time, animationFrame: 0, alternateAnimation: false,
       fullbright: surface.unlit ? null : texture.fullbright, q1LightmapEncoding: "rgb", cull: surface.cull, depthRange: surface.depthRange,
       project: point => { const projected = project(point); return surface.mirrorWeapon ? { ...projected, x: -projected.x } : projected; } });
-    const flags = surface.entity.flags.kind === "q2" ? surface.entity.flags.bits : 0, shadows = input.q2FragmentLighting;
+
     const receives = this.provider.family === "q2" && shade !== undefined && shadows !== undefined && shadows.atlas !== null
       && !surface.unlit && options.viewModel !== true && (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0
       && !(options.infrared === true && (flags & 32768) !== 0);
-    const affecting = receives ? aliasShadowLightFractions(surface.entity.transform.origin, shade, shadows.lights) : [];
+    const affecting = receives ? aliasShadowLightFractions(surface.entity.transform.origin, shade, coneLights === null ? shadows.lights : shadows.lights.filter(light => light.cone === null)) : [];
     const shadeScale = receives && affecting.length !== 0 ? aliasShadeDivisor(shade) : 1;
     return [sequenceDrawGroup(alpha < 1 ? "translucent" : "opaque", batches.map((batch, index): DrawBatch => {
       const state = { ...batch.state, alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
         cull: surface.mirrorWeapon ? batch.state.cull === "front" ? "back" : batch.state.cull === "back" ? "front" : "none" : batch.state.cull } satisfies DrawBatch["state"];
-      if (index !== 0 || affecting.length === 0 || shadows === undefined || shadows.atlas === null) return { ...batch, state };
-      const lighting = { kind: "q2-model-shadow", worldPositions: surface.geometry.vertices.map(vertex => vertex.position),
-        lights: affecting, shadeScale, atlas: shadows.atlas } satisfies DrawBatch["lighting"];
+      if (index !== 0) return { ...batch, state };
+      const alias: DrawBatch["lighting"] = affecting.length === 0 || shadows === undefined || shadows.atlas === null ? batch.lighting
+        : { kind: "q2-model-shadow", worldPositions: surface.geometry.vertices.map(vertex => vertex.position), lights: affecting, shadeScale, atlas: shadows.atlas };
       const color = (value: DrawBatch["vertices"][number]["color"]): DrawBatch["vertices"][number]["color"] =>
         ({ x: value.x / shadeScale, y: value.y / shadeScale, z: value.z / shadeScale, w: value.w });
-      return batch.texturing === "single" ? { ...batch, state, lighting, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) }
-        : { ...batch, state, lighting, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) };
+      const corrected: DrawBatch = alias.kind !== "q2-model-shadow" ? { ...batch, state } : batch.texturing === "single"
+        ? { ...batch, state, lighting: alias, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) }
+        : { ...batch, state, lighting: alias, vertices: batch.vertices.map(vertex => ({ ...vertex, color: color(vertex.color) })) };
+      if (!receivesCone) return corrected;
+      const lighting = { kind: "q2-world", pass: "model", shadeScale: corrected.lighting.kind === "q2-model-shadow" ? shadeScale : null,
+        worldPositions: surface.geometry.vertices.map(vertex => vertex.position), normals: surface.geometry.vertices.map(vertex => normalize3(vertex.normal)), atlas: shadows.atlas,
+        lights: shadows.lights.map(light => ({ ...light, color: light.cone === null ? { x: 0, y: 0, z: 0 } : light.color,
+          scale: light.cone === null ? 0 : light.scale,
+          fraction: affecting.find(point => point.origin === light.origin)?.fraction ?? { x: 0, y: 0, z: 0 } })) } satisfies DrawBatch["lighting"];
+      return { ...corrected, lighting };
     }))];
   }
 }

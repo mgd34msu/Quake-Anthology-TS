@@ -353,6 +353,13 @@ export class Q2RereleasePlayers extends Q2Players {
     return undefined;
   }
 
+  emitFlashlight(actor: ActorId, game: Q2GameServices): undefined {
+    const state = this.states.get(actor);
+    if (state === undefined) throw new Error("Flashlight player is not admitted");
+    return this.rereleaseHooks.emit({ kind: "flashlight", actor, hand: state.hand,
+      enabled: this.extra(actor).flashlight && this.intermission.kind === "playing" && (game.host.combat.read(actor)?.health ?? 0) > 0 });
+  }
+
   override endFrame(entity: Q2Entity, game: Q2GameServices): undefined {
     this.extension?.beginPlayerFrame(entity, game);
     super.endFrame(entity, game);
@@ -361,6 +368,7 @@ export class Q2RereleasePlayers extends Q2Players {
     const alpha = this.intermission.kind === "playing" && (game.host.combat.read(entity.actor.id)?.health ?? 0) > 0 && extra.invisibilityUntil > now
       ? Math.max(0.1, Math.min(1, (extra.invisibilityFadeUntil - now) / 2)) : 1;
     this.rereleaseHooks.emit({ kind: "alpha", actor: entity.actor.id, alpha });
+    this.emitFlashlight(entity.actor.id, game);
     if (this.intermission.kind === "playing" && game.options.mode === "coop" && this.rereleaseOptions.coopPlayerCollision && (entity.clipMask & 0x40000000) === 0 && game.host.combat.read(entity.actor.id)?.canTakeDamage) {
       const body = game.body(entity), trace = game.host.trace({ start: body.origin, end: body.origin, bounds: body.bounds, ignore: entity.actor.id, mask: 0x40000000 });
       if (!trace.startSolid && !trace.allSolid) { entity.clipMask |= 0x40000000; this.rereleaseHooks.playerCollision?.(entity.actor.id, true); }

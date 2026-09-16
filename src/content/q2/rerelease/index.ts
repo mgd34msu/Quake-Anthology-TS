@@ -161,10 +161,10 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
     if (this.players.rereleaseOptions.coopLives) for (const extra of this.players.rereleaseStates.values()) extra.lives = this.players.rereleaseOptions.coopNumLives + 1;
     return undefined;
   }
-  spawned(entity: Q2Entity, _game: Q2GameServices): undefined {
+  spawned(entity: Q2Entity, game: Q2GameServices): undefined {
     const extra = this.players.extra(entity.actor.id); extra.wantedFog = this.worldFog; extra.spawned = !extra.awaitingRespawn;
     this.forceFog(entity.actor.id, true);
-    return this.hooks.emit({ kind: "flashlight", actor: entity.actor.id, enabled: extra.flashlight });
+    return this.players.emitFlashlight(entity.actor.id, game);
   }
 
   private instanced(game: Q2GameServices): boolean { return game.options.mode === "coop" && q2UsesInstancedItems(this.players.rereleaseOptions); }

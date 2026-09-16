@@ -13,7 +13,7 @@ import { attenuateFogColor, fogPassState } from "./fog.ts";
 import type { FogAdjustment } from "./fog.ts";
 import { MaterialDeformState } from "./geometry.ts";
 import type { MaterialGeometry, MaterialVertex } from "./geometry.ts";
-import { evaluateTexCoords, SourceTexCoordGenerator, stageState } from "./material.ts";
+import { evaluateTexCoords, SourceColorGenerator, SourceTexCoordGenerator, stageState } from "./material.ts";
 import { sourceMaterialIterator, type FinishedIteratorStage } from "./material-iterator.ts";
 import type { BatchLighting } from "../contracts/render.ts";
 import { sourceStateChanges } from "./source-state.ts";
@@ -29,6 +29,7 @@ export interface MaterialDrawContext extends Omit<StageColorContext, "time" | "p
   readonly dynamicLights?: { readonly lights: readonly DynamicLight[]; readonly mask: number; readonly image: RendererImage };
   /** Scene-owned masks and resources, evaluated on the deformed vertices. */
   readonly dynamicLightBatches?: (geometry: MaterialGeometry) => readonly DrawBatch[];
+  readonly modelLighting?: (geometry: MaterialGeometry) => Extract<BatchLighting, { readonly kind: "q2-world" }> & { readonly pass: "model" };
   readonly lightmapLighting?: (geometry: MaterialGeometry) => Extract<BatchLighting, { readonly kind: "q2-world" }>;
   readonly depthRange: RenderState["depthRange"];
   readonly polygonOffset: RenderState["polygonOffset"];
@@ -101,7 +102,8 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
   const batches: DrawBatch[] = [];
   const previousColors: Vec4[] = geometry.vertices.map(() => ({ x: 0, y: 0, z: 0, w: 0 }));
   const lightmapLighting = context.lightmapLighting !== undefined && compiled.finished.hasLightmapStage ? context.lightmapLighting(geometry) : null;
-  const iterator = lightmapLighting === null ? compiled.finished.iterator : sourceMaterialIterator({ stages: compiled.finished.sourceStages,
+  const modelLighting = context.modelLighting !== undefined && compiled.finished.sourceStages.some(stage => stage.rgbGen === SourceColorGenerator.LightingDiffuse) ? context.modelLighting(geometry) : null;
+  const iterator = lightmapLighting === null && modelLighting === null ? compiled.finished.iterator : sourceMaterialIterator({ stages: compiled.finished.sourceStages,
     sky: definition.sky !== null, polygonOffset: definition.polygonOffset, deformCount: definition.deforms.length },
     { ignoreFastPath: true, multitexture: false, textureEnvAdd: false, driver: "generic" });
   for (const pass of iterator.passes) {
@@ -119,7 +121,8 @@ export function evaluateMaterialPasses(compiled: CompiledMaterial, input: Materi
       return { position: context.project(vertex.position), color, texCoord: coordinates(first, vertex, time, context) };
     });
     if (second === undefined) {
-      batches.push({ lighting: first.isLightmap && lightmapLighting !== null ? { ...lightmapLighting, pass: "material-lightmap" } : { kind: "vertex" },
+      batches.push({ lighting: first.isLightmap && lightmapLighting !== null ? { ...lightmapLighting, pass: "material-lightmap" }
+        : pass.rgbGen === SourceColorGenerator.LightingDiffuse && modelLighting !== null ? modelLighting : { kind: "vertex" },
         primitive: "triangles", texturing: "single", state: renderState, texture, indices: geometry.indices, vertices });
     } else {
       if (!second.active) throw new Error("Collapsed stage lost its second registered texture");

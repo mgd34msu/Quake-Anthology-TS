@@ -2168,7 +2168,7 @@ export class SharedSimulation implements Simulation {
     this.events.emit(content, { kind: "q2-rerelease", event: { kind: "story", text: source.entities.story } });
     for (const [player, state] of source.players.rereleaseStates) if (actor === null || sameActor(actor, player)) {
       this.events.emit(content, { kind: "q2-rerelease", event: { kind: "fog", actor: player, value: state.fog, transitionMilliseconds: 0 } });
-      this.events.emit(content, { kind: "q2-rerelease", event: { kind: "flashlight", actor: player, enabled: state.flashlight } });
+      source.players.emitFlashlight(player, this.source.game);
     } return undefined;
   }
 

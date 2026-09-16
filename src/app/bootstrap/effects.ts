@@ -89,6 +89,7 @@ export class ApplicationEffects {
   private styles: readonly SceneLightStyle[] = [];
   private lights: TimedLight[] = [];
   private sampledLights: SurfaceDynamicLight[] = [];
+  private readonly flashlights = new Map<ActorId, Extract<SimulationPresentationEvent, { readonly kind: "q2-rerelease" }>["event"] & { readonly kind: "flashlight" }>();
   private readonly shadowLights = new Map<ActorId, Q2ShadowLightState>();
   private readonly sourceLights = new Map<ActorId, SurfaceDynamicLight>();
   private readonly playerViews = new Q2EffectViews();
@@ -205,6 +206,7 @@ export class ApplicationEffects {
     const pending = this.pending; this.pending = [];
     for (const source of pending) await this.event(source);
     const liveActors = new Set(snapshot.actors.map(actor => actor.id));
+    for (const actor of this.flashlights.keys()) if (!liveActors.has(actor)) this.flashlights.delete(actor);
     for (const actor of this.shadowLights.keys()) if (!liveActors.has(actor)) this.shadowLights.delete(actor);
     for (const actor of this.sourceLights.keys()) if (!liveActors.has(actor)) this.sourceLights.delete(actor);
     for (const actor of this.trackerPain.keys()) if (!liveActors.has(actor)) this.trackerPain.delete(actor);
@@ -279,8 +281,17 @@ export class ApplicationEffects {
     const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
     return { q3Admissions, operations: [...operations.filter(polygon), ...operations.filter(operation => !polygon(operation))], lights: [...this.sampledLights, ...sourceLights], q3Lights: q3Lights.slice(0, 32) };
   }
-  shadowSceneLights(camera: SceneCamera, style: (index: number) => number): readonly SceneLight[] {
-    return [...this.shadowLights.values()].flatMap(light => {
+  shadowSceneLights(camera: SceneCamera, style: (index: number) => number, viewer: ActorId | null = null): readonly SceneLight[] {
+    const flashlights: SceneLight[] = [...this.flashlights.values()].flatMap(light => {
+      const pose = this.pose(light.actor);
+      if (pose === undefined) return [];
+      const local = viewer?.equals(light.actor) === true, axis = local ? camera.axis : anglesToAxis(pose.angles);
+      // q2repro CL_AddPacketEntities per-pixel flashlight; scene axis[1] is left.
+      const origin = local ? add3(camera.origin, scale3(axis[1], light.hand === "center" ? 0 : light.hand === "left" ? 7 : -7)) : pose.origin;
+      return [{ origin, color: white, radius: 512, additive: true, profile: { kind: "q2", scale: 2,
+        cone: { direction: axis[0], cosHalfAngle: Math.cos(22 * Math.PI / 180) }, shadow: { kind: "cast", resolution: 512 } } } satisfies SceneLight];
+    });
+    return [...flashlights, ...[...this.shadowLights.values()].flatMap(light => {
       if (!light.visible || light.radius <= 0) return [];
       let fade = 1;
       if (!(light.fadeStart <= 1 && light.fadeEnd <= 1) && light.fadeStart <= light.fadeEnd) {
@@ -292,7 +303,7 @@ export class ApplicationEffects {
       return fade <= 0 ? [] : [{ origin: light.origin, color: light.color, radius: light.radius, additive: true,
         profile: { kind: "q2", scale: light.intensity * fade * (light.lightstyle === -1 ? 1 : style(light.lightstyle)),
           cone: light.cone, shadow: { kind: "cast", resolution: light.resolution } } } satisfies SceneLight];
-    });
+    })];
   }
   private palette(group: Group, index: number): Vec3 {
     const palette = group.provider.palette; if (palette === null) throw new Error("Indexed effects require their source palette");
@@ -341,7 +352,9 @@ export class ApplicationEffects {
     }
     if (source.kind === "q2-rerelease") {
       const event = source.event;
-      if (event.kind === "dynamic-light") {
+      if (event.kind === "flashlight") {
+        if (event.enabled) this.flashlights.set(event.actor, event); else this.flashlights.delete(event.actor);
+      } else if (event.kind === "dynamic-light") {
         if (event.visible) this.sourceLights.set(event.actor, { origin: event.origin, radius: event.radius, color: event.color, minimum: 0 });
         else this.sourceLights.delete(event.actor);
       }
@@ -617,7 +630,7 @@ export class ApplicationEffects {
     if (this.closed) throw new Error("Effect world is closed");
     this.pending = []; this.unhandled = []; this.beams = []; this.explosions = [];
     this.staticBrushes.length = 0; this.styles = []; this.lights = []; this.sampledLights = [];
-    this.entityTrails.clear(); this.shadowLights.clear(); this.sourceLights.clear();
+    this.entityTrails.clear(); this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear();
     this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
     this.poses = []; this.time = null; this.q3WeaponTimes.clear();
     for (const group of this.groups.values()) {
@@ -633,6 +646,6 @@ export class ApplicationEffects {
     this.preparedQ3Weapons.clear();
     for (const image of this.images.values()) this.assets.images.release(image);
     this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear();
-    this.shadowLights.clear(); this.sourceLights.clear(); this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
+    this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear(); this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
   }
 }

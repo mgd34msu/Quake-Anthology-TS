@@ -214,3 +214,42 @@ test("mipmapped implicit pictures retain 2D alpha blending and native first-regi
     expect(Array.from(renderer.pixels.slice(20, 23))).toEqual([128, 128, 255]);
   } finally { renderer.close(); }
 });
+
+test("Q1 fragment lights use direct RGB lightmaps for all source encodings without changing fullbright", () => {
+  const material = createQ1Material("stone", base.frame.image, { kind: "lightmap", image: lightmap.frame.image, styles: [0] });
+  const direct = image("direct-lightmap", 3);
+  for (const encoding of ["rgb", "inverted-alpha", "inverted-luminance"] satisfies readonly Q1LightmapEncoding[]) {
+    const batches = prepareLegacyMaterialBatches(material, geometry, { time: 0, animationFrame: 0, alternateAnimation: false,
+      fullbright: white.frame.image, q1LightmapEncoding: encoding, translucentLightmap: direct, cull: "back", depthRange: [0, 1], project: context.project,
+      fragmentLighting: { kind: "q2-world", pass: "texture", worldPositions: geometry.vertices.map(vertex => vertex.position),
+        normals: geometry.vertices.map(vertex => vertex.normal), lights: [], atlas: null } });
+    expect(batches[0]?.lighting).toEqual({ kind: "vertex" });
+    expect(batches[1]?.lighting.kind).toBe("q2-world");
+    expect(batches[1]?.texture).toEqual({ kind: "bind-image", image: direct });
+    expect(batches[1]?.state.blend).toEqual({ source: "dst-color", destination: "zero" });
+    expect(batches[2]?.lighting).toEqual({ kind: "vertex" });
+    expect(batches[2]?.texture).toEqual({ kind: "bind-image", image: white.frame.image });
+  }
+});
+
+test("Q3 model fragment lights bind only to diffuse skin stages and preserve emissive stages", async () => {
+  const [material] = await compileShaderScript(`models/test/skin
+{
+ { map textures/skin.tga
+   rgbGen lightingDiffuse }
+ { map textures/glow.tga
+   blendFunc add
+   rgbGen identity }
+}`, host, { lightmapIndex: -1 });
+  if (material === undefined) throw new Error("Missing authored model shader");
+  let prepared = 0;
+  const batches = prepareMaterialBatches(material, geometry, { ...context,
+    lighting: { ambientLight: { x: 30, y: 30, z: 30 }, directedLight: { x: 40, y: 40, z: 40 }, lightDir: { x: 0, y: 0, z: 1 }, ambientLightInt: 0xff1e1e1e },
+    modelLighting: geometry => { prepared++; return { kind: "q2-world", pass: "model", shadeScale: null, lights: [], atlas: null,
+      worldPositions: geometry.vertices.map(vertex => vertex.position), normals: geometry.vertices.map(vertex => vertex.normal) }; } });
+  expect(prepared).toBe(1);
+  expect(batches).toHaveLength(2);
+  expect(batches[0]?.lighting).toMatchObject({ kind: "q2-world", pass: "model" });
+  expect(batches[1]?.lighting).toEqual({ kind: "vertex" });
+  expect(batches[1]?.state.blend).toEqual({ source: "one", destination: "one" });
+});
