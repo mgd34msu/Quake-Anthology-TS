@@ -99,3 +99,34 @@ test("remote provenance cannot change playback, and release preserves replacemen
   f.commands.register("playdemo", () => { replacement++; }); f.release(); f.commands.executeNow("playdemo demo1");
   expect(replacement).toBe(1); expect(f.commands.exists("startdemos")).toBe(false);
 });
+
+test("typed dispatch preserves supplied arguments and nested script provenance without parsing", () => {
+  const f = fixture();
+  const source: CommandContext = { ...f.context, origin: { kind: "script", name: "nested.cfg", caller: { kind: "script", name: "autoexec.cfg", caller: f.context.origin } } };
+  const name = 'recording with spaces;echo "literal".dem';
+  expect(f.service.handle("PLAYdemo", [name], source)).toBe(true);
+  const intent = f.publishLast();
+  expect(intent.request).toEqual({ family: "q1", name, timedemo: false });
+  expect(intent.source).toBe(source);
+  expect(f.appended).toHaveLength(0);
+  expect(f.service.handle("map", ["start"], source)).toBe(false);
+  expect(f.staged).toHaveLength(1);
+});
+
+test("typed routing retains timedemo cvar ownership and rejects remote script playback", () => {
+  const f = fixture({ kind: "local", family: "q3" });
+  for (const family of ["q2", "q3"] satisfies readonly ("q2" | "q3")[]) {
+    f.state({ kind: "local", family });
+    expect(f.service.handle("timedemo", ["1"], f.context)).toBe(false);
+  }
+  expect(f.staged).toHaveLength(0);
+  f.state({ kind: "local", family: "qw" });
+  expect(f.service.handle("timedemo", ["benchmark.qwd"], f.context)).toBe(true);
+  expect(f.publishLast().request).toEqual({ family: "qw", name: "benchmark.qwd", timedemo: true });
+  const remote: CommandContext = { ...f.context, origin: { kind: "script", name: "remote.cfg", caller: { kind: "remote-client", client: f.identity.client(1, 0) } } };
+  for (const name of ["playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", "timedemo"]) {
+    expect(f.service.handle(name, ["other"], remote)).toBe(true);
+    expect(f.printed.at(-1)).toBe(`${name} is a local client command.\n`);
+  }
+  expect(f.staged).toHaveLength(1);
+});

@@ -1,3 +1,4 @@
+import { asciiFold } from "../../core/commands/index.ts";
 import type { CommandContext } from "../../contracts/common.ts";
 import type { CommandBuffer, CommandHandler, CommandInvocation } from "../../core/commands/index.ts";
 import { demoFamily, type DemoFamily, type DemoRequest } from "./demo-playback.ts";
@@ -20,8 +21,10 @@ export interface ClientDemoCommandHost {
   takeCompletionCommand(family: "q2" | "q3"): string;
 }
 
-function local(command: CommandInvocation): boolean {
-  let origin = command.source.origin;
+type DemoCommand = Pick<CommandInvocation, "args" | "source"> & { readonly name: string };
+
+function local(source: CommandContext): boolean {
+  let origin = source.origin;
   while (origin.kind === "script") origin = origin.caller;
   return origin.kind !== "remote-client";
 }
@@ -39,36 +42,23 @@ export class ClientDemoCommands {
 
   attach(commands: CommandBuffer): () => void {
     const owned = new Map<string, CommandHandler>();
-    const add = (name: string, handler: CommandHandler, summary: string, usage: string): void => {
-      const guarded: CommandHandler = command => {
-        if (!local(command)) { this.host.print(`${name} is a local client command.\n`); return; }
-        handler(command);
-      };
+    const add = (name: string, summary: string, usage: string): void => {
+      const handler: CommandHandler = command => { this.handle(name, command.args, command.source); };
       const examples = [usage.replace("<name>", "demo1").replace("[name ...]", "demo1 demo2 demo3")];
-      if (commands.register(name, guarded, { summary, usage, examples })) owned.set(name, guarded);
+      if (commands.register(name, handler, { summary, usage, examples })) owned.set(name, handler);
       else this.host.print(`Demo command ${name} is already owned by another command.\n`);
     };
-    add("playdemo", command => { this.play(command); }, "Play a recording; its file extension selects the game.", "playdemo <name>");
-    add("demo", command => { this.play(command, "q3"); }, "Play a Quake III recording.", "demo <name>");
-    add("demomap", command => { this.play(command, "q2"); }, "Play a Quake II recording.", "demomap <name>");
-    add("startdemos", command => { this.startDemos(command); }, "Set the Quake attract-mode recording list.", "startdemos [name ...]");
-    add("demos", command => {
-      if (this.host.dedicated) return;
-      if (this.next < 0) this.next = 1;
-      this.cycleSource = command.source;
-      this.nextDemo();
-    }, "Resume the saved Quake attract list.", "demos");
-    add("stopdemo", command => {
-      if (this.host.dedicated || this.host.current().kind !== "demo") return;
-      this.next = -1;
-      this.latestRequest = null;
-      this.host.stage({ kind: "stop", source: command.source });
-    }, "Stop the active recording and return to the menu.", "stopdemo");
+    add("playdemo", "Play a recording; its file extension selects the game.", "playdemo <name>");
+    add("demo", "Play a Quake III recording.", "demo <name>");
+    add("demomap", "Play a Quake II recording.", "demomap <name>");
+    add("startdemos", "Set the Quake attract-mode recording list.", "startdemos [name ...]");
+    add("demos", "Resume the saved Quake attract list.", "demos");
+    add("stopdemo", "Stop the active recording and return to the menu.", "stopdemo");
     const binding = {
       refresh: (): void => {
         const family = this.host.current().family;
         if (family === "q1" || family === "qw") {
-          if (!owned.has("timedemo")) add("timedemo", command => { this.play(command, undefined, true); }, "Benchmark a Quake recording.", "timedemo <name>");
+          if (!owned.has("timedemo")) add("timedemo", "Benchmark a Quake recording.", "timedemo <name>");
         } else {
           const handler = owned.get("timedemo");
           if (handler !== undefined) { commands.unregister("timedemo", handler); owned.delete("timedemo"); }
@@ -81,13 +71,50 @@ export class ClientDemoCommands {
     return binding.release;
   }
 
+  handle(nameInput: string, args: readonly string[], source: CommandContext): boolean {
+    const name = asciiFold(nameInput);
+    switch (name) {
+      case "playdemo": case "demo": case "demomap": case "startdemos": case "demos": case "stopdemo": break;
+      case "timedemo": {
+        const family = this.host.current().family;
+        if (family !== "q1" && family !== "qw") return false;
+        break;
+      }
+      default: return false;
+    }
+    if (!local(source)) { this.host.print(`${name} is a local client command.\n`); return true; }
+    const command: DemoCommand = { name, args, source };
+    switch (name) {
+      case "playdemo": this.play(command); break;
+      case "demo": this.play(command, "q3"); break;
+      case "demomap": this.play(command, "q2"); break;
+      case "timedemo": this.play(command, undefined, true); break;
+      case "startdemos": this.startDemos(command); break;
+      case "demos":
+        if (!this.host.dedicated) {
+          if (this.next < 0) this.next = 1;
+          this.cycleSource = source;
+          this.nextDemo();
+        }
+        break;
+      case "stopdemo":
+        if (!this.host.dedicated && this.host.current().kind === "demo") {
+          this.next = -1;
+          this.latestRequest = null;
+          this.host.stage({ kind: "stop", source });
+        }
+        break;
+    }
+    return true;
+  }
+
   /** Call at the published world/profile boundary, after cvar routing is adopted. */
   refresh(): void { for (const binding of this.bindings) binding.refresh(); }
 
-  private play(command: CommandInvocation, selected?: DemoFamily, timedemo = false): void {
+  private play(command: DemoCommand, selected?: DemoFamily, timedemo = false): void {
     if (this.host.dedicated && selected !== "q2") return;
     const name = command.args[0];
-    if (command.args.length !== 1 || name === undefined) { this.host.print(`Usage: ${command.argv[0]} <name>\n`); return; }
+    if (command.args.length !== 1 || name === undefined) { this.host.print(`Usage: ${command.name} <name>\n`); return; }
     this.next = -1;
     const family = selected ?? demoFamily(name, this.host.current().family);
     this.start({ family, name, timedemo }, command.source);
@@ -99,7 +126,7 @@ export class ClientDemoCommands {
     this.host.stage({ kind: "start", request, source });
   }
 
-  private startDemos(command: CommandInvocation): void {
+  private startDemos(command: DemoCommand): void {
     const current = this.host.current();
     if (this.host.dedicated) {
       if (current.kind === "idle" && !current.explicitStartup) this.host.append("map start\n", command.source);

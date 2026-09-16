@@ -201,12 +201,26 @@ export async function openApplicationConfigurationContent(catalog: InstalledCata
 /** A map and every resolved reference retain their original archive identity. */
 export class LoadedApplicationContent {
   private readonly scoped = new Map<ContentId, Promise<MountedContent>>();
-  private closed = false;
+  private readonly lifecycle = { closed: false, mainMountLeases: 0 };
+  private get closed(): boolean { return this.lifecycle.closed; }
   private readonly opened = new Set<MountedContent>();
 
   constructor(readonly catalog: InstalledCatalog, readonly recipe: ExecutableRecipe,
     readonly world: ApplicationWorld, readonly mounts: MountedContent, readonly preparedQuakeC: PreparedQuakeCSource | null = null,
     private readonly pure?: PureMountPolicy, readonly preparedQ3Game: PreparedQ3Game | null = null) {}
+
+  retainMainMounts(): () => void {
+    if (this.closed) throw new Error("Application content is closed");
+    const lifecycle = this.lifecycle, mounts = this.mounts;
+    lifecycle.mainMountLeases++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      lifecycle.mainMountLeases--;
+      if (lifecycle.closed && lifecycle.mainMountLeases === 0) mounts.close();
+    };
+  }
 
   openedMounts(): readonly MountedContent[] { return this.closed ? [] : [this.mounts, ...this.opened]; }
 
@@ -237,8 +251,8 @@ export class LoadedApplicationContent {
 
   async close(): Promise<void> {
     if (this.closed) return;
-    this.closed = true;
-    this.mounts.close();
+    this.lifecycle.closed = true;
+    if (this.lifecycle.mainMountLeases === 0) this.mounts.close();
     for (const pending of this.scoped.values()) {
       const result = await pending.catch(() => null);
       result?.close();
