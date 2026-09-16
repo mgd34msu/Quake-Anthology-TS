@@ -44,6 +44,12 @@ export class GlRenderer implements RendererBackend {
   private alphaTest: RenderState["alphaTest"] = "none";
   private textureUnit: 0 | 1 | 2 | 3 | null = null;
   private matricesIdentity = false;
+  private depthEnabled: boolean | undefined;
+  private depthFunction: RenderState["depthTest"] | undefined;
+  private depthWrite: boolean | undefined;
+  private blendEnabled: boolean | undefined;
+  private blendSource: RenderState["blend"]["source"] | undefined;
+  private blendDestination: RenderState["blend"]["destination"] | undefined;
   private currentCull: RenderState["cull"] | undefined;
   private rangeNear: number | undefined;
   private rangeFar: number | undefined;
@@ -175,6 +181,12 @@ export class GlRenderer implements RendererBackend {
     this.textureUnit = null;
     this.matricesIdentity = false;
     this.currentCull = undefined;
+    this.depthEnabled = undefined;
+    this.depthFunction = undefined;
+    this.depthWrite = undefined;
+    this.blendEnabled = undefined;
+    this.blendSource = undefined;
+    this.blendDestination = undefined;
     this.rangeNear = undefined;
     this.rangeFar = undefined;
     this.offsetEnabled = undefined;
@@ -222,13 +234,31 @@ export class GlRenderer implements RendererBackend {
   private state(state: RenderState): void {
     const gl = this.gl;
     if (state.blend.destination === "src-alpha-saturate") throw new RangeError("OpenGL destination blend cannot use source alpha saturate");
-    gl.glEnable(0xb71);
-    gl.glDepthFunc(state.depthTest === "less-equal" ? 0x203 : state.depthTest === "equal" ? 0x202 : 0x207);
-    gl.glDepthMask(state.depthWrite ? 1 : 0);
-    if (state.blend.source === "one" && state.blend.destination === "zero") gl.glDisable(0xbe2);
-    else {
-      gl.glEnable(0xbe2);
+    if (this.depthEnabled !== true) {
+      this.depthEnabled = undefined;
+      gl.glEnable(0xb71);
+      this.depthEnabled = true;
+    }
+    if (this.depthFunction !== state.depthTest) {
+      this.depthFunction = undefined;
+      gl.glDepthFunc(state.depthTest === "less-equal" ? 0x203 : state.depthTest === "equal" ? 0x202 : 0x207);
+      this.depthFunction = state.depthTest;
+    }
+    if (this.depthWrite !== state.depthWrite) {
+      this.depthWrite = undefined;
+      gl.glDepthMask(state.depthWrite ? 1 : 0);
+      this.depthWrite = state.depthWrite;
+    }
+    const blendEnabled = state.blend.source !== "one" || state.blend.destination !== "zero";
+    if (this.blendEnabled !== blendEnabled) {
+      this.blendEnabled = undefined;
+      if (blendEnabled) gl.glEnable(0xbe2); else gl.glDisable(0xbe2);
+      this.blendEnabled = blendEnabled;
+    }
+    if (blendEnabled && (this.blendSource !== state.blend.source || this.blendDestination !== state.blend.destination)) {
+      this.blendSource = undefined; this.blendDestination = undefined;
       gl.glBlendFunc(blendFactors[state.blend.source], blendFactors[state.blend.destination]);
+      this.blendSource = state.blend.source; this.blendDestination = state.blend.destination;
     }
     gl.glDisable(0xbc0);
     this.alphaTest = state.alphaTest;
@@ -282,6 +312,7 @@ export class GlRenderer implements RendererBackend {
       if (!Number.isFinite(depth) || color !== null && !positionValues(color).every(finite32))
         throw new RangeError("OpenGL clear values must be finite");
       gl.glDepthMask(1);
+      this.depthWrite = true;
       gl.glClearDepth(depth);
       if (color !== null) gl.glClearColor(color.x, color.y, color.z, color.w);
       if (stencil) { gl.glStencilMask(0xffffffff); gl.glClearStencil(0); }
