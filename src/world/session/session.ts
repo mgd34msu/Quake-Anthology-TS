@@ -53,10 +53,15 @@ export class SessionClient implements SessionResource {
   get worldResources(): ResourceScope { this.resources.assertOpen(); return this.activeResources; }
   get connection(): SessionConnection | null { return this.activeConnection; }
 
-  bindSeat(seat: SessionSeat): undefined {
+  validateSeatBinding(seat: SessionSeat): void {
     this.resources.assertOpen();
+    seat.resources.assertOpen();
     if (seat.client !== this) throw new RangeError("Seat belongs to another client");
     if (this.seats.has(seat)) throw new Error("Seat is already bound");
+  }
+
+  bindSeat(seat: SessionSeat): undefined {
+    this.validateSeatBinding(seat);
     this.seats.add(seat);
     seat.resources.defer(() => { this.seats.delete(seat); return undefined; });
     this.resources.own(seat);
@@ -66,10 +71,15 @@ export class SessionClient implements SessionResource {
   connect(kind: SessionConnection["kind"]): SessionConnection {
     this.resources.assertOpen();
     this.disconnect();
+    return this.replaceConnection(kind).connection;
+  }
+
+  replaceConnection(kind: SessionConnection["kind"]): { readonly connection: SessionConnection; readonly retired: SessionConnection | null } {
     this.resources.assertOpen();
+    const retired = this.activeConnection;
     const connection = new SessionConnection(this.id, kind);
     this.activeConnection = connection;
-    return connection;
+    return { connection, retired };
   }
 
   disconnect(): undefined {
@@ -177,8 +187,9 @@ export class EngineSession implements SessionResource {
   readonly resources = new ResourceScope("Session resources");
   readonly session: SessionId;
   private readonly clients = new Map<number, SessionClient>();
-  private readonly preparedClients = new Set<SessionClient>();
+  private readonly preparedClients = new Map<SessionClient, SessionClient | null>();
   private readonly seats = new Map<number, SessionSeat>();
+  private readonly preparedSeats = new Map<SessionSeat, SessionSeat | null>();
   private readonly generations = new Map<number, number>();
   private currentWorld: WorldLifetime | null = null;
   private published: WorldSnapshot | null = null;
@@ -187,7 +198,8 @@ export class EngineSession implements SessionResource {
   constructor(private readonly identity: IdentityOwner, readonly mode: SessionMode) {
     this.session = identity.session;
     this.resources.defer(() => closeAll([...this.clients.values()].reverse(), "Client shutdown failed"));
-    this.resources.defer(() => closeAll([...this.preparedClients].reverse(), "Prepared client shutdown failed"));
+    this.resources.defer(() => closeAll([...this.preparedClients.keys()].reverse(), "Prepared client shutdown failed"));
+    this.resources.defer(() => closeAll([...this.preparedSeats.keys()].reverse(), "Prepared seat shutdown failed"));
     this.resources.defer(() => closeAll([...this.seats.values()].reverse(), "Seat shutdown failed"));
     this.resources.defer(() => this.closeWorld());
   }
@@ -196,6 +208,11 @@ export class EngineSession implements SessionResource {
   get world(): WorldLifetime | null { return this.currentWorld; }
   get snapshot(): WorldSnapshot | null { return this.published; }
 
+  clientAt(slot: number): SessionClient | null {
+    const client = this.clients.get(slot);
+    return client === undefined || client.isClosed ? null : client;
+  }
+
   attachWorld(simulation: Simulation): WorldLifetime {
     const replacement = this.replaceWorld(simulation);
     replacement.retired.close();
@@ -203,32 +220,54 @@ export class EngineSession implements SessionResource {
   }
 
   validateWorldReplacement(simulation: Simulation, presentations: Parameters<EngineSession["replaceWorld"]>[1] = [],
-    clients: Parameters<EngineSession["replaceWorld"]>[2] = { added: [], removed: [] }): void {
+    clients: Parameters<EngineSession["replaceWorld"]>[2] = { added: [], removed: [] },
+    seats: Parameters<EngineSession["replaceWorld"]>[3] = { added: [], removed: [] }): void {
     this.resources.assertOpen();
     if (this.stepping) throw new Error("Cannot replace a world during simulation.step");
     if (simulation.session !== this.session) throw new RangeError("Simulation belongs to another session");
     if (this.currentWorld?.simulation === simulation) throw new Error("Simulation is already attached");
     const additions = new Map<number, SessionClient>();
     const removals = new Set<SessionClient>();
+    const seatAdditions = new Map<number, SessionSeat>();
+    const seatRemovals = new Set<SessionSeat>();
+    for (const seat of seats.removed) {
+      if (seatRemovals.has(seat)) throw new Error("Duplicate retired seat");
+      if (seat.isClosed || this.seats.get(seat.id.index) !== seat) throw new Error("Retired seat is not owned by this session");
+      seatRemovals.add(seat);
+    }
     for (const client of clients.removed) {
       if (removals.has(client)) throw new Error("Duplicate retired client");
       if (client.isClosed || this.clients.get(client.id.slot) !== client) throw new Error("Retired client is not owned by this session");
-      if ([...this.seats.values()].some(seat => seat.client === client && !seat.isClosed)) throw new Error("Cannot retire a client with a local seat during world replacement");
+      if ([...this.seats.values()].some(seat => seat.client === client && !seat.isClosed && !seatRemovals.has(seat))) throw new Error("Cannot retire a client with a local seat during world replacement");
       removals.add(client);
     }
     for (const client of clients.added) {
-      if (client.isClosed || !this.preparedClients.has(client)) throw new Error("Replacement client was not prepared by this session");
+      const incumbent = this.preparedClients.get(client);
+      if (client.isClosed || incumbent === undefined) throw new Error("Replacement client was not prepared by this session");
       if (additions.has(client.id.slot)) throw new Error("Duplicate prepared client slot");
       const existing = this.clients.get(client.id.slot);
-      if (existing !== undefined && !existing.isClosed) throw new Error(`Client slot ${client.id.slot} is occupied`);
+      if (incumbent !== null && (existing !== incumbent || !removals.has(incumbent))) throw new Error("Prepared client incumbent changed or is not retired");
+      if (incumbent === null && existing !== undefined && !existing.isClosed) throw new Error(`Client slot ${client.id.slot} is occupied`);
       additions.set(client.id.slot, client);
     }
-    const seats = new Set<SessionSeat>();
+    for (const seat of seats.added) {
+      const incumbent = this.preparedSeats.get(seat);
+      if (seat.isClosed || incumbent === undefined) throw new Error("Replacement seat was not prepared by this session");
+      if (seatAdditions.has(seat.id.index)) throw new Error("Duplicate prepared seat slot");
+      if (seat.client.isClosed || removals.has(seat.client)
+        || (this.clients.get(seat.client.id.slot) !== seat.client && additions.get(seat.client.id.slot) !== seat.client)) throw new Error("Replacement seat client is not published by this transition");
+      seat.client.validateSeatBinding(seat);
+      const existing = this.seats.get(seat.id.index);
+      if (incumbent !== null && (existing !== incumbent || !seatRemovals.has(incumbent))) throw new Error("Prepared seat incumbent changed or is not retired");
+      if (incumbent === null && existing !== undefined && !existing.isClosed) throw new Error(`Seat ${seat.id.index} is occupied`);
+      seatAdditions.set(seat.id.index, seat);
+    }
+    const presented = new Set<SessionSeat>();
     for (const entry of presentations) {
-      if (this.seats.get(entry.seat.id.index) !== entry.seat) throw new Error("Presentation seat is not owned by this session");
-      if (seats.has(entry.seat)) throw new Error("Duplicate replacement presentation");
+      if (seatRemovals.has(entry.seat) || (this.seats.get(entry.seat.id.index) !== entry.seat && seatAdditions.get(entry.seat.id.index) !== entry.seat)) throw new Error("Presentation seat is not owned by this session");
+      if (presented.has(entry.seat)) throw new Error("Duplicate replacement presentation");
       entry.seat.validatePresentation(entry.presentation);
-      seats.add(entry.seat);
+      presented.add(entry.seat);
     }
   }
 
@@ -236,10 +275,11 @@ export class EngineSession implements SessionResource {
     readonly seat: SessionSeat;
     readonly presentation: SeatPresentation;
     readonly cleanup: () => undefined;
-  }[] = [], clients: { readonly added: readonly SessionClient[]; readonly removed: readonly SessionClient[] } = { added: [], removed: [] }): {
+  }[] = [], clients: { readonly added: readonly SessionClient[]; readonly removed: readonly SessionClient[] } = { added: [], removed: [] },
+    seats: { readonly added: readonly SessionSeat[]; readonly removed: readonly SessionSeat[] } = { added: [], removed: [] }): {
     readonly world: WorldLifetime; readonly retired: SessionResource;
   } {
-    this.validateWorldReplacement(simulation, presentations, clients);
+    this.validateWorldReplacement(simulation, presentations, clients, seats);
     const additions = new Map(clients.added.map(client => [client.id.slot, client]));
     const removals = new Set(clients.removed);
     const nextPresentations = new Map<SessionSeat, PresentationLifetime>();
@@ -251,6 +291,8 @@ export class EngineSession implements SessionResource {
     const world = new WorldLifetime(simulation);
     const retired: SessionResource[] = [];
     if (this.currentWorld !== null) retired.push(this.currentWorld);
+    for (const seat of seats.removed) { this.seats.delete(seat.id.index); retired.push(seat); }
+    for (const seat of seats.added) { seat.client.bindSeat(seat); this.seats.set(seat.id.index, seat); this.preparedSeats.delete(seat); }
     for (const seat of this.seats.values()) {
       const previous = seat.replacePresentation(nextPresentations.get(seat) ?? null);
       if (previous !== null) retired.push(previous);
@@ -281,16 +323,20 @@ export class EngineSession implements SessionResource {
     return undefined;
   }
 
-  prepareClient(slot: number): SessionClient {
+  prepareClient(slot: number, retiring?: SessionClient): SessionClient {
     this.resources.assertOpen();
     const existing = this.clients.get(slot);
-    if (existing !== undefined && !existing.isClosed) throw new Error(`Client slot ${slot} is occupied`);
+    if (retiring !== undefined && (existing !== retiring || retiring.isClosed)) throw new Error("Retiring client is not the current slot owner");
+    if (retiring === undefined && existing !== undefined && !existing.isClosed) throw new Error(`Client slot ${slot} is occupied`);
     const generation = (this.generations.get(slot) ?? -1) + 1;
     const id = this.identity.client(slot, generation);
     const client = new SessionClient(id);
     this.generations.set(slot, generation);
-    this.preparedClients.add(client);
-    client.resources.defer(() => { this.preparedClients.delete(client); return undefined; });
+    this.preparedClients.set(client, retiring ?? null);
+    client.resources.defer(() => {
+      this.preparedClients.delete(client);
+      return closeAll([...this.preparedSeats.keys()].filter(seat => seat.client === client), "Prepared client seats shutdown failed");
+    });
     return client;
   }
 
@@ -313,14 +359,24 @@ export class EngineSession implements SessionResource {
   }
 
   createSeat(index: number, client: SessionClient): SessionSeat {
-    this.resources.assertOpen();
-    if (this.mode.kind === "headless") throw new Error("Headless sessions do not have local seats");
     if (this.clients.get(client.id.slot) !== client || client.isClosed) throw new RangeError("Client is not owned by this session");
-    const previous = this.seats.get(index);
-    if (previous !== undefined && !previous.isClosed) throw new Error(`Seat ${index} is occupied`);
-    const seat = new SessionSeat(this.identity.seat(index), client);
+    const seat = this.prepareSeat(index, client);
     client.bindSeat(seat);
     this.seats.set(index, seat);
+    this.preparedSeats.delete(seat);
+    return seat;
+  }
+
+  prepareSeat(index: number, client: SessionClient, retiring?: SessionSeat): SessionSeat {
+    this.resources.assertOpen();
+    if (this.mode.kind === "headless") throw new Error("Headless sessions do not have local seats");
+    if ((this.clients.get(client.id.slot) !== client && !this.preparedClients.has(client)) || client.isClosed) throw new RangeError("Client is not owned by this session");
+    const previous = this.seats.get(index);
+    if (retiring !== undefined && (previous !== retiring || retiring.isClosed)) throw new Error("Retiring seat is not the current index owner");
+    if (retiring === undefined && previous !== undefined && !previous.isClosed) throw new Error(`Seat ${index} is occupied`);
+    const seat = new SessionSeat(this.identity.seat(index), client);
+    this.preparedSeats.set(seat, retiring ?? null);
+    seat.resources.defer(() => { this.preparedSeats.delete(seat); return undefined; });
     return seat;
   }
 
@@ -375,6 +431,6 @@ export class EngineSession implements SessionResource {
   close(): undefined {
     if (this.isClosed) return undefined;
     try { return this.resources.close(); }
-    finally { this.clients.clear(); this.preparedClients.clear(); this.seats.clear(); this.published = null; }
+    finally { this.clients.clear(); this.preparedClients.clear(); this.preparedSeats.clear(); this.seats.clear(); this.published = null; }
   }
 }

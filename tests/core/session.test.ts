@@ -344,3 +344,98 @@ test("failed world preflight leaves shared keys capture and profile untouched", 
   fixture.session.validateWorldReplacement(fixture.simulation()); expect(fixture.session.world).toBe(world); expect(client.worldResources).toBe(resources);
   router.close(); fixture.session.close(); foreign.session.close();
 });
+
+test("a staged local player replaces an occupied bot slot only when the next world publishes", () => {
+  const { session, simulation } = stepFixture("local");
+  const oldWorld = session.attachWorld(simulation());
+  const first = session.createClient(0), firstSeat = session.createSeat(0, first), connection = first.connect("loopback");
+  const bot = session.createClient(1), botConnection = bot.connect("loopback");
+  const player = session.prepareClient(1, bot), seat = session.prepareSeat(1, player);
+  expect(session.clientAt(1)).toBe(bot);
+  expect(player.id.generation).toBeGreaterThan(bot.id.generation);
+  expect(() => session.replaceWorld(simulation(), [], { added: [player], removed: [] }, { added: [seat], removed: [] })).toThrow("incumbent");
+  expect(session.world).toBe(oldWorld); expect(firstSeat.isClosed).toBe(false); expect(botConnection.isClosed).toBe(false);
+  const next = session.replaceWorld(simulation(), [], { added: [player], removed: [bot] }, { added: [seat], removed: [] });
+  expect(session.clientAt(1)).toBe(player); expect(session.clientAt(0)).toBe(first);
+  expect(first.connection).toBe(connection); expect(seat.client).toBe(player);
+  expect(() => session.createSeat(1, player)).toThrow("occupied");
+  expect(bot.isClosed).toBe(false); expect(oldWorld.isClosed).toBe(false);
+  next.retired.close();
+  expect(bot.isClosed).toBe(true); expect(botConnection.isClosed).toBe(true); expect(oldWorld.isClosed).toBe(true);
+  expect(seat.isClosed).toBe(false); expect(firstSeat.isClosed).toBe(false);
+  const replacementBot = session.prepareClient(1, player);
+  const shrink = session.replaceWorld(simulation(), [], { added: [replacementBot], removed: [player] }, { added: [], removed: [seat] });
+  expect(seat.isClosed).toBe(false); expect(session.clientAt(1)).toBe(replacementBot);
+  shrink.retired.close(); expect(seat.isClosed).toBe(true); expect(player.isClosed).toBe(true);
+  expect(replacementBot.isClosed).toBe(false); expect(firstSeat.isClosed).toBe(false);
+  session.close(); expect(replacementBot.isClosed).toBe(true);
+});
+
+test("client and seat replacement validates both captured owners before changing either", () => {
+  const { session, simulation } = stepFixture("local");
+  const world = session.attachWorld(simulation()), oldClient = session.createClient(0), oldSeat = session.createSeat(0, oldClient);
+  const oldResources = oldClient.worldResources;
+  const client = session.prepareClient(0, oldClient), seat = session.prepareSeat(0, client, oldSeat);
+  expect(() => session.replaceWorld(simulation(), [], { added: [client], removed: [oldClient] })).toThrow("local seat");
+  expect(() => session.replaceWorld(simulation(), [], { added: [client], removed: [oldClient] }, { added: [seat], removed: [] })).toThrow("local seat");
+  expect(session.world).toBe(world); expect(oldClient.worldResources).toBe(oldResources); expect(oldSeat.isClosed).toBe(false);
+  const next = session.replaceWorld(simulation(), [], { added: [client], removed: [oldClient] }, { added: [seat], removed: [oldSeat] });
+  expect(session.clientAt(0)).toBe(client); expect(oldSeat.isClosed).toBe(false);
+  next.retired.close(); expect(oldSeat.isClosed).toBe(true); expect(oldClient.isClosed).toBe(true);
+  expect(seat.isClosed).toBe(false); expect(client.isClosed).toBe(false);
+  session.closeClient(oldClient.id); expect(client.isClosed).toBe(false);
+  session.close(); expect(seat.isClosed).toBe(true);
+});
+
+test("discarded seats on retained clients leave their live connection and presentation resources alone", () => {
+  const { session, simulation } = stepFixture("local");
+  const world = session.attachWorld(simulation()), client = session.createClient(0), oldSeat = session.createSeat(0, client);
+  const connection = client.connect("loopback"), resources = client.worldResources;
+  const candidate = session.prepareSeat(0, client, oldSeat);
+  expect(() => session.replaceWorld(simulation(), [], { added: [], removed: [] }, { added: [candidate], removed: [] })).toThrow("incumbent");
+  candidate.close();
+  expect(session.world).toBe(world); expect(client.connection).toBe(connection); expect(client.worldResources).toBe(resources);
+  expect(oldSeat.isClosed).toBe(false); expect(connection.isClosed).toBe(false);
+  const nextSeat = session.prepareSeat(1, client);
+  const next = session.replaceWorld(simulation(), [], { added: [], removed: [] }, { added: [nextSeat], removed: [] });
+  next.retired.close(); expect(nextSeat.isClosed).toBe(false); expect(oldSeat.isClosed).toBe(false);
+  const unselected = session.prepareSeat(2, client);
+  session.close(); expect(unselected.isClosed).toBe(true); expect(nextSeat.isClosed).toBe(true);
+});
+
+test("stale and duplicate staged owners cannot replace a newer published client or seat", () => {
+  const { session, simulation } = stepFixture("local");
+  const world = session.attachWorld(simulation()), oldClient = session.createClient(0), oldSeat = session.createSeat(0, oldClient);
+  const candidate = session.prepareClient(0, oldClient), seat = session.prepareSeat(0, candidate, oldSeat);
+  session.closeClient(oldClient.id);
+  const current = session.createClient(0), currentSeat = session.createSeat(0, current);
+  expect(() => session.prepareClient(0, oldClient)).toThrow("current slot owner");
+  expect(() => session.prepareSeat(0, candidate, oldSeat)).toThrow("current index owner");
+  expect(() => session.replaceWorld(simulation(), [], { added: [candidate], removed: [current] }, { added: [seat], removed: [currentSeat] })).toThrow("incumbent");
+  expect(session.world).toBe(world); expect(session.clientAt(0)).toBe(current); expect(currentSeat.isClosed).toBe(false);
+  const duplicate = session.prepareSeat(1, current);
+  expect(() => session.replaceWorld(simulation(), [], { added: [], removed: [] }, { added: [duplicate, duplicate], removed: [] })).toThrow("Duplicate prepared seat");
+  expect(() => session.replaceWorld(simulation(), [], { added: [], removed: [] }, { added: [], removed: [currentSeat, currentSeat] })).toThrow("Duplicate retired seat");
+  session.close(); expect(candidate.isClosed).toBe(true); expect(seat.isClosed).toBe(true); expect(duplicate.isClosed).toBe(true);
+});
+
+test("connection publication defers old-channel cleanup without clearing active world resources", () => {
+  const { session, simulation } = stepFixture("local");
+  const world = session.attachWorld(simulation()), client = session.createClient(0), seat = session.createSeat(0, client);
+  const resources = client.worldResources, old = client.connect("loopback");
+  const activeResources = client.worldResources;
+  let retired = 0, activeClosed = 0;
+  old.defer(() => { retired++; throw new Error("old channel cleanup"); });
+  activeResources.defer(() => { activeClosed++; return undefined; });
+  const next = client.replaceConnection("remote");
+  expect(next.retired).toBe(old); expect(client.connection).toBe(next.connection);
+  expect(next.connection.kind).toBe("remote"); expect(old.isClosed).toBe(false);
+  expect(client.worldResources).toBe(activeResources); expect(session.world).toBe(world);
+  expect(seat.isClosed).toBe(false); expect(activeClosed).toBe(0); expect(retired).toBe(0);
+  expect(resources.isClosed).toBe(true);
+  expect(() => next.retired?.close()).toThrow(AggregateError);
+  expect(retired).toBe(1); expect(client.connection).toBe(next.connection); expect(activeClosed).toBe(0);
+  const fresh = client.connect("demo");
+  expect(next.connection.isClosed).toBe(true); expect(fresh.kind).toBe("demo"); expect(activeClosed).toBe(1);
+  session.close(); expect(fresh.isClosed).toBe(true); expect(retired).toBe(1);
+});
