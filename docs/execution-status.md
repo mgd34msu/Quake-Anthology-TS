@@ -2,7 +2,19 @@
 
 ## Installed executable and recent fixes
 
-Accepted and installed source is `94d7f5be60312aca3e558f7f7c3684719a0933b6`, tree `a25800d45847ead67842d9c23f45698f1ff1dbe9`. Installed at `2026-09-16T10:59:30.174Z`: SHA-256 `333dcb8b44f1468936526bcaa1880d7f79c694f4fe69dfd555ac1640d45f7b10`, 123,328,640 bytes, mode `0755`. Receipt: [installed build](../.artifacts/resume-20260915/final-94d7f5b/installed-build.json).
+Accepted and installed source is `74119b8d58fa1a9832bbb1464d8e32aaf0d6d725`, tree `d1cbffd518156cde6fbbbc36be930c8cc34c337e`. Installed at `2026-09-16T12:02:42.748Z`: SHA-256 `275a9970fe87a1b895a733ea6ca6e1b0e315d0c2397d26875be9bff6858eaf88`, 123,480,192 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260915/final-74119b8/installed-build.json).
+
+This installs shared output-rate, mono/stereo, sample-format and device settings with persistence, restart and session transfer; the SDL3 audio adapter; Main recovery when the frontend menu stack is empty; and the accepted PCM conversion, material projection and lazy clip-plane changes. SDL2 remains the fallback when SDL3 cannot be loaded; its native fallback execution is not qualified by the SDL3 tests.
+
+The compiled GL check changed actual playing output to 8000 Hz mono 8-bit and restored 44100 Hz stereo 16-bit through public console commands, then completed 10.165 seconds of controls, public saves, Main return and normal Quit. Save-to-save source time advanced 17,900 ms against 17,914.939 ms of host time. Runner, game exit and integrity guards passed; processes were reaped. Root inspected all four audio/gameplay/Main captures. Receipts: [runtime proof](../.artifacts/resume-20260915/final-74119b8/runtime-proof.json) and [visual acceptance](../.artifacts/resume-20260915/final-74119b8/root-visual-acceptance.json).
+
+Separate source checks exercised the audio menu, world/travel/frontend transfer and persistence, plus all 16 combinations of 11025/22050/44100/48000 Hz, 8/16-bit and mono/stereo on SDL3. These used dummy audio. Physical speaker output, full campaigns, whole-frame performance and the native-peer matrix remain open. The earlier CPU source-clock lag below remains unresolved. `s_info` still displays floating-point noise in volume values.
+
+Accepted source `b416aef` additionally reduces Q1 cap-membership allocations. All 5,000 retained complete traces matched; three component pairs reduced aggregate elapsed by 3.34%. This change is committed and pushed but is **not included in installed `74119b8`**. See the [comparison](../.artifacts/resume-20260915/cap-membership8b10/RESULT.md).
+
+## Historical 94d7f5b renderer-transition proof
+
+The previously installed source was `94d7f5be60312aca3e558f7f7c3684719a0933b6`, tree `a25800d45847ead67842d9c23f45698f1ff1dbe9`. Installed at `2026-09-16T10:59:30.174Z`: SHA-256 `333dcb8b44f1468936526bcaa1880d7f79c694f4fe69dfd555ac1640d45f7b10`, 123,328,640 bytes, mode `0755`. Receipt: [installed build](../.artifacts/resume-20260915/final-94d7f5b/installed-build.json).
 
 Shared renderer restart is installed. The public run completed all three ten-second control segments, renderer transitions, captures, Main return and normal game exit. The formal runner returned 1 because CPU rendering accumulated source-clock lag beyond the unchanged 200 ms gate. The catch-up work budget retains that debt; GL subsequently repaid part of it. The workflow and reviewed images are accepted, but the run is not a clock-parity or performance pass. Receipts: [public proof](../.artifacts/resume-20260915/final-94d7f5b/runtime-proof.json) and [visual acceptance](../.artifacts/resume-20260915/final-94d7f5b/root-visual-acceptance.json).
 
