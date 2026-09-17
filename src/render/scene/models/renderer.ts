@@ -85,9 +85,15 @@ export class SceneModelRenderer {
     const work: Promise<void>[] = [];
     const visit = (entity: SceneEntity): void => {
       const source = options(entity), selections = this.selections(entity, source);
-      for (const selection of selections) work.push(this.load(entity, selection, source));
+      for (const selection of selections) {
+        const pending = this.load(entity, selection, source);
+        if (pending !== null) work.push(pending);
+      }
       const replacement = entity.model.kind === "q1-mdl" && source.indexedSkin !== undefined ? null : replacementEntity(entity);
-      if (replacement !== null) for (const selection of this.selections(replacement, source)) work.push(this.load(replacement, selection, source));
+      if (replacement !== null) for (const selection of this.selections(replacement, source)) {
+        const pending = this.load(replacement, selection, source);
+        if (pending !== null) work.push(pending);
+      }
       for (const attachment of entity.attachments) visit(attachment.entity);
     };
     for (const entity of entities) visit(entity);
@@ -98,11 +104,18 @@ export class SceneModelRenderer {
     if (this.textures !== this.provider.textures) {
       this.materials.clear(); this.pending.clear(); this.textures = this.provider.textures;
     }
-    const work = this.selections(resource, options).map(selection => this.load(resource, selection, options, allowCinematics));
+    const work: Promise<void>[] = [];
+    for (const selection of this.selections(resource, options)) {
+      const pending = this.load(resource, selection, options, allowCinematics);
+      if (pending !== null) work.push(pending);
+    }
     const model = resource.model;
     if ((model.kind === "q1-mdl" || model.kind === "q2-md2") && !(model.kind === "q1-mdl" && options.indexedSkin !== undefined)) {
       const replacement = model.replacement;
-      if (replacement != null) for (const selection of this.selections(replacement, options)) work.push(this.load(replacement, selection, options, allowCinematics));
+      if (replacement != null) for (const selection of this.selections(replacement, options)) {
+        const pending = this.load(replacement, selection, options, allowCinematics);
+        if (pending !== null) work.push(pending);
+      }
     }
     await Promise.all(work);
   }
@@ -140,12 +153,14 @@ export class SceneModelRenderer {
     return result;
   }
 
-  private load(entity: ModelResource, selection: ModelImageSelection, options: ModelSourceOptions, allowCinematics = true): Promise<void> {
+  private load(entity: ModelResource, selection: ModelImageSelection, options: ModelSourceOptions, allowCinematics = true): Promise<void> | null {
     if (!allowCinematics && this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
       const name = selection.kind === "external" ? selection.name : "*default", remap = this.provider.shaders.resolveRemap(name);
       if (this.provider.shaders.hasCinematic(remap.name)) return Promise.reject(new Error(`Model cinematic deferred until use: ${remap.name}`));
     }
-    const key = materialKey(entity, selection, options), old = this.pending.get(key);
+    const key = materialKey(entity, selection, options);
+    if (this.materials.has(key)) return null;
+    const old = this.pending.get(key);
     if (old !== undefined) return old;
     const pending = (async (): Promise<void> => {
       if (this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
