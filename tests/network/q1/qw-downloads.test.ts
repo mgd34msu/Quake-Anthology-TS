@@ -77,3 +77,29 @@ test('retiring a QW directory cancels a pending mounted lookup before sending do
     expect(await Bun.file(join(f.gameRoot, 'maps/retired.bsp')).exists()).toBe(false);
   } finally { receiver.close(); f.close(); }
 });
+
+test('QW public progress reflects real bytes and revoked permission removes partial staging', async () => {
+  const root=mkdtempSync(join(tmpdir(),'qw-policy-progress-'));let permitted=true;const commands:string[]=[];
+  const receiver=new QwDownloadReceiver({gameRoot:root,skinRoot:root,exists:async()=>false,sendCommand:text=>{commands.push(text);},print:()=>{},noskins:()=>0,demoRecording:()=>false,demoPlayback:()=>false,permission:()=>permitted});
+  try {
+    expect(await receiver.request('maps/a.bsp','model')).toBe('waiting');
+    await receiver.receive({kind:'data',percent:40,bytes:new Uint8Array([1,2,3])});
+    expect(receiver.progress[0]).toMatchObject({path:'maps/a.bsp',received:3,percent:40,total:null,transport:'native'});
+    permitted=false;expect(await receiver.receive({kind:'data',percent:100,bytes:new Uint8Array([4])})).toBe('missing');
+    expect(receiver.progress).toEqual([]);expect(readdirSync(join(root,'maps'))).toEqual([]);
+    expect(await receiver.request('sound/a.wav','sound')).toBe('skipped');expect(commands).toEqual(['download maps/a.bsp','nextdl']);
+  }finally{receiver.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('QW cancel and retry drains the outstanding old block before restarting native request', async () => {
+  const f=fixture();try {
+    await f.receiver.request('maps/a.bsp','model');
+    await f.receiver.receive({kind:'data',percent:40,bytes:new Uint8Array([1])});
+    f.receiver.cancel();f.receiver.cancel();expect(await f.receiver.retry()).toBe('waiting');
+    expect(f.commands).toEqual(['download maps/a.bsp','nextdl']);
+    expect(await f.receiver.receive({kind:'data',percent:100,bytes:new Uint8Array([2])})).toBe('waiting');
+    expect(f.commands.at(-1)).toBe('download maps/a.bsp');
+    await f.receiver.receive({kind:'data',percent:100,bytes:new Uint8Array([3,4])});
+    expect(await Bun.file(join(f.gameRoot,'maps/a.bsp')).bytes()).toEqual(new Uint8Array([3,4]));
+  }finally{f.close();}
+});

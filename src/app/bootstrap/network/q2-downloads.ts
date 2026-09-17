@@ -1,3 +1,4 @@
+import type { ClientDownloadProgress } from './client-download-policy.ts';
 import { remoteContentSelection } from "../../../content/catalog/index.ts";
 import { clientDownloadCategory } from './client-download-policy.ts';
 import type { ClientDownloadPermission } from './client-download-policy.ts';
@@ -96,6 +97,9 @@ type HttpAssetScope = 'search-path' | 'game-local';
 type Q2DownloadBlock = Extract<Q2ServerEvent, { readonly kind: 'download' }>;
 export type Q2DownloadPreparation = 'ready' | 'waiting' | 'canceled';
 export interface Q2ApplicationClientDownloads {
+    readonly progress?: readonly ClientDownloadProgress[];
+    cancel?(): void;
+    retry?(): void;
     setHttpServer(server: URL | null): void;
     prepare(state: Q2ApplicationGameState): Promise<Q2DownloadPreparation>;
     receive(block: Q2DownloadBlock): 'complete' | 'waiting' | 'unsolicited';
@@ -104,6 +108,17 @@ export interface Q2ApplicationClientDownloads {
 
 /** Protocol 34 has a completion percent, but advertises neither a size nor a digest. */
 export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
+    private cancelled = false;
+    private retiredBlock = false;
+    private retryRequested = false;
+    get progress(): readonly ClientDownloadProgress[] {
+        const http: ClientDownloadProgress[] = (this.http?.progress ?? []).map(item => ({ path: this.httpResource(item.path), transport: 'http', received: item.received, total: item.total, percent: item.total === null || item.total === 0 ? null : item.received * 100 / item.total, phase: item.phase }));
+        const pending = this.pending;
+        if (pending !== null) http.push({ path: pending.path, transport: 'native', received: pending.sink.byteLength, total: null, percent: pending.percent, phase: 'running' });
+        return http;
+    }
+    cancel(): void { if (this.cancelled) return; const waiting = this.pending !== null; this.close(); this.cancelled = true; this.retiredBlock = waiting; }
+    retry(): void { if (this.retiredBlock) { this.retryRequested = true; return; } this.close(); this.cancelled = false; }
     private server: URL | null = null;
     private http: HttpDownloadQueue | null = null;
     private metadata = new AbortController();
@@ -123,7 +138,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
         private readonly permission: ClientDownloadPermission = () => true) {}
     get revision(): number { return this.generation; }
 
-    setHttpServer(server: URL | null): void { this.close(); this.server = server; }
+    setHttpServer(server: URL | null): void { this.close(); this.cancelled = false; this.server = server; }
     private root(path: string): string {
         const content = this.content();
         return path.toLowerCase().startsWith('players/') ? content.baseWriteRoot : content.writeRoot;
@@ -277,6 +292,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
     }
 
     async prepare(state: Q2ApplicationGameState): Promise<Q2DownloadPreparation> {
+        if (this.cancelled) return 'canceled';
         const selected = remoteContentSelection('q2-classic-baseq2', state.data.gamedir), owner = this.content();
         if (owner.selection.base !== selected.base || owner.selection.directory !== selected.directory)
             throw new Error('Q2 server game differs from prepared content');
@@ -317,6 +333,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
     }
 
     receive(block: Q2DownloadBlock): 'complete' | 'waiting' | 'unsolicited' {
+        if (this.retiredBlock) { this.retiredBlock = false; if (this.retryRequested) { this.retryRequested = false; this.cancelled = false; } return 'complete'; }
         const pending = this.pending;
         if (pending === null) return 'unsolicited';
         if (!this.permission({ transport: 'native', category: clientDownloadCategory(pending.path) })) { pending.sink.close(); this.pending = null; return 'complete'; }
@@ -342,6 +359,7 @@ export class Q2DownloadReceiver implements Q2ApplicationClientDownloads {
     }
 
     close(): void {
+        this.retiredBlock = false; this.retryRequested = false;
         this.generation++; this.http?.cancel(); this.http = null; this.metadata.abort(); this.metadata = new AbortController();
         this.httpTask = null; this.httpError = null; this.attempted.clear(); this.httpPaths.clear(); this.retryPath = null;
         this.pending?.sink.close(); this.pending = null;

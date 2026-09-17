@@ -161,3 +161,15 @@ test('retiring a download epoch during package refresh cannot send donedl', asyn
     expect(f.commands).not.toContain('donedl');
   } finally { release(); f.client.close(); f.server.close(); rmSync(f.root, { recursive: true, force: true }); }
 });
+
+test('cancel preserves remaining Q3 package requests and retry uses native download without leaking staging', () => {
+  const f = fixture();
+  try {
+    expect(f.client.progress[0]?.phase).toBe('running');
+    f.client.cancel(); f.client.cancel(); expect(f.commands.at(-1)).toBe('stopdl'); expect(f.client.progress[0]?.phase).toBe('pending');
+    expect(f.client.retry()).toBe(true); expect(f.commands.at(-1)).toBe('download baseq3/custom.pk3');
+    expect(f.client.progress[0]?.received).toBe(0);
+    f.client.close(); expect(f.client.retry()).toBe(false); expect(f.client.progress).toEqual([]);
+    expect(readdirSync(f.root)).toEqual([]);
+  } finally { f.client.close(); f.server.close(); rmSync(f.root,{recursive:true,force:true}); }
+});

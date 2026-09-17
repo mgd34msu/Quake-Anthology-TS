@@ -39,3 +39,12 @@ export function createClientDownloadPermission(cvars: CvarRegistry, family: 'q2'
     return request => cvars.variableValue('allow_download') > 0
         && (request.transport !== 'http' || cvars.variableValue('cl_http_downloads') !== 0) && categoryAllowed(request.category);
 }
+
+export interface ClientDownloadProgress {
+    readonly path: string;
+    readonly transport: 'http' | 'native';
+    readonly received: number;
+    readonly total: number | null;
+    readonly percent: number | null;
+    readonly phase: 'pending' | 'running' | 'done';
+}

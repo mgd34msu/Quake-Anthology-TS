@@ -262,3 +262,55 @@ test('whole-file range retry cannot publish a truncated protocol-completion file
   try { expect((await queue.enqueue(rangeRequest(server.port ?? 0))).kind).toBe('fallback'); expect(readdirSync(root)).toEqual([]); }
   finally { queue.cancel(); await server.stop(true); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('HTTP redirect stays within advertised origin and settled fallback can be retried', async () => {
+  const root = mkdtempSync(join(tmpdir(),'http-redirect-')); let ready = false;
+  const server = Bun.serve({hostname:'127.0.0.1',port:0,fetch(req) {
+    const path = new URL(req.url).pathname;
+    if (path === '/redirect') return new Response(null,{status:302,headers:{location:'/asset'}});
+    if (path === '/escape') return new Response(null,{status:302,headers:{location:'http://localhost:1/asset'}});
+    return ready ? new Response('complete') : new Response('',{status:503});
+  }});
+  const queue=new HttpDownloadQueue({root,assertCurrent(){},resolved:()=>false,async refreshPackage(){},progress(){}});
+  try {
+    expect((await queue.enqueue(request(server.port ?? 0,'redirect'))).kind).toBe('fallback');
+    ready=true; expect((await queue.retry('redirect')).kind).toBe('downloaded');
+    expect(readFileSync(join(root,'redirect'),'utf8')).toBe('complete');
+    expect((await queue.enqueue(request(server.port ?? 0,'escape'))).kind).toBe('fallback');
+    expect(queue.progress.find(item=>item.path==='redirect')).toMatchObject({phase:'done',received:8,result:'downloaded'});
+  } finally {queue.cancel();await server.stop(true);rmSync(root,{recursive:true,force:true});}
+});
+
+test('per-file cancellation preserves unrelated queue work and permits explicit retry', async () => {
+  const root=mkdtempSync(join(tmpdir(),'http-file-cancel-')), started=deferred(),release=deferred();let block=true;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(req){
+    if(new URL(req.url).pathname==='/first'&&block)return new Response(new ReadableStream<Uint8Array>({async start(controller){controller.enqueue(new Uint8Array([1]));started.resolve();await release.promise;try{controller.close();}catch{}}}));
+    return new Response('ok');
+  }});
+  const queue=new HttpDownloadQueue({root,concurrency:1,assertCurrent(){},resolved:()=>false,async refreshPackage(){},progress(){}});
+  try {
+    const first=queue.enqueue(request(server.port ?? 0,'first')),second=queue.enqueue(request(server.port ?? 0,'second'));
+    await started.promise;queue.cancelFile('first');release.resolve();
+    expect((await first).kind).toBe('cancelled');expect((await second).kind).toBe('downloaded');
+    block=false;expect((await queue.retry('first')).kind).toBe('downloaded');expect(readdirSync(root).sort()).toEqual(['first','second']);
+  }finally{release.resolve();queue.cancel();await server.stop(true);rmSync(root,{recursive:true,force:true});}
+});
+
+test('interrupted byte range resumes at retained offset under the same strong ETag', async () => {
+  const root=mkdtempSync(join(tmpdir(),'http-resume-')),bytes=new Uint8Array(2*1024*1024).fill(37),ranges:string[]=[];
+  let interrupted=false;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch(req){
+    if(req.method==='HEAD')return new Response(null,{headers:{'content-length':String(bytes.length),'accept-ranges':'bytes',etag:'"same"'}});
+    const raw=req.headers.get('range')??'',match=/^bytes=(\d+)-(\d+)$/.exec(raw);ranges.push(raw);
+    if(match===null)throw new Error('Expected range');const start=Number(match[1]),end=Number(match[2]);
+    const headers={'content-range':`bytes ${start}-${end}/${bytes.length}`,etag:'"same"'};
+    if(start===0&&!interrupted){interrupted=true;return new Response(new ReadableStream<Uint8Array>({async start(controller){controller.enqueue(bytes.slice(0,4096));await Bun.sleep(10);controller.error(new Error('interrupted'));}}),{status:206,headers});}
+    return new Response(bytes.slice(start,end+1),{status:206,headers});
+  }});
+  const queue=new HttpDownloadQueue({root,rangeStreams:2,assertCurrent(){},resolved:()=>false,async refreshPackage(){},progress(){}});
+  try {
+    const result=await queue.enqueue({...request(server.port ?? 0,'asset'),expected:{kind:'protocol-completion',maximumBytes:bytes.length}});
+    expect(result.kind).toBe('downloaded');expect(ranges).toContain('bytes=4096-1048575');
+    expect(readFileSync(join(root,'asset'))).toEqual(Buffer.from(bytes));expect(queue.progress[0]?.received).toBe(bytes.length);
+  }finally{queue.cancel();await server.stop(true);rmSync(root,{recursive:true,force:true});}
+});

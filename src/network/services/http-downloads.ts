@@ -23,12 +23,14 @@ export interface HttpDownloadQueueOptions {
   refreshPackage(path: string): Promise<void>;
   progress(path: string, received: number, total: number | null): void;
 }
+export interface DownloadProgress { readonly path: string; readonly phase: 'pending' | 'running' | 'done'; readonly received: number; readonly total: number | null; readonly result: HttpDownloadResult['kind'] | null; }
 interface Entry {
   readonly request: HttpDownloadRequest;
   readonly promise: Promise<HttpDownloadResult>;
   readonly resolve: (result: HttpDownloadResult) => void;
   readonly abort: AbortController;
   state: 'pending' | 'running' | 'done';
+  received: number; total: number | null; result: HttpDownloadResult['kind'] | null;
 }
 function sameExpectation(left: HttpDownloadRequest['expected'], right: HttpDownloadRequest['expected']): boolean {
   if ('kind' in left) return 'kind' in right && left.maximumBytes === right.maximumBytes;
@@ -36,10 +38,27 @@ function sameExpectation(left: HttpDownloadRequest['expected'], right: HttpDownl
 }
 function failure(error: unknown): Error { return error instanceof Error ? error : new Error(String(error)); }
 
+/** Redirects stay within the advertised origin and never acquire credentials. */
+async function downloadResponse(url: URL, signal: AbortSignal, method: 'GET' | 'HEAD' = 'GET', headers: Record<string, string> = {}): Promise<Response> {
+  let current = new URL(url.href);
+  for (let redirects = 0; ; redirects++) {
+    if (!['http:', 'https:'].includes(current.protocol) || current.username || current.password) throw new Error('Invalid download URL');
+    const response = await fetch(current, { method, headers, redirect: 'manual', signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const body: unknown = response.body;
+    if (isReadableStream(body)) await body.cancel();
+    signal.throwIfAborted();
+    const location = response.headers.get('location');
+    if (redirects === 4 || location === null) throw new Error('HTTP download redirect limit or missing location');
+    const next = new URL(location, current);
+    if (next.origin !== url.origin || next.username || next.password) throw new Error('HTTP download redirect left advertised origin');
+    current = next;
+  }
+}
+
 async function openResponse(url: URL, signal: AbortSignal, identity?: string): Promise<{ readonly headers: Headers; readonly body: ReadableStream<unknown> }> {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new RangeError('Download URL requires HTTP or HTTPS');
-  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
-    headers: identity === undefined ? {} : { 'Accept-Encoding': 'identity', 'If-Match': identity } });
+  const response = await downloadResponse(url, signal, 'GET', identity === undefined ? {} : { 'Accept-Encoding': 'identity', 'If-Match': identity });
   const body: unknown = response.body;
   if (response.status !== 200 || !isReadableStream(body) || identity !== undefined
     && (response.headers.get('etag') !== identity || !identityEncoding(response.headers))) {
@@ -66,8 +85,7 @@ async function probeRanges(request: HttpDownloadRequest, signal: AbortSignal): P
   if (limit <= rangeThreshold) return null;
   let response: Response;
   try {
-    response = await fetch(request.url, { method: 'HEAD', redirect: 'error',
-      headers: { 'Accept-Encoding': 'identity' }, signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) });
+    response = await downloadResponse(request.url, signal, 'HEAD', { 'Accept-Encoding': 'identity' });
   } catch { signal.throwIfAborted(); return null; }
   const body: unknown = response.body;
   if (isReadableStream(body)) await body.cancel();
@@ -87,8 +105,12 @@ function byteSpans(total: number, streams: number): DownloadSpan[] {
 }
 async function receiveRange(request: HttpDownloadRequest, probe: RangeProbe, span: DownloadSpan, sink: DownloadSink,
   signal: AbortSignal, current: () => void, progress: () => void): Promise<void> {
-  const response = await fetch(request.url, { redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
-    headers: { Range: `bytes=${span.start}-${span.end}`, 'If-Range': probe.etag, 'Accept-Encoding': 'identity' } });
+  let received = 0;
+  for (let attempt = 0; ; attempt++) {
+  const start = span.start + received;
+  try {
+  const response = await downloadResponse(request.url, signal, 'GET',
+    { Range: `bytes=${start}-${span.end}`, 'If-Range': probe.etag, 'Accept-Encoding': 'identity' });
   const body: unknown = response.body;
   try {
     current(); signal.throwIfAborted();
@@ -98,12 +120,12 @@ async function receiveRange(request: HttpDownloadRequest, probe: RangeProbe, spa
     const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get('content-range') ?? '');
     const length = contentLength(response.headers);
     if (response.status !== 206 || etag !== probe.etag || !identityEncoding(response.headers) || match === null
-      || Number(match[1]) !== span.start || Number(match[2]) !== span.end || Number(match[3]) !== probe.total
-      || response.headers.has('content-length') && length !== span.end - span.start + 1 || !isReadableStream(body))
+      || Number(match[1]) !== start || Number(match[2]) !== span.end || Number(match[3]) !== probe.total
+      || response.headers.has('content-length') && length !== span.end - start + 1 || !isReadableStream(body))
       throw new Error('Invalid HTTP byte range response');
   } catch (error) { if (isReadableStream(body)) await body.cancel(); throw error; }
   if (!isReadableStream(body)) throw new Error('HTTP range has no body');
-  const reader = body.getReader(); let received = 0;
+  const reader = body.getReader();
   try {
     for (;;) {
       const chunk = await reader.read(); current(); signal.throwIfAborted();
@@ -115,6 +137,12 @@ async function receiveRange(request: HttpDownloadRequest, probe: RangeProbe, spa
     if (received !== span.end - span.start + 1) throw new Error('Incomplete HTTP byte range');
   } catch (error) { await reader.cancel(); throw error; }
   finally { reader.releaseLock(); }
+  return;
+  } catch (error) {
+    current(); signal.throwIfAborted();
+    if (error instanceof UnsupportedRange || attempt >= 2 || received === span.end - span.start + 1) throw error;
+  }
+  }
 }
 async function receiveRanges(request: HttpDownloadRequest, probe: RangeProbe, spans: readonly DownloadSpan[], sink: DownloadSink,
   signal: AbortSignal, current: () => void, progress: () => void): Promise<void> {
@@ -192,8 +220,25 @@ export class HttpDownloadQueue {
     let resolve: (result: HttpDownloadResult) => void = () => {};
     const promise = new Promise<HttpDownloadResult>(complete => { resolve = complete; });
     const owned = { ...request, url: new URL(request.url.href), expected: { ...request.expected } };
-    this.entries.set(request.path, { request: owned, promise, resolve, abort: new AbortController(), state: 'pending' });
+    this.entries.set(request.path, { request: owned, promise, resolve, abort: new AbortController(), state: 'pending', received: 0, total: null, result: null });
     this.schedule(); return promise;
+  }
+  get progress(): readonly DownloadProgress[] {
+    return [...this.entries.values()].map(entry => ({ path: entry.request.path, phase: entry.state, received: entry.received, total: entry.total, result: entry.result }));
+  }
+  retry(path: string): Promise<HttpDownloadResult> {
+    const entry = this.entries.get(path);
+    if (entry === undefined || entry.state !== 'done' || entry.result !== 'fallback' && entry.result !== 'cancelled') throw new Error('Only a settled HTTP fallback or cancellation can be retried');
+    this.entries.delete(path); return this.enqueue(entry.request);
+  }
+  cancelFile(path: string): void {
+    const entry = this.entries.get(path);
+    if (entry?.state === 'pending') this.settle(entry, { kind: 'cancelled' });
+    else if (entry?.state === 'running') entry.abort.abort();
+    this.schedule();
+  }
+  private report(entry: Entry, received: number, total: number | null): void {
+    entry.received = received; entry.total = total; this.options.progress(entry.request.path, received, total);
   }
   private schedule(): void {
     if (this.closed) return;
@@ -206,7 +251,7 @@ export class HttpDownloadQueue {
       });
     });
   }
-  private settle(entry: Entry, result: HttpDownloadResult): void { entry.state = 'done'; entry.resolve(result); }
+  private settle(entry: Entry, result: HttpDownloadResult): void { entry.state = 'done'; entry.result = result.kind; entry.resolve(result); }
   private async pump(): Promise<void> {
     if (this.closed || this.packageActive) return;
     try {
@@ -243,7 +288,7 @@ export class HttpDownloadQueue {
     let sink: DownloadSink | null = null, published = false;
     const current = (): void => {
       if (this.closed || generation !== this.generation) throw new Error('HTTP download epoch retired');
-      this.options.assertCurrent();
+      this.options.assertCurrent(); entry.abort.signal.throwIfAborted();
     };
     try {
       current();
@@ -253,11 +298,11 @@ export class HttpDownloadQueue {
       if (probe !== null) {
         const spans = byteSpans(probe.total, this.rangeStreams);
         sink = DownloadSink.createRanged(this.options.root, request.path, request.expected, probe.total, spans);
-        this.options.progress(request.path, 0, probe.total);
+        this.report(entry, 0, probe.total);
         const rangedSink = sink;
         try {
           await receiveRanges(request, probe, spans, sink, entry.abort.signal, current,
-            () => { this.options.progress(request.path, rangedSink.byteLength, probe.total); });
+            () => { this.report(entry, rangedSink.byteLength, probe.total); });
         } catch (error) {
           if (!(error instanceof UnsupportedRange)) throw error;
           try { sink.close(); }
@@ -277,13 +322,14 @@ export class HttpDownloadQueue {
         if (reader === undefined) throw new Error('HTTP download has no response body');
         try {
           sink = DownloadSink.create(this.options.root, request.path, request.expected);
-          this.options.progress(request.path, 0, total);
+          this.report(entry, 0, total);
           for (;;) {
             const chunk = await reader.read(); current();
             if (chunk.done) break;
             if (!(chunk.value instanceof Uint8Array)) throw new TypeError('HTTP download supplied a non-byte chunk');
-            sink.append(chunk.value); this.options.progress(request.path, sink.byteLength, total);
+            sink.append(chunk.value); this.report(entry, sink.byteLength, total);
           }
+          if (total !== null && sink.byteLength !== total) throw new Error('Incomplete HTTP response body');
           if (retryIdentity !== undefined && sink.byteLength !== probe?.total)
             throw new Error('HTTP whole-file retry differs from probed size');
         } catch (error) {
@@ -301,7 +347,7 @@ export class HttpDownloadQueue {
     } catch (error) {
       try { sink?.close(); }
       catch (cleanup) { return { kind: 'failed', reason: new AggregateError([error, cleanup], 'HTTP download and staged cleanup failed') }; }
-      if (this.closed || generation !== this.generation) return { kind: 'cancelled' };
+      if (this.closed || generation !== this.generation || entry.abort.signal.aborted) return { kind: 'cancelled' };
       return { kind: published || error instanceof StagedCleanupFailure ? 'failed' : 'fallback', reason: failure(error) };
     }
   }
