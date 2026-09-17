@@ -1,8 +1,8 @@
 # Functional target status
 
-At accepted and installed source `30ea85dfac940396ef7fa6b60c49d4c47f22d3f4`: **3/23 targets complete; 20/23 open.** These are the functional targets defined in [the shared-engine plan](README.md), not source inventory counts. Integrated source changes do not close a target until its required behavior and public consumers are qualified together.
+At accepted source `333f0118bb92698d93202af516c67c76b78fdb19`: **4/23 targets complete; 19/23 open.** The exact accepted executable is installed. These are the functional targets defined in [the shared-engine plan](README.md), not source inventory counts. Integrated source changes do not close a target until its required behavior and public consumers are qualified together.
 
-Installed executable is `30ea85dfac940396ef7fa6b60c49d4c47f22d3f4`, including the prior integrations and current delivery fixes; see [execution status](../execution-status.md#installed-executable-and-recent-fixes) for exact identity and bounded delivery evidence.
+Installed executable is `333f0118bb92698d93202af516c67c76b78fdb19`, including accepted T03 and prior integrations; see [execution status](../execution-status.md#installed-executable-and-recent-fixes) for exact identity and bounded delivery evidence.
 
 The accepted [Application](../../src/app/bootstrap/application.ts) now consumes substantial content, local-input, HUD, progression, mode, campaign, save and tool work. The table separates those integrations from remaining implementation and verification. It does not repeat obsolete blanket instructions to join code that already has callers.
 
@@ -10,7 +10,7 @@ The accepted [Application](../../src/app/bootstrap/application.ts) now consumes 
 |---|---|---|---|
 | T01 | Session and resource lifetime | Complete in source | Retained client/profile publication and the current executable are delivered; remaining feature-specific public workflows keep their own acceptance boundaries. |
 | T02 | Content and asset loading | Complete in accepted source | Product starts, mounted catalogs, replacement dimensions, add-on management and independent product restrictions are integrated; public add-on and authored arena workflows passed. Delivered in executable `30ea85d`. |
-| T03 | Rendering and visual effects | Open | Source effects, shadows, Q64 materials and diagnostics have consumers. The installed proof still shows a black triangular pillar defect. Inspect combined CPU/GL output; remaining fidelity and whole-frame performance are unqualified. |
+| T03 | Rendering and visual effects | Complete in accepted source | Shared CPU/GL rendering, live hardware profiles, source candle effects and renderer-worker restart/capture are qualified. Worker execution defaults off; exact source `333f011` is installed. No FPS or exhaustive pixel-parity claim. |
 | T04 | Audio and music | Open | Acoustics, music commands and voice timing are integrated. Generalized jump audio remains in progress: model lookup coverage does not close private Q3 event-routing/Q2 voice-selection defects. The authored Crash run also reports an unbound source `play` command. Qualify that routing, physical output and relative weapon/explosion loudness. |
 | T05 | Input and local players | Open | Device assignment, source look controls and live local-seat paths are integrated. Complete joined-seat camera/angle checks and the protocol-specific remote-seat matrix. |
 | T06 | Console, cvars and profiles | Open | Shared command/profile consumers are integrated. Finish public library/frontend callers and verify script routing and persistence across source changes. |
@@ -87,3 +87,12 @@ Current proof: [Q2 runtime receipt](../../.artifacts/resume-20260916/targets/t08
 Earlier failed fixtures remain preserved. Q2 initially respected installed CTF settings that disabled sound downloads; explicit temporary profile permissions corrected the test. QW exposed a real stock-id1-only simulation admission guard, corrected to accept validated QW edition identities while retaining native-source constraints. Its next fixture needed ordinary idle user-command submission for active peer packet pacing; no download assertion or timeout was weakened.
 
 Standard NetQuake has no native download opcode. Native retries restart where a verified resumable identity is unavailable; HTTP range continuation uses a strong ETag. No cross-process partial-file cache is claimed. Q3/QW public pause/retry joins have focused adapter coverage; the new actual public control run is Q2. This record does not close T07's external-peer matrix or expand the bounded installed-delivery evidence. The historical source-row ledger is unchanged.
+
+
+## T03 rendering and visual effects
+
+Root accepted and installed exact `333f011` after check5 strict/policy qualification. Compiled gameplay used check4 with identical worker/Application code; the final two-path candle delta was checked separately. This does not claim a full gameplay session on the final installed binary. The latter completed 30.199 seconds of controls, retained the recipe and binding, advanced source frames 218 → 803 → 1779, accepted fresh serial-mode input and exited through Main/Quit normally. Root inspected ready, gameplay, serial and Main captures. The embedded worker executed with checkout source inaccessible and no worker sidecar. Earlier runner failures are retained. [Machine-local compiled receipt](../../.artifacts/resume-20260917/t03-compiled-check4/proof-worker4/receipt.json).
+
+The shared owner supports CPU/GL worker execution, serial/worker restart, ordered resources and captures, and failure cleanup. Worker execution defaults off; no performance gain is claimed. Live hardware getters reach shared Q3 effects/particles, and the final candle producer delta is source-qualified separately from the compiled check4 run. Six actual Q1/Q2/Q3 CPU/GL light/shadow cases support shared surface consumption. These bounded proofs do not establish every original image, driver or material combination.
+
+The previously reported black pillar patch is authored BSP underside geometry with almost-black baked lightmap data, confirmed by GPU draw attribution and source samples. No renderer fix is justified; original-renderer image parity remains unmeasured. [Source attribution](../../.artifacts/resume-20260917/black-patch-t02-15/RESULT.md). T04 audio remains active; physical audio, whole-frame performance and full campaigns are not closed by T03 acceptance.
