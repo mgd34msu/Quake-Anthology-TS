@@ -110,3 +110,23 @@ test("output conversion retains fractional source phase and signed PCM channel s
     expect(Math.abs(converted.length / 2 / 48000 - source.length / 2 / 44100)).toBeLessThan(1 / 48000);
     expect(["11", "22", "44", "48", "0"].map(audioKhzRate)).toEqual([11025, 22050, 44100, 48000, null]);
 });
+
+
+test("raw refill resets rate channels and source origin inside a mix block", () => {
+    const stream = new RawAudioStream(48000);
+    stream.queue({ samples: Int16Array.of(10, 20), sampleRate: 24000, channels: 1, sourceSample: 0, resetStream: true });
+    const observed: number[] = [];
+    const refill = () => {
+        observed.push(stream.sourcePosition);
+        return observed.length === 1 ? { samples: Int16Array.of(30, -30, 40, -40), sampleRate: 48000,
+            channels: 2, sourceSample: 100, resetStream: true } satisfies import("../../src/audio/types.ts").StreamPcm : null;
+    };
+    expect([...stream.mix(6, 0.5, refill)]).toEqual([5, 5, 5, 5, 10, 10, 10, 10, 15, -15, 20, -20]);
+    expect(observed).toEqual([2]); expect(stream.sourcePosition).toBe(102);
+    stream.paused = true;
+    expect([...stream.mix(3, 1, refill)]).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(observed).toEqual([2]); expect(stream.sourcePosition).toBe(102);
+    stream.paused = false;
+    expect([...stream.mix(2, 1, refill)]).toEqual([0, 0, 0, 0]);
+    expect(observed).toEqual([2, 102]); expect(stream.sourcePosition).toBe(102);
+});

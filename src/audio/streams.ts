@@ -150,7 +150,8 @@ export class RawAudioStream {
             return output;
         for (let frame = 0; frame < frames; frame++) {
             let segment = this.segments[0];
-            while (segment === undefined || this.sourcePosition >= segment.end) {
+            let position = this.sourcePosition;
+            while (segment === undefined || position >= segment.end) {
                 if (segment !== undefined)
                     this.segments.shift();
                 segment = this.segments[0];
@@ -161,8 +162,8 @@ export class RawAudioStream {
                     this.queue(chunk);
                     segment = this.segments[0];
                 }
+                position = this.sourcePosition;
             }
-            const position = this.sourcePosition;
             const index = (position - segment.begin) * this.channels;
             const left = segment.samples[index], right = this.channels === 1 ? left : segment.samples[index + 1];
             if (left === undefined || right === undefined)
