@@ -2,7 +2,7 @@
 
 This plan groups remaining work by engine function. Each target defines the shared service, the source behavior that must survive, and the user-visible result needed for completion. It covers Quake, QuakeWorld, both rereleases, Quake II, Quake III Arena, their required expansions, and the already requested mod integrations.
 
-**Functional targets: 1 of 23 complete in accepted source; 22 remain open.** T01 session and resource lifetime is complete at `e3eea6a`; see [target status and remaining work](status.md). This is a count of the T01–T23 targets, independent of the historical source-row inventory below.
+**Functional targets: 3 of 23 complete in accepted source; 20 remain open.** T01 session and resource lifetime is complete at `e3eea6a`; T02 content/assets and T08 downloads are complete in root-accepted check13 source, with commit/build delivery pending; see [target status and remaining work](status.md). This is a count of the T01–T23 targets, independent of the historical source-row inventory below.
 
 Installed `6103c97` includes T01’s retained remote configuration/profile changes and the accepted Application integrations. Its bounded compiled QW recipe, travel/save and normal Quit proof is recorded in [execution status](../execution-status.md#installed-executable-and-recent-fixes), separately from the longer source check. The installed `451a905` optimization reduced model-material preparation component time by 19.55% across three pairs; it does not establish an FPS gain. Broader jump audio, physical audibility, campaign completeness and overall FPS remain unqualified.
 
@@ -102,7 +102,7 @@ The frame-time budget and reference workload should be explicit before a perform
 
 T01's shared-client lifetime implementation is complete in accepted source `e3eea6a`. The retained client owns input, console programs, settings, renderer/audio and resources through local play, network connections, demos, save restoration and menus. Source configuration is prepared before publication, including a server-selected mod; profile scripts can wait or disconnect without deadlocking the packet decoder. Separate compiled and native runs cover these transitions; [the completion record](status.md#t01-session-and-resource-lifetime) states their scope and delivery status.
 
-The other 22 targets remain open. Their candidates are being joined to the shared application and menus; supporting modules alone do not count as completed targets. Performance remains active under T03/T11/T13.
+The other 20 targets remain open. T02 passed public add-on installation/play/recovery and authored arena gameplay; T08 retains its qualified transfer, fallback, interruption and remount workflows. See [their evidence and limits](status.md). Supporting modules alone do not count as completed targets. Performance remains active under T03/T11/T13.
 
 The shared font path now connects TrueType generation and optional font export to the same material registry used by retail DAT fonts. Both appeared correctly in an inspected rendered image. This advances T03/T18; it does not complete international text, captions, or every mod UI workflow.
 

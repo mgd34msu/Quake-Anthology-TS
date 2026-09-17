@@ -35,7 +35,7 @@ export interface Q3ClientBindings {
   readonly localServerRunning: () => boolean;
 }
 export type Q3ClientPacketResult = Exclude<ChannelResult, { readonly kind: "accepted" }>
-  | { readonly kind: "accepted"; readonly sequence: number; readonly dropped: number; readonly message: ServerMessage };
+  | { readonly kind: "accepted"; readonly sequence: number; readonly dropped: number; readonly message: ServerMessage; readonly plaintext: Uint8Array };
 export type Q3ClientMode = { readonly kind: "network"; readonly challenge: number; readonly qport: number }
   | { readonly kind: "demo"; readonly reader: DemoMessageReader };
 
@@ -202,7 +202,7 @@ export class Q3ClientConnection {
     const ack = new MessageReader(result.payload).readLong();
     const plaintext = xorServerMessage(result.payload, this.mode.challenge, result.sequence, this.reliable.lookupMasked(ack));
     const message = await this.receiveMessage(result.sequence, plaintext, realTime);
-    return { kind: "accepted", sequence: result.sequence, dropped: result.dropped, message };
+    return { kind: "accepted", sequence: result.sequence, dropped: result.dropped, message, plaintext };
   }
   async readDemo(realTime: number): Promise<ServerMessage | DemoEnd> {
     if (this.mode.kind !== "demo") throw new Error("Network connection cannot read demo messages");

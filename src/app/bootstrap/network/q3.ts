@@ -1,3 +1,4 @@
+import { Q3ServerAuthorization } from '../../../network/q3/authorization.ts';
 import { q3ConfigstringCommands } from "../../../network/q3/configstrings.ts";
 import type { Q3GuestOutput } from '../simulation/q3/guest-runtime.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
@@ -15,13 +16,16 @@ import { Q3ServerSnapshotHistory, Q3SnapshotEntities } from '../../../network/q3
 import type { EntityStateFields } from '../../../network/q3/state/entity.ts';
 import { EntityStateRecord } from '../../../network/q3/state/entity.ts';
 import { q3ChannelDelivery } from '../../../network/q3/transport.ts';
-import { encodeConnectionlessText } from '../../../network/q3/connectionless.ts';
+import { decodeConnectionless, encodeConnectionlessText } from '../../../network/q3/connectionless.ts';
+import { RconService, q3RconCommand } from '../../../network/services/admin.ts';
+import { MasterHeartbeat } from '../../../network/services/discovery.ts';
+import { q3DiscoveryWire } from '../../../network/q3/discovery.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import type { Q3ApplicationPlayer, Q3ApplicationServerHost, Q3NetworkRoundRestart } from './q3-types.ts';
 import { Q3GameCallbackError, q3GameCallback } from './q3-types.ts';
 interface Peer { readonly slot: number; readonly download: Q3ServerDownload; readonly baselines: Map<number, EntityStateFields>; remote: Q3Address; player: Q3ApplicationPlayer; readonly connection: Q3ServerConnection; lastReceived: number; readonly connectedAt: number; sequence: number; userinfo: string; }
-export interface Q3ServerNetworkOptions { readonly transport: DatagramTransport<NetworkAddress>; readonly host: Q3ApplicationServerHost; readonly random: () => number; readonly timeoutMilliseconds?: number; }
+export interface Q3ServerNetworkOptions { readonly transport: DatagramTransport<NetworkAddress>; readonly host: Q3ApplicationServerHost; readonly random: () => number; readonly timeoutMilliseconds?: number; readonly resolveAuthorization?: import('../../../network/q3/authorization.ts').Q3ServerAuthorizationOptions['resolve']; }
 export class Q3ServerNetwork implements ApplicationNetwork {
   readonly role = 'server';
   readonly wire = { kind: 'source', protocol: { kind: 'q3', version: 68 } } satisfies ApplicationNetwork['wire'];
@@ -39,17 +43,32 @@ export class Q3ServerNetwork implements ApplicationNetwork {
   private readonly peers = new Map<number, Peer>();
   private readonly entities = new Q3SnapshotEntities(32768);
   private readonly admission: Q3ServerAdmission;
+  private readonly rcon: RconService;
+  private readonly masterHeartbeat: MasterHeartbeat;
   constructor(readonly options: Q3ServerNetworkOptions) {
     this.checksumFeed = (options.random() << 16) ^ options.random();
     this.host = options.host; this.requireSupported(this.host);
-    this.admission = new Q3ServerAdmission({ enabled: () => !this.ended, slots: () => this.slots(), privateClients: () => 0,
-      privatePassword: () => '', reconnectLimitSeconds: () => 3, minimumPing: () => 0, maximumPing: () => 0,
-      authorizeAddress: () => null, demoRestricted: () => false, isLan: address => address.kind === 'loopback' || address.host[0] === 127 || address.host[0] === 10 || (address.host[0] === 192 && address.host[1] === 168) || (address.host[0] === 172 && address.host[1] >= 16 && address.host[1] <= 31), random: options.random,
-      authorize: challenge => { if (challenge.address !== null) { options.transport.send(challenge.address, encodeConnectionlessText(`challengeResponse ${challenge.challenge}`)); } }, send: (to, bytes) => { options.transport.send(to, bytes); }, admit: request => this.admit(request),
+    this.rcon = new RconService({ password: () => this.host.administration?.rconPassword() ?? '',
+      execute: async (command, output) => { const administration = this.host.administration; if (administration === undefined) throw new Error('Server administration is unavailable'); await administration.execute(command, output); },
+      reply: (address, text) => { options.transport.send(address, encodeConnectionlessText(`print\n${text}`)); } });
+    this.masterHeartbeat = new MasterHeartbeat(q3DiscoveryWire(), options.transport);
+    const authorization = new Q3ServerAuthorization({ ...(options.resolveAuthorization === undefined ? {} : { resolve: options.resolveAuthorization }), enabled: () => !this.ended, gameDirectory: () => this.host.admission?.gameDirectory() ?? '', strictAuth: () => this.host.admission?.strictAuth() ?? '1', send: (address, packet) => { options.transport.send(address, packet); }, print: text => this.host.print(text) });
+    this.admission = new Q3ServerAdmission({ enabled: () => !this.ended && (this.host.admission?.enabled() ?? true), slots: () => this.slots(), privateClients: () => this.host.admission?.privateClients() ?? 0,
+      privatePassword: () => this.host.admission?.privatePassword() ?? '', reconnectLimitSeconds: () => this.host.admission?.reconnectLimitSeconds() ?? 3, minimumPing: () => this.host.admission?.minimumPing() ?? 0, maximumPing: () => this.host.admission?.maximumPing() ?? 0,
+      authorizeAddress: () => authorization.address, demoRestricted: () => this.host.admission?.demoRestricted() ?? false, isLan: address => address.kind === 'loopback' || address.host[0] === 127 || address.host[0] === 10 || (address.host[0] === 192 && address.host[1] === 168) || (address.host[0] === 172 && address.host[1] >= 16 && address.host[1] <= 31), random: options.random,
+      authorize: challenge => authorization.request(challenge), send: (to, bytes) => { options.transport.send(to, bytes); }, admit: request => this.admit(request),
       dropBot: () => { throw new Error('Native Q3 admission cannot evict an application bot'); }, print: text => this.host.print(text),
       query: (from, packet) => {
-        if (packet.command === 'getinfo' || packet.command === 'getstatus') options.transport.send(from, encodeConnectionlessText(this.host.status(packet.arguments[0] ?? '', packet.command === 'getstatus')));
+        if (packet.command === 'getinfo' || packet.command === 'getstatus') {
+          const response = this.host.status(packet.arguments[0] ?? '', packet.command === 'getstatus');
+          if (response !== null) options.transport.send(from, encodeConnectionlessText(response));
+        }
       } });
+  }
+  heartbeat(nowMilliseconds: number): void { if (!this.ended) this.masterHeartbeat.send(this.host.administration?.masters() ?? [], Math.trunc(nowMilliseconds), true, true); }
+  get recordingSource(): { readonly host: Q3ApplicationServerHost; readonly serverId: number; readonly snapshotServerBit: 0 | 4 } {
+    if (this.ended) throw new Error('Q3 recording source is retired');
+    return { host: this.host, serverId: this.serverId, snapshotServerBit: this.serverFlags };
   }
   get address(): NetworkAddress { return this.options.transport.address; }
   get phase(): ApplicationNetworkPhase { return this.ended ? 'closed' : 'active'; }
@@ -84,7 +103,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     const download = new Q3ServerDownload({ open: name => this.host.openDownload(name), enabled: () => this.host.downloadsEnabled(), pure: () => this.host.pure(this.serverId, this.restartedServerId).enabled, drop: async reason => { await this.disconnectClient(peer.player.client, reason); }, print: text => this.host.print(text) });
     const connection: Q3ServerConnection = new Q3ServerConnection({ client: admitted.player.client, seat: null }, request.challenge, request.qport, snapshots, {
       assertCurrent: () => this.assertPeer(peer), serverId: () => this.serverId, restartedServerId: () => this.restartedServerId, checksumFeed: () => this.checksumFeed,
-      pure: () => this.host.pure(this.serverId, this.restartedServerId).enabled, debugBuild: false, time: () => this.host.time(), clientRunning: () => false, floodProtect: () => true, downloadName: () => download.name,
+      pure: () => this.host.pure(this.serverId, this.restartedServerId).enabled, debugBuild: false, time: () => this.host.time(), clientRunning: () => false, floodProtect: () => this.host.admission?.floodProtect() ?? true, downloadName: () => download.name,
       command: async (command, clientOK): Promise<boolean> => {
         const host = this.host, serverId = this.serverId;
         const argv = tokenizeCommand(command.text, 'q3').argv, name = argv[0] ?? '';
@@ -132,9 +151,16 @@ export class Q3ServerNetwork implements ApplicationNetwork {
       if (this.ended) break;
       if (event.kind === 'error') { this.host.print(event.error.message); continue; }
       if (event.kind !== 'packet' || (event.from.kind !== 'ipv4' && event.from.kind !== 'loopback')) continue;
+      if (this.host.administration?.rejects(event.from)) continue;
       try {
         const bytes = event.payload;
-        if (bytes[0] === 255 && bytes[1] === 255 && bytes[2] === 255 && bytes[3] === 255) await this.admission.receive(event.from, bytes, this.now);
+        if (bytes[0] === 255 && bytes[1] === 255 && bytes[2] === 255 && bytes[3] === 255) {
+          const packet = decodeConnectionless(bytes, 'server');
+          if (packet.command === 'rcon') {
+            const result = await this.rcon.handle(event.from, packet.arguments[0] ?? '', q3RconCommand(packet.line), this.now);
+            this.host.administration?.record({ address: event.from, operation: 'rcon', result });
+          } else await this.admission.receive(event.from, bytes, this.now);
+        }
         else {
           const slot = routeQ3SequencedPacket(event.from, bytes, this.slots()), peer = slot === null ? undefined : this.peers.get(slot.slot);
           if (peer !== undefined) { peer.remote = event.from; const result = await peer.connection.receiveDatagram(bytes); if (this.peers.get(peer.slot) !== peer) continue; this.assertPeer(peer, host, serverId); if (result.kind === 'accepted') { peer.lastReceived = this.now; if (peer.connection.phase === 'connected') this.gamestate(peer); } }
@@ -142,6 +168,8 @@ export class Q3ServerNetwork implements ApplicationNetwork {
       } catch (error) { if (error instanceof Q3GameCallbackError) throw error; if (this.ended) break; this.host.print(error instanceof Error ? error.message : String(error)); }
     }
     if (this.ended) { this.pending = []; return []; }
+    const masters = this.host.administration?.masters() ?? [];
+    if (masters.length > 0) this.masterHeartbeat.send(masters, this.now, true);
     for (const peer of this.peers.values()) if (this.now - peer.lastReceived > (this.options.timeoutMilliseconds ?? 30000)) await this.disconnectClient(peer.player.client, 'timed out');
     const commands = this.pending; this.pending = []; return commands;
   }

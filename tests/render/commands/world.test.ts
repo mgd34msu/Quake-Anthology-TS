@@ -190,6 +190,7 @@ const cases: readonly { readonly family: "q1" | "q2" | "q3"; readonly archive: s
   { family: "q2", archive: "q2/baseq2/pak0.pak", map: "maps/base1.bsp" },
   { family: "q2", archive: "q2/rerelease/baseq2/pak0.pak", map: "maps/base1.bsp" },
   { family: "q3", archive: "q3a/baseq3/pak0.pk3", map: "maps/q3dm1.bsp" },
+  { family: "q3", archive: "q2/baseq2/pak6.pak", map: "maps/q3test1.bsp" },
 ];
 
 for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}`))(`prepares and draws ${fixture.archive}:${fixture.map}`, async () => {
@@ -281,11 +282,30 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     frame.world(prepared);
     const backend = new SoftwareRenderer(160, 120, owner);
     const target = new CpuRenderTarget(backend);
-    target.execute(frame.finish(false));
+    const commands = frame.finish(false);
+    target.execute(commands);
+    if (fixture.map === "maps/q3test1.bsp" && process.env["QUAKE_BSP44_GL"] === "1") {
+      const { NativeRenderer } = await import("../../../src/app/bootstrap/renderer.ts");
+      const renderer = NativeRenderer.open({ renderer: "gl", width: 160, height: 120, hidden: true, gamma: 1 }, owner);
+      try {
+        const captured = renderer.captureNextFrame();
+        renderer.execute({ ...commands, commands: [...commands.commands, { kind: "swap-buffers" }] });
+        const pixels = await captured;
+        const diagnostics = renderer.diagnostics();
+        expect(diagnostics.backend).toBe("gl");
+        const uploads = commands.commands.flatMap(command => command.kind === "image-resource" && command.operation.kind === "create-image" ? [command.operation.image] : []);
+        for (const image of uploads) expect(diagnostics.images.find(resident => resident.ordinal === image.ordinal)).toMatchObject({ width: image.width, height: image.height });
+        let colored = 0;
+        for (let offset = 0; offset < pixels.length; offset += 4) if ((pixels[offset] ?? 0) + (pixels[offset + 1] ?? 0) + (pixels[offset + 2] ?? 0) > 0) colored++;
+        expect(colored).toBeGreaterThan(1000);
+        console.log(JSON.stringify({ format: "IBSP44", backend: diagnostics.backend, driver: diagnostics.driver, images: uploads.length, colored }));
+      } finally { renderer.close(); }
+    }
     let colored = 0;
     for (let pixel = 0; pixel < backend.pixels.length; pixel += 4) if ((backend.pixels[pixel] ?? 0) + (backend.pixels[pixel + 1] ?? 0) + (backend.pixels[pixel + 2] ?? 0) > 0) colored++;
     if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/w17-scene/${fixture.family}${fixture.archive.includes("rerelease") ? "-rerelease" : ""}.png`, encodePng(160, 120, backend.pixels));
     expect(colored).toBeGreaterThan(1000);
+    if (fixture.map === "maps/q3test1.bsp") console.log(JSON.stringify({ format: "IBSP44", backend: "cpu", surfaces: scene.surfaces.length, visible: prepared.visibility.surfaces.length, colored }));
     if (fixture.family !== "q3" && !fixture.archive.includes("rerelease")) {
       const candidate = scene.surfaces.find(surface => surface.kind === "legacy" && surface.lightmap !== null);
       if (candidate === undefined || candidate.kind !== "legacy" || candidate.lightmap === null) throw new Error("Missing authored override candidate");

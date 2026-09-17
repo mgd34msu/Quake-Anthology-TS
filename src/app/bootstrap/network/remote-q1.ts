@@ -275,7 +275,7 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
         if (player === null || !player.actor.equals(actor) || data === null)
             throw new Error('Remote Q1 player has no clientdata');
         const entity = this.current.get(this.viewEntity);
-        return { origin: entity === undefined ? zero : this.sampled(entity).origin, angles: this.viewAngles, viewHeight: data.viewHeight, kickAngles: data.punchAngles };
+        return { origin: entity === undefined ? zero : this.sampled(entity).origin, angles: this.viewAngles, viewHeight: data.viewHeight, kickAngles: data.punchAngles, pitchDrift: { grounded: data.onGround, idealPitch: data.idealPitch, disabled: this.demoSeconds !== null } };
     }
     playerUi(actor: ActorId): PlayerUi {
         this.playerView(actor);

@@ -227,7 +227,7 @@ export class SceneTextureLoader {
       }
       let logicalSize: Pick<ImageLevel, "width" | "height"> = content.levels[0];
       if (options.family === "q2" && suffix !== ".wal" && (name.toLowerCase().endsWith(".wal") || !explicit && wall)) {
-        const original = await this.reader.read(`${base}.wal`);
+        const original = await this.reader.readOriginal?.(`${base}.wal`) ?? await this.reader.read(`${base}.wal`);
         if (original !== null) logicalSize = decodeWal(original.bytes, `${base}.wal`);
       }
       if (options.family === "q2" && name.toLowerCase().endsWith(".pcx") && suffix !== ".pcx") {
@@ -240,7 +240,10 @@ export class SceneTextureLoader {
       }
       const original = await this.reader.readOriginal?.(path);
       if (original !== undefined && original !== null && logicalSize === content.levels[0]) {
-        if (suffix === ".gif") logicalSize = decodeGif(original.bytes, path);
+        if (suffix === ".pcx") logicalSize = decodePcx(original.bytes, path);
+        else if (suffix === ".wal") logicalSize = decodeWal(original.bytes, path);
+        else if (suffix === ".lmp") logicalSize = decodeQpic(original.bytes, path);
+        else if (suffix === ".gif") logicalSize = decodeGif(original.bytes, path);
         else if (suffix === ".png") logicalSize = decodePng(original.bytes, path);
         else if (suffix === ".tga") logicalSize = decodeTga(original.bytes, path);
         else if (suffix === ".jpg" || suffix === ".jpeg") logicalSize = decodeJpeg(original.bytes, path);

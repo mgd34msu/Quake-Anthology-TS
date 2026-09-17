@@ -8,7 +8,7 @@ export interface DemoRequest {
 }
 export type DemoResource =
   | { readonly kind: "q1" | "qw" | "q2"; readonly path: string; readonly bytes: Uint8Array }
-  | { readonly kind: "q3"; readonly path: string; readonly bytes: Uint8Array; readonly protocol: 68 };
+  | { readonly kind: "q3"; readonly path: string; readonly bytes: Uint8Array; readonly protocol: 66 | 67 | 68 };
 
 function hasExtension(path: string): boolean {
   return path.lastIndexOf(".") > path.lastIndexOf("/");
@@ -51,8 +51,8 @@ export async function openDemoResource(request: DemoRequest, read: (path: string
       if (!supportedSuffix) print(`Not found: ${candidate.path}\n`);
       continue;
     }
-    if (candidate.protocol !== 68) throw new Error(`Demo ${candidate.path} uses Quake III protocol ${candidate.protocol}; this decoder supports protocol 68`);
-    return { kind: "q3", path: candidate.path, bytes, protocol: 68 };
+    if (candidate.protocol !== 66 && candidate.protocol !== 67 && candidate.protocol !== 68) throw new Error('Invalid Quake III demo protocol selection');
+    return { kind: "q3", path: candidate.path, bytes, protocol: candidate.protocol };
   }
   throw new Error(`Couldn't open demo ${name}`);
 }

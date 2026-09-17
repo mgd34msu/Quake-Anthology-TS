@@ -1,9 +1,12 @@
+import type { ClientDownloadProgress } from './client-download-policy.ts';
 import { RemoteWorldContent } from './remote-world.ts';
 import type { RemoteContentMounts } from "../content.ts";
 import type { ClientDownloadPermission } from './client-download-policy.ts';
 import type { WorldText } from "../../../text/world.ts";
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
 import type { ActorId, IdentityOwner } from '../../../contracts/identity.ts';
+import { q2proExtensions } from '../../../network/q2/codecs/q2pro-fields.ts';
+import { q2SolidEncoding, unpackQ2Solid } from '../../../network/q2/solid.ts';
 import { negotiatedR1Q2Protocol } from '../../../network/q2/codec.ts';
 import type { Bounds, Vec3 } from '../../../contracts/math.ts';
 import type { Q2ProtocolIdentity } from '../../../contracts/protocol.ts';
@@ -13,7 +16,7 @@ import { blockChecksum } from '../../../core/md4.ts';
 import { Q2_BASE_WEAPONS } from '../../../content/q2/foundation/weapons/index.ts';
 import { muzzleOffset } from '../../../content/q2/foundation/monsters/muzzle.ts';
 import { anglesVectors } from '../../../content/q2/foundation/monsters/ai.ts';
-import { fromQ2Command, readElement, toQ2Command, toQ2Player } from '../../../network/q2/index.ts';
+import { fromQ2Command, readElement, toQ2Command, toQ2RereleaseCommand, toQ2Player, toQ2RereleasePlayer } from '../../../network/q2/index.ts';
 import type { Q2ServerRecord, Q2WireFrame, UsercmdT } from '../../../network/q2/index.ts';
 import type { EngineSession, SessionClient } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
@@ -39,6 +42,7 @@ export interface Q2RemotePresentationOptions {
     readonly protocol: Q2ProtocolIdentity;
     readonly userinfo: () => string;
     readonly downloadPermission?: ClientDownloadPermission;
+    readonly cinematic?: { start(name: string, ended: () => void): Promise<void>; stop(): void };
     print(text: string): void;
     sendCommand(text: string): void;
     loadContent?(state: Q2ApplicationGameState): Promise<LoadedApplicationContent>;
@@ -46,10 +50,7 @@ export interface Q2RemotePresentationOptions {
     refreshDownloads?(assertCurrent: () => void): Promise<RemoteContentMounts>;
 }
 export function q2RemoteEntityBounds(solid: number, longSolid: boolean): Bounds {
-    const size = longSolid ? solid & 255 : (solid & 31) * 8;
-    const down = longSolid ? solid >>> 8 & 255 : (solid >>> 5 & 31) * 8;
-    const up = longSolid ? (solid >>> 16 & 65535) - 32768 : (solid >>> 10 & 63) * 8 - 32;
-    return { min: { x: -size, y: -size, z: -down }, max: { x: size, y: size, z: up } };
+    return unpackQ2Solid(solid, longSolid ? 'r1q2' : 'short');
 }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function vector(values: Float32Array): Vec3 { return { x: readElement(values, 0), y: readElement(values, 1), z: readElement(values, 2) }; }
@@ -61,10 +62,15 @@ function interpolateAngles(from: Vec3, to: Vec3, fraction: number): Vec3 {
 /** Decoded source records are presentation state. This owner has no Simulation or combat table. */
 export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePresentationAccess {
     readonly downloads: Q2DownloadReceiver;
+    get downloadProgress(): readonly ClientDownloadProgress[] { return this.downloads.progress; }
+    cancelDownloads(): void { this.downloads.cancel(); }
+    /** The next existing network poll resumes its retained pending gamestate. */
+    retryDownloads(): void { this.downloads.retry(); }
     private downloadContent: RemoteContentMounts | null = null;
     readonly client: SessionClient;
     private selectedProtocol: Q2ProtocolIdentity;
     private strafejumpHack = false;
+    private extendedGame = false;
     get protocol(): Q2ProtocolIdentity { return this.selectedProtocol; }
     readonly messageOptions;
     readonly userinfo: () => string;
@@ -91,13 +97,13 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     readonly prediction = {
         acknowledged: (sequence: number, _nowMilliseconds: number): void => { this.packetAcknowledged = sequence; },
         sent: (sequence: number, command: UsercmdT, nowMilliseconds: number): void => {
-            this.predictionOwner?.submit({ sequence, timeMilliseconds: nowMilliseconds, command: toQ2Command(command) });
+            this.predictionOwner?.submit({ sequence, timeMilliseconds: nowMilliseconds, command: this.protocol.kind === 'q2-rerelease' ? toQ2RereleaseCommand(command, this.current?.serverFrame ?? 0) : toQ2Command(command) });
             this.predicted = this.predictionOwner?.replay() ?? null;
         },
     };
     constructor(readonly options: Q2RemotePresentationOptions) {
-        if (options.protocol.kind !== 'q2-classic' && options.protocol.kind !== 'q2-r1q2')
-            throw new Error('Remote application presentation binds Q2 protocol 34 or R1Q2');
+        if (options.protocol.kind === 'q2-kex' || options.protocol.kind === 'q2-kex-demo')
+            throw new Error('KEX native live transport is not bound');
         this.selectedProtocol = options.protocol;
         this.layout = q2ApplicationLayout(options.protocol);
         this.messageOptions = { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 };
@@ -137,15 +143,30 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         return actor;
     }
     async serverData(data: Q2ApplicationGameState["data"], assertCurrent: () => void): Promise<void> {
+        this.options.cinematic?.stop();
         const revision = this.downloads.revision;
         const current = (): void => { assertCurrent(); if (revision !== this.downloads.revision) throw new Error('Q2 server content preparation was retired'); };
         const prepared = await this.options.prepareServerData(data, current);
         current(); this.downloadContent = prepared;
+        if (data.clientnum < 0) {
+            const cinematic = this.options.cinematic;
+            if (cinematic === undefined) throw new Error('Q2 cinematic serverdata requires the shared media owner');
+            this.current = null; this.previousFrame = null; this.published = null; this.currentPlayer = null;
+            this.predictionOwner = null; this.predicted = null;
+            let completed = false;
+            await cinematic.start(data.levelname, () => {
+                if (completed) return;
+                try { current(); } catch { return; }
+                completed = true; this.options.sendCommand(`nextserver ${data.servercount}\n`);
+            });
+            current();
+        }
     }
     async gameState(state: Q2ApplicationGameState): Promise<void> {
         const offered = this.options.protocol;
         if (offered.kind === 'q2-r1q2') this.selectedProtocol = negotiatedR1Q2Protocol(offered, state.data.r1q2Version);
-        this.strafejumpHack = offered.kind === 'q2-r1q2' && state.data.r1q2StrafejumpHack === true;
+        this.strafejumpHack = offered.kind === 'q2-r1q2' ? state.data.r1q2StrafejumpHack === true : state.data.q2proStrafejumpHack === true;
+        this.extendedGame = offered.kind === 'q2-q2pro' && q2proExtensions({ revision: state.data.q2proVersion ?? offered.revision, flags: state.data.wireFlags ?? 0 });
         const revision = this.downloads.revision;
         const content = this.options.loadContent === undefined ? this.world.content : await this.options.loadContent(state);
         if (revision !== this.downloads.revision) return;
@@ -193,8 +214,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
             throw new Error('Remote Q2 player has no decoded frame');
         return { player: this.currentPlayer, frame: this.current };
     }
-    private nativePlayer(frame: Q2WireFrame) { return toQ2Player(frame.player); }
-    private playerOrigin(frame: Q2WireFrame): Vec3 { const movement = this.nativePlayer(frame).movement; return { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 }; }
+    private nativePlayer(frame: Q2WireFrame) { return this.protocol.kind === 'q2-rerelease' ? toQ2RereleasePlayer(frame.player) : toQ2Player(frame.player); }
+    private playerOrigin(frame: Q2WireFrame): Vec3 { const movement = this.nativePlayer(frame).movement; return movement.kind === 'q2-rerelease' ? movement.origin : { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 }; }
     worldText(): readonly WorldText[] { return []; }
 
     playerView(actor: ActorId): PlayerView {
@@ -276,9 +297,9 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         this.predicted = null;
         this.fraction = 1;
         this.receivedAt = this.options.presentationTime?.() ?? nowMilliseconds;
-        const movement = this.nativePlayer(frame).movement, view = this.playerView(player.actor), velocity = { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 };
+        const movement = this.nativePlayer(frame).movement, view = this.playerView(player.actor), velocity = movement.kind === 'q2-rerelease' ? movement.velocity : { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 };
         const bodies: BodySnapshot[] = frame.entities.filter(entity => entity.number !== player.sourceEntity).map(entity => {
-            const bounds = q2RemoteEntityBounds(entity.solid, this.protocol.kind === 'q2-r1q2' && this.protocol.revision >= 1905);
+            const bounds = unpackQ2Solid(entity.solid, q2SolidEncoding(this.protocol, this.extendedGame));
             return { actor: this.actor(entity.number), body: { origin: vector(entity.origin), angles: vector(entity.angles), velocity: zero, bounds, ground: null } };
         });
         bodies.push({ actor: player.actor, body: { origin: view.origin, angles: view.angles, velocity, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: view.viewHeight + 10 } }, ground: null } });
@@ -316,9 +337,11 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         if (player === null) return;
         const native = this.nativePlayer(frame), recipe = this.world.content.recipe;
         const profile = movementProfile(recipe);
-        if (profile.kind !== 'q2-classic' || native.kind !== 'q2-classic') return;
+        if (profile.kind !== 'q2-classic' && profile.kind !== 'q2-rerelease') return;
+        if (profile.kind !== native.kind) throw new Error('Q2 server movement API differs from selected prediction profile');
         const airAccelerate = (): number => Number(this.configs.get(this.layout.airAccelerate) ?? '0');
         const strafejumpHack = (): boolean => this.strafejumpHack;
+        const n64Physics = (): boolean => this.layout.n64Physics !== null && Number(this.configs.get(this.layout.n64Physics) ?? '0') !== 0;
         const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
         const snapshot: MovementPredictionSnapshot = { sequence: this.packetAcknowledged, commandTimeMilliseconds: frame.serverFrame * this.frameMilliseconds,
             state: native.movement, viewAngles: native.viewAngles, viewHeight: native.viewOffset.z, viewOffset: native.viewOffset, bounds,
@@ -330,7 +353,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
             contact: null, q3Arsenal: null };
         if (this.predictionOwner === null) this.predictionOwner = new SelectedMovementPrediction({
             actor: this.options.identity.ownedActor(player.actor, recipe.map.entities.provider), seat: this.options.seat,
-            recipe, get profile() { return { ...profile, airAccelerate: airAccelerate(), strafejumpHack: strafejumpHack() }; },
+            recipe, get profile() { return profile.kind === 'q2-rerelease' ? { ...profile, airAccelerate: airAccelerate(), n64Physics: n64Physics() } : { ...profile, airAccelerate: airAccelerate(), strafejumpHack: strafejumpHack() }; },
             standingBounds: bounds, standingViewHeight: 22, scene: this.world.scene,
             isBrush: hit => hit.kind === 'world' || hit.kind === 'actor' && (this.current?.entities.some(entity => this.actor(entity.number).equals(hit.actor) && entity.solid === 31) ?? false),
         }, snapshot);
@@ -427,6 +450,6 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         }
     }
     drainPresentationEvents(): readonly SimulationPresentationEvent[] { return this.events.splice(0); }
-    disconnected(reason: string): void { this.options.print(`${reason}\n`); this.options.disconnected(reason); }
+    disconnected(reason: string): void { this.options.cinematic?.stop(); this.options.print(`${reason}\n`); this.options.disconnected(reason); }
     print(text: string): void { this.options.print(text); }
 }

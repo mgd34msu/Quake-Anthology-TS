@@ -15,13 +15,14 @@ test("recording suffix selects its family and mounted lookup retains its bytes",
   }
 });
 
-test("Q3 searches native suffix order and rejects an available unsupported decoder protocol", async () => {
+test("Q3 searches the donor's compatible suffix order and retains the recorded protocol identity", async () => {
   const bytes = new Uint8Array([1]), paths: string[] = [];
   const request = { family: "q3", name: "demo1", timedemo: false } satisfies Parameters<typeof openDemoResource>[0];
   const result = await openDemoResource(request, async path => { paths.push(path); return path.endsWith("68") ? bytes : undefined; }, () => {});
   expect(paths).toEqual(["demos/demo1.dm_66", "demos/demo1.dm_67", "demos/demo1.dm_68"]);
   expect(result).toEqual({ kind: "q3", path: "demos/demo1.dm_68", bytes, protocol: 68 });
-  await expect(openDemoResource(request, async () => bytes, () => {})).rejects.toThrow("supports protocol 68");
+  expect(await openDemoResource(request, async () => bytes, () => {})).toMatchObject({ protocol: 66, path: 'demos/demo1.dm_66' });
+  expect(await openDemoResource({ ...request, name: 'demo1.dm_67' }, async () => bytes, () => {})).toMatchObject({ protocol: 67, path: 'demos/demo1.dm_67' });
   const explicit: string[] = [];
   await openDemoResource({ ...request, name: "demos/demo1.dm_68" }, async path => { explicit.push(path); return bytes; }, () => {});
   expect(explicit).toEqual(["demos/demo1.dm_68"]);

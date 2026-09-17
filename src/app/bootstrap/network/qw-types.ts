@@ -1,3 +1,4 @@
+import type { Vec3 } from '../../../contracts/math.ts';
 import type { ActorCommand } from '../../../contracts/session.ts';
 import type { QwUserCommand } from '../../../contracts/protocol.ts';
 import type { QuakeWorldMessage } from '../../../network/q1/quakeworld.ts';
@@ -22,6 +23,7 @@ export interface QwApplicationClientHost {
     gameState(data: QwServerData, models: readonly string[], sounds: readonly string[]): Promise<number>;
     receive(messages: readonly QuakeWorldMessage[], nowMilliseconds: number): Promise<void>;
     command(command: ActorCommand): QwUserCommand;
+    takeSpectatorTeleport?(): Vec3 | null;
     disconnected(reason: string): void;
     print(text: string): void;
 }

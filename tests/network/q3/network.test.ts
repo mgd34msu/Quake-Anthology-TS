@@ -7,7 +7,7 @@ import { Q3ClientConnection } from "../../../src/network/q3/client.ts";
 import { Q3ClientDownload, Q3ServerDownload } from "../../../src/network/q3/download.ts";
 import { MessageReader, MessageWriter } from "../../../src/network/q3/message.ts";
 import { ClientMessageReader, encodeClientMessage } from "../../../src/network/q3/client-message.ts";
-import { encodeConnect } from "../../../src/network/q3/connectionless.ts";
+import { encodeConnectionlessText, encodeConnect } from "../../../src/network/q3/connectionless.ts";
 import { Q3ServerConfigStrings } from "../../../src/network/q3/configstrings.ts";
 import { Q3ServerNetwork } from "../../../src/app/bootstrap/network/q3.ts";
 import { Q3GameCallbackError } from "../../../src/app/bootstrap/network/q3-types.ts";
@@ -380,5 +380,40 @@ test("Q3 packet recovery handles malformed bytes but propagates an awaited game 
     expect(caught.cause).toBe(failure);
     expect(calls).toEqual(["begin"]);
     expect(printed.some(text => text.includes(failure.message))).toBe(false);
+  } finally { await network.close(); hub.close(); }
+});
+
+
+test("Q3 endpoint authenticates rcon, preserves quoted commands and applies its address filter", async () => {
+  const hub = new LoopbackHub(), transport = hub.bind("admin-server"), client = hub.bind("admin-client");
+  const owner = createIdentityOwner("q3-admin-network"), player = { client: owner.client(0, 0), actor: owner.actor(0, 0), sourceEntity: 0 };
+  const commands: string[] = [];
+  let blocked = false;
+  const host: Q3ApplicationServerHost = {
+    product: "baseq3", maxClients: 1, async prepare() {},
+    pure: () => ({ enabled: false, checksumFeed: 0, checksumFeedServerId: 1, cgameChecksum: undefined, uiChecksum: undefined, loadedPureChecksums: [] }),
+    downloadsEnabled: () => false, openDownload: () => null,
+    rate: () => ({ rate: 10000, maxRate: 0, snapshotMsec: 50, local: true, forceLan: false, lan: true }),
+    supportsSourceWire: () => ({ kind: "supported" }), time: () => 0, occupiedSlots: () => [],
+    admit: () => ({ kind: "accepted", player }), carriedPlayer: () => player, disconnect() {},
+    gameState: () => ({ kind: "gamestate", commandSequence: 0, entries: [], clientNumber: 0, checksumFeed: 0 }),
+    snapshot: () => ({ player: new PlayerStateRecord("baseq3", 0, 0, 0), areaMask: new Uint8Array(), entities: [] }),
+    input: () => null, command() {}, userinfo() {}, status: () => "", print() {},
+    administration: { rconPassword: () => "secret", rejects: () => blocked, masters: () => [], record() {},
+      async execute(command, output) { commands.push(command); output("executed\n"); } },
+  };
+  const network = new Q3ServerNetwork({ transport, host, random: () => 0 });
+  const reply = () => {
+    const event = client.poll(); if (event?.kind !== "packet") throw new Error("Missing rcon response");
+    return new TextDecoder().decode(event.payload.subarray(4));
+  };
+  try {
+    client.send(transport.address, encodeConnectionlessText('rcon wrong echo "two words"'));
+    await network.poll(1000); expect(reply()).toContain("Bad rconpassword"); expect(commands).toEqual([]);
+    client.send(transport.address, encodeConnectionlessText('rcon secret echo "two words"'));
+    await network.poll(2000); expect(reply()).toContain("executed"); expect(commands).toEqual(['echo "two words"']);
+    blocked = true;
+    client.send(transport.address, encodeConnectionlessText('rcon secret echo blocked'));
+    await network.poll(3000); expect(client.poll()).toBeNull(); expect(commands).toHaveLength(1);
   } finally { await network.close(); hub.close(); }
 });

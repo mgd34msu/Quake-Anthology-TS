@@ -1,4 +1,7 @@
+import type { Q3ClientAuthorization } from '../../../network/q3/client-authorization.ts';
 import type { CvarRegistry } from "../../../core/cvars/index.ts";
+import type { DemoRecordingSeed, DemoRecordingSink } from '../demo-recording.ts';
+import { q3DemoGamestate } from '../../../network/q3/recording.ts';
 /* Q3 cl_main.c, cl_parse.c and cl_input.c application binding. GPL-2.0-or-later. */
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
@@ -48,8 +51,25 @@ export interface Q3ClientNetworkOptions {
   readonly qport: number;
   readonly cvars?: CvarRegistry;
   readonly timeoutMilliseconds?: number;
+  readonly authorization?: Pick<Q3ClientAuthorization, 'request'>;
 }
 export class Q3ClientNetwork implements ApplicationNetwork {
+  private recordingSink: DemoRecordingSink | null = null;
+  readonly recording = {
+    seed: (): DemoRecordingSeed => {
+      const client = this.connection;
+      if (client === null || this.state !== 'active') throw new Error('Recording requires an active Q3 connection');
+      return { identity: { kind: 'q3', protocol: 68 }, packets: [{ kind: 'q3', ...q3DemoGamestate(client) }] };
+    },
+    attach: (sink: DemoRecordingSink): (() => void) => {
+      if (this.recordingSink !== null) throw new Error('Q3 recording is already attached');
+      const client = this.connection;
+      if (client === null || this.state !== 'active') throw new Error('Recording requires an active Q3 connection');
+      client.demoWaiting = true;
+      this.recordingSink = sink;
+      return () => { if (this.recordingSink === sink) this.recordingSink = null; };
+    },
+  };
   readonly role = 'client';
   readonly wire: ApplicationNetwork['wire'] = { kind: 'source', protocol: { kind: 'q3', version: 68 } };
   private readonly admission: Q3ClientAdmission;
@@ -81,7 +101,18 @@ export class Q3ClientNetwork implements ApplicationNetwork {
   async poll(now: number): Promise<readonly ActorCommand[]> {
     if (this.state === 'closed' || this.state === 'rejected') return [];
     const request = this.admission.resend(now, this.options.host.userinfo());
-    if (request !== null && request.to.kind === 'ipv4') this.options.transport.send(request.to, request.payload);
+    if (request !== null && request.to.kind === 'ipv4') {
+      const peer = request.to;
+      const lan = peer.host[0] === 127 || peer.host[0] === 10 || peer.host[0] === 192 && peer.host[1] === 168 || peer.host[0] === 172 && peer.host[1] >= 16 && peer.host[1] <= 31;
+      if (this.admission.phase === 'connecting' && !lan) {
+        const authorization = this.options.authorization;
+        if (authorization === undefined) throw new Error('Q3 WAN admission requires the client key authorization owner');
+        const assertCurrent = (): void => { if (this.phase === 'closed' || this.phase === 'rejected' || this.admission.phase !== 'connecting' || this.admission.address === null || !sameAddress(this.admission.address, peer)) throw new Error('Q3 authorization belongs to a retired connection'); };
+        await authorization.request(assertCurrent, (address, payload) => { this.options.transport.send(address, payload); });
+        assertCurrent();
+      }
+      this.options.transport.send(peer, request.payload);
+    }
     for (;;) {
       const packet = this.options.transport.poll(); if (packet === null) break;
       if (packet.kind !== 'packet' || packet.from.kind !== 'ipv4') continue;
@@ -99,7 +130,11 @@ export class Q3ClientNetwork implements ApplicationNetwork {
         }));
         this.connection = connection; host.attach(connection);
       } else if (result.kind === 'sequenced' && this.connection !== null) {
-        try { await this.connection.receiveDatagram(result.bytes, now); this.lastReceived = now; }
+        try {
+          const packet = await this.connection.receiveDatagram(result.bytes, now);
+          if (packet.kind === 'accepted' && !this.connection.demoWaiting) await this.recordingSink?.append({ kind: 'q3', sequence: packet.sequence, message: packet.plaintext });
+          this.lastReceived = now;
+        }
         catch (error) { this.state = 'rejected'; this.options.host.disconnected(error instanceof Error ? error.message : String(error)); throw error; }
       } else if (result.kind === 'connectionless') {
         if (result.packet.command === 'print') {

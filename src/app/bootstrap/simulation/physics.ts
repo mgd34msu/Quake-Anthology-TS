@@ -124,7 +124,15 @@ export class SharedPhysics {
       motions: [...this.motions].map(([actor, motion]) => ({ ...motion, actor: savedActorId(actor.id), owner: motion.owner === null ? null : savedActorId(motion.owner) })),
       flags: [...this.flags].map(([actor, flags]) => ({ actor: savedActorId(actor.id), ...flags, ...(flags.enemy === undefined ? {} : { enemy: flags.enemy === null ? null : savedActorId(flags.enemy) }) })) };
   }
-  restoreCheckpoint(reader: SaveReader, requireExactCollisions = false): undefined {
+  restoreCheckpoint(reader: SaveReader, requireExactCollisions = false, reconstructed: (actor: ActorId) => boolean = () => false): undefined {
+    const retain = <T>(values: Map<OwnedActor, T>): (() => void) => {
+      const retained = [...values].filter(([actor]) => reconstructed(actor.id));
+      return () => {
+        for (const actor of values.keys()) if (reconstructed(actor.id)) values.delete(actor);
+        for (const [actor, value] of retained) values.set(actor, value);
+      };
+    };
+    const restoreRetained = [retain(this.solids), retain(this.motions), retain(this.flags), retain(this.collisions)];
     this.setWorldGravity(reader.field("gravity").finite());
     this.rereleaseMovement.restore(readVector(reader.field("rereleaseMovement")));
     const reference = (value: SaveReader) => this.options.actors.referenceSaved(readSavedActor(value));
@@ -164,16 +172,23 @@ export class SharedPhysics {
         ...(value.field("waterType").value === undefined ? {} : { waterType: value.field("waterType").number() }), ...(value.field("deltaYaw").value === undefined ? {} : { deltaYaw: value.field("deltaYaw").number() }),
         ...(value.field("enemy").value === undefined ? {} : { enemy: value.field("enemy").nullable(reference) }) });
     });
+    for (const restore of restoreRetained) restore();
     return undefined;
   }
-  restoreSpatial(reader: SaveReader): undefined {
+  restoreSpatial(reader: SaveReader, reconstructed: (actor: ActorId) => boolean = () => false): undefined {
+    const retained = this.options.scene.spatial.query({ min: { x: -Infinity, y: -Infinity, z: -Infinity }, max: { x: Infinity, y: Infinity, z: Infinity } })
+      .filter(entry => reconstructed(entry.body.actor));
     this.options.scene.spatial.clear();
     reader.field("spatial").list(value => {
       const actor = this.options.actors.resolveSaved(readSavedActor(value.field("actor")));
-      const body = actor === null ? null : this.bodies.linked(actor.id);
+      if (actor === null) return value.fail("Saved spatial actor has no restored identity");
+      const collision = this.readCollision(value.field("collision"));
+      if (reconstructed(actor.id)) return undefined;
+      const body = this.bodies.linked(actor.id);
       if (body === null) return value.fail("Saved spatial actor has no retained body link");
-      this.options.scene.link(body, this.readCollision(value.field("collision")));
+      this.options.scene.link(body, collision);
     });
+    for (const entry of retained) this.options.scene.link(entry.body, entry.collision);
     return undefined;
   }
   private readCollision(collision: SaveReader): ActorCollision {

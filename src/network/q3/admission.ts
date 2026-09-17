@@ -99,7 +99,7 @@ export interface Q3ServerAdmissionBindings {
   readonly demoRestricted: () => boolean;
   isLan(address: Q3Address): boolean;
   random(): number;
-  authorize(challenge: Readonly<Q3Challenge>): void;
+  authorize(challenge: Readonly<Q3Challenge>): void | Promise<void>;
   send(address: Q3Address, packet: Uint8Array): void;
   /** Shared session performs the real ClientConnect call and owns client/seat allocation. */
   admit(connection: Q3AcceptedConnect): string | null | Promise<string | null>;
@@ -111,7 +111,7 @@ export class Q3ServerAdmission {
   readonly challenges: readonly Q3Challenge[] = Array.from({ length: 1024 }, () => ({ address: null, challenge: 0, time: 0, firstTime: 0, pingTime: 0, connected: false }));
   constructor(readonly bindings: Q3ServerAdmissionBindings) {}
   private reply(to: Q3Address, text: string): void { this.bindings.send(copyAddress(to), encodeConnectionlessText(text)); }
-  private challenge(from: Q3Address, now: number): void {
+  private async challenge(from: Q3Address, now: number): Promise<void> {
     if (!this.bindings.enabled()) return;
     let oldestTime = 0x7fffffff, oldest = this.challenges[0], found: Q3Challenge | undefined;
     for (const candidate of this.challenges) {
@@ -126,7 +126,7 @@ export class Q3ServerAdmission {
     if (this.bindings.isLan(from) || ((now - found.firstTime) | 0) > 5000) {
       found.pingTime = now; this.reply(from, `challengeResponse ${found.challenge}`); return;
     }
-    this.bindings.authorize(found);
+    await this.bindings.authorize(found);
   }
   private authorize(from: Q3Address, packet: ConnectionlessPacket, now: number): void {
     const authority = this.bindings.authorizeAddress();
@@ -182,7 +182,7 @@ export class Q3ServerAdmission {
   async receive(from: Q3Address, bytes: Uint8Array, now: number): Promise<void> {
     const packet = decodeConnectionless(bytes, "server");
     switch (packet.command.toLowerCase()) {
-      case "getchallenge": this.challenge(from, now); break;
+      case "getchallenge": await this.challenge(from, now); break;
       case "ipauthorize": this.authorize(from, packet, now); break;
       case "connect": await this.connect(from, packet.arguments[0] ?? "", now); break;
       default: this.bindings.query(from, packet); break;

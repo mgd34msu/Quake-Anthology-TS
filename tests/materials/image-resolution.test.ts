@@ -252,6 +252,82 @@ test("Q2 picture dimensions ignore an unrelated same-basename WAL or PCX", async
   } finally { textures.close(); textures.images.close(); }
 });
 
+test("native user images retain authored picture and wall dimensions", async () => {
+  const colors = new Uint8Array(768), palette = { colors, source: reference("palette", colors) };
+  const qpic = (width: number, height: number): Uint8Array => {
+    const bytes = new Uint8Array(8 + width * height), view = new DataView(bytes.buffer);
+    view.setUint32(0, width, true); view.setUint32(4, height, true); return bytes;
+  };
+  const wal = (size: number): Uint8Array => {
+    const bytes = new Uint8Array(100 + size * size * 85 / 64), view = new DataView(bytes.buffer);
+    view.setUint32(32, size, true); view.setUint32(36, size, true);
+    let offset = 100;
+    for (let mip = 0; mip < 4; mip++) { view.setUint32(40 + mip * 4, offset, true); offset += (size >> mip) ** 2; }
+    return bytes;
+  };
+  const fixtures = [
+    { path: "pics/icon.pcx", family: "q2", usage: "picture", original: encodePcx({ width: 2, height: 3, indices: new Uint8Array(6) }, colors), replacement: encodePcx({ width: 8, height: 8, indices: new Uint8Array(64) }, colors), width: 2, height: 3 },
+    { path: "gfx/icon.lmp", family: "q1", usage: "picture", original: qpic(2, 3), replacement: qpic(8, 8), width: 2, height: 3 },
+    { path: "textures/wall.wal", family: "q2", usage: "wall", original: wal(16), replacement: wal(32), width: 16, height: 16 },
+  ] satisfies readonly { path: string; family: "q1" | "q2"; usage: "picture" | "wall"; original: Uint8Array; replacement: Uint8Array; width: number; height: number }[];
+  for (const fixture of fixtures) {
+    const images = new SceneImageRegistry({ identity: Symbol("native-size"), session: createIdentityOwner("native-size").session, generation: 0 });
+    const files = new Map([[fixture.path, asset(fixture.replacement, "user")]]);
+    const textures = new SceneTextureLoader(images, { read: async path => files.get(path) ?? null,
+      readOriginal: async path => path === fixture.path ? asset(fixture.original, "authored") : null }, palette);
+    try {
+      const loaded = await textures.load(fixture.path, { family: fixture.family, usage: fixture.usage, mipmap: false });
+      expect([loaded?.width, loaded?.height]).toEqual([fixture.width, fixture.height]);
+      expect(loaded?.image.width).toBe(fixture.usage === "wall" ? 32 : 8);
+      if (fixture.usage === "wall") {
+        files.set("textures/wall.bmp", asset(bmp(64, 64), "truecolor-user"));
+        const replaced = await textures.load("textures/wall", { family: "q2", usage: "wall", mipmap: false });
+        expect([replaced?.width, replaced?.height, replaced?.image.width]).toEqual([16, 16, 64]);
+      }
+    } finally { textures.close(); images.close(); }
+  }
+});
+
+test.skipIf(process.env["QUAKE_IMAGE_HUD"] !== "1")("actual weapon HUD keeps authored icon aspect across replacement refresh", async () => {
+  const { mkdtemp, mkdir, rm } = await import("node:fs/promises"), { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { loadApplicationContent } = await import("../../src/app/bootstrap/content.ts");
+  const { parseApplicationCommand } = await import("../../src/app/bootstrap/options.ts");
+  const { ApplicationAssets } = await import("../../src/app/bootstrap/assets.ts");
+  const { ApplicationWeaponHudAssets } = await import("../../src/app/bootstrap/weapon-hud.ts");
+  const users = await mkdtemp(join(tmpdir(), "weapon-hud-aspect-"));
+  try {
+    const pictures = join(users, "q2/baseq2/pics"); await mkdir(pictures, { recursive: true });
+    await Bun.write(join(pictures, "w_blaster.bmp"), bmp(8, 4));
+    const parsed = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--user-content-root", users,
+      "--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
+    if (parsed.kind !== "run") throw new Error("Missing installed HUD content options");
+    const content = await loadApplicationContent(parsed.options);
+    const owner = { identity: Symbol("hud-aspect"), session: createIdentityOwner("hud-aspect").session, generation: 0 };
+    const assets = new ApplicationAssets(content, owner), replacement = new ApplicationAssets(content, owner);
+    try {
+      const source = content.recipe.map.geometryContent, provider = await assets.provider(source);
+      const original = await provider.mounts.open("pics/w_blaster.pcx");
+      if (original === null) throw new Error("Missing installed blaster HUD icon");
+      const authored = decodePcx(original.bytes), hud = new ApplicationWeaponHudAssets(assets);
+      const id = await hud.load({ kind: "image", resource: { content: source, path: "pics/w_blaster.pcx" } });
+      const before = hud.picture(id);
+      if (before?.kind !== "image") throw new Error("HUD icon did not load shared image");
+      expect([before.image.width, before.image.height]).toEqual([8, 4]);
+      expect(hud.aspect(id)).toBe(authored.width / authored.height);
+      await Bun.write(join(pictures, "w_blaster.bmp"), bmp(4, 8));
+      const publish = await hud.prepareImageRefresh(replacement);
+      expect(hud.picture(id)).toBe(before);
+      expect(hud.aspect(id)).toBe(authored.width / authored.height);
+      publish();
+      const after = hud.picture(id);
+      if (after?.kind !== "image") throw new Error("HUD refresh lost shared image");
+      expect([after.image.width, after.image.height]).toEqual([4, 8]);
+      expect(hud.aspect(id)).toBe(authored.width / authored.height);
+    } finally { replacement.close(); assets.close(); await content.close(); }
+  } finally { await rm(users, { recursive: true, force: true }); }
+});
+
 import { encodePng, encodeTga, decodePcx } from "../../src/formats/images/index.ts";
 import { createContentDigest, createContentId, createMountId, createMountIdentity, createMountPlanId, createResourceId } from "../../src/contracts/content.ts";
 import type { ResolvedResourceReference } from "../../src/contracts/content.ts";

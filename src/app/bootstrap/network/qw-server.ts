@@ -10,7 +10,7 @@ import { SourceChatFlood } from '../../../network/services/admin.ts';
 import { sameAddress } from '../../../network/common/endpoint.ts';
 import { QuakeWorldChannel } from '../../../network/q1/channels.ts';
 import { decodeQuakeWorldClient, QuakeWorldCommandReplay } from '../../../network/q1/commands.ts';
-import { QuakeWorldChallenges, QuakeWorldConnectionlessServer, quakeWorldCommandArguments, quakeWorldInfo } from '../../../network/q1/handshake.ts';
+import { QuakeWorldMasterHeartbeat, quakeWorldShutdown, QuakeWorldChallenges, QuakeWorldConnectionlessServer, quakeWorldCommandArguments, quakeWorldInfo } from '../../../network/q1/handshake.ts';
 import { SizeBuf } from '../../../network/q1/message.ts';
 import { qwWireEntity, writeQuakeWorldEntities, writeQuakeWorldMessage } from '../../../network/q1/quakeworld.ts';
 import { QuakeWorldSignonServer } from '../../../network/q1/session.ts';
@@ -49,14 +49,21 @@ export class QwServerNetwork implements ApplicationNetwork {
     private host: QwApplicationServerHost;
     private readonly peers: Peer[] = [];
     private readonly connectionless: QuakeWorldConnectionlessServer;
+    private readonly masterHeartbeat = new QuakeWorldMasterHeartbeat();
     private ended = false;
     constructor(readonly options: QwServerNetworkOptions) {
         this.validate(options.host); this.host = options.host;
+        const currentHost = (): QwApplicationServerHost => this.host;
         this.connectionless = new QuakeWorldConnectionlessServer({
-            password: '', spectatorPassword: '', rconPassword: '', highCharacters: false,
-            blocked: () => false, status: () => '\\hostname\\QuakeWorld\n', log: () => null, executeAdmin: () => undefined,
+            get password() { return currentHost().authentication?.password ?? ''; },
+            get spectatorPassword() { return currentHost().authentication?.spectatorPassword ?? ''; },
+            get highCharacters() { return currentHost().authentication?.highCharacters ?? false; },
+            get rconPassword() { return currentHost().administration?.rconPassword ?? ''; },
+            blocked: from => currentHost().administration?.blocked(from) ?? false,
+            status: () => currentHost().administration?.status() ?? '\\hostname\\QuakeWorld\n',
+            log: sequence => currentHost().administration?.log(sequence) ?? null,
+            executeAdmin: (command, write) => { const administration = currentHost().administration; if (administration === undefined) throw new Error('QW administrator commands require a source command owner'); administration.executeAdmin(command, write); },
             connect: (request, now) => {
-                if (request.spectator) return { kind: 'rejected', reason: 'This host admits native players only' };
                 if (request.from.kind !== 'ipv4' && request.from.kind !== 'ipv6') return { kind: 'rejected', reason: 'QW requires an IP endpoint' };
                 const existing = this.peers.find(peer => sameAddress(peer.remote, request.from, false) && peer.channel.qport === request.qport);
                 if (existing !== undefined) {
@@ -79,6 +86,11 @@ export class QwServerNetwork implements ApplicationNetwork {
                 return { kind: 'accepted' };
             }
         }, new QuakeWorldChallenges(options.random));
+    }
+    heartbeat(nowMilliseconds: number): void {
+        if (this.ended) return;
+        const packet = this.masterHeartbeat.next(nowMilliseconds, this.peers.length, true);
+        if (packet !== null) for (const master of this.host.masters?.() ?? []) this.options.transport.send(master, packet);
     }
     get address(): IpAddress { return this.options.transport.address; }
     get phase(): ApplicationNetworkPhase { return this.ended ? 'closed' : 'active'; }
@@ -131,7 +143,7 @@ export class QwServerNetwork implements ApplicationNetwork {
     }
     private bind(player: QwApplicationPlayer, host = this.host): { signon: QuakeWorldSignonServer; baselines: ReadonlyMap<number, QwEntityStateT> } {
         const source = host.signon(player), data = source.serverData();
-        if (data.protocol.kind !== 'q1-quakeworld' || data.protocol.version !== 28 || data.spectator || data.playerSlot !== player.slot
+        if (data.protocol.kind !== 'q1-quakeworld' || data.protocol.version !== 28 || data.playerSlot !== player.slot
             || player.slot < 0 || player.slot >= host.maxClients) throw new Error('Source signon does not describe an admitted native QW player');
         const signon = new QuakeWorldSignonServer({
             serverData: () => source.serverData(), models: () => source.models(), sounds: () => source.sounds(), signonBuffers: () => source.signonBuffers(),
@@ -182,6 +194,10 @@ export class QwServerNetwork implements ApplicationNetwork {
         }
     }
     async poll(now: number): Promise<readonly ActorCommand[]> {
+        if (!this.ended) {
+            const masters = this.host.masters?.() ?? [];
+            if (masters.length > 0) { const packet = this.masterHeartbeat.next(now, this.peers.length); if (packet !== null) for (const master of masters) this.options.transport.send(master, packet); }
+        }
         if (this.ended) return [];
         for (;;) {
             const packet = this.options.transport.poll(); if (packet === null) break;
@@ -304,6 +320,7 @@ export class QwServerNetwork implements ApplicationNetwork {
     }
     close(): void {
         if (this.ended) return;
+        for (const master of this.host.masters?.() ?? []) this.options.transport.send(master, quakeWorldShutdown());
         for (const peer of [...this.peers]) this.disconnectClient(peer.player.client, 'Server shutdown');
         this.ended = true; this.options.transport.close();
     }

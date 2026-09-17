@@ -1,3 +1,4 @@
+import { decodeQ2ClassicOriginalSave } from "../../../persistence/q2-classic-guest.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { QuakeCCheckpoint, QvmCheckpoint } from "../../../contracts/execution.ts";
 import type { Q3ArsenalRuntimeState } from "../../../content/q3/foundation/arsenal.ts";
@@ -19,6 +20,8 @@ export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderC
 }
 
 export function savedSourceCvars(image: SaveImage): unknown {
+  const native = nativeQ2OriginalSave(image);
+  if (native !== null) return decodeCheckpointValue(native.server.cvars);
   if (!image.providers.some(record => record.schema === "world:source-cvars")) return undefined;
   return decodeCheckpointValue(simulationProviderCheckpoint(image, "world:source-cvars").bytes);
 }
@@ -62,6 +65,29 @@ export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | 
   return checkpoint;
 }
 
+export function nativeQ2OriginalSave(image: SaveImage) {
+  const execution = image.recipe.execution.find(module => module.role === "server-game");
+  if (execution?.kind !== "native") {
+    if (image.providers.some(record => record.schema === "q2:classic-native-original")) throw new Error("Original API 3 save has no matching native execution");
+    return null;
+  }
+  if (execution.api.kind !== "q2-classic-game" || execution.api.version !== 3 || execution.profile.kind !== "windows-i386")
+    throw new Error("Unsupported native original-save execution");
+  return decodeQ2ClassicOriginalSave(simulationProviderCheckpoint(image, "q2:classic-native-original"), {
+    module: { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest, revision: execution.artifact.digest },
+    map: image.recipe.map.geometry.requestedPath,
+  });
+}
+
+export function nativeQ2SavedClients(image: SaveImage) {
+  if (nativeQ2OriginalSave(image) === null) return [];
+  const clients = simulationSaveReader(image).field("nativeClients").list(value => ({
+    clientSlot: value.field("clientSlot").integer(0), phase: value.field("phase").choice("connected", "active"), userinfo: value.field("userinfo").string(),
+  }));
+  if (new Set(clients.map(client => client.clientSlot)).size !== clients.length) throw new Error("Duplicate native saved client slot");
+  return clients;
+}
+
 export function simulationQuakeCCheckpoint(image: SaveImage): QuakeCCheckpoint | null {
   const checkpoint = simulationGuestCheckpoint(image);
   return checkpoint?.kind === "quakec" ? checkpoint : null;
@@ -83,6 +109,8 @@ export function validateSimulationSave(image: SaveImage): void {
   simulationProviderCheckpoint(image, "world:simulation");
   simulationProviderCheckpoint(image, "world:source-slots");
   const guest = simulationGuestCheckpoint(image);
+  const native = nativeQ2OriginalSave(image);
+  if (native !== null && simulationSaveReader(image).field("players").list(value => value.value).length !== 0) throw new Error("Native API 3 players must remain source-owned");
   if (guest?.kind === "qvm" && simulationSaveReader(image).field("players").list(value => value.value).length !== 0)
     throw new Error("QVM players must remain owned by the saved guest client records");
   const execution = image.recipe.execution.find(module => module.role === "server-game");
@@ -149,6 +177,6 @@ export function savedSimulationSettings(image: SaveImage) {
     maxClients: settings.field("maxClients").integer(1), seed: settings.field("seed").integer(0),
     startItems: settings.field("startItems").value === undefined ? "" : settings.field("startItems").string(),
     hostMilliseconds: reader.field("hostMilliseconds").finite(),
-    clientSlots: guest === null ? reader.field("players").list(value => value.field("clientSlot").integer(0))
+    clientSlots: nativeQ2OriginalSave(image) !== null ? nativeQ2SavedClients(image).map(client => client.clientSlot) : guest === null ? reader.field("players").list(value => value.field("clientSlot").integer(0))
       : savedQ3GuestClients(guest).map(player => player.client.slot) };
 }

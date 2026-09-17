@@ -1,3 +1,8 @@
+import type { ApplicationOptions } from "./options.ts";
+import { q3TeamArenaCatalogPolicy, type Q3ProductPolicy } from "../../core/q3-product-policy.ts";
+import { openMountPlan, type MountedContent } from "../../content/mounts/index.ts";
+import { createMountPlanId } from "../../contracts/content.ts";
+import { prepareQ3ApplicationProduct } from "./q3-product.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { q3GameCvarDefinitions } from "../../content/q3/base/settings.ts";
@@ -142,11 +147,33 @@ export function currentTeamArenaCursor(campaign: TeamArenaCampaign, live: Pick<T
   if (gameTypeIndex === -1 || mapIndex === -1) throw new Error("Current Team Arena match has no authored campaign entry");
   return { gameTypeIndex, mapIndex };
 }
+export async function readTeamArenaCampaign(mounts: Pick<MountedContent, "read" | "listFiles">, policy: Q3ProductPolicy): Promise<TeamArenaCampaign> {
+  const files = q3TeamArenaCatalogPolicy(policy);
+  const [game, teams] = await Promise.all([mounts.read(files.gameInfo), mounts.read(files.teamInfo)]);
+  const campaign = parseTeamArenaCampaign(Buffer.from(game).toString("latin1"), Buffer.from(teams).toString("latin1"));
+  if (!files.additionalTeams) return campaign;
+  const mergedTeams = new Map(campaign.teams), aliases = new Map(campaign.aliases);
+  for (const path of await mounts.listFiles("scripts", ".team")) {
+    const extra = parseTeamArenaCampaign("", Buffer.from(await mounts.read(`scripts/${path}`)).toString("latin1"));
+    for (const [name, members] of extra.teams) mergedTeams.set(name, members);
+    for (const [name, ai] of extra.aliases) aliases.set(name, ai);
+  }
+  return { ...campaign, teams: mergedTeams, aliases };
+}
+export async function loadTeamArenaCampaign(catalog: InstalledCatalog, options: Pick<ApplicationOptions, "startupCommands" | "q3Product"> = {}): Promise<{ readonly campaign: TeamArenaCampaign; readonly q3Product: NonNullable<ApplicationOptions["q3Product"]>; readonly catalog: InstalledCatalog }> {
+  const prepared = await prepareQ3ApplicationProduct(catalog, "q3-missionpack", options);
+  if (prepared.q3Product === null) throw new Error("Team Arena requires a Q3 product policy");
+  const product = prepared.catalog.require("q3-missionpack"), mounts = await prepared.catalog.mountsFor(product.id);
+  using mounted = await openMountPlan({ id: createMountPlanId("team-arena-catalog", Buffer.from(product.id).toString("hex")), mounts,
+    defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] }, prepared.q3Product.restriction.kind === "demo" ? { q3Restriction: "demo" } : {});
+  return { campaign: await readTeamArenaCampaign(mounted, prepared.q3Product.policy), q3Product: prepared.q3Product, catalog: prepared.catalog };
+}
 export async function readTeamArenaSkirmish(catalog: InstalledCatalog, skill: TeamArenaSkirmish["skill"] = 2,
-  previous?: Pick<TeamArenaSkirmish, "map" | "gameType"> & { readonly advance?: boolean }, teams?: TeamArenaTeams): Promise<TeamArenaSkirmish> {
-  const product = catalog.require("q3-missionpack");
-  const [game, teamInfo] = await Promise.all([catalog.read(product.id, "gameinfo.txt"), catalog.read(product.id, "teaminfo.txt")]);
-  const campaign = parseTeamArenaCampaign(Buffer.from(game).toString("latin1"), Buffer.from(teamInfo).toString("latin1"));
+  previous?: Pick<TeamArenaSkirmish, "map" | "gameType"> & { readonly advance?: boolean }, teams?: TeamArenaTeams,
+  source?: { readonly mounts: Pick<MountedContent, "read" | "listFiles">; readonly policy: Q3ProductPolicy }): Promise<TeamArenaSkirmish> {
+  let campaign: TeamArenaCampaign;
+  if (source !== undefined) campaign = await readTeamArenaCampaign(source.mounts, source.policy);
+  else campaign = (await loadTeamArenaCampaign(catalog)).campaign;
   return planTeamArenaSkirmish(campaign, skill, previous === undefined ? undefined : previous.advance === false ? currentTeamArenaCursor(campaign, previous) : nextTeamArenaCursor(campaign, currentTeamArenaCursor(campaign, previous)), teams);
 }
 

@@ -1,5 +1,7 @@
 /* QW cl_main.c, cl_parse.c and cl_input.c. GPL-2.0-or-later. */
 import { remoteContentSelection } from "../../../content/catalog/index.ts";
+import type { DemoRecordingSeed, DemoRecordingSink } from '../demo-recording.ts';
+import { QuakeWorldRecordingState } from '../../../network/q1/qw-recording.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { QwUserCommand } from '../../../contracts/protocol.ts';
 import type { IpAddress } from '../../../network/common/endpoint.ts';
@@ -10,7 +12,7 @@ import { QuakeWorldConnectClient, quakeWorldCommandArguments, quakeWorldInfo } f
 import { QuakeWorldDecoder } from '../../../network/q1/quakeworld.ts';
 import type { QuakeWorldMessage } from '../../../network/q1/quakeworld.ts';
 import { writeQuakeWorldMove } from '../../../network/q1/commands.ts';
-import { SizeBuf, MSG_WriteByte } from '../../../network/q1/message.ts';
+import { SizeBuf, MSG_WriteByte, MSG_WriteCoord } from '../../../network/q1/message.ts';
 import { writeClientStringCommand } from '../../../network/q1/session.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
@@ -25,6 +27,24 @@ export interface QwClientNetworkOptions {
     readonly timeoutMilliseconds?: number;
 }
 export class QwClientNetwork implements ApplicationNetwork {
+    private readonly recordingState = new QuakeWorldRecordingState();
+    private recordingSink: DemoRecordingSink | null = null;
+    private recordingWaiting = false;
+    private recordingWrites: Promise<void> = Promise.resolve();
+    private recordingFailure: { readonly error: unknown } | null = null;
+    readonly recording = {
+        seed: (): DemoRecordingSeed => {
+            if (this.state !== 'active' || this.data === null) throw new Error('Recording requires an active QuakeWorld connection');
+            return { identity: { kind: 'qw', protocol: 28 }, packets: this.recordingState.seed(this.data, this.models, this.sounds,
+                (this.lastReceived ?? 0) / 1000, this.channel.outgoingSequence, this.channel.incomingSequence).map(record => ({ kind: 'qw', record })) };
+        },
+        attach: (sink: DemoRecordingSink): (() => void) => {
+            if (this.recordingSink !== null || this.state === 'closed' || this.state === 'rejected') throw new Error('QuakeWorld recording cannot attach');
+            this.recordingWaiting = this.state === 'active'; this.lastDelta = null; this.recordingFailure = null;
+            this.recordingSink = sink;
+            return () => { if (this.recordingSink === sink) this.recordingSink = null; };
+        },
+    };
     readonly role = 'client';
     readonly wire: ApplicationNetwork['wire'] = { kind: 'source', protocol: { kind: 'q1-quakeworld', version: 28 } };
     private handshake: QuakeWorldConnectClient;
@@ -103,7 +123,6 @@ export class QwClientNetwork implements ApplicationNetwork {
             if (message.kind === 'server-data') {
                 if (message.protocol.kind !== 'q1-quakeworld' || message.playerSlot >= 32) throw new Error('Remote QW requires native protocol 28 and a valid player slot');
                 remoteContentSelection("q1-quakeworld", message.gameDirectory);
-                if (message.spectator) throw new Error('QW spectator presentation is not supported');
                 this.options.host.downloads?.close();
                 await this.options.host.serverData(message);
                 this.data = message; this.models = []; this.sounds = []; this.skinPassPending = false; this.begun = false; this.lastDelta = null; this.commands.clear(); this.oldest = idle; this.previous = idle; this.state = 'loading'; this.downloads = null;
@@ -136,6 +155,8 @@ export class QwClientNetwork implements ApplicationNetwork {
         return this.state === 'closed';
     }
     async poll(now: number): Promise<readonly ActorCommand[]> {
+        await this.recordingWrites;
+        if (this.recordingFailure !== null) throw this.recordingFailure.error;
         if (this.state === 'closed' || this.state === 'rejected') return [];
         this.lastReceived ??= now;
         this.syncUserinfo();
@@ -155,7 +176,11 @@ export class QwClientNetwork implements ApplicationNetwork {
             const delivery = this.channel.receive(packet.payload, now); if (delivery === null) continue;
             this.lastReceived = now;
             this.options.host.prediction?.acknowledged(delivery.acknowledged, now);
-            const closed = await this.records(this.decoder.decode(delivery.payload, delivery.sequence), now);
+            const messages = this.decoder.decode(delivery.payload, delivery.sequence);
+            this.recordingState.observe(messages);
+            const closed = await this.records(messages, now);
+            if (messages.some(message => message.kind === 'packet-entities' && message.deltaSequence === null)) this.recordingWaiting = false;
+            if (!this.recordingWaiting) await this.recordingSink?.append({ kind: 'qw', record: { kind: 'packet', seconds: now / 1000, message: packet.payload } });
             if (closed) return [];
         }
         if (now - this.lastReceived > (this.options.timeoutMilliseconds ?? 120000)) { this.state = 'rejected'; this.options.host.disconnected('Connection timed out'); return []; }
@@ -171,11 +196,22 @@ export class QwClientNetwork implements ApplicationNetwork {
         if (commands.length > 1) throw new Error('A QW connection carries one player');
         for (const input of commands) {
             const command = this.options.host.command(input), sequence = this.channel.outgoingSequence;
+            const teleport = this.options.host.takeSpectatorTeleport?.();
+            if (teleport !== undefined && teleport !== null) {
+                const reliable = new SizeBuf(7);
+                MSG_WriteByte(reliable, 6);
+                MSG_WriteCoord(reliable, teleport.x); MSG_WriteCoord(reliable, teleport.y); MSG_WriteCoord(reliable, teleport.z);
+                this.channel.queueReliable(reliable.bytes());
+            }
+            if (this.recordingSink !== null) {
+                const write = this.recordingSink.append({ kind: 'qw', record: { kind: 'command', seconds: now / 1000, command, viewAngles: command.angles } });
+                this.recordingWrites = Promise.all([this.recordingWrites, write]).then(() => {}, (error: unknown) => { this.recordingFailure ??= { error }; });
+            }
             const bytes = new SizeBuf(256);
             this.oldest = this.commands.get(sequence - 2) ?? idle;
             this.previous = this.commands.get(sequence - 1) ?? idle;
             writeQuakeWorldMove(bytes, { kind: 'q1-quakeworld', version: 28 }, { oldest: this.oldest, previous: this.previous, current: command, lossPercent: 0 }, sequence);
-            const delta = this.lastDelta !== null && sequence - this.lastDelta < 63 ? this.lastDelta : null;
+            const delta = !this.recordingWaiting && this.lastDelta !== null && sequence - this.lastDelta < 63 ? this.lastDelta : null;
             if (delta !== null) { MSG_WriteByte(bytes, 5); MSG_WriteByte(bytes, delta & 255); }
             this.decoder.recordDeltaRequest(sequence, delta);
             this.commands.set(sequence, command);

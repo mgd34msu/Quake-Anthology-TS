@@ -15,7 +15,8 @@ export async function mountedMusicTracks(mounts: Pick<MountedContent, "listFiles
     }
     if (directory.split("/").length < 16) for (const name of await mounts.listFiles(directory, "/")) {
       if (directories.length === 4095) break;
-      directories.push(`${directory}/${name}`);
+      const child = name.replace(/[\\/]+$/, "");
+      if (child !== "") directories.push(`${directory}/${child}`);
     }
   }
   return [...tracks].sort();

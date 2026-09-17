@@ -17,7 +17,10 @@ test('Q2 remote profile is explicit and leaves protocol 34 as the default', () =
     if (enhanced.kind !== 'run') throw new Error('No launch');
     expect(enhanced.options.q2Protocol).toEqual({ kind: 'q2-r1q2', version: 35, revision: 1904 });
     expect(() => parseApplicationCommand([...launch, '--q2-protocol', '35'])).toThrow('--connect-q2');
-    expect(() => parseApplicationCommand([...launch, '--connect-q2', '127.0.0.1', '--q2-protocol', '36'])).toThrow('34 or 35');
+    const q2pro = parseApplicationCommand([...launch, '--connect-q2', '127.0.0.1', '--q2-protocol', '36']);
+    if (q2pro.kind !== 'run') throw new Error('No launch');
+    expect(q2pro.options.q2Protocol).toEqual({ kind: 'q2-q2pro', version: 36, revision: 1026 });
+    expect(() => parseApplicationCommand([...launch, '--connect-q2', '127.0.0.1', '--q2-protocol', '36:1016'])).toThrow('--q2-protocol');
 });
 
 test('normal remote application joins the donor R1Q2 server over localhost UDP', async () => {
@@ -86,3 +89,15 @@ test('normal remote application joins the donor R1Q2 server over localhost UDP',
         }
     }
 }, 40000);
+
+test('explicit Q2 dialect selection applies to hosting and rejects unsupported native transport claims', () => {
+    for (const [text, version] of [['34', 34], ['35:1904', 35], ['35:1905', 35], ['36:1015', 36], ['36:1026', 36], ['4038', 4038], ['1038', 1038]] satisfies readonly (readonly [string, 34 | 35 | 36 | 4038 | 1038])[]) {
+        for (const endpoint of [['--connect-q2', '127.0.0.1'], ['--listen-q2', '27910']]) {
+            const parsed = parseApplicationCommand([...launch, ...endpoint, '--q2-protocol', text]);
+            if (parsed.kind !== 'run') throw new Error('No launch');
+            expect(parsed.options.q2Protocol?.version).toBe(version);
+        }
+    }
+    for (const unsupported of ['36:1016', '36:1027', '35:1903', '2023', '2022'])
+        expect(() => parseApplicationCommand([...launch, '--connect-q2', '127.0.0.1', '--q2-protocol', unsupported])).toThrow('--q2-protocol');
+});

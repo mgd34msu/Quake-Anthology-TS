@@ -128,6 +128,25 @@ export class Q2ServerMessageReader {
             throw new RangeError('Invalid Q2 message layout limits');
     }
     get seat(): number { return this.selectedSeat; }
+    /** MVD decoding enters the same retained state without fabricating native datagrams. */
+    acceptDecoded(records: readonly Q2ServerRecord[]): void {
+        for (const record of records) {
+            const event = record.event;
+            if (event.kind === 'server-data') this.reset();
+            this.selectedSeat = record.seat;
+            if (event.kind === 'config-string') this.configStrings.set(event.index, event.value);
+            else if (event.kind === 'baseline') {
+                this.baselines.set(event.entity.number, event.entity);
+                for (const history of this.histories.values()) history.baselines.set(event.entity.number, event.entity);
+            } else if (event.kind === 'frame') this.history(record.seat).accept(event.frame);
+        }
+    }
+    *latestFrames(): Generator<{ readonly seat: number; readonly frame: Q2WireFrame }, void, unknown> {
+        for (const [seat, history] of this.histories) {
+            const frame = history.latest();
+            if (frame !== null) yield { seat, frame };
+        }
+    }
     history(seat = this.selectedSeat): Q2FrameHistory {
         const existing = this.histories.get(seat);
         if (existing !== undefined)

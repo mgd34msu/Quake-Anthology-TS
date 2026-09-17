@@ -1,3 +1,5 @@
+import { createIdentityOwner } from '../../../src/contracts/identity.ts';
+import type { QwUserCommand } from '../../../src/contracts/protocol.ts';
 import type { QwEntityStateT } from "../../../src/network/q1/qw-constants.ts";
 import { expect, test } from 'bun:test';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
@@ -8,19 +10,23 @@ import { writeQuakeWorldMessage, writeQuakeWorldEntities } from '../../../src/ne
 import type { QuakeWorldMessage } from '../../../src/network/q1/quakeworld.ts';
 import { SizeBuf } from '../../../src/network/q1/message.ts';
 import { QwClientNetwork } from '../../../src/app/bootstrap/network/qw-client.ts';
+import type { DemoRecordingPacket } from '../../../src/app/bootstrap/demo-recording.ts';
 import { quakeWorldMapChecksum2 } from '../../../src/network/q1/checksum.ts';
 import type { QwServerData } from '../../../src/app/bootstrap/network/qw-types.ts';
 const profile = { kind: 'q1-quakeworld', version: 28 } satisfies QwServerData['protocol'];
 const data: QwServerData = { kind: 'server-data', protocol: profile, serverCount: 7, gameDirectory: 'id1', playerSlot: 3, spectator: false, level: 'Loopback', moveVariables: { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500, accelerate: 10, airAccelerate: 0.7, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 } };
 test('QW UDP joins through lists, downloads, checksum prespawn, spawn and begin', async () => {
     const server = await UdpTransport.bind({ host: '127.0.0.1', port: 0 }), transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
+    const move: QwUserCommand = { kind: 'q1-quakeworld', milliseconds: 16, angles: { x: 0, y: 0, z: 0 }, forwardMove: 1, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
     const channel = new QuakeWorldChannel('server', 241), commands: string[] = [], downloads: string[] = [], messages: QuakeWorldMessage[] = [];
     const client = new QwClientNetwork({ transport, remote: server.address, qport: 241, userinfo: () => '\\name\\Loopback', host: {
         downloads: { request: async path => { downloads.push(path); return 'available'; }, receive: async () => 'complete', close() {} },
         serverData: async () => {},
         gameState: async (received, models, sounds) => { expect(received.playerSlot).toBe(3); expect(received.moveVariables.airAccelerate).toBeCloseTo(0.7); expect(models).toEqual(['maps/test.bsp', 'progs/player.mdl']); expect(sounds).toEqual(['misc/menu1.wav']); return -123; },
-        receive: async records => { messages.push(...records); }, command: () => { throw new Error('No input during signon'); }, disconnected: reason => { throw new Error(reason); }, print() {},
+        receive: async records => { messages.push(...records); }, command: () => move, takeSpectatorTeleport: () => ({ x: 80, y: -16, z: 24 }), disconnected: reason => { throw new Error(reason); }, print() {},
     } });
+    const signonRecording: DemoRecordingPacket[] = [];
+    const detachSignon = client.recording.attach({ append: async packet => { signonRecording.push(packet); } });
     let now = 0;
     const send = (records: readonly Exclude<QuakeWorldMessage, { kind: 'packet-entities' | 'invalid-delta' }>[]): void => {
         const bytes = new SizeBuf(1450); for (const record of records) writeQuakeWorldMessage(bytes, profile, record); channel.queueReliable(bytes.bytes()); server.send(transport.address, channel.transmit(new Uint8Array(0), now));
@@ -53,6 +59,20 @@ test('QW UDP joins through lists, downloads, checksum prespawn, spawn and begin'
         expect(commands).toEqual(['new', 'soundlist 7 0', 'modellist 7 0', 'modellist 7 1', 'prespawn 7 0 -123', 'spawn 7 0', 'begin 7']);
         expect(downloads).toEqual(['sound/misc/menu1.wav', 'maps/test.bsp', 'progs/player.mdl']);
         expect(messages.some(message => message.kind === 'packet-entities')).toBe(true);
+        expect(signonRecording.length).toBeGreaterThan(0);
+        const firstRecorded = signonRecording[0];
+        expect(firstRecorded?.kind === 'qw' && firstRecorded.record.kind === 'packet' ? firstRecorded.record.message[8] : -1).toBe(11);
+        detachSignon();
+        const seed = client.recording.seed();
+        expect(seed.identity).toEqual({ kind: 'qw', protocol: 28 });
+        expect(seed.packets.at(-1)).toMatchObject({ kind: 'qw', record: { kind: 'sequences' } });
+        const recorded: DemoRecordingPacket[] = [];
+        const detach = client.recording.attach({ append: async packet => { recorded.push(packet); } });
+        const full = new SizeBuf(64); writeQuakeWorldEntities(full, profile, [], new Map<number, QwEntityStateT>(), null);
+        const packet = channel.transmit(full.bytes(), now); server.send(transport.address, packet);
+        await Bun.sleep(1); await client.poll(now + 1);
+        expect(recorded).toEqual([{ kind: 'qw', record: { kind: 'packet', seconds: (now + 1) / 1000, message: packet } }]);
+        detach(); detach();
         client.command('fly "mod-option"');
         for (let tick = 0; tick < 10 && !commands.includes('fly "mod-option"'); tick++) {
             now += 1000; await client.poll(now); await Bun.sleep(1);
@@ -64,6 +84,20 @@ test('QW UDP joins through lists, downloads, checksum prespawn, spawn and begin'
             }
         }
         expect(commands).toContain('fly "mod-option"');
+        server.send(transport.address, channel.transmit(new Uint8Array(0), now));
+        await Bun.sleep(1); await client.poll(now);
+        const identity = createIdentityOwner('spectator wire');
+        client.submit([{ actor: identity.actor(0, 0), source: { kind: 'local-seat', seat: identity.seat(0), client: identity.client(0, 0) }, sequence: 1, command: move }], now + 1);
+        await Bun.sleep(1);
+        const records: Array<ReturnType<typeof decodeQuakeWorldClient>[number]> = [];
+        for (;;) {
+            const packet = server.poll(); if (packet === null) break; if (packet.kind !== 'packet') continue;
+            const delivery = channel.receive(packet.payload, now + 1);
+            if (delivery !== null) records.push(...decodeQuakeWorldClient(delivery.payload, profile, delivery.sequence));
+        }
+        expect(records.find(record => record.kind === 'spectator-teleport')).toEqual({ kind: 'spectator-teleport', origin: { x: 80, y: -16, z: 24 } });
+        expect(records.some(record => record.kind === 'move')).toBe(true);
+
     } finally { client.close(); server.close(); }
 });
 test('QW checksum2 ignores only source entities, visibility, nodes and leaves lumps', () => {

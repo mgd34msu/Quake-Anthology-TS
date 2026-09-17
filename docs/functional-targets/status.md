@@ -1,6 +1,6 @@
 # Functional target status
 
-At accepted source `6103c976f2abd315176206ebe190661173204fb4`: **1/23 targets complete; 22/23 open.** These are the functional targets defined in [the shared-engine plan](README.md), not source inventory counts. Integrated source changes do not close a target until its required behavior and public consumers are qualified together.
+In root-accepted check13 source: **3/23 targets complete; 20/23 open.** Exact commit and executable delivery are pending. These are the functional targets defined in [the shared-engine plan](README.md), not source inventory counts. Integrated source changes do not close a target until its required behavior and public consumers are qualified together.
 
 Installed executable is `6103c976f2abd315176206ebe190661173204fb4`, including the prior integrations and current delivery fixes; see [execution status](../execution-status.md#installed-executable-and-recent-fixes) for exact identity and bounded delivery evidence.
 
@@ -9,13 +9,13 @@ The accepted [Application](../../src/app/bootstrap/application.ts) now consumes 
 | Target | Function | Status | Accepted progress and remaining work |
 |---|---|---|---|
 | T01 | Session and resource lifetime | Complete in source | Retained client/profile publication and the current executable are delivered; remaining feature-specific public workflows keep their own acceptance boundaries. |
-| T02 | Content and asset loading | Open | Codecs, product policy and restricted-content resolution are integrated. Qualify required products, remounting and public frontend selection, including independent prerelease rules. |
+| T02 | Content and asset loading | Complete in accepted source | Product starts, mounted catalogs, replacement dimensions, add-on management and independent product restrictions are integrated; public add-on and authored arena workflows passed. Installed delivery remains separate. |
 | T03 | Rendering and visual effects | Open | Source effects, shadows, Q64 materials and diagnostics have consumers. The installed proof still shows a black triangular pillar defect. Inspect combined CPU/GL output; remaining fidelity and whole-frame performance are unqualified. |
-| T04 | Audio and music | Open | Acoustics, music commands and voice timing are integrated. Generalized jump audio remains in progress: model lookup coverage does not close private Q3 event-routing/Q2 voice-selection defects. Qualify physical output and relative weapon/explosion loudness. |
+| T04 | Audio and music | Open | Acoustics, music commands and voice timing are integrated. Generalized jump audio remains in progress: model lookup coverage does not close private Q3 event-routing/Q2 voice-selection defects. The authored Crash run also reports an unbound source `play` command. Qualify that routing, physical output and relative weapon/explosion loudness. |
 | T05 | Input and local players | Open | Device assignment, source look controls and live local-seat paths are integrated. Complete joined-seat camera/angle checks and the protocol-specific remote-seat matrix. |
 | T06 | Console, cvars and profiles | Open | Shared command/profile consumers are integrated. Finish public library/frontend callers and verify script routing and persistence across source changes. |
 | T07 | Network connections and prediction | Open | Retained connection foundations are accepted; additional admission/transport work remains separately qualified. Complete native peers in both directions, prediction and KEX 2023 transport. |
-| T08 | Downloads and content acquisition | Open | Remote progress/cancel/retry presentation is prepared. Finish public caller qualification, interrupted downloads, missing-content joins and package remounting. |
+| T08 | Downloads and content acquisition | Complete in accepted source | Public Q2 transfer controls/remount/fallback and QW mod-host policies passed, alongside retained Q3/QW client evidence. Accepted in the check13 composition; installed delivery remains separate. |
 | T09 | Server discovery and administration | Open | Browser/source administration helpers are present. Finish public discovery, query, join, rcon and host-profile workflows against real peers. |
 | T10 | Gamecode and mod execution | Open | Native guest services and world adapters have progressed. Private CTF and Xatrix single-player checks passed; native Application joins, required ABI/lifecycle coverage and additional modules remain. |
 | T11 | Collision, movement and scale | Open | Source corpse/gib query behavior is integrated. Complete movement/body and cross-source scale qualification without changing native world scale. |
@@ -58,3 +58,32 @@ Evidence is combined from several runs, not a claim that one run exercised every
 | [Accepted final source](../../.artifacts/resume-20260916/peer-profile3-check/commit-receipt.json) | Exact final file, strict/policy qualification, all 2,194 source inputs, committed and pushed as e3eea6a. |
 
 The existing preparation/publication tests and source review cover their failure boundaries; this record does not claim a separate injected shell-publication failure was exercised in the compiled executable. It also does not close T05's additional local/remote seat features, T07's native protocol matrix, T20's remaining recording formats, or whole-frame performance.
+
+
+## T02 content and asset loading
+
+The composed source resolves 19 installed official campaign starts and keeps six custom/multiplayer products as separate choices. Active mounts supply arena/bot metadata, source ordering and saved unlocks. Independent Q3 prerelease policy is selected before asset resolution. The shared package catalog supports verified install, update, removal and launch while retaining files borrowed by active worlds. Replacement pixels preserve authored logical dimensions. Production check10 passed strict and policy checks for the composed source.
+
+The authored training/Crash run on check12 passed skill 4, 30 seconds of controls, 157 frames and 28.450 seconds of source time, moving 334.875 units and firing ammo from 100 to 0, then Endgame → Main → Quit. Its 21 assertions passed and all 2,401 inputs remained unchanged. Root inspected the 320×240 CPU capture; this is not graphics-fidelity or performance evidence.
+
+The final check13 add-on run passed 12 assertions in 48.52 seconds: installed `basetohell`, 15 seconds of controls, 187 frames and 139.8 units of movement, then death recovery → Endgame → Main → Q3 tier picker → Main → Quit. All 2,401 inputs and fixture guards remained unchanged. Root inspected the GL 640×480 live scene, tilted death view, Main and authored arena selection. Earlier fixture failures remain recorded. Arena5 production and fixture inputs are identical in check13. Root accepted T02 and the separately qualified T08 in this composition; commit/build delivery remains pending. Machine-local evidence: [arena run](../../.artifacts/resume-20260916/targets/t02-public-arena5), [add-on run](../../.artifacts/resume-20260916/targets/t02-public-addon2). See the machine-local [integration evidence](../../.artifacts/resume-20260916/targets/t02-close/evidence.md).
+
+The composed fixes generalize nested archive music listing, product-driven configuration/mod discovery and map-only add-on program inheritance while preserving configuration/save identity. They also retain QC/DLL/QVM ancestry and expansion rules/equipment and resolve duplicate pause-menu focus; these are shared behaviors, not one-package exceptions. These are source changes, not installed-delivery claims.
+
+Actual IBSP44 geometry reached both CPU and GL prepared frames; this is format-consumption evidence, not pixel parity. Quake64 and demota media are absent, so their real-media appearance is unqualified. Discovered Xatrix native startup, asynchronous original-file restoration and retained travel passed bounded checks. Its 64.760-second cold launch and 1.376-second first explicit step are loading measurements, not steady FPS; performance remains open under T03/T10.
+
+## T08 downloads and content acquisition
+
+Completed in root-accepted check13 source, retaining the separately qualified standalone frontend/T08 workflows. This combines current checks with retained accepted workflows; it is not a claim that one new run exercised every protocol.
+
+- The shared queue and contained staging retain verification, bounded HTTP concurrency, same-origin redirects, ETag range continuation, cancellation/retry and package remount ordering. The focused adapter/service run passed 52 tests.
+- Actual Q2 public progress/cancel/retry passed 1 test with 20 assertions. Cancellation left no final file; retry reached active admission with exact bytes. Same-peer mod travel resolved a downloaded PACK member, and an HTTP404 loose dependency fell back to native transfer. Temporary source profiles explicitly enabled the tested permissions; installed settings were untouched.
+- Actual dedicated QW mod hosting passed 1 test with 37 assertions over UDP, using the installed real qwprogs in a temporary user mod. It advertised the selected directory and enforced maps/models/sounds/skins denial then allowance, exact bytes, global denial, archived-map restrictions and traversal rejection. Catalog tests passed 2/25, including a user QW program overlaying an existing classic mod directory.
+- Retained Q3 evidence covers first missing-package pure admission at b48bfea, 1/16, and interrupted second-package close/reopen at c578714, 1/134. The first package remained, the second partial was removed, reopen installed exact files, pure admission succeeded, and the guest initialized once.
+- Retained QW client evidence at 820173d, 11/187, covers selected mod directories, shared skins, travel, cancellation and reopen. The old historical base-only client limitation is superseded.
+
+Current proof: [Q2 runtime receipt](../../.artifacts/resume-20260916/targets/t08-workflow3/native-checked/receipt.json), [Q2 test log](../../.artifacts/resume-20260916/targets/t08-workflow3/native-checked/tests.log), [QW runtime receipt](../../.artifacts/resume-20260916/targets/t08-qw-host-workflow2/native-checked/receipt.json), and [QW test log](../../.artifacts/resume-20260916/targets/t08-qw-host-workflow2/native-checked/tests.log). All 2,358 Q2 and 2,364 QW source files stayed unchanged during their respective runs; both processes exited successfully and were reaped. Final QW runtime and fixture successors passed strict/policy checks over the qualified frontend7 baseline.
+
+Earlier failed fixtures remain preserved. Q2 initially respected installed CTF settings that disabled sound downloads; explicit temporary profile permissions corrected the test. QW exposed a real stock-id1-only simulation admission guard, corrected to accept validated QW edition identities while retaining native-source constraints. Its next fixture needed ordinary idle user-command submission for active peer packet pacing; no download assertion or timeout was weakened.
+
+Standard NetQuake has no native download opcode. Native retries restart where a verified resumable identity is unavailable; HTTP range continuation uses a strong ETag. No cross-process partial-file cache is claimed. Q3/QW public pause/retry joins have focused adapter coverage; the new actual public control run is Q2. This record does not close T07's external-peer matrix or claim that this successor is installed. The historical source-row ledger is unchanged.

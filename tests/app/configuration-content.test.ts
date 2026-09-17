@@ -2,11 +2,12 @@ import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { applicationConfigurationPreset, applicationPreset, openApplicationConfigurationContent, remoteConfigurationContent } from '../../src/app/bootstrap/content.ts';
+import { applicationDiscoversMods, applicationConfigurationPreset, applicationPreset, openApplicationConfigurationContent, remoteConfigurationContent } from '../../src/app/bootstrap/content.ts';
 import { parseApplicationCommand } from '../../src/app/bootstrap/options.ts';
+import { prepareQ3ApplicationProduct } from '../../src/app/bootstrap/q3-product.ts';
 import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch } from '../../src/content/catalog/index.ts';
 import type { ProductExpectation } from '../../src/content/catalog/index.ts';
-import type { LaunchChoice, ProviderReference } from '../../src/contracts/content.ts';
+import type { GameFamily, LaunchChoice, ProviderReference } from '../../src/contracts/content.ts';
 import { prepareLaunchMountPlan } from '../../src/content/catalog/launch.ts';
 import { selectedWeaponResources } from '../../src/content/catalog/weapons.ts';
 import { serverDefinitionsForRecipe, serverDefinitionsForSelection } from '../../src/settings/server/selection.ts';
@@ -34,12 +35,16 @@ async function fixture() {
     return { ...product, requiredContentArchives: [], requiredPrograms: [], mapWitness: null };
   });
   const q3 = products.find(product => product.id === 'q3-baseq3'); if (q3 === undefined) throw new Error('No Q3 product');
-  products.push({ ...q3, id: 'q3-testmod', campaign: 'testmod', contentDirectory: 'q3a/testmod', baseProduct: q3.id });
+  products.push({ ...q3, id: 'q3-testmod', campaign: 'testmod', contentDirectory: 'q3a/testmod', baseProduct: q3.id, requiredPrograms: ['vm/qagame.qvm'] });
   for (const product of products) {
     await mkdir(join(root, product.contentDirectory), { recursive: true });
     await writeFile(join(root, product.contentDirectory, 'quake.rc'), `echo ${product.id}\n`);
     await writeFile(join(root, product.contentDirectory, 'config.cfg'), `set fixture ${product.id}\n`);
   }
+  await mkdir(join(root, 'q3a/testmod/vm'), { recursive: true });
+  await writeFile(join(root, 'q3a/testmod/vm/qagame.qvm'), 'fixture-program');
+  // Valid donor retail identification makes this synthetic Q3 installation retail.
+  await writeFile(join(root, 'q3a/baseq3/productid.txt'), Buffer.from('VGhpcyBmaWxlIGlzIGNvcHlyaWdodCAxOTk5IElkIFNvZnR3YXJlLCBhbmQgbWF5IG5vdCBiZSBkdXBsaWNhdGVkIGV4Y2VwdCBkdXJpbmcgYSBsaWNlbnNlZCBpbnN0YWxsYXRpb24gb2YgdGhlIGZ1bGwgY29tbWVyY2lhbCB2ZXJzaW9uIG9mIFF1YWtlIDM6QXJlbmE=', 'base64'));
   const userContentRoot = join(root, 'user'); await mkdir(join(userContentRoot, 'q3a/testmod'), { recursive: true });
   await writeFile(join(userContentRoot, 'q3a/testmod/config.cfg'), 'set fixture user-mod\n');
   const catalog = await discoverInstalledContent({ corpusRoot: root, userContentRoot, discoverMods: false, products });
@@ -250,6 +255,8 @@ test('mixed selected launch mount order and artifact overrides match normal reso
         await mkdir(dirname(file), { recursive: true }); await writeFile(file, 'fixture-resource');
       }
       const recipe = await resolveLaunch({ catalog, preset, choice });
+      expect(applicationDiscoversMods({ ...options('q1-classic-id1'), movement: 'q1', character: 'q1' }, { ...recipe, execution: [] })).toBe(true);
+      expect(applicationDiscoversMods({ ...options('q1-classic-id1'), network: { kind: 'q3-client', remote: '127.0.0.1:27960' } }, recipe)).toBe(false);
       expect(config.mounts.plan).toEqual(recipe.mounts);
       expect(recipe.mounts.prefixOrders[0]?.prefix).toBe('vm/qagame.qvm');
       expect(serverDefinitionsForSelection(config.selection)).toEqual(serverDefinitionsForRecipe(recipe));
@@ -284,7 +291,9 @@ test('remote profile uses its actual client registry and stages configuration be
       await writeFile(join(directory, 'q3config.cfg'), 'set name config-name\n');
       await writeFile(join(directory, 'autoexec.cfg'), 'wait\nset name autoexec-name\nbind mouse2 +jump\nconnect example.invalid\nset name after-connect\n');
       const nextPreset = applicationConfigurationPreset(catalog, selected);
-      const mounted = await openApplicationConfigurationContent(catalog, { kind: 'launch', preset: nextPreset, choice: presetChoice(nextPreset.id) });
+      const product = await prepareQ3ApplicationProduct(catalog, selected.product, selected);
+      if (product.q3Product === null) throw new Error('Missing selected Q3 policy');
+      const mounted = await openApplicationConfigurationContent(product.catalog, { kind: 'launch', preset: nextPreset, choice: presetChoice(nextPreset.id) }, product.q3Product);
       const client = new CvarRegistry({ dialect: 'q3', context: original.context });
       client.register('name', 'Player');
       const images = image.prepareClientSettings();
@@ -292,7 +301,7 @@ test('remote profile uses its actual client registry and stages configuration be
       initial.prepared.commands.append('echo retained-tail\n', original.context);
       const profile = await prepareProfileConfiguration({ prepared: initial.prepared,
         clientSource: { inputState: "retained", cvars: client, archive: 'set name archived-name\n', route: routing => routing },
-        seats: [{ seat: actual, input: original.input }], options: selected, content: remoteConfigurationContent(selected, mounted),
+        seats: [{ seat: actual, input: original.input }], options: selected, content: remoteConfigurationContent(selected, { ...mounted, q3Product: product.q3Product }),
         settings, shared: images.settings.cvars, host: { print() {} }, sourceArchive: [], defaultCapacity: 1, nextFrame: async () => {} });
       try {
         expect(profile.source).toBe(client);
@@ -374,4 +383,19 @@ test('fresh owned remote seed retains selected defaults and saved input settings
       } finally { await content.close(); await scripts.close(); session.close(); }
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('configuration and world discovery follow selected products rather than movement or character', () => {
+  const movements: readonly GameFamily[] = ['q1', 'q2', 'q3'];
+  for (const product of ['q1-classic-custom-source', 'q2-classic-custom-source', 'q3-custom-source', 'q1:classic:custom-source:installed']) {
+    for (const movement of movements) {
+      const selected = { ...options(product), movement };
+      expect(applicationDiscoversMods(selected)).toBe(true);
+      expect(applicationDiscoversMods({ ...selected, network: { kind: 'q3-client', remote: '127.0.0.1:27960' } })).toBe(false);
+    }
+  }
+  expect(applicationDiscoversMods({ ...options('q3-baseq3'), movement: 'q1', character: 'q2' })).toBe(true);
+  expect(applicationDiscoversMods({ ...options('q1-classic-id1'), movement: 'q3', character: 'q3' })).toBe(false);
+  expect(applicationDiscoversMods({ ...options('q1-classic-id1'), dedicated: true, network: { kind: 'native-server', host: '127.0.0.1', port: 26000 } })).toBe(true);
 });

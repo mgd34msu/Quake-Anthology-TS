@@ -14,6 +14,9 @@ import { NetQuakeSignon, writeClientStringCommand } from '../../../network/q1/se
 import type { NetQuakeSeatIdentity } from '../../../network/q1/session.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase } from './types.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
+import type { Vec3 } from '../../../contracts/math.ts';
+import type { DemoRecordingSeed, DemoRecordingSink } from '../demo-recording.ts';
+import { NetQuakeRecordingState } from '../../../network/q1/recording.ts';
 export interface Q1ApplicationClientHost {
     receive(messages: readonly NetQuakeMessage[], nowMilliseconds: number): Promise<void>;
     command(command: ActorCommand): Q1UserCommand;
@@ -27,6 +30,21 @@ export interface Q1ClientNetworkOptions {
     readonly timeoutMilliseconds?: number;
 }
 export class Q1ClientNetwork implements ApplicationNetwork {
+    private readonly recordingState = new NetQuakeRecordingState();
+    private recordingSink: DemoRecordingSink | null = null;
+    private viewAngles: Vec3 = { x: 0, y: 0, z: 0 };
+    readonly recording = {
+        seed: (): DemoRecordingSeed => {
+            if (this.state !== 'active') throw new Error('Recording requires an active NetQuake connection');
+            return { identity: { kind: 'q1', protocol: this.decoder.protocol.version, track: -1 },
+                packets: this.recordingState.seed(this.decoder.protocol).map(message => ({ kind: 'q1', message, viewAngles: this.viewAngles })) };
+        },
+        attach: (sink: DemoRecordingSink): (() => void) => {
+            if (this.recordingSink !== null || this.state !== 'active') throw new Error('NetQuake recording cannot attach');
+            this.recordingSink = sink;
+            return () => { if (this.recordingSink === sink) this.recordingSink = null; };
+        },
+    };
     readonly role = 'client';
     get wire(): ApplicationNetwork['wire'] { return { kind: 'source', protocol: this.decoder.protocol }; }
     private readonly handshake = new NetQuakeConnectClient();
@@ -93,6 +111,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
             if (received.delivery === null)
                 continue;
             const messages = this.decoder.decode(received.delivery.payload);
+            this.recordingState.observe(messages);
             for (const message of messages) {
                 if (message.kind === 'server-info') {
                     if (message.maxClients < 1 || message.maxClients > 16)
@@ -103,6 +122,8 @@ export class Q1ClientNetwork implements ApplicationNetwork {
                 }
             }
             await this.options.host.receive(messages, now);
+            for (const message of messages) if (message.kind === 'set-angle') this.viewAngles = message.angles;
+            await this.recordingSink?.append({ kind: 'q1', message: received.delivery.payload, viewAngles: this.viewAngles });
             for (const message of messages) {
                 if (message.kind === 'signon') {
                     const response = this.signon.receive(message.stage);
@@ -144,6 +165,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
         for (const command of commands) {
             const bytes = new SizeBuf(128);
             const move = this.options.host.command(command);
+            this.viewAngles = move.viewAngles;
             if (++this.movementMessages <= 2)
                 continue;
             writeNetQuakeMove(bytes, { ...move, acknowledgedServerTimeSeconds: this.decoder.timeSeconds }, this.decoder.protocol, this.decoder.flags);

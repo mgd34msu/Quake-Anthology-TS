@@ -3,6 +3,8 @@ import { parseQ2Token } from '../../../core/common-parse.ts';
 import { Q2ServerMessageReader } from '../../../network/q2/index.ts';
 import type { Q2ServerRecord, ServerDataParamsT } from '../../../network/q2/index.ts';
 import type { Q2ApplicationClientHost, Q2ApplicationGameState } from './types.ts';
+import { encodeQ2Frame, encodeQ2ServerEvent } from '../../../network/q2/index.ts';
+import type { DemoRecordingPacket, DemoRecordingSeed } from '../demo-recording.ts';
 export type Q2ClientReceiverHost = Pick<Q2ApplicationClientHost, 'protocol' | 'messageOptions' | 'serverData' | 'gameState' | 'frame' | 'records' | 'disconnected' | 'print'>;
 export type Q2ClientReceiverSource = { readonly kind: 'demo' } | {
     readonly kind: 'network';
@@ -45,9 +47,35 @@ export class Q2ClientReceiver {
     get worldGeneration(): number { return this.loadingGeneration; }
     get recordedTimeMilliseconds(): number | null { return this.recordedTime; }
     get disconnectedDemo(): boolean { return this.demoDisconnected; }
-    async receive(bytes: Uint8Array, nowMilliseconds: number): Promise<void> {
-        if (this.state === 'closed') return;
-        await this.serverRecords(this.reader.read(bytes), nowMilliseconds);
+    seed(): DemoRecordingSeed {
+        const data = this.serverData;
+        if (data === null || this.state !== 'active') throw new Error('Recording requires an active Q2 server');
+        const wire = this.reader.wire, packets: DemoRecordingPacket[] = [];
+        const add = (message: Uint8Array): void => { packets.push({ kind: 'q2', message }); };
+        add(encodeQ2ServerEvent(wire, { kind: 'server-data', data: { ...data, attractloop: true } }));
+        for (const [index, value] of this.reader.configStrings) add(encodeQ2ServerEvent(wire, { kind: 'config-string', index, value }));
+        const history = this.reader.history();
+        for (const entity of history.baselines.values()) add(encodeQ2ServerEvent(wire, { kind: 'baseline', entity }));
+        add(encodeQ2ServerEvent(wire, { kind: 'command-text', text: 'precache\n' }));
+        for (const { seat, frame } of this.reader.latestFrames()) {
+            if (wire.protocol.kind === 'q2-kex' || wire.protocol.kind === 'q2-kex-demo') add(encodeQ2ServerEvent(wire, { kind: 'seat', seat }));
+            add(encodeQ2Frame(wire, frame, null, history.baselines, 0));
+        }
+        if (wire.protocol.kind === 'q2-kex' || wire.protocol.kind === 'q2-kex-demo') add(encodeQ2ServerEvent(wire, { kind: 'seat', seat: this.reader.seat }));
+        return { identity: { kind: 'q2', protocol: wire.protocol }, packets };
+    }
+    requestFullFrame(): void { this.lastFrame = -1; }
+    async receive(bytes: Uint8Array, nowMilliseconds: number): Promise<readonly Q2ServerRecord[]> {
+        if (this.state === 'closed') return [];
+        const records = this.reader.read(bytes);
+        await this.serverRecords(records, nowMilliseconds);
+        return records;
+    }
+    async receiveRecords(records: readonly Q2ServerRecord[], nowMilliseconds: number): Promise<readonly Q2ServerRecord[]> {
+        if (this.state === 'closed') return [];
+        this.reader.acceptDecoded(records);
+        await this.serverRecords(records, nowMilliseconds);
+        return records;
     }
     close(): void { this.cancelLoading(); this.state = 'closed'; }
     private loadingGeneration = 0;

@@ -1,3 +1,4 @@
+import { expandCommandMacros } from '../../../core/commands/text.ts';
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
 import type { ActorCommand } from '../../../contracts/session.ts';
@@ -7,6 +8,7 @@ import { Q2CvarFlag } from '../../../core/cvars/index.ts';
 import { addressKey } from '../../../network/common/endpoint.ts';
 import { q2Userinfo } from '../../../content/q2/base/player/index.ts';
 import { Q2_BASE_WEAPONS } from '../../../content/q2/foundation/weapons/index.ts';
+import { packQ2Solid, q2SolidEncoding } from '../../../network/q2/solid.ts';
 import { EntityStateT, PlayerStateT, toQ2Command, toQ2RereleaseCommand } from '../../../network/q2/index.ts';
 import type { Q2ServerWriteEvent, Q2WireFrame, UsercmdT } from '../../../network/q2/index.ts';
 import type { EngineSession } from '../../../world/session/session.ts';
@@ -21,6 +23,8 @@ export interface Q2ApplicationServerBindingOptions {
     readonly simulation: SharedSimulation;
     readonly content: LoadedApplicationContent;
     readonly protocol: Q2ProtocolIdentity;
+    readonly administration?: Q2ApplicationServerHost['administration'];
+    readonly masters?: Q2ApplicationServerHost['masters'];
     print(text: string): void;
 }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
@@ -78,7 +82,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
     image('i_health');
     source.items.list().forEach((item, ordinal) => configs.set(layout.items + ordinal + 1, item.name));
     const inventoryOrdinal = (item: string): number => source.items.list().findIndex(definition => definition.id === item) + 1;
-    const entityStates = (): readonly EntityStateT[] => {
+    const entityStates = (protocol: Q2ProtocolIdentity): readonly EntityStateT[] => {
         const presentations = new Map(simulation.presentations().filter(presentation => !presentation.viewWeapon).map(presentation => [presentation.actor, presentation]));
         const result: EntityStateT[] = [];
         for (const entity of source.game.entities.values()) {
@@ -123,7 +127,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             if (entity.solid === 'brush')
                 wire.solid = 31;
             else if (entity.solid === 'box')
-                wire.solid = (Math.max(1, Math.min(31, Math.trunc(body.bounds.max.x / 8))) | (Math.max(1, Math.min(31, Math.trunc(-body.bounds.min.z / 8))) << 5) | (Math.max(1, Math.min(63, Math.trunc((body.bounds.max.z + 32) / 8))) << 10));
+                wire.solid = packQ2Solid(body.bounds, q2SolidEncoding(protocol));
             if (wire.modelindex !== 0 || wire.sound !== 0 || wire.effects !== 0 || wire.event !== 0)
                 result.push(wire);
         }
@@ -170,6 +174,8 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             state.pmove.pm_type = native.type;
             state.pmove.origin.set(native.originEighths);
             state.pmove.velocity.set(native.velocityEighths);
+            state.pmove.originF.set(native.originEighths.map(value => value / 8));
+            state.pmove.velocityF.set(native.velocityEighths.map(value => value / 8));
             state.pmove.delta_angles.set(native.deltaAngleShorts);
             state.pmove.pm_flags = native.flags;
             state.pmove.pm_time = native.timeEightMilliseconds;
@@ -181,6 +187,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             vector(state.pmove.velocityF, native.velocity);
             vector(state.pmove.delta_anglesF, native.deltaAngles);
             state.pmove.deltaAngleEncoding = 'float';
+            state.pmove.delta_angles.set([native.deltaAngles.x, native.deltaAngles.y, native.deltaAngles.z].map(angle => Math.trunc(angle * 65536 / 360) & 65535));
             state.pmove.pm_flags = native.flags;
             state.pmove.pm_time = native.timeMilliseconds;
             state.pmove.gravity = native.gravity;
@@ -218,6 +225,8 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
     const knownConfigs = new Map<number, Map<number, string>>();
     return {
         downloads,
+        ...(options.administration === undefined ? {} : { administration: options.administration }),
+        ...(options.masters === undefined ? {} : { masters: options.masters }),
         discovery: {
             status: () => ({ serverInfo: cvars.infoString(Q2CvarFlag.ServerInfo), players: [...source.players.states.values()]
                 .filter(player => player.connected).map(player => ({ name: player.name, score: player.score, ping: player.ping })) }),
@@ -252,9 +261,9 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
                 reasons.push('Selected movement requires unified peer serialization');
             if (!simulation.recipe.character.definition.provider.startsWith('q2:'))
                 reasons.push('Selected character requires unified peer serialization');
-            if (options.protocol.kind !== 'q2-classic')
-                reasons.push('Application state adapter currently binds native Q2 protocol 34; rerelease movement selection and layout remain unbound');
-            if (source.game.options.edition === 'classic' && options.protocol.kind !== 'q2-classic' || source.game.options.edition === 'rerelease' && options.protocol.kind !== 'q2-rerelease')
+            if (options.protocol.kind === 'q2-kex' || options.protocol.kind === 'q2-kex-demo')
+                reasons.push('KEX native live transport is not bound');
+            if (source.game.options.edition === 'classic' && (options.protocol.kind === 'q2-rerelease' || options.protocol.kind === 'q2-kex' || options.protocol.kind === 'q2-kex-demo') || source.game.options.edition === 'rerelease' && options.protocol.kind !== 'q2-rerelease')
                 reasons.push('Selected application game API and native message layout differ');
             return reasons.length === 0 ? { kind: 'supported' } : { kind: 'unsupported', reasons };
         },
@@ -293,16 +302,16 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         disconnect: (player, _reason) => { simulation.disconnectPlayer(player.actor); options.session.closeClient(player.client); clients.delete(player.client.slot); knownConfigs.delete(player.client.slot); },
         carriedPlayer: client => { const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client)); if (actor === undefined)
             throw new Error('Application has not admitted carried Q2 network client'); const player = { client, actor, sourceEntity: sourceNumber(actor) }; clients.set(client.slot, player); return player; },
-        gameState: player => {
+        gameState: (player, protocol = options.protocol) => {
             updateMovementConfigs();
-            const entities = entityStates();
+            const entities = entityStates(protocol);
             for (const state of source.players.states.values())
                 configs.set(layout.playerSkins + state.slot, `${state.name}\\${state.skin}`);
             knownConfigs.set(player.client.slot, new Map(configs));
-            return { data: { servercount: 1, attractloop: false, gamedir: options.content.catalog.product(simulation.recipe.map.entities.content).expectation.contentDirectory.split('/').at(-1) ?? 'baseq2', clientnum: player.sourceEntity - 1, levelname: configs.get(0) ?? '', serverState: 2, serverFps: source.game.options.edition === 'rerelease' ? 40 : 10 }, configStrings: new Map(configs), baselines: new Map(entities.map(entity => [entity.number, entity])) };
+            return { data: { servercount: 1, attractloop: false, gamedir: options.content.catalog.product(simulation.recipe.map.entities.content).expectation.contentDirectory.split('/').at(-1) ?? 'baseq2', clientnum: player.sourceEntity - 1, levelname: configs.get(0) ?? '', serverState: 2, ...(protocol.kind === 'q2-r1q2' ? { r1q2Version: protocol.revision, r1q2StrafejumpHack: false } : protocol.kind === 'q2-q2pro' ? { q2proVersion: protocol.revision, wireFlags: 0 } : {}), serverFps: source.game.options.edition === 'rerelease' ? 40 : 10 }, configStrings: new Map(configs), baselines: new Map(entities.map(entity => [entity.number, entity])) };
         },
-        frame: (player, output): Q2WireFrame => { const body = simulation.bodies.read(player.actor); if (body === null)
-            throw new Error('Network player body disappeared'); const state = playerState(player), origin = { x: body.origin.x + (state.viewoffset[0] ?? 0), y: body.origin.y + (state.viewoffset[1] ?? 0), z: body.origin.z + (state.viewoffset[2] ?? 0) }; return { serverFrame: output.snapshot.frame.frame, deltaFrame: -1, suppressedCount: 0, areaBits: simulation.scene.areaBits(simulation.scene.leafArea(simulation.scene.pointLeaf(origin))), player: state, entities: visibleEntities(player, entityStates(), origin) }; },
+        frame: (player, output, protocol = options.protocol): Q2WireFrame => { const body = simulation.bodies.read(player.actor); if (body === null)
+            throw new Error('Network player body disappeared'); const state = playerState(player), origin = { x: body.origin.x + (state.viewoffset[0] ?? 0), y: body.origin.y + (state.viewoffset[1] ?? 0), z: body.origin.z + (state.viewoffset[2] ?? 0) }; return { serverFrame: output.snapshot.frame.frame, deltaFrame: -1, suppressedCount: 0, areaBits: simulation.scene.areaBits(simulation.scene.leafArea(simulation.scene.pointLeaf(origin))), player: state, entities: visibleEntities(player, entityStates(protocol), origin) }; },
         events: (player, _output, events) => {
             updateMovementConfigs();
             const messages: Q2ApplicationServerEvent[] = [];
@@ -359,6 +368,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             return [...updates, ...messages];
         },
         input: (player, command: UsercmdT, sequence): ActorCommand => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command: source.game.options.edition === 'classic' ? toQ2Command(command) : toQ2RereleaseCommand(command, sequence) }),
+        expandClientCommand: text => expandCommandMacros(text, name => cvars.variableString(name), options.print),
         command: (player, name, args) => { const entity = source.game.entity(player.actor); if (entity === null)
             throw new Error('Q2 command has no source player'); source.players.clientCommand(entity, source.game, name, args); },
         userinfo: (player, value) => { const entity = source.game.entity(player.actor); if (entity === null)

@@ -1,6 +1,7 @@
 import { Q3QvmServerGame } from './q3/guest-runtime.ts';
 import { Q3ClientAdmissionDenied } from './q3/runtime.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
+import { setInfoValue } from '../../../core/cvars/info.ts';
 import { CvarFlag } from '../../../core/cvars/index.ts';
 import { Q3ApplicationPackages } from '../network/q3-downloads.ts';
 import { q3InfoValue } from '../../../network/q3/admission.ts';
@@ -13,7 +14,7 @@ import type { EngineSession } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { Q3ApplicationAdmission, Q3ApplicationPlayer, Q3ApplicationServerHost } from '../network/q3-types.ts';
 import type { SharedSimulation } from './runtime.ts';
-export interface Q3ApplicationServerBindingOptions { readonly session: EngineSession; readonly simulation: SharedSimulation; readonly content: LoadedApplicationContent; readonly mode?: 'new' | 'restore'; print(text: string): void; }
+export interface Q3ApplicationServerBindingOptions { readonly session: EngineSession; readonly simulation: SharedSimulation; readonly content: LoadedApplicationContent; readonly mode?: 'new' | 'restore'; readonly administration?: Q3ApplicationServerHost['administration']; print(text: string): void; }
 export interface Q3ApplicationServerAuthority extends Q3ApplicationServerHost {
   connect(client: ClientId, userinfo: string): Promise<Q3ApplicationAdmission>;
 }
@@ -68,6 +69,17 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
     return entries;
   };
   return {
+    admission: {
+      privateClients: () => cvars.get('sv_privateClients')?.integerValue ?? 0,
+      privatePassword: () => cvars.variableString('sv_privatePassword'),
+      reconnectLimitSeconds: () => cvars.get('sv_reconnectlimit')?.integerValue ?? 3,
+      minimumPing: () => cvars.variableValue('sv_minPing'), maximumPing: () => cvars.variableValue('sv_maxPing'),
+      demoRestricted: () => options.content.q3Product?.restriction.kind === 'demo',
+      enabled: () => cvars.variableValue('g_gametype') !== 2 && cvars.variableValue('ui_singlePlayerActive') === 0,
+      gameDirectory: () => cvars.variableString('fs_game'), strictAuth: () => cvars.variableString('sv_strictAuth'),
+      floodProtect: () => cvars.variableValue('sv_floodProtect') !== 0,
+    },
+    ...(options.administration === undefined ? {} : { administration: options.administration }),
     product, maxClients, connect,
     ...(guest ? {} : { sourceRound: {
       preflight() {
@@ -180,12 +192,34 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
     command: (player, name, args) => guest ? source.command(player, [name, ...args]) : nativeSource().playerCommand(player.actor, name, args),
     userinfo: (player, value) => { if (guest) return source.userinfo(player, value); state.setUserinfo(player.sourceEntity, value); nativeSource().admission.userinfoChanged(player.sourceEntity); return undefined; },
     status: (challenge, detailed) => {
-      const info = `${cvars.infoString(CvarFlag.ServerInfo)}\\protocol\\${Q3_PROTOCOL.version}\\challenge\\${challenge.replace(/[\\;"\n\r]/g, '')}\\clients\\${simulation.players().length}`;
-      const players = guest ? source.players().map(player => {
+      if (cvars.variableValue('g_gametype') === 2 || !detailed && cvars.variableValue('ui_singlePlayerActive') !== 0) return null;
+      const put = (info: string, key: string, value: string): string => setInfoValue(info, key, value,
+        { dialect: 'q3', maximumLength: 1024, target: 'server-info', serverHighCharacters: false, print: options.print });
+      let info = put(detailed ? cvars.infoString(CvarFlag.ServerInfo) : '', 'challenge', challenge);
+      if (!detailed) {
+        const privateClients = cvars.get('sv_privateClients')?.integerValue ?? 0;
+        const occupied = guest ? source.players().map(player => player.sourceEntity) : simulation.players().map(actor => nativeSource().records.byActor(actor)?.slot ?? -1);
+        const fields: readonly (readonly [string, string])[] = [
+          ['protocol', String(Q3_PROTOCOL.version)], ['hostname', cvars.variableString('sv_hostname')],
+          ['mapname', cvars.variableString('mapname')], ['clients', String(occupied.filter(slot => slot >= privateClients && slot < maxClients).length)],
+          ['sv_maxclients', String(maxClients - privateClients)], ['gametype', String(cvars.get('g_gametype')?.integerValue ?? 0)],
+          ['pure', String(cvars.get('sv_pure')?.integerValue ?? 0)],
+        ];
+        for (const [key, value] of fields) info = put(info, key, value);
+        for (const [key, name] of [['minPing', 'sv_minPing'], ['maxPing', 'sv_maxPing']] satisfies readonly (readonly [string, string])[]) {
+          const value = cvars.get(name)?.integerValue ?? 0; if (value !== 0) info = put(info, key, String(value));
+        }
+        info = put(info, 'game', cvars.variableString('fs_game'));
+        return `infoResponse\n${info}`;
+      }
+      if (options.content.q3Product?.restriction.kind === 'demo') info = put(info, 'sv_keywords', `demo ${q3InfoValue(info, 'sv_keywords')}`);
+      const rows = guest ? source.players().map(player => {
         const ps = source.records.player(player.sourceEntity), name = q3InfoValue(state.getUserinfo(player.sourceEntity) ?? '', 'name');
         return `${ps.persistent[0] ?? 0} ${source.game.data.playerPing(player.sourceEntity)} "${name}"\n`;
-      }).join('') : simulation.players().map(actor => { const client = nativeSource().records.byActor(actor)?.client; return client == null ? '' : `${client.ps.persistant.get(0)} ${client.ps.ping} "${client.pers.netname}"\n`; }).join('');
-      return detailed ? `statusResponse\n${info}\n${players}` : `infoResponse\n${info}`;
+      }) : simulation.players().map(actor => { const client = nativeSource().records.byActor(actor)?.client; return client == null ? '' : `${client.ps.persistant.get(0)} ${client.ps.ping} "${client.pers.netname}"\n`; });
+      let players = '';
+      for (const row of rows) { if (players.length + row.length >= 16384) break; players += row; }
+      return `statusResponse\n${info}\n${players}`;
     }, print: options.print,
   };
 }

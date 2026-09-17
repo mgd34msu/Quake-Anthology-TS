@@ -36,6 +36,7 @@ import type { PlayerView, SimulationPresentation, SimulationPresentationAccess, 
 import type { ApplicationSeatUi } from "./ui.ts";
 import type { ApplicationQ3Client } from "./q3-client.ts";
 import type { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
+import type { NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
 
 /** Viewport ownership is independent of the simulation actor and renderer. */
 export function seatViewport(index: number, count: number, width: number, height: number): Rect {
@@ -75,6 +76,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   private readonly q1Fog: Q1MapFog | null;
   private layoutIndex: number;
   private layoutCount: number;
+  private nativeQ2Frame: NativeQ2HudFrame | null = null;
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText">, seatCount: number,
@@ -87,7 +89,9 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly consoleScale: () => number = () => 0,
     private readonly viewSize: () => Q1ViewSettings | null = () => null,
     planarShadows: () => boolean = () => false,
-    private readonly cameraOverride: (camera: SceneCamera) => SceneCamera = camera => camera) {
+    private readonly cameraOverride: (camera: SceneCamera) => SceneCamera = camera => camera,
+    private readonly graphOverlay: ((draw: Draw2D, view: Rect) => void) | null = null,
+    private readonly nativeQ2?: { readonly frame: () => NativeQ2HudFrame; readonly ownsEffects: boolean }) {
     this.layoutIndex = local.player.seat.id.index;
     this.layoutCount = seatCount;
     this.q1Fog = assets.content.world.kind === "q1-bsp" ? new Q1MapFog(assets.content.world.entities, local.player.actor, assets.content.recipe.map.entities.content) : null;
@@ -250,6 +254,9 @@ export class WorldSeatPresentation implements SeatPresentation {
         ...(this.assets.imagePolicy === undefined ? {} : { imagePolicy: this.assets.imagePolicy }) }));
     }
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
+    this.nativeQ2Frame = this.nativeQ2?.frame() ?? null;
+    if (this.nativeQ2Frame !== null) await this.ui.prepareNativeQ2Hud(this.nativeQ2Frame, this.assets.content.recipe.presentation.assets,
+      this.assets, { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 });
     if (this.q3Client !== null) {
       const size = this.viewSize();
       const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
@@ -307,13 +314,18 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
       this.frames.command(command);
     }, material), "pixels");
-    if (this.q3Client === null && playerView.blend !== null) draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height },
-      playerView.blend, { kind: "image", name: "white", image: this.assets.world.shaders.textures.white.image });
+    const blend = this.simulation.playerView(this.local.player.actor).blend ?? playerView.blend;
+    if (this.q3Client === null && blend !== null) draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height },
+      blend, { kind: "image", name: "white", image: this.assets.world.shaders.textures.white.image });
     this.finale.draw(draw, this.preparedTime);
     this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, this.viewport.height / 480));
     this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,
       !this.finale.active && (this.viewSize()?.size ?? 100) < 120 && (this.q3Client?.weaponHudView().visible ?? true), !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
-      this.q3Client !== null, this.q3Client?.weaponHudView().aggregateWarning ?? true);
+      this.q3Client !== null || this.nativeQ2 !== undefined, this.q3Client?.weaponHudView().aggregateWarning ?? true, this.q3Client !== null);
+    if (this.nativeQ2Frame !== null) this.ui.drawNativeQ2Hud(this.nativeQ2Frame,
+      { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, command => this.frames.command(command), material);
+    this.graphOverlay?.(draw, { x: camera.viewport.x - area.x, y: camera.viewport.y - area.y,
+      width: camera.viewport.width, height: camera.viewport.height });
     if (this.local.input.focus.kind === "console") {
       const height = Math.trunc(this.viewport.height * 0.5);
       const logical = this.native.window.logicalSize, drawable = this.native.window.drawableSize;
@@ -336,5 +348,16 @@ export class WorldSeatPresentation implements SeatPresentation {
     return this.native.execute(frame);
   }
 
-  close(): undefined { for (const font of this.worldFonts.values()) font.close(); this.worldFonts.clear(); this.worldText = []; this.q3Client?.close(); this.ui.close(); this.scene.close(); return undefined; }
+  close(): undefined {
+    const errors: unknown[] = [];
+    const close = (dispose: () => void): void => { try { dispose(); } catch (error) { errors.push(error); } };
+    for (const font of this.worldFonts.values()) close(() => font.close());
+    this.worldFonts.clear(); this.worldText = []; this.nativeQ2Frame = null;
+    close(() => this.q3Client?.close());
+    close(() => this.ui.close());
+    close(() => this.scene.close());
+    if (this.nativeQ2?.ownsEffects === true) close(() => this.effects.close());
+    if (errors.length > 0) throw new AggregateError(errors, "Failed to close seat presentation");
+    return undefined;
+  }
 }

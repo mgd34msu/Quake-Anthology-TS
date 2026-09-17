@@ -1,3 +1,8 @@
+import type { ApplicationKeys } from "./keys.ts";
+import type { ActiveCaption } from "../../text/captions.ts";
+import type { Rect, RenderCommand } from "../../contracts/render.ts";
+import type { ClientDemoRecording } from "./demo-recording-commands.ts";
+import type { DemoRecordingSeed, DemoRecordingSink } from "./demo-recording.ts";
 import type { InputDevices } from "./input-devices.ts";
 import type { ApplicationVideoRestart, PreparedVideoPresentation } from "./video-restart.ts";
 import type { MusicControls } from "../../audio/music.ts";
@@ -38,7 +43,14 @@ export type ClientInputPublication = {
   retireCommands(): void;
 } | { readonly kind: "world"; readonly input: ApplicationInput };
 
+export interface ClientRecordingFeed {
+  readonly root: string;
+  seed(): DemoRecordingSeed;
+  attach(sink: DemoRecordingSink): () => void;
+}
+
 export interface ClientSourceLifetime {
+  prepareRecording(source: CommandContext): Promise<ClientRecordingFeed>;
   prepareVideoRestart(): Promise<PreparedVideoPresentation | null>;
   readonly captureMap: string | null;
   prepareRetirement(): Promise<void>;
@@ -48,6 +60,10 @@ export interface ClientSourceLifetime {
 
 /** Source borrowers receive the existing client objects without their final close authority. */
 export interface ClientBootstrap {
+  readonly keys: ApplicationKeys;
+  captionCommands(captions: readonly ActiveCaption[], viewport: Rect, timeMilliseconds: number): readonly RenderCommand[];
+  readonly recording: ClientDemoRecording;
+  stopRecording(source: ClientSourceLifetime): Promise<void>;
   readonly videoRestart: ApplicationVideoRestart;
   readonly musicControls: MusicControls;
   readonly capture: ApplicationCapture;

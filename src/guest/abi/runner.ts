@@ -61,6 +61,11 @@ interface ActiveCall { readonly context: GuestCallContext; remaining: number; }
 export class GuestCallRunner {
   readonly #active: ActiveCall[] = [];
   #callbackContext: GuestCallContext | null = null;
+  #instructionsExecuted = 0n;
+  #loadingSuspended = false;
+  #maximumLoadingSliceMilliseconds = 0;
+  get maximumLoadingSliceMilliseconds(): number { return this.#maximumLoadingSliceMilliseconds; }
+  get instructionsExecuted(): bigint { return this.#instructionsExecuted; }
   constructor(readonly options: GuestCallRunnerOptions) {
     if (options.callbacks.memory !== options.cpu.memory) throw new TypeError("Callback table and CPU use different guest memory");
     options.cpu.memory.check(options.returnAddress, 1, "execute");
@@ -69,6 +74,27 @@ export class GuestCallRunner {
   get currentContext(): GuestCallContext | null { return this.#callbackContext ?? this.#active.at(-1)?.context ?? null; }
 
   invoke(request: GuestCallRequest): GuestCallResult {
+    if (this.#loadingSuspended) throw new Error("Guest loading call is suspended");
+    const steps = this.invokeSteps(request);
+    const result = steps.next();
+    if (!result.done) throw new Error("Synchronous guest call yielded");
+    return result.value;
+  }
+  async invokeLoading(request: GuestCallRequest, nextFrame: () => Promise<void>): Promise<GuestCallResult> {
+    if (this.depth !== 0) throw new Error("Guest loading requires an idle call runner");
+    const steps = this.invokeSteps(request, 16_384);
+    try {
+      for (;;) {
+        const started = performance.now();
+        const result = steps.next();
+        this.#maximumLoadingSliceMilliseconds = Math.max(this.#maximumLoadingSliceMilliseconds, performance.now() - started);
+        if (result.done) return result.value;
+        this.#loadingSuspended = true;
+        try { await nextFrame(); } finally { this.#loadingSuspended = false; }
+      }
+    } finally { steps.return({ kind: "void" }); }
+  }
+  private *invokeSteps(request: GuestCallRequest, slice = Number.MAX_SAFE_INTEGER): Generator<undefined, GuestCallResult, void> {
     if (!Number.isSafeInteger(request.instructionBudget) || request.instructionBudget <= 0) throw new RangeError("Guest instruction budget must be positive");
     const { cpu, callbacks, returnAddress } = this.options;
     if (request.context.module.id !== cpu.memory.module.id || request.context.module.digest !== cpu.memory.module.digest) throw new TypeError("Call context belongs to a different guest module");
@@ -82,12 +108,16 @@ export class GuestCallRunner {
     const entryStack = cpu.state.registers.read("rsp", width);
     const plan = planGuestCall(request.signature, request.arguments.map((value, index) => request.signature.parameters[index] ?? inferredLayout(value, request.signature.variadic)));
     this.#active.push(active);
+    let sliceRemaining = slice;
     try {
       for (;;) {
-        const rawStop = cpu.run({ instructionBudget: active.remaining, returnAddress });
+        if (sliceRemaining <= 0 && active.remaining > 0) { yield undefined; sliceRemaining = slice; }
+        const rawStop = cpu.run({ instructionBudget: Math.min(active.remaining, sliceRemaining), returnAddress });
         const stop: GuestExecutionStop = rawStop.kind === "budget" && cpu.state.instructionPointer === returnAddress.byteOffset
           ? { kind: "return", instructions: rawStop.instructions, address: returnAddress } : rawStop;
         if (!Number.isSafeInteger(stop.instructions) || stop.instructions < 0 || stop.instructions > active.remaining) throw new Error("CPU returned an invalid instruction count");
+        this.#instructionsExecuted += BigInt(stop.instructions);
+        sliceRemaining -= stop.instructions;
         for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - stop.instructions);
         if (stop.kind === "return") {
           if (cpu.state.registers.read("rsp", width) !== entryStack + BigInt(cpu.memory.pointerBytes + plan.calleePopBytes)) throw new Error("Guest returned with incorrect ABI stack cleanup");
@@ -100,6 +130,7 @@ export class GuestCallRunner {
           }
           return result;
         }
+        if (stop.kind === "budget" && active.remaining > 0 && sliceRemaining <= 0) continue;
         if (stop.kind !== "host-call") throw new GuestCallStopped(stop, context);
         const callback = callbacks.resolve(stop.address);
         if (callback === null) throw new Error(`Unknown guest callback at 0x${stop.address.byteOffset.toString(16)}`);
@@ -110,6 +141,7 @@ export class GuestCallRunner {
         if (callback.signature.variadic && this.options.variadicLayouts === undefined) throw new TypeError("Variadic host callback requires a layout resolver");
         const extra = callback.signature.variadic ? this.options.variadicLayouts?.(callback, fixed, callbackContext) ?? [] : [];
         const arguments_ = extra.length === 0 ? fixed : callbackAdapter.arguments(cpu, callback.signature, extra);
+        sliceRemaining--;
         // Count dispatch as one step so a zero-instruction trap loop remains bounded.
         for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - 1);
         const previousContext = this.#callbackContext;

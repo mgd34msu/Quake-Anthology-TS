@@ -153,3 +153,32 @@ test("an i386 RET that exactly consumes the instruction budget is still a comple
   const context: GuestCallContext = { module, callback: { kind: "native-guest", module, address: guestPointer(memory, 0x1000n), abi }, parent: null, self: null, other: null };
   expect(runner.invoke({ target: guestPointer(memory, 0x1000n), signature: { abi, parameters: [], result: "void", variadic: false }, arguments: [], context, instructionBudget: 1 })).toEqual({ kind: "void" });
 });
+
+test("loading slices preserve guest state and reject unrelated reentry while suspended", async () => {
+  const abi = abis[0];
+  if (abi === undefined) throw new Error("Missing i386 ABI");
+  const memory = new SparseGuestMemory({ module, pointerBytes: 4, allocationBase: 0x40000n });
+  const code = new Uint8Array(20_006).fill(0x90);
+  code.set([0xb8, 42, 0, 0, 0, 0xc3], 20_000);
+  memory.map({ base: 0x1000n, byteLength: 32768, permissions: "read-execute", bytes: code });
+  memory.map({ base: 0x10000n, byteLength: 65536, permissions: "read-write" });
+  const callbacks = new GuestCallbackTable(memory), state = stateFor(abi);
+  const cpu = new I386Cpu({ memory, state });
+  const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: guestPointer(memory, 0x8000n) });
+  const target = guestPointer(memory, 0x1000n);
+  const context: GuestCallContext = { module, callback: { kind: "native-guest", module, address: target, abi }, parent: null, self: null, other: null };
+  const request = { target, signature: { abi, parameters: [], result: { kind: "scalar", storage: "int32" }, variadic: false } satisfies GuestHostCallback["signature"], arguments: [], context, instructionBudget: 30_000 };
+  let yields = 0;
+  const result = await runner.invokeLoading(request, async () => {
+    yields++;
+    expect(runner.depth).toBe(1);
+    expect(() => runner.invoke(request)).toThrow("suspended");
+    await Promise.resolve();
+  });
+  expect(yields).toBe(1);
+  expect(result).toEqual({ kind: "int32", value: 42 });
+  expect(runner.instructionsExecuted).toBe(20_002n);
+  expect(runner.depth).toBe(0);
+  expect(runner.invoke(request)).toEqual(result);
+  expect(runner.instructionsExecuted).toBe(40_004n);
+});

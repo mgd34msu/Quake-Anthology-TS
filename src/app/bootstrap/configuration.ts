@@ -1,3 +1,5 @@
+import { applyQ3MapLaunch } from "./q3-map-command.ts";
+import { q3ProductMapCommands } from "../../core/q3-product-policy.ts";
 import { registerRunCvar } from "./shared-setting-cvars.ts";
 import { inputDeviceStore, loadInputDeviceSettings } from "./input-devices.ts";
 import { audioOutputCvarNames, writeAudioOutputCvars } from "./audio/output-settings.ts";
@@ -5,7 +7,7 @@ import { defaultAudioOutputFormat } from "../../audio/output.ts";
 import type { ApplicationHost } from "./application.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { ApplicationConfigurationContent } from "./content.ts";
-import { applicationConfigurationPreset, openApplicationConfigurationContent } from "./content.ts";
+import { applicationDiscoversMods, applicationConfigurationPreset, openApplicationConfigurationContent } from "./content.ts";
 import { discoverInstalledContent, presetChoice, type InstalledCatalog } from "../../content/catalog/index.ts";
 import type { ExecutableRecipe } from "../../contracts/content.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -26,6 +28,7 @@ import { asciiFold } from "../../core/commands/index.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
 import { registerQ1ClientCommands } from "./q1-client-commands.ts";
 import { registerQ2ClientCommands } from "./q2-client-commands.ts";
+import { prepareQ3ApplicationProduct } from "./q3-product.ts";
 import { createStartupSource, resolveStartupRules } from "./startup-source.ts";
 import { ApplicationImageSettings } from "./image-settings.ts";
 import { ApplicationViewSettings } from "./view-settings.ts";
@@ -70,7 +73,8 @@ export async function prepareProfileConfiguration(args: {
   readonly defaultCapacity: number;
   readonly nextFrame: () => Promise<void>;
 }): Promise<PreparedProfileConfiguration> {
-  const { prepared, options, content, settings, shared, host } = args;
+  const { prepared, content, settings, shared, host } = args;
+  const options = content.q3Product === undefined ? args.options : { ...args.options, q3Product: content.q3Product };
   const dialect = configurationDialect(content), movementDialect = configurationMovementDialect(content);
   const source = args.clientSource?.cvars ?? createStartupSource(options, content.selection, dialect, prepared.source.context, args.defaultCapacity, host.print);
   if (source.dialect !== dialect) throw new Error("Configuration source dialect differs from its selected product");
@@ -105,6 +109,8 @@ export async function prepareProfileConfiguration(args: {
   const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
     consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
     mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
+    mountedResource: name => content.mounts.open(name),
+    mountedFiles: (directory, extension) => content.mounts.listFiles(directory, extension),
     mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
   const read = configurationScriptReader(content, options, scripts);
   const requests: ConfigurationCommandRequest[] = [];
@@ -125,8 +131,8 @@ export async function prepareProfileConfiguration(args: {
       allowCommand: command => !active?.restrictSharedConfiguration || allowSeatConfigurationCommand(command, routing, seats, host.print),
       forwardToServer: command => dispatch(command.argv[0] ?? "", command.args, command.source),
     }, seats);
-    for (const name of ["map", "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team", "connect", "disconnect", "quit",
-      "in_restart", "midiinfo", "playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : [])])
+    for (const name of [...(dialect === "q3" ? q3ProductMapCommands(options.q3Product?.policy ?? { kind: "retail" }) : ["map"]), "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team", "connect", "disconnect", "quit",
+      "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause", "cinematic", "cinematicpause", "stopcinematic", "record", "rerecord", "stop", "stoprecord", "playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : [])])
       program.commands.register(name, command => dispatch(name, command.args, command.source));
     registerQ1ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
     registerQ2ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
@@ -233,8 +239,9 @@ export async function prepareProfileConfiguration(args: {
     });
     const launch = args.clientSource !== undefined || options.teamArenaSkirmish === undefined ? null : new TeamArenaLaunchOverrides(options.teamArenaSkirmish);
     launch?.apply(source, seats);
-    const resolved = args.clientSource === undefined ? resolveStartupRules(options, source, options.teamArenaSkirmish?.maxClients ?? args.defaultCapacity,
-      serverDefinitionsForSelection(content.selection), launch === null) : { options, maxClients: args.defaultCapacity };
+    if (options.q3MapLaunch !== undefined) applyQ3MapLaunch(source, options.q3MapLaunch);
+    const resolved = args.clientSource === undefined ? resolveStartupRules(options, source, options.q3MapLaunch?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? args.defaultCapacity,
+      serverDefinitionsForSelection(content.selection), launch === null && options.q3MapLaunch === undefined) : { options, maxClients: args.defaultCapacity };
     return { source, movement, fallback, seats, program, routing, scripts, read, ...resolved, requests, applyBindingDefaults,
       publishContinuation: owner => {
         if (owner !== prepared) throw new Error("Configuration continuation belongs to another client");
@@ -258,12 +265,14 @@ export async function prepareProfileConfiguration(args: {
 }
 
 export async function openInitialConfigurationContent(options: ApplicationOptions, recipe?: ExecutableRecipe, installedCatalog?: InstalledCatalog): Promise<ApplicationConfigurationContent> {
-  const catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
-    discoverMods: options.dedicated || options.network.kind === "offline" && (options.movement === "q3" && options.character === "q3"
-      || recipe?.execution.some(module => module.kind === "qvm" && module.role === "server-game") === true) });
-  if (recipe !== undefined) return openApplicationConfigurationContent(catalog, { kind: "recipe", recipe });
+  let catalog = installedCatalog ?? await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(),
+    discoverMods: applicationDiscoversMods(options, recipe) });
+  const product = await prepareQ3ApplicationProduct(catalog, recipe?.map.entities.content ?? options.product, options);
+  catalog = product.catalog;
+  if (product.q3Product !== null) options = { ...options, q3Product: product.q3Product };
+  if (recipe !== undefined) return openApplicationConfigurationContent(catalog, { kind: "recipe", recipe }, options.q3Product);
   const preset = applicationConfigurationPreset(catalog, options);
-  return openApplicationConfigurationContent(catalog, { kind: "launch", preset, choice: presetChoice(preset.id) });
+  return openApplicationConfigurationContent(catalog, { kind: "launch", preset, choice: presetChoice(preset.id) }, options.q3Product);
 }
 
 export function configurationDialect(content: ApplicationConfigurationContent): CommandDialect {
@@ -307,6 +316,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     readonly prepared: PreparedStartup; readonly image: ApplicationImageSettings | null; readonly options: ApplicationOptions;
     readonly maxClients: number; readonly requests: readonly ConfigurationCommandRequest[]; readonly scripts: ConsoleScriptFiles;
   }> {
+  if (content.q3Product !== undefined) options = { ...options, q3Product: content.q3Product };
   const dialect = configurationDialect(content), movement = configurationMovementDialect(content);
   const context: CommandContext = { session: session.session, origin: { kind: "server-console" } };
   const source = createStartupSource(options, { source: content.selection.source, match: content.selection.match }, dialect, context, defaultCapacity, text => host.print(text));
@@ -317,6 +327,8 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
     consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
     mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
+    mountedResource: name => content.mounts.open(name),
+    mountedFiles: (directory, extension) => content.mounts.listFiles(directory, extension),
     mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
   try {
     const sharedArchive = [...image?.persistedEntries ?? [], ...await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot))];
@@ -354,7 +366,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
         mouseArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["input", dialect, String(index)], dialect) });
     }
     const requests: ConfigurationCommandRequest[] = [];
-    const prepared = new PreparedStartup(source, inputCvars, scripts, { startupCommands: options.startupCommands ?? [], dialect, movementDialect: movement, seats, shared: image?.cvars ?? null,
+    const prepared = new PreparedStartup(source, inputCvars, scripts, { startupCommands: options.startupCommands ?? [], ...(options.q3Product === undefined ? {} : { q3Policy: options.q3Product.policy }), dialect, movementDialect: movement, seats, shared: image?.cvars ?? null,
       sharedNames: source.snapshots().map(variable => variable.name), print: text => host.print(text),
       forward: (name, args, sourceContext) => {
         let origin = sourceContext.origin; while (origin.kind === "script") origin = origin.caller;
@@ -373,8 +385,9 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
       fallbackArchive: options.dedicated ? [] : await loadCvarArchive(settings, ["fallback", dialect], dialect),
       applyLaunchOptions: () => {
         teamArenaLaunch?.apply(prepared.source, prepared.seats);
-        resolved = resolveStartupRules(options, prepared.source, options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
-          serverDefinitionsForSelection(content.selection), options.teamArenaSkirmish === undefined);
+        if (options.q3MapLaunch !== undefined) applyQ3MapLaunch(prepared.source, options.q3MapLaunch);
+        resolved = resolveStartupRules(options, prepared.source, options.q3MapLaunch?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
+          serverDefinitionsForSelection(content.selection), options.teamArenaSkirmish === undefined && options.q3MapLaunch === undefined);
         if (options.teamArenaSkirmish !== undefined) resolved = { ...resolved, options: { ...resolved.options, mode: options.mode } };
         if (options.displayOverrides?.width !== undefined) image?.cvars.set("r_customwidth", String(options.displayOverrides.width), true);
         if (options.displayOverrides?.height !== undefined) image?.cvars.set("r_customheight", String(options.displayOverrides.height), true);

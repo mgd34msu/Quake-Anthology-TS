@@ -147,49 +147,54 @@ export class Q2ConnectionlessServer {
                 reply(admission.kind === 'accepted' ? `client_connect${admission.responseArguments === undefined ? '' : ` ${admission.responseArguments}`}` : `print\n${admission.reason}\n`);
                 return true;
             }
-            case 'rcon': {
-                if (this.host.profile === 'rerelease' && !this.host.rconRateAllowed(now))
-                    return true;
-                const password = message.arguments[0] ?? '', full = this.host.rconPassword(), limit = this.host.limitedRcon();
-                const limited = !(full.length > 0 && password === full) && this.host.profile === 'rerelease' && limit !== null && limit.password.length > 0 && password === limit.password;
-                if (!(full.length > 0 && password === full) && !limited) {
-                    reply('print\nBad rcon_password.\n');
-                    return true;
-                }
-                if (this.host.profile === 'rerelease')
-                    this.host.rechargeRconRate();
-                const cursor = { data: message.text, index: 0 };
-                parseQ2Token(cursor);
-                parseQ2Token(cursor);
-                const command = this.host.profile === 'classic' ? `${message.arguments.slice(1).join(' ')} ` : message.text.slice(cursor.index).trimStart();
-                if (limited && limit !== null && !limit.prefixes.some(prefix => command.startsWith(prefix))) {
-                    reply('print\nThis command is not permitted.\n');
-                    return true;
-                }
-                let buffered = '';
-                const flush = (): void => {
-                    if (buffered.length > 0) {
-                        reply(`print\n${buffered}`);
-                        buffered = '';
-                    }
-                };
-                try {
-                    await this.host.executeRcon(command, limited, text => {
-                        for (const character of text) {
-                            if (character.charCodeAt(0) > 255)
-                                throw new RangeError('Q2 rcon output requires byte characters');
-                            if (buffered.length === 1383)
-                                flush();
-                            buffered += character;
-                        }
-                    });
-                }
-                finally {
-                    flush();
-                }
-                return true;
-            }
+            case 'rcon': await handleQ2Rcon(this.host, from, message, now); return true;
             default: return false;
         }
     }
+}
+
+export type Q2RconHost = Pick<Q2ConnectionlessHost, "profile" | "reply" | "rconPassword" | "limitedRcon" | "rconRateAllowed" | "rechargeRconRate" | "executeRcon">;
+export async function handleQ2Rcon(host: Q2RconHost, from: NetworkAddress, message: Q2ConnectionlessMessage, now: number): Promise<void> {
+    const reply = (text: string): void => host.reply(from, q2OutOfBand(text));
+    if (host.profile === 'rerelease' && !host.rconRateAllowed(now))
+        return;
+    const password = message.arguments[0] ?? '', full = host.rconPassword(), limit = host.limitedRcon();
+    const limited = !(full.length > 0 && password === full) && host.profile === 'rerelease' && limit !== null && limit.password.length > 0 && password === limit.password;
+    if (!(full.length > 0 && password === full) && !limited) {
+        reply('print\nBad rcon_password.\n');
+        return;
+    }
+    if (host.profile === 'rerelease')
+        host.rechargeRconRate();
+    const cursor = { data: message.text, index: 0 };
+    parseQ2Token(cursor);
+    parseQ2Token(cursor);
+    const command = host.profile === 'classic' ? `${message.arguments.slice(1).join(' ')} ` : message.text.slice(cursor.index).trimStart();
+    if (limited && limit !== null && !limit.prefixes.some(prefix => command.startsWith(prefix))) {
+        reply('print\nThis command is not permitted.\n');
+        return;
+    }
+    let buffered = '';
+    const flush = (): void => {
+        if (buffered.length > 0) {
+            reply(`print\n${buffered}`);
+            buffered = '';
+        }
+    };
+    try {
+        await host.executeRcon(command, limited, text => {
+            for (const character of text) {
+                if (character.charCodeAt(0) > 255)
+                    throw new RangeError('Q2 rcon output requires byte characters');
+                if (buffered.length === 1383)
+                    flush();
+                buffered += character;
+            }
+        });
+    }
+    finally {
+        flush();
+    }
+    return;
+ 
 }

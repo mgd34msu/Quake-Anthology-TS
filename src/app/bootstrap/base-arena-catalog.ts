@@ -1,5 +1,5 @@
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
-import type { InstalledCatalog, CatalogProduct } from "../../content/catalog/index.ts";
+import type { MountedContent } from "../../content/mounts/index.ts";
 
 export interface BaseArena {
   readonly number: number;
@@ -43,18 +43,12 @@ export function parseBaseArenaCatalog(texts: readonly string[]): BaseArenaCatalo
   });
   return { arenas, regularCount, tierCount: regularCount / 4 };
 }
-export async function readBaseArenaCatalog(catalog: InstalledCatalog, productId = "q3-baseq3"): Promise<BaseArenaCatalog> {
-  const product = catalog.require(productId), paths = new Set<string>();
-  const add = (owner: CatalogProduct): void => {
-    for (const archive of owner.archives) for (const entry of archive.entries) if (entry.path.toLowerCase() === "scripts/arenas.txt" || /^scripts\/[^/]+\.arena$/i.test(entry.path)) paths.add(entry.path);
-    if (owner.expectation.baseProduct !== null) add(catalog.product(owner.expectation.baseProduct));
-  };
-  add(product);
-  const files = [...paths].sort((a, b) => a === "scripts/arenas.txt" ? -1 : b === "scripts/arenas.txt" ? 1 : 0);
+export async function readBaseArenaCatalog(mounts: Pick<MountedContent, "listFiles" | "open">): Promise<BaseArenaCatalog> {
+  const files = ["scripts/arenas.txt", ...(await mounts.listFiles("scripts", ".arena")).map(name => `scripts/${name}`)];
   const texts: string[] = [];
   for (const path of files) {
-    const bytes = await catalog.read(product.id, path);
-    texts.push(Buffer.from(bytes).toString("latin1"));
+    const resource = await mounts.open(path);
+    if (resource !== null) texts.push(Buffer.from(resource.bytes).toString("latin1"));
   }
   return parseBaseArenaCatalog(texts);
 }

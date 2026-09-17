@@ -12,6 +12,10 @@ export function q3ServerCvarDefinitions(settings: { readonly maxClients: number;
     ['sv_maxclients', String(settings.maxClients), CvarFlag.ServerInfo | CvarFlag.Latch],
     ['mapname', settings.mapName, CvarFlag.ServerInfo | CvarFlag.ReadOnly],
     ['sv_mapname', '', CvarFlag.ServerInfo | CvarFlag.ReadOnly],
+    ['sv_privateClients', '0', CvarFlag.ServerInfo], ['sv_privatePassword', '', CvarFlag.Temporary],
+    ['sv_reconnectlimit', '3', CvarFlag.None], ['sv_minPing', '0', CvarFlag.Archive | CvarFlag.ServerInfo],
+    ['sv_maxPing', '0', CvarFlag.Archive | CvarFlag.ServerInfo], ['sv_floodProtect', '1', CvarFlag.Archive | CvarFlag.ServerInfo],
+    ['sv_strictAuth', '1', CvarFlag.Archive],
   ] satisfies readonly (readonly [string, string, number])[];
   return [...common.map(([name, value, flags]) => ({ name, value, flags })), ...collisionMapCvarDefinitions];
 }

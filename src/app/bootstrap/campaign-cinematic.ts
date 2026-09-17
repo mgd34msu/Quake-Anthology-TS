@@ -8,7 +8,7 @@ import { cinematicPcx } from "../../media/still.ts";
 import type { CinematicAudio, CinematicStatus, CinematicTimeline } from "../../media/types.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { ApplicationAudio } from "./audio.ts";
-import type { LoadedApplicationContent } from "./content.ts";
+import type { MountedContent } from "../../content/mounts/index.ts";
 import type { NativeRenderer } from "./renderer.ts";
 import type { Q2TravelTarget } from "./q2-travel.ts";
 
@@ -29,12 +29,12 @@ export class CampaignCinematic {
   private constructor(private readonly movie: FullscreenCinematic, private readonly renderer: NativeRenderer,
     private readonly assets: Pick<ApplicationAssets, "images">, private readonly audio: Pick<ApplicationAudio, "engine">, private readonly clock: { milliseconds: number },
     private readonly captions: ScreenCinematicCaptions | null) {}
-  static async open(target: Q2TravelTarget, content: Pick<LoadedApplicationContent, "mounts">, assets: Pick<ApplicationAssets, "images">,
+  static async open(target: Q2TravelTarget, content: { readonly mounts: Pick<MountedContent, "open"> }, assets: Pick<ApplicationAssets, "images">,
     audio: Pick<ApplicationAudio, "engine">, renderer: NativeRenderer, seat: SeatId, captions: ScreenCinematicCaptions | null = null): Promise<CampaignCinematic> {
     if (target.kind !== "cinematic" && target.kind !== "picture") throw new Error(`Unsupported campaign media: ${target.name}`);
     return this.openMedia({ name: target.name, loop: false, hold: false, silent: false }, content, assets, audio, renderer, seat, captions);
   }
-  static async openMedia(request: ScreenCinematicRequest, content: Pick<LoadedApplicationContent, "mounts">, assets: Pick<ApplicationAssets, "images">,
+  static async openMedia(request: ScreenCinematicRequest, content: { readonly mounts: Pick<MountedContent, "open"> }, assets: Pick<ApplicationAssets, "images">,
     audio: Pick<ApplicationAudio, "engine">, renderer: NativeRenderer, seat: SeatId, captions: ScreenCinematicCaptions | null = null): Promise<CampaignCinematic> {
     const selected = /\.[^/]+$/.test(request.name) ? request.name : `${request.name}.roq`;
     if (selected.startsWith("/") || selected.includes("\\") || selected.includes("\0") || selected.split("/").some(part => part === ".." || part === "." || part.length === 0)) throw new Error("Invalid cinematic resource path");

@@ -8,6 +8,8 @@ import {
 } from "./binary.ts";
 import type { BinaryFormat, BinaryOperation, BinaryResult, BinaryValue } from "./binary.ts";
 
+import { x87Arctangent, x87Trigonometric } from "./trigonometric.ts";
+
 class DeferredX87Exception extends Error {}
 class UnsupportedX87 extends Error {}
 
@@ -278,9 +280,25 @@ function execute(context: NumericExecutionContext): void {
         : value.coefficient === 0n ? 0x4000 : value.denormal ? 0x4400 : 0x400;
       state.statusWord = (state.statusWord & ~0x4700) | bits | (value.sign === 1 ? 0x200 : 0); return;
     }
+    if (modrm === 0xeb) {
+      const constant: BinaryValue = { kind: "finite", sign: 0, coefficient: 0xc90fdaa22168c234cn, exponent: -66, denormal: false };
+      pushX87(state, convertBinary(constant, binary80, rounding(state.controlWord >> 10)).value);
+      return;
+    }
     if (modrm === 0xe8 || modrm === 0xee) { pushX87(state, modrm === 0xe8 ? fromInteger(1n) : zero()); return; }
     if (modrm === 0xf6 || modrm === 0xf7) { setTop(state, top(state) + (modrm === 0xf6 ? -1 : 1)); state.statusWord &= ~0x200; return; }
+    if (modrm === 0xf3) {
+      commit(state, 1, x87Arctangent(readX87Register(state, 1), readX87Register(state), rounding(state.controlWord >> 10)));
+      popX87(state); return;
+    }
     if (modrm === 0xfa) { commit(state, 0, squareRoot(readX87Register(state), resultFormat(state), rounding(state.controlWord >> 10))); return; }
+    if (modrm === 0xfe || modrm === 0xff) {
+      const result = x87Trigonometric(readX87Register(state), modrm === 0xff, rounding(state.controlWord >> 10));
+      if (result.kind === "out-of-range") { state.statusWord |= 0x400; return; }
+      state.statusWord &= ~0x400;
+      commit(state, 0, result.result);
+      return;
+    }
     if (modrm === 0xfc) {
       commit(state, 0, roundIntegral(readX87Register(state), rounding(state.controlWord >> 10))); return;
     }

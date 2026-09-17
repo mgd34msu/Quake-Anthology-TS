@@ -39,6 +39,8 @@ export class SessionActorRegistry implements ActorRegistry {
   private readonly releases = new Set<(actor: OwnedActor) => undefined>();
   private readonly generations: Map<number, number>;
   private readonly restoredActors = new Map<number, { readonly savedGeneration: number; readonly actor: OwnedActor }>();
+  private readonly restoredActorSlots = new Map<OwnedActor, number>();
+  private readonly restoredSources = new Map<ProviderId, SourceActorCheckpoint[]>();
   private readonly restoredHistory: { readonly checkpoint: ActorSlotCheckpoint; readonly generationBase: number }[] = [];
   private readonly savedReferences = new Map<string, ActorId>();
   private closed = false;
@@ -102,7 +104,11 @@ export class SessionActorRegistry implements ActorRegistry {
     slot.source = null;
     slot.generation++;
     this.orderingRevision++;
-    this.restoredActors.delete(actor.id.slot);
+    const restoredSlot = this.restoredActorSlots.get(actor);
+    if (restoredSlot !== undefined) {
+      this.restoredActors.delete(restoredSlot);
+      this.restoredActorSlots.delete(actor);
+    }
     if (source !== null) this.sourceSlots.get(source.provider)?.delete(source.slot);
     const errors: unknown[] = [];
     for (const callback of [...this.releases]) {
@@ -160,6 +166,28 @@ export class SessionActorRegistry implements ActorRegistry {
     return actor !== undefined && actor !== null && actor.id.generation === saved.generation ? actor : null;
   }
 
+  /** Original game save callbacks can reconstruct source slots in a different host allocation order. */
+  rebindRestoredSource(provider: ProviderId): undefined {
+    if (this.closed) throw new Error("Actor registry is closed");
+    const sources = this.restoredSources.get(provider);
+    if (sources === undefined) throw new RangeError("Source has no pending checkpoint reconstruction");
+    const replacements = sources.map(source => {
+      const prior = this.restoredActors.get(source.actor.slot);
+      if (prior !== undefined) throw new RangeError("Saved source actor has not been retired before reconstruction");
+      const actor = this.atSource(provider, source.sourceSlot);
+      if (actor === null) throw new RangeError(`Reconstructed source is missing saved slot ${provider}/${source.sourceSlot}`);
+      if (this.restoredActorSlots.has(actor)) throw new RangeError("Reconstructed actor already has a saved identity");
+      return { source, actor };
+    });
+    for (const { source, actor } of replacements) {
+      this.restoredActors.set(source.actor.slot, { savedGeneration: source.actor.generation, actor });
+      this.restoredActorSlots.set(actor, source.actor.slot);
+      this.savedReferences.set(`${source.actor.slot}/${source.actor.generation}`, actor.id);
+    }
+    this.restoredSources.delete(provider);
+    return undefined;
+  }
+
   /** Resolves provenance in checkpoint or current-registry generations without granting actor authority. */
   referenceSaved(saved: SavedActorId, domain: "checkpoint" | "current" = "checkpoint"): ActorId {
     if (domain === "current") {
@@ -203,6 +231,7 @@ export class SessionActorRegistry implements ActorRegistry {
       if (actor !== null) {
         registry.orderingRevision++;
         registry.restoredActors.set(index, { savedGeneration: checkpoint.generation, actor });
+        registry.restoredActorSlots.set(actor, index);
         registry.savedReferences.set(`${index}/${checkpoint.generation}`, actor.id);
       }
       else registry.generations.set(index, generation);
@@ -217,6 +246,9 @@ export class SessionActorRegistry implements ActorRegistry {
       if (table.has(source.sourceSlot) || slot.source !== null) throw new RangeError("Duplicate source actor binding");
       slot.source = Object.freeze({ provider: source.provider, slot: source.sourceSlot });
       table.set(source.sourceSlot, actor);
+      let restoredSources = registry.restoredSources.get(source.provider);
+      if (restoredSources === undefined) { restoredSources = []; registry.restoredSources.set(source.provider, restoredSources); }
+      restoredSources.push({ provider: source.provider, sourceSlot: source.sourceSlot, actor: { ...source.actor } });
       registry.orderingRevision++;
     }
     return registry;

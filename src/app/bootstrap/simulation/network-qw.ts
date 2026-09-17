@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
 import type { QwUserCommand, QwPlayerState } from '../../../contracts/protocol.ts';
@@ -20,11 +21,14 @@ export interface QwApplicationServerBindingOptions {
     readonly simulation: SharedSimulation;
     readonly content: LoadedApplicationContent;
     readonly serverCount: number;
+    readonly administration?: QwApplicationServerHost['administration'];
+    readonly masters?: QwApplicationServerHost['masters'];
     print(text: string): void;
 }
 const idle: QwUserCommand = { kind: 'q1-quakeworld', milliseconds: 0, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
 interface ClientState {
     readonly player: QwApplicationPlayer;
+    readonly role: 'player' | 'spectator';
     info: Map<string, string>;
     begun: boolean;
     command: QwUserCommand;
@@ -115,7 +119,15 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         [10, scalar(actor, 'weapon')], [11, global('total_secrets')], [12, global('total_monsters')], [13, global('found_secrets')], [14, global('killed_monsters')],
         [15, Math.trunc(scalar(actor, 'items')) | Math.trunc(global('serverflags')) << 28]
     ]);
+    const spawnMessages = (player: QwApplicationPlayer, start: number): readonly Uint8Array[] => encode([
+                ...[...clients.values()].filter(client => client.player.slot >= start).map(client => ({ kind: 'userinfo', slot: client.player.slot, userId: client.player.client.generation * 32 + client.player.slot + 1, value: infoText(client.info) } satisfies QwServerMessage)),
+                ...styles.map((value, index) => ({ kind: 'light-style', index, value } satisfies QwServerMessage)),
+                ...[...stats(player.actor)].map(([index, value]) => ({ kind: 'stat', index, value: Math.trunc(value) } satisfies QwServerMessage))
+            ]);
     return {
+        ...(options.administration === undefined ? {} : { administration: options.administration }),
+        ...(options.masters === undefined ? {} : { masters: options.masters }),
+        authentication: { get password() { return game.cvars.variableString('password'); }, get spectatorPassword() { return game.cvars.variableString('spectator_password'); }, get highCharacters() { return game.cvars.variableValue('sv_highchars') !== 0; } },
         maxClients: 32, paused: false, supportsSourceWire: () => ({ kind: 'supported' }),
         clientInfo: player => requireClient(player).info,
         commandPhase: (player, action, emit) => simulation.queueQuakeWorldAction(player.client, () => {
@@ -133,23 +145,42 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
             flush(); action(); flush();
         }),
         admit: request => {
-            if (clients.size >= simulation.options.maxClients) return { kind: 'rejected', reason: 'Server is full' };
+            const role = request.spectator ? 'spectator' : 'player';
+            const limit = request.spectator ? Math.max(0, Math.min(32, Math.trunc(game.cvars.variableValue('maxspectators')))) : simulation.options.maxClients;
+            if ([...clients.values()].filter(client => client.role === role).length >= limit) return { kind: 'rejected', reason: 'Server is full' };
             let index = 0; while (clients.has(index) && index < 32) index++;
             if (index === 32) return { kind: 'rejected', reason: 'Server is full' };
             const client = options.session.createClient(index); client.connect('remote');
             try {
-                const info = new Map(quakeWorldInfo(request.userinfo)); game.setClientInfo(client.id, info);
+                const info = new Map(quakeWorldInfo(request.userinfo));
+                info.delete('*spectator');
+                if (role === 'spectator') info.set('*spectator', '1');
+                game.setClientRole(client.id, role); game.setClientInfo(client.id, info);
                 const actor = game.reservedClient(client.id), player = { client: client.id, actor: actor.id, slot: index };
-                clients.set(index, { player, info, begun: false, command: idle, commandTime: game.timeSeconds, stats: new Map<number, number>(), frags: 0 });
+                clients.set(index, { player, role, info, begun: false, command: idle, commandTime: game.timeSeconds, stats: new Map<number, number>(), frags: 0 });
                 queued.push({ message: { kind: 'userinfo', slot: index, userId: client.id.generation * 32 + index + 1, value: infoText(info) }, destination: { kind: 'broadcast', reliable: true } });
                 return { kind: 'accepted', player };
             } catch (error) { options.session.closeClient(client.id); throw error; }
         },
+        recordingPlayer: client => {
+            const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
+            if (actor === undefined || !game.isActiveClient(actor)) throw new Error('QW recording requires an active source player');
+            const existing = clients.get(client.slot);
+            if (existing !== undefined) {
+                if (!existing.player.client.equals(client) || !existing.player.actor.equals(actor)) throw new Error('QW recording client slot belongs to another source player');
+                return existing.player;
+            }
+            const player = { client, actor, slot: client.slot };
+            clients.set(client.slot, { player, role: game.isSpectatorClient(actor) ? 'spectator' : 'player', info: new Map(game.clientInfo(client)), begun: true,
+                command: idle, commandTime: game.timeSeconds, stats: new Map<number, number>(), frags: scalar(actor, 'frags') });
+            return player;
+        },
+        recordingSignon: player => { requireClient(player); return spawnMessages(player, 0); },
         carriedPlayer: client => {
             const actor = game.reservedClient(client), player = { client, actor: actor.id, slot: client.slot };
             const carry = simulation.options.travel?.source;
             const info = new Map<string, string>(carry?.kind === 'quakeworld' ? carry.clients.find(entry => entry.client.equals(client))?.userInfo ?? [] : []);
-            clients.set(client.slot, { player, info, begun: false, command: idle, commandTime: game.timeSeconds, stats: new Map<number, number>(), frags: 0 }); return player;
+            clients.set(client.slot, { player, role: game.isSpectatorClient(actor.id) ? 'spectator' : 'player', info, begun: false, command: idle, commandTime: game.timeSeconds, stats: new Map<number, number>(), frags: 0 }); return player;
         },
         disconnect: (player, reason) => {
             const actor = simulation.actors.resolveOwned(player.actor);
@@ -173,17 +204,13 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
             }, close: () => { bytes = null; } };
         },
         signon: player => ({
-            serverData: () => ({ kind: 'server-data', protocol: { kind: 'q1-quakeworld', version: 28 }, serverCount: options.serverCount, gameDirectory: 'qw', playerSlot: player.slot,
-                spectator: false, level: game.machine.strings.get(game.entities.at(0).int(field('message'))),
+            serverData: () => ({ kind: 'server-data', protocol: { kind: 'q1-quakeworld', version: 28 }, serverCount: options.serverCount, gameDirectory: basename(content.catalog.product(simulation.recipe.map.entities.content).expectation.contentDirectory), playerSlot: player.slot,
+                spectator: requireClient(player).role === 'spectator', level: game.machine.strings.get(game.entities.at(0).int(field('message'))),
                 moveVariables: { gravity: game.cvars.variableValue('sv_gravity'), stopSpeed: game.cvars.variableValue('sv_stopspeed'), maxSpeed: game.cvars.variableValue('sv_maxspeed'),
                     spectatorMaxSpeed: game.cvars.variableValue('sv_spectatormaxspeed'), accelerate: game.cvars.variableValue('sv_accelerate'), airAccelerate: game.cvars.variableValue('sv_airaccelerate'),
                     waterAccelerate: game.cvars.variableValue('sv_wateraccelerate'), friction: game.cvars.variableValue('sv_friction'), waterFriction: game.cvars.variableValue('sv_waterfriction'), entityGravity: 1 } }),
             models: () => models, sounds: () => sounds, signonBuffers: () => signon, acceptsMapChecksum: value => value === (checksum >>> 0),
-            spawn: start => { game.prepareClientSpawn(player.client); return encode([
-                ...[...clients.values()].filter(client => client.player.slot >= start).map(client => ({ kind: 'userinfo', slot: client.player.slot, userId: client.player.client.generation * 32 + client.player.slot + 1, value: infoText(client.info) } satisfies QwServerMessage)),
-                ...styles.map((value, index) => ({ kind: 'light-style', index, value } satisfies QwServerMessage)),
-                ...[...stats(player.actor)].map(([index, value]) => ({ kind: 'stat', index, value: Math.trunc(value) } satisfies QwServerMessage))
-            ]); },
+            spawn: start => { game.prepareClientSpawn(player.client); return spawnMessages(player, start); },
             begin: () => { const client = requireClient(player); const admitted = simulation.admitPlayer(player.client);
                 if (!admitted.actor.equals(player.actor)) throw new Error('QW begin changed the reserved actor'); client.begun = true; },
             disconnect: reason => { options.print(reason); }, openDownload: () => null
@@ -217,7 +244,7 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
             const client = requireClient(player), messages: QwServerMessage[] = [], reliable: QwServerMessage[] = [];
             for (const entry of routed) if (receives(player, entry.destination)) (entry.destination.kind !== 'signon' && entry.destination.reliable ? reliable : messages).push(entry.message);
             for (const [index, raw] of stats(player.actor)) { const value = Math.trunc(raw); if (client.stats.get(index) !== value) { client.stats.set(index, value); reliable.push({ kind: 'stat', index, value }); } }
-            for (const other of clients.values()) if (other.begun && visible(player.actor, other.player.actor)) messages.push({ kind: 'player', state: playerState(other, player) });
+            for (const other of clients.values()) if (other.begun && (other.role === 'player' || other.player.actor.equals(player.actor)) && visible(player.actor, other.player.actor)) messages.push({ kind: 'player', state: playerState(other, player) });
             const entities: QuakeWorldEntity[] = [], nails: { readonly origin: Vec3; readonly pitch: number; readonly yaw: number }[] = [];
             for (const actor of sourceActors()) if (visible(player.actor, actor.id)) {
                 const entity = state(actor.id);

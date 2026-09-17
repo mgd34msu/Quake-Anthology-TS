@@ -1,11 +1,12 @@
-import { readFile, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
-import type { CommandContext } from "../../contracts/common.ts";
-import type { SeatId } from "../../contracts/identity.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
+import type { CommandContext } from "../../contracts/common.ts";
+import type { SeatId } from "../../contracts/identity.ts";
+import type { OpenedResource } from "../../content/mounts/index.ts";
 import { findContentPath, normalizeResourcePath } from "../../content/mounts/paths.ts";
 import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { ConfigStore } from "../../settings/config.ts";
@@ -27,6 +28,7 @@ export function sourceScriptReader(catalog: InstalledCatalog, mounts: MountedCon
     defaultOrder: [...primary, ...mounts.plan.defaultOrder.filter(id => !ordered.has(id))], prefixOrders: [] });
   return async name => (await reader.open(name, mount => allowed.has(mount.identity.content)))?.bytes;
 }
+
 
 export function consoleConfigRoot(userContentRoot: string | undefined): string {
   return join(userContentRoot ?? defaultUserContentRoot(), "console");
@@ -81,6 +83,8 @@ export async function readConsoleScript(options: {
   readonly settings: ConfigStore;
   readonly mounted: ((name: string) => Promise<Uint8Array | undefined>) | undefined;
   readonly mountedScript?: (name: string) => Promise<Uint8Array | undefined>;
+  readonly mountedFiles?: (directory: string, extension: string) => Promise<readonly string[]>;
+  readonly mountedResource?: (path: string) => Promise<OpenedResource | null>;
   readonly legacyConfig?: LegacyConsoleConfigSources;
 }): Promise<string | undefined> {
   const name = normalizeResourcePath(options.name);
@@ -110,6 +114,7 @@ export class ConsoleScriptFiles {
   private readsSettled: (() => void) | null = null;
   constructor(private readonly options: Omit<Parameters<typeof readConsoleScript>[0], "name" | "source">,
     private readonly retireMounted?: () => Promise<void>) {}
+  get root(): string { return this.options.settings.root; }
   async list(source: CommandContext): Promise<readonly ConsoleScriptEntry[]> {
     this.acquireRead();
     try {
@@ -143,6 +148,26 @@ export class ConsoleScriptFiles {
     this.acquireRead();
     try { return await this.options.mounted?.(name); }
     finally { this.releaseRead(); }
+  }
+  async listMounted(directory: string, extension: string, source: CommandContext): Promise<readonly string[]> {
+    this.acquireRead();
+    try {
+      let origin = source.origin;
+      while (origin.kind === "script") origin = origin.caller;
+      if (origin.kind === "remote-client") throw new Error("Remote clients cannot list local mounted files");
+      await this.writes;
+      return await this.options.mountedFiles?.(directory, extension) ?? [];
+    } finally { this.releaseRead(); }
+  }
+  async openMounted(path: string, source: CommandContext): Promise<OpenedResource | null> {
+    this.acquireRead();
+    try {
+      let origin = source.origin;
+      while (origin.kind === "script") origin = origin.caller;
+      if (origin.kind === "remote-client") throw new Error("Remote clients cannot open local mounted files");
+      await this.writes;
+      return await this.options.mountedResource?.(path) ?? null;
+    } finally { this.releaseRead(); }
   }
   close(): Promise<void> {
     if (this.retirement !== null) return this.retirement;

@@ -1,3 +1,6 @@
+import type { NativeQ2Travel } from "./native-q2-travel.ts";
+import type { PreparedClassicGuest } from "./classic-guest-source.ts";
+import type { WindowsCapabilities } from "../../../guest/runtime/windows/contracts.ts";
 import type { Q1FogTransition } from "../../../materials/legacy-fog.ts";
 import type { CvarArchiveEntry } from "../../../core/cvars/index.ts";
 import type { DebugLine } from "../../../debug/shapes.ts";
@@ -18,7 +21,7 @@ import type { ApplicationMonsterNavigation } from "./monster-navigation.ts";
 import type { Q2RereleaseCampaignState } from "../../../content/q2/rerelease/campaign.ts";
 import type { ContentId, ExecutableRecipe, GameFamily, ResolvedResourceReference } from "../../../contracts/content.ts";
 import type { ActorId, ClientId, IdentityOwner } from "../../../contracts/identity.ts";
-import type { Vec3 } from "../../../contracts/math.ts";
+import type { Vec3, Vec4 } from "../../../contracts/math.ts";
 import type { Q1CompositionEvent } from "../../../content/composition/q1/types.ts";
 import type { Q1Event } from "../../../content/q1/foundation/types.ts";
 import type { Q2PresentationEvent } from "../../../content/q2/foundation/host.ts";
@@ -43,6 +46,14 @@ export interface SimulationOptions {
   readonly dedicated?: boolean;
   readonly promptSupported?: (client: ClientId) => boolean;
   readonly preparedQuakeC?: PreparedQuakeCSource;
+  readonly q2Guest?: {
+    readonly prepared: PreparedClassicGuest;
+    readonly capabilities: WindowsCapabilities;
+    print(text: string): void;
+    addCommand(text: string): undefined;
+    debugGraph(value: number, color: number): undefined;
+  };
+  readonly nativeQ2Travel?: NativeQ2Travel;
   readonly originalSaveCandidate?: true;
   readonly startItems?: string;
   readonly q3Guest?: Pick<Q3GuestRuntimeOptions, "writable" | "common"> & {
@@ -91,7 +102,7 @@ export interface SimulationTravel {
 }
 
 export interface PlayerAdmission { readonly actor: ActorId; readonly viewHeight: number; }
-export interface PlayerView { readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true;
+export interface PlayerView { readonly blend?: Vec4; readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true;
   readonly pitchDrift?: { readonly grounded: boolean; readonly idealPitch: number; readonly disabled: boolean }; }
 export interface PlayerUiItem {
   readonly id: ItemId;

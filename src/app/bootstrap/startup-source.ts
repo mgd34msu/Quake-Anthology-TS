@@ -1,3 +1,5 @@
+import { q3PrereleaseDemo, q3TeamArenaDemo, registerQ3ProductPolicy } from "../../core/q3-product-policy.ts";
+import { CvarFlag } from "../../core/cvars/index.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { ApplicationSourceSelection } from "./content.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
@@ -13,6 +15,13 @@ export function createStartupSource(options: ApplicationOptions, selection: Pick
   const cvars = new CvarRegistry({ dialect, context, print });
   if (dialect === "q2-classic" || dialect === "q2-rerelease") registerQ2ServerCvars(cvars, selection.match.provider);
   else if (dialect === "q3") {
+    if (options.q3Product !== undefined) {
+      cvars.set("com_prereleaseDemo", q3PrereleaseDemo(options.q3Product.policy) ? "1" : "0", true);
+      cvars.set("com_prereleaseTeamArenaDemo", q3TeamArenaDemo(options.q3Product.policy) ? "1" : "0", true);
+      cvars.set("fs_restrict", options.q3Product.restriction.kind === "demo" ? "1" : "0", true);
+    }
+    registerQ3ProductPolicy(cvars);
+    cvars.register("fs_restrict", "0", CvarFlag.Init);
     for (const definition of q3GameCvarDefinitions(selection.source.content.includes("missionpack") ? "missionpack" : "baseq3"))
       cvars.register(definition.name, definition.value, definition.flags);
   } else for (const [name, value] of Object.entries({ skill: "1", deathmatch: "0", coop: "0", teamplay: "0", sv_cheats: "0", sv_aim: "0.93",

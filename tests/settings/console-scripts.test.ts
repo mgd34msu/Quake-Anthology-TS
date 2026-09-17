@@ -16,6 +16,27 @@ import { openMountPlan } from "../../src/content/mounts/index.ts";
 const identity = createIdentityOwner("config-scripts");
 function context(index: number): CommandContext { return { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } }; }
 
+test("mounted library listing protects its owner through queued writes and retirement", async () => {
+  const writing = Promise.withResolvers<void>(), listing = Promise.withResolvers<readonly string[]>();
+  const entered = Promise.withResolvers<void>(), calls: string[] = [];
+  let retired = 0;
+  const scripts = new ConsoleScriptFiles({ consoleRoot: tmpdir(), settings: new ConfigStore(tmpdir()), mounted: undefined,
+    mountedFiles: (directory, extension) => { calls.push(`${directory}:${extension}`); entered.resolve(); return listing.promise; } }, async () => { retired++; });
+  const remote: CommandContext = { session: identity.session, origin: { kind: "script", name: "remote.cfg", caller: { kind: "remote-client", client: identity.client(2, 0) } } };
+  await expect(scripts.listMounted("video", ".roq", remote)).rejects.toThrow("Remote clients");
+  expect(calls).toEqual([]);
+  const write = scripts.write(() => writing.promise);
+  const result = scripts.listMounted("video", ".roq", context(0));
+  const close = scripts.close();
+  await Promise.resolve(); expect(calls).toEqual([]); expect(retired).toBe(0);
+  writing.resolve(); await write; await entered.promise;
+  expect(calls).toEqual(["video:.roq"]); expect(retired).toBe(0);
+  listing.resolve(["intro.roq", "end.roq"]);
+  expect(await result).toEqual(["intro.roq", "end.roq"]);
+  await close; expect(retired).toBe(1);
+  await expect(scripts.listMounted("", ".dem", context(0))).rejects.toThrow("retired");
+});
+
 test("configuration library lists readable seat and product scripts with the same precedence", async () => {
   const root = await mkdtemp(join(tmpdir(), "console-script-library-"));
   try {
@@ -105,6 +126,18 @@ test("exec reads each seat's exported config before product user files and mount
     await seatConsoleConfig(consoleRoot, identity.seat(0)).dump("config.cfg", "seta seat_value zero\nexec scripts/custom.txt\n");
     await seatConsoleConfig(consoleRoot, identity.seat(1)).dump("config.cfg", "seta seat_value one\nexec scripts/custom.txt\n");
     using mounts = await openMountPlan({ id: "mount-plan:scripts:1", mounts: [{ kind: "loose", rootPath: installed.root, identity: { id: "mount:scripts:1", content: "q3:classic:baseq3:installed", generation: 1 } }], defaultOrder: ["mount:scripts:1"], prefixOrders: [] });
+    const resource = await mounts.open("scripts/custom.txt"), gate = Promise.withResolvers<void>();
+    let retired = false;
+    const resourceReader = new ConsoleScriptFiles({ consoleRoot, settings, mounted: undefined,
+      mountedResource: async () => { await gate.promise; return resource; } }, async () => { retired = true; });
+    expect(resourceReader.root).toBe(settings.root);
+    await expect(resourceReader.openMounted("scripts/custom.txt", { session: identity.session, origin: { kind: "remote-client", client: identity.client(3, 0) } })).rejects.toThrow("Remote clients");
+    const opened = resourceReader.openMounted("scripts/custom.txt", context(0));
+    const retirement = resourceReader.close();
+    await Promise.resolve(); expect(retired).toBe(false);
+    gate.resolve(); expect(await opened).toBe(resource); expect(resource).not.toBeNull();
+    await retirement; expect(retired).toBe(true);
+    await expect(resourceReader.openMounted("scripts/custom.txt", context(0))).rejects.toThrow("retired");
     for (const index of [0, 1, 2]) {
       const source = context(index), cvars = new CvarRegistry({ dialect: "q3", context: source });
       const scripts = new ConsoleScriptFiles({ consoleRoot, settings, mounted: async path => (await mounts.open(path))?.bytes });

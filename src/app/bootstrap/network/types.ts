@@ -1,3 +1,4 @@
+import type { DemoRecordingSeed, DemoRecordingSink } from '../demo-recording.ts';
 import type { ActorId, ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { Q2ProtocolIdentity } from '../../../contracts/protocol.ts';
@@ -7,11 +8,13 @@ import type { DatagramTransport } from '../../../network/common/transport.ts';
 import type { EntityStateT, Q2ConnectRequest, Q2ServerMessageOptions, Q2ServerRecord, Q2ServerWriteEvent, Q2WireFrame, ServerDataParamsT, UsercmdT } from '../../../network/q2/index.ts';
 import type { SimulationPresentationAccess, SimulationPresentationEvent } from '../simulation/types.ts';
 import type { Q2ApplicationDownloads, Q2ApplicationClientDownloads } from './q2-downloads.ts';
-import type { Q2ConnectionlessHost } from '../../../network/q2/connectionless.ts';
+import type { Q2ConnectionlessHost, Q2RconHost } from '../../../network/q2/connectionless.ts';
 /** Input/render consumers never acquire authority to step a remote server. */
 export type RemotePresentationAccess = Pick<SimulationPresentationAccess, 'worldText' | 'playerUi' | 'characterViews' | 'presentations' | 'registerResource' | 'playerView' | 'playerCommand'>;
 export type ApplicationNetworkPhase = 'challenging' | 'connecting' | 'loading' | 'active' | 'closed' | 'rejected';
 export interface ApplicationNetwork {
+    readonly recording?: { seed(): DemoRecordingSeed; attach(sink: DemoRecordingSink): () => void };
+    heartbeat?(nowMilliseconds: number): void;
     readonly role: 'server' | 'client';
     readonly phase: ApplicationNetworkPhase;
     readonly wire: WireSelection;
@@ -46,6 +49,8 @@ export type Q2ApplicationServerEvent = Q2ServerWriteEvent & {
     readonly reliable?: boolean;
 };
 export interface Q2ApplicationServerHost {
+    readonly administration?: Omit<Q2RconHost, 'reply'>;
+    masters?(): readonly NetworkAddress[];
     readonly discovery?: Pick<Q2ConnectionlessHost, 'status' | 'info'>;
     readonly downloads: Q2ApplicationDownloads;
     readonly protocol: Q2ProtocolIdentity;
@@ -58,11 +63,15 @@ export interface Q2ApplicationServerHost {
     disconnect(player: Q2ApplicationPlayer, reason: string): void;
     /** Resolve a carried client after the application's existing travel owner admits the new actor. */
     carriedPlayer(client: ClientId): Q2ApplicationPlayer;
-    gameState(player: Q2ApplicationPlayer): Q2ApplicationGameState;
-    frame(player: Q2ApplicationPlayer, output: SimulationOutput): Q2WireFrame;
+    begin?(player: Q2ApplicationPlayer): void;
+    rawMessages?(player: Q2ApplicationPlayer): readonly { readonly bytes: Uint8Array; readonly reliable: boolean }[];
+    gameState(player: Q2ApplicationPlayer, protocol?: Q2ProtocolIdentity): Q2ApplicationGameState;
+    frame(player: Q2ApplicationPlayer, output: SimulationOutput, protocol?: Q2ProtocolIdentity): Q2WireFrame;
     events(player: Q2ApplicationPlayer, output: SimulationOutput, events: readonly SimulationPresentationEvent[]): readonly Q2ApplicationServerEvent[];
-    input(player: Q2ApplicationPlayer, command: UsercmdT, sequence: number): ActorCommand;
+    input(player: Q2ApplicationPlayer, command: UsercmdT, sequence: number): ActorCommand | null;
     command(player: Q2ApplicationPlayer, name: string, arguments_: readonly string[]): void;
+    commandText?(player: Q2ApplicationPlayer, text: string): void;
+    expandClientCommand?(text: string): string | undefined;
     userinfo(player: Q2ApplicationPlayer, value: string): void;
     print(text: string): void;
 }
@@ -98,4 +107,16 @@ export interface Q2ClientNetworkOptions<TAddress extends NetworkAddress> {
     readonly host: Q2ApplicationClientHost;
     readonly qport: number;
     readonly timeoutMilliseconds?: number;
+}
+
+
+export class Q2GameCallbackError extends Error {
+    constructor(cause: unknown) {
+        super(`Q2 game callback failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+        this.name = 'Q2GameCallbackError';
+    }
+}
+export function q2GameCallback<T>(callback: () => T): T {
+    try { return callback(); }
+    catch (error) { throw error instanceof Q2GameCallbackError ? error : new Q2GameCallbackError(error); }
 }

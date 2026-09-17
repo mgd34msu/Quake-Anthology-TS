@@ -1,3 +1,4 @@
+import type { Q3ServerAdmissionBindings } from '../../../network/q3/admission.ts';
 import type { ActorId, ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand } from '../../../contracts/session.ts';
 import type { WireAdmission } from '../../../network/common/session.ts';
@@ -26,6 +27,10 @@ export interface Q3NetworkRoundRestart {
   reconnectClient(client: ClientId): Promise<boolean>;
 }
 export interface Q3ApplicationServerHost {
+  readonly admission?: Pick<Q3ServerAdmissionBindings, 'privateClients' | 'privatePassword' | 'reconnectLimitSeconds' | 'minimumPing' | 'maximumPing' | 'demoRestricted'> & {
+    enabled(): boolean; gameDirectory(): string; strictAuth(): string; floodProtect(): boolean;
+  };
+  readonly administration?: import("../../../network/services/admin.ts").ServerAdministration;
   readonly sourceRound?: Q3SourceRoundBinding;
   readonly product: Product;
   readonly maxClients: number;
@@ -46,7 +51,7 @@ export interface Q3ApplicationServerHost {
   input(player: Q3ApplicationPlayer, command: WireUserCommand, sequence: number): ActorCommand | null | Promise<ActorCommand | null>;
   command(player: Q3ApplicationPlayer, name: string, args: readonly string[]): void | Promise<void>;
   userinfo(player: Q3ApplicationPlayer, value: string): void | Promise<void>;
-  status(challenge: string, detailed: boolean): string;
+  status(challenge: string, detailed: boolean): string | null;
   print(text: string): void;
 }
 

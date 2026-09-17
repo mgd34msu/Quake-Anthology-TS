@@ -1,3 +1,4 @@
+import { managedAddonHidden, managedAddonTitle } from "./addons.ts";
 import { open, readdir, stat } from "node:fs/promises";
 import { basename, dirname, extname, relative, resolve } from "node:path";
 import { createContentId, createMountId, createMountIdentity } from "../../contracts/content.ts";
@@ -45,7 +46,7 @@ export interface CatalogProduct {
   readonly diagnostics: readonly string[];
 }
 
-export type RemoteContentBase = "q1-quakeworld" | "q2-classic-baseq2" | "q3-baseq3";
+export type RemoteContentBase = "q1-quakeworld" | "q2-classic-baseq2" | "q2-rerelease-baseq2" | "q3-baseq3";
 export interface RemoteContentSelection {
   readonly base: RemoteContentBase;
   readonly directory: string;
@@ -54,7 +55,7 @@ export interface RemoteContentSelection {
 export function remoteContentSelection(base: RemoteContentBase, gameDirectory: string): RemoteContentSelection {
   const directory = gameDirectory.toLowerCase();
   if (base === "q1-quakeworld" && (directory === "qw" || directory === "id1")) return { base, directory: "qw" };
-  if (base === "q2-classic-baseq2" && directory === "") return { base, directory: "baseq2" };
+  if ((base === "q2-classic-baseq2" || base === "q2-rerelease-baseq2") && directory === "") return { base, directory: "baseq2" };
   if (base === "q3-baseq3" && directory === "") return { base, directory: "baseq3" };
   if (!/^[a-zA-Z0-9_+.-]+$/.test(directory) || directory === "." || directory.includes(".."))
     throw new Error("Remote game directory must be a single safe directory name");
@@ -177,9 +178,8 @@ async function modDescription(product: ProductExpectation, roots: readonly strin
   return product;
 }
 
-async function discoverMods(root: string, products: readonly ProductExpectation[]): Promise<readonly ProductExpectation[]> {
+async function discoverMods(root: string, products: readonly ProductExpectation[], inspect: (path: string, format: ArchiveFormat) => Promise<CatalogArchive>): Promise<readonly ProductExpectation[]> {
   const roots = new Map<string, ProductExpectation>();
-  const known = new Set(products.map(product => product.contentDirectory.toLowerCase()));
   for (const product of products) if (product.baseProduct === null && !roots.has(dirname(product.contentDirectory))) roots.set(dirname(product.contentDirectory), product);
   const found: ProductExpectation[] = [];
   for (const [directory, base] of roots) {
@@ -187,16 +187,36 @@ async function discoverMods(root: string, products: readonly ProductExpectation[
     if (installed === null) continue;
     for (const entry of await readdir(installed, { withFileTypes: true })) {
       const contentDirectory = `${directory}/${entry.name}`;
-      if (!entry.isDirectory() || known.has(contentDirectory.toLowerCase()) || entry.name.toLowerCase() === "rerelease") continue;
+      if (!entry.isDirectory() || entry.name.toLowerCase() === "rerelease") continue;
+      const known = products.filter(product => product.contentDirectory.toLowerCase() === contentDirectory.toLowerCase());
+      if (known.length !== 0 && (base.family !== "q1" || known.some(product => product.edition === "quakeworld"))) continue;
+      if (await managedAddonHidden(root, contentDirectory)) continue;
       const members = await readdir(resolve(installed, entry.name), { withFileTypes: true });
       const archives = members.filter(member => member.isFile() && archiveFormat(member.name) !== null);
       const hasContent = archives.length > 0 || members.some(member => member.isDirectory() && ["maps", "models", "vm"].includes(member.name.toLowerCase())
         || member.isFile() && /^(?:qw?progs\.dat|progs\.dat|game.*\.(?:dll|so))$/i.test(member.name));
       if (!hasContent) continue;
       if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(entry.name)) throw new Error(`Mod directory needs a valid content identity: ${contentDirectory}`);
-      found.push({ id: `${base.family}-${base.edition}-${entry.name}`, family: base.family, edition: base.edition, campaign: entry.name,
-        title: entry.name, contentDirectory, baseProduct: base.id, requiredContentArchives: archives.map(archive => `${contentDirectory}/${archive.name}`),
-        requiredPrograms: [], mapWitness: null, unresolvedReason: null });
+      const programNames = members.filter(member => member.isFile()).map(member => member.name.toLowerCase());
+      if (base.family === "q3" && await findContentPath(resolve(installed, entry.name), "vm/qagame.qvm") !== null) programNames.push("vm/qagame.qvm");
+      for (const archive of archives) {
+        const format = archiveFormat(archive.name);
+        if (format === null || base.family === "q2" && format !== "pak" && !(format === "zip" && archive.name.toLowerCase().endsWith(".pkz"))) continue;
+        const inspected = await inspect(resolve(installed, entry.name, archive.name), format).catch(() => null);
+        programNames.push(...inspected?.entries.map(member => member.path.toLowerCase()) ?? []);
+      }
+      const variants = [base];
+      const quakeworld = base.family === "q1" ? products.find(product => product.edition === "quakeworld" && dirname(product.contentDirectory) === directory) : undefined;
+      if (quakeworld !== undefined && programNames.includes("qwprogs.dat")) variants.push(quakeworld);
+      const q2WindowsGame = base.family === "q2" && base.edition === "classic" && programNames.includes("gamex86.dll");
+      const q2OtherGame = base.family === "q2" && base.edition === "classic" && programNames.some(name => /^game[^/]*\.(?:dll|so)$/.test(name));
+      for (const variant of variants.filter(candidate => !known.some(product => product.edition === candidate.edition))) found.push({ id: `${variant.family}-${variant.edition}-${entry.name}`, family: variant.family, edition: variant.edition, campaign: entry.name,
+        title: await managedAddonTitle(root, contentDirectory) ?? (variant.edition === "quakeworld" ? `${entry.name} (QuakeWorld)` : entry.name), contentDirectory, baseProduct: variant.id,
+        requiredContentArchives: archives.map(archive => `${contentDirectory}/${archive.name}`),
+        requiredPrograms: variant.edition === "quakeworld" ? ["qwprogs.dat"] : q2WindowsGame ? ["gamex86.dll"]
+          : variant.family === "q1" && programNames.includes("progs.dat") ? ["progs.dat"]
+          : variant.family === "q3" && programNames.includes("vm/qagame.qvm") ? ["vm/qagame.qvm"] : [], mapWitness: null,
+        unresolvedReason: q2OtherGame && !q2WindowsGame ? "This Quake II add-on needs a Windows i386 gamex86.dll; its installed game module is unsupported." : null });
     }
   }
   return found;
@@ -367,12 +387,6 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   if (remoteProduct !== null && remoteProduct.id !== selected?.base) remoteOverlays.add(remoteProduct.id);
   if (selected?.base === "q1-quakeworld") remoteOverlays.add(selected.base);
   const expected = remoteProduct === null || stock.some(product => product.id === remoteProduct.id) ? stock : [...stock, remoteProduct];
-  const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected);
-  const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods]);
-  const userModIds = new Set([...userMods.map(product => product.id), ...remoteOverlays]);
-  const descriptionRoots = userContentRoot === null ? [corpusRoot] : [userContentRoot, corpusRoot];
-  const expectations = await Promise.all([...expected, ...corpusMods, ...userMods].map(product =>
-    stock.some(known => known.id === product.id) ? product : modDescription(product, descriptionRoots)));
   const archives = new Map<string, Promise<CatalogArchive>>();
   const inspect = (path: string, format: ArchiveFormat): Promise<CatalogArchive> => {
     const existing = archives.get(path);
@@ -385,6 +399,12 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
     archives.set(path, pending);
     return pending;
   };
+  const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected, inspect);
+  const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods], inspect);
+  const userModIds = new Set([...userMods.map(product => product.id), ...remoteOverlays]);
+  const descriptionRoots = userContentRoot === null ? [corpusRoot] : [userContentRoot, corpusRoot];
+  const expectations = await Promise.all([...expected, ...corpusMods, ...userMods].map(product =>
+    stock.some(known => known.id === product.id) ? product : modDescription(product, descriptionRoots)));
   const products: CatalogProduct[] = [];
   const rootArchives = new Map<string, CatalogArchive>();
   for (const expectation of expectations) {

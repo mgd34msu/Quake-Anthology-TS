@@ -1,3 +1,5 @@
+import { ApplicationQ2NativeHud } from "./q2-native-hud.ts";
+import type { NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
 import { registerInventoryMenu } from "../../ui/library/inventory.ts";
 import { SeatSoundCaptions } from "./sound-captions.ts";
 import { BaseArenaMenus, type BaseArenaMenuService } from "./base-arena-menu.ts";
@@ -55,6 +57,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private manualPause = false;
   get pauseMenuOpen(): boolean { return this.manualPause || this.teamArena?.active === true || this.death.active && this.controller.activeMenu !== playerDeathMenu; }
   private readonly death: SeatPlayerDeath;
+  private readonly nativeQ2Hud = new ApplicationQ2NativeHud();
   private readonly inventoryMenu: ReturnType<typeof registerInventoryMenu>;
   private readonly matchMenu: ReturnType<typeof registerMatchMenu> | null;
   private readonly baseArena: BaseArenaMenus | null;
@@ -93,8 +96,9 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.menuText.bind(this.art.skin.font, typography.body); this.menuText.bind(menuTitleFont, typography.title);
   }
 
-  prepareImageRefresh(providers: Pick<ApplicationAssets, "provider">): Promise<() => void> {
-    return this.weaponAssets?.prepareImageRefresh(providers) ?? Promise.resolve(() => undefined);
+  async prepareImageRefresh(providers: Pick<ApplicationAssets, "provider">): Promise<() => void> {
+    const commit = await (this.weaponAssets?.prepareImageRefresh(providers) ?? Promise.resolve(() => undefined));
+    return () => { commit(); this.nativeQ2Hud.clear(); };
   }
 
   async prepare(assets: ApplicationAssets): Promise<void> {
@@ -191,7 +195,6 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         button("load", "Load game", 3, () => this.controller.openMenu(this.saves.load)),
         button("settings", "Options", 4, () => this.controller.openMenu(this.settings.root)),
         button("console", "Console", 5, () => { this.controller.closeAll(); local.console.toggle(); return undefined; }),
-        ...(this.matchMenu === null ? [] : [button("match", "Match controls", 7, () => this.controller.openMenu("menu:application:match"))]),
         ...(this.baseArena === null ? [] : [button("progress", "Arena progress", 6, () => this.controller.openMenu("menu:application:arena-progress"))]),
         ...(this.matchMenu === null ? [] : [button("match", "Match controls", 7, () => this.controller.openMenu("menu:application:match"))]),
         button("quit", "End game", 8, quit)], open: () => { this.manualPause = true; return undefined; }, close: () => { this.manualPause = false; return undefined; } }));
@@ -277,7 +280,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   }
 
   draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
-    material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true, nativeStatus = false, showAggregateWarning = true): void {
+    material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true, nativeStatus = false, showAggregateWarning = true, nativeCrosshair = nativeStatus): void {
     this.text.bind(this.art.skin.font, this.hudFont); this.menuText.bind(this.art.skin.font, this.menuFont);
     if (!this.guestUi) {
       const player = this.simulation.playerUi(this.local.player.actor);
@@ -287,7 +290,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       const base = emptyHudData(this.local.player.seat.id);
       const hud: CommonHudData = { ...base, ...sourceHud, captions: this.soundCaptions.active({ subtitles: true, soundCaptions: this.preferences.values.captions, speakers: true }), powerups: player.powerups, prompts: [...this.match.prompts, ...sourceHud.prompts,
         ...(player.armor.kind === "q2" && player.armor.powerArmor.kind !== "none" ? [{ action: `Power ${player.armor.powerArmor.kind} ${player.armor.powerArmor.cells}`, binding: "", icon: null }] : [])], ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
-        crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeStatus },
+        crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeCrosshair },
         ...(player.weaponStatus === null ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
           weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,
           iconAspect: this.weaponAssets?.aspect(this.weaponIcons.weapon ?? this.weaponIcons.ammo) ?? 1, ammoAspect: this.weaponAssets?.aspect(this.weaponIcons.ammo) ?? 1,
@@ -301,6 +304,15 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     const backdrop = this.controller.activeMenu === playerDeathMenu && panel.kind === "fill" ? { ...panel, color: { ...panel.color, w: 0.45 } } : panel;
     renderUiCommands(context, this.controller.activeMenu === null ? [] : [backdrop, ...this.controller.draw({ ...context, timeMilliseconds: this.now() })],
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
+  }
+
+  prepareNativeQ2Hud(frame: NativeQ2HudFrame, content: ContentId, assets: ApplicationAssets, context: UiDrawContext): Promise<void> {
+    return this.nativeQ2Hud.prepare(content, assets, frame, context, this.preferences.values.hudScale * context.binding.hudScale);
+  }
+  drawNativeQ2Hud(frame: NativeQ2HudFrame, context: UiDrawContext, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
+    material: (draw: MaterialTextDraw) => void, binding?: (command: string) => string): void {
+    renderUiCommands(context, this.nativeQ2Hud.commands(frame, context, this.preferences.values.hudScale * context.binding.hudScale, binding),
+      { text: this.text, white: this.art.white, picture: resource => this.nativeQ2Hud.picture(resource) ?? this.art.picture(resource), emit, material });
   }
 
   captionCommands(captions: readonly ActiveCaption[], context: UiDrawContext): readonly Exclude<RenderCommand, { readonly kind: "swap-buffers" }>[] {

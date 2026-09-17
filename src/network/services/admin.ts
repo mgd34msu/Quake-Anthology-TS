@@ -83,6 +83,22 @@ export interface RconHost {
   execute(command: string, output: (text: string) => void): Promise<void>;
   reply(to: NetworkAddress, text: string): void;
 }
+export interface ServerAdministration {
+  rconPassword(): string;
+  execute(command: string, output: (text: string) => void): Promise<void>;
+  rejects(address: NetworkAddress): boolean;
+  masters(): readonly NetworkAddress[];
+  record(event: { readonly address: NetworkAddress; readonly operation: "rcon"; readonly result: RconResult }): void;
+}
+
+/** Q3 SVC_RemoteCommand advances past the password without retokenizing command quotes. */
+export function q3RconCommand(line: string): string {
+  let cursor = 4;
+  while (line[cursor] === " ") cursor++;
+  while (cursor < line.length && line[cursor] !== " ") cursor++;
+  while (line[cursor] === " ") cursor++;
+  return line.slice(cursor, cursor + 1023);
+}
 export type RconResult = "throttled" | "disabled" | "denied" | "executed";
 export class RconService {
   private lastTime = 0;

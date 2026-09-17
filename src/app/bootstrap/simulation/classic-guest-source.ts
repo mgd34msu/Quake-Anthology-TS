@@ -89,6 +89,15 @@ export class ClassicGuestSource {
       throw error;
     }
   }
+  async initLoading(nextFrame: () => Promise<void>): Promise<void> {
+    if (this.phase !== 'created') throw new Error('Classic guest Init requires a fresh source');
+    this.phase = 'initializing';
+    try { await this.host.initLoading(nextFrame); this.phase = 'running'; }
+    catch (error) {
+      try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Classic guest initialization and cleanup failed'); }
+      throw error;
+    }
+  }
 
   /** Candidate disposal runs no game exports or DLL detach callbacks. */
   discard(): void {

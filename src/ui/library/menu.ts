@@ -3,6 +3,7 @@ import type { NativeUiController } from "../common/controller.ts";
 
 export interface LibraryEntry { readonly id: string; readonly label: string; readonly detail?: string; readonly unavailable?: string; }
 export interface LibraryMenuService {
+  scope?(): string;
   entries(): readonly LibraryEntry[];
   status(): string;
   refresh(): void;
@@ -11,13 +12,19 @@ export interface LibraryMenuService {
   readonly stop?: { readonly label: string; activate(): void };
 }
 export function registerLibraryMenu(controller: NativeUiController, id: UiMenuId, title: string, service: LibraryMenuService): { readonly root: UiMenuId; dispose(): void } {
-  let selected: string | null = null, query = "", name = "";
+  let selected: string | null = null, query = "", name = "", scope = service.scope?.() ?? "";
+  const views = new Map<string, { readonly query: string; readonly selected: string | null }>();
   const activate = (value: string): undefined => {
     const entry = service.entries().find(entry => entry.id === value);
     if (entry !== undefined && entry.unavailable === undefined) service.activate(value);
     return undefined;
   };
   const dispose = controller.register(id, () => {
+    const nextScope = service.scope?.() ?? "";
+    if (nextScope !== scope) {
+      views.set(scope, { query, selected });
+      const restored = views.get(nextScope); query = restored?.query ?? ""; selected = restored?.selected ?? null; scope = nextScope;
+    }
     const entries = service.entries().filter(entry => `${entry.label} ${entry.detail ?? ""}`.toLowerCase().includes(query.toLowerCase()));
     if (!entries.some(entry => entry.id === selected)) selected = entries[0]?.id ?? null;
     const button = (suffix: string, label: string, x: number, y: number, width: number, action: () => void, enabled = true): UiControl => ({

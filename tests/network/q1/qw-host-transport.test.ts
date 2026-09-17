@@ -197,3 +197,48 @@ test('native QW transport signs on, recovers command groups, sends deltas, downl
         expect(prints.filter(text => !text.includes('changing') && !text.includes('datagram overflow') && !text.includes('preparation failed') && !text.includes('read failed'))).toEqual([]);
     } finally { client?.close(); secondSocket?.close(); server?.close(); await rm(root, { recursive: true, force: true }); }
 }, 10000);
+
+test('QW application endpoint enforces live player and spectator passwords before authenticated role admission', async () => {
+    const identity = createIdentityOwner('qw-password-role');
+    let playerPassword = 'players', spectatorPassword = 'watchers';
+    const roles: boolean[] = [];
+    const host: QwApplicationServerHost = {
+        authentication: { get password() { return playerPassword; }, get spectatorPassword() { return spectatorPassword; }, highCharacters: true },
+        maxClients: 32, paused: false, supportsSourceWire: () => ({ kind: 'supported' }),
+        clientInfo: () => new Map<string, string>(), commandPhase: (_player, action) => action(),
+        admit: request => { const slot = roles.length; roles.push(request.spectator); return { kind: 'accepted', player: { client: identity.client(slot, 0), actor: identity.actor(slot + 1, 0), slot } }; },
+        carriedPlayer: () => { throw new Error('No travel'); }, disconnect: () => undefined, baselines: () => [],
+        signon: player => ({ serverData: () => ({ kind: 'server-data', protocol: { kind: 'q1-quakeworld', version: 28 }, serverCount: 1,
+            gameDirectory: 'qw', playerSlot: player.slot, spectator: roles[player.slot] === true, level: 'Authentication test',
+            moveVariables: { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500, accelerate: 10, airAccelerate: 0.7, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 } }),
+            models: () => [], sounds: () => [], signonBuffers: () => [], acceptsMapChecksum: () => true, spawn: () => [], begin: () => undefined,
+            disconnect: () => undefined, openDownload: () => null }),
+        commandGroup: () => undefined, command: () => undefined, observe: () => undefined, print: () => undefined,
+        frame: () => ({ entities: [], messages: [], reliable: [] }),
+    };
+    const server = new QwServerNetwork({ host, transport: await UdpTransport.bind({ host: '127.0.0.1', port: 0 }), random: () => 0.5 });
+    const socket = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
+    let now = 0;
+    const connect = async (userinfo: string, qport: number): Promise<QuakeWorldConnectClient['state']> => {
+        const client = new QuakeWorldConnectClient(qport, userinfo);
+        for (let turn = 0; turn < 30; turn++) {
+            now += 100;
+            const request = client.next(now); if (request !== null) socket.send(server.address, request);
+            await Bun.sleep(1); await server.poll(now); await Bun.sleep(1);
+            for (let packet = socket.poll(); packet !== null; packet = socket.poll()) if (packet.kind === 'packet') client.receive(packet.payload);
+            if (client.state.kind === 'connected' || client.state.kind === 'rejected') return client.state;
+        }
+        throw new Error('QW challenge timed out');
+    };
+    try {
+        expect((await connect('\\name\\player\\password\\wrong', 21001)).kind).toBe('rejected');
+        expect((await connect('\\name\\spectator\\spectator\\wrong', 21002)).kind).toBe('rejected');
+        expect(roles).toEqual([]);
+        expect((await connect('\\name\\spectator\\spectator\\watchers', 21003)).kind).toBe('connected');
+        expect(roles).toEqual([true]);
+        playerPassword = 'changed'; spectatorPassword = 'changed-watchers';
+        expect((await connect('\\name\\player\\password\\players', 21004)).kind).toBe('rejected');
+        expect((await connect('\\name\\player\\password\\changed', 21005)).kind).toBe('connected');
+        expect(roles).toEqual([true, false]);
+    } finally { socket.close(); server.close(); }
+});

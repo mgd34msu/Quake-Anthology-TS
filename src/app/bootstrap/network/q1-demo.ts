@@ -145,7 +145,7 @@ export class QuakeWorldDemoInput {
         const messages = this.decoder.decode(record.message.subarray(8), sequence);
         for (const message of messages) {
             if (message.kind === 'server-data') {
-                if (message.playerSlot >= 32 || message.spectator) throw new Error('QWD requires an admitted native player');
+                if (message.playerSlot >= 32) throw new Error('QWD requires a valid native player slot');
                 this.data = message; this.models = []; this.sounds = []; this.modelListComplete = false; this.soundListComplete = false; this.worldReady = false; this.commands.clear();
                 await this.remote.serverData(message); this.operation.assertCurrent();
             } else if (message.kind === 'model-list' || message.kind === 'sound-list') {

@@ -21,6 +21,7 @@ export interface ClassicQ2EngineServices {
   readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "combat" | "inventory" | "callbacks" | "trace" | "pointContents" | "inPvs" | "inPhs" | "setAreaPortal" | "setSolid" | "inlineModelBounds">;
   readonly cvars: CvarRegistry;
   readonly bindEntity: (record: RawEntityView, actor: OwnedActor) => undefined;
+  readonly linkBody?: (record: RawEntityView, actor: OwnedActor) => undefined;
   readonly print: (destination: "broadcast" | "debug" | "client" | "center", entity: GuestAddress | null, level: number, text: string) => undefined;
   readonly configstring: (index: number, value: string) => undefined;
   readonly resourceIndex: (kind: "model" | "sound" | "image", name: string) => number;
@@ -62,6 +63,8 @@ function intResult(value: number): GuestCallResult { return { kind: "int32", val
 /** The DLL owns gameplay bytes. Every call and nested callback uses the supplied CPU and memory. */
 export class ClassicQ2GuestHost {
   readonly memory: MappedGuestMemory;
+  #spawnInstructions = 0n;
+  get spawnInstructions(): bigint { return this.#spawnInstructions; }
   readonly imports: GuestAddress;
   readonly cvars: ClassicQ2Cvars;
   readonly #callbackNames = new Map<CallbackId, string>();
@@ -71,6 +74,7 @@ export class ClassicQ2GuestHost {
   #edicts: ClassicQ2Edicts | null = null;
   #exports: GuestAddress | null = null;
   #initialized = false;
+  #suppressReconcile = false;
   constructor(readonly options: ClassicQ2GuestHostOptions) {
     this.memory = options.runner.options.cpu.memory;
     if (this.memory.pointerBytes !== 4) throw new TypeError("Classic Q2 API 3 requires a 32-bit guest");
@@ -94,11 +98,11 @@ export class ClassicQ2GuestHost {
     const index = name === "bprintf" || name === "centerprintf" ? 1 : name === "cprintf" ? 2 : 0;
     return classicPrintfLayouts(readClassicString(this.memory, classicRequiredPointer(fixed, index)));
   }
-  invoke(target: GuestAddress, signature: GuestCallSignature, arguments_: readonly GuestCallValue[], self: RawEntityView | null = null): GuestCallResult {
+  invoke(target: GuestAddress, signature: GuestCallSignature, arguments_: readonly GuestCallValue[], self: RawEntityView | null = null, instructionBudget = this.options.instructionBudget): GuestCallResult {
     const context: GuestCallContext = { module: this.memory.module,
       callback: { kind: "native-guest", module: this.memory.module, address: target, abi: CLASSIC_Q2_ABI },
       parent: this.options.runner.currentContext, self, other: null };
-    return this.options.runner.invoke({ target, signature, arguments: arguments_, context, instructionBudget: this.options.instructionBudget });
+    return this.options.runner.invoke({ target, signature, arguments: arguments_, context, instructionBudget });
   }
   getGameApi(target: GuestAddress): GuestAddress {
     if (this.#exports !== null) throw new Error("GetGameAPI already bound");
@@ -113,16 +117,20 @@ export class ClassicQ2GuestHost {
     this.#exports = result.value; this.#edicts = edicts;
     return result.value;
   }
-  call(name: string, arguments_: readonly GuestCallValue[] = [], self: RawEntityView | null = null): GuestCallResult {
+  call(name: string, arguments_: readonly GuestCallValue[] = [], self: RawEntityView | null = null, instructionBudget = this.options.instructionBudget): GuestCallResult {
     if (this.#exports === null) throw new Error("GetGameAPI must run before lifecycle calls");
     const entry = CLASSIC_Q2_EXPORTS[name];
     if (entry === undefined) throw new Error(`Unknown API 3 export ${name}`);
     const target = this.memory.readPointer(this.memory.offset(this.#exports, BigInt(entry.offset)));
     if (target === null) throw new Error(`Null API 3 export ${name}`);
     this.cvars.refresh();
-    const result = this.invoke(target, entry.signature, arguments_, self);
-    if (this.#initialized && name !== "Shutdown") this.edicts.reconcile();
+    const result = this.invoke(target, entry.signature, arguments_, self, instructionBudget);
+    if (this.#initialized && !this.#suppressReconcile && name !== "Shutdown") this.edicts.reconcile();
     return result;
+  }
+  async initLoading(nextFrame: () => Promise<void>): Promise<void> {
+    if (this.#initialized) throw new Error("API 3 Init already completed");
+    await this.callLoading("Init", [], nextFrame); this.#initialized = true; this.edicts.reconcile();
   }
   init(): undefined { if (this.#initialized) throw new Error("API 3 Init already completed"); this.call("Init"); this.#initialized = true; this.edicts.reconcile(); return undefined; }
   shutdown(): undefined {
@@ -132,8 +140,70 @@ export class ClassicQ2GuestHost {
   }
   spawnEntities(map: string, entities: string, spawnPoint: string): undefined {
     for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
-    this.withStrings([map, entities, spawnPoint], pointers => { this.call("SpawnEntities", pointers); return undefined; });
+    const before = this.options.runner.instructionsExecuted;
+    try {
+      this.withStrings([map, entities, spawnPoint], pointers => {
+        this.call("SpawnEntities", pointers, null, Math.min(Number.MAX_SAFE_INTEGER, this.options.instructionBudget * 10));
+        return undefined;
+      });
+    } finally { this.#spawnInstructions = this.options.runner.instructionsExecuted - before; }
     return undefined;
+  }
+  async callLoading(name: string, arguments_: readonly GuestCallValue[], nextFrame: () => Promise<void>, instructionBudget = this.options.instructionBudget): Promise<GuestCallResult> {
+    if (this.#exports === null) throw new Error("GetGameAPI must run before lifecycle calls");
+    const entry = CLASSIC_Q2_EXPORTS[name];
+    if (entry === undefined) throw new Error(`Unknown API 3 export ${name}`);
+    const target = this.memory.readPointer(this.memory.offset(this.#exports, BigInt(entry.offset)));
+    if (target === null) throw new Error(`Null API 3 export ${name}`);
+    this.cvars.refresh();
+    const result = await this.options.runner.invokeLoading({ target, signature: entry.signature, arguments: arguments_,
+      context: { module: this.memory.module, callback: { kind: "native-guest", module: this.memory.module, address: target, abi: CLASSIC_Q2_ABI }, parent: null, self: null, other: null }, instructionBudget }, nextFrame);
+    if (this.#initialized && !this.#suppressReconcile && name !== "Shutdown") this.edicts.reconcile();
+    return result;
+  }
+  async saveLoading(name: "ReadGame" | "ReadLevel", filename: string, nextFrame: () => Promise<void>): Promise<void> {
+    for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
+    const address = allocateClassicString(this.memory, filename);
+    try { await this.callLoading(name, [{ kind: "pointer", value: address }], nextFrame, Math.min(Number.MAX_SAFE_INTEGER, this.options.instructionBudget * 10)); }
+    finally { this.memory.unmap(address, classicStringAllocationBytes(filename)); }
+  }
+  async spawnEntitiesLoading(map: string, entities: string, spawnPoint: string, nextFrame: () => Promise<void>): Promise<void> {
+    for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
+    const records = [map, entities, spawnPoint].map(text => ({ text, address: allocateClassicString(this.memory, text) }));
+    const before = this.options.runner.instructionsExecuted;
+    try {
+      await this.callLoading("SpawnEntities", records.map(record => ({ kind: "pointer", value: record.address })), nextFrame,
+        Math.min(Number.MAX_SAFE_INTEGER, this.options.instructionBudget * 10));
+    } finally {
+      this.#spawnInstructions = this.options.runner.instructionsExecuted - before;
+      for (const record of records) this.memory.unmap(record.address, classicStringAllocationBytes(record.text));
+    }
+  }
+  setModelName(index: number, name: string): void {
+    if (!Number.isInteger(index) || index < 1 || index >= 256) throw new RangeError("API 3 model index outside MAX_MODELS");
+    if (name === "") this.#models.delete(index); else this.#models.set(index, name);
+  }
+  rebindWorld(): void {
+    if (!this.#initialized || this.#exports === null || this.options.runner.depth !== 0) throw new Error("API 3 world rebind requires an idle initialized module");
+    this.#edicts = new ClassicQ2Edicts(this.memory, this.#exports, this.options.services.engine.actors, this.options.provider, this.options.services.bindEntity);
+    this.#models.clear();
+  }
+  writeTravelLevel(filename: string, maxClients: number): void {
+    if (!this.#initialized || this.options.runner.depth !== 0 || this.#suppressReconcile) throw new Error("API 3 travel save requires an idle initialized module");
+    const clients = Array.from({ length: maxClients }, (_, index) => this.edicts.at(index + 1));
+    const inUse = clients.map(record => record.bytes.getInt32(88, true));
+    this.#suppressReconcile = true;
+    let failure: { readonly error: unknown } | null = null;
+    try {
+      for (const record of clients) record.bytes.setInt32(88, 0, true);
+      this.save("WriteLevel", filename);
+    } catch (error) { failure = { error }; } finally {
+      for (const [index, record] of clients.entries()) record.bytes.setInt32(88, inUse[index] ?? 0, true);
+      this.#suppressReconcile = false;
+    }
+    try { this.edicts.reconcile(); }
+    catch (error) { if (failure !== null) throw new AggregateError([failure.error, error], "Travel WriteLevel and reconciliation failed"); throw error; }
+    if (failure !== null) throw failure.error;
   }
   runFrame(): undefined { this.call("RunFrame"); return undefined; }
   clientConnect(slot: number, userinfo: string): { readonly allowed: boolean; readonly userinfo: string } {
@@ -148,9 +218,14 @@ export class ClassicQ2GuestHost {
   clientEvent(name: "ClientBegin" | "ClientDisconnect" | "ClientCommand", slot: number): undefined {
     const record = this.edicts.at(slot); this.call(name, [{ kind: "pointer", value: record.address }], record); return undefined;
   }
-  clientUserinfoChanged(slot: number, userinfo: string): undefined {
-    this.withStrings([userinfo], pointers => { const record = this.edicts.at(slot); this.call("ClientUserinfoChanged", [{ kind: "pointer", value: record.address }, ...pointers], record); return undefined; });
-    return undefined;
+  clientUserinfoChanged(slot: number, userinfo: string): string {
+    const buffer = this.memory.allocate({ byteLength: 516, label: "API 3 mutable userinfo change" });
+    try {
+      writeClassicString(this.memory, buffer, userinfo, 512);
+      const record = this.edicts.at(slot);
+      this.call("ClientUserinfoChanged", [{ kind: "pointer", value: record.address }, { kind: "pointer", value: buffer }], record);
+      return readClassicString(this.memory, buffer, 512);
+    } finally { this.memory.unmap(buffer, 516); }
   }
   clientThink(slot: number, command: Uint8Array): undefined {
     if (command.byteLength !== 16) throw new RangeError("API 3 usercmd_t requires 16 source bytes");
@@ -211,7 +286,7 @@ export class ClassicQ2GuestHost {
         return intResult(index);
       }
       case "sound": services.sound(null, pointer(0), number(1), number(2), number(3), number(4), number(5)); return voidResult;
-      case "positioned_sound": services.sound(vector(0), pointer(1), number(2), number(3), number(4), number(5), number(6)); return voidResult;
+      case "positioned_sound": services.sound(pointer(0) === null ? null : vector(0), pointer(1), number(2), number(3), number(4), number(5), number(6)); return voidResult;
       case "pointcontents": return intResult(services.engine.pointContents(vector(0)));
       case "inPVS": return intResult(Number(services.engine.inPvs(vector(0), vector(1))));
       case "inPHS": return intResult(Number(services.engine.inPhs(vector(0), vector(1))));
@@ -301,7 +376,10 @@ export class ClassicQ2GuestHost {
     const modelName = this.#models.get(view.getInt32(40, true));
     if (solid === 3 && (modelName === undefined || !/^\*\d+$/.test(modelName))) throw new Error("API 3 solid brush has no registered inline model");
     engine.setSolid(actor, solid === 0 ? "none" : solid === 1 ? "trigger" : solid === 2 ? "box" : "brush", solid === 3 && modelName !== undefined ? Number(modelName.slice(1)) : null);
-    if (solid !== 0) engine.bodies.link(actor);
+    if (solid !== 0) {
+      if (this.options.services.linkBody === undefined) engine.bodies.link(actor);
+      else this.options.services.linkBody(record, actor);
+    }
     return undefined;
   }
 }

@@ -1,3 +1,4 @@
+import { registerArenaSelectionMenu } from "./base-arena-select-menu.ts";
 import { captionCommands as mediaCaptionCommands } from "../../ui/common/captions.ts";
 import type { ActiveCaption } from "../../text/captions.ts";
 import { accessibleColors } from "../../ui/common/accessibility.ts";
@@ -42,7 +43,7 @@ export interface StartupMenuOptions {
   readonly titleFont: TextFontSelection;
   readonly now: () => number;
   readonly play: () => void;
-  readonly playPreset?: (id: string, skill: number) => void;
+  readonly playPreset?: (id: string, skill: number, arenaMap?: string) => void;
   readonly browser?: StartupServerBrowser;
   readonly connect?: (connection: BrowserConnection) => void;
   readonly load: (id: string) => void;
@@ -52,7 +53,7 @@ export interface StartupMenuOptions {
   readonly settings?: readonly SettingBinding[];
   readonly appearance?: () => UiPreferenceValues;
   readonly teamArena?: { choices(): readonly { readonly id: string; readonly label: string }[]; read(): { readonly player: string; readonly opponent: string }; write(side: "player" | "opponent", team: string): void };
-  readonly libraries?: { readonly demos?: LibraryMenuService; readonly movies?: LibraryMenuService; readonly serverProfiles?: LibraryMenuService; readonly configurations?: LibraryMenuService };
+  readonly libraries?: { readonly addons?: LibraryMenuService; readonly playerProgress?: LibraryMenuService; readonly demos?: LibraryMenuService; readonly movies?: LibraryMenuService; readonly serverProfiles?: LibraryMenuService; readonly configurations?: LibraryMenuService };
 }
 const libraryMenu: UiMenuId = "menu:startup:library";
 const main: UiMenuId = "menu:startup:main";
@@ -98,6 +99,7 @@ export class StartupMenu {
   private nativeEdition = "classic";
   private nativePreset: StartupNativePreset | null = null;
   private nativeSkill = "1";
+  private nativeArena: string | undefined;
 
   constructor(private readonly options: StartupMenuOptions) {
     this.text = new UiTextRenderer(options.seat);
@@ -115,10 +117,12 @@ export class StartupMenu {
       this.button("quit", "Quit", options.libraries === undefined ? 3 : 4, options.quit),
     ]);
     const libraryPages = ([
+      { name: "addons", label: "Add-ons — Quaddicted", service: options.libraries?.addons },
       { name: "demos", label: "Demos", service: options.libraries?.demos },
       { name: "movies", label: "Movies", service: options.libraries?.movies },
       { name: "configurations", label: "Configurations", service: options.libraries?.configurations },
       { name: "server-profiles", label: "Server profiles", service: options.libraries?.serverProfiles },
+      { name: "player-progress", label: "Achievements and progress", service: options.libraries?.playerProgress },
     ]).flatMap(library => {
       if (library.service === undefined) return [];
       const page = registerLibraryMenu(this.controller, `menu:library:${library.name}`, library.label, library.service);
@@ -138,10 +142,19 @@ export class StartupMenu {
         }, true), enabled: !this.busy && options.model.presets().some(preset => preset.family === game.family && preset.edition === game.edition),
       })), this.button("custom", "Custom game", 5, () => { this.status = ""; this.controller.openMenu(session); }, true), this.back(),
     ]);
+    const arenas: UiMenuId = "menu:library:arena-selection";
+    this.disposers.push(registerArenaSelectionMenu(this.controller, arenas, {
+      read: () => options.model.baseArenas(),
+      choose: map => { this.nativeArena = map; this.controller.openMenu(nativeDifficultyMenu); },
+    }));
     this.register(nativeCampaignMenu, () => [
       ...this.nativeCampaigns().map((preset, index) => ({
         ...this.button(`preset:${preset.id}`, this.fit(`${preset.label}${preset.unavailable === null ? "" : " (unavailable)"}`, 486, 2.6), index, () => {
-          this.nativePreset = preset; this.nativeSkill = preset.defaultSkill; this.status = ""; this.controller.openMenu(nativeDifficultyMenu);
+          this.nativePreset = preset; this.nativeSkill = preset.defaultSkill; this.nativeArena = undefined; this.status = "";
+          if (preset.id !== "q3-baseq3") { this.controller.openMenu(nativeDifficultyMenu); return; }
+          this.setStatus("Loading arenas...", true);
+          options.model.refreshBaseArenas().then(() => { this.setStatus(""); this.controller.openMenu(arenas); })
+            .catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
         }, true), enabled: !this.busy && preset.unavailable === null,
       })), this.back(),
     ]);
@@ -155,7 +168,7 @@ export class StartupMenu {
       })), ...(preset.id === "q3-missionpack" && options.teamArena !== undefined ? (["player", "opponent"] satisfies ("player" | "opponent")[]).map((side, index): UiControl => ({
         id: `ui:startup:team:${side}`, kind: "choice", label: side === "player" ? "Your team" : "Opponent", rect: menuRow(index + 5), visible: true, enabled: !this.busy,
         choices: options.teamArena?.choices() ?? [], selected: options.teamArena?.read()[side] ?? "", select: (_seat, value) => { options.teamArena?.write(side, value); return undefined; },
-      })) : []), { ...this.button("play-preset", "Play", 7, () => options.playPreset?.(preset.id, Number(this.nativeSkill)), true),
+      })) : []), { ...this.button("play-preset", "Play", 7, () => options.playPreset?.(preset.id, Number(this.nativeSkill), this.nativeArena), true),
         enabled: !this.busy && preset.unavailable === null && options.playPreset !== undefined }, this.back()];
     });
     this.register(browserMenu, () => this.browserControls());

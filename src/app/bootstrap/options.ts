@@ -7,13 +7,15 @@ import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 
 export interface ApplicationOptions {
+  readonly q3MapLaunch?: import("./q3-map-command.ts").Q3MapLaunch;
+  readonly q3Product?: import("../../core/q3-product-policy.ts").Q3ApplicationProduct;
   readonly authoredCampaignStart?: true;
   readonly startupCommands?: readonly string[];
   readonly explicitRules?: { readonly skill?: boolean; readonly mode?: boolean; readonly capacity?: boolean };
   readonly teamArenaSkirmish?: import("./team-arena-skirmish.ts").TeamArenaSkirmish;
   readonly remoteContent?: import("../../content/catalog/index.ts").RemoteContentSelection;
   readonly q1Protocol?: Q1ProtocolIdentity;
-  readonly q2Protocol?: Extract<Q2ProtocolIdentity, { kind: "q2-classic" }> | { readonly kind: "q2-r1q2"; readonly version: 35; readonly revision: 1904 | 1905 };
+  readonly q2Protocol?: Exclude<Q2ProtocolIdentity, { kind: "q2-kex" | "q2-kex-demo" }>;
   readonly serverProfile?: import("../../settings/server/types.ts").ServerProfile;
   readonly serverProfilePath?: string;
   readonly corpusRoot: string;
@@ -21,6 +23,7 @@ export interface ApplicationOptions {
   readonly product: string;
   readonly map: string;
   readonly quakeCProgram?: string;
+  readonly q2GameLibrary?: string;
   readonly movement: GameFamily;
   readonly character: GameFamily;
   readonly characterModel: string;
@@ -58,7 +61,8 @@ Usage: bun run src/main.ts [options]
   --user-content-root PATH   Writable user content root (default ~/.local/share/quake-typescript/content)
   --game PRODUCT             Installed catalog product, e.g. q2-classic-baseq2
   --map NAME                 Map name or maps/path.bsp
-  --progs MOUNTED_PATH       Validated QuakeC .dat artifact; dedicated offline classic Q1 only
+  --progs MOUNTED_PATH       Validated mounted QuakeC .dat artifact
+  --q2-game MOUNTED_PATH     Explicit classic Quake II Windows i386 game DLL
   --movement q1|q2|q3        Player movement provider
   --character q1|q2|q3       Player character provider
   --model NAME               Character model (e.g. sarge or male)
@@ -79,7 +83,7 @@ Usage: bun run src/main.ts [options]
   --connect-q1 ADDRESS       Join a native Quake server (id1, protocols 15/666/999)
   --connect-qw ADDRESS       Join a base QuakeWorld protocol 28 server
   --connect-q3 ADDRESS       Join a baseq3 protocol 68 server (sv_pure 0)
-  --q2-protocol 34|35|35:1905 Q2 remote protocol (default 34; 35 selects revision 1904)
+  --q2-protocol 34|35[:1904|1905]|36[:revision]|4038|1038 Q2 client/server protocol (35 defaults to 1904; 36 to 1026)
   --connect-q2 ADDRESS       Join a native Quake II server
   --seed N                   Gameplay random seed
   --frames N                 Close after N simulation steps
@@ -142,6 +146,11 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--content-root": options = { ...options, corpusRoot: resolve(value) }; break;
       case "--game": options = { ...options, product: value }; break;
       case "--map": options = { ...options, map: mapResourcePath(value) }; break;
+      case "--q2-game": {
+        const path = normalizeResourcePath(value);
+        if (!path.endsWith(".dll")) throw new Error("--q2-game requires a mounted .dll artifact");
+        options = { ...options, q2GameLibrary: path }; break;
+      }
       case "--progs": {
         const path = normalizeResourcePath(value);
         if (!path.endsWith(".dat")) throw new Error("--progs requires a mounted .dat artifact");
@@ -181,8 +190,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         listenKind = kind; listen = integer(value, flag, 0, 65535); break;
       }
       case "--q2-protocol":
-        if (value !== "34" && value !== "35" && value !== "35:1905") throw new Error("--q2-protocol requires 34 or 35 or 35:1905");
-        options = { ...options, q2Protocol: value === "34" ? { kind: "q2-classic", version: 34 } : { kind: "q2-r1q2", version: 35, revision: value === "35:1905" ? 1905 : 1904 } };
+        options = { ...options, q2Protocol: parseApplicationQ2Protocol(value) };
         break;
       case "--q1-protocol": options = { ...options, q1Protocol: defaultNetQuakeProfile(integer(value, flag, 15, 999)) }; break;
       case "--connect-qw": case "--connect-q1": case "--connect-q2": case "--connect-q3":
@@ -220,11 +228,27 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     if (options.botSkill !== undefined) throw new Error("--bot-skill is not a native Quake II client setting");
     options = { ...options, network: { kind: remoteKind, remote } };
   }
-  if (options.q2Protocol !== undefined && options.network.kind !== "q2-client") throw new Error("--q2-protocol requires --connect-q2");
+  if (options.q2Protocol !== undefined && options.network.kind !== "q2-client" && options.network.kind !== "q2-server") throw new Error("--q2-protocol requires --connect-q2 or --listen-q2");
   if (options.q1Protocol !== undefined && options.network.kind !== "native-server") throw new Error("--q1-protocol requires --listen for a Quake I host");
   if (options.q1Protocol !== undefined && options.product === "q1-quakeworld") throw new Error("--q1-protocol selects NetQuake; QuakeWorld uses native protocol 28");
   if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: options.network.kind === "native-server" && (options.product.startsWith("q3-") || options.product === "q1-quakeworld") ? "deathmatch" : "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
   if (menu && (options.dedicated || options.network.kind !== "offline")) throw new Error("--menu requires a local, non-dedicated application");
   return { kind: menu || !explicitLaunch ? "menu" : "run", options };
+}
+
+function parseApplicationQ2Protocol(value: string): NonNullable<ApplicationOptions['q2Protocol']> {
+  switch (value) {
+    case '34': return { kind: 'q2-classic', version: 34 };
+    case '35': case '35:1904': return { kind: 'q2-r1q2', version: 35, revision: 1904 };
+    case '35:1905': return { kind: 'q2-r1q2', version: 35, revision: 1905 };
+    case '4038': return { kind: 'q2-private-classic', version: 4038 };
+    case '1038': return { kind: 'q2-rerelease', version: 1038 };
+  }
+  const revision = value === '36' ? 1026 : value.startsWith('36:') ? Number(value.slice(3)) : 0;
+  switch (revision) {
+    case 1015: case 1017: case 1018: case 1019: case 1020: case 1021: case 1022: case 1023: case 1024: case 1025: case 1026:
+      return { kind: 'q2-q2pro', version: 36, revision };
+    default: throw new Error('--q2-protocol requires 34, 35:1904/1905, 36:1015/1017..1026, 4038 or 1038');
+  }
 }

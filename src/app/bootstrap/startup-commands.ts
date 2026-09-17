@@ -27,7 +27,7 @@ export function readStartupCommand(argv: readonly string[], index: number): { re
 }
 
 export function startupRequestsWorld(lines: readonly string[]): boolean {
-  return lines.some(line => tokenizeCommand(line, "q3").argv[0]?.toLowerCase() === "map");
+  return lines.some(line => ["map", "devmap", "spmap", "spdevmap"].includes(tokenizeCommand(line, "q3").argv[0]?.toLowerCase() ?? ""));
 }
 
 export function startupCommandPhases(lines: readonly string[], dialect: CommandDialect): {

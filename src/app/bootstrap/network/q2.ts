@@ -1,26 +1,19 @@
+import { Q2GameCallbackError } from './types.ts';
+import type { DemoRecordingSink } from '../demo-recording.ts';
 import { Q2ClientReceiver } from './q2-client-receiver.ts';
 import type { ClientId } from "../../../contracts/identity.ts";
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { WireSelection } from '../../../network/common/session.ts';
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
 import { addressKey, sameAddress } from '../../../network/common/endpoint.ts';
-import { parseQ2Token } from '../../../core/common-parse.ts';
+import { tokenizeCommand } from '../../../core/commands/text.ts';
 import { Q2Channel, Q2ChallengeTable, Q2ClientHandshake, Q2CommandReplay, Q2WireCodec, UsercmdT, encodeQ2ClientControl, encodeQ2Frame, encodeQ2Move, encodeQ2ServerEvent, q2OutOfBand, readQ2ClientMessages, readQ2Connect, readQ2OutOfBand } from '../../../network/q2/index.ts';
 import type { Q2ChannelReceive, Q2ServerWriteEvent, Q2WireFrame } from '../../../network/q2/index.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import type { ApplicationNetwork, ApplicationNetworkPhase, Q2ApplicationGameState, Q2ApplicationPlayer, Q2ApplicationServerHost, Q2ClientNetworkOptions, Q2ServerNetworkOptions } from './types.ts';
 import { Q2PeerDownload } from './q2-downloads.ts';
-import { q2InfoText, q2StatusText } from '../../../network/q2/connectionless.ts';
-function tokens(text: string): readonly string[] {
-    const cursor = { data: text, index: 0 }, result: string[] = [];
-    while (cursor.index < text.length) {
-        const before = cursor.index, value = parseQ2Token(cursor);
-        if (cursor.index === before)
-            break;
-        result.push(value);
-    }
-    return result;
-}
+import { MasterHeartbeat } from '../../../network/services/discovery.ts';
+import { q2InfoText, q2StatusText, q2DiscoveryWire, handleQ2Rcon } from '../../../network/q2/connectionless.ts';
 function integer(text: string | undefined): number {
     if (text === undefined || !/^-?\d+$/.test(text))
         throw new Error('Invalid Q2 signon number');
@@ -62,6 +55,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         const url = this.options.host.downloads?.httpServer?.() ?? null;
         this.reply(remote, `client_connect${url === null ? '' : ` dlserver=${url.href}`}`);
     }
+    private readonly masterHeartbeat: MasterHeartbeat;
     private ended = false;
     private readonly peers = new Map<string, ServerPeer<TAddress>>();
     private readonly challenges: Q2ChallengeTable;
@@ -69,6 +63,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
     private host: Q2ApplicationServerHost;
     private serverGeneration = 1;
     constructor(readonly options: Q2ServerNetworkOptions<TAddress>) {
+        this.masterHeartbeat = new MasterHeartbeat(q2DiscoveryWire(options.host.protocol, () => { const discovery = this.host.discovery; if (discovery === undefined) throw new Error('Q2 master publication requires source status'); return discovery.status(); }), options.transport);
         this.host = options.host;
         const supported = options.host.supportsSourceWire();
         if (supported.kind === 'unsupported')
@@ -104,10 +99,12 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         }
     }
     private reply(remote: TAddress, text: string): void { this.options.transport.send(remote, q2OutOfBand(text)); }
+    heartbeat(nowMilliseconds: number): void { if (!this.ended) this.masterHeartbeat.send(this.host.masters?.() ?? [], nowMilliseconds, true, true); }
     disconnectClient(client: ClientId, reason: string): boolean {
         const peer = [...this.peers.values()].find(peer => peer.player.client.equals(client));
         if (peer === undefined) return false;
         try {
+            this.reliable(peer, { kind: 'print', level: 2, text: `${reason}\n` });
             this.reliable(peer, { kind: 'disconnect' });
             peer.channel.send(this.options.transport, peer.remote, new Uint8Array(0), performance.now());
         } finally { this.drop(peer, reason); }
@@ -119,11 +116,16 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         this.pending = this.pending.filter(command => command.source.kind !== 'remote-client' || !command.source.client.equals(peer.player.client));
         this.host.disconnect(peer.player, reason);
     }
-    private connectionless(remote: TAddress, bytes: Uint8Array, now: number): boolean {
+    private async connectionless(remote: TAddress, bytes: Uint8Array, now: number): Promise<boolean> {
         const message = readQ2OutOfBand(bytes);
         if (message === null)
             return false;
         switch (message.command) {
+            case 'rcon': {
+                const administration = this.host.administration;
+                if (administration !== undefined) await handleQ2Rcon({ ...administration, reply: (_to, payload) => { this.options.transport.send(remote, payload); } }, remote, message, now);
+                return true;
+            }
             case 'status':
                 if (this.host.discovery !== undefined) this.reply(remote, `print\n${q2StatusText(this.host.discovery.status())}`);
                 break;
@@ -165,7 +167,9 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     this.reply(remote, `print\n${admitted.reason}\n`);
                     break;
                 }
-                const protocol = request.protocol;
+                const configured = this.host.protocol, offered = request.protocol;
+                const protocol = configured.kind === 'q2-r1q2' && offered.kind === 'q2-r1q2' && configured.revision < offered.revision ? configured
+                    : configured.kind === 'q2-q2pro' && offered.kind === 'q2-q2pro' && configured.revision < offered.revision ? configured : offered;
                 const peer: ServerPeer<TAddress> = { remote, player: admitted.player, download: new Q2PeerDownload(), downloadFailure: null,
                     channel: new Q2Channel({ side: 'server', protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes, compress: request.compression }),
                     wire: new Q2WireCodec(protocol), replay: new Q2CommandReplay(), frames: new Map<number, Q2WireFrame>(), gameState: null, active: false, sequence: 0, lastReceived: now, datagram: [], userinfo: request.userinfo };
@@ -198,7 +202,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         peer.frames.clear();
         peer.replay = new Q2CommandReplay();
         peer.datagram = [];
-        const original = this.host.gameState(peer.player), state = { ...original, data: { ...original.data, servercount: this.serverGeneration } };
+        const original = this.host.gameState(peer.player, peer.wire.protocol), state = { ...original, data: { ...original.data, servercount: this.serverGeneration } };
         peer.gameState = state;
         this.reliable(peer, { kind: 'server-data', data: state.data });
         this.stuff(peer, `cmd configstrings ${state.data.servercount} 0\n`);
@@ -231,7 +235,10 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             this.stuff(peer, `precache ${state.data.servercount}\n`);
     }
     private clientCommand(peer: ServerPeer<TAddress>, text: string): void {
-        const words = tokens(text), name = words[0];
+        if (this.host.expandClientCommand !== undefined) {
+            const expanded = this.host.expandClientCommand(text); if (expanded === undefined) return; text = expanded;
+        }
+        const words = tokenizeCommand(text, 'q2-classic').argv, name = words[0];
         if (name === undefined)
             return;
         if (name === 'disconnect') {
@@ -258,14 +265,17 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 return;
             }
             if (name === 'begin') {
+                if (!peer.active) this.host.begin?.(peer.player);
                 peer.active = true;
                 return;
             }
             this.signonPage(peer, name, integer(words[2]));
             return;
         }
-        if (peer.active)
-            this.host.command(peer.player, name, words.slice(1));
+        if (peer.active) {
+            if (this.host.commandText !== undefined) this.host.commandText(peer.player, text);
+            else this.host.command(peer.player, name, words.slice(1));
+        }
     }
     private process(peer: ServerPeer<TAddress>, result: Extract<Q2ChannelReceive, {
         kind: 'message';
@@ -276,7 +286,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 case 'move':
                 case 'batch-move':
                     if (peer.active)
-                        peer.replay.execute(event, result.dropped, command => this.pending.push(this.host.input(peer.player, command, peer.sequence++)));
+                        peer.replay.execute(event, result.dropped, command => { const input = this.host.input(peer.player, command, peer.sequence++); if (input !== null) this.pending.push(input); });
                     break;
                 case 'command':
                     this.clientCommand(peer, event.text);
@@ -299,6 +309,8 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
     async poll(nowMilliseconds: number): Promise<readonly ActorCommand[]> {
         if (this.ended)
             return [];
+        const masters = this.host.masters?.() ?? [];
+        if (masters.length > 0) this.masterHeartbeat.send(masters, nowMilliseconds, true);
         for (const peer of this.peers.values()) if (peer.downloadFailure !== null) this.drop(peer, peer.downloadFailure);
         for (;;) {
             const packet = this.options.transport.poll();
@@ -311,7 +323,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             }
             let peer = this.peers.get(addressKey(packet.from));
             try {
-                if (this.connectionless(packet.from, packet.payload, nowMilliseconds))
+                if (await this.connectionless(packet.from, packet.payload, nowMilliseconds))
                     continue;
                 if (peer === undefined)
                     peer = [...this.peers.values()].find(candidate => sameAddress(candidate.remote, packet.from, false)
@@ -333,6 +345,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 }
             }
             catch (error) {
+                if (error instanceof Q2GameCallbackError) throw error;
                 const reason = error instanceof Error ? error.message : String(error);
                 if (peer !== undefined)
                     this.drop(peer, reason);
@@ -358,9 +371,13 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             return;
         this.host.observe(output, events);
         for (const peer of this.peers.values()) {
+            for (const message of this.host.rawMessages?.(peer.player) ?? []) {
+                if (message.reliable) peer.channel.queueReliable(message.bytes);
+                else if (peer.active) peer.datagram.push(message.bytes);
+            }
             if (!peer.active)
                 continue;
-            const frame = this.host.frame(peer.player, output);
+            const frame = this.host.frame(peer.player, output, peer.wire.protocol);
             for (const event of this.host.events(peer.player, output, events)) {
                 const reliable = event.reliable ?? (event.kind !== 'sound' && event.kind !== 'muzzle-flash' && event.kind !== 'temporary-entity');
                 const bytes = encodeQ2ServerEvent(peer.wire, event);
@@ -396,25 +413,37 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         }
     }
     close(): void {
-        if (this.ended)
-            return;
+        if (this.ended) return;
         this.ended = true;
-        for (const peer of this.peers.values()) this.closeDownload(peer);
+        const failures: unknown[] = [];
+        const cleanup = (operation: () => void): void => { try { operation(); } catch (error) { failures.push(error); } };
+        cleanup(() => this.masterHeartbeat.send(this.host.masters?.() ?? [], performance.now(), false, true));
         for (const peer of this.peers.values()) {
-            try {
+            cleanup(() => this.closeDownload(peer));
+            cleanup(() => {
                 this.reliable(peer, { kind: 'disconnect' });
                 peer.channel.send(this.options.transport, peer.remote, new Uint8Array(0), performance.now());
-            }
-            finally {
-                this.host.disconnect(peer.player, 'Server shutdown');
-            }
+            });
+            cleanup(() => this.host.disconnect(peer.player, 'Server shutdown'));
         }
         this.peers.clear();
         this.pending = [];
-        this.options.transport.close();
+        cleanup(() => this.options.transport.close());
+        if (failures.length !== 0) throw new AggregateError(failures, 'Q2 server shutdown failed');
     }
 }
 export class Q2ClientNetwork<TAddress extends NetworkAddress> implements ApplicationNetwork {
+    private recordingOwner: { readonly sink: DemoRecordingSink; waitingFullFrame: boolean } | null = null;
+    readonly recording = {
+        seed: () => this.receiver.seed(),
+        attach: (sink: DemoRecordingSink): (() => void) => {
+            if (this.recordingOwner !== null) throw new Error('Q2 connection is already recording');
+            if (this.phase !== 'active') throw new Error('Recording requires an active Q2 connection');
+            const owner = { sink, waitingFullFrame: true }; this.recordingOwner = owner;
+            this.receiver.requestFullFrame();
+            return () => { if (this.recordingOwner === owner) this.recordingOwner = null; };
+        },
+    };
     readonly role = 'client';
     readonly wire: WireSelection;
     private readonly receiver: Q2ClientReceiver;
@@ -485,7 +514,22 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                 const result = this.channel.receive(packet.payload, nowMilliseconds);
                 if (result.kind === 'message') {
                     this.options.host.prediction?.acknowledged(result.acknowledged, nowMilliseconds);
-                    await this.receiver.receive(result.bytes, nowMilliseconds);
+                    const records = await this.receiver.receive(result.bytes, nowMilliseconds);
+                    const owner = this.recordingOwner;
+                    if (owner !== null) {
+                        const messages: Uint8Array[] = [];
+                        for (const record of records) {
+                            if (record.event.kind === 'server-data') owner.waitingFullFrame = true;
+                            if (record.event.kind === 'frame') {
+                                if (record.event.frame.valid === false) continue;
+                                if (owner.waitingFullFrame && record.event.frame.deltaFrame > 0) continue;
+                                owner.waitingFullFrame = false;
+                            }
+                            messages.push(record.raw);
+                        }
+                        if (owner.waitingFullFrame) this.receiver.requestFullFrame();
+                        if (messages.length > 0) await owner.sink.append({ kind: 'q2', message: joinPackets(messages) });
+                    }
                 }
             }
         }
@@ -524,6 +568,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     }
     publish(_output: SimulationOutput, _events: readonly SimulationPresentationEvent[], _nowMilliseconds: number): void { throw new Error('Remote Q2 client cannot publish authoritative server state'); }
     close(): void {
+        this.recordingOwner = null;
         const phase = this.phase;
         this.receiver.close();
         if (this.options.transport.closed)

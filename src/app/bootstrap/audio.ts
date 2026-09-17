@@ -51,6 +51,7 @@ interface ActorAudio {
   painTime: number;
 }
 interface StaticAudio {
+  readonly audience: AudioAudience;
   readonly sound: SoundAsset;
   readonly origin: Vec3;
   readonly volume: number;
@@ -58,6 +59,13 @@ interface StaticAudio {
   readonly seats: SeatId[];
 }
 export type ApplicationEffectSound = SourceEffectSound;
+export interface ApplicationAudioSeatEvents {
+  readonly seat: SeatId;
+  readonly snapshot: WorldSnapshot;
+  readonly events: readonly SimulationPresentationEvent[];
+  readonly music: boolean;
+  readonly effectSounds?: readonly ApplicationEffectSound[];
+}
 export interface ApplicationAudioOptions {
   readonly musicControls?: MusicControls;
   readonly outputFormat?: AudioOutputFormat;
@@ -349,9 +357,9 @@ export class ApplicationAudio {
     return pending;
   }
 
-  private async characterSound(content: ContentId, event: Q3CharacterEvent): Promise<void> {
+  private async characterSound(content: ContentId, event: Q3CharacterEvent, audience: AudioAudience): Promise<void> {
     const actor = event.actor.id, state = this.actor(actor);
-    const play = (path: string, channel: number): Promise<void> => this.play(content, "q3", path, actor, null, channel, 1, 1);
+    const play = (path: string, channel: number): Promise<void> => this.play(content, "q3", path, actor, null, channel, 1, 1, 0, audience);
     switch (event.event & ~0x300) {
       case EntityEvent.EV_PAIN: {
         if (((event.timeMilliseconds - state.painTime) | 0) < 500) return;
@@ -387,86 +395,92 @@ export class ApplicationAudio {
       case EntityEvent.EV_GIB_PLAYER: await play("player/gibsplt1.wav", 5); break;
       case EntityEvent.EV_ITEM_POP: case EntityEvent.EV_ITEM_RESPAWN: await play("items/respawn1.wav", 0); break;
       case EntityEvent.EV_CHANGE_WEAPON: await play("weapons/change.wav", 0); break;
-      case EntityEvent.EV_STOPLOOPINGSOUND: this.stopLoop(actor); break;
+      case EntityEvent.EV_STOPLOOPINGSOUND: this.stopLoop(actor, audience); break;
     }
   }
 
-  private stopLoop(actor: ActorId): void {
-    for (let index = this.loops.length - 1; index >= 0; index--) if (this.loops[index]?.actor.equals(actor)) this.loops.splice(index, 1);
-    this.engine.stopLoop(actor);
+  private stopLoop(actor: ActorId, audience: AudioAudience = { kind: "world" }): void {
+    for (let index = this.loops.length - 1; index >= 0; index--) { const loop = this.loops[index]; if (loop?.actor.equals(actor) && (audience.kind === "world" || loop.audience.kind === "seat" && loop.audience.seat.equals(audience.seat))) this.loops.splice(index, 1); }
+    this.engine.stopLoop(actor, audience);
   }
 
-  private async chat(content: ContentId, family: GameFamily, target: ActorId | null): Promise<void> {
+  private async chat(content: ContentId, family: GameFamily, target: ActorId | null, audience: AudioAudience = { kind: "world" }): Promise<void> {
     for (const listener of this.listeners) {
+      if (audience.kind === "seat" && !listener.seat.equals(audience.seat)) continue;
       if (target !== null && !listener.actor?.equals(target)) continue;
       await this.play(content, family, family === "q3" ? "player/talk.wav" : "misc/talk.wav", null, null, 0, 1, 0, 0,
         { kind: "seat", seat: listener.seat });
     }
   }
 
-  async receive(events: readonly SimulationPresentationEvent[]): Promise<void> {
+  async receive(events: readonly SimulationPresentationEvent[], audience: AudioAudience = { kind: "world" }, music = true): Promise<void> {
     for (const source of events) {
       if (source.kind === "music") {
-        await this.playMusic(source.content, String(source.event.track));
+        if (music) await this.playMusic(source.content, String(source.event.track));
       } else if (source.kind === "q1") {
         const event = source.event;
         if (event.kind === "sound") {
           const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
-          await this.play(source.content, "q1", event.path, event.actor, event.origin ?? null, channel, event.volume, event.attenuation);
+          await this.play(source.content, "q1", event.path, event.actor, event.origin ?? null, channel, event.volume, event.attenuation, 0, audience);
         } else if (event.kind === "stop-sound") {
           const command = sourceSoundChannel("q1", event.channel);
           if (command.kind === "replace-actor") throw new Error("NetQuake stop sound requires a nonnegative channel");
-          this.engine.stopSound(event.actor, command.kind === "auto" ? null : command.channel);
+          this.engine.stopSound(event.actor, command.kind === "auto" ? null : command.channel, audience);
         } else if (event.kind === "ambient") {
           const sound = await this.sound(source.content, event.path, "q1");
-          if (sound !== null && sound.pcm.loopStart !== null) this.statics.push({ sound, origin: event.origin,
+          if (sound !== null && sound.pcm.loopStart !== null) this.statics.push({ audience, sound, origin: event.origin,
             volume: Math.trunc(event.volume * 255), attenuation: Math.trunc(event.attenuation * 64), seats: [] });
         }
       } else if (source.kind === "q1-level" && source.event.kind === "finale") {
-        await this.playMusic(source.content, String(source.event.track));
+        if (music) await this.playMusic(source.content, String(source.event.track));
       } else if (source.kind === "q2") {
         const event = source.event;
-        if (event.kind === "music") await this.playMusic(source.content, event.track);
+        if (event.kind === "music") { if (music) await this.playMusic(source.content, event.track); }
         else if (event.kind === "sound") {
-          if (event.loop === "stop" && event.actor !== null) this.stopLoop(event.actor);
+          if (event.loop === "stop" && event.actor !== null) this.stopLoop(event.actor, audience);
           else if (event.loop === "start" && event.actor !== null) {
             const sound = await this.sound(source.content, event.path, "q2", event.actor);
-            this.stopLoop(event.actor);
+            this.stopLoop(event.actor, audience);
             this.engine.updateActor(event.actor, event.origin);
             if (sound !== null) this.loops.push({ sound, family: "q2", actor: event.actor, origin: { kind: "actor", actor: event.actor },
-              audience: { kind: "world" }, volume: event.volume, attenuation: event.attenuation, velocity: { x: 0, y: 0, z: 0 },
+              audience, volume: event.volume, attenuation: event.attenuation, velocity: { x: 0, y: 0, z: 0 },
               frameNumber: 0, lifetime: "frame" });
           } else {
             const live = event.actor !== null && this.snapshot?.actors.some(actor => event.actor?.equals(actor.id));
-            await this.play(source.content, "q2", event.path, event.actor, live ? null : event.origin, event.channel, event.volume, event.attenuation);
+            await this.play(source.content, "q2", event.path, event.actor, live ? null : event.origin, event.channel, event.volume, event.attenuation, 0, audience);
           }
         } else if (event.kind === "monster-muzzleflash") {
           const sounds = q2MonsterMuzzleSounds(event.flash, () => this.random.rand(), this.content.catalog.product(source.content).expectation.edition === "rerelease");
           if (sounds === null) this.print(`Unresolved Quake II monster muzzle sound ${event.flash}\n`);
-          else for (const sound of sounds) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds);
+          else for (const sound of sounds) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds, audience);
         } else if (event.kind === "entity-event") {
           const sound = q2EntitySound(event.event, () => this.random.rand());
-          if (sound !== null) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation);
-        } else if (event.kind === "print" && event.level === "chat") await this.chat(source.content, "q2", event.actor);
+          if (sound !== null) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation, 0, audience);
+        } else if (event.kind === "print" && event.level === "chat") await this.chat(source.content, "q2", event.actor, audience);
+      } else if (source.kind === "q2-rerelease" && source.event.kind === "mission-objective" && source.event.talkSound) {
+        await this.chat(source.content, "q2", source.event.actor, audience);
       } else if (source.kind === "q2-player") {
         const event = source.event;
-        if (event.kind === "userinfo") { this.actor(event.actor).model = event.skin.split("/")[0] || "male"; if (event.name === "") this.stopLoop(event.actor); }
+        if (event.kind === "userinfo") { this.actor(event.actor).model = event.skin.split("/")[0] || "male"; if (event.name === "") this.stopLoop(event.actor, audience); }
         else if (event.kind === "view") this.actor(event.actor).underwater = event.view.underwater;
         else if (event.kind === "chase") this.actor(event.actor).chase = event.target;
-        else if (event.kind === "print" && event.level === "chat") await this.chat(source.content, "q2", event.target);
+        else if (event.kind === "print" && event.level === "chat") await this.chat(source.content, "q2", event.target, audience);
       } else if (source.kind === "q2-weapon" && source.event.kind === "muzzleflash") {
         for (const sound of q2MuzzleSounds(source.event.flash, source.event.silenced, () => this.random.rand(), this.content.catalog.product(source.content).expectation.edition === "rerelease"))
-          await this.play(source.content, "q2", sound.path, source.event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds);
-      } else if (source.kind === "q3-character") await this.characterSound(source.content, source.event);
+          await this.play(source.content, "q2", sound.path, source.event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds, audience);
+      } else if (source.kind === "q3-character") await this.characterSound(source.content, source.event, audience);
     }
   }
 
-  async frame(snapshot: WorldSnapshot, listeners: readonly AudioListener[], events: readonly SimulationPresentationEvent[], frameStartedAt = performance.now()): Promise<void> {
+  async frame(snapshot: WorldSnapshot, listeners: readonly AudioListener[], events: readonly SimulationPresentationEvent[], frameStartedAt = performance.now(), seatEvents: readonly ApplicationAudioSeatEvents[] = []): Promise<void> {
     this.syncGeometry();
     this.engine.setEffectsVolume(this.effectsVolume); this.music.volume = this.musicVolume;
-    this.snapshot = snapshot;
+    const snapshots = [snapshot, ...seatEvents.map(batch => batch.snapshot)];
+    const actors = snapshots.flatMap(value => value.actors), bodies = snapshots.flatMap(value => value.bodies);
+    this.snapshot = { ...snapshot, actors: actors.filter((actor, index) => actors.findIndex(other => other.id.equals(actor.id)) === index),
+      bodies: bodies.filter((body, index) => bodies.findIndex(other => other.actor.equals(body.actor)) === index) };
     this.listeners = listeners;
-    for (const body of snapshot.bodies) this.engine.updateActor(body.actor, body.body.origin);
+    for (const body of this.snapshot.bodies) this.engine.updateActor(body.actor, body.body.origin);
     this.engine.setListeners(listeners);
     for (let index = this.environmentSeats.length - 1; index >= 0; index--) {
       const seat = this.environmentSeats[index];
@@ -485,14 +499,17 @@ export class ApplicationAudio {
         channel: 0, volume: 1, attenuation: 0 });
     }
     await this.receive(events);
-    for (const sound of this.effectSounds.splice(0)) {
+    for (const batch of seatEvents) await this.receive(batch.events, { kind: "seat", seat: batch.seat }, batch.music);
+    const effects: { readonly sound: ApplicationEffectSound; readonly audience: AudioAudience }[] = this.effectSounds.splice(0).map(sound => ({ sound, audience: { kind: "world" } }));
+    for (const batch of seatEvents) for (const sound of batch.effectSounds ?? []) effects.push({ sound, audience: { kind: "seat", seat: batch.seat } });
+    for (const { sound, audience } of effects) {
       const family = this.content.catalog.product(sound.content).expectation.family;
-      if (sound.playback.kind === "once") await this.play(sound.content, family, sound.path, null, sound.origin, sound.channel, sound.volume, 1);
-      else if (sound.playback.kind === "actor") await this.play(sound.content, family, sound.path, sound.playback.actor, null, sound.channel, sound.volume, 1);
+      if (sound.playback.kind === "once") await this.play(sound.content, family, sound.path, null, sound.origin, sound.channel, sound.volume, 1, 0, audience);
+      else if (sound.playback.kind === "actor") await this.play(sound.content, family, sound.path, sound.playback.actor, null, sound.channel, sound.volume, 1, 0, audience);
       else {
         const asset = await this.sound(sound.content, sound.path, family, sound.playback.actor);
         if (asset !== null) this.engine.loop({ sound: asset, family, actor: sound.playback.actor, origin: { kind: "fixed", position: sound.origin },
-          audience: { kind: "world" }, volume: sound.volume, attenuation: 1, velocity: sound.playback.velocity, frameNumber: snapshot.frame.frame, lifetime: "frame" });
+          audience, volume: sound.volume, attenuation: 1, velocity: sound.playback.velocity, frameNumber: snapshot.frame.frame, lifetime: "frame" });
       }
     }
     if (this.closed) return;
@@ -502,7 +519,7 @@ export class ApplicationAudio {
       return { ...listener, underwater: followed.underwater ?? listener.underwater };
     }));
     for (const loop of [...this.loops]) {
-      if (!snapshot.actors.some(actor => actor.id.equals(loop.actor))) { this.stopLoop(loop.actor); continue; }
+      if (!this.snapshot.actors.some(actor => actor.id.equals(loop.actor))) { this.stopLoop(loop.actor, loop.audience); continue; }
       this.engine.loop({ ...loop, frameNumber: snapshot.frame.frame });
     }
     for (const sound of this.statics) {
@@ -510,7 +527,7 @@ export class ApplicationAudio {
         const seat = sound.seats[index];
         if (seat !== undefined && !listeners.some(listener => listener.seat.equals(seat))) sound.seats.splice(index, 1);
       }
-      for (const listener of listeners) if (!sound.seats.some(seat => seat.equals(listener.seat))) {
+      for (const listener of listeners) if ((sound.audience.kind === "world" || sound.audience.seat.equals(listener.seat)) && !sound.seats.some(seat => seat.equals(listener.seat))) {
         this.engine.addStaticSound(listener.seat, sound.sound, sound.origin, sound.volume, sound.attenuation);
         sound.seats.push(listener.seat);
       }

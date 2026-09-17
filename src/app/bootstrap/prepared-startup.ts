@@ -1,3 +1,4 @@
+import { q3ProductMapCommands, registerQ3ProductPolicy, type Q3ProductPolicy } from "../../core/q3-product-policy.ts";
 import { cdCommandDocumentation, musicCommandDocumentation } from "./audio/commands.ts";
 import { startupCommandPhases } from "./startup-commands.ts";
 import { registerQ1ViewCommands } from "./q1-client-settings.ts";
@@ -70,11 +71,13 @@ export class PreparedStartup {
   private continuation: AsyncGenerator<void, void, void> | undefined;
   private worldAction = false;
   get pending(): boolean { return this.profileContinuations.length !== 0 || this.continuation !== undefined; }
+  private readonly q3Policy: Q3ProductPolicy;
   private readonly deferredCommands = ["map", "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team"];
   private forward: (name: string, args: readonly string[], source: CommandContext) => undefined;
   constructor(public source: CvarRegistry, public movement: CvarRegistry, public scripts: ConsoleScriptFiles,
     private readonly options: {
       readonly startupCommands?: readonly string[];
+      readonly q3Policy?: Q3ProductPolicy;
       readonly dialect: CommandDialect;
       readonly movementDialect: CommandDialect;
       readonly seats: readonly PreparedSeatConfiguration[];
@@ -84,6 +87,8 @@ export class PreparedStartup {
       readonly forward: (name: string, args: readonly string[], source: CommandContext) => undefined;
     }) {
     this.forward = options.forward;
+    this.q3Policy = options.q3Policy ?? (options.dialect === "q3" ? registerQ3ProductPolicy(source) : { kind: "retail" });
+    if (options.dialect === "q3") this.deferredCommands.push(...q3ProductMapCommands(this.q3Policy).filter(name => name !== "map"));
     for (const seat of options.seats) registerRunCvar(seat.mouse.cvars, options.movementDialect);
     this.fallback = movement.dialect === options.dialect ? movement : new CvarRegistry({ dialect: options.dialect, context: source.context, print: text => this.print(text) });
     this.routing = new ApplicationConsoleRouting({ fallback: this.fallback, sourceDialect: () => options.dialect,
@@ -104,7 +109,7 @@ export class PreparedStartup {
     for (const name of this.deferredCommands) this.commands.register(name, invocation => {
       this.worldAction = true; return this.forward(name, invocation.args, invocation.source);
     });
-    for (const name of ["in_restart", "midiinfo"])
+    for (const name of ["in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause"])
       this.commands.register(name, invocation => this.forward(name, invocation.args, invocation.source));
     this.commands.register("snd_restart", invocation => this.forward("snd_restart", invocation.args, invocation.source));
     this.commands.register("cd", invocation => this.forward("cd", invocation.args, invocation.source), cdCommandDocumentation);
@@ -148,6 +153,10 @@ export class PreparedStartup {
       this.registryOutputs.set(registry, registry.bindOutput(text => this.print(text, this.commands.executionContext ?? registry.context)));
   }
   allowCommand(command: CommandInvocation): boolean {
+    const name = asciiFold(command.argv[0] ?? "");
+    if (this.options.dialect === "q3" && ["devmap", "spmap", "spdevmap"].includes(name) && !q3ProductMapCommands(this.q3Policy).includes(name)) {
+      this.print(`Unknown command "${name}"\n`, command.source); return false;
+    }
     if (!this.currentContext(command.source)) {
       this.options.print("Command ignored because its local client is inactive or has retired.\n"); return false;
     }

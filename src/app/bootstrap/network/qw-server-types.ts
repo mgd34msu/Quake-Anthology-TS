@@ -5,7 +5,7 @@ import type { IpAddress } from '../../../network/common/endpoint.ts';
 import type { WireAdmission } from '../../../network/common/session.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
 import type { DownloadSource } from '../../../network/services/downloads.ts';
-import type { QuakeWorldConnectRequest } from '../../../network/q1/handshake.ts';
+import type { QuakeWorldConnectionHost, QuakeWorldConnectRequest } from '../../../network/q1/handshake.ts';
 import type { QuakeWorldEntity, QuakeWorldMessage } from '../../../network/q1/quakeworld.ts';
 import type { QuakeWorldSignonHost } from '../../../network/q1/session.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
@@ -17,11 +17,16 @@ export interface QwApplicationPlayer {
     readonly slot: number;
 }
 export interface QwApplicationServerHost {
+    readonly administration?: Pick<QuakeWorldConnectionHost, 'rconPassword' | 'blocked' | 'status' | 'log' | 'executeAdmin'>;
+    masters?(): readonly IpAddress[];
+    readonly authentication?: Pick<QuakeWorldConnectionHost, 'password' | 'spectatorPassword' | 'highCharacters'>;
     readonly maxClients: number;
     readonly paused: boolean;
     supportsSourceWire(): WireAdmission;
     admit(request: QuakeWorldConnectRequest): { readonly kind: 'accepted'; readonly player: QwApplicationPlayer } | { readonly kind: 'rejected'; readonly reason: string };
     carriedPlayer(client: ClientId): QwApplicationPlayer;
+    recordingPlayer?(client: ClientId): QwApplicationPlayer;
+    recordingSignon?(player: QwApplicationPlayer): readonly Uint8Array[];
     clientInfo(player: QwApplicationPlayer): ReadonlyMap<string, string>;
     commandPhase(player: QwApplicationPlayer, action: () => void, emit: (recipient: QwApplicationPlayer, message: QwServerMessage) => void): void;
     disconnect(player: QwApplicationPlayer, reason: string): void;

@@ -46,6 +46,7 @@ export interface ClassicQ2EdictDescriptor { readonly base: GuestAddress; readonl
 
 /** Reads the DLL's current export descriptor and borrows complete source-owned edicts. */
 export class ClassicQ2Edicts {
+  readonly #retainedClients = new Set<number>();
   constructor(readonly memory: MappedGuestMemory, readonly exports: GuestAddress, readonly actors: SessionActorRegistry,
     readonly provider: ProviderId, readonly bind: (record: RawEntityView, actor: OwnedActor) => undefined) {
     memory.check(exports, CLASSIC_Q2_EXPORT_BYTES, "read");
@@ -81,7 +82,7 @@ export class ClassicQ2Edicts {
   }
   observe(address: GuestAddress): OwnedActor | null {
     const record = this.fromPointer(address), existing = this.actors.atSource(this.provider, record.slot);
-    if (record.bytes.getInt32(88, true) === 0) {
+    if (record.bytes.getInt32(88, true) === 0 && !this.#retainedClients.has(record.slot)) {
       if (existing !== null) this.actors.release(existing);
       return null;
     }
@@ -90,6 +91,19 @@ export class ClassicQ2Edicts {
     try { this.bind(record, actor); }
     catch (error) { this.actors.release(actor); throw error; }
     return actor;
+  }
+  retainClient(slot: number): OwnedActor {
+    if (!Number.isInteger(slot) || slot < 1) throw new RangeError("Invalid retained API 3 client slot");
+    const record = this.at(slot);
+    this.#retainedClients.add(slot);
+    const actor = this.observe(record.address);
+    if (actor === null) throw new Error("Retained source client has no actor");
+    return actor;
+  }
+  releaseClient(slot: number): undefined {
+    this.#retainedClients.delete(slot);
+    this.observe(this.at(slot).address);
+    return undefined;
   }
   reconcile(): undefined {
     const descriptor = this.descriptor();

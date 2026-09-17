@@ -190,3 +190,18 @@ test('NQ bf server commands and bonus opcode drive the shared actor blend and de
     effects.resetRound(); expect(effects.playerView(player.actor, camera).blend).toBeNull();
   } finally { effects.close(); assets.close(); await content.close(); session.close(); }
 });
+
+test('remote native view exposes authoritative pitch drift inputs and disables demo drift', async () => {
+  const { content, session, options } = fixture(), remote = new Q1RemotePresentation(options);
+  try {
+    await remote.receive([{ kind: 'server-info', protocol: { kind: 'q1-netquake', version: 15 }, maxClients: 1, gameType: 0, level: 'fixture', models: ['maps/music.bsp'], sounds: [] }, { kind: 'time', seconds: 12 }], 12000);
+    await activate(remote);
+    const player = remote.player; if (player === null) throw new Error('Missing native player');
+    expect(remote.playerView(player.actor).pitchDrift).toEqual({ grounded: false, idealPitch: 0, disabled: false });
+    const zero = { x: 0, y: 0, z: 0 };
+    await remote.receive([{ kind: 'client-data', weaponAlpha: 0, data: { viewHeight: 22, idealPitch: 17, punchAngles: zero, velocity: zero, items: 0, onGround: true, inWater: false, weaponFrame: 0, armor: 0, weaponModel: 0, health: 100, ammo: 0, shells: 0, nails: 0, rockets: 0, cells: 0, activeWeapon: 0 } }], 12000);
+    expect(remote.playerView(player.actor).pitchDrift).toEqual({ grounded: true, idealPitch: 17, disabled: false });
+    remote.sampleDemo(12);
+    expect(remote.playerView(player.actor).pitchDrift).toEqual({ grounded: true, idealPitch: 17, disabled: true });
+  } finally { session.close(); await content.close(); }
+});

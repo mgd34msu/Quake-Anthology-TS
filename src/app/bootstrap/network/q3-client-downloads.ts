@@ -1,4 +1,4 @@
-import type { ClientDownloadProgress } from './client-download-policy.ts';
+import type { ClientDownloadPermission, ClientDownloadProgress } from './client-download-policy.ts';
 // CL_InitDownloads/CL_DownloadsComplete over the shared staged filesystem. GPL-2.0-or-later.
 import { openArchive } from '../../../content/archive/index.ts';
 import { Q3ClientDownload } from '../../../network/q3/download.ts';
@@ -28,7 +28,7 @@ export function q3DownloadPath(path: string, owner: DownloadMounts): string {
 }
 
 export interface Q3ApplicationDownloadBindings {
-  readonly permission?: () => boolean;
+  readonly permission?: ClientDownloadPermission;
   assertCurrent(): void;
   reliable(text: string): void;
   sendPacket(): void;
@@ -61,14 +61,14 @@ export class Q3ApplicationClientDownloads {
   }
   retry(): boolean {
     this.bindings.assertCurrent();
-    if (this.paused === null || this.bindings.permission?.() === false) return false;
+    if (this.paused === null || this.bindings.permission?.({ transport: 'native', category: 'package' }) === false) return false;
     this.queue = this.paused; this.paused = null; return this.startNext();
   }
   constructor(private readonly root: string, private readonly bindings: Q3ApplicationDownloadBindings, private readonly owner?: DownloadMounts) {
     if (owner !== undefined && resolve(root) !== dirname(resolve(owner.writeRoot)))
       throw new Error('Q3 download root differs from the selected mount family');
     this.source = new Q3ClientDownload({
-      assertCurrent: () => { bindings.assertCurrent(); if (bindings.permission?.() === false) throw new Error('Q3 package download permission denied'); },
+      assertCurrent: () => { bindings.assertCurrent(); if (bindings.permission?.({ transport: 'native', category: 'package' }) === false) throw new Error('Q3 package download permission denied'); },
       reliable: text => bindings.reliable(text), sendPacket: () => bindings.sendPacket(),
       progress: (name, count, size) => bindings.progress(name, count, size),
       openTemporary: path => {
@@ -92,7 +92,7 @@ export class Q3ApplicationClientDownloads {
           } finally { archive.close(); }
         });
         bindings.assertCurrent();
-        if (bindings.permission?.() === false) throw new Error('Q3 package download permission denied');
+        if (bindings.permission?.({ transport: 'native', category: 'package' }) === false) throw new Error('Q3 package download permission denied');
         if (generation !== this.generation || sink !== this.sink) throw new Error('Q3 download was retired during validation');
         sink.finish(); this.sink = null;
       },
@@ -110,7 +110,7 @@ export class Q3ApplicationClientDownloads {
   begin(referenced: readonly ServerPak[], loadedChecksums: readonly number[], exists: (path: string) => boolean): boolean {
     this.bindings.assertCurrent();
     if (this.receiving) throw new Error('Cannot replace Q3 downloads during block processing');
-    if (this.bindings.permission?.() === false) { this.close(); return false; }
+    if (this.bindings.permission?.({ transport: 'native', category: 'package' }) === false) { this.close(); return false; }
     this.close();
     const list = compareQ3Packages(referenced, loadedChecksums, path => exists(this.destination(path)), true);
     const loaded = new Set(loadedChecksums.map(checksum => checksum >>> 0));
@@ -147,7 +147,7 @@ export class Q3ApplicationClientDownloads {
   }
   async receive(download: Download): Promise<void> {
     if (this.receiving) throw new Error('Q3 download block processing is already active');
-    if (this.bindings.permission?.() === false) { this.cancel(); return; }
+    if (this.bindings.permission?.({ transport: 'native', category: 'package' }) === false) { this.cancel(); return; }
     this.receiving = true;
     const generation = this.generation;
     try { await this.source.receive(download); }

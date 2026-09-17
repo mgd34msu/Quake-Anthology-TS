@@ -35,7 +35,7 @@ function downloadOwner(content: LoadedApplicationContent): RemoteContentMounts {
     const userRoot = content.catalog.userContentRoot ?? defaultUserContentRoot();
     const base = content.catalog.require('q2-classic-baseq2');
     return { selection: remoteContentSelection('q2-classic-baseq2', product.expectation.contentDirectory.split('/').at(-1) ?? 'baseq2'),
-        catalog: content.catalog, product, mounts: content.mounts,
+        catalog: content.catalog, product, mounts: content.mounts, q3Product: content.q3Product,
         writeRoot: product.userContent?.root ?? userProductDirectory(userRoot, product.expectation.contentDirectory),
         baseWriteRoot: base.userContent?.root ?? userProductDirectory(userRoot, base.expectation.contentDirectory) };
 }

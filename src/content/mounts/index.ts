@@ -147,6 +147,7 @@ export class MountedContent {
   /** A locally closable scope over identical sources; null requests an independently opened plan. */
   borrowMountPlan(plan: ResolvedMountPlan, options: OpenMountOptions = {}): MountedContent | null {
     this.assertOpen();
+    if (this.options.q3Restriction !== undefined) options = { ...options, q3Restriction: this.options.q3Restriction };
     if (options.q3Restriction !== this.options.q3Restriction) return null;
     const resolved = resolveMountPlan(plan, options);
     const sources: MountedSource[] = [];

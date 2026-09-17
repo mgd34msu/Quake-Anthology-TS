@@ -19,7 +19,7 @@ import { mapPeImage } from "../../../../src/guest/pe/index.ts";
 import { WindowsGuestRuntime, type WindowsCapabilities } from "../../../../src/guest/runtime/windows/index.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/gameplay/index.ts";
-import { ClassicQ2GuestHost, CLASSIC_Q2_TRACE_LAYOUT, classicSignature, classicRequiredPointer, classicPrintf, classicPrintfLayouts, q2Int, q2Pointer, q2Trace, runClassicGuestPmove, type ClassicQ2EngineServices } from "../../../../src/compat/q2/classic/index.ts";
+import { ClassicQ2GuestHost, CLASSIC_Q2_EXPORTS, CLASSIC_Q2_TRACE_LAYOUT, classicSignature, classicRequiredPointer, classicPrintf, classicPrintfLayouts, q2Int, q2Pointer, q2Trace, runClassicGuestPmove, type ClassicQ2EngineServices } from "../../../../src/compat/q2/classic/index.ts";
 
 function unavailable(): never { throw new Error("This startup check does not provide a loaded collision world, clients, or network transport"); }
 function savedFiles() {
@@ -176,4 +176,41 @@ test.skipIf(!existsSync(retailPath))("selected classic native module owns attach
     candidate.discard(); expect(candidate.memory.mappings()).toHaveLength(0);
     expect(candidateServices.prints).toEqual([]);
   } finally { mounts.close(); }
+});
+
+
+test("travel WriteLevel masks clients without retiring identities and rebinds the retained export table", () => {
+  let current = services();
+  const memory = new SparseGuestMemory({ pointerBytes: 4, module: { id: "test:travel-api3", artifactPath: "authored", revision: "1", digest: createContentDigest("77".repeat(32)) } });
+  const exports = memory.allocate({ byteLength: 80 }), records = memory.allocate({ byteLength: 640 });
+  memory.writeInt32(exports, 3); memory.writePointer(memory.offset(exports, 64n), records);
+  memory.writeInt32(memory.offset(exports, 68n), 320); memory.writeInt32(memory.offset(exports, 72n), 2); memory.writeInt32(memory.offset(exports, 76n), 2);
+  const inUse = memory.offset(records, 408n); memory.writeInt32(inUse, 1);
+  const callbacks = new GuestCallbackTable(memory), stack = memory.allocate({ byteLength: 4096 });
+  const returned = memory.allocate({ byteLength: 16, permissions: "read-execute" });
+  const state = createGuestProcessorState({ architecture: "i386", instructionPointer: 0n, stackPointer: stack.byteOffset + 4080n, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const cpu = new I386Cpu({ state, memory, hostCall: address => callbacks.enter(address) });
+  const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: returned });
+  let fail = false, savedInUse = -1;
+  for (const [name, entry] of Object.entries(CLASSIC_Q2_EXPORTS)) {
+    const address = callbacks.bind({ id: `test:travel:${name}`, signature: entry.signature, invoke: () => {
+      if (name === "WriteLevel") { savedInUse = memory.readInt32(inUse); if (fail) throw new Error("authored WriteLevel failure"); }
+      return { kind: "void" };
+    } });
+    memory.writePointer(memory.offset(exports, BigInt(entry.offset)), address);
+  }
+  const getApi = callbacks.bind({ id: "test:travel:GetGameAPI", signature: classicSignature([q2Pointer], q2Pointer), invoke: () => ({ kind: "pointer", value: exports }) });
+  const host = new ClassicQ2GuestHost({ runner, provider: "test:travel", instructionBudget: 1000, services: { ...current.hostServices, get engine() { return current.hostServices.engine; } } });
+  host.getGameApi(getApi); host.init();
+  const oldRegistry = current.hostServices.engine.actors, actor = host.edicts.at(1).currentActor();
+  if (actor === null) throw new Error("Missing authored client actor");
+  host.writeTravelLevel("level.sav", 1);
+  expect(savedInUse).toBe(0); expect(memory.readInt32(inUse)).toBe(1); expect(oldRegistry.isLive(actor)).toBe(true); expect(host.edicts.at(1).currentActor()).toBe(actor);
+  fail = true; expect(() => host.writeTravelLevel("level.sav", 1)).toThrow("authored WriteLevel failure");
+  expect(memory.readInt32(inUse)).toBe(1); expect(oldRegistry.isLive(actor)).toBe(true);
+  for (const owned of oldRegistry.ownedBy("test:travel")) oldRegistry.release(owned);
+  current = services(); host.rebindWorld(); host.edicts.reconcile();
+  expect(host.edicts.exports).toEqual(exports); expect(host.memory).toBe(memory);
+  expect(host.edicts.at(1).currentActor()?.equals(actor)).toBe(false); expect(current.hostServices.engine.actors.ownedBy("test:travel")).toHaveLength(1);
+  host.shutdown(); oldRegistry.close(); current.hostServices.engine.actors.close();
 });

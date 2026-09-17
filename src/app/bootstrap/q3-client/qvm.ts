@@ -1,3 +1,5 @@
+import type { ApplicationKeyProfile } from "../keys.ts";
+import { qvmUiKeySyscall } from "../../../compat/qvm/ui-key-syscalls.ts";
 import { ScriptGlobalDefines } from "../../../ui/common/legacy/script/preprocessor.ts";
 import { QvmClientScripts, qvmClientScriptSyscall } from "../../../compat/qvm/client-script-syscalls.ts";
 import { QvmUiExport } from '../../../compat/qvm/abi.ts';
@@ -45,6 +47,7 @@ export interface ApplicationQvmClientOptions {
   readonly commands: Pick<CommandBuffer, 'executeNow' | 'insert' | 'append'>;
   readonly cvars: QvmCvarServices;
   readonly browser: Q3BrowserView;
+  readonly keys: ApplicationKeyProfile;
   readonly map: string;
   readonly now: () => number;
   readonly keyCatcher: () => number;
@@ -113,6 +116,7 @@ export class ApplicationQvmClient {
       ?? qvmClientMarkSyscall(call, this.marks)
       ?? qvmClientCinematicSyscall(call, { cinematics: o.services.cinematics, draw: o.services.draw, developerPrint: session.print })
       ?? qvmClientBrowserSyscall(call, o.browser)
+      ?? qvmUiKeySyscall(call, { keys: o.keys, gameDirectory: () => o.keys.gameDirectory, assertCurrent: () => this.assertCurrent() })
       ?? o.scalar(call, this) ?? rejectQvmSyscall(call);
   }
   private async module(role: 'cgame' | 'ui'): Promise<QvmModuleOptions> {

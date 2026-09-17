@@ -51,3 +51,13 @@ test("cvar_t pointer stays stable and reflects existing registry values, latch a
   expect(cvars.pointer("gravity")).toEqual(gravity); expect(memory.readFloat32(memory.offset(gravity, 20n))).toBe(400);
   expect(memory.readPointer(memory.offset(gravity, 8n))).toBeNull();
 });
+
+test("connected source client retains one actor before ClientBegin without setting inuse", () => {
+  const { actors, edicts } = fixture(), record = edicts.at(1);
+  const actor = edicts.retainClient(1);
+  expect(record.bytes.getInt32(88, true)).toBe(0); expect(record.currentActor()).toEqual(actor.id);
+  edicts.reconcile(); expect(record.currentActor()).toEqual(actor.id);
+  record.bytes.setInt32(88, 1, true); edicts.reconcile(); expect(record.currentActor()).toEqual(actor.id);
+  record.bytes.setInt32(88, 0, true); edicts.reconcile(); expect(actors.isLive(actor.id)).toBe(true);
+  edicts.releaseClient(1); expect(record.currentActor()).toBeNull(); expect(actors.isLive(actor.id)).toBe(false);
+});

@@ -80,3 +80,10 @@ export function encodeDemo(messages: readonly DemoMessage[]): Uint8Array {
   view.setInt32(offset + 4, -1, true);
   return output;
 }
+
+export function encodeDemoMessage(message: DemoMessage): Uint8Array {
+  const framed = encodeDemo([message]);
+  return framed.subarray(0, framed.length - 8);
+}
+
+export function finishDemo(): Uint8Array { return new Uint8Array(8).fill(255); }

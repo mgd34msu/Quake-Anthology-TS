@@ -15,6 +15,37 @@ import type { PcmStream } from "../../../src/audio/streams.ts";
 import { ApplicationMusic, q1MusicFallback } from "../../../src/app/bootstrap/audio/music.ts";
 import { resolveQ3MountRestriction } from "../../../src/content/q3/product-restriction.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
+import { mountedMusicTracks } from "../../../src/app/bootstrap/audio/playlist.ts";
+
+test("music traversal accepts source archive directory records and nested loose directories", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "music-directory-"));
+  try {
+    const archivePath = resolve(root, "music.pk3"), looseRoot = resolve(root, "loose");
+    await writeFile(archivePath, zip([["music/", ""], ["music/nested/", ""], ["music/nested/deep/", ""],
+      ["music/intro.ogg", "track"], ["music/nested/title.wav", "track"], ["music/nested/deep/ending.ogg", "track"]]));
+    await mkdir(resolve(looseRoot, "music/nested"), { recursive: true });
+    await mkdir(resolve(looseRoot, "music/loose"), { recursive: true });
+    await writeFile(resolve(looseRoot, "music/loose/track.wav"), "track");
+    const archive: ArchiveMount = { kind: "archive", format: "pk3", archivePath, archiveDigest: await digestFile(archivePath),
+      identity: createMountIdentity("mount:music:archive", "q3:classic:baseq3:installed", 0) };
+    const loose: ContentMount = { kind: "loose", rootPath: looseRoot,
+      identity: createMountIdentity("mount:music:loose", "q3:classic:baseq3:installed", 0) };
+    using mounts = await openMountPlan({ id: "mount-plan:music:directories", mounts: [archive, loose],
+      defaultOrder: [archive.identity.id, loose.identity.id], prefixOrders: [] });
+    expect(await mounts.listFiles("", "/")).toContain("music/");
+    expect(await mounts.listFiles("music", "/")).toEqual(["", "nested/", "loose", "nested"]);
+    expect(await mounts.listFiles("music/nested", "/")).toEqual(["", "deep/"]);
+    expect(await mountedMusicTracks(mounts)).toEqual(["music/intro.ogg", "music/loose/track.wav", "music/nested/deep/ending.ogg", "music/nested/title.wav"]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3"))("installed Q3 archive retains the explicit music directory that playlist traversal must skip", async () => {
+  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3");
+  try {
+    expect(archive.entries.some(entry => entry.path === "music/")).toBe(true);
+    expect(archive.entries.some(entry => entry.path.startsWith("music/") && entry.path.endsWith(".wav"))).toBe(true);
+  } finally { archive.close(); }
+});
 
 test("Q3 demo mounts restrict loose resources and reject an unrelated PK3 without changing prior ownership", async () => {
   const root = await mkdtemp(resolve(tmpdir(), "quake-demo-mount-"));
@@ -28,7 +59,9 @@ test("Q3 demo mounts restrict loose resources and reject an unrelated PK3 withou
     expect(new TextDecoder().decode(await restricted.read("autoexec.cfg"))).toBe("set test 1");
     expect(await restricted.open("texture.tga")).toBeNull();
     expect(await restricted.listFiles("", ".cfg")).toEqual([]);
-    expect(restricted.borrowMountPlan(plan)).toBeNull();
+    using inherited = restricted.borrowMountPlan(plan);
+    expect(inherited?.options.q3Restriction).toBe("demo");
+    expect(await inherited?.open("texture.tga")).toBeNull();
     using borrowed = restricted.borrowMountPlan(plan, { q3Restriction: "demo" });
     expect(borrowed).not.toBeNull();
     const archivePath = resolve(root, "pak0.pk3");
@@ -664,4 +697,12 @@ test("remote QW default and mod can use an empty user qw overlay above strict id
     const missing = await discoverInstalledContent({ corpusRoot, userContentRoot, products: [base, qw], discoverMods: false, remoteContent: remoteContentSelection("q1-quakeworld", "qw") });
     expect(() => missing.require(qw.id)).toThrow("base product");
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('remote Q2 rerelease directories retain their selected edition', () => {
+  const selected = remoteContentSelection('q2-rerelease-baseq2', '');
+  expect(selected).toEqual({ base: 'q2-rerelease-baseq2', directory: 'baseq2' });
+  expect(remoteContentProduct(selected)).toBe('q2-rerelease-baseq2');
+  expect(remoteContentProduct(remoteContentSelection('q2-rerelease-baseq2', 'custom'))).toBe('q2-rerelease-baseq2-mod-custom');
+  expect(remoteContentProduct(remoteContentSelection('q2-classic-baseq2', 'xatrix'))).toBe('q2-classic-xatrix');
 });

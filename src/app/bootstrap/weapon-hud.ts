@@ -8,16 +8,22 @@ import type { ApplicationAssets } from "./assets.ts";
 export class ApplicationWeaponHudAssets {
   private readonly pending = new Map<string, Promise<ResourceId>>();
   private readonly pictures = new Map<ResourceId, PictureAsset>();
+  private readonly logicalAspects = new Map<ResourceId, number>();
   private readonly textureIcons = new Map<string, WeaponHudIcon>();
   constructor(readonly assets: ApplicationAssets) {}
   picture(id: ResourceId): PictureAsset | undefined { return this.pictures.get(id); }
   async prepareImageRefresh(providers: Pick<ApplicationAssets, "provider">): Promise<() => void> {
-    const pictures = new Map<ResourceId, PictureAsset>();
-    for (const [key, icon] of this.textureIcons) await this.loadIcon(icon, key, providers, pictures);
-    return () => { for (const [id, picture] of pictures) this.pictures.set(id, picture); };
+    const pictures = new Map<ResourceId, PictureAsset>(), aspects = new Map<ResourceId, number>();
+    for (const [key, icon] of this.textureIcons) await this.loadIcon(icon, key, providers, pictures, aspects);
+    return () => {
+      for (const [id, picture] of pictures) this.pictures.set(id, picture);
+      for (const [id, aspect] of aspects) this.logicalAspects.set(id, aspect);
+    };
   }
   aspect(id: ResourceId | null): number {
     if (id === null) return 1;
+    const logical = this.logicalAspects.get(id);
+    if (logical !== undefined) return logical;
     const picture = this.pictures.get(id);
     if (picture?.kind === "image") return picture.image.width / picture.image.height;
     if (picture?.kind === "material") for (const stage of picture.material.compiled.registered.stages) {
@@ -41,7 +47,7 @@ export class ApplicationWeaponHudAssets {
     const pending = this.loadIcon(icon, key); this.pending.set(key, pending); return pending;
   }
   private async loadIcon(icon: WeaponHudIcon, key: string, providers: Pick<ApplicationAssets, "provider"> = this.assets,
-    pictures: Map<ResourceId, PictureAsset> = this.pictures): Promise<ResourceId> {
+    pictures: Map<ResourceId, PictureAsset> = this.pictures, aspects: Map<ResourceId, number> = this.logicalAspects): Promise<ResourceId> {
     const id: ResourceId = `resource:weapon-hud:${key}`;
     const provider = await providers.provider(icon.kind === "shader" ? icon.content : icon.resource.content);
     if (icon.kind === "shader") pictures.set(id, await provider.shaders.registerPicture(icon.name));
@@ -58,6 +64,7 @@ export class ApplicationWeaponHudAssets {
       const texture = await provider.textures.load(icon.resource.path, { family: provider.family, mipmap: false, wrap: "clamp" });
       if (texture === null) throw new Error(`Weapon HUD image missing: ${key}`);
       pictures.set(id, { kind: "image", name: key, image: texture.image });
+      aspects.set(id, texture.width / texture.height);
       this.textureIcons.set(key, icon);
     }
     return id;

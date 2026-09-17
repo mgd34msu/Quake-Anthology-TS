@@ -1,3 +1,6 @@
+import { readArenaSelection, type ArenaSelection } from "./base-arena-selection.ts";
+import { prepareQ3ApplicationProduct } from "./q3-product.ts";
+import { classifyBsp } from "../../formats/bsp-kind.ts";
 import { matchModeUnavailable, type MatchRules } from "./match-modes.ts";
 import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
 import { baseWeaponBindingItems } from "../../input/weapon-bindings.ts";
@@ -10,7 +13,7 @@ import { openArchive } from "../../content/archive/index.ts";
 import type { ArchiveHandle } from "../../content/archive/index.ts";
 import { parseQ2Entities } from "../../content/q2/foundation/fields.ts";
 import { FileSource } from "../../content/archive/source.ts";
-import { parseQ1Entities, q1EntityValue, Q1_BSP_VERSION, Q1_BSP2_VERSION, Q1_2PSB_VERSION } from "../../formats/q1-map/index.ts";
+import { parseQ1Entities, q1EntityValue } from "../../formats/q1-map/index.ts";
 import type { CampaignSelection, EnemySelection, EquipmentSelection, MonsterSelectionTarget, ExecutableRecipe, GameFamily, LaunchChoice, ProviderReference } from "../../contracts/content.ts";
 import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import type { CatalogProduct, InstalledCatalog } from "../../content/catalog/index.ts";
@@ -18,7 +21,7 @@ import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "../../c
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../content/catalog/monsters.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
-import { parseTeamArenaCampaign, planTeamArenaSkirmish, type TeamArenaCampaign, type TeamArenaTeams } from "./team-arena-skirmish.ts";
+import { loadTeamArenaCampaign, planTeamArenaSkirmish, type TeamArenaCampaign, type TeamArenaTeams } from "./team-arena-skirmish.ts";
 import { applicationPreset } from "./content.ts";
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { ApplicationOptions } from "./options.ts";
@@ -62,6 +65,12 @@ function productChoice(product: CatalogProduct): StartupSelectionChoice {
 
 /** The draft stores UI choices; the existing launch resolver remains the recipe authority. */
 export class StartupSelectionModel {
+  private arenaSelection: ArenaSelection | null = null;
+  baseArenas(): ArenaSelection | null { return this.arenaSelection; }
+  async refreshBaseArenas(): Promise<void> {
+    const launch = await this.resolvePreset("q3-baseq3");
+    this.arenaSelection = await readArenaSelection(this.catalog, launch.options);
+  }
   private teamArenaCampaign: TeamArenaCampaign | null = null;
   private selectedTeams: TeamArenaTeams = { player: "pagans", opponent: "stroggs" };
   private selectedServerProfile: Pick<ApplicationOptions, "serverProfilePath"> | null = null;
@@ -80,12 +89,22 @@ export class StartupSelectionModel {
     const { serverProfile: _serverProfile, serverProfilePath: _serverProfilePath, ...rest } = options;
     return { ...rest, ...this.selectedServerProfile };
   }
+  private async prepareQ3Catalog(): Promise<void> {
+    const preferred = this.catalog.products.find(product => product.expectation.id === this.initial.product && product.expectation.family === "q3");
+    const product = preferred ?? this.catalog.products.find(product => product.expectation.family === "q3" && product.availability.kind === "installed");
+    if (product === undefined) return;
+    const prepared = await prepareQ3ApplicationProduct(this.catalog, product.id, this.initial);
+    this.currentCatalog = prepared.catalog;
+    if (prepared.q3Product !== null) this.initial = { ...this.initial, q3Product: prepared.q3Product };
+  }
   private async prepareTeamArena(): Promise<void> {
     if (this.teamArenaCampaign !== null) return;
     const product = this.catalog.products.find(product => product.expectation.id === "q3-missionpack");
     if (product === undefined || product.availability.kind !== "installed") return;
-    const [game, teams] = await Promise.all([this.catalog.read(product.id, "gameinfo.txt"), this.catalog.read(product.id, "teaminfo.txt")]);
-    this.teamArenaCampaign = parseTeamArenaCampaign(Buffer.from(game).toString("latin1"), Buffer.from(teams).toString("latin1"));
+    const prepared = await loadTeamArenaCampaign(this.catalog, this.initial);
+    this.teamArenaCampaign = prepared.campaign;
+    this.currentCatalog = prepared.catalog;
+    this.initial = { ...this.initial, q3Product: prepared.q3Product };
   }
   private readonly values: Record<StartupSelectionField, string>;
   private display: Pick<ApplicationOptions, "width" | "height" | "gamma">;
@@ -97,7 +116,9 @@ export class StartupSelectionModel {
   private readonly rosters = new Map<string, { source: string; default: string; readonly byClassname: Map<string, string> }>();
   private readonly selectedModels = new Map<string, string>();
   private readonly modelChoices = new Map<string, readonly StartupSelectionChoice[]>();
-  constructor(readonly catalog: InstalledCatalog, private readonly initial: ApplicationOptions) {
+  get catalog(): InstalledCatalog { return this.currentCatalog; }
+  constructor(private currentCatalog: InstalledCatalog, private initial: ApplicationOptions) {
+    const catalog = currentCatalog;
     this.display = { width: initial.width, height: initial.height, gamma: initial.gamma };
     const product = catalog.product(initial.product), campaign = product.expectation.campaign;
     const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
@@ -107,7 +128,25 @@ export class StartupSelectionModel {
       skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer };
     this.selectedModels.set(this.values.character, initial.characterModel);
   }
+  async refreshCatalog(): Promise<void> {
+    const catalog = await discoverInstalledContent({ corpusRoot: this.catalog.corpusRoot, generation: this.catalog.generation + 1, ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }), discoverMods: true });
+    const initialProduct = catalog.products.find(product => product.expectation.id === this.initial.product && product.availability.kind === "installed")
+      ?? catalog.products.find(product => product.availability.kind === "installed");
+    if (initialProduct === undefined) throw new Error("No installed game content remains");
+    const candidate = new StartupSelectionModel(catalog, { ...this.initial, product: initialProduct.expectation.id });
+    await candidate.prepareMaps();
+    this.currentCatalog = candidate.catalog; this.initial = candidate.initial; this.teamArenaCampaign = candidate.teamArenaCampaign;
+    this.playableMaps.clear(); for (const [id, value] of candidate.playableMaps) this.playableMaps.set(id, value);
+    this.authoredDefaultMaps.clear(); for (const [id, value] of candidate.authoredDefaultMaps) this.authoredDefaultMaps.set(id, value);
+    this.looseModels.clear(); for (const [id, value] of candidate.looseModels) this.looseModels.set(id, value);
+    this.monsterClasses.clear(); for (const [id, value] of candidate.monsterClasses) this.monsterClasses.set(id, value);
+    this.modelChoices.clear();
+    if (!catalog.products.some(product => product.expectation.id === this.values.product)) {
+      this.values.product = initialProduct.expectation.id; this.values.map = this.defaultMap();
+    }
+  }
   async prepareMaps(): Promise<void> {
+    await this.prepareQ3Catalog();
     await this.prepareTeamArena();
     const archives = new Map<string, ArchiveHandle>(), files = new Map<string, FileSource>(), playable = new Map<string, boolean>();
     try {
@@ -122,6 +161,7 @@ export class StartupSelectionModel {
         }
         const choices: StartupSelectionChoice[] = [];
         for (const map of this.catalog.mapsFor(product.id)) {
+          try {
           const key = `${map.source}:${map.memberIndex}`;
           let accepted = playable.get(key);
           if (accepted === undefined && product.expectation.family === "q1") {
@@ -139,8 +179,8 @@ export class StartupSelectionModel {
             }
             const header = decoded?.subarray(0, 12) ?? await file.read(offset, Math.min(12, length));
             if (header.byteLength < 12) throw new Error(`Truncated map header: ${map.path}`);
-            const view = new DataView(header.buffer, header.byteOffset, header.byteLength), version = view.getUint32(0, true);
-            if (![Q1_BSP_VERSION, Q1_BSP2_VERSION, Q1_2PSB_VERSION].includes(version)) throw new Error(`Unsupported Quake map header: ${map.path}`);
+            const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+            if (classifyBsp(header, map.path) === "q1") {
             const start = view.getUint32(4, true), size = view.getUint32(8, true);
             if (start > length || size > length - start) throw new Error(`Invalid map entity lump: ${map.path}`);
             const bytes = decoded?.subarray(start, start + size) ?? await file.read(offset + start, size);
@@ -150,16 +190,20 @@ export class StartupSelectionModel {
               const classname = q1EntityValue(entity, "classname");
               return classname === "info_player_start" || classname === "info_player_deathmatch" || classname === "info_player_coop" || classname === "info_player_start2";
             });
+            } else accepted = true;
             playable.set(key, accepted);
           }
           if (accepted !== false) choices.push(choice(map.path));
+          } catch (error) {
+            choices.push(choice(map.path, map.path, error instanceof Error ? error.message : String(error)));
+          }
         }
         const authored = await this.catalog.authoredStartsFor(product.id);
         const starts: StartupSelectionChoice[] = [];
         for (const start of authored?.starts ?? []) {
           if (starts.some(choice => choice.id.toLowerCase() === start.path.toLowerCase())) continue;
           const installed = choices.find(choice => choice.id.toLowerCase() === start.path.toLowerCase());
-          starts.push(choice(installed?.id ?? start.path, start.title || start.path, installed === undefined ? `Missing authored start map: ${start.path}` : null));
+          starts.push(choice(installed?.id ?? start.path, start.title || start.path, installed === undefined ? `Missing authored start map: ${start.path}` : installed.unavailable));
         }
         const first = starts[0];
         if (first !== undefined) this.authoredDefaultMaps.set(product.expectation.id, first.id);
@@ -201,7 +245,7 @@ export class StartupSelectionModel {
         unavailable: null };
     });
   }
-  async resolvePreset(id: string, difficulty?: number): Promise<StartupLaunch> {
+  async resolvePreset(id: string, difficulty?: number, arenaMap?: string): Promise<StartupLaunch> {
     const selected = this.presets().find(preset => preset.id === id);
     if (selected === undefined) throw new Error(`Installed official campaign preset unavailable: ${id}`);
     if (selected.unavailable !== null) throw new Error(selected.unavailable);
@@ -210,7 +254,9 @@ export class StartupSelectionModel {
     const product = this.catalog.require(id), family = product.expectation.family;
     const teamArenaSkirmish = product.expectation.campaign === "missionpack" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5)
       ? planTeamArenaSkirmish(this.teamArenaCampaign ?? (() => { throw new Error("Team Arena metadata is not prepared"); })(), level, undefined, this.selectedTeams) : undefined;
-    const preferred = teamArenaSkirmish?.map ?? (family === "q3" ? await this.q3TrainingMap(product)
+    const selectedArena = arenaMap === undefined ? undefined : this.arenaSelection?.rows.find(row => row.arena.map === arenaMap);
+    if (arenaMap !== undefined && (id !== "q3-baseq3" || selectedArena?.available !== true)) throw new Error("That arena is not unlocked in this profile.");
+    const preferred = selectedArena?.arena.map ?? teamArenaSkirmish?.map ?? (family === "q3" ? await this.q3TrainingMap(product)
       : this.authoredDefaultMaps.get(id) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null));
     const map = this.playableMaps.get(id)?.find(map => map.id.toLowerCase() === preferred?.toLowerCase());
     if (map === undefined || map.unavailable !== null) throw new Error(`${selected.label}: ${map?.unavailable ?? "authored campaign start map is unavailable"}`);
@@ -297,8 +343,7 @@ export class StartupSelectionModel {
       const header = decoded?.subarray(0, headerLength) ?? await file.read(offset, Math.min(length, headerLength));
       if (header.byteLength < headerLength) throw new Error("Truncated map header");
       const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
-      if (q2 ? !["IBSP", "QBSP"].includes(new TextDecoder().decode(header.subarray(0, 4))) || view.getUint32(4, true) !== 38
-        : ![Q1_BSP_VERSION, Q1_BSP2_VERSION, Q1_2PSB_VERSION].includes(view.getUint32(0, true))) throw new Error("Unsupported map header");
+      if (classifyBsp(header, map.path) !== (q2 ? "q2" : "q1")) throw new Error("Unsupported map header");
       const start = view.getUint32(q2 ? 8 : 4, true), size = view.getUint32(q2 ? 12 : 8, true);
       if (start > length || size > length - start) throw new Error("Invalid map entity lump");
       const bytes = decoded?.subarray(start, start + size) ?? await file.read(offset + start, size), text = new TextDecoder().decode(bytes).replace(/\0+$/, "");

@@ -44,3 +44,5 @@ export function q3TeamArenaCatalogPolicy(policy: Q3ProductPolicy): {
   return { gameInfo: demo ? "demogameinfo.txt" : "gameinfo.txt", teamInfo: demo ? "demoteaminfo.txt" : "teaminfo.txt",
     additionalTeams: !demo, additionalArenas: !demo };
 }
+
+export interface Q3ApplicationProduct { readonly policy: Q3ProductPolicy; readonly restriction: Q3MountRestriction; }

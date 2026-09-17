@@ -231,10 +231,10 @@ export class UnifiedAudio {
             this.options.onSound?.(request);
         return playing;
     }
-    stopSound(actor: ActorId, channel: SharedSoundChannel | null): void {
+    stopSound(actor: ActorId, channel: SharedSoundChannel | null, audience: AudioAudience = { kind: "world" }): void {
         const entity = this.entity(actor);
         for (const state of this.seats) {
-            state.mixer.stopSharedChannel(entity, channel);
+            if (selected(audience, state.listener.seat)) state.mixer.stopSharedChannel(entity, channel);
         }
     }
     private loopPosition(request: LoopSound, listener: AudioListener): Vec3 {
@@ -278,9 +278,10 @@ export class UnifiedAudio {
             state.mixer.setListener(entity, state.listener.origin, state.listener.axis);
         }
     }
-    stopLoop(actor: ActorId): void {
+    stopLoop(actor: ActorId, audience: AudioAudience = { kind: "world" }): void {
         const entity = this.entity(actor);
         for (const state of this.seats) {
+            if (!selected(audience, state.listener.seat)) continue;
             for (const family of ["q1", "q2", "q3"])
                 state.loops.delete(`${family}:${entity}`);
             state.mixer.stopLoopingSound(entity);

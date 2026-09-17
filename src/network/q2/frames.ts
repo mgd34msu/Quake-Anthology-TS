@@ -60,7 +60,20 @@ export class Q2FrameHistory {
             throw new RangeError('Invalid Q2 frame history');
     }
     get(number: number): Q2WireFrame | null { return this.frames.get(number) ?? null; }
+    latest(): Q2WireFrame | null {
+        let latest: Q2WireFrame | null = null;
+        for (const frame of this.frames.values()) if (frame.valid !== false && (latest === null || frame.serverFrame > latest.serverFrame)) latest = frame;
+        return latest;
+    }
     clear(): void { this.frames.clear(); this.baselines.clear(); }
+    accept(frame: Q2WireFrame): void {
+        this.frames.set(frame.serverFrame, frame);
+        while (this.frames.size > this.capacity) {
+            const oldest = this.frames.keys().next();
+            if (oldest.done) break;
+            this.frames.delete(oldest.value);
+        }
+    }
     read(wire: Q2WireCodec, readSuppressByte = true): Q2WireFrame {
         const areaBits = new Uint8Array(255);
         const header = wire.codec.readFrameHeader(areaBits, readSuppressByte);
@@ -114,13 +127,7 @@ export class Q2FrameHistory {
         }
         checkMessageRead(wire.message);
         const frame: Q2WireFrame = { valid, serverFrame: header.serverframe, deltaFrame: header.deltaframe, suppressedCount: header.surpressCount, areaBits: areaBits.slice(0, header.areabytes), player, entities };
-        this.frames.set(frame.serverFrame, frame);
-        while (this.frames.size > this.capacity) {
-            const oldest = this.frames.keys().next();
-            if (oldest.done)
-                break;
-            this.frames.delete(oldest.value);
-        }
+        this.accept(frame);
         return frame;
     }
 }

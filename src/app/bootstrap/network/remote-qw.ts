@@ -1,3 +1,6 @@
+import { QwSpectatorCamera } from './qw-camera.ts';
+import type { QwCameraOptions, QwCameraPlayer } from './qw-camera.ts';
+import type { Vec3 } from '../../../contracts/math.ts';
 import { RemoteWorldContent } from './remote-world.ts';
 /* QW decoded protocol state shares the Q1 scene/session presentation. GPL-2.0-or-later. */
 import type { IndexedModelSkin } from '../../../contracts/scene.ts';
@@ -20,6 +23,7 @@ export interface QwRemotePresentationOptions extends Q1RemotePresentationOptions
     readonly seat: SeatId;
     readonly downloads?: QwApplicationDownloads;
     readonly skinOptions: QwSkinOptions;
+    readonly cameraOptions?: QwCameraOptions;
     prepareServerData(data: QwServerData): Promise<void>;
     mapChecksum(world: Q1RemoteWorld, gameDirectory: string): Promise<number>;
 }
@@ -75,6 +79,9 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         messages.push({ kind: 'name', slot, value: (info.get('name') ?? '').slice(0, 15) }, { kind: 'colors', slot, value: color('topcolor') * 16 + color('bottomcolor') });
     }
     private ownPlayer: QwPlayerState | null = null;
+    private readonly cameraPlayers = new Map<number, QwPlayerState>();
+    private readonly camera: QwSpectatorCamera;
+    takeSpectatorTeleport(): Vec3 | null { return this.camera.takeTeleport(); }
     private records: readonly QuakeWorldMessage[] = [];
     private entities: readonly Q1ExtendedEntityState[] = [];
     private modelNames: readonly string[] = [];
@@ -84,7 +91,14 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     private kick = 0;
     private intermission: Extract<QuakeWorldMessage, { kind: 'intermission' }> | null = null;
     private variables: QwMoveVariables | null = null;
-    constructor(readonly options: QwRemotePresentationOptions) { this.playerSkins = new QwPlayerSkins(options.skinOptions); this.world = new RemoteWorldContent(options.content); this.shared = new Q1RemotePresentation({ ...options, loadContent: async (world, assertCurrent) => { const content = await options.loadContent(world, assertCurrent); assertCurrent?.(); this.world.content = content; return content; } }); if (options.downloads !== undefined) this.downloads = options.downloads; }
+    constructor(readonly options: QwRemotePresentationOptions) {
+        this.camera = new QwSpectatorCamera(options.cameraOptions ?? { hightrack: () => 0, chasecam: () => 0 }, text => options.sendCommand(text), (start, end) => {
+            const trace = this.scene.trace({ start, end, shape: { kind: 'box', bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } } },
+                target: { kind: 'world' }, policy: { kind: 'q1', move: 'no-monsters', hull: 1 },
+                numeric: movementProfile(this.world.content.recipe).numeric, passActor: this.player?.actor ?? null });
+            if (trace.kind !== 'q1') throw new Error('QW camera requires Q1 collision');
+            return { fraction: trace.startSolid ? 0 : trace.fraction, end: trace.end, inWater: trace.inWater };
+        }, text => options.print(text)); this.playerSkins = new QwPlayerSkins(options.skinOptions); this.world = new RemoteWorldContent(options.content); this.shared = new Q1RemotePresentation({ ...options, loadContent: async (world, assertCurrent) => { const content = await options.loadContent(world, assertCurrent); assertCurrent?.(); this.world.content = content; return content; } }); if (options.downloads !== undefined) this.downloads = options.downloads; }
     get moveVariables(): QwMoveVariables | null { return this.variables; }
     get client() { return this.shared.client; }
     get player() { return this.shared.player; }
@@ -99,7 +113,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     }
     async gameState(data: QwServerData, models: readonly string[], sounds: readonly string[], assertCurrent?: () => void): Promise<number> {
         assertCurrent?.();
-        this.playerSkins.clear(); this.userinfos.clear(); this.selectedSkins.clear(); this.skinSignature = ''; this.skinLoading = false; this.skinRevision++; this.predictor = null; this.predicted = null; this.modelNames = models; this.linked.length = 0; this.data = data; this.variables = data.moveVariables; this.stats.clear(); this.ownPlayer = null; this.entities = []; this.kick = 0; this.intermission = null;
+        this.camera.reset(); this.cameraPlayers.clear(); this.playerSkins.clear(); this.userinfos.clear(); this.selectedSkins.clear(); this.skinSignature = ''; this.skinLoading = false; this.skinRevision++; this.predictor = null; this.predicted = null; this.modelNames = models; this.linked.length = 0; this.data = data; this.variables = data.moveVariables; this.stats.clear(); this.ownPlayer = null; this.entities = []; this.kick = 0; this.intermission = null;
         const map = models[0]; if (map === undefined) throw new Error('QW has no world model');
         await this.shared.receive([{ kind: 'server-info', protocol: { kind: 'q1-netquake', version: 15 }, maxClients: 32, gameType: 1, level: data.level, models, sounds }, { kind: 'set-view', entity: data.playerSlot + 1 }], 0, assertCurrent);
         if (this.pendingMusicTrack !== null) {
@@ -126,7 +140,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         let frame = false;
         for (const message of messages) {
             switch (message.kind) {
-                case 'player': players.push(message.state); if (message.state.number === this.data.playerSlot) this.ownPlayer = message.state; break;
+                case 'player': players.push(message.state); this.cameraPlayers.set(message.state.number, message.state); if (message.state.number === this.data.playerSlot) this.ownPlayer = message.state; break;
                 case 'packet-entities': this.entities = message.entities; frame = true; break;
                 case 'invalid-delta': break;
                 case 'nails': {
@@ -181,7 +195,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         const recipe = this.world.content.recipe, view = this.shared.playerView(player.actor), ui = this.shared.playerUi(player.actor);
         const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
         const base: MovementPredictionSnapshot = { sequence: this.acknowledgedSequence, commandTimeMilliseconds: now,
-            state: { kind: 'q1-quakeworld', origin: own.origin, velocity: own.velocity, angles: view.angles, oldButtons: 0, waterJumpTimeSeconds: 0, dead: ui.health <= 0, spectator: 0, ground: { kind: 'none' } },
+            state: { kind: 'q1-quakeworld', origin: own.origin, velocity: own.velocity, angles: view.angles, oldButtons: 0, waterJumpTimeSeconds: 0, dead: ui.health <= 0, spectator: data.spectator ? 1 : 0, ground: { kind: 'none' } },
             viewAngles: view.angles, viewHeight: view.viewHeight, viewOffset: { x: 0, y: 0, z: view.viewHeight }, bounds,
             environment: { health: ui.health, flight: false, haste: false, invulnerable: false, gravityMultiplier: variables.entityGravity },
             arsenal: { provider: recipe.inventory.provider, activeWeapon: ui.activeWeapon, ammo: ui.inventory,
@@ -190,7 +204,7 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         if (this.predictor === null) this.predictor = new QuakeWorldPrediction({ actor: this.options.identity.ownedActor(player.actor, recipe.map.entities.provider),
             seat: this.options.seat, recipe, profile: movementProfile(recipe), standingBounds: bounds, standingViewHeight: 22,
             scene: this.scene, isBrush: hit => hit.kind === 'world' || hit.kind === 'actor' && this.scene.spatial.get(hit.actor)?.collision.shape.kind === 'model' }, base, variables);
-        this.predictor.receive(base, own, variables, { health: ui.health, spectator: 0 });
+        this.predictor.receive(base, own, variables, { health: ui.health, spectator: data.spectator ? 1 : 0 });
         this.predicted = this.predictor.replay();
     }
     private linkSolids(players: readonly QwPlayerState[], nails: readonly Q1ExtendedEntityState[]): void {
@@ -216,7 +230,16 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     }
     command(input: ActorCommand): QwUserCommand {
         if (input.command.kind !== 'q1-quakeworld') throw new Error('QW requires QuakeWorld input');
-        const command = input.command;
+        let command = input.command;
+        const self = this.ownPlayer;
+        if (this.data?.spectator === true && self !== null && this.intermission === null) {
+            const users = new Map<number, QwCameraPlayer>();
+            for (const [slot, info] of this.userinfos) users.set(slot, { name: info.get('name') ?? '', spectator: (info.get('*spectator') ?? '') !== '', frags: this.scoreboard.get(slot)?.frags ?? 0 });
+            const previous = this.camera.view;
+            command = this.camera.command(command, { self, players: this.cameraPlayers, users, seconds: performance.now() / 1000 });
+            const camera = this.camera.view ?? previous;
+            if (camera !== null) { this.ownPlayer = { ...self, origin: camera.origin, weaponFrame: camera.chase ? camera.target.weaponFrame : self.weaponFrame }; this.receivePrediction(performance.now()); }
+        }
         const selected = this.shared.command({ ...input, command: { kind: 'q1-netquake', acknowledgedServerTimeSeconds: 0, viewAngles: command.angles, forwardMove: command.forwardMove, sideMove: command.sideMove, upMove: command.upMove, buttons: command.buttons, impulse: command.impulse } });
         return { ...command, impulse: selected.impulse };
     }
@@ -225,10 +248,12 @@ export class QwRemotePresentation implements QwApplicationClientHost {
     playerUi(...args: Parameters<Q1RemotePresentation['playerUi']>) { return this.shared.playerUi(...args); }
     playerView(...args: Parameters<Q1RemotePresentation['playerView']>) {
         const view = this.shared.playerView(...args);
-        if (this.intermission !== null) return { ...view, origin: this.intermission.origin, angles: this.intermission.angles, viewHeight: 0, kickAngles: zero };
+        if (this.intermission !== null) return { ...view, origin: this.intermission.origin, angles: this.intermission.angles, viewHeight: 0, kickAngles: zero, pitchDrift: { grounded: false, idealPitch: 0, disabled: true } };
+        const camera = this.camera.view;
+        if (camera !== null && this.data?.spectator === true) return { ...view, origin: camera.origin, angles: camera.angles, viewHeight: (camera.target.flags & 512) !== 0 && camera.chase ? -16 : 22, kickAngles: zero, pitchDrift: { grounded: false, idealPitch: 0, disabled: true } };
         const predicted = this.predicted;
         const origin = predicted !== null && predicted.status !== 'history-exhausted' && predicted.player.state.kind === 'q1-quakeworld' ? predicted.player.state.origin : view.origin;
-        return { ...view, origin, angles: this.ownPlayer !== null && (this.ownPlayer.flags & 512) !== 0 ? { ...view.angles, z: 80 } : view.angles };
+        return { ...view, origin, pitchDrift: { grounded: predicted !== null && predicted.status !== 'history-exhausted' && predicted.player.state.kind === 'q1-quakeworld' && predicted.player.state.ground.kind !== 'none', idealPitch: 0, disabled: (view.pitchDrift?.disabled ?? false) || this.data?.spectator === true }, angles: this.ownPlayer !== null && (this.ownPlayer.flags & 512) !== 0 ? { ...view.angles, z: 80 } : view.angles };
     }
     playerCommand(...args: Parameters<Q1RemotePresentation['playerCommand']>) { return this.shared.playerCommand(...args); }
     characterViews() { return this.shared.characterViews(); }
@@ -240,7 +265,13 @@ export class QwRemotePresentation implements QwApplicationClientHost {
         if (this.intermission !== null) return models.filter(model => !model.viewWeapon);
         if (player === null) return models;
         const view = this.playerView(player.actor);
-        return models.map(model => model.viewWeapon ? { ...model, origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles } : model);
+        const camera = this.camera.view;
+        return models.map(model => {
+            if (model.viewWeapon) return { ...model, origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles,
+                frame: camera?.chase === true ? camera.target.weaponFrame : model.frame, oldFrame: camera?.chase === true ? camera.target.weaponFrame : model.oldFrame,
+                visible: model.visible && (this.data?.spectator !== true || camera?.chase === true) };
+            return camera?.chase === true && this.shared.playerSlot(model.actor) === camera.target.number ? { ...model, visible: false } : model;
+        });
     }
     registerResource(...args: Parameters<Q1RemotePresentation['registerResource']>) { return this.shared.registerResource(...args); }
     samplePresentation(...args: Parameters<Q1RemotePresentation['samplePresentation']>): SimulationOutput | null {

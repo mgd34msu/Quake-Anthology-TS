@@ -55,7 +55,7 @@ test("inventory controller activation uses the source item and close dispatches 
 test("Arena results preserve an opened progress menu when service returns a fresh snapshot", async () => {
   const { BaseArenaMenus } = await import("../../src/app/bootstrap/base-arena-menu.ts");
   const ui = controller();
-  const menus = new BaseArenaMenus(ui, { result: () => ({ result: { rank: 1, completedTier: 0, unlockedMovie: null, awards: [], nextLevel: 1 },
+  const menus = new BaseArenaMenus(ui, { selection: () => ({ tiers: [], rows: [], current: null }), skill: () => 2, play: () => undefined, result: () => ({ result: { rank: 1, completedTier: 0, unlockedMovie: null, awards: [], nextLevel: 1 },
     podium: [{ client: 0, rank: 1, score: 10 }], musicCommand: "music music/win", winnerAnnouncementAfterMilliseconds: 1000, controls: ["retry", "next", "main"] }),
     playerName: () => "Ranger", progress: () => [], retry: () => undefined, next: () => undefined, quit: () => undefined, reset: () => undefined });
   menus.update(); expect(ui.activeMenu).toBe("menu:application:arena-result");

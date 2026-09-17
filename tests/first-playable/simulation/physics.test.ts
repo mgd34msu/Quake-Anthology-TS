@@ -19,6 +19,65 @@ import { captureSharedBodies, restoreSharedBodyLinks } from "../../../src/persis
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const unitBounds: Bounds = { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } };
 
+test("original source reconstruction retains native physics while restoring foreign collisions", () => {
+  const source = setup();
+  const native = source.actor("q2:native", zero, "stationary");
+  const unlinked = source.actor("q2:unlinked", { ...zero, x: 80 }, "stationary");
+  const foreign = source.actor("q3:foreign", { ...zero, x: 40 }, "stationary");
+  const nativeCollision = { family: "q2", shape: { kind: "box" }, contents: 33554432,
+    owner: null, role: "solid", monster: true, deadMonster: false } satisfies Parameters<SharedPhysics["setCollision"]>[1];
+  source.physics.setCollision(native, nativeCollision);
+  source.physics.setCollision(foreign, { ...nativeCollision, family: "q3", shape: { kind: "capsule" } });
+  const bodies = captureSharedBodies(source.actors, source.physics.bodies);
+  const reader = new SaveReader(decodeCheckpointValue(encodeCheckpointValue(source.physics.capture())));
+  const actors = SessionActorRegistry.restore(createIdentityOwner("original-physics"), source.actors.checkpoint(), source.actors.sourceCheckpoint());
+  const restoredNative = actors.resolveSaved(native.id), restoredUnlinked = actors.resolveSaved(unlinked.id);
+  const restoredForeign = actors.resolveSaved(foreign.id), world = actors.resolveSaved(source.world.id);
+  if (restoredNative === null || restoredUnlinked === null || restoredForeign === null || world === null) throw new Error("Missing restored actors");
+  source.actors.close();
+  const scene = createSceneQueries(emptyWorld()), physics = new SharedPhysics({ actors, callbacks: new ActorCallbackTable(actors), scene,
+    numeric: Q2_DONOR_PROFILE, sourceOrder: (a, b) => a.slot - b.slot, worldActor: () => world.id, onBlocked: () => undefined });
+  try {
+    for (const entry of bodies) {
+      const owner = actors.resolveSaved(entry.actor);
+      if (owner === null) throw new Error("Missing body owner");
+      physics.bodies.create(owner, { ...entry.body, ground: null });
+    }
+    const nativeBody = physics.bodies.read(restoredNative.id);
+    if (nativeBody === null) throw new Error("Missing native body");
+    physics.bodies.write(restoredNative, { ...nativeBody, origin: { ...zero, x: 200 } });
+    physics.setCollision(restoredNative, { ...nativeCollision, deadMonster: true });
+    physics.setMotion({ actor: restoredNative, kind: "bounce", velocity: { ...zero, x: 7 }, angularVelocity: zero,
+      gravity: 0.5, gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 33554432, owner: null });
+    physics.setFlags(restoredNative, { dead: true });
+    physics.bodies.link(restoredNative);
+    physics.setCollision(restoredUnlinked, nativeCollision);
+    physics.setCollision(restoredForeign, { ...nativeCollision, role: "trigger" });
+    const added = actors.allocate("test:actors", "q2:added-by-original-callback");
+    physics.bodies.create(added, { ...nativeBody, origin: { ...zero, x: 230 } });
+    physics.setCollision(added, nativeCollision);
+    physics.bodies.link(added);
+    const reconstructed = (id: ActorId): boolean => [restoredNative, restoredUnlinked, added].some(actor => actor.id.equals(id));
+    physics.restoreCheckpoint(reader, true, reconstructed);
+    restoreSharedBodyLinks({ bodies }, { actors, bodies: physics.bodies,
+      storage: actor => reconstructed(actor.id) ? "source-reconstructed" : "copied" });
+    physics.restoreSpatial(reader, reconstructed);
+    expect(scene.spatial.get(restoredNative.id)?.body.state.origin.x).toBe(200);
+    expect(scene.spatial.get(restoredNative.id)?.collision.deadMonster).toBe(true);
+    expect(physics.motionOf(restoredNative.id)?.kind).toBe("bounce");
+    expect(physics.motionOf(restoredNative.id)?.velocity.x).toBe(7);
+    expect(physics.capture().flags.find(entry => entry.actor.slot === restoredNative.id.slot)?.dead).toBe(true);
+    expect(scene.spatial.get(restoredUnlinked.id)).toBeNull();
+    expect(scene.spatial.get(added.id)?.body.state.origin.x).toBe(230);
+    expect(scene.spatial.get(restoredForeign.id)?.body.state.origin.x).toBe(40);
+    expect(scene.spatial.get(restoredForeign.id)?.collision.shape.kind).toBe("capsule");
+    expect(scene.spatial.get(restoredForeign.id)?.collision.role).toBe("solid");
+    expect(physics.motionOf(restoredForeign.id)?.kind).toBe("stationary");
+    physics.bodies.link(restoredNative);
+    expect(scene.spatial.get(restoredNative.id)?.collision.deadMonster).toBe(true);
+  } finally { actors.close(); }
+});
+
 test("exact Q3 collision metadata survives restore and the next source link", () => {
   const source = setup("q3"), actor = source.actor("q3:saved-capsule", zero, "stationary");
   source.physics.setCollision(actor, { family: "q3", shape: { kind: "capsule" }, contents: 33554432, owner: source.world.id,

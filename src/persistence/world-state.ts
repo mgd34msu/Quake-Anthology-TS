@@ -22,10 +22,15 @@ export function captureSharedBodies(actors: SessionActorRegistry, bodies: Shared
 }
 
 /** Run after provider restore has made collision metadata available, before scheduling resumes. */
-export function restoreSharedBodyLinks(save: Pick<SaveImage, "bodies">, host: Pick<SharedWorldRestoreHost, "actors" | "bodies">): undefined {
+export function restoreSharedBodyLinks(save: Pick<SaveImage, "bodies">,
+  host: Pick<SharedWorldRestoreHost, "actors" | "bodies"> & { readonly storage?: SharedWorldRestoreHost["storage"] }): undefined {
   for (const entry of save.bodies) {
     const actor = host.actors.resolveSaved(entry.actor);
     if (actor === null) throw new SaveFormatError("world.body-links", `missing saved actor ${entry.actor.slot}/${entry.actor.generation}`);
+    if (host.storage?.(actor) === "source-reconstructed") {
+      if (host.bodies.read(actor.id) === null) throw new SaveFormatError("world.body-links", "reconstructed source body has not been bound");
+      continue;
+    }
     host.bodies.restoreLinkState(actor, { linkCount: entry.linkCount, linked: entry.linked === null ? null : { absoluteBounds: entry.linked.absoluteBounds,
       state: { ...entry.linked.state, ground: entry.linked.state.ground === null ? null : host.actors.referenceSaved(entry.linked.state.ground) } } });
   }
@@ -37,8 +42,8 @@ export interface SharedWorldRestoreHost {
   readonly bodies: SharedBodyTable;
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
-  /** Prebound source storage and its semantic views must already contain the saved values. */
-  storage(actor: OwnedActor): "copied" | "prebound";
+  /** Exact prebound checkpoints retain saved values; original-file callbacks own reconstructed values. */
+  storage(actor: OwnedActor): "copied" | "prebound" | "source-reconstructed";
 }
 
 /** Run before source-provider restore binds named callbacks; link bodies after source collision metadata exists. */
@@ -53,7 +58,7 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   const inventoryActors = new Set(save.inventories.map(entry => actor(entry.actor)));
   for (const entry of save.actors) if (entry.lifetime.kind === "active") {
     const restored = actor(entry);
-    if (host.storage(restored) !== "prebound") continue;
+    if (host.storage(restored) === "copied") continue;
     if ((host.bodies.read(restored.id) !== null) !== bodyActors.has(restored)
       || (host.combat.read(restored.id) !== null) !== combatActors.has(restored)
       || host.inventory.has(restored.id) !== inventoryActors.has(restored))
@@ -61,9 +66,11 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   }
   for (const entry of save.bodies) {
     const restored = actor(entry.actor);
-    if (host.storage(restored) === "prebound") {
+    const storage = host.storage(restored);
+    if (storage !== "copied") {
       const body = host.bodies.read(restored.id);
       if (body === null) throw new SaveFormatError("world.bodies", "source body view has not been bound");
+      if (storage === "source-reconstructed") continue;
       const ground = entry.body.ground === null ? null : host.actors.referenceSaved(entry.body.ground);
       const sameGround = body.ground === null ? ground === null : ground !== null && body.ground.equals(ground);
       if (!sameGround || !isDeepStrictEqual({ ...body, ground: null }, { ...entry.body, ground: null }))
@@ -75,17 +82,19 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   }
   for (const entry of save.combat) {
     const restored = actor(entry.actor);
-    if (host.storage(restored) === "prebound") {
+    const storage = host.storage(restored);
+    if (storage !== "copied") {
       const state = host.combat.read(restored.id);
       if (state === null) throw new SaveFormatError("world.combat", "source combat view has not been bound");
-      if (!isDeepStrictEqual(state, entry.state)) throw new SaveFormatError("world.combat", "source combat disagrees with saved shared state");
+      if (storage === "prebound" && !isDeepStrictEqual(state, entry.state)) throw new SaveFormatError("world.combat", "source combat disagrees with saved shared state");
     } else host.combat.create(restored, entry.state);
   }
   for (const entry of save.inventories) {
     const restored = actor(entry.actor);
-    if (host.storage(restored) === "prebound") {
+    const storage = host.storage(restored);
+    if (storage !== "copied") {
       if (!host.inventory.has(restored.id)) throw new SaveFormatError("world.inventories", "source inventory view has not been bound");
-      if (!isDeepStrictEqual(host.inventory.entries(restored.id), entry.entries))
+      if (storage === "prebound" && !isDeepStrictEqual(host.inventory.entries(restored.id), entry.entries))
         throw new SaveFormatError("world.inventories", "source inventory disagrees with saved shared state");
     } else host.inventory.create(restored, entry.entries);
   }
