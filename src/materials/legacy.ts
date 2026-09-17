@@ -213,3 +213,23 @@ export function splitQ1SkyTexture(image: RenderImage): {
   }
   return { solid: { width: 128, height: 128, pixels: solid }, overlay: { width: 128, height: 128, pixels: overlay } };
 }
+
+/** Ironwail Sky_LoadTextureQ64: upper translucent foreground and lower indexed background. */
+export function splitQ64SkyTexture(image: RenderImage): { readonly solid: ImageLevel; readonly overlay: ImageLevel } {
+  if (image.kind !== "indexed8") throw new Error("Quake64 sky requires an indexed source image");
+  const level = image.levels[0];
+  if (level === undefined || level.height < 2 || level.height % 2 !== 0) throw new Error("Quake64 sky requires two vertically stacked layers");
+  const width = level.width, height = level.height / 2, count = width * height;
+  const solid = new Uint8Array(count * 4), overlay = new Uint8Array(count * 4);
+  for (let index = 0; index < count; index++) {
+    const front = level.pixels[index], back = level.pixels[count + index];
+    if (front === undefined || back === undefined) throw new Error("Quake64 sky texture is incomplete");
+    for (let channel = 0; channel < 3; channel++) {
+      const a = image.palette.colors[front * 3 + channel], b = image.palette.colors[back * 3 + channel];
+      if (a === undefined || b === undefined) throw new Error("Quake64 sky palette is incomplete");
+      overlay[index * 4 + channel] = a; solid[index * 4 + channel] = b;
+    }
+    overlay[index * 4 + 3] = 128; solid[index * 4 + 3] = 255;
+  }
+  return { solid: { width, height, pixels: solid }, overlay: { width, height, pixels: overlay } };
+}

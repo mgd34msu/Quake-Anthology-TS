@@ -63,7 +63,7 @@ export class ApplicationWorldScene {
   private previousTime = 0;
   private flares: { readonly flare: SceneFlare; readonly origin: Vec3; readonly image: RendererImage; readonly imagePath: string }[] = [];
 
-  constructor(readonly assets: ApplicationAssets, private readonly characterAssets: Q3CharacterAssets | null) {
+  constructor(readonly assets: ApplicationAssets, private readonly characterAssets: Q3CharacterAssets | null, private readonly planarShadows: () => boolean = () => false) {
     this.foreignWeapons = new ForeignHeldWeapons(assets);
   }
 
@@ -122,7 +122,11 @@ export class ApplicationWorldScene {
         continue;
       }
       const asset = await this.assets.model(source.content, source.path);
-      const axis = anglesToAxis(source.angles);
+      const modelFlags = asset.model.kind === "q1-mdl" ? asset.model.flags
+        : asset.model.kind === "md5" && asset.model.skinSelection.kind === "q1-mdl-replacement" ? asset.model.skinSelection.flags : 0;
+      const angles = source.family === "q1" && (modelFlags & 8) !== 0 ? { ...source.angles,
+        y: Math.fround((360 / 65536) * (Math.trunc(Math.fround(100 * this.preparedTime) * (65536 / 360)) & 65535)) } : source.angles;
+      const axis = anglesToAxis(angles);
       if (asset.model.kind === "brush-model") {
         const transform = { origin: weaponViewOrigin(source), axis, scale: source.scale };
         const alpha = source.alpha ?? 1;
@@ -196,7 +200,7 @@ export class ApplicationWorldScene {
     const modelOperations: SceneOperation[] = [], emitted = new Set<PresentationObject>();
     const prepare = (group: ModelGroup, pass: ModelPass) => group.renderer.prepare([pass.entity],
       pass.options(pass.entity).viewModel === true ? { ...input, camera: weaponCamera } : input,
-      current => ({ ...pass.options(current), infrared }), skinningFrame);
+      current => ({ ...pass.options(current), infrared, planarShadow: this.planarShadows() }), skinningFrame);
     for (const { group, pass } of this.ordered) {
       const object = this.objects.get(pass);
       if (object === undefined || object.opacity === 1) { modelOperations.push(...prepare(group, pass)); continue; }

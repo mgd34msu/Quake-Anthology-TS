@@ -9,7 +9,7 @@ import type { MountedContent } from "../../content/mounts/index.ts";
 import { decodePalette, decodePcx, decodeWad, indexedRenderImage } from "../../formats/images/index.ts";
 import { SceneTextureLoader } from "../../render/scene/index.ts";
 import type { SceneImageRegistry } from "../../render/scene/index.ts";
-import { classicCharset } from "../../text/atlas.ts";
+import { classicCharset, textCodepoints } from "../../text/atlas.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import { createMountedTextFonts } from "../../text/mounted.ts";
 import { mountedImageReader } from "./image-reader.ts";
@@ -92,9 +92,21 @@ export async function loadMenuTypography(catalog: InstalledCatalog,
   try {
     const codepoints = [...Array.from({ length: 224 }, (_, index) => index + 32),
       ...Array.from({ length: 112 }, (_, index) => index + 0x2000)];
+    const coverage = new Set(codepoints);
+    for (const name of await mounted.listFiles("localization", ".txt")) {
+      const resource = await mounted.open(`localization/${name}`);
+      if (resource !== null) for (const point of textCodepoints(new TextDecoder().decode(resource.bytes))) if (point >= 32) coverage.add(point);
+    }
+    const authoredCodepoints = [...coverage];
     const body = await fonts.loadTrueType("fonts/Montserrat-Regular.ttf", 48, codepoints);
     const title = await fonts.loadTrueType("fonts/NotoSans-Bold.ttf", 72, codepoints);
     if (body === null || title === null) throw new Error("Installed proportional menu fonts are missing");
-    return { body: { kind: "atlas", font: body, classic }, title: { kind: "atlas", font: title, classic }, close() { fonts.close(); mounted.close(); } };
+    const fallbacks: TextAtlas[] = [title];
+    for (const path of ["fonts/NotoSans-Bold.ttf", "fonts/NotoSansJP-Regular.otf", "fonts/NotoSansKR-Regular.otf"]) {
+      const missing = authoredCodepoints.filter(point => !body.glyphs.has(point) && !fallbacks.some(font => font.glyphs.has(point)));
+      if (missing.length === 0) break;
+      fallbacks.push(...await fonts.loadTrueTypePages(path, 48, missing));
+    }
+    return { body: { kind: "atlas", font: body, classic, fallbacks }, title: { kind: "atlas", font: title, classic, fallbacks: fallbacks.slice(1) }, close() { fonts.close(); mounted.close(); } };
   } catch (error) { fonts.close(); mounted.close(); throw error; }
 }

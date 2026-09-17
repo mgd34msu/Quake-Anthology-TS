@@ -1,3 +1,4 @@
+import { inputDeviceStore, loadInputDeviceSettings } from "./input-devices.ts";
 import { audioOutputCvarNames, writeAudioOutputCvars } from "./audio/output-settings.ts";
 import { defaultAudioOutputFormat } from "../../audio/output.ts";
 import type { ApplicationHost } from "./application.ts";
@@ -92,13 +93,15 @@ export async function prepareProfileConfiguration(args: {
   const [movementArchive, fallbackArchive] = await Promise.all([
     loadCvarArchive(settings, ["movement", movementDialect], movementDialect), loadCvarArchive(settings, ["fallback", dialect], dialect),
   ]);
-  const sharedArchive = shared.archiveEntries();
+  const sharedArchive = [...shared.archiveEntries(), ...(args.clientSource?.inputState === "fresh"
+    ? await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot)) : [])];
   const routing = new ApplicationConsoleRouting({ fallback, sourceDialect: () => dialect,
     server: () => args.clientSource === undefined ? { cvars: source, sharedNames: source.snapshots().map(variable => variable.name) } : null,
     seat: id => seats.find(seat => seat.id.equals(id))?.cvars ?? null,
     input: id => seats.find(seat => id === null || seat.id.equals(id))?.mouse.cvars ?? null,
     movement: () => movement, shared: () => published?.sharedCvars ?? shared });
-  const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+  const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
+    consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
     mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
   const read = configurationScriptReader(content, options, scripts);
   const requests: ConfigurationCommandRequest[] = [];
@@ -120,7 +123,7 @@ export async function prepareProfileConfiguration(args: {
       forwardToServer: command => dispatch(command.argv[0] ?? "", command.args, command.source),
     }, seats);
     for (const name of ["map", "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team", "connect", "disconnect", "quit",
-      "playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : [])])
+      "in_restart", "midiinfo", "playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : [])])
       program.commands.register(name, command => dispatch(name, command.args, command.source));
     registerQ1ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
     registerQ2ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
@@ -271,6 +274,16 @@ function configurationMovementDialect(content: ApplicationConfigurationContent):
   return timing.clock.kind;
 }
 
+export function legacyConfigurationOptions(options: ApplicationOptions, catalog: InstalledCatalog,
+  reference: ContentId): Pick<ConstructorParameters<typeof ConsoleScriptFiles>[0], "legacyConfig"> {
+  const selected = catalog.product(reference);
+  if (selected.expectation.family !== "q1" || selected.expectation.edition === "quakeworld") return {};
+  const sharedRoot = options.userContentRoot ?? defaultUserContentRoot();
+  const products = [selected, ...catalog.products.filter(product => product.expectation.family === "q1" && product.expectation.edition !== "quakeworld")];
+  const gameRoots = [...new Set(products.map(product => product.userContent?.root ?? userProductDirectory(sharedRoot, product.expectation.contentDirectory)))];
+  return { legacyConfig: { sharedRoot, gameRoots } };
+}
+
 export function configurationStore(options: ApplicationOptions, content: ApplicationConfigurationContent, reference: ContentId): ConfigStore {
   const product = content.catalog.product(reference);
   return new ConfigStore(product.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), product.expectation.contentDirectory));
@@ -298,10 +311,11 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
     audioOutputFormat: (await loadAudioSettings(settings)).outputFormat ?? defaultAudioOutputFormat,
     ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
-  const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+  const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
+    consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
     mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
   try {
-    const sharedArchive = [...image?.persistedEntries ?? []];
+    const sharedArchive = [...image?.persistedEntries ?? [], ...await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot))];
     if (image?.cvars.find("volume") !== undefined) {
       const audio = await loadAudioSettings(settings);
       if (audio.outputFormat !== undefined) {

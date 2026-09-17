@@ -121,7 +121,7 @@ test("fullscreen CIN pauses its clock and audio, targets a second seat, and comp
   expect(fullscreen.close()?.kind).toBe("release-image");
 });
 
-test("material uploads acknowledge execution and OGV reports the missing decoder", () => {
+test("material uploads acknowledge execution and malformed OGV fails before native admission", () => {
   const identity = createIdentityOwner("material-media");
   const options: CinematicOptions = { clock: { sample: () => 0 }, target: { kind: "material", id: "wall" },
     onAudio: () => {}, onAudioReset: () => {}, onAudioPause: () => {}, onComplete: () => {} };
@@ -137,7 +137,7 @@ test("material uploads acknowledge execution and OGV reports the missing decoder
   material.resolve(operation => { operations.push(operation.kind); });
   expect(operations).toEqual(["create-image"]);
   expect(material.close()?.kind).toBe("release-image");
-  expect(() => new CinematicPlayback({ format: "ogv", source: "intro.ogv" }, options)).toThrow("not implemented yet");
+  expect(() => new CinematicPlayback(cinematicBytes("ogv", new Uint8Array([0]), "intro.ogv"), options)).toThrow("Invalid or truncated Ogg page");
 });
 
 const corpus = "/home/buzzkill/Projects/qfiles";
@@ -406,3 +406,66 @@ test.skipIf(process.env["SDL_AUDIODRIVER"] !== "dummy" || !existsSync("../qfiles
     movies.close(); expect(assets.images.drainOperations()).toHaveLength(0);
   } finally { movies.close(); audio.close(); assets.close(); await content.close(); }
 }, 30000);
+
+test("cinematic timeline freezes across pause, hold and completion", () => {
+  const clock = { time: 0, sample(): number { return this.time; } }, completed: CinematicEndReason[] = [];
+  const playback = new CinematicPlayback(cinematicBytes("cin", shortCin(), "video/unit.cin"), {
+    clock, target: { kind: "material", id: "timeline" }, hold: true,
+    onAudio: () => {}, onAudioReset: () => {}, onAudioPause: () => {}, onComplete: reason => { completed.push(reason); },
+  });
+  clock.time = 100; playback.tick(); playback.pause(true);
+  const paused = playback.timeline; clock.time = 9000;
+  expect(playback.timeline).toEqual(paused);
+  playback.pause(false); clock.time = 9100; playback.tick();
+  expect(playback.timeline.elapsedMilliseconds).toBe(200);
+  for (let tick = 0; tick < 20 && playback.status !== "held"; tick++) { clock.time += 72; playback.tick(); }
+  expect(playback.status).toBe("held");
+  const held = playback.timeline; clock.time += 10000; playback.tick();
+  expect(playback.timeline).toEqual(held);
+  expect(playback.timeline.source).toBe("video/unit.cin");
+  playback.skip(); playback.skip(); playback.close();
+  expect(completed).toEqual(["skipped"]);
+});
+
+test("Ogg demux joins continued packets and separates the original Vorbis pages", async () => {
+  const { decodeOggMovie } = await import("../../src/media/ogg.ts");
+  const page = (serial: number, sequence: number, flags: number, lacing: readonly number[], payload: Uint8Array): Uint8Array => {
+    const bytes = new Uint8Array(27 + lacing.length + payload.length), view = new DataView(bytes.buffer);
+    bytes.set([79, 103, 103, 83, 0, flags]); view.setBigInt64(6, -1n, true); view.setUint32(14, serial, true); view.setUint32(18, sequence, true);
+    bytes[26] = lacing.length; bytes.set(lacing, 27); bytes.set(payload, 27 + lacing.length);
+    let crc = 0;
+    for (const byte of bytes) { crc ^= byte << 24; for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1; }
+    view.setUint32(22, crc >>> 0, true); return bytes;
+  };
+  const header = new Uint8Array(267); header.set([128, 116, 104, 101, 111, 114, 97]);
+  const first = page(1, 0, 2, [255], header.subarray(0, 255));
+  const tail = new Uint8Array(12 + 7 + 7 + 1); tail.set(header.subarray(255));
+  tail.set([129, 116, 104, 101, 111, 114, 97], 12); tail.set([130, 116, 104, 101, 111, 114, 97], 19);
+  const last = page(1, 1, 5, [12, 7, 7, 1], tail), audio = page(2, 0, 6, [7], new Uint8Array([1, 118, 111, 114, 98, 105, 115]));
+  const bytes = new Uint8Array(first.length + audio.length + last.length); bytes.set(first); bytes.set(audio, first.length); bytes.set(last, first.length + audio.length);
+  const movie = decodeOggMovie(bytes);
+  expect(movie.video.length).toBe(4); expect(movie.video[0]?.data).toEqual(header); expect(movie.video[3]?.last).toBe(true);
+  expect(movie.audio).toEqual(audio);
+  const corrupt = bytes.slice(); corrupt[corrupt.length - 1] = 1;
+  expect(() => decodeOggMovie(corrupt)).toThrow("checksum");
+  expect(() => decodeOggMovie(bytes.subarray(0, bytes.length - 1))).toThrow("Truncated Ogg page payload");
+});
+
+test.skipIf(process.env["QUAKE_MEDIA_NATIVE"] !== "1")("installed rerelease OGV decodes Theora frames and synchronized Vorbis through the shared media owner", async () => {
+  const path = `${corpus}/q2/rerelease/baseq2/video/eou1_.ogv`, bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+  const clock = { time: 0, sample(): number { return this.time; } }, audio: CinematicAudio[] = [];
+  const playback = new CinematicPlayback(cinematicBytes("ogv", bytes, path), { clock, target: { kind: "material", id: "rerelease" },
+    onAudio: block => { audio.push(block); }, onAudioReset: () => {}, onAudioPause: () => {}, onComplete: () => {} });
+  try {
+    const first = playback.currentFrame;
+    expect(first).not.toBeNull(); expect(first?.rgba.length).toBe((first?.width ?? 0) * (first?.height ?? 0) * 4);
+    clock.time = 250; const next = playback.tick().frame;
+    expect(next?.index).toBeGreaterThan(first?.index ?? -1);
+    expect(audio.length).toBeGreaterThan(0); expect(audio[0]?.sourceSample).toBe(0); expect(audio[0]?.resetStream).toBe(true);
+    let samples = 0;
+    for (const block of audio) { expect(block.sourceSample).toBe(samples); expect(block.sourceTime).toBe(block.sourceSample * 1000 / block.sampleRate); samples += block.samples.length / block.channels; }
+    playback.pause(true); const paused = playback.timeline; clock.time = 10000; playback.tick(); expect(playback.timeline).toEqual(paused);
+    playback.pause(false); clock.time += 100; playback.tick(); expect(playback.timeline.elapsedMilliseconds).toBe(350);
+    playback.skip(); expect(playback.status).toBe("ended");
+  } finally { playback.close(); }
+});

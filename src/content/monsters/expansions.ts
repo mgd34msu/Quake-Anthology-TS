@@ -1,3 +1,4 @@
+import { mg3MonsterResources } from "./mg3-resources.ts";
 import type { MonsterSourceDefinition } from "./definitions.ts";
 import { q1MonsterSources } from "./q1.ts";
 
@@ -167,4 +168,8 @@ export const q1ExpansionMonsterSources: readonly MonsterSourceDefinition[] = q1M
 export const q1AddonMonsterSources: readonly MonsterSourceDefinition[] = q1MonsterSources.filter(source => source.edition === "rerelease").flatMap(source => [
   { ...source, provider: "q1:monsters/rerelease/dopa", family: "q1", program: "dopa", creatures: source.creatures },
   { ...source, provider: "q1:monsters/rerelease/mg1", family: "q1", program: "mg1", creatures: source.creatures },
+  { ...source, provider: "q1:monsters/rerelease/mg3", family: "q1", program: "mg3", creatures: { ...source.creatures,
+    ...Object.fromEntries(Object.entries(mg3MonsterResources).map(([classname, definition]) => [classname, { resources: [...new Set([
+      ...Object.values(source.creatures).flatMap(creature => creature.resources), ...definition.resources,
+    ])] }])) } },
 ]);

@@ -14,3 +14,5 @@ export * from "./material.ts";
 export * from "./audio.ts";
 export * from "./still.ts";
 export * from "./transitions.ts";
+export * from "./ogg.ts";
+export * from "./ogv-playback.ts";

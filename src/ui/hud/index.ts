@@ -1,3 +1,5 @@
+import { accessibleColors } from "../common/accessibility.ts";
+import { captionCommands } from "../common/captions.ts";
 import { drawWeaponHud, hudStatusRows } from "./weapon.ts";
 import { drawPowerupTimers } from "./powerups.ts";
 import type { CommonWeaponHud } from "./weapon.ts";
@@ -72,6 +74,9 @@ export interface CommonHudData {
   readonly wheel: WheelPresentation | null;
   readonly carousel: CarouselPresentation | null;
   readonly crosshair: { readonly visible: boolean; readonly color: Vec4; readonly image: ResourceId | null };
+  readonly helpPath?: { readonly origin: Vec3; readonly direction: Vec3 } | null;
+  readonly damageIndicators?: readonly { readonly origin: Vec3; readonly amount: number; readonly expiresMilliseconds: number }[];
+  readonly pickup?: { readonly name: string; readonly icon: ResourceId | null; readonly expiresMilliseconds: number } | null;
   readonly hitMarker: { readonly damage: number; readonly expiresMilliseconds: number } | null;
 }
 export function emptyHudData(seat: SeatId): CommonHudData {
@@ -87,16 +92,23 @@ export class SeatHudMessages {
   private sequence = 0;
   private notices: UiNotification[] = [];
   private center: CenterPrintState | null = null;
+  private readonly queuedCenters: CenterPrintState[] = [];
   private readonly points: HudPointOfInterest[] = [];
   constructor(readonly seat: SeatId) {}
   notify(seat: SeatId, text: string, chat: boolean, starts: SourceTime, duration: SourceTime): void {
     this.requireSeat(seat); this.notices.push({ sequence: this.sequence++, text, chat, starts, duration });
   }
-  centerPrint(seat: SeatId, text: string, starts: SourceTime, duration: SourceTime, instant = true): void {
-    this.requireSeat(seat); this.center = { text, starts, duration, instant };
+  centerPrint(seat: SeatId, text: string, starts: SourceTime, duration: SourceTime, instant = true, characterMilliseconds = 125): void {
+    this.requireSeat(seat);
+    if (instant) { this.queuedCenters.length = 0; this.center = { text, starts, duration, instant }; return; }
+    const prior = this.queuedCenters.at(-1) ?? this.center;
+    const start = Math.max(milliseconds(starts), prior === null ? 0 : milliseconds(prior.starts) + milliseconds(prior.duration));
+    const print: CenterPrintState = { text, starts: { kind: "milliseconds", value: start }, instant, characterMilliseconds,
+      duration: { kind: "milliseconds", value: milliseconds(duration) + Array.from(text).length * characterMilliseconds } };
+    if (this.center === null) this.center = print; else this.queuedCenters.push(print);
   }
   clearNotify(): void { this.notices = []; }
-  clearCenterPrint(): void { this.center = null; }
+  clearCenterPrint(): void { this.center = null; this.queuedCenters.length = 0; }
   clear(): void { this.clearNotify(); this.clearCenterPrint(); this.points.length = 0; }
   /** Keyed POIs replace matching IDs; unkeyed POIs replace only expired or oldest unkeyed entries. */
   addPoint(seat: SeatId, point: HudPointOfInterest, nowMilliseconds: number, capacity = 64): boolean {
@@ -119,7 +131,7 @@ export class SeatHudMessages {
   }
   active(nowMilliseconds: number): { readonly notifications: readonly UiNotification[]; readonly centerPrint: CenterPrintState | null; readonly points: readonly HudPointOfInterest[] } {
     this.notices = this.notices.filter(notice => milliseconds(notice.starts) + milliseconds(notice.duration) > nowMilliseconds);
-    if (this.center !== null && milliseconds(this.center.starts) + milliseconds(this.center.duration) <= nowMilliseconds) this.center = null;
+    while (this.center !== null && milliseconds(this.center.starts) + milliseconds(this.center.duration) <= nowMilliseconds) this.center = this.queuedCenters.shift() ?? null;
     return { notifications: this.notices.filter(notice => alive(notice.starts, notice.duration, nowMilliseconds)),
       centerPrint: this.center !== null && alive(this.center.starts, this.center.duration, nowMilliseconds) ? this.center : null,
       points: this.points.filter(point => point.expiresMilliseconds > nowMilliseconds) };
@@ -141,9 +153,8 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   const preferences = options.preferences, skin = options.skin;
   const commands: { readonly command: UiDrawCommand; readonly anchor: Vec2; readonly scale: number; readonly transform?: UiTransform }[] = [];
   let anchor: Vec2 = { x: 320, y: 240 }, groupScale = preferences.hudScale * context.binding.hudScale;
-  const color = preferences.highContrast ? { x: 1, y: 1, z: 1, w: 1 } : skin.colors.text;
-  const accent = preferences.highContrast ? { x: 1, y: 1, z: 0, w: 1 } : skin.colors.accent;
-  const background = preferences.highContrast ? { x: 0, y: 0, z: 0, w: 1 } : skin.colors.panel;
+  const palette = accessibleColors(skin.colors, preferences);
+  const color = palette.text, accent = palette.accent, background = palette.panel;
   const textScale = skin.fontScale * preferences.textScale, lineHeight = skin.lineHeight * preferences.textScale;
   const status = statusLayout(context, data.vitals.length + (data.weapon === undefined || data.weapon.nativeStatus ? 0 : 1), preferences.hudScale, textScale, skin.capInk?.height);
   const statusCommand = (command: UiDrawCommand): void => { commands.push({ command, anchor, scale: groupScale, transform: status.transform }); };
@@ -220,9 +231,25 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   if (state.centerPrint !== null) {
     const print = state.centerPrint;
     const elapsed = context.timeMilliseconds - milliseconds(print.starts);
-    const value = print.instant ? print.text : Array.from(print.text).slice(0, Math.max(0, Math.floor(elapsed * 0.008))).join("");
+    const value = print.instant ? print.text : Array.from(print.text).slice(0, Math.max(0, Math.floor(elapsed / (print.characterMilliseconds ?? 125)))).join("");
     const lines = value.split("\n"), start = 160 - lines.length * lineHeight / 2;
     lines.forEach((line, index) => text(line, 320, start + index * lineHeight, color, "center"));
+  }
+  if (options.camera !== null && !preferences.reducedFlashes) {
+    const camera = options.camera;
+    for (const damage of data.damageIndicators ?? []) {
+      if (damage.expiresMilliseconds <= context.timeMilliseconds) continue;
+      const delta = { x: damage.origin.x - camera.origin.x, y: damage.origin.y - camera.origin.y, z: damage.origin.z - camera.origin.z };
+      const dot = (axis: Vec3): number => delta.x * axis.x + delta.y * axis.y + delta.z * axis.z;
+      const horizontal = -dot(camera.axis[1]), vertical = dot(camera.axis[0]), length = Math.hypot(horizontal, vertical) || 1;
+      const tint = { x: 1, y: 0.15, z: 0.05, w: Math.min(1, (damage.expiresMilliseconds - context.timeMilliseconds) / 400) };
+      for (let step = 0; step < 3; step++) fill({ x: 317 + horizontal / length * (55 + step * 7), y: 237 - vertical / length * (55 + step * 7), width: 6, height: 6 }, tint);
+    }
+  }
+  if (data.pickup !== undefined && data.pickup !== null && data.pickup.expiresMilliseconds > context.timeMilliseconds) {
+    anchor = { x: 320, y: 480 };
+    if (data.pickup.icon !== null) image(data.pickup.icon, { x: 184, y: 346, width: 28, height: 28 });
+    text(data.pickup.name, 320, 350, accent, "center");
   }
   if (data.inventory !== null) {
     fill({ x: 128, y: 72, width: 384, height: 328 }, background);
@@ -241,12 +268,7 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
   for (const [index, prompt] of data.prompts.entries()) {
     const y = 394 - (data.prompts.length - index - 1) * (lineHeight + 4);
     if (prompt.icon !== null) image(prompt.icon, { x: 176, y: y - 2, width: lineHeight + 4, height: lineHeight + 4 });
-    text(`[${prompt.binding}] ${options.localize(prompt.action)}`, 320, y, accent, "center");
-  }
-  if (preferences.captions) for (const [index, caption] of data.captions.entries()) {
-    const y = 360 - (data.captions.length - index - 1) * (lineHeight + 6);
-    fill({ x: 40, y: y - 3, width: 560, height: lineHeight + 6 }, background);
-    text(`${caption.localizedSpeaker === null ? "" : `${caption.localizedSpeaker}: `}${caption.localizedText}`, 320, y, color, "center");
+    text(`${prompt.binding === "" ? "" : `[${prompt.binding}] `}${options.localize(prompt.action)}`, 320, y, accent, "center");
   }
   if (data.help !== null) {
     anchor = { x: 320, y: 240 }; groupScale = 1;
@@ -292,6 +314,14 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
     x: transform.x + item.anchor.x * transform.scale * (1 - item.scale), y: transform.y + item.anchor.y * transform.scale * (1 - item.scale) })));
   if (options.camera !== null) {
     const project = createViewProjector(options.camera), area = options.camera.viewport;
+    if (data.helpPath !== undefined && data.helpPath !== null) {
+      for (const distance of [0, 24, 48]) {
+        const origin = data.helpPath.origin, direction = data.helpPath.direction;
+        const point = project({ x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance });
+        if (point.w > 0) result.push({ kind: "fill", rect: { x: area.x + (point.x / point.w * 0.5 + 0.5) * area.width - 3,
+          y: area.y + (-point.y / point.w * 0.5 + 0.5) * area.height - 3, width: 6, height: 6 }, color: accent });
+      }
+    }
     for (const point of state.points) {
       const clip = project(point.origin), divisor = clip.w === 0 ? 1 : clip.w;
       let x = area.x + (clip.x / divisor * 0.5 + 0.5) * area.width, y = area.y + (-clip.y / divisor * 0.5 + 0.5) * area.height;
@@ -305,5 +335,8 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
           w: point.color.w * (point.hideOnAim ? Math.max(0.25, Math.min(1, distance / Math.max(1, width * 3))) : 1) } });
     }
   }
+  if (preferences.captions) result.push(...captionCommands(data.captions,
+    { x: area.x + 8, y: area.y + area.height * 0.6, width: area.width - 16, height: area.height * 0.22 }, skin.font,
+    textScale * transform.scale, options.measureText ?? ((text, scale) => Array.from(text).length * 8 * scale), skin.capInk));
   result.push({ kind: "clip", rect: null }); return result;
 }

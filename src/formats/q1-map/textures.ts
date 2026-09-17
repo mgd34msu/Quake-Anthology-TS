@@ -9,7 +9,7 @@ export interface Q1TextureLump {
   readonly mipOffsets: readonly (readonly [number, number, number, number] | null)[];
 }
 
-export function readTextures(reader: BinaryReader): Q1TextureLump {
+export function readTextures(reader: BinaryReader, quake64 = false): Q1TextureLump {
   if (reader.length === 0) return { textures: [], offsets: [], mipOffsets: [] };
   const count = reader.i32();
   if (count < 0 || count > reader.remaining / 4) throw new BinaryError(reader.source, 0, `invalid miptex count ${count}`);
@@ -23,25 +23,28 @@ export function readTextures(reader: BinaryReader): Q1TextureLump {
   const mipOffsets: (readonly [number, number, number, number] | null)[] = [];
   for (const offset of offsets) {
     if (offset === null) { textures.push(null); mipOffsets.push(null); continue; }
-    const header = reader.section(offset, 40);
+    const headerSize = quake64 ? 44 : 40;
+    const header = reader.section(offset, headerSize);
     const name = header.fixedByteString(16);
     const width = header.u32();
     const height = header.u32();
+    const metadata = quake64 ? { quake64Shift: header.u32() } : {};
     const mips: [number, number, number, number] = [header.u32(), header.u32(), header.u32(), header.u32()];
     mipOffsets.push(mips);
     if (width === 0 || height === 0) throw new BinaryError(reader.source, offset, "zero-sized mip texture");
-    if (mips.every((value) => value === 0)) {
+    if (!quake64 && mips.every((value) => value === 0)) {
       textures.push({ kind: "external", name, width, height });
       continue;
     }
     const level = (mipOffset: number, scale: number): Uint8Array => {
-      if (mipOffset < 40) throw new BinaryError(reader.source, offset + mipOffset, "mip pixels overlap texture header");
+      if (quake64 && mipOffset === 0) return new Uint8Array();
+      if (mipOffset < headerSize) throw new BinaryError(reader.source, offset + mipOffset, "mip pixels overlap texture header");
       const length = Math.floor(width / scale) * Math.floor(height / scale);
       return reader.section(offset + mipOffset, length).bytes(length);
     };
     textures.push({
-      kind: "embedded", name, width, height,
-      levels: [level(mips[0], 1), level(mips[1], 2), level(mips[2], 4), level(mips[3], 8)],
+      kind: "embedded", name, width, height, ...metadata,
+      levels: [level(quake64 ? headerSize : mips[0], 1), level(mips[1], 2), level(mips[2], 4), level(mips[3], 8)],
     });
   }
   return { textures, offsets, mipOffsets };

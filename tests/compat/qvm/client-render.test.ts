@@ -211,3 +211,30 @@ test("guest scene admission keeps refentity slots, polygon membership, and earli
   expect(cleared.admission.entities).toHaveLength(0); expect(cleared.admission.polygons).toHaveLength(0);
   expect(first.admission.entities).toHaveLength(6); expect(first.admission.polygons).toHaveLength(1);
 });
+
+import { createContentDigest, createContentId, createMountId, createMountIdentity, createMountPlanId, createResourceId } from "../../../src/contracts/content.ts";
+import type { ResolvedResourceReference } from "../../../src/contracts/content.ts";
+import type { SceneModel } from "../../../src/content/q3/presentation/ref-entity.ts";
+
+test("renderer diagnostics retain real handles, exclude failures, and snapshot registration membership", async () => {
+  const f = await fixture();
+  const fields: Omit<ResolvedResourceReference, "id"> = { requestedPath: "sprite.sp2", byteLength: 0,
+    digest: createContentDigest(new Bun.CryptoHasher("sha256").update(new Uint8Array()).digest("hex")),
+    provenance: { kind: "loose", memberPath: "sprite.sp2", mount: { kind: "loose", rootPath: "/", identity: createMountIdentity(createMountId("diagnostics", "fixture"),
+      createContentId({ family: "q2", edition: "classic", package: "base", revision: "test" }), 0) } },
+    resolution: { kind: "default-order", plan: createMountPlanId("diagnostics", "fixture"), rank: 0 } };
+  const model: SceneModel = { kind: "model", path: "sprite.sp2", resource: { ...fields, id: createResourceId(fields) },
+    model: { kind: "q2-sp2", bounds: { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } },
+      frames: [{ image: "sprite.pcx", width: 2, height: 2, originX: 1, originY: 1 }] } };
+  const resources = new Q3RendererResources({ ...f.resources.host, model: async path => path === "missing" ? DEFAULT_MODEL : model,
+    skin: async path => path === "missing" ? null : f.skin });
+  const emptyModels = resources.registeredModels(), emptySkins = resources.registeredSkins();
+  await resources.registerModel("missing"); await resources.registerSkin("missing");
+  expect(resources.registeredModels()).toEqual([]); expect(resources.registeredSkins()).toEqual([]);
+  await resources.registerModel("sprite.sp2"); await resources.registerModel("alias.sp2");
+  await resources.registerSkin("skin"); await resources.registerSkin("skin-alias");
+  expect(resources.registeredModels()).toEqual([{ path: "sprite.sp2", handle: 1, model }]);
+  expect(resources.registeredSkins()).toEqual([{ path: "skin", handle: 1, skin: f.skin }]);
+  expect(resources.modelForHandle(1)).toBe(model); expect(resources.skinForHandle(1)).toBe(f.skin);
+  expect(emptyModels).toEqual([]); expect(emptySkins).toEqual([]);
+});

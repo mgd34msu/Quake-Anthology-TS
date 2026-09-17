@@ -1,3 +1,4 @@
+import type { InputDevices } from "./input-devices.ts";
 import type { ApplicationVideoRestart, PreparedVideoPresentation } from "./video-restart.ts";
 import type { MusicControls } from "../../audio/music.ts";
 import type { ApplicationCapture } from "./capture.ts";
@@ -58,6 +59,7 @@ export interface ClientBootstrap {
   readonly renderer: NativeRenderer;
   readonly imageSettings: ApplicationImageSettings;
   readonly controllers: SdlControllers;
+  readonly inputDevices: InputDevices;
   readonly settings: ConfigStore;
   readonly output: { current: UnifiedAudio };
   readonly platform: { current: ClientInputPublication | null };

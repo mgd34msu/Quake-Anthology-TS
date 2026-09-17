@@ -17,8 +17,9 @@ import { decodeQ2PlayersCheckpoint, encodeQ2PlayersCheckpoint, decodeQ2Character
 import { decodeQ2RereleasePlayersCheckpoint, encodeQ2RereleasePlayersCheckpoint, decodeQ2RereleaseModuleCheckpoint, encodeQ2RereleaseModuleCheckpoint } from "../../../src/persistence/q2-rerelease-state.ts";
 import { killQ2RereleaseBox } from "../../../src/content/q2/rerelease/killbox.ts";
 import { q2WorldText } from "../../../src/content/q2/rerelease/world-text.ts";
+import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
 
-function rerelease(initializeInventory = true, worldFields = "") {
+function rerelease(initializeInventory = true, worldFields = "", startItems = "") {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const inventory = new SharedInventoryTable(actors), combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
@@ -33,6 +34,7 @@ function rerelease(initializeInventory = true, worldFields = "") {
     const value = movements.get(actor); if (value === undefined) throw new Error("missing player movement"); return value;
   };
   const hooks: Q2PlayerHooks = { movement, setMovement: () => undefined, emit: () => undefined, noise: () => undefined, banned: () => false,
+    persistentInventoryInitialized: (entity, game) => items.giveStartItems(entity.actor, game, startItems),
     weaponInput: () => ({ attack: false, latchedAttack: false, holster: false, angles: zero, ducked: false, spectator: false, notarget: false,
       hand: "right", animatePlayer: false, quadUntil: 0, doubleUntil: 0, quadFireUntil: 0, haste: false, noStackDouble: false, instantSwitch: false,
       quickSwitch: false, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false }) };
@@ -135,6 +137,13 @@ test("rerelease pickups and fog preserve independent split players", () => {
   expect(active.inventory.count(second.actor.id, "q2:ammo_shells")).toBe(10);
   expect(game.entity(ammo.actor.id)).toBe(ammo);
   expect(active.messages).toEqual(["per player pickup", "per player pickup"]);
+  const saved = decodeQ2RereleaseModuleCheckpoint(encodeQ2RereleaseModuleCheckpoint(module.capture()));
+  active.events.length = 0;
+  module.restore(game, saved);
+  expect(active.events.filter(event => event.kind === "item-visibility")).toEqual([
+    { kind: "item-visibility", actor: first.actor.id, item: ammo.actor.id, visible: false },
+    { kind: "item-visibility", actor: second.actor.id, item: ammo.actor.id, visible: false },
+  ]);
   const fog = game.spawn({ classname: "trigger_fog", ordinal: 3, values: new Map([["spawnflags", "9"], ["fog_density", "0.6"], ["fog_color", "0.2 0.3 0.4"]]) });
   fog.touch?.(fog, game, { self: fog.actor, other: first.actor.id, plane: null, surface: null });
   module.forceFog(first.actor.id, false);
@@ -332,4 +341,73 @@ test("flashlight presentation follows source hand and suppresses death/intermiss
   module.toggleFlashlight(first.actor.id, game, false);
   expect(events.at(-1)).toMatchObject({ enabled: false });
   expect(players.extra(first.actor.id).flashlight).toBe(false);
+});
+
+test("authored starting items use native pickups, explicit ammo counts and zero removal without leaked temporary entities", () => {
+  const { game, items, first, inventory } = rerelease();
+  const before = game.entities.size;
+  items.giveStartItems(first.actor, game, "weapon_shotgun;ammo_shells 20;key_data_cd");
+  expect(inventory.count(first.actor.id, "q2:weapon_shotgun")).toBe(1);
+  expect(inventory.count(first.actor.id, "q2:ammo_shells")).toBeGreaterThanOrEqual(20);
+  expect(inventory.count(first.actor.id, "q2:key_data_cd")).toBe(1);
+  expect(game.entities.size).toBe(before);
+  items.giveStartItems(first.actor, game, "weapon_shotgun 0;ammo_shells 0;key_data_cd 0");
+  expect(inventory.count(first.actor.id, "q2:weapon_shotgun")).toBe(0);
+  expect(inventory.count(first.actor.id, "q2:ammo_shells")).toBe(0);
+  expect(inventory.count(first.actor.id, "q2:key_data_cd")).toBe(0);
+  expect(() => items.giveStartItems(first.actor, game, "key_data_cd;not_an_item")).toThrow("Invalid Q2 starting item");
+  expect(inventory.count(first.actor.id, "q2:key_data_cd")).toBe(0);
+});
+
+test("restored campaign presentation preserves marker deadline and help visibility without replaying compass callbacks", () => {
+  const active = rerelease(), { game, first, module, players, events } = active;
+  const state = players.states.get(first.actor.id); if (state === undefined) throw new Error("Missing player state");
+  state.showHelp = true; module.campaign.mission.primary = "Open the gate";
+  active.advance(2); module.sendPoi(first.actor.id, game);
+  const saved = decodeQ2RereleasePlayersCheckpoint(encodeQ2RereleasePlayersCheckpoint(players.captureRerelease()));
+  expect(saved.players.find(entry => entry.actor.slot === first.actor.id.slot)?.state.helpMarkerUntil).toBe(12);
+  events.length = 0; active.advance(5); module.resumePresentation(game, first.actor.id);
+  expect(events.find(event => event.kind === "poi")).toMatchObject({ duration: 7000 });
+  expect(events.find(event => event.kind === "help-computer")).toMatchObject({ visible: true, primary: "Open the gate" });
+  events.length = 0; active.advance(13); module.resumePresentation(game, first.actor.id);
+  expect(events.some(event => event.kind === "poi" || event.kind === "help-path")).toBe(false);
+  const campaign = structuredClone(module.campaign); campaign.crossUnitFlags = 123;
+  module.restoreCampaign(campaign); campaign.mission.primary = "mutated caller";
+  expect(module.campaign.crossUnitFlags).toBe(123);
+  expect(module.campaign.mission.primary).toBe("Open the gate");
+});
+
+test("authored Q2 grants and removals preserve selected foreign arsenal mapping", () => {
+  const { game, items, first, inventory } = rerelease();
+  inventory.configure(first.actor, { item: "q3:weapon/shotgun", count: 0, capacity: 1 });
+  inventory.configure(first.actor, { item: "q3:ammo/shells", count: 0, capacity: 200 });
+  inventory.configure(first.actor, { item: "q3:weapon/grenadelauncher", count: 0, capacity: 1 });
+  inventory.configure(first.actor, { item: "q3:ammo/grenades", count: 0, capacity: 200 });
+  items.setPickupAdmission(new SharedPickupAdmission({ inventory, profile: { id: "q3:fixture", weaponOwnership: "all-destinations",
+    ammo: [{ source: "q2:ammo_shells", destinations: ["q3:ammo/shells"] }, { source: "q2:ammo_grenades", destinations: ["q3:ammo/grenades"] }],
+    weapons: [{ source: "q2:weapon_shotgun", destinations: ["q3:weapon/shotgun"] }, { source: "q2:ammo_grenades", destinations: ["q3:weapon/grenadelauncher"] }] },
+    ammoGranted: () => undefined, weaponGranted: () => undefined }));
+  items.giveStartItems(first.actor, game, "weapon_shotgun;ammo_shells 20");
+  expect(inventory.count(first.actor.id, "q3:weapon/shotgun")).toBe(1);
+  expect(inventory.count(first.actor.id, "q3:ammo/shells")).toBeGreaterThanOrEqual(20);
+  expect(inventory.count(first.actor.id, "q2:weapon_shotgun")).toBe(0);
+  items.giveStartItems(first.actor, game, "weapon_shotgun 0;ammo_shells 0");
+  expect(inventory.count(first.actor.id, "q3:weapon/shotgun")).toBe(0);
+  expect(inventory.count(first.actor.id, "q3:ammo/shells")).toBe(0);
+  items.giveStartItems(first.actor, game, "weapon_blaster 0;ammo_grenades 200");
+  expect(inventory.count(first.actor.id, "q3:weapon/grenadelauncher")).toBe(1);
+  expect(inventory.count(first.actor.id, "q3:ammo/grenades")).toBe(200);
+  items.giveStartItems(first.actor, game, "ammo_grenades 0");
+  expect(inventory.count(first.actor.id, "q3:weapon/grenadelauncher")).toBe(0);
+  expect(inventory.count(first.actor.id, "q3:ammo/grenades")).toBe(0);
+});
+
+test("dead carry rebuilds native starting inventory once while living travel retains its current count", () => {
+  const { game, items, first, players, inventory } = rerelease(true, "", "ammo_shells 20");
+  items.giveStartItems(first.actor, game, "ammo_shells 7");
+  const living = players.saveCarry(first, game);
+  players.restoreCarry(first, game, living);
+  expect(inventory.count(first.actor.id, "q2:ammo_shells")).toBe(7);
+  players.restoreCarry(first, game, { ...living, health: 0 });
+  expect(inventory.count(first.actor.id, "q2:ammo_shells")).toBe(20);
 });

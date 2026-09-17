@@ -48,6 +48,7 @@ interface Q1MipTextureHeader {
   readonly name: string;
   readonly width: number;
   readonly height: number;
+  readonly quake64Shift?: number;
 }
 export type Q1MipTexture = Q1MipTextureHeader & ({ readonly kind: "external" }
   | { readonly kind: "embedded"; readonly levels: readonly [Uint8Array, Uint8Array, Uint8Array, Uint8Array] });
@@ -83,7 +84,7 @@ export interface Q1WorldModel {
 }
 export interface Q1WorldGeometry {
   readonly kind: "q1-bsp";
-  readonly format: "bsp29" | "bsp2" | "2psb";
+  readonly format: "bsp29" | "bsp2" | "2psb" | "quake64";
   readonly entities: string;
   readonly planes: readonly BspPlane[];
   readonly vertices: readonly Vec3[];

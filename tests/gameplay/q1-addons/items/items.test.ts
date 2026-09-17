@@ -1,3 +1,7 @@
+import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
+import { expansionSourceSupply } from "../../../../src/content/composition/expansion-source-supply.ts";
+import { Q1_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q1-q2-supply.ts";
+import { q2BaseWeaponInventory } from "../../../../src/content/q2/foundation/items.ts";
 import { expect, test } from "bun:test";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -14,6 +18,7 @@ import { registerQ1CampaignAddons, BLOODY_NIGHTMARE_ACTIVE, BLOODY_NIGHTMARE_NEW
 import { spawnSpammer } from "../../../../src/content/q1/addons/monsters/bosses/oldnew-children.ts";
 import { giveNextMg3Upgrade, mg3UpgradeFlag, mg3UpgradedMaximum, mg3HammerBodyFrame } from "../../../../src/content/q1/addons/items/index.ts";
 import type { Mg3Upgrade } from "../../../../src/content/q1/addons/items/index.ts";
+import { q1PowerupTimers } from "../../../../src/app/bootstrap/simulation/powerup-timers.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../src/persistence/q1-foundation.ts";
 import { openArchive } from "../../../../src/content/archive/index.ts";
@@ -26,21 +31,22 @@ interface Saved {
   readonly sources: ReturnType<SessionActorRegistry["sourceCheckpoint"]>;
   readonly bodies: readonly BodyCheckpoint[]; readonly combat: readonly CombatCheckpoint[]; readonly inventories: readonly InventoryCheckpoint[];
 }
-function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; readonly deathmatch?: number } = {}) {
+function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; readonly deathmatch?: number; readonly coop?: boolean; readonly itemFloor?: boolean } = {}) {
   const identity = createIdentityOwner("mg3-items-smoke");
   const actors = saved === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors), events: Q1Event[] = [], players: ActorId[] = [], pending = new Map<OwnedActor, number>();
   let runtime: Q1Foundation | null = null, hit: ActorId | null = null;
+  let contents: ReturnType<Q1FoundationHost["contents"]> = "empty";
   const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
-    trace: request => ({ fraction: hit === null || !request.monsters ? 1 : 0.5, end: request.end, normal: { x: -1, y: 0, z: 0 }, actor: request.monsters ? hit : null,
-      startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }), contents: () => "empty", walkMove: () => false,
+    trace: request => ({ fraction: options.itemFloor === true && request.start.z - request.end.z === 256 ? 0.5 : hit === null || !request.monsters ? 1 : 0.5, end: request.end, normal: { x: -1, y: 0, z: 0 }, actor: request.monsters ? hit : null,
+      startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }), contents: () => contents, walkMove: () => false,
     changeYaw: () => { throw new Error("This item fixture does not drive monster turning"); }, moveToGoal: () => undefined, checkBottom: () => false, pusherServices: () => { throw new Error("This fixture does not step native pushers"); },
     scheduleThink: (actor, seconds) => { pending.set(actor, seconds); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => players, checkClient: () => null,
     classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined };
-  const game = new Q1Foundation(host, { edition: "rerelease", skill: options.skill ?? 1, deathmatch: options.deathmatch ?? 0, coop: false, gravity: 800, maxClients: 2,
+  const game = new Q1Foundation(host, { edition: "rerelease", skill: options.skill ?? 1, deathmatch: options.deathmatch ?? 0, coop: options.coop ?? false, gravity: 800, maxClients: 2,
     campaign: "q1:mg3", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), sourceEffects: game.damageSourceEffects,
     armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
@@ -68,8 +74,55 @@ function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; reado
   function save(): Saved { return { source: decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(game.capture())), slots: actors.checkpoint(), sources: actors.sourceCheckpoint(),
     bodies: captureSharedBodies(actors, bodies), combat: actors.observations().flatMap(observation => { const state = combat.read(observation.id); return state === null ? [] : [{ actor: { slot: observation.id.slot, generation: observation.id.generation }, state }]; }),
     inventories: actors.observations().flatMap(observation => inventory.has(observation.id) ? [{ actor: { slot: observation.id.slot, generation: observation.id.generation }, entries: inventory.entries(observation.id) }] : []) }; }
-  return { actors, game, base, context, player, inventory, combat, events, pending, spawn, think, touch, save, hit: (entity: Q1Actor | null) => { hit = entity?.actor.id ?? null; } };
+  return { actors, game, base, context, player, inventory, combat, events, pending, spawn, think, touch, save, contents: (value: ReturnType<Q1FoundationHost["contents"]>) => { contents = value; }, hit: (entity: Q1Actor | null) => { hit = entity?.actor.id ?? null; } };
 }
+
+test("MG3 lava suit blocks all liquid hazards, restores its timer and expires distinctly from the biosuit", () => {
+  const state = session(undefined, { itemFloor: true });
+  try {
+    const suit = state.spawn("item_artifact_lavasuit"); state.think(suit, 0.2);
+    expect(suit.model).toBe("progs/lavasuit.mdl");
+    state.game.time = 1; state.touch(suit);
+    expect(state.player.powerups.get("mg3:lavasuit")).toBe(31);
+    expect(state.player.powerups.has("suit")).toBe(false);
+    expect(q1PowerupTimers(state.player.powerups, 1)).toContainEqual({ item: "q1:item_artifact_lavasuit", label: "Lava Suit", remainingSeconds: 30 });
+    for (const [index, liquid] of (["lava", "slime", "water"] satisfies readonly ReturnType<Q1FoundationHost["contents"]>[]).entries()) {
+      state.contents(liquid); state.player.airFinished = 0;
+      state.game.playerFrame(state.player.actor, index + 2, 3);
+      expect(state.game.health(state.player.actor.id)).toBe(50);
+    }
+    const restored = session(state.save());
+    try {
+      expect(restored.player.powerups.get("mg3:lavasuit")).toBe(31);
+      restored.contents("lava");
+      restored.game.playerFrame(restored.player.actor, 29, 3);
+      expect(restored.events.filter(event => event.kind === "message" && event.text === "$mg3_qc_lavasuit_wearing_out")).toHaveLength(1);
+      restored.game.playerFrame(restored.player.actor, 29.5, 3);
+      expect(restored.events.filter(event => event.kind === "message" && event.text === "$mg3_qc_lavasuit_wearing_out")).toHaveLength(1);
+      restored.game.playerFrame(restored.player.actor, 31, 3);
+      expect(restored.player.powerups.has("mg3:lavasuit")).toBe(false);
+      expect(restored.game.health(restored.player.actor.id)).toBe(20);
+      expect(q1PowerupTimers(restored.player.powerups, 31)).toEqual([]);
+      restored.game.givePowerup(restored.player, "suit");
+      restored.game.playerFrame(restored.player.actor, 32.1, 3);
+      expect(restored.game.health(restored.player.actor.id)).toBe(-10);
+    } finally { restored.actors.close(); }
+  } finally { state.actors.close(); }
+});
+
+test("MG3 coop lava suit respawns after 2.5 seconds and clears its fired target", () => {
+  const state = session(undefined, { coop: true, itemFloor: true });
+  try {
+    const suit = state.spawn("item_artifact_lavasuit"); state.think(suit, 0.2);
+    suit.target = "already-fired"; state.game.time = 1; state.touch(suit);
+    expect(suit.target).toBe("");
+    expect(state.pending.get(suit.actor)).toBe(3.5);
+    expect(suit.model).toBe("");
+    state.think(suit, 3.5);
+    expect(suit.model).toBe("progs/lavasuit.mdl");
+    expect(suit.solid).toBe("trigger");
+  } finally { state.actors.close(); }
+});
 
 test("retail MG3 upgrade identity, capacity refill, repeated pickup and saved continuation", async () => {
   const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/rerelease/mg3/pak0.pak");
@@ -222,4 +275,20 @@ test("retail MG3 bosses register source controllers and restore their live callb
       expect(() => restored.save()).not.toThrow();
     } finally { restored.actors.close(); }
   } finally { archive.close(); state.actors.close(); }
+});
+
+test("MG3 laser and hammer source pickups grant the selected foreign arsenal", () => {
+  const scene = session(undefined, { itemFloor: true });
+  try {
+    for (const entry of q2BaseWeaponInventory()) scene.inventory.configure(scene.player.actor, { ...entry, count: 0 });
+    scene.game.pickupAdmission = new SharedPickupAdmission({ inventory: scene.inventory, profile: expansionSourceSupply(Q1_Q2_SUPPLY_PROFILE), ammoGranted: () => undefined, weaponGranted: () => undefined });
+    for (const classname of ["weapon_laser_gun", "weapon_mjolnir"]) {
+      const item = scene.spawn(classname); scene.think(item, 0.2); scene.touch(item);
+      expect(scene.inventory.count(scene.player.actor.id, classname === "weapon_laser_gun" ? "q2:weapon_hyperblaster" : "q2:weapon_blaster")).toBe(1);
+      expect(item.solid).toBe("none");
+    }
+    expect(scene.inventory.count(scene.player.actor.id, "q2:ammo_cells")).toBe(60);
+    expect(scene.inventory.count(scene.player.actor.id, "q1:weapon/mg3:laser")).toBe(0);
+    expect(scene.inventory.count(scene.player.actor.id, "q1:weapon/mg3:mjolnir")).toBe(0);
+  } finally { scene.actors.close(); }
 });

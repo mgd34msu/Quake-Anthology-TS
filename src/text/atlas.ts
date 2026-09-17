@@ -20,7 +20,7 @@ export interface TextAtlas {
   readonly glyphs: ReadonlyMap<number, AtlasGlyph>;
 }
 export type TextFontSelection = { readonly kind: "classic"; readonly classic: TextAtlas; readonly unicode: TextAtlas | null }
-  | { readonly kind: "atlas"; readonly font: TextAtlas; readonly classic: TextAtlas };
+  | { readonly kind: "atlas"; readonly font: TextAtlas; readonly classic: TextAtlas; readonly fallbacks?: readonly TextAtlas[] };
 export interface FontImageServices {
   read(path: string): Promise<Uint8Array | null>;
   registerImage(name: string, content: RenderImage): Promise<RendererImage>;
@@ -89,6 +89,26 @@ export class TextFontRegistry {
       return this.register("truetype", key, atlas, atlas.lineHeight, glyphs);
     });
   }
+  async loadTrueTypePages(path: string, pixelSize: number, codepoints: readonly number[]): Promise<readonly TextAtlas[]> {
+    if (!Number.isInteger(pixelSize) || pixelSize <= 0 || pixelSize > 1024) throw new RangeError("Invalid TrueType pixel size");
+    const bytes = await this.services.read(path); if (bytes === null) return [];
+    const parsed = parseFont(bytes); if (!parsed.ok) throw new Error(`${path}: ${parsed.reason}`);
+    const coverage = [...new Set(codepoints)].filter(code => {
+      if (!Number.isInteger(code) || code < 0 || code > 0x10ffff || code >= 0xd800 && code <= 0xdfff) throw new RangeError("Font coverage must contain Unicode scalar values");
+      return parsed.font.cmapLookup(code) !== 0;
+    });
+    const pages: TextAtlas[] = [];
+    for (let offset = 0; offset < coverage.length; offset += 128) {
+      const codes = coverage.slice(offset, offset + 128), key = `truetype-page:${path}:${pixelSize}:${codes.join(",")}`;
+      const page = await this.cached(key, async () => {
+        const atlas = buildFontAtlas(parsed.font, codes, pixelSize), glyphs = new Map<number, AtlasGlyph>();
+        for (const [code, glyph] of atlas.glyphs) glyphs.set(code, { x: glyph.x, y: glyph.y, width: glyph.w, height: glyph.h, advance: glyph.w, color: glyph.color });
+        return this.register("truetype", key, atlas, atlas.lineHeight, glyphs);
+      });
+      if (page !== null) pages.push(page);
+    }
+    return pages;
+  }
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -149,6 +169,9 @@ export function resolveTextGlyph(selection: TextFontSelection, codepoint: number
   }
   const glyph = atlasGlyph(selection.font, codepoint);
   if (glyph !== null) return glyph;
+  for (const fallback of selection.fallbacks ?? []) {
+    const glyph = atlasGlyph(fallback, codepoint); if (glyph !== null) return glyph;
+  }
   if (codepoint <= 255) return classic(codepoint);
   return atlasGlyph(selection.font, 63) ?? classic(63);
 }

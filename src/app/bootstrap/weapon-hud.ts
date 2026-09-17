@@ -35,7 +35,7 @@ export class ApplicationWeaponHudAssets {
     const [weapon, ammo] = await Promise.all([load(icons.selectedWeapon ?? icons.weapon), load(icons.ammo)]);
     return { weapon, ammo };
   }
-  private load(icon: WeaponHudIcon): Promise<ResourceId> {
+  load(icon: WeaponHudIcon): Promise<ResourceId> {
     const key = icon.kind === "shader" ? `${icon.content}/${icon.name}` : `${icon.resource.content}/${icon.resource.path}/${icon.kind === "wad-picture" ? icon.lump : ""}`;
     const prior = this.pending.get(key); if (prior !== undefined) return prior;
     const pending = this.loadIcon(icon, key); this.pending.set(key, pending); return pending;

@@ -51,16 +51,16 @@ test("rejected traversal retries retain node eligibility and publish only admitt
  expect(f.runtime.checkpoint().admissionSeconds.some(edge=>edge.id===0)).toBe(false);
 });
 
-test("elevator waiting eligibility is distinct from grounded eligibility and refreshed next query", () => {
+for (const source of ["nav2", "nav3"] satisfies readonly ("nav2" | "nav3")[]) test(`${source} elevator waiting eligibility is distinct from grounded eligibility and refreshed next query`, () => {
  const f=fixture(), top={x:0,y:0,z:224.125}, bottom=f.origin;
  let phase: "top" | "bottom" = "top";
  const actor=createIdentityOwner("elevator-test").actor(1,1);
  const binding={model:1,bounds:{min:bottom,max:top},raw:[]};
  const graph: NavigationGraph={...f.graph, profile:{...profile,capabilities:new Set([...profile.capabilities,"mover"])},
-  nodes:f.graph.nodes.map(node=>({...node,origin:node.id===1?bottom:top,flags:node.id===2?64:0,source:{kind:"nav3",node:node.id,link:null}})),
+  nodes:f.graph.nodes.map(node=>({...node,origin:node.id===1?bottom:top,flags:node.id===2?64:0,source:{kind:source,node:node.id,link:null}})),
   edges:[
-   {id:0,from:1,to:2,start:bottom,end:top,mode:"walk",travelSeconds:1,sourceTravelType:0,sourceFlags:3,hint:null,entity:null,source:{kind:"nav3",node:1,link:0}},
-   {id:1,from:2,to:3,start:bottom,end:top,mode:"mover",travelSeconds:1,sourceTravelType:6,sourceFlags:3,hint:null,entity:binding,source:{kind:"nav3",node:2,link:1}},
+   {id:0,from:1,to:2,start:bottom,end:top,mode:"walk",travelSeconds:1,sourceTravelType:0,sourceFlags:3,hint:null,entity:null,source:{kind:source,node:1,link:0}},
+   {id:1,from:2,to:3,start:bottom,end:top,mode:"mover",travelSeconds:1,sourceTravelType:6,sourceFlags:3,hint:null,entity:binding,source:{kind:source,node:2,link:1}},
   ]};
  const world:NavigationWorld={...f.world,entity:()=>({actor,enabled:true,locked:false,bounds:binding.bounds,velocity:{x:0,y:0,z:0},destination:null,elevator:{origin:phase==="top"?top:bottom,bottom,top,phase}})};
  const runtime=new NavigationRuntime(graph,world),query={start:bottom,goal:top,startNode:1,goalNode:3};

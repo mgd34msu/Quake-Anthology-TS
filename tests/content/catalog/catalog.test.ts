@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { ContentId, ExecutionSelection, ProviderReference } from "../../../src/contracts/content.ts";
@@ -68,10 +68,13 @@ describe("installed content catalog", () => {
     const root = await mkdtemp(resolve(tmpdir(), "quake-catalog-"));
     try {
       const catalog = await discoverInstalledContent({ corpusRoot: root });
-      expect(expectedProducts).toHaveLength(25);
-      expect(catalog.products).toHaveLength(25);
-      expect(catalog.products.filter(product => product.availability.kind === "missing")).toHaveLength(24);
-      expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("unresolved");
+      expect(expectedProducts).toHaveLength(26);
+      expect(catalog.products).toHaveLength(26);
+      expect(catalog.products.filter(product => product.availability.kind === "missing")).toHaveLength(26);
+      expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("missing");
+      expect(catalog.product("q1-rerelease-quake64").expectation).toMatchObject({ contentDirectory: "q1/rerelease/q64", mapWitness: "maps/start.bsp", baseProduct: "q1-rerelease-id1" });
+      expect(catalog.product("q3-demota").expectation.baseProduct).toBeNull();
+      expect(catalog.product("q3-demota").availability.kind).toBe("missing");
       expect(() => catalog.require("q1-classic-id1")).toThrow("requires");
       expect(() => catalog.product("unknown-mod")).toThrow("Unknown requested content or mod");
       await mkdir(resolve(root, "q1/custom/maps"), { recursive: true });
@@ -79,6 +82,32 @@ describe("installed content catalog", () => {
       const withMod = await discoverInstalledContent({ corpusRoot: root });
       expect(withMod.product("q1-classic-custom").maps).toHaveLength(1);
       expect(withMod.product("q1-classic-custom").availability.kind).toBe("missing");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  test("Q3 mod descriptions preserve source bytes, root precedence and directory identity", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "quake-mod-descriptions-"));
+    const corpus = resolve(root, "corpus"), user = resolve(root, "user");
+    try {
+      for (const name of ["named", "long", "missing", "empty"]) await mkdir(resolve(corpus, `q3a/${name}/vm`), { recursive: true });
+      await mkdir(resolve(user, "q3a/named"), { recursive: true });
+      await mkdir(resolve(user, "q3a/empty"), { recursive: true });
+      await writeFile(resolve(corpus, "q3a/named/description.txt"), "Installed description");
+      await writeFile(resolve(user, "q3a/named/description.txt"), Buffer.from("User \xe9dition\0ignored", "latin1"));
+      await writeFile(resolve(corpus, "q3a/long/description.txt"), "x".repeat(60));
+      await writeFile(resolve(corpus, "q3a/empty/description.txt"), "Lower priority");
+      await writeFile(resolve(user, "q3a/empty/description.txt"), "");
+      const catalog = await discoverInstalledContent({ corpusRoot: corpus, userContentRoot: user });
+      expect(catalog.product("q3-classic-named").expectation.title).toBe("User \xe9dition");
+      expect(catalog.product("q3-classic-named").expectation.contentDirectory).toBe("q3a/named");
+      expect(catalog.product("q3-classic-named").expectation.baseProduct).toBe("q3-baseq3");
+      expect(catalog.product("q3-classic-long").expectation.title).toBe("x".repeat(48));
+      expect(catalog.product("q3-classic-missing").expectation.title).toBe("missing");
+      expect(catalog.product("q3-classic-empty").expectation.title).toBe("empty");
+      expect(catalog.product("q3-baseq3").expectation.title).toBe("Quake III Arena");
+      await writeFile(resolve(root, "outside.txt"), "Outside");
+      await symlink(resolve(root, "outside.txt"), resolve(corpus, "q3a/missing/description.txt"));
+      await expect(discoverInstalledContent({ corpusRoot: corpus, userContentRoot: user })).rejects.toThrow("Content symlink escapes root");
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -98,9 +127,9 @@ describe("installed content catalog", () => {
 
   test.skipIf(!existsSync(corpusRoot))("discovers the supplied 24 products and reads campaign progs under selected classic behavior", async () => {
     const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
-    expect(catalog.products).toHaveLength(25);
+    expect(catalog.products).toHaveLength(26);
     expect(catalog.products.filter(product => product.availability.kind === "installed")).toHaveLength(24);
-    expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("unresolved");
+    expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("missing");
     expect(catalog.mapsFor("q1-quakeworld").some(map => map.path === "maps/start.bsp")).toBe(true);
     const native = preset(catalog.product("q1-rerelease-mg1").id);
     const classic: ProviderReference = { provider: "q1:classic", content: catalog.product("q1-classic-id1").id };

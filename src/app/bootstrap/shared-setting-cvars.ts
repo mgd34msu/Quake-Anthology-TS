@@ -1,3 +1,5 @@
+import { registerRenderSettings } from "./render-settings.ts";
+import { registerInputDeviceCvars } from "../../input/device-settings.ts";
 import { registerMusicSettings } from "./audio/playlist-settings.ts";
 import { defaultAudioOutputFormat, type AudioOutputFormat } from "../../audio/output.ts";
 import { registerAudioOutputCvars, readAudioOutputCvars } from "./audio/output-settings.ts";
@@ -27,8 +29,14 @@ export function bindRunCvar(cvars: CvarRegistry, builder: InputCommandBuilder): 
 
 /** Shared aliases exist before source configuration executes in every world dialect. */
 export function registerSharedClientSettings(cvars: CvarRegistry, outputFormat: AudioOutputFormat = defaultAudioOutputFormat): void {
+  registerRenderSettings(cvars);
+  registerInputDeviceCvars(cvars);
   registerAudioOutputCvars(cvars, outputFormat);
   registerMusicSettings(cvars);
+  cvars.register("s_geometryAcoustics", "0", CvarFlag.Archive);
+  cvars.bindValue("s_geometryAcoustics", { validate: value => value === "0" || value === "1" ? null : "Use 0 or 1", changed: () => undefined });
+  cvars.document("s_geometryAcoustics", { summary: "Enable shared geometry sound obstruction. Off preserves native attenuation; this is a functional A3D replacement, not native numerical emulation.",
+    usage: "s_geometryAcoustics <0|1>", examples: ["s_geometryAcoustics 1", "s_geometryAcoustics 0"], allowedValues: ["0", "1"] });
   cvars.register("r_saveFontData", "0", CvarFlag.None);
   cvars.document("r_saveFontData", { summary: "Export generated Q3 font atlases and DAT records to this content's user directory.",
     usage: "r_saveFontData <0|1>", examples: ["r_saveFontData 1"] });

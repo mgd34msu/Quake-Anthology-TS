@@ -47,6 +47,8 @@ function mouse(value: unknown): MouseTuning {
   const input = record(value);
   return { sensitivity: number(input["sensitivity"]), acceleration: number(input["acceleration"]), filter: boolean(input["filter"]),
     yaw: number(input["yaw"]), pitch: number(input["pitch"]), side: number(input["side"]), forward: number(input["forward"]),
+    lookSpring: input["lookSpring"] === undefined ? false : boolean(input["lookSpring"]),
+    lookStrafe: input["lookStrafe"] === undefined ? false : boolean(input["lookStrafe"]),
     freeLook: boolean(input["freeLook"]), invertPitch: boolean(input["invertPitch"]) };
 }
 function axis(value: unknown): ControllerAxis {

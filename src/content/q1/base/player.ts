@@ -256,17 +256,18 @@ export class Q1CharacterActor {
   environment(seconds: number, suit = false, noclip = false): undefined {
     if (this.life !== "alive" || noclip) return undefined;
     const { game, actor, input } = this; game.time = seconds;
+    const lavaSuit = (game.player(actor.id)?.powerups.get("mg3:lavasuit") ?? 0) > seconds;
     if (input.waterLevel !== 3) {
       if (this.airFinished < seconds) this.sound("player/gasp2.wav"); else if (this.airFinished < seconds + 9) this.sound("player/gasp1.wav");
       this.airFinished = seconds + 12; this.drownDamage = 2;
-    } else if (suit) this.airFinished = seconds + 12;
+    } else if (suit || lavaSuit) this.airFinished = seconds + 12;
     else if (this.airFinished < seconds && this.painUntil < seconds) {
       this.drownDamage += 2; if (this.drownDamage > 15) this.drownDamage = 10;
       game.damage(actor.id, game.world?.actor.id ?? actor.id, game.world?.actor.id ?? null, this.drownDamage, null, "direct", "drown"); this.painUntil = seconds + 1;
     }
     if (input.waterLevel === 0) { if (this.inWater) game.sound(actor, "misc/outwater.wav", "body"); this.inWater = false; return undefined; }
-    if (this.hazardAt < seconds && input.waterType === "lava") { this.hazardAt = seconds + (suit ? 1 : 0.2); game.damage(actor.id, game.world?.actor.id ?? actor.id, game.world?.actor.id ?? null, 10 * input.waterLevel, null, "direct", "lava"); }
-    else if (this.hazardAt < seconds && input.waterType === "slime" && !suit) { this.hazardAt = seconds + 1; game.damage(actor.id, game.world?.actor.id ?? actor.id, game.world?.actor.id ?? null, 4 * input.waterLevel, null, "direct", "slime"); }
+    if (this.hazardAt < seconds && input.waterType === "lava" && !lavaSuit) { this.hazardAt = seconds + (suit ? 1 : 0.2); game.damage(actor.id, game.world?.actor.id ?? actor.id, game.world?.actor.id ?? null, 10 * input.waterLevel, null, "direct", "lava"); }
+    else if (this.hazardAt < seconds && input.waterType === "slime" && !suit && !lavaSuit) { this.hazardAt = seconds + 1; game.damage(actor.id, game.world?.actor.id ?? actor.id, game.world?.actor.id ?? null, 4 * input.waterLevel, null, "direct", "slime"); }
     if (!this.inWater) { game.sound(actor, input.waterType === "lava" ? "player/inlava.wav" : input.waterType === "slime" ? "player/slimbrn2.wav" : "player/inh2o.wav", "body"); this.inWater = true; this.hazardAt = 0; }
     return undefined;
   }

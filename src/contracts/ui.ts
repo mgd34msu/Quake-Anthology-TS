@@ -54,6 +54,7 @@ export interface CenterPrintState {
   readonly starts: SourceTime;
   readonly duration: SourceTime;
   readonly instant: boolean;
+  readonly characterMilliseconds?: number;
 }
 /** No default seat exists. Input, notification, and menu state are seat-owned. */
 export interface SeatUiState {

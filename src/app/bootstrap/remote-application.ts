@@ -2,7 +2,7 @@ import { defaultAudioOutputFormat } from "../../audio/output.ts";
 import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart, prepareVideoGuests, type PreparedVideoPresentation } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
-import { prepareProfileConfiguration, type ConfigurationCommandRequest, type PreparedProfileConfiguration } from "./configuration.ts";
+import { legacyConfigurationOptions, prepareProfileConfiguration, type ConfigurationCommandRequest, type PreparedProfileConfiguration } from "./configuration.ts";
 import { PreparedStartup } from "./prepared-startup.ts";
 import { RecordedRemoteSource } from "./network/recorded-source.ts";
 import type { DemoResource, DemoFamily } from "./demo-playback.ts";
@@ -1018,7 +1018,8 @@ export class RemoteApplication {
     let input: ApplicationInput | null = null, ui: ApplicationSeatUi | null = null, q3: ApplicationQ3Client | null = null;
     try {
       const mounts = this.content.mounts, releaseMounts = this.content.retainMainMounts();
-      const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(this.options.userContentRoot), settings: this.inputConfig,
+      const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(this.options, this.content.catalog, this.content.recipe.engineBehavior.content),
+        consoleRoot: consoleConfigRoot(this.options.userContentRoot), settings: this.inputConfig,
         mounted: name => mounts.open(name).then(resource => resource?.bytes) }, async () => { releaseMounts(); });
       candidateScripts = scripts;
       const q3Scene = remote instanceof Q3RemotePresentation ? { remote, queries: remote.scene } : null;
@@ -1195,6 +1196,13 @@ export class RemoteApplication {
             throw new Error("Remote command belongs to a retired local client");
         }
         if (command.seat !== null && !command.seat.equals(this.configuration.seat.id)) throw new Error("Remote command belongs to an inactive local seat");
+        if (command.name === "in_restart" || command.name === "midiinfo") {
+          const input = this.controls;
+          if (input === null) { print("Input devices are not active before signon.\n"); return; }
+          if (command.name === "midiinfo") input.inputDevices.info();
+          else { input.releaseForProfileChange(); input.inputDevices.restart(); input.router.restart(); }
+          return;
+        }
         if (command.name === "quit" || command.name === "disconnect") { this.requestQuit(); return; }
         if (await this.browserCommand(command.name, command.args, print)) return;
         if (this.network instanceof QwClientNetwork && (command.name === "skins" || command.name === "allskins")) {

@@ -3,7 +3,7 @@
 import type { Vec3 } from "../../contracts/math.ts";
 import type { Q1WorldGeometry } from "../../contracts/scene.ts";
 
-export type Q1BspFormat = "bsp29" | "bsp2" | "2psb";
+export type Q1BspFormat = "bsp29" | "bsp2" | "2psb" | "quake64";
 export type Q1LumpName = "entities" | "planes" | "textures" | "vertices" | "visibility"
   | "nodes" | "textureInfo" | "faces" | "lighting" | "clipnodes" | "leaves"
   | "leafFaces" | "edges" | "surfaceEdges" | "models";

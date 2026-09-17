@@ -18,18 +18,28 @@ export class ControllerSettings {
   private closed = false;
   private readonly pending = new Set<Promise<void>>();
   async settle(): Promise<void> { await Promise.all(this.pending); }
-  constructor(readonly router: InputRouter, private readonly seats: readonly SeatId[], private readonly devices: () => readonly ControllerDevice[],
+  constructor(readonly router: InputRouter, private seats: readonly SeatId[], private readonly devices: () => readonly ControllerDevice[],
     private readonly store = new ConfigStore(join(homedir(), ".local", "share", "quake-typescript", "settings")),
     private readonly report: (message: string) => void = () => undefined) {
     for (const seat of seats) this.seatFallbacks.set(seat, { ...(router.seat(seat)?.gamepad.tuning.gyro ?? defaultGamepadTuning.gyro) });
   }
+  publishSeats(seats: readonly SeatId[]): void {
+    if (this.pending.size !== 0) throw new Error("Controller profiles are still loading");
+    this.seats = [...seats];
+    for (const seat of this.profiles.keys()) if (!seats.some(next => next.equals(seat))) this.profiles.delete(seat);
+    for (const seat of this.seatFallbacks.keys()) if (!seats.some(next => next.equals(seat))) this.seatFallbacks.delete(seat);
+    for (const seat of seats) if (!this.seatFallbacks.has(seat)) this.seatFallbacks.set(seat, { ...(this.router.seat(seat)?.gamepad.tuning.gyro ?? defaultGamepadTuning.gyro) });
+  }
   copySettledProfilesFrom(previous: ControllerSettings): void {
     if (previous.pending.size !== 0) throw new Error("Controller profiles are still loading");
-    for (const [seat, profile] of previous.profiles) this.profiles.set(seat, { ...profile });
+    for (const seat of this.seats) {
+      const profile = [...previous.profiles].find(([prior]) => prior.equals(seat))?.[1];
+      if (profile !== undefined) this.profiles.set(seat, { ...profile });
+    }
   }
   update(): void {
     if (this.closed) return;
-    for (const [index, seat] of this.seats.entries()) {
+    for (const seat of this.seats) {
       const instance = this.router.controllerFor(seat), current = this.profiles.get(seat);
       if (instance === null) { this.profiles.delete(seat); continue; }
       if (current?.instance === instance) continue;
@@ -38,7 +48,7 @@ export class ControllerSettings {
       const identity: GyroProfileIdentity = device.guid !== null && device.serial !== null && device.serial.length > 0
         ? { kind: "device", guid: device.guid, serial: device.serial } : { kind: "seat" };
       const name = identity.kind === "seat" ? "seat" : `${identity.guid}-${createHash("sha256").update(identity.serial).digest("hex")}`;
-      const profile: Profile = { instance, identity, path: `controllers/seat-${index + 1}/${name}.json`, fallback: this.seatFallbacks.get(seat) ?? defaultGamepadTuning.gyro, busy: true, message: "Loading settings..." };
+      const profile: Profile = { instance, identity, path: `controllers/seat-${seat.index + 1}/${name}.json`, fallback: this.seatFallbacks.get(seat) ?? defaultGamepadTuning.gyro, busy: true, message: "Loading settings..." };
       this.profiles.set(seat, profile);
       const input = this.router.seat(seat);
       if (input !== null) input.gamepad.tuning = { ...input.gamepad.tuning, gyro: { ...defaultGamepadTuning.gyro } };

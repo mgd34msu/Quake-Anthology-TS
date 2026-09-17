@@ -10,10 +10,12 @@ export interface MouseTuning {
   readonly side: number;
   readonly forward: number;
   readonly freeLook: boolean;
+  readonly lookSpring?: boolean;
+  readonly lookStrafe?: boolean;
   readonly invertPitch: boolean;
 }
 export const defaultMouseTuning: MouseTuning = Object.freeze({ sensitivity: 3, acceleration: 0, filter: false,
-  yaw: 0.022, pitch: 0.022, side: 0.8, forward: 1, freeLook: true, invertPitch: false });
+  yaw: 0.022, pitch: 0.022, side: 0.8, forward: 1, freeLook: true, lookSpring: false, lookStrafe: false, invertPitch: false });
 export interface MouseMove { readonly yaw: number; readonly pitch: number; readonly side: number; readonly forward: number; }
 export interface MouseTuningStore {
   read(): MouseTuning;
@@ -35,7 +37,8 @@ export class MouseInput {
     const rate = f(Math.sqrt(f(f(x * x) + f(y * y))) / f(frameMilliseconds));
     const gain = f(f(tuning.sensitivity + f(rate * tuning.acceleration)) * zoomSensitivity);
     x = f(x * gain); y = f(y * gain);
-    return { yaw: strafe ? 0 : f(-tuning.yaw * x), side: strafe ? f(tuning.side * x) : 0,
+    const horizontalStrafe = strafe || tuning.lookStrafe === true && mouseLook;
+    return { yaw: horizontalStrafe ? 0 : f(-tuning.yaw * x), side: horizontalStrafe ? f(tuning.side * x) : 0,
       pitch: !strafe && (mouseLook || tuning.freeLook) ? f(tuning.pitch * y * (tuning.invertPitch ? -1 : 1)) : 0,
       forward: strafe || !(mouseLook || tuning.freeLook) ? f(-tuning.forward * y) : 0 };
   }

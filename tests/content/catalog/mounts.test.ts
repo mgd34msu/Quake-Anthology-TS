@@ -13,6 +13,50 @@ import { SoundBank } from "../../../src/audio/bank.ts";
 import { UnifiedAudio } from "../../../src/audio/engine.ts";
 import type { PcmStream } from "../../../src/audio/streams.ts";
 import { ApplicationMusic, q1MusicFallback } from "../../../src/app/bootstrap/audio/music.ts";
+import { resolveQ3MountRestriction } from "../../../src/content/q3/product-restriction.ts";
+import { openArchive } from "../../../src/content/archive/index.ts";
+
+test("Q3 demo mounts restrict loose resources and reject an unrelated PK3 without changing prior ownership", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "quake-demo-mount-"));
+  try {
+    await writeFile(resolve(root, "autoexec.cfg"), "set test 1");
+    await writeFile(resolve(root, "texture.tga"), "replacement");
+    const loose: ContentMount = { kind: "loose", identity: createMountIdentity("mount:demo:loose", "q3:demo:demota:installed", 0), rootPath: root };
+    const plan: ResolvedMountPlan = { id: "mount-plan:demo:1", mounts: [loose], defaultOrder: [loose.identity.id], prefixOrders: [] };
+    using prior = await openMountPlan(plan);
+    using restricted = await openMountPlan(plan, { q3Restriction: "demo" });
+    expect(new TextDecoder().decode(await restricted.read("autoexec.cfg"))).toBe("set test 1");
+    expect(await restricted.open("texture.tga")).toBeNull();
+    expect(await restricted.listFiles("", ".cfg")).toEqual([]);
+    expect(restricted.borrowMountPlan(plan)).toBeNull();
+    using borrowed = restricted.borrowMountPlan(plan, { q3Restriction: "demo" });
+    expect(borrowed).not.toBeNull();
+    const archivePath = resolve(root, "pak0.pk3");
+    await writeFile(archivePath, zip([["texture.tga", "other product"]]));
+    const archive: ArchiveMount = { kind: "archive", identity: createMountIdentity("mount:demo:archive", "q3:demo:demota:installed", 0),
+      archivePath, archiveDigest: await digestFile(archivePath), format: "pk3" };
+    await expect(openMountPlan({ ...plan, mounts: [loose, archive], defaultOrder: [loose.identity.id, archive.identity.id] }, { q3Restriction: "demo" })).rejects.toThrow("Corrupted demo pak0.pk3");
+    expect(new TextDecoder().decode(await prior.read("texture.tga"))).toBe("replacement");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Q3 product restrictions distinguish forced, missing and corrupted product identification", async () => {
+  expect(await resolveQ3MountRestriction({ kind: "prerelease-demo", teamArenaUi: "retail" }, false,
+    async () => { throw new Error("Forced restriction must not read productid"); })).toEqual({ kind: "demo", directory: "demota", pakChecksum: 437558517 });
+  expect((await resolveQ3MountRestriction({ kind: "retail" }, false, async () => null)).kind).toBe("demo");
+  await expect(resolveQ3MountRestriction({ kind: "retail" }, false, async () => new Uint8Array([1]))).rejects.toThrow("Invalid product identification");
+});
+
+const retailPak = "/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3";
+test.skipIf(!existsSync(retailPak))("Q3 retail product identification preserves unrestricted mounts", async () => {
+  const archive = await openArchive(retailPak, "pk3");
+  try {
+    const entry = archive.findEntries("productid.txt")[0];
+    if (entry === undefined) throw new Error("Missing retail productid.txt");
+    expect(await resolveQ3MountRestriction({ kind: "retail" }, false, () => archive.readEntry(entry))).toEqual({ kind: "none" });
+    expect(await resolveQ3MountRestriction({ kind: "prerelease-ta-demo" }, false, () => archive.readEntry(entry))).toEqual({ kind: "none" });
+  } finally { archive.close(); }
+});
 
 function pak(path: string, text: string): Uint8Array {
   const bytes = new Uint8Array(12 + text.length + 64);

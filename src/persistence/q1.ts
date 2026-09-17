@@ -71,8 +71,10 @@ export function decodeQ1Save(bytes: Uint8Array): Q1SaveData {
   const lightStyles = Array.from({ length: 64 }, () => scanner.token());
   const globals = scanner.record(); const entities: (readonly QcTextPair[])[] = [];
   for (;;) {
+    while (scanner.offset < scanner.text.length && scanner.text.charCodeAt(scanner.offset) <= 32) scanner.offset++;
+    const extensionStart = scanner.offset;
     scanner.skip();
-    if (scanner.text.charAt(scanner.offset) !== "{") break;
+    if (scanner.text.charAt(scanner.offset) !== "{") { scanner.offset = extensionStart; break; }
     entities.push(scanner.record());
   }
   return { format, comment, spawnParameters, skill, map, time, lightStyles, globals, entities, extensionText: scanner.text.slice(scanner.offset) };

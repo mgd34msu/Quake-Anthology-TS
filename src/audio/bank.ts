@@ -21,7 +21,7 @@ export class SoundBank {
         if (prior !== undefined)
             return prior;
         const pcm = family !== "q3" && opened.bytes[0] === 82 ? decodeQuakeWav(opened.bytes, path) : decodeSoundBytes(opened.bytes, path);
-        const asset = { resource: opened.reference.id, name: path, pcm };
+        const asset = { resource: opened.reference.id, reference: opened.reference, name: path, pcm };
         this.assets.set(key, asset);
         return asset;
     }

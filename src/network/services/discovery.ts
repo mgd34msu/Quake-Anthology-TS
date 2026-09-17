@@ -78,6 +78,8 @@ export class ServerBrowser {
   }
   entry(address: NetworkAddress): BrowserEntry | null { return this.entries.get(addressKey(address)) ?? null; }
   list(): readonly BrowserEntry[] { return [...this.entries.values()]; }
+  get size(): number { return this.entries.size; }
+  get pendingRequests(): number { return this.queries.size; }
   query(address: NetworkAddress, now: number, kind: DiscoveryRequestKind = "info"): boolean {
     for (const pending of this.queries.values()) {
       if (!pending.retainResult && pending.requestKind === kind && addressKey(pending.address) === addressKey(address)) {

@@ -8,7 +8,7 @@ import type { MissionpackWorldHooks } from "./index.ts";
 import { later, vector } from "./common.ts";
 
 function solid(value: string): Q1Solid {
-  switch (value) { case "none": case "trigger": case "bbox": case "slidebox": case "bsp": return value; default: throw new Error(`Invalid func_spawn saved solid ${value}`); }
+  switch (value) { case "none": case "trigger": case "bbox": case "slidebox": case "bsp": case "corpse": return value; default: throw new Error(`Invalid func_spawn saved solid ${value}`); }
 }
 function template(game: Q1EntityServices, mold: Q1Actor, classname: string): Q1Actor {
   const entity = game.create(classname, { properties: [...mold.fields].filter(([key]) => key !== "classname").map(([key, value]) => ({ key, value })).concat({ key: "classname", value: classname }) });

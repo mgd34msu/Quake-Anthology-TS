@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
+import { CinematicPlayback, cinematicBytes } from "../../../src/media/playback.ts";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
-import { ApplicationQ3Cinematics } from "../../../src/app/bootstrap/q3-client/cinematics.ts";
+import { ApplicationQ3Cinematics, type SystemCinematicHost } from "../../../src/app/bootstrap/q3-client/cinematics.ts";
 import { qvmClientCinematicSyscall } from "../../../src/compat/qvm/client-cinematic-syscalls.ts";
 import { QvmCgameImport } from "../../../src/compat/qvm/abi.ts";
 import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
@@ -28,11 +29,11 @@ function opened(): OpenedResource {
     resolution: { kind: "default-order", plan: createMountPlanId("qvm", "movies"), rank: 0 } };
   return { bytes, reference: { ...data, id: createResourceId(data) } };
 }
-function fixture(open: () => Promise<OpenedResource | null> = async () => opened()) {
+function fixture(open: () => Promise<OpenedResource | null> = async () => opened(), system?: SystemCinematicHost) {
   const identity = createIdentityOwner("qvm-movies"), seat = identity.seat(0), images = new SceneImageRegistry({ identity: Symbol("movies"), session: identity.session, generation: 0 });
   let now = 0; const pcm: StreamPcm[] = [], resets: string[] = [], draws: MaterialTextDraw[] = [];
   const movies = new ApplicationQ3Cinematics({ provider: { mounts: { open } }, assets: { images }, print: () => {} },
-    { engine: { queueStream: (_target, block) => { pcm.push(block); }, stopStream: id => { resets.push(id); }, pauseStream: () => {} } }, seat, () => now);
+    { engine: { queueStream: (_target, block) => { pcm.push(block); }, stopStream: id => { resets.push(id); }, pauseStream: () => {} } }, seat, () => now, system);
   const rect = { x: 0, y: 0, width: 640, height: 480 };
   const draw = new Draw2D(new TextCommandSink(seat, rect, () => {}, value => { draws.push(value); }), "pixels");
   const guest = new QvmMemory(new Uint8Array(1024)); guest.writeString(64, "test.roq", 32);
@@ -84,4 +85,25 @@ test("native TypeScript preview defaults remain looping and silent", async () =>
   expect(f.movies.play(asset)?.handle.index).toBe(0);
   f.movies.run(0); f.time(34); f.movies.run(0); f.time(67);
   expect(f.movies.runGuest(0)).toBe(1); expect(f.pcm).toHaveLength(0); f.movies.close();
+});
+
+test("guest system cinematic delegates to the shared owner and retires its real decoder once", async () => {
+  const identity = createIdentityOwner("system-cinematic"), clock = { time: 0, sample(): number { return this.time; } };
+  const completed: string[] = [], active: CinematicPlayback[] = [];
+  const system: SystemCinematicHost = { async open(request) {
+    const playback = new CinematicPlayback(cinematicBytes("roq", shortRoq(), request.name), {
+      clock, target: { kind: "seat", seat: identity.seat(0) }, loop: request.loop, hold: request.hold, silent: request.silent,
+      onAudio: () => {}, onAudioReset: () => {}, onAudioPause: () => {}, onComplete: reason => { completed.push(reason); },
+    });
+    active.push(playback);
+    return { get status() { return playback.status; }, skip() { playback.skip(); playback.close(); }, stop() { playback.close(); } };
+  } };
+  const f = fixture(async () => opened(), system);
+  const handle = await f.movies.playGuest("test.roq", f.rect, 1 | 4 | 8);
+  expect(handle).toBe(0); expect(f.movies.runGuest(handle)).toBe(1);
+  const playback = active[0]; if (playback === undefined) throw new Error("Missing shared playback");
+  playback.tick(); clock.time = 34; playback.tick(); clock.time = 67; playback.tick();
+  expect(f.movies.runGuest(handle)).toBe(0);
+  f.movies.drawGuest(handle, f.draw); expect(f.draws).toHaveLength(0);
+  f.movies.stopGuest(handle); f.movies.close(); expect(completed).toEqual(["skipped"]);
 });

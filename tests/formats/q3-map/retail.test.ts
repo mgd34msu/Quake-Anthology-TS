@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { adaptQ3Bsp, parseQ3Bsp } from "../../../src/formats/q3-map/index.ts";
+import { CollisionMapResource } from "../../../src/world/collision/q3/map-resource.ts";
 
 const root = process.env["Q3_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../qfiles/q3a");
 const fixtures = [
@@ -10,6 +11,26 @@ const fixtures = [
   { archive: "missionpack/pak0.pk3", member: "maps/mpteam1.bsp", vertices: 69060, surfaces: 13455, lightmaps: 30 },
   { archive: "missionpack/pak0.pk3", member: "maps/mpterra3.bsp", vertices: null, surfaces: null, lightmaps: null },
 ];
+
+const testArchive = resolve(process.env["Q2_DATA_PATH"] ?? resolve(import.meta.dir, "../../../../qfiles/q2"), "baseq2/pak6.pak");
+test.skipIf(!existsSync(testArchive))("installed Q3 test BSP44 shares render and collision model ownership", async () => {
+  const archive = await openArchive(testArchive, "pak");
+  try {
+    const entry = archive.findEntries("maps/q3test1.bsp")[0];
+    if (entry === undefined) throw new Error("Missing installed maps/q3test1.bsp");
+    const bytes = await archive.readEntry(entry), map = parseQ3Bsp(bytes, "q3test1.bsp"), world = adaptQ3Bsp(map);
+    const collision = new CollisionMapResource("q3test1.bsp", { kind: "unaccounted" }, null);
+    collision.load(bytes);
+    expect(world.surfaces).toHaveLength(6400);
+    expect(world.vertices).toHaveLength(35002);
+    expect(world.lightmaps).toHaveLength(22);
+    expect(map.models.map(model => model.surfaceCount)).toEqual([6304, 0, 0, 0, 0, 12, 78, 6]);
+    expect(collision.models).toHaveLength(map.models.length);
+    expect(collision.brushes).toHaveLength(map.brushes.length + 1);
+    expect(collision.shaders).toEqual(map.shaders);
+    expect(map.fogs.map(fog => fog.shader)).toEqual(["textures/sfx/hellfogdense", "textures/sfx/fog_intel"]);
+  } finally { archive.close(); }
+});
 
 for (const fixture of fixtures) {
   const archivePath = resolve(root, fixture.archive);

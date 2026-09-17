@@ -1,3 +1,5 @@
+import type { ProductExpectation } from "./products.ts";
+import { xatrixWeaponDefinitions, rogueWeaponDefinitions } from "../q2/missionpacks/weapons/definitions.ts";
 import { missionWeapons } from "../q1/missionpacks/types.ts";
 import { weaponHudResources } from "./weapon-hud.ts";
 import { Q2_BASE_WEAPONS } from "../q2/foundation/weapons/definitions.ts";
@@ -23,32 +25,28 @@ export const Q2_WEAPON_PROVIDERS = {
   rerelease: "q2:weapons/rerelease/baseq2",
 } satisfies Readonly<Record<"classic" | "rerelease", ProviderReference["provider"]>>;
 
+export function supportsSelectedWeaponProduct(product: ProductExpectation): boolean {
+  if (product.edition !== "classic" && product.edition !== "rerelease") return false;
+  return product.family === "q1" ? ["id1", "hipnotic", "rogue"].includes(product.campaign) || product.edition === "rerelease" && ["dopa", "mg1", "mg3"].includes(product.campaign)
+    : product.family === "q2" && (["baseq2", "xatrix", "rogue"].includes(product.campaign) || product.edition === "rerelease" && product.campaign === "mg2");
+}
+
 export function canonicalWeaponSource(map: ProviderReference, weapon: ProviderReference, catalog: InstalledCatalog): ProviderReference {
   if (Object.values(EQUIPMENT_PROVIDERS).some(provider => provider === weapon.provider)) return weapon;
   const family = weapon.provider.startsWith("q1:") ? "q1" : weapon.provider.startsWith("q2:") ? "q2" : null;
   if (family === null) return weapon;
-  const program = family === "q1" ? "id1" : "baseq2", providers = family === "q1" ? Q1_WEAPON_PROVIDERS : Q2_WEAPON_PROVIDERS;
   const role = weapon.provider.startsWith(`${family}:weapons/`);
   if (!role && weapon.provider !== `${family}:official`) throw new Error(`Unsupported ${family.toUpperCase()} weapon provider ${weapon.provider}`);
   const product = catalog.require(weapon.content).expectation;
-  const mapProduct = catalog.require(map.content).expectation;
-  if (family === "q1" && product.family === "q1" && product.campaign === "hipnotic" && (product.edition === "classic" || product.edition === "rerelease")) {
-    const provider = Q1_HIPNOTIC_WEAPON_PROVIDERS[product.edition];
-    if (role && weapon.provider !== provider) throw new Error(`Selected weapon role ${weapon.provider} does not match ${weapon.content}`);
-    return weapon.content === map.content && map.provider === "q1:official" ? map : { provider, content: weapon.content };
-  }
-  if (weapon.content !== map.content && mapProduct.family === family && (mapProduct.campaign !== program || mapProduct.edition !== "classic" && mapProduct.edition !== "rerelease"))
-    throw new Error(`Cross-edition ${family.toUpperCase()} arsenals require a classic or rerelease ${program} map program`);
-  const base = product.family === family && product.campaign === program && (product.edition === "classic" || product.edition === "rerelease");
-  if (!base) {
+  const supported = product.family === family && supportsSelectedWeaponProduct(product);
+  if (!supported) {
     if (role || weapon.content !== map.content || product.family !== family)
-      throw new Error(`Selected ${family.toUpperCase()} arsenal roles require classic or rerelease ${program} content`);
+      throw new Error(`Selected ${family.toUpperCase()} arsenal has no source adapter: ${weapon.content}`);
     return weapon;
   }
-  const provider = product.edition === "classic" ? providers.classic : providers.rerelease;
+  const provider: ProviderReference["provider"] = `${family}:weapons/${product.edition}/${product.campaign}`;
   if (role && weapon.provider !== provider) throw new Error(`Selected weapon role ${weapon.provider} does not match ${weapon.content}`);
-  if (weapon.content === map.content && map.provider === `${family}:official`) return map;
-  return { provider, content: weapon.content };
+  return weapon.content === map.content && map.provider === `${family}:official` ? map : { provider, content: weapon.content };
 }
 
 const q1BaseWeaponPaths: readonly string[] = (() => {
@@ -73,6 +71,14 @@ const q1HipnoticWeaponPaths: readonly string[] = [
   ...["hipweap/laserg.wav", "hipweap/laserric.wav", "enforcer/enfstop.wav", "hipweap/proxbomb.wav", "hipweap/proxwarn.wav",
     "hipweap/mjoltink.wav", "knight/sword1.wav", "hipweap/mjolslap.wav", "hipweap/mjolhit.wav"].map(path => `sound/${path}`),
 ];
+
+const q1RogueWeaponPaths: readonly string[] = [
+  ...missionWeapons.filter(weapon => weapon.id.startsWith("rogue:")).flatMap(weapon => [weapon.model, weapon.worldModel]),
+  "progs/hook.mdl", "progs/v_grpple.mdl", "sound/weapons/chain1.wav", "sound/pendulum/hit.wav", "progs/lspike.mdl", "progs/mervup.mdl", "progs/rockup.mdl", "progs/rockup_d.mdl", "progs/plasma.mdl",
+  "sound/plasma/flight.wav", "sound/plasma/fire.wav", "sound/plasma/explode.wav", "sound/weapons/spike2.wav", "sound/weapons/lhit.wav",
+];
+const q1Mg3WeaponPaths: readonly string[] = ["progs/lasrspik.mdl", "progs/v_laserg.mdl", "progs/v_hammer.mdl", "progs/v_hammer_glow.mdl",
+  "progs/v_bloodshot.mdl", "progs/v_bloodshot2.mdl", ...q1HipnoticWeaponPaths.filter(path => path.startsWith("sound/") && !path.includes("prox"))];
 
 // Base g_items precaches plus the shared base weapon/projectile effect paths.
 function q2BaseWeaponPaths(rerelease: boolean): readonly string[] {
@@ -105,9 +111,9 @@ const q2ExpansionWeaponPaths: Readonly<Record<string, readonly string[]>> = {
 
 export function q2RegisteredWeaponResources(weapons: Pick<Q2Weapons, "registeredDefinitions">, rerelease: boolean): readonly string[] {
   return [...q2BaseWeaponPaths(rerelease), ...weapons.registeredDefinitions().flatMap(weapon => [weapon.viewModel, weapon.worldModel,
-    ...q2ExpansionWeaponPaths[weapon.name] ?? [], ...weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : [],
+    ...(q2ExpansionWeaponPaths[weapon.name] ?? []).filter(path => rerelease || path !== "sound/weapons/sawslice.wav"), ...weapon.name === "tesla" && !rerelease ? ["models/weapons/v_tesla2/tris.md2"] : [],
     ...weapon.name === "heatbeam" && !rerelease ? ["models/weapons/v_beamer2/tris.md2"] : []]),
-    ...rerelease ? ["sound/weapons/railgr1b.wav"] : []];
+    ...rerelease ? ["sound/weapons/railgr1b.wav"] : []].filter(path => path !== "");
 }
 
 export function selectedWeaponResources(map: ProviderReference, weapons: readonly ProviderReference[], catalog: InstalledCatalog): readonly ResourceRequest[] {
@@ -119,13 +125,16 @@ export function weaponResources(map: ProviderReference, weapons: readonly Provid
     const weapon = canonicalWeaponSource(map, reference, catalog);
     if (Object.values(EQUIPMENT_PROVIDERS).some(provider => provider === weapon.provider)) return [];
     const product = catalog.require(weapon.content).expectation;
-    if (weapon.provider.startsWith("q2:") && product.family === "q2" && product.campaign === "baseq2" &&
+    if (weapon.provider.startsWith("q2:") && product.family === "q2" && ["baseq2", "xatrix", "rogue", "mg2"].includes(product.campaign) &&
       (product.edition === "classic" || product.edition === "rerelease"))
-      return [...q2BaseWeaponPaths(product.edition === "rerelease").map(path => ({ content: weapon.content, path })), ...weaponHudResources(weapon, product)];
+      return [...q2RegisteredWeaponResources({ registeredDefinitions: () => [...Q2_BASE_WEAPONS,
+        ...(product.edition === "rerelease" || product.campaign === "xatrix" ? xatrixWeaponDefinitions : []),
+        ...(product.edition === "rerelease" || product.campaign === "rogue" ? rogueWeaponDefinitions : [])] }, product.edition === "rerelease")
+        .map(path => ({ content: weapon.content, path })), ...weaponHudResources(weapon, product)];
     if (weapon.provider.startsWith("q3:") && product.family === "q3") return weaponHudResources(weapon, product);
-    if (!weapon.provider.startsWith("q1:") || product.family !== "q1" || (product.campaign !== "id1" && product.campaign !== "hipnotic") ||
+    if (!weapon.provider.startsWith("q1:") || product.family !== "q1" || !["id1", "hipnotic", "rogue", "dopa", "mg1", "mg3"].includes(product.campaign) ||
       product.edition !== "classic" && product.edition !== "rerelease") return [];
-    return [...[...q1BaseWeaponPaths, ...(product.campaign === "hipnotic" ? q1HipnoticWeaponPaths : [])].map(path => ({ content: weapon.content, path })), ...weaponHudResources(weapon, product)];
+    return [...[...q1BaseWeaponPaths, ...(product.campaign === "hipnotic" ? q1HipnoticWeaponPaths : product.campaign === "rogue" ? q1RogueWeaponPaths : product.campaign === "mg3" ? q1Mg3WeaponPaths : [])].map(path => ({ content: weapon.content, path })), ...weaponHudResources(weapon, product)];
   });
 }
 
@@ -137,16 +146,13 @@ export function selectedWeaponTiming(map: ProviderReference, weapons: readonly P
     if (Object.values(EQUIPMENT_PROVIDERS).some(provider => provider === weapon.provider)) return [];
     if (weapon.content === map.content) return [];
     const product = catalog.require(weapon.content).expectation;
-    const supported = weapon.provider.startsWith("q1:") && product.family === "q1" && (product.campaign === "id1" || product.campaign === "hipnotic") &&
-      (product.edition === "classic" || product.edition === "rerelease") ||
-      weapon.provider.startsWith("q2:") && product.family === "q2" && product.campaign === "baseq2" &&
-      (product.edition === "classic" || product.edition === "rerelease") ||
+    const supported = supportsSelectedWeaponProduct(product) && weapon.provider.startsWith(`${product.family}:`) ||
       weapon.provider.startsWith("q3:") && product.family === "q3" && product.campaign === "baseq3";
     if (!supported) return [];
     const prior = providers.get(weapon.provider);
     if (weapon.provider === map.provider || prior !== undefined && prior !== weapon.content)
       throw new Error(`Selected weapon provider ${weapon.provider} has conflicting content`);
-    if (mapFamily === product.family && ![...Object.values(Q1_WEAPON_PROVIDERS), ...Object.values(Q1_HIPNOTIC_WEAPON_PROVIDERS), ...Object.values(Q2_WEAPON_PROVIDERS)].some(provider => provider === weapon.provider) || prior !== undefined) return [];
+    if (mapFamily === product.family && !weapon.provider.startsWith(`${product.family}:weapons/`) || prior !== undefined) return [];
     providers.set(weapon.provider, weapon.content);
     return [nativeProviderTiming(weapon, product.family, product.edition === "rerelease")];
   });

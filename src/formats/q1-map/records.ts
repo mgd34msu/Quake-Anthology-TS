@@ -8,6 +8,8 @@ import type {
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { Q1BspFormat } from "./types.ts";
 
+type Q1RecordFormat = Exclude<Q1BspFormat, "quake64">;
+
 export function vec3(reader: BinaryReader): Vec3 {
   return { x: reader.finiteF32(), y: reader.finiteF32(), z: reader.finiteF32() };
 }
@@ -61,7 +63,7 @@ export function readPlanes(reader: BinaryReader): BspPlane[] {
   });
 }
 
-function nodeChild(reader: BinaryReader, format: Q1BspFormat, nodeCount: number): BspChild {
+function nodeChild(reader: BinaryReader, format: Q1RecordFormat, nodeCount: number): BspChild {
   if (format === "bsp29") {
     const value = reader.u16();
     return value < nodeCount ? { kind: "node", index: value } : { kind: "leaf", index: 65535 - value };
@@ -70,7 +72,7 @@ function nodeChild(reader: BinaryReader, format: Q1BspFormat, nodeCount: number)
   return value >= 0 ? { kind: "node", index: value } : { kind: "leaf", index: -1 - value };
 }
 
-export function readNodes(reader: BinaryReader, format: Q1BspFormat): BspNode[] {
+export function readNodes(reader: BinaryReader, format: Q1RecordFormat): BspNode[] {
   const stride = format === "bsp29" ? 24 : format === "2psb" ? 32 : 44;
   const count = reader.length / stride;
   return records(reader, stride, (r) => {
@@ -82,13 +84,13 @@ export function readNodes(reader: BinaryReader, format: Q1BspFormat): BspNode[] 
   });
 }
 
-function clipChild(reader: BinaryReader, format: Q1BspFormat, count: number): Q1ClipChild {
+function clipChild(reader: BinaryReader, format: Q1RecordFormat, count: number): Q1ClipChild {
   let value = format === "bsp29" ? reader.u16() : reader.i32();
   if (format === "bsp29" && value >= count) value -= 65536;
   return value < 0 ? { kind: "contents", value } : { kind: "clipnode", index: value };
 }
 
-export function readClipnodes(reader: BinaryReader, format: Q1BspFormat): Q1ClipNode[] {
+export function readClipnodes(reader: BinaryReader, format: Q1RecordFormat): Q1ClipNode[] {
   const stride = format === "bsp29" ? 8 : 12;
   const count = reader.length / stride;
   return records(reader, stride, (r) => ({
@@ -96,7 +98,7 @@ export function readClipnodes(reader: BinaryReader, format: Q1BspFormat): Q1Clip
   }));
 }
 
-export function readLeaves(reader: BinaryReader, format: Q1BspFormat): Q1Leaf[] {
+export function readLeaves(reader: BinaryReader, format: Q1RecordFormat): Q1Leaf[] {
   const stride = format === "bsp29" ? 28 : format === "2psb" ? 32 : 44;
   return records(reader, stride, (r) => {
     const contents = r.i32();
@@ -107,13 +109,13 @@ export function readLeaves(reader: BinaryReader, format: Q1BspFormat): Q1Leaf[] 
   });
 }
 
-export function readEdges(reader: BinaryReader, format: Q1BspFormat): BspEdge[] {
+export function readEdges(reader: BinaryReader, format: Q1RecordFormat): BspEdge[] {
   return records(reader, format === "bsp29" ? 4 : 8, (r) => ({
     vertices: format === "bsp29" ? [r.u16(), r.u16()] : [r.u32(), r.u32()],
   }));
 }
 
-export function readFaces(reader: BinaryReader, format: Q1BspFormat): BspFace[] {
+export function readFaces(reader: BinaryReader, format: Q1RecordFormat): BspFace[] {
   return records(reader, format === "bsp29" ? 20 : 28, (r) => {
     const plane = format === "bsp29" ? r.u16() : r.u32();
     const side = format === "bsp29" ? r.u16() : r.u32();

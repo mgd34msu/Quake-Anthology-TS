@@ -30,14 +30,20 @@ function weaponTouch(context: Q1AddonContext, entity: Q1Actor, other: ActorId): 
   if (player === null) return undefined;
   const weapon: Q1Weapon = entity.classname === "weapon_mjolnir" ? "mg3:mjolnir" : "mg3:laser";
   const leave = game.options.coop || [2, 3, 5].includes(game.options.deathmatch);
-  const owned = game.host.inventory.count(other, game.weaponItem(weapon)) !== 0;
+  const item = game.weaponItem(weapon), admission = game.pickupAdmission?.maps("weapons", item) === true ? game.pickupAdmission : null;
+  const owned = admission === null ? game.host.inventory.count(other, item) !== 0 : admission.owns(other, item);
   if (leave && owned) return undefined;
-  game.host.inventory.give(player.actor, "q1:ammo/cells", 30);
-  game.host.inventory.configure(player.actor, { item: game.weaponItem(weapon), count: 1, capacity: 1 });
-  if (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned) {
-    if (game.options.deathmatch === 0 || mg3WeaponRank(weapon) < mg3WeaponRank(player.weapon)) game.selectWeapon(player.actor, weapon);
+  if (admission !== null) {
+    const selection = player.autoSwitch === "always" || player.autoSwitch === "new" && !owned ? game.options.deathmatch === 0 ? "always" : "better" : "never";
+    if (!admission.weapon(player.actor, { item, ammo: [{ item: "q1:ammo/cells", amount: 30 }] }, selection)) return undefined;
+  } else {
+    game.host.inventory.give(player.actor, "q1:ammo/cells", 30);
+    game.host.inventory.configure(player.actor, { item: game.weaponItem(weapon), count: 1, capacity: 1 });
+    if (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned) {
+      if (game.options.deathmatch === 0 || mg3WeaponRank(weapon) < mg3WeaponRank(player.weapon)) game.selectWeapon(player.actor, weapon);
+    }
+    game.selectWeapon(player.actor, player.weapon);
   }
-  game.selectWeapon(player.actor, player.weapon);
   game.message(other, "$qc_got_item", true, [entity.text("netname")]); game.sound(player.actor, "weapons/pkup.wav", "item");
   game.effect("pickup", game.body(entity).origin, other); entity.activator = other; game.useTargets(entity, other);
   if (!game.live(entity)) return undefined;

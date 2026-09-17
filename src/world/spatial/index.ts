@@ -19,6 +19,8 @@ export interface ActorCollision {
     readonly role: 'solid' | 'trigger';
     readonly monster: boolean;
     readonly deadMonster: boolean;
+    /** Declared rerelease corpse policy: point attacks hit; bodies pass through. */
+    readonly q1Corpse?: true;
 }
 export interface SpatialActor {
     readonly body: LinkedBody;

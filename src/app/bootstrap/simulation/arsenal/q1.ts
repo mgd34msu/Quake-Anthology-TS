@@ -25,6 +25,7 @@ export interface Q1SelectedArsenalOptions {
   readonly replacedItems?: readonly ItemId[];
   fired?(actor: ActorId, weapon: Q1Weapon, animation: WeaponStepInput["animation"]): WeaponStepResult["animation"];
   impulse?(player: Q1PlayerState, value: number): boolean;
+  preparePickup?(player: Q1PlayerState): undefined;
   observe(actor: ActorId): { readonly viewAngles: Vec3; readonly waterLevel: number };
 }
 
@@ -101,15 +102,17 @@ export class Q1SelectedArsenal implements SelectedArsenal {
 
   pickupAmmo(actor: OwnedActor, grants: readonly PickupAmmoReceipt[], autoSwitch: boolean): undefined {
     const game = this.options.game, player = this.require(actor.id);
+    this.options.preparePickup?.(player);
     const before = game.chooseBest(actor, item => grants.find(grant => grant.item === item)?.before ?? game.host.inventory.count(actor.id, item));
-    return q1AmmoPickupSelection(game, player, before, autoSwitch && this.options.nativePlayer?.(actor.id).autoSwitch !== "never");
+    return q1AmmoPickupSelection(game, player, before, autoSwitch && (this.options.nativePlayer?.(actor.id).autoSwitch ?? player.autoSwitch) !== "never");
   }
 
   pickupWeapons(actor: OwnedActor, weapons: readonly ItemId[], selection: PickupSelection): undefined {
     const game = this.options.game, player = this.require(actor.id);
+    this.options.preparePickup?.(player);
     for (const item of weapons) {
       const weapon = this.weapons.find(weapon => game.weaponItem(weapon) === item);
-      if (weapon !== undefined) q1WeaponPickupSelection(game, player, weapon, this.options.nativePlayer?.(actor.id).autoSwitch === "never" ? "never" : selection);
+      if (weapon !== undefined) q1WeaponPickupSelection(game, player, weapon, (this.options.nativePlayer?.(actor.id).autoSwitch ?? player.autoSwitch) === "never" ? "never" : selection);
     }
     return undefined;
   }

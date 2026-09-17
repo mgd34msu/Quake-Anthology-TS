@@ -42,6 +42,21 @@ export function q2MissionWeaponDisplayName(name: string): string | null {
   return names.get(name)?.name ?? [...xatrixAmmo, ...rogueAmmo].find(item => item.classname === `ammo_${name}`)?.name ?? null;
 }
 
+export function q2MissionWeaponInventory(pack: Q2MissionPack): readonly { readonly item: ItemId; readonly capacity: number }[] {
+  const ammo = pack === "xatrix" ? xatrixAmmo : rogueAmmo;
+  const weapons = pack === "xatrix" ? xatrixWeaponDefinitions : rogueWeaponDefinitions;
+  return [...ammo.flatMap(item => item.kind === "ammo" ? [{ item: `q2:${item.classname}` satisfies ItemId, capacity: item.capacity }] : []),
+    ...weapons.filter(weapon => weapon.item !== weapon.ammo).map(weapon => ({ item: weapon.item, capacity: 1 }))];
+}
+
+export function q2MissionWeaponIcons(): readonly { readonly item: ItemId; readonly icon: string }[] {
+  return [...[...xatrixAmmo, ...rogueAmmo].filter(item => item.kind === "ammo").map(item => ({ item: `q2:${item.classname}` satisfies ItemId, icon: item.icon })),
+    ...[...xatrixWeaponDefinitions, ...rogueWeaponDefinitions].flatMap(weapon => {
+      const display = names.get(weapon.name);
+      return display === undefined ? [] : [{ item: weapon.item, icon: display.icon }];
+    })];
+}
+
 export class Q2MissionPackItems implements Q2SpawnModule {
   private powers = new Map<ActorId, Q2MissionPackPowerups>();
   constructor(readonly hooks: Q2MissionPackItemHooks, readonly pack: Q2MissionPack, readonly sharedItems: Q2ItemModule) {}

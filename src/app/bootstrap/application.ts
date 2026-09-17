@@ -1,9 +1,17 @@
+import { prepareLocalSeatChange, type LocalSeatRequest } from "./local-seat-change.ts";
+import { ApplicationTools } from "./application-tools.ts";
+import { randomUUID } from "node:crypto";
+import { BaseArenaProgression } from "./base-arena-progression.ts";
+import { parseArenaPostgame, arenaPostgamePresentation, type ArenaPostgamePresentation } from "./base-arena-postgame.ts";
+import { readBaseArenaCatalog, baseArenaForMap, type BaseArenaCatalog } from "./base-arena-catalog.ts";
+import type { BaseArenaMenuService } from "./base-arena-menu.ts";
+import { PlayerProgressStore } from "./player-progress.ts";
 import { defaultAudioOutputFormat } from "../../audio/output.ts";
 import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
 import { ApplicationVideoRestart, prepareVideoGuests, type PreparedVideoPresentation, type VideoGuestSeat } from "./video-restart.ts";
 import { MusicControls } from "../../audio/music.ts";
 import { SceneImageRegistry } from "../../render/scene/resources.ts";
-import { openInitialConfigurationContent, prepareInitialConfiguration, prepareProfileConfiguration, configurationDialect, configurationStore, type PreparedProfileConfiguration, type ConfigurationCommandRequest } from "./configuration.ts";
+import { legacyConfigurationOptions, openInitialConfigurationContent, prepareInitialConfiguration, prepareProfileConfiguration, configurationDialect, configurationStore, type PreparedProfileConfiguration, type ConfigurationCommandRequest } from "./configuration.ts";
 import { SeatInput } from "../../input/seat.ts";
 import { ClientSourcePublicationError, type ClientBootstrap } from "./client-bootstrap.ts";
 import { readQ1ViewSettings } from "./q1-client-settings.ts";
@@ -48,15 +56,16 @@ import { applyFrontendPreferences, readFrontendPreferences, changedFrontendPrefe
 import type { FrontendPreferenceOverrides, FrontendPreferenceValues } from "./frontend-preferences.ts";
 import { ApplicationQ2Console, q2OperatorPlayerName } from "./q2-console.ts";
 import { preloadApplicationMonsterNavigation } from "./simulation/monster-navigation.ts";
-import { botAdmissionError, ApplicationBots, openApplicationBotLog, resumeApplicationBotLog } from "./simulation/bots.ts";
-import type { ApplicationBotClient, ApplicationBotsOptions, ApplicationBotTransportCheckpoint } from "./simulation/bots.ts";
+import { botAdmissionError, openApplicationBotLog, resumeApplicationBotLog } from "./simulation/bots.ts";
+import type { ApplicationBotClient, ApplicationBotsOptions, ApplicationBotTransportCheckpoint, ApplicationBotService } from "./simulation/bots.ts";
+import { loadApplicationBotAssets } from "./simulation/bot-assets.ts";
+import { createApplicationBots } from "./simulation/bot-rerelease.ts";
 import { createApplicationBotNavigation } from "./simulation/navigation.ts";
-import { loadMountedBotAssetFiles } from "../../bots/behavior/index.ts";
 import type { ActorId, ClientId, IdentityOwner, SeatId } from "../../contracts/identity.ts";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { ExecutableRecipe } from "../../contracts/content.ts";
+import type { ContentId, ExecutableRecipe } from "../../contracts/content.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { TransitionDecision } from "../../contracts/gameplay.ts";
 import type { SceneCamera } from "../../contracts/render.ts";
@@ -73,12 +82,18 @@ import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { DedicatedConsole } from "../../console/dedicated.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
-import { readSaveImage, writeSaveImage } from "../../persistence/save-image.ts";
+import { saveUnavailable, TimedAutosave, type SavePurpose } from "../../persistence/save-policy.ts";
+import { writeSavedGame } from "../../persistence/saved-game.ts";
+import { prepareApplicationSave } from "./original-save.ts";
 import { EngineSession } from "../../world/session/index.ts";
 import type { SessionClient, SessionConnection, SessionSeat } from "../../world/session/index.ts";
 import { SharedTransitionCoordinator } from "../../world/gameplay/transitions.ts";
 import { parseQ2Travel, type Q2TravelTarget } from "./q2-travel.ts";
-import { CampaignCinematic } from "./campaign-cinematic.ts";
+import { CampaignCinematic, type ScreenCinematicRequest, type ScreenCinematicCaptions } from "./campaign-cinematic.ts";
+import { SeatMediaCaptions } from "../../text/media-captions.ts";
+import type { SystemCinematicHost } from "./q3-client/cinematics.ts";
+import { CampaignUnit } from "./campaign-unit.ts";
+import { authoredCampaignStart } from "./authored-start.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
 import { ApplicationAssets } from "./assets.ts";
@@ -185,11 +200,12 @@ export class Application {
   });
   private graphical: GraphicalApplication | null = null;
   private capture: ApplicationCapture | null = null;
+  private tools: ApplicationTools | null = null;
   private ownedVideoRestart: ApplicationVideoRestart | null = null;
   private frontendOverrides: FrontendPreferenceOverrides = {};
   private imageSettings: ApplicationImageSettings | null = null;
   private frontendBaseline: FrontendPreferenceValues | null = null;
-  private bots: ApplicationBots | null = null;
+  private bots: ApplicationBotService | null = null;
   private clientCvars = new Map<SeatId, CvarRegistry>();
   private teamArenaOverrides: TeamArenaOverrides | null = null;
 
@@ -224,8 +240,14 @@ export class Application {
   private network: NativeServer | null = null;
   private readonly transitions = new SharedTransitionCoordinator(decision => { this.pendingTransition = decision; return undefined; });
   private pendingTransition: Exclude<TransitionDecision, { readonly kind: "stay" }> | null = null;
-  private campaignMovie: { readonly playback: CampaignCinematic; readonly next: Q2TravelTarget | null; readonly carry: SimulationTravel } | null = null;
+  private readonly movies = new Map<SharedSimulation, { readonly playback: CampaignCinematic; complete(): Promise<void> }>();
+  private get campaignMovie() { return this.movies.get(this.simulation) ?? null; }
+  private set campaignMovie(movie: { readonly playback: CampaignCinematic; complete(): Promise<void> } | null) {
+    if (movie === null) this.movies.delete(this.simulation); else this.movies.set(this.simulation, movie);
+  }
   private pendingMap: string | null = null;
+  private readonly baseArenaProgress = new WeakMap<SharedSimulation, { readonly catalog: BaseArenaCatalog; readonly progression: BaseArenaProgression; result: ArenaPostgamePresentation | null; resultAt: number; announced: boolean; moviePlayed: boolean }>();
+  private playerProgress: Promise<PlayerProgressStore> | null = null;
   private pendingTeamArena: "next" | "retry" | null = null;
   private pendingTeamArenaPostgame: TeamArenaPostgameStats | null = null;
   private sourceCommands: CommandBuffer | null = null;
@@ -237,20 +259,34 @@ export class Application {
   private localSnapshotServerBit: 0 | 4 = 0;
   private fatalWorldFailure = false;
   private roundPresentationEvents: SimulationPresentationEvent[] = [];
-  private pendingSave: SaveImage | null = null;
+  private pendingSave: string | null = null;
   private savedGames: StartupSaves | null = null;
   private localGuest: LocalQ3GuestWorld | null = null;
   private guestBrowser: LocalQ3GuestBrowser | null = null;
   private saveOperation: { readonly run: () => Promise<void>; readonly resolve: () => void; readonly reject: (error: unknown) => void } | null = null;
   private lastOutput: { readonly simulation: SharedSimulation; readonly output: SimulationOutput } | null = null;
+  private timedAutosave = new TimedAutosave(30_000);
+  private campaignUnit = new CampaignUnit();
   private get saveDirectory(): string { return this.host.saveDirectory ?? join(homedir(), ".local", "share", "quake-typescript", "saves"); }
+  private saveUnavailable(purpose: SavePurpose): string | null {
+    const players = this.localPlayers.map(player => player.actor);
+    return saveUnavailable({ authority: this.network === null && this.options.network.kind === "offline" ? "offline" : "server",
+      family: this.simulation.q3Source() !== null || this.simulation.q3Guest() !== null ? "q3"
+        : this.simulation.q2Source() !== null ? "q2" : "q1",
+      mode: this.options.mode, active: !this.closed && this.campaignMovie === null,
+      intermission: players.some(actor => this.simulation.movementPlayer(actor)?.intermission === true)
+        || (this.simulation.q3Source()?.level.intermissionTime ?? 0) !== 0
+        || this.simulation.q3Guest()?.state.configstrings.get(22) === "1",
+      playerHealth: players.map(actor => this.simulation.combat.read(actor)?.health ?? 0) }, purpose);
+  }
   private levelRecoveryAvailable(simulation: SharedSimulation, options: ApplicationOptions): boolean {
-    return !options.dedicated && options.network.kind === "offline" && options.mode === "singleplayer"
+    return !options.dedicated && options.network.kind === "offline" && simulation.options.mode === "singleplayer"
       && (simulation.q1Source() !== null || simulation.q2Source() !== null || simulation.quakecSource() !== null);
   }
 
   private async autosaveLevel(): Promise<void> {
-    if (!this.levelRecoveryAvailable(this.simulation, this.options) || this.network !== null || this.localPlayers.length === 0) return;
+    if (!this.levelRecoveryAvailable(this.simulation, this.options) || this.saveUnavailable("autosave") !== null
+      || this.sourceCvars()?.variableValue("sv_autosave") === 0) return;
     const directory = join(this.saveDirectory, this.content.catalog.product(this.content.recipe.map.entities.content).expectation.id);
     try {
       await mkdir(directory, { recursive: true });
@@ -258,6 +294,21 @@ export class Application {
       await this.saveGame(path);
       this.host.print(`Autosaved ${path}.\n`);
     } catch (error) { this.host.print(`Autosave failed: ${error instanceof Error ? error.message : String(error)}\n`); }
+    finally { this.timedAutosave.completed(); }
+  }
+
+  private async advanceAutosave(milliseconds: number): Promise<void> {
+    const cvars = this.sourceCvars();
+    if (cvars === null) return;
+    const interval = cvars.variableValue("sv_autosave_interval") * 1000;
+    if (!Number.isFinite(interval) || interval <= 0 || cvars.variableValue("sv_autosave") === 0) return;
+    if (interval !== this.timedAutosave.intervalMilliseconds) this.timedAutosave = new TimedAutosave(interval);
+    const eligible = this.levelRecoveryAvailable(this.simulation, this.options) && this.saveUnavailable("autosave") === null
+      && this.worldOperation === "idle" && this.campaignMovie === null && this.pendingTeamArena === null && this.pendingMap === null
+      && this.pendingRestart === null && this.pendingTransition === null && this.pendingSave === null && this.saveOperation === null;
+    if (this.timedAutosave.advance(milliseconds, eligible)) {
+      try { await this.autosaveLevel(); } finally { this.timedAutosave.completed(); }
+    }
   }
 
   private saveMenu(simulation: SharedSimulation, options: ApplicationOptions): SavedGameMenuService {
@@ -509,10 +560,13 @@ export class Application {
         loadedContent = content;
         host.loading?.stage("Preparing world...");
         const monsterNavigation = await preloadApplicationMonsterNavigation(content);
+        const authoredStart = initialSave === undefined && options.authoredCampaignStart === true
+          ? authoredCampaignStart(await content.catalog.authoredStartsFor(content.recipe.map.entities.content), options.map) : null;
         const maxClients = Math.max(startup?.maxClients ?? savedSettings?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? borrowedCapacity,
           ...[...localSeats.keys()].map(client => client.slot + 1));
         if (borrowedSource !== null) borrowedSource.set(borrowedSource.dialect === "q3" ? "sv_maxclients" : "maxclients", String(maxClients), true);
         const simulation = createSimulation({ dedicated: options.dedicated, sourceArchive,
+          ...(authoredStart === null ? {} : { startItems: authoredStart.startItems }),
           ...(borrowedSource !== null ? { sourceRegistry: borrowedSource } : startup === null ? {} : { sourceRegistry: startup.prepared.source }),
           ...(ownership.kind !== "borrowed" || initialSave !== undefined || options.teamArenaSkirmish === undefined
             || options.teamArenaSkirmish.cvars.every(setting => borrowedSource?.variableString(setting.name) === setting.value)
@@ -529,7 +583,8 @@ export class Application {
           if (source === null) throw new Error("--bot-skill requires the Quake III game provider");
           source.host.cvars.set("g_spSkill", String(options.botSkill), true);
         }
-        application = new Application(options, content, session, simulation, host, identity, localSeats, inputConfig, ownership);
+        const { authoredCampaignStart: consumedCampaignStart, ...retainedOptions } = options;
+        application = new Application(retainedOptions, content, session, simulation, host, identity, localSeats, inputConfig, ownership);
         application.sourceClientChanges.added.push(...stagedClients.added);
         application.sourceClientChanges.removed.push(...stagedClients.removed);
         application.sourceSeatChanges.added.push(...stagedSeats.added);
@@ -541,6 +596,7 @@ export class Application {
         application.profileConfiguration = profileConfiguration;
         application.imageSettings = borrowedImages?.settings ?? startup?.image ?? null;
         if (initialSave !== undefined) {
+          application.campaignUnit.restore(initialSave);
           application.teamArenaOverrides = readTeamArenaOverrides(initialSave, [...localSeats.values()].map(seat => ({ seat: seat.id.index, client: seat.client.id.slot })));
           if (application.isTeamArenaSkirmish() && application.teamArenaOverrides === null) host.print("Legacy Team Arena save has no per-seat timer baseline; current timer preferences will be preserved.\n");
         }
@@ -603,6 +659,7 @@ export class Application {
         if (initialSave === undefined) {
           if (options.teamArenaSkirmish !== undefined) application.startTeamArenaSkirmish(options.teamArenaSkirmish);
           await application.autosaveLevel();
+          if (authoredStart !== null && authoredStart.target.kind !== "map") await application.advanceQ2Travel(authoredStart.target, simulation.captureTravel());
         }
         else application.requestRestoredScores();
         return application;
@@ -636,7 +693,7 @@ export class Application {
   private async createBots(content: LoadedApplicationContent, simulation: SharedSimulation,
     setup: Pick<ApplicationBotsOptions, "clients" | "restart" | "restore"> & {
       readonly requested?: boolean; readonly commands?: Pick<CommandBuffer, "insert"> | null;
-    } = {}): Promise<ApplicationBots | null> {
+    } = {}): Promise<ApplicationBotService | null> {
     const { clients = [], restart = false, requested = false, commands = this.sourceCommands, restore } = setup;
     if (simulation.q3Source() === null && clients.length === 0 && !requested && restore === undefined) return null;
     const unsupported = botAdmissionError(simulation);
@@ -644,17 +701,16 @@ export class Application {
       if (clients.length !== 0 || requested || restore !== undefined) throw new Error(unsupported);
       return null;
     }
-    const definitions = simulation.q3Source() === null ? content.catalog.product("q3-baseq3").id : content.recipe.map.entities.content;
-    const files = await loadMountedBotAssetFiles(await content.forContent(definitions), content.catalog);
+    const assets = await loadApplicationBotAssets(content, simulation);
     const navigation = await createApplicationBotNavigation({ content, simulation });
     const configuration = simulation.q1Source()?.cvars ?? simulation.q2ServerCvars() ?? undefined;
-    return new ApplicationBots({ session: this.session, simulation, files, navigation, ...(restore === undefined ? { clients, restart } : { restore }), automaticFrame: true,
+    return createApplicationBots({ session: this.session, simulation, files: assets.files, navigation, ...(restore === undefined ? { clients, restart } : { restore }), automaticFrame: true,
       ...(configuration === undefined ? {} : { configuration }),
       leafCount: content.world.leaves.length, print: text => { this.host.print(text); },
       insertConsoleCommand: text => {
         if (commands === null) throw new Error("Bot console has no source command buffer");
         commands.insert(text);
-      }, openLog: openApplicationBotLog, resumeLog: resumeApplicationBotLog });
+      }, openLog: openApplicationBotLog, resumeLog: resumeApplicationBotLog }, assets);
   }
 
   get frontendSettings(): FrontendPreferenceOverrides {
@@ -723,7 +779,11 @@ export class Application {
 
   private inputActions(simulation = this.simulation, content = this.content, q2Console = this.q2Console, localGuest = this.localGuest, clientCvars = this.clientCvars,
     sharedCvars = this.imageSettings?.cvars, candidateAction?: (request: ApplicationCommandRequest) => undefined): ApplicationInputCommands {
-    return { readScript: path => content.mounts.open(path).then(resource => resource?.bytes),
+    return { localPlayerCapacity: () => {
+      let available = 0;
+      for (let slot = 0; slot < simulation.options.maxClients; slot++) if (this.session.clientAt(slot) === null) available++;
+      return this.localSeats.size + available;
+    }, readScript: path => content.mounts.open(path).then(resource => resource?.bytes),
       startupReader: (scripts, options) => Application.startupScriptReader(content, options, scripts),
       ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => { if (localGuest !== null && localGuest !== this.localGuest) throw new Error("Guest candidate requested quit"); return this.requestQuit(); },
       execute: (name, arguments_, seat, source) => candidateAction !== undefined ? candidateAction({ target: "application", name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) })
@@ -740,7 +800,7 @@ export class Application {
         const player = client === undefined ? undefined : simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client));
         return player === undefined ? [] : simulation.playerUi(player).items;
       },
-      bindingCapabilities: () => ({ chat: simulation.q2Source() !== null || simulation.q3Source() !== null || simulation.q3Guest() !== null,
+      bindingCapabilities: () => ({ chat: simulation.q1Source() !== null || simulation.q2Source() !== null || simulation.q3Source() !== null || simulation.q3Guest() !== null,
         scoreCommand: simulation.q2Source() !== null ? "score" : simulation.q3Source() !== null || simulation.q3Guest() !== null ? "+scores" : null,
         offhandGrapple: simulation.recipe.equipment.grapple.kind === "enabled" && simulation.recipe.equipment.grapple.binding === "offhand",
         offhandGrenades: simulation.recipe.equipment.handGrenades.kind === "enabled" }),
@@ -783,6 +843,29 @@ export class Application {
     commands.register("server_setting", handler);
     return () => { commands.unregister("server_setting", handler); };
   }
+  private refreshApplicationTools(): void {
+    const commands = this.sourceCommands;
+    if (commands === null) return;
+    if (this.tools === null) this.tools = new ApplicationTools(commands, {
+      mounts: () => this.content.mounts, outputRoot: () => applicationCaptureRoot(this.options.userContentRoot),
+      milliseconds: () => this.elapsed, cvars: () => this.sourceCvars(),
+      frame: () => ({ frame: this.frames, milliseconds: this.elapsed, map: this.options.map,
+        renderer: this.graphical?.renderer.diagnostics().backend ?? "headless", clients: this.simulation.players().length }),
+      renderer: () => { if (this.graphical === null) throw new Error("Renderer is not active"); return this.graphical.renderer.diagnostics(); },
+      shaders: sorted => { if (this.graphical === null) throw new Error("Renderer is not active"); return this.graphical.assets.materialRegistrations.snapshot(sorted); },
+      resources: source => {
+        let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+        const seat = origin.kind === "local-seat" ? origin.seat : this.localPlayers[0]?.seat.id;
+        return seat === undefined ? null : this.graphical?.q3.get(seat)?.client.resourceDiagnostics() ?? null;
+      },
+      print: (text, source) => {
+        if (source !== undefined && this.graphical !== null) this.graphical.input.print(text, source);
+        else { this.host.print(text); for (const local of this.graphical?.input.locals ?? []) local.console.print(text); }
+      },
+    });
+    this.tools.bind([commands, ...(this.graphical !== null && (this.sourcePublished || this.ownership.kind === "owned") ? [this.graphical.input.commands] : [])]);
+  }
+
   private async bindSourceCommands(restoring = false): Promise<void> {
     const prepared = await this.prepareSourceCommands(this.simulation, this.content, restoring, request => { this.requestedCommands.push(request); return undefined; });
     this.publishSourceCommands(prepared);
@@ -810,6 +893,7 @@ export class Application {
     } else this.sourceCommands.setProfile(options.dialect, undefined);
     this.releaseSourceCommands = prepared.activate(this.sourceCommands);
     this.q2Console = prepared.q2Console;
+    this.refreshApplicationTools();
   }
 
   private async prepareSourceCommands(simulation: SharedSimulation, content: LoadedApplicationContent, restoring: boolean, action: (request: ApplicationCommandRequest) => undefined): Promise<PreparedSourceCommands> {
@@ -845,7 +929,15 @@ export class Application {
         return () => { for (const dispose of [...disposers].reverse()) dispose(); };
       } });
     const timeCvars = this.sourceCvars(simulation);
-    if (timeCvars !== null) registerFrameTimeCvars(timeCvars);
+    if (timeCvars !== null) {
+      registerFrameTimeCvars(timeCvars);
+      timeCvars.register("cl_avidemo", "0", 0);
+      timeCvars.register("cl_forceavidemo", "0", 0);
+      if (this.levelRecoveryAvailable(simulation, this.options)) {
+        timeCvars.register("sv_autosave", "1", CvarFlag.Archive);
+        timeCvars.register("sv_autosave_interval", "30", CvarFlag.Archive);
+      }
+    }
     let sourceCommands: CommandBuffer | null = null;
     let q2Console: ApplicationQ2Console | null = null;
     if (simulation.q2Source() !== null) {
@@ -887,7 +979,7 @@ export class Application {
         queue("exec", invocation.args, null, { session: invocation.source.session, origin: invocation.source.origin });
         return undefined;
       });
-      for (const name of ["map", "map_restart", "devmap", "spmap", "spdevmap", "addbot", "removebot", "botlist", "kick"])
+      for (const name of ["map", "map_restart", "devmap", "spmap", "spdevmap", "addbot", "removebot", "botlist", "kick", "cinematic"])
         register(commands, name, invocation => queue(name, invocation.args, null, invocation.source));
       sourceCommands = commands; bind(commands, owner => this.bindServerSettingCommand(owner, simulation)); return prepared();
     }
@@ -911,7 +1003,16 @@ export class Application {
     register(commands, "fly", invocation => queue("fly", invocation.args, null, invocation.source));
     register(commands, "map", invocation => queue("map", invocation.args, null, invocation.source));
     register(commands, "map_restart", invocation => queue("map_restart", invocation.args, null, invocation.source));
-    if (this.isTeamArenaSkirmish(simulation)) register(commands, "postgame", invocation => sourceAction("postgame", invocation.args, invocation.source));
+    register(commands, "cinematic", invocation => queue("cinematic", invocation.args, null, invocation.source));
+    await this.prepareBaseArenaProgress(simulation, content, restoring);
+    if (this.isTeamArenaSkirmish(simulation) || this.baseArenaProgress.has(simulation))
+      register(commands, "postgame", invocation => sourceAction("postgame", invocation.args, invocation.source));
+    if (this.baseArenaProgress.has(simulation)) {
+      register(commands, "spPostgame", invocation => sourceAction("spPostgame", invocation.args, invocation.source));
+      register(commands, "iamacheater", invocation => sourceAction("arena-unlock", invocation.args, invocation.source));
+      register(commands, "iamamonkey", invocation => sourceAction("arena-medals", invocation.args, invocation.source));
+      register(commands, "arena-reset", invocation => sourceAction("arena-reset", invocation.args, invocation.source));
+    }
     register(commands, "teamarena-results", invocation => sourceAction("teamarena-results", invocation.args, invocation.source));
     register(commands, "kick", invocation => sourceAction("kick", invocation.args, invocation.source));
     register(commands, "removebot", invocation => queue("removebot", invocation.args, null, invocation.source));
@@ -972,6 +1073,7 @@ export class Application {
 
   private async sourceActions(events: readonly SimulationPresentationEvent[] = this.sourceEvents): Promise<void> {
     for (const source of events) {
+      await this.recordPlayerProgress(source);
       if (source.kind === "q1-composition") {
         const event = source.event.kind === "addon" ? source.event.event : source.event;
         if (event.kind === "developer-message") {
@@ -1054,7 +1156,7 @@ export class Application {
         ? { kind: "qw", host: await createQwApplicationServerHost({ ...common, serverCount }) }
         : { kind: "q1", host: await createQ1ApplicationServerHost({ ...common, protocol: this.options.q1Protocol ?? { kind: "q1-netquake", version: 15 } }) };
       case "q2": return { kind: "q2", host: await createQ2ApplicationServerHost({ ...common,
-        protocol: source.edition === "rerelease" ? { kind: "q2-rerelease", version: 1038 } : { kind: "q2-classic", version: 34 } }) };
+        protocol: this.options.q2Protocol ?? (source.edition === "rerelease" ? { kind: "q2-rerelease", version: 1038 } : { kind: "q2-classic", version: 34 }) }) };
       case "q3": return { kind: "q3", host: await createQ3ApplicationServerHost(common) };
     }
   }
@@ -1210,12 +1312,13 @@ export class Application {
         if (restoring && sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
-          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(this.simulation, this.options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(this.simulation, local.player.seat));
-        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect()));
+          await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(this.simulation, this.options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(this.simulation, local.player.seat), this.uiSourceOptions(this.simulation, rerelease, local.player.seat.id));
+        const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect()), () => (this.imageSettings?.cvars.variableValue("r_shadows") ?? 0) !== 0, camera => this.tools?.applyCamera(camera) ?? camera);
         if (client === null) local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
       }
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease };
+      this.refreshApplicationTools();
       this.capture = client?.capture ?? new ApplicationCapture(inputCaptureServices(input, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text)), renderer);
       if (client === null) {
         this.capture.activate();
@@ -1256,7 +1359,7 @@ export class Application {
       const guest = this.localGuest?.seats.get(id);
       if (presentation === undefined || guest === undefined || guest.client !== current.client) throw new Error("Guest video seat has no current presentation");
       seats.push({ client: current.client,
-        viewport: window => { const size = window.drawableSize; return seatViewport(id.index, this.options.seats, size.width, size.height); },
+        viewport: window => { const size = window.drawableSize; return this.localViewport(id, size.width, size.height); },
         publish: client => { graphical.q3.set(id, { ...current, client }); guest.client = client; presentation.replaceQ3Client(client); this.clientInputs = this.clientInputs.filter(event => !event.seat.equals(id)); } });
     }
     return prepareVideoGuests(graphical.input, graphical.renderer, seats, () => {
@@ -1266,6 +1369,7 @@ export class Application {
   }
 
   async prepareRetirement(): Promise<void> {
+    await this.tools?.drain();
     await this.capture?.beforeWorldChange();
   }
 
@@ -1277,7 +1381,7 @@ export class Application {
     return resource?.bytes;
   }
 
-  releaseSettings(): void { this.releaseViewCvars?.(); this.releaseViewCvars = null; }
+  releaseSettings(): void { this.tools?.beforeWorldChange(); this.releaseViewCvars?.(); this.releaseViewCvars = null; }
 
   retire(): Promise<void> { return this.close(); }
 
@@ -1321,6 +1425,7 @@ export class Application {
       this.viewSettings.setFieldOfView(client.imageSettings.cvars.variableValue("fov"));
       this.releaseViewCvars = this.viewSettings.bindCvars(client.imageSettings.cvars);
       graphical.input.publishClientPlatform(client, "replace");
+      this.refreshApplicationTools();
       if (this.configurationScripts !== null && this.configurationScripts !== client.configuration.current.scripts) {
         retiredConfiguration = client.configuration.current.scripts;
         client.configuration.current = { scripts: this.configurationScripts, options: this.options };
@@ -1348,7 +1453,8 @@ export class Application {
 
   private static sourceScripts(content: LoadedApplicationContent, options: ApplicationOptions, settings: ConfigStore): ConsoleScriptFiles {
     const mounts = content.mounts, release = content.retainMainMounts();
-    return new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+    return new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content),
+      consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
       mounted: name => mounts.open(name).then(resource => resource?.bytes) }, async () => { release(); });
   }
 
@@ -1434,6 +1540,120 @@ export class Application {
     return source?.options.product === "missionpack" && source.host.cvars.variableString("nextmap") === "teamarena-results";
   }
 
+  private uiSourceOptions(simulation: SharedSimulation, rerelease: ApplicationRereleasePresentation, seat: SeatId) {
+    const cvars = this.sourceCvars(simulation);
+    const baseArena = this.baseArenaMenu(simulation, seat);
+    return { ...(cvars === null ? {} : { gameplay: { cvars } }), ...(baseArena === undefined ? {} : { baseArena }),
+      localize: (content: ContentId, text: string, args?: readonly string[]) => rerelease.localizeMessage(seat, content, text, args) };
+  }
+
+  private async recordPlayerProgress(source: SimulationPresentationEvent): Promise<void> {
+    const achievement = source.kind === "q1" && source.event.kind === "achievement"
+      ? { family: "q1", id: source.event.id, actor: source.event.player }
+      : source.kind === "q2-rerelease" && source.event.kind === "achievement" ? { family: "q2", id: source.event.id, actor: null } : null;
+    const completion = source.kind === "q1" && source.event.kind === "intermission" ? "q1"
+      : source.kind === "q2-rerelease" && source.event.kind === "end-of-unit" ? "q2" : null;
+    if ((achievement === null || achievement.id === "") && completion === null) return;
+    this.playerProgress ??= PlayerProgressStore.open(join(this.inputConfig.root, "player-progress.json"));
+    const store = await this.playerProgress;
+    for (const seat of this.localSeats.values()) {
+      if (achievement?.actor !== null && achievement?.actor !== undefined
+        && !this.simulation.movementPlayer(achievement.actor)?.client.equals(seat.client.id)) continue;
+      const participant = `local-seat:${seat.id.index}`;
+      if (achievement !== null && achievement.id !== "") await store.record({ kind: "achievement", source: achievement.family === "q1" ? "q1" : "q2", participant,
+        event: `achievement:${source.content}:${achievement.id}`, award: achievement.id });
+      if (completion !== null) await store.record({ kind: "level-completed", source: completion, participant,
+        event: `level:${source.content}:${this.options.map}`, map: this.options.map });
+    }
+  }
+
+  private async prepareBaseArenaProgress(simulation: SharedSimulation, content: LoadedApplicationContent, restoring: boolean): Promise<void> {
+    const source = simulation.q3Source();
+    if (source === null || source.options.product === "missionpack" || source.gameType !== GameType.GT_SINGLE_PLAYER) return;
+    const catalog = await readBaseArenaCatalog(content.catalog, content.catalog.product(content.recipe.map.entities.content).id);
+    const progression = new BaseArenaProgression(source.host.cvars, { regularLevels: catalog.regularCount,
+      training: catalog.arenas.find(arena => arena.special.toLowerCase() === "training")?.number ?? null,
+      final: catalog.arenas.find(arena => arena.special.toLowerCase() === "final")?.number ?? null,
+      totalLevels: catalog.regularCount + catalog.arenas.filter(arena => arena.special !== "").length });
+    source.host.cvars.register("g_spRoundIdentity", "", CvarFlag.Archive);
+    source.host.cvars.register("g_spCompletedRound", "", CvarFlag.Archive);
+    if (!restoring || source.host.cvars.variableString("g_spRoundIdentity") === "") source.host.cvars.set("g_spRoundIdentity", randomUUID(), true);
+    this.baseArenaProgress.set(simulation, { catalog, progression, result: null, resultAt: 0, announced: false, moviePlayed: false });
+  }
+
+  private async completeBaseArena(args: readonly string[]): Promise<void> {
+    const state = this.baseArenaProgress.get(this.simulation), source = this.simulation.q3Source();
+    if (state === undefined || source === null) throw new Error("Base arena postgame lost its source owner");
+    const arena = baseArenaForMap(state.catalog, this.options.map), rawSkill = source.host.cvars.variableValue("g_spSkill");
+    const skill = rawSkill >= 5 ? 5 : rawSkill >= 4 ? 4 : rawSkill >= 3 ? 3 : rawSkill >= 2 ? 2 : 1;
+    const game = parseArenaPostgame(args, arena.number, skill);
+    const round = `${source.host.cvars.variableString("g_spRoundIdentity")}:${source.level.startTime}`;
+    if (source.host.cvars.variableString("g_spCompletedRound") === round) {
+      state.result = arenaPostgamePresentation(game, { rank: game.result.rank, completedTier: state.progression.completedTier(arena.number),
+        unlockedMovie: null, awards: [], nextLevel: state.progression.currentLevel() });
+      state.announced = true; state.moviePlayed = true;
+      return;
+    }
+    const local = [...this.localSeats.values()].find(seat => seat.client.id.slot === game.playerClient);
+    if (local !== undefined) {
+      this.playerProgress ??= PlayerProgressStore.open(join(this.inputConfig.root, "player-progress.json"));
+      await (await this.playerProgress).record({ kind: "match-completed", source: "q3", participant: `local-seat:${local.id.index}`,
+        event: round, map: arena.map, score: game.result.frags });
+    }
+    const names = ["g_spScores1", "g_spScores2", "g_spScores3", "g_spScores4", "g_spScores5", "g_spAwards", "g_spVideos", "g_spCompletedRound"];
+    const before = names.map(name => ({ name, value: source.host.cvars.variableString(name) }));
+    const result = state.progression.record(game.result);
+    source.host.cvars.set("g_spCompletedRound", round, true);
+    try { await this.saveSourceArchive(this.options, this.content, this.simulation, this.teamArenaOverrides); }
+    catch (error) { for (const value of before) source.host.cvars.set(value.name, value.value, true); throw error; }
+    state.result = arenaPostgamePresentation(game, result);
+    state.resultAt = performance.now(); state.announced = false; state.moviePlayed = false;
+    const music = state.result.musicCommand.split(" ");
+    this.queueCommand("music", music.slice(1), local?.id ?? null);
+  }
+
+  private baseArenaMenu(simulation: SharedSimulation, seat: SeatId): BaseArenaMenuService | undefined {
+    const state = this.baseArenaProgress.get(simulation);
+    if (state === undefined) return undefined;
+    return {
+      result: () => {
+        const result = state.result;
+        if (result === null) return null;
+        const elapsed = performance.now() - state.resultAt;
+        if (!state.announced && elapsed >= result.winnerAnnouncementAfterMilliseconds) {
+          state.announced = true;
+          const winner = result.podium[0];
+          const name = winner === undefined ? "" : simulation.q3Source()?.pool.clientAt(winner.client).pers.netname.replace(/\^[0-9]/g, "").toLowerCase() ?? "";
+          if (result.result.rank === 1 || name !== "") this.queueCommand("play", [result.result.rank === 1
+            ? "sound/player/announce/youwin.wav" : `sound/player/announce/${name}_wins.wav`], seat);
+        }
+        if (!state.moviePlayed && result.result.unlockedMovie !== null && elapsed >= 5000 + Math.max(5000, result.result.awards.length * 2000)) {
+          state.moviePlayed = true;
+          const movie = state.progression.catalog.final !== null && result.result.completedTier === state.progression.catalog.regularLevels / 4 + 1
+            ? "end.RoQ" : `tier${result.result.unlockedMovie}.RoQ`;
+          this.queueCommand("cinematic", [movie], seat);
+        }
+        return result;
+      },
+      playerName: client => simulation.q3Source()?.pool.clientAt(client).pers.netname ?? `Player ${client + 1}`,
+      progress: () => {
+        const medals = ["Accuracy", "Impressive", "Excellent", "Gauntlet", "Frags", "Perfect"];
+        return [...state.catalog.arenas.map(arena => {
+          const best = state.progression.best(arena.number);
+          return { label: arena.title, value: best.rank === 0 ? state.progression.levelAvailable(arena.number) ? "Available" : "Locked"
+            : `Best rank ${best.rank}, skill ${best.skill}` };
+        }), ...medals.map((label, medal) => ({ label, value: String(state.progression.award(medal)) }))];
+      },
+      retry: () => { state.result = null; this.queueCommand("map", [this.options.map], seat); },
+      next: () => {
+        const next = state.catalog.arenas.find(arena => arena.number === state.progression.currentLevel());
+        if (next !== undefined) { state.result = null; this.queueCommand("map", [next.map], seat); }
+      },
+      quit: () => { this.requestQuit(); },
+      reset: () => { this.requestedCommands.push({ target: "source", name: "arena-reset", arguments_: [], seat }); },
+    };
+  }
+
   private teamArenaResults(simulation: SharedSimulation, seat: SessionSeat): TeamArenaResultService | undefined {
     if (!this.isTeamArenaSkirmish(simulation)) return undefined;
     return { read: () => {
@@ -1472,11 +1692,11 @@ export class Application {
     return player.actor;
   }
 
-  private restoreQ3InputAngles(input: ApplicationInput, simulation: SharedSimulation): void {
+  private restoreQ3InputAngles(input: ApplicationInput, simulation: SharedSimulation, seat?: SeatId): void {
     const state = simulation.q3Source()?.host.serverState ?? simulation.q3Guest()?.state;
     if (state === undefined) return;
     for (const local of input.locals) {
-      if (local.builder.dialect !== "q3") continue;
+      if (local.builder.dialect !== "q3" || seat !== undefined && !local.player.seat.id.equals(seat)) continue;
       const command = state.getUserCommand(local.player.seat.client.id.slot);
       local.builder.setViewAngles(command === undefined ? { x: 0, y: 0, z: 0 } : { x: (command.angles[0] << 16 >> 16) * (360 / 65536),
         y: (command.angles[1] << 16 >> 16) * (360 / 65536), z: (command.angles[2] << 16 >> 16) * (360 / 65536) });
@@ -1505,13 +1725,14 @@ export class Application {
       if (localGuest === null || seat === undefined || browser === null) throw new Error("Local guest client services are not prepared");
       const { state, cvars } = seat;
       const client = await ApplicationQ3Client.create({ saveFontData: () => (input.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, kind: "qvm", localServer: true, source: state.source, connection: state, cvars,
+        systemCinematics: this.systemCinematics(simulation, assets.content, assets, audio, renderer, local.player.seat.id, input),
         assets, queries: simulation.scene, local, audio, renderer, browser: browser.view, commandBuffer: input.guestCommands, guestCvars: input.guestCvars(local.player.seat.id), guestInput: input.guestInput(local.player.seat.id),
         commandRegistration: input.clientCommandRegistration(local.player.seat.id),
-        splitScreen: this.options.seats > 1,
+        get splitScreen() { return input.locals.length > 1; },
         timeCvars: guest.state.cvars,
         assertCurrent: () => { if (simulation.q3Guest()?.isRetired !== false || local.player.seat.client.isClosed) throw new Error("Guest presentation world is retired"); },
         clientState: () => ({ phase: 8, connectPacketCount: 0, clientNumber: state.clientNumber, serverName: "localhost", message: "" }),
-        viewport: () => { const size = renderer.window.drawableSize; return seatViewport(local.player.seat.id.index, this.options.seats, size.width, size.height); },
+        viewport: () => { const size = renderer.window.drawableSize; return this.localViewport(local.player.seat.id, size.width, size.height); },
         now: () => performance.now(), commands: {
           reliable: text => { const [name, ...args] = tokenizeCommand(text, "q3").argv; if (name !== undefined)
             this.queueLocalGuestCommand(localGuest, { target: "client", name, arguments_: args, seat: local.player.seat.id }); },
@@ -1524,16 +1745,17 @@ export class Application {
     const source = simulation.q3Source(); if (source === null) return null;
     const prediction = createSimulationPredictionHost(simulation, local.player.actor, local.player.seat.id);
     const initial = source.sourceState(); prediction.captureSource(initial);
-    const client = await ApplicationQ3Client.create({ saveFontData: () => (input.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, weaponHud: () => { const ui = simulation.playerUi(local.player.actor); return { status: ui.weaponStatus, warning: ui.arsenalWarning }; }, assets, queries: simulation.scene, initial, local, audio, movement: prediction,
+    const client = await ApplicationQ3Client.create({ saveFontData: () => (input.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, weaponHud: () => { const ui = simulation.playerUi(local.player.actor); return { status: ui.weaponStatus, warning: ui.arsenalWarning }; }, assets, renderer, queries: simulation.scene, initial, local, audio, movement: prediction,
+      systemCinematics: this.systemCinematics(simulation, assets.content, assets, audio, renderer, local.player.seat.id, input),
       commandRegistration: input.clientCommandRegistration(local.player.seat.id),
-      splitScreen: this.options.seats > 1,
+      get splitScreen() { return input.locals.length > 1; },
       timeCvars: source.host.cvars,
       ...(cvars === undefined ? {} : { cvars }),
       ...(settings === undefined ? {} : { settings }), predictionCommand: (command, time) => prediction.submit(command, time),
       linkBounds: number => source.world.linkState(number)?.absbounds ?? null,
       sourceActor: number => { const record = source.records.get(number); return record?.inuse ? record.actor.id : null; },
       serverSettings: () => source.host.cvars.snapshots().filter(variable => source.settings.definitions.some(definition => definition.name === variable.name)),
-      viewport: () => { const size = renderer.window.drawableSize; return seatViewport(local.player.seat.id.index, this.options.seats, size.width, size.height); },
+      viewport: () => { const size = renderer.window.drawableSize; return this.localViewport(local.player.seat.id, size.width, size.height); },
       now: () => performance.now(), commands: {
         reliable: text => input.enqueueClientReliable(text, { session: this.session.session, origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } }, (text, source) => {
           const [name, ...args] = tokenizeCommand(text, "q3").argv;
@@ -1591,7 +1813,7 @@ export class Application {
     }
   }
 
-  private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage, skirmish?: TeamArenaSkirmish): Promise<void> {
+  private async replaceWorld(map: string, carry: SimulationTravel | null, initialSourceMilliseconds = 0, save?: SaveImage, skirmish?: TeamArenaSkirmish, published?: () => void): Promise<void> {
     if (this.campaignMovie !== null) throw new Error("Finish or skip the campaign cinematic before changing worlds");
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     this.worldOperation = "travel";
@@ -1608,6 +1830,8 @@ export class Application {
       if (this.fatalWorldFailure && !this.stepping) await this.closeFailedWorld(error);
       throw error;
     }
+    this.timedAutosave.worldChanged();
+    published?.();
     if (save === undefined) await this.autosaveLevel();
   }
 
@@ -1617,7 +1841,8 @@ export class Application {
     if (save === undefined && carry === null && this.simulation.quakecSource()?.kind === "quakeworld") carry = this.simulation.captureTravel();
     const settings = save === undefined ? null : savedSimulationSettings(save);
     const savedBots = save === undefined ? null : savedBotCheckpoint(save);
-    let options = { ...this.options, map: mapResourcePath(map),
+    const { authoredCampaignStart: consumedCampaignStart, ...travelOptions } = this.options;
+    let options = { ...travelOptions, map: mapResourcePath(map),
       ...(skirmish === undefined ? {} : { teamArenaSkirmish: skirmish, characterModel: skirmish.playerModel }),
       ...(settings === null ? {} : { skill: settings.skill, mode: settings.mode, seed: settings.seed }) };
     if (save !== undefined) { const { teamArenaSkirmish, ...restoredOptions } = options; options = restoredOptions; }
@@ -1658,7 +1883,7 @@ export class Application {
     const q3Cvars = q3?.host.cvars.snapshots().filter(variable => variable.name !== "sv_mapname" && variable.name !== "mapname")
       .map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value }));
     let simulation: SharedSimulation | null = null, assets: ApplicationAssets | null = null, art: NativeUiArt | null = null;
-    let nextBots: ApplicationBots | null = null;
+    let nextBots: ApplicationBotService | null = null;
     let nextLocalGuest: LocalQ3GuestWorld | null = null;
     const previousGuestBrowser = this.guestBrowser;
     let nextGuestBrowser = previousGuestBrowser;
@@ -1707,7 +1932,7 @@ export class Application {
         playerIdentity: client => ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
         ...(save === undefined ? { ...(skirmish === undefined ? { serverProfile } : {}), sourceArchive, ...(q1SourceRegistry === undefined ? {} : { sourceRegistry: q1SourceRegistry }), ...(q2Cvars === undefined ? {} : { q2Cvars }), ...(carry === null ? {} : { travel: carry }), ...(q3Session === undefined || skirmish !== undefined ? {} : { q3Session }),
           ...(continueQ3Clock || q3Session !== undefined && skirmish === undefined ? { initialSourceMilliseconds: destinationSourceMilliseconds } : {}),
-          ...(q3Cvars === undefined ? {} : { q3Cvars: [...q3Cvars, ...(skirmish === undefined ? [] : teamArenaSourceCvars(skirmish, q3Cvars))] }) } : { restore: save, restoredClients: clients }) });
+          ...(q3Cvars === undefined ? {} : { q3Cvars: [...q3Cvars, ...(skirmish === undefined ? [] : teamArenaSourceCvars(skirmish, q3Cvars))] }) } : { restore: save, restoredClients: clients, ...(carry === null ? {} : { travel: carry }) }) });
       const nextSimulation = simulation;
       if (save !== undefined && nextSimulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
       if (previous !== null && nextSimulation.q3Guest() === null) for (const local of previous.input.locals) {
@@ -1818,9 +2043,9 @@ export class Application {
           if (sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
           const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
-            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(current, options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(current, local.player.seat));
+            await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(current, options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(current, local.player.seat), this.uiSourceOptions(current, rerelease, local.player.seat.id));
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
-          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect(content)));
+          const presentation = new WorldSeatPresentation(local, worldAssets, previous.renderer, current, options.seats, font, characters, ui, effects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => current.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect(content)), () => (this.imageSettings?.cvars.variableValue("r_shadows") ?? 0) !== 0, camera => this.tools?.applyCamera(camera) ?? camera);
           stagedPresentations.push(presentation);
           presentations.push(presentation);
         }
@@ -1869,7 +2094,8 @@ export class Application {
       const adoptHeadless = (() => {
         const prepared = this.preparedStartup;
         if (nextGraphical !== null || prepared === null) return () => {};
-        const scripts = new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings: this.inputConfig,
+        const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content),
+          consoleRoot: consoleConfigRoot(options.userContentRoot), settings: this.inputConfig,
           mounted: name => content.mounts.open(name).then(resource => resource?.bytes) });
         const source = this.sourceCvars(nextSimulation);
         if (source === null) throw new Error("Prepared authority requires a source registry");
@@ -1906,6 +2132,7 @@ export class Application {
       this.guestBrowser = nextGuestBrowser;
       this.frontendOverrides = frontendOverrides;
       this.capture = nextCapture;
+      this.tools?.beforeWorldChange();
       this.elapsed = destinationSourceMilliseconds;
       this.sourceEvents = []; this.roundPresentationEvents = []; this.localSnapshotServerBit = 0;
       this.clientInputs = [];
@@ -1918,6 +2145,7 @@ export class Application {
         candidateCommands = null;
         this.requestedCommands.push(...candidateActions.splice(0));
         nextGraphical?.input.publishCandidateCommands();
+        this.refreshApplicationTools();
         if (candidateImages !== null && this.imageSettings !== null) {
           const fovChanged = candidateImages.settings.cvars.variableString("fov") !== this.imageSettings.cvars.variableString("fov");
           this.releaseViewCvars?.(); this.releaseViewCvars = null;
@@ -2007,14 +2235,15 @@ export class Application {
 
   async saveGame(path: string): Promise<void> {
     if (this.closed) throw new Error("Application is closed");
-    if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
+    const unavailable = this.saveUnavailable("manual");
+    if (unavailable !== null) throw new Error(unavailable);
     if (this.worldOperation !== "idle") throw new Error("Another world operation is in progress");
     if (this.campaignMovie !== null || this.pendingTeamArena !== null || this.pendingMap !== null || this.pendingRestart !== null || this.pendingTransition !== null || this.pendingSave !== null)
       throw new Error("Saving requires pending world travel or restoration to finish");
-    const image = saveTeamArenaOverrides(this.simulation.checkpoint(), this.teamArenaOverrides, this.overrideSeats());
+    const image = this.campaignUnit.attach(saveTeamArenaOverrides(this.simulation.checkpoint(), this.teamArenaOverrides, this.overrideSeats()));
     this.worldOperation = "saving";
     const completion = Promise.withResolvers<void>(); this.worldOperationCompletion = completion.promise;
-    try { await writeSaveImage(path, image); }
+    try { await writeSavedGame(this.saveDirectory, path, { kind: "shared", image }); }
     finally { this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve(); this.resumeInput(); }
   }
 
@@ -2032,10 +2261,13 @@ export class Application {
     try {
       try {
         await serviceLoading(async () => {
-          const image = await readSaveImage(path);
+          const { image } = await prepareApplicationSave(this.options, this.content.catalog, path);
+          const unit = new CampaignUnit(); unit.restore(image);
           await this.prepareAndReplaceWorld(image.recipe.map.geometry.requestedPath, null, 0, image);
+          this.campaignUnit = unit;
         }, () => { if (!this.closed) this.graphical?.input.pollLoadingEvents(); });
         this.pendingTeamArena = null; this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null; this.pendingSave = null;
+        this.timedAutosave.worldChanged();
       } finally {
         this.worldOperation = "idle"; this.worldOperationCompletion = null; completion.resolve();
         if (!this.closed) this.resumeInput();
@@ -2185,10 +2417,10 @@ export class Application {
   private async applyTransition(): Promise<void> {
     if (this.clientCommandsBlocked) return;
     if (this.pendingSave !== null) {
-      const image = this.pendingSave, previous = this.content;
+      const path = this.pendingSave, previous = this.content;
       this.pendingSave = null;
       try {
-        await this.replaceWorld(image.recipe.map.geometry.requestedPath, null, 0, image);
+        await this.restoreSavedGame(path);
         this.pendingTeamArena = null; this.pendingMap = null; this.pendingRestart = null; this.pendingTransition = null;
       } catch (error) {
         if (this.content !== previous) throw error;
@@ -2274,16 +2506,57 @@ export class Application {
 
   private async advanceQ2Travel(target: Q2TravelTarget, carry: SimulationTravel): Promise<void> {
     if (target.kind === "map") {
-      await this.replaceWorld(target.name, { ...carry, spawnPoint: target.spawnPoint });
+      const visit = this.campaignUnit.stage({ content: this.content.recipe.map.geometryContent, path: target.name }, target.newUnit, this.simulation.checkpoint());
+      await this.replaceWorld(target.name, { ...carry, spawnPoint: target.spawnPoint }, 0, visit.restore ?? undefined, undefined, visit.commit);
       return;
     }
     const graphical = this.graphical, seat = this.localPlayers[0]?.seat.id;
     if (graphical === null || seat === undefined || this.network !== null)
       throw new Error("Campaign cinematics require an offline local presentation");
-    const playback = await CampaignCinematic.open(target, this.content, graphical.assets, graphical.audio, graphical.renderer, seat);
+    const playback = await CampaignCinematic.open(target, this.content, graphical.assets, graphical.audio, graphical.renderer, seat,
+      this.screenCaptions(this.simulation, this.content, seat));
     const next = target.kind === "picture" && target.name.toLowerCase() === "victory.pcx" && this.options.mode === "coop"
       ? parseQ2Travel("*base1") : target.next;
-    this.campaignMovie = { playback, next, carry };
+    this.campaignMovie = { playback, complete: async () => {
+      if (next !== null) await this.advanceQ2Travel(next, carry); else this.requestQuit();
+    } };
+  }
+
+  private screenCaptions(simulation: SharedSimulation, content: LoadedApplicationContent, seat: SeatId): ScreenCinematicCaptions {
+    const captions = new SeatMediaCaptions(seat, async path => (await content.mounts.open(path))?.bytes ?? null);
+    return {
+      prepare: source => captions.prepare(source, this.graphical?.rerelease.selectedLanguage(seat) ?? "english"),
+      commands: (timeline, viewport) => {
+        if (this.simulation !== simulation) return [];
+        const presentation = this.graphical?.presentations.find(value => value.local.player.seat.id.equals(seat));
+        if (presentation === undefined) return [];
+        return presentation.ui.captionCommands(captions.active(timeline, { subtitles: presentation.ui.preferences.values.captions,
+          soundCaptions: presentation.ui.preferences.values.captions, speakers: true }), {
+          binding: { ...presentation.state.presentation, viewport, safeArea: viewport }, timeMilliseconds: timeline.elapsedMilliseconds });
+      },
+    };
+  }
+
+  private systemCinematics(simulation: SharedSimulation, content: LoadedApplicationContent, assets: ApplicationAssets,
+    audio: ApplicationAudio, renderer: NativeRenderer, seat: SeatId, input: ApplicationInput): SystemCinematicHost {
+    return { open: async (request: ScreenCinematicRequest) => {
+      const existing = this.movies.get(simulation);
+      if (existing !== undefined) { existing.playback.close(this.frames); this.movies.delete(simulation); }
+      const cvars = this.sourceCvars(simulation), next = cvars?.variableString("nextmap") ?? "";
+      const localSeat = [...this.localSeats.values()].find(value => value.id.equals(seat));
+      if (localSeat === undefined) throw new Error("Cinematic has no admitted local seat");
+      const playback = await CampaignCinematic.openMedia(request, content, assets, audio, renderer, seat, this.screenCaptions(simulation, content, seat));
+      const movie = { playback, complete: async (): Promise<void> => {
+        if (next.length === 0) return;
+        if (cvars?.variableString("nextmap") === next) cvars.set("nextmap", "", true);
+        input.enqueueClientCommand(`${next}\n`, { session: this.session.session, origin: { kind: "script", name: "cinematic", caller: { kind: "local-seat", seat, client: localSeat.client.id } } });
+      } };
+      this.movies.set(simulation, movie);
+      return { get status() { return playback.status; }, skip: () => playback.skip(), stop: () => {
+        if (this.movies.get(simulation) === movie) this.movies.delete(simulation);
+        playback.close(this.frames);
+      } };
+    } };
   }
 
   private underwater(camera: SceneCamera, actor: ActorId): boolean {
@@ -2296,6 +2569,113 @@ export class Application {
     return contents.kind === "q1" ? contents.contents <= -3 && contents.contents >= -5 : ((contents.kind === "q2" ? contents.merged : contents.contents) & 56) !== 0;
   }
 
+  private localViewport(seat: SeatId, width: number, height: number) {
+    const seats = [...this.localSeats.values()].sort((a,b)=>a.id.index-b.id.index);
+    const index = seats.findIndex(local=>local.id.equals(seat));
+    return seatViewport(index,seats.length,width,height);
+  }
+
+  private async changeLocalPlayers(kind: "join" | "drop", args: readonly string[], invokingSeat: SeatId | null): Promise<void> {
+    const graphical = this.graphical;
+    if (graphical === null || this.worldOperation !== "idle") throw new Error("Local player changes require an active graphical world");
+    if (args.length > (kind === "drop" ? 1 : 0)) throw new Error(kind === "join" ? "Usage: local_join" : "Usage: local_drop [player number]");
+    const selected = args[0] === undefined ? invokingSeat ?? graphical.input.locals.at(-1)?.player.seat.id : graphical.input.locals.find(local => local.player.seat.id.index + 1 === Number(args[0]))?.player.seat.id;
+    if (kind === "drop" && (selected === undefined || graphical.input.locals.length === 1)) throw new Error("Keep at least one local player in the world");
+    const request: LocalSeatRequest | null = kind === "join" ? { kind } : selected === undefined ? null : { kind, seat: selected };
+    if (request === null) throw new Error("Unknown local player");
+    const change = prepareLocalSeatChange(this.session, graphical.input.locals.map(local => ({client:local.player.seat.client,seat:local.player.seat})), request,
+      {localSeats:4,clients:this.simulation.options.maxClients});
+    let committed = false;
+    let stagedPresentation: WorldSeatPresentation | null = null;
+    let stagedUi: ApplicationSeatUi | null = null;
+    let preparedInput: Awaited<ReturnType<ApplicationInput["prepareLocalSeats"]>> | null = null;
+    try {
+      await graphical.input.saveSettings();
+      await this.saveClientArchives(this.options,this.content,this.clientCvars,this.teamArenaOverrides);
+      preparedInput = await graphical.input.prepareLocalSeats(change.next.map(local => local.seat));
+      const added = change.added;
+      const archive = added === null ? [] : await this.loadClientArchive(added.seat,this.content);
+      const font = await graphical.assets.loadConsoleFont(), typography = await graphical.assets.loadMenuTypography();
+      const characters = added !== null && this.options.character === "q3" ? await loadQ3Character(await this.content.forContent(this.content.recipe.character.appearance.content),
+        {model:this.options.characterModel,skin:"default",headModel:"",headSkin:"default",team:null,teamName:""}) : null;
+      change.validate();
+      if (this.graphical !== graphical || this.closed) throw new Error("World changed during local player preparation");
+      committed = true;
+      const players = graphical.input.locals.filter(local => local.player.seat !== change.removed?.seat).map(local => local.player);
+      if (added !== null) {
+        const cvars = this.createClientCvars(this.simulation,this.content,this.options,added.seat,null,undefined,archive,true);
+        this.localSeats.set(added.client.id,added.seat); this.clientCvars.set(added.seat.id,cvars);
+        this.sourceConnections.set(added.client,added.client.connect("loopback"));
+        if (this.localGuest !== null) {
+          const authority=this.localGuest.authority, userinfo=`${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`;
+          const admission=await authority.connect(added.client.id,userinfo);
+          if(admission.kind==="rejected") throw new Error(admission.reason);
+          this.prepareLocalGuestSeat(this.localGuest,this.simulation,added.seat,cvars,userinfo,authority.gameState(admission.player,1));
+          await authority.begin?.(admission.player,{serverTime:0,angles:[0,0,0],forwardmove:0,rightmove:0,upmove:0,buttons:0,weapon:2});
+          players.push({seat:added.seat,actor:admission.player.actor});
+        } else {
+          this.simulation.q3Source()?.host.engine.setUserinfo(added.client.id.slot,`${cvars.infoString(CvarFlag.UserInfo)}\\ip\\localhost`);
+          players.push({seat:added.seat,actor:this.simulation.admitPlayer(added.client.id).actor});
+        }
+      }
+      if(change.removed!==null) {
+        const removed=graphical.input.locals.find(local=>local.player.seat===change.removed?.seat);
+        if(removed===undefined)throw new Error("Dropped player is missing");
+        graphical.presentations.find(presentation => presentation.local.player.seat === change.removed?.seat)?.ui.closeMenus();
+        await graphical.q3.get(change.removed.seat.id)?.client.shutdown();
+        const guest=this.simulation.q3Guest();
+        if(guest!==null){const player=guest.players().find(player=>player.actor.equals(removed.player.actor));if(player===undefined)throw new Error("Guest player is missing");await guest.disconnect(player);}
+        else this.simulation.disconnectPlayer(removed.player.actor);
+        this.localSeats.delete(change.removed.client.id);this.clientCvars.delete(change.removed.seat.id);
+        this.localGuest?.seats.delete(change.removed.seat.id);graphical.q3.delete(change.removed.seat.id);
+        this.sourceConnections.delete(change.removed.client);
+        const removedSeat = change.removed.seat.id;
+        this.requestedCommands = this.requestedCommands.filter(command => command.seat === null || !command.seat.equals(removedSeat));
+        this.clientInputs = this.clientInputs.filter(event => !event.seat.equals(removedSeat));
+      }
+      players.sort((a,b)=>a.seat.id.index-b.seat.id.index);
+      preparedInput.publish(players,this.ownership.kind==="borrowed"?this.ownership.client:undefined);
+      if (added !== null) this.restoreQ3InputAngles(graphical.input,this.simulation,added.seat.id);
+      this.launchOptions={...this.options,seats:players.length};
+      graphical.rerelease.publishSeats(players.map(player=>({seat:player.seat.id,actor:player.actor})));
+      const presentations=graphical.presentations.filter(presentation=>presentation.local.player.seat!==change.removed?.seat);
+      const additions: Parameters<EngineSession["publishLocalSeats"]>[0][number][]=[];
+      if(added!==null){
+        const local=graphical.input.locals.find(local=>local.player.seat===added.seat);
+        if(local===undefined)throw new Error("Admitted local input is missing");
+        const sourceClient=await this.createQ3SeatClient(local,graphical.assets,graphical.audio,graphical.input,graphical.renderer,this.simulation);
+        if(sourceClient!==null)graphical.q3.set(added.seat.id,sourceClient);
+        if(this.viewSettings.override!==null){if(sourceClient?.kind!=="qvm")this.simulation.setPlayerFieldOfView(local.player.actor,this.viewSettings.fieldOfView,"change");sourceClient?.client.cvars.set("cg_fov",String(this.viewSettings.fieldOfView));}
+        const ui=new ApplicationSeatUi(local,graphical.art,graphical.input,this.simulation,font,graphical.audio,()=>this.requestQuit(),
+          (name,args)=>this.queueCommand(name,args,local.player.seat.id),typography,{bindings:()=>this.simulation.serverSettings(),store:this.serverProfileStore},
+          await graphical.rerelease.languageBinding(local.player.seat.id,this.content.recipe.map.entities.content,error=>local.console.print(`Language reload failed: ${String(error)}\n`)),this.saveMenu(this.simulation,this.options),this.viewSettings.binding(),this.host.llm,sourceClient?.kind==="qvm",this.teamArenaResults(this.simulation,local.player.seat),this.uiSourceOptions(this.simulation,graphical.rerelease,local.player.seat.id));
+        stagedUi=ui;
+        const presentation=new WorldSeatPresentation(local,graphical.assets,graphical.renderer,this.simulation,players.length,font,characters,ui,graphical.effects,sourceClient?.client??null,graphical.rerelease,()=>this.imageSettings?.cvars.variableValue("gl_debug_distfrac")??0.004,()=>this.viewSettings.fieldOfView,{lines:()=>this.simulation.debugLines(),lineWidth:()=>this.imageSettings?.debugLineWidth??2},()=>this.imageSettings?.cvars.variableValue("con_scale")??0,()=>readQ1ViewSettings(this.imageSettings?.cvars??null,this.sourceDialect()),()=>(this.imageSettings?.cvars.variableValue("r_shadows")??0)!==0,camera=>this.tools?.applyCamera(camera)??camera);
+        stagedPresentation=presentation;
+        presentations.push(presentation);additions.push({seat:added.seat,presentation,cleanup:()=>presentation.close()});
+      }
+      presentations.sort((a,b)=>a.local.player.seat.id.index-b.local.player.seat.id.index);
+      for(const [index,presentation]of presentations.entries())presentation.publishLayout(index,presentations.length);
+      const retired=change.publish(additions);
+      this.graphical={...graphical,presentations};
+      const publicationFailures: unknown[] = [];
+      try { this.publishLocalGuestSnapshots(); } catch (error) { publicationFailures.push(error); }
+      finally { try { retired.close(); } catch (error) { publicationFailures.push(error); } }
+      if (publicationFailures.length === 1) throw publicationFailures[0];
+      if (publicationFailures.length > 1) throw new AggregateError(publicationFailures, "Local player publication and retirement failed");
+      this.host.print(`Local players: ${players.length}\n`);
+    }catch(error){
+      if(committed){
+        this.fatalWorldFailure=true;
+        if(!change.published) try { if(stagedPresentation!==null)stagedPresentation.close();else stagedUi?.close(); } catch(cleanup) {throw new AggregateError([error,cleanup],"Local player publication cleanup failed");}
+        throw error;
+      }
+      preparedInput?.discard();
+      try{change.discard();}catch(cleanup){throw new AggregateError([error,cleanup],"Local player preparation cleanup failed");}
+      throw error;
+    }
+  }
+
   private commandActor(seat: SeatId | null): ActorId {
     const player = this.localPlayers.find(player => seat === null || player.seat.id.equals(seat));
     if (player === undefined) throw new Error("Command requires a player");
@@ -2303,6 +2683,7 @@ export class Application {
   }
 
   private async afterCommandDispatch(): Promise<void> {
+    await this.tools?.drain();
     if (this.closed || this.fatalWorldFailure || this.clientCommandsBlocked || this.pendingShellPublication) return;
     do {
       await this.commands(async () => {
@@ -2361,6 +2742,20 @@ export class Application {
         }
       };
       try {
+        if (command.name === "local_join" || command.name === "local_drop") {
+          await this.changeLocalPlayers(command.name === "local_join" ? "join" : "drop", command.arguments_, command.seat);
+          continue;
+        }
+        if (command.name === "cinematic") {
+          const name = command.arguments_[0], graphical = this.graphical;
+          const seat = command.seat ?? this.localPlayers[0]?.seat.id;
+          if (name === undefined || graphical === null || seat === undefined) throw new Error("cinematic requires a movie and a local presentation");
+          const mode = command.arguments_[1];
+          await this.systemCinematics(this.simulation, this.content, graphical.assets, graphical.audio, graphical.renderer, seat, graphical.input)
+            .open({ name, loop: mode?.startsWith("2") === true || mode === "loop",
+              hold: mode?.startsWith("1") === true || mode === "hold" || ["end.roq", "demoend.roq"].includes(name.toLowerCase().split("/").at(-1) ?? ""), silent: false });
+          continue;
+        }
         if (command.name === "centerview") {
           for (const target of this.graphical?.input.locals ?? []) {
             if (command.seat !== null && !target.player.seat.id.equals(command.seat)) continue;
@@ -2372,7 +2767,16 @@ export class Application {
           continue;
         }
         if (command.target === "source") {
-          if (command.name === "postgame") {
+          if ((command.name === "postgame" || command.name === "spPostgame") && this.baseArenaProgress.has(this.simulation)) {
+            await this.completeBaseArena(command.arguments_);
+          } else if (command.name === "arena-reset" || command.name === "arena-unlock" || command.name === "arena-medals") {
+            const state = this.baseArenaProgress.get(this.simulation);
+            if (state === undefined) throw new Error("No base arena progression is active");
+            if (command.name === "arena-reset") { state.progression.reset(); state.result = null; }
+            else if (command.name === "arena-unlock") state.progression.unlockLevels();
+            else state.progression.unlockMedals();
+            await this.saveSourceArchive(this.options, this.content, this.simulation, this.teamArenaOverrides);
+          } else if (command.name === "postgame") {
             this.pendingTeamArenaPostgame = parseTeamArenaPostgame(command.arguments_);
             print("Match complete. Choose Next match, Retry match, or Main menu.\n");
           } else if (command.name === "teamarena-results") {
@@ -2385,6 +2789,13 @@ export class Application {
               if (player !== null) game.host.engine.dropClient(player.client.slot, "was kicked");
             }
           } else throw new Error("Unknown source application action " + command.name);
+          continue;
+        }
+        if (command.target === "application" && (command.name === "in_restart" || command.name === "midiinfo")) {
+          const input = this.graphical?.input;
+          if (input === undefined) { print("Input devices require a graphical client.\n"); continue; }
+          if (command.name === "midiinfo") input.inputDevices.info();
+          else { input.releaseForProfileChange(); input.inputDevices.restart(); input.router.restart(); }
           continue;
         }
         if (command.name === "quit") { this.requestQuit(); continue; }
@@ -2491,14 +2902,14 @@ export class Application {
         } else if (command.name === "weapnext" || command.name === "weapprev" || command.name === "use") {
           this.simulation.playerCommand(this.commandActor(command.seat), command.name, command.arguments_);
         } else if (command.name === "say" || command.name === "say_team") {
-          if (this.simulation.q2Source() === null && this.simulation.q3Source() === null) throw new Error("Selected Quake source chat commands are not yet joined");
+          if (this.simulation.q1Source() === null && this.simulation.q2Source() === null && this.simulation.q3Source() === null) throw new Error("Selected guest source chat requires its native command channel");
           this.simulation.playerCommand(this.commandActor(command.seat), command.name, command.arguments_);
         }
         else if (command.name === "map_restart") this.requestRestart(command.arguments_);
         else if (command.name === "load") {
           const path = command.arguments_[0]; if (path === undefined || path.length === 0) throw new Error("Usage: load <path>");
           if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
-          this.pendingSave = await readSaveImage(path);
+          this.pendingSave = path;
         }
         else if (command.name === "teamarena-next" || command.name === "teamarena-retry") {
           if (!this.isTeamArenaSkirmish() || this.simulation.q3Source()?.level.intermissionTime === 0) throw new Error("Team Arena match has not finished");
@@ -2560,15 +2971,14 @@ export class Application {
       this.enableStartupPersistence();
       const movie = this.campaignMovie;
       if (movie !== null) {
-        const retained = this.lastOutput;
-        if (retained === null || retained.simulation !== this.simulation) throw new Error("Campaign movie has no completed world frame");
+        const retained = this.lastOutput?.simulation === this.simulation ? this.lastOutput : { simulation: this.simulation, output: this.simulation.currentOutput() };
         try {
           const graphical = this.graphical;
           const consoleOpen = graphical?.input.locals.some(local => local.input.focus.kind === "console") ?? false;
-          if (movie.playback.frame(elapsedMilliseconds, ++this.frames, consoleOpen)) {
+          const menuOpen = graphical?.presentations.some(presentation => presentation.ui.pauseMenuOpen) ?? false;
+          if (movie.playback.frame(elapsedMilliseconds, ++this.frames, consoleOpen, menuOpen)) {
             movie.playback.close(this.frames); this.campaignMovie = null;
-            if (movie.next !== null) await this.advanceQ2Travel(movie.next, movie.carry);
-            else this.requestQuit();
+            await movie.complete();
           } else if (consoleOpen && graphical !== null) {
             const presentations = this.simulation.presentations(), characters = this.simulation.characterViews();
             for (const presentation of graphical.presentations) {
@@ -2610,8 +3020,13 @@ export class Application {
         && this.simulation.players().length === this.localPlayers.length + this.botClients.length && this.graphical?.presentations.some(presentation => presentation.ui.pauseMenuOpen) === true
         && retained !== null && retained.simulation === this.simulation;
       const timeCvars = this.sourceCvars();
-      const frameMilliseconds = timeCvars === null ? elapsedMilliseconds : sourceFrameMilliseconds(this.sourceDialect(), elapsedMilliseconds,
+      const sourceMilliseconds = timeCvars === null ? elapsedMilliseconds : sourceFrameMilliseconds(this.sourceDialect(), elapsedMilliseconds,
         readFrameTimeControls(timeCvars), { dedicated: this.options.dedicated, localServer: true });
+      const captureFrame = this.graphical === null ? { milliseconds: sourceMilliseconds, capture: false }
+        : this.tools?.frameTime(sourceMilliseconds, true) ?? { milliseconds: sourceMilliseconds, capture: false };
+      const frameMilliseconds = captureFrame.milliseconds;
+      if (captureFrame.capture) this.capture?.captureFrame();
+      this.tools?.timer.stamp("frame begin");
       if (!paused) this.elapsed += frameMilliseconds;
       if (this.closed) throw new Error("Application closed during step");
       const remote = await this.network?.server.poll(performance.now()) ?? [];
@@ -2632,8 +3047,9 @@ export class Application {
           state.commands.append(fromQ3UserCommand(command.command));
         }
       }
-      const output = paused ? { snapshot: retained.output.snapshot, events: [] } : await this.session.stepAsync({ elapsedMilliseconds: frameMilliseconds,
-        commands: [...localCommands, ...remote] });
+      const advanceSimulation = () => this.session.stepAsync({ elapsedMilliseconds: frameMilliseconds, commands: [...localCommands, ...remote] });
+      const output = paused ? { snapshot: retained.output.snapshot, events: [] } : this.tools === null ? await advanceSimulation()
+        : await this.tools.measureAsync("simulation", advanceSimulation);
       this.lastOutput = { simulation: this.simulation, output };
       this.publishLocalGuestSnapshots();
       this.guestBrowser?.host.poll(); this.guestBrowser?.view.poll();
@@ -2680,8 +3096,10 @@ export class Application {
         graphical.audio.receiveEffectSounds(graphical.effects.drainSounds());
         for (const presentation of graphical.presentations) {
           presentation.sourceEvents(presentationEvents);
-          await presentation.prepare(output.snapshot, presentations, characters);
-          presentation.local.player.seat.present(output.snapshot, graphical.renderer.backend);
+          if (this.tools === null) await presentation.prepare(output.snapshot, presentations, characters);
+          else await this.tools.measureAsync("presentation", () => presentation.prepare(output.snapshot, presentations, characters));
+          const render = () => presentation.local.player.seat.present(output.snapshot, graphical.renderer.backend);
+          if (this.tools === null) render(); else this.tools.timer.measure("render", render);
         }
         graphical.renderer.execute({ owner: graphical.assets.images.owner, sequence: this.frames, commands: [{ kind: "swap-buffers" }] });
         const listeners = graphical.presentations.map(presentation => {
@@ -2692,6 +3110,7 @@ export class Application {
         await graphical.audio.frame(output.snapshot, listeners, commonEvents, frameStartedAt);
       }
       await this.capture?.drain();
+      this.tools?.timer.stamp("frame end");
       if (captureTransitionPending) {
         const heldRequests = this.requestedCommands;
         this.requestedCommands = [];
@@ -2709,6 +3128,7 @@ export class Application {
       const currentGraphics = this.graphical;
       if (currentGraphics !== null) await this.imageSettings?.refresh(currentGraphics.assets, currentGraphics.presentations, currentGraphics.rerelease, currentGraphics.renderer);
       this.sourceEvents = [...roundEvents, ...this.sourceEvents];
+      if (!paused && this.lastOutput?.simulation === this.simulation) await this.advanceAutosave(frameMilliseconds);
       return output;
     } catch (error) {
       if (!this.fatalWorldFailure) { await this.capture?.beforeWorldChange(); throw error instanceof Q3GameCallbackError ? error.cause : error; }
@@ -2763,13 +3183,15 @@ export class Application {
     const graphical = this.graphical;
     this.graphical = null;
     const errors: unknown[] = [];
+    try { await this.tools?.close(); } catch (error) { errors.push(error); }
+    this.tools = null;
     try { this.ownedVideoRestart?.close(); } catch (error) { errors.push(error); }
     this.ownedVideoRestart = null;
     if (this.ownership.kind === "borrowed" && this.ownership.client.source.current === this) {
       try { await this.ownership.client.capture.beforeWorldChange(); } catch (error) { errors.push(error); }
     }
-    try { this.campaignMovie?.playback.close(this.frames); } catch (error) { errors.push(error); }
-    this.campaignMovie = null;
+    for (const movie of this.movies.values()) { try { movie.playback.close(this.frames); } catch (error) { errors.push(error); } }
+    this.movies.clear();
     try { if (this.ownership.kind === "owned") await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
     if (this.sourcePublished && this.archivePersistence && !this.preparedStartup?.pending) {

@@ -154,6 +154,9 @@ export class SharedSceneQueries implements SceneQueries {
                         ? collision.owner !== null && sameActor(owner, collision.owner) : sameActor(owner, id))) continue;
                 }
             }
+            if (collision.q1Corpse === true && query.shape.kind !== 'point'
+                && (query.shape.bounds.min.x !== query.shape.bounds.max.x || query.shape.bounds.min.y !== query.shape.bounds.max.y || query.shape.bounds.min.z !== query.shape.bounds.max.z))
+                continue;
             if (query.policy.kind === 'q1' && query.policy.move === 'no-monsters' && collision.shape.kind !== 'model')
                 continue;
             if (query.policy.kind === 'q1' ? actorContents(collision, 'q1') !== -2 : (actorContents(collision, query.policy.kind) & query.policy.contentsMask) === 0)

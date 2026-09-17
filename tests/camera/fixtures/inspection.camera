@@ -1,0 +1,16 @@
+cameraPathDef {
+ time 1
+ camera_spline {
+  name "inspection"
+  target {
+   granularity 0.25
+   ( 0 0 32 )
+   ( 64 0 32 )
+   ( 128 64 48 )
+   ( 192 64 48 )
+  }
+ }
+ target_fixed { name "subject" pos ( 128 128 32 ) }
+ event { type 4 param "subject" time 0 }
+ fov { fov 90 startFOV 90 endFOV 60 time 1000 }
+}

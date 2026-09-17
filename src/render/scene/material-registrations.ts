@@ -70,9 +70,9 @@ export class SceneMaterialRegistrations {
     if (this.admitted.get(registration) !== null) throw new Error("Only an unpublished shader admission can be cancelled");
     this.admitted.delete(registration);
   }
-  snapshot(): readonly RegisteredSceneMaterial[] {
-    return [...this.admitted.values()].flatMap(material => material === null ? [] : [material])
-      .sort((a, b) => a.finished.sort - b.finished.sort);
+  snapshot(sorted = true): readonly RegisteredSceneMaterial[] {
+    const materials = [...this.admitted.values()].flatMap(material => material === null ? [] : [material]);
+    return sorted ? materials.sort((a, b) => a.finished.sort - b.finished.sort) : materials;
   }
 }
 

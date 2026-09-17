@@ -1,4 +1,9 @@
-import { bindMusicPlaylistSettings } from "../../ui/settings/index.ts";
+import { bindConsoleSettings } from "../../ui/settings/console.ts";
+import { bindInputRoutingSettings } from "../../ui/settings/input-routing.ts";
+import type { LibraryMenuService, LibraryEntry } from "../../ui/library/menu.ts";
+import { readStartupCommand } from "./startup-commands.ts";
+import { InputDevices, inputDeviceStore } from "./input-devices.ts";
+import { SeatUiPreferences, bindAudioGeometrySettings, bindGamepadSettings, bindMusicPlaylistSettings } from "../../ui/settings/index.ts";
 import { readMusicSettings } from "./audio/playlist-settings.ts";
 import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-settings.ts";
 import { applyAudioOutputSettings } from "./shared-setting-cvars.ts";
@@ -31,7 +36,7 @@ import { openMountPlan } from "../../content/mounts/index.ts";
 import { EngineSession, type SessionSeat } from "../../world/session/index.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SdlControllers } from "../../platform/controller.ts";
-import { readSaveImage } from "../../persistence/save-image.ts";
+import { prepareApplicationSave } from "./original-save.ts";
 import { SceneFrameBuilder } from "../../render/commands/frame.ts";
 import { SceneImageRegistry } from "../../render/scene/resources.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
@@ -105,6 +110,7 @@ export class StartupApplication {
   private client: ClientBootstrap | null = null;
   private readonly musicControls = new MusicControls();
   private scripts: ConsoleScriptFiles | null = null;
+  private frontendRoutingBaseline = "";
   private releaseMenuInput: (() => void) | null = null;
   private lastFrame = performance.now();
   private demos: ClientDemoCommands | null = null;
@@ -131,11 +137,36 @@ export class StartupApplication {
     return local === undefined ? undefined : this.client?.consoles.get(local.seat)?.history.lines;
   }
 
+  private frontendRoutingState(router: InputRouter): string {
+    return JSON.stringify({ keyboard: router.keyboardSeat()?.index ?? null,
+      controllers: router.inputs.map(input => ({ seat: input.seat.index, controller: router.controllerSelection(input.seat) })) });
+  }
+
+  private async saveFrontendInput(): Promise<void> {
+    const graphics = this.graphics, client = this.client;
+    if (graphics === null) return;
+    await graphics.inputProfile.save(this.preferences.values, this.frontendHistory);
+    if (client === null || client.platform.current?.kind !== "menu") return;
+    const settings = this.preferenceStore ?? client.settings, router = client.platform.current.router;
+    const routing = this.frontendRoutingState(router);
+    if (routing === this.frontendRoutingBaseline) return;
+    for (const input of router.inputs) {
+      const prepared = client.prepared.seats.find(seat => seat.id.equals(input.seat));
+      if (prepared === undefined) throw new Error("Frontend routing refers to a retired seat");
+      const path = `input/seat-${input.seat.index + 1}.json`, saved = await settings.loadSeat(path);
+      if (saved !== null) await settings.saveSeat(path, { ...saved, controller: router.controllerSelection(input.seat) });
+      else await settings.saveSeat(path, { version: 1, bindings: input.bindings, gamepad: structuredClone(input.gamepad.tuning),
+        mouse: prepared.mouse.read(), history: this.frontendHistory ?? [], rumble: true, controller: router.controllerSelection(input.seat) });
+    }
+    await settings.saveInputRouting("input/routing.json", router.keyboardSeat()?.index ?? null);
+    this.frontendRoutingBaseline = routing;
+  }
+
   private async refreshPreferenceBaseline(force = false): Promise<void> {
     const options = this.model.options;
     const inputKey = JSON.stringify([movementDialect(options), this.model.bindingItems()]);
     if (!force && this.baselineProduct === options.product && this.baselineInput === inputKey) return;
-    await this.graphics?.inputProfile.save(this.preferences.values, this.frontendHistory);
+    await this.saveFrontendInput();
     if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
     const product = this.model.catalog.product(options.product);
     const settings = new ConfigStore(product.userContent?.root
@@ -185,12 +216,15 @@ export class StartupApplication {
     const mounted = await openMountPlan({ id: createMountPlanId("startup", "font"), mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
     let themeMounts: Awaited<ReturnType<typeof openMountPlan>> | null = null;
     let audio: StartupAudio | null = null;
+    let inputDevices: InputDevices | null = null;
     let font: Awaited<ReturnType<typeof loadMenuFont>> | null = null;
     let art: Awaited<ReturnType<typeof loadNativeUiArt>> | null = null;
     let typography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
     let renderer: NativeRenderer | null = null, controllers: SdlControllers | null = null, router: InputRouter | null = null, menu: StartupMenu | null = null;
     try {
       const imageSettings = initial.image;
+      const devices = new InputDevices(imageSettings.cvars, inputDeviceStore(options.userContentRoot), this.host.print);
+      inputDevices = devices;
       font = await loadMenuFont({ catalog: this.model.catalog, mounts: mounted, family: product.expectation.family, rerelease: product.expectation.edition === "rerelease", images, imagePolicy: imageSettings.policy });
       typography = await loadMenuTypography(this.model.catalog, images, font.font.classic, imageSettings.policy);
       const fontSource = font.font.classic.picture.image.source;
@@ -212,7 +246,8 @@ export class StartupApplication {
       audio.bindOutputCvars(imageSettings.cvars);
       const activeAudio = audio;
       const currentAudio = (): StartupAudio["engine"] => this.client?.output.current ?? activeAudio.engine;
-      menu = new StartupMenu({ sound: sound => { const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.sound(sound); }, ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
+      const accessibility = new SeatUiPreferences(seat, imageSettings.cvars);
+      menu = new StartupMenu({ appearance: () => accessibility.values, libraries: { configurations: this.configurationLibrary() }, sound: sound => { const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.sound(sound); }, ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
         clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
         ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
         playPreset: (id, skill) => { this.pending = { kind: "preset", id, skill }; },
@@ -220,7 +255,7 @@ export class StartupApplication {
           try { this.pending = { kind: "load", path: this.saves.path(id) }; }
           catch (error) { this.status = error instanceof Error ? error.message : String(error); this.graphics?.menu.setStatus(this.status); }
         },
-        quit: () => this.requestQuit(), settings: [...this.preferences.bindings({ selected: () => currentAudio().selectedOutput,
+        quit: () => this.requestQuit(), settings: [...accessibility.bindings(), ...bindConsoleSettings(imageSettings.cvars), ...this.preferences.bindings({ selected: () => currentAudio().selectedOutput,
           devices: () => currentAudio().outputDeviceNames(), select: name => {
             currentAudio().selectOutput(name); this.graphics?.menu.setStatus("");
           },
@@ -230,6 +265,15 @@ export class StartupApplication {
             this.graphics?.menu.setStatus("");
           } },
           report: message => this.graphics?.menu.setStatus(message) }, () => readMusicSettings(imageSettings.cvars)),
+          ...devices.bindings(),
+          ...bindInputRoutingSettings(() => {
+            const platform = this.client?.platform.current;
+            const active = platform?.kind === "world" ? platform.input.router : platform?.router ?? router;
+            if (active === null) throw new Error("Input routing is not published");
+            return active;
+          }, () => this.client?.controllers.devices ?? controllers?.devices ?? []),
+          ...bindGamepadSettings(() => this.client?.prepared.seats[0]?.input ?? primary.input),
+          ...bindAudioGeometrySettings(imageSettings.cvars),
           ...bindMusicPlaylistSettings(imageSettings.cvars, () => activeAudio.musicTracks),
           ...bindNativeVideoSettings(() => native.window, imageSettings.cvars, message => this.graphics?.menu.setStatus(message)),
           ...bindRendererSettings({ current: () => native.window.backend, enabled: () => this.graphics !== null && !this.graphics.menu.isBusy,
@@ -246,10 +290,12 @@ export class StartupApplication {
 
       activeMenu.bindInput(input, () => sharedBindingActions(movementDialect(this.model.options), this.model.bindingItems(), this.model.bindingCapabilities()));
       input.setFocus({ kind: "menu", menu: activeMenu.controller.activeMenu ?? "menu:startup:main", control: null }, performance.now());
-      router = new InputRouter({ seats: [{ input, controller: { kind: "automatic" } }], keyboardSeat: seat, controllers,
+      router = new InputRouter({ seats: [{ input, controller: (await settings.loadSeat(`input/seat-${seat.index + 1}.json`))?.controller ?? { kind: "automatic" } }], keyboardSeat: seat, controllers,
         now: () => performance.now(), ticks: () => native.window.ticks, subframe: false,
         unhandled: event => { if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit(); } });
       router.attachWindow(native.window);
+      devices.activate(router);
+      this.frontendRoutingBaseline = this.frontendRoutingState(router);
       const controllerSettings = new ControllerSettings(router, [seat], () => controllers?.devices ?? [], new ConfigStore(join(this.saves.directory, "..", "settings")), this.host.print);
       controllerSettings.update(); activeMenu.bindGyro(controllerSettings.ui(seat));
       const builder = new SceneFrameBuilder(images), activeFont = font, activeTypography = typography, activeArt = art, activeRouter = router, pads = controllers;
@@ -290,7 +336,7 @@ export class StartupApplication {
           }
           native.execute(builder.finish());
         },
-        close: () => { activeMenu.close(); activeAudio.close(); activeThemeMounts?.close(); (this.graphics?.controllerSettings ?? controllerSettings).close();
+        close: () => { activeMenu.close(); (this.graphics?.controllerSettings ?? controllerSettings).close(); devices.close(); activeAudio.close(); activeThemeMounts?.close();
           (this.graphics?.router ?? activeRouter).close(); pads.close(); activeArt.close(); activeTypography.close(); activeFont.close(); images.close(); native.close(); mounted.close(); } };
       const locals = initial.prepared.seats.map(prepared => {
         const local = [...localSeats.values()].find(candidate => candidate.id.equals(prepared.id));
@@ -340,7 +386,7 @@ export class StartupApplication {
           throw error;
         },
       });
-      this.client = { videoRestart, musicControls: this.musicControls, capture, consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, settings,
+      this.client = { videoRestart, musicControls: this.musicControls, capture, consoles: new Map<SessionSeat, SeatConsole>(), identity, session, locals, prepared: initial.prepared, renderer: native, imageSettings, controllers: pads, inputDevices: devices, settings,
         output: { current: activeAudio.engine }, platform: { current: { kind: "menu", router: activeRouter, controllerSettings,
           retireCommands: () => { this.releaseMenuInput?.(); this.releaseMenuInput = null; } } },
         source: { current: null }, sourceProfile: { current: configuration.selection.source }, configuration: { current: { scripts: initial.scripts, options: initial.options } }, activateFrontend: configuration => this.activateFrontend(configuration),
@@ -360,7 +406,7 @@ export class StartupApplication {
     } catch (error) {
       this.client?.videoRestart.close();
       await this.client?.capture.close();
-      menu?.close(); audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
+      menu?.close(); inputDevices?.close(); audio?.close(); themeMounts?.close(); router?.close(); controllers?.close(); art?.close(); typography?.close(); font?.close(); images.close(); renderer?.close(); mounted.close();
       await session.close(); await initial.image.close(); await initial.scripts.close();
       throw error;
     }
@@ -403,6 +449,19 @@ export class StartupApplication {
     let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
     if (origin.kind === "remote-client") return false;
     if (this.demos?.handle(name, args, source)) return true;
+    if (name === "in_restart" || name === "midiinfo") {
+      const client = this.client;
+      if (client === null) throw new Error("Input command requires the retained client");
+      if (name === "midiinfo") client.inputDevices.info();
+      else {
+        const platform = client.platform.current;
+        if (platform?.kind === "world") platform.input.releaseForProfileChange();
+        else for (const seat of client.prepared.seats) seat.input.release(performance.now());
+        client.inputDevices.restart();
+        if (platform?.kind === "world") platform.input.router.restart(); else platform?.router.restart();
+      }
+      return true;
+    }
     if (name === "quit") { this.requestQuit(); return true; }
     if (name === "disconnect") { this.pending = { kind: "frontend" }; return true; }
     const options = this.game?.options ?? this.remote?.options ?? this.model.options;
@@ -454,6 +513,9 @@ export class StartupApplication {
   private frontendCommand(name: string, args: readonly string[], source: CommandContext): void {
     if (this.routeCommand(name, args, source)) return;
     if (name === "snd_restart" && this.graphics !== null) { this.graphics.audio.restartOutput(); return; }
+    if (name === "music" && this.graphics !== null) {
+      this.graphics.audio.queueMusicCommand(args, text => this.print(text)); return;
+    }
     if (name === "cd" && this.graphics !== null) {
       this.graphics.audio.queueCdCommand(args, text => this.print(text)); return;
     }
@@ -491,7 +553,8 @@ export class StartupApplication {
       clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); },
       focus: focus => {
         input.setFocus(focus.kind === "game" ? { kind: "menu", menu: graphics.menu.controller.activeMenu ?? "menu:startup:main", control: null } : focus, performance.now());
-        graphics.router.updateCapture();
+        client.inputDevices.activate(graphics.router);
+    graphics.router.updateCapture();
       }, chat: () => { this.print("Chat requires an active connection.\n"); } });
     const retained = client.consoles.get(local.seat), console = retained ?? candidate;
     if (retained === undefined) { candidate.publish(input.focus); client.consoles.set(local.seat, candidate); }
@@ -512,6 +575,32 @@ export class StartupApplication {
     this.releaseMenuInput = () => { releaseInput(); releaseOutput(); releaseDiscovery(); };
   }
 
+  private configurationLibrary(): LibraryMenuService {
+    let entries: readonly LibraryEntry[] = [], status = "", generation = 0;
+    const submit = (name: "exec" | "writeconfig", path: string): void => {
+      try {
+        const client = this.captureClient(), seat = client.prepared.seats[0];
+        if (seat === undefined) throw new Error("Configuration command has no local seat");
+        const command = readStartupCommand([`+${name}`, path], 0);
+        client.prepared.commands.append(`${command.text}\n`, seat.context);
+        status = `${name === "exec" ? "Queued" : "Saving"} ${path}`;
+      } catch (error) { status = error instanceof Error ? error.message : String(error); }
+    };
+    const refresh = async (): Promise<void> => {
+      const revision = ++generation;
+      try {
+        const client = this.captureClient(), seat = client.prepared.seats[0], scripts = client.configuration.current.scripts;
+        if (seat === undefined) throw new Error("Configuration library has no local seat");
+        const files = await scripts.list(seat.context);
+        if (revision !== generation || this.closed || client.configuration.current.scripts !== scripts) return;
+        entries = files.map(file => ({ id: file.name, label: file.name, detail: file.kind === "seat" ? "Current player" : "Selected game" }));
+        status = `${entries.length} configuration files`;
+      } catch (error) { if (revision === generation) status = error instanceof Error ? error.message : String(error); }
+    };
+    return { entries: () => entries, status: () => status, refresh: () => { void refresh(); },
+      activate: path => submit("exec", path), create: { label: "Save config", submit: path => submit("writeconfig", path) } };
+  }
+
   private activateFrontend(configuration?: Parameters<ClientBootstrap["activateFrontend"]>[0]): void {
     const client = this.client, graphics = this.graphics;
     if (client === null || graphics === null) throw new Error("Retained frontend is unavailable");
@@ -520,11 +609,13 @@ export class StartupApplication {
     if (graphics.router.seat(primary.id) !== primary.input) {
       this.releaseMenuInput?.(); this.releaseMenuInput = null;
       const oldRouter = graphics.router;
-      const router = new InputRouter({ seats: [{ input: primary.input, controller: { kind: "automatic" } }], keyboardSeat: primary.id,
+      const previousRouter = client.platform.current?.kind === "world" ? client.platform.current.input.router : oldRouter;
+      const router = new InputRouter({ seats: [{ input: primary.input, controller: previousRouter.seat(primary.id) === null ? { kind: "automatic" } : previousRouter.controllerSelection(primary.id) }], keyboardSeat: primary.id,
         controllers: client.controllers, deferPlatform: true, now: () => performance.now(), ticks: () => client.renderer.window.ticks, subframe: false,
         unhandled: event => { if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit(); } });
       if (client.platform.current?.kind === "menu") oldRouter.transferWindowTo(router);
       graphics.controllerSettings.close(); oldRouter.close(); graphics.router = router;
+      this.frontendRoutingBaseline = this.frontendRoutingState(router);
       graphics.controllerSettings = new ControllerSettings(router, [primary.id], () => client.controllers.devices, client.settings, this.host.print);
       graphics.inputProfile = StartupInputProfile.retained(client.settings, primary.input);
       graphics.menu.bindInput(primary.input, () => sharedBindingActions(movementDialect(this.model.options), this.model.bindingItems(), this.model.bindingCapabilities()));
@@ -544,6 +635,7 @@ export class StartupApplication {
       retireCommands: () => { this.releaseMenuInput?.(); this.releaseMenuInput = null; } };
     if (configuration === undefined) this.publishFrontendRouting(client); else configuration.publish();
     this.bindFrontendConsole();
+    client.inputDevices.activate(graphics.router);
     graphics.router.updateCapture();
   }
 
@@ -600,7 +692,7 @@ export class StartupApplication {
   private async launch(action: StartupAction): Promise<void> {
     const previous = this.client?.source.current;
     if (this.game !== null) this.preferences.values = this.game.frontendSettings;
-    await this.graphics?.inputProfile.save(this.preferences.values, this.frontendHistory);
+    await this.saveFrontendInput();
     if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore);
     this.graphics?.menu.setStatus("Loading...", true);
     this.graphics?.draw(previous ?? null);
@@ -619,11 +711,12 @@ export class StartupApplication {
         const selected = action.kind === "initial" ? { options: action.options, recipe: undefined, image: undefined }
           : action.kind === "preset" ? { ...await this.model.resolvePreset(action.id, action.skill), image: undefined }
           : action.kind === "play" ? { ...await this.model.resolve(), image: undefined } : await (async () => {
-          const image = await readSaveImage(action.path), settings = savedSimulationSettings(image);
+          const saved = await prepareApplicationSave(this.model.options, this.model.catalog, action.path);
+          const image = saved.image, settings = savedSimulationSettings(image);
           const bots = savedBotCheckpoint(image);
           const seats = settings.clientSlots.filter(slot => !bots?.transport.connections.some(connection => connection.client.slot === slot)).length;
           if (seats < 1 || seats > 4) throw new Error("This saved game requires between 1 and 4 local players.");
-          const { botSkill: _botSkill, ...options } = this.model.options;
+          const { botSkill: _botSkill, ...options } = saved.options;
           return { recipe: image.recipe, image, options: { ...options, skill: settings.skill, mode: settings.mode, seed: settings.seed,
             seats } };
         })();
@@ -658,11 +751,11 @@ export class StartupApplication {
   }
 
   private async connect(connection: BrowserConnection): Promise<void> {
-    const family = connection.protocol;
-    const options: ApplicationOptions = { ...this.model.options, product: family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3",
+    const family = connection.protocol === "qw" ? "q1" : connection.protocol;
+    const options: ApplicationOptions = { ...this.model.options, product: connection.protocol === "qw" ? "q1-quakeworld" : family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3",
       map: family === "q1" ? "maps/e1m1.bsp" : family === "q2" ? "maps/base1.bsp" : "maps/q3dm1.bsp", movement: family, character: family,
       characterModel: family === "q1" ? "player" : family === "q2" ? "male" : "sarge", seats: 1, dedicated: false, rules: "standard",
-      network: { kind: family === "q1" ? "q1-client" : family === "q2" ? "q2-client" : "q3-client", remote: connection.remote } };
+      network: { kind: connection.protocol === "qw" ? "qw-client" : family === "q1" ? "q1-client" : family === "q2" ? "q2-client" : "q3-client", remote: connection.remote } };
     await this.connectOptions(options);
   }
 
@@ -718,6 +811,7 @@ export class StartupApplication {
     if (graphics === null || client === null) throw new Error("Startup frame has no client");
     const source = this.game ?? this.remote;
     if (client.platform.current?.kind === "menu") {
+      client.inputDevices.frame(now);
       for (const event of graphics.renderer.window.pollEvents()) graphics.router.handlePlatform(event);
       for (const event of graphics.controllers.pollEvents()) graphics.router.handleController(event);
     } else source?.pumpClientInput();
@@ -757,6 +851,7 @@ export class StartupApplication {
     if (client.platform.current?.kind !== "menu") return;
     await this.refreshPreferenceBaseline();
     graphics.controllerSettings.update();
+    client.inputDevices.activate(graphics.router);
     graphics.router.updateCapture();
     if (this.refreshSaves) {
       this.refreshSaves = false; graphics.menu.setStatus("Reading saved games...", true); graphics.draw();
@@ -779,11 +874,12 @@ export class StartupApplication {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true; this.stopping = true;
-    try { await this.graphics?.inputProfile.save(this.preferences.values, this.frontendHistory); }
+    try { await this.saveFrontendInput(); }
     catch (error) { this.print(`Could not save controls: ${error instanceof Error ? error.message : String(error)}\n`); }
     try { if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore); }
     catch (error) { this.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
     const errors: unknown[] = [];
+    try { await this.client?.inputDevices.save(); } catch (error) { errors.push(error); }
     this.game?.requestQuit(); this.remote?.requestQuit();
     this.client?.videoRestart.close();
     try { await this.client?.capture.close(); } catch (error) { errors.push(error); }

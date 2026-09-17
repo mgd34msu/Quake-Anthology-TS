@@ -14,11 +14,12 @@ import type { MaterialTextDraw } from '../../../text/draw2d.ts';
 import type { ApplicationAudio } from '../audio.ts';
 import type { Q3SeatAudioOperation } from '../audio/q3.ts';
 import type { ApplicationQ3Assets } from './assets.ts';
-import { ApplicationQ3Cinematics } from './cinematics.ts';
+import { ApplicationQ3Cinematics, type SystemCinematicHost } from './cinematics.ts';
 import { q3ClientCollision } from './collision.ts';
 import { SharedSceneQueries } from '../../../world/collision/index.ts';
 
 export interface ApplicationQ3ServiceOptions {
+  readonly systemCinematics?: SystemCinematicHost;
   readonly collisionSettings: CollisionMapSettings;
   readonly media: ApplicationQ3Assets;
   readonly audio: ApplicationAudio;
@@ -63,6 +64,6 @@ export async function createApplicationQ3Services(options: ApplicationQ3ServiceO
     output.command(command);
   }, value => output.text(value)), 'stretch-640');
   return { scene, resources, sound, draw, collision: q3ClientCollision(options.queries, options.collisionSettings),
-    cinematics: new ApplicationQ3Cinematics(media, options.audio, seat, options.clock.now) };
+    cinematics: new ApplicationQ3Cinematics(media, options.audio, seat, options.clock.now, options.systemCinematics) };
 }
 export type ApplicationQ3Services = Awaited<ReturnType<typeof createApplicationQ3Services>>;

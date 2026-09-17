@@ -24,6 +24,7 @@ const q1Timers: Readonly<Record<Q1Powerup, { readonly item: ActivePowerupTimer["
   invulnerability: { item: "q1:item_artifact_invulnerability", label: "Invulnerability" },
   invisibility: { item: "q1:item_artifact_invisibility", label: "Invisibility" },
   suit: { item: "q1:item_artifact_envirosuit", label: "Environment Suit" },
+  "mg3:lavasuit": { item: "q1:item_artifact_lavasuit", label: "Lava Suit" },
   "hipnotic:wetsuit": { item: "q1:item_artifact_wetsuit", label: "Wetsuit" },
   "hipnotic:empathy": { item: "q1:item_artifact_empathy_shields", label: "Empathy Shields" },
   "rogue:shield": { item: "q1:item_powerup_shield", label: "Power Shield" },

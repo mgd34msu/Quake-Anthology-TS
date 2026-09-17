@@ -194,3 +194,26 @@ for (const fixture of fixtures) {
   } finally { archive.close(); }
  }, 20000);
 }
+
+
+test('declared rerelease corpses receive point traces without blocking foreign bodies', () => {
+ const scene = createSceneQueries(decodeQ3World(q3Fixture()));
+ const actor = createIdentityOwner('corpse policy').actor(1, 0);
+ const origin = { x: 120, y: 0, z: 100 }, zero = { x: 0, y: 0, z: 0 };
+ const bounds = { min: { x: -8, y: -8, z: -8 }, max: { x: 8, y: 8, z: 8 } };
+ const body = { actor, state: { origin, angles: zero, velocity: zero, bounds, ground: null },
+  absoluteBounds: { min: { x: 111, y: -9, z: 91 }, max: { x: 129, y: 9, z: 109 } }, linkCount: 1 };
+ const collision = { family: 'q1', shape: { kind: 'box' }, contents: -2, owner: null, role: 'solid', monster: false, deadMonster: false } satisfies Parameters<typeof scene.link>[1];
+ scene.link(body, { ...collision, q1Corpse: true });
+ for (const policy of policies) {
+  const input = { start: { x: 100, y: 0, z: 100 }, end: { x: 140, y: 0, z: 100 },
+   target: { kind: 'world' }, policy, numeric, passActor: null } satisfies Omit<Parameters<typeof scene.trace>[0], 'shape'>;
+  expect(scene.trace({ ...input, shape: { kind: 'point' } }).hit.kind).toBe('actor');
+  expect(scene.trace({ ...input, shape: { kind: 'box', bounds: { min: zero, max: zero } } }).hit.kind).toBe('actor');
+  expect(scene.trace({ ...input, shape: { kind: 'box', bounds } }).hit.kind).toBe('none');
+  expect(scene.trace({ ...input, shape: { kind: 'capsule', bounds } }).hit.kind).toBe('none');
+ }
+ scene.link(body, collision);
+ expect(scene.trace({ start: { x: 100, y: 0, z: 100 }, end: { x: 140, y: 0, z: 100 },
+  target: { kind: 'world' }, policy: { kind: 'q1', move: 'normal', hull: null }, numeric, passActor: null, shape: { kind: 'box', bounds } }).hit.kind).toBe('actor');
+});

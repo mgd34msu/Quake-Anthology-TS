@@ -3,11 +3,11 @@
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 
-export type NativeLibrary = "sdl2" | "sdl3" | "gl" | "vorbisfile" | "freetype";
+export type NativeLibrary = "sdl2" | "sdl3" | "gl" | "vorbisfile" | "theoradec" | "freetype";
 
 const variables: Readonly<Record<NativeLibrary, string>> = {
   sdl2: "QUAKE_SDL2_LIBRARY", sdl3: "QUAKE_SDL3_LIBRARY", gl: "QUAKE_GL_LIBRARY",
-  vorbisfile: "QUAKE_VORBISFILE_LIBRARY", freetype: "QUAKE_FREETYPE_LIBRARY",
+  vorbisfile: "QUAKE_VORBISFILE_LIBRARY", theoradec: "QUAKE_THEORA_LIBRARY", freetype: "QUAKE_FREETYPE_LIBRARY",
 };
 
 const linuxNames: Readonly<Record<NativeLibrary, readonly string[]>> = {
@@ -15,6 +15,7 @@ const linuxNames: Readonly<Record<NativeLibrary, readonly string[]>> = {
   sdl3: ["libSDL3.so.0", "libSDL3.so"],
   gl: ["libGL.so.1", "libGL.so"],
   vorbisfile: ["libvorbisfile.so.3", "libvorbisfile.so"],
+  theoradec: ["libtheoradec.so.2", "libtheoradec.so"],
   freetype: ["libfreetype.so.6", "libfreetype.so"],
 };
 
@@ -45,11 +46,11 @@ export function nativeLibraryCandidates(kind: NativeLibrary, options: NativeLibr
       break;
     case "win32":
       names = kind === "sdl3" ? ["SDL3.dll"] : kind === "sdl2" ? ["SDL2.dll"] : kind === "gl" ? ["opengl32.dll"]
-        : kind === "vorbisfile" ? ["libvorbisfile-3.dll", "vorbisfile.dll"] : ["freetype.dll", "libfreetype-6.dll", "freetype6.dll"];
+        : kind === "vorbisfile" ? ["libvorbisfile-3.dll", "vorbisfile.dll"] : kind === "theoradec" ? ["libtheoradec-1.dll", "theoradec.dll"] : ["freetype.dll", "libfreetype-6.dll", "freetype6.dll"];
       break;
     case "darwin":
       names = kind === "sdl3" ? ["libSDL3.0.dylib", "libSDL3.dylib"] : kind === "sdl2" ? ["libSDL2-2.0.0.dylib", "libSDL2.dylib"] : kind === "gl" ? [defaultOpenGlDriver(platform)]
-        : kind === "vorbisfile" ? ["libvorbisfile.3.dylib", "libvorbisfile.dylib"] : ["libfreetype.6.dylib", "libfreetype.dylib"];
+        : kind === "vorbisfile" ? ["libvorbisfile.3.dylib", "libvorbisfile.dylib"] : kind === "theoradec" ? ["libtheoradec.2.dylib", "libtheoradec.dylib"] : ["libfreetype.6.dylib", "libfreetype.dylib"];
       for (const directory of ["/opt/homebrew/lib", "/usr/local/lib"]) {
         for (const name of names) installed.push(posix.join(directory, name));
       }

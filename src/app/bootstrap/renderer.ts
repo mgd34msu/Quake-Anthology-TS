@@ -2,7 +2,7 @@ import { SceneImageRegistry } from "../../render/scene/resources.ts";
 import { resolveDrawTextures } from "../../render/commands/dynamic-texture.ts";
 import type { Vec4 } from "../../contracts/math.ts";
 import type { DrawBatch, ImageResourceOperation, RenderCommand, RendererBackend, RendererResourceOwner, RenderFrame, RenderOperation, RenderImage } from "../../contracts/render.ts";
-import { SdlWindow } from "../../platform/sdl.ts";
+import { SdlWindow, type SdlDisplayMode } from "../../platform/sdl.ts";
 import { SoftwareRenderer } from "../../render/cpu/index.ts";
 import { GlRenderer } from "../../render/gl/index.ts";
 import type { ApplicationOptions } from "./options.ts";
@@ -11,6 +11,16 @@ interface ResidentImage {
   beforeTextureMode: boolean;
   readonly creation: Extract<ImageResourceOperation, { readonly kind: "create-image" }>;
   readonly updates: Map<number, Extract<ImageResourceOperation, { readonly kind: "update-image" }>>;
+}
+
+export interface RendererDiagnostics {
+  readonly backend: "cpu" | "gl";
+  readonly width: number;
+  readonly height: number;
+  readonly driver: GlRenderer["driver"] | null;
+  readonly displayModes: readonly SdlDisplayMode[];
+  readonly images: readonly { readonly ordinal: number; readonly name: string; readonly width: number; readonly height: number;
+    readonly encoding: RenderImage["kind"]; readonly mipLevels: number }[];
 }
 
 export interface PreparedRendererRestart {
@@ -164,6 +174,19 @@ export class NativeRenderer {
 
   get backend(): RendererBackend { return this.current; }
   get outputGamma(): number { return this.gamma; }
+  diagnostics(): RendererDiagnostics {
+    if (this.closed) throw new Error("Native renderer is closed");
+    const backend = this.current;
+    return { backend: backend instanceof GlRenderer ? "gl" : "cpu", width: backend.width, height: backend.height,
+      driver: backend instanceof GlRenderer ? { ...backend.driver } : null,
+      displayModes: this.currentWindow.displayModes.map(mode => ({ ...mode })),
+      images: [...this.resident.values()].map(({ creation, updates }) => {
+        const level = updates.get(0)?.content ?? creation.content.levels[0];
+        return { ordinal: creation.image.ordinal, name: creation.image.source.kind === "generated" ? creation.image.source.name : creation.image.source.resource.requestedPath,
+          width: level.width, height: level.height,
+          encoding: creation.content.kind, mipLevels: creation.content.levels.length };
+      }) };
+  }
   setOutputGamma(gamma: number): void { this.writable(); this.current.setOutputGamma(gamma); this.gamma = gamma; }
 
   private resize(): void {

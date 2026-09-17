@@ -36,6 +36,7 @@ export interface ModelSourceOptions {
   readonly leftHand?: 0 | 1 | 2;
   readonly infrared?: boolean;
   readonly viewModel?: boolean;
+  readonly planarShadow?: boolean;
   readonly player?: boolean;
   readonly overbrightModels?: boolean;
   readonly playerColors?: { readonly top: number; readonly bottom: number };

@@ -12,6 +12,8 @@ import type { BotMoveResult, BotMoveState, BotMoveStateStore, BotMoveVariable } 
 
 export interface BotTravelPredictionResult {
   readonly end: Vec3; readonly velocity: Vec3; readonly frames: number; readonly stopEvent: number;
+  /** Explicit crossing area wins over classifying an endpoint exactly on a BSP plane. */
+  readonly endArea: number | null;
   readonly trajectory: readonly Vec3[]; readonly seconds: number; readonly grounded: boolean; readonly waterLevel: number;
 }
 export interface BotTravelModel {

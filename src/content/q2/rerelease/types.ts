@@ -58,6 +58,7 @@ export class Q2RereleasePlayerState {
   helpPoints: readonly Vec3[] = [];
   helpIndex = 0;
   helpDrawTime = 0;
+  helpMarkerUntil = 0;
   constructor(readonly seat: number, readonly socialId: string) {}
 }
 export interface Q2RereleaseOptions {
@@ -108,7 +109,7 @@ export interface Q2RereleaseHooks {
   lightStyle(style: number): string;
   playerIdentity(actor: ActorId): { readonly seat: number; readonly socialId: string };
   clipTrigger(trigger: Q2Entity, player: ActorId, game: Q2GameServices): boolean;
-  navigation(start: Vec3, goal: Vec3): { readonly kind: "path"; readonly distanceSquared: number; readonly points: readonly Vec3[] } | { readonly kind: "no-navigation" | "unreachable" };
+  navigation(start: Vec3, goal: Vec3, actor: ActorId | null): { readonly kind: "path"; readonly distanceSquared: number; readonly points: readonly Vec3[] } | { readonly kind: "no-navigation" | "unreachable" };
   monstersSearching(player: ActorId | null): boolean;
   monsterHoldsHealthBar?(monster: ActorId): boolean;
   expansionPowerups?(player: ActorId): { readonly doubleUntil: number; readonly quadFireUntil: number; readonly irUntil: number };

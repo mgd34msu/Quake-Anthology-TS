@@ -761,3 +761,45 @@ test("playlist source round reset replays unchanged authored music while manual 
     } finally { music.stop(); bank.clear(); }
   }
 });
+
+test("named music command uses retained source and source one-shot or intro-loop semantics", async () => {
+  const content = createContentId({ family: "q3", edition: "test", package: "postgame-music", revision: "1" });
+  using mounts = new MenuMemoryMounts(content, new Map([["music/win.wav", menuWave(1000)], ["music/loop.wav", menuWave(2000)]]));
+  using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const music = new ApplicationMusic(engine, () => undefined, "immediate"), bank = new SoundBank(mounts), output: string[] = [];
+  const source = { content, family: "q3", edition: "classic", campaign: "baseq3" } satisfies Parameters<ApplicationMusic["play"]>[0];
+  music.select(source, bank); music.volume = 0.25;
+  try {
+    await music.musicCommand(["music/win"], text => { output.push(text); });
+    expect(engine.mix(64).some(value => value === 250)).toBe(true);
+    expect(engine.mix(64).every(value => value === 0)).toBe(true);
+    await music.musicCommand(["music/win", "music/loop"], text => { output.push(text); });
+    const first = engine.mix(128); expect(first.some(value => value === 250)).toBe(true); expect(first.some(value => value === 500)).toBe(true);
+    expect(engine.mix(128).every(value => value === 500)).toBe(true);
+    await music.cdCommand(["pause"]); expect(engine.mix(64).every(value => value === 0)).toBe(true);
+    await music.cdCommand(["resume"]); expect(engine.mix(64).every(value => value === 500)).toBe(true);
+    await music.musicCommand([], text => { output.push(text); }); expect(output).toEqual(["music <intro> [loop]\n"]);
+    await music.cdCommand(["off"]); await music.musicCommand(["music/win"]); expect(engine.mix(64).every(value => value === 0)).toBe(true);
+  } finally { music.stop(); bank.clear(); }
+});
+
+test("retained frontend music command drains in order without creating another music owner", async () => {
+  const dialect = "q3", identity = createIdentityOwner("frontend-named-music"), context: CommandContext = { session: identity.session, origin: { kind: "local-console" } };
+  const cvars = new CvarRegistry({ dialect, context }), output: string[] = [];
+  const scripts = new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined });
+  const prepared = new PreparedStartup(cvars, cvars, scripts, { dialect, movementDialect: dialect, seats: [], shared: null, sharedNames: [], print: text => { output.push(text); }, forward: () => undefined });
+  const content = createContentId({ family: "q3", edition: "test", package: "queued-music", revision: "1" });
+  using mounts = new MenuMemoryMounts(content, new Map([["music/win.wav", menuWave(1000)], ["music/loop.wav", menuWave(2000)]]));
+  const audio = await StartupAudio.open({ mounts, source: { content, family: "q3", edition: "classic", campaign: "baseq3" }, theme: null,
+    seat: identity.seat(0), print: () => undefined, preferences: { musicVolume: 0.25, menuTrack: "0" } });
+  prepared.forwardCommands((name, args) => { if (name === "music") audio.queueMusicCommand(args, text => { output.push(text); }); else if (name === "cd") audio.queueCdCommand(args, text => { output.push(text); }); });
+  try {
+    expect(prepared.commands.registeredNames().filter(name => name === "music")).toEqual(["music"]);
+    expect(prepared.commands.commandDocumentation("music")?.usage).toBe("music <intro> [loop]");
+    prepared.commands.append("music music/win music/loop\ncd pause\n", context);
+    await prepared.commands.executeAsync(() => audio.flushCommands()); expect(audio.engine.mix(64).every(value => value === 0)).toBe(true);
+    prepared.commands.append("cd resume\n", context); await prepared.commands.executeAsync(() => audio.flushCommands());
+    expect(audio.engine.mix(64).some(value => value === 250)).toBe(true); expect(audio.engine.mix(64).every(value => value === 500)).toBe(true);
+    expect(output).toEqual([]);
+  } finally { audio.close(); }
+});

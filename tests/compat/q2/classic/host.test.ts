@@ -1,3 +1,7 @@
+import { dirname } from "node:path";
+import { openMountPlan } from "../../../../src/content/mounts/index.ts";
+import { createMountIdentity } from "../../../../src/contracts/content.ts";
+import { ClassicGuestSource, prepareClassicGuest } from "../../../../src/app/bootstrap/simulation/classic-guest-source.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -143,4 +147,33 @@ test("Pmove reenters source trace and contents callbacks synchronously on the sa
   expect(state.registers.read("rsp", 32)).toBe(stackBefore);
   expect(view.getInt16(8, true)).toBeLessThan(640); expect(view.getInt16(4, true)).toBeGreaterThan(0);
   expect(memory.readPointer(memory.offset(pm, 232n))).toEqual(trace);
+});
+
+
+test.skipIf(!existsSync(retailPath))("selected classic native module owns attach, game calls and complete disposal", async () => {
+  const identity = createMountIdentity("mount:test:classic-guest", "q2:classic:ctf:installed", 1);
+  const mounts = await openMountPlan({ id: "mount-plan:test:classic-guest", mounts: [{ kind: "loose", identity, rootPath: dirname(retailPath) }], defaultOrder: [identity.id], prefixOrders: [] });
+  try {
+    const artifact = await mounts.open("gamex86.dll"); if (artifact === null) throw new Error("Missing actual CTF DLL");
+    const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:ctf-native", content: identity.content }, role: "server-game",
+      api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
+    const fixture = services(), files = savedFiles();
+    const source = ClassicGuestSource.create(prepared, { services: () => fixture.hostServices, capabilities: files.capabilities, instructionBudget: 2_000_000 });
+    try {
+      source.init();
+      source.host.spawnEntities("native_check", '{ "classname" "worldspawn" "message" "Selected DLL" }', "");
+      expect(fixture.configuration.get(0)).toBe("Selected DLL");
+      expect(source.host.clientConnect(1, "\\name\\Native Guest\\skin\\male/grunt\\ip\\127.0.0.1").allowed).toBe(true);
+      source.host.runFrame(); source.host.save("WriteGame", "save/game.sav");
+      expect(files.files.get("save/game.sav")?.length).toBeGreaterThan(1000);
+      expect(() => source.init()).toThrow("fresh source");
+    } finally { source.close(); }
+    expect(source.memory.mappings()).toHaveLength(0);
+    expect(fixture.hostServices.engine.actors.ownedBy("q2:ctf-native")).toHaveLength(0);
+    source.close();
+    const candidateServices = services();
+    const candidate = ClassicGuestSource.create(prepared, { services: () => candidateServices.hostServices, capabilities: {}, instructionBudget: 2_000_000 });
+    candidate.discard(); expect(candidate.memory.mappings()).toHaveLength(0);
+    expect(candidateServices.prints).toEqual([]);
+  } finally { mounts.close(); }
 });

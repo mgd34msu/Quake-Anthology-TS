@@ -1,3 +1,4 @@
+import { registerAddonMonsters } from "./monsters/index.ts";
 import type { Q1Base } from "../base/provider.ts";
 import { Q1AddonContext } from "./context.ts";
 import type { Q1AddonServices } from "./context.ts";
@@ -11,19 +12,8 @@ import { registerAddonLights } from "./lights.ts";
 import { registerAddonRopes } from "./rope.ts";
 import { registerMg3Items } from "./items/index.ts";
 import { registerAddonCorpses } from "./corpses.ts";
-import { registerMg3Demodog } from "./monsters/demodog.ts";
-import { registerMg3Infected } from "./monsters/infected/index.ts";
-import { registerMg3Heavy } from "./monsters/heavy/index.ts";
 import { spawnMapActor } from "../foundation/spawns.ts";
-import { registerMg3PathTargets } from "./monsters/ai/targets.ts";
-import { registerOrdinaryAddonMonsters } from "./monsters/ordinary/index.ts";
 
-import { registerFinalBoss } from "./monsters/bosses/final.ts";
-import { registerSacrifice } from "./monsters/bosses/sacrifice.ts";
-import { registerGhost } from "./monsters/bosses/ghost.ts";
-import { registerOrb } from "./monsters/bosses/orb.ts";
-import { registerShubZombie } from "./monsters/bosses/szombie.ts";
-import { registerOldnew } from "./monsters/bosses/oldnew.ts";
 
 export { Q1AddonContext } from "./context.ts";
 export type { Q1AddonEvent, Q1AddonProgram, Q1AddonServices } from "./context.ts";
@@ -48,9 +38,7 @@ export function registerQ1CampaignAddons(base: Q1Base, program: "dopa" | "mg1" |
   registerCampaignAddons(context); registerAddonTriggers(context); registerAddonBaseTriggers(context); registerAddonFieldTriggers(context); registerAddonBrushes(context);
   registerAddonEffects(context); registerAddonFog(context); registerAddonLights(context);
   registerAddonCorpses(context);
-  registerOrdinaryAddonMonsters(context);
-  if (program === "mg3") { registerMg3PathTargets(context); registerAddonRopes(context); registerMg3Items(context); registerMg3Demodog(context); registerMg3Infected(context); registerMg3Heavy(context);
-    registerSacrifice(context); registerGhost(context); registerOrb(context); registerShubZombie(context); registerOldnew(context); registerFinalBoss(context);
-  }
+  registerAddonMonsters(context);
+  if (program === "mg3") { registerAddonRopes(context); registerMg3Items(context); }
   return context;
 }

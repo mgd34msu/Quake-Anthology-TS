@@ -12,7 +12,7 @@ import { MusicPlayer } from "./music.ts";
 import { EnvironmentReverb } from "./environments.ts";
 import type { AudioTraceQuery, ReverbEnvironment } from "./environments.ts";
 import { StereoReverb, UnderwaterFilter } from "./reverb.ts";
-import type { AudioListener, PlaySound, LoopSound, AudioAudience, AudioStreamTarget, StreamPcm, SoundAsset } from "./types.ts";
+import type { AudioVoiceEvent, AudioVoiceClock, AudioListener, PlaySound, LoopSound, AudioAudience, AudioStreamTarget, StreamPcm, SoundAsset } from "./types.ts";
 interface SeatAudio {
     listener: AudioListener;
     readonly mixer: AudioMixer;
@@ -51,6 +51,25 @@ function add(output: Float64Array, input: Float64Array | Int16Array, gain: numbe
 /** One output device; each listener owns a shared voice core and acoustic state. */
 export class UnifiedAudio {
     readonly sampleRate: number;
+    private nextVoiceId = 0;
+    private readonly voiceObservers = new Set<(event: AudioVoiceEvent) => void>();
+    observeVoices(observer: (event: AudioVoiceEvent) => void): () => void {
+        this.check(); this.voiceObservers.add(observer);
+        return () => { this.voiceObservers.delete(observer); };
+    }
+    get voiceClock(): AudioVoiceClock {
+        const queued = this.device?.queuedFrames ?? (this.detachedOutput === null ? 0 : this.queuedPcm.length / 2);
+        return { outputSample: Math.max(0, this.frame - Math.ceil(queued * this.sampleRate / this.format.sampleRate)), sampleRate: this.sampleRate, paused: this.paused };
+    }
+    private geometry: ((listener: AudioListener, position: Vec3) => number) | null = null;
+    setGeometryTransmission(geometry: ((listener: AudioListener, position: Vec3) => number) | null): void {
+        this.check(); this.geometry = geometry;
+        for (const state of this.seats) this.bindGeometry(state);
+    }
+    private bindGeometry(state: SeatAudio): void {
+        const geometry = this.geometry;
+        state.mixer.setGeometryTransmission(geometry === null ? null : position => geometry(state.listener, position));
+    }
     private readonly seats: SeatAudio[] = [];
     private readonly roundMixers: { readonly seat: SeatId; readonly mixer: AudioMixer }[] = [];
     private readonly actors: ActorId[] = [];
@@ -127,7 +146,7 @@ export class UnifiedAudio {
         for (let index = this.seats.length - 1; index >= 0; index--) {
             const state = this.seats[index];
             if (state !== undefined && !listeners.some(listener => listener.seat.equals(state.listener.seat)))
-                this.seats.splice(index, 1);
+                { state.mixer.stopAll(); this.seats.splice(index, 1); }
         }
         for (const listener of listeners) {
             let state = this.seats.find(value => value.listener.seat.equals(listener.seat));
@@ -144,6 +163,10 @@ export class UnifiedAudio {
                 for (const [entity, position] of this.positions) {
                     state.mixer.updateEntityPosition(entity, position);
                 }
+                state.mixer.setVoiceObserver(event => {
+                    for (const observer of this.voiceObservers) observer({ ...event, seat: listener.seat });
+                }, () => ++this.nextVoiceId);
+                this.bindGeometry(state);
                 this.seats.push(state);
             }
             state.listener = listener;
@@ -198,9 +221,9 @@ export class UnifiedAudio {
             const local = state.listener.actor === null ? 0 : this.entity(state.listener.actor);
             const options = { entity: origin.kind === "local" ? local : entity, channel: request.channel, origin, volume: request.volume, attenuation: request.attenuation,
                 ...(request.delaySeconds === undefined ? {} : { delaySeconds: request.delaySeconds }), ...(request.serverMilliseconds === undefined ? {} : { serverMilliseconds: request.serverMilliseconds }) };
-            const accepted = request.family === "q3" ? state.mixer.startSharedSound(request.sound.pcm, { ...options, volume: Math.trunc(request.volume * 127) }, channelCommand, request.sound.name)
-                : request.family === "q1" ? state.mixer.startQ1Sound(request.sound.pcm, options, channelCommand, this.options.random)
-                : state.mixer.startQ2Sound(request.sound.pcm, options, channelCommand);
+            const accepted = request.family === "q3" ? state.mixer.startSharedSound(request.sound.pcm, { ...options, volume: Math.trunc(request.volume * 127) }, channelCommand, request.sound.name, request.sound)
+                : request.family === "q1" ? state.mixer.startQ1Sound(request.sound.pcm, options, channelCommand, this.options.random, request.sound)
+                : state.mixer.startQ2Sound(request.sound.pcm, options, channelCommand, request.sound);
             if (accepted)
                 playing++;
         }
@@ -520,6 +543,10 @@ export class UnifiedAudio {
     }
     finally {
         this.closed = true;
+        this.geometry = null;
+        this.voiceObservers.clear();
+        for (const state of this.seats) state.mixer.setGeometryTransmission(null);
+        for (const state of this.roundMixers) state.mixer.setGeometryTransmission(null);
         this.roundMixers.length = 0;
         this.device?.close();
         this.device = null;

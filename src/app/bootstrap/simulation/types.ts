@@ -43,6 +43,8 @@ export interface SimulationOptions {
   readonly dedicated?: boolean;
   readonly promptSupported?: (client: ClientId) => boolean;
   readonly preparedQuakeC?: PreparedQuakeCSource;
+  readonly originalSaveCandidate?: true;
+  readonly startItems?: string;
   readonly q3Guest?: Pick<Q3GuestRuntimeOptions, "writable" | "common"> & {
     readonly prepared: PreparedQ3Game;
     readonly gameDirectory: string;
@@ -74,7 +76,7 @@ export interface QuakeCSourceTravel {
   readonly kind: "netquake" | "quakeworld";
   readonly serverFlags: number;
   readonly cvars: readonly { readonly name: string; readonly value: string }[];
-  readonly clients: readonly { readonly client: ClientId; readonly parameters: readonly number[]; readonly userInfo: ReadonlyMap<string, string> }[];
+  readonly clients: readonly { readonly client: ClientId; readonly parameters: readonly number[]; readonly userInfo: ReadonlyMap<string, string>; readonly role?: "player" | "spectator" }[];
 }
 
 export interface SimulationTravel {
@@ -89,7 +91,8 @@ export interface SimulationTravel {
 }
 
 export interface PlayerAdmission { readonly actor: ActorId; readonly viewHeight: number; }
-export interface PlayerView { readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true; }
+export interface PlayerView { readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true;
+  readonly pitchDrift?: { readonly grounded: boolean; readonly idealPitch: number; readonly disabled: boolean }; }
 export interface PlayerUiItem {
   readonly id: ItemId;
   readonly label: string;

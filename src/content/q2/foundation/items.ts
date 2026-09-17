@@ -12,6 +12,7 @@ import type { Q2CallbackDefinitions } from "./callbacks.ts";
 import { freeQ2Entity } from "./callbacks.ts";
 import { restoreQ2Actor } from "./checkpoint.ts";
 import type { Q2Touch, Q2Use } from "./host.ts";
+import { parseQ2StartItems } from "./start-items.ts";
 
 interface ItemVisual { readonly classname: string; readonly model: string; readonly icon: string; readonly name: string; readonly sound: string; readonly rotate: boolean; readonly respawn: number; readonly consoleGive?: "inventory-only" | "individual-only" | "forbidden"; }
 export type Q2ItemDefinition = ItemVisual & (
@@ -93,6 +94,7 @@ export interface Q2ItemHooks {
   powerArmor(player: ActorId, kind: "none" | "screen" | "shield"): undefined;
   ammoPack?(player: OwnedActor, game: Q2GameServices, full: boolean): undefined;
   randomRespawn?(entity: Q2Entity, game: Q2GameServices): Q2Entity | null;
+  weaponRespawnSeconds?(): number;
 }
 
 export interface Q2PickupPolicy {
@@ -119,7 +121,8 @@ export interface Q2InventoryItem {
   readonly weapon: boolean;
   readonly consoleGive: "pickup" | "inventory-only" | "individual-only" | "forbidden";
 }
-export interface Q2DropOptions { readonly playerDeath: boolean; readonly yawOffset?: number; readonly expiresAt?: number; }
+export interface Q2DropOptions {
+  readonly immediateTouch?: boolean; readonly playerDeath: boolean; readonly yawOffset?: number; readonly expiresAt?: number; }
 
 export interface Q2ItemsCheckpoint {
   readonly powerCubeCount: number;
@@ -129,8 +132,6 @@ export interface Q2ItemsCheckpoint {
 }
 
 function id(item: Item): ItemId { return `q2:${item.classname}`; }
-const baseAmmoIds = new Set(ammunition.map(id));
-const baseWeaponIds = new Set(Q2_BASE_WEAPONS.map(weapon => weapon.item));
 function isDropped(entity: Q2Entity): boolean { return (entity.spawnflags & 0x30000) !== 0; }
 function staysCoop(item: Item): boolean {
   return item.kind === "key" || item.kind === "weapon" && (item.coopStay ?? true) || (item.kind === "power" || item.kind === "custom") && item.coopStay;
@@ -169,7 +170,7 @@ export class Q2ItemModule implements Q2SpawnModule {
 
   setPickupPolicy(policy: Q2PickupPolicy): undefined { this.pickupPolicy = policy; return undefined; }
   setPickupAdmission(admission: PickupAdmission | null): undefined { this.pickupAdmission = admission; return undefined; }
-  mapsSupply(item: ItemId): boolean { return this.pickupAdmission !== null && (baseAmmoIds.has(item) || baseWeaponIds.has(item)); }
+  mapsSupply(item: ItemId): boolean { return this.pickupAdmission !== null && (this.pickupAdmission.maps("ammo", item) || this.pickupAdmission.maps("weapons", item)); }
 
   get callbacks(): Q2CallbackDefinitions {
     return { think: { q2_items_respawn: this.respawn, q2_items_drop_to_floor: this.dropToFloor, q2_items_make_touchable: this.makeTouchable,
@@ -217,10 +218,41 @@ export class Q2ItemModule implements Q2SpawnModule {
     return this.list().find(item => item.id.toLowerCase() === key || item.classname.toLowerCase() === key || item.name.toLowerCase() === key) ?? null;
   }
 
+  giveStartItems(player: OwnedActor, game: Q2GameServices, expression: string): undefined {
+    const grants = parseQ2StartItems(expression).map(grant => {
+      const item = this.catalog.get(grant.classname.toLowerCase());
+      if (item === undefined || item.consoleGive === "inventory-only") throw new Error(`Invalid Q2 starting item: ${grant.classname}`);
+      return { ...grant, item };
+    });
+    for (const { item, count } of grants) {
+      if (count === 0) {
+        const admission = this.pickupAdmission;
+        let destinations = [id(item)];
+        if (admission !== null && item.kind === "ammo" && admission.maps("ammo", id(item))) {
+          destinations = admission.preview(player.id, { kind: "ammo", offer: { item: id(item), amount: 0 } }).ammo.map(value => value.item);
+          if (item.weaponAmmo === true) destinations.push(...admission.preview(player.id, { kind: "weapon", offer: { item: id(item), ammo: [] } }).weapons.map(value => value.item));
+        } else if (admission !== null && item.kind === "weapon" && admission.maps("weapons", id(item)) && id(item) !== "q2:weapon_blaster") {
+          destinations = admission.preview(player.id, { kind: "weapon", offer: { item: id(item), ammo: [] } }).weapons.map(value => value.item);
+        }
+        for (const destination of new Set(destinations)) {
+          const entry = game.host.inventory.entries(player.id).find(value => value.item === destination);
+          if (entry !== undefined) game.host.inventory.configure(player, { ...entry, count: 0 });
+        }
+        continue;
+      }
+      const temporary = game.create(item.classname);
+      temporary.count = count; temporary.spawnflags |= 0x10000;
+      this.pickups.set(temporary, { item, targetsUsed: false, retained: false, expiresAt: null });
+      try { this.take(temporary, game, player, item); }
+      finally { if (game.host.actors.isLive(temporary.actor.id)) game.remove(temporary); }
+    }
+    return undefined;
+  }
+
   giveAmmoCount(player: OwnedActor, game: Q2GameServices, itemId: ItemId, count: number | null): undefined {
     const item = this.lookup(itemId);
     if (item === null || item.kind !== "ammo") throw new Error("Console ammo grant requires a source ammo item");
-    const mapped = this.pickupAdmission !== null && baseAmmoIds.has(item.id);
+    const mapped = this.pickupAdmission !== null && this.pickupAdmission.maps("ammo", item.id);
     const destinations = mapped && this.pickupAdmission !== null
       ? this.pickupAdmission.preview(player.id, { kind: "ammo", offer: { item: item.id, amount: 0 } }).ammo.map(receipt => receipt.item)
       : [item.id];
@@ -270,7 +302,8 @@ export class Q2ItemModule implements Q2SpawnModule {
     game.move(dropped, { origin, bounds, velocity: { ...scale(forward, 100), z: 300 } }, false);
     dropped.touch = this.temporaryTouch;
     game.solid(dropped, "trigger"); game.motion(dropped, "toss"); game.show(dropped);
-    game.schedule(dropped, 1, this.makeTouchable);
+    if (options.immediateTouch === true) this.makeTouchable(dropped, game);
+    else game.schedule(dropped, 1, this.makeTouchable);
     return dropped;
   }
 
@@ -366,10 +399,10 @@ export class Q2ItemModule implements Q2SpawnModule {
     const entity = game.entity(pickupActor), item = entity === null ? undefined : this.pickups.get(entity)?.item;
     if (entity === null || item === undefined) return null;
     let offer: PickupSupplyOffer;
-    if (item.kind === "ammo" && baseAmmoIds.has(id(item))) {
+    if (item.kind === "ammo") {
       const ammo = { item: id(item), amount: this.ammoQuantity(entity, game, item) };
       offer = item.weaponAmmo === true ? { kind: "ammoWeapon", offer: { ...ammo, weapon: id(item) } } : { kind: "ammo", offer: ammo };
-    } else if (item.kind === "weapon" && baseWeaponIds.has(id(item))) {
+    } else if (item.kind === "weapon") {
       offer = { kind: "weapon", offer: { item: id(item), ammo: this.weaponAmmo(entity, game, item) } };
     } else return null;
     const inactive = { actor: pickupActor, offer, availability: { kind: "inactive" } } satisfies PickupSupplyObservation;
@@ -398,12 +431,12 @@ export class Q2ItemModule implements Q2SpawnModule {
   }
 
   private weaponOwned(game: Q2GameServices, player: ActorId, item: Item): number {
-    const admission = baseWeaponIds.has(id(item)) ? this.pickupAdmission : null;
+    const admission = this.pickupAdmission?.maps("weapons", id(item)) === true ? this.pickupAdmission : null;
     return admission === null ? game.host.inventory.count(player, id(item)) : admission.owns(player, id(item)) ? 1 : 0;
   }
 
   private weaponEligible(entity: Q2Entity, game: Q2GameServices, item: Item, previous: number): boolean {
-    if (this.pickupAdmission !== null && baseWeaponIds.has(id(item)) && id(item) === "q2:weapon_blaster") return false;
+    if (this.pickupAdmission !== null && this.pickupAdmission.maps("weapons", id(item)) && id(item) === "q2:weapon_blaster") return false;
     const stays = game.options.mode === "coop" ? !(this.pickupPolicy?.instancedCoop?.(game) ?? false)
       : game.options.mode === "deathmatch" && (game.options.deathmatchFlags & 4) !== 0;
     return !stays || previous <= 0 || isDropped(entity);
@@ -502,7 +535,7 @@ export class Q2ItemModule implements Q2SpawnModule {
     const current = game.host.combat.read(player.id);
     if (current === null) return false;
     const playerEntity = game.entity(player.id), maximum = playerEntity?.maxHealth || 100;
-    const respawn = item.respawn;
+    const respawn = item.kind === "weapon" ? this.hooks.weaponRespawnSeconds?.() ?? item.respawn : item.respawn;
     switch (item.kind) {
       case "custom": {
         this.ensure(player, game, id(item), item.capacity);
@@ -537,7 +570,7 @@ export class Q2ItemModule implements Q2SpawnModule {
       }
       case "ammo": {
         const quantity = this.ammoQuantity(entity, game, item);
-        if (this.pickupAdmission !== null && baseAmmoIds.has(id(item))) {
+        if (this.pickupAdmission !== null && this.pickupAdmission.maps("ammo", id(item))) {
           const taken = item.weaponAmmo === true
             ? this.pickupAdmission.ammoWeapon(player, { item: id(item), amount: quantity, weapon: id(item) }, { mode: "always", when: "empty-ammo" })
             : this.pickupAdmission.ammo(player, { item: id(item), amount: quantity });
@@ -551,7 +584,7 @@ export class Q2ItemModule implements Q2SpawnModule {
         break;
       }
       case "weapon": {
-        const admission = baseWeaponIds.has(id(item)) ? this.pickupAdmission : null;
+        const admission = this.pickupAdmission?.maps("weapons", id(item)) === true ? this.pickupAdmission : null;
         if (admission !== null && id(item) === "q2:weapon_blaster") return false;
         if (admission === null) this.ensure(player, game, id(item), 32767);
         const previous = this.weaponOwned(game, player.id, item);

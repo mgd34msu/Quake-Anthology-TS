@@ -6,6 +6,7 @@ import type { ArchiveMount, ContentDigest, ContentMount, LooseMount, MountId, Re
 import { openArchive, readLooseEntry } from "../archive/index.ts";
 import type { ArchiveHandle } from "../archive/index.ts";
 import { findContentPath, isMissingFile, normalizeResourcePath } from "./paths.ts";
+import { q3ArchiveChecksums } from "../../network/q3/pure.ts";
 
 export { findContentPath, normalizeResourcePath } from "./paths.ts";
 
@@ -42,6 +43,7 @@ export interface PureMountPolicy {
 
 export interface OpenMountOptions {
   readonly pure?: PureMountPolicy;
+  readonly q3Restriction?: "demo";
   readonly links?: readonly ResourceLink[];
   readonly looseComparison?: "exact" | "case-insensitive";
 }
@@ -145,6 +147,7 @@ export class MountedContent {
   /** A locally closable scope over identical sources; null requests an independently opened plan. */
   borrowMountPlan(plan: ResolvedMountPlan, options: OpenMountOptions = {}): MountedContent | null {
     this.assertOpen();
+    if (options.q3Restriction !== this.options.q3Restriction) return null;
     const resolved = resolveMountPlan(plan, options);
     const sources: MountedSource[] = [];
     for (const mount of plan.mounts) {
@@ -185,6 +188,7 @@ export class MountedContent {
   }
 
   #allowed(source: MountedSource, path: string): boolean {
+    if (source.kind === "loose" && this.options.q3Restriction === "demo" && !pureLoosePath(path)) return false;
     const pure = this.options.pure;
     if (pure === undefined || pure.archives.length === 0) return true;
     return source.kind === "archive" ? pure.archives.includes(source.mount.archiveDigest) : pureLoosePath(path);
@@ -278,7 +282,7 @@ export class MountedContent {
           add(name.slice(directory.length === 0 ? 0 : directory.length + 1));
         }
       } else {
-        if ((this.options.pure?.archives.length ?? 0) !== 0) continue;
+        if (this.options.q3Restriction === "demo" || (this.options.pure?.archives.length ?? 0) !== 0) continue;
         const location = directory === "" ? source.mount.rootPath
           : await findContentPath(source.mount.rootPath, directory, this.options.looseComparison);
         if (location === null) continue;
@@ -351,7 +355,13 @@ export async function openMountPlan(plan: ResolvedMountPlan, options: OpenMountO
       if (mount.kind === "loose") sources.push({ kind: "loose", mount });
       else {
         if (await digestFile(mount.archivePath) !== mount.archiveDigest) throw new Error(`Archive bytes changed before mount: ${mount.archivePath}`);
-        sources.push({ kind: "archive", mount, archive: await openArchive(mount.archivePath, mount.format) });
+        const archive = await openArchive(mount.archivePath, mount.format);
+        sources.push({ kind: "archive", mount, archive });
+        if (options.q3Restriction === "demo") {
+          if (archive.format !== "pk3") throw new Error(`Restricted Q3 content requires PK3 archives: ${mount.archivePath}`);
+          const checksum = q3ArchiveChecksums(archive, 0).checksum >>> 0;
+          if (checksum !== 437558517) throw new Error(`Corrupted demo pak0.pk3: ${checksum}`);
+        }
       }
     }
     return new MountedContent(resolvedPlan, sources, options);

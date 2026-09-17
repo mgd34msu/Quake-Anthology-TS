@@ -23,6 +23,13 @@ export interface CinematicAudio {
   readonly resetStream: boolean;
 }
 export type CinematicStatus = "playing" | "paused" | "held" | "ended" | "stopped";
+export interface CinematicTimeline {
+  readonly source: string;
+  readonly sourceTimeMilliseconds: number;
+  readonly elapsedMilliseconds: number;
+  readonly loop: number;
+  readonly status: CinematicStatus;
+}
 export type CinematicEndReason = "finished" | "skipped" | "stopped";
 export interface CinematicTick {
   readonly status: CinematicStatus;
@@ -40,11 +47,4 @@ export interface CinematicOptions {
   readonly onAudioPause: (paused: boolean, target: CinematicTarget) => void;
   readonly onComplete: (reason: CinematicEndReason, target: CinematicTarget) => void;
   readonly developerPrint?: (message: string) => void;
-}
-
-export class UnsupportedMediaError extends Error {
-  constructor(readonly format: string) {
-    super(format === "ogv" ? "OGV/Theora playback requires a TypeScript decoder that is not implemented yet" : `Unsupported cinematic format: ${format}`);
-    this.name = "UnsupportedMediaError";
-  }
 }

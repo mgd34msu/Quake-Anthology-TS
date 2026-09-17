@@ -127,7 +127,7 @@ export class NavigationRuntime {
   outgoing(id: number): readonly NavigationEdge[] { return this.#outgoing.get(id) ?? []; }
   boardingElevator(node: number) {
     for (const edge of this.outgoing(node)) {
-      if (edge.source.kind !== "nav3" || edge.mode !== "mover" || edge.sourceTravelType !== 6 || edge.entity === null) continue;
+      if ((edge.source.kind !== "nav3" && edge.source.kind !== "nav2") || edge.mode !== "mover" || edge.sourceTravelType !== 6 || edge.entity === null) continue;
       const state = this.world.entity(edge.entity);
       if (state?.elevator !== undefined && state.enabled && !state.locked) return { edge, actor: state.actor, platform: state.elevator };
     }
@@ -279,7 +279,7 @@ export class NavigationRuntime {
     return result;
   }
   #traverseEdge(edge: NavigationEdge, state: RouteTraversal): boolean {
-    const mover = edge.mode === "mover" && edge.source.kind === "nav3" && edge.sourceTravelType === 6 && edge.entity !== null ? this.world.entity(edge.entity) : null;
+    const mover = edge.mode === "mover" && (edge.source.kind === "nav3" || edge.source.kind === "nav2") && edge.sourceTravelType === 6 && edge.entity !== null ? this.world.entity(edge.entity) : null;
     if (mover?.elevator !== undefined && mover.enabled && !mover.locked) {
       const elevator = mover.elevator;
       if (elevator.top.z <= elevator.bottom.z || elevator.top.x !== elevator.bottom.x || elevator.top.y !== elevator.bottom.y) return false;
@@ -291,7 +291,7 @@ export class NavigationRuntime {
     }
     if (distance(state.cursor, edge.start) > 1 && !this.#admit(state, { from: state.cursor, to: edge.start, mode: edge.mode === "crouch" ? "crouch" : "walk", hint: null, entity: null }).admitted) return false;
     let landing = edge.end;
-    const boarding = edge.mode === "walk" && edge.source.kind === "nav3" ? this.boardingElevator(edge.to) : null;
+    const boarding = edge.mode === "walk" && (edge.source.kind === "nav3" || edge.source.kind === "nav2") ? this.boardingElevator(edge.to) : null;
     if (boarding !== null && boarding.platform.phase !== "bottom") landing = edge.start;
     else if (boarding !== null) {
       const floor = this.world.scene.trace({ start: edge.end, end: { ...edge.end, z: edge.end.z - 96 }, shape: this.graph.profile.shape,

@@ -58,6 +58,24 @@ export class Q3RendererResources implements RendererResources {
   private entityCursor = new CommonParseCursor("");
   private worldLoaded = false;
   constructor(readonly host: Q3ResourceHost, private readonly world?: Q3ResourceWorld) {}
+  registeredModels(): readonly { readonly path: string; readonly handle: number; readonly model: SceneModel }[] {
+    const names = [...this.modelNames];
+    return this.models.flatMap((model, handle) => {
+      if (handle === 0) return [];
+      const named = names.find(([, value]) => value === model);
+      if (named === undefined) throw new Error("Registered cgame model has no source name");
+      return [{ path: named[0], handle, model }];
+    });
+  }
+  registeredSkins(): readonly { readonly path: string; readonly handle: number; readonly skin: SceneSkin }[] {
+    const names = [...this.skins];
+    return this.skinHandles.flatMap((skin, handle) => {
+      if (skin === null) return [];
+      const named = names.find(([, value]) => value === skin);
+      if (named === undefined) throw new Error("Registered cgame skin has no source name");
+      return [{ path: named[0], handle, skin }];
+    });
+  }
   async registerModel(path: string | null): Promise<SceneModel> {
     if (path === null || path.length === 0) return DEFAULT_MODEL;
     const prior = this.modelNames.get(path); if (prior !== undefined) return prior;

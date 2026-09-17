@@ -59,6 +59,13 @@ export class ApplicationMusic {
     this.current = { source, bank, fallback, player, cd, opener, track: "", looping: false, authoredCue: "" };
   }
 
+  async musicCommand(args: readonly string[], print: (text: string) => void = this.print): Promise<void> {
+    if (args.length < 1 || args.length > 2 || args.some(value => value.trim() === "")) { print("music <intro> [loop]\n"); return; }
+    if (this.current === null) { print("No soundtrack source selected.\n"); return; }
+    this.automatic = null;
+    await this.startTrack(args.map(musicFileCue).join(" "), args.length === 2, false);
+  }
+
   async cdCommand(args: readonly string[], print: (text: string) => void = this.print): Promise<void> {
     const command = args[0]?.toLowerCase();
     if (command === undefined) return;

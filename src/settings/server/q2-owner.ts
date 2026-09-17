@@ -1,6 +1,6 @@
 import { Q2CvarFlag } from "../../core/cvars/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
-import type { Q2ProductRuntime } from "../../content/composition/q2/index.ts";
+import type { Q2ProductRuntime, Q2CompositionServices } from "../../content/composition/q2/index.ts";
 import { Q2Ctf } from "../../content/q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../content/q2/multiplayer/lmctf/runtime.ts";
 import { createQ2PlayerRules } from "../../content/q2/base/player/types.ts";
@@ -9,10 +9,42 @@ import type { Q2RereleaseOptions } from "../../content/q2/rerelease/types.ts";
 import { createQ2CtfRules } from "../../content/q2/multiplayer/ctf/types.ts";
 import { createLmctfRules } from "../../content/q2/multiplayer/lmctf/types.ts";
 import { bindLmctfConsoleRules } from "./lmctf-cvars.ts";
-import { q2CombatSettings, q2CtfCaptureSettings, q2LimitSettings, q2SpawnSettings } from "./q2.ts";
+import { q2CombatSettings, q2CtfCaptureSettings, q2LimitSettings, q2SpawnSettings, q2DeathBallSettings, q2RereleaseSettings } from "./q2.ts";
 import { lmctfLimitSettings, lmctfRuneSettings, lmctfWeaponSettings } from "./lmctf.ts";
 import type { ServerSettingCollection } from "./types.ts";
 
+const rereleaseCombatDefaults = [
+  ["g_instant_weapon_switch", "0", Q2CvarFlag.Latch], ["g_weapon_respawn_time", "30", 0],
+  ["g_dm_weapons_stay", "0", 0], ["g_dm_instant_items", "1", 0], ["g_dm_same_level", "0", 0],
+  ["g_no_mines", "0", 0], ["g_no_nukes", "0", 0], ["g_no_spheres", "0", 0],
+  ["g_dm_random_items", "0", 0], ["g_dm_no_quadfire_drop", "0", 0],
+  ["g_dm_no_quad_drop", "0", 0], ["g_dm_no_stack_double", "0", 0], ["g_dm_strong_mines", "0", 0],
+] satisfies readonly (readonly [string, string, number])[];
+export function q2RereleaseItemServices(cvars: CvarRegistry): Pick<Q2CompositionServices, "randomItems" | "dropQuadFire"> {
+  if (cvars.dialect !== "q2-rerelease") return {};
+  return {
+    randomItems: () => {
+      const flags = q2SourceDeathmatchFlags(cvars);
+      return { enabled: cvars.variableValue("g_dm_random_items") !== 0,
+        noMines: cvars.variableValue("g_no_mines") !== 0 || (flags & 0x20000) !== 0,
+        noNukes: cvars.variableValue("g_no_nukes") !== 0 || (flags & 0x80000) !== 0,
+        noSpheres: cvars.variableValue("g_no_spheres") !== 0 || (flags & 0x40000) !== 0 };
+    },
+    dropQuadFire: () => cvars.variableValue("g_dm_no_quadfire_drop") === 0,
+  };
+}
+export function q2SourceDeathmatchFlags(cvars: CvarRegistry): number {
+  let flags = Math.trunc(cvars.variableValue("dmflags"));
+  if (cvars.dialect !== "q2-rerelease") return flags;
+  for (const [name, mask, inverted] of [
+    ["g_dm_weapons_stay", 4, false], ["g_dm_instant_items", 16, false],
+    ["g_dm_same_level", 32, false], ["g_dm_no_quad_drop", 16384, true],
+  ] satisfies readonly (readonly [string, number, boolean])[]) {
+    const enabled = (cvars.variableValue(name) !== 0) !== inverted;
+    flags = enabled ? flags | mask : flags & ~mask;
+  }
+  return flags;
+}
 type NumericPlayerRule = "maxSpectators" | "floodMessages" | "floodSeconds" | "floodWaitSeconds" | "rollSpeed" | "rollAngle" | "runPitch" | "runRoll" | "bobUp" | "bobPitch" | "bobRoll";
 const playerNumbers: readonly (readonly [string, NumericPlayerRule, string, number])[] = [
   ["maxspectators", "maxSpectators", "4", Q2CvarFlag.ServerInfo],
@@ -48,12 +80,17 @@ export function restoreQ2ServerCvars(cvars: CvarRegistry, value: unknown): void 
     order: [...missing.map(variable => variable.name), ...saved.order] });
 }
 
-export function q2ServerSettingCollections(match: string, q2Combat: boolean): readonly ServerSettingCollection[] {
+export function q2ServerSettingCollections(match: string, q2Combat: boolean, rerelease = false): readonly ServerSettingCollection[] {
   return [q2SpawnSettings(), ...(q2Combat ? [q2CombatSettings()] : []),
     ...(match === "q2:lmctf" ? [lmctfLimitSettings(), lmctfRuneSettings(), lmctfWeaponSettings()] : [q2LimitSettings()]),
-    ...(match === "q2:ctf" ? [q2CtfCaptureSettings()] : [])];
+    ...(match === "q2:ctf" ? [q2CtfCaptureSettings()] : []), ...(match === "q2:deathball" ? [q2DeathBallSettings()] : []),
+    ...(rerelease ? [q2RereleaseSettings()] : [])];
 }
 export function registerQ2ServerCvars(cvars: CvarRegistry, match: string): void {
+  if (match === "q2:deathball") {
+    cvars.register("dball_team1_skin", "male/ctf_r", 0); cvars.register("dball_team2_skin", "male/ctf_b", 0); cvars.register("goallimit", "0", 0);
+  }
+  if (cvars.dialect === "q2-rerelease") for (const [name, value, flags] of rereleaseCombatDefaults) cvars.register(name, value, flags);
   const defaults = createQ2PlayerRules();
   cvars.register("sv_gravity", "800", 0);
   cvars.register("sv_airaccelerate", "0", 0);

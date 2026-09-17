@@ -226,6 +226,11 @@ export class EngineSession implements SessionResource {
     if (this.stepping) throw new Error("Cannot replace a world during simulation.step");
     if (simulation.session !== this.session) throw new RangeError("Simulation belongs to another session");
     if (this.currentWorld?.simulation === simulation) throw new Error("Simulation is already attached");
+    this.validateOwnershipChange(presentations, clients, seats);
+  }
+
+  private validateOwnershipChange(presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
+    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>, seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>): void {
     const additions = new Map<number, SessionClient>();
     const removals = new Set<SessionClient>();
     const seatAdditions = new Map<number, SessionSeat>();
@@ -305,6 +310,32 @@ export class EngineSession implements SessionResource {
     this.currentWorld = world;
     this.published = null;
     return { world, retired: { close: () => closeAll(retired, "Retired world shutdown failed") } };
+  }
+
+  validateLocalSeats(presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
+    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>, seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>): void {
+    this.resources.assertOpen();
+    if (this.stepping) throw new Error("Cannot change local seats during simulation.step");
+    if (this.currentWorld === null || this.currentWorld.isClosed) throw new Error("Local seat publication requires an active world");
+    this.validateOwnershipChange(presentations, clients, seats);
+  }
+
+  /** Publish only changed seats; the current simulation, snapshot and retained client scopes survive. */
+  publishLocalSeats(presentations: NonNullable<Parameters<EngineSession["replaceWorld"]>[1]>,
+    clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>, seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>): SessionResource {
+    this.validateLocalSeats(presentations, clients, seats);
+    const retired: SessionResource[] = [];
+    for (const seat of seats.removed) { this.seats.delete(seat.id.index); retired.push(seat); }
+    for (const client of clients.removed) { this.clients.delete(client.id.slot); retired.push(client); }
+    for (const client of clients.added) { this.clients.set(client.id.slot, client); this.preparedClients.delete(client); }
+    for (const seat of seats.added) { seat.client.bindSeat(seat); this.seats.set(seat.id.index, seat); this.preparedSeats.delete(seat); }
+    for (const entry of presentations) {
+      const resources = new ResourceScope(`Seat ${entry.seat.id.index} presentation`); resources.defer(entry.cleanup);
+      const previous = entry.seat.replacePresentation({ presentation: entry.presentation, resources });
+      if (previous !== null) retired.push(previous);
+    }
+    let closed = false;
+    return { close: () => { if (closed) return undefined; closed = true; return closeAll(retired, "Retired local seats shutdown failed"); } };
   }
 
   detachWorld(): SessionResource {

@@ -60,3 +60,33 @@ export function q3Fixture(): Uint8Array {
   for (const lump of lumps) output.bytes(lump);
   return output.finish();
 }
+
+export function q3TestFixture(): Uint8Array {
+  const original = q3Fixture(), view = new DataView(original.buffer);
+  const lump = (index: number): Uint8Array => {
+    const offset = view.getInt32(8 + index * 8, true), length = view.getInt32(12 + index * 8, true);
+    return original.slice(offset, offset + length);
+  };
+  const leaves = lump(4); new DataView(leaves.buffer).setInt32(36, 3, true);
+  const surfaces = lump(13), shader = lump(1).subarray(0, 64);
+  const surfaceWriter = new BinaryWriter(164 * 3);
+  for (let i = 0; i < 3; i++) {
+    const input = new DataView(surfaces.buffer, i * 104, 104);
+    surfaceWriter.bytes(shader); surfaceWriter.i32(0); surfaceWriter.i32(0);
+    surfaceWriter.i32(input.getInt32(12, true)); surfaceWriter.i32(input.getInt32(16, true));
+    surfaceWriter.i32(0); surfaceWriter.i32(i === 2 ? 3 : 0);
+    surfaceWriter.i32(i === 1 ? 3 : 0); surfaceWriter.i32(i === 1 ? 3 : 0);
+    surfaceWriter.bytes(surfaces.subarray(i * 104 + 28, i * 104 + 96));
+  }
+  const parts = [lump(0), record(20, w => { w.bytes(lump(2)); w.i32(0); }), lump(3), leaves, lump(5).subarray(0, 12), lump(6),
+    record(48, w => { w.bytes(lump(7).subarray(0, 24)); w.i32(0); w.i32(0); w.i32(0); w.i32(0); w.i32(999); w.i32(999); }),
+    record(12, w => { w.i32(0); w.i32(6); w.i32(1); }),
+    record(48, w => { for (let i = 0; i < 6; i++) { w.i32(0); w.i32(128); } }),
+    lump(14), lump(16), lump(10), surfaceWriter.finish(), lump(12).subarray(0, 68), lump(11)];
+  const writer = new BinaryWriter(128 + parts.reduce((sum, part) => sum + part.length, 0));
+  writer.u32(0x50534249); writer.i32(44);
+  let offset = 128;
+  for (const part of parts) { writer.i32(offset); writer.i32(part.length); offset += part.length; }
+  for (const part of parts) writer.bytes(part);
+  return writer.finish();
+}

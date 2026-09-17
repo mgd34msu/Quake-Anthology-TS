@@ -292,6 +292,15 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("native Q3 pres
     expect(teamArena.options).toMatchObject({ map: "maps/mpteam1.bsp", characterModel: "james", botSkill: 4,
       teamArenaSkirmish: { gameType: 4, maxClients: 6, playerTeam: "Red", playerHeadModel: "*james" } });
     expect(teamArena.recipe.character.appearance.provider).toBe("q3:model/james");
+    expect(model.teamArena.choices().some(team => team.id === "stroggs")).toBe(true);
+    model.teamArena.write("player", "stroggs"); model.teamArena.write("opponent", "pagans");
+    model.selectServerProfile("/private/selected-server-profile.cfg");
+    const selectedTeams = await model.resolvePreset("q3-missionpack", 3);
+    expect(selectedTeams.options.serverProfilePath).toBe("/private/selected-server-profile.cfg");
+    expect(selectedTeams.options.teamArenaSkirmish?.cvars.find(row => row.name === "g_redTeam")?.value).toBe("stroggs");
+    expect(selectedTeams.options.teamArenaSkirmish?.bots[0]?.name).toBe("Khan");
+    expect(() => model.teamArena.write("player", "missing team")).toThrow("Unknown authored");
+    model.selectServerProfile(null); expect(model.options.serverProfilePath).toBeUndefined();
   }
 }, 60000);
 

@@ -49,13 +49,14 @@ export type Q2PlayerEvent =
   | { readonly kind: "stufftext"; readonly actor: ActorId; readonly text: string }
   | { readonly kind: "view"; readonly actor: ActorId; readonly view: Q2PlayerView }
   | { readonly kind: "scoreboard"; readonly actor: ActorId; readonly rows: readonly Q2ScoreRow[]; readonly killer: ActorId | null; readonly reliable: boolean }
-  | { readonly kind: "inventory"; readonly actor: ActorId; readonly entries: readonly InventoryEntry[] }
+  | { readonly kind: "inventory"; readonly actor: ActorId; readonly entries: readonly InventoryEntry[]; readonly visible?: boolean; readonly selected?: ItemId | null; readonly labels?: readonly { readonly item: ItemId; readonly name: string }[] }
   | { readonly kind: "help"; readonly actor: ActorId; readonly visible: boolean }
   | { readonly kind: "load-menu"; readonly actor: ActorId }
   | { readonly kind: "trail"; readonly actor: ActorId; readonly origin: Vec3; readonly time: number }
   | { readonly kind: "chase"; readonly actor: ActorId; readonly target: ActorId | null };
 
 export interface Q2PlayerHooks {
+  quadFireDropUntil?(actor: ActorId): number;
   grantSelectedArsenal?(actor: ActorId, category: "weapons" | "ammo"): boolean;
   giveSelectedItem?(actor: ActorId, args: readonly string[]): boolean;
   weaponState?(actor: ActorId): Q2CharacterWeapon | null;
@@ -68,6 +69,7 @@ export interface Q2PlayerHooks {
   banned(address: string): boolean;
   score?(victim: Q2Entity, attacker: Q2Entity | null, game: Q2GameServices, change: number, meansOfDeath: number, recipient: Q2Entity): undefined;
   playerSpawned?(entity: Q2Entity, game: Q2GameServices): undefined;
+  persistentInventoryInitialized?(entity: Q2Entity, game: Q2GameServices): undefined;
   selectSpawn?(entity: Q2Entity, game: Q2GameServices): { readonly origin: Vec3; readonly angles: Vec3 } | null;
   /** Expansion modes may react synchronously after base death/disconnect state changes. */
   death?(entity: Q2Entity, game: Q2GameServices, attack: AttackProvenance | null): undefined;

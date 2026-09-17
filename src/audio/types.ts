@@ -1,5 +1,5 @@
 import type { ActorId, SeatId } from "../contracts/identity.ts";
-import type { ResourceId } from "../contracts/content.ts";
+import type { ResolvedResourceReference, ResourceId } from "../contracts/content.ts";
 import type { Axis, Vec3 } from "../contracts/math.ts";
 import type { PcmSound } from "./wav.ts";
 export type SoundFamily = "q1" | "q2" | "q3";
@@ -18,6 +18,7 @@ export interface AudioListener {
     readonly underwater: boolean;
 }
 export interface SoundAsset {
+    readonly reference?: ResolvedResourceReference;
     readonly resource: ResourceId;
     readonly name: string;
     readonly pcm: PcmSound;
@@ -73,3 +74,7 @@ export function sourceSoundChannel(family: SoundFamily, channel: number): SoundC
     const names: readonly SharedSoundChannel[] = family === "q3" ? ["local", "weapon", "voice", "item", "body", "local-sound", "announcer"] : ["weapon", "voice", "item", "body"];
     return { kind: "channel", channel: names[channel - 1] ?? `${family}:extension:${channel}` };
 }
+
+export type AudioVoiceEvent = { readonly kind: "start"; readonly seat: SeatId; readonly voiceId: number; readonly sound: SoundAsset; readonly outputSample: number; readonly sampleRate: number; readonly sourceOffsetSeconds: number }
+  | { readonly kind: "stop"; readonly seat: SeatId; readonly voiceId: number; readonly outputSample: number; readonly reason: "ended" | "stopped" | "replaced" };
+export interface AudioVoiceClock { readonly outputSample: number; readonly sampleRate: number; readonly paused: boolean; }

@@ -5,11 +5,19 @@ import { CinematicPlayback, type CinematicSource } from "./playback.ts";
 import { RoqDecoder, RoqDecoderScratch } from "./roq.ts";
 import { RoqStream } from "./roq-stream.ts";
 import { readMedia } from "./source.ts";
-import { UnsupportedMediaError, type CinematicFrame } from "./types.ts";
+import { type CinematicFrame } from "./types.ts";
+import { decodeOggMovie } from "./ogg.ts";
+import { TheoraDecoder } from "../platform/theora.ts";
 
 /** Reads movie metadata without retaining another decoder or output device. */
 export function cinematicDimensions(source: CinematicSource): { readonly width: number; readonly height: number } {
-  if (source.format === "ogv") throw new UnsupportedMediaError("ogv");
+  if (source.format === "ogv") {
+    const input = source.open();
+    try {
+      const movie = decodeOggMovie(readMedia(input, 0, input.byteLength)), decoder = new TheoraDecoder(movie.video.slice(0, 3));
+      try { return { width: decoder.width, height: decoder.height }; } finally { decoder.close(); }
+    } finally { input.close(); }
+  }
   if (source.format === "image") return { width: source.width, height: source.height };
   if (source.format === "cin") {
     const input = source.open();

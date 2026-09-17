@@ -19,6 +19,7 @@ export { decompressQ1Pvs, findQ1Leaf, q1FaceVertices, q1LeafPvs } from "./querie
 export const Q1_BSP_VERSION = 29;
 export const Q1_BSP2_VERSION = 0x32505342;
 export const Q1_2PSB_VERSION = 0x42535032;
+export const Q1_QUAKE64_VERSION = 0x51363420;
 
 const lumpNames: readonly Q1LumpName[] = [
   "entities", "planes", "textures", "vertices", "visibility", "nodes", "textureInfo",
@@ -30,6 +31,7 @@ function formatFor(version: number, source: string): Q1BspFormat {
     case Q1_BSP_VERSION: return "bsp29";
     case Q1_BSP2_VERSION: return "bsp2";
     case Q1_2PSB_VERSION: return "2psb";
+    case Q1_QUAKE64_VERSION: return "quake64";
     default: throw new BinaryError(source, 0, `unsupported Quake BSP version ${version}`);
   }
 }
@@ -45,13 +47,25 @@ export function readQ1Lit(data: Uint8Array, sampleCount: number | null = null): 
   return reader.bytes(reader.remaining);
 }
 
-function selectLighting(monochrome: Uint8Array, rgb: Uint8Array | null, lit: Uint8Array | undefined): BspLighting {
-  if (lit !== undefined) return { kind: "rgb8", source: "lit", samples: readQ1Lit(lit, monochrome.length > 0 ? monochrome.length : null) };
+function selectLighting(monochrome: Uint8Array, rgb: Uint8Array | null, lit: Uint8Array | undefined, packed?: Uint8Array): BspLighting {
+  if (packed !== undefined && packed.length % 2 !== 0) throw new BinaryError("Quake64 lighting", 0, "incomplete packed RGB sample");
+  const sampleCount = packed === undefined ? monochrome.length : packed.length / 2;
+  if (lit !== undefined) return { kind: "rgb8", source: "lit", samples: readQ1Lit(lit, sampleCount > 0 ? sampleCount : null) };
   if (rgb !== null) {
-    if (rgb.length % 3 !== 0 || monochrome.length > 0 && rgb.length !== monochrome.length * 3) {
+    if (rgb.length % 3 !== 0 || sampleCount > 0 && rgb.length !== sampleCount * 3) {
       throw new BinaryError("BSPX RGBLIGHTING", 0, "RGB sample count differs from BSP lighting");
     }
     return { kind: "rgb8", source: "bspx", samples: rgb };
+  }
+  if (packed !== undefined) {
+    const samples = new Uint8Array(sampleCount * 3), input = new DataView(packed.buffer, packed.byteOffset, packed.byteLength);
+    for (let i = 0; i < sampleCount; i++) {
+      const first = input.getUint8(i * 2), second = input.getUint8(i * 2 + 1);
+      samples[i * 3] = first & 0xf8;
+      samples[i * 3 + 1] = ((first & 7) << 5) | ((second & 0xc0) >> 5);
+      samples[i * 3 + 2] = (second & 0x3f) << 2;
+    }
+    return { kind: "rgb8", source: "bsp", samples };
   }
   return { kind: "luminance8", samples: monochrome };
 }
@@ -62,6 +76,7 @@ export function readQ1Bsp(data: Uint8Array, options: Q1MapOptions = {}): Q1Map {
   const reader = new BinaryReader(data, source);
   const version = reader.u32();
   const format = formatFor(version, source);
+  const layout = format === "quake64" ? "bsp29" : format;
   const directory = reader.section(4, 120);
   const lumps: Q1Lump[] = [];
   for (const name of lumpNames) {
@@ -78,15 +93,20 @@ export function readQ1Bsp(data: Uint8Array, options: Q1MapOptions = {}): Q1Map {
   const bspx = readBspx(reader, lumps);
   const planes = readPlanes(lump("planes"));
   const vertices = records(lump("vertices"), 12, vec3);
-  const textureData = readTextures(lump("textures"));
-  const faces = readFaces(lump("faces"), format);
+  const textureData = readTextures(lump("textures"), format === "quake64");
+  const faces = readFaces(lump("faces"), layout).map(face => {
+    if (format !== "quake64" || face.lightingOffset === null) return face;
+    if (face.lightingOffset % 2 !== 0) throw new BinaryError(source, face.lightingOffset, "unaligned Quake64 lighting offset");
+    return { ...face, lightingOffset: face.lightingOffset / 2 };
+  });
   const models = readModels(lump("models"));
   const bspxMetadata = readBspxMetadata(bspx, faces.length, vertices.length, faces.reduce((sum, face) => sum + face.edges.count, 0));
   const embeddedEntities = lump("entities");
   const entityReader = options.entities === undefined ? embeddedEntities : new BinaryReader(options.entities, `${source}:.ent`);
   const entities = entityReader.fixedByteString(entityReader.length);
   const lightReader = lump("lighting");
-  const monochromeLighting = lightReader.bytes(lightReader.remaining);
+  const storedLighting = lightReader.bytes(lightReader.remaining);
+  const monochromeLighting = format === "quake64" ? new Uint8Array() : storedLighting;
   const visibilityReader = lump("visibility");
   const map: Q1Map = {
     kind: "q1-bsp", format, source, version, lumps, bspx, bspxMetadata,
@@ -94,12 +114,12 @@ export function readQ1Bsp(data: Uint8Array, options: Q1MapOptions = {}): Q1Map {
     entities, entityList: parseQ1Entities(entities), planes, vertices,
     textures: textureData.textures, textureOffsets: textureData.offsets, mipOffsets: textureData.mipOffsets,
     textureInfo: readTextureInfo(lump("textureInfo")), faces, models,
-    nodes: readNodes(lump("nodes"), format), leaves: readLeaves(lump("leaves"), format),
-    edges: readEdges(lump("edges"), format), clipnodes: readClipnodes(lump("clipnodes"), format),
+    nodes: readNodes(lump("nodes"), layout), leaves: readLeaves(lump("leaves"), layout),
+    edges: readEdges(lump("edges"), layout), clipnodes: readClipnodes(lump("clipnodes"), layout),
     surfaceEdges: records(lump("surfaceEdges"), 4, (r) => r.i32()),
-    leafFaces: records(lump("leafFaces"), format === "bsp29" ? 2 : 4, (r) => format === "bsp29" ? r.u16() : r.u32()),
+    leafFaces: records(lump("leafFaces"), layout === "bsp29" ? 2 : 4, (r) => layout === "bsp29" ? r.u16() : r.u32()),
     visibility: visibilityReader.bytes(visibilityReader.remaining), monochromeLighting,
-    lighting: selectLighting(monochromeLighting, bspxMetadata.rgbLighting, options.lit),
+    lighting: selectLighting(monochromeLighting, bspxMetadata.rgbLighting, options.lit, format === "quake64" ? storedLighting : undefined),
     decoupledLightmaps: readDecoupledLightmaps(bspxData(bspx, "DECOUPLED_LM"), faces.length),
     brushList: readBrushList(bspxData(bspx, "BRUSHLIST"), models.length),
   };

@@ -22,6 +22,7 @@ import type { Q1Map } from "../../formats/q1-map/index.ts";
 import { readQ2Bsp, toQ2WorldGeometry } from "../../formats/q2-map/index.ts";
 import type { Q2DecodedMap } from "../../formats/q2-map/index.ts";
 import { decodeQ3World } from "../../formats/q3-map/index.ts";
+import { classifyBsp } from "../../formats/bsp-kind.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 export type ApplicationWorld = Q1Map | Q2DecodedMap | Q3WorldGeometry;
@@ -117,8 +118,10 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
   const source: ProviderReference = { provider: `${family}:official`, content: product.id };
   const rerelease = product.expectation.edition === "rerelease";
   const rules = options.rules ?? (family === "q2" && !rerelease && (product.expectation.campaign === "ctf" || product.expectation.campaign === "lmctf") ? product.expectation.campaign : "standard");
-  if (rules !== "standard" && (family !== "q2" || rerelease)) throw new Error(`${rules} requires a classic Quake II game provider`);
-  const match: ProviderReference = rules === "standard" ? source : { provider: `q2:${rules}`, content: catalog.require(`q2-classic-${rules}`).id };
+  if ((rules === "ctf" || rules === "lmctf") && (family !== "q2" || rerelease)) throw new Error(`${rules} requires a classic Quake II game provider`);
+  if ((rules === "tag" || rules === "deathball") && (family !== "q2" || !rerelease && product.expectation.campaign !== "rogue")) throw new Error("Tag and DeathBall require Ground Zero or Quake II rerelease");
+  if (rules === "horde" && (family !== "q1" || !rerelease || product.expectation.campaign !== "mg1" && product.expectation.campaign !== "dopa")) throw new Error("Horde requires Quake rerelease MG1 or DOPA");
+  const match: ProviderReference = rules === "standard" ? source : rules === "ctf" || rules === "lmctf" ? { provider: `q2:${rules}`, content: catalog.require(`q2-classic-${rules}`).id } : { provider: `${family}:${rules}`, content: product.id };
   return { source, match, rules };
 }
 
@@ -130,9 +133,9 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
     throw new Error("Selected Q3 mods require an offline local or dedicated server with native Q3 movement and character, deathmatch and bots disabled");
   const quakeworld = product.expectation.id === "q1-quakeworld" && presentationSource?.family !== "qw" && options.network.kind !== "qw-client";
   const nativeProgram = options.quakeCProgram;
-  if (nativeProgram !== undefined && (!(product.expectation.id === "q1-classic-id1" || product.expectation.id === "q1-classic-hipnotic")
-    || !options.dedicated || options.network.kind !== "offline" || options.movement !== "q1" || options.character !== "q1"))
-    throw new Error("--progs requires dedicated offline classic id1 or Hipnotic with Q1 movement and character");
+  if (nativeProgram !== undefined && (family !== "q1" || product.expectation.edition === "quakeworld"
+    || options.network.kind !== "offline" || options.movement !== "q1" || options.character !== "q1"))
+    throw new Error("--progs requires an offline NetQuake source with Q1 movement and character");
   if (quakeworld && (!options.dedicated || options.mode !== "deathmatch" || options.movement !== "q1" || options.character !== "q1"
     || options.q1Protocol !== undefined || options.network.kind !== "offline" && options.network.kind !== "native-server"))
     throw new Error("Native QuakeWorld currently requires dedicated deathmatch with Q1 movement and character; NetQuake protocol overrides and mixed roles are unsupported");
@@ -283,7 +286,7 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
   return { ...options, product: content.catalog.product(recipe.map.entities.content).expectation.id,
     map: recipe.map.geometry.requestedPath, movement: family(recipe.movement), character,
     characterModel: recipe.character.appearance.provider.slice(prefix.length),
-    rules: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : "standard" };
+    rules: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : recipe.match.provider === "q2:tag" ? "tag" : recipe.match.provider === "q2:deathball" ? "deathball" : recipe.match.provider === "q1:horde" ? "horde" : "standard" };
 }
 
 export async function resolveApplicationTravel(content: LoadedApplicationContent, path: string): Promise<ExecutableRecipe> {
@@ -332,11 +335,11 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       const product = catalog.product(recipe.map.entities.content).expectation.id;
       const nativeQw = product === "q1-quakeworld" && module.api.kind === "q1-quakeworld" && options.mode === "deathmatch"
         && (options.network.kind === "offline" || options.network.kind === "native-server") && options.q1Protocol === undefined;
-      const nativeNq = (product === "q1-classic-id1" || product === "q1-classic-hipnotic") && module.api.kind === "q1-netquake" && options.network.kind === "offline";
-      if (!options.dedicated || !nativeQw && !nativeNq
+      const nativeNq = catalog.product(recipe.map.entities.content).expectation.family === "q1" && module.api.kind === "q1-netquake" && options.network.kind === "offline";
+      if (nativeQw && !options.dedicated || !nativeQw && !nativeNq
         || recipe.map.geometryContent !== recipe.map.entities.content || module.owner.provider !== recipe.map.entities.provider
         || module.owner.content !== recipe.map.entities.content || recipe.execution.length !== 1)
-        throw new Error("QuakeC application execution requires a dedicated native classic id1, Hipnotic or QuakeWorld map and its validated server artifact; mixed roles and saves are unsupported");
+        throw new Error("QuakeC requires matching source geometry, actors and validated server artifact; QuakeWorld requires dedicated operation");
       continue;
     }
     if (module.kind !== "typescript") throw new Error(`Application cannot execute ${module.kind} ${module.role} module ${module.owner.provider} (${module.artifact.requestedPath}): this executor is not joined to the shared simulation. Select a supported TypeScript execution module.`);
@@ -350,8 +353,8 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
         resources: recipe.resources.map(resource => resource.id === oldGeometry.id ? geometry : resource) };
     }
     const bytes = await mounts.read(recipe.map.geometry);
-    const family = catalog.product(recipe.map.geometry.provenance.mount.identity.content).expectation.family;
     const map = recipe.map.geometry.requestedPath;
+    const family = classifyBsp(bytes, map);
     let world: ApplicationWorld;
     if (family === "q1") {
       using mapContent = await openMapContent(catalog, recipe);

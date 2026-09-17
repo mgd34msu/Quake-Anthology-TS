@@ -2,6 +2,7 @@
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { Q3WorldGeometry, Q3BspShader as BspShader } from "../../../contracts/scene.ts";
 import { BinaryError } from "../../../core/binary/index.ts";
+import { normalizeQ3Bsp } from "../../../formats/q3-map/ibsp44.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import type { HunkAllocation } from "./allocation.ts";
 import { add3, sub3, vec3 } from "../../../core/math.ts";
@@ -196,6 +197,7 @@ export class CollisionMapResource implements CollisionMapData {
   }
 
   load(raw: Uint8Array): void {
+    raw = normalizeQ3Bsp(raw, this.source);
     const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
     const range = (offset: number, length: number): void => {
       if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset > raw.length - length) {

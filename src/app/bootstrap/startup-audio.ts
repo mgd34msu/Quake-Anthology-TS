@@ -34,7 +34,7 @@ export class StartupAudio {
   private tracks: readonly string[] = [];
   get musicTracks(): readonly string[] { return this.tracks; }
   get musicPreferences(): MusicPreferences { return this.outputCvars === null ? { musicShuffle: false, menuTrack: this.menuTrack ?? "auto" } : readMusicSettings(this.outputCvars); }
-  private readonly commands: { readonly args: readonly string[]; readonly print: (text: string) => void }[] = [];
+  private readonly commands: { readonly name: "cd" | "music"; readonly args: readonly string[]; readonly print: (text: string) => void }[] = [];
   private readonly bank: SoundBank;
   private readonly sounds = new Map<UiSound, SoundAsset>();
   private closed = false;
@@ -103,14 +103,18 @@ export class StartupAudio {
     if (!this.closed) await this.music.cdCommand(args, print);
   }
   queueCdCommand(args: readonly string[], print: (text: string) => void): void {
-    if (!this.closed) this.commands.push({ args: [...args], print });
+    if (!this.closed) this.commands.push({ name: "cd", args: [...args], print });
+  }
+  queueMusicCommand(args: readonly string[], print: (text: string) => void): void {
+    if (!this.closed) this.commands.push({ name: "music", args: [...args], print });
   }
   async flushCommands(): Promise<void> {
     if (this.outputCvars !== null) await this.selectMenuTrack(readMusicSettings(this.outputCvars).menuTrack);
     while (!this.closed) {
       const command = this.commands.shift();
       if (command === undefined) return;
-      await this.cdCommand(command.args, command.print);
+      if (command.name === "cd") await this.cdCommand(command.args, command.print);
+      else await this.music.musicCommand(command.args, command.print);
     }
   }
   setVolumes(effects: number, music: number): void {

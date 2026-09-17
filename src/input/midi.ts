@@ -2,7 +2,7 @@
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 // Linux ALSA raw MIDI supplies the system byte stream in place of WinMM.
 import { closeSync, constants, fstatSync, openSync, readdirSync, readSync } from "node:fs";
-import { CvarFlag } from "../core/cvars/index.ts";
+import { registerMidiSettings } from "./device-settings.ts";
 import type { CvarRegistry } from "../core/cvars/index.ts";
 import { SourceMidiDecoder } from "./source-midi.ts";
 
@@ -129,6 +129,11 @@ export class SourceMidiInput {
   private devices: readonly MidiDevice[] = [];
   private handle: MidiInputHandle | null = null;
   private closed = false;
+  private readonly held = new Set<number>();
+  private readonly released = new Set<number>();
+  private channel: number | null = null;
+  get connected(): boolean { return this.handle !== null; }
+  availableDevices(): readonly MidiDevice[] { return this.boundary.list(); }
 
   /** Construction performs no device access, including enumeration. */
   constructor(private readonly options: SourceMidiOptions,
@@ -137,10 +142,7 @@ export class SourceMidiInput {
   initialize(): void {
     this.requireOpen();
     const cvars = this.options.cvars;
-    cvars.register("in_midi", "0", CvarFlag.Archive);
-    cvars.register("in_midiport", "1", CvarFlag.Archive);
-    cvars.register("in_midichannel", "1", CvarFlag.Archive);
-    cvars.register("in_mididevice", "0", CvarFlag.Archive);
+    registerMidiSettings(cvars);
     this.stop();
     if (this.cvar("in_midi").numericValue === 0) return;
     const selected = this.cvar("in_mididevice").integerValue;
@@ -158,6 +160,10 @@ export class SourceMidiInput {
 
   frame(queueKey: (key: number, down: boolean, time: number) => undefined, time = 0): void {
     this.requireOpen();
+    const channel = this.cvar("in_midichannel").integerValue;
+    if (channel !== this.channel) { this.release(time, queueKey); this.channel = channel; }
+    for (const key of this.released) queueKey(key, false, time);
+    this.released.clear();
     // Bound one frame's reads even when a virtual MIDI producer never becomes idle.
     for (let reads = 0; reads < 16; reads++) {
       const handle = this.handle;
@@ -165,13 +171,16 @@ export class SourceMidiInput {
       let count: number;
       try { count = handle.read(this.buffer); }
       catch (error) {
-        this.stop();
+        this.stop(); this.release(time, queueKey);
         this.options.print(`WARNING: MIDI input stopped: ${error instanceof Error ? error.message : String(error)}\n`);
         return;
       }
       if (!Number.isInteger(count) || count < 0 || count > this.buffer.length) throw new Error("Invalid MIDI input boundary read length");
       if (count === 0) return;
-      this.decoder.feed(this.buffer.subarray(0, count), this.cvar("in_midichannel").integerValue, time, queueKey);
+      this.decoder.feed(this.buffer.subarray(0, count), channel, time, (key, down, timestamp) => {
+        if (down) this.held.add(key); else this.held.delete(key);
+        return queueKey(key, down, timestamp);
+      });
     }
   }
 
@@ -197,7 +206,14 @@ export class SourceMidiInput {
 
   private requireOpen(): void { if (this.closed) throw new Error("Source MIDI input is closed"); }
 
+  release(time: number, queueKey: (key: number, down: boolean, time: number) => undefined): void {
+    for (const key of new Set([...this.held, ...this.released])) queueKey(key, false, time);
+    this.held.clear(); this.released.clear(); this.decoder.reset();
+  }
+
   private stop(): void {
+    for (const key of this.held) this.released.add(key);
+    this.held.clear();
     const handle = this.handle;
     this.handle = null;
     this.devices = [];

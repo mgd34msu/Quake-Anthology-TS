@@ -27,6 +27,8 @@ export type Q2CompositionEvent =
 export interface Q2CompositionServices {
   readonly deathmatchFlags?: { read(): number; write(flags: number): undefined };
   readonly sharedGrapple?: SharedGrappleControl;
+  randomItems?(): import("../../q2/missionpacks/random-items.ts").Q2RandomItemSettings;
+  dropQuadFire?(): boolean;
   gravity(): number;
   emit(event: Q2CompositionEvent): undefined;
   readonly hunterCamera: boolean;

@@ -221,7 +221,7 @@ export class Q2RereleaseEntities implements Q2SpawnModule {
         if ((member.spawnflags & 8) !== 0) continue;
         if ((member.spawnflags & 2) !== 0) { fallback = member; continue; }
         if (member.count !== 0 && this.poiStage > member.count || member.style > bestStyle) continue;
-        const destination = game.body(member).origin, path = this.hooks.navigation(origin, destination);
+        const destination = game.body(member).origin, path = this.hooks.navigation(origin, destination, activator);
         const distance = path.kind === "path" ? path.distanceSquared : path.kind === "no-navigation" ? dot(subtract(destination, origin), subtract(destination, origin)) : Infinity;
         const nearest = (master.spawnflags & 1) !== 0;
         if (nearest && selected !== null && distance > bestDistance) continue;

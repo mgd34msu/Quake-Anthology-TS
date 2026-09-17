@@ -1,3 +1,6 @@
+import { validateGamepadTuning } from "../../input/gamepad.ts";
+import type { GamepadTuning, StickCurve } from "../../input/gamepad.ts";
+import { defaultUiPreferences, readUiPreferences, writeUiPreferences } from "./accessibility.ts";
 import { audioOutputFormat, audioOutputRates, type AudioOutputFormat } from "../../audio/output.ts";
 import { registerLlmSettingsMenu, type LlmSettingsUi } from "./llm.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -16,6 +19,7 @@ import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
 export * from "./bindings.ts";
 export * from "./services.ts";
+export * from "./input-routing.ts";
 
 export type SettingCategory = "display" | "video" | "audio" | "input" | "network" | "accessibility" | "language";
 interface SettingBase { readonly id: UiControlId; readonly label: string; readonly category: SettingCategory; readonly enabled: () => boolean; }
@@ -92,9 +96,14 @@ const categories: readonly { readonly id: SettingCategory; readonly label: strin
   { id: "network", label: "Network" }, { id: "accessibility", label: "Accessibility" }, { id: "language", label: "Language" },
 ];
 /** Categories retain native controls in one scrollable view. */
-export function registerSettingsMenus(controller: NativeUiController, bindings: readonly SettingBinding[], llm?: LlmSettingsUi): SettingsMenus {
+export function registerSettingsMenus(controller: NativeUiController, bindings: readonly SettingBinding[], llm?: LlmSettingsUi, reset?: { readonly label: string; apply(): void }): SettingsMenus {
   const root: UiMenuId = "menu:settings:root", disposers: (() => void)[] = [];
   const llmMenu = llm === undefined ? null : registerLlmSettingsMenu(controller, llm);
+  if (reset !== undefined) disposers.push(controller.register("menu:settings:reset-confirm", () => ({ id: "menu:settings:reset-confirm", title: reset.label, fullScreen: true,
+    controls: [{ id: "ui:settings:keep", kind: "button", label: "Keep current settings", rect: menuRow(3), enabled: true, visible: true, activate: () => controller.closeMenu() },
+      { id: "ui:settings:reset-apply", kind: "button", label: "Restore defaults", rect: menuRow(5), enabled: true, visible: true, activate: () => { reset.apply(); return controller.closeMenu(); } }],
+    open: () => undefined, close: () => undefined })));
+
   if (llmMenu !== null) disposers.push(llmMenu.dispose);
   const back = (): UiControl => ({ id: "ui:settings:back", kind: "button", label: "Back", rect: menuRow(11), enabled: true, visible: true,
     activate: () => controller.closeMenu() });
@@ -116,18 +125,20 @@ export function registerSettingsMenus(controller: NativeUiController, bindings: 
     controls: [...categories.filter(category => bindings.some(binding => binding.category === category.id)).map((category, index): UiControl => ({
       id: `ui:settings:category:${category.id}`, kind: "button", label: category.label, rect: menuRow(index), enabled: true, visible: true,
       activate: () => controller.openMenu(`menu:settings:${category.id}:0`),
-    })), ...(llmMenu === null ? [] : [{ id: "ui:settings:llm", kind: "button", label: "LLM options", rect: menuRow(categories.filter(category => bindings.some(binding => binding.category === category.id)).length), enabled: true, visible: true, activate: () => controller.openMenu(llmMenu.root) } satisfies UiControl]), back()], open: () => undefined, close: () => undefined })));
+    })), ...(llmMenu === null ? [] : [{ id: "ui:settings:llm", kind: "button", label: "LLM options", rect: menuRow(categories.filter(category => bindings.some(binding => binding.category === category.id)).length), enabled: true, visible: true, activate: () => controller.openMenu(llmMenu.root) } satisfies UiControl]), ...(reset === undefined ? [] : [{ id: "ui:settings:reset", kind: "button", label: reset.label,
+    rect: menuRow(categories.filter(category => bindings.some(binding => binding.category === category.id)).length + (llmMenu === null ? 0 : 1)), enabled: true, visible: true,
+    activate: () => controller.openMenu("menu:settings:reset-confirm") } satisfies UiControl]), back()], open: () => undefined, close: () => undefined })));
   return { root, dispose() { for (const dispose of disposers.reverse()) dispose(); } };
 }
 
-function numeric(id: string, label: string, minimum: number, maximum: number, step: number, read: () => number, write: (value: number) => void): SettingBinding {
+function numeric(id: string, label: string, minimum: number, maximum: number, step: number, read: () => number, write: (value: number) => void): Extract<SettingBinding, { readonly kind: "slider" }> {
   return { id: `ui:input:${id}`, label, category: "input", kind: "slider", enabled: () => true, minimum, maximum, step, read, write };
 }
 function toggle(id: string, label: string, read: () => boolean, write: (value: boolean) => void): SettingBinding {
   return { id: `ui:input:${id}`, label, category: "input", kind: "toggle", enabled: () => true, read, write };
 }
 export interface PrimaryInputSettings { readonly sensitivity: number; readonly pitch: number; readonly yaw: number; readonly invertMouse: boolean; readonly alwaysRun: boolean; }
-export type MouseMotionSettings = Pick<MouseTuning, "acceleration" | "filter" | "freeLook">;
+export type MouseMotionSettings = Pick<MouseTuning, "acceleration" | "filter" | "freeLook" | "lookSpring" | "lookStrafe">;
 export interface ControllerVibrationSettings { readonly controllerVibration: boolean; readonly controllerVibrationStrength: number; }
 export function bindControllerVibration(service: SettingsValueService<ControllerVibrationSettings>): readonly SettingBinding[] {
   return [toggle("controller-vibration", "Controller vibration", () => service.read().controllerVibration,
@@ -153,9 +164,12 @@ export function bindPrimaryInputSettings(service: SettingsValueService<PrimaryIn
     toggle("invert-mouse", "Invert mouse", () => service.read().invertMouse, value => service.write({ invertMouse: value })),
     toggle("always-run", "Always run", () => service.read().alwaysRun, value => service.write({ alwaysRun: value }))];
 }
-export function bindMouseMotionSettings(service: SettingsValueService<MouseMotionSettings>): readonly SettingBinding[] {
+export function bindMouseMotionSettings(service: SettingsValueService<MouseMotionSettings>, springAvailable: () => boolean = () => true): readonly SettingBinding[] {
   return [numeric("acceleration", "Mouse acceleration", 0, 2, 0.05, () => service.read().acceleration, value => service.write({ acceleration: value })),
     toggle("filter", "Mouse smoothing", () => service.read().filter, value => service.write({ filter: value })),
+    { ...toggle("lookspring", "Look spring", () => service.read().lookSpring === true, value => service.write({ lookSpring: value })),
+      enabled: () => springAvailable() && !service.read().freeLook },
+    toggle("lookstrafe", "Look strafe", () => service.read().lookStrafe === true, value => service.write({ lookStrafe: value })),
     toggle("freelook", "Free look", () => service.read().freeLook, value => service.write({ freeLook: value }))];
 }
 export interface AudioOutputSettings {
@@ -175,6 +189,10 @@ export function bindMusicPlaylistSettings(registry: SettingCvars | null, tracks?
       if (current !== "auto" && current !== "0") names.add(current);
       return [{ id: "auto", label: "Automatic" }, { id: "0", label: "Off" }, ...[...names].map(name => ({ id: name, label: name }))]; } });
   return settings;
+}
+export function bindAudioGeometrySettings(registry: SettingCvars | null): readonly SettingBinding[] {
+  return registry === null ? [] : [{ id: "ui:audio:geometry", label: "Geometry sound obstruction", category: "audio", kind: "toggle", enabled: () => true,
+    read: () => registry.variableValue("s_geometryAcoustics") !== 0, write: value => { registry.set("s_geometryAcoustics", value ? "1" : "0"); } }];
 }
 export function bindAudioSettings(service: SettingsValueService<AudioSettings>, output?: AudioOutputSettings): readonly SettingBinding[] {
   const device: SettingBinding[] = output === undefined ? [] : [{ id: "ui:audio:device", label: "Output device", category: "audio", kind: "choice", enabled: () => true,
@@ -206,7 +224,7 @@ export function bindAudioSettings(service: SettingsValueService<AudioSettings>, 
 
 /** These controls change the objects sampled by the next real user command. */
 export function bindInputSettings(input: SeatInput, builder: InputCommandBuilder, vibration?: SettingsValueService<ControllerVibrationSettings>): readonly SettingBinding[] {
-  const mouse = builder.mouse, pad = input.gamepad;
+  const mouse = builder.mouse;
   return [
     ...(vibration === undefined ? [] : bindControllerVibration(vibration)),
     ...bindPrimaryInputSettings({ read: () => ({ sensitivity: mouse.tuning.sensitivity, pitch: mouse.tuning.pitch, yaw: mouse.tuning.yaw, invertMouse: mouse.tuning.invertPitch, alwaysRun: builder.tuning.alwaysRun }),
@@ -216,15 +234,8 @@ export function bindInputSettings(input: SeatInput, builder: InputCommandBuilder
           ...(values.invertMouse === undefined ? {} : { invertPitch: values.invertMouse }) };
         if (values.alwaysRun !== undefined) builder.tuning = { ...builder.tuning, alwaysRun: values.alwaysRun };
       } }),
-    ...bindMouseMotionSettings({ read: () => mouse.tuning, write: values => { mouse.tuning = { ...mouse.tuning, ...values }; } }),
-    toggle("invert-controller", "Invert controller", () => pad.tuning.invertPitch, value => { pad.tuning = { ...pad.tuning, invertPitch: value }; }),
-    toggle("swap-sticks", "Swap controller sticks", () => pad.tuning.swapSticks, value => { pad.tuning = { ...pad.tuning, swapSticks: value }; }),
-    numeric("look-speed", "Controller turn speed", 30, 720, 10, () => pad.tuning.yawDegreesPerSecond, value => { pad.tuning = { ...pad.tuning, yawDegreesPerSecond: value }; }),
-    numeric("pitch-speed", "Controller look speed", 30, 720, 10, () => pad.tuning.pitchDegreesPerSecond, value => { pad.tuning = { ...pad.tuning, pitchDegreesPerSecond: value }; }),
-    numeric("move-deadzone", "Move stick deadzone", 0, 0.5, 0.01, () => pad.tuning.move.deadzone, value => { pad.tuning = { ...pad.tuning, move: { ...pad.tuning.move, deadzone: value } }; }),
-    numeric("look-deadzone", "Look stick deadzone", 0, 0.5, 0.01, () => pad.tuning.look.deadzone, value => { pad.tuning = { ...pad.tuning, look: { ...pad.tuning.look, deadzone: value } }; }),
-    numeric("look-curve", "Look response curve", 0.5, 4, 0.1, () => pad.tuning.look.exponent, value => { pad.tuning = { ...pad.tuning, look: { ...pad.tuning.look, exponent: value } }; }),
-    numeric("trigger", "Trigger threshold", 0.05, 0.95, 0.05, () => pad.tuning.triggerThreshold, value => { pad.tuning = { ...pad.tuning, triggerThreshold: value }; }),
+    ...bindMouseMotionSettings({ read: () => mouse.tuning, write: values => { mouse.tuning = { ...mouse.tuning, ...values }; } }, () => builder.dialect === "q1-netquake" || builder.dialect === "q1-quakeworld"),
+    ...bindGamepadSettings(input),
   ];
 }
 
@@ -232,11 +243,14 @@ export interface UiPreferenceValues {
   readonly hudScale: number; readonly textScale: number; readonly menuScale: number;
   readonly highContrast: boolean; readonly reducedFlashes: boolean; readonly captions: boolean;
   readonly crosshair: boolean; readonly crosshairSize: number;
+  readonly typeface: "standard" | "bold"; readonly colorMode: "standard" | "blue-yellow" | "monochrome";
 }
 /** Preferences are consumed directly by the common menu and HUD draw functions. */
 export class SeatUiPreferences {
-  values: UiPreferenceValues = { hudScale: 1, textScale: 1, menuScale: 1, highContrast: false, reducedFlashes: false, captions: true, crosshair: true, crosshairSize: 8 };
-  constructor(readonly seat: SeatId) {}
+  private localValues: UiPreferenceValues = { ...defaultUiPreferences };
+  constructor(readonly seat: SeatId, private readonly cvars: SettingCvars | null = null) {}
+  get values(): UiPreferenceValues { return this.cvars === null ? this.localValues : readUiPreferences(this.cvars, this.seat.index); }
+  set values(value: UiPreferenceValues) { if (this.cvars === null) this.localValues = value; else writeUiPreferences(this.cvars, this.seat.index, value); }
   bindings(): readonly SettingBinding[] {
     const number = (key: "hudScale" | "textScale" | "menuScale" | "crosshairSize", label: string, minimum: number, maximum: number, step: number): SettingBinding => ({
       id: `ui:accessibility:${key}`, label, category: "accessibility", kind: "slider", enabled: () => true, minimum, maximum, step,
@@ -246,9 +260,55 @@ export class SeatUiPreferences {
       id: `ui:accessibility:${key}`, label, category: "accessibility", kind: "toggle", enabled: () => true,
       read: () => this.values[key], write: value => { this.values = { ...this.values, [key]: value }; },
     });
-    return [number("hudScale", "HUD size", 0.5, 1.5, 0.05), number("textScale", "Text size", 0.75, 2, 0.05),
+    const typeface: SettingBinding = { id: "ui:accessibility:typeface", label: "Typeface", category: "accessibility", kind: "choice", enabled: () => true,
+      read: () => this.values.typeface, choices: () => [{ id: "standard", label: "Standard" }, { id: "bold", label: "Bold" }],
+      write: value => { if (value !== "standard" && value !== "bold") throw new RangeError("Unknown typeface"); this.values = { ...this.values, typeface: value }; } };
+    const colorMode: SettingBinding = { id: "ui:accessibility:colorMode", label: "Interface colors", category: "accessibility", kind: "choice", enabled: () => true,
+      read: () => this.values.colorMode, choices: () => [{ id: "standard", label: "Standard" }, { id: "blue-yellow", label: "Blue and yellow" }, { id: "monochrome", label: "Monochrome" }],
+      write: value => { if (value !== "standard" && value !== "blue-yellow" && value !== "monochrome") throw new RangeError("Unknown interface colors"); this.values = { ...this.values, colorMode: value }; } };
+    return [typeface, colorMode, number("hudScale", "HUD size", 0.5, 1.5, 0.05), number("textScale", "Text size", 0.75, 2, 0.05),
       number("menuScale", "Menu size", 0.75, 1, 0.05), number("crosshairSize", "Crosshair size", 2, 32, 1),
-      boolean("highContrast", "High contrast"), boolean("reducedFlashes", "Reduce HUD flashes"), boolean("captions", "Captions"), boolean("crosshair", "Crosshair")];
+      boolean("highContrast", "High contrast"), boolean("reducedFlashes", "Reduce HUD flashes"), boolean("captions", "Captions"), boolean("crosshair", "Crosshair"),
+      { id: "ui:accessibility:reset", label: "Reset accessibility settings", category: "accessibility", kind: "button", enabled: () => true, activate: () => { this.values = { ...defaultUiPreferences }; } }];
   }
 }
 export * from "./gyro.ts";
+
+export function bindGamepadSettings(input: SeatInput | (() => SeatInput)): readonly SettingBinding[] {
+  const pad = () => (typeof input === "function" ? input() : input).gamepad;
+  const update = (values: Partial<GamepadTuning>): void => { pad().tuning = validateGamepadTuning({ ...pad().tuning, ...values }); };
+  const curve = (stick: "move" | "look", values: StickCurve): void => update({ [stick]: values });
+  const tuning: SettingBinding[] = [];
+  for (const stick of ["move", "look"] satisfies readonly ("move" | "look")[]) {
+    const name = stick === "move" ? "Move" : "Look";
+    tuning.push({ id: `ui:input:${stick}-curve-type`, label: `${name} deadzone shape`, category: "input", kind: "choice", enabled: () => true,
+      read: () => pad().tuning[stick].kind, choices: () => [{ id: "radial", label: "Radial" }, { id: "axial", label: "Axial" }],
+      write: value => { if (value !== "radial" && value !== "axial") throw new Error("Unknown controller curve");
+        const previous = pad().tuning[stick]; curve(stick, value === "radial"
+          ? { kind: value, deadzone: previous.deadzone, exponent: previous.exponent, outerThreshold: Math.min(0.02, (1 - previous.deadzone) / 2) }
+          : { kind: value, deadzone: previous.deadzone, exponent: previous.exponent }); } });
+    const outer = numeric(`${stick}-outer`, `${name} outer threshold`, 0, 0.49, 0.01,
+      () => { const selected = pad().tuning[stick]; return selected.kind === "radial" ? selected.outerThreshold : 0; },
+      value => { const selected = pad().tuning[stick]; if (selected.kind === "radial") curve(stick, { ...selected, outerThreshold: Math.min(value, 0.999 - selected.deadzone) }); });
+    tuning.push({ ...outer, enabled: () => pad().tuning[stick].kind === "radial" });
+    for (const component of ["x", "y"] satisfies readonly ("x" | "y")[]) {
+      const preview = numeric(`${stick}-preview-${component}`, `${name} ${component.toUpperCase()} live`, -1, 1, 0.01,
+        () => pad().preview()[stick].curved[component], () => {});
+      tuning.push({ ...preview, enabled: () => false, formatValue: value => `Raw ${pad().preview()[stick].raw[component].toFixed(2)} / ${value.toFixed(2)}` });
+    }
+  }
+  return [
+    toggle("invert-controller", "Invert controller", () => pad().tuning.invertPitch, value => { update({ invertPitch: value }); }),
+    toggle("swap-sticks", "Swap controller sticks", () => pad().tuning.swapSticks, value => { update({ swapSticks: value }); }),
+    numeric("look-speed", "Controller turn speed", 30, 720, 10, () => pad().tuning.yawDegreesPerSecond, value => { update({ yawDegreesPerSecond: value }); }),
+    numeric("pitch-speed", "Controller look speed", 30, 720, 10, () => pad().tuning.pitchDegreesPerSecond, value => { update({ pitchDegreesPerSecond: value }); }),
+    numeric("move-deadzone", "Move stick deadzone", 0, 0.5, 0.01, () => pad().tuning.move.deadzone, value => { const selected = pad().tuning.move; curve("move", { ...selected, deadzone: selected.kind === "radial" ? Math.min(value, 0.999 - selected.outerThreshold) : value }); }),
+    numeric("look-deadzone", "Look stick deadzone", 0, 0.5, 0.01, () => pad().tuning.look.deadzone, value => { const selected = pad().tuning.look; curve("look", { ...selected, deadzone: selected.kind === "radial" ? Math.min(value, 0.999 - selected.outerThreshold) : value }); }),
+    numeric("look-curve", "Look response curve", 0.5, 4, 0.1, () => pad().tuning.look.exponent, value => { curve("look", { ...pad().tuning.look, exponent: value }); }),
+    numeric("trigger", "Trigger threshold", 0.05, 0.95, 0.05, () => pad().tuning.triggerThreshold, value => { update({ triggerThreshold: value }); }),
+    numeric("move-curve", "Move response curve", 0.5, 4, 0.1, () => pad().tuning.move.exponent, value => curve("move", { ...pad().tuning.move, exponent: value })),
+    numeric("forward-sensitivity", "Forward controller sensitivity", 0, 3, 0.05, () => pad().tuning.forwardSensitivity, value => update({ forwardSensitivity: value })),
+    numeric("side-sensitivity", "Side controller sensitivity", 0, 3, 0.05, () => pad().tuning.sideSensitivity, value => update({ sideSensitivity: value })),
+    ...tuning,
+  ];
+}

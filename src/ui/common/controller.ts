@@ -1,3 +1,4 @@
+import { accessibleColors } from "./accessibility.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Navigation, wrapping, menu stack and fields follow Q3 ui_qmenu.c/ui_field.c.
 // Every mutable cursor, field, list and held controller direction belongs to a seat.
@@ -22,7 +23,7 @@ export interface NativeUiOptions {
   readonly sound: (sound: UiSound, seat: SeatId) => void;
   readonly executeScript: (script: LegacyUiScript, seat: SeatId) => void;
   readonly localize?: (text: string) => string;
-  readonly appearance?: () => { readonly menuScale: number; readonly textScale: number; readonly highContrast: boolean };
+  readonly appearance?: () => { readonly menuScale: number; readonly textScale: number; readonly highContrast: boolean; readonly colorMode?: "standard" | "blue-yellow" | "monochrome" };
   readonly clipboard?: () => string | null;
   readonly measureText?: (text: string, scale: number) => number;
 }
@@ -382,8 +383,7 @@ export class NativeUiController implements SeatUiController {
     const active = this.active(); if (active === null) return [];
     const originalSkin = this.options.skin();
     const skin = { ...originalSkin, fontScale: originalSkin.fontScale * appearance.textScale,
-      colors: appearance.highContrast ? { ...originalSkin.colors, text: white, accent: { x: 1, y: 1, z: 0, w: 1 },
-        panel: { x: 0, y: 0, z: 0, w: 1 }, control: { x: 0, y: 0, z: 0, w: 1 }, focused: { x: 0.2, y: 0.2, z: 0.2, w: 1 } } : originalSkin.colors };
+      colors: accessibleColors(originalSkin.colors, appearance) };
     const commands: UiDrawCommand[] = [];
     const text = (value: string, x: number, y: number, color: Vec4, align: "left" | "center" | "right" = "left"): void => {
       commands.push({ kind: "text", origin: { x, y }, text: this.options.localize?.(value) ?? value, font: skin.font,

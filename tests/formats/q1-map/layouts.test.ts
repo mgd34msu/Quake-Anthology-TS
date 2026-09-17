@@ -3,6 +3,35 @@ import { BinaryReader, BinaryWriter } from "../../../src/core/binary/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import { readBrushList, readDecoupledLightmaps } from "../../../src/formats/q1-map/extensions.ts";
 import { readEdges, readNodes } from "../../../src/formats/q1-map/records.ts";
+import { classifyBsp } from "../../../src/formats/bsp-kind.ts";
+
+test("Quake64 keeps shifted texture dimensions and decodes packed lighting offsets", () => {
+  const texture = new BinaryWriter(56);
+  texture.i32(1); texture.i32(8);
+  texture.bytes(new TextEncoder().encode("stone")); texture.bytes(new Uint8Array(11));
+  texture.u32(2); texture.u32(2); texture.u32(2);
+  texture.u32(44); texture.u32(0); texture.u32(0); texture.u32(0);
+  texture.bytes(new Uint8Array([1, 2, 3, 4]));
+  const plane = new BinaryWriter(20); plane.f32(0); plane.f32(0); plane.f32(1); plane.f32(0); plane.i32(2);
+  const face = new BinaryWriter(20);
+  face.u16(0); face.u16(0); face.i32(0); face.u16(0); face.u16(0);
+  face.bytes(new Uint8Array([0, 255, 255, 255])); face.i32(2);
+  const lumps: Uint8Array[] = Array.from({ length: 15 }, () => new Uint8Array());
+  lumps[1] = plane.finish(); lumps[2] = texture.finish(); lumps[6] = new Uint8Array(40); lumps[7] = face.finish();
+  lumps[8] = new Uint8Array([255, 255, 8, 64]);
+  const writer = new BinaryWriter(124 + lumps.reduce((sum, lump) => sum + lump.length, 0));
+  writer.u32(0x51363420);
+  let offset = 124;
+  for (const lump of lumps) { writer.i32(offset); writer.i32(lump.length); offset += lump.length; }
+  for (const lump of lumps) writer.bytes(lump);
+  const bytes = writer.finish(), map = readQ1Bsp(bytes);
+  expect(classifyBsp(bytes)).toBe("q1");
+  expect(map.format).toBe("quake64");
+  expect(map.textures[0]).toMatchObject({ width: 2, height: 2, quake64Shift: 2 });
+  expect(map.lighting).toEqual({ kind: "rgb8", source: "bsp", samples: new Uint8Array([248, 230, 252, 8, 2, 0]) });
+  expect(map.faces[0]?.lightingOffset).toBe(1);
+  expect(map.lumps.find(lump => lump.name === "lighting")?.data).toEqual(new Uint8Array([255, 255, 8, 64]));
+});
 
 test("BSP2 keeps float bounds and 2PSB keeps short bounds with wide indices", () => {
   const formats: readonly ("bsp2" | "2psb")[] = ["bsp2", "2psb"];

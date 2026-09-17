@@ -403,3 +403,69 @@ for (const [game, map] of [["q1-classic-id1", "e1m1"], ["q2-classic-baseq2", "ba
     }
   } finally { effects.close(); assets.close(); await content.close(); }
 }, 30000);
+
+test("Q1 source model trails preserve tracer alternation, spacing, blood density and lifetime", () => {
+  const particles = new SourceParticles(new SourceRandom(1));
+  particles.q1Trail({ x: 0, y: 0, z: 0 }, { x: 9, y: 0, z: 0 }, 3, 0);
+  const born = particles.sample(0, 0.1).q1;
+  expect(born.map(p => p.origin)).toEqual([{ x: 2, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }]);
+  expect(born.map(p => p.kind === "indexed" ? p.paletteIndex : -1)).toEqual([52, 52, 52]);
+  expect(particles.sample(0.1, 0).q1.map(p => p.origin)).toEqual([{ x: 2, y: -3, z: 0 }, { x: 1, y: 3, z: 0 }, { x: 0, y: -3, z: 0 }]);
+  expect(particles.sample(0.51, 0).q1).toHaveLength(0);
+  particles.q1Trail({ x: 0, y: 0, z: 0 }, { x: 9, y: 0, z: 0 }, 4, 1);
+  expect(particles.sample(1, 0).q1).toHaveLength(2);
+  particles.clear();
+  particles.q1Trail({ x: 1, y: 2, z: 3 }, { x: 1, y: 2, z: 3 }, 0, 2);
+  expect(particles.sample(2, 0).q1).toHaveLength(0);
+});
+
+test("Q1 brightfield uses all source normals and respects particle capacity", () => {
+  const particles = new SourceParticles(new SourceRandom(1));
+  particles.q1Entity({ x: 10, y: 20, z: 30 }, 0);
+  const samples = particles.sample(0, 0).q1;
+  expect(samples).toHaveLength(162);
+  expect(samples.every(p => p.kind === "indexed" && p.paletteIndex === 111)).toBe(true);
+  expect(particles.sample(0.02, 0).q1).toHaveLength(0);
+  const limited = new SourceParticles(new SourceRandom(1), 2);
+  limited.q1Entity({ x: 0, y: 0, z: 0 }, 0);
+  expect(limited.sample(0, 0).q1).toHaveLength(2);
+});
+
+test("Q1 entity lights retain keyed precedence, rerelease colors and paused-frame stability", async () => {
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--renderer", "cpu"]);
+  if (command.kind !== "run") throw new Error("Expected Q1 effects fixture");
+  const content = await loadApplicationContent(command.options), identity = createIdentityOwner("q1-entity-effects");
+  const owner: RendererResourceOwner = { identity: Symbol("q1-entity-effects"), session: identity.session, generation: 0 };
+  const assets = new ApplicationAssets(content, owner);
+  try {
+    await assets.loadWorld();
+    const actors = new SessionActorRegistry(identity), actor = actors.allocate("q1:base", "q1:monster/soldier");
+    const effects = new ApplicationEffects(assets, createSceneQueries(content.world), () => false);
+    try {
+      const source: SimulationPresentation = { actor: actor.id, content: content.recipe.map.entities.content, family: "q1", path: "progs/soldier.mdl",
+        origin: { x: 80, y: 0, z: 0 }, angles: { x: 0, y: 0, z: 0 }, frame: 0, oldFrame: 0, skin: 0, effects: 2 | 4 | 8,
+        renderFlags: 0, scale: 1, visible: false, viewWeapon: false };
+      const snapshot = (seconds: number): WorldSnapshot => ({ session: identity.session, frame: { frame: Math.trunc(seconds * 10),
+        time: { kind: "seconds", value: seconds }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+        actors: actors.observations(), bodies: [], inventories: [], configurations: [], scene: { session: identity.session, time: { kind: "seconds", value: seconds },
+          world: null, entities: [], lights: [], particles: [], lightStyles: [], areaBits: null } });
+      const camera: SceneCamera = { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
+        viewport: { x: 0, y: 0, width: 160, height: 120 }, projection: perspectiveProjection(90, 73.739795, 4096), clip: { kind: "none" } };
+      const frame = () => effects.frame(camera, createSourceSceneOrder(assets.materialRegistrations));
+      await effects.prepare(snapshot(1), [source]);
+      const first = frame().lights;
+      expect(first).toHaveLength(1); expect(first[0]?.origin).toEqual(source.origin);
+      expect(first[0]?.radius).toBeGreaterThanOrEqual(200); expect(first[0]?.radius).toBeLessThanOrEqual(231);
+      await effects.prepare(snapshot(1), [source]); expect(frame().lights).toEqual(first);
+      const rerelease = content.catalog.require("q1-rerelease-id1").id;
+      await effects.prepare(snapshot(1.1), [{ ...source, content: rerelease, effects: 16 | 32 }]);
+      expect(frame().lights).toHaveLength(1); expect(frame().lights[0]?.color).toEqual({ x: 1, y: 0.25, z: 0.25 });
+      await effects.prepare(snapshot(1.2), [{ ...source, effects: 16 | 32 }]);
+      expect(frame().lights).toHaveLength(0);
+      effects.resetRound(); await effects.prepare(snapshot(0), [{ ...source, effects: 2 }]);
+      expect(frame().lights[0]?.origin).toEqual({ x: 98, y: 0, z: 16 });
+      await effects.prepare(snapshot(0.05), []); expect(frame().lights).toHaveLength(1);
+      await effects.prepare(snapshot(0.11), []); expect(frame().lights).toHaveLength(0);
+    } finally { effects.close(); }
+  } finally { assets.close(); await content.close(); }
+}, 30000);

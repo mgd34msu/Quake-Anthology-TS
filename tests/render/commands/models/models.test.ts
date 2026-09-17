@@ -253,6 +253,14 @@ ordering/model-mark { polygonOffset cull none { map $whiteimage blendFunc GL_ZER
     const ordinary = sceneModelBatches(cache1.prepare([gun], gunInput))[0]?.vertices.find(value => value.color.x > 0 && value.color.x < 250 && value.color.y > 0 && value.color.y < 250);
     if (ordinary === undefined) throw new Error("Expected ordinary Q1 model lighting");
     expect(ordinary.color.x / ordinary.color.y).toBeCloseTo(sampled.x / sampled.y, 2);
+    const withoutShadow = sceneModelBatches(cache1.prepare([gun], gunInput));
+    const withShadow = sceneModelBatches(cache1.prepare([gun], gunInput, () => ({ planarShadow: true })));
+    expect(withShadow).toHaveLength(withoutShadow.length + 1);
+    expect(withShadow.slice(0, -1)).toEqual([...withoutShadow]);
+    const shadow = withShadow[withShadow.length - 1];
+    expect(shadow?.vertices.every(value => value.color.x === 0 && value.color.y === 0 && value.color.z === 0 && value.color.w === 0.5)).toBe(true);
+    expect(shadow?.state.depthWrite).toBe(true);
+    expect(sceneModelBatches(cache1.prepare([gun], gunInput, () => ({ planarShadow: true, viewModel: true })))).toEqual(gunBatches);
     const dynamic = { origin: gunOrigin, radius: 25.6, color: { x: 0, y: 0, z: 1 }, scale: 1, cone: null, shadow: { kind: "none" } } satisfies import("../../../../src/contracts/render.ts").Q2FragmentLight;
     const dynamicInput = { ...gunInput, q2FragmentLighting: { lights: [dynamic], atlas: null } };
     const dynamicBatches = sceneModelBatches(cache1.prepare([gun], dynamicInput, () => ({ viewModel: true })));

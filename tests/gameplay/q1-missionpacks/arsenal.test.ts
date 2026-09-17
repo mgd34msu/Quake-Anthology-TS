@@ -1,3 +1,9 @@
+import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
+import { expansionSourceSupply } from "../../../src/content/composition/expansion-source-supply.ts";
+import { Q1_Q2_SUPPLY_PROFILE } from "../../../src/content/composition/q1-q2-supply.ts";
+import { q2BaseWeaponInventory } from "../../../src/content/q2/foundation/items.ts";
+import { registerSelectedQ1MissionWeapons } from "../../../src/content/composition/q1-expansion-arsenal.ts";
+import { Q1SelectedArsenal } from "../../../src/app/bootstrap/simulation/arsenal/q1.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
@@ -217,4 +223,68 @@ test.skipIf(!existsSync(archivePath))("Pack obituary decisions preserve source r
   const vengeance = missionPackObituary({ ...input, attacker: { ...attacker, isPlayer: false, classname: "Vengeance" } }, { ...context, pack: "rogue" }); expect(vengeance.score).toBe(null);
   const tag = missionPackObituary({ ...input, teamplay: 3 }, { ...context, pack: "rogue", tagScore: () => { tags++; return 5; } }); expect(tag.score).toEqual({ actor: player.actor.id, delta: 5 }); expect(tags).toBe(1);
   const suicide = missionPackObituary({ ...input, edition: "classic", attacker: victim }, context); expect(suicide.message?.text).toBe("target checks if his weapon is loaded\n"); actors.close();
+});
+
+
+test("foreign selected Q1 pickup switch respects its own saved player policy", async () => {
+  const { game, player, inventory, actors } = await session("hipnotic");
+  try {
+    const selected = new Q1SelectedArsenal({ game, observe: () => ({ viewAngles: ZERO, waterLevel: 0 }) });
+    inventory.give(player.actor, weaponItem("hipnotic:laser"), 1);
+    inventory.give(player.actor, "q1:ammo/cells", 30);
+    player.autoSwitch = "never";
+    selected.pickupWeapons(player.actor, [weaponItem("hipnotic:laser")], "always");
+    expect(player.weapon).toBe("shotgun");
+    selected.pickupAmmo(player.actor, [{ item: "q1:ammo/cells", before: 0, given: 30 }], true);
+    expect(player.weapon).toBe("shotgun");
+    player.autoSwitch = "always";
+    selected.pickupWeapons(player.actor, [weaponItem("hipnotic:laser")], "always");
+    expect(player.weapon).toBe("hipnotic:laser");
+  } finally { actors.close(); }
+});
+
+for (const program of ["rogue", "mg3"] satisfies readonly ("rogue" | "mg3")[]) test(`selected ${program} source arsenal fires registered extensions on shared foreign players`, async () => {
+  const native = await session("hipnotic");
+  try {
+    const game = new Q1EntityServices(native.game.host, { ...native.game.options, provider: `q1:weapons/rerelease/${program}` });
+    const source = registerSelectedQ1MissionWeapons(game, program, { emit: () => undefined, isMonster: () => false, cvar: () => 0, setCvar: () => undefined });
+    const arsenal = new Q1SelectedArsenal({ game, impulse: source.impulse, preparePickup: source.preparePickup, observe: () => ({ viewAngles: ZERO, waterLevel: 0 }) });
+    arsenal.admit(native.player.actor, 100);
+    if (program === "rogue") {
+      native.inventory.give(native.player.actor, weaponItem("nailgun"), 1);
+      native.inventory.give(native.player.actor, "rogue:ammo/lava-nails", 10);
+      arsenal.pickupAmmo(native.player.actor, [{ item: "rogue:ammo/lava-nails", before: 0, given: 10 }], true);
+      expect(native.inventory.count(native.player.actor.id, weaponItem("rogue:lava-nailgun"))).toBe(1);
+      expect(arsenal.read(native.player.actor.id).activeWeapon).toBe(weaponItem("rogue:lava-nailgun"));
+    }
+    let time = 1;
+    for (const weapon of game.registeredWeapons.values()) {
+      if (!weapon.id.startsWith(`${program}:`) || weapon.id === "rogue:grapple") continue;
+      native.inventory.configure(native.player.actor, { item: game.weaponItem(weapon.id), count: 1, capacity: 1 });
+      if (weapon.ammo !== null) native.inventory.configure(native.player.actor, { item: weapon.ammo, count: 100, capacity: 200 });
+      expect(arsenal.select(native.player.actor.id, game.weaponItem(weapon.id))).toBe(true);
+      expect(game.weaponInput(native.player.actor, true, ZERO, time)).toBe(true);
+      expect(arsenal.read(native.player.actor.id).activeWeapon).toBe(game.weaponItem(weapon.id));
+      time += 2;
+    }
+    expect(game.capture().players.length).toBe(1);
+    if (program === "mg3") expect(game.capture().extensions.length).toBeGreaterThan(0);
+  } finally { native.actors.close(); }
+});
+
+for (const pack of ["hipnotic", "rogue"] satisfies readonly Q1MissionPack[]) test(`native ${pack} pickups route into the selected foreign inventory`, async () => {
+  const scene = await session(pack);
+  try {
+    for (const entry of q2BaseWeaponInventory()) scene.inventory.configure(scene.player.actor, { ...entry, count: 0 });
+    scene.game.pickupAdmission = new SharedPickupAdmission({ inventory: scene.inventory, profile: expansionSourceSupply(Q1_Q2_SUPPLY_PROFILE), ammoGranted: () => undefined, weaponGranted: () => undefined });
+    const entity = scene.game.create(pack === "hipnotic" ? "weapon_laser_gun" : "item_lava_spikes");
+    scene.game.spawnEntity(entity); entity.solid = "trigger";
+    scene.callbacks.touch({ self: entity.actor, other: scene.player.actor.id, plane: null, surface: null });
+    expect(scene.inventory.count(scene.player.actor.id, pack === "hipnotic" ? "q2:ammo_cells" : "q2:ammo_bullets")).toBe(pack === "hipnotic" ? 30 : 25);
+    if (pack === "hipnotic") {
+      expect(scene.inventory.count(scene.player.actor.id, "q2:weapon_hyperblaster")).toBe(1);
+      expect(scene.inventory.count(scene.player.actor.id, weaponItem("hipnotic:laser"))).toBe(0);
+    } else expect(scene.inventory.count(scene.player.actor.id, "rogue:ammo/lava-nails")).toBe(0);
+    expect<string>(entity.solid).toBe("none");
+  } finally { scene.actors.close(); }
 });

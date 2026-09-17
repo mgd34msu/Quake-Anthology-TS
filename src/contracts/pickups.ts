@@ -30,6 +30,7 @@ export interface PickupSupplyPreview {
 
 /** Source touch callbacks retain targets, placement, retention, and respawn. */
 export interface PickupAdmission {
+  maps(kind: "ammo" | "weapons", item: ItemId): boolean;
   preview(actor: ActorId, offer: PickupSupplyOffer): PickupSupplyPreview;
   owns(actor: ActorId, sourceWeapon: ItemId): boolean;
   ammo(actor: OwnedActor, offer: PickupAmmoGrant, autoSwitch?: boolean): boolean;

@@ -3,6 +3,7 @@ import { menuRow, type NativeUiController } from "../../ui/common/index.ts";
 
 export interface TeamArenaResultService {
   read(): { readonly title: string; readonly won: boolean; readonly score: number; readonly opponent: number; readonly points: number; readonly time: string } | null;
+  readonly demo?: { available(): boolean; play(): void };
   next(): undefined;
   retry(): undefined;
   quit(): undefined;
@@ -20,7 +21,7 @@ export class TeamArenaResults {
         : `${result.won ? "Victory" : "Defeat"}: ${result.title} (${result.score} - ${result.opponent})`, fullScreen: true,
         controls: [ { id: "ui:team-arena:score", kind: "button", label: result === null ? "" : `Score ${result.points} · Time ${result.time}`,
           rect: menuRow(0), visible: true, enabled: false, activate: () => undefined }, button("next", "Next match", 2, () => service.next()), button("retry", "Retry match", 3, () => service.retry()),
-          button("main-menu", "Main menu", 5, () => service.quit())], open: () => undefined, close: () => undefined };
+          ...(service.demo?.available() === true ? [button("demo", "Watch demo", 4, () => { service.demo?.play(); return undefined; })] : []), button("main-menu", "Main menu", 5, () => service.quit())], open: () => undefined, close: () => undefined };
     });
   }
   update(): void {

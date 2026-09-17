@@ -8,8 +8,9 @@ export interface BotMovementProjection {
   readonly services: MovementServices;
   input(previous: MovementResult | null, frame: number, commandMove: Vec3): MovementInput;
   /** Selected character/trigger semantics classify source stop requests from actual movement output. */
-  stopEvents(previous: MovementResult | null, result: MovementResult): number;
+  stop(previous: MovementResult | null, result: MovementResult, frame: number): BotMovementStop;
 }
+export interface BotMovementStop { readonly events: number; readonly origin: Vec3; readonly area: number | null; }
 
 function move(input: MovementInput, projection: BotMovementProjection): MovementResult {
   const provider = projection.provider;
@@ -28,6 +29,7 @@ function move(input: MovementInput, projection: BotMovementProjection): Movement
 export function projectBotMovement(query: BotMovementPrediction, projection: BotMovementProjection): BotTravelPredictionResult {
   let previous: MovementResult | null = null, end = { ...query.origin }, velocity = { ...query.velocity };
   let seconds = 0, frames = 0, stopEvent = 0, grounded = query.onGround, waterLevel = 0;
+  let endArea: number | null = null;
   const trajectory: Vec3[] = [end], noCommand = { x: 0, y: 0, z: 0 };
   for (let frame = 0; frame < query.maxFrames; frame++) {
     const input = projection.input(previous, frame, frame < query.commandFrames ? query.commandMove : noCommand);
@@ -39,9 +41,12 @@ export function projectBotMovement(query: BotMovementPrediction, projection: Bot
     end = state.kind === "q2-classic" ? { x: state.originEighths[0] / 8, y: state.originEighths[1] / 8, z: state.originEighths[2] / 8 } : { ...state.origin };
     velocity = state.kind === "q2-classic" ? { x: state.velocityEighths[0] / 8, y: state.velocityEighths[1] / 8, z: state.velocityEighths[2] / 8 } : { ...state.velocity };
     grounded = result.ground.kind !== "none"; waterLevel = result.waterLevel;
-    stopEvent = projection.stopEvents(previous, result) & query.stopEvents;
+    const stop = projection.stop(previous, result, frame);
+    endArea = stop.area;
+    stopEvent = stop.events & query.stopEvents;
+    if (stopEvent !== 0) end = { ...stop.origin };
     seconds += elapsed; frames++; trajectory.push(end); previous = result;
     if (stopEvent !== 0) break;
   }
-  return { end, velocity, frames, stopEvent, trajectory, seconds, grounded, waterLevel };
+  return { end, endArea, velocity, frames, stopEvent, trajectory, seconds, grounded, waterLevel };
 }

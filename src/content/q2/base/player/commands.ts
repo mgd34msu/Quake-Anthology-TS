@@ -11,6 +11,10 @@ function team(context: Q2PlayerContext, skin: string): string {
 function print(context: Q2PlayerContext, text: string): undefined {
   return context.hooks.emit({ kind: "print", target: context.entity.actor.id, level: "high", text });
 }
+function publishInventory(context: Q2PlayerContext): undefined {
+  return context.hooks.emit({ kind: "inventory", actor: context.entity.actor.id, entries: context.game.host.inventory.entries(context.entity.actor.id),
+    visible: context.state.showInventory, selected: context.state.selectedItem, labels: context.items.list().map(item => ({ item: item.id, name: item.name })) });
+}
 function select(context: Q2PlayerContext, direction: 1 | -1, filter: "all" | "weapon" | "power"): undefined {
   const { entity, game, state, items } = context;
   const list = items.list(), first = list.findIndex(item => item.id === state.selectedItem);
@@ -120,12 +124,14 @@ const listPlayers: Q2CommandHandler = (players, context, _args, command) => {
 const score: Q2CommandHandler = (players, context) => {
   const { entity, game, state } = context;
   state.showInventory = false; state.showHelp = false; state.showScores = !state.showScores;
+  publishInventory(context);
   if (state.showScores && game.options.mode !== "singleplayer") players.scoreboard(entity, game);
 };
 
 const showHelp: Q2CommandHandler = (players, context) => {
   const { entity, game, state, hooks } = context;
   state.showInventory = false; state.showScores = false;
+  publishInventory(context);
   if (game.options.mode === "deathmatch") { state.showScores = true; players.scoreboard(entity, game); }
   else { state.showHelp = !state.showHelp; hooks.emit({ kind: "help", actor: entity.actor.id, visible: state.showHelp }); }
 };
@@ -139,15 +145,15 @@ const dropItem: Q2CommandHandler = (players, context, args) => {
 };
 
 const inventory: Q2CommandHandler = (_players, context) => {
-  const { entity, game, state, hooks } = context;
+  const { state } = context;
   state.showScores = false; state.showHelp = false; state.showInventory = !state.showInventory;
-  if (state.showInventory) hooks.emit({ kind: "inventory", actor: entity.actor.id, entries: game.host.inventory.entries(entity.actor.id) });
+  publishInventory(context);
 };
 
 const selectItem: Q2CommandHandler = (players, context, _args, command) => {
   const { entity, game, state } = context;
   if (state.chaseTarget !== null) players.chase(entity, game, command.startsWith("invnext") ? 1 : -1);
-  else select(context, command.startsWith("invnext") ? 1 : -1, command.endsWith("w") ? "weapon" : command.endsWith("p") ? "power" : "all");
+  else { select(context, command.startsWith("invnext") ? 1 : -1, command.endsWith("w") ? "weapon" : command.endsWith("p") ? "power" : "all"); if (state.showInventory) publishInventory(context); }
 };
 
 const selectedItem: Q2CommandHandler = (players, context, _args, command) => {

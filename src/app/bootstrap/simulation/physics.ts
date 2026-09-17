@@ -32,6 +32,7 @@ export interface SharedSolid {
   readonly owner: ActorId | null;
   readonly monster?: boolean;
   readonly deadMonster?: boolean;
+  readonly q1Corpse?: true;
   readonly item?: boolean;
 }
 export interface SharedPhysicsFlags {
@@ -144,6 +145,7 @@ export class SharedPhysics {
         family: value.field("family").choice("q1", "q2", "q3"), owner: value.field("owner").nullable(reference),
         ...(value.field("monster").value === undefined ? {} : { monster: value.field("monster").boolean() }),
         ...(value.field("deadMonster").value === undefined ? {} : { deadMonster: value.field("deadMonster").boolean() }),
+        ...this.readCorpse(value),
         ...(value.field("item").value === undefined ? {} : { item: value.field("item").boolean() }) });
     });
     reader.field("motions").list(value => {
@@ -179,7 +181,14 @@ export class SharedPhysics {
     return { family: collision.field("family").choice("q1", "q2", "q3"), shape: kind === "model" ? { kind, model: shape.field("model").integer(0) } : { kind },
       contents: collision.field("contents").number(), owner: collision.field("owner").nullable(value => this.options.actors.referenceSaved(readSavedActor(value))),
       ...(collision.field("q3Owner").value === undefined ? {} : { q3Owner: { entityNumber: collision.field("q3Owner").field("entityNumber").integer(), ownerNumber: collision.field("q3Owner").field("ownerNumber").integer() } }),
+      ...this.readCorpse(collision),
       role: collision.field("role").choice("solid", "trigger"), monster: collision.field("monster").boolean(), deadMonster: collision.field("deadMonster").boolean() };
+  }
+  private readCorpse(value: SaveReader): Pick<SharedSolid, "q1Corpse"> {
+    const corpse = value.field("q1Corpse");
+    if (corpse.value === undefined) return {};
+    if (!corpse.boolean()) return corpse.fail("Saved Q1 corpse flag must be true or absent");
+    return { q1Corpse: true };
   }
   solidOf(actor: ActorId): SharedSolid | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.solid(owned); }
   motionOf(actor: ActorId): Q2Motion | null { const owned = this.options.actors.resolveOwned(actor); return owned === null ? null : this.motion(owned); }
@@ -205,7 +214,7 @@ export class SharedPhysics {
     this.collisions.set(actor, collision);
     this.solids.set(actor, { solid: collision.role === "trigger" ? "trigger" : collision.shape.kind === "model" ? "brush" : "box",
       model: collision.shape.kind === "model" ? collision.shape.model : null, family: collision.family, owner: collision.owner,
-      monster: collision.monster, deadMonster: collision.deadMonster });
+      monster: collision.monster, deadMonster: collision.deadMonster, ...(collision.q1Corpse === true ? { q1Corpse: true } : {}) });
     const linked = this.bodies.linked(actor.id);
     return linked === null ? undefined : this.linked(linked);
   }
@@ -239,6 +248,7 @@ export class SharedPhysics {
     const contents = solid.family === "q1" ? -2 : solid.solid === "brush" ? 1 : solid.deadMonster ? 0x4000000 : 0x2000000;
     const motion = this.motion(actor);
     this.options.scene.link(body, { family: solid.family, shape, contents, owner: motion === null ? solid.owner : motion.owner,
+      ...(solid.q1Corpse === true ? { q1Corpse: true } : {}),
       role: solid.solid === "trigger" ? "trigger" : "solid", monster: solid.monster ?? false, deadMonster: solid.deadMonster ?? false });
     return undefined;
   }

@@ -87,6 +87,11 @@ export class ApplicationCapture {
     void pending.then(() => { this.operations.delete(pending); });
   }
 
+  /** cl_avidemo uses the same pending readback and retirement path as screenshot. */
+  captureFrame(): void {
+    this.queue(async () => { await this.currentFrameCapture().screenshot({ format: "tga" }); }, true);
+  }
+
   get pendingReadback(): boolean { return this.reads.size !== 0; }
 
   async drain(): Promise<void> { await Promise.all([...this.operations]); }

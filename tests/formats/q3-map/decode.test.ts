@@ -1,7 +1,24 @@
 import { expect, test } from "bun:test";
 import { BinaryError } from "../../../src/core/binary/index.ts";
 import { adaptQ3Bsp, decodeQ3World, parseEntities, parseQ3Bsp } from "../../../src/formats/q3-map/index.ts";
-import { q3Fixture } from "./fixture.ts";
+import { q3Fixture, q3TestFixture } from "./fixture.ts";
+import { classifyBsp } from "../../../src/formats/bsp-kind.ts";
+
+test("IBSP44 preserves surface and collision flags and derives model ownership from leaves", () => {
+  expect(classifyBsp(q3TestFixture())).toBe("q3");
+  expect(classifyBsp(q3Fixture())).toBe("q3");
+  const map = parseQ3Bsp(q3TestFixture());
+  expect(map.surfaces.map(surface => surface.type)).toEqual(["planar", "patch", "triangles"]);
+  expect(map.models[0]).toMatchObject({ firstSurface: 0, surfaceCount: 3, firstBrush: 0, brushCount: 1 });
+  expect(map.indices).toEqual([0, 1, 2, 0, 1, 2]);
+  expect(map.shaders[map.brushes[0]?.shader ?? -1]?.contentFlags).toBe(1);
+  expect(map.shaders[map.brushSides[0]?.shader ?? -1]?.surfaceFlags).toBe(128);
+  expect(map.fogs[0]?.visibleSide).toBe(-1);
+  expect(adaptQ3Bsp(map).surfaces).toHaveLength(3);
+  const malformed = q3TestFixture();
+  new DataView(malformed.buffer).setInt32(12 + 12 * 8, 1, true);
+  expect(() => parseQ3Bsp(malformed)).toThrow("invalid IBSP44 record size");
+});
 
 test("IBSP46 decodes stored values across all 17 lumps", () => {
   const map = parseQ3Bsp(q3Fixture());
@@ -68,7 +85,7 @@ test("rejects truncated payloads, unsupported versions and invalid references", 
   expect(() => parseQ3Bsp(data.subarray(0, 100))).toThrow(BinaryError);
   expect(() => parseQ3Bsp(data.subarray(0, data.length - 1))).toThrow(BinaryError);
   const version = data.slice();
-  new DataView(version.buffer).setInt32(4, 44, true);
+  new DataView(version.buffer).setInt32(4, 45, true);
   expect(() => parseQ3Bsp(version)).toThrow("version 46");
   const invalidLump = data.slice();
   new DataView(invalidLump.buffer).setInt32(8, -1, true);

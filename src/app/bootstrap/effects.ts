@@ -81,6 +81,7 @@ export class ApplicationEffects {
   private readonly preparedQ3Weapons = new Map<ContentId, Q3ApplicationEffects>();
   private readonly q3WeaponTimes = new Map<ContentId, number>();
   private entityTrails = new Map<ActorId, { readonly content: ContentId; readonly origin: Vec3; readonly count: number }>();
+  private q1Trails = new Map<ActorId, { readonly content: ContentId; readonly path: string; readonly origin: Vec3 }>();
   private pending: SimulationPresentationEvent[] = [];
   private unhandled: UnhandledApplicationEffect[] = [];
   private beams: Beam[] = [];
@@ -221,6 +222,7 @@ export class ApplicationEffects {
     this.beams = this.beams.filter(beam => beam.die >= now);
     this.explosions = this.explosions.filter(explosion => Math.floor((Math.round(now * 1000) - Math.round(explosion.start * 1000)) / 100) < explosion.frames - 1);
     this.lights = this.lights.filter(light => light.die >= now && light.radius - light.decay * (now - light.born) > 0);
+    await this.q1Entities(presentations, now, elapsed > 0 || this.time === null);
     this.sampledLights = this.lights.map(light => ({ origin: light.origin, radius: Math.max(0, light.radius - light.decay * (now - light.born)), minimum: light.minimum, color: light.color }));
     this.sampledLights.push(...this.sourceLights.values());
     await this.q2Entities(presentations, now, elapsed > 0 || this.time === null);
@@ -553,6 +555,39 @@ export class ApplicationEffects {
       default: this.reject(source, `Unresolved Quake II source effect ${original}`);
     }
   }
+  private async q1Entities(presentations: readonly SimulationPresentation[], seconds: number, advance: boolean): Promise<void> {
+    if (!advance) return;
+    const trails = new Map<ActorId, { readonly content: ContentId; readonly path: string; readonly origin: Vec3 }>();
+    for (const entity of presentations) {
+      if (entity.family !== "q1" || entity.viewWeapon || entity.path === "") continue;
+      const group = await this.group(entity.content), model = (await this.assets.model(entity.content, entity.path)).model;
+      const flags = model.kind === "q1-mdl" ? model.flags : model.kind === "md5" && model.skinSelection.kind === "q1-mdl-replacement" ? model.skinSelection.flags : 0;
+      const prior = this.q1Trails.get(entity.actor), delta = prior === undefined ? zero : sub3(entity.origin, prior.origin);
+      const reset = prior === undefined || prior.content !== entity.content || prior.path !== entity.path
+        || Math.abs(delta.x) > 100 || Math.abs(delta.y) > 100 || Math.abs(delta.z) > 100;
+      const start = reset || prior === undefined ? entity.origin : prior.origin;
+      trails.set(entity.actor, { content: entity.content, path: entity.path, origin: entity.origin });
+      const assign = (origin: Vec3, radius: number, color: Vec3 = white, minimum = 0, duration = 0.001): void => {
+        this.light(origin, seconds, radius, duration, color, 0, minimum, entity.actor);
+      };
+      if (advance && (entity.effects & 1) !== 0) group.particles.q1Entity(entity.origin, seconds);
+      if ((entity.effects & 2) !== 0) {
+        const forward = anglesToAxis(entity.angles)[0];
+        assign(add3(add3(entity.origin, { x: 0, y: 0, z: 16 }), scale3(forward, 18)), 200 + (this.random.nextInteger() & 31), white, 32, 0.1);
+      }
+      if ((entity.effects & 4) !== 0) assign(add3(entity.origin, { x: 0, y: 0, z: 16 }), 400 + (this.random.nextInteger() & 31));
+      if ((entity.effects & 8) !== 0) assign(entity.origin, 200 + (this.random.nextInteger() & 31));
+      if (this.assets.content.catalog.product(entity.content).expectation.edition === "rerelease") {
+        if ((entity.effects & 16) !== 0) assign(entity.origin, 200 + (this.random.nextInteger() & 31), { x: 0.25, y: 0.25, z: 1 });
+        if ((entity.effects & 32) !== 0) assign(entity.origin, 200 + (this.random.nextInteger() & 31), { x: 1, y: 0.25, z: 0.25 });
+      }
+      const trail = (flags & 4) !== 0 ? 2 : (flags & 32) !== 0 ? 4 : (flags & 16) !== 0 ? 3 : (flags & 64) !== 0 ? 5
+        : (flags & 1) !== 0 ? 0 : (flags & 2) !== 0 ? 1 : (flags & 128) !== 0 ? 6 : null;
+      if (trail !== null && advance) group.particles.q1Trail(start, entity.origin, trail, seconds);
+      if (trail === 0) assign(entity.origin, 200, white, 0, 0.01);
+    }
+    this.q1Trails = trails;
+  }
   private async q2Entities(presentations: readonly SimulationPresentation[], seconds: number, advance: boolean): Promise<void> {
     const trails = new Map<ActorId, { readonly content: ContentId; readonly origin: Vec3; readonly count: number }>();
     for (const entity of presentations) {
@@ -631,7 +666,7 @@ export class ApplicationEffects {
     if (this.closed) throw new Error("Effect world is closed");
     this.pending = []; this.unhandled = []; this.beams = []; this.explosions = [];
     this.staticBrushes.length = 0; this.styles = []; this.lights = []; this.sampledLights = [];
-    this.entityTrails.clear(); this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear();
+    this.entityTrails.clear(); this.q1Trails.clear(); this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear();
     this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
     this.poses = []; this.time = null; this.q3WeaponTimes.clear();
     for (const group of this.groups.values()) {
@@ -646,7 +681,7 @@ export class ApplicationEffects {
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values(), ...this.preparedQ3Weapons.values()]) effects.close();
     this.preparedQ3Weapons.clear();
     for (const image of this.images.values()) this.assets.images.release(image);
-    this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear();
+    this.images.clear(); this.groups.clear(); this.preparedRenderers.clear(); this.q3.clear(); this.q3Weapons.clear(); this.q3WeaponTimes.clear(); this.entityTrails.clear(); this.q1Trails.clear();
     this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear(); this.playerViews.clear(); this.bonusFlashes.clear(); this.trackerPain.clear(); this.steam = []; this.sounds.length = 0;
   }
 }

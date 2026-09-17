@@ -25,6 +25,7 @@ interface SeatState {
   fogReceived: boolean;
   story: string;
   storySource: { readonly content: ContentId; readonly text: string } | null;
+  readonly hiddenItems: Set<ActorId>;
 }
 
 /** Player name tokens are resolved after localized argument expansion, as in CL_ParseLocPrint. */
@@ -34,7 +35,7 @@ export function q2PlayerNameTokens(text: string, names: ReadonlyMap<number, stri
 
 /** Holds client configstrings and interpolation only. Source game callbacks own story changes and application actions. */
 export class ApplicationRereleasePresentation {
-  private readonly seats: readonly SeatState[];
+  private seats: readonly SeatState[];
   private readonly names = new Map<number, string>();
   private readonly pending: (RereleaseSource | Extract<SimulationPresentationEvent, { readonly kind: "q2-player" }>)[] = [];
   private readonly prints: SimulationPresentationEvent[] = [];
@@ -49,7 +50,15 @@ export class ApplicationRereleasePresentation {
   }
 
   constructor(private readonly assets: Pick<ApplicationAssets, "provider">, seats: readonly RereleasePresentationSeat[]) {
-    this.seats = seats.map(binding => ({ binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(), fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null }));
+    this.seats = seats.map(binding => ({ binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(), fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>() }));
+  }
+
+  publishSeats(bindings: readonly RereleasePresentationSeat[]): void {
+    this.seats = bindings.map(binding => {
+      const retained = this.seats.find(seat => seat.binding.seat.equals(binding.seat) && seat.binding.actor.equals(binding.actor));
+      return retained ?? { binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(),
+        fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>() };
+    });
   }
 
   receive(events: readonly SimulationPresentationEvent[]): void {
@@ -57,12 +66,23 @@ export class ApplicationRereleasePresentation {
       if (source.kind === "q2-player" && source.event.kind === "userinfo") this.pending.push(source);
       if (source.kind !== "q2-rerelease") continue;
       const event = source.event;
+      if (event.kind === "item-visibility") {
+        for (const seat of this.seats) if (seat.binding.actor.equals(event.actor)) {
+          for (const hidden of seat.hiddenItems) if (hidden.equals(event.item)) seat.hiddenItems.delete(hidden);
+          if (!event.visible) seat.hiddenItems.add(event.item);
+        }
+      }
       if (event.kind === "fog") { for (const seat of this.seats) if (seat.binding.actor.equals(event.actor)) { seat.fog.receive(event.value, event.transitionMilliseconds, source.seconds); seat.fogReceived = true; } }
       else if (event.kind === "story" || event.kind === "localized-print" || event.kind === "sky") this.pending.push(source);
     }
   }
 
   selectedLanguage(id: SeatId): string { return this.seats.find(seat => seat.binding.seat.equals(id))?.language ?? "english"; }
+
+  itemVisible(actor: ActorId, item: ActorId): boolean {
+    const seat = this.seats.find(seat => seat.binding.actor.equals(actor));
+    return seat === undefined || ![...seat.hiddenItems].some(hidden => hidden.equals(item));
+  }
 
   async localizeMessage(id: SeatId, content: ContentId, text: string, args: readonly string[] = []): Promise<string> {
     const seat = this.seats.find(seat => seat.binding.seat.equals(id));

@@ -1,5 +1,5 @@
 // Quake III source joystick/mouse lifecycle. GPL-2.0-or-later.
-import { CvarFlag } from "../core/cvars/index.ts";
+import { registerSourceInputSettings } from "./device-settings.ts";
 import type { CvarRegistry } from "../core/cvars/index.ts";
 import { SdlJoystick } from "../platform/sdl.ts";
 import type { SdlJoystickEvent } from "../platform/sdl.ts";
@@ -14,6 +14,7 @@ export class SourceInputState {
   private joystick: SdlJoystick | null = null;
   private joystickEvents: SdlJoystickEvent[] = [];
   private joystickProfile: SourceJoystickProfile = "linux";
+  get instance(): number | null { return this.joystick?.instance ?? null; }
 
   /** Inert construction permits the common owner to publish input before initialization prints. */
   constructor(private readonly options: SourceInputOptions) {}
@@ -23,18 +24,11 @@ export class SourceInputState {
     this.requireOpen();
     const { cvars, print } = this.options;
     print("\n------- Input Initialization -------\n");
-    cvars.register("in_mouse", "1", CvarFlag.Archive);
-    cvars.register("in_dgamouse", "1", CvarFlag.Archive);
-    cvars.register("in_subframe", "1", CvarFlag.Archive);
-    cvars.register("in_nograb", "0");
-    cvars.register("in_joystick", "0", CvarFlag.Archive | CvarFlag.Latch);
-    cvars.register("in_debugjoystick", "0", CvarFlag.Temporary);
-    cvars.register("joy_threshold", "0.15", CvarFlag.Archive);
-    cvars.register("in_joystickProfile", process.platform === "win32" ? "windows" : "linux", CvarFlag.Archive | CvarFlag.Latch);
+    registerSourceInputSettings(cvars);
+    cvars.applyLatched("in_joystick"); cvars.applyLatched("in_joystickProfile");
     const profile = this.cvar("in_joystickProfile").value;
     if (profile !== "linux" && profile !== "windows") throw new Error("in_joystickProfile must be linux or windows");
     this.joystickProfile = profile;
-    cvars.register("in_joyBallScale", "0.02", CvarFlag.Archive);
     this.mouse.available = this.cvar("in_mouse").numericValue !== 0;
 
     // The source abandons the old descriptor but retains IN_JoyMove's static axis state.

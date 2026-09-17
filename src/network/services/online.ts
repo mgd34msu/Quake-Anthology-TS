@@ -65,6 +65,7 @@ export interface Lobby {
   readonly endpoint: NetworkAddress;
   readonly members: readonly LobbyMember[];
   readonly phase: "open" | "playing";
+  readonly matchGeneration: number;
 }
 
 export class LocalLobbyService {
@@ -72,7 +73,7 @@ export class LocalLobbyService {
   create(owner: Account, name: string, capacity: number, composition: CompositionIdentity, endpoint: NetworkAddress): Lobby {
     if (!Number.isSafeInteger(capacity) || capacity < 1 || name.length === 0) throw new RangeError("Invalid lobby settings");
     const lobby: Lobby = { id: `lobby:${randomBytes(16).toString("hex")}`, owner: owner.id, name, capacity, composition, endpoint,
-      members: [{ account: owner, seats: 1, ready: false }], phase: "open" };
+      members: [{ account: owner, seats: 1, ready: false }], phase: "open", matchGeneration: 0 };
     this.lobbies.set(lobby.id, lobby); return lobby;
   }
   private require(id: LobbyId): Lobby { const lobby = this.lobbies.get(id); if (lobby === undefined) throw new Error("Lobby no longer exists"); return lobby; }
@@ -93,7 +94,14 @@ export class LocalLobbyService {
   start(id: LobbyId, owner: AccountId): Lobby {
     const lobby = this.require(id);
     if (lobby.owner !== owner || lobby.phase !== "open" || lobby.members.some(member => !member.ready)) throw new Error("Lobby is not ready to start");
-    const updated: Lobby = { ...lobby, phase: "playing" }; this.lobbies.set(id, updated); return updated;
+    const updated: Lobby = { ...lobby, phase: "playing", matchGeneration: lobby.matchGeneration + 1 }; this.lobbies.set(id, updated); return updated;
+  }
+  complete(id: LobbyId, owner: AccountId, matchGeneration: number): Lobby {
+    const lobby = this.require(id);
+    if (lobby.owner !== owner) throw new Error("Only the lobby owner can complete its match");
+    if (lobby.phase === "open" || lobby.matchGeneration !== matchGeneration) return lobby;
+    const updated: Lobby = { ...lobby, phase: "open", members: lobby.members.map(member => ({ ...member, ready: false })) };
+    this.lobbies.set(id, updated); return updated;
   }
   leave(id: LobbyId, account: AccountId): void {
     const lobby = this.require(id);

@@ -1,3 +1,4 @@
+import { matchModeUnavailable, type MatchRules } from "./match-modes.ts";
 import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
 import { baseWeaponBindingItems } from "../../input/weapon-bindings.ts";
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
@@ -17,7 +18,7 @@ import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "../../c
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../content/catalog/monsters.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
-import { readTeamArenaSkirmish } from "./team-arena-skirmish.ts";
+import { parseTeamArenaCampaign, planTeamArenaSkirmish, type TeamArenaCampaign, type TeamArenaTeams } from "./team-arena-skirmish.ts";
 import { applicationPreset } from "./content.ts";
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { ApplicationOptions } from "./options.ts";
@@ -61,6 +62,31 @@ function productChoice(product: CatalogProduct): StartupSelectionChoice {
 
 /** The draft stores UI choices; the existing launch resolver remains the recipe authority. */
 export class StartupSelectionModel {
+  private teamArenaCampaign: TeamArenaCampaign | null = null;
+  private selectedTeams: TeamArenaTeams = { player: "pagans", opponent: "stroggs" };
+  private selectedServerProfile: Pick<ApplicationOptions, "serverProfilePath"> | null = null;
+  readonly teamArena = {
+    choices: (): readonly { readonly id: string; readonly label: string }[] => [...this.teamArenaCampaign?.teams.keys() ?? []].map(id => ({ id, label: id.charAt(0).toUpperCase() + id.slice(1) })),
+    read: (): TeamArenaTeams => this.selectedTeams,
+    write: (side: "player" | "opponent", team: string): void => {
+      const name = team.toLowerCase();
+      if (!this.teamArenaCampaign?.teams.has(name)) throw new Error("Unknown authored Team Arena team");
+      this.selectedTeams = { ...this.selectedTeams, [side]: name };
+    },
+  };
+  selectServerProfile(path: string | null): void { this.selectedServerProfile = path === null ? {} : { serverProfilePath: path }; }
+  private applySelectedServerProfile(options: ApplicationOptions): ApplicationOptions {
+    if (this.selectedServerProfile === null) return options;
+    const { serverProfile: _serverProfile, serverProfilePath: _serverProfilePath, ...rest } = options;
+    return { ...rest, ...this.selectedServerProfile };
+  }
+  private async prepareTeamArena(): Promise<void> {
+    if (this.teamArenaCampaign !== null) return;
+    const product = this.catalog.products.find(product => product.expectation.id === "q3-missionpack");
+    if (product === undefined || product.availability.kind !== "installed") return;
+    const [game, teams] = await Promise.all([this.catalog.read(product.id, "gameinfo.txt"), this.catalog.read(product.id, "teaminfo.txt")]);
+    this.teamArenaCampaign = parseTeamArenaCampaign(Buffer.from(game).toString("latin1"), Buffer.from(teams).toString("latin1"));
+  }
   private readonly values: Record<StartupSelectionField, string>;
   private display: Pick<ApplicationOptions, "width" | "height" | "gamma">;
   private displayOverridesConsumed = false;
@@ -82,6 +108,7 @@ export class StartupSelectionModel {
     this.selectedModels.set(this.values.character, initial.characterModel);
   }
   async prepareMaps(): Promise<void> {
+    await this.prepareTeamArena();
     const archives = new Map<string, ArchiveHandle>(), files = new Map<string, FileSource>(), playable = new Map<string, boolean>();
     try {
       for (const product of this.catalog.products) {
@@ -182,7 +209,7 @@ export class StartupSelectionModel {
     if (!selected.difficulties.some(choice => Number(choice.id) === level)) throw new Error("Invalid preset difficulty");
     const product = this.catalog.require(id), family = product.expectation.family;
     const teamArenaSkirmish = product.expectation.campaign === "missionpack" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5)
-      ? await readTeamArenaSkirmish(this.catalog, level) : undefined;
+      ? planTeamArenaSkirmish(this.teamArenaCampaign ?? (() => { throw new Error("Team Arena metadata is not prepared"); })(), level, undefined, this.selectedTeams) : undefined;
     const preferred = teamArenaSkirmish?.map ?? (family === "q3" ? await this.q3TrainingMap(product)
       : this.authoredDefaultMaps.get(id) ?? product.expectation.mapWitness ?? (family === "q1" ? "maps/start.bsp" : null));
     const map = this.playableMaps.get(id)?.find(map => map.id.toLowerCase() === preferred?.toLowerCase());
@@ -197,11 +224,11 @@ export class StartupSelectionModel {
     const bot: Pick<ApplicationOptions, "botSkill"> = family === "q3" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5) ? { botSkill: level } : {};
     const renderer = this.values.renderer;
     if (renderer !== "gl" && renderer !== "cpu") throw new Error("Invalid renderer selection");
-    const options: ApplicationOptions = { ...preferences, ...this.display,
+    const options = this.applySelectedServerProfile({ ...preferences, ...this.display,
       ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}), renderer,
       ...(teamArenaSkirmish === undefined ? {} : { teamArenaSkirmish }),
       product: id, map: map.id, movement: family, character: family, characterModel, skill, ...bot,
-      mode: "singleplayer", rules: "standard", seats: 1, dedicated: false, network: { kind: "offline" } };
+      mode: "singleplayer", rules: "standard", seats: 1, dedicated: false, network: { kind: "offline" } });
     const movement: ProviderReference = { provider: `${family}:movement`, content: product.id };
     const character: ProviderReference = { provider: `${family}:character`, content: product.id };
     const preset = applicationPreset(this.catalog, options, { movement, character });
@@ -358,9 +385,9 @@ export class StartupSelectionModel {
     const row = (id: StartupSelectionField, label: string, choices: readonly StartupSelectionChoice[]): StartupSelectionRow => ({ id, label, value: id === "enemies" ? monsterValue : this.values[id], choices });
     const current = this.product("product"), currentLabel = productChoice(current).label;
     const provider: ProviderReference = { provider: `${current.expectation.family}:official`, content: current.id };
-    const rules = this.values.rules === "standard" ? current : this.catalog.product(`q2-classic-${this.values.rules}`);
+    const rules = this.values.rules === "ctf" || this.values.rules === "lmctf" ? this.catalog.product(`q2-classic-${this.values.rules}`) : current;
     const defaults = unavailable(current) !== null || unavailable(rules) !== null ? disabledEquipment()
-      : nativeEquipment(this.catalog, provider, this.values.rules === "standard" ? provider : { provider: `q2:${this.values.rules}`, content: rules.id });
+      : nativeEquipment(this.catalog, provider, this.values.rules === "standard" ? provider : { provider: `${current.expectation.family}:${this.values.rules}`, content: rules.id });
     const nativeWeapons = choice("native", `${currentLabel} weapons`);
     const nativeMonsters = choice("native", `${currentLabel} authored monsters`);
     const nativeGrapple = choice("native", defaults.grapple.kind === "disabled" ? "Off (campaign default)" : `${defaults.grapple.mechanic} (${defaults.grapple.binding})`);
@@ -386,7 +413,7 @@ export class StartupSelectionModel {
       row("grapple", "Grapple", grapples), row("grenades", "Offhand grenades", [nativeGrenades, choice("disabled", "Disabled"),
         ...this.catalog.products.filter(product => product.expectation.family === "q2" && product.expectation.campaign === "baseq2").map(productChoice)]),
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
-      row("rules", "Match rules", [choice("standard", "Standard"), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Q2 Capture the Flag" : "Loki's Minions CTF",
+      row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...this.product("product").expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Q2 Capture the Flag" : "Loki's Minions CTF",
         this.product("product").expectation.family !== "q2" || this.product("product").expectation.edition !== "classic" ? "Requires a classic Quake II campaign"
           : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q2-classic-${rule}`))))]),
       row("skill", "Difficulty", [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")]),
@@ -405,7 +432,9 @@ export class StartupSelectionModel {
     }
     if (field === "mode" || field === "product") {
       const product = this.product("product");
-      if (this.values.mode !== "deathmatch" || product.expectation.family !== "q2" || product.expectation.edition !== "classic") this.values.rules = "standard";
+      const rules = this.values.rules;
+      if (rules === "standard" || rules === "ctf" || rules === "lmctf" || rules === "tag" || rules === "deathball" || rules === "horde")
+        if (matchModeUnavailable({ ...product.expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules }) !== null) this.values.rules = "standard";
     }
     if (field === "model") this.selectedModels.set(this.values.character, id);
     if (field === "character") {
@@ -424,10 +453,10 @@ export class StartupSelectionModel {
   get options(): ApplicationOptions {
     const mode = this.values.mode, renderer = this.values.renderer, rules = this.values.rules, skill = Number(this.values.skill);
     if (mode !== "singleplayer" && mode !== "coop" && mode !== "deathmatch" || renderer !== "gl" && renderer !== "cpu"
-      || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
-    return { ...this.initial, product: this.values.product, map: this.values.map, movement: this.product("movement").expectation.family,
+      || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" && rules !== "tag" && rules !== "deathball" && rules !== "horde" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
+    return this.applySelectedServerProfile({ ...this.initial, product: this.values.product, map: this.values.map, movement: this.product("movement").expectation.family,
       character: this.product("character").expectation.family, characterModel: this.values.model, mode, rules, skill,
-      seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) };
+      seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) });
   }
   summary(): readonly string[] {
     return [...this.rows().filter(row => row.id !== "renderer").map(row => `${row.label}: ${row.choices.find(choice => choice.id === row.value)?.label ?? row.value}`),

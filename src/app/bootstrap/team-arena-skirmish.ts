@@ -5,6 +5,8 @@ import { GameType } from "../../content/q3/base/shared/definitions.ts";
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
 
+export interface TeamArenaTeams { readonly player: string; readonly opponent: string; }
+export function teamArenaTeamChoices(campaign: TeamArenaCampaign): readonly string[] { return [...campaign.teams.keys()]; }
 export interface TeamArenaSkirmishCursor { readonly gameTypeIndex: number; readonly mapIndex: number; }
 export interface TeamArenaSkirmish {
   readonly kind: "team-arena";
@@ -108,14 +110,15 @@ export function nextTeamArenaCursor(campaign: TeamArenaCampaign, current: TeamAr
 }
 
 export function planTeamArenaSkirmish(campaign: TeamArenaCampaign, skill: TeamArenaSkirmish["skill"] = 2,
-  cursor: TeamArenaSkirmishCursor = { gameTypeIndex: 3, mapIndex: 0 }): TeamArenaSkirmish {
+  cursor: TeamArenaSkirmishCursor = { gameTypeIndex: 3, mapIndex: 0 },
+  teams: TeamArenaTeams = { player: "Pagans", opponent: "Stroggs" }): TeamArenaSkirmish {
   const gameType = campaign.gameTypes[cursor.gameTypeIndex], map = campaign.maps[cursor.mapIndex];
   if (gameType !== 1 && gameType !== 4 && gameType !== 5 && gameType !== 6 && gameType !== 7)
     throw new Error("Unsupported Team Arena single-player game type");
   if (map === undefined || !active(map, gameType)) throw new Error("Selected Team Arena map is not authored for this skirmish");
   const bots: TeamArenaSkirmish["bots"][number][] = [];
   if (gameType === 1) bots.push({ ai: map.opponent, name: map.opponent, team: "", delayMilliseconds: 500 });
-  else for (const [name, team, count] of [["Stroggs", "Blue", map.teamMembers], ["Pagans", "Red", map.teamMembers - 1]] satisfies readonly (readonly [string, "Red" | "Blue", number])[]) {
+  else for (const [name, team, count] of [[teams.opponent, "Blue", map.teamMembers], [teams.player, "Red", map.teamMembers - 1]] satisfies readonly (readonly [string, "Red" | "Blue", number])[]) {
     const members = campaign.teams.get(name.toLowerCase());
     if (members === undefined) throw new Error(`Team Arena team is missing: ${name}`);
     for (let index = 0; index < count; index++) {
@@ -125,10 +128,10 @@ export function planTeamArenaSkirmish(campaign: TeamArenaCampaign, skill: TeamAr
   }
   const maxClients = gameType === 1 ? 2 : map.teamMembers * 2, timeToBeat = map.times.get(gameType) ?? 0;
   const values: Readonly<Record<string, string>> = { nextmap: "teamarena-results", ui_teamArenaTimeToBeat: String(timeToBeat), g_gametype: String(gameType), ui_singlePlayerActive: "1", g_spSkill: String(skill),
-    sv_maxclients: String(maxClients), g_doWarmup: "1", g_warmup: "15", sv_pure: "0", g_friendlyFire: "0", g_redTeam: "Pagans", g_blueTeam: "Stroggs",
+    sv_maxclients: String(maxClients), g_doWarmup: "1", g_warmup: "15", sv_pure: "0", g_friendlyFire: "0", g_redTeam: teams.player, g_blueTeam: teams.opponent,
     capturelimit: gameType === 6 ? "4" : gameType === 7 ? "15" : "5", fraglimit: "10",
     ui_scoreMap: map.title, ui_gameType: String(cursor.gameTypeIndex), ui_currentMap: String(cursor.mapIndex),
-    ui_mapIndex: String(campaign.maps.slice(0, cursor.mapIndex).filter(row => active(row, gameType)).length), ui_teamName: "Pagans", ui_opponentName: "Stroggs" };
+    ui_mapIndex: String(campaign.maps.slice(0, cursor.mapIndex).filter(row => active(row, gameType)).length), ui_teamName: teams.player, ui_opponentName: teams.opponent };
   return { kind: "team-arena", map: `maps/${map.name}.bsp`, title: map.title, gameType, maxClients, timeToBeat, skill,
     cvars: Object.entries(values).map(([name, value]) => ({ name, value })),
     clientCvars: [{ name: "cg_cameraOrbit", value: "0" }, { name: "cg_thirdPerson", value: "0" }, { name: "cg_drawTimer", value: "1" }], bots,
@@ -140,11 +143,11 @@ export function currentTeamArenaCursor(campaign: TeamArenaCampaign, live: Pick<T
   return { gameTypeIndex, mapIndex };
 }
 export async function readTeamArenaSkirmish(catalog: InstalledCatalog, skill: TeamArenaSkirmish["skill"] = 2,
-  previous?: Pick<TeamArenaSkirmish, "map" | "gameType"> & { readonly advance?: boolean }): Promise<TeamArenaSkirmish> {
+  previous?: Pick<TeamArenaSkirmish, "map" | "gameType"> & { readonly advance?: boolean }, teams?: TeamArenaTeams): Promise<TeamArenaSkirmish> {
   const product = catalog.require("q3-missionpack");
-  const [game, teams] = await Promise.all([catalog.read(product.id, "gameinfo.txt"), catalog.read(product.id, "teaminfo.txt")]);
-  const campaign = parseTeamArenaCampaign(Buffer.from(game).toString("latin1"), Buffer.from(teams).toString("latin1"));
-  return planTeamArenaSkirmish(campaign, skill, previous === undefined ? undefined : previous.advance === false ? currentTeamArenaCursor(campaign, previous) : nextTeamArenaCursor(campaign, currentTeamArenaCursor(campaign, previous)));
+  const [game, teamInfo] = await Promise.all([catalog.read(product.id, "gameinfo.txt"), catalog.read(product.id, "teaminfo.txt")]);
+  const campaign = parseTeamArenaCampaign(Buffer.from(game).toString("latin1"), Buffer.from(teamInfo).toString("latin1"));
+  return planTeamArenaSkirmish(campaign, skill, previous === undefined ? undefined : previous.advance === false ? currentTeamArenaCursor(campaign, previous) : nextTeamArenaCursor(campaign, currentTeamArenaCursor(campaign, previous)), teams);
 }
 
 export const teamArenaServerOverrides = [

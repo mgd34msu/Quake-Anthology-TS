@@ -12,8 +12,17 @@ export class ClientCommandBindings {
   private readonly owners = new Set<{ readonly seat: SeatId; readonly names: Set<string> }>();
   private readonly installed = new Map<string, CommandHandler>();
   private active = false;
-  constructor(private readonly commands: CommandBuffer, private readonly seats: readonly SeatId[],
+  constructor(private readonly commands: CommandBuffer, private seats: readonly SeatId[],
     private readonly execute: (command: CommandInvocation, seat: SeatId) => undefined) {}
+
+  publishSeats(seats: readonly SeatId[]): void {
+    for (const owner of this.owners) if (!seats.some(seat => seat.equals(owner.seat))) {
+      this.owners.delete(owner);
+      for (const name of owner.names) this.removeUnused(name);
+      owner.names.clear();
+    }
+    this.seats = [...seats];
+  }
 
   createOwner(seat: SeatId): ClientCommandRegistration {
     if (!this.seats.some(value => value.equals(seat))) throw new Error("Client commands require a local seat");

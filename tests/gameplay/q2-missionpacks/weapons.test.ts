@@ -1,3 +1,8 @@
+import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
+import { expansionSourceSupply } from "../../../src/content/composition/expansion-source-supply.ts";
+import { Q2_Q1_SUPPLY_PROFILE } from "../../../src/content/composition/q2-q1-supply.ts";
+import { registerSelectedQ2MissionWeapons } from "../../../src/content/composition/q2-expansion-arsenal.ts";
+import { Q2SelectedArsenal } from "../../../src/app/bootstrap/simulation/arsenal/q2.ts";
 import { q2PowerupTimers } from "../../../src/app/bootstrap/simulation/powerup-timers.ts";
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -32,6 +37,59 @@ function clearTrace(request: Q2TraceRequest): TraceResult {
 }
 
 describe("mission-pack source weapons", () => {
+  test("selected expansion arsenal uses registered inventory, native selectors and handoffs", () => {
+    for (const pack of ["xatrix", "rogue"] satisfies readonly Q2MissionPack[]) {
+      const scene = fixture("classic");
+      try {
+        const projectiles = new Q2MissionPackProjectiles({ base: scene.weapons, monster: () => null, playerEffect: () => undefined });
+        new Q2MissionPackWeapons(projectiles).register(scene.weapons, pack);
+        const definitions = scene.weapons.registeredDefinitions();
+        const inventoryDefinitions = definitions.flatMap(definition => definition.ammo === null
+          ? [{ item: definition.item, capacity: 1 }]
+          : [{ item: definition.item, capacity: 200 }, { item: definition.ammo, capacity: 200 }]);
+        const options = { game: scene.game, weapons: scene.weapons, inventoryDefinitions,
+          observe: () => ({ owner: scene.self, input: { ...input, attack: false } }) };
+        expect(() => new Q2SelectedArsenal(options)).toThrow("explicit pickup preference");
+        const arsenal = new Q2SelectedArsenal({ ...options, pickupOrder: definitions.map(definition => definition.item) });
+        arsenal.remove(scene.player.id);
+        arsenal.admit(scene.player, 100);
+        for (const definition of definitions) {
+          scene.inventory.configure(scene.player, { item: definition.item, count: 1, capacity: 200 });
+          if (definition.ammo !== null) scene.inventory.configure(scene.player, { item: definition.ammo, count: 100, capacity: 200 });
+          expect(arsenal.select(scene.player.id, definition.item)).toBe(true);
+          expect(arsenal.handoff(scene.player.id).accepts(definition.item)).toBe(true);
+          expect(arsenal.read(scene.player.id).ammo.some(entry => entry.item === definition.item)).toBe(true);
+        }
+        const extension = scene.weapons.definition(pack === "xatrix" ? "phalanx" : "heatbeam");
+        arsenal.handoff(scene.player.id).holster();
+        for (let frame = 0; frame < 100 && !arsenal.handoff(scene.player.id).isHolstered(); frame++) {
+          scene.setTime(frame / 10); arsenal.frame(scene.player.id);
+        }
+        expect(arsenal.handoff(scene.player.id).isHolstered()).toBe(true);
+        arsenal.handoff(scene.player.id).resume(extension.item);
+        expect(arsenal.read(scene.player.id).activeWeapon).toBe(extension.item);
+        expect(arsenal.view(scene.player.id)?.path).toBe(extension.viewModel);
+        arsenal.pickupWeapons(scene.player, ["q2:weapon_shotgun"], "never");
+        expect(arsenal.pendingWeapon(scene.player.id)).toBe(null);
+      } finally { scene.actors.close(); }
+    }
+  });
+
+  test("selected weapon respawn interval leaves ammunition timers unchanged", () => {
+    const scene = fixture("rerelease", "blaster", 0.025, "deathmatch");
+    try {
+      const items = new Q2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined, weaponRespawnSeconds: () => 7.5 });
+      items.configurePlayer(scene.player, scene.game);
+      scene.inventory.configure(scene.player, { item: "q2:ammo_shells", count: 0, capacity: 100 });
+      const weapon = scene.game.create("weapon_shotgun"), ammo = scene.game.create("ammo_shells");
+      expect(items.spawn(weapon, scene.game)).toBe(true); expect(items.spawn(ammo, scene.game)).toBe(true);
+      items.touch(weapon, scene.game, scene.player.id); items.touch(ammo, scene.game, scene.player.id);
+      expect(weapon.nextThink).toBe(7.5);
+      expect(ammo.nextThink).toBe(30);
+      expect(scene.inventory.count(scene.player.id, "q2:weapon_shotgun")).toBe(1);
+    } finally { scene.actors.close(); }
+  });
+
   test("external handoff exits expansion repeat and held-throw paths through source runners", () => {
     for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) for (const name of ["trap", "tesla", "heatbeam", "chainfist", "etf_rifle"]) {
       const scene = fixture(edition), projectiles = new Q2MissionPackProjectiles({ base: scene.weapons, monster: () => null, playerEffect: () => undefined });
@@ -394,3 +452,40 @@ for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) t
     scene.setTime(40); expect(timers().map(timer => timer.item)).toEqual(["q2:item_quad", "q2:item_ir_goggles"]);
     scene.setTime(70); expect(timers()).toEqual([]);
   });
+
+for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) test(`selected ${edition} mission weapon installer covers registered ammunition and native callbacks`, () => {
+  const scene = fixture(edition);
+  try {
+    const configured = registerSelectedQ2MissionWeapons(scene.game, scene.weapons, "rogue", { monster: () => null, playerEffect: () => undefined });
+    const arsenal = new Q2SelectedArsenal({ game: scene.game, weapons: scene.weapons, ...configured, observe: () => ({ owner: scene.self, input }) });
+    arsenal.remove(scene.player.id); arsenal.admit(scene.player, 100);
+    for (const definition of scene.weapons.registeredDefinitions()) {
+      expect(configured.pickupOrder.includes(definition.item)).toBe(true);
+      expect(scene.inventory.entries(scene.player.id).some(entry => entry.item === definition.item)).toBe(true);
+      if (definition.ammo !== null) expect(scene.inventory.entries(scene.player.id).some(entry => entry.item === definition.ammo)).toBe(true);
+    }
+    expect(scene.weapons.registeredDefinitions().some(definition => definition.name === "ionripper")).toBe(edition === "rerelease");
+  } finally { scene.actors.close(); }
+});
+
+for (const pack of ["xatrix", "rogue"] satisfies readonly Q2MissionPack[]) test(`native ${pack} expansion weapon pickups map to admitted foreign inventory`, () => {
+  const scene = fixture("classic");
+  try {
+    const items = new Q2ItemModule({ weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined });
+    registerQ2MissionPackArmory(pack, { weapons: scene.weapons, items, monster: () => null, playerEffect: () => undefined, hunterCamera: false, intermission: () => false });
+    const profile = expansionSourceSupply(Q2_Q1_SUPPLY_PROFILE);
+    for (const item of new Set([...profile.ammo, ...profile.weapons].flatMap(row => row.destinations)))
+      if (item.startsWith("q1:")) scene.inventory.configure(scene.player, { item, count: 0, capacity: 200 });
+    const admission = new SharedPickupAdmission({ inventory: scene.inventory, profile, ammoGranted: () => undefined, weaponGranted: () => undefined });
+    items.setPickupAdmission(admission);
+    for (const definition of scene.weapons.registeredDefinitions().filter(definition => !Q2_BASE_WEAPONS.some(base => base.item === definition.item))) {
+      for (const entry of scene.inventory.entries(scene.player.id)) if (entry.item.startsWith("q1:")) scene.inventory.configure(scene.player, { ...entry, count: 0 });
+      const pickup = scene.game.create(definition.classname);
+      expect(items.spawn(pickup, scene.game)).toBe(true);
+      expect(items.mapsSupply(definition.item)).toBe(true);
+      items.touch(pickup, scene.game, scene.player.id);
+      expect(scene.inventory.entries(scene.player.id).some(entry => entry.item.startsWith("q1:") && entry.count > 0)).toBe(true);
+      expect(scene.actors.isLive(pickup.actor.id)).toBe(false);
+    }
+  } finally { scene.actors.close(); }
+});

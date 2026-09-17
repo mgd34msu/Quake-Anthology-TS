@@ -73,9 +73,11 @@ export class WorldSeatPresentation implements SeatPresentation {
   private readonly worldFonts = new Map<ContentId, Awaited<ReturnType<typeof loadMenuFont>>>();
   private readonly scene: ApplicationWorldScene;
   private readonly q1Fog: Q1MapFog | null;
+  private layoutIndex: number;
+  private layoutCount: number;
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
-    private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText">, private readonly seatCount: number,
+    private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText">, seatCount: number,
     font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
     private readonly effects: ApplicationEffects, private currentQ3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null,
@@ -83,16 +85,26 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly fieldOfView: () => number = () => 90,
     private readonly debugShapes: DebugShapePresentationAccess | null = null,
     private readonly consoleScale: () => number = () => 0,
-    private readonly viewSize: () => Q1ViewSettings | null = () => null) {
+    private readonly viewSize: () => Q1ViewSettings | null = () => null,
+    planarShadows: () => boolean = () => false,
+    private readonly cameraOverride: (camera: SceneCamera) => SceneCamera = camera => camera) {
+    this.layoutIndex = local.player.seat.id.index;
+    this.layoutCount = seatCount;
     this.q1Fog = assets.content.world.kind === "q1-bsp" ? new Q1MapFog(assets.content.world.entities, local.player.actor, assets.content.recipe.map.entities.content) : null;
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets, () => this.rerelease?.selectedLanguage(local.player.seat.id) ?? "english");
-    this.scene = new ApplicationWorldScene(assets, characterAssets);
+    this.scene = new ApplicationWorldScene(assets, characterAssets, planarShadows);
     this.frames = new SceneFrameBuilder(assets.images);
     this.text = new SeatTextPresentation(local.player.seat.id, font);
     this.finale = new SourceFinale(assets, this.text, this.q1Messages);
   }
 
-  get viewport(): Rect { const size = this.native.window.drawableSize; return seatViewport(this.local.player.seat.id.index, this.seatCount, size.width, size.height); }
+  get viewport(): Rect { const size = this.native.window.drawableSize; return seatViewport(this.layoutIndex, this.layoutCount, size.width, size.height); }
+
+  publishLayout(index: number, count: number): void {
+    if (!Number.isSafeInteger(index) || !Number.isSafeInteger(count) || index < 0 || index >= count || count < 1 || count > 4) throw new RangeError("Invalid local seat layout");
+    this.layoutIndex = index;
+    this.layoutCount = count;
+  }
 
   async prepareImageRefresh(images: PreparedApplicationImages): Promise<PreparedApplicationImageBinding> {
     const { font, typography } = images;
@@ -121,6 +133,10 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   camera(): SceneCamera {
+    return this.cameraOverride(this.sourceCamera());
+  }
+
+  private sourceCamera(): SceneCamera {
     if (this.q3Client?.options.kind === "qvm") return this.q3Client.camera();
     const player = this.simulation.playerView(this.local.player.actor), size = this.viewSize();
     const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
@@ -193,6 +209,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
+    const visiblePresentations = presentations.filter(presentation => this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false);
     const q1Messages = this.pendingQ1Messages.splice(0);
     const q2Messages = this.pendingQ2Messages.splice(0);
     const mirrored = new Set([...q1Messages.map(source => source.sequence), ...q2Messages.filter(source => source.kind === "q2"
@@ -236,10 +253,10 @@ export class WorldSeatPresentation implements SeatPresentation {
     if (this.q3Client !== null) {
       const size = this.viewSize();
       const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
-      await this.q3Client.prepare(snapshot.frame.frame, viewport, presentations); return;
+      await this.q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations); return;
     }
     await this.finale.prepare();
-    await this.scene.prepare(this.chaseSettings === null ? this.local.player.actor : null, snapshot, presentations, characters);
+    await this.scene.prepare(this.chaseSettings === null ? this.local.player.actor : null, snapshot, visiblePresentations, characters);
   }
 
   frame(snapshot: WorldSnapshot): RenderFrame {
@@ -255,9 +272,9 @@ export class WorldSeatPresentation implements SeatPresentation {
       lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
       ...this.scene.styles() };
     const nativeFrame = this.q3Client?.frame((camera, source) => this.effects.frame(camera, source, this.local.player.actor), camera => {
-      if (this.q3Client?.options.kind === "qvm") return camera;
+      if (this.q3Client?.options.kind === "qvm") return this.cameraOverride(camera);
       const player = this.simulation.playerView(this.local.player.actor);
-      return this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
+      return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));
     });
     this.frames.begin();
     const area = this.viewport;

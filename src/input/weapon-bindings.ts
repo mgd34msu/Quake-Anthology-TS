@@ -1,3 +1,4 @@
+import type { Q1Weapon } from "../content/q1/foundation/types.ts";
 import { WEAPONS, weaponItem } from "../content/q1/foundation/types.ts";
 import { q1WeaponDisplayName } from "../content/q1/foundation/weapon-names.ts";
 import { missionWeapons } from "../content/q1/missionpacks/types.ts";
@@ -12,11 +13,11 @@ import { q2MissionWeaponDisplayName } from "../content/q2/missionpacks/items.ts"
 export interface WeaponBindingItem { readonly id: string; readonly label: string; readonly kind: "weapon" | "powerup"; }
 
 /** Official boot catalog. A running game's registered items supersede this list. */
-export function baseWeaponBindingItems(family: "q1" | "q2" | "q3", campaign = ""): readonly WeaponBindingItem[] {
+export function baseWeaponBindingItems(family: "q1" | "q2" | "q3", campaign = "", edition = "classic"): readonly WeaponBindingItem[] {
   switch (family) {
-    case "q1": return [...WEAPONS, ...missionWeapons.filter(weapon => (campaign === "hipnotic" || campaign === "rogue") && weapon.id.startsWith(`${campaign}:`)).map(weapon => weapon.id)]
+    case "q1": return [...WEAPONS, ...(campaign === "mg3" ? ["mg3:laser", "mg3:mjolnir"] satisfies readonly Q1Weapon[] : []), ...missionWeapons.filter(weapon => (campaign === "hipnotic" || campaign === "rogue") && weapon.id.startsWith(`${campaign}:`)).map(weapon => weapon.id)]
       .map(weapon => ({ id: weaponItem(weapon), label: q1WeaponDisplayName(weapon), kind: "weapon" }));
-    case "q2": return [...Q2_BASE_WEAPONS, ...(campaign === "xatrix" ? xatrixWeaponDefinitions : campaign === "rogue" ? rogueWeaponDefinitions : [])]
+    case "q2": return [...Q2_BASE_WEAPONS, ...(edition === "rerelease" && ["baseq2", "xatrix", "rogue", "mg2"].includes(campaign) ? [...xatrixWeaponDefinitions, ...rogueWeaponDefinitions] : campaign === "xatrix" ? xatrixWeaponDefinitions : campaign === "rogue" ? rogueWeaponDefinitions : [])]
       .map(weapon => ({ id: weapon.item, label: q2BaseWeaponDisplayName(weapon.item) ?? q2MissionWeaponDisplayName(weapon.name) ?? weapon.name, kind: "weapon" }));
     case "q3": {
       const product = campaign === "missionpack" ? "missionpack" : "baseq3";
@@ -34,6 +35,7 @@ export function defaultWeaponBindings(items: readonly WeaponBindingItem[]): read
   for (const [index, weapon] of WEAPONS.entries()) append(`q1:weapon/${weapon}`, String(index + 1));
   append(weaponItem("hipnotic:laser"), "9");
   append(weaponItem("hipnotic:mjolnir"), "0");
+  append(weaponItem("mg3:laser"), "9");
   // Q2's hand grenades have their own key and do not consume a number slot.
   let slot = 1;
   for (const weapon of Q2_BASE_WEAPONS) {

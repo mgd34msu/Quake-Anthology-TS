@@ -29,7 +29,7 @@ export function readFrontendInput(local: LocalInput): FrontendInputValues {
   const mouse = local.builder.mouse.tuning;
   return { controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength, sensitivity: mouse.sensitivity,
     pitch: mouse.pitch, yaw: mouse.yaw, invertMouse: mouse.invertPitch, acceleration: mouse.acceleration, filter: mouse.filter,
-    freeLook: mouse.freeLook, alwaysRun: local.builder.tuning.alwaysRun };
+    lookSpring: mouse.lookSpring === true, lookStrafe: mouse.lookStrafe === true, freeLook: mouse.freeLook, alwaysRun: local.builder.tuning.alwaysRun };
 }
 export function applyFrontendInput(values: Partial<FrontendInputValues>, local: LocalInput): void {
   if (values.controllerVibrationStrength !== undefined) local.haptics.setStrength(values.controllerVibrationStrength);
@@ -44,6 +44,8 @@ function frontendMouseTuning(values: Partial<FrontendInputValues>, mouse: MouseT
     ...(values.yaw === undefined ? {} : { yaw: values.yaw }),
     ...(values.acceleration === undefined ? {} : { acceleration: values.acceleration }),
     ...(values.filter === undefined ? {} : { filter: values.filter }),
+    ...(values.lookSpring === undefined ? {} : { lookSpring: values.lookSpring }),
+    ...(values.lookStrafe === undefined ? {} : { lookStrafe: values.lookStrafe }),
     ...(values.freeLook === undefined ? {} : { freeLook: values.freeLook }),
     ...(values.invertMouse === undefined ? {} : { invertPitch: values.invertMouse }) };
 }
@@ -70,6 +72,8 @@ export function changedFrontendPreferences(before: FrontendPreferenceValues, aft
     ...(Object.is(after.yaw, before.yaw) ? {} : { yaw: after.yaw }),
     ...(after.acceleration === before.acceleration ? {} : { acceleration: after.acceleration }),
     ...(after.filter === before.filter ? {} : { filter: after.filter }),
+    ...(after.lookSpring === before.lookSpring ? {} : { lookSpring: after.lookSpring === true }),
+    ...(after.lookStrafe === before.lookStrafe ? {} : { lookStrafe: after.lookStrafe === true }),
     ...(after.freeLook === before.freeLook ? {} : { freeLook: after.freeLook }),
     ...(after.invertMouse === before.invertMouse ? {} : { invertMouse: after.invertMouse }),
     ...(after.alwaysRun === before.alwaysRun ? {} : { alwaysRun: after.alwaysRun }) };
@@ -120,7 +124,8 @@ export class FrontendPreferences {
       alwaysRun: this.values.alwaysRun ?? this.alwaysRunBaseline ?? defaultViewInputTuning(this.dialect()).alwaysRun }),
       write: values => { this.values = { ...this.values, ...values }; } }),
     ...bindMouseMotionSettings({ read: () => ({ acceleration: this.values.acceleration ?? this.mouseBaseline.acceleration,
+      lookSpring: this.values.lookSpring ?? this.mouseBaseline.lookSpring ?? false, lookStrafe: this.values.lookStrafe ?? this.mouseBaseline.lookStrafe ?? false,
       filter: this.values.filter ?? this.mouseBaseline.filter, freeLook: this.values.freeLook ?? this.mouseBaseline.freeLook }),
-      write: values => { this.values = { ...this.values, ...values }; } })];
+      write: values => { this.values = { ...this.values, ...values }; } }, () => this.dialect() === "q1-netquake" || this.dialect() === "q1-quakeworld")];
   }
 }

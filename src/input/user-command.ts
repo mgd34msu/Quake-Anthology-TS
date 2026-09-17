@@ -3,15 +3,16 @@
 import type { CommandDialect } from "../contracts/common.ts";
 import type { Vec3 } from "../contracts/math.ts";
 import type { UserCommand, AngleWords } from "../contracts/protocol.ts";
+import { PitchDrift, type PitchDriftState } from "./pitch-drift.ts";
 import { MouseInput } from "./mouse.ts";
 import type { SeatInputSample, SourceAction } from "./seat.ts";
 
-export type UserCommandFrame =
+export type UserCommandFrame = (
   | { readonly kind: "q1-netquake"; readonly acknowledgedServerTimeSeconds: number }
   | { readonly kind: "q1-quakeworld" }
   | { readonly kind: "q2-classic"; readonly deltaAngles: Vec3; readonly lightLevel: number; readonly attackAllowed: boolean }
   | { readonly kind: "q2-rerelease"; readonly deltaAngles: Vec3; readonly serverFrame: number; readonly attackAllowed: boolean }
-  | { readonly kind: "q3"; readonly serverTimeMilliseconds: number; readonly weapon: number; readonly sensitivity: number };
+  | { readonly kind: "q3"; readonly serverTimeMilliseconds: number; readonly weapon: number; readonly sensitivity: number }) & { readonly pitchDrift?: PitchDriftState };
 export interface ViewInputTuning {
   readonly forwardSpeed: number;
   readonly backSpeed: number;
@@ -35,6 +36,10 @@ function q1Yaw(angle: number): number { return (Math.trunc(angle * 65536 / 360) 
 function clamp(value: number, maximum: number): number { return Math.max(-maximum, Math.min(maximum, value)); }
 
 export class InputCommandBuilder {
+  private readonly pitchDrift = new PitchDrift();
+  private previousMouseLook = false;
+  private pitchDriftSettings = () => ({ speed: 500, delay: .15 });
+  bindPitchDrift(settings: () => { readonly speed: number; readonly delay: number }): void { this.pitchDriftSettings = settings; }
   private angles: Vec3 = { x: 0, y: 0, z: 0 };
   private tuningValue: ViewInputTuning;
   private runPreference: { read(): boolean; write(value: boolean): void } | null = null;
@@ -58,7 +63,7 @@ export class InputCommandBuilder {
     this.angles = { ...angles };
   }
   centerView(deltaPitch = 0): void { this.angles = { ...this.angles, x: -deltaPitch }; }
-  clear(): void { this.angles = { x: 0, y: 0, z: 0 }; this.mouse.clear(); }
+  clear(): void { this.angles = { x: 0, y: 0, z: 0 }; this.mouse.clear(); this.pitchDrift.clear(); this.previousMouseLook = false; }
   build(sample: SeatInputSample, frame: UserCommandFrame, sourceFrameMilliseconds = sample.frameMilliseconds): UserCommand {
     if (frame.kind !== this.dialect) throw new Error("User-command frame and input dialect differ");
     const q3 = frame.kind === "q3", q1 = frame.kind === "q1-netquake" || frame.kind === "q1-quakeworld";
@@ -108,6 +113,15 @@ export class InputCommandBuilder {
     const padForward = q3 ? moveSpeed : this.tuning.forwardSpeed * (running ? this.tuning.moveSpeedMultiplier : 1);
     const padSide = q3 ? moveSpeed : this.tuning.sideSpeed * (running ? this.tuning.moveSpeedMultiplier : 1);
     forward = add(forward, sample.gamepadMove.y * padForward); side = add(side, sample.gamepadMove.x * padSide);
+    if (q1 && frame.pitchDrift !== undefined) {
+      const mouseLook = active("mlook"), settings = this.pitchDriftSettings();
+      const manual = mouseLook || this.mouse.tuning.freeLook || klook && (active("forward") || active("back"))
+        || fraction("look-up") !== 0 || fraction("look-down") !== 0 || sample.gamepadLookDegrees.y !== 0;
+      pitch = this.pitchDrift.sample(pitch, sourceFrameMilliseconds, frame.pitchDrift, manual,
+        !mouseLook && (this.previousMouseLook || pressed("mlook")) && this.mouse.tuning.lookSpring === true,
+        forward, frame.kind === "q1-quakeworld" ? 200 : this.tuning.forwardSpeed, settings.speed, settings.delay);
+    }
+    this.previousMouseLook = active("mlook");
     let buttons = 0;
     const any = sample.anyKeyDown !== 0;
     if (q3) {

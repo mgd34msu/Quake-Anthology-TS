@@ -6,6 +6,7 @@ import type { LightingSample } from '../../../materials/q3-lighting.ts';
 import { QvmCgameImport, QvmUiImport } from '../../../compat/qvm/abi.ts';
 import type { QvmHostCall, QvmHostResult } from '../../../compat/qvm/syscalls.ts';
 import { GlRenderer } from '../../../render/gl/renderer.ts';
+import { q3Hardware, q3HardwareNumber } from '../../../render/q3-hardware.ts';
 import { keynumToString } from '../../../input/keys.ts';
 import { KeyCode } from '../../../input/key-codes.ts';
 import { readSdlClipboard } from '../../../platform/sdl.ts';
@@ -77,6 +78,7 @@ export class QvmApplicationScalars {
       guest.writeString(pointer + 2048, gl?.driver.version ?? 'software', 1024);
       record.setInt32(11264, gl?.maxTextureSize ?? 0, true); record.setInt32(11268, gl?.textureUnits ?? 0, true);
       record.setInt32(11272, gl?.colorBits ?? 24, true); record.setInt32(11276, gl?.depthBits ?? 64, true); record.setInt32(11280, renderer.stencilBits, true);
+      record.setInt32(11288, q3HardwareNumber(q3Hardware(gl?.driver.renderer ?? "")), true);
       record.setInt32(11304, viewport.width, true); record.setInt32(11308, viewport.height, true);
       record.setFloat32(11312, viewport.width / viewport.height, true); record.setInt32(11324, Number(gl?.stereoEnabled ?? false), true);
       return 0;

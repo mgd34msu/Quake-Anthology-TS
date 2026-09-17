@@ -58,6 +58,8 @@ import type { LocalInput } from "./input.ts";
 import type { ApplicationAssets, ProviderSceneAssets } from "./assets.ts";
 import type { ApplicationAudio } from "./audio.ts";
 import type { ApplicationEffectFrame } from "./effects.ts";
+import { GlRenderer } from "../../render/gl/renderer.ts";
+import { q3Hardware } from "../../render/q3-hardware.ts";
 import type { Q3SeatAudioOperation } from "./audio/q3.ts";
 import type { Q3SourcePresentationState } from "./simulation/q3/presentation.ts";
 import type { SimulationPresentation, SimulationPresentationEvent } from "./simulation/types.ts";
@@ -65,7 +67,7 @@ import { ApplicationQ3Source } from "./q3-client/source.ts";
 import { ApplicationQ3Assets } from "./q3-client/assets.ts";
 import { createApplicationQ3Services } from "./q3-client/services.ts";
 import type { ApplicationQ3Services } from "./q3-client/services.ts";
-import { ApplicationQ3Cinematics } from "./q3-client/cinematics.ts";
+import { ApplicationQ3Cinematics, type SystemCinematicHost } from "./q3-client/cinematics.ts";
 import { frameTimeCvarNames, refreshFrameTimeCvars } from "./frame-time.ts";
 import { selectApplicationQ3Snapshot } from "./q3-client/visibility.ts";
 import { ApplicationQ3ForeignModels } from "./q3-client/foreign.ts";
@@ -85,12 +87,14 @@ export interface ApplicationQ3ClientSource extends SnapshotSource {
   snapshotPing?(number: number): number | null;
 }
 interface ApplicationQ3ClientCommonOptions {
+  readonly systemCinematics?: SystemCinematicHost;
   saveFontData(): boolean;
   readonly cvars?: CvarRegistry;
   readonly timeCvars?: CvarRegistry;
   readonly weaponHud?: WeaponHudReader;
   assertCurrent?(): void;
   readonly assets: ApplicationAssets;
+  readonly renderer: QvmApplicationScalarOptions["renderer"];
   readonly queries: SceneQueries & Pick<SharedSceneQueries, "pointLeaf" | "leafCluster" | "leafArea" | "areaBits">;
   readonly local: LocalInput; readonly audio: ApplicationAudio;
   readonly settings?: readonly CvarSnapshot[];
@@ -111,7 +115,7 @@ export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
       readonly browser: Q3BrowserView;
       readonly guestCvars: QvmCvarServices;
       readonly guestInput: QvmApplicationScalarOptions["input"];
-      readonly queries: SharedSceneQueries; readonly commandBuffer: Pick<CommandBuffer, 'executeNow' | 'insert' | 'append'>; readonly renderer: QvmApplicationScalarOptions["renderer"];
+      readonly queries: SharedSceneQueries; readonly commandBuffer: Pick<CommandBuffer, 'executeNow' | 'insert' | 'append'>;
       readonly clientState: QvmApplicationScalarOptions["clientState"] }
 );
 export type QvmVideoReopenOptions = Pick<Extract<ApplicationQ3ClientOptions, { readonly kind: "qvm" }>,
@@ -281,6 +285,10 @@ export class ApplicationQ3Client {
   private commandContext(): CommandContext { const player = this.options.local.player; return { session: player.actor.session,
     origin: { kind: "local-seat", seat: player.seat.id, client: player.seat.client.id } }; }
   private requireServices(): ApplicationQ3Services { if (this.closed || this.services === null) throw new Error("Q3 presentation services are closed or uninitialized"); return this.services; }
+  resourceDiagnostics() {
+    const resources = this.requireServices().resources;
+    return { models: resources.registeredModels(), skins: resources.registeredSkins() };
+  }
   private requireBackend() { if (this.closed || this.backend === null) throw new Error("Q3 cgame seat is closed or uninitialized"); return this.backend; }
   private requireGame(): Q3ClientPresentation { const backend = this.requireBackend(); if (backend.kind !== "typescript") throw new Error("This seat runs native guest cgame"); return backend.game; }
   private async initialize(): Promise<void> {
@@ -291,6 +299,7 @@ export class ApplicationQ3Client {
     });
     collisionSettings.registerMap();
     const services = await createApplicationQ3Services({ collisionSettings, media, audio: o.audio, seat, viewport: this.viewportValue, queries: o.queries,
+      ...(o.systemCinematics === undefined ? {} : { systemCinematics: o.systemCinematics }),
       actorAt: number => source.actorAt(number), clock: { now: o.now, frameNumber: () => this.frameNumber }, output: {
         scene: scene => { this.submissions.push({ kind: "scene", scene }); if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) this.latestCamera = scene.camera; },
         command: command => { this.submissions.push({ kind: "command", command }); }, text: draw => { this.submissions.push({ kind: "text", draw }); },
@@ -325,7 +334,8 @@ export class ApplicationQ3Client {
       updateViewAngles: (state, command) => this.localRound().movement.updateViewAngles(state, command),
     };
     const game = await createQ3ClientPresentation({ ...(o.weaponHud === undefined ? {} : { weaponHud: o.weaponHud }), assets: media, resources, scene: recorder, sound, draw, fontRegistry: media.fontRegistry,
-      world: o.assets.world, collision: services.collision, movement, target: this.viewportValue, hardware: "generic", commandContext: this.commandContext(),
+      world: o.assets.world, collision: services.collision, movement, target: this.viewportValue,
+      get hardware() { const backend = o.renderer.backend; return backend instanceof GlRenderer && q3Hardware(backend.driver.renderer) === "ragepro" ? "ragepro" : "generic"; }, commandContext: this.commandContext(),
       session,
       clock: { milliseconds: o.now, serverTime: () => source.time, frameNumber: () => this.frameNumber },
       menus: this.product === "baseq3" ? { kind: "baseq3" } : { kind: "missionpack", cinematics,

@@ -185,6 +185,7 @@ export class SeatInput {
       case "mouse-button": this.digital({ kind: "mouse-button", button: event.button }, event.down, time, consumed); break;
       case "controller-button": this.digital({ kind: "controller-button", device: event.device, button: event.button }, event.down, time, consumed); break;
       case "controller-axis": {
+        this.gamepad.previewAxis(event.axis, event.value);
         if (!consumed && this.currentFocus.kind === "game") this.gamepad.axis(event.axis, event.value);
         for (const direction of ["negative", "positive"] satisfies readonly ("negative" | "positive")[]) {
           const value = direction === "positive" ? event.value : -event.value;

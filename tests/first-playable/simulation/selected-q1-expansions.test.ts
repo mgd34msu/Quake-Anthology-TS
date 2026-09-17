@@ -22,11 +22,13 @@ const models: Readonly<Record<string, string>> = {
   monster_scourge: "scor", monster_gremlin: "grem", monster_armagon: "armalegs", monster_eel: "eel2",
   monster_sword: "sword", monster_wrath: "wrath", monster_mummy: "mummy", monster_super_wrath: "s_wrath", monster_lava_man: "lavaman",
 };
+const mg3Models: Readonly<Record<string, string>> = { monster_demodog: "dog_explosive", monster_army_infected: "soldier", monster_knight_infected: "knight",
+  monster_enforcer_infected: "enforcer", monster_hell_knight_infected: "hknight", monster_ranged_knight: "rknight", monster_super_shambler: "shambler_blood", monster_lava_man: "lavaman" };
 const addonModels: Readonly<Record<string, string>> = { monster_army: "soldier", monster_ogre: "ogre", monster_knight: "knight", monster_fish: "fish" };
 
 for (const source of [...q1ExpansionMonsterSources, ...q1AddonMonsterSources]) test(`${source.provider} actual selected expansion controllers preserve foreign authored actors and save continuation`, async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
-  const addon = source.program === "dopa" || source.program === "mg1", expectedModels = addon ? addonModels : models;
+  const addon = source.program === "dopa" || source.program === "mg1" || source.program === "mg3", expectedModels = source.program === "mg3" ? mg3Models : addon ? addonModels : models;
   for (const classname of Object.keys(source.creatures).filter(name => Object.hasOwn(expectedModels, name))) {
     const aquatic = classname === "monster_eel" || classname === "monster_fish";
     const command = parseApplicationCommand(["--game", aquatic ? "q1-classic-id1" : "q2-classic-baseq2", "--map", aquatic ? "e2m3" : "base1", "--dedicated"]);

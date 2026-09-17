@@ -174,6 +174,7 @@ export class Q2RereleasePlayers extends Q2Players {
       game.host.combat.setTraits(entity.actor, { invulnerable: false });
       const weapon = this.weapons.states.get(entity.actor.id);
       if (weapon !== undefined) { weapon.weapon = "blaster"; weapon.pending = null; }
+      if (state.useQ2Inventory) this.hooks.persistentInventoryInitialized?.(entity, game);
       this.extension?.spawned(entity, game);
       state.coopRespawn = this.saveCarry(entity, game);
     }

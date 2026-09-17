@@ -453,7 +453,7 @@ export class Q1EntityServices {
       const angular = entity.angularVelocity;
       stepQ1Pusher({ actor: actor.id, elapsedSeconds,
         movement: angular.x !== 0 || angular.y !== 0 || angular.z !== 0 ? "rotate" : "translate" }, this.host.pusherServices(this));
-    } else if (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "fly" || entity.movement === "flymissile") this.projectilePhysics(entity, elapsedSeconds);
+    } else if (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "gib" || entity.movement === "fly" || entity.movement === "flymissile") this.projectilePhysics(entity, elapsedSeconds);
     return undefined;
   }
 
@@ -472,7 +472,8 @@ export class Q1EntityServices {
     for (const [powerup, expires] of player.powerups) if (expires <= seconds) { player.powerups.delete(powerup); this.host.powerup(actor, powerup, 0); }
     if (this.intermission !== null || this.health(actor.id) < 0) return undefined;
     const suit = (player.powerups.get("suit") ?? 0) > seconds;
-    if (player.waterLevel !== 3 || suit) { player.airFinished = seconds + 12; player.drownDamage = 2; }
+    const lavaSuit = (player.powerups.get("mg3:lavasuit") ?? 0) > seconds;
+    if (player.waterLevel !== 3 || suit || lavaSuit) { player.airFinished = seconds + 12; player.drownDamage = 2; }
     else if (player.airFinished < seconds && player.drownAt < seconds) {
       player.drownDamage += 2; if (player.drownDamage > 15) player.drownDamage = 10;
       this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, player.drownDamage, null, "direct", "drown"); player.drownAt = seconds + 1;
@@ -480,9 +481,9 @@ export class Q1EntityServices {
     const body = this.host.bodies.read(actor.id);
     if (body !== null && player.waterLevel > 0 && player.hazardAt < seconds) {
       const contents = this.host.contents(vadd(body.origin, { x: 0, y: 0, z: body.bounds.min.z + 1 }));
-      if (contents === "lava") {
+      if (contents === "lava" && !lavaSuit) {
         player.hazardAt = seconds + (suit ? 1 : 0.2); this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 10 * player.waterLevel, null, "direct", "lava");
-      } else if (contents === "slime" && !suit) {
+      } else if (contents === "slime" && !suit && !lavaSuit) {
         player.hazardAt = seconds + 1; this.damage(actor.id, this.world?.actor.id ?? actor.id, this.world?.actor.id ?? null, 4 * player.waterLevel, null, "direct", "slime");
       }
     }
@@ -611,10 +612,13 @@ export class Q1EntityServices {
   }
   presentations(): readonly Q1Presentation[] { return [...this.entities.values()].map(entity => ({ actor: entity.actor.id, classname: entity.classname, model: entity.model, frame: entity.frame, skin: entity.skin, effects: entity.effects, solid: entity.solid, movement: entity.movement, targetname: entity.targetname, sourceOrdinal: entity.sourceOrdinal })); }
   private projectilePhysics(entity: Q1Actor, elapsed: number): undefined {
+    const gib = entity.movement === "gib";
+    if (gib && (this.options.physicsEdition ?? this.options.edition) !== "rerelease") throw new Error("Gib movement requires the rerelease physics profile");
+    const gravity = gib ? (entity.number("gravity") || 1) * this.options.gravity : this.options.gravity;
     let body = this.body(entity);
     if (body.ground !== null) return undefined;
     let velocity = body.velocity;
-    if (entity.movement !== "flymissile" && entity.movement !== "fly") velocity = { ...velocity, z: Math.fround(velocity.z - this.options.gravity * elapsed) };
+    if (entity.movement !== "flymissile" && entity.movement !== "fly") velocity = { ...velocity, z: Math.fround(velocity.z - gravity * elapsed) };
     const trace = this.host.trace({ start: body.origin, end: vadd(body.origin, vscale(velocity, elapsed)), bounds: body.bounds, ignore: entity.actor.id,
       monsters: entity.solid !== "none" && entity.solid !== "trigger", missile: entity.movement === "flymissile" });
     this.setBody(entity, { origin: trace.end, velocity, angles: vadd(body.angles, vscale(entity.angularVelocity, elapsed)) }); this.link(entity);
@@ -627,9 +631,10 @@ export class Q1EntityServices {
     }
     if (!this.live(entity)) return undefined;
     body = this.body(entity);
-    const overbounce = entity.movement === "bounce" ? 1.5 : 1;
+    const bounces = entity.movement === "bounce" || entity.movement === "gib" && (this.options.physicsEdition ?? this.options.edition) === "rerelease";
+    const overbounce = bounces ? 1.5 : 1;
     velocity = vsub(body.velocity, vscale(trace.normal, dot(body.velocity, trace.normal) * overbounce));
-    if (trace.normal.z > 0.7 && (velocity.z < 60 || entity.movement !== "bounce")) { velocity = ZERO; entity.angularVelocity = ZERO; }
+    if (trace.normal.z > 0.7 && (velocity.z < 60 || !bounces)) { velocity = ZERO; entity.angularVelocity = ZERO; }
     this.setBody(entity, { velocity, ground: velocity === ZERO ? trace.actor : null });
     return this.checkWaterTransition(entity);
   }

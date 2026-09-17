@@ -1,3 +1,5 @@
+import type { Q1SaveData } from "../../../persistence/q1.ts";
+import { captureQ1SourceSave, restoreQ1SourceSave } from "../../../persistence/q1-source.ts";
 import { registerQuakeWorldEngineCvars } from "./quakeworld-cvars.ts";
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue, namespaced } from "../../../persistence/value.ts";
 import { captureQcCheckpoint, restoreQcCheckpoint, type QcExecutorHost } from "../../../compat/qc/executor.ts";
@@ -111,6 +113,7 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
 export type QuakeCPhysicsCallback = Id1PhysicsCallback;
 
 export interface QuakeCSourceOptions {
+  readonly originalSaveCandidate?: boolean;
   readonly sourceRegistry?: CvarRegistry;
   readonly restore?: { readonly checkpoint: QuakeCCheckpoint; readonly clients: readonly ClientId[] };
   readonly recipe: ExecutableRecipe;
@@ -155,6 +158,9 @@ export class QuakeCSource {
   private readonly userInfo = new Map<number, ReadonlyMap<string, string>>();
   private readonly spawnParameters = new Map<number, readonly number[]>();
   private readonly clientIdentities = new Map<number, ClientId>();
+  private originalSaveRestored = false;
+  private originalSaveExtensionText = "";
+  private readonly spectatorSlots = new Set<number>();
   private readonly preparedClients = new Set<number>();
   private readonly fragRecords: { readonly killer: ActorId; readonly victim: ActorId }[] = [];
   private readonly routed: { readonly entries: readonly QcRoutedMessage[]; readonly destination: QcMessageDestination }[] = [];
@@ -273,12 +279,29 @@ export class QuakeCSource {
     this.attacks.assertIdle();
     return captureQcCheckpoint(this.machine, this.module, this.checkpointHost());
   }
+  captureOriginalSave(format: Q1SaveData["format"], comment: string): Q1SaveData {
+    const actor = this.slots.at(1), parameters = this.spawnParameters.get(1);
+    if (actor === null || !this.activeClients.has(actor.id) || parameters === undefined) throw new Error("Original Quake save requires an active source client");
+    return captureQ1SourceSave(this, format, comment, parameters, this.originalSaveExtensionText);
+  }
+  restoreOriginalSave(save: Q1SaveData): ReturnType<typeof restoreQ1SourceSave> {
+    if (this.options.originalSaveCandidate !== true || this.originalSaveRestored) throw new Error("Original Quake restore requires a fresh staged candidate");
+    const actor = this.slots.at(1);
+    if (actor === null || !this.activeClients.has(actor.id)) throw new Error("Original Quake restore requires an active source client binding");
+    this.originalSaveRestored = true;
+    return restoreQ1SourceSave(this, save, header => {
+      this.currentTime = header.time; this.spawnParameters.set(1, [...header.spawnParameters]);
+      this.changeLevelIssued = false; this.pendingWeapons.clear(); this.originalSaveExtensionText = save.extensionText;
+      return undefined;
+    });
+  }
   private checkpointHost(): QcExecutorHost {
     return { checkpoint: () => ({ state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
       kind: this.kind, maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
       changeLevelIssued: this.changeLevelIssued, spawning: this.spawning, activeClients: [...this.activeClients].map(savedQcActor),
       pendingWeapons: [...this.pendingWeapons].map(([actor, pending]) => ({ actor: savedQcActor(actor), weapon: pending.weapon.item, following: pending.following })),
       userInfo: [...this.userInfo].map(([slot, values]) => ({ slot, values: [...values].map(([key, value]) => ({ key, value })) })),
+      spectatorSlots: [...this.spectatorSlots], originalSaveExtensionText: this.originalSaveExtensionText,
       spawnParameters: [...this.spawnParameters].map(([slot, values]) => ({ slot, values })),
       clientIdentities: [...this.clientIdentities].map(([slot, client]) => ({ slot, clientSlot: client.slot })), preparedClients: [...this.preparedClients],
       fragRecords: this.fragRecords.map(entry => ({ killer: savedQcActor(entry.killer), victim: savedQcActor(entry.victim) })),
@@ -300,6 +323,8 @@ export class QuakeCSource {
     this.spawning = false; this.currentTime = reader.field("currentTime").finite();
     if (this.currentTime < 0) reader.fail("negative source frame-entry time");
     this.changeLevelIssued = reader.field("changeLevelIssued").boolean();
+    const extension = reader.field("originalSaveExtensionText");
+    this.originalSaveExtensionText = extension.value === undefined ? "" : extension.string();
     const reference = (entry: SaveReader) => this.options.actors.referenceSaved({ slot: entry.field("slot").integer(0), generation: entry.field("generation").integer(0) });
     const live = (entry: SaveReader) => { const actor = reference(entry); if (this.sourceSlot(actor) === null) entry.fail("missing live QC actor"); return actor; };
     const clientSlot = (entry: SaveReader) => { const slot = entry.integer(1); if (slot > this.reservedClientSlots) entry.fail("invalid reserved client slot"); return slot; };
@@ -324,6 +349,12 @@ export class QuakeCSource {
       const client = restore.clients.find(client => client.slot === clientSlotValue);
       if (slot !== clientSlotValue + 1 || client === undefined || this.clientIdentities.has(slot)) return entry.fail("missing restored QC client identity");
       this.clientIdentities.set(slot, client);
+    }
+    this.spectatorSlots.clear();
+    const spectators = reader.field("spectatorSlots");
+    if (spectators.value !== undefined) for (const slot of spectators.list(clientSlot)) {
+      if (this.kind !== "quakeworld" || !this.clientIdentities.has(slot) || this.spectatorSlots.has(slot)) spectators.fail("invalid spectator slot");
+      this.spectatorSlots.add(slot);
     }
     this.preparedClients.clear(); for (const slot of reader.field("preparedClients").list(clientSlot)) {
       if (this.preparedClients.has(slot) || !this.clientIdentities.has(slot)) reader.fail("invalid prepared client phase"); this.preparedClients.add(slot);
@@ -369,6 +400,21 @@ export class QuakeCSource {
     if (actor !== null && (this.activeClients.has(actor.id) || this.preparedClients.has(client.slot + 1))) this.entities.at(client.slot + 1).setInt(this.field("netname"),
       this.kind === "quakeworld" ? this.machine.strings.setEngine(`qw-name:${client.slot + 1}`, values.get("name") ?? "unnamed", 32) : this.machine.strings.allocate(values.get("name") ?? "unnamed"));
   }
+  setClientRole(client: ClientId, role: "player" | "spectator"): void {
+    if (role === "spectator" && this.kind !== "quakeworld") throw new Error("Spectator clients require the QuakeWorld host ABI");
+    const actor = this.reservedClient(client), slot = client.slot + 1;
+    if (this.activeClients.has(actor.id)) throw new Error("QC client role must be selected before begin");
+    if (role === "spectator") this.spectatorSlots.add(slot); else this.spectatorSlots.delete(slot);
+  }
+  isSpectatorClient(actor: ActorId): boolean {
+    const slot = this.sourceSlot(actor);
+    return slot !== null && this.kind === "quakeworld" && this.spectatorSlots.has(slot);
+  }
+  private spectatorCallback(name: "SpectatorConnect" | "SpectatorThink" | "SpectatorDisconnect", slot: number): undefined {
+    const callback = this.prepared.program.functionsByName.get(name);
+    if (callback !== undefined && callback.index !== 0) this.invoke(callback.index, slot, 0, this.currentTime);
+    return undefined;
+  }
   reservedClient(client: ClientId): OwnedActor {
     if (client.slot < 0 || client.slot >= this.options.maxClients || this.spawning) throw new Error("QC reserved client is unavailable");
     const existing = this.clientIdentities.get(client.slot + 1);
@@ -393,7 +439,7 @@ export class QuakeCSource {
       }
       const parameters = this.spawnParameters.get(slot);
       if (parameters === undefined) throw new Error("Native QuakeC connection has no spawn parameters");
-      clients.push({ client, parameters: [...parameters], userInfo: new Map(this.userInfo.get(slot)) });
+      clients.push({ client, role: this.spectatorSlots.has(slot) ? "spectator" : "player", parameters: [...parameters], userInfo: new Map(this.userInfo.get(slot)) });
     }
     return { kind: this.kind, serverFlags, clients, cvars: this.cvars.snapshots().map(variable => ({ name: variable.name, value: variable.latchedValue ?? variable.value })) };
   }
@@ -408,6 +454,10 @@ export class QuakeCSource {
       const slot = record.client.slot + 1;
       if (slot < 1 || slot > this.reservedClientSlots || this.clientIdentities.has(slot) || record.parameters.length !== 16 || record.parameters.some(value => !Number.isFinite(value)))
         throw new Error("Invalid native QuakeC travel client parameters");
+      if (record.role === "spectator") {
+        if (this.kind !== "quakeworld") throw new Error("NetQuake travel cannot contain a spectator");
+        this.spectatorSlots.add(slot);
+      }
       this.clientIdentities.set(slot, record.client); this.spawnParameters.set(slot, [...record.parameters]); this.userInfo.set(slot, new Map(record.userInfo));
     }
   }
@@ -543,16 +593,29 @@ export class QuakeCSource {
       words.setFloat(this.field("colormap"), slot); words.setFloat(this.field("team"), 1);
       words.setInt(this.field("netname"), this.machine.strings.allocate(this.userInfo.get(slot)?.get("name") ?? `Player ${slot}`));
     }
-    for (const [index, value] of parameters.entries()) this.machine.globals.setFloat(this.machine.globalOffset(`parm${index + 1}`), value);
+    const spectator = this.spectatorSlots.has(slot), spectatorConnect = this.prepared.program.functionsByName.get("SpectatorConnect");
+    if (!spectator || spectatorConnect !== undefined && spectatorConnect.index !== 0)
+      for (const [index, value] of parameters.entries()) this.machine.globals.setFloat(this.machine.globalOffset(`parm${index + 1}`), value);
     this.activeClients.add(actor.id);
     this.bindClientInventory(actor, slot);
-    this.invoke(this.prepared.program.functionNamed("ClientConnect").index, slot, 0, this.currentTime);
-    this.invoke(this.prepared.program.functionNamed("PutClientInServer").index, slot, 0, this.currentTime);
+    if (spectator) {
+      words.setVector(this.field("origin"), { x: 0, y: 0, z: 0 });
+      words.setVector(this.field("view_ofs"), { x: 0, y: 0, z: 22 });
+      for (let candidate = this.reservedClientSlots - 1; candidate < this.entities.count; candidate++) {
+        const entity = this.entities.at(candidate);
+        if (this.machine.strings.get(entity.int(this.field("classname"))) !== "info_player_start") continue;
+        words.setVector(this.field("origin"), entity.vector(this.field("origin"))); break;
+      }
+      this.spectatorCallback("SpectatorConnect", slot);
+    } else {
+      this.invoke(this.prepared.program.functionNamed("ClientConnect").index, slot, 0, this.currentTime);
+      this.invoke(this.prepared.program.functionNamed("PutClientInServer").index, slot, 0, this.currentTime);
+    }
     return actor;
   }
   clientKill(actor: ActorId): boolean {
     const slot = this.sourceSlot(actor);
-    if (slot === null || !this.activeClients.has(actor) || this.entities.at(slot).float(this.field("health")) <= 0) return false;
+    if (slot === null || !this.activeClients.has(actor) || this.isSpectatorClient(actor) || this.entities.at(slot).float(this.field("health")) <= 0) return false;
     this.invoke(this.prepared.program.functionNamed("ClientKill").index, slot, 0, this.currentTime);
     return true;
   }
@@ -560,7 +623,11 @@ export class QuakeCSource {
   disconnectClient(actor: OwnedActor): undefined {
     const slot = this.sourceSlot(actor.id);
     if (slot === null || !this.isReservedClient(actor.id)) throw new Error("QC disconnect requires a reserved client");
-    if (this.activeClients.has(actor.id)) this.invoke(this.prepared.program.functionNamed("ClientDisconnect").index, slot, 0, this.currentTime);
+    if (this.activeClients.has(actor.id)) {
+      if (this.isSpectatorClient(actor.id)) this.spectatorCallback("SpectatorDisconnect", slot);
+      else this.invoke(this.prepared.program.functionNamed("ClientDisconnect").index, slot, 0, this.currentTime);
+    }
+    this.spectatorSlots.delete(slot);
     this.activeClients.delete(actor.id);
     this.pendingWeapons.delete(actor.id);
     this.preparedClients.delete(slot); this.spawnParameters.delete(slot); this.userInfo.delete(slot); this.clientIdentities.delete(slot);
@@ -599,7 +666,7 @@ export class QuakeCSource {
     return { ...state, origin: { x: origin.x + mins.x + 16, y: origin.y + mins.y + 16, z: origin.z + mins.z + 24 },
       velocity: words.vector(this.field("velocity")), angles: words.vector(this.field("v_angle")),
       waterJumpTimeSeconds: words.float(this.field("teleport_time")), dead: words.float(this.field("health")) <= 0,
-      spectator: words.float(this.field("movetype")) === 8 ? 1 : 0 };
+      spectator: this.isSpectatorClient(actor) ? 1 : 0 };
   }
   writeQuakeWorldState(actor: ActorId, state: QwMovementState): undefined {
     const words = this.entities.fromReference(this.reference(actor)), mins = words.vector(this.field("mins"));
@@ -641,6 +708,7 @@ export class QuakeCSource {
       angles.z = (Math.abs(side) < 200 ? Math.abs(side) * 2 / 200 : 2) * (side < 0 ? -1 : 1) * 4;
       words.setVector(this.field("angles"), angles);
     }
+    if (this.isSpectatorClient(actor.id)) return undefined;
     this.machine.globals.setFloat(this.machine.globalOffset("frametime"), command.milliseconds * 0.001);
     this.clientPreThink(actor);
     return this.runThink(actor, { ...frame, time: { kind: "seconds", value: this.currentTime }, elapsed: { kind: "seconds", value: command.milliseconds * 0.001 } });
@@ -695,12 +763,14 @@ export class QuakeCSource {
     return true;
   }
   clientPreThink(actor: OwnedActor): undefined {
+    if (this.isSpectatorClient(actor.id)) return undefined;
     const slot = this.sourceSlot(actor.id); if (slot === null) throw new Error("Missing QC client");
     this.invoke(this.prepared.program.functionNamed("PlayerPreThink").index, slot, 0, this.currentTime);
     return undefined;
   }
   clientPostThink(actor: OwnedActor): undefined {
     const slot = this.sourceSlot(actor.id); if (slot === null) return undefined;
+    if (this.isSpectatorClient(actor.id)) return this.spectatorCallback("SpectatorThink", slot);
     const words = this.entities.at(slot), pending = this.pendingWeapons.get(actor.id), impulse = words.float(this.field("impulse"));
     if (pending !== undefined && (this.options.inventory.count(actor.id, pending.weapon.item) <= 0 || words.float(this.field("health")) <= 0)) {
       this.pendingWeapons.delete(actor.id);
@@ -846,7 +916,8 @@ export class QuakeCSource {
     const slot = this.sourceSlot(actor.id); if (slot === null) return null;
     const words = this.entities.at(slot), solid = words.float(this.field("solid")), flags = Math.trunc(words.float(this.field("flags")));
     const name = this.machine.strings.get(words.int(this.field("model"))), model = name.startsWith("*") ? Number(name.slice(1)) : slot === 0 ? 0 : null;
-    return { family: "q1", solid: solid === 0 ? "none" : solid === 1 ? "trigger" : solid === 4 ? "brush" : "box", model,
+    const corpse = solid === 5 && this.options.recipe.engineBehavior.content.startsWith("q1:rerelease:");
+    return { family: "q1", ...(corpse ? { q1Corpse: true } : {}), solid: solid === 0 || solid === 5 && !corpse ? "none" : solid === 1 ? "trigger" : solid === 4 ? "brush" : "box", model,
       owner: words.int(this.field("owner")) === 0 ? null : this.slots.at(this.entities.slot(words.int(this.field("owner"))))?.id ?? null,
       monster: (flags & 32) !== 0, item: (flags & 256) !== 0 };
   }
@@ -862,6 +933,9 @@ export class QuakeCSource {
       case 7: kind = "push"; break;
       case 9: kind = "fly-missile"; break;
       case 10: kind = "bounce"; break;
+      case 11:
+        if (!this.options.recipe.engineBehavior.content.startsWith("q1:rerelease:")) throw new Error(`Unsupported id1 movetype ${move}`);
+        kind = "bounce"; break;
       default: throw new Error(`Unsupported id1 movetype ${move}`);
     }
     return { actor, kind, velocity: body.velocity, angularVelocity: words.vector(this.field("avelocity")), gravity: this.prepared.program.fieldsByName.has("gravity") ? words.float(this.field("gravity")) || 1 : 1,

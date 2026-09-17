@@ -69,8 +69,15 @@ export function hipnoticWeaponRank(weapon: Q1PlayerState["weapon"]): number {
   }
 }
 function takeWeapon(game: Q1EntityServices, player: Q1PlayerState, weapon: MissionWeaponDefinition): "refused" | "leave" | "taken" {
-  const leave = game.pickupRules?.weaponLeave?.(game) ?? false, item = weaponItem(weapon.id), owned = game.host.inventory.count(player.actor.id, item) > 0;
+  const leave = game.pickupRules?.weaponLeave?.(game) ?? false, item = weaponItem(weapon.id);
+  const admission = game.pickupAdmission?.maps("weapons", item) === true ? game.pickupAdmission : null;
+  const owned = admission === null ? game.host.inventory.count(player.actor.id, item) > 0 : admission.owns(player.actor.id, item);
   if (leave && owned) return "refused";
+  if (admission !== null) {
+    const selection = (game.pickupRules?.autoSwitch?.(game, player, owned) ?? true) ? game.options.deathmatch === 0 ? "always" : "better" : "never";
+    if (!admission.weapon(player.actor, { item, ammo: [{ item: weapon.ammo ?? "q1:ammo/cells", amount: weapon.pickupAmmo }] }, selection)) return "refused";
+    return leave ? "leave" : "taken";
+  }
   game.host.inventory.give(player.actor, item, 1); game.host.inventory.give(player.actor, weapon.ammo ?? "q1:ammo/cells", weapon.pickupAmmo);
   if (game.pickupRules?.autoSwitch?.(game, player, owned) ?? true) {
     if (game.options.deathmatch === 0 || weapon.rank < hipnoticWeaponRank(player.weapon)) game.selectWeapon(player.actor, weapon.id);
@@ -84,6 +91,10 @@ function pickup(game: Q1EntityServices, entity: Q1Actor, other: ActorId, service
   switch (item.kind) {
     case "weapon": result = takeWeapon(game, player, item.weapon); break;
     case "ammo": {
+      if (game.pickupAdmission?.maps("ammo", item.item) === true) {
+        if (!game.pickupAdmission.ammo(player.actor, { item: item.item, amount: item.amount }, game.options.edition === "classic" || player.autoSwitch !== "never")) return undefined;
+        break;
+      }
       const best = game.chooseBest(player.actor);
       if (game.host.inventory.give(player.actor, item.item, item.amount) === 0) return undefined;
       services.enableCombos(player); if (player.weapon === best && (game.options.edition === "classic" || player.autoSwitch !== "never")) game.selectWeapon(player.actor, game.chooseBest(player.actor)); break;

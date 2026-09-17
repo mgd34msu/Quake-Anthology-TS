@@ -1,7 +1,8 @@
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import type { InstalledCatalog } from "../../content/catalog/index.ts";
-import { readSaveImage } from "../../persistence/save-image.ts";
+import { readSavedGame } from "../../persistence/saved-game.ts";
+import { selectQ1SaveProduct } from "../../persistence/q1-selection.ts";
 import { savedSimulationSettings } from "./simulation/index.ts";
 
 export interface StartupSaveRow {
@@ -56,14 +57,15 @@ export class StartupSaves {
       let savedAtMilliseconds = 0, map = "Unknown map", game = "Unknown game", unavailable: string | null = null;
       try {
         savedAtMilliseconds = (await stat(path)).mtimeMs;
-        const image = await readSaveImage(path);
-        map = image.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, "");
-        const product = this.catalog.product(image.recipe.map.entities.content);
+        const save = await readSavedGame(path);
+        const product = save.kind === "shared" ? this.catalog.product(save.image.recipe.map.entities.content)
+          : selectQ1SaveProduct(this.catalog, save.data, path);
+        map = save.kind === "shared" ? save.image.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, "") : save.data.map;
         game = `${product.expectation.title} (${product.expectation.edition})`;
-        savedSimulationSettings(image);
+        if (save.kind === "shared") savedSimulationSettings(save.image);
         if (product.availability.kind !== "installed") unavailable = "Required game content is not installed.";
-      } catch {
-        unavailable = "This saved game is unreadable or uses an unsupported save version.";
+      } catch (cause) {
+        unavailable = cause instanceof Error ? cause.message : "This saved game is unreadable or uses an unsupported save version.";
       }
       paths.set(id, path); rows.push({ id, label, map, game, savedAtMilliseconds, unavailable });
     }

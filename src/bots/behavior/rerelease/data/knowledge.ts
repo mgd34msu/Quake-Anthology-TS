@@ -161,6 +161,14 @@ export interface BotKnowledgeOptions {
   readonly weaponNumber?: (classname: string) => number | undefined;
 }
 export class BotKnowledge {
+  replaceWeapons(weapons: readonly BotWeaponT[]): void {
+    this.weapons.splice(0, this.weapons.length, ...weapons);
+    this.weaponsByNumber.clear(); this.weaponsByName.clear();
+    for (const weapon of weapons) {
+      if (weapon.number !== 0) this.weaponsByNumber.set(weapon.number, weapon);
+      this.weaponsByName.set(weapon.name, weapon);
+    }
+  }
   readonly format: BotDataFormat;
   readonly dangers: DangerEntry[];
   readonly characters: CharacterEntry[] = [];

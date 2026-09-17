@@ -40,12 +40,13 @@ export type Q2PresentationEvent =
   | { readonly kind: "model"; readonly actor: ActorId; readonly path: string; readonly attachedModels: readonly string[]; readonly frame: number; readonly oldFrame: number; readonly scale: number; readonly alpha: number; readonly skin: number; readonly effects: number; readonly renderFlags: number }
   | { readonly kind: "visibility"; readonly actor: ActorId; readonly visible: boolean }
   | { readonly kind: "sound"; readonly actor: ActorId | null; readonly origin: Vec3; readonly path: string; readonly channel: number; readonly volume: number; readonly attenuation: number; readonly reliable: boolean; readonly loop: "start" | "stop" | "once" }
-  | { readonly kind: "centerprint"; readonly actor: ActorId; readonly text: string }
+  | { readonly kind: "centerprint"; readonly actor: ActorId; readonly text: string; readonly instant?: boolean; readonly durationSeconds?: number }
   | { readonly kind: "print"; readonly actor: ActorId | null; readonly level: "low" | "medium" | "high" | "chat"; readonly text: string }
   | { readonly kind: "help"; readonly slot: 1 | 2; readonly text: string }
   | { readonly kind: "lightstyle"; readonly style: number; readonly pattern: string }
   | { readonly kind: "music"; readonly track: string }
   | { readonly kind: "effect"; readonly effect: string; readonly origin: Vec3; readonly direction: Vec3; readonly count: number; readonly color: number }
+  | { readonly kind: "damage-indicator"; readonly actor: ActorId; readonly origin: Vec3; readonly amount: number }
   | { readonly kind: "pickup"; readonly player: ActorId; readonly item: ItemId; readonly icon: string; readonly name: string }
   | { readonly kind: "poi"; readonly origin: Vec3; readonly message: string; readonly fields: ReadonlyMap<string, string> }
   | ({ readonly kind: "dynamic-light" } & import("./shadow-lights.ts").Q2ShadowLightState)

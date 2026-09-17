@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { basename, dirname, extname, relative, resolve } from "node:path";
 import { createContentId, createMountId, createMountIdentity } from "../../contracts/content.ts";
 import type { ArchiveFormat, ContentDigest, ContentId, ContentMount, MountPlanId, ResolvedMountPlan } from "../../contracts/content.ts";
@@ -159,10 +159,28 @@ function productDirectories(product: CatalogProduct): readonly { readonly root: 
   return [user, { root: product.looseRoot, archives: product.archives.filter(archive => !userArchives.has(archive)) }];
 }
 
+/** Q3 FS_GetModList reads loose description bytes, home before base, bounded to 48. */
+async function modDescription(product: ProductExpectation, roots: readonly string[]): Promise<ProductExpectation> {
+  if (product.family !== "q3") return product;
+  for (const root of roots) {
+    const path = await findContentPath(root, `${product.contentDirectory}/description.txt`);
+    if (path === null) continue;
+    const file = await open(path, "r");
+    try {
+      const bytes = Buffer.alloc(48);
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+      if (bytesRead === 0) return product;
+      const end = bytes.subarray(0, bytesRead).indexOf(0);
+      return { ...product, title: bytes.toString("latin1", 0, end < 0 ? bytesRead : end) };
+    } finally { await file.close(); }
+  }
+  return product;
+}
+
 async function discoverMods(root: string, products: readonly ProductExpectation[]): Promise<readonly ProductExpectation[]> {
   const roots = new Map<string, ProductExpectation>();
   const known = new Set(products.map(product => product.contentDirectory.toLowerCase()));
-  for (const product of products) if (product.baseProduct === null) roots.set(dirname(product.contentDirectory), product);
+  for (const product of products) if (product.baseProduct === null && !roots.has(dirname(product.contentDirectory))) roots.set(dirname(product.contentDirectory), product);
   const found: ProductExpectation[] = [];
   for (const [directory, base] of roots) {
     const installed = await findContentPath(root, directory);
@@ -352,7 +370,9 @@ export async function discoverInstalledContent(options: DiscoverContentOptions):
   const corpusMods = options.discoverMods === false ? [] : await discoverMods(corpusRoot, expected);
   const userMods = options.discoverMods === false || userContentRoot === null ? [] : await discoverMods(userContentRoot, [...expected, ...corpusMods]);
   const userModIds = new Set([...userMods.map(product => product.id), ...remoteOverlays]);
-  const expectations = [...expected, ...corpusMods, ...userMods];
+  const descriptionRoots = userContentRoot === null ? [corpusRoot] : [userContentRoot, corpusRoot];
+  const expectations = await Promise.all([...expected, ...corpusMods, ...userMods].map(product =>
+    stock.some(known => known.id === product.id) ? product : modDescription(product, descriptionRoots)));
   const archives = new Map<string, Promise<CatalogArchive>>();
   const inspect = (path: string, format: ArchiveFormat): Promise<CatalogArchive> => {
     const existing = archives.get(path);

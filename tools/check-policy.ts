@@ -215,7 +215,7 @@ function isDynamicImplementation(symbol: ts.Symbol | undefined): boolean {
     && (symbol?.declarations?.some((declaration) => declaration.getSourceFile().isDeclarationFile) ?? false);
 }
 
-type PlatformLibrary = "sdl" | "gl" | "unix" | "darwin" | "ucrt" | "msvcrt" | "ntdll" | "kernel32" | "bun-files" | "freetype" | "vorbisfile";
+type PlatformLibrary = "sdl" | "gl" | "unix" | "darwin" | "ucrt" | "msvcrt" | "ntdll" | "kernel32" | "bun-files" | "freetype" | "vorbisfile" | "theoradec";
 
 const glSymbols = new Set([
   "glLockArraysEXT", "glUnlockArraysEXT", "glCallList", "glNewList", "glEndList", "glDeleteLists", "glGetString", "glGetError",
@@ -310,6 +310,7 @@ function helperLibrary(node: ts.CallExpression, checker: ts.TypeChecker, project
   if (kind.text === "gl" && projectPath === "src/platform/gl.ts") return "gl";
   if (kind.text === "freetype" && projectPath === "src/platform/freetype.ts") return "freetype";
   if (kind.text === "vorbisfile" && projectPath === "src/platform/vorbis.ts") return "vorbisfile";
+  if (kind.text === "theoradec" && projectPath === "src/platform/theora.ts") return "theoradec";
   return undefined;
 }
 
@@ -327,7 +328,8 @@ function platformLibraryAllowed(library: PlatformLibrary, projectPath: string): 
     case "sdl": case "gl": case "unix": return true;
     case "freetype": case "msvcrt": return projectPath === "src/platform/freetype.ts";
     case "vorbisfile": return projectPath === "src/platform/vorbis.ts";
-    case "darwin": return ["src/platform/unix-io.ts", "src/platform/local-time.ts", "src/platform/freetype.ts", "src/platform/file-posix.ts"].includes(projectPath);
+    case "theoradec": return projectPath === "src/platform/theora.ts";
+    case "darwin": return ["src/platform/unix-io.ts", "src/platform/local-time.ts", "src/platform/freetype.ts", "src/platform/theora.ts", "src/platform/file-posix.ts"].includes(projectPath);
     case "ucrt": return ["src/platform/unix-io.ts", "src/platform/local-time.ts"].includes(projectPath);
     case "ntdll": case "kernel32": case "bun-files": return projectPath === "src/platform/file-windows.ts";
   }
@@ -338,15 +340,16 @@ function platformSymbolAllowed(library: PlatformLibrary, symbol: string, project
     case "sdl": return /^SDL_/.test(symbol) && !["SDL_LoadObject", "SDL_LoadFunction", "SDL_UnloadObject"].includes(symbol);
     case "gl": return glSymbols.has(symbol);
     case "unix": return ["tcgetattr", "tcsetattr", "sigaction", "localtime_r", "tzset", "_exit"].includes(symbol)
-      || projectPath === "src/platform/freetype.ts" && symbol === "memcpy";
+      || (projectPath === "src/platform/freetype.ts" || projectPath === "src/platform/theora.ts") && symbol === "memcpy";
     case "freetype": return ["FT_Init_FreeType", "FT_Done_FreeType", "FT_New_Memory_Face", "FT_Done_Face",
       "FT_Set_Char_Size", "FT_Get_Char_Index", "FT_Load_Glyph", "FT_Select_Charmap", "FT_Render_Glyph",
       "FT_Outline_Translate", "FT_Outline_Get_Bitmap"].includes(symbol);
+    case "theoradec": return ["th_info_init", "th_info_clear", "th_comment_init", "th_comment_clear", "th_decode_headerin", "th_decode_alloc", "th_setup_free", "th_decode_free", "th_decode_packetin", "th_decode_ycbcr_out"].includes(symbol);
     case "vorbisfile": return ["ov_fopen", "ov_open_callbacks", "ov_clear", "ov_info", "ov_streams", "ov_pcm_total", "ov_pcm_tell", "ov_read", "ov_pcm_seek"].includes(symbol);
     case "darwin":
       if (projectPath === "src/platform/unix-io.ts") return ["tcgetattr", "tcsetattr", "sigaction", "_exit"].includes(symbol);
       if (projectPath === "src/platform/local-time.ts") return ["localtime_r", "tzset"].includes(symbol);
-      if (projectPath === "src/platform/freetype.ts") return symbol === "memcpy";
+      if (projectPath === "src/platform/freetype.ts" || projectPath === "src/platform/theora.ts") return symbol === "memcpy";
       return projectPath === "src/platform/file-posix.ts"
         && ["__openat_nocancel", "__fcntl_nocancel", "__error", "lseek", "mkdirat", "renameat", "linkat", "unlinkat", "fstatat", "fstatat$INODE64"].includes(symbol);
     case "ucrt": return projectPath === "src/platform/unix-io.ts" ? symbol === "_exit"

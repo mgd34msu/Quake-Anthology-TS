@@ -16,7 +16,7 @@ import { restoreQ2Actor, saveQ2Actor } from "../foundation/checkpoint.ts";
 import type { Q2RereleaseModuleCheckpoint } from "./checkpoint.ts";
 import { Q2RereleaseTriggers } from "./triggers.ts";
 import { Q2RereleaseQ64 } from "./q64/index.ts";
-import { enterQ2RereleaseLevel, updateQ2RereleaseLevel } from "./campaign.ts";
+import { enterQ2RereleaseLevel, updateQ2RereleaseLevel, q2RereleaseUnitReport } from "./campaign.ts";
 import type { Q2CallbackDefinitions } from "../foundation/callbacks.ts";
 import { Q2RereleaseLights, q2RereleaseColor } from "./lights.ts";
 import { Q2RereleaseGoals } from "./goals.ts";
@@ -127,12 +127,23 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
     this.q64.restore(game, checkpoint.q64);
     this.lights.active.clear(); for (const entry of checkpoint.lights) this.lights.active.set(restoreQ2Actor(game, entry.actor).id, entry.active);
     this.goals.restore(checkpoint.goals);
+    for (const [actor, state] of this.players.states) this.publishItemVisibility(game, actor, state.slot);
     return undefined;
+  }
+
+  restoreCampaign(campaign: Q2RereleaseCampaignState): void {
+    const current = structuredClone(campaign);
+    this.campaign.crossUnitFlags = current.crossUnitFlags;
+    this.campaign.visitedMaps = current.visitedMaps;
+    this.campaign.levels.clear();
+    for (const [map, entry] of current.levels) this.campaign.levels.set(map, entry);
+    Object.assign(this.campaign.mission, current.mission);
   }
 
   admitted(entity: Q2Entity, game: Q2GameServices): undefined {
     enterQ2RereleaseLevel(game, this.players, this.campaign);
     const state = this.players.context(entity, game).state, extra = this.players.extra(entity.actor.id);
+    this.publishItemVisibility(game, entity.actor.id, state.slot);
     extra.spawned = !extra.awaitingRespawn;
     extra.wantedFog = this.worldFog;
     this.forceFog(entity.actor.id, true);
@@ -168,6 +179,10 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
   }
 
   private instanced(game: Q2GameServices): boolean { return game.options.mode === "coop" && q2UsesInstancedItems(this.players.rereleaseOptions); }
+  private publishItemVisibility(game: Q2GameServices, actor: ActorId, slot: number): void {
+    if (!this.instanced(game)) return;
+    for (const [item, slots] of this.pickedUpBy) if (slots.has(slot)) this.hooks.emit({ kind: "item-visibility", actor, item, visible: false });
+  }
   instancedCoop(game: Q2GameServices): boolean { return this.instanced(game); }
   canPickup(entity: Q2Entity, game: Q2GameServices, player: ActorId): boolean {
     const state = this.players.states.get(player);
@@ -201,8 +216,29 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
   }
   keepAfterPickup(entity: Q2Entity, game: Q2GameServices, _player: ActorId): boolean { return this.instanced(game) && (entity.spawnflags & 0x20000) === 0; }
 
-  sendPoi(actor: ActorId): undefined {
+  resumePresentation(game: Q2GameServices, only: ActorId | null = null): undefined {
+    const now = game.host.now(), mission = this.campaign.mission;
+    for (const [actor, extra] of this.players.rereleaseStates) {
+      if (only !== null && actor !== only) continue;
+      const state = this.players.states.get(actor);
+      if (state === undefined || !state.connected) continue;
+      this.hooks.emit({ kind: "help-computer", actor, visible: state.showHelp, primary: mission.primary, secondary: mission.secondary, slowTime: state.showHelp });
+      if (extra.helpMarkerUntil > now) {
+        this.hooks.emit({ kind: "poi", actor, position: extra.helpLocation, image: extra.helpImage, duration: (extra.helpMarkerUntil - now) * 1000, color: 208 });
+        const index = extra.helpIndex - 1, point = extra.helpPoints[index];
+        if (point !== undefined) this.hooks.emit({ kind: "help-path", actor, first: true, position: point,
+          direction: normalize(subtract(extra.helpPoints[index + 1] ?? extra.helpLocation, point)) });
+      }
+    }
+    const intermission = this.players.intermission;
+    if (intermission.kind !== "playing" && intermission.map.includes("*") && (this.players.intermissionFlags & 16) === 0)
+      this.hooks.emit({ kind: "end-of-unit", levels: q2RereleaseUnitReport(this.campaign), buttonTime: intermission.started + 5 });
+    return undefined;
+  }
+
+  sendPoi(actor: ActorId, game: Q2GameServices): undefined {
     const extra = this.players.extra(actor);
+    extra.helpMarkerUntil = game.host.now() + 10;
     return this.hooks.emit({ kind: "poi", actor, position: extra.helpLocation, image: extra.helpImage, duration: 10000, color: 208 });
   }
 
@@ -214,7 +250,7 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
     if (body === null) return undefined;
     const extra = this.players.extra(actor), poi = this.poi;
     extra.helpLocation = poi.origin; extra.helpImage = poi.image;
-    const path = this.hooks.navigation(body.origin, poi.origin);
+    const path = this.hooks.navigation(body.origin, poi.origin, actor);
     if (path.kind === "path" && path.points.length !== 0) {
       const points = path.points.slice(0, 128);
       let index = 0;
@@ -229,7 +265,7 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
       extra.helpPoints = points; extra.helpIndex = index; extra.helpDrawTime = 0;
       this.compassUpdate(actor, game, true);
     } else {
-      this.sendPoi(actor);
+      this.sendPoi(actor, game);
       game.host.emit({ kind: "sound", actor, origin: body.origin, path: "misc/help_marker.wav", channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "once" });
     }
     return undefined;
@@ -240,7 +276,7 @@ export class Q2RereleaseModule extends Q2RereleaseEntities implements Q2PickupPo
     if (point === undefined || body === null || extra.helpDrawTime >= game.host.now()) return undefined;
     if (length(subtract(point, body.origin)) > 4096 || !game.host.inPhs(body.origin, point)) { extra.helpPoints = []; return undefined; }
     this.hooks.emit({ kind: "help-path", actor, first, position: point, direction: normalize(subtract(extra.helpPoints[extra.helpIndex + 1] ?? extra.helpLocation, point)) });
-    this.sendPoi(actor);
+    this.sendPoi(actor, game);
     game.host.emit({ kind: "sound", actor, origin: point, path: "misc/help_marker.wav", channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "once" });
     extra.helpIndex++; extra.helpDrawTime = game.host.now() + 0.2;
     return undefined;

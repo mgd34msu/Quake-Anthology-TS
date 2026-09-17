@@ -13,6 +13,7 @@ import type { DecodedModel } from "../../contracts/scene.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
 import { decodePalette, decodePcx } from "../../formats/images/index.ts";
 import { readQ1Bsp } from "../../formats/q1-map/index.ts";
+import { classifyBsp } from "../../formats/bsp-kind.ts";
 import { readQ2Bsp, toQ2WorldGeometry } from "../../formats/q2-map/index.ts";
 import { decodeQ3World, parseEntities } from "../../formats/q3-map/index.ts";
 import { SceneImageRegistry, SceneShaderRegistry, SceneTextureLoader, WorldScene } from "../../render/scene/index.ts";
@@ -168,7 +169,7 @@ export class ApplicationAssets {
       if (this.closed) throw new Error("Material movie loaded after assets closed");
       if (asset === null) throw new Error(`Material movie is absent from selected content: ${content}/${path}`);
       const extension = path.toLowerCase().split(".").at(-1);
-      if (extension !== "roq" && extension !== "cin") throw new Error(`Unsupported material movie format: ${path}`);
+      if (extension !== "roq" && extension !== "cin" && extension !== "ogv") throw new Error(`Unsupported material movie format: ${path}`);
       const source = cinematicBytes(extension, asset.bytes, path), dimensions = cinematicDimensions(source);
       const image = this.images.allocate(dimensions.width, dimensions.height, { kind: "resource", resource: asset.reference });
       const playback = new CinematicPlayback(source, { clock: this.mediaClock, target: { kind: "material", id: key }, loop: true, silent: true,
@@ -308,8 +309,9 @@ export class ApplicationAssets {
       const asset = await provider.mounts.open(path);
       if (asset === null) throw new Error(`Model is absent from selected content: ${content}/${path}`);
       if (path.toLowerCase().endsWith(".bsp")) {
-        const world = provider.family === "q1" ? readQ1Bsp(asset.bytes, { source: path })
-          : provider.family === "q2" ? toQ2WorldGeometry(readQ2Bsp(asset.bytes, path)) : decodeQ3World(asset.bytes, path);
+        const format = classifyBsp(asset.bytes, path);
+        const world = format === "q1" ? readQ1Bsp(asset.bytes, { source: path })
+          : format === "q2" ? toQ2WorldGeometry(readQ2Bsp(asset.bytes, path)) : decodeQ3World(asset.bytes, path);
         const brushScene = await WorldScene.load(world, provider.shaders, world.kind === "q2-bsp" ? { q2LightModulate: this.q2LightModulate(asset.reference.provenance.mount.identity.content) } : {});
         this.brushScenes.push(brushScene);
         return { resource: asset.reference, model: { kind: "brush-model", world, model: 0 }, provider, brushScene };

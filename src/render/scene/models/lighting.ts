@@ -36,6 +36,18 @@ export function aliasShadowPoint(point: Vec3, shadeVector: Vec3, entityHeight: n
   return { x: point.x - shadeVector.x * (point.z + height), y: point.y - shadeVector.y * (point.z + height), z: -height + 1 };
 }
 
+/** GLQuake GL_DrawAliasShadow keeps its model-space float stores before the entity transform. */
+export function q1AliasShadowPoint(point: Vec3, shadeVector: Vec3, entityHeight: number, floorHeight: number): Vec3 {
+  const f = Math.fround, height = f(entityHeight - floorHeight), elevation = f(point.z + height);
+  return { x: f(point.x - f(shadeVector.x * elevation)), y: f(point.y - f(shadeVector.y * elevation)), z: f(-height + 1) };
+}
+
+export function q1AliasShadowDirection(yaw: number): Vec3 {
+  const f = Math.fround, angle = f(yaw), x = f(Math.cos(-angle)), y = f(Math.sin(-angle));
+  const length = f(Math.sqrt(f(f(f(x * x) + f(y * y)) + 1))), inverse = f(1 / length);
+  return { x: f(x * inverse), y: f(y * inverse), z: inverse };
+}
+
 /** quake-2-re-ts gl_mesh.ts enhancement: remove only each occluded light's share. */
 export function aliasShadowLightFractions(origin: Vec3, shade: Vec3, lights: readonly Q2FragmentLight[], modulate = 1, monochrome = false): readonly Q2ModelShadowLight[] {
   const result: Q2ModelShadowLight[] = [];

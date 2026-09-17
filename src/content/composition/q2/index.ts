@@ -1,6 +1,6 @@
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { AttackProvenance, DamageDecision } from "../../../contracts/gameplay.ts";
-import type { Q2Entity, Q2SpawnModule, Q2LandmarkCarry } from "../../q2/foundation/host.ts";
+import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2LandmarkCarry } from "../../q2/foundation/host.ts";
 import { Q2Foundation } from "../../q2/foundation/runtime.ts";
 import { createQ2ItemModule } from "../../q2/foundation/items.ts";
 import { createQ2MoverModule } from "../../q2/foundation/movers.ts";
@@ -86,6 +86,10 @@ export class Q2ProductRuntime {
       resumeMonster: (entity, game) => this.monsters.resumeMonster(entity, game),
     });
     this.items = createQ2ItemModule({ ...configuration.itemHooks,
+      ...(configuration.services.randomItems === undefined ? {} : { randomRespawn: (entity: Q2Entity, game: Q2GameServices) => {
+        const settings = configuration.services.randomItems?.();
+        return settings === undefined ? null : this.armory?.items.randomRespawn(entity, game, settings) ?? null;
+      } }),
       weaponPicked: (actor, item, first) => {
         if (this.rerelease !== null) {
           const entity = this.game.entity(actor);
@@ -153,6 +157,8 @@ export class Q2ProductRuntime {
     this.rogueSpawns = configuration.edition === "classic" && configuration.program === "rogue" ? new Q2RoguePlayerSpawns() : null;
     this.movementStopSpeed = configuration.match?.kind === "deathball" ? 0 : null;
     const playerHooks: Q2PlayerHooks = { ...configuration.playerHooks,
+      quadFireDropUntil: actor => configuration.edition === "rerelease" && (configuration.services.dropQuadFire?.() ?? true)
+        ? this.armory?.items.powerups(actor).quadFireUntil ?? 0 : 0,
       weaponInput: actor => this.weaponInput(actor, configuration.playerHooks.weaponInput(actor)),
       score: (victim, attacker, game, change, means, recipient) => {
         if ((configuration.match === undefined || configuration.match.kind === "standard") && configuration.playerHooks.score !== undefined)

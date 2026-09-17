@@ -69,12 +69,20 @@ interface GyroCapture {
 const gyroCalibrationDuration = 2000, gyroCalibrationSamples = 64;
 export class GamepadInput {
   private readonly axes = new Map<ControllerAxis, number>();
+  private readonly previewAxes = new Map<ControllerAxis, number>();
+  previewAxis(axis: ControllerAxis, value: number): void { this.previewAxes.set(axis, Math.max(-1, Math.min(1, value))); }
+  preview(): { readonly move: { readonly raw: Vec2; readonly curved: Vec2 }; readonly look: { readonly raw: Vec2; readonly curved: Vec2 } } {
+    const left = { x: this.previewAxes.get("left-x") ?? 0, y: this.previewAxes.get("left-y") ?? 0 };
+    const right = { x: this.previewAxes.get("right-x") ?? 0, y: this.previewAxes.get("right-y") ?? 0 };
+    const move = this.tuning.swapSticks ? right : left, look = this.tuning.swapSticks ? left : right;
+    return { move: { raw: move, curved: applyStickCurve(move, this.tuning.move) }, look: { raw: look, curved: applyStickCurve(look, this.tuning.look) } };
+  }
   private gyroSample: Vec3 | null = null;
   private gyroBias: Vec3 | null = null;
   private calibrating = false;
   private capture: GyroCapture | null = null;
   constructor(public tuning: GamepadTuning = defaultGamepadTuning) { validateGamepadTuning(tuning); }
-  axis(axis: ControllerAxis, value: number): void { this.axes.set(axis, Math.max(-1, Math.min(1, value))); }
+  axis(axis: ControllerAxis, value: number): void { this.previewAxis(axis, value); this.axes.set(axis, Math.max(-1, Math.min(1, value))); }
   get gyroCalibration(): GyroCalibrationState {
     if (this.calibrating) return { kind: "calibrating", samples: this.capture?.samples ?? 0,
       progress: this.capture === null ? 0 : Math.min(1, (this.capture.last - this.capture.start) / gyroCalibrationDuration,
@@ -125,5 +133,5 @@ export class GamepadInput {
         y: (look.y * this.tuning.pitchDegreesPerSecond * seconds - gyroPitch * gyro.pitchSensitivity * gyroScale) * (this.tuning.invertPitch ? -1 : 1) },
     };
   }
-  clear(): void { this.axes.clear(); this.cancelGyroCalibration(); }
+  clear(): void { this.previewAxes.clear(); this.axes.clear(); this.cancelGyroCalibration(); }
 }

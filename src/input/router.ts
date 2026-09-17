@@ -26,6 +26,15 @@ export interface InputRouterOptions {
 export class InputRouter {
   private readonly routes: InputSeatRoute[];
   private keyboard: SeatInput | null = null;
+  private sourceJoystick: number | null = null;
+  private sourceJoystickSeat: SeatId | null = null;
+  get inputs(): readonly SeatInput[] { return this.routes.map(route => route.input); }
+  setSourceJoystick(instance: number | null, seat: SeatId | null = null): void {
+    if (seat !== null && this.seat(seat) === null) throw new Error("Source joystick seat is not active");
+    if (instance === this.sourceJoystick && (seat === this.sourceJoystickSeat || seat !== null && this.sourceJoystickSeat?.equals(seat))) return;
+    for (const selected of [this.sourceJoystick, instance]) if (selected !== null) this.deviceSeats.get(selected)?.releaseDevice(selected, this.options.now());
+    this.sourceJoystick = instance; this.sourceJoystickSeat = instance === null ? null : seat;
+  }
   private readonly keyboardKeys = new Map<number, number>();
   private readonly deviceSeats = new Map<number, SeatInput>();
   private readonly calibrationSensors = new Set<number>();
@@ -40,6 +49,14 @@ export class InputRouter {
     this.setKeyboardSeat(options.keyboardSeat);
     if (this.platformActive) options.controllers?.setAssignments(this.routes.map(route => route.controller));
   }
+  publishSeats(routes: readonly InputSeatRoute[], keyboard: SeatId | null): void {
+    for (const [index, route] of routes.entries()) if (routes.slice(0, index).some(previous => previous.input.seat.equals(route.input.seat))) throw new Error("Duplicate input seat");
+    if (keyboard !== null && !routes.some(route => route.input.seat.equals(keyboard))) throw new Error("Keyboard seat is not published");
+    for (const route of this.routes) route.input.release(this.options.now());
+    this.routes.splice(0, this.routes.length, ...routes);
+    this.sourceJoystick = null; this.sourceJoystickSeat = null;
+    this.setKeyboardSeat(keyboard); this.restart(); this.updateCapture();
+  }
   keyboardSeat(): SeatId | null { return this.keyboard?.seat ?? null; }
   controllerSelection(id: SeatId): ControllerSelection { const route = this.routes.find(value => value.input.seat.equals(id)); if (route === undefined) throw new Error("Unknown input seat"); return route.controller; }
   setControllerSelection(id: SeatId, selection: ControllerSelection): void {
@@ -49,7 +66,8 @@ export class InputRouter {
   }
   seat(id: SeatId): SeatInput | null { return this.routes.find(route => route.input.seat.equals(id))?.input ?? null; }
   controllerFor(id: SeatId): number | null {
-    for (const [instance, input] of this.deviceSeats) if (input.seat.equals(id)) return instance;
+    if (this.sourceJoystick !== null && this.sourceJoystickSeat?.equals(id)) return this.sourceJoystick;
+    for (const [instance, input] of this.deviceSeats) if (instance !== this.sourceJoystick && input.seat.equals(id)) return instance;
     return null;
   }
   setGyroEnabled(id: SeatId, enabled: boolean): ControllerOperationResult {
@@ -180,6 +198,7 @@ export class InputRouter {
     if (!("instance" in event)) { this.options.unhandled(event); return; }
     const seat = this.deviceSeats.get(event.instance);
     if (seat === undefined) { this.options.unhandled(event); return; }
+    if (event.instance === this.sourceJoystick && event.kind !== "disconnected") return;
     const common = { seat: seat.seat, timeMilliseconds, device: event.instance };
     switch (event.kind) {
       case "disconnected":
@@ -202,7 +221,7 @@ export class InputRouter {
   pump(): void {
     for (const event of this.window?.pollEvents() ?? []) this.handlePlatform(event);
     for (const event of this.options.controllers?.pollEvents() ?? []) this.handleController(event);
-    for (const [instance, seat] of this.deviceSeats) if (seat.focused && seat.focus.kind === "game") {
+    for (const [instance, seat] of this.deviceSeats) if (instance !== this.sourceJoystick && seat.focused && seat.focus.kind === "game") {
       const snapshot = this.options.controllers?.snapshot(instance);
       for (const [axisNumber, value] of snapshot?.axes.entries() ?? []) {
         const axis = controllerAxisName(axisNumber);

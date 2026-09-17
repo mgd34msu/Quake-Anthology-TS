@@ -10,7 +10,7 @@ export type MonsterSourceDefinition = {
   readonly provider: ProviderId;
   readonly edition: "classic" | "rerelease";
   readonly creatures: Readonly<Record<string, { readonly resources: readonly string[] }>>;
-} & ({ readonly family: "q1"; readonly program: "id1" | "hipnotic" | "rogue" | "dopa" | "mg1" } | { readonly family: "q2"; readonly program: "baseq2" | "xatrix" | "rogue" | "mg2" });
+} & ({ readonly family: "q1"; readonly program: "id1" | "hipnotic" | "rogue" | "dopa" | "mg1" | "mg3" } | { readonly family: "q2"; readonly program: "baseq2" | "xatrix" | "rogue" | "mg2" });
 
 /** These identities bind the existing source modules, including their edition-specific continuations. */
 export const monsterSources: readonly MonsterSourceDefinition[] = [

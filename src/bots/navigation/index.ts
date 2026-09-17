@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 export { parseAas, aasPointArea, aasTraceAreas, aasBBoxAreas } from "./aas.ts";
 export type { AasAsset, AasAreaCrossing } from "./aas.ts";
+export { writeAas } from "./aas-write.ts";
+export { optimizeAas } from "./aas-optimize.ts";
+export { clusterAas } from "./aas-cluster.ts";
+export { buildAasReachability } from "./aas-reachability.ts";
+export type { AasReachabilityOptions } from "./aas-reachability.ts";
 export { parseKexNavigation } from "./nav.ts";
 export type { KexNavigationAsset } from "./nav.ts";
 export { navigationFromAsset, navigationClusters, aasAreaTravelFlags, aasTravelFlag, aasTravelMode, kexTravelMode } from "./graph.ts";

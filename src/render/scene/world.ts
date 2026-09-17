@@ -11,7 +11,7 @@ import { prepareMaterialBatches, evaluateMaterialPasses } from "../../materials/
 import type { MaterialDrawContext } from "../../materials/evaluate.ts";
 import type { MaterialGeometry } from "../../materials/geometry.ts";
 import { RendererNoise } from "../../materials/deform.ts";
-import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches, q1AnimatedTexture, q1SkyTexCoords, q1SurfaceKind, q1TextureAnimations, splitQ1SkyTexture } from "../../materials/legacy.ts";
+import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches, q1AnimatedTexture, q1SkyTexCoords, q1SurfaceKind, q1TextureAnimations, splitQ1SkyTexture, splitQ64SkyTexture } from "../../materials/legacy.ts";
 import type { Q1Material, Q2Material } from "../../materials/legacy.ts";
 import { buildQ1Lightmap, buildQ2Lightmap, directLightmapPixels } from "../../materials/lighting.ts";
 import type { LightmapFace, Q1LightmapEncoding, Q2LightStyle, SurfaceDynamicLight } from "../../materials/lighting.ts";
@@ -230,7 +230,10 @@ export class WorldScene {
         const warp = map.kind === "q1-bsp" ? name.startsWith("*") : (info.flags & 8) !== 0;
         const sky = map.kind === "q1-bsp" ? name.startsWith("sky") : (info.flags & 4) !== 0;
         const original = map.kind === "q1-bsp" && "texture" in info ? map.textures[info.texture] : null;
-        const prepared = prepareBrushFace(map, face, index, { x: original?.width ?? texture.width, y: original?.height ?? texture.height }, warp, map.kind === "q1-bsp" ? 128 : 64);
+        const textureScale = original?.quake64Shift !== undefined && original.quake64Shift > 0 ? 2 * original.quake64Shift : 1;
+        let prepared = prepareBrushFace(map, face, index, { x: original?.width ?? texture.width, y: original?.height ?? texture.height }, warp, map.kind === "q1-bsp" ? 128 : 64);
+        if (!warp && !sky && textureScale !== 1) prepared = { ...prepared, geometry: { ...prepared.geometry,
+          vertices: prepared.geometry.vertices.map(vertex => ({ ...vertex, texCoord: { x: vertex.texCoord.x / textureScale, y: vertex.texCoord.y / textureScale } })) } };
         let lightmap: Extract<WorldSurface, { readonly kind: "legacy" }>["lightmap"] = null;
         let lighting: SurfaceLighting = { kind: "unlit" };
         if (!sky && !warp && prepared.lightmap.lighting !== null) {
@@ -247,7 +250,7 @@ export class WorldScene {
           if (q1SurfaceKind(name) === "sky" && texture.content.kind === "indexed8") {
             q1Sky = skyLayers.get(texture.image) ?? null;
             if (q1Sky === null) {
-              const split = splitQ1SkyTexture(texture.content);
+              const split = original?.quake64Shift === undefined ? splitQ1SkyTexture(texture.content) : splitQ64SkyTexture(texture.content);
               q1Sky = { solid: generated(`${name}:solid`, split.solid, "repeat"), overlay: generated(`${name}:overlay`, split.overlay, "repeat") };
               skyLayers.set(texture.image, q1Sky);
             }

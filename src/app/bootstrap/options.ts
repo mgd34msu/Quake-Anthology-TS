@@ -7,6 +7,7 @@ import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 
 export interface ApplicationOptions {
+  readonly authoredCampaignStart?: true;
   readonly startupCommands?: readonly string[];
   readonly explicitRules?: { readonly skill?: boolean; readonly mode?: boolean; readonly capacity?: boolean };
   readonly teamArenaSkirmish?: import("./team-arena-skirmish.ts").TeamArenaSkirmish;
@@ -34,7 +35,7 @@ export interface ApplicationOptions {
   readonly skill: 0 | 1 | 2 | 3;
   readonly botSkill?: 1 | 2 | 3 | 4 | 5;
   readonly mode: "singleplayer" | "coop" | "deathmatch";
-  readonly rules?: "standard" | "ctf" | "lmctf";
+  readonly rules?: "standard" | "ctf" | "lmctf" | "tag" | "deathball" | "horde";
   readonly seed: number;
   readonly frameLimit: number | null;
   readonly hidden: boolean;
@@ -67,7 +68,7 @@ Usage: bun run src/main.ts [options]
   --seats N                  Local seats, 1 through 4
   --mode singleplayer|coop|deathmatch
   --server-profile PATH      Load validated shared server settings from JSON
-  --rules standard|ctf|lmctf Q2 match rules, independent of map and movement
+  --rules standard|ctf|lmctf|tag|deathball|horde Source match rules
   --skill 0|1|2|3            Quake I/II gameplay difficulty
   --bot-skill 1|2|3|4|5      Quake III bot difficulty (default 2)
   --dedicated                Run without a window or local seats
@@ -200,7 +201,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       }
       case "--server-profile": options = { ...options, serverProfilePath: resolve(value) }; break;
       case "--rules":
-        if (value !== "standard" && value !== "ctf" && value !== "lmctf") throw new Error(`Unknown match rules: ${value}`);
+        if (value !== "standard" && value !== "ctf" && value !== "lmctf" && value !== "tag" && value !== "deathball" && value !== "horde") throw new Error(`Unknown match rules: ${value}`);
         options = { ...options, rules: value }; break;
       case "--mode":
         if (value !== "singleplayer" && value !== "coop" && value !== "deathmatch") throw new Error(`Unknown game mode: ${value}`);

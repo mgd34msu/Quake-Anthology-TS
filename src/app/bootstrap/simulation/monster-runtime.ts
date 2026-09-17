@@ -1,3 +1,4 @@
+import type { Q1AddonContext } from "../../../content/q1/addons/context.ts";
 import type { SelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import type { EnemySelection, MonsterDefinitionReference, ProviderReference } from "../../../contracts/content.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -18,7 +19,7 @@ export type SelectedMonsterSource = {
   readonly reference: ProviderReference;
   readonly random: SourceRandom;
   readonly clock: { frame: FrameContext; advanced: boolean };
-} & ({ readonly kind: "q1"; readonly game: Q1EntityServices }
+} & ({ readonly kind: "q1"; readonly game: Q1EntityServices; readonly addon?: Q1AddonContext }
   | ({ readonly kind: "q2" } & SelectedQ2MonsterModules));
 
 export interface SelectedMonsterBehavior {
@@ -34,7 +35,7 @@ export interface SelectedMonsterBehavior {
 export type MonsterMap = { readonly kind: "q1"; readonly game: Q1Foundation }
   | { readonly kind: "q2"; readonly game: Q2Foundation; readonly items: Q2ItemModule };
 
-const q1Ordinary = new Set(["monster_army", "monster_dog", "monster_knight", "monster_enforcer", "monster_demon1", "monster_ogre", "monster_ogre_marksman", "monster_hell_knight", "monster_shambler", "monster_wizard", "monster_shalrath", "monster_tarbaby", "monster_fish", "monster_zombie", "monster_scourge", "monster_gremlin", "monster_eel", "monster_sword", "monster_wrath", "monster_mummy", "monster_lava_man"]);
+const q1Ordinary = new Set(["monster_army_infected", "monster_knight_infected", "monster_enforcer_infected", "monster_hell_knight_infected", "monster_demodog", "monster_ranged_knight", "monster_ogre_rocket", "monster_army", "monster_dog", "monster_knight", "monster_enforcer", "monster_demon1", "monster_ogre", "monster_ogre_marksman", "monster_hell_knight", "monster_shambler", "monster_wizard", "monster_shalrath", "monster_tarbaby", "monster_fish", "monster_zombie", "monster_scourge", "monster_gremlin", "monster_eel", "monster_sword", "monster_wrath", "monster_mummy", "monster_lava_man"]);
 const q2Ordinary = new Set(["monster_soldier", "monster_soldier_light", "monster_soldier_ss", "monster_infantry", "monster_berserk", "monster_gladiator", "monster_gunner", "monster_parasite", "monster_flyer", "monster_floater", "monster_hover", "monster_mutant", "monster_chick", "monster_tank", "monster_tank_commander", "monster_flipper", "monster_brain", "monster_gekk", "monster_chick_heat", "monster_soldier_ripper", "monster_soldier_hypergun", "monster_soldier_lasergun", "monster_stalker", "monster_daedalus"]);
 
 /** Authored links and counters remain in the map program while behavior attaches to its actual actor. */

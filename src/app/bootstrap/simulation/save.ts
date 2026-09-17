@@ -147,6 +147,7 @@ export function savedSimulationSettings(image: SaveImage) {
   const guest = simulationQvmCheckpoint(image);
   return { skill: settings.field("skill").choice(0, 1, 2, 3), mode: settings.field("mode").choice("singleplayer", "coop", "deathmatch"),
     maxClients: settings.field("maxClients").integer(1), seed: settings.field("seed").integer(0),
+    startItems: settings.field("startItems").value === undefined ? "" : settings.field("startItems").string(),
     hostMilliseconds: reader.field("hostMilliseconds").finite(),
     clientSlots: guest === null ? reader.field("players").list(value => value.field("clientSlot").integer(0))
       : savedQ3GuestClients(guest).map(player => player.client.slot) };

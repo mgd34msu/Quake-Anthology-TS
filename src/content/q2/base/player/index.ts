@@ -236,6 +236,7 @@ export class Q2Players implements Q2SpawnModule {
         if (state.useQ2Inventory) this.items.configurePlayer(entity.actor, game, true);
         game.host.combat.setHealth(entity.actor, 100); game.host.combat.setArmor(entity.actor, { kind: "none" }); entity.maxHealth = 100;
         state.selectedItem = "q2:weapon_blaster";
+        if (state.useQ2Inventory) this.hooks.persistentInventoryInitialized?.(entity, game);
       }
     }
     state.dead = false; state.gibbed = false; state.oldWaterLevel = 0; state.airFinished = game.host.now() + 12; state.drownDamage = 2;
@@ -378,9 +379,13 @@ export class Q2Players implements Q2SpawnModule {
     const definition = weapon === undefined || weapon === null ? null : this.weapons.definition(weapon);
     const item = definition !== null && definition.name !== "blaster" && (definition.ammo === null || game.host.inventory.count(entity.actor.id, definition.ammo) !== 0) ? definition.item : null;
     const quad = this.items.playerPowerups(entity.actor.id).quadUntil;
-    const dropQuad = (game.options.deathmatchFlags & 16384) !== 0 && quad > game.host.now() + 1, spread = item !== null && dropQuad ? 22.5 : 0;
+    const quadFire = this.hooks.quadFireDropUntil?.(entity.actor.id) ?? 0;
+    const dropQuad = (game.options.deathmatchFlags & 16384) !== 0 && quad > game.host.now() + 1;
+    const dropQuadFire = quadFire > game.host.now() + 1;
+    const spread = item === null ? 0 : dropQuad ? 22.5 : dropQuadFire ? 12.5 : 0;
     if (item !== null) this.items.drop(entity, game, item, { playerDeath: true, yawOffset: -spread });
-    if (dropQuad) this.items.drop(entity, game, "q2:item_quad", { playerDeath: true, yawOffset: spread, expiresAt: quad });
+    if (dropQuad) this.items.drop(entity, game, "q2:item_quad", { playerDeath: true, yawOffset: spread, expiresAt: quad, immediateTouch: game.options.edition === "rerelease" });
+    if (dropQuadFire) this.items.drop(entity, game, "q2:item_quadfire", { playerDeath: true, yawOffset: spread, expiresAt: quadFire, immediateTouch: true });
     return undefined;
   }
   private clearPowerups(entity: Q2Entity, game: Q2GameServices): undefined {

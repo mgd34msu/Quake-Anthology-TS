@@ -483,3 +483,76 @@ test("persistent input profile releases old bindings before adopting native move
   for (const current of [input, fresh]) { current.bind({ input: { kind: "key", code: 119 }, target: { kind: "action", action: "forward" } }); current.input({ kind: "key", seat, code: 119, down: true, repeat: false, timeMilliseconds: 30 }); }
   expect(input.sample(40, 10)).toEqual(fresh.sample(40, 10)); expect(input.seat).toBe(seat);
 });
+
+test("controller menu preview follows physical axes without issuing gameplay movement", () => {
+  const identity = createIdentityOwner("controller-preview"), seat = identity.seat(0);
+  const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat, client: identity.client(0, 0) } };
+  const commands = new CommandBuffer({ dialect: "q3", context });
+  const input = new SeatInput({ seat, dialect: "q3", context, commands, uiEvent: () => true });
+  input.setFocus({ kind: "menu", menu: "menu:settings:input:0", control: null }, 0);
+  input.input({ kind: "controller-axis", seat, device: 0, axis: "left-x", value: 0.8, timeMilliseconds: 10 });
+  expect(input.gamepad.preview().move.raw.x).toBe(0.8);
+  expect(input.gamepad.preview().move.curved.x).toBeGreaterThan(0);
+  expect(input.gamepad.sample(16).move).toEqual({ x: 0, y: -0 });
+  input.input({ kind: "focus", seat, focused: false, timeMilliseconds: 20 });
+  expect(input.gamepad.preview().move.raw).toEqual({ x: 0, y: 0 });
+});
+
+test("controller tuning exposes both complete curves and applies preview to the saved tuning", async () => {
+  const { bindGamepadSettings } = await import("../../src/ui/settings/index.ts");
+  const identity = createIdentityOwner("controller-tuning"), seat = identity.seat(0);
+  const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat, client: identity.client(0, 0) } };
+  const input = new SeatInput({ seat, dialect: "q3", context, commands: new CommandBuffer({ dialect: "q3", context }), uiEvent: () => true });
+  const controls = bindGamepadSettings(input);
+  for (const stick of ["move", "look"] satisfies readonly ("move" | "look")[]) {
+    const outer = controls.find(control => control.id === `ui:input:${stick}-outer`);
+    const shape = controls.find(control => control.id === `ui:input:${stick}-curve-type`);
+    if (outer?.kind !== "slider" || shape?.kind !== "choice") throw Error("Missing complete curve controls");
+    outer.write(0.1); expect(input.gamepad.tuning[stick]).toMatchObject({ kind: "radial", outerThreshold: 0.1 });
+    shape.write("axial"); expect(outer.enabled()).toBe(false);
+    shape.write("radial"); expect(outer.enabled()).toBe(true);
+  }
+  const curve = controls.find(control => control.id === "ui:input:move-curve");
+  if (curve?.kind !== "slider") throw Error("Missing movement exponent");
+  curve.write(1); expect(input.gamepad.tuning.move.exponent).toBe(1);
+  input.gamepad.previewAxis("left-x", 0.8);
+  const preview = controls.find(control => control.id === "ui:input:move-preview-x");
+  if (preview?.kind !== "slider") throw Error("Missing live preview");
+  expect(preview.enabled()).toBe(false); expect(preview.read()).toBeCloseTo(applyStickCurve({ x: 0.8, y: 0 }, input.gamepad.tuning.move).x);
+});
+
+test('Main controller controls resolve the newly published seat instead of retaining its predecessor', async () => {
+ const { bindGamepadSettings } = await import('../../src/ui/settings/index.ts');
+ const identity = createIdentityOwner('menu-pad-replacement');
+ const make = (index: number) => {
+  const seat = identity.seat(index), context = { session: identity.session, origin: { kind: 'local-seat', seat, client: identity.client(0, index) } } satisfies CommandContext;
+  return new SeatInput({ seat, dialect: 'q3', context, commands: new CommandBuffer({ dialect: 'q3', context }), uiEvent: () => false });
+ };
+ const old = make(0), next = make(1); let current = old;
+ const setting = bindGamepadSettings(() => current).find(binding => binding.id === 'ui:input:move-deadzone');
+ if (setting?.kind !== 'slider') throw new Error('Missing move deadzone');
+ current = next; setting.write(.3);
+ expect(next.gamepad.tuning.move.deadzone).toBe(.3); expect(old.gamepad.tuning.move.deadzone).toBe(defaultGamepadTuning.move.deadzone);
+ expect(setting.read()).toBe(.3);
+});
+
+test('routing settings change actual keyboard owner and retain explicit disconnected controller choices', async () => {
+ const { bindInputRoutingSettings } = await import('../../src/ui/settings/input-routing.ts');
+ const identity = createIdentityOwner('menu-routing');
+ const inputs = [0, 1].map(index => { const seat = identity.seat(index), context = { session: identity.session, origin: { kind: 'local-seat', seat, client: identity.client(0,index) } } satisfies CommandContext;
+  return new SeatInput({ seat, dialect: 'q3', context, commands: new CommandBuffer({ dialect: 'q3', context }), uiEvent: () => false }); });
+ const first=inputs[0], second=inputs[1]; if(first===undefined||second===undefined)throw new Error('Missing seats');
+ const router=new InputRouter({ seats:inputs.map(input=>({input,controller:{kind:'none'}})), keyboardSeat:first.seat, controllers:null, deferPlatform:false, now:()=>10,ticks:()=>10,subframe:false,unhandled:()=>{} });
+ const controls=bindInputRoutingSettings(()=>router,()=>[]);
+ const keyboard=controls.find(c=>c.id==='ui:input:keyboard-player'); if(keyboard?.kind!=='choice')throw new Error('Missing keyboard choice');
+ first.bind({input:{kind:'key',code:119},target:{kind:'action',action:'forward'}});
+ first.input({kind:'key',seat:first.seat,code:119,down:true,repeat:false,timeMilliseconds:1}); expect(first.button('forward').active).toBe(true);
+ keyboard.write('1'); expect(router.keyboardSeat()).toBe(second.seat); expect(first.button('forward').active).toBe(false);
+ router.setControllerSelection(first.seat,{kind:'serial',guid:'fixture',serial:'retained'});
+ const controller=controls.find(c=>c.id==='ui:input:controller-device'); if(controller?.kind!=='choice')throw new Error('Missing controller choice');
+ expect(controller.choices().find(c=>c.id===controller.read())?.label).toBe('Saved controller (disconnected)');
+ controller.write('none'); expect(router.controllerSelection(first.seat)).toEqual({kind:'none'});
+ router.handleController({ kind: 'assignment', timestamp: 10, slot: 0, previous: null, instance: 7 });
+ router.setSourceJoystick(7, second.seat); expect(router.controllerFor(first.seat)).toBeNull(); expect(router.controllerFor(second.seat)).toBe(7);
+ router.setSourceJoystick(null); expect(router.controllerFor(first.seat)).toBe(7); expect(router.controllerFor(second.seat)).toBeNull(); router.close();
+});

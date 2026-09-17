@@ -45,9 +45,11 @@ export function actorMotion(entry: ActorExecution, body: BodyState): Q2Motion {
   const entity = entry.entity;
   if (entry.kind === "q2") return { actor: entry.entity.actor, velocity: body.velocity, angularVelocity: entry.entity.angularVelocity,
     kind: entry.entity.motion, gravity: entry.entity.gravity, gravityVector: entry.entity.gravityVector, clipMask: entry.entity.clipMask, owner: entry.entity.owner };
+  if (entry.entity.movement === "gib" && (entry.services.options.physicsEdition ?? entry.services.options.edition) !== "rerelease")
+    throw new Error("Q1 gib movement requires rerelease engine behavior");
   return { actor: entity.actor, velocity: body.velocity, angularVelocity: entity.angularVelocity,
-    kind: entry.entity.movement === "flymissile" ? "fly-missile" : entry.entity.movement === "none" || entry.entity.movement === "noclip" ? "stationary" : entry.entity.movement,
-    gravity: 1, gravityVector: down, clipMask: 0x6000003, owner: entity.owner };
+    kind: entry.entity.movement === "gib" ? "bounce" : entry.entity.movement === "flymissile" ? "fly-missile" : entry.entity.movement === "none" || entry.entity.movement === "noclip" ? "stationary" : entry.entity.movement,
+    gravity: entry.entity.number("gravity") || 1, gravityVector: down, clipMask: 0x6000003, owner: entity.owner };
 }
 
 export function actorCollision(entry: ActorExecution): SharedSolid {
@@ -55,6 +57,9 @@ export function actorCollision(entry: ActorExecution): SharedSolid {
   if (entry.kind === "q3") return { family: "q3", solid: "none", model: null, owner: entry.owner };
   if (entry.kind === "q1") {
     const entity = entry.entity;
+    if (entity.solid === "corpse") return { family: "q1", model: null, owner: entity.owner,
+      ...((entry.services.options.physicsEdition ?? entry.services.options.edition) === "rerelease"
+        ? { solid: "box", q1Corpse: true } : { solid: "none" }) };
     return { family: "q1", solid: entity.solid === "none" ? "none" : entity.solid === "trigger" ? "trigger" : entity.solid === "bsp" ? "brush" : "box",
       model: model(entity.model || entity.originalModel), owner: entity.owner, monster: entity.monster !== null, item: (entity.movementFlags & 256) !== 0 };
   }

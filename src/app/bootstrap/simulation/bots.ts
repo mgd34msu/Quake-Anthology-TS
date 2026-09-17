@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { ActorId, ClientId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ActorCommand, SavedActorId } from "../../../contracts/session.ts";
+import type { Vec3 } from "../../../contracts/math.ts";
 import type { UserCommand } from "../../../content/q3/base/shared/player-state.ts";
 import { ServerEntityFlags } from "../../../content/q3/base/shared/entity-shared.ts";
 import { Q3_WEAPON_ITEMS } from "../../../content/q3/foundation/arsenal.ts";
@@ -27,14 +28,32 @@ import type { Q3SourceBots } from "./q3/types.ts";
 import type { SharedSimulation } from "./runtime.ts";
 import type { SimulationPresentationEvent } from "./types.ts";
 
+export type ApplicationBotService = Pick<ApplicationBots, "options" | "configuration" | "isBot" | "actor" | "frame" | "receive" | "clients" | "consoleCommand" | "disconnect" | "close" | "checkpoint" | "beginRoundRestart" | "bindRestartedRound" | "reconnectRestartedClient" | "resumeRoundBots">;
+
 /** Stable source imports are installed before the game and bound before bot admission. */
 export class SimulationBotServices {
   isBot(actor: ActorId): boolean { return this.transport?.isBot(actor) ?? false; }
-  get configuration(): CvarRegistry | null { return this.transport?.game.options.cvars ?? null; }
+  get configuration(): CvarRegistry | null { return this.transport?.configuration ?? null; }
   checkpoint(): ApplicationBotsCheckpoint | null { return this.transport?.checkpoint() ?? null; }
   private director: SourceBotDirector | null = null;
-  private transport: ApplicationBots | null = null;
+  private transport: ApplicationBotService | null = null;
   frame(time: number, elapsed: number): readonly ActorCommand[] { return this.transport?.options.automaticFrame === true ? this.transport.frame(time, elapsed) : []; }
+  navigation(actor: ActorId, start: Vec3, goal: Vec3): { readonly kind: "path"; readonly distanceSquared: number; readonly points: readonly Vec3[] }
+    | { readonly kind: "no-navigation" | "unreachable" } {
+    const transport = this.transport;
+    if (transport === null) return { kind: "no-navigation" };
+    const player = transport.options.simulation.movementPlayer(actor);
+    if (player === null) return { kind: "no-navigation" };
+    const result = transport.options.navigation.forClient(player.client.slot).route({ start, goal });
+    if (result.kind === "unreachable") return { kind: "unreachable" };
+    let distance = 0;
+    let previous: Vec3 | null = null;
+    for (const current of result.route.points) {
+      if (previous !== null) distance += Math.hypot(current.x - previous.x, current.y - previous.y, current.z - previous.z);
+      previous = current;
+    }
+    return { kind: "path", distanceSquared: distance * distance, points: result.route.points };
+  }
   readonly source: Q3SourceBots = {
     kind: "available",
     connect: (client, restart) => this.require().connect(client, restart),
@@ -45,8 +64,16 @@ export class SimulationBotServices {
     consoleCommand: argv => this.require().consoleCommand(argv),
   };
   attach(director: SourceBotDirector, transport: ApplicationBots): void {
-    if (this.director !== null) throw new Error("Source bot services already have a director");
+    if (this.director !== null || this.transport !== null) throw new Error("Source bot services already have a director");
     this.director = director; this.transport = transport;
+  }
+  attachTransport(transport: ApplicationBotService): void {
+    if (this.director !== null || this.transport !== null) throw new Error("Bot transport is already attached");
+    this.transport = transport;
+  }
+  detachTransport(transport: ApplicationBotService): void {
+    if (this.director !== null || this.transport !== transport) throw new Error("Bot transport lifetime differs");
+    this.transport = null;
   }
   detach(director: SourceBotDirector): void {
     if (this.director !== director) throw new Error("Cannot detach a different source bot director");
@@ -101,7 +128,7 @@ export interface ApplicationBotTransportCheckpoint {
 export interface ApplicationBotsCheckpoint {
   readonly version: 1;
   readonly transport: ApplicationBotTransportCheckpoint;
-  readonly director: ReturnType<SourceBotDirector["captureSaveState"]>;
+  readonly director: ReturnType<SourceBotDirector["captureSaveState"]> | import("./bot-rerelease.ts").RereleasePopulationCheckpoint;
   readonly navigation: ApplicationBotNavigationCheckpoint;
   readonly knowledge: ReturnType<BotArsenalBinding["checkpoint"]> | null;
   readonly sharedWorld: ReturnType<ReturnType<typeof createSharedBotWorld>["checkpoint"]> | null;
@@ -139,7 +166,7 @@ function persistentNavigation(navigation: SelectedBotNavigation | ApplicationBot
   return navigation;
 }
 
-class RestoredBotReliableCommands extends ServerReliableCommands {
+export class RestoredBotReliableCommands extends ServerReliableCommands {
   constructor(image: ApplicationBotTransportCheckpoint["connections"][number]["reliable"]) {
     super();
     if (!Number.isInteger(image.sequence) || image.sequence < 0 || image.sequence > 0x7fffffff
@@ -156,6 +183,7 @@ class RestoredBotReliableCommands extends ServerReliableCommands {
 
 /** Local bot connections consume the same source snapshot selector and reliable command ring as clients. */
 export class ApplicationBots {
+  get configuration(): CvarRegistry { return this.game.options.cvars; }
   readonly director: SourceBotDirector;
   readonly population: SharedBotPopulation;
   private sourceValue: Q3SourceRuntime | null;
@@ -176,6 +204,7 @@ export class ApplicationBots {
     const error = botAdmissionError(options.simulation);
     if (error !== null) throw new Error(error);
     const source = options.simulation.q3Source();
+    if (source === null && legacyBotAdmissionError(options.simulation) !== null) throw new Error(legacyBotAdmissionError(options.simulation) ?? "Legacy bot policy is unavailable");
     if (options.session.session !== options.simulation.session) throw new Error("Bot clients and simulation belong to different sessions");
     this.sourceValue = source;
     this.arsenal = source === null ? null : createBotArsenalBinding(options.simulation, client =>
@@ -566,7 +595,11 @@ export function botAdmissionError(simulation: SharedSimulation): string | null {
     ? null : "Q3-map bots support native Q3 weapons or selected Q1/Q2 weapons in base Q3 deathmatch";
   const q1 = simulation.q1Source(), q2 = simulation.q2Source();
   if (simulation.q2WeaponSource() === null && simulation.q1WeaponSource() === null && simulation.selectedQ3WeaponSource() === null) return "Shared bot arsenal observation is unavailable";
-  if (simulation.options.mode !== "deathmatch" || q1 !== null && (q1.composition.selection.program !== "id1" || q1.cvars.variableValue("teamplay") !== 0)
-    || q2 !== null && q2.product.match.selection.kind !== "standard") return "Shared bots support standard deathmatch; team and campaign objectives are not yet bound";
   return q1 !== null || q2 !== null ? null : "Bot world observation is unavailable";
+}
+function legacyBotAdmissionError(simulation: SharedSimulation): string | null {
+  const q1 = simulation.q1Source(), q2 = simulation.q2Source();
+  if (simulation.options.mode !== "deathmatch" || q1 !== null && (q1.composition.selection.program !== "id1" || q1.cvars.variableValue("teamplay") !== 0)
+    || q2 !== null && q2.product.match.selection.kind !== "standard") return "Team and campaign bots require mounted native bot definitions";
+  return null;
 }

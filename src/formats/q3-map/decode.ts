@@ -3,6 +3,7 @@
 import { BinaryError, BinaryReader } from "../../core/binary/index.ts";
 import type { Bounds, Vec2, Vec3, Vec4 } from "../../contracts/math.ts";
 import { parseEntities } from "./entities.ts";
+import { normalizeQ3Bsp } from "./ibsp44.ts";
 
 export interface BspShader { readonly name: string; readonly surfaceFlags: number; readonly contentFlags: number }
 export interface BspPlane { readonly normal: Vec3; readonly distance: number }
@@ -113,6 +114,7 @@ function surface(reader: BinaryReader): BspSurface {
 
 /** Parse the stored map data; renderer overbright shifts and collision bounds expansion are separate operations. */
 export function parseQ3Bsp(data: Uint8Array, source = "<bsp>"): BspMap {
+  data = normalizeQ3Bsp(data, source);
   const reader = new BinaryReader(data, source);
   if (reader.u32() !== 0x50534249) throw new BinaryError(source, 0, "expected IBSP magic");
   if (reader.i32() !== 46) throw new BinaryError(source, 4, "expected BSP version 46");

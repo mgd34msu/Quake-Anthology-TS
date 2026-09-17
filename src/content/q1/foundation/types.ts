@@ -23,12 +23,12 @@ export function q1WeaponBit(weapon: Q1BaseWeapon): number {
   }
 }
 export type Q1Weapon = Q1BaseWeapon | "hipnotic:laser" | "hipnotic:mjolnir" | "hipnotic:proximity" | "rogue:lava-nailgun" | "rogue:lava-supernailgun" | "rogue:multi-grenade" | "rogue:multi-rocket" | "rogue:plasma" | "rogue:grapple" | "mg3:laser" | "mg3:mjolnir" | "ctf:grapple";
-export type Q1Powerup = "quad" | "invulnerability" | "invisibility" | "suit" | "hipnotic:wetsuit" | "hipnotic:empathy" | "rogue:shield" | "rogue:antigrav";
-export const Q1_POWERUP_IDS: readonly Q1Powerup[] = ["quad", "invulnerability", "invisibility", "suit", "hipnotic:wetsuit", "hipnotic:empathy", "rogue:shield", "rogue:antigrav"];
+export type Q1Powerup = "quad" | "invulnerability" | "invisibility" | "suit" | "hipnotic:wetsuit" | "hipnotic:empathy" | "rogue:shield" | "rogue:antigrav" | "mg3:lavasuit";
+export const Q1_POWERUP_IDS: readonly Q1Powerup[] = ["quad", "invulnerability", "invisibility", "suit", "hipnotic:wetsuit", "hipnotic:empathy", "rogue:shield", "rogue:antigrav", "mg3:lavasuit"];
 export type Q1SoundChannel = "auto" | "weapon" | "voice" | "item" | "body" | 5 | 6 | 7;
 export type Q1BeamStyle = "lightning1" | "lightning2" | "lightning3" | "grapple";
-export type Q1Solid = "none" | "trigger" | "bbox" | "slidebox" | "bsp";
-export type Q1MoveType = "none" | "push" | "step" | "toss" | "bounce" | "fly" | "flymissile" | "noclip";
+export type Q1Solid = "none" | "trigger" | "bbox" | "slidebox" | "bsp" | "corpse";
+export type Q1MoveType = "none" | "push" | "step" | "toss" | "bounce" | "fly" | "flymissile" | "noclip" | "gib";
 export interface Q1Trace {
   readonly fraction: number;
   readonly end: Vec3;
@@ -124,6 +124,8 @@ export interface Q1FoundationOptions {
   /** Only the declared source program can opt into its covered native precache calls. */
   readonly precacheProgram?: "id1";
   readonly edition: "classic" | "rerelease";
+  /** Selected engine behavior; source content edition remains independent. */
+  readonly physicsEdition?: "classic" | "rerelease";
   readonly skill: 0 | 1 | 2 | 3;
   readonly deathmatch: number;
   readonly coop: boolean;

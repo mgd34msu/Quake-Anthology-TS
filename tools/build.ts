@@ -47,7 +47,8 @@ export async function buildWorkspace(directory: string, kind: BuildKind): Promis
   const workspace = resolve(directory);
   const entries: readonly BuildEntry[] = kind === "runtime"
     ? [{ source: "src/main.ts", executable: "quake-typescript" }]
-    : [{ source: "docs/validate-plan.ts", executable: "validate-plan" }, { source: "tools/check-policy.ts", executable: "check-policy" }];
+    : [{ source: "docs/validate-plan.ts", executable: "validate-plan" }, { source: "tools/check-policy.ts", executable: "check-policy" },
+      { source: "tools/source-camera.ts", executable: "source-camera" }, { source: "tools/navigation/aas.ts", executable: "aas" }];
   for (const entry of entries) {
     if (!await Bun.file(join(workspace, entry.source)).exists()) {
       throw new Error(kind === "runtime"

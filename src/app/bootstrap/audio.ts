@@ -1,5 +1,6 @@
 import { mountedMusicTracks } from "./audio/playlist.ts";
 import { readMusicSettings, type MusicPreferences } from "./audio/playlist-settings.ts";
+import { geometryTransmission } from "../../audio/geometry.ts";
 import { readAudioOutputCvars, writeAudioOutputCvars } from "./audio/output-settings.ts";
 import type { AudioOutputFormat } from "../../audio/output.ts";
 import type { MusicControls } from "../../audio/music.ts";
@@ -85,6 +86,13 @@ export class ApplicationAudio {
   private readonly cgameFrames: Q3SeatAudioFrame[] = [];
   private listeners: readonly AudioListener[] = [];
   private snapshot: WorldSnapshot | null = null;
+  private geometry: ((listener: AudioListener, position: Vec3) => number) | null = null;
+  private geometryEnabled = false;
+  private syncGeometry(): void {
+    const enabled = (this.volumeCvars?.variableValue("s_geometryAcoustics") ?? 0) !== 0;
+    if (enabled === this.geometryEnabled) return;
+    this.geometryEnabled = enabled; this.engine.setGeometryTransmission(enabled ? this.geometry : null);
+  }
   private environment: { readonly definitions: readonly ReverbEnvironment[]; readonly trace: (listener: AudioListener) => AudioTraceQuery } | null = null;
   private readonly environmentSeats: SeatId[] = [];
   private volume = 0.7;
@@ -137,6 +145,13 @@ export class ApplicationAudio {
   }
 
   async prepareEnvironment(scene: SceneQueries): Promise<void> {
+    const timing = this.content.recipe.timing.find(value => value.provider === this.content.recipe.engineBehavior.provider);
+    if (timing === undefined) throw new Error("Audio geometry has no numeric profile");
+    this.geometry = (listener, position) => geometryTransmission(listener.origin, position, (start, end) =>
+      scene.trace({ start, end, shape: { kind: "point" }, target: { kind: "world" }, passActor: listener.actor, numeric: timing.numeric,
+        policy: { kind: "q2", contentsMask: 3, leafContents: "merged" } }));
+    this.engine.setGeometryTransmission(this.geometryEnabled ? this.geometry : null);
+    this.syncGeometry();
     const selection = this.content.recipe.presentation.environment;
     if (selection.kind === "disabled") return;
     const request = selection.kind === "selected" ? selection.resource
@@ -148,8 +163,6 @@ export class ApplicationAudio {
       return;
     }
     const definitions = parseEnvironments(new TextDecoder().decode(await mounts.read(resource)), text => this.print(text));
-    const timing = this.content.recipe.timing.find(value => value.provider === this.content.recipe.engineBehavior.provider);
-    if (timing === undefined) throw new Error("Audio geometry has no numeric profile");
     if (this.closed) return;
     this.environment = { definitions, trace: listener => (start, end, mins, maxs) => {
       const current = this.listeners.find(value => value.seat.equals(listener.seat));
@@ -180,6 +193,7 @@ export class ApplicationAudio {
     if (this.closed) throw new Error("Sound system is closed");
     const print = request.print ?? this.print;
     if (request.name === "snd_restart") { this.restartOutput(); return true; }
+    if (request.name === "music") { await this.music.musicCommand(request.args, print); return true; }
     if (request.name === "cd") { await this.music.cdCommand(request.args, print); return true; }
     if (request.name === "soundinfo" || request.name === "s_info") {
       const output = this.engine.outputConfiguration;
@@ -448,6 +462,7 @@ export class ApplicationAudio {
   }
 
   async frame(snapshot: WorldSnapshot, listeners: readonly AudioListener[], events: readonly SimulationPresentationEvent[], frameStartedAt = performance.now()): Promise<void> {
+    this.syncGeometry();
     this.engine.setEffectsVolume(this.effectsVolume); this.music.volume = this.musicVolume;
     this.snapshot = snapshot;
     this.listeners = listeners;
@@ -539,6 +554,7 @@ export class ApplicationAudio {
   close(): undefined {
     if (this.closed) return undefined;
     this.closed = true;
+    this.geometry = null; this.geometryEnabled = false;
     this.music.stop(); this.engine.close(); this.banks.clear(); this.sounds.clear(); this.footsteps.clear();
     this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
     this.listeners = []; this.snapshot = null;

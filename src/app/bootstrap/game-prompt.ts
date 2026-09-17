@@ -1,9 +1,10 @@
+import { loadLocalizationResources } from "../../text/localization-resources.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { SeatInputEvent, SeatInputFocus, UiControl } from "../../contracts/ui.ts";
 import type { Q1CompositionEvent } from "../../content/composition/q1/types.ts";
 import { NativeUiController, menuRow } from "../../ui/common/index.ts";
-import { LocalizationCatalog } from "../../text/localization.ts";
+import type { LocalizationCatalog } from "../../text/localization.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 
@@ -14,14 +15,15 @@ interface PendingPrompt { readonly content: ContentId; readonly value: Prompt; }
 export class SeatGamePrompt {
   private pending: PendingPrompt | null = null;
   private prepared: PendingPrompt | null = null;
+  private preparedLanguage = "";
   private title = "";
   private page = 0;
   private choices: Prompt["choices"] = [];
-  private readonly catalogs = new Map<ContentId, Promise<LocalizationCatalog>>();
+  private readonly catalogs = new Map<string, Promise<LocalizationCatalog>>();
   private readonly unregister: () => void;
 
   constructor(private readonly seat: SeatId, private readonly actor: () => ActorId,
-    private readonly controller: NativeUiController, private readonly impulse: (value: number) => void) {
+    private readonly controller: NativeUiController, private readonly impulse: (value: number) => void, private readonly language: () => string = () => "english") {
     this.unregister = controller.register(gamePromptMenu, () => ({ id: gamePromptMenu, title: this.title, fullScreen: false,
       controls: this.controls(), open: () => undefined, close: () => undefined }));
   }
@@ -51,28 +53,26 @@ export class SeatGamePrompt {
     }
   }
 
-  private catalog(content: ContentId, assets: Pick<ApplicationAssets, "provider">): Promise<LocalizationCatalog> {
-    const found = this.catalogs.get(content); if (found !== undefined) return found;
+  private catalog(content: ContentId, language: string, assets: Pick<ApplicationAssets, "provider">): Promise<LocalizationCatalog> {
+    const key = `${content}:${language}`;
+    const found = this.catalogs.get(key); if (found !== undefined) return found;
     const pending = (async () => {
       const provider = await assets.provider(content);
-      const [base, mod] = await Promise.all([provider.mounts.open("localization/loc_english.txt"), provider.mounts.open("localization/loc_english_mod.txt")]);
-      const catalog = new LocalizationCatalog(this.seat, "q1-rerelease");
-      catalog.loadOrdered({ base: base?.bytes ?? null, mods: mod === null ? [] : [mod.bytes] }, { base: null, mods: [] });
-      return catalog;
+      return loadLocalizationResources(this.seat, language, async path => (await provider.mounts.open(path))?.bytes ?? null);
     })();
-    this.catalogs.set(content, pending); return pending;
+    this.catalogs.set(key, pending); return pending;
   }
 
   async prepare(assets: Pick<ApplicationAssets, "provider">, focus: () => SeatInputFocus): Promise<void> {
-    const pending = this.pending;
+    const pending = this.pending, language = this.language();
     if (pending !== null && !pending.value.actor.equals(this.actor())) { this.clear(); return; }
-    if (pending !== null && pending !== this.prepared) {
-      const catalog = await this.catalog(pending.content, assets);
-      if (this.pending !== pending || !pending.value.actor.equals(this.actor())) return;
+    if (pending !== null && (pending !== this.prepared || language !== this.preparedLanguage)) {
+      const catalog = await this.catalog(pending.content, language, assets);
+      if (this.language() !== language || this.pending !== pending || !pending.value.actor.equals(this.actor())) return;
       this.page = 0;
       this.title = catalog.localize(pending.value.title);
       this.choices = pending.value.choices.map(choice => ({ ...choice, label: catalog.localize(choice.label) }));
-      this.prepared = pending;
+      this.prepared = pending; this.preparedLanguage = language;
     }
     if (this.pending !== null && focus().kind === "game") this.controller.openMenu(gamePromptMenu);
     if (this.pending === null && this.controller.activeMenu === gamePromptMenu) this.controller.closeMenu();

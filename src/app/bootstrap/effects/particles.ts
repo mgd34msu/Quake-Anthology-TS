@@ -6,12 +6,16 @@ import { add3, anglesToAxis, cross3, dot3, length3, normalize3OrZero, scale3, su
 import { advanceQ1Particle, sampleQ2Particle } from "../../../render/scene/particles/legacy.ts";
 import type { Q1ParticleState, Q2ParticleState } from "../../../render/scene/particles/legacy.ts";
 import { SourceRandom } from "../simulation/random.ts";
+import { ALIAS_NORMALS } from "../../../formats/q12-model/normals.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const gravity: Vec3 = { x: 0, y: 0, z: -40 };
+const q1FireRamp: readonly number[] = [109, 107, 6, 5, 4, 3];
 export class SourceParticles {
   private q1: Q1ParticleState[] = [];
   private q2: Q2ParticleState[] = [];
+  private tracerCount = 0;
+  private angularVelocities: readonly Vec3[] = [];
   constructor(readonly random: SourceRandom, readonly capacity = 4096) {}
   private rand(): number { return this.random.nextInteger(); }
   private unit(): number { return (this.rand() & 32767) / 32767; }
@@ -35,6 +39,54 @@ export class SourceParticles {
       const die = seconds + 0.1 * (this.rand() % 5), shade = (color & ~7) + (this.rand() & 7);
       if (!this.first({ origin: add3(origin, this.xyz(() => (this.rand() & 15) - 8)), velocity: scale3(direction, 15),
         die, color: shade, ramp: 0, type: "slow-gravity" })) return;
+    }
+  }
+  q1Entity(origin: Vec3, seconds: number): void {
+    const f = Math.fround;
+    if (this.angularVelocities[0]?.x === undefined || this.angularVelocities[0]?.x === 0)
+      this.angularVelocities = ALIAS_NORMALS.map(() => this.xyz(() => f((this.rand() & 255) * 0.01)));
+    for (const [index, normal] of ALIAS_NORMALS.entries()) {
+      if (this.q1.length === this.capacity) return;
+      const velocity = this.angularVelocities[index];
+      if (velocity === undefined) throw new Error("Missing Q1 particle angular velocity");
+      const yaw = f(seconds * velocity.x), pitch = f(seconds * velocity.y);
+      const cp = f(Math.cos(pitch)), sp = f(Math.sin(pitch)), cy = f(Math.cos(yaw)), sy = f(Math.sin(yaw));
+      const forward = { x: f(cp * cy), y: f(cp * sy), z: -sp };
+      const component = (base: number, n: number, direction: number): number => f(f(base + f(n * 64)) + f(direction * 16));
+      this.first({ origin: { x: component(origin.x, normal.x, forward.x), y: component(origin.y, normal.y, forward.y), z: component(origin.z, normal.z, forward.z) },
+        velocity: zero, color: 111, die: f(seconds + 0.01), ramp: 0, type: "explode" });
+    }
+  }
+  q1Trail(start: Vec3, end: Vec3, type: 0 | 1 | 2 | 3 | 4 | 5 | 6, seconds: number): void {
+    const f = Math.fround, delta = { x: f(end.x - start.x), y: f(end.y - start.y), z: f(end.z - start.z) };
+    let remaining = f(Math.sqrt(f(f(f(delta.x * delta.x) + f(delta.y * delta.y)) + f(delta.z * delta.z))));
+    const inverse = remaining === 0 ? 0 : f(1 / remaining);
+    const direction = { x: f(delta.x * inverse), y: f(delta.y * inverse), z: f(delta.z * inverse) };
+    let point = start;
+    while (remaining > 0) {
+      remaining = f(remaining - 3);
+      if (this.q1.length === this.capacity) return;
+      let origin = point, velocity = zero, color = 0, ramp = 0, die = f(seconds + 2);
+      let particleType: Q1ParticleState["type"] = "static";
+      if (type === 0 || type === 1) {
+        ramp = (this.rand() & 3) + (type === 1 ? 2 : 0);
+        color = q1FireRamp[ramp] ?? 0; particleType = "fire";
+        origin = { x: f(point.x + (this.rand() % 6 - 3)), y: f(point.y + (this.rand() % 6 - 3)), z: f(point.z + (this.rand() % 6 - 3)) };
+      } else if (type === 2 || type === 4) {
+        color = 67 + (this.rand() & 3); particleType = "gravity";
+        origin = { x: f(point.x + (this.rand() % 6 - 3)), y: f(point.y + (this.rand() % 6 - 3)), z: f(point.z + (this.rand() % 6 - 3)) };
+        if (type === 4) remaining = f(remaining - 3);
+      } else if (type === 3 || type === 5) {
+        die = f(seconds + 0.5); color = (type === 3 ? 52 : 230) + ((this.tracerCount & 4) << 1);
+        this.tracerCount++;
+        velocity = (this.tracerCount & 1) !== 0 ? { x: f(30 * direction.y), y: f(30 * -direction.x), z: 0 }
+          : { x: f(30 * -direction.y), y: f(30 * direction.x), z: 0 };
+      } else {
+        color = 152 + (this.rand() & 3); die = f(seconds + 0.3);
+        origin = { x: f(point.x + ((this.rand() & 15) - 8)), y: f(point.y + ((this.rand() & 15) - 8)), z: f(point.z + ((this.rand() & 15) - 8)) };
+      }
+      this.first({ origin, velocity, color, ramp, die, type: particleType });
+      point = { x: f(point.x + direction.x), y: f(point.y + direction.y), z: f(point.z + direction.z) };
     }
   }
   q1Explosion(origin: Vec3, seconds: number, blob: boolean): void {

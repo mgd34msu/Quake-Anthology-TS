@@ -1,3 +1,5 @@
+import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
+import { registerQ2ServerCvars, q2RereleaseItemServices } from "../../../../src/settings/server/q2-owner.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../../src/contracts/identity.ts";
@@ -15,7 +17,7 @@ import type { Q2CompositionServices, Q2MatchSelection } from "../../../../src/co
 import { Q2Ctf } from "../../../../src/content/q2/multiplayer/ctf/index.ts";
 import { Q2Lmctf } from "../../../../src/content/q2/multiplayer/lmctf/runtime.ts";
 import { Q2Tag } from "../../../../src/content/q2/missionpacks/modes/index.ts";
-function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }, clientCount = 2, deathmatchFlags?: Q2CompositionServices["deathmatchFlags"]) {
+function compose(initializeInventory = true, entities = '{ "classname" "worldspawn" } { "classname" "info_player_start" }', match: Q2MatchSelection = { kind: "standard" }, clientCount = 2, deathmatchFlags?: Q2CompositionServices["deathmatchFlags"], options: Pick<Q2CompositionServices, "randomItems" | "dropQuadFire"> = {}) {
   const actors = new SessionActorRegistry(createIdentityOwner("rr-source-check")), callbacks = new ActorCallbackTable(actors);
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const inventory = new SharedInventoryTable(actors), combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
@@ -48,7 +50,7 @@ function compose(initializeInventory = true, entities = '{ "classname" "worldspa
       provider: "q2:game", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q2:movement" },
     playerHooks: hooks, itemHooks: { weaponPicked: () => undefined, silencer: () => undefined, powerArmor: () => undefined },
     entityHooks: { playerPush: () => undefined, setActorGravity: () => undefined, localTime: () => ({hour: 12, minute: 0, second: 0}) },
-    services: { ...(deathmatchFlags === undefined ? {} : { deathmatchFlags }), gravity: () => 800, emit: () => undefined, hunterCamera: false, strongMines: false,
+    services: { ...options, ...(deathmatchFlags === undefined ? {} : { deathmatchFlags }), gravity: () => 800, emit: () => undefined, hunterCamera: false, strongMines: false,
       foreignPowerups: () => ({quadUntil: 0, doubleUntil: 0, invulnerabilityUntil: 0}) }, rereleaseHooks: rrHooks });
   combat.register(createQ2CombatPolicy({ id: "q2:combat", sourceEffects: composition.match.sourceEffects(composition.game), armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "rerelease", ctf: false, alive: true } })),
     context: () => ({ arithmetic: "binary64", player: true, monster: false, attackerPlayer: false, hasEnemy: false, easySkill: false,
@@ -331,4 +333,42 @@ test("DeathBall initializes required flags through the external owner and preser
   expect(flags).toBe(16 | required);
   expect(active.game.options.deathmatchFlags).toBe(16 | required);
   expect(active.composition.movementStopSpeed).toBe(0);
+});
+
+
+test("rerelease live random-item policy replaces the existing pickup at respawn", () => {
+  const id = createIdentityOwner("random-items"), cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: id.session, origin: { kind: "server-console" } } });
+  registerQ2ServerCvars(cvars, "q2:tag");
+  const active = compose(true, undefined, { kind: "tag" }, 2, undefined, q2RereleaseItemServices(cvars));
+  const pickup = active.game.spawn({ classname: "ammo_shells", ordinal: 9, values: new Map<string, string>() });
+  const actor = pickup.actor.id;
+  pickup.think?.(pickup, active.game);
+  expect(active.items.touch(pickup, active.game, active.first.actor.id)).toBeUndefined();
+  active.advance(30); pickup.think?.(pickup, active.game);
+  expect(pickup.classname).toBe("ammo_shells");
+  cvars.set("g_dm_random_items", "1");
+  active.items.touch(pickup, active.game, active.second.actor.id);
+  active.advance(60); pickup.think?.(pickup, active.game);
+  expect(pickup.actor.id).toBe(actor); expect(pickup.classname).not.toBe("ammo_shells");
+  expect(active.items.itemDefinition(pickup)?.classname).toBe(pickup.classname);
+});
+
+test("rerelease DualFire death drop preserves remaining duration and obeys live suppression", () => {
+  for (const allow of [true, false]) {
+    const id = createIdentityOwner("dual-fire-drop"), cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: id.session, origin: { kind: "server-console" } } });
+    registerQ2ServerCvars(cvars, "q2:tag"); cvars.set("g_dm_no_quadfire_drop", allow ? "0" : "1");
+    const active = compose(true, undefined, { kind: "tag" }, 2, undefined, q2RereleaseItemServices(cvars));
+    const state = active.players.states.get(active.first.actor.id); if (state === undefined) throw new Error("Missing player"); state.useQ2Weapons = true;
+    active.inventory.configure(active.first.actor, { item: "q2:item_quadfire", count: 1, capacity: 2 });
+    active.items.use(active.first.actor, "q2:item_quadfire", active.game);
+    active.advance(10);
+    active.players.recordDeath(active.first, active.game, { attack: null, self: active.first.actor, attacker: active.second.actor.id, inflictor: active.second.actor.id, damage: 110, kick: 0, point: active.game.body(active.first).origin });
+    const drop = [...active.game.entities.values()].find(entity => entity.classname === "item_quadfire");
+    if (!allow) { expect(drop).toBeUndefined(); continue; }
+    if (drop === undefined) throw new Error("No DualFire drop");
+    expect(drop.nextThink).toBe(30); expect(drop.spawnflags & 0x20000).not.toBe(0);
+    active.items.touch(drop, active.game, active.second.actor.id);
+    expect(active.composition.armory?.items.powerups(active.second.actor.id).quadFireUntil).toBe(30);
+    expect(active.composition.armory?.items.powerups(active.first.actor.id).quadFireUntil).toBe(0);
+  }
 });

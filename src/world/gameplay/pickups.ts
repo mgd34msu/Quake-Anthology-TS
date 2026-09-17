@@ -57,6 +57,8 @@ export class SharedPickupAdmission implements PickupAdmission {
     }
   }
 
+  maps(kind: "ammo" | "weapons", item: ItemId): boolean { return this.options.profile[kind].some(mapping => mapping.source === item); }
+
   private destinations(kind: "ammo" | "weapons", item: ItemId): readonly ItemId[] {
     const mapping = this.options.profile[kind].find(entry => entry.source === item);
     if (mapping === undefined) throw new Error(`Pickup supply ${this.options.profile.id} has no ${kind} mapping for ${item}`);

@@ -102,7 +102,7 @@ test("all startup input controls survive saving without a gameplay world", async
           expected.set(binding.id, binding.read());
         } else throw new Error(`Unhandled startup control ${binding.id}`);
       }
-      expect(expected.size).toBe(10);
+      expect(expected.size).toBe(12);
       await profile.save(preferences.values);
       const fresh = new FrontendPreferences(() => "q3"); await fresh.loadBaseline(settings);
       for (const binding of fresh.bindings()) {
@@ -150,4 +150,20 @@ test("frontend-only console history saves through the existing seat profile and 
     await reopened.save();
     expect((await settings.loadSeat("input/seat-1.json"))?.history).toEqual(["find gamma", "help map", "echo back in menu"]);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('Main controller curve edits persist while retaining newer bindings and mouse settings', async () => {
+ const root = await mkdtemp(join(tmpdir(), 'startup-controller-'));
+ try {
+  const settings = new ConfigStore(root), seat = input();
+  const profile = await StartupInputProfile.open(settings, seat, 'q3');
+  seat.gamepad.tuning = { ...seat.gamepad.tuning, move: { kind: 'radial', deadzone: .2, outerThreshold: .1, exponent: 2 } };
+  await profile.save();
+  const saved = await settings.loadSeat('input/seat-1.json'); if (saved === null) throw new Error('Missing profile');
+  expect(saved.gamepad.move).toEqual(seat.gamepad.tuning.move);
+  await settings.saveSeat('input/seat-1.json', { ...saved, bindings: [], mouse: { ...saved.mouse, sensitivity: 8 } });
+  seat.gamepad.tuning = { ...seat.gamepad.tuning, look: { kind: 'axial', deadzone: .3, exponent: 1.5 } };
+  await profile.save();
+  expect(await settings.loadSeat('input/seat-1.json')).toMatchObject({ bindings: [], mouse: { sensitivity: 8 }, gamepad: { look: { kind: 'axial', deadzone: .3, exponent: 1.5 } } });
+ } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -1,3 +1,5 @@
+import { q2MissionWeaponIcons } from "../q2/missionpacks/items.ts";
+import { xatrixWeaponDefinitions, rogueWeaponDefinitions } from "../q2/missionpacks/weapons/definitions.ts";
 import { Q2_BASE_WEAPONS } from "../q2/foundation/weapons/definitions.ts";
 import type { ProviderReference, ResourceRequest } from "../../contracts/content.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
@@ -33,6 +35,25 @@ const hipnoticPictures: typeof q1Pictures = [
   { item: "q1:weapon/hipnotic:proximity", classic: "prox", wheel: "ui_h_weapon_gren", ammo: "sb_rocket" },
 ];
 
+const roguePictures: typeof q1Pictures = [
+  { item: "q1:weapon/rogue:lava-nailgun", classic: "r_lava", wheel: "ui_r_weapon_lava", ammo: "r_ammolava" },
+  { item: "q1:weapon/rogue:lava-supernailgun", classic: "r_superlava", wheel: "ui_r_weapon_superlava", ammo: "r_ammolava" },
+  { item: "q1:weapon/rogue:multi-grenade", classic: "r_gren", wheel: "ui_r_weapon_gren", ammo: "r_ammoplasma" },
+  { item: "q1:weapon/rogue:multi-rocket", classic: "r_multirock", wheel: "ui_r_weapon_multirock", ammo: "r_ammoplasma" },
+  { item: "q1:weapon/rogue:plasma", classic: "r_plasma", wheel: "ui_r_weapon_plasma", ammo: "r_ammomulti" },
+];
+const mg3Pictures: typeof q1Pictures = [
+  { item: "q1:weapon/mg3:laser", classic: "laser", wheel: "ui_h_weapon_laser", ammo: "sb_cells" },
+  { item: "q1:weapon/mg3:mjolnir", classic: null, wheel: "axe", ammo: "sb_cells" },
+];
+function q1WeaponPictures(program: string): typeof q1Pictures {
+  return [...q1Pictures, ...(program === "hipnotic" ? hipnoticPictures : program === "rogue" ? roguePictures : program === "mg3" ? mg3Pictures : [])];
+}
+function q2WeaponDefinitions(product: ProductExpectation) {
+  return [...Q2_BASE_WEAPONS, ...(product.edition === "rerelease" || product.campaign === "xatrix" ? xatrixWeaponDefinitions : []),
+    ...(product.edition === "rerelease" || product.campaign === "rogue" ? rogueWeaponDefinitions : [])];
+}
+
 function image(source: ProviderReference, path: string): WeaponHudIcon {
   return { kind: "image", resource: { content: source.content, path } };
 }
@@ -41,16 +62,16 @@ function wad(source: ProviderReference, lump: string): WeaponHudIcon {
 }
 
 export function weaponHudIcons(source: ProviderReference, product: ProductExpectation, item: ItemId): WeaponHudIcons | null {
-  if (product.family === "q1" && (product.campaign === "id1" || product.campaign === "hipnotic") && (product.edition === "classic" || product.edition === "rerelease")) {
-    const pictures = [...q1Pictures, ...(product.campaign === "hipnotic" ? hipnoticPictures : [])].find(entry => entry.item === item);
+  if (product.family === "q1" && ["id1", "hipnotic", "rogue", "dopa", "mg1", "mg3"].includes(product.campaign) && (product.edition === "classic" || product.edition === "rerelease")) {
+    const pictures = q1WeaponPictures(product.campaign).find(entry => entry.item === item);
     if (pictures === undefined) return null;
-    return { weapon: product.edition === "rerelease" ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_h_") ? pictures.wheel : `ww_${pictures.wheel}`}_1.lmp`) : pictures.classic === null ? null : wad(source, `inv_${pictures.classic}`),
-      selectedWeapon: product.edition === "rerelease" ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_h_") ? pictures.wheel : `ww_${pictures.wheel}`}_2.lmp`) : pictures.classic === null ? null : wad(source, `inv2_${pictures.classic}`),
+    return { weapon: product.edition === "rerelease" ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_") ? pictures.wheel : `ww_${pictures.wheel}`}_1.lmp`) : pictures.classic === null ? null : wad(source, pictures.classic.startsWith("r_") ? pictures.classic : `inv_${pictures.classic}`),
+      selectedWeapon: product.edition === "rerelease" ? image(source, `gfx/weapons/${pictures.wheel.startsWith("ui_") ? pictures.wheel : `ww_${pictures.wheel}`}_2.lmp`) : pictures.classic === null ? null : wad(source, pictures.classic.startsWith("r_") ? pictures.classic : `inv2_${pictures.classic}`),
       ammo: pictures.ammo === null ? null : wad(source, pictures.ammo) };
   }
-  if (product.family === "q2" && product.campaign === "baseq2" && (product.edition === "classic" || product.edition === "rerelease")) {
-    const pictures = q2BaseItemIcons(), picture = pictures.find(entry => entry.item === item);
-    const weapon = Q2_BASE_WEAPONS.find(entry => entry.item === item);
+  if (product.family === "q2" && ["baseq2", "xatrix", "rogue", "mg2"].includes(product.campaign) && (product.edition === "classic" || product.edition === "rerelease")) {
+    const pictures = [...q2BaseItemIcons(), ...q2MissionWeaponIcons()], picture = pictures.find(entry => entry.item === item);
+    const weapon = q2WeaponDefinitions(product).find(entry => entry.item === item);
     if (picture === undefined || weapon === undefined) return null;
     const ammo = pictures.find(entry => entry.item === weapon.ammo);
     return { weapon: image(source, `pics/${picture.icon}.pcx`), selectedWeapon: image(source, `pics/${picture.icon}.pcx`),
@@ -77,7 +98,7 @@ const teamArenaImages: Readonly<Record<string, string>> = {
 };
 
 export function weaponHudResources(source: ProviderReference, product: ProductExpectation): readonly ResourceRequest[] {
-  const items = product.family === "q1" ? [...q1Pictures, ...(product.campaign === "hipnotic" ? hipnoticPictures : [])].map(entry => entry.item) : product.family === "q2" ? Q2_BASE_WEAPONS.map(entry => entry.item) : Q3_WEAPON_ITEMS.map(entry => entry.item);
+  const items = product.family === "q1" ? q1WeaponPictures(product.campaign).map(entry => entry.item) : product.family === "q2" ? q2WeaponDefinitions(product).map(entry => entry.item) : Q3_WEAPON_ITEMS.map(entry => entry.item);
   const paths = new Set<string>();
   for (const item of items) {
     const icons = weaponHudIcons(source, product, item);

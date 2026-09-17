@@ -559,3 +559,22 @@ test.skipIf(!existsSync(path))("native Q1 supply previews match source touches w
     } finally { actors.close(); }
   }
 });
+
+
+test.skipIf(!existsSync(path))("declared rerelease gib gravity and corpse enum survive provider checkpoint", async () => {
+  const { runtime, player, bodies } = gameFor(await loadMap());
+  const playerBody = bodies.read(player.id);
+  if (playerBody === null) throw new Error("Missing fixture player body");
+  const gib = runtime.create("declared_gib");
+  gib.movement = "gib"; gib.solid = "corpse"; gib.fields.set("gravity", "0.5");
+  runtime.setBody(gib, { origin: playerBody.origin, velocity: ZERO, bounds: { min: ZERO, max: ZERO }, ground: null });
+  runtime.physicsEntity(gib.actor, 0.001, 0.001);
+  expect(runtime.body(gib).velocity.z).toBe(Math.fround(-0.4));
+  const checkpoint = decodeQ1FoundationCheckpoint(encodeQ1FoundationCheckpoint(runtime.capture()));
+  const saved = checkpoint.entities.find(entity => entity.classname === "declared_gib");
+  expect(saved?.state.movement).toBe("gib"); expect(saved?.state.solid).toBe("corpse");
+  expect(saved?.fields.find(field => field.key === "gravity")?.value).toBe("0.5");
+  const classic = gameFor(await loadMap(), undefined, "classic").runtime;
+  const invalid = classic.create("declared_gib"); invalid.movement = "gib";
+  expect(() => classic.physicsEntity(invalid.actor, 0.001, 0.001)).toThrow("rerelease physics profile");
+});

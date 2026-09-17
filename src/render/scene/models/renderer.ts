@@ -21,7 +21,7 @@ import { entityCastsShadow, shadowMaterialGeometry } from "../shadow-geometry.ts
 import { shadowCaster, shadowMesh } from "../shadows.ts";
 import type { ShadowCaster, ShadowMesh, ShadowSphere } from "../shadows.ts";
 import { ModelLightSampler } from "./light-sampler.ts";
-import { Q2_SHELL_MASK, aliasShadeDivisor, aliasShadowLightFractions, q2AliasLight, q2ShellColor } from "./lighting.ts";
+import { Q2_SHELL_MASK, aliasShadeDivisor, aliasShadowLightFractions, q1AliasShadowDirection, q1AliasShadowPoint, q2AliasLight, q2ShellColor } from "./lighting.ts";
 import { prepareSceneEntity, preparedModelGroups } from "./prepare.ts";
 import { replacementEntity } from "./replacements.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
@@ -405,7 +405,7 @@ export class SceneModelRenderer {
       && !(options.infrared === true && (flags & 32768) !== 0);
     const affecting = receives ? aliasShadowLightFractions(surface.entity.transform.origin, shade, coneLights === null ? shadows.lights : shadows.lights.filter(light => light.cone === null)) : [];
     const shadeScale = receives && affecting.length !== 0 ? aliasShadeDivisor(shade) : 1;
-    return [sequenceDrawGroup(alpha < 1 ? "translucent" : "opaque", batches.map((batch, index): DrawBatch => {
+    const preparedBatches = batches.map((batch, index): DrawBatch => {
       const state = { ...batch.state, alphaTest: surface.alphaTest === "none" ? batch.state.alphaTest : surface.alphaTest,
         cull: surface.mirrorWeapon ? batch.state.cull === "front" ? "back" : batch.state.cull === "back" ? "front" : "none" : batch.state.cull } satisfies DrawBatch["state"];
       if (index !== 0) return { ...batch, state };
@@ -423,6 +423,25 @@ export class SceneModelRenderer {
           scale: light.cone === null ? 0 : light.scale,
           fraction: affecting.find(point => point.origin === light.origin)?.fraction ?? { x: 0, y: 0, z: 0 } })) } satisfies DrawBatch["lighting"];
       return { ...corrected, lighting };
-    }))];
+    });
+    if (options.planarShadow === true && options.viewModel !== true && this.provider.family === "q1"
+      && (surface.entity.model.kind === "q1-mdl" || surface.entity.model.kind === "md5")) {
+      const floor = this.lighting.sample(surface.transform.origin, input, false).floor;
+      if (floor !== null) {
+        const yaw = Math.atan2(surface.transform.axis[0].y, surface.transform.axis[0].x);
+        const direction = q1AliasShadowDirection(yaw);
+        const shadowTransform = { ...surface.transform, scale: { x: 1, y: 1, z: 1 } };
+        preparedBatches.push({ primitive: "triangles", texturing: "single", indices: surface.localGeometry.indices,
+          texture: { kind: "bind-image", image: this.provider.textures.white.image }, lighting: { kind: "vertex" },
+          state: { blend: { source: "src-alpha", destination: "one-minus-src-alpha" }, depthTest: "less-equal", depthWrite: true,
+            alphaTest: "none", cull: surface.cull, depthRange: surface.depthRange, polygonOffset: null },
+          vertices: surface.localGeometry.vertices.map(vertex => ({
+            position: project(modelWorldPoint(shadowTransform, q1AliasShadowPoint({
+              x: Math.fround(vertex.position.x * surface.transform.scale.x), y: Math.fround(vertex.position.y * surface.transform.scale.y),
+              z: Math.fround(vertex.position.z * surface.transform.scale.z) }, direction, surface.transform.origin.z, floor.point.z))),
+            texCoord: { x: 0, y: 0 }, color: { x: 0, y: 0, z: 0, w: 0.5 * alpha } })) });
+      }
+    }
+    return [sequenceDrawGroup(alpha < 1 ? "translucent" : "opaque", preparedBatches)];
   }
 }

@@ -43,14 +43,14 @@ export function arenaPrediction(simulation: SharedSimulation, query: BotMovement
           forwardMove: Math.min(127, Math.round(horizontal * 127 / 400)), rightMove: 0,
           upMove: query.presence === 4 ? -127 : Math.max(-127, Math.min(127, Math.round(commandMove.z * 127 / 400))), buttons: 0, weapon: entity.client?.ps.weapon ?? 0 } };
     },
-    stopEvents(previous, result) {
-      if (result.status !== "active") throw new Error("Arena projection removed its actor");
+    stop(previous, result) {
+      if (result.status !== "active" || result.state.kind !== "q3") throw new Error("Arena projection lost its Q3 movement actor");
       const wasGrounded = previous?.status === "active" ? previous.ground.kind !== "none" : query.onGround;
       const grounded = result.ground.kind !== "none";
       let flags = !wasGrounded && grounded ? 1 : wasGrounded && !grounded ? 2 : 0;
       if (result.waterLevel > 0) flags |= result.waterType & 8 ? 8 : result.waterType & 16 ? 16 : 4;
       for (const { effect } of result.effects) if (effect.kind === "event"
         && (effect.value.event === EntityEvent.EV_FALL_MEDIUM || effect.value.event === EntityEvent.EV_FALL_FAR)) flags |= 32;
-      return flags;
+      return { events: flags, origin: result.state.origin, area: null };
     } });
 }
