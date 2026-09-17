@@ -2,7 +2,25 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, symlink, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { containedSaveName, saveUnavailable, TimedAutosave, writeContainedSave } from "../../src/persistence/save-policy.ts";
+import { containedSaveName, saveCommandPath, saveUnavailable, TimedAutosave, writeContainedSave } from "../../src/persistence/save-policy.ts";
+
+test("console save names resolve in the save directory and preserve explicit import paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "save-command-"));
+  try {
+    const directory = join(root, "saves"), path = saveCommandPath(directory, "quicksave");
+    expect(path).toBe(join(directory, "quicksave.sav"));
+    expect(saveCommandPath(directory, "quicksave.sav")).toBe(path);
+    expect(saveCommandPath(directory, "campaign/manual")).toBe(join(directory, "campaign", "manual.sav"));
+    expect(saveCommandPath(directory, path)).toBe(path);
+    const imported = join(root, "original.sav");
+    expect(saveCommandPath(directory, imported)).toBe(imported);
+    expect(() => containedSaveName(directory, imported)).toThrow(`outside the save directory: ${directory}`);
+    expect(() => containedSaveName(directory, saveCommandPath(directory, "../outside"))).toThrow("outside the save directory");
+    expect(() => saveCommandPath(directory, "")).toThrow("save name");
+    await writeContainedSave(directory, path, Uint8Array.of(7, 3));
+    expect(new Uint8Array(await readFile(saveCommandPath(directory, "quicksave")))).toEqual(Uint8Array.of(7, 3));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("timed autosave counts eligible play and retries once per interval", () => {
   const timer = new TimedAutosave(100);

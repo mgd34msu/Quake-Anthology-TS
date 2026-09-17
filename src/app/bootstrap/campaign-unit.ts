@@ -4,13 +4,24 @@ import type { ProviderCheckpoint, SaveImage } from "../../contracts/session.ts";
 import { decodeSaveImage, encodeSaveImage } from "../../persistence/save-image.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from "../../persistence/value.ts";
 
-const provider = "session:campaign-unit";
+import { CAMPAIGN_UNIT_CHECKPOINT, validateSaveProviderOwner } from "../../persistence/provider-ownership.ts";
+
+const provider = CAMPAIGN_UNIT_CHECKPOINT.provider;
+function campaignEntries(image: SaveImage): readonly ProviderCheckpoint[] {
+  const entries = image.providers.filter(entry => entry.provider === provider || entry.schema === CAMPAIGN_UNIT_CHECKPOINT.schema);
+  if (entries.length > 1) throw new Error("Duplicate campaign unit checkpoint");
+  for (const entry of entries) validateSaveProviderOwner(entry, image.recipe.map.entities.provider);
+  return entries;
+}
 function path(value: string): string { return value.replace(/^maps\//, "").replace(/\.bsp$/, ""); }
 function key(map: ResourceRequest): string { return `${map.content}/${path(map.path)}`; }
 function location(image: SaveImage): ResourceRequest {
   return { content: image.recipe.map.geometryContent, path: image.recipe.map.geometry.requestedPath };
 }
-function worldOnly(image: SaveImage): SaveImage { return { ...image, providers: image.providers.filter(entry => entry.provider !== provider) }; }
+function worldOnly(image: SaveImage): SaveImage {
+  campaignEntries(image);
+  return { ...image, providers: image.providers.filter(entry => entry.schema !== CAMPAIGN_UNIT_CHECKPOINT.schema) };
+}
 
 export interface CampaignUnitVisit {
   readonly restore: SaveImage | null;
@@ -40,7 +51,7 @@ export class CampaignUnit {
   }
 
   checkpoint(current: ResourceRequest | null = this.current): ProviderCheckpoint {
-    return { provider, schema: "session:campaign-unit", version: 1,
+    return { ...CAMPAIGN_UNIT_CHECKPOINT,
       bytes: encodeCheckpointValue({ current, worlds: [...this.worlds].map(([map, bytes]) => ({ map, bytes })) }) };
   }
 
@@ -51,13 +62,11 @@ export class CampaignUnit {
   }
 
   restore(image: SaveImage): void {
-    const entries = image.providers.filter(entry => entry.provider === provider);
-    if (entries.length > 1) throw new Error("Duplicate campaign unit checkpoint");
+    const entries = campaignEntries(image);
     const checkpoint = entries[0];
     let current: ResourceRequest | null = location(image);
     const worlds = new Map<string, Uint8Array>();
     if (checkpoint !== undefined) {
-      if (checkpoint.schema !== "session:campaign-unit" || checkpoint.version !== 1) throw new Error("Unsupported campaign unit checkpoint");
       const reader = new SaveReader(decodeCheckpointValue(checkpoint.bytes), "campaign-unit");
       current = reader.field("current").nullable(entry => {
         const content = entry.field("content").string();
@@ -68,7 +77,7 @@ export class CampaignUnit {
       for (const entry of reader.field("worlds").list(value => ({ map: value.field("map").string(), bytes: value.field("bytes").bytes() }))) {
         const saved = decodeSaveImage(entry.bytes), map = location(saved);
         if (entry.map !== key(map) || map.content !== current.content || entry.map === key(current) || worlds.has(entry.map)
-          || saved.providers.some(value => value.provider === provider)) throw new Error("Invalid campaign unit world checkpoint");
+          || campaignEntries(saved).length !== 0) throw new Error("Invalid campaign unit world checkpoint");
         worlds.set(entry.map, entry.bytes.slice());
       }
     }

@@ -1,6 +1,6 @@
 import { closeSync, constants, openSync, writeSync, fsyncSync } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { containedFileParts, openContainedParent } from "../platform/files/contained.ts";
 
 export type SavePurpose = "manual" | "autosave" | "transition";
@@ -25,9 +25,15 @@ export function saveUnavailable(state: SaveEligibility, purpose: SavePurpose): s
   return null;
 }
 
+export function saveCommandPath(directory: string, name: string): string {
+  if (name.length === 0) throw new RangeError("Enter a save name or file path");
+  return resolve(directory, extname(name) === "" ? `${name}.sav` : name);
+}
+
 export function containedSaveName(directory: string, path: string): string {
   const name = relative(resolve(directory), resolve(path));
-  if (isAbsolute(name)) throw new RangeError("Save path is outside the save directory");
+  if (isAbsolute(name) || name === ".." || name.startsWith(`..${sep}`))
+    throw new RangeError(`Save path is outside the save directory: ${resolve(directory)}`);
   const parts = containedFileParts(name);
   if (parts.some(part => part.replace(/\.sav$/i, "").toLowerCase() === "current"))
     throw new RangeError("The current slot is reserved for transition state");

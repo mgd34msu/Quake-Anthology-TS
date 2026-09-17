@@ -8,12 +8,13 @@ import { readQ2AttackCheckpoint } from "../../../persistence/q2-foundation.ts";
 import { SaveReader, decodeCheckpointValue } from "../../../persistence/value.ts";
 import { decodeApplicationBotsCheckpoint, type DecodedApplicationBotsCheckpoint } from "./bots.ts";
 import { savedQ3GuestClients } from "./q3/guest-runtime.ts";
+import { saveProviderContract, validateSaveProviderOwner } from "../../../persistence/provider-ownership.ts";
 
 export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderCheckpoint["schema"]): ProviderCheckpoint {
   const matches = image.providers.filter(value => value.schema === schema);
   const value = matches[0];
-  const provider = schema === "world:source-slots" ? "world:actors" : image.recipe.map.entities.provider;
-  if (value === undefined || matches.length !== 1 || value.provider !== provider || value.version !== (schema === "world:simulation" ? 11 : 1)) throw new Error(`Missing or unsupported saved provider ${schema}`);
+  const expected = saveProviderContract(schema, image.recipe.map.entities.provider);
+  if (value === undefined || matches.length !== 1 || value.provider !== expected.provider || value.version !== expected.version) throw new Error(`Missing or unsupported saved provider ${schema}`);
   return value;
 }
 
@@ -77,8 +78,7 @@ export function validateSimulationSave(image: SaveImage): void {
     const key = `${record.provider}/${record.schema}`;
     if (records.has(key)) throw new Error(`Duplicate saved provider ${record.schema}`);
     records.add(key);
-    if (record.provider !== (record.schema === "world:source-slots" ? "world:actors" : image.recipe.map.entities.provider))
-      throw new Error(`Saved provider ${record.schema} has a different owner`);
+    validateSaveProviderOwner(record, image.recipe.map.entities.provider);
   }
   simulationProviderCheckpoint(image, "world:simulation");
   simulationProviderCheckpoint(image, "world:source-slots");

@@ -37,6 +37,7 @@ import { EngineSession, type SessionSeat } from "../../world/session/index.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SdlControllers } from "../../platform/controller.ts";
 import { prepareApplicationSave } from "./original-save.ts";
+import { saveCommandPath } from "../../persistence/save-policy.ts";
 import { SceneFrameBuilder } from "../../render/commands/frame.ts";
 import { SceneImageRegistry } from "../../render/scene/resources.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
@@ -476,7 +477,11 @@ export class StartupApplication {
       if (args.length !== 1 || args[0] === undefined) { this.print("Usage: map <name>\n"); return true; }
       this.pending = { kind: "initial", options: { ...options, map: mapResourcePath(args[0]), network: { kind: "offline" } } }; return true;
     }
-    if (this.game === null && name === "load" && args[0] !== undefined) { this.pending = { kind: "load", path: args[0] }; return true; }
+    if (this.game === null && name === "load") {
+      const saved = args[0];
+      if (args.length !== 1 || saved === undefined || saved.length === 0) { this.print("Usage: load <name or path>\n"); return true; }
+      this.pending = { kind: "load", path: saveCommandPath(this.saves.directory, saved) }; return true;
+    }
     return false;
   }
 

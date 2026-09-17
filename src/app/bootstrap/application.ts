@@ -82,7 +82,7 @@ import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { DedicatedConsole } from "../../console/dedicated.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import { Q3_WEAPON_ITEMS, q3WeaponItem } from "../../content/q3/foundation/arsenal.ts";
-import { saveUnavailable, TimedAutosave, type SavePurpose } from "../../persistence/save-policy.ts";
+import { saveCommandPath, saveUnavailable, TimedAutosave, type SavePurpose } from "../../persistence/save-policy.ts";
 import { writeSavedGame } from "../../persistence/saved-game.ts";
 import { prepareApplicationSave } from "./original-save.ts";
 import { EngineSession } from "../../world/session/index.ts";
@@ -2895,8 +2895,9 @@ export class Application {
           const bot = this.botClients.find(bot => argument === undefined || String(bot.client.id.slot) === argument);
           if (bot !== undefined) this.bots?.disconnect(bot.client.id.slot);
         } else if (command.name === "save") {
-          const path = command.arguments_[0];
-          if (path === undefined || path.length === 0) throw new Error("Usage: save <path>");
+          const name = command.arguments_[0];
+          if (command.arguments_.length !== 1 || name === undefined || name.length === 0) throw new Error("Usage: save <name or path>");
+          const path = saveCommandPath(this.saveDirectory, name);
           await this.saveGame(path);
           print(`Saved ${path}.\n`);
         } else if (command.name === "weapnext" || command.name === "weapprev" || command.name === "use") {
@@ -2907,7 +2908,8 @@ export class Application {
         }
         else if (command.name === "map_restart") this.requestRestart(command.arguments_);
         else if (command.name === "load") {
-          const path = command.arguments_[0]; if (path === undefined || path.length === 0) throw new Error("Usage: load <path>");
+          const name = command.arguments_[0]; if (command.arguments_.length !== 1 || name === undefined || name.length === 0) throw new Error("Usage: load <name or path>");
+          const path = saveCommandPath(this.saveDirectory, name);
           if (this.network !== null) throw new Error("Save/load unavailable while hosting a network game.");
           this.pendingSave = path;
         }
