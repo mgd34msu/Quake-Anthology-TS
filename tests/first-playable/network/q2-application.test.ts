@@ -153,8 +153,14 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
         const info = await query('info 34');
         expect(info?.command).toBe('info'); expect(info?.body).toContain('Local discovery fixture');
         expect((await query('info 999'))?.body).toBe('Local discovery fixture: wrong version\n');
-        expect(await query('rcon wrong hostname changed')).toBeNull();
+        expect((await query('rcon wrong hostname changed'))?.body).toBe('Bad rcon_password.\n');
         expect(cvars.variableString('hostname')).toBe('Local discovery fixture');
+        cvars.set('rcon_password', 'local-admin-check');
+        expect((await query('rcon local-admin-check echo admin-reply'))?.body).toContain('admin-reply');
+        expect((await query('rcon local-admin-check hostname'))?.body).toContain('Local discovery fixture');
+        await query('rcon local-admin-check hostname AdminUpdatedHostname');
+        expect(cvars.variableString('hostname')).toBe('AdminUpdatedHostname');
+        cvars.set('hostname', 'Local discovery fixture'); cvars.set('rcon_password', '');
         nativePlayer.score = priorScore; nativePlayer.ping = priorPing;
         expect(server.simulation.players().some(actor => actor.equals(admitted.actor))).toBe(true);
         expect(admitted.actor.equals(player.actor)).toBe(false);

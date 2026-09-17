@@ -36,7 +36,7 @@ import { serviceLoading } from "./loading.ts";
 import { ControllerSettings } from "./controller-settings.ts";
 import { StartupServerBrowser } from "./server-browser.ts";
 import type { BrowserConnection } from "./server-browser.ts";
-import { ConfigStore } from "../../settings/config.ts";
+import { ConfigStore, settingsPath } from "../../settings/config.ts";
 import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { RemoteApplication } from "./remote-application.ts";
 import { homedir } from "node:os";
@@ -697,7 +697,7 @@ export class StartupApplication {
     };
     return { entries: () => entries, status: () => status, refresh: () => { void refresh(); }, activate: path => {
       if (!entries.some(entry => entry.id === path)) { status = "Server profile is no longer listed"; return; }
-      this.model.selectServerProfile(path); status = `Selected ${entries.find(entry => entry.id === path)?.label ?? path}`;
+      this.model.selectServerProfile(settingsPath(store.root, path)); status = `Selected ${entries.find(entry => entry.id === path)?.label ?? path}`;
     } };
   }
 

@@ -62,7 +62,7 @@ export class QwServerNetwork implements ApplicationNetwork {
             blocked: from => currentHost().administration?.blocked(from) ?? false,
             status: () => currentHost().administration?.status() ?? '\\hostname\\QuakeWorld\n',
             log: sequence => currentHost().administration?.log(sequence) ?? null,
-            executeAdmin: (command, write) => { const administration = currentHost().administration; if (administration === undefined) throw new Error('QW administrator commands require a source command owner'); administration.executeAdmin(command, write); },
+            executeAdmin: (command, write) => { const administration = currentHost().administration; if (administration === undefined) throw new Error('QW administrator commands require a source command owner'); return administration.executeAdmin(command, write); },
             connect: (request, now) => {
                 if (request.from.kind !== 'ipv4' && request.from.kind !== 'ipv6') return { kind: 'rejected', reason: 'QW requires an IP endpoint' };
                 const existing = this.peers.find(peer => sameAddress(peer.remote, request.from, false) && peer.channel.qport === request.qport);
@@ -205,7 +205,7 @@ export class QwServerNetwork implements ApplicationNetwork {
             let owner: Peer | undefined;
             try {
                 if (packet.payload.length >= 4 && new DataView(packet.payload.buffer, packet.payload.byteOffset).getUint32(0, true) === 0xffffffff) {
-                    for (const reply of this.connectionless.receive(packet.payload, packet.from, now)) this.options.transport.send(packet.from, reply);
+                    for (const reply of await this.connectionless.receive(packet.payload, packet.from, now)) this.options.transport.send(packet.from, reply);
                     continue;
                 }
                 if (packet.payload.length < 10) continue;
@@ -213,6 +213,7 @@ export class QwServerNetwork implements ApplicationNetwork {
                 owner = this.peers.find(peer => peer.channel.qport === qport && sameAddress(peer.remote, packet.from, false));
                 if (owner === undefined) continue;
                 const canReply = new DataView(packet.payload.buffer, packet.payload.byteOffset).getUint32(0, true) % 0x80000000 >= owner.channel.outgoingSequence;
+                if (this.host.administration?.blocked(packet.from)) continue;
                 const delivery = owner.channel.receive(packet.payload, now); if (delivery === null) continue;
                 const acknowledged = owner.pingFrames.get(delivery.acknowledged & 63);
                 if (acknowledged?.sequence === delivery.acknowledged) acknowledged.ping = now - acknowledged.sent;

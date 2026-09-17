@@ -13,6 +13,7 @@ import { createNetQuakeCodec } from '../../../network/q1/profile.ts';
 import { MessageReader } from '../../../network/q1/message.ts';
 export interface Q1ApplicationServerBindingOptions {
     readonly session: EngineSession;
+    readonly rejects?: (address: import("../../../network/common/endpoint.ts").NetworkAddress) => boolean;
     readonly simulation: SharedSimulation;
     readonly content: LoadedApplicationContent;
     readonly protocol: Q1ProtocolIdentity;
@@ -232,6 +233,7 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         }
     };
     return {
+        ...(options.rejects === undefined ? {} : { rejects: options.rejects }),
         protocol: options.protocol, maxClients, mapName: game.mapName,
         supportsSourceWire: () => { const reasons: string[] = []; if (source.composition.selection.program !== 'id1')
             reasons.push('Native NetQuake application item serialization currently binds id1'); if (!simulation.recipe.movement.provider.startsWith('q1:') || !simulation.recipe.character.definition.provider.startsWith('q1:') || !simulation.recipe.inventory.provider.startsWith('q1:') || simulation.recipe.weapons.some(value => !value.provider.startsWith('q1:')))

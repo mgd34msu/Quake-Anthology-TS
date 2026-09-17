@@ -1,3 +1,4 @@
+import { registerSourceAdministrationCvars } from "./server-administration.ts";
 import { q3PrereleaseDemo, q3TeamArenaDemo, registerQ3ProductPolicy } from "../../core/q3-product-policy.ts";
 import { CvarFlag } from "../../core/cvars/index.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
@@ -35,6 +36,7 @@ export function createStartupSource(options: ApplicationOptions, selection: Pick
   if (dialect === "q1-quakeworld") registerQuakeWorldEngineCvars(cvars);
   if (dialect === "q3") registerQ3ServerCvars(cvars, { maxClients, mapName: options.map });
   registerFrameTimeCvars(cvars);
+  registerSourceAdministrationCvars(cvars);
   return cvars;
 }
 

@@ -50,6 +50,7 @@ export async function createClassicQ2ApplicationServerHost(options: Q2Applicatio
         if (tokens.argv.length !== 0) world.command(player.sourceEntity, tokens.argv, tokens.argsText);
     });
     return {
+        ...(options.rejects === undefined ? {} : { rejects: options.rejects }),
         protocol: options.protocol, messageOptions: { maxConfigStrings: 2080, inventorySlots: 256 }, maxClients, downloads,
         ...(options.administration === undefined ? {} : { administration: options.administration }), ...(options.masters === undefined ? {} : { masters: options.masters }),
         supportsSourceWire: () => {

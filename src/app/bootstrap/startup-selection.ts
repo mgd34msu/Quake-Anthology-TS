@@ -1,7 +1,8 @@
 import { readArenaSelection, type ArenaSelection } from "./base-arena-selection.ts";
 import { prepareQ3ApplicationProduct } from "./q3-product.ts";
 import { classifyBsp } from "../../formats/bsp-kind.ts";
-import { matchModeUnavailable, type MatchRules } from "./match-modes.ts";
+import { parseEntities as parseQ3Entities } from "../../formats/q3-map/entities.ts";
+import { matchMapUnavailable, matchModeUnavailable, type MatchRules } from "./match-modes.ts";
 import type { BindingCapabilities } from "../../ui/settings/action-catalog.ts";
 import { baseWeaponBindingItems } from "../../input/weapon-bindings.ts";
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
@@ -37,6 +38,10 @@ export interface StartupNativePreset extends StartupSelectionChoice {
   readonly defaultSkill: string;
 }
 export interface StartupLaunch { readonly options: ApplicationOptions; readonly recipe: ExecutableRecipe; }
+export interface StartupHosting {
+  readonly kind: "offline" | "native-server" | "unified-server";
+  readonly port: number;
+}
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
 const monsterNames: Readonly<Record<string, string>> = { monster_army: "Grunt", monster_demon1: "Fiend", monster_wizard: "Scrag", monster_shalrath: "Vore", monster_tarbaby: "Spawn" };
 function monsterLabel(classname: string): string {
@@ -84,6 +89,24 @@ export class StartupSelectionModel {
     },
   };
   selectServerProfile(path: string | null): void { this.selectedServerProfile = path === null ? {} : { serverProfilePath: path }; }
+  hosting(): StartupHosting {
+    const network = this.initial.network;
+    if (network.kind === "native-server" || network.kind === "q2-server" || network.kind === "unified-server")
+      return { kind: network.kind === "q2-server" ? "native-server" : network.kind, port: network.port };
+    const product = this.product("product").expectation;
+    return { kind: "offline", port: product.family === "q3" ? 27960 : product.family === "q2" ? 27910 : product.edition === "quakeworld" ? 27500 : 26000 };
+  }
+  setHosting(value: StartupHosting): void {
+    if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) throw new Error("Port must be a whole number from 1 to 65535.");
+    if (value.kind !== "offline" && this.values.mode === "singleplayer")
+      this.select("mode", this.product("product").expectation.family === "q3" ? "deathmatch" : "coop");
+    const previous = this.initial.network;
+    const host = previous.kind === "native-server" || previous.kind === "q2-server" || previous.kind === "unified-server" ? previous.host : "0.0.0.0";
+    const { networkTransport: _transport, ...initial } = this.initial;
+    this.initial = { ...initial,
+      network: value.kind === "offline" ? { kind: "offline" } : { kind: value.kind, host, port: value.port },
+      ...(value.kind === "native-server" && this.initial.networkTransport !== undefined ? { networkTransport: this.initial.networkTransport } : {}) };
+  }
   private applySelectedServerProfile(options: ApplicationOptions): ApplicationOptions {
     if (this.selectedServerProfile === null) return options;
     const { serverProfile: _serverProfile, serverProfilePath: _serverProfilePath, ...rest } = options;
@@ -112,6 +135,8 @@ export class StartupSelectionModel {
   private readonly playableMaps = new Map<string, readonly StartupSelectionChoice[]>();
   private readonly authoredDefaultMaps = new Map<string, string>();
   private readonly looseModels = new Map<string, readonly string[]>();
+  private readonly eligibleMaps = new Map<string, readonly StartupSelectionChoice[]>();
+  private readonly mapClassnames = new Map<string, readonly string[]>();
   private readonly monsterClasses = new Map<string, ReadonlyMap<string, number>>();
   private readonly rosters = new Map<string, { source: string; default: string; readonly byClassname: Map<string, string> }>();
   private readonly selectedModels = new Map<string, string>();
@@ -139,6 +164,8 @@ export class StartupSelectionModel {
     this.playableMaps.clear(); for (const [id, value] of candidate.playableMaps) this.playableMaps.set(id, value);
     this.authoredDefaultMaps.clear(); for (const [id, value] of candidate.authoredDefaultMaps) this.authoredDefaultMaps.set(id, value);
     this.looseModels.clear(); for (const [id, value] of candidate.looseModels) this.looseModels.set(id, value);
+    this.eligibleMaps.clear();
+    this.mapClassnames.clear(); for (const [id, value] of candidate.mapClassnames) this.mapClassnames.set(id, value);
     this.monsterClasses.clear(); for (const [id, value] of candidate.monsterClasses) this.monsterClasses.set(id, value);
     this.modelChoices.clear();
     if (!catalog.products.some(product => product.expectation.id === this.values.product)) {
@@ -146,6 +173,7 @@ export class StartupSelectionModel {
     }
   }
   async prepareMaps(): Promise<void> {
+    this.eligibleMaps.clear();
     await this.prepareQ3Catalog();
     await this.prepareTeamArena();
     const archives = new Map<string, ArchiveHandle>(), files = new Map<string, FileSource>(), playable = new Map<string, boolean>();
@@ -280,7 +308,23 @@ export class StartupSelectionModel {
     const preset = applicationPreset(this.catalog, options, { movement, character });
     return { options: { ...options, explicitRules: { skill: true, mode: true, capacity: true } }, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: presetChoice(preset.id) }) };
   }
-  private maps(): readonly StartupSelectionChoice[] { return this.playableMaps.get(this.geometry().expectation.id) ?? []; }
+  private maps(): readonly StartupSelectionChoice[] {
+    const product = this.geometry(), choices = this.playableMaps.get(product.expectation.id) ?? [];
+    if (product.expectation.family === "q3") return choices;
+    const { mode, rules = "standard" } = this.options;
+    if (mode !== "deathmatch" && rules === "standard") return choices;
+    const key = `${product.id}:${mode}:${rules}`, cached = this.eligibleMaps.get(key);
+    if (cached !== undefined) return cached;
+    const metadata = new Map(this.catalog.mapsFor(product.id).map(map => [map.path.toLowerCase(), map]));
+    const result = choices.map(option => {
+      if (option.unavailable !== null) return option;
+      const map = metadata.get(option.id.toLowerCase());
+      const classnames = map === undefined ? undefined : this.mapClassnames.get(`${map.source}:${map.memberIndex}`);
+      return classnames === undefined ? option : { ...option, unavailable: matchMapUnavailable({ ...product.expectation, mode, rules }, classnames) };
+    });
+    this.eligibleMaps.set(key, result);
+    return result;
+  }
   private defaultMap(): string {
     const product = this.geometry(), maps = this.maps();
     const preferred = this.authoredDefaultMaps.get(product.expectation.id) ?? product.expectation.mapWitness ?? (product.expectation.family === "q1" ? "maps/start.bsp" : product.expectation.family === "q2" ? "maps/base1.bsp" : "maps/q3dm0.bsp");
@@ -317,6 +361,8 @@ export class StartupSelectionModel {
     return roster;
   }
   private cacheMonsterClasses(key: string, classnames: readonly string[]): void {
+    this.mapClassnames.set(key, classnames);
+    this.eligibleMaps.clear();
     const counts = new Map<string, number>();
     for (const classname of classnames) if (classname.startsWith("monster_")) counts.set(classname, (counts.get(classname) ?? 0) + 1);
     this.monsterClasses.set(key, counts);
@@ -324,10 +370,14 @@ export class StartupSelectionModel {
   async prepareMonsterRoster(): Promise<void> {
     const product = this.geometry();
     if (product.expectation.family === "q3") throw new Error("This map has no supported authored monster roster");
-    const map = this.catalog.mapsFor(product.id).find(map => map.path === this.values.map);
+    await this.prepareMapClassnames();
+  }
+  private async prepareMapClassnames(): Promise<void> {
+    const product = this.geometry();
+    const map = this.catalog.mapsFor(product.id).find(map => map.path.toLowerCase() === this.values.map.toLowerCase());
     if (map === undefined) throw new Error("Selected map is unavailable");
     const key = `${map.source}:${map.memberIndex}`;
-    if (this.monsterClasses.has(key)) return;
+    if (this.mapClassnames.has(key)) return;
     const file = new FileSource(map.source);
     let archive: ArchiveHandle | null = null;
     try {
@@ -339,15 +389,16 @@ export class StartupSelectionModel {
         length = entry.byteLength;
         if (entry.format === "pak") offset = entry.dataOffset; else decoded = await archive.readEntry(entry);
       }
-      const q2 = product.expectation.family === "q2", headerLength = q2 ? 16 : 12;
-      const header = decoded?.subarray(0, headerLength) ?? await file.read(offset, Math.min(length, headerLength));
-      if (header.byteLength < headerLength) throw new Error("Truncated map header");
+      const header = decoded?.subarray(0, 16) ?? await file.read(offset, Math.min(length, 16));
+      if (header.byteLength < 16) throw new Error("Truncated map header");
+      const codec = classifyBsp(header, map.path), q1 = codec === "q1";
       const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
-      if (classifyBsp(header, map.path) !== (q2 ? "q2" : "q1")) throw new Error("Unsupported map header");
-      const start = view.getUint32(q2 ? 8 : 4, true), size = view.getUint32(q2 ? 12 : 8, true);
+      const start = view.getUint32(q1 ? 4 : 8, true), declaredSize = view.getUint32(q1 ? 8 : 12, true);
+      const size = codec === "q2" && start < length ? Math.min(declaredSize, length - start) : declaredSize;
       if (start > length || size > length - start) throw new Error("Invalid map entity lump");
       const bytes = decoded?.subarray(start, start + size) ?? await file.read(offset + start, size), text = new TextDecoder().decode(bytes).replace(/\0+$/, "");
-      this.cacheMonsterClasses(key, q2 ? parseQ2Entities(text, product.expectation.edition === "rerelease" ? "rerelease" : "classic").map(entity => entity.classname)
+      this.cacheMonsterClasses(key, codec === "q2" ? parseQ2Entities(text, product.expectation.edition === "rerelease" ? "rerelease" : "classic").map(entity => entity.classname)
+        : codec === "q3" ? parseQ3Entities(text, map.path).map(entity => entity.get("classname") ?? "")
         : parseQ1Entities(text).map(entity => q1EntityValue(entity, "classname") ?? ""));
     } finally { archive?.close(); file.close(); }
   }
@@ -541,6 +592,8 @@ export class StartupSelectionModel {
     return equipment;
   }
   async resolve(): Promise<StartupLaunch> {
+    if (this.geometry().expectation.family !== "q3" && (this.values.mode === "deathmatch" || this.values.rules !== "standard"))
+      await this.prepareMapClassnames();
     for (const row of this.rows()) {
       const selected = row.choices.find(choice => choice.id === row.value);
       if (selected === undefined || selected.unavailable !== null) throw new Error(`${row.label}: ${selected?.unavailable ?? "choose an installed option"}`);

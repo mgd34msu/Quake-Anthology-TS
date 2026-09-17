@@ -20,6 +20,7 @@ import { createQ2ApplicationDownloads } from '../network/q2-downloads.ts';
 import type { SharedSimulation } from './runtime.ts';
 export interface Q2ApplicationServerBindingOptions {
     readonly session: EngineSession;
+    readonly rejects?: (address: import("../../../network/common/endpoint.ts").NetworkAddress) => boolean;
     readonly simulation: SharedSimulation;
     readonly content: LoadedApplicationContent;
     readonly protocol: Q2ProtocolIdentity;
@@ -225,6 +226,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
     const knownConfigs = new Map<number, Map<number, string>>();
     return {
         downloads,
+        ...(options.rejects === undefined ? {} : { rejects: options.rejects }),
         ...(options.administration === undefined ? {} : { administration: options.administration }),
         ...(options.masters === undefined ? {} : { masters: options.masters }),
         discovery: {

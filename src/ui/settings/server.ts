@@ -6,6 +6,7 @@ import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
 import { settingControl } from "./index.ts";
 import type { SettingsMenus } from "./index.ts";
+import { registerMapRotationMenu } from "./rotation.ts";
 
 export interface HostServerSettingsUi {
   readonly bindings: () => readonly BoundServerSetting[];
@@ -25,6 +26,7 @@ function lines(text: string): readonly string[] {
   if (line !== "") result.push(line); return result;
 }
 export function registerServerSettingsMenu(controller: NativeUiController, host: HostServerSettingsUi): SettingsMenus {
+  const rotation = registerMapRotationMenu(controller, host.bindings);
   const root = "menu:server:settings", detail = "menu:server:detail", profiles = "menu:server:profiles";
   let page = 0, selected: ServerSettingId | null = null, draft = "", error = "", profileName = "default", profileMessage = "", busy = false;
   const button = (id: UiControlId, label: string, row: number, activate: () => void, enabled = true): UiControl => ({ id, kind: "button", label,
@@ -59,7 +61,7 @@ export function registerServerSettingsMenu(controller: NativeUiController, host:
     const controls = available.slice(page * 7, page * 7 + 7).map((current, index) => {
       const status = readServerSetting(current);
       return button(`ui:server:${current.definition.id}`, `${current.definition.label}: ${status.desired}${status.pending ? " (pending)" : ""}`, index, () => {
-        selected = current.definition.id; draft = readServerSetting(current).desired; error = ""; controller.openMenu(detail);
+        selected = current.definition.id; draft = readServerSetting(current).desired; error = ""; controller.openMenu(current.definition.id === "server:map-rotation" ? rotation.root : detail);
       });
     });
     controls.push(button("ui:server:previous", "Previous page", 7, () => { page--; }, page > 0),
@@ -93,5 +95,5 @@ export function registerServerSettingsMenu(controller: NativeUiController, host:
     info("profile-timing", "Loaded settings keep their normal apply timing.", 5),
     ...lines(busy ? "Working…" : profileMessage).slice(0, 3).map((line, index) => info(`profile-message-${index}`, line, 7 + index)), back(),
   ], open: () => undefined, close: () => undefined }))];
-  return { root, dispose() { for (const dispose of disposers.reverse()) dispose(); } };
+  return { root, dispose() { rotation.dispose(); for (const dispose of disposers.reverse()) dispose(); } };
 }

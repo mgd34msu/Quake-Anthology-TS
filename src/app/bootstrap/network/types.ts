@@ -49,6 +49,7 @@ export type Q2ApplicationServerEvent = Q2ServerWriteEvent & {
     readonly reliable?: boolean;
 };
 export interface Q2ApplicationServerHost {
+    rejects?(address: NetworkAddress): boolean;
     readonly administration?: Omit<Q2RconHost, 'reply'>;
     masters?(): readonly NetworkAddress[];
     readonly discovery?: Pick<Q2ConnectionlessHost, 'status' | 'info'>;

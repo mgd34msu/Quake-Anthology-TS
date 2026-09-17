@@ -9,6 +9,8 @@ import { applyServerProfile, captureServerProfile, collectServerSettings, cvarSe
   parseServerProfile, q2CombatSettings, q2LimitSettings, q2SpawnSettings, q3CombatSettings, q3LimitSettings, q3MatchSettings,
   readServerSetting, registerQ2ServerCvars, saveServerProfile, writeServerSetting } from "../../src/settings/server/index.ts";
 import type { BoundServerSetting } from "../../src/settings/server/index.ts";
+import { moveRotationMap, q2RotationSettings, rotationMapName } from "../../src/settings/server/rotation.ts";
+import { listServerProfiles } from "../../src/settings/server/library.ts";
 
 function q2Bindings() {
   const identity = createIdentityOwner("server-settings"), cvars = new CvarRegistry({ dialect: "q2-classic", context: { session: identity.session, origin: { kind: "server-console" } } });
@@ -55,9 +57,37 @@ test("profile validation finishes before source writes and actual files preserve
     writeServerSetting(binding(bindings, "server:q2.no-health"), "1");
     writeServerSetting(binding(bindings, "server:frag-limit"), "9");
     const store = new ConfigStore(root), profile = captureServerProfile(bindings);
+    expect(await listServerProfiles(store)).toEqual([]);
     await saveServerProfile(store, "servers/test.json", profile, definitions);
+    expect(await listServerProfiles(store)).toEqual([{ name: "test", path: "servers/test.json" }]);
     expect(await loadServerProfile(store, "servers/test.json", definitions)).toEqual(profile);
     expect(() => parseServerProfile({ version: 1, overrides: [{ id: "server:missing", value: "0" }] }, definitions)).toThrow("no selected owner");
     await expect(saveServerProfile(store, "../escape.json", profile, definitions)).rejects.toThrow("escapes");
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("ordered rotations use the selected source cvar and survive profile capture", () => {
+  for (const rerelease of [false, true]) {
+    const identity = createIdentityOwner(`rotation-${rerelease}`);
+    const cvars = new CvarRegistry({ dialect: rerelease ? "q2-rerelease" : "q2-classic", context: { session: identity.session, origin: { kind: "server-console" } } });
+    const name = rerelease ? "g_map_list" : "sv_maplist";
+    cvars.register(name, "", 0);
+    if (rerelease) cvars.register("g_map_list_shuffle", "0", 0);
+    const definitions = q2RotationSettings(rerelease).definitions, owner = cvarServerSettingsOwner(cvars);
+    const bindings = definitions.map(definition => ({ definition, owner }));
+    const rotation = binding(bindings, "server:map-rotation");
+    const maps = ["maps/q2dm1.bsp", "q2dm2", "q2dm3"].map(rotationMapName);
+    writeServerSetting(rotation, moveRotationMap(maps, 2, -1).join(" "));
+    expect(cvars.variableString(name)).toBe("q2dm1 q2dm3 q2dm2");
+    if (rerelease) writeServerSetting(binding(bindings, "server:map-rotation-shuffle"), "1");
+    const profile = captureServerProfile(bindings);
+    writeServerSetting(rotation, "");
+    expect(cvars.variableString(name)).toBe("");
+    applyServerProfile(profile, bindings);
+    expect(cvars.variableString(name)).toBe("q2dm1 q2dm3 q2dm2");
+    expect(cvars.variableString("g_map_list_shuffle")).toBe(rerelease ? "1" : "");
+    expect(moveRotationMap(maps, 0, -1)).toBe(maps);
+  }
+  expect(() => rotationMapName("../outside")).toThrow();
+  expect(() => rotationMapName("q2dm1;quit")).toThrow();
 });

@@ -84,6 +84,7 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     this.host.print(packet.error.message);
                 continue;
             }
+            if (this.host.rejects?.(packet.from)) continue;
             try {
                 if (packet.payload.length >= 4 && new DataView(packet.payload.buffer, packet.payload.byteOffset).getUint32(0) >>> 16 === 0x8000) {
                     const response = answerNetQuakeControl(packet.payload, packet.from, now, {

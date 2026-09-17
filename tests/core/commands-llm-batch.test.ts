@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { CommandContext } from "../../src/contracts/common.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
+import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
 
 function context(): CommandContext {
@@ -55,4 +56,33 @@ test("runaway or paused derived batch work fails explicitly and leaves unrelated
   expect(commands.pendingText).toBe("echo pending\n");
   expect(() => commands.executeBatch("wait;echo later\n", source)).toThrow("remaining batch discarded");
   expect(commands.pendingText).toBe("echo pending\n");
+});
+
+
+test("async administrator batch awaits nested scripts while retaining existing input", async () => {
+  const local=context(), source:CommandContext={session:local.session,origin:{kind:"server-console"}};
+  const calls:string[]=[];
+  const commands=new CommandBuffer({dialect:"q3",context:local,readScript:async name=>name==="admin.cfg"?"note script;exec nested.cfg\n":name==="nested.cfg"?"note nested\n":undefined});
+  commands.register("note",invocation=>{calls.push(invocation.args[0]??"");return undefined;});
+  commands.append("note retained\n");
+  await commands.executeBatchAsync("note first;exec admin.cfg;note last\n",source,async()=>{});
+  expect(calls).toEqual(["first","script","nested","last"]);
+  expect(commands.pendingText).toBe("note retained\n");
+  await expect(commands.executeBatchAsync("wait 2;note discarded\n",source,async()=>{})).rejects.toThrow("paused or deferred");
+  expect(commands.pendingText).toBe("note retained\n");
+  commands.execute();expect(calls).toEqual(["first","script","nested","last","retained"]);
+});
+
+
+test("native administrator command dispatch preserves semicolons and limited literal arguments", async () => {
+  const source=context(), cvars=new CvarRegistry({dialect:"q2-classic",context:source});
+  cvars.register("word","expanded");
+  const observed:string[][]=[];
+  const commands=new CommandBuffer({dialect:"q2-classic",context:source,cvars});
+  commands.register("note",invocation=>{observed.push([...invocation.args]);return undefined;});
+  commands.append("note retained\n");
+  await commands.executeCommandAsync("note $word;tail",source,async()=>{},"none");
+  await commands.executeCommandAsync("note $word",source,async()=>{});
+  expect(observed).toEqual([["$word;tail"],["expanded"]]);
+  expect(commands.pendingText).toBe("note retained\n");
 });

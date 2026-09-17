@@ -321,6 +321,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     this.host.print(`${packet.error.message}\n`);
                 continue;
             }
+            if (this.host.rejects?.(packet.from)) continue;
             let peer = this.peers.get(addressKey(packet.from));
             try {
                 if (await this.connectionless(packet.from, packet.payload, nowMilliseconds))

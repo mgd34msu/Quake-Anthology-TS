@@ -30,7 +30,7 @@ import type { StartupSaveList } from "./startup-saves.ts";
 import { UiTextRenderer } from "../../text/ui.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import type { MaterialTextDraw } from "../../text/draw2d.ts";
-import type { StartupNativePreset, StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
+import type { StartupHosting, StartupNativePreset, StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
 
 export interface StartupMenuOptions {
   readonly sound?: (sound: UiSound) => void;
@@ -64,6 +64,7 @@ const nativeFamilyMenu: UiMenuId = "menu:startup:native-family";
 const nativeCampaignMenu: UiMenuId = "menu:startup:native-campaign";
 const nativeDifficultyMenu: UiMenuId = "menu:startup:native-difficulty";
 const session: UiMenuId = "menu:startup:session";
+const hostingMenu: UiMenuId = "menu:startup:hosting";
 const optionsMenu: UiMenuId = "menu:startup:options";
 const displayMenu: UiMenuId = "menu:settings:display:0";
 const soundMenu: UiMenuId = "menu:startup:sound";
@@ -100,6 +101,8 @@ export class StartupMenu {
   private nativePreset: StartupNativePreset | null = null;
   private nativeSkill = "1";
   private nativeArena: string | undefined;
+  private hostDraft: StartupHosting = { kind: "offline", port: 27910 };
+  private hostPort = "27910";
 
   constructor(private readonly options: StartupMenuOptions) {
     this.text = new UiTextRenderer(options.seat);
@@ -176,7 +179,23 @@ export class StartupMenu {
     this.register(browserDetailsMenu, () => this.browserDetailsControls());
     this.register(session, () => [...(options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu))] : []), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
       this.group = group; this.controller.openMenu(categoryMenu);
-    })), this.button("play", "Play", 6, options.play), this.button("back", "Back", 7, () => this.controller.closeMenu())]);
+    })), this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", 4, () => {
+      this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
+    }), this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 6, options.play), this.button("back", "Back", 7, () => this.controller.closeMenu())]);
+    this.register(hostingMenu, () => [
+      { id: "ui:startup:host-kind", kind: "choice", label: "Connections", rect: menuRow(0), visible: true, enabled: !this.busy,
+        selected: this.hostDraft.kind, choices: [{ id: "offline", label: "Local only" }, { id: "native-server", label: "Native game clients" }, { id: "unified-server", label: "This client: mixed games" }],
+        select: (_seat, kind) => { if (kind === "offline" || kind === "native-server" || kind === "unified-server") this.hostDraft = { ...this.hostDraft, kind }; return undefined; } },
+      { id: "ui:startup:host-port", kind: "text-entry", label: "Port", text: this.hostPort, maximumLength: 5, rect: menuRow(1), visible: true, enabled: !this.busy && this.hostDraft.kind !== "offline",
+        change: (_seat, value) => { this.hostPort = value; return undefined; }, submit: () => undefined },
+      { ...this.button("host-mode", options.model.options.mode === "singleplayer" && this.hostDraft.kind !== "offline"
+        ? options.model.catalog.product(options.model.options.product).expectation.family === "q3" ? "Uses Deathmatch. Change rules in Combat." : "Uses Co-op. Change rules in Combat."
+        : "Choose game rules and difficulty in Combat.", 2, () => undefined, true), enabled: false },
+      this.button("host-apply", "Apply", 4, () => {
+        try { options.model.setHosting({ ...this.hostDraft, port: this.hostDraft.kind === "offline" ? this.hostDraft.port : Number(this.hostPort) }); this.status = ""; this.controller.closeMenu(); }
+        catch (error) { this.setStatus(error instanceof Error ? error.message : String(error)); }
+      }, true), this.back(),
+    ]);
     this.register(categoryMenu, () => [
       ...this.rows(this.group?.fields ?? []).map((row, index) => this.row(row, index)), this.back(),
     ]);
@@ -406,7 +425,7 @@ export class StartupMenu {
     };
     const backdrop = menuBackdrop(context), originalPanel = menuPanel(context, active === main);
     const panel = appearance.highContrast && originalPanel.kind === "fill" ? { ...originalPanel, color: colors.panel } : originalPanel;
-    const title = active === main ? "QUAKE" : active === session ? "Custom game"
+    const title = active === main ? "QUAKE" : active === session ? "Custom game" : active === hostingMenu ? "Host a game"
       : active === libraryMenu ? "Library" : active === nativeFamilyMenu ? "Play a game"
       : active === nativeCampaignMenu ? `${this.familyLabel(this.nativeFamily)}${this.nativeFamily === "q3" ? "" : this.nativeEdition === "classic" ? " classic" : " rerelease"}`
       : active === nativeDifficultyMenu ? "Difficulty"

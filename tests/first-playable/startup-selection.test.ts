@@ -43,7 +43,10 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   model.select("product", "q2-classic-baseq2");
   expect(model.options.map).toBe("maps/base1.bsp");
   model.select("rules", "ctf");
+  await expect(model.resolve()).rejects.toThrow("CTF map is missing");
+  model.select("product", "q2-classic-ctf");
   expect((await model.resolve()).recipe.match.provider).toBe("q2:ctf");
+  model.select("product", "q2-classic-baseq2");
   model.select("mode", "singleplayer");
   expect(model.options.rules).toBe("standard");
   expect((await model.resolve()).recipe.match.provider).toBe("q2:official");
@@ -56,6 +59,16 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   }
   const inferred = new StartupSelectionModel(catalog, { ...command.options, product: "q2-classic-ctf", mode: "deathmatch" });
   expect(inferred.options.rules).toBe("ctf");
+  expect(model.hosting()).toEqual({ kind: "offline", port: 27910 });
+  model.setHosting({ kind: "unified-server", port: 28123 });
+  expect(model.options.mode).toBe("coop");
+  expect((await model.resolve()).options.network).toEqual({ kind: "unified-server", host: "0.0.0.0", port: 28123 });
+  expect(() => model.setHosting({ kind: "native-server", port: 65536 })).toThrow("Port must");
+  expect(model.hosting()).toEqual({ kind: "unified-server", port: 28123 });
+  model.setHosting({ kind: "native-server", port: 27910 });
+  expect((await model.resolve()).options.network.kind).toBe("native-server");
+  model.setHosting({ kind: "offline", port: 27910 });
+  expect(model.options.network.kind).toBe("offline");
 }, 60000);
 
 test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup roster edits actual map classes with native defaults and exceptions", async () => {

@@ -22,6 +22,7 @@ export interface Q1ApplicationGameState {
     readonly signon: readonly Q1ApplicationMessage[];
 }
 export interface Q1ApplicationServerHost {
+    rejects?(address: NetworkAddress): boolean;
     readonly protocol: Q1ProtocolIdentity;
     readonly maxClients: number;
     readonly mapName: string;

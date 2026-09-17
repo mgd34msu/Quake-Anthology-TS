@@ -1,3 +1,5 @@
+import { ServerOperatorState, sourceServerAdministration, registerSourceAdministrationCvars, sourceAdministrationCommandNames, type ServerOperatorHost } from "./server-administration.ts";
+import type { NetworkAddress } from "../../network/common/endpoint.ts";
 import { q3ProductMapCommands } from "../../core/q3-product-policy.ts";
 import { applyQ3MapLaunch, q3MapLaunch, type Q3MapLaunch } from "./q3-map-command.ts";
 import { NativeQ2ClientPresentation } from "./native-q2-client.ts";
@@ -291,6 +293,9 @@ export class Application {
   private pendingTeamArena: "next" | "retry" | null = null;
   private pendingTeamArenaPostgame: TeamArenaPostgameStats | null = null;
   private sourceCommands: CommandBuffer | null = null;
+  private operatorState: ServerOperatorState | null = null;
+  private operatorOutput: { write: ((text: string) => void) | null } = { write: null };
+  private operatorSend: ((to: NetworkAddress, bytes: Uint8Array) => boolean) | null = null;
   private sourceCommandBinding: Pick<PreparedSourceCommands, "options"> | null = null;
   private releaseSourceCommands: () => void = () => {};
   private q2Console: ApplicationQ2Console | null = null;
@@ -482,6 +487,8 @@ export class Application {
 
   private static async openSource(ownership: Application["ownership"], options: ApplicationOptions, host: ApplicationHost,
     recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides, initialSave?: SaveImage): Promise<Application> {
+    const originalHost = host, originalPrint = (text: string): void => originalHost.print(text), operatorOutput: { write: ((text: string) => void) | null } = { write: null };
+    host = { ...host, print: text => { (operatorOutput.write ?? originalPrint)(text); return undefined; } };
     if ((options.network.kind === "qw-client" || options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client" || options.network.kind === "unified-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
     const savedSettings = initialSave === undefined ? null : savedSimulationSettings(initialSave);
     const savedBots = initialSave === undefined ? null : savedBotCheckpoint(initialSave);
@@ -647,6 +654,8 @@ export class Application {
         }
         const { authoredCampaignStart: consumedCampaignStart, q3MapLaunch: consumedMapLaunch, ...retainedOptions } = options;
         application = new Application(retainedOptions, content, session, simulation, host, identity, localSeats, inputConfig, ownership);
+        application.operatorOutput = operatorOutput;
+        application.operatorState = await ServerOperatorState.open(Application.sourceConfig(options, content), "settings/server-operator.json");
         application.debugGraph = candidateGraph;
         application.sourceClientChanges.added.push(...stagedClients.added);
         application.sourceClientChanges.removed.push(...stagedClients.removed);
@@ -998,6 +1007,17 @@ export class Application {
       let commands: CommandBuffer;
       if (this.sourceCommands === null) commands = new CommandBuffer(options);
       else { program = this.sourceCommands.prepareProgram(options); commands = program.commands; }
+      const operatorNames = sourceAdministrationCommandNames(selected.dialect).filter(name =>
+        name !== "sv" && name !== "addlrconcmd" && name !== "dellrconcmd" && name !== "listlrconcmds"
+        && !(selected.dialect === "q3" && name !== "heartbeat"));
+      for (const name of operatorNames) register(commands, name, invocation => {
+        if (name === "setmaster" && this.options.dedicated && (selected.dialect === "q2-classic" || selected.dialect === "q2-rerelease"))
+          selected.cvars?.set("public", "1");
+        return queue(name, invocation.args, null, invocation.source);
+      });
+      if (selected.dialect === "q2-classic" || selected.dialect === "q2-rerelease") for (const name of ["addlrconcmd", "dellrconcmd", "listlrconcmds"])
+        register(commands, name, invocation => { if (this.operatorState === null) throw new Error("Server operator is unavailable");
+          this.operatorState.limitedRconCommand(name, invocation.argsText, text => this.host.print(text)); return undefined; });
       for (const name of applicationAudioCommands) register(commands, name, invocation => {
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         return queue(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
@@ -1024,6 +1044,7 @@ export class Application {
     const timeCvars = this.sourceCvars(simulation);
     if (timeCvars !== null) {
       registerFrameTimeCvars(timeCvars);
+      registerSourceAdministrationCvars(timeCvars);
       const register = (name: string, defaultValue: string, flags: number): void => {
         if (!timeCvars.dialect.startsWith("q1") || timeCvars.find(name) === undefined || timeCvars.isConsoleCreated(name))
           timeCvars.register(name, defaultValue, flags);
@@ -1049,7 +1070,7 @@ export class Application {
       const commands = create({ dialect: "q2-classic", cvars: nativeQ2.services.options.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => this.host.print(text) });
       for (const name of ["quit", "map", "gamemap", "save", "load"]) register(commands, name, invocation => queue(name, invocation.args, null, invocation.source));
-      register(commands, "sv", invocation => { q2GameCallback(() => nativeQ2.serverCommand(invocation.argv, invocation.argsText)); return undefined; });
+      register(commands, "sv", invocation => { if (["addip", "removeip", "listip", "writeip"].includes(invocation.args[0] ?? "")) return queue("sv", invocation.args, null, invocation.source); q2GameCallback(() => nativeQ2.serverCommand(invocation.argv, invocation.argsText)); return undefined; });
       sourceCommands = commands;
       bind(commands, owner => this.bindServerSettingCommand(owner, simulation));
       return prepared();
@@ -1060,6 +1081,7 @@ export class Application {
       sourceCommands = create({ dialect: q2Console.cvars.dialect, cvars: q2Console.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => this.host.print(text) });
       const console = q2Console; bind(sourceCommands, commands => console.bind(commands));
+      register(sourceCommands, "sv", invocation => queue("sv", invocation.args, null, invocation.source));
       for (const name of ["addbot", "removebot", "botlist", "kick"]) register(sourceCommands, name, invocation => queue(name, invocation.args, null, invocation.source));
       if (!restoring) await q2Console.initialize();
       register(sourceCommands, "fly", invocation => queue("fly", invocation.args, null, invocation.source));
@@ -1334,20 +1356,56 @@ export class Application {
     }
   }
 
+  private operatorHost(): ServerOperatorHost {
+    const cvars = this.sourceCvars();
+    if (cvars === null) throw new Error("Server administration has no source cvars");
+    return { dialect: cvars.dialect, cvars, dedicated: this.options.dedicated, print: text => this.host.print(text),
+      send: (to, bytes) => this.operatorSend?.(to, bytes) ?? false,
+      writeConfig: (name, text) => Application.sourceConfig(this.options, this.content).dump(name, text),
+      heartbeat: () => { const server = this.network?.server; if (server !== undefined && "heartbeat" in server) server.heartbeat(performance.now()); } };
+  }
+  private async executeAdministration(text: string, output: (text: string) => void, limited = false): Promise<void> {
+    const commands = this.sourceCommands;
+    if (commands === null) throw new Error("Server administration has no source command owner");
+    if (this.operatorOutput.write !== null) throw new Error("Nested server administration is not supported");
+    const pending = this.requestedCommands; this.requestedCommands = [];
+    const restoreOutput = commands.bindOutput(output); this.operatorOutput.write = output;
+    try {
+      await commands.executeCommandAsync(text, { session: this.session.session, origin: { kind: "server-console" } }, () => this.commands(undefined, undefined, false), limited ? "none" : "source");
+    } catch (error) {
+      if (error instanceof Q3GameCallbackError || error instanceof Q2GameCallbackError || this.fatalWorldFailure) throw error;
+      output(`${error instanceof Error ? error.message : String(error)}\n`);
+    } finally {
+      this.operatorOutput.write = null; restoreOutput();
+      this.requestedCommands.unshift(...pending);
+    }
+  }
+
   private async networkHost(simulation = this.simulation, content = this.content, serverCount = this.nativeWorldCount): Promise<NativeServerHost> {
     const source = content.catalog.product(content.recipe.map.entities.content).expectation;
     if (this.options.q1Protocol !== undefined && source.family !== "q1") throw new Error("--q1-protocol requires a Quake I source game");
     if (this.options.network.kind === "q2-server" && source.family !== "q2") throw new Error("--listen-q2 requires a Quake II source game; use --listen for the selected native protocol");
+    const cvars = this.sourceCvars(simulation), state = this.operatorState;
+    if (cvars === null || state === null) throw new Error("Server administration was not initialized");
+    const shared = { state, cvars, dedicated: this.options.dedicated, execute: (text: string, output: (text: string) => void) => this.executeAdministration(text, output),
+      record: (event: { readonly address: NetworkAddress; readonly result: string }) => this.host.print(`Rcon ${addressKey(event.address)}: ${event.result}\n`) };
+    const administration = sourceServerAdministration({ ...shared, dialect: cvars.dialect });
     const common = { session: this.session, simulation, content, print: (text: string): void => { this.host.print(text); } };
     switch (source.family) {
       case "q1": return source.edition === "quakeworld"
-        ? { kind: "qw", host: await createQwApplicationServerHost({ ...common, serverCount }) }
-        : { kind: "q1", host: await createQ1ApplicationServerHost({ ...common, protocol: this.options.q1Protocol ?? { kind: "q1-netquake", version: 15 } }) };
+        ? { kind: "qw", host: await createQwApplicationServerHost({ ...common, serverCount, masters: () => administration.masters().filter(address => address.kind === "ipv4" || address.kind === "ipv6"),
+          administration: { get rconPassword() { return administration.rconPassword(); }, blocked: administration.rejects,
+            status: () => `${cvars.infoString(CvarFlag.ServerInfo)}\n`, log: () => null, executeAdmin: administration.execute } }) }
+        : { kind: "q1", host: await createQ1ApplicationServerHost({ ...common, rejects: administration.rejects, protocol: this.options.q1Protocol ?? { kind: "q1-netquake", version: 15 } }) };
       case "q2": {
         const world = simulation.q2Native(), protocol = this.options.q2Protocol ?? (source.edition === "rerelease" ? { kind: "q2-rerelease", version: 1038 } : { kind: "q2-classic", version: 34 }) satisfies NonNullable<ApplicationOptions["q2Protocol"]>;
-        return { kind: "q2", host: world === null ? await createQ2ApplicationServerHost({ ...common, protocol }) : await createClassicQ2ApplicationServerHost({ ...common, protocol, world }) };
+        const operator = { rconPassword: administration.rconPassword, profile: protocol.kind === "q2-rerelease" ? "rerelease" : "classic",
+          limitedRcon: () => state.limitedRcon(cvars), rconRateAllowed: now => state.rconRateAllowed(cvars, now, text => this.host.print(text)), rechargeRconRate: () => state.rechargeRconRate(),
+          executeRcon: (text: string, limited: boolean, output: (text: string) => void) => this.executeAdministration(text, output, limited) } satisfies NonNullable<import("./network/types.ts").Q2ApplicationServerHost["administration"]>;
+        const binding = { ...common, protocol, administration: operator, masters: administration.masters, rejects: administration.rejects };
+        return { kind: "q2", host: world === null ? await createQ2ApplicationServerHost(binding) : await createClassicQ2ApplicationServerHost({ ...binding, world }) };
       }
-      case "q3": return { kind: "q3", host: await createQ3ApplicationServerHost(common) };
+      case "q3": return { kind: "q3", host: await createQ3ApplicationServerHost({ ...common, administration }) };
     }
   }
 
@@ -1390,6 +1448,7 @@ export class Application {
     this.recordingHost = selected;
     const limits = selected.kind === "q1" ? UNIFIED_DATAGRAM_LIMITS : selected.kind === "q2" ? Q2_DATAGRAM_LIMITS : Q3_DATAGRAM_LIMITS;
     const transport = await openApplicationTransport({ selection: this.options.networkTransport ?? { kind: "udp" }, family: selected.kind, host: selection.host, port: selection.port, limits });
+    this.operatorSend = (to, bytes) => to.kind !== "loopback" && transport.send(to, bytes);
     const random = (): number => crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
     try {
       switch (selected.kind) {
@@ -3141,6 +3200,7 @@ export class Application {
       const source: CommandContext | undefined = command.source ?? (local === undefined ? undefined : { session: this.session.session,
         origin: { kind: "local-seat", seat: local.player.seat.id, client: local.player.seat.client.id } });
       const print = (text: string): void => {
+        if (this.operatorOutput.write !== null) { this.operatorOutput.write(text); return; }
         if (source !== undefined && this.graphical !== null) this.graphical.input.print(text, source);
         else {
           this.host.print(text);
@@ -3189,6 +3249,14 @@ export class Application {
             target.builder.setViewAngles({ ...target.builder.viewAngles, x: state === undefined ? 0 : -(state.deltaAngles.x << 16 >> 16) * (360 / 65536) });
           }
           continue;
+        }
+        if (this.operatorState !== null) {
+          const operator = this.operatorHost();
+          if (["addlrconcmd", "dellrconcmd", "listlrconcmds"].includes(command.name)
+            && this.operatorState.limitedRconCommand(command.name, command.arguments_[0] ?? "", text => print(text))) continue;
+          if (command.name === "setmaster") { await this.operatorState.setMasters(operator, command.arguments_); continue; }
+          if (command.name === "heartbeat") { operator.heartbeat(); continue; }
+          if (await this.operatorState.filterCommand(operator, command.name, command.arguments_)) continue;
         }
         if (command.target === "source") {
           if ((command.name === "postgame" || command.name === "spPostgame") && this.baseArenaProgress.has(this.simulation)) {
@@ -3462,6 +3530,9 @@ export class Application {
       this.tools?.timer.stamp("frame begin");
       if (!paused) this.elapsed += frameMilliseconds;
       if (this.closed) throw new Error("Application closed during step");
+      const serverCvars = this.sourceCvars();
+      if (serverCvars?.dialect === "q3" && this.options.dedicated && serverCvars.variableValue("dedicated") === 2 && this.operatorState !== null && this.network !== null)
+        this.operatorState.refreshQ3Masters(serverCvars, text => this.host.print(text));
       const remote = await this.network?.server.poll(performance.now()) ?? [];
       if (this.closed) throw new Error("Application closed during step");
       for (const native of this.graphical?.nativeQ2.values() ?? []) {
@@ -3638,6 +3709,7 @@ export class Application {
   close(): Promise<void> {
     if (this.closing !== null) return this.closing;
     this.closed = true; this.stopping = true;
+    this.operatorState?.close();
     this.closing = this.closeOwned(); return this.closing;
   }
   private async closeFailedWorld(error: unknown): Promise<never> {

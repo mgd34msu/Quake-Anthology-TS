@@ -1,3 +1,4 @@
+import { sourceAdministrationCommandNames } from "./server-administration.ts";
 import { BindingStore } from "../../input/binding-store.ts";
 import { q3ProductMapCommands, registerQ3ProductPolicy, type Q3ProductPolicy } from "../../core/q3-product-policy.ts";
 import { cdCommandDocumentation, musicCommandDocumentation } from "./audio/commands.ts";
@@ -111,6 +112,12 @@ export class PreparedStartup {
     this.activeSeatIds = this.seats.map(seat => seat.id);
     for (const name of this.deferredCommands) this.commands.register(name, invocation => {
       this.worldAction = true; return this.forward(name, invocation.args, invocation.source);
+    });
+    const operatorNames = sourceAdministrationCommandNames(options.dialect);
+    for (const name of operatorNames) this.commands.register(name, invocation => {
+      if (name === "setmaster" && options.seats.length === 0 && (options.dialect === "q2-classic" || options.dialect === "q2-rerelease"))
+        this.source.set("public", "1");
+      return this.forward(name, name === "addlrconcmd" || name === "dellrconcmd" ? [invocation.argsText] : invocation.args, invocation.source);
     });
     for (const name of ["in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause"])
       this.commands.register(name, invocation => this.forward(name, invocation.args, invocation.source));

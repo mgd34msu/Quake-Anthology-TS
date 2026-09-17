@@ -106,14 +106,14 @@ test('actual UDP carries NetQuake connect control and QW challenge negotiation',
         const request = client.next(0);
         if (request === null)
             throw new Error('Missing challenge request');
-        const challengeReply = server.receive(request, a.address, 0)[0];
+        const challengeReply = (await server.receive(request, a.address, 0))[0];
         if (challengeReply === undefined)
             throw new Error('Missing challenge');
         client.receive(challengeReply);
         const connect = client.next(1);
         if (connect === null)
             throw new Error('Missing connect');
-        const reply = server.receive(connect, a.address, 1)[0];
+        const reply = (await server.receive(connect, a.address, 1))[0];
         if (reply === undefined)
             throw new Error('Missing acceptance');
         client.receive(reply);

@@ -533,6 +533,30 @@ export class CommandBuffer {
   }
   /** Execute a bounded batch without draining another seat's pending input. */
   executeBatch(text: string, source: CommandContext, signal?: AbortSignal): number {
+    const restore = this.beginBatch(text, source, signal);
+    try { const count = this.execute(); this.completeBatch(); return count; } finally { restore(); }
+  }
+  /** Same bounded program, awaiting exec reads and the caller's ordinary request dispatch. */
+  async executeBatchAsync(text: string, source: CommandContext, afterDispatch: () => Promise<void>, signal?: AbortSignal): Promise<number> {
+    const restore = this.beginBatch(text, source, signal);
+    try { const count = await this.executeScriptsAsync(afterDispatch); this.completeBatch(); return count; } finally { restore(); }
+  }
+  /** Native rcon executes one initial command; derived exec and alias work remains ordered. */
+  async executeCommandAsync(text: string, source: CommandContext, afterDispatch: () => Promise<void>, macroExpansion: "source" | "none" = "source", signal?: AbortSignal): Promise<number> {
+    if (text.length >= this.maximumCommand) throw new RangeError("Command line exceeds the engine line limit.");
+    const restore = this.beginBatch(text, source, signal, false);
+    try {
+      let count = this.dispatch(text, this.inputContext(source), false, undefined, undefined, macroExpansion === "source");
+      await afterDispatch();
+      count += await this.executeScriptsAsync(afterDispatch); this.completeBatch(); return count;
+    } finally { restore(); }
+  }
+  private completeBatch(): void {
+    if (this.chunks.length > 0 || this.deferred.length > 0 || this.scriptRead !== undefined || this.waitFrames !== 0)
+      throw new Error("Command batch paused or deferred execution; remaining batch discarded. Use immediate commands.");
+  }
+  private beginBatch(text: string, source: CommandContext, signal?: AbortSignal, append = true): () => void {
+    if (this.asyncDraining || this.inheritedAsyncDrain || this.frame !== undefined) throw new Error("Command buffer is already executing");
     const context = this.inputContext(source), value = sourceCommandText(text);
     if (value !== text || value.length >= this.maximumBuffer) throw new RangeError("Command batch exceeds the engine buffer limit.");
     let quoted = false, length = 0;
@@ -546,16 +570,12 @@ export class CommandBuffer {
     this.scriptRead = undefined;
     this.chunks = []; this.deferred = []; this.waitFrames = 0; this.aliasCount = 0;
     this.batchBudget = { remaining: 128, signal };
-    try {
-      this.appendFor(value, context, false, undefined, undefined, true);
-      const count = this.execute();
-      if (this.chunks.length > 0 || this.deferred.length > 0 || this.scriptRead !== undefined) throw new Error("Command batch paused or deferred execution; remaining batch discarded. Use immediate commands.");
-      return count;
-    } finally {
+    if (append) this.appendFor(value, context, false, undefined, undefined, true);
+    return () => {
       this.chunks = saved.chunks; this.deferred = saved.deferred; this.waitFrames = saved.waitFrames; this.waitDialect = saved.waitDialect;
       this.aliasCount = saved.aliasCount; this.tokens = saved.tokens; this.batchBudget = undefined;
       this.scriptRead = saved.scriptRead;
-    }
+    };
   }
 
   private commandText(first: TextChunk): string {
@@ -593,11 +613,11 @@ export class CommandBuffer {
     }
   }
 
-  private dispatch(raw: string, source: CommandContext, direct = false, textMode = this.inputTextMode(source, direct), dialect = this.executionDialect): number {
+  private dispatch(raw: string, source: CommandContext, direct = false, textMode = this.inputTextMode(source, direct), dialect = this.executionDialect, macroExpansion = true): number {
     this.programRevision++;
     if (this.batchBudget?.signal?.aborted) throw new Error("Command batch cancelled; remaining batch discarded.");
     if (this.batchBudget !== undefined && --this.batchBudget.remaining < 0) throw new Error("Command batch exceeded 128 dispatched commands; remaining batch discarded.");
-    const expanded = isQ2(dialect) ? expandCommandMacros(raw, name => {
+    const expanded = isQ2(dialect) && macroExpansion ? expandCommandMacros(raw, name => {
       const owner = this.cvarOwner(name, source), variable = owner?.find(name);
       return owner !== undefined && isQ2(owner.dialect) && variable !== undefined && (variable.flags & Q2CvarFlag.Private) !== 0 ? "" : variable?.value ?? "";
     }, text => this.print(text), textMode) : raw;

@@ -269,11 +269,11 @@ export interface QuakeWorldConnectionHost {
     };
     status(): string;
     log(sequence: number): string | null;
-    executeAdmin(command: string, write: (text: string) => void): void;
+    executeAdmin(command: string, write: (text: string) => void): void | Promise<void>;
 }
 export class QuakeWorldConnectionlessServer {
     constructor(readonly host: QuakeWorldConnectionHost, readonly challenges: QuakeWorldChallenges) { }
-    receive(bytes: Uint8Array, from: NetworkAddress, nowMilliseconds: number): readonly Uint8Array[] {
+    async receive(bytes: Uint8Array, from: NetworkAddress, nowMilliseconds: number): Promise<readonly Uint8Array[]> {
         if (this.host.blocked(from))
             return [quakeWorldOutOfBand('n\nbanned.\n')];
         const text = readQuakeWorldOutOfBand(bytes), args = quakeWorldCommandArguments(text.split('\n', 1)[0] ?? ''), command = args[0];
@@ -298,7 +298,7 @@ export class QuakeWorldConnectionlessServer {
                     output = '';
                 }
             };
-            this.host.executeAdmin(args.slice(2).map(arg => `${arg} `).join(''), part => {
+            await this.host.executeAdmin(args.slice(2).map(arg => `${arg} `).join(''), part => {
                 for (const ch of part) {
                     output += ch;
                     if (output.length >= 7995)
