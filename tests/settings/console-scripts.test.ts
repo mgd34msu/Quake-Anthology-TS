@@ -150,13 +150,27 @@ test("exec reads each seat's exported config before product user files and mount
       const seatConsole = new SeatConsole({ seat: identity.seat(index), dialect: "q3", context: source, commands, cvars,
         now: () => 0, connected: () => false, clipboard: () => null, focus() {}, chat() {} });
       const writes: Promise<void>[] = [];
+      const results: string[] = [];
+      let failPreparation = false, failQueue = false;
       const unregister = registerConsoleCommands({ commands, config: seat => seatConsoleConfig(consoleRoot, seat),
-        configuration: invocation => `${commands.archiveCommands(invocation.source).join("\n")}\n`, console: () => seatConsole,
-        canChat: () => false, capture: () => null, mapName: () => "test", print() {}, queue: operation => { writes.push(scripts.write(operation)); } });
+        configurationWriteStarted: (caller, path) => { expect(caller).toEqual(source); return result => { results.push(`${path}:${result.kind}`); }; },
+        configuration: invocation => { if (failPreparation) throw new Error("snapshot rejected"); return `${commands.archiveCommands(invocation.source).join("\n")}\n`; }, console: () => seatConsole,
+        canChat: () => false, capture: () => null, mapName: () => "test", print() {}, queue: operation => { if (failQueue) throw new Error("queue rejected"); writes.push(scripts.write(operation)); } });
       commands.append("writeconfig roundtrip; seta seat_value changed; exec roundtrip; seta roundtrip_finished yes\n");
       for (let attempts = 0; attempts < 100 && cvars.variableString("roundtrip_finished") !== "yes"; attempts++) { commands.execute(); await Bun.sleep(1); }
       expect(cvars.variableString("seat_value")).toBe(index === 0 ? "zero" : index === 1 ? "one" : "user");
-      await Promise.all(writes); unregister();
+      await Promise.all(writes);
+      expect(results).toEqual(["roundtrip.cfg:written"]);
+      commands.executeNow("writeconfig ../escape");
+      const settled = await Promise.allSettled(writes);
+      expect(settled.at(-1)?.status).toBe("rejected");
+      expect(results).toEqual(["roundtrip.cfg:written", "../escape.cfg:failed"]);
+      failPreparation = true;
+      expect(() => commands.executeNow("writeconfig preparation")).toThrow("snapshot rejected");
+      failPreparation = false; failQueue = true;
+      expect(() => commands.executeNow("writeconfig queue")).toThrow("queue rejected");
+      expect(results).toEqual(["roundtrip.cfg:written", "../escape.cfg:failed", "preparation.cfg:failed", "queue.cfg:failed"]);
+      unregister();
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

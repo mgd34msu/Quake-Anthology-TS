@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SeatConsole } from "../../src/console/session.ts";
 import { registerDiscoveryCommands } from "../../src/console/discovery.ts";
 import { expect, test } from "bun:test";
@@ -14,7 +17,7 @@ import { PreparedStartup } from "../../src/app/bootstrap/prepared-startup.ts";
 import { resolveStartupRules } from "../../src/app/bootstrap/startup-source.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { Q3ServerState, registerQ3ServerCvars } from "../../src/app/bootstrap/simulation/q3/server-state.ts";
-import { defaultBindings } from "../../src/input/bindings.ts";
+import { archivedBindings, defaultBindings } from "../../src/input/bindings.ts";
 
 function options(args: readonly string[] = []) {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", ...args]);
@@ -322,7 +325,8 @@ for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic"] satisfies r
       }, applyLaunchOptions: () => { launchSkill = source.variableValue("skill"); },
     });
     expect(prepared.seats).toHaveLength(0);
-    expect(messages).toContain("bind <key> [command]\n");
+    expect(messages).not.toContain("bind <key> [command]\n");
+    expect(prepared.consoleBindings?.binding({ kind: "key", code: 32 })).toEqual({ kind: "command", text: "+jump" });
     expect(requests).toHaveLength(1);
     let origin = requests[0]?.origin;
     while (origin?.kind === "script") origin = origin.caller;
@@ -496,4 +500,102 @@ test("prepared profile publication preserves tail order and appended physical re
     expect(prepared.commands).toBe(commands); expect(prepared.seats[0]?.input).toBe(input);
     expect(commands.dialect).toBe(dialect); expect(input.dialect).toBe(dialect); expect(prepared.seats[0]?.mouse).toBe(mouse);
   }
+});
+
+test("dedicated startup owns bindings through trusted scripts, archives and profile publication", async () => {
+  const identity = createIdentityOwner("dedicated-bindings"), output: string[] = [];
+  const context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+  const source = new CvarRegistry({ dialect: "q2-classic", context });
+  const prepared = new PreparedStartup(source, source,
+    new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined }), {
+      dialect: "q2-classic", movementDialect: "q2-classic", shared: null, sharedNames: [], seats: [],
+      print: text => { output.push(text); }, forward: () => undefined,
+    });
+  await prepared.execute({ nextFrame: async () => {}, hasMod: false, sourceArchive: [], movementArchive: [], fallbackArchive: [], sharedArchive: [],
+    read: async name => name === "default.cfg" ? 'unbindall\nbind MOUSE2 +moveup\nbind F1 "echo one; echo two"\n' : "", applyLaunchOptions: () => {} });
+  const bindings = prepared.consoleBindings;
+  if (bindings === null) throw new Error("Dedicated binding store missing");
+  expect(prepared.seats).toHaveLength(0);
+  expect(bindings.binding({ kind: "mouse-button", button: 3 })).toEqual({ kind: "command", text: "+moveup" });
+  expect(output.join("")).not.toContain("bind <key>");
+  prepared.commands.executeNow("bind MOUSE2", context);
+  expect(output.at(-1)).toBe("MOUSE2 = +moveup\n");
+  const archive = archivedBindings(bindings);
+  expect(archive).toContain('bind "F1" "echo one; echo two"');
+  const trusted: CommandContext = { session: identity.session, origin: { kind: "script", name: "outer.cfg", caller: {
+    kind: "script", name: "inner.cfg", caller: { kind: "local-console" } } } };
+  prepared.commands.executeNow("unbind mouse2", trusted);
+  expect(bindings.binding({ kind: "mouse-button", button: 3 })).toBeNull();
+  prepared.commands.append(`${archive.join("\n")}\n`, trusted); prepared.commands.execute();
+  expect(archivedBindings(bindings)).toEqual(archive);
+  const remote: CommandContext = { session: identity.session, origin: { kind: "script", name: "remote.cfg", caller: {
+    kind: "remote-client", client: identity.client(0, 0) } } };
+  prepared.commands.append('unbindall\nbind MOUSE2 "echo hostile"\nunbind F1\n', remote); prepared.commands.execute();
+  expect(archivedBindings(bindings)).toEqual(archive);
+  const nextCvars = new CvarRegistry({ dialect: "q3", context });
+  const candidate = prepared.prepareClientCommands({ dialect: "q3", context, cvars: nextCvars });
+  candidate.commands.executeNow('bind MOUSE2 "echo candidate"', context);
+  expect(archivedBindings(bindings)).toEqual(archive);
+  candidate.publish();
+  expect(bindings.binding({ kind: "mouse-button", button: 3 })).toEqual({ kind: "command", text: "echo candidate" });
+  prepared.commands.executeNow('bind MOUSE2 "echo live"', context);
+  expect(bindings.binding({ kind: "mouse-button", button: 3 })).toEqual({ kind: "command", text: "echo live" });
+  const conflict = prepared.prepareClientCommands({ dialect: "q3", context, cvars: new CvarRegistry({ dialect: "q3", context }) });
+  bindings.unbind({ kind: "key", code: 145 });
+  expect(() => conflict.publish()).toThrow("Console bindings changed during preparation");
+  prepared.commands.executeNow("unbindall", context);
+  expect(bindings.bindings).toEqual([]);
+});
+
+test("dedicated writeconfig snapshots its profile and drains writes before retiring readers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dedicated-config-"));
+  const identity = createIdentityOwner("dedicated-writeconfig"), output: string[] = [];
+  const context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+  let retired = false;
+  const scripts = new ConsoleScriptFiles({ consoleRoot: root, settings: new ConfigStore(join(root, "first")), mounted: undefined },
+    async () => { retired = true; });
+  const next = new ConsoleScriptFiles({ consoleRoot: root, settings: new ConfigStore(join(root, "next")), mounted: undefined });
+  const source = new CvarRegistry({ dialect: "q2-classic", context });
+  source.register("archived_probe", "before", CvarFlag.Archive);
+  const prepared = new PreparedStartup(source, source, scripts, {
+    dialect: "q2-classic", movementDialect: "q2-classic", shared: null, sharedNames: [], seats: [],
+    print: text => { output.push(text); }, forward: () => undefined,
+  });
+  try {
+    let releaseWrite: () => void = () => {};
+    const gate = new Promise<void>(resolve => { releaseWrite = resolve; });
+    const pending = scripts.write(() => gate);
+    prepared.commands.executeNow('bind mouse2 "echo before"', context);
+    prepared.commands.executeNow("bind right_trigger +attack", context);
+    prepared.commands.executeNow("bind x_button help", context);
+    prepared.commands.executeNow("writeconfig dedicated", context);
+    prepared.commands.executeNow('bind mouse2 "echo after"', context);
+    source.set("archived_probe", "after");
+    prepared.adoptReaders(next, async () => undefined);
+    const closing = scripts.close();
+    await Promise.resolve(); expect(retired).toBe(false);
+    releaseWrite(); await pending; await closing;
+    expect(retired).toBe(true);
+    const text = await readFile(join(root, "first", "dedicated.cfg"), "latin1");
+    expect(text).toContain('bind "MOUSE2" "echo before"'); expect(text).toContain('"before"');
+    expect(text).not.toContain("after");
+    expect(text).toContain('bind "GAMEPAD_RIGHT_TRIGGER" "+attack"');
+    expect(text).toContain('bind "GAMEPAD_X_BUTTON" "help"');
+    prepared.commands.executeNow("unbindall", context);
+    prepared.commands.append(text, context); prepared.commands.execute();
+    expect(prepared.consoleBindings?.binding({ kind: "controller-axis", device: 0, axis: "right-trigger", direction: "positive" }))
+      .toEqual({ kind: "command", text: "+attack" });
+    expect(prepared.consoleBindings?.binding({ kind: "controller-button", device: 0, button: 2 })).toEqual({ kind: "command", text: "help" });
+    expect(output).toContain("Wrote dedicated.cfg\n");
+    expect(await next.read("dedicated.cfg", context)).toBeUndefined();
+    await expect(scripts.write(async () => {})).rejects.toThrow("retired");
+    prepared.commands.executeNow("writeconfig ../escape", context);
+    await next.write(async () => {});
+    expect(output.some(line => line.startsWith("Console output failed:"))).toBe(true);
+    const count = output.length;
+    prepared.commands.executeNow("writeconfig rejected", { session: identity.session,
+      origin: { kind: "script", name: "remote.cfg", caller: { kind: "remote-client", client: identity.client(0, 0) } } });
+    expect(output.slice(count)).toEqual(["writeconfig requires a local console.\n"]);
+    expect(await next.read("rejected.cfg", context)).toBeUndefined();
+  } finally { await scripts.close(); await next.close(); await rm(root, { recursive: true, force: true }); }
 });

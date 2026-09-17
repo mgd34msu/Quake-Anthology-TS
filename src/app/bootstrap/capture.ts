@@ -1,6 +1,6 @@
 import type { ImageLevel } from "../../contracts/render.ts";
 import { FrameCapture } from "../../capture/index.ts";
-import { registerConsoleCommands } from "../../console/commands.ts";
+import { registerConsoleCommands, type ConfigurationWriteStarted } from "../../console/commands.ts";
 import { archivedBindings } from "../../input/bindings.ts";
 import { consoleConfigRoot, seatConsoleConfig } from "./config-scripts.ts";
 import type { SeatId } from "../../contracts/identity.ts";
@@ -16,6 +16,7 @@ export function applicationCaptureRoot(userContentRoot: string | undefined): str
 
 export interface ApplicationCaptureServices {
   readonly commands: CommandBuffer;
+  readonly configurationWriteStarted?: ConfigurationWriteStarted;
   console(seat: SeatId): SeatConsole | null;
   input(seat: SeatId): SeatInput | null;
   canChat(): boolean;
@@ -48,6 +49,7 @@ export class ApplicationCapture {
     if (this.unregister !== null) return;
     const services = this.services;
     this.unregister = registerConsoleCommands({ commands: services.commands,
+      ...(services.configurationWriteStarted === undefined ? {} : { configurationWriteStarted: services.configurationWriteStarted }),
       config: seat => seatConsoleConfig(services.root(), seat),
       configuration: invocation => {
         let origin = invocation.source.origin;

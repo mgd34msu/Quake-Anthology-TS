@@ -1,5 +1,6 @@
 import { q3MapLaunch } from "./q3-map-command.ts";
 import { AddonLibrary } from "./addon-library.ts";
+import type { ConfigurationWriteStarted } from "../../console/commands.ts";
 import { PlayerProgressLibrary } from "./player-progress-library.ts";
 import { PlayerProgressStore } from "./player-progress.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
@@ -129,6 +130,7 @@ export class StartupApplication {
   private scripts: ConsoleScriptFiles | null = null;
   private frontendRoutingBaseline = "";
   private releaseMenuInput: (() => void) | null = null;
+  private configurationWriteStarted: ConfigurationWriteStarted | undefined;
   private lastFrame = performance.now();
   private demos: ClientDemoCommands | null = null;
   private releaseDemos: (() => void) | null = null;
@@ -382,6 +384,7 @@ export class StartupApplication {
       });
       const hasPendingSource = (): boolean => this.pending !== null || this.pendingDemo !== null || this.pendingRecording !== null || this.pendingMovie !== null;
       const capture = new ApplicationCapture({ commands: initial.prepared.commands,
+        configurationWriteStarted: (source, path) => this.configurationWriteStarted?.(source, path),
         root: () => applicationCaptureRoot(this.captureClient().configuration.current.options.userContentRoot),
         mapName: () => this.captureClient().source.current?.captureMap ?? "menu",
         console: seat => { const client = this.captureClient(), local = this.captureSeats().find(local => local.seat.id.equals(seat));
@@ -843,25 +846,57 @@ export class StartupApplication {
 
   private configurationLibrary(): LibraryMenuService {
     let entries: readonly LibraryEntry[] = [], status = "", generation = 0;
+    let releaseCompletion: (() => void) | undefined;
+    this.releaseSourceCommands.push(() => { releaseCompletion?.(); this.configurationWriteStarted = undefined; });
     const submit = (name: "exec" | "writeconfig", path: string): void => {
       try {
         const client = this.captureClient(), seat = client.prepared.seats[0];
         if (seat === undefined) throw new Error("Configuration command has no local seat");
+        releaseCompletion?.(); releaseCompletion = undefined;
         const command = readStartupCommand([`+${name}`, path], 0);
+        generation++;
+        if (name === "exec") {
+          const descriptor = client.configuration.current;
+          const expected = client.prepared.commands.dialect === "q3" && !path.slice(path.lastIndexOf("/") + 1).includes(".") ? `${path}.cfg` : path;
+          releaseCompletion = client.prepared.commands.bindScriptCompletion(event => {
+            if (this.closed || client.configuration.current !== descriptor) { releaseCompletion?.(); releaseCompletion = undefined; return; }
+            const origin = event.source.origin, caller = origin.kind === "script" ? origin.caller : undefined;
+            const local = seat.context.origin;
+            if (event.name !== expected || caller?.kind !== "local-seat" || local.kind !== "local-seat"
+              || !caller.seat.equals(local.seat) || !caller.client.equals(local.client)) return;
+            releaseCompletion?.(); releaseCompletion = undefined;
+            generation++;
+            status = event.result.kind === "completed" ? `Finished ${event.name}` : event.result.kind === "missing" ? `Not found: ${event.name}`
+              : `Could not read ${event.name}: ${event.result.error instanceof Error ? event.result.error.message : String(event.result.error)}`;
+          });
+        }
         client.prepared.commands.append(`${command.text}\n`, seat.context);
         status = `${name === "exec" ? "Queued" : "Saving"} ${path}`;
       } catch (error) { status = error instanceof Error ? error.message : String(error); }
     };
-    const refresh = async (): Promise<void> => {
+    const refresh = async (message?: string): Promise<void> => {
       const revision = ++generation;
+      const descriptor = this.client?.configuration.current;
       try {
         const client = this.captureClient(), seat = client.prepared.seats[0], scripts = client.configuration.current.scripts;
         if (seat === undefined) throw new Error("Configuration library has no local seat");
         const files = await scripts.list(seat.context);
         if (revision !== generation || this.closed || client.configuration.current.scripts !== scripts) return;
         entries = files.map(file => ({ id: file.name, label: file.name, detail: file.kind === "seat" ? "Current player" : "Selected game" }));
-        status = `${entries.length} configuration files`;
-      } catch (error) { if (revision === generation) status = error instanceof Error ? error.message : String(error); }
+        status = message ?? `${entries.length} configuration files`;
+      } catch (error) { if (revision === generation && !this.closed && this.client?.configuration.current === descriptor) status = error instanceof Error ? error.message : String(error); }
+    };
+    this.configurationWriteStarted = (source, path) => {
+      const client = this.captureClient(), descriptor = client.configuration.current, seat = client.prepared.seats[0];
+      let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+      const local = seat?.context.origin;
+      if (origin.kind !== "local-seat" || local?.kind !== "local-seat" || !origin.seat.equals(local.seat) || !origin.client.equals(local.client)) return undefined;
+      const revision = ++generation;
+      return result => {
+        if (revision !== generation || this.closed || client.configuration.current !== descriptor) return;
+        if (result.kind === "written") { status = `Saved ${path}`; void refresh(status); }
+        else { generation++; status = `Could not save ${path}: ${result.error instanceof Error ? result.error.message : String(result.error)}`; }
+      };
     };
     return { entries: () => entries, status: () => status, refresh: () => { void refresh(); },
       activate: path => submit("exec", path), create: { label: "Save config", submit: path => submit("writeconfig", path) } };

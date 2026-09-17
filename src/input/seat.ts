@@ -1,3 +1,5 @@
+import { physicalInputKey } from "./binding-store.ts";
+export { physicalInputKey } from "./binding-store.ts";
 // Per-seat binding and CL_KeyState flow derived from Quake I/II/III cl_input.c.
 // Copyright (C) id Software. GPL-2.0-or-later.
 import type { CommandContext, CommandDialect } from "../contracts/common.ts";
@@ -22,14 +24,6 @@ const actionCommands: ReadonlyMap<string, SourceAction> = new Map([
   ["klook", "klook"], ["holster", "holster"],
   ...Array.from({ length: 15 }, (_, index): [string, SourceAction] => [`button${index}`, `button${index}`]),
 ]);
-export function physicalInputKey(input: PhysicalInput): string {
-  switch (input.kind) {
-    case "key": return `key:${input.code}`;
-    case "mouse-button": return `mouse:${input.button}`;
-    case "controller-button": return `pad:${input.device}:button:${input.button}`;
-    case "controller-axis": return `pad:${input.device}:axis:${input.axis}:${input.direction}`;
-  }
-}
 function commandKey(input: PhysicalInput): number {
   switch (input.kind) {
     case "key": return input.code;

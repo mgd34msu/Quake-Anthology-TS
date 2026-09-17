@@ -124,6 +124,7 @@ export class CommandBuffer {
   private fallbackCvars: CvarRegistry | undefined;
   private readonly builtinHandlers = new Map<string, CommandHandler>();
   private readonly outputBindings = new Set<{ readonly print: (text: string, source?: CommandContext) => void }>();
+  private readonly scriptListeners = new Set<(event: ScriptCompletion) => void>();
   readonly context: CommandContext;
   private handlers: RegisteredEntry | undefined;
   private readonly aliases: AliasEntry[] = [];
@@ -222,7 +223,7 @@ export class CommandBuffer {
       commands.preparationTail = pending;
       commands.chunks = []; commands.deferred = []; commands.waitFrames = 0;
       commands.waitDialect = undefined; commands.scriptRead = undefined; commands.tokens = [];
-      commands.aliasCount = 0; commands.startupCommandText = undefined; commands.inheritedAsyncDrain = false;
+      commands.aliasCount = 0; commands.startupCommandText = options.startupCommandText; commands.inheritedAsyncDrain = false;
       try {
         const complete = await run();
         if (complete) commands.finishPreparation();
@@ -281,6 +282,10 @@ export class CommandBuffer {
     const binding = { print };
     this.outputBindings.add(binding);
     return () => { this.outputBindings.delete(binding); };
+  }
+  bindScriptCompletion(listener: (event: ScriptCompletion) => void): () => void {
+    this.scriptListeners.add(listener);
+    return () => { this.scriptListeners.delete(listener); };
   }
   private print(text: string, source = this.frame?.source): void {
     let output = this.options.print;
@@ -501,7 +506,10 @@ export class CommandBuffer {
         const frame: ExecutionFrame = { dialect: first.dialect, source: first.event.source, direct: false,
           textMode: first.textMode, parent: this.frame, active: true };
         this.frame = frame; this.selectBuiltins(first.dialect);
-        try { this.options.onScriptComplete?.(first.event); }
+        try {
+          this.options.onScriptComplete?.(first.event);
+          for (const listener of this.scriptListeners) listener(first.event);
+        }
         finally { frame.active = false; this.frame = frame.parent; this.selectBuiltins(this.executionDialect); }
         continue;
       }

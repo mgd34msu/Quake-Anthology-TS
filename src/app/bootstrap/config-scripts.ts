@@ -173,7 +173,7 @@ export class ConsoleScriptFiles {
     if (this.retirement !== null) return this.retirement;
     this.retiring = true;
     const settled = this.reads === 0 ? Promise.resolve() : new Promise<void>(resolve => { this.readsSettled = resolve; });
-    this.retirement = settled.then(() => this.retireMounted?.());
+    this.retirement = Promise.all([settled, this.writes]).then(() => this.retireMounted?.());
     return this.retirement;
   }
   private acquireRead(): void {
@@ -185,6 +185,7 @@ export class ConsoleScriptFiles {
     if (this.reads === 0) { this.readsSettled?.(); this.readsSettled = null; }
   }
   write(operation: () => Promise<void>): Promise<void> {
+    if (this.retiring) return Promise.reject(new Error("Configuration reader is retired"));
     const pending = this.writes.then(operation);
     this.writes = pending.catch(() => undefined);
     return pending;

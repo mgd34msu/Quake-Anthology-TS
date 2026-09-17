@@ -6,6 +6,19 @@ import { CommandBuffer } from "../../src/core/commands/index.ts";
 const identity = createIdentityOwner("async-exec");
 const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(1), client: identity.client(1, 0) } };
 
+test("script observers preserve startup completion and can release themselves across async results", async () => {
+  const seen: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context,
+    readScript: async name => { if (name === "bad.cfg") throw new Error("read failure"); return name === "missing.cfg" ? undefined : "echo loaded\n"; },
+    onScriptComplete: event => { seen.push(`startup:${event.name}:${event.result.kind}`); } });
+  const release = commands.bindScriptCompletion(event => { seen.push(`menu:${event.name}:${event.result.kind}`); });
+  commands.append("exec good;exec missing;exec bad\n");
+  await commands.executeScriptsAsync(async () => {});
+  expect(seen).toEqual(["startup:good.cfg:completed", "menu:good.cfg:completed", "startup:missing.cfg:missing", "menu:missing.cfg:missing", "startup:bad.cfg:failed", "menu:bad.cfg:failed"]);
+  release(); release(); commands.append("exec good\n"); await commands.executeScriptsAsync(async () => {});
+  expect(seen.at(-1)).toBe("startup:good.cfg:completed"); expect(seen.length).toBe(7);
+});
+
 function pendingScript() {
   let resolve: (value: string | undefined) => void = () => { throw new Error("Promise not initialized"); };
   let reject: (error: Error) => void = () => { throw new Error("Promise not initialized"); };

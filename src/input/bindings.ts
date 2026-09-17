@@ -5,7 +5,7 @@ import type { CommandBuffer, CommandInvocation } from "../core/commands/index.ts
 import { keynumToString, stringToKeynum } from "./keys.ts";
 import { physicalMouseButton, quakeMouseButton } from "./mouse-buttons.ts";
 import { KeyCode } from "./key-codes.ts";
-import type { SeatInput } from "./seat.ts";
+import type { BindingStore } from "./binding-store.ts";
 import { defaultWeaponBindings, type WeaponBindingItem } from "./weapon-bindings.ts";
 
 const controllerButtons: readonly (readonly [command: string, button: number, label: string])[] = [
@@ -69,24 +69,32 @@ function quoted(value: string): string {
   if (/["\r\n\0]/.test(value)) throw new Error("Source cfg cannot represent a binding containing quotes or newlines; use the seat settings document");
   return `"${value}"`;
 }
-export function archivedBindings(input: SeatInput): readonly string[] {
+/** Dedicated profiles include named device-zero controls; graphical profiles retain controllers in seat settings. */
+export function archivedBindings(input: Pick<BindingStore, "bindings">, includeControllerBindings = false): readonly string[] {
   const commands: string[] = ["unbindall"];
   for (const binding of input.bindings) {
     if (binding.target.kind !== "command") continue;
-    const name = binding.input.kind === "key" || binding.input.kind === "mouse-button" ? physicalInputName(binding.input) : null;
+    const physical = binding.input;
+    let name: string | null = physical.kind === "key" || physical.kind === "mouse-button" ? physicalInputName(physical) : null;
+    if (includeControllerBindings && (physical.kind === "controller-button" || physical.kind === "controller-axis") && physical.device === 0) {
+      if (physical.kind === "controller-button") name = controllerButtons.find(([, button]) => button === physical.button)?.[0].toUpperCase() ?? null;
+      else if (physical.direction === "positive" && (physical.axis === "left-trigger" || physical.axis === "right-trigger"))
+        name = physical.axis === "left-trigger" ? "GAMEPAD_LEFT_TRIGGER" : "GAMEPAD_RIGHT_TRIGGER";
+    }
     if (name !== null) commands.push(`bind ${quoted(name)} ${quoted(binding.target.text)}`);
   }
   return commands;
 }
-export type BindingCommandSeat = Pick<SeatInput, "bindings" | "binding" | "bind" | "unbind" | "unbindAll">;
+export type BindingCommandSeat = Pick<BindingStore, "bindings" | "binding" | "bind" | "unbind" | "unbindAll">;
 
 export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: SeatId) => BindingCommandSeat | null,
-  print: (text: string) => void): () => void {
+  print: (text: string) => void, consoleBindings: BindingCommandSeat | null = null): () => void {
   const registered: string[] = [];
   const local = (invocation: CommandInvocation): BindingCommandSeat | null => {
     let origin = invocation.source.origin;
     while (origin.kind === "script") origin = origin.caller;
-    return origin.kind === "local-seat" ? lookup(origin.seat) : null;
+    return origin.kind === "local-seat" ? lookup(origin.seat)
+      : origin.kind === "local-console" || origin.kind === "server-console" ? consoleBindings : null;
   };
   const add = (name: string, handler: (invocation: CommandInvocation) => undefined, documentation?: Parameters<CommandBuffer["register"]>[2]): void => { if (commands.register(name, handler, documentation)) registered.push(name); };
   add("bind", invocation => {
@@ -102,12 +110,12 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
         : `${physicalInputName(input)} = ${binding.kind === "command" ? binding.text : binding.action}\n`); return;
     }
     seat.bind({ input, target: { kind: "command", text: invocation.argv.slice(2).join(" ") } });
-  }, { summary: "Read or set a binding for the invoking local seat. Quote multiple commands to keep them on one key.",
+  }, { summary: "Read or set a binding for the invoking local seat or dedicated console. Quote multiple commands to keep them on one key.",
     usage: "bind <key> [command]", examples: ["bind Q", 'bind SPACE "+jump"', 'bind F1 "echo ready; echo done"'] });
   add("unbind", invocation => {
     const name = invocation.argv[1], seat = local(invocation);
     if (invocation.argv.length !== 2 || name === undefined) { print("unbind <key> : remove commands from a key\n"); return; }
-    if (seat === null) { print("unbind requires a local seat.\n"); return; }
+    if (seat === null) { print("unbind requires a local binding owner.\n"); return; }
     const input = namedPhysicalInput(name);
     if (input === null) { print(`Unknown key ${name}\n`); return; }
     if (input.kind === "controller-button" || input.kind === "controller-axis") {
@@ -117,12 +125,12 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
           || input.kind === "controller-axis" && candidate.kind === "controller-axis" && input.axis === candidate.axis && input.direction === candidate.direction) seat.unbind(candidate);
       }
     } else seat.unbind(input);
-  }, { summary: "Remove a key or mouse binding from the invoking local seat. Named controller buttons are cleared on that seat's devices.",
+  }, { summary: "Remove a key or mouse binding from the invoking local seat or dedicated console. Named controller buttons are cleared on that seat's devices.",
     usage: "unbind <key>", examples: ["unbind Q", "unbind MOUSE2"] });
   add("unbindall", invocation => { local(invocation)?.unbindAll(); },
-    { summary: "Clear all bindings for the invoking local seat, including controller bindings.", usage: "unbindall", examples: ["unbindall"] });
+    { summary: "Clear all bindings for the invoking local seat or dedicated console, including controller bindings.", usage: "unbindall", examples: ["unbindall"] });
   add("bindlist", invocation => { const seat = local(invocation); if (seat !== null) for (const binding of seat.bindings) print(`${physicalInputName(binding.input)} = ${binding.target.kind === "command" ? binding.target.text : binding.target.action}\n`); },
-    { summary: "List the invoking local seat's current key, mouse and controller bindings.", usage: "bindlist", examples: ["bindlist"] });
+    { summary: "List the invoking local seat or dedicated console's current key, mouse and controller bindings.", usage: "bindlist", examples: ["bindlist"] });
   return () => { for (const name of registered) commands.unregister(name); };
 }
 

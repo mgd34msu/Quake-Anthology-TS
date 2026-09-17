@@ -4,11 +4,16 @@ import type { SeatConsole } from "./session.ts";
 import type { ConfigStore } from "../settings/config.ts";
 import type { FrameCapture } from "../capture/index.ts";
 import { isQ2 } from "../core/commands/text.ts";
+import type { CommandContext } from "../contracts/common.ts";
+
+export type ConfigurationWriteResult = { readonly kind: "written" } | { readonly kind: "failed"; readonly error: unknown };
+export type ConfigurationWriteStarted = (source: CommandContext, path: string) => ((result: ConfigurationWriteResult) => void) | undefined;
 
 export interface ConsoleCommandServices {
   readonly commands: CommandBuffer;
   readonly config: (seat: SeatId) => ConfigStore;
   readonly configuration: (invocation: CommandInvocation) => string;
+  readonly configurationWriteStarted?: ConfigurationWriteStarted;
   readonly console: (seat: SeatId) => SeatConsole | null;
   readonly canChat: () => boolean;
   readonly capture: (seat: SeatId) => FrameCapture | null;
@@ -45,8 +50,17 @@ export function registerConsoleCommands(services: ConsoleCommandServices): () =>
     const id = seat(invocation);
     if (id === null || services.console(id) === null) { services.print("writeconfig requires an active local seat\n"); return; }
     const name = invocation.argv[1] ?? "config.cfg", path = name.endsWith(".cfg") ? name : `${name}.cfg`;
-    const contents = services.configuration(invocation), store = services.config(id);
-    services.queue(async () => { await store.dump(path, contents); services.print(`Wrote ${path}\n`); });
+    const notify = services.configurationWriteStarted?.(invocation.source, path);
+    let completed = false;
+    const complete = (result: ConfigurationWriteResult): void => { if (completed) return; completed = true; notify?.(result); };
+    try {
+      const contents = services.configuration(invocation), store = services.config(id);
+      services.queue(async () => {
+        try { await store.dump(path, contents); }
+        catch (error) { complete({ kind: "failed", error }); throw error; }
+        services.print(`Wrote ${path}\n`); complete({ kind: "written" });
+      });
+    } catch (error) { complete({ kind: "failed", error }); throw error; }
   }, { summary: "Save the invoking seat's configuration.", usage: "writeconfig [filename]", examples: ["writeconfig config.cfg"] });
   for (const [name, format] of [["screenshot", "tga"], ["screenshotJPEG", "jpg"], ["screenshotPNG", "png"]] satisfies readonly (readonly [string, "tga" | "jpg" | "png"])[]) {
     add(name, invocation => {

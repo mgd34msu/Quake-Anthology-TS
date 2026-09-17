@@ -672,6 +672,31 @@ test("profile configuration runs separately from an in-flight originating comman
   expect(live.aliasValue("selected")).toContain("configured");
 });
 
+test("initial profile stuffcmds preserves launch order without replaying on later profiles", async () => {
+  const output: string[] = [], source = context();
+  const options = { dialect: "q1-netquake", context: source, print: (text: string) => { output.push(text.trim()); },
+    readScript: () => "echo before\nstuffcmds\necho after\n" } satisfies ConstructorParameters<typeof CommandBuffer>[0];
+  const live = new CommandBuffer({ ...options, startupCommandText: "echo stale\n" });
+  live.append("echo tail\n");
+  const initial = live.prepareProgram({ ...options, startupCommandText: "echo launch\n" });
+  await initial.preparePrefix(async () => {
+    initial.commands.appendPreparation("exec quake.rc\n");
+    while (!initial.commands.preparationComplete) await initial.commands.advanceProgramFrame();
+    return true;
+  });
+  expect(output).toEqual(["execing quake.rc", "before", "launch", "after"]);
+  initial.publish(); live.execute();
+  expect(output.at(-1)).toBe("tail");
+  output.length = 0;
+  const later = live.prepareProgram(options);
+  await later.preparePrefix(async () => {
+    later.commands.appendPreparation("exec quake.rc\n");
+    while (!later.commands.preparationComplete) await later.commands.advanceProgramFrame();
+    return true;
+  });
+  expect(output).toEqual(["execing quake.rc", "before", "after"]);
+});
+
 test("failed or unfinished prepared configuration cannot publish partial state", async () => {
   const live = new CommandBuffer({ dialect: "q2-classic", context: context() });
   live.append("echo retained\n");
