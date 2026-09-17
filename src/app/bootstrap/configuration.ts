@@ -1,3 +1,4 @@
+import { startupCommandPhases } from "./startup-commands.ts";
 import { applyQ3MapLaunch } from "./q3-map-command.ts";
 import { q3ProductMapCommands } from "../../core/q3-product-policy.ts";
 import { registerRunCvar } from "./shared-setting-cvars.ts";
@@ -14,7 +15,7 @@ import type { ContentId } from "../../contracts/content.ts";
 import type { ClientId, IdentityOwner, SeatId } from "../../contracts/identity.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { EngineSession, SessionSeat } from "../../world/session/index.ts";
-import { CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
+import { CvarFlag, CvarRegistry, type CvarArchiveEntry } from "../../core/cvars/index.ts";
 import { ConfigStore } from "../../settings/config.ts";
 import { defaultUserContentRoot, userProductDirectory } from "../../content/user-data.ts";
 import { serverDefinitionsForSelection } from "../../settings/server/index.ts";
@@ -62,7 +63,7 @@ export interface PreparedProfileConfiguration {
 
 export async function prepareProfileConfiguration(args: {
   readonly prepared: PreparedStartup;
-  readonly clientSource?: { readonly inputState: "fresh" | "retained"; readonly cvars: CvarRegistry; readonly archive: string | null; route(base: CommandCvarRouting): CommandCvarRouting };
+  readonly clientSource?: { readonly inputState: "fresh" | "retained"; readonly startupCommands?: readonly string[]; readonly cvars: CvarRegistry; readonly archive: string | null; readonly seatCvars?: ReadonlyMap<SeatId, CvarRegistry>; readonly seatArchives?: ReadonlyMap<SeatId, readonly CvarArchiveEntry[]>; route(base: CommandCvarRouting): CommandCvarRouting };
   readonly seats: readonly { readonly seat: SessionSeat; readonly input: SeatInput; readonly selectedBindings?: readonly InputBinding[] }[];
   readonly options: ApplicationOptions;
   readonly content: ApplicationConfigurationContent;
@@ -76,6 +77,7 @@ export async function prepareProfileConfiguration(args: {
   const { prepared, content, settings, shared, host } = args;
   const options = content.q3Product === undefined ? args.options : { ...args.options, q3Product: content.q3Product };
   const dialect = configurationDialect(content), movementDialect = configurationMovementDialect(content);
+  const phases = args.clientSource?.startupCommands === undefined ? null : startupCommandPhases(args.clientSource.startupCommands, dialect);
   const source = args.clientSource?.cvars ?? createStartupSource(options, content.selection, dialect, prepared.source.context, args.defaultCapacity, host.print);
   if (source.dialect !== dialect) throw new Error("Configuration source dialect differs from its selected product");
   const movement = new CvarRegistry({ dialect: movementDialect, context: prepared.movement.context, print: host.print });
@@ -83,8 +85,8 @@ export async function prepareProfileConfiguration(args: {
   const seats = await Promise.all(args.seats.map(async ({ seat, input }) => {
     if (!input.seat.equals(seat.id)) throw new Error("Configuration input belongs to another seat");
     const context: CommandContext = { session: seat.id.session, origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } };
-    const cvars = args.clientSource?.cvars ?? new CvarRegistry({ dialect, context, print: host.print, cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
-    if (args.clientSource !== undefined && (args.seats.length !== 1 || cvars.context.origin.kind !== "local-seat" || !cvars.context.origin.seat.equals(seat.id) || !cvars.context.origin.client.equals(seat.client.id)))
+    const cvars = args.clientSource?.seatCvars?.get(seat.id) ?? args.clientSource?.cvars ?? new CvarRegistry({ dialect, context, print: host.print, cheatsAllowed: () => source.variableValue("sv_cheats") === 1 });
+    if (args.clientSource !== undefined && (cvars.dialect !== dialect || cvars.context.origin.kind !== "local-seat" || !cvars.context.origin.seat.equals(seat.id) || !cvars.context.origin.client.equals(seat.client.id)))
       throw new Error("Client configuration requires its actual primary seat cvar owner");
     if (args.clientSource === undefined && dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: options.characterModel });
     const mouse = new MouseSettings(new CvarRegistry({ dialect, context, print: host.print }));
@@ -125,7 +127,7 @@ export async function prepareProfileConfiguration(args: {
   };
   let active: StartupConfig | null = null;
   try {
-    const program = prepared.prepareClientCommands({ dialect, context: prepared.commands.context, cvars: fallback, cvarRouting: args.clientSource?.route(routing) ?? routing,
+    const program = prepared.prepareClientCommands({ ...(phases === null ? {} : { startupCommandText: phases.stuffed }), dialect, context: prepared.commands.context, cvars: fallback, cvarRouting: args.clientSource?.route(routing) ?? routing,
       readScript: (name, context) => active?.readScript(name, context) ?? scripts.read(name, context),
       onScriptComplete: event => active?.onScriptComplete(event), print: host.print,
       allowCommand: command => !active?.restrictSharedConfiguration || allowSeatConfigurationCommand(command, routing, seats, host.print),
@@ -167,7 +169,22 @@ export async function prepareProfileConfiguration(args: {
       if (!choices.all) for (const binding of defaults)
         if (!choices.overridden.has(physicalInputKey(binding.input))) bindings.bind(binding);
     };
+    const launchContext = seats[0]?.context ?? prepared.commands.context;
+    const applyStartupVariables = (): void => {
+      for (const variable of phases?.variables ?? []) {
+        const owner = routing.owner(variable.name, launchContext);
+        owner.set(variable.name, variable.value, true);
+        const registered = owner.register(variable.name, "");
+        if (registered === undefined) throw new Error(`Q3 startup variable registration rejected: ${variable.name}`);
+        owner.addFlags(registered.name, CvarFlag.UserCreated);
+      }
+    };
     async function* run(): AsyncGenerator<void, void, void> {
+      if (phases !== null) {
+        applyStartupVariables();
+        currentCommands().appendPreparation(phases.early, launchContext, dialect);
+        await currentCommands().executeScriptsAsync(async () => {});
+      }
       for (const [index, seat] of seats.entries()) {
         const bindings = () => {
           const owner = currentBindings(seat.id);
@@ -180,7 +197,7 @@ export async function prepareProfileConfiguration(args: {
         let collectingBindings = index !== 0;
         const defaults = args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect);
         if (index !== 0) applyBindingDefaults(seat.id, defaults);
-        active = new StartupConfig({ dialect, context: seat.context, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
+        active = new StartupConfig({ ...(phases === null ? {} : { safeMode: phases.safe }), dialect, context: seat.context, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
           scope: index === 0 ? "source" : "seat", read: (name, context, scope) => published === undefined ? read(name, context, scope) : published.readConfiguration(name, context, scope),
           applySelectedDefaults: () => {
             for (const binding of bindings().bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) bindings().unbind(binding.input);
@@ -191,7 +208,7 @@ export async function prepareProfileConfiguration(args: {
           applyArchive: () => {
             if (index === 0) { if (args.clientSource === undefined) (published?.source ?? source).applyArchive(args.sourceArchive); (published?.movement ?? movement).applyArchive(movementArchive); (published?.fallback ?? fallback).applyArchive(fallbackArchive); (published === undefined ? shared : published.sharedCvars)?.applyArchive(sharedArchive); }
             currentSeat(seat.id).cvars.applyArchive(seat.archive); currentSeat(seat.id).mouse.cvars.applyArchive(seat.mouseArchive);
-            if (args.clientSource !== undefined) currentSeat(seat.id).cvars.applyArchive(args.sourceArchive);
+            if (args.clientSource !== undefined) currentSeat(seat.id).cvars.applyArchive(args.clientSource.seatArchives?.get(seat.id) ?? (index === 0 ? args.sourceArchive : []));
             if (retained !== undefined) {
               bindings().unbindAll(); for (const binding of retained.bindings) bindings().bind(binding);
               choices.all = retained.allBindingsChosen;
@@ -212,6 +229,7 @@ export async function prepareProfileConfiguration(args: {
               currentCommands().insert(args.clientSource.archive, { ...seat.context, origin: { kind: "script", name: "client.cfg", caller: seat.context.origin } });
             collectingBindings = true;
           }, applyLaunchOptions: () => {},
+          replayStartupVariables: () => { if (index === 0 && phases !== null) { applyStartupVariables(); currentCommands().insert(phases.early, launchContext); } },
         });
         while (!await active.executeFrame({
           append: (text, context) => currentCommands().appendPreparation(text, context, dialect),
@@ -227,6 +245,7 @@ export async function prepareProfileConfiguration(args: {
         }, () => published === undefined ? !stopped : published.configurationCanContinue)) yield;
         active = null;
       }
+      if (phases !== null && dialect !== "q1-netquake" && dialect !== "q1-quakeworld") currentCommands().appendPreparation(phases.late, launchContext, dialect);
       while (!currentCommands().preparationComplete) { yield; await currentCommands().advanceProgramFrame(); }
     }
     const continuation = run();

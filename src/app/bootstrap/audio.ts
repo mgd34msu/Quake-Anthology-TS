@@ -62,6 +62,7 @@ interface StaticAudio {
 export type ApplicationEffectSound = SourceEffectSound;
 export interface ApplicationAudioSeatEvents {
   readonly seat: SeatId;
+  readonly scene?: SceneQueries;
   readonly snapshot: WorldSnapshot;
   readonly events: readonly SimulationPresentationEvent[];
   readonly music: boolean;
@@ -96,6 +97,7 @@ export class ApplicationAudio {
   private readonly effectSounds: ApplicationEffectSound[] = [];
   private readonly cgameFrames: Q3SeatAudioFrame[] = [];
   private listeners: readonly AudioListener[] = [];
+  private seatScenes: readonly { readonly seat: SeatId; readonly scene: SceneQueries }[] = [];
   private snapshot: WorldSnapshot | null = null;
   private geometry: ((listener: AudioListener, position: Vec3) => number) | null = null;
   private geometryEnabled = false;
@@ -159,8 +161,9 @@ export class ApplicationAudio {
   async prepareEnvironment(scene: SceneQueries): Promise<void> {
     const timing = this.content.recipe.timing.find(value => value.provider === this.content.recipe.engineBehavior.provider);
     if (timing === undefined) throw new Error("Audio geometry has no numeric profile");
+    const sceneFor = (listener: AudioListener): SceneQueries => this.seatScenes.find(value => value.seat.equals(listener.seat))?.scene ?? scene;
     this.geometry = (listener, position) => geometryTransmission(listener.origin, position, (start, end) =>
-      scene.trace({ start, end, shape: { kind: "point" }, target: { kind: "world" }, passActor: listener.actor, numeric: timing.numeric,
+      sceneFor(listener).trace({ start, end, shape: { kind: "point" }, target: { kind: "world" }, passActor: listener.actor, numeric: timing.numeric,
         policy: { kind: "q2", contentsMask: 3, leafContents: "merged" } }));
     this.engine.setGeometryTransmission(this.geometryEnabled ? this.geometry : null);
     this.syncGeometry();
@@ -180,7 +183,7 @@ export class ApplicationAudio {
       const current = this.listeners.find(value => value.seat.equals(listener.seat));
       if (current === undefined) throw new Error("Reverb seat has no current listener");
       const point = mins.x === 0 && mins.y === 0 && mins.z === 0 && maxs.x === 0 && maxs.y === 0 && maxs.z === 0;
-      const result = scene.trace({ start, end, shape: point ? { kind: "point" } : { kind: "box", bounds: { min: mins, max: maxs } }, target: { kind: "world" },
+      const result = sceneFor(current).trace({ start, end, shape: point ? { kind: "point" } : { kind: "box", bounds: { min: mins, max: maxs } }, target: { kind: "world" },
         passActor: current.actor, numeric: timing.numeric, policy: { kind: "q2", contentsMask: 3, leafContents: "merged" } });
       if (result.kind !== "q2") throw new Error("Audio trace did not honor its shared query policy");
       return { fraction: result.fraction, end: result.end, material: result.surface?.material || null, sky: ((result.surface?.flags ?? 0) & 4) !== 0 };
@@ -479,6 +482,7 @@ export class ApplicationAudio {
   }
 
   async frame(snapshot: WorldSnapshot, listeners: readonly AudioListener[], events: readonly SimulationPresentationEvent[], frameStartedAt = performance.now(), seatEvents: readonly ApplicationAudioSeatEvents[] = []): Promise<void> {
+    this.seatScenes = seatEvents.flatMap(batch => batch.scene === undefined ? [] : [{ seat: batch.seat, scene: batch.scene }]);
     this.syncGeometry();
     this.engine.setEffectsVolume(this.effectsVolume); this.music.volume = this.musicVolume;
     const snapshots = [snapshot, ...seatEvents.map(batch => batch.snapshot)];
@@ -571,7 +575,7 @@ export class ApplicationAudio {
     this.engine.resetRound();
     this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0;
     this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
-    this.listeners = []; this.snapshot = null; this.environmentSeats.length = 0;
+    this.listeners = []; this.seatScenes = []; this.snapshot = null; this.environmentSeats.length = 0;
   }
 
   close(): undefined {
@@ -580,7 +584,7 @@ export class ApplicationAudio {
     this.geometry = null; this.geometryEnabled = false;
     this.music.stop(); this.engine.close(); this.banks.clear(); this.sounds.clear(); this.footsteps.clear();
     this.actorAudio.length = 0; this.loops.length = 0; this.statics.length = 0; this.uiSounds.length = 0; this.effectSounds.length = 0; this.cgameFrames.length = 0;
-    this.listeners = []; this.snapshot = null;
+    this.listeners = []; this.seatScenes = []; this.snapshot = null;
     return undefined;
   }
 }

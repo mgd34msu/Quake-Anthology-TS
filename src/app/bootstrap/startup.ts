@@ -569,7 +569,7 @@ export class StartupApplication {
       if (prepared === undefined) throw new Error("Connect has no prepared command owner");
       const dialect = prepared.commands.dialect;
       const kind = dialect === "q1-netquake" ? "q1-client" : dialect === "q1-quakeworld" ? "qw-client" : dialect === "q3" ? "q3-client" : "q2-client";
-      this.pending = { kind: "initial", options: { ...options, seats: 1, network: { kind, remote: args[0] } } }; return true;
+      this.pending = { kind: "initial", options: { ...options, network: { kind, remote: args[0] } } }; return true;
     }
     if (this.game === null && (name === "map" || prepared?.commands.dialect === "q3" && ["devmap", "spmap", "spdevmap"].includes(name))) {
       if (args.length !== 1 || args[0] === undefined) { this.print("Usage: " + name + " <name>\n"); return true; }
@@ -908,6 +908,7 @@ export class StartupApplication {
   private async returnToFrontend(): Promise<void> {
     const client = this.client;
     if (client === null) throw new Error("Retained client is unavailable");
+    const localPlayerCount = this.activeDemo === null ? (this.game ?? this.remote)?.options.seats : undefined;
     const source = client.source.current;
     await source?.prepareRetirement();
     this.activateFrontend();
@@ -916,6 +917,7 @@ export class StartupApplication {
     this.game = null; this.remote = null;
     client.source.current = null;
     try { await source?.retire(); } finally { await retired.close(); }
+    if (localPlayerCount !== undefined) this.model.select("seats", String(localPlayerCount));
     this.activeDemo = null;
     this.graphics?.menu.setStatus(this.status);
     this.demos?.refresh();
@@ -1020,9 +1022,10 @@ export class StartupApplication {
 
   private async connect(connection: BrowserConnection): Promise<void> {
     const family = connection.protocol === "qw" ? "q1" : connection.protocol;
+    const seats = this.game?.options.seats ?? this.remote?.options.seats ?? this.model.options.seats;
     const options: ApplicationOptions = { ...this.model.options, product: connection.protocol === "qw" ? "q1-quakeworld" : family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3",
       map: family === "q1" ? "maps/e1m1.bsp" : family === "q2" ? "maps/base1.bsp" : "maps/q3dm1.bsp", movement: family, character: family,
-      characterModel: family === "q1" ? "player" : family === "q2" ? "male" : "sarge", seats: 1, dedicated: false, rules: "standard",
+      characterModel: family === "q1" ? "player" : family === "q2" ? "male" : "sarge", seats, dedicated: false, rules: "standard",
       network: { kind: connection.protocol === "qw" ? "qw-client" : family === "q1" ? "q1-client" : family === "q2" ? "q2-client" : "q3-client", remote: connection.remote } };
     await this.connectOptions(options);
   }

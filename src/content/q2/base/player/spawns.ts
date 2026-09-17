@@ -103,7 +103,7 @@ export function q2KillBox(entity: Q2Entity, game: Q2GameServices): boolean {
     if (trace.hit.kind !== "actor") return !trace.startSolid;
     const target = trace.hit.actor;
     game.damage(target, entity, entity.actor.id, 100000, 0, zero, body.origin, zero, 21, 32);
-    if (game.host.actors.isLive(target) && (game.host.combat.read(target)?.canTakeDamage ?? false)) {
+    if (game.host.actors.isLive(target)) {
       const other = game.entity(target);
       if (other === null || other.solid !== "none") return false;
     }

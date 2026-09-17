@@ -1922,8 +1922,9 @@ export class SharedSimulation implements Simulation {
     if (player !== undefined && (player.intermission || player.cutscene !== null)) return { family: providerFamily(player.profile.id), solid: "none", model: null, owner: null };
     if (player !== undefined && this.q2Characters.get(actor)?.state.gibbed) return { family: "q2", solid: "none", model: null, owner: null };
     if (player !== undefined && this.q1Characters.get(actor)?.presentation.solid === "none") return { family: "q1", solid: "none", model: null, owner: null };
-    if (player !== undefined) return { family: providerFamily(player.profile.id), solid: "box", model: null, owner: null };
     const entry = this.actorExecutions.get(actor.id);
+    if (entry?.kind === "q2") return actorCollision(entry);
+    if (player !== undefined) return { family: providerFamily(player.profile.id), solid: "box", model: null, owner: null };
     return entry === undefined ? null : actorCollision(entry);
   }
 

@@ -24,11 +24,11 @@ export class ClientSocksSettings {
       visible: source => [...base.visible(source), this.cvars],
     };
   }
-  async connect(transport: UdpTransport): Promise<void> {
-    this.cvars.applyLatched();
-    if ((this.cvars.get('net_socksEnabled')?.integerValue ?? 0) === 0) return;
-    await transport.connectSocks({ server: this.cvars.variableString('net_socksServer'),
-      port: (this.cvars.get('net_socksPort')?.integerValue ?? 1080) & 65535,
-      username: this.cvars.variableString('net_socksUsername'), password: this.cvars.variableString('net_socksPassword') });
+  async connect(transport: UdpTransport, cvars = this.cvars): Promise<void> {
+    cvars.applyLatched();
+    if ((cvars.get('net_socksEnabled')?.integerValue ?? 0) === 0) return;
+    await transport.connectSocks({ server: cvars.variableString('net_socksServer'),
+      port: (cvars.get('net_socksPort')?.integerValue ?? 1080) & 65535,
+      username: cvars.variableString('net_socksUsername'), password: cvars.variableString('net_socksPassword') });
   }
 }

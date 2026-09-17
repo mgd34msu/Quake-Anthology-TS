@@ -316,7 +316,7 @@ export class EngineSession implements SessionResource {
     clients: NonNullable<Parameters<EngineSession["replaceWorld"]>[2]>, seats: NonNullable<Parameters<EngineSession["replaceWorld"]>[3]>): void {
     this.resources.assertOpen();
     if (this.stepping) throw new Error("Cannot change local seats during simulation.step");
-    if (this.currentWorld === null || this.currentWorld.isClosed) throw new Error("Local seat publication requires an active world");
+    if (this.currentWorld?.isClosed) throw new Error("Local seat publication cannot use a retired world");
     this.validateOwnershipChange(presentations, clients, seats);
   }
 

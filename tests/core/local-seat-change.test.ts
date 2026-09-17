@@ -24,5 +24,39 @@ test('local join preparation rolls back and publication retains current world an
  const drop=prepareLocalSeatChange(session,added.next,{kind:'drop',seat:newSeat.seat.id},capacity); drop.validate();
  const retired=drop.publish(); expect(session.clientAt(1)).toBeNull(); expect(newSeat.seat.isClosed).toBe(false); expect(removedClosed).toBe(0);
  retired.close();retired.close();expect(newSeat.seat.isClosed).toBe(true);expect(removedClosed).toBe(1);expect(retainedClosed).toBe(0);expect(session.world).toBe(world);expect(session.snapshot).toBe(output.snapshot);
+ world.close(); expect(() => session.validateLocalSeats([], {added:[],removed:[]}, {added:[],removed:[]})).toThrow("retired world");
  session.close();expect(worldClosed).toBe(1);expect(retainedClosed).toBe(1);
+});
+
+test('remote seats reserve and publish distinct connections without an authoritative world', async () => {
+  const { prepareRemoteSeatIdentities } = await import('../../src/app/bootstrap/remote-seat-identities.ts');
+  const identity=createIdentityOwner('remote-seat-identities'),session=new EngineSession(identity,{kind:'local'});
+  const primary=session.createClient(0),seat=session.createSeat(0,primary),connection=primary.connect('remote');
+  try {
+    const abandoned=prepareRemoteSeatIdentities(session,[{client:primary,seat}],3);
+    expect(session.clientAt(1)).toBeNull();
+    abandoned.discard();abandoned.discard();
+    expect(abandoned.added.every(entry=>entry.client.isClosed && entry.seat.isClosed)).toBe(true);
+    expect(primary.connection).toBe(connection);
+    const next=prepareRemoteSeatIdentities(session,[{client:primary,seat}],3);
+    next.validate();next.publish();
+    expect(session.world).toBeNull();expect(session.snapshot).toBeNull();
+    expect(next.selected[0]?.seat).toBe(seat);
+    expect(new Set(next.selected.map(entry=>entry.client.id.slot)).size).toBe(3);
+    expect(new Set(next.selected.map(entry=>entry.seat.id.index)).size).toBe(3);
+    for(const entry of next.added){expect(session.clientAt(entry.client.id.slot)).toBe(entry.client);entry.client.connect('remote');}
+    next.discard();
+    expect(next.selected.every(entry=>!entry.client.isClosed && !entry.seat.isClosed)).toBe(true);
+    expect(primary.connection).toBe(connection);
+    const promoted = next.selected[1];
+    if (promoted === undefined) throw new Error('Missing retained successor');
+    const promotedConnection = promoted.client.connection;
+    primary.disconnect();
+    const joined = prepareRemoteSeatIdentities(session, [promoted, {client: primary, seat}], 2);
+    joined.validate(); joined.publish();
+    expect(joined.selected[0]).toBe(promoted);
+    expect(joined.selected[1]?.seat).toBe(seat);
+    expect(joined.added).toHaveLength(0);
+    expect(promoted.client.connection).toBe(promotedConnection);
+  } finally {session.close();}
 });
