@@ -1,3 +1,4 @@
+import { relativeMovementCommand } from "../q3-commands.ts";
 import type { UserCommand } from "../../../../contracts/protocol.ts";
 import type { OrderedMovementEffect } from "../../../../contracts/movement.ts";
 import { Q2RereleaseMovementContext } from "../../../../movement/q2/index.ts";
@@ -46,7 +47,8 @@ export class SelectedMovementPrediction {
     let player = copyPredictionSnapshot(this.snapshot);
     const effects: OrderedMovementEffect[] = [];
     if ((player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease") && (player.state.flags & 64) !== 0) {
-      const command = this.commands.at(-1)?.command, state = player.state;
+      const latest = this.commands.at(-1), state = player.state;
+      const command = latest === undefined ? undefined : relativeMovementCommand(latest, state).command;
       const shortAngle = (word: number): number => (word << 16 >> 16) * 360 / 65536;
       if (state.kind === "q2-classic" && command?.kind === "q2-classic") player = { ...player, viewAngles: {
         x: shortAngle(command.angleShorts[0]) + shortAngle(state.deltaAngleShorts[0]),

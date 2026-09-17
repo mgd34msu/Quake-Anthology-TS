@@ -46,8 +46,8 @@ export interface ApplicationOptions {
   readonly seed: number;
   readonly frameLimit: number | null;
   readonly hidden: boolean;
-  readonly network: { readonly kind: "offline" } | { readonly kind: "native-server" | "q2-server"; readonly host: string; readonly port: number }
-    | { readonly kind: "q1-client" | "qw-client" | "q2-client" | "q3-client"; readonly remote: string };
+  readonly network: { readonly kind: "offline" } | { readonly kind: "native-server" | "q2-server" | "unified-server"; readonly host: string; readonly port: number }
+    | { readonly kind: "q1-client" | "qw-client" | "q2-client" | "q3-client" | "unified-client"; readonly remote: string };
 }
 
 export type ApplicationCommand = { readonly kind: "help" }
@@ -81,6 +81,8 @@ Usage: bun run src/main.ts [options]
   --skill 0|1|2|3            Quake I/II gameplay difficulty
   --bot-skill 1|2|3|4|5      Quake III bot difficulty (default 2)
   --dedicated                Run without a window or local seats
+  --listen-unified PORT      Host the selected mixed-game recipe
+  --connect-unified ADDRESS  Join a mixed-game server
   --listen PORT              Host the selected game's native source protocol
   --q1-protocol 15|666|999    NetQuake host protocol (default 15; RMQ flags 130)
   --listen-q2 PORT           Host the native Quake II source protocol
@@ -127,8 +129,8 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
   };
   const startupCommands: string[] = [];
   let list = false, menu = false, explicitLaunch = false;
-  let listenKind: "native-server" | "q2-server" = "q2-server";
-  let remoteKind: "q1-client" | "qw-client" | "q2-client" | "q3-client" = "q2-client";
+  let listenKind: "native-server" | "q2-server" | "unified-server" = "q2-server";
+  let remoteKind: "q1-client" | "qw-client" | "q2-client" | "q3-client" | "unified-client" = "q2-client";
   let bind = "0.0.0.0", listen: number | null = null, remote: string | null = null;
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
@@ -202,18 +204,18 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--seats": options = { ...options, seats: integer(value, flag, 1, 4), explicitRules: { ...options.explicitRules, capacity: true } }; break;
       case "--seed": options = { ...options, seed: integer(value, flag, 0, 0xffffffff) }; break;
       case "--frames": options = { ...options, frameLimit: integer(value, flag, 1, Number.MAX_SAFE_INTEGER) }; break;
-      case "--listen": case "--listen-q2": {
-        const kind = flag === "--listen" ? "native-server" : "q2-server";
-        if (listen !== null && listenKind !== kind) throw new Error("Choose either --listen or --listen-q2");
+      case "--listen": case "--listen-q2": case "--listen-unified": {
+        const kind = flag === "--listen-unified" ? "unified-server" : flag === "--listen" ? "native-server" : "q2-server";
+        if (listen !== null && listenKind !== kind) throw new Error("Choose one server listener");
         listenKind = kind; listen = integer(value, flag, 0, 65535); break;
       }
       case "--q2-protocol":
         options = { ...options, q2Protocol: parseApplicationQ2Protocol(value) };
         break;
       case "--q1-protocol": options = { ...options, q1Protocol: defaultNetQuakeProfile(integer(value, flag, 15, 999)) }; break;
-      case "--connect-qw": case "--connect-q1": case "--connect-q2": case "--connect-q3":
-        if (remote !== null) throw new Error("Choose one native remote connection");
-        remoteKind = flag === "--connect-qw" ? "qw-client" : flag === "--connect-q1" ? "q1-client" : flag === "--connect-q3" ? "q3-client" : "q2-client"; remote = value; break;
+      case "--connect-qw": case "--connect-q1": case "--connect-q2": case "--connect-q3": case "--connect-unified":
+        if (remote !== null) throw new Error("Choose one remote connection");
+        remoteKind = flag === "--connect-unified" ? "unified-client" : flag === "--connect-qw" ? "qw-client" : flag === "--connect-q1" ? "q1-client" : flag === "--connect-q3" ? "q3-client" : "q2-client"; remote = value; break;
       case "--bind": bind = value; break;
       case "--skill": {
         const skill = integer(value, flag, 0, 3);
@@ -239,20 +241,21 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
   if (startupCommands.length > 0) options = { ...options, startupCommands };
   explicitLaunch ||= startupRequestsWorld(startupCommands);
   if (list) return { kind: "list-content", corpusRoot: options.corpusRoot };
-  if (listen !== null && remote !== null) throw new Error("Choose a native server listener or --connect-q2");
+  if (listen !== null && remote !== null) throw new Error("Choose a server listener or a remote connection");
   if (listen !== null) options = { ...options, network: { kind: listenKind, host: bind, port: listen } };
-  else if (bind !== "0.0.0.0") throw new Error("--bind requires --listen or --listen-q2");
+  else if (bind !== "0.0.0.0") throw new Error("--bind requires --listen, --listen-q2 or --listen-unified");
   if (remote !== null) {
     if (options.botSkill !== undefined) throw new Error("--bot-skill is not a native Quake II client setting");
     options = { ...options, network: { kind: remoteKind, remote } };
   }
+  if (options.networkTransport !== undefined && (options.network.kind === "unified-server" || options.network.kind === "unified-client")) throw new Error("Unified networking uses UDP; IPX applies to native game protocols");
   if (options.networkTransport !== undefined && options.network.kind === "offline") throw new Error("IPX selection requires --listen, --listen-q2 or a native client connection");
   if (options.networkTransport?.kind === "ipx-native" && bind !== "0.0.0.0") throw new Error("--bind selects an IP interface and cannot bind native AF_IPX");
   if (options.networkTransport !== undefined && options.network.kind === "qw-client") throw new Error("QuakeWorld uses UDP; IPX is not a QuakeWorld transport");
   if (options.q2Protocol !== undefined && options.network.kind !== "q2-client" && options.network.kind !== "q2-server") throw new Error("--q2-protocol requires --connect-q2 or --listen-q2");
   if (options.q1Protocol !== undefined && options.network.kind !== "native-server") throw new Error("--q1-protocol requires --listen for a Quake I host");
   if (options.q1Protocol !== undefined && options.product === "q1-quakeworld") throw new Error("--q1-protocol selects NetQuake; QuakeWorld uses native protocol 28");
-  if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: options.network.kind === "native-server" && (options.product.startsWith("q3-") || options.product === "q1-quakeworld") ? "deathmatch" : "coop" };
+  if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: (options.network.kind === "native-server" || options.network.kind === "unified-server") && (options.product.startsWith("q3-") || options.product === "q1-quakeworld") ? "deathmatch" : "coop" };
   if (options.seats > 1 && options.mode === "singleplayer") options = { ...options, mode: "coop" };
   if (menu && (options.dedicated || options.network.kind !== "offline")) throw new Error("--menu requires a local, non-dedicated application");
   return { kind: menu || !explicitLaunch ? "menu" : "run", options };

@@ -1,4 +1,4 @@
-import { relativeQ3SourceCommand } from "../../../src/app/bootstrap/simulation/q3-commands.ts";
+import { relativeQ3SourceCommand, relativeMovementCommand } from "../../../src/app/bootstrap/simulation/q3-commands.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { GameFamily } from "../../../src/contracts/content.ts";
@@ -146,4 +146,18 @@ test("Q3 raw local commands and foreign absolute conversion preserve bot/network
   expect((relative.angles.z + delta.z) & 65535).toBe(command.angles.z);
   expect(relativeQ3SourceCommand({ kind: "bot", provider: "q3:official" }, "q3", command, delta)).toBe(command);
   expect(relativeQ3SourceCommand({ kind: "remote-client", client }, "q3", command, delta)).toBe(command);
+  expect(relativeQ3SourceCommand({ kind: "remote-client", client }, "q3", command, delta, "absolute").angles).toEqual(relative.angles);
+  expect(relativeQ3SourceCommand({ kind: "remote-client", client }, "q1-netquake", command, delta, "source-relative")).toBe(command);
+  const absolute = { actor: owner.actor(1, 0), source: { kind: "remote-client", client }, sequence: 0, angleSpace: "absolute",
+    command: { kind: "q3", serverTimeMilliseconds: 50, angleWords: [65530, 5, 57344], buttons: 0, weapon: 2, forwardMove: 127, rightMove: 0, upMove: 0 } } satisfies import("../../../src/contracts/session.ts").ActorCommand;
+  const state = { kind: "q3", commandTimeMilliseconds: 0, movementType: 0, bobCycle: 0, movementFlags: 0, movementTimeMilliseconds: 0,
+    origin: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, gravity: 800, speed: 320, deltaAngleWords: [20, 65530, 57344],
+    movementDirection: 0, grapplePoint: { x: 0, y: 0, z: 0 }, flags: 0, viewAngles: { x: 0, y: 0, z: 0 }, viewHeight: 26,
+    ground: { kind: "none" }, jumpPad: null, movementFrame: 0, jumpPadFrame: 0, predictableEventSequence: 0 } satisfies import("../../../src/contracts/movement.ts").Q3MovementState;
+  const normalized = relativeMovementCommand(absolute, state);
+  expect(normalized.command.kind === "q3" ? normalized.command.angleWords : null).toEqual([65510, -65525, 0]);
+  expect(relativeMovementCommand(normalized, state)).toBe(normalized);
+  const native = { ...absolute, angleSpace: "source-relative" } satisfies import("../../../src/contracts/session.ts").ActorCommand;
+  expect(relativeMovementCommand(native, state)).toBe(native);
+
 });

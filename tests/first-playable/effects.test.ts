@@ -113,7 +113,7 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak"))("r
       { kind: "q2", content: q2, seconds: 1, sequence: 2, event: { kind: "effect", effect: "rocket-explosion", origin: { x: 80, y: 20, z: 0 }, direction: { x: -1, y: 0, z: 0 }, count: 0, color: 0 } },
       { kind: "q2-weapon", content: q2, seconds: 1, sequence: 3, event: { kind: "muzzleflash", actor: actor.id, flash: 1, silenced: false } },
       { kind: "q2-weapon", content: q2, seconds: 1, sequence: 4, event: { kind: "muzzleflash", actor: actor.id, flash: 1, silenced: false } },
-      { kind: "q3-character", content: q3, seconds: 1, sequence: 5, event: { actor, sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_JUMP_PAD, parameter: 0 } },
+      { kind: "q3-character", content: q3, seconds: 1, sequence: 5, event: { actor: actor.id, sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_JUMP_PAD, parameter: 0 } },
     ]);
     await effects.prepare(snapshot(1), [rocket], [character]);
     expect(effects.drainSounds().map(sound => sound.path)).toContain("weapons/r_exp3.wav");

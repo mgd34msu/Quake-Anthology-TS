@@ -368,7 +368,7 @@ export class ApplicationEffects {
       return;
     }
     if (source.kind === "q3-character") {
-      const pose = this.pose(source.event.actor.id);
+      const pose = this.pose(source.event.actor);
       if (pose === undefined) { this.reject(source, "Q3 character event has no captured actor pose"); return; }
       let effects = this.q3.get(source.content);
       if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer, undefined, this.readHardware); this.q3.set(source.content, effects); }

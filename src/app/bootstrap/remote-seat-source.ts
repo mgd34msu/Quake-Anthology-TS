@@ -1,3 +1,5 @@
+import { UnifiedRemotePresentation, type UnifiedRemoteOptions } from './network/remote-unified.ts';
+import { UnifiedClientNetwork } from './network/unified-client.ts';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -36,8 +38,8 @@ import { Q3ApplicationClientDownloads, q3DownloadPath } from './network/q3-clien
 import { Q3ApplicationPackages } from './network/q3-downloads.ts';
 import { Q3ClientContent } from './network/q3-client-content.ts';
 
-export type RemoteSeatPresentation = Q1RemotePresentation | QwRemotePresentation | Q2RemotePresentation | Q3RemotePresentation;
-export type RemoteSeatNetwork = Q1ClientNetwork | QwClientNetwork | Q2ClientNetwork<ApplicationNetworkAddress> | Q3ClientNetwork;
+export type RemoteSeatPresentation = UnifiedRemotePresentation | Q1RemotePresentation | QwRemotePresentation | Q2RemotePresentation | Q3RemotePresentation;
+export type RemoteSeatNetwork = UnifiedClientNetwork<ApplicationNetworkAddress> | Q1ClientNetwork | QwClientNetwork | Q2ClientNetwork<ApplicationNetworkAddress> | Q3ClientNetwork;
 export interface RemoteSeatSourceHooks {
   options(): ApplicationOptions;
   mounts(): LoadedApplicationContent['mounts'];
@@ -69,7 +71,8 @@ interface RemoteSeatSourceCommon {
   readonly hooks: RemoteSeatSourceHooks;
 }
 export type RemoteSeatSourceOptions = RemoteSeatSourceCommon & (
-  { readonly family: 'q1' } | { readonly family: 'qw' }
+  { readonly family: 'unified'; readonly unified: Pick<UnifiedRemoteOptions, 'loadContent' | 'model'> }
+  | { readonly family: 'q1' } | { readonly family: 'qw' }
   | { readonly family: 'q2'; readonly protocol: Q2ProtocolIdentity }
   | { readonly family: 'q3'; readonly authorization: Pick<Q3ClientAuthorization, 'request'> }
 );
@@ -94,7 +97,12 @@ export class RemoteSeatSource {
       print: (text: string) => hooks.print(text), sendCommand: (text: string) => this.network.command(text),
       disconnected: (reason: string) => hooks.disconnected(reason) };
     const qport = owner.qport;
-    if (owner.family === 'qw') {
+    if (owner.family === 'unified') {
+      const remote = new UnifiedRemotePresentation({identity,client:seat.client,seat:seat.id,nextGeneration,...owner.unified,
+        publish:output=>hooks.publish(output),sendCommand:(name,args)=>{if(this.network instanceof UnifiedClientNetwork)this.network.playerCommand(name,args);},
+        disconnected:reason=>hooks.disconnected(reason),print:text=>hooks.print(text)});
+      this.remote=remote;this.network=new UnifiedClientNetwork({transport,remote:address,host:remote,userinfo:()=>owner.cvars().infoString(CvarFlag.UserInfo)});
+    } else if (owner.family === 'qw') {
       if (address.kind === 'ipx') throw new Error('QuakeWorld requires UDP');
       const remote = new QwRemotePresentation({ ...common, seat: seat.id,
         cameraOptions: { hightrack: () => owner.cvars().variableValue('cl_hightrack'), chasecam: () => owner.cvars().variableValue('cl_chasecam') },

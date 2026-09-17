@@ -110,6 +110,8 @@ export function movementDialect(options: Pick<ApplicationOptions, "movement"> & 
 }
 
 export interface ApplicationInputCommandOwner {
+  readonly movement?: CvarRegistry;
+  readonly fallback?: CvarRegistry;
   readonly scripts?: ConsoleScriptFiles;
   readonly cvars: CvarRegistry;
   readonly commands: CommandBuffer;
@@ -165,9 +167,10 @@ export class ApplicationInput {
     if (this.consoleCvars === candidate) this.consoleCvars = retained;
   }
   adoptClientSource(owner: ApplicationInputCommandOwner & { readonly scripts: ConsoleScriptFiles }): void {
-    if (this.consoleRouting !== null || owner.cvars.dialect !== this.dialect) throw new Error("Client input requires a matching source registry");
-    this.cvarOwner = owner.cvars;
-    this.consoleCvars = owner.cvars;
+    const movement=owner.movement ?? owner.cvars, fallback=owner.fallback ?? owner.cvars;
+    if (this.consoleRouting !== null || movement.dialect !== this.dialect || fallback.dialect !== owner.cvars.dialect || owner.cvars.dialect !== this.consoleCvars.dialect) throw new Error("Client input requires matching movement and source registries");
+    this.cvarOwner = movement;
+    this.consoleCvars = fallback;
     this.externalRouting = owner.routing;
     this.scriptOwner = owner.scripts;
     for (const local of this.locals) {
@@ -291,7 +294,7 @@ export class ApplicationInput {
     previous?: ApplicationInput, prepared?: PreparedStartup) {
     const saved = await Promise.all(players.map(player => settings.loadSeat(`input/seat-${player.seat.id.index + 1}.json`)));
     const routing = await settings.loadInputRouting("input/routing.json");
-    const sourceDialect = actions.console?.dialect() ?? dialect;
+    const sourceDialect = actions.console?.dialect() ?? owner?.cvars.dialect ?? previous?.consoleCvars.dialect ?? dialect;
     const hasOwners = owner !== undefined || previous !== undefined || prepared !== undefined;
     const archives = {
       movement: hasOwners ? [] : await loadCvarArchive(settings, ["movement", dialect], dialect),
@@ -362,7 +365,7 @@ export class ApplicationInput {
   }
 
   private createJoinedLocal(player: LocalPlayer, saved: SeatSettings | null, archive: readonly CvarArchiveEntry[]): LocalInput {
-    const seat = player.seat.id, sourceDialect = this.actions.console?.dialect() ?? this.dialect;
+    const seat = player.seat.id, sourceDialect = this.actions.console?.dialect() ?? this.consoleCvars.dialect;
     const context: CommandContext = {session:seat.session, origin:{kind:"local-seat", seat, client:player.seat.client.id}};
     const prepared = this.startup?.seats.find(candidate => candidate.id.equals(seat));
     const input = prepared?.input ?? new SeatInput({seat, dialect:this.dialect, context, commands:this.commands, uiEvent:()=>false});
@@ -410,10 +413,10 @@ export class ApplicationInput {
     if (first === undefined) throw new Error("Native input requires at least one local player");
     const context: CommandContext = { session: first.actor.session, origin: { kind: "local-console" } };
     const print = (text: string, source?: CommandContext): void => this.print(text, source);
-    if (owner !== undefined && (owner.cvars.dialect !== dialect || actions.console !== undefined)) throw new Error("Input command owner does not match its console dialect");
-    const sourceDialect = actions.console?.dialect() ?? dialect;
-    this.cvarOwner = configuration?.movement ?? (staging === null && previous === undefined && this.startup?.movement.dialect === dialect ? this.startup.movement : undefined) ?? owner?.cvars ?? new CvarRegistry({ dialect, context, print });
-    const consoleCvars = configuration?.fallback ?? (staging === null && previous === undefined && this.startup?.fallback.dialect === sourceDialect ? this.startup.fallback : undefined) ?? (sourceDialect === dialect ? this.cvars : new CvarRegistry({ dialect: sourceDialect, context, print }));
+    if (owner !== undefined && ((owner.movement ?? owner.cvars).dialect !== dialect || (owner.fallback ?? owner.cvars).dialect !== owner.cvars.dialect || actions.console !== undefined)) throw new Error("Input command owner does not match its movement and console dialects");
+    const sourceDialect = actions.console?.dialect() ?? owner?.cvars.dialect ?? dialect;
+    this.cvarOwner = configuration?.movement ?? owner?.movement ?? (staging === null && previous === undefined && this.startup?.movement.dialect === dialect ? this.startup.movement : undefined) ?? owner?.cvars ?? new CvarRegistry({ dialect, context, print });
+    const consoleCvars = configuration?.fallback ?? owner?.fallback ?? owner?.cvars ?? (staging === null && previous === undefined && this.startup?.fallback.dialect === sourceDialect ? this.startup.fallback : undefined) ?? (sourceDialect === dialect ? this.cvars : new CvarRegistry({ dialect: sourceDialect, context, print }));
     this.consoleCvars = consoleCvars;
     if (owner === undefined && configuration === undefined) {
       if (this.startup?.movement !== this.cvars) {
@@ -592,8 +595,8 @@ export class ApplicationInput {
     this.registerCommand("midiinfo", () => { this.inputDevices.info(); return undefined; });
     if (this.startup !== undefined) this.unregister.push(this.startup.bindOutput((text, source) => this.print(text, source)));
     const locals = this.locals, actions = this.actions;
-    const context = this.cvars.context;
-    const sourceDialect = actions.console?.dialect() ?? this.dialect;
+    const context = this.consoleCvars.context;
+    const sourceDialect = actions.console?.dialect() ?? this.consoleCvars.dialect;
     const print = (text: string, source?: CommandContext): void => this.print(text, source);
     const settingBindings = locals.map(local => {
       const registry = this.inputCvars(local.player.seat.id);
@@ -666,7 +669,7 @@ export class ApplicationInput {
   validateStartupAdoption(): void {
     if (this.startup === undefined) return;
     if (this.actions.startupReader?.(this.scripts, this.options) === undefined) throw new Error("Startup script reader adoption is missing");
-    this.startup.validateOwners({ source: this.actions.console?.server()?.cvars ?? (this.externalRouting === undefined ? this.startup.source : this.cvars),
+    this.startup.validateOwners({ source: this.actions.console?.server()?.cvars ?? (this.externalRouting === undefined ? this.startup.source : this.consoleCvars),
       movement: this.cvars, fallback: this.consoleCvars });
   }
   adoptStartup(): void {
@@ -678,10 +681,10 @@ export class ApplicationInput {
     this.startup.adopt(routing, (name, args, source) => {
       let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
       return this.actions.execute(name, args, origin.kind === "local-seat" ? origin.seat : null, source);
-    }, { source: this.actions.console?.server()?.cvars ?? (this.externalRouting === undefined ? this.startup.source : this.cvars), movement: this.cvars, fallback: this.consoleCvars, scripts: this.scripts, read });
+    }, { source: this.actions.console?.server()?.cvars ?? (this.externalRouting === undefined ? this.startup.source : this.consoleCvars), movement: this.cvars, fallback: this.consoleCvars, scripts: this.scripts, read });
     for (const local of this.locals) this.startup.adoptSeat(local.player.seat.id,
       this.actions.console?.seat(local.player.seat.id) ?? this.startup.seats.find(seat=>seat.id.equals(local.player.seat.id))?.cvars
-        ?? (this.externalRouting === undefined ? undefined : this.cvars), this.mouseSettings.get(local.player.seat.id));
+        ?? (this.externalRouting === undefined ? undefined : this.consoleCvars), this.mouseSettings.get(local.player.seat.id));
     const configuration = this.actions.configuration;
     if (configuration !== undefined && !this.configurationPublished) {
       if (this.candidateProgram !== null) throw new Error("Configuration commands must publish before their continuation");

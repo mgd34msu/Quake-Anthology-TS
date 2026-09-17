@@ -25,6 +25,7 @@ export interface MovementPredictionSnapshot {
 }
 
 export interface MovementPredictionOptions {
+  readonly movementOnly?: boolean;
   readonly actor: OwnedActor;
   readonly seat: SeatId;
   readonly recipe: ExecutableRecipe;
@@ -38,6 +39,7 @@ export interface MovementPredictionOptions {
 export type MovementProbeOptions = Omit<MovementPredictionOptions, "seat">;
 
 export interface PredictionCommand {
+  readonly angleSpace?: "absolute" | "source-relative";
   readonly sequence: number;
   readonly timeMilliseconds: number;
   readonly command: UserCommand;

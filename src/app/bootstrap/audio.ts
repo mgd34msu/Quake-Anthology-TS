@@ -24,7 +24,7 @@ import { findQ1Leaf } from "../../formats/q1-map/queries.ts";
 import { parseEntities } from "../../formats/q3-map/index.ts";
 import { parsePlayerAnimationConfig } from "../../content/q3/foundation/animation-config.ts";
 import type { PlayerFootsteps } from "../../content/q3/foundation/animation-config.ts";
-import type { Q3CharacterEvent } from "../../content/q3/foundation/character.ts";
+import type { Q3CharacterPresentationEvent } from "./simulation/types.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { UiSound } from "../../ui/common/controller.ts";
@@ -366,8 +366,8 @@ export class ApplicationAudio {
     return pending;
   }
 
-  private async characterSound(content: ContentId, event: Q3CharacterEvent, audience: AudioAudience): Promise<void> {
-    const actor = event.actor.id, state = this.actor(actor);
+  private async characterSound(content: ContentId, event: Q3CharacterPresentationEvent, audience: AudioAudience): Promise<void> {
+    const actor = event.actor, state = this.actor(actor);
     const play = (path: string, channel: number): Promise<void> => this.play(content, "q3", path, actor, null, channel, 1, 1, 0, audience);
     switch (event.event & ~0x300) {
       case EntityEvent.EV_PAIN: {

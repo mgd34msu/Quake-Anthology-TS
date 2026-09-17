@@ -31,7 +31,7 @@ import type { Product } from "../../../content/q3/base/shared/definitions.ts";
 import { Weapon } from "../../../content/q3/base/shared/definitions.ts";
 import { evaluateTrajectory, evaluateTrajectoryDelta, TrajectoryType } from "../../../content/q3/base/shared/trajectory.ts";
 import { ClientWeaponMediaRegistry, emitShotgunPresentation, emitWeaponImpact, emitRailTrail, emitPlasmaTrail, ImpactSound } from "../../../content/q3/presentation/weapons.ts";
-import type { Q3CharacterEvent } from "../../../content/q3/foundation/character.ts";
+import type { Q3CharacterPresentationEvent } from "../simulation/types.ts";
 import { EntityEvent } from "../../../movement/q3/constants.ts";
 import { SceneModelRenderer } from "../../../render/scene/models/renderer.ts";
 import type { ModelSourceOptions } from "../../../render/scene/models/types.ts";
@@ -296,7 +296,7 @@ export class Q3ApplicationEffects {
       }
     }
   }
-  event(event: Q3CharacterEvent, origin: Vec3): boolean {
+  event(event: Q3CharacterPresentationEvent, origin: Vec3): boolean {
     this.state.time = event.timeMilliseconds;
     switch (event.event & ~0x300) {
       case EntityEvent.EV_PLAYER_TELEPORT_IN: case EntityEvent.EV_PLAYER_TELEPORT_OUT: this.effects.spawnEffect(origin); return true;

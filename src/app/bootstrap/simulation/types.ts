@@ -153,6 +153,8 @@ export interface SimulationPresentation {
     readonly firing: boolean; readonly horizontalSpeed: number; readonly bobCycle: number; readonly weapon: number };
 }
 
+export type Q3CharacterPresentationEvent = Omit<Q3CharacterEvent, "actor"> & { readonly actor: ActorId };
+
 export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1Event }
   | { readonly kind: "q1-fog"; readonly event: { readonly kind: "transition"; readonly player: ActorId | null; readonly transition: Q1FogTransition; readonly skyFactor: number } }
   | { readonly kind: "music"; readonly event: { readonly kind: "cd-track"; readonly track: number } }
@@ -164,7 +166,7 @@ export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1E
   | { readonly kind: "q2-composition"; readonly event: Q2CompositionEvent }
   | { readonly kind: "q2-rerelease"; readonly event: Q2RereleaseEvent }
   | { readonly kind: "q2-player"; readonly event: Q2PlayerEvent }
-  | { readonly kind: "q3-character"; readonly event: Q3CharacterEvent }
+  | { readonly kind: "q3-character"; readonly event: Q3CharacterPresentationEvent }
   | { readonly kind: "q3-ballistics"; readonly event: Q3SharedBallisticEvent }
   | { readonly kind: "q3-source"; readonly event: Q3SourceEvent };
 export type SimulationPresentationEvent = SourcePresentationEvent & { readonly sequence: number; readonly content: ContentId; readonly seconds: number; readonly sourceEntity?: number | null };

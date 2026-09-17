@@ -155,7 +155,7 @@ import type { ClientMovementOptions, ClientMovementResult } from "./q3/types.ts"
 import { Q3SourceRuntime, createQ3SourceHost, readQ3MovementState, writeQ3MovementState, writeQ3CharacterAnimation,
   readQ3MovementEnvironment, readQ3ArsenalRuntime, writeQ3ArsenalRuntime, applyQ3CommandPolicy } from "./q3/index.ts";
 import { CommandButtons, MoveFlags, MoveType, PlayerAnimation } from "../../../movement/q3/constants.ts";
-import { q3SourceCommand, relativeQ3SourceCommand, selectedQ3Command } from "./q3-commands.ts";
+import { q3SourceCommand, relativeQ3SourceCommand, relativeMovementCommand, selectedQ3Command } from "./q3-commands.ts";
 import { q3SourceAnimation, q3SourceTorso, runQ3TorsoOperation } from "../../../movement/q3/animation.ts";
 import { createQ1MonsterMovement } from "../../../movement/q1/index.ts";
 import type { Q1MonsterMovement } from "../../../movement/q1/monsters.ts";
@@ -1588,7 +1588,7 @@ export class SharedSimulation implements Simulation {
           if (client == null) throw new Error("Q3 source command has no actual client");
           const command = q3SourceCommand(input, this.requirePlayer(input.actor), this.sourceSchedulingMilliseconds, client.ps.weapon);
           const delta = client.ps.deltaAngles;
-          return relativeQ3SourceCommand(input.source, input.command.kind, command, delta);
+          return relativeQ3SourceCommand(input.source, input.command.kind, command, delta, input.angleSpace);
         },
         spawnPlayer: (entity, pose) => this.spawnQ3Player(entity, pose), moveClient: (entity, command, options) => this.moveQ3Client(entity, command, options),
         emit: event => { this.events.emit(content, { kind: "q3-source", event }); }, clientNumber: actor => this.requirePlayer(actor).client.slot,
@@ -2084,7 +2084,7 @@ export class SharedSimulation implements Simulation {
       if (character === undefined) {
         character = new Q3CharacterActor(player.actor, this.recipe.character.definition.provider, product, {
           bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory, timeMilliseconds: () => Math.trunc(this.timeSeconds * 1000),
-          emit: event => this.events.emit(this.recipe.character.definition.content, { kind: "q3-character", event }),
+          emit: event => this.events.emit(this.recipe.character.definition.content, { kind: "q3-character", event: { ...event, actor: event.actor.id } }),
           placement: "source-game",
           deathContext: actor => { const attack = this.lastAttack.get(actor); return { blood: true, noDrop: false,
             suicide: attack?.cause.kind === "q3" && attack.cause.meansOfDeath === 20,
@@ -2135,13 +2135,16 @@ export class SharedSimulation implements Simulation {
     const pending = this.q3Commands.get(player.actor);
     const converted = selectedQ3Command(player.profile.kind === "q3" ? command : { ...command, angles: add(command.angles, client.ps.deltaAngles) }, player, elapsed);
     const before = pending === undefined ? command : q3SourceCommand(pending, player, this.sourceSchedulingMilliseconds, client.ps.weapon);
-    const sourceBefore = pending === undefined ? before : relativeQ3SourceCommand(pending.source, pending.command.kind, before, client.ps.deltaAngles);
-    const input: ActorCommand = pending === undefined ? { actor: player.actor.id, sequence: player.lastSequence + 1,
+    const sourceBefore = pending === undefined ? before : relativeQ3SourceCommand(pending.source, pending.command.kind, before, client.ps.deltaAngles, pending.angleSpace);
+    let input: ActorCommand = pending === undefined ? { actor: player.actor.id, sequence: player.lastSequence + 1,
       source: { kind: "bot", provider: this.recipe.map.entities.provider }, command: converted,
       ...(this.selectedArsenal === null ? {} : { arsenal: { provider: this.weaponProvider.provider, weapon: null,
         useHoldable: (command.buttons & CommandButtons.USE_HOLDABLE) !== 0 } }) }
       : applyQ3CommandPolicy(pending, sourceBefore, command, converted,
         client.ps.pmType === MoveType.PM_FREEZE || client.ps.pmType === MoveType.PM_INTERMISSION || client.ps.pmType === MoveType.PM_SPINTERMISSION);
+    if (input.angleSpace === "absolute" && input.command.kind === "q3" && converted.kind === "q3")
+      input = { ...input, angleSpace: "source-relative", command: { ...input.command, angleWords: converted.angleWords } };
+    input = relativeMovementCommand(input, player.readState());
     player.sourceMovement = options;
     const lastSequence = player.lastSequence;
     const result = player.move(input, { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: elapsed } });
@@ -2256,7 +2259,7 @@ export class SharedSimulation implements Simulation {
       this.characterStarts.set(actor, null);
       const character = new Q3CharacterActor(actor, this.recipe.character.definition.provider, "baseq3", { bodies: this.bodies, callbacks: this.callbacks,
         combat: this.combat, inventory: this.inventory, timeMilliseconds: () => Math.trunc(this.timeSeconds * 1000),
-        emit: event => this.events.emit(this.recipe.character.definition.content, { kind: "q3-character", event }),
+        emit: event => this.events.emit(this.recipe.character.definition.content, { kind: "q3-character", event: { ...event, actor: event.actor.id } }),
         placement: "source-game", deathContext: owned => {
           const attack = this.lastAttack.get(owned); return { blood: true, noDrop: false,
             suicide: attack?.cause.kind === "q3" && attack.cause.meansOfDeath === 20,
@@ -2960,7 +2963,7 @@ export class SharedSimulation implements Simulation {
           player.gravityMultiplier *= matchGravity * (this.grapple?.gravityScale(player.actor.id) ?? 1);
           if ((this.source.kind === "q2" || this.grapple !== null) && (player.state.kind === "q2-classic" || player.state.kind === "q2-rerelease" || player.state.kind === "q3"))
             player.state = { ...player.state, gravity: Math.trunc(this.physics.gravity * player.gravityMultiplier) };
-          try { const moved = player.move(command, { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: player.profile.kind === "q1-netquake" ? Math.min(100, Math.max(1, input.elapsedMilliseconds)) : input.elapsedMilliseconds } });
+          try { const moved = player.move(relativeMovementCommand(command, player.readState()), { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: player.profile.kind === "q1-netquake" ? Math.min(100, Math.max(1, input.elapsedMilliseconds)) : input.elapsedMilliseconds } });
           if (this.source.kind === "q2" && moved.kind === "q2-rerelease" && moved.status === "active") this.source.product.movementImpact(player.actor.id, moved.impactDelta, (moved.state.flags & 128) !== 0);
           } finally { player.gravityMultiplier = gravityMultiplier; }
         }
@@ -4193,7 +4196,7 @@ export class SharedSimulation implements Simulation {
       const character = new Q3CharacterActor(actor, this.recipe.character.definition.provider, checkpoint.product, {
         bodies: this.bodies, combat: this.combat, inventory: this.inventory, callbacks: this.callbacks,
         placement: "source-game",
-        timeMilliseconds: () => Math.trunc(this.timeSeconds * 1000), emit: event => this.events.emit(this.recipe.character.definition.content, { kind: "q3-character", event }),
+        timeMilliseconds: () => Math.trunc(this.timeSeconds * 1000), emit: event => this.events.emit(this.recipe.character.definition.content, { kind: "q3-character", event: { ...event, actor: event.actor.id } }),
         deathContext: owned => { const attack = this.lastAttack.get(owned); return { blood: true, noDrop: false, suicide: attack?.cause.kind === "q3" && attack.cause.meansOfDeath === 20,
           killerSourceSlot: attack?.attacker === null || attack?.attacker === undefined ? 1022 : this.actors.sourceOf(attack.attacker)?.slot ?? 1022 }; },
       }, this.deathAnimations);

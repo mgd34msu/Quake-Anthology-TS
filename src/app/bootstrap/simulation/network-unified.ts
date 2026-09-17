@@ -1,0 +1,194 @@
+import { projectUnifiedPrediction } from '../network/unified-prediction.ts';
+import type { ExecutableRecipe, ResolvedResourceReference, ResourceId } from '../../../contracts/content.ts';
+import type { ArsenalIntent } from '../../../contracts/gameplay.ts';
+import type { ActorId, ClientId } from '../../../contracts/identity.ts';
+import type { UserCommand } from '../../../contracts/protocol.ts';
+import type { ActorCommand, SimulationEvent, SimulationOutput } from '../../../contracts/session.ts';
+import { q2Userinfo } from '../../../content/q2/base/player/index.ts';
+import { addressKey } from '../../../network/common/endpoint.ts';
+import type { NetworkAddress } from '../../../network/common/endpoint.ts';
+import type { EngineSession } from '../../../world/session/session.ts';
+import type { LoadedApplicationContent } from '../content.ts';
+import type { UnifiedResourceKey } from '../network/unified-frame-codec.ts';
+import { unifiedResourceId } from '../network/unified-content.ts';
+import type { UnifiedPresentationFrame } from '../network/unified-types.ts';
+import { Q3ClientAdmissionDenied } from './q3/runtime.ts';
+import type { SharedSimulation } from './runtime.ts';
+import type { SimulationPresentationEvent } from './types.ts';
+
+export interface UnifiedApplicationPlayer { readonly client: ClientId; readonly actor: ActorId; readonly sourceEntity: number; }
+export interface UnifiedApplicationServerHost {
+  readonly recipe: ExecutableRecipe;
+  readonly maxClients: number;
+  readonly mode: SharedSimulation["options"]["mode"];
+  admit(address: NetworkAddress, userinfo: string): { readonly kind: 'accepted'; readonly player: UnifiedApplicationPlayer } | { readonly kind: 'rejected'; readonly reason: string };
+  carriedPlayer(client: ClientId): UnifiedApplicationPlayer;
+  disconnect(player: UnifiedApplicationPlayer): void;
+  userinfo(player: UnifiedApplicationPlayer, value: string): void;
+  command(player: UnifiedApplicationPlayer, name: string, args: readonly string[]): void;
+  input(player: UnifiedApplicationPlayer, sequence: number, command: UserCommand, arsenal?: ArsenalIntent): ActorCommand;
+  frame(player: UnifiedApplicationPlayer, output: SimulationOutput, epoch: number, acknowledgedInput: number): UnifiedPresentationFrame;
+  resources(player: UnifiedApplicationPlayer, output: SimulationOutput): readonly UnifiedResourceKey[];
+  presentationEvents(player: UnifiedApplicationPlayer, events: readonly SimulationPresentationEvent[]): readonly SimulationPresentationEvent[];
+  initialPresentation(player: UnifiedApplicationPlayer): readonly SimulationPresentationEvent[];
+}
+
+/** Audience projection does not execute server actions or expose another seat's private UI. */
+export function unifiedPresentationFor(actor: ActorId, client: ClientId, value: SimulationPresentationEvent): boolean {
+  const own = (target: ActorId | null): boolean => target === null || target.equals(actor);
+  switch (value.kind) {
+    case 'view-reset': return own(value.actor);
+    case 'q1-fog': return own(value.event.player);
+    case 'q1': {
+      const event = value.event;
+      if (event.kind === 'server-command') return false;
+      return 'player' in event ? own(event.player) : true;
+    }
+    case 'q1-composition': {
+      const event = value.event;
+      if (event.kind === 'source-log' || event.kind === 'developer-message') return false;
+      if (event.kind === 'addon') return 'player' in event.event ? own(event.event.player) : event.event.kind !== 'developer-message';
+      if (event.kind === 'ctf-status' || event.kind === 'prompt' || event.kind === 'clear-prompt') return own(event.actor);
+      return true;
+    }
+    case 'q2': {
+      const event = value.event;
+      if (event.kind === 'pickup') return own(event.player);
+      if (event.kind === 'centerprint' || event.kind === 'print' || event.kind === 'damage-indicator') return own(event.actor);
+      return true;
+    }
+    case 'q2-player': {
+      const event = value.event;
+      if (event.kind === 'stufftext' || event.kind === 'load-menu' || event.kind === 'trail') return false;
+      if (event.kind === 'userinfo') return true;
+      return event.kind === 'print' ? own(event.target) : own(event.actor);
+    }
+    case 'q2-composition': {
+      const event = value.event;
+      if (event.kind === 'kick') return false;
+      if (event.kind === 'missionpack-entity') return true;
+      if (event.kind === 'missionpack-player') return own(event.event.actor);
+      if (event.kind === 'grapple-prediction') return own(event.actor);
+      if (event.event.kind === 'score-log') return false;
+      if (event.event.kind === 'grapple-cable' || event.event.kind === 'match-status') return true;
+      return own(event.event.actor);
+    }
+    case 'q2-rerelease': {
+      const event = value.event;
+      if (event.kind === 'autosave' || event.kind === 'restart-level') return false;
+      if (event.kind === 'alpha' || event.kind === 'dynamic-light' || event.kind === 'player-dogtag' || event.kind === 'flashlight') return true;
+      return 'actor' in event ? own(event.actor) : true;
+    }
+    case 'q3-source': {
+      const event = value.event;
+      if (event.kind === 'console-command' || event.kind === 'drop-client' || event.kind === 'log') return false;
+      return event.kind === 'server-command' ? event.client < 0 || event.client === client.slot : true;
+    }
+    case 'q3-ballistics': return value.event.kind !== 'rail-award' || own(value.event.actor);
+    case 'q2-weapon': return value.event.kind !== 'view-weapon' || own(value.event.actor);
+    case 'q3-character': case 'music': case 'q1-level': return true;
+  }
+}
+
+export function createUnifiedApplicationServerHost(options: { readonly session: EngineSession; readonly simulation: SharedSimulation; readonly content: LoadedApplicationContent; print(text: string): void }): UnifiedApplicationServerHost {
+  const { simulation, session } = options;
+  const q1 = simulation.q1Source(), q2 = simulation.q2Source(), q3 = simulation.q3Source();
+  if (q1 === null && q2 === null && q3 === null) throw new Error('Unified hosting currently requires a TypeScript Q1, Q2 or Q3 source game');
+  const players = new Map<number, UnifiedApplicationPlayer>();
+  const sourcePlayer = (client: ClientId, actor: ActorId): UnifiedApplicationPlayer => {
+    const source = simulation.actors.sourceOf(actor);
+    if (source === null || source.provider !== simulation.recipe.map.entities.provider) throw new Error('Unified player lost its authoritative source address');
+    return { client, actor, sourceEntity: source.slot };
+  };
+  const userinfos = new Map<number, ReadonlyMap<string, string>>();
+  const requirePlayer = (player: UnifiedApplicationPlayer): void => {
+    const current = players.get(player.client.slot);
+    if (current === undefined || !current.client.equals(player.client) || !current.actor.equals(player.actor) || !simulation.actors.isLive(player.actor)) throw new Error('Unified client belongs to a retired source player');
+  };
+  const info = (value: string, address: string): ReadonlyMap<string, string> => { const values = new Map(q2Userinfo(value)); values.set('ip', address); return values; };
+  const text = (values: ReadonlyMap<string, string>): string => [...values].map(([key, value]) => `\\${key}\\${value}`).join('');
+  const update = (player: UnifiedApplicationPlayer, values: ReadonlyMap<string, string>): void => {
+    if (q1 !== null) q1.composition.userinfo(player.actor, values);
+    else if (q2 !== null) { const entity = q2.game.entity(player.actor); if (entity === null) throw new Error('Unified Q2 player lost its source entity'); q2.players.userinfoChanged(entity, q2.game, text(values)); }
+    else if (q3 !== null) { q3.host.serverState.setUserinfo(player.client.slot, text(values)); q3.admission.userinfoChanged(player.client.slot); }
+    userinfos.set(player.client.slot, values);
+  };
+  const permitted = (player: UnifiedApplicationPlayer, event: SimulationEvent): boolean => {
+    if (event.audience.kind === 'seat' || event.audience.kind === 'client' && !event.audience.client.equals(player.client)) return false;
+    if (event.payload.kind === 'transition' || event.payload.kind === 'damage') return false;
+    if (event.payload.kind === 'message' && (event.payload.event.kind === 'command-text' || event.payload.event.kind === 'disconnect')) return false;
+    return true;
+  };
+  const resource = (id: ResourceId): ResolvedResourceReference => {
+    const found = simulation.events.resource(id) ?? simulation.recipe.resources.find(value => value.id === id);
+    if (found === undefined || found === null) throw new Error('Unified sound has no declared content resource');
+    return found;
+  };
+  const key = (value: ResolvedResourceReference): UnifiedResourceKey => ({ content: value.provenance.mount.identity.content, path: value.requestedPath, digest: value.digest, byteLength: value.byteLength });
+  const presentationEvents = (player: UnifiedApplicationPlayer, events: readonly SimulationPresentationEvent[]): readonly SimulationPresentationEvent[] => { requirePlayer(player); return events.filter(event => unifiedPresentationFor(player.actor, player.client, event)).map(event => event.kind === 'q3-source' && event.event.kind === 'server-command' ? { ...event, event: { ...event.event, client: -1 } } : event.kind === 'q1-composition' && event.event.kind === 'client' ? { ...event, event: { ...event.event, client: { ...event.event.client, userinfo: [] } } } : event); };
+  return {
+    recipe: simulation.recipe, maxClients: simulation.options.maxClients, mode: simulation.options.mode,
+    admit(address, value) {
+      let values = info(value, address.kind === 'loopback' ? 'localhost' : addressKey(address));
+      let firstSlot = 0;
+      if (q3 !== null && (values.get('password') ?? '') !== q3.host.cvars.variableString('sv_privatePassword')) firstSlot = Math.max(0, Math.trunc(q3.host.cvars.variableValue('sv_privateClients')));
+      let slot = firstSlot;
+      while (slot < simulation.options.maxClients && (players.has(slot) || simulation.players().some(actor => simulation.movementPlayer(actor)?.client.slot === slot))) slot++;
+      if (slot >= simulation.options.maxClients) return { kind: 'rejected', reason: 'Server is full' };
+      if (q2 !== null) { const allowed = q2.players.connect(q2.game, text(values)); if (!allowed.allowed) return { kind: 'rejected', reason: allowed.reason }; values = info(allowed.userinfo, values.get('ip') ?? ''); }
+      const client = session.createClient(slot); client.connect(address.kind === 'loopback' ? 'loopback' : 'remote');
+      let actor: ActorId | null = null;
+      try {
+        if (q3 !== null) q3.host.serverState.setUserinfo(slot, text(values));
+        actor = simulation.admitPlayer(client.id).actor;
+        const player = sourcePlayer(client.id, actor); players.set(slot, player); if (q3 === null) update(player, values); else userinfos.set(slot, values);
+        return { kind: 'accepted', player };
+      } catch (error) {
+        actor ??= simulation.players().find(value => simulation.movementPlayer(value)?.client.equals(client.id)) ?? null;
+        const failures: unknown[] = [error];
+        try { if (actor !== null) simulation.disconnectPlayer(actor); } catch (cleanup) { failures.push(cleanup); }
+        try { session.closeClient(client.id); } catch (cleanup) { failures.push(cleanup); }
+        players.delete(slot); userinfos.delete(slot);
+        if (failures.length > 1) throw new AggregateError(failures, 'Unified admission cleanup failed');
+        if (error instanceof Q3ClientAdmissionDenied) return { kind: 'rejected', reason: error.message };
+        throw error;
+      }
+    },
+    carriedPlayer(client) {
+      const actor = simulation.players().find(value => simulation.movementPlayer(value)?.client.equals(client));
+      if (actor === undefined) throw new Error('Unified carried client has no source player');
+      const player = sourcePlayer(client, actor); players.set(client.slot, player); return player;
+    },
+    disconnect(player) {
+      requirePlayer(player); const failures: unknown[] = [];
+      try { simulation.disconnectPlayer(player.actor); } catch (error) { failures.push(error); }
+      try { session.closeClient(player.client); } catch (error) { failures.push(error); }
+      players.delete(player.client.slot); userinfos.delete(player.client.slot);
+      if (failures.length !== 0) throw new AggregateError(failures, 'Unified player disconnect failed');
+    },
+    userinfo(player, value) { requirePlayer(player); update(player, info(value, userinfos.get(player.client.slot)?.get('ip') ?? '')); },
+    command(player, name, args) {
+      requirePlayer(player);
+      if (q1 !== null && name === 'name') { const values = new Map(q1.composition.clients.require(player.actor).userinfo); values.set('name', (args[0] ?? 'unconnected').slice(0, 15)); update(player, values); return; }
+      if (q1 !== null && name === 'color') { q1.composition.clients.colors(player.actor, Number(args[0] ?? 0), Number(args[1] ?? args[0] ?? 0)); return; }
+      simulation.playerCommand(player.actor, name, args);
+    },
+    input(player, sequence, command, arsenal) {
+      requirePlayer(player);
+      if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error('Invalid unified input sequence');
+      const movement = simulation.movementPlayer(player.actor);
+      if (movement === null || movement.state.kind !== command.kind) throw new Error('Unified command does not match selected movement');
+      return { actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command, angleSpace: "absolute", ...(arsenal === undefined ? {} : { arsenal }) };
+    },
+    resources(player, output) { requirePlayer(player); const result = new Map<ResourceId, UnifiedResourceKey>(); for (const event of output.events) if (permitted(player, event) && event.payload.kind === 'sound') { const value = resource(event.payload.resource); result.set(value.id, key(value)); } return [...result.values()]; },
+    frame(player, output, epoch, acknowledgedInput) {
+      requirePlayer(player);
+      const events = output.events.filter(event => permitted(player, event)).map((event): SimulationEvent => event.payload.kind === 'sound' ? { ...event, payload: { ...event.payload, resource: unifiedResourceId(resource(event.payload.resource)) } } : event);
+      return { epoch, acknowledgedInput, prediction: projectUnifiedPrediction(simulation, player.actor, acknowledgedInput), output: { snapshot: { ...output.snapshot, inventories: output.snapshot.inventories.filter(value => value.actor.equals(player.actor)) }, events },
+        models: simulation.presentations().filter(value => !value.viewWeapon || value.actor.equals(player.actor)), characters: simulation.characterViews(), worldText: simulation.worldText(),
+        player: { actor: player.actor, view: simulation.playerView(player.actor), ui: simulation.playerUi(player.actor) } };
+    },
+    presentationEvents,
+    initialPresentation(player) { return presentationEvents(player, simulation.events.persistentPresentation()); },
+  };
+}

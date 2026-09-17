@@ -1,7 +1,7 @@
 import { sourceProgramImplementation, sourceProgramProduct } from "../../content/catalog/source-program.ts";
 import { prepareClassicGuest, type PreparedClassicGuest } from "./simulation/classic-guest-source.ts";
 import type { DemoFamily } from "./demo-playback.ts";
-export interface ApplicationContentSource { readonly kind: "recorded"; readonly family: DemoFamily; }
+export interface ApplicationContentSource { readonly kind: "recorded" | "unified"; readonly family: DemoFamily; }
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { findContentPath } from "../../content/mounts/paths.ts";
@@ -12,7 +12,7 @@ import { assertQ3GuestRecipe, prepareQ3Game } from "./simulation/q3/guest-artifa
 import type { PreparedQ3Game } from "./simulation/q3/guest-artifact.ts";
 import { resolveLaunchResource, prepareLaunchMountPlan } from "../../content/catalog/launch.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
-import type { ContentId, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference, LaunchChoice, ProviderTiming } from "../../contracts/content.ts";
+import type { ContentId, ResolvedResourceReference, ExecutableRecipe, ExecutionSelection, GameFamily, ProviderReference, LaunchChoice, ProviderTiming } from "../../contracts/content.ts";
 import { createMountPlanId, createRecipeId } from "../../contracts/content.ts";
 import type { Q3WorldGeometry } from "../../contracts/scene.ts";
 import { discoverInstalledContent, remoteContentProduct, remoteContentSelection, expectedProducts, nativeEquipment, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
@@ -30,6 +30,7 @@ import { classifyBsp } from "../../formats/bsp-kind.ts";
 import type { ApplicationOptions } from "./options.ts";
 
 export type ApplicationWorld = Q1Map | Q2DecodedMap | Q3WorldGeometry;
+export interface ApplicationMapSidecar { readonly content: ContentId; readonly path: string; readonly resource: ResolvedResourceReference | null; }
 
 export interface RemoteContentMounts {
   readonly selection: RemoteContentSelection;
@@ -262,7 +263,7 @@ export class LoadedApplicationContent {
 
   constructor(readonly catalog: InstalledCatalog, readonly recipe: ExecutableRecipe,
     readonly world: ApplicationWorld, readonly mounts: MountedContent, readonly preparedQuakeC: PreparedQuakeCSource | null = null,
-    private readonly pure?: PureMountPolicy, readonly preparedQ3Game: PreparedQ3Game | null = null, readonly preparedQ2Game: PreparedClassicGuest | null = null, readonly q3Product: Q3ApplicationProduct | null = null) {}
+    private readonly pure?: PureMountPolicy, readonly preparedQ3Game: PreparedQ3Game | null = null, readonly preparedQ2Game: PreparedClassicGuest | null = null, readonly q3Product: Q3ApplicationProduct | null = null, readonly mapSidecars: readonly ApplicationMapSidecar[] = []) {}
 
   retainMainMounts(): () => void {
     if (this.closed) throw new Error("Application content is closed");
@@ -370,6 +371,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
   };
   let recipe = restoredRecipe ?? await resolveRecipe();
   for (const module of recipe.execution) {
+    if (presentationSource?.kind === "unified") continue;
     if (module.kind === "qvm" && module.role === "server-game") {
       if (!options.dedicated && options.network.kind !== "offline" || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch" || options.botSkill !== undefined
         || catalog.product(recipe.map.geometryContent).expectation.family !== "q3")
@@ -411,9 +413,12 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     const map = recipe.map.geometry.requestedPath;
     const family = classifyBsp(bytes, map);
     let world: ApplicationWorld;
+    const mapSidecars: ApplicationMapSidecar[] = [];
     if (family === "q1") {
       using mapContent = await openMapContent(catalog, recipe, product.q3Product);
       const [entities, lit] = await Promise.all([mapContent.open(map.replace(/\.bsp$/, ".ent")), mapContent.open(map.replace(/\.bsp$/, ".lit"))]);
+      mapSidecars.push({ content: recipe.map.geometryContent, path: map.replace(/\.bsp$/, ".ent"), resource: entities?.reference ?? null },
+        { content: recipe.map.geometryContent, path: map.replace(/\.bsp$/, ".lit"), resource: lit?.reference ?? null });
       world = readQ1Bsp(bytes, { source: map, ...(entities === null ? {} : { entities: entities.bytes }), ...(lit === null ? {} : { lit: lit.bytes }) });
     } else if (family === "q2") {
       using mapContent = await openMapContent(catalog, recipe, product.q3Product);
@@ -421,19 +426,20 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       const materials = new Map<string, Uint8Array>();
       await Promise.all([...new Set(raw.textureInfo.map(texture => `textures/${texture.name}.mat`))].map(async path => {
         const asset = await mapContent.open(path);
+        mapSidecars.push({ content: recipe.map.geometryContent, path, resource: asset?.reference ?? null });
         if (asset !== null) materials.set(path, asset.bytes);
       }));
       world = toQ2WorldGeometry(raw, { readMaterial: path => materials.get(path) ?? null });
     } else world = decodeQ3World(bytes, map);
     const execution = recipe.execution.find(module => module.kind === "quakec");
-    const prepared = execution?.kind === "quakec" ? await prepareQuakeCSource(execution, mounts, world.entities) : null;
+    const prepared = presentationSource?.kind !== "unified" && execution?.kind === "quakec" ? await prepareQuakeCSource(execution, mounts, world.entities) : null;
     const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
-    const q3Prepared = q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
+    const q3Prepared = presentationSource?.kind !== "unified" && q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
     if (q3Prepared !== null && world.kind !== "q3-bsp") throw new Error("Q3 bytecode requires native Q3 geometry");
     const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game");
-    const q2Prepared = q2Execution?.kind === "native" ? await prepareClassicGuest(q2Execution, mounts) : null;
+    const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? await prepareClassicGuest(q2Execution, mounts) : null;
     if (q2Prepared !== null && world.kind !== "q2-bsp") throw new Error("Classic native API 3 requires native Quake II geometry");
-    return new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product);
+    return new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product, mapSidecars.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   } catch (error) {
     mounts.close();
     throw error;

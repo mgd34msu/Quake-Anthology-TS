@@ -568,11 +568,13 @@ export class StartupApplication {
     if (name === "disconnect") { this.pending = { kind: "frontend" }; return true; }
     const options = this.game?.options ?? this.remote?.options ?? this.model.options;
     if (name === "connect") {
-      if (args.length !== 1 || args[0] === undefined) { this.print("Usage: connect <address>\n"); return true; }
+      if (args.length !== 1 || args[0] === undefined) { this.print("Usage: connect <address>; use qts://<address> for mixed-game servers\n"); return true; }
       if (prepared === undefined) throw new Error("Connect has no prepared command owner");
       const dialect = prepared.commands.dialect;
-      const kind = dialect === "q1-netquake" ? "q1-client" : dialect === "q1-quakeworld" ? "qw-client" : dialect === "q3" ? "q3-client" : "q2-client";
-      this.pending = { kind: "initial", options: { ...options, network: { kind, remote: args[0] } } }; return true;
+      const unified = args[0].startsWith("qts://"), remote = unified ? args[0].slice(6) : args[0];
+      if (remote.length === 0) { this.print("Connect requires a server address.\n"); return true; }
+      const kind = unified ? "unified-client" : dialect === "q1-netquake" ? "q1-client" : dialect === "q1-quakeworld" ? "qw-client" : dialect === "q3" ? "q3-client" : "q2-client";
+      this.pending = { kind: "initial", options: { ...options, network: { kind, remote } } }; return true;
     }
     if (this.game === null && (name === "map" || prepared?.commands.dialect === "q3" && ["devmap", "spmap", "spdevmap"].includes(name))) {
       if (args.length !== 1 || args[0] === undefined) { this.print("Usage: " + name + " <name>\n"); return true; }
@@ -1005,7 +1007,7 @@ export class StartupApplication {
       if (action.kind === "frontend") { await this.returnToFrontend(); return; }
       if (action.kind === "connect") { await this.connect(action.connection); return; }
       if (action.kind === "initial" && (action.options.network.kind === "q1-client" || action.options.network.kind === "qw-client"
-        || action.options.network.kind === "q2-client" || action.options.network.kind === "q3-client")) {
+        || action.options.network.kind === "q2-client" || action.options.network.kind === "q3-client" || action.options.network.kind === "unified-client")) {
         await this.connectOptions(action.options); return;
       }
       const loading = this.graphics;

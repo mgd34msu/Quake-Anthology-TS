@@ -157,6 +157,10 @@ import type { SharedSimulation, SimulationOptions } from "./simulation/index.ts"
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { SimulationTravel } from "./simulation/types.ts";
 
+import { createUnifiedApplicationServerHost } from "./simulation/network-unified.ts";
+import { UnifiedServerNetwork } from "./network/unified-server.ts";
+import { buildUnifiedComposition } from "./network/unified-content.ts";
+
 type NativeServerHost = { readonly kind: "q1"; readonly host: Q1ApplicationServerHost }
   | { readonly kind: "qw"; readonly host: QwApplicationServerHost }
   | { readonly kind: "q2"; readonly host: Q2ApplicationServerHost }
@@ -165,7 +169,8 @@ type NativeServer = { readonly address: ApplicationNetworkAddress } & (
   { readonly kind: "q1"; readonly server: Q1ServerNetwork<ApplicationNetworkAddress> }
   | { readonly kind: "qw"; readonly server: QwServerNetwork }
   | { readonly kind: "q2"; readonly server: Q2ServerNetwork<ApplicationNetworkAddress> }
-  | { readonly kind: "q3"; readonly server: Q3ServerNetwork });
+  | { readonly kind: "q3"; readonly server: Q3ServerNetwork }
+  | { readonly kind: "unified"; readonly server: UnifiedServerNetwork<ApplicationNetworkAddress> });
 
 type SavedBotClientId = ApplicationBotTransportCheckpoint["connections"][number]["client"];
 interface SavedApplicationClients {
@@ -477,7 +482,7 @@ export class Application {
 
   private static async openSource(ownership: Application["ownership"], options: ApplicationOptions, host: ApplicationHost,
     recipe?: ExecutableRecipe, preferences?: FrontendPreferenceOverrides, initialSave?: SaveImage): Promise<Application> {
-    if ((options.network.kind === "qw-client" || options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
+    if ((options.network.kind === "qw-client" || options.network.kind === "q1-client" || options.network.kind === "q2-client" || options.network.kind === "q3-client" || options.network.kind === "unified-client")) throw new Error("Remote clients require RemoteApplication without a local simulation");
     const savedSettings = initialSave === undefined ? null : savedSimulationSettings(initialSave);
     const savedBots = initialSave === undefined ? null : savedBotCheckpoint(initialSave);
     if (initialSave !== undefined && savedSettings !== null) {
@@ -1366,6 +1371,16 @@ export class Application {
 
   private async openNetwork(): Promise<void> {
     const selection = this.options.network;
+    if (selection.kind === "unified-server") {
+      const host = createUnifiedApplicationServerHost({ session: this.session, simulation: this.simulation, content: this.content, print: text => { this.host.print(text); } });
+      const composition = await buildUnifiedComposition(this.content);
+      const transport = await openApplicationTransport({ selection: { kind: "udp" }, family: "q2", host: selection.host, port: selection.port, limits: UNIFIED_DATAGRAM_LIMITS });
+      try {
+        this.network = { kind: "unified", address: transport.address, server: new UnifiedServerNetwork({ transport, host, composition, print: text => { this.host.print(text); } }) };
+        this.host.print(`Listening for mixed-game peers on ${addressKey(transport.address)}.\n`);
+      } catch (error) { transport.close(); throw error; }
+      return;
+    }
     if (selection.kind !== "q2-server" && selection.kind !== "native-server") {
       if (this.simulation.q2Native() !== null) this.recordingHost = await this.networkHost();
       return;
@@ -2261,8 +2276,12 @@ export class Application {
         return [client.slot, actor];
       }));
       let nextNetworkHost: NativeServerHost | null = null;
+      const nextUnifiedHost = this.network?.kind === "unified" ? {
+        host: createUnifiedApplicationServerHost({ session: this.session, simulation, content, print: text => { this.host.print(text); } }),
+        composition: await buildUnifiedComposition(content),
+      } : null;
       let recordingTransitionError: unknown = null;
-      if (this.network !== null) {
+      if (this.network !== null && this.network.kind !== "unified") {
         nextNetworkHost = await this.networkHost(simulation, content, this.nativeWorldCount + 1);
         this.validateNetworkHost(nextNetworkHost);
       } else if (simulation.q2Native() !== null) {
@@ -2541,6 +2560,11 @@ export class Application {
         if (graphical.q3.size === 0) await retire("world music", () => graphical.audio.startWorldMusic());
       }
       if (nextNetworkHost !== null && this.network !== null) await retire("network publication", () => this.changeNetworkWorld(nextNetworkHost));
+      if (nextUnifiedHost !== null) {
+        const network = this.network;
+        if (network?.kind !== "unified") throw new Error("Mixed-game travel lost its retained server");
+        network.server.changeWorld(nextUnifiedHost.host, nextUnifiedHost.composition);
+      }
       if (skirmish !== undefined) this.startTeamArenaSkirmish(skirmish);
       for (const failure of retirementErrors) this.host.print(`Entered world; ${failure.label} failed: ${String(failure.error)}\n`);
       this.host.print(`Entered ${content.recipe.map.geometry.requestedPath}.\n`);

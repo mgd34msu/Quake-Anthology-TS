@@ -1,5 +1,5 @@
 import { SimulationQ1Fog, type SimulationQ1FogOptions } from "./q1-fog.ts";
-import type { ContentId, ResolvedResourceReference } from "../../../contracts/content.ts";
+import type { ContentId, ResolvedResourceReference, ResourceId } from "../../../contracts/content.ts";
 import type { ActorId, ClientId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { NetworkEvent } from "../../../contracts/protocol.ts";
@@ -25,6 +25,7 @@ export class SimulationEvents {
   private readonly source: SimulationPresentationEvent[] = [];
   private readonly emitted: SimulationEvent[] = [];
   private readonly resources = new Map<string, ResolvedResourceReference>();
+  private readonly resourcesById = new Map<ResourceId, ResolvedResourceReference>();
   private readonly styles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
   private readonly persistent = new Map<string, SimulationPresentationEvent>();
 
@@ -37,9 +38,13 @@ export class SimulationEvents {
 
   get nextSequence(): number { return this.sequence; }
 
+  resource(id: ResourceId): ResolvedResourceReference | null { return this.resourcesById.get(id) ?? null; }
+  persistentPresentation(): readonly SimulationPresentationEvent[] { return [...this.persistent.values()]; }
+
   registerResource(content: ContentId, path: string, resource: ResolvedResourceReference): undefined {
     if (resource.requestedPath !== path) throw new Error("Registered resource path does not match its source request");
     this.resources.set(`${content}/${path}`, resource);
+    this.resourcesById.set(resource.id, resource);
     return undefined;
   }
 
@@ -49,8 +54,7 @@ export class SimulationEvents {
       origin: { ...source.event.origin }, angles: { ...source.event.angles } } };
     const seconds = time.kind === "seconds" ? time.value : time.value / 1000;
     const event = source.kind === "view-reset" ? source : source.kind === "q2-composition" ? "event" in source.event ? source.event.event : source.event : source.event;
-    const reference = "actor" in event ? event.actor : null;
-    const actor = reference === null ? null : "id" in reference ? reference.id : reference;
+    const actor = "actor" in event ? event.actor : null;
     const presentation = { ...source, sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
     this.source.push(presentation);
     if (source.kind === "q1-composition" && source.event.kind === "addon" && source.event.event.kind === "fog")

@@ -38,7 +38,7 @@ test("shared round reset removes actor effects, retains Q3 media and accepts onl
         time: { kind: "seconds", value: seconds }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, actors: actors.observations(), bodies: [], inventories: [], configurations: [],
         scene: { session: identity.session, time: { kind: "seconds", value: seconds }, world: null, entities: [], lights: [], particles: [], lightStyles: [], areaBits: null } });
       const smoke: SimulationPresentationEvent = { kind: "q3-character", content: source, sequence: 1, seconds: 1,
-        event: { actor: old, sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_JUMP_PAD, parameter: 0 } };
+        event: { actor: old.id, sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_JUMP_PAD, parameter: 0 } };
       const light: SimulationPresentationEvent = { kind: "q2-rerelease", content: source, sequence: 2, seconds: 1,
         event: { kind: "dynamic-light", actor: old.id, origin, radius: 200, color: { x: 1, y: 0, z: 0 }, visible: true } };
       effects.receive([smoke, light]); await effects.prepare(snapshot(1), [], [view(old.id)]);
@@ -58,7 +58,7 @@ test("shared round reset removes actor effects, retains Q3 media and accepts onl
         expect(register).not.toHaveBeenCalled(); expect(model).not.toHaveBeenCalled();
         effects.receive([smoke, light, { ...smoke, sequence: 3 }]); await effects.prepare(snapshot(1.4), [], [view(next.id)]);
         expect(instance.effects.pool.activeCount).toBe(0); expect(effects.drainUnhandled()).toEqual([]);
-        effects.receive([{ ...smoke, sequence: 4, seconds: 1.4, event: { ...smoke.event, actor: next, timeMilliseconds: 1400 } }]);
+        effects.receive([{ ...smoke, sequence: 4, seconds: 1.4, event: { ...smoke.event, actor: next.id, timeMilliseconds: 1400 } }]);
         await effects.prepare(snapshot(1.4), [], [view(next.id)]);
         expect(instance.effects.pool.activeCount).toBeGreaterThan(0); expect(create).toHaveBeenCalledTimes(1);
         expect(instance.renderer).toBe(renderer); expect(instance.shaders).toBe(shaders);

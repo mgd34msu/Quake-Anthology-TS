@@ -1,3 +1,4 @@
+import { UnifiedClientNetwork } from './network/unified-client.ts';
 import type { ActorCommand, SimulationOutput } from "../../contracts/session.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { eventTargetsSeat, type SessionConnection, type SessionSeat } from "../../world/session/session.ts";
@@ -18,9 +19,12 @@ export class RemoteSeatChannel {
   private sourceElapsed = 0;
   private sourceFrameElapsed = 0;
   private frameNumber = 0;
+  private sourceCvars:CvarRegistry;
   constructor(readonly seat: SessionSeat, readonly clock: PresentationTime, readonly services: RemoteSeatServices) {
+    this.sourceCvars=services.cvars;
     if (services.remote.client !== seat.client) throw new Error("Remote channel belongs to another session client");
   }
+  adoptCvars(cvars:CvarRegistry):void {if(cvars.context.session!==this.seat.id.session)throw new Error("Remote clock registry belongs to another session");this.sourceCvars=cvars;}
   get elapsedMilliseconds(): number { return this.sourceElapsed; }
   get frameMilliseconds(): number { return this.sourceFrameElapsed; }
   get frames(): number { return this.frameNumber; }
@@ -34,7 +38,7 @@ export class RemoteSeatChannel {
   }
   beginFrame(wallNow: number, wallElapsed: number): void {
     if (this.closed) throw new Error("Remote channel is closed");
-    const cvars = this.services.cvars;
+    const cvars = this.sourceCvars;
     this.sourceFrameElapsed = sourceFrameMilliseconds(cvars.dialect, wallElapsed, readFrameTimeControls(cvars), { dedicated: false, localServer: false });
     this.sourceElapsed += this.sourceFrameElapsed;
     this.clock.advance(wallNow, wallElapsed, this.sourceFrameElapsed);
@@ -50,7 +54,8 @@ export class RemoteSeatChannel {
     const player = this.services.remote.player;
     if (player === null || !player.actor.equals(command.actor)) throw new Error("Remote command belongs to another admitted actor");
     if (!this.active) throw new Error("Remote command has no active connection");
-    this.services.network.submit([command], wallNow);
+    if(this.services.network instanceof UnifiedClientNetwork)this.services.network.submitTimed([command],wallNow,this.sourceFrameElapsed);
+    else this.services.network.submit([command], wallNow);
   }
   receive(output: SimulationOutput): SimulationOutput {
     if (output.snapshot.session !== this.seat.id.session) throw new Error("Remote snapshot belongs to another session");

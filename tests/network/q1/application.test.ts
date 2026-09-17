@@ -260,6 +260,7 @@ test('production NetQuake remote frontend presents retail e1m1, sends input and 
         expect(playback?.payload.kind).toBe('sound');
         if(playback?.payload.kind!=='sound') throw new Error('No decoded native sound playback');
         expect(playback.payload.channel).toBe(1);expect(playback.payload.actor?.equals(local.actor)).toBe(true);
+        if (!(app.remote instanceof Q1RemotePresentation)) throw new Error('Wrong remote adapter');
         expect(app.remote.sourceRecords.some(record=>typeof record==='object'&&record!==null&&'kind' in record&&record.kind==='sound')).toBe(true);
         const audible=app.presentationEvents.find(event=>event.kind==='q1'&&event.event.kind==='sound');
         if(audible?.kind!=='q1'||audible.event.kind!=='sound'||audible.event.origin===undefined) throw new Error('No positional audio event');

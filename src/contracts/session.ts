@@ -26,6 +26,8 @@ export interface ActorCommand {
   readonly source: CommandSource;
   readonly sequence: number;
   readonly command: UserCommand;
+  /** Explicit unified aim; absent commands retain their native source convention. */
+  readonly angleSpace?: "absolute" | "source-relative";
   /** Absent for native clients whose source command already carries these actions. */
   readonly arsenal?: ArsenalIntent;
 }

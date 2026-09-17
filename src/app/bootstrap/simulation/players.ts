@@ -99,6 +99,15 @@ export function movementVelocity(state: MovementState): Vec3 {
 }
 
 export class MovementPlayer {
+  get predictionProfile(): MovementProfile {
+    const profile = selectedMovementProfile(this);
+    return profile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(profile) ?? profile : profile;
+  }
+  get predictionEnvironment(): MovementInput["environment"] {
+    const combat = this.host.combat.read(this.actor.id);
+    if (combat === null) throw new Error("Prediction player has no combat state");
+    return playerMovementEnvironment(this, combat);
+  }
   get q2MovementConfig(): { readonly airAccelerate: number; readonly n64Physics: boolean } | null { return this.host.q2MovementConfig?.() ?? null; }
   readonly character: GameFamily;
   readonly standingBounds: Bounds;

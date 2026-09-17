@@ -1,3 +1,4 @@
+import { relativeMovementCommand } from "../q3-commands.ts";
 import type { MovementInput, MovementResult, MovementServices, MovementState, Q1MovementInput, WeaponStepInput, WeaponStepResult } from "../../../../contracts/movement.ts";
 import type { FrameContext } from "../../../../contracts/time.ts";
 import { createNumericOperations } from "../../../../core/numeric.ts";
@@ -38,11 +39,12 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
   entry: PredictionCommand, options: PredictionStepOptions, shape: TraceShape = { kind: "box", bounds: configuration.standingBounds }) {
   const source = copyPredictionSnapshot(snapshot), profile = configuration.profile;
   let command = entry.command;
-  if (source.arsenal.state.kind === "q3" && source.q3Arsenal !== null) {
+  if (entry.angleSpace === "absolute") command = relativeMovementCommand(entry, source.state).command;
+  if (!configuration.movementOnly && source.arsenal.state.kind === "q3" && source.q3Arsenal !== null) {
     const controls = resolveQ3ArsenalControls(source.arsenal, entry.arsenal, command, source.q3Arsenal.product);
     if (command.kind === "q3" && entry.arsenal !== undefined) command = { ...command,
       weapon: controls.requestedWeapon, buttons: (command.buttons & ~4) | (controls.useHoldable ? 4 : 0) };
-  } else if (entry.arsenal !== undefined) throw new Error("Prediction has no selected arsenal owner for this intent");
+  } else if (!configuration.movementOnly && entry.arsenal !== undefined) throw new Error("Prediction has no selected arsenal owner for this intent");
   const environment = source.state.kind === "q3" ? { ...source.environment, gravityMultiplier: 1 } : source.environment;
   const duration = command.kind === "q1-netquake" || command.kind === "q3"
     ? Math.max(0, entry.timeMilliseconds - source.commandTimeMilliseconds) : command.milliseconds;
@@ -53,7 +55,7 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
   let runtime = source.q3Arsenal;
   const weaponStep = (input: WeaponStepInput): WeaponStepResult => {
     // Native Q1/Q2 client prediction does not execute server weapon gamecode.
-    if (input.arsenal.state.kind !== "q3") return { arsenal: input.arsenal, animation: input.animation, effects: [] };
+    if (configuration.movementOnly || input.arsenal.state.kind !== "q3") return { arsenal: input.arsenal, animation: input.animation, effects: [] };
     if (runtime === null) throw new Error("Q3 prediction needs the snapshot's private arsenal runtime");
     const controls = resolveQ3ArsenalControls(input.arsenal, entry.arsenal, input.command, runtime.product);
     const result = stepQ3Arsenal(input, runtime, input.command.kind === "q3"
@@ -63,7 +65,7 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
   };
   const services: MovementServices = { scene: options.scene, numeric: createNumericOperations(profile.numeric),
     touch: (_contact, state) => ({ kind: "continue", state }), weaponStep,
-    animationStep: input => input.animation.state.kind === "q3"
+    animationStep: input => !configuration.movementOnly && input.animation.state.kind === "q3"
       ? stepQ3CharacterAnimation(input, runtime?.product ?? "baseq3", source.environment.health <= 0, runtime?.eventSequence ?? 0)
       : { animation: input.animation, effects: [] } };
   const base = { actor: configuration.actor, commandSequence: entry.sequence, frame,
@@ -97,8 +99,8 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
       ...(options.traceMask === null ? {} : { tracePolicy: () => ({ kind: "q3", contentsMask: options.traceMask ?? 0, curves: true, playerCurveClip: true } satisfies import("../../../../contracts/scene.ts").TracePolicy) }),
       hooks: {
         firing: context => (context.command.buttons & 1) !== 0 && context.motion.health > 0,
-        animation: (request, context) => context.animation.state.kind === "q3" ? q3SourceAnimation(request, context) : { animation: context.animation, effects: [] },
-        torso: context => context.animation.state.kind === "q3" ? q3SourceTorso(11, context, true) : { animation: context.animation, effects: [] },
+        animation: (request, context) => !configuration.movementOnly && context.animation.state.kind === "q3" ? q3SourceAnimation(request, context) : { animation: context.animation, effects: [] },
+        torso: context => !configuration.movementOnly && context.animation.state.kind === "q3" ? q3SourceTorso(11, context, true) : { animation: context.animation, effects: [] },
         weapon: context => {
           const moved = weaponStep({ actor: configuration.actor, command: { ...command, buttons: context.command.buttons, weapon: context.command.weapon }, frame: context.frame,
             arsenal: context.arsenal, animation: context.animation, environment, gauntletHit: options.gauntletHit });
@@ -117,6 +119,7 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
     result = { ...result, arsenal: step.arsenal, animation: step.animation,
       effects: [...previous, ...step.effects.map((effect, index) => ({ effect, substep: 0, sequence: previous.length + index, time: frame.time }))] };
   }
+  if (configuration.movementOnly) result = { ...result, arsenal: source.arsenal, animation: source.animation };
   const player: MovementPredictionSnapshot = { ...source, environment, sequence: entry.sequence, commandTimeMilliseconds: entry.timeMilliseconds,
     state: result.state, arsenal: result.arsenal, animation: result.animation, bounds: result.bounds, viewAngles: result.viewAngles,
     viewHeight: result.viewHeight, contact: { ground: result.ground, waterLevel: result.waterLevel, waterType: result.waterType }, q3Arsenal: runtime };

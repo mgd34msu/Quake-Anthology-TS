@@ -66,6 +66,10 @@ export class SharedSceneQueries implements SceneQueries {
     }
     link(body: LinkedBody, collision: ActorCollision): void { this.spatial.link(body, collision); }
     unlink(actor: ActorId): void { this.spatial.unlink(actor); }
+    linkedActor(actor: ActorId): SpatialActor | null {
+        const linked = this.spatial.get(actor);
+        return linked === null ? null : this.#currentActor(linked);
+    }
     bindActorState(read: (actor: ActorId) => BodyState | null): void { this.#readActorState = read; }
     bindActorCollision(read: (actor: ActorId) => ActorCollision | null): void { this.#readActorCollision = read; }
     #currentActor(linked: SpatialActor): SpatialActor | null {

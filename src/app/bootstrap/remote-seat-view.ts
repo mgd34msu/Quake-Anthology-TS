@@ -1,3 +1,5 @@
+import { UnifiedRemotePresentation } from "./network/remote-unified.ts";
+import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import type { LoadedApplicationContent } from "./content.ts";
 import type { CommandContext } from "../../contracts/common.ts";
 import type { Rect } from "../../contracts/render.ts";
@@ -101,8 +103,12 @@ export class RemoteSeatView {
         });
         options.assertCurrent();
       }
+      const characters=remote instanceof UnifiedRemotePresentation && options.options.character==="q3"
+        ? await loadQ3Character(await options.content.forContent(options.content.recipe.character.appearance.content),
+          {model:options.options.characterModel,skin:"default",headModel:"",headSkin:"default",team:null,teamName:""}) : null;
+      options.assertCurrent();
       const presentation = new WorldSeatPresentation(local, assets, renderer, remote, options.count(), font,
-        null, ui, effects, q3, null, () => options.images.cvars.variableValue("gl_debug_distfrac"),
+        characters, ui, effects, q3, null, () => options.images.cvars.variableValue("gl_debug_distfrac"),
         () => options.view.fieldOfView, null, () => options.images.cvars.variableValue("con_scale"));
       presentation.publishLayout(options.index(),options.count());
       seat.validatePresentation(presentation);
@@ -125,6 +131,7 @@ export class RemoteSeatView {
   async prepareFrame(output: SimulationOutput): Promise<ApplicationAudioSeatEvents> {
     if (this.closed) throw new Error("Remote seat view is closed");
     const remote = this.options.source.remote, events = remote.drainPresentationEvents();
+    if(remote instanceof UnifiedRemotePresentation)this.options.local.player.seat.receive(remote.drainSimulationEvents());
     const models = remote.presentations(), characters = remote.characterViews();
     this.effects.receive(events);
     if (!(remote instanceof Q3RemotePresentation)) await this.effects.prepare(output.snapshot, models, characters);

@@ -132,11 +132,11 @@ test("bootstrap plays source player events, filters a wet listener, replaces mus
       expect(audioWet.engine.mix(4096).some(sample => sample !== 0)).toBe(true);
       audioWet.engine.stopAll();
       const q3 = content.catalog.require("q3-baseq3").id;
-      await audioWet.receive([{ ...source, content: q3, kind: "q3-character", event: { actor: identity.ownedActor(actor, "q3:character"),
+      await audioWet.receive([{ ...source, content: q3, kind: "q3-character", event: { actor,
         sequence: 1, timeMilliseconds: 1000, event: EntityEvent.EV_PAIN, parameter: 20 } }]);
       expect(audioWet.engine.mix(4096).some(sample => sample !== 0)).toBe(true);
       audioWet.engine.stopAll();
-      await audioWet.receive([{ ...source, content: q3, kind: "q3-character", event: { actor: identity.ownedActor(actor, "q3:character"),
+      await audioWet.receive([{ ...source, content: q3, kind: "q3-character", event: { actor,
         sequence: 2, timeMilliseconds: 1200, event: EntityEvent.EV_PAIN, parameter: 20 } }]);
       expect(audioWet.engine.mix(128).every(sample => sample === 0)).toBe(true);
       for (const flash of [26, 39, 41, 43, 45, 53, 58, 62, 82, 1, 4, 23, 57]) {

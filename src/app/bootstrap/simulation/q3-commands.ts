@@ -1,3 +1,4 @@
+import type { MovementState } from "../../../contracts/movement.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { resolveQ3ArsenalControls } from "./arsenal-intent.ts";
 import type { ActorCommand } from "../../../contracts/session.ts";
@@ -6,8 +7,8 @@ import type { UserCommand } from "../../../content/q3/base/shared/player-state.t
 import type { MovementPlayer } from "./players.ts";
 
 /** Foreign local input owns absolute aim; Q3 commands already contain source-relative words. */
-export function relativeQ3SourceCommand(source: ActorCommand["source"], dialect: SelectedCommand["kind"], command: UserCommand, delta: Vec3): UserCommand {
-  return source.kind === "local-seat" && dialect !== "q3" ? { ...command, angles: {
+export function relativeQ3SourceCommand(source: ActorCommand["source"], dialect: SelectedCommand["kind"], command: UserCommand, delta: Vec3, angleSpace?: ActorCommand["angleSpace"]): UserCommand {
+  return angleSpace === "absolute" || angleSpace === undefined && source.kind === "local-seat" && dialect !== "q3" ? { ...command, angles: {
     x: command.angles.x - delta.x, y: command.angles.y - delta.y, z: command.angles.z - delta.z
   } } : command;
 }
@@ -47,4 +48,18 @@ export function selectedQ3Command(command: UserCommand, player: Pick<MovementPla
     case "q3": return { kind: "q3", serverTimeMilliseconds: command.serverTime, angleWords: [command.angles.x, command.angles.y, command.angles.z],
       forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove, buttons: command.buttons, weapon: command.weapon };
   }
+}
+
+
+/** PMove adds its own delta angles; absolute unified aim crosses that boundary once. */
+export function relativeMovementCommand<T extends Pick<ActorCommand, "command" | "angleSpace">>(input: T, state: MovementState): T {
+  if (input.angleSpace !== "absolute") return input;
+  const command = input.command;
+  if (command.kind === "q3" && state.kind === "q3") return { ...input, angleSpace: "source-relative", command: { ...command,
+    angleWords: [command.angleWords[0] - state.deltaAngleWords[0], command.angleWords[1] - state.deltaAngleWords[1], command.angleWords[2] - state.deltaAngleWords[2]] } };
+  if (command.kind === "q2-classic" && state.kind === "q2-classic") return { ...input, angleSpace: "source-relative", command: { ...command,
+    angleShorts: [command.angleShorts[0] - state.deltaAngleShorts[0], command.angleShorts[1] - state.deltaAngleShorts[1], command.angleShorts[2] - state.deltaAngleShorts[2]] } };
+  if (command.kind === "q2-rerelease" && state.kind === "q2-rerelease") return { ...input, angleSpace: "source-relative", command: { ...command,
+    angles: { x: command.angles.x - state.deltaAngles.x, y: command.angles.y - state.deltaAngles.y, z: command.angles.z - state.deltaAngles.z } } };
+  return input;
 }
