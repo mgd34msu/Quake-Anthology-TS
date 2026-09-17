@@ -148,6 +148,21 @@ test("completion follows inserted alias work and preserves Q2 cross-file bytes",
   expect(seen).toEqual(["alias-body", "alias.cfg", "joined-tail", "bytes.cfg"]);
 });
 
+test("Q2 script fragments unwind only through their own caller completions", () => {
+  const dialects: readonly CommandDialect[] = ["q2-classic", "q2-rerelease"];
+  for (const dialect of dialects) {
+    const seen: string[] = [], origins: CommandContext[] = [];
+    const commands = new CommandBuffer({ dialect, context,
+      readScript: name => name === "outer.cfg" ? "exec inner.cfg" : "record nested",
+      onScriptComplete: event => { seen.push(event.name); } });
+    commands.register("record", invocation => { seen.push(invocation.args.join(" ")); origins.push(invocation.source); });
+    commands.append("exec outer.cfg\n\nrecord after\n");
+    commands.execute();
+    expect(seen).toEqual(["nestedrecord after", "inner.cfg", "outer.cfg"]);
+    expect(origins[0]?.origin).toEqual({ kind: "script", name: "inner.cfg", caller: { kind: "script", name: "outer.cfg", caller: context.origin } });
+  }
+});
+
 test("empty and rejected scripts complete once and hook failure retains caller", async () => {
   const seen: string[] = [], failure = new Error("read denied");
   const commands = new CommandBuffer({ dialect: "q3", context, readScript: async name => { if (name === "bad.cfg") throw failure; return ""; },

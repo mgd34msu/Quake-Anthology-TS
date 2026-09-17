@@ -596,7 +596,7 @@ test('retained Q3 vstr and wait use Q3 grammar after Q2 default publication', as
   expect(calls).toEqual([['probe', 'a', 'b']]);
   commands.execute(); expect(calls).toHaveLength(1);
   commands.execute(); expect(calls).toEqual([['probe', 'a', 'b'], ['probe', 'end']]);
-  expect(commands.dialect).toBe('q2-classic'); expect(commands.exists('vstr')).toBe(false);
+  expect(commands.dialect).toBe('q2-classic'); expect(commands.exists('vstr')).toBe(true);
 });
 
 test("world command disposal cannot remove a later handler with the same name", () => {

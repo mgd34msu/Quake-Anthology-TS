@@ -123,6 +123,7 @@ export class CommandBuffer {
   private waitDialect: CommandDialect | undefined;
   private fallbackCvars: CvarRegistry | undefined;
   private readonly builtinHandlers = new Map<string, CommandHandler>();
+  private readonly outputBindings = new Set<{ readonly print: (text: string, source?: CommandContext) => void }>();
   readonly context: CommandContext;
   private handlers: RegisteredEntry | undefined;
   private readonly aliases: AliasEntry[] = [];
@@ -276,7 +277,16 @@ export class CommandBuffer {
   get maximumCommandLength(): number { return this.maximumCommand; }
   get maximumBufferLength(): number { return this.maximumBuffer; }
   get executionContext(): CommandContext | undefined { return this.frame?.source; }
-  private print(text: string): void { this.options.print?.(text, this.frame?.source); }
+  bindOutput(print: (text: string, source?: CommandContext) => void): () => void {
+    const binding = { print };
+    this.outputBindings.add(binding);
+    return () => { this.outputBindings.delete(binding); };
+  }
+  private print(text: string, source = this.frame?.source): void {
+    let output = this.options.print;
+    for (const binding of this.outputBindings) output = binding.print;
+    output?.(text, source);
+  }
 
   private cvarOwner(name: string, source: CommandContext): CvarRegistry | undefined {
     const owner = this.options.cvarRouting?.owner(name, source) ?? this.fallbackCvars;
@@ -477,7 +487,7 @@ export class CommandBuffer {
         if (script.result.kind === "pending") return;
         this.programRevision++; this.scriptRead = undefined;
         if (script.result.kind === "failed") {
-          this.options.print?.(`couldn't exec ${script.name}: ${script.result.error instanceof Error ? script.result.error.message : String(script.result.error)}\n`, script.source);
+          this.print(`couldn't exec ${script.name}: ${script.result.error instanceof Error ? script.result.error.message : String(script.result.error)}\n`, script.source);
           this.chunks.unshift({ kind: "completion", event: this.scriptCompletion(script.name, script.source, { kind: "failed", error: script.result.error }), dialect: script.dialect, textMode: script.textMode });
         }
         else this.insertScript(script.name, script.result.text, script.source, script.dialect, script.textMode);
@@ -542,9 +552,18 @@ export class CommandBuffer {
 
   private commandText(first: TextChunk): string {
     let text = "";
+    let origin = first.source.origin;
+    let resumedCaller = false;
     for (const chunk of this.chunks) {
-      if (chunk.kind !== "text" || chunk.dialect !== first.dialect || chunk.direct !== first.direct
-        || chunk.textMode !== first.textMode || !sameOrigin(chunk.source.origin, first.source.origin)) break;
+      if (chunk.dialect !== first.dialect || chunk.textMode !== first.textMode) break;
+      if (chunk.kind === "completion") {
+        if (!isQ2(first.dialect) || origin.kind !== "script" || chunk.event.result.kind !== "completed"
+          || !sameOrigin(chunk.event.source.origin, origin)) break;
+        origin = origin.caller;
+        resumedCaller = true;
+        continue;
+      }
+      if ((!resumedCaller && chunk.direct !== first.direct) || !sameOrigin(chunk.source.origin, origin)) break;
       text += chunk.text;
     }
     return text;
@@ -643,11 +662,11 @@ export class CommandBuffer {
 
   private insertScript(filename: string, file: string | undefined, caller: CommandContext, dialect = this.executionDialect, textMode = this.frame?.textMode ?? "source"): void {
     if (file === undefined) {
-      this.options.print?.(`couldn't exec ${filename}\n`, caller);
+      this.print(`couldn't exec ${filename}\n`, caller);
       this.chunks.unshift({ kind: "completion", event: this.scriptCompletion(filename, caller, { kind: "missing" }), dialect, textMode });
       return;
     }
-    this.options.print?.(`execing ${filename}\n`, caller);
+    this.print(`execing ${filename}\n`, caller);
     let text = sourceCommandText(file);
     // Preserve the Q1 donor repair without changing NQ Cbuf_InsertText semantics.
     if (isQ1(dialect) && !text.endsWith("\n")) text += "\n";
@@ -665,7 +684,7 @@ export class CommandBuffer {
         : dialect === "q1-quakeworld" ? ["stuffcmds", "exec", "echo", "alias", "wait", "cmd"]
         : isQ2(dialect) ? ["cmdlist", "exec", "echo", "alias", "wait", "set", "cvarlist", "cmd"]
         : ["toggle", "set", "sets", "setu", "seta", "reset", "cvarlist", "cvar_restart", "cmdlist", "exec", "vstr", "echo", "wait", "cmd"];
-      for (const name of [...order, ...["inc", "dec", "resetall", "seta", "setu", "sets", "reset", "toggle"].filter(name => !order.includes(name))]) {
+      for (const name of [...order, ...["set", "cmdlist", "cvarlist", "vstr", "inc", "dec", "resetall", "seta", "setu", "sets", "reset", "toggle"].filter(name => !order.includes(name))]) {
         const handler = handlers.get(name);
         if (handler !== undefined && !this.exists(name) && this.register(name, handler, documents.get(name))) this.builtinHandlers.set(name, handler);
       }
@@ -706,7 +725,7 @@ export class CommandBuffer {
       }
       if (script.length > 0) command.insert(script);
     });
-    if (!isQ1(dialect)) {
+    {
       register("set", command => { this.setCommand(command, 0); }, { summary: "Set a console variable.", usage: "set <variable> <value>", examples: ['set name "Player"'] });
       register("cmdlist", command => {
         const pattern = this.executionDialect === "q3" ? command.argv[1] : undefined;
@@ -750,10 +769,10 @@ export class CommandBuffer {
         cvars?.resetConsole(variable.name, true);
       }
     });
-    if (dialect === "q3") register("vstr", command => {
+    register("vstr", command => {
       if (command.argv.length !== 2) { this.print("vstr <variablename> : execute a variable command\n"); return; }
       command.insert(`${this.findCvar(command.argv[1] ?? "", command.source)?.value ?? ""}\n`);
-    });
+    }, { summary: "Execute the invoking owner's variable as commands in this command buffer.", usage: "vstr <variablename>", examples: ["vstr nextmap"] });
     for (const [name, flag] of [["seta", CvarFlag.Archive], ["setu", CvarFlag.UserInfo], ["sets", CvarFlag.ServerInfo]] satisfies readonly (readonly [string, number])[]) {
       register(name, command => {
         const variable = command.argv[1];

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
@@ -14,6 +14,54 @@ import { openMountPlan } from "../../src/content/mounts/index.ts";
 
 const identity = createIdentityOwner("config-scripts");
 function context(index: number): CommandContext { return { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } }; }
+
+test("configuration library lists readable seat and product scripts with the same precedence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "console-script-library-"));
+  try {
+    const settings = new ConfigStore(join(root, "product")), consoleRoot = join(root, "console");
+    const scripts = new ConsoleScriptFiles({ consoleRoot, settings, mounted: undefined });
+    await settings.dump("config.cfg", "echo product\n");
+    await settings.dump("presets/aim.cfg", "echo aim\n");
+    await settings.dump("ignored.txt", "not a config");
+    await seatConsoleConfig(consoleRoot, identity.seat(0)).dump("CONFIG.cfg", "echo seat\n");
+    await seatConsoleConfig(consoleRoot, identity.seat(1)).dump("other.cfg", "echo other\n");
+    expect(await scripts.list(context(0))).toEqual([{ name: "CONFIG.cfg", kind: "seat" }, { name: "presets/aim.cfg", kind: "product" }]);
+    expect(await scripts.read("CONFIG.cfg", context(0))).toBe("echo seat\n");
+    expect((await scripts.list(context(1))).map(entry => entry.name)).toEqual(["config.cfg", "other.cfg", "presets/aim.cfg"]);
+    await scripts.close();
+    await expect(scripts.list(context(0))).rejects.toThrow("retired");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("explicit legacy home migration selects latest game config without writing or overriding seat archives", async () => {
+  const root = await mkdtemp(join(tmpdir(), "console-script-migration-"));
+  try {
+    const home = join(root, "legacy"), first = new ConfigStore(join(home, "id1")), latest = new ConfigStore(join(home, "hipnotic"));
+    const settings = new ConfigStore(join(root, "current-product")), consoleRoot = join(root, "console");
+    await first.dump("config.cfg", "seta imported older\n");
+    await latest.dump("config.cfg", "seta imported newest\nexec nested.cfg\n");
+    await utimes(join(first.root, "config.cfg"), 100, 100); await utimes(join(latest.root, "config.cfg"), 200, 200);
+    await settings.dump("nested.cfg", "seta nested done\n");
+    const source = context(0), output: string[] = [];
+    const scripts = new ConsoleScriptFiles({ consoleRoot, settings, legacyConfig: { sharedRoot: home, gameRoots: [first.root, latest.root] }, mounted: undefined });
+    const cvars = new CvarRegistry({ dialect: "q1-netquake", context: source });
+    const commands = new CommandBuffer({ dialect: "q1-netquake", context: source, cvars, readScript: (name, caller) => scripts.read(name, caller), print: text => { output.push(text); } });
+    commands.append("exec config.cfg\necho after\n"); await commands.executeScriptsAsync(async () => {});
+    expect(cvars.variableString("imported")).toBe("newest"); expect(cvars.variableString("nested")).toBe("done");
+    expect(output.join("")).toContain("after");
+    expect(await Bun.file(join(consoleRoot, "settings/seat-0/config.cfg")).exists()).toBe(false);
+    await writeFile(join(home, "config.cfg"), Buffer.from('seta imported "caf\xe9"\n', "latin1"));
+    expect(await scripts.read("config.cfg", source)).toContain('"caf\xe9"');
+    await settings.dump("subdir/config.cfg", "echo requested nested product\n");
+    expect(await scripts.read("subdir/config.cfg", source)).toBe("echo requested nested product\n");
+    await seatConsoleConfig(consoleRoot, identity.seat(0)).dump("config.cfg", "seta imported retained\n");
+    expect(await scripts.read("config.cfg", source)).toBe("seta imported retained\n");
+    expect(await scripts.read("config.cfg", context(1))).toContain('"caf\xe9"');
+    const separate = new ConsoleScriptFiles({ consoleRoot: join(root, "qw-console"), settings, mounted: async () => new TextEncoder().encode("mounted config") });
+    expect(await separate.read("config.cfg", context(0))).toBe("mounted config");
+    await separate.close(); await scripts.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("configuration retirement retains reads from invocation through queued writes and mounted settlement", async () => {
   const root = await mkdtemp(join(tmpdir(), "console-script-retirement-"));
