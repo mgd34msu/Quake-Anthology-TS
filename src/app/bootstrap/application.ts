@@ -989,8 +989,14 @@ export class Application {
       options = { ...selected, readScript: selected.readScript ?? (async name => {
         const bytes = await readSourceScript(name); return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
       }) };
-      if (this.sourceCommands === null) return new CommandBuffer(options);
-      program = this.sourceCommands.prepareProgram(options); return program.commands;
+      let commands: CommandBuffer;
+      if (this.sourceCommands === null) commands = new CommandBuffer(options);
+      else { program = this.sourceCommands.prepareProgram(options); commands = program.commands; }
+      for (const name of applicationAudioCommands) register(commands, name, invocation => {
+        let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
+        return queue(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
+      });
+      return commands;
     };
     const register = (commands: CommandBuffer, name: string, handler: CommandHandler): void => {
       commands.register(name, handler);
@@ -1474,7 +1480,7 @@ export class Application {
         this.publishLocalGuestSnapshots();
       }
       audio = new ApplicationAudio(this.content, () => this.elapsed, this.options.seed, this.options.characterModel, text => this.host.print(text),
-        { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, deferOutput: client !== null });
+        { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, q3TeamGame: () => this.simulation.teamGame(), deferOutput: client !== null });
       if (this.imageSettings?.cvars.find("volume") !== undefined) {
         if (this.preparedStartup === null) {
           this.imageSettings.cvars.set("volume", String(audio.effectsVolume));
@@ -2327,7 +2333,7 @@ export class Application {
         input.resumeCommands(Math.max(previous.input.nextCommandSequence,
           ...players.map(player => (nextSimulation.movementPlayer(player.actor)?.lastSequence ?? -1) + 1)));
         const audio = new ApplicationAudio(content, () => this.elapsed, options.seed, options.characterModel, text => this.host.print(text),
-          { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, deferOutput: true });
+          { ...await loadAudioSettings(this.inputConfig), musicControls: this.musicControls, q3TeamGame: () => nextSimulation.teamGame(), deferOutput: true });
         audio.bindHaptics(input);
         nextAudio = audio;
         await audio.prepareEnvironment(nextSimulation.scene);

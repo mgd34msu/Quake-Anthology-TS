@@ -55,9 +55,23 @@ test("audio diagnostics and play use the actual common console and queued PCM fo
         observe = false;
         expect(nonzeroQueued).toBeGreaterThan(0);
         expect(messages.some(text => text.includes(fixture.listed) && text.includes("16-bit"))).toBe(true);
-        expect(messages.some(text => text.includes("44100 Hz, 2 channels, 16-bit PCM"))).toBe(true);
+        const output = owners.audio.engine.outputConfiguration;
+        if (output === null) throw new Error("Audio output did not open");
+        expect(messages.some(text => text.includes(`${output.sampleRate} Hz, ${output.channels} ${output.channels === 1 ? "channel" : "channels"}, ${output.sampleBits}-bit PCM`))).toBe(true);
         expect(messages.some(text => text.includes("queued frames"))).toBe(true);
-        expect(owners.audio.engine.outputConfiguration?.sampleRate).toBe(owners.audio.engine.sampleRate);
+        expect(output.sampleRate).toBe(owners.audio.outputFormat.sampleRate);
+        if (fixture.family === "q3") {
+          const source = application.simulation.q3Source();
+          if (source === null) throw new Error("Expected authoritative Q3 command source");
+          nonzeroQueued = 0; observe = true;
+          source.host.engine.appendConsoleCommand("stopsound; play sound/player/announce/crash.wav; soundlist\n");
+          await application.step(50);
+          await application.step(50);
+          observe = false;
+          expect(messages.some(text => text.includes("sound/player/announce/crash.wav") && text.includes("16-bit"))).toBe(true);
+          expect(nonzeroQueued).toBeGreaterThan(0);
+          expect(messages.some(text => text.includes("Unbound source engine command"))).toBe(false);
+        }
         owners.input.commands.append("play missing/audio-diagnostic-file; s_info\n");
         await application.step(50);
         expect(messages.some(text => text.includes("Sound unavailable:") && text.includes("missing/audio-diagnostic-file.wav"))).toBe(true);

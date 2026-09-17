@@ -1,3 +1,4 @@
+import { publishQ3CharacterMovementEvent } from "../player-jump.ts";
 import { relativeQ3SourceCommand } from "../q3-commands.ts";
 import type { ActorId, SeatId } from "../../../../contracts/identity.ts";
 import type { ActorCommand } from "../../../../contracts/session.ts";
@@ -115,7 +116,8 @@ export class PresentationPredictionAdapter implements PresentationMovementHost {
       fixedMilliseconds: movement.fixedMsec, noFootsteps: movement.noFootsteps, gauntletHit: movement.gauntletHit,
       traceMask: movement.traceMask, firstCommand: !this.states.has(ps) || this.states.get(ps)?.commandTimeMilliseconds !== ps.commandTime });
     writePredictionSourceState(ps, output.player, this.options.entities);
-    for (const effect of output.result.effects) if (effect.effect.kind === "event" && effect.effect.value.provider.startsWith("q3:")) ps.addEvent(effect.effect.value.event, effect.effect.value.parameter);
+    for (const effect of output.result.effects) if (effect.effect.kind === "event" && effect.effect.value.provider.startsWith("q3:")
+      && publishQ3CharacterMovementEvent(output.player.animation.state.kind, effect.effect.value.event)) ps.addEvent(effect.effect.value.event, effect.effect.value.parameter);
     this.states.set(ps, copyPredictionSnapshot(output.player));
     return { bounds: output.result.bounds };
   }

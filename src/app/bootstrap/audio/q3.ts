@@ -1,3 +1,5 @@
+import type { InstalledCatalog } from "../../../content/catalog/index.ts";
+import { q3CustomSoundFallback } from "../../../content/q3/presentation/character-resources.ts";
 import type { ContentId } from "../../../contracts/content.ts";
 import type { LoopSound, PlaySound } from "../../../audio/types.ts";
 import type { ActorId, SeatId } from "../../../contracts/identity.ts";
@@ -9,3 +11,13 @@ export type Q3SeatAudioOperation = { readonly kind: "play"; readonly sound: Play
   | { readonly kind: "stop-loop"; readonly actor: ActorId }
   | { readonly kind: "clear-loops"; readonly killAll: boolean };
 export interface Q3SeatAudioFrame { readonly content: ContentId; readonly seat: SeatId; readonly operations: readonly Q3SeatAudioOperation[]; }
+
+/** Character/client-code edition follows the selected provider, including inherited mods. */
+export function q3VoiceFallback(catalog: Pick<InstalledCatalog, "product">, content: ContentId, teamGame: boolean): "sarge" | "james" {
+  let product = catalog.product(content);
+  for (;;) {
+    if (product.expectation.campaign === "missionpack") return q3CustomSoundFallback("missionpack", teamGame);
+    if (product.expectation.baseProduct === null) return q3CustomSoundFallback("baseq3", teamGame);
+    product = catalog.product(product.expectation.baseProduct);
+  }
+}

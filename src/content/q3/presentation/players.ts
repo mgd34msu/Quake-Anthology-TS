@@ -1,3 +1,4 @@
+import { q3CustomSoundFallback } from "./character-resources.ts";
 // Player media and presentation from id Software's code/cgame/cg_players.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { parsePlayerAnimationConfig, PlayerAnimationParseError } from "../foundation/animation-config.ts";
@@ -637,7 +638,7 @@ export class ClientInfoStore {
       }
     }
     ci.newAnims = lerpModelTag(ci.torsoModel, "tag_flag", 0, 0, 1) !== null;
-    const fallback = settings.gameType >= GameType.GT_TEAM ? teamModel : "sarge";
+    const fallback = q3CustomSoundFallback(this.host.state.product, settings.gameType >= GameType.GT_TEAM);
     const sounds: (PcmSound | null)[] = Array.from({ length: 32 }, () => null);
     for (let i = 0; i < CUSTOM_SOUND_NAMES.length; i++) {
       const name = at(CUSTOM_SOUND_NAMES, i).slice(1);

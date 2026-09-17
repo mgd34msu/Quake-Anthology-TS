@@ -1,3 +1,4 @@
+import type { GameFamily } from "../../../contracts/content.ts";
 import type { MovementResult, MovementState } from "../../../contracts/movement.ts";
 import type { UserCommand } from "../../../contracts/protocol.ts";
 import type { TraceHit } from "../../../contracts/scene.ts";
@@ -16,4 +17,9 @@ export function movementJumped(before: MovementState, ground: TraceHit, command:
     case "q2-rerelease": return result.jumpSound && (result.state.flags & PmflagsT.PMF_ON_LADDER) === 0;
     case "q3": return result.effects.some(({ effect }) => effect.kind === "event" && effect.value.event === EntityEvent.EV_JUMP);
   }
+}
+
+/** Native Q3 cgame owns jump voice only for a Q3 character; foreign characters use their shared source cue. */
+export function publishQ3CharacterMovementEvent(character: GameFamily, event: number): boolean {
+  return event !== EntityEvent.EV_JUMP || character === "q3";
 }

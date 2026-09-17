@@ -1,3 +1,5 @@
+import { publishQ3CharacterMovementEvent } from "./player-jump.ts";
+import { EntityEvent as MovementEntityEvent } from "../../../movement/q3/constants.ts";
 import { selectedSourceProgram } from "../../../content/catalog/source-program.ts";
 import type { NativeQ2Travel } from "./native-q2-travel.ts";
 import type { Q2ClassicVisitedLevel } from "../../../persistence/q2-classic-guest.ts";
@@ -483,15 +485,7 @@ export class SharedSimulation implements Simulation {
         projectile: (actor, owner, step) => { this.registerActorExecution({ kind: "q3", actor, owner, step, provider: this.weaponProvider.provider, content: this.weaponProvider.content }); },
         // Current foreign match selections do not expose Q3 GT_TEAM; CTF is a distinct mode.
         teamDeathmatch: () => false, isPlayer: actor => this.player(actor) !== null,
-        teamGame: () => {
-          if (this.source.kind === "q1") return this.source.composition.selection.program === "ctf" || this.source.cvars.variableValue("teamplay") !== 0;
-          if (this.source.kind === "q3") return this.source.game.gameType >= 3;
-          if (this.source.kind !== "q2") throw new Error("Selected Q3 accuracy requires admitted match rules");
-          const selected = this.source.product.match;
-          if (selected.source instanceof Q2Lmctf) return (selected.source.rules.ctfFlags & 128) === 0;
-          const match = selected.selection.kind;
-          return match === "ctf" || match === "lmctf" || match === "deathball" || this.source.game.options.mode === "deathmatch" && (this.source.game.options.deathmatchFlags & (64 | 128)) !== 0;
-        },
+        teamGame: () => this.teamGame(),
         pose: actor => { const player = this.requirePlayer(actor.id), view = player.view();
           const quad = this.source.kind === "q1" ? (this.source.game.player(actor.id)?.powerups.get("quad") ?? 0) > this.timeSeconds
             : this.source.kind === "q2" && this.source.items.playerPowerups(actor.id).quadUntil > this.timeSeconds;
@@ -2166,7 +2160,8 @@ export class SharedSimulation implements Simulation {
       this.characters.get(player.actor)?.commitAnimation(player.animation);
     }
     writeQ3CharacterAnimation(entity, player.animation);
-    for (const { effect } of result.effects) if (effect.kind === "event" && providerFamily(effect.value.provider) === "q3") client.ps.addEvent(effect.value.event, effect.value.parameter);
+    for (const { effect } of result.effects) if (effect.kind === "event" && providerFamily(effect.value.provider) === "q3"
+      && publishQ3CharacterMovementEvent(player.character, effect.value.event)) client.ps.addEvent(effect.value.event, effect.value.parameter);
     const worldActor = this.source.game.pool.at(1022).actor.id;
     return { contacts: result.contacts.flatMap(contact => contact.target.kind === "actor" ? [contact.target.actor] : contact.target.kind === "world" ? [worldActor] : []),
       bounds: player.bounds, waterlevel: player.waterLevel, watertype: player.waterType < 0 ? player.waterType === -3 ? 32 : player.waterType === -4 ? 16 : player.waterType === -5 ? 8 : 0 : player.waterType,
@@ -2275,7 +2270,8 @@ export class SharedSimulation implements Simulation {
     }
     if (source.kind === "q1") { source.game.attachPlayer(actor); source.composition.attach(actor, { slot: client.slot, userinfo: new Map([["name", `Player ${client.slot + 1}`], ["topcolor", "0"], ["bottomcolor", "0"]]) }); }
     else { source.items.configurePlayer(actor, source.game, true); if (entity !== null) {
-      source.product.admit(actor, { slot: client.slot, userinfo: `\\name\\Player ${client.slot + 1}\\skin\\male/grunt\\fov\\90`, initializeInventory: false, useQ2Weapons: this.selectedArsenal === null }, travel?.source.kind === "q2" && travel.source.landmark?.clientSlot === client.slot ? { ...travel.source.landmark, player: actor.id } : null);
+      const model = player.character === "q2" ? this.recipe.character.appearance.provider.split("/").at(-1) ?? "male" : "male";
+      source.product.admit(actor, { slot: client.slot, userinfo: `\\name\\Player ${client.slot + 1}\\skin\\${model}/grunt\\fov\\90`, initializeInventory: false, useQ2Weapons: this.selectedArsenal === null }, travel?.source.kind === "q2" && travel.source.landmark?.clientSlot === client.slot ? { ...travel.source.landmark, player: actor.id } : null);
     } }
     if (player.character === "q1") this.attachQ1Character(player);
     if (player.character === "q2" && source.kind === "q1") this.attachQ2Character(player);
@@ -2652,7 +2648,14 @@ export class SharedSimulation implements Simulation {
   private jump(actor: OwnedActor, action: "jump" | "swim"): undefined {
     if (action === "jump") {
       const player = this.requirePlayer(actor.id);
-      if (this.source.kind === "q3" && player.profile.kind === "q3" && player.character === "q3") return undefined;
+      if (this.source.kind === "q3" && player.character === "q3") {
+        if (player.profile.kind !== "q3") {
+          const client = this.source.game.records.nativeByActor(actor.id)?.client;
+          if (client == null) throw new Error("Q3 jump voice has no source client");
+          client.ps.addEvent(MovementEntityEvent.EV_JUMP, 0);
+        }
+        return undefined;
+      }
       const character = this.characters.get(actor);
       if (character !== undefined) return character.jump();
       if (this.requirePlayer(actor.id).character === "q2") return this.events.emit(this.recipe.character.definition.content,
@@ -3481,6 +3484,19 @@ export class SharedSimulation implements Simulation {
     if (this.stepping || settlement.kind !== "active" || this.source.kind !== "q3" || this.source.game !== settlement.source || settlement.completed !== 4)
       throw new Error("Source round settlement requires four completed frames before resuming");
     this.sourceRoundSettlement = { kind: "none" };
+  }
+
+  teamGame(): boolean {
+    const source = this.source;
+    if (source.kind === "q1") return source.composition.selection.program === "ctf" || source.cvars.variableValue("teamplay") !== 0;
+    if (source.kind === "quakec") return source.game.cvars.variableValue("teamplay") !== 0;
+    if (source.kind === "q3") return source.game.gameType >= 3;
+    if (source.kind === "q3-qvm") return source.game.state.cvars.variableValue("g_gametype") >= 3;
+    if (source.kind !== "q2") throw new Error("Team match policy requires an initialized source");
+    const selected = source.product.match;
+    if (selected.source instanceof Q2Lmctf) return (selected.source.rules.ctfFlags & 128) === 0;
+    const match = selected.selection.kind;
+    return match === "ctf" || match === "lmctf" || match === "deathball" || source.game.options.mode === "deathmatch" && (source.game.options.deathmatchFlags & (64 | 128)) !== 0;
   }
 
   q3Source(): Q3SourceRuntime | null { return this.source.kind === "q3" ? this.source.game : null; }

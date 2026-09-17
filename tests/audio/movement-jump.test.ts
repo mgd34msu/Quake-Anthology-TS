@@ -28,3 +28,11 @@ test("QuakeWorld cue follows accepted jump latch rather than held air input",()=
  expect(movementJumped(before,{kind:"none"},command,result)).toBe(false);
  expect(movementJumped(before,{kind:"world",model:0},command,{...result,state:{...result.state,dead:true}})).toBe(false);
 });
+
+test("native Q3 jump voice publication belongs only to selected Q3 characters", async () => {
+ const { publishQ3CharacterMovementEvent } = await import("../../src/app/bootstrap/simulation/player-jump.ts");
+ for (const character of ["q1","q2","q3"] satisfies readonly import("../../src/contracts/content.ts").GameFamily[]) {
+  expect(publishQ3CharacterMovementEvent(character,14)).toBe(character === "q3");
+  expect(publishQ3CharacterMovementEvent(character,21)).toBe(true);
+ }
+});

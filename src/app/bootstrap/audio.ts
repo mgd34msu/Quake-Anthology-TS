@@ -30,6 +30,7 @@ import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { UiSound } from "../../ui/common/controller.ts";
 import { ApplicationMusic, q1MusicFallback, worldMusicTrack } from "./audio/music.ts";
 import { q2EntitySound, q2MuzzleSounds, q2MonsterMuzzleSounds } from "./audio/q2-events.ts";
+import { q3VoiceFallback } from "./audio/q3.ts";
 import type { Q3SeatAudioFrame } from "./audio/q3.ts";
 import type { SourceEffectSound } from "./effects/q3.ts";
 import { applicationAudioCommands } from "./audio/commands.ts";
@@ -67,6 +68,7 @@ export interface ApplicationAudioSeatEvents {
   readonly effectSounds?: readonly ApplicationEffectSound[];
 }
 export interface ApplicationAudioOptions {
+  readonly q3TeamGame?: () => boolean;
   readonly musicControls?: MusicControls;
   readonly outputFormat?: AudioOutputFormat;
   readonly deferOutput?: boolean;
@@ -78,6 +80,7 @@ export interface ApplicationAudioOptions {
 /** The output device mixes independent local listeners without advancing the game. */
 export class ApplicationAudio {
   readonly engine: UnifiedAudio;
+  private readonly q3TeamGame: () => boolean;
   private readonly playlists = new Map<ContentId, Promise<readonly string[]>>();
   get musicPreferences(): MusicPreferences { return readMusicSettings(this.volumeCvars); }
   private readonly banks = new Map<ContentId, Promise<SoundBank>>();
@@ -111,6 +114,7 @@ export class ApplicationAudio {
 
   constructor(private readonly content: LoadedApplicationContent, now: () => number, seed: number,
     private readonly characterModel: string, private readonly print: (text: string) => undefined, options: ApplicationAudioOptions = {}) {
+    this.q3TeamGame = options.q3TeamGame ?? (() => false);
     this.random = new GameRandom(seed);
     this.engine = new UnifiedAudio({ ...(options.outputFormat === undefined ? {} : { outputFormat: options.outputFormat }), milliseconds: () => Math.trunc(now()), random: () => this.random.rand() });
     this.engine.setDopplerEnabled(content.recipe.presentation.doppler.kind === "source");
@@ -266,7 +270,8 @@ export class ApplicationAudio {
   private actor(actor: ActorId): ActorAudio {
     const existing = this.actorAudio.find(value => value.actor.equals(actor));
     if (existing !== undefined) return existing;
-    const state: ActorAudio = { actor, model: "male", underwater: null, chase: null, painTime: 0 };
+    const selectedQ2 = this.content.catalog.product(this.content.recipe.character.definition.content).expectation.family === "q2";
+    const state: ActorAudio = { actor, model: selectedQ2 ? this.characterModel : "male", underwater: null, chase: null, painTime: 0 };
     this.actorAudio.push(state);
     return state;
   }
@@ -274,10 +279,11 @@ export class ApplicationAudio {
   private sound(content: ContentId, path: string, family: GameFamily, actor: ActorId | null = null, selectedModel?: string): Promise<SoundAsset | null> {
     if (path.startsWith("sound/")) path = path.slice(6);
     const model = selectedModel ?? (family === "q2" ? actor === null ? "male" : this.actor(actor).model : this.characterModel);
-    const key = `${content}/${family}/${path}/${path.startsWith("*") ? model : ""}`;
+    const fallback = family === "q3" && path.startsWith("*") ? q3VoiceFallback(this.content.catalog, content, this.q3TeamGame()) : "";
+    const key = `${content}/${family}/${path}/${path.startsWith("*") ? `${model}/${fallback}` : ""}`;
     const prior = this.sounds.get(key);
     if (prior !== undefined) return prior;
-    const pending = this.loadSound(content, path, family, model);
+    const pending = this.loadSound(content, path, family, model, fallback);
     this.sounds.set(key, pending);
     return pending;
   }
@@ -295,12 +301,12 @@ export class ApplicationAudio {
     }
   }
 
-  private async loadSound(content: ContentId, path: string, family: GameFamily, model: string): Promise<SoundAsset | null> {
+  private async loadSound(content: ContentId, path: string, family: GameFamily, model: string, fallback: string): Promise<SoundAsset | null> {
     const bank = await this.bank(content);
     const sound = !path.startsWith("*") ? await bank.register(path, family)
       : family === "q2" ? await bank.registerSexedSound(path, model)
       : family === "q3" ? await bank.register(`player/${model}/${path.slice(1)}`, "q3")
-        ?? await bank.register(`player/sarge/${path.slice(1)}`, "q3") : null;
+        ?? await bank.register(`player/${fallback}/${path.slice(1)}`, "q3") : null;
     if (sound === null && !this.warned.has(`${content}/${path}`)) {
       this.warned.add(`${content}/${path}`);
       this.print(`Sound unavailable: ${content}/${path}\n`);

@@ -10,3 +10,8 @@ export const Q3_CHARACTER_SOUNDS = {
 export const Q3_FOOTSTEP_PATHS: readonly (readonly [keyof ClientMedia["footsteps"], string])[] = [
   ["normal", "step"], ["boot", "boot"], ["flesh", "flesh"], ["mech", "mech"], ["energy", "energy"], ["splash", "splash"], ["metal", "clank"],
 ];
+
+/** CG_LoadClientInfo: missionpack changes the team default, never the FFA default. */
+export function q3CustomSoundFallback(product: "baseq3" | "missionpack", teamGame: boolean): "sarge" | "james" {
+  return product === "missionpack" && teamGame ? "james" : "sarge";
+}
