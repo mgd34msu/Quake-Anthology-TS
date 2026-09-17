@@ -10,6 +10,7 @@ if (!isMainThread) {
   let context: SdlWorkerRenderContext | null = null;
   let native: ReturnType<typeof loadGl> | null = null;
   const release = (): void => {
+    context?.resume();
     try { native?.close(); }
     finally { context?.release(); context?.release(); }
     port.postMessage({ kind: "released" });
@@ -26,7 +27,18 @@ if (!isMainThread) {
     let resourceProtected = false;
     try { context.release(); }
     catch (error) { resourceProtected = error instanceof Error && error.message.includes("procedure tables"); }
-    port.once("message", release);
+    port.on("message", (message: unknown) => {
+      if (message === "park") {
+        context?.park();
+        let currentRejected = false, readRejected = false;
+        try { context?.makeCurrent(); } catch { currentRejected = true; }
+        try { void context?.drawableSize; } catch { readRejected = true; }
+        port.postMessage({ kind: "parked", currentRejected, readRejected });
+      } else if (message === "resume") {
+        context?.resume();
+        port.postMessage({ kind: "resumed", error: native?.symbols.glGetError() });
+      } else release();
+    });
     port.postMessage({ kind: "ready", pixels, resourceProtected, error: native.symbols.glGetError() });
   } catch (error) {
     port.postMessage({ kind: "error", message: error instanceof Error ? error.message : String(error) });
@@ -73,6 +85,15 @@ if (!isMainThread) {
             expect(() => window.makeCurrent()).toThrow("worker");
             expect(() => window.close()).toThrow("worker");
             expect(() => window.restoreRenderContext()).toThrow("worker");
+            expect(() => SdlWindow.open({ title: "blocked while adopted", width: 4, height: 4, backend: "gl", hidden: true })).toThrow("worker");
+            first.worker.postMessage("park");
+            expect(await first.receive()).toEqual({ kind: "parked", currentRejected: true, readRejected: true });
+            expect(() => window.restoreRenderContext()).toThrow("worker");
+            expect(() => window.close()).toThrow("worker");
+            const other = SdlWindow.open({ title: "allowed while parked", width: 4, height: 4, backend: "gl", hidden: true });
+            other.close();
+            first.worker.postMessage("resume");
+            expect(await first.receive()).toEqual({ kind: "resumed", error: 0 });
             window.pushEvent({ kind: "quit", timestamp: 42 });
             expect(window.pollEvents().some(event => event.kind === "quit")).toBe(true);
             const duplicate = spawnContext(transfer);

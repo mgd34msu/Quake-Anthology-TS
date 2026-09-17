@@ -1,4 +1,5 @@
 import { addQ2Blend } from "../../content/q2/base/player/view.ts";
+import type { Q3Hardware } from "../../render/q3-hardware.ts";
 import type { Q3SceneAdmission } from "../../content/q3/presentation/scene.ts";
 import { sequenceDrawGroup, type SourceSceneOrder, type SceneOperation } from "../../render/scene/submissions.ts";
 import type { Q2ShadowLightState } from "../../content/q2/foundation/shadow-lights.ts";
@@ -102,6 +103,9 @@ export class ApplicationEffects {
   private time: number | null = null;
   private sequence = -1;
   private closed = false;
+  private rendererHardware: () => Q3Hardware = () => "generic";
+  private readonly readHardware = (): Q3Hardware => this.rendererHardware();
+  bindRendererHardware(read: () => Q3Hardware): void { this.rendererHardware = read; }
   constructor(readonly assets: ApplicationAssets, readonly queries: SceneQueries, readonly isPlayer: (actor: ActorId) => boolean, seed = 1) { this.random = new SourceRandom(seed); }
   receive(events: readonly SimulationPresentationEvent[]): void {
     if (this.closed) throw new Error("Effect world is closed");
@@ -146,14 +150,14 @@ export class ApplicationEffects {
     }
     const failures: { content: ContentId; path: string; error: string }[] = [];
     if (character !== recipe.map.entities.content && this.assets.content.catalog.product(character).expectation.family === "q3" && !this.q3.has(character)) {
-      try { this.q3.set(character, await Q3ApplicationEffects.create(this.assets, this.queries, character, this.isPlayer, "character")); }
+      try { this.q3.set(character, await Q3ApplicationEffects.create(this.assets, this.queries, character, this.isPlayer, "character", this.readHardware)); }
       catch (error: unknown) { failures.push({ content: character, path: "Q3 character effect media", error: error instanceof Error ? error.message : String(error) }); }
     }
     for (const content of new Set(recipe.weapons.map(weapon => weapon.content))) {
       if (content === recipe.map.entities.content || this.assets.content.catalog.product(content).expectation.family !== "q3"
         || this.preparedQ3Weapons.has(content) || this.q3Weapons.has(content)) continue;
       try {
-        const effects = await Q3ApplicationEffects.create(this.assets, this.queries, content, this.isPlayer, "weapons");
+        const effects = await Q3ApplicationEffects.create(this.assets, this.queries, content, this.isPlayer, "weapons", this.readHardware);
         this.preparedQ3Weapons.set(content, effects);
       } catch (error: unknown) {
         failures.push({ content, path: "Q3 effect media", error: error instanceof Error ? error.message : String(error) });
@@ -320,7 +324,7 @@ export class ApplicationEffects {
       if (source.event.kind === "rail-award") { this.reject(source, "Selected Q3 rail reward presentation has no source cgame binding"); return; }
       let effects = this.q3Weapons.get(source.content);
       if (effects === undefined) {
-        effects = this.preparedQ3Weapons.get(source.content) ?? await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer);
+        effects = this.preparedQ3Weapons.get(source.content) ?? await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer, undefined, this.readHardware);
         this.preparedQ3Weapons.delete(source.content);
         this.q3Weapons.set(source.content, effects);
       }
@@ -367,7 +371,7 @@ export class ApplicationEffects {
       const pose = this.pose(source.event.actor.id);
       if (pose === undefined) { this.reject(source, "Q3 character event has no captured actor pose"); return; }
       let effects = this.q3.get(source.content);
-      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer); this.q3.set(source.content, effects); }
+      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer, undefined, this.readHardware); this.q3.set(source.content, effects); }
       if (!effects.event(source.event, pose.origin)) this.reject(source, "Q3 event requires the full cgame snapshot payload");
       return;
     }
@@ -580,6 +584,8 @@ export class ApplicationEffects {
       if (this.assets.content.catalog.product(entity.content).expectation.edition === "rerelease") {
         if ((entity.effects & 16) !== 0) assign(entity.origin, 200 + (this.random.nextInteger() & 31), { x: 0.25, y: 0.25, z: 1 });
         if ((entity.effects & 32) !== 0) assign(entity.origin, 200 + (this.random.nextInteger() & 31), { x: 1, y: 0.25, z: 0.25 });
+        if ((entity.effects & 64) !== 0) assign(entity.origin, 64 + (this.random.nextInteger() & 31),
+          { x: 1, y: 192 / 255, z: 120 / 255 }, 0, Math.fround(seconds + 0.001) - seconds);
       }
       const trail = (flags & 4) !== 0 ? 2 : (flags & 32) !== 0 ? 4 : (flags & 16) !== 0 ? 3 : (flags & 64) !== 0 ? 5
         : (flags & 1) !== 0 ? 0 : (flags & 2) !== 0 ? 1 : (flags & 128) !== 0 ? 6 : null;

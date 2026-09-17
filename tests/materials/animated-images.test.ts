@@ -103,7 +103,7 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync(`${roo
   const viewport = { x: 0, y: 0, width, height };
   const batches = prepareMaterialText({ seat: identity.seat(0), rect: viewport, uv: { s: 0, t: 0, s2: 1, t2: 1 }, color: { x: 1, y: 1, z: 1, w: 1 }, picture }, viewport, context);
   expect(batches.length).toBeGreaterThan(0);
-  const renderer = NativeRenderer.open({ renderer: rendererKind, width, height, hidden: true, gamma: 1 }, owner);
+  const renderer = await NativeRenderer.open({ renderer: rendererKind, width, height, hidden: true, gamma: 1 }, owner);
   try {
     const frames = new SceneFrameBuilder(images), captures: Uint8Array[] = [];
     const operations: ImageResourceOperation[] = [];
@@ -112,19 +112,19 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen" || !existsSync(`${roo
       frames.view({ target: { kind: "preview", id: "animated-image" }, time: { kind: "milliseconds", value: time }, viewport, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: true }, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
       const frame = frames.finish(true);
       operations.push(...frame.commands.flatMap(command => command.kind === "image-resource" ? [command.operation] : []));
-      const capture = renderer.captureNextFrame(); renderer.execute(frame); const pixels = await capture; captures.push(pixels);
+      const capture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frame); const pixels = await capture; captures.push(pixels);
       if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/animated-images/${asset.split("/").at(-1)}-${family}-${rendererKind}-${time}.png`, encodePng(width, height, pixels));
     }
     expect(captures[0]).not.toEqual(captures[1]);
     expect(captures[1]).not.toEqual(captures[2]);
     expect(operations.some(op => op.kind === "update-image")).toBe(true);
     renderer.close();
-    const restarted = NativeRenderer.open({ renderer: rendererKind, width, height, hidden: true, gamma: 1 }, owner);
+    const restarted = await NativeRenderer.open({ renderer: rendererKind, width, height, hidden: true, gamma: 1 }, owner);
     try {
       const replay = new SceneFrameBuilder(images); replay.begin(); replay.resources(operations);
       replay.view({ target: { kind: "preview", id: "animated-image-replay" }, time: { kind: "milliseconds", value: now }, viewport,
         clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: true }, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
-      const capture = restarted.captureNextFrame(); restarted.execute(replay.finish(true));
+      const capture = restarted.captureNextFrame().then(frame => frame.pixels); restarted.execute(replay.finish(true));
       const expected = captures[2];
       if (expected === undefined) throw new Error("Missing final GIF capture");
       expect(await capture).toEqual(expected);

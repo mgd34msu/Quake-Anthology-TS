@@ -59,7 +59,6 @@ import type { LocalInput } from "./input.ts";
 import type { ApplicationAssets, ProviderSceneAssets } from "./assets.ts";
 import type { ApplicationAudio } from "./audio.ts";
 import type { ApplicationEffectFrame } from "./effects.ts";
-import { GlRenderer } from "../../render/gl/renderer.ts";
 import { q3Hardware } from "../../render/q3-hardware.ts";
 import type { Q3SeatAudioOperation } from "./audio/q3.ts";
 import type { Q3SourcePresentationState } from "./simulation/q3/presentation.ts";
@@ -337,7 +336,7 @@ export class ApplicationQ3Client {
     };
     const game = await createQ3ClientPresentation({ ...(o.weaponHud === undefined ? {} : { weaponHud: o.weaponHud }), assets: media, resources, scene: recorder, sound, draw, fontRegistry: media.fontRegistry,
       world: o.assets.world, collision: services.collision, movement, target: this.viewportValue,
-      get hardware() { const backend = o.renderer.backend; return backend instanceof GlRenderer && q3Hardware(backend.driver.renderer) === "ragepro" ? "ragepro" : "generic"; }, commandContext: this.commandContext(),
+      get hardware() { return q3Hardware(o.renderer.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic"; }, commandContext: this.commandContext(),
       session,
       clock: { milliseconds: o.now, serverTime: () => source.time, frameNumber: () => this.frameNumber },
       menus: this.product === "baseq3" ? { kind: "baseq3" } : { kind: "missionpack", cinematics,

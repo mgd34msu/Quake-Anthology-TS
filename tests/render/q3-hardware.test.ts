@@ -1,5 +1,19 @@
 import { expect, test } from "bun:test";
-import { q3Hardware, q3HardwareNumber, type Q3Hardware } from "../../src/render/q3-hardware.ts";
+import { q3EffectHardware, q3Hardware, q3HardwareNumber, type Q3Hardware } from "../../src/render/q3-hardware.ts";
+
+test("retained Q3 effect profiles follow renderer changes with both source spellings", () => {
+  let renderer = "";
+  const profile = q3EffectHardware(() => q3Hardware(renderer));
+  expect([profile.hardware, profile.hardwareType]).toEqual(["generic", "generic"]);
+  renderer = "ATI Rage Pro";
+  expect([profile.hardware, profile.hardwareType]).toEqual(["ragepro", "rage-pro"]);
+  renderer = "NVIDIA RIVA 128";
+  expect([profile.hardware, profile.hardwareType]).toEqual(["generic", "generic"]);
+  renderer = "ATI RagePro";
+  expect([profile.hardware, profile.hardwareType]).toEqual(["ragepro", "rage-pro"]);
+  renderer = "";
+  expect([profile.hardware, profile.hardwareType]).toEqual(["generic", "generic"]);
+});
 
 test("Q3 hardware classification retains source precedence and GL config enum values", () => {
   const cases = [["NVIDIA GeForce RTX 5060 Ti", "generic", 0], ["Mesa Voodoo_Graphics", "3dfx", 1],

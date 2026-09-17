@@ -27,6 +27,7 @@ interface ImageSettingsOptions {
   readonly dialect: CommandDialect;
   readonly userContentRoot?: string;
   readonly gamma?: number;
+  readonly renderWorker?: boolean;
   readonly displayOverrides?: NonNullable<ApplicationOptions["displayOverrides"]>;
   readonly print: (text: string) => void;
 }
@@ -82,6 +83,9 @@ export class ApplicationImageSettings {
     this.cvars.register("r_customheight", "0", CvarFlag.Archive);
     this.cvars.register("r_fullscreen", "0", CvarFlag.Archive);
     this.cvars.register("r_swapInterval", "1", CvarFlag.Archive);
+    this.cvars.register("r_smp", "0", CvarFlag.Archive);
+    this.cvars.bindValue("r_smp", { validate: value => value === "0" || value === "1" ? null : "r_smp must be 0 or 1", changed: () => {} });
+    this.cvars.document("r_smp", { summary: "Render on a worker after vid_restart.", usage: "r_smp <0|1>", examples: ["r_smp 1", "vid_restart"], allowedValues: ["0: main thread", "1: worker"] });
     this.cvars.register("gl_debug_linewidth", "2", CvarFlag.None);
     this.cvars.register("gl_debug_distfrac", "0.004", CvarFlag.None);
     this.cvars.register("r_override_textures", "1", CvarFlag.Archive);
@@ -155,6 +159,7 @@ export class ApplicationImageSettings {
       settings.restoredSize = { width: settings.cvars.variableValue("r_customwidth"), height: settings.cvars.variableValue("r_customheight") };
     }
     const saved = settings.signature();
+    if (options.renderWorker !== undefined) settings.cvars.set("r_smp", options.renderWorker ? "1" : "0", true);
     if (options.displayOverrides?.width !== undefined) settings.cvars.set("r_customwidth", String(options.displayOverrides.width), true);
     if (options.displayOverrides?.height !== undefined) settings.cvars.set("r_customheight", String(options.displayOverrides.height), true);
     if (options.displayOverrides?.gamma !== undefined) settings.cvars.set("r_gamma", String(options.displayOverrides.gamma), true);
@@ -199,19 +204,21 @@ export class ApplicationImageSettings {
       const width = this.cvars.variableValue("r_customwidth") || current.width, height = this.cvars.variableValue("r_customheight") || current.height;
       try {
         if (![width, height].every(value => Number.isSafeInteger(value) && value >= 64 && value <= 16384)) throw new RangeError("Invalid saved window size");
-        if (!window.fullscreen) {
-          const desktop = window.display.bounds;
-          const restoredWidth = this.options.displayOverrides?.width === undefined && restored?.width === width;
-          const restoredHeight = this.options.displayOverrides?.height === undefined && restored?.height === height;
-          window.setSize(restoredWidth ? Math.min(width, desktop.width) : width, restoredHeight ? Math.min(height, desktop.height) : height);
-        }
-        const fullscreen = this.cvars.variableValue("r_fullscreen");
-        if (fullscreen !== 0 && fullscreen !== 1) throw new RangeError("Invalid fullscreen setting");
-        if (window.fullscreen !== (fullscreen === 1)) window.setFullscreen(fullscreen === 1);
+        renderer.mutateWindow(() => {
+          if (!window.fullscreen) {
+            const desktop = window.display.bounds;
+            const restoredWidth = this.options.displayOverrides?.width === undefined && restored?.width === width;
+            const restoredHeight = this.options.displayOverrides?.height === undefined && restored?.height === height;
+            window.setSize(restoredWidth ? Math.min(width, desktop.width) : width, restoredHeight ? Math.min(height, desktop.height) : height);
+          }
+          const fullscreen = this.cvars.variableValue("r_fullscreen");
+          if (fullscreen !== 0 && fullscreen !== 1) throw new RangeError("Invalid fullscreen setting");
+          if (window.fullscreen !== (fullscreen === 1)) window.setFullscreen(fullscreen === 1);
+        });
         if (window.backend === "gl") {
           const interval = this.cvars.variableValue("r_swapInterval");
           if (interval !== 0 && interval !== 1) throw new RangeError("Vertical sync must be on or off");
-          if (window.swapInterval !== interval) window.setSwapInterval(interval);
+          if (renderer.swapInterval !== interval) renderer.setSwapInterval(interval);
         }
       } catch (error) { this.options.print(`Display settings rejected: ${String(error)}\n`); }
     }
@@ -220,7 +227,7 @@ export class ApplicationImageSettings {
       this.cvars.set("r_customwidth", String(size.width), true); this.cvars.set("r_customheight", String(size.height), true);
     }
     this.cvars.set("r_fullscreen", window.fullscreen ? "1" : "0", true);
-    if (window.backend === "gl") this.cvars.set("r_swapInterval", String(window.swapInterval === 0 ? 0 : 1), true);
+    if (window.backend === "gl") this.cvars.set("r_swapInterval", String(renderer.swapInterval === 0 ? 0 : 1), true);
     this.displayApplied = signature();
     this.displayWindow = window;
   }

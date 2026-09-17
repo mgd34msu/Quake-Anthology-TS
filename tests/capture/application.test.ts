@@ -229,18 +229,18 @@ for (const renderer of ["cpu", "gl"]) test.skipIf(process.env["SDL_VIDEODRIVER"]
 
 test.skipIf(process.env["SDL_VIDEODRIVER"] !== "offscreen")("cancelled native readbacks do not wait for a future frame or survive renderer close", async () => {
   const identity = createIdentityOwner("cancelled-captures"), owner = { identity: Symbol("capture"), session: identity.session, generation: 0 };
-  const renderer = NativeRenderer.open({ renderer: "cpu", width: 8, height: 8, hidden: true, gamma: 1 }, owner);
+  const renderer = await NativeRenderer.open({ renderer: "cpu", width: 8, height: 8, hidden: true, gamma: 1 }, owner);
   try {
     for (let index = 0; index < 32; index++) {
-      const controller = new AbortController(), capture = renderer.captureNextFrame(controller.signal);
+      const controller = new AbortController(), capture = renderer.captureNextFrame(controller.signal).then(frame => frame.pixels);
       controller.abort(new Error("travel")); await expect(capture).rejects.toThrow("travel");
     }
     const aborted = new AbortController(); aborted.abort(new Error("already cancelled"));
-    await expect(renderer.captureNextFrame(aborted.signal)).rejects.toThrow("already cancelled");
-    const live = renderer.captureNextFrame();
+    await expect(renderer.captureNextFrame(aborted.signal).then(frame => frame.pixels)).rejects.toThrow("already cancelled");
+    const live = renderer.captureNextFrame().then(frame => frame.pixels);
     renderer.execute({ owner, sequence: 0, commands: [{ kind: "draw-buffer", buffer: "back", clear: true }, { kind: "swap-buffers" }] });
     expect((await live).length).toBe(8 * 8 * 4);
-    const closing = renderer.captureNextFrame(); renderer.close();
+    const closing = renderer.captureNextFrame().then(frame => frame.pixels); renderer.close();
     await expect(closing).rejects.toThrow("Renderer closed");
   } finally { renderer.close(); }
 });

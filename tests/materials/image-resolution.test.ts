@@ -400,7 +400,7 @@ test("semantic Q2 skin and sprite PCX retain global palette, flood fill, transpa
 for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.skipIf(process.env["QUAKE_IMAGE_RENDER"] !== "1")(`actual MD2 custom skins use every shared image format through ${backend}`, async () => {
   const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak");
   const identity = createIdentityOwner(`image-model-${backend}`), owner = { identity: Symbol(backend), session: identity.session, generation: 0 };
-  const images = new SceneImageRegistry(owner), renderer = NativeRenderer.open({ renderer: backend, width: 320, height: 240, hidden: true, gamma: 1 }, owner);
+  const images = new SceneImageRegistry(owner), renderer = await NativeRenderer.open({ renderer: backend, width: 320, height: 240, hidden: true, gamma: 1 }, owner);
   const loaders: SceneTextureLoader[] = [];
   async function read(path: string): Promise<SceneAsset | null> {
     const entry = archive.findEntries(path)[0]; return entry === undefined ? null : asset(await archive.readEntry(entry), path);
@@ -430,7 +430,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
       const texture = await textures.load(`${custom}.pcx`, { family: "q2", usage: "skin" });
       expect([texture?.width, texture?.height]).toEqual([decodePcx(skinBytes).width, decodePcx(skinBytes).height]);
       frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: input.clear, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
-      const capture = renderer.captureNextFrame(); renderer.execute(frames.finish()); const pixels = await capture;
+      const capture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish()); const pixels = await capture;
       expect(pixels.filter((value, index) => index % 4 !== 3 && value > 5).length).toBeGreaterThan(100);
       if (extension === "gif" || extension === "pcx") await Bun.write(`/tmp/shared-image-${backend}-${extension}.png`, encodePng(320, 240, pixels));
     }

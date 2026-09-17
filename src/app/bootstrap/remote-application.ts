@@ -390,9 +390,9 @@ export class RemoteApplication {
       const audioProduct = content.catalog.require(qw ? "q1-quakeworld" : options.product);
       const audioSettings = new ConfigStore(audioProduct.userContent?.root ?? userProductDirectory(options.userContentRoot ?? defaultUserContentRoot(), audioProduct.expectation.contentDirectory));
       imageSettings = ownership.kind === "borrowed" ? ownership.client.imageSettings : await ApplicationImageSettings.open({ audioOutputFormat: (await loadAudioSettings(audioSettings)).outputFormat ?? defaultAudioOutputFormat, context: { session: session.session, origin: { kind: "local-console" } },
-        dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : product.expectation.edition === "rerelease" ? "q2-rerelease" : "q2-classic", gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
+        dialect: qw ? "q1-quakeworld" : q1 ? "q1-netquake" : q3 ? "q3" : product.expectation.edition === "rerelease" ? "q2-rerelease" : "q2-classic", gamma: options.gamma, ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }), ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }),
         print: text => { if (application === null) host.print(text); else application.print(text); } });
-      renderer = ownership.kind === "borrowed" ? ownership.client.renderer : NativeRenderer.open(options, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
+      renderer = ownership.kind === "borrowed" ? ownership.client.renderer : await NativeRenderer.open({ ...options, renderWorker: imageSettings.cvars.variableValue("r_smp") !== 0 }, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
       if (ownership.kind === "owned") await imageSettings.refreshDisplay(renderer);
       if (address !== null) transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
       const browserSettings = host.saveDirectory !== undefined ? join(host.saveDirectory, "..", "settings")
@@ -412,6 +412,7 @@ export class RemoteApplication {
         application.activateSourceCommands();
         const current = application;
         const video = new ApplicationVideoRestart(current.renderer, {
+          renderWorker: () => current.imageSettings.cvars.variableValue("r_smp") !== 0,
           capture: () => current.capture, prepare: () => current.prepareVideoRestart(),
           publishWindow: window => { current.controls?.publishWindow(window); },
           published: renderer => { current.launchOptions = { ...current.launchOptions, renderer }; },
@@ -1104,7 +1105,7 @@ export class RemoteApplication {
       }
       const typography = await frontend.assets.loadMenuTypography();
       assertCurrent();
-      ui = new ApplicationSeatUi(local, frontend.art, controls, remote, frontend.font, frontend.audio,
+      ui = new ApplicationSeatUi(local, frontend.art, controls, operation => this.renderer.mutateWindow(operation), remote, frontend.font, frontend.audio,
         requestQuit, (name, args) => execute(name, args, seat.id), typography, undefined, undefined, undefined, this.viewSettings.binding(), this.host.llm);
       if (this.uiPreferences !== null) ui.preferences.values = this.uiPreferences;
       if (q3Scene !== null) {
@@ -1567,7 +1568,7 @@ export class RemoteApplication {
     }
   }
   readPixels(): Uint8Array { return this.renderer.readPixels(); }
-  captureNextFrame(): Promise<Uint8Array> { return this.renderer.captureNextFrame(); }
+  captureNextFrame(): Promise<Uint8Array> { return this.renderer.captureNextFrame().then(frame => frame.pixels); }
 
   close(): Promise<void> {
     if (this.closeResult !== null) return this.closeResult;

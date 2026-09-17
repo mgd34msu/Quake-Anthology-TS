@@ -20,7 +20,7 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("saved display state cla
     const settings = await ApplicationImageSettings.open({ context, dialect: "q3", userContentRoot: root, print: text => errors.push(text),
       ...(parsed.options.displayOverrides === undefined ? {} : { displayOverrides: parsed.options.displayOverrides }) });
     expect(settings.gamma).toBe(1);
-    const renderer = NativeRenderer.open({ renderer: "cpu", width: 640, height: 480, hidden: true, gamma: 1 }, { identity: Symbol("display"), session: identity.session, generation: 0 });
+    const renderer = await NativeRenderer.open({ renderer: "cpu", width: 640, height: 480, hidden: true, gamma: 1 }, { identity: Symbol("display"), session: identity.session, generation: 0 });
     try {
       await settings.refreshDisplay(renderer);
       const desktop = renderer.window.display.bounds;
@@ -34,7 +34,7 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("saved display state cla
       await settings.refreshDisplay(renderer); expect(renderer.window.logicalSize).toEqual({ width: 1300, height: 800 });
       settings.cvars.set("r_customheight", "801"); await settings.refreshDisplay(renderer);
       expect(renderer.window.logicalSize).toEqual({ width: 1300, height: 801 });
-      const replacement = NativeRenderer.open({ renderer: "cpu", width: 320, height: 240, hidden: true, gamma: 1 },
+      const replacement = await NativeRenderer.open({ renderer: "cpu", width: 320, height: 240, hidden: true, gamma: 1 },
         { identity: Symbol("replacement display"), session: identity.session, generation: 1 });
       try {
         await settings.refreshDisplay(replacement);
@@ -46,7 +46,7 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("saved display state cla
       expect(await Bun.file(join(root, "settings/images.cfg")).text()).toContain('r_fullscreen "1"');
     } finally { renderer.close(); await settings.close(); }
     const restored = await ApplicationImageSettings.open({ context, dialect: "q3", userContentRoot: root, print: text => errors.push(text) });
-    const next = NativeRenderer.open({ renderer: "cpu", width: 640, height: 480, hidden: true, gamma: 1 }, { identity: Symbol("restored display"), session: identity.session, generation: 1 });
+    const next = await NativeRenderer.open({ renderer: "cpu", width: 640, height: 480, hidden: true, gamma: 1 }, { identity: Symbol("restored display"), session: identity.session, generation: 1 });
     try {
       await restored.refreshDisplay(next); expect(next.window.fullscreen).toBe(true); expect(next.outputGamma).toBe(1);
       next.window.setFullscreen(false); await restored.refreshDisplay(next);
@@ -59,11 +59,11 @@ test.skipIf(process.env["SDL_VIDEODRIVER"] !== "dummy")("saved display state cla
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test.skipIf(process.env['SDL_VIDEODRIVER'] !== 'dummy')('retained video bindings operate on the published window', () => {
+test.skipIf(process.env['SDL_VIDEODRIVER'] !== 'dummy')('retained video bindings operate on the published window', async () => {
   const identity = createIdentityOwner('video-window-publication');
-  const first = NativeRenderer.open({ renderer: 'cpu', width: 640, height: 480, hidden: true, gamma: 1 },
+  const first = await NativeRenderer.open({ renderer: 'cpu', width: 640, height: 480, hidden: true, gamma: 1 },
     { identity: Symbol('first window'), session: identity.session, generation: 0 });
-  const second = NativeRenderer.open({ renderer: 'cpu', width: 800, height: 600, hidden: true, gamma: 1 },
+  const second = await NativeRenderer.open({ renderer: 'cpu', width: 800, height: 600, hidden: true, gamma: 1 },
     { identity: Symbol('second window'), session: identity.session, generation: 1 });
   let current = first.window;
   const errors: string[] = [];

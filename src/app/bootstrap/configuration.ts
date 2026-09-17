@@ -322,6 +322,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   const source = createStartupSource(options, { source: content.selection.source, match: content.selection.match }, dialect, context, defaultCapacity, text => host.print(text));
   const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
   const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
+    ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }),
     audioOutputFormat: (await loadAudioSettings(settings)).outputFormat ?? defaultAudioOutputFormat,
     ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
   const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
@@ -389,6 +390,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
         resolved = resolveStartupRules(options, prepared.source, options.q3MapLaunch?.maxClients ?? options.teamArenaSkirmish?.maxClients ?? defaultCapacity,
           serverDefinitionsForSelection(content.selection), options.teamArenaSkirmish === undefined && options.q3MapLaunch === undefined);
         if (options.teamArenaSkirmish !== undefined) resolved = { ...resolved, options: { ...resolved.options, mode: options.mode } };
+        if (options.renderWorker !== undefined) image?.cvars.set("r_smp", options.renderWorker ? "1" : "0", true);
         if (options.displayOverrides?.width !== undefined) image?.cvars.set("r_customwidth", String(options.displayOverrides.width), true);
         if (options.displayOverrides?.height !== undefined) image?.cvars.set("r_customheight", String(options.displayOverrides.height), true);
         if (options.displayOverrides?.gamma !== undefined) image?.cvars.set("r_gamma", String(options.displayOverrides.gamma), true);

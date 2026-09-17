@@ -21,7 +21,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test(`Q
   if (parsed.kind !== "run") throw new Error("Missing launch");
   const content = await loadApplicationContent(parsed.options), identity = createIdentityOwner("qw-indexed-skin");
   const owner = { identity: Symbol("qw-skin"), session: identity.session, generation: 0 };
-  const assets = new ApplicationAssets(content, owner), renderer = NativeRenderer.open({ renderer: backend, width: 320, height: 240, hidden: true, gamma: 1 }, owner);
+  const assets = new ApplicationAssets(content, owner), renderer = await NativeRenderer.open({ renderer: backend, width: 320, height: 240, hidden: true, gamma: 1 }, owner);
   try {
     await assets.loadWorld();
     const provider = await assets.provider(content.recipe.map.entities.content), loaded = await assets.model(content.recipe.map.entities.content, "progs/player.mdl");
@@ -66,7 +66,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test(`Q
         const input = { camera, lights: [{ origin, radius: 96, minimum: 0, color: { x: 1, y: 1, z: 1 } }], time: { kind: "seconds", value: 0 }, target: { kind: "seat", seat: identity.seat(0) }, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false } } satisfies Parameters<SceneModelRenderer["prepare"]>[1];
         const batches = sceneModelBatches(scene.prepare([entity], input, options)); expect(batches.length).toBeGreaterThan(0);
         frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: input.clear, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
-        const pending = renderer.captureNextFrame(); renderer.execute(frames.finish()); const image = await pending;
+        const pending = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish()); const image = await pending;
         expect(image.filter((value, index) => index % 4 !== 3 && value > 5).length).toBeGreaterThan(100);
         snapshots.push(image); await Bun.write(`/tmp/qw-indexed-skin-${backend}-${colors.top}.png`, encodePng(320, 240, image));
       }
@@ -84,7 +84,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test(`Q
           expect(batches.some(batch => batch.texture.kind === "bind-image" && batch.texture.image.width === 296 && batch.texture.image.height === 194)).toBe(true);
           expect(prepareSceneEntity(entity, { camera, timeSeconds: 0, options: source }).surfaces[0]?.geometry).toEqual(native.surfaces[0]?.geometry);
           frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: { color: { x: 0, y: 0, z: 0, w: 1 }, depth: 1, stencil: false }, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
-          const pending = renderer.captureNextFrame(); renderer.execute(frames.finish());
+          const pending = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish());
           await Bun.write(`/tmp/qw-indexed-skin-${backend}-q2-map.png`, encodePng(320, 240, await pending));
         } finally { world.close(); }
       } finally { await q2.close(); }

@@ -11,7 +11,7 @@ function unavailable(): never { throw new Error("GL config accessed an unrelated
 test("cgame and UI GL config use the seat viewport while preserving renderer capabilities", () => {
   const backend = new SoftwareRenderer(16, 8, { identity: Symbol("viewport"), session: createIdentityOwner("viewport").session, generation: 0 });
   let viewport = { width: 8, height: 8 };
-  const scalar = new QvmApplicationScalars({ renderer: { backend }, viewport: () => viewport,
+  const scalar = new QvmApplicationScalars({ renderer: { backend, driver: null, glConfig: null }, viewport: () => viewport,
     get local() { return unavailable(); }, get input() { return unavailable(); }, get media() { return unavailable(); }, get services() { return unavailable(); },
     now: unavailable, keyCatcher: { get: unavailable, set: unavailable }, clientState: unavailable, lightForPoint: unavailable, assertCurrent() {},
   });

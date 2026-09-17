@@ -1,18 +1,15 @@
 import { SceneImageRegistry } from "../../render/scene/resources.ts";
-import { resolveDrawTextures } from "../../render/commands/dynamic-texture.ts";
+import { RenderExecutor } from "../../render/execution.ts";
+import { RenderImageJournal } from "../../render/image-journal.ts";
+import { WorkerRenderer } from "../../render/worker.ts";
 import type { Vec4 } from "../../contracts/math.ts";
-import type { DrawBatch, ImageResourceOperation, RenderCommand, RendererBackend, RendererResourceOwner, RenderFrame, RenderOperation, RenderImage } from "../../contracts/render.ts";
+import type { ImageLevel, ImageResourceOperation, RendererBackend, RendererResourceOwner, RenderFrame, RenderImage } from "../../contracts/render.ts";
 import { SdlWindow, type SdlDisplayMode } from "../../platform/sdl.ts";
 import { SoftwareRenderer } from "../../render/cpu/index.ts";
 import { GlRenderer } from "../../render/gl/index.ts";
 import type { ApplicationOptions } from "./options.ts";
 
-interface ResidentImage {
-  beforeTextureMode: boolean;
-  readonly creation: Extract<ImageResourceOperation, { readonly kind: "create-image" }>;
-  readonly updates: Map<number, Extract<ImageResourceOperation, { readonly kind: "update-image" }>>;
-}
-
+type NativeBackend = SoftwareRenderer | GlRenderer | WorkerRenderer;
 export interface RendererDiagnostics {
   readonly backend: "cpu" | "gl";
   readonly width: number;
@@ -22,7 +19,6 @@ export interface RendererDiagnostics {
   readonly images: readonly { readonly ordinal: number; readonly name: string; readonly width: number; readonly height: number;
     readonly encoding: RenderImage["kind"]; readonly mipLevels: number }[];
 }
-
 export interface PreparedRendererRestart {
   readonly window: SdlWindow;
   readonly backend: RendererBackend;
@@ -31,111 +27,180 @@ export interface PreparedRendererRestart {
   discard(): void;
 }
 
-function snapshotImage(content: RenderImage): RenderImage {
-  if (content.kind === "depth32f") {
-    const [first, ...rest] = content.levels;
-    return { ...content, levels: [{ ...first, pixels: first.pixels.slice() }, ...rest.map(level => ({ ...level, pixels: level.pixels.slice() }))] };
+class FrameCaptures {
+  private nextId = 1;
+  private armed: number[] = [];
+  private failure: Error | null = null;
+  private readonly pending = new Map<number, { resolve(image: ImageLevel): void; reject(error: Error): void }>();
+  take(): readonly number[] { const armed = this.armed; this.armed = []; return armed; }
+  complete(image: ImageLevel | null, ids: readonly number[]): void {
+    if (ids.length !== 0 && image === null) throw new Error("Renderer capture has no pixels");
+    if (image === null) return;
+    for (const id of ids) {
+      const capture = this.pending.get(id); this.pending.delete(id);
+      capture?.resolve({ width: image.width, height: image.height, pixels: image.pixels.slice() });
+    }
   }
-  const [first, ...rest] = content.levels;
-  const levels: typeof content.levels = [{ ...first, pixels: first.pixels.slice() }, ...rest.map(level => ({ ...level, pixels: level.pixels.slice() }))];
-  return content.kind === "rgba8" ? { ...content, levels, borderColor: { ...content.borderColor } }
-    : { ...content, levels, palette: { ...content.palette, colors: content.palette.colors.slice() }, translation: content.translation?.slice() ?? null,
-      transparency: { ...content.transparency }, fullbright: content.fullbright === null ? null : { ...content.fullbright } };
+  request(signal?: AbortSignal): Promise<ImageLevel> {
+    if (this.failure !== null) return Promise.reject(this.failure);
+    const reason = (): Error => { const value: unknown = signal?.reason; return value instanceof Error ? value : new Error("Frame capture aborted"); };
+    if (signal?.aborted) return Promise.reject(reason());
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      const clear = (): void => { signal?.removeEventListener("abort", abort); };
+      const abort = (): void => {
+        this.pending.delete(id); this.armed = this.armed.filter(value => value !== id); clear(); reject(reason());
+      };
+      this.pending.set(id, { resolve: image => { clear(); resolve(image); }, reject: error => { clear(); reject(error); } });
+      this.armed.push(id); signal?.addEventListener("abort", abort, { once: true });
+    });
+  }
+  close(): void {
+    this.fail(new Error("Renderer closed before the requested frame was presented"));
+  }
+  fail(reason: unknown): void {
+    this.failure ??= reason instanceof Error ? reason : new Error(String(reason));
+    for (const capture of this.pending.values()) capture.reject(this.failure);
+    this.pending.clear(); this.armed = [];
+  }
 }
 
-/** Owns one native window and consumes the same ordered frame on either renderer. */
+async function openBackend(window: SdlWindow, owner: RendererResourceOwner, gamma: number, worker: boolean,
+  images: SceneImageRegistry, journal: RenderImageJournal, captures: FrameCaptures, failed: (error: unknown) => void): Promise<NativeBackend> {
+  if (worker) return WorkerRenderer.open(window, owner, gamma, images, journal, (image, ids) => {
+    captures.complete(image, ids);
+    if (window.backend === "cpu") {
+      if (image === null) throw new Error("CPU renderer presentation has no pixels");
+      window.present(image.pixels);
+    }
+  }, failed);
+  const backend = window.backend === "cpu" ? new SoftwareRenderer(window.width, window.height, owner) : new GlRenderer(window, owner);
+  try { backend.setOutputGamma(gamma); return backend; } catch (error) { backend.close(); throw error; }
+}
+
+/** Owns the native surface, image identity, and ordered serial or worker execution. */
 export class NativeRenderer {
-  private current: SoftwareRenderer | GlRenderer;
+  private readonly executor: RenderExecutor;
   private color: Vec4 = { x: 1, y: 1, z: 1, w: 1 };
-  private readonly resident = new Map<number, ResidentImage>();
-  private textureMode: Extract<ImageResourceOperation, { readonly kind: "texture-mode" }> | null = null;
   private closed = false;
+  private preparing = false;
   private pendingRestart: PreparedRendererRestart | null = null;
   private readonly retirements = new Set<() => void>();
   private interval: -1 | 0 | 1 = 1;
-  private readonly captures: { readonly resolve: (pixels: Uint8Array) => void; readonly reject: (reason: Error) => void }[] = [];
 
-  private constructor(private currentWindow: SdlWindow, readonly owner: RendererResourceOwner, backend: SoftwareRenderer | GlRenderer, private gamma: number, readonly images: SceneImageRegistry) {
-    this.current = backend;
+  private constructor(private currentWindow: SdlWindow, readonly owner: RendererResourceOwner, private current: NativeBackend,
+    private gamma: number, readonly images: SceneImageRegistry, private journal: RenderImageJournal, private readonly captures: FrameCaptures) {
+    this.executor = new RenderExecutor(current, {
+      imageApplied: operation => this.journal.record(operation),
+      swap: ids => this.swap(ids),
+    });
   }
 
-  static open(options: Pick<ApplicationOptions, "renderer" | "width" | "height" | "hidden" | "gamma">, owner: RendererResourceOwner, images: SceneImageRegistry = new SceneImageRegistry(owner)): NativeRenderer {
+  static async open(options: Pick<ApplicationOptions, "renderer" | "width" | "height" | "hidden" | "gamma"> & { readonly renderWorker?: boolean },
+    owner: RendererResourceOwner, images: SceneImageRegistry = new SceneImageRegistry(owner)): Promise<NativeRenderer> {
     if (images.owner !== owner) throw new Error("Renderer image registry belongs to another owner");
-    const window = SdlWindow.open({ title: "Quake", backend: options.renderer, width: options.width, height: options.height,
-      hidden: options.hidden, resizable: true });
-    let backend: SoftwareRenderer | GlRenderer | null = null;
+    const window = WorkerRenderer.withParkedContexts(() => SdlWindow.open({ title: "Quake", backend: options.renderer, width: options.width, height: options.height,
+      hidden: options.hidden, resizable: true }));
+    const journal = new RenderImageJournal(), captures = new FrameCaptures();
+    let backend: NativeBackend | null = null;
+    let renderer: NativeRenderer | null = null;
     try {
-      backend = options.renderer === "cpu" ? new SoftwareRenderer(window.width, window.height, owner) : new GlRenderer(window, owner);
-      backend.setOutputGamma(options.gamma);
       if (options.renderer === "gl") window.setSwapInterval(1);
-      return new NativeRenderer(window, owner, backend, options.gamma, images);
+      backend = await openBackend(window, owner, options.gamma, options.renderWorker ?? false, images, journal, captures,
+        error => { if (renderer?.current === backend) captures.fail(error); });
+      renderer = new NativeRenderer(window, owner, backend, options.gamma, images, journal, captures);
+      return renderer;
     } catch (error) {
-      try { backend?.close(); } finally { window.close(); }
+      const failures: unknown[] = [error];
+      try { backend?.close(); } catch (cleanup) { failures.push(cleanup); }
+      try { WorkerRenderer.withParkedContexts(() => window.close()); } catch (cleanup) { failures.push(cleanup); }
+      if (failures.length > 1) throw new AggregateError(failures, "Renderer opening and cleanup failed");
       throw error;
     }
   }
 
   get window(): SdlWindow { return this.currentWindow; }
+  get backend(): RendererBackend { return this.current; }
+  get renderWorker(): boolean { return this.current instanceof WorkerRenderer; }
+  get driver(): GlRenderer["driver"] | null { return this.current instanceof WorkerRenderer ? this.current.description.driver : this.current instanceof GlRenderer ? this.current.driver : null; }
+  get glConfig(): Pick<GlRenderer, "maxTextureSize" | "textureUnits" | "colorBits" | "depthBits" | "stereoEnabled"> | null {
+    return this.current instanceof WorkerRenderer ? this.current.description.glConfig : this.current instanceof GlRenderer ? this.current : null;
+  }
+  get swapInterval(): -1 | 0 | 1 {
+    if (this.current instanceof WorkerRenderer) return this.current.description.swapInterval;
+    if (this.window.backend !== "gl") return 0;
+    const interval = this.window.swapInterval;
+    if (interval !== -1 && interval !== 0 && interval !== 1) throw new Error("SDL returned an unsupported swap interval");
+    return interval;
+  }
+  setSwapInterval(interval: -1 | 0 | 1): void {
+    this.writable();
+    if (this.current instanceof WorkerRenderer) this.current.setSwapInterval(interval);
+    else if (this.window.backend === "gl") this.window.setSwapInterval(interval);
+    this.interval = interval;
+  }
+  mutateWindow(operation: () => void): void { this.writable(); WorkerRenderer.withParkedContexts(operation); }
+  get outputGamma(): number { return this.gamma; }
+  synchronize(): void { if (this.current instanceof WorkerRenderer) this.current.synchronize(); }
 
   private writable(): void {
     if (this.closed) throw new Error("Native renderer is closed");
-    if (this.pendingRestart !== null) throw new Error("Native renderer restart is prepared");
+    if (this.preparing || this.pendingRestart !== null) throw new Error("Native renderer restart is prepared");
+  }
+  private image(operation: ImageResourceOperation): void {
+    if (this.current instanceof WorkerRenderer) this.current.applyImageResource(operation);
+    else this.executor.image(operation);
   }
 
-  private replay(backend: SoftwareRenderer | GlRenderer): void {
-    const upload = (record: ResidentImage): void => {
-      backend.applyImageResource(record.creation);
-      for (const update of record.updates.values()) backend.applyImageResource(update);
-    };
-    for (const record of this.resident.values()) if (record.beforeTextureMode) upload(record);
-    if (this.textureMode !== null) backend.applyImageResource(this.textureMode);
-    for (const record of this.resident.values()) if (!record.beforeTextureMode) upload(record);
-  }
-
-  prepareRestart(kind: "cpu" | "gl"): PreparedRendererRestart {
-    this.writable();
+  async prepareRestart(kind: "cpu" | "gl", worker = this.renderWorker): Promise<PreparedRendererRestart> {
+    this.writable(); this.synchronize();
     for (const operation of this.images.drainPendingOperations()) this.image(operation);
-    const previousWindow = this.window, previousBackend = this.current, presentation = previousWindow.capturePresentation();
-    const dimensions = previousWindow.drawableSize;
-    if (previousWindow.backend === "gl") {
-      const interval = previousWindow.swapInterval;
-      if (interval !== -1 && interval !== 0 && interval !== 1) throw new Error("SDL returned an unsupported swap interval");
-      this.interval = interval;
-    }
-    const restoreContext = (): void => { if (!this.closed && this.window.backend === "gl") this.window.makeCurrent(); };
-    let window: SdlWindow | null = null, backend: SoftwareRenderer | GlRenderer | null = null;
+    const previousWindow = this.window, previousBackend = this.current, previousJournal = this.journal;
+    const presentation = previousWindow.capturePresentation(), dimensions = previousWindow.drawableSize;
+    if (previousWindow.backend === "gl") this.interval = this.swapInterval;
+    this.preparing = true;
+    const restoreContext = (): void => { if (!this.closed && !this.renderWorker && this.window.backend === "gl") this.window.makeCurrent(); };
+    let window: SdlWindow | null = null, backend: NativeBackend | null = null;
+    const journal = new RenderImageJournal();
     try {
-      window = SdlWindow.open({ title: "Quake", backend: kind, width: presentation.size.width, height: presentation.size.height,
-        hidden: true, resizable: (previousWindow.flags & 0x20) !== 0, displayIndex: presentation.displayIndex, position: presentation.position });
-      backend = kind === "cpu" ? new SoftwareRenderer(window.width, window.height, this.owner) : new GlRenderer(window, this.owner);
-      backend.setOutputGamma(this.gamma);
+      window = WorkerRenderer.withParkedContexts(() => SdlWindow.open({ title: "Quake", backend: kind, width: presentation.size.width, height: presentation.size.height,
+        hidden: true, resizable: (previousWindow.flags & 0x20) !== 0, displayIndex: presentation.displayIndex, position: presentation.position }));
       if (kind === "gl") window.setSwapInterval(this.interval);
-      this.replay(backend);
+      backend = await openBackend(window, this.owner, this.gamma, worker, this.images, journal, this.captures,
+        error => { if (this.current === backend) this.captures.fail(error); });
+      previousJournal.replay(backend);
+      if (!(backend instanceof WorkerRenderer)) {
+        // Serial backend calls have no transport acknowledgment; retain the same successful journal.
+        previousJournal.replay({ applyImageResource: operation => { journal.record(operation); return undefined; } });
+      } else {
+        backend.execute([{ kind: "set-color", color: this.color }], [], []); backend.synchronize();
+      }
       if (window.width !== dimensions.width || window.height !== dimensions.height) throw new Error("Prepared renderer drawable dimensions changed");
+      if (this.closed) throw new Error("Renderer closed during restart preparation");
       restoreContext();
     } catch (error) {
+      this.preparing = false;
       const errors: unknown[] = [error];
       try { backend?.close(); } catch (failure) { errors.push(failure); }
-      try { window?.close(); } catch (failure) { errors.push(failure); }
+      try { WorkerRenderer.withParkedContexts(() => window?.close()); } catch (failure) { errors.push(failure); }
       try { restoreContext(); } catch (failure) { errors.push(failure); }
       if (errors.length > 1) throw new AggregateError(errors, "Renderer restart preparation and cleanup failed");
       throw error;
     }
-    const dispose = (window: SdlWindow, backend: SoftwareRenderer | GlRenderer): void => {
+    const dispose = (window: SdlWindow, backend: NativeBackend): void => WorkerRenderer.withParkedContexts(() => {
       const errors: unknown[] = [];
-      try { if (window.backend === "gl") window.makeCurrent(); } catch (error) { errors.push(error); }
+      try { if (window.backend === "gl" && !(backend instanceof WorkerRenderer)) window.makeCurrent(); } catch (error) { errors.push(error); }
       try { backend.close(); } catch (error) { errors.push(error); }
       try { window.close(); } catch (error) { errors.push(error); }
       try { restoreContext(); } catch (error) { errors.push(error); }
       if (errors.length !== 0) throw new AggregateError(errors, "Renderer resource retirement failed");
-    };
+    });
     const candidateWindow = window, candidateBackend = backend;
     let phase: "prepared" | "published" | "discarded" = "prepared", retired = false;
     const retire = (): void => {
       if (retired) return;
-      retired = true;
-      this.retirements.delete(retire);
       dispose(previousWindow, previousBackend);
+      retired = true; this.retirements.delete(retire);
     };
     const prepared: PreparedRendererRestart = {
       window: candidateWindow, backend: candidateBackend,
@@ -143,194 +208,100 @@ export class NativeRenderer {
       publish: () => {
         if (phase !== "prepared" || this.pendingRestart !== prepared || this.closed) throw new Error("Renderer restart is no longer prepared");
         try {
-          candidateWindow.restorePresentation(presentation);
-          if (kind === "gl") candidateWindow.makeCurrent();
-          previousWindow.setVisible(false);
+          WorkerRenderer.withParkedContexts(() => {
+            candidateWindow.restorePresentation(presentation);
+            if (kind === "gl" && !(candidateBackend instanceof WorkerRenderer)) candidateWindow.makeCurrent();
+            previousWindow.setVisible(false);
+          });
         } catch (error) {
           const errors: unknown[] = [error];
           try { candidateWindow.setVisible(false); } catch (failure) { errors.push(failure); }
-          try { previousWindow.restorePresentation(presentation); } catch (failure) { errors.push(failure); }
+          try { WorkerRenderer.withParkedContexts(() => previousWindow.restorePresentation(presentation)); } catch (failure) { errors.push(failure); }
           try { restoreContext(); } catch (failure) { errors.push(failure); }
           if (errors.length > 1) throw new AggregateError(errors, "Renderer restart publication and restoration failed");
           throw error;
         }
-        this.currentWindow = candidateWindow;
-        this.current = candidateBackend;
-        phase = "published";
-        this.pendingRestart = null;
-        this.retirements.add(retire);
+        this.currentWindow = candidateWindow; this.current = candidateBackend; this.journal = journal;
+        this.executor.replaceBackend(candidateBackend);
+        this.executor.execute({ kind: "set-color", color: this.color });
+        phase = "published"; this.pendingRestart = null; this.retirements.add(retire);
         return retire;
       },
       discard: () => {
         if (phase !== "prepared") return;
-        phase = "discarded";
-        this.pendingRestart = null;
         dispose(candidateWindow, candidateBackend);
+        phase = "discarded"; this.pendingRestart = null;
       },
     };
-    this.pendingRestart = prepared;
+    this.preparing = false; this.pendingRestart = prepared;
     return prepared;
   }
 
-  get backend(): RendererBackend { return this.current; }
-  get outputGamma(): number { return this.gamma; }
   diagnostics(): RendererDiagnostics {
     if (this.closed) throw new Error("Native renderer is closed");
-    const backend = this.current;
-    return { backend: backend instanceof GlRenderer ? "gl" : "cpu", width: backend.width, height: backend.height,
-      driver: backend instanceof GlRenderer ? { ...backend.driver } : null,
-      displayModes: this.currentWindow.displayModes.map(mode => ({ ...mode })),
-      images: [...this.resident.values()].map(({ creation, updates }) => {
-        const level = updates.get(0)?.content ?? creation.content.levels[0];
-        return { ordinal: creation.image.ordinal, name: creation.image.source.kind === "generated" ? creation.image.source.name : creation.image.source.resource.requestedPath,
-          width: level.width, height: level.height,
-          encoding: creation.content.kind, mipLevels: creation.content.levels.length };
-      }) };
+    this.synchronize();
+    return { backend: this.window.backend, width: this.current.width, height: this.current.height, driver: this.driver,
+      displayModes: this.window.displayModes.map(mode => ({ ...mode })), images: this.journal.describe() };
   }
   setOutputGamma(gamma: number): void { this.writable(); this.current.setOutputGamma(gamma); this.gamma = gamma; }
 
   private resize(): void {
-    if (!(this.current instanceof SoftwareRenderer)) return;
+    if (this.current instanceof GlRenderer) return;
     const { width, height } = this.window.drawableSize;
+    if (this.current instanceof WorkerRenderer) { this.current.resize(width, height); return; }
     if (width === this.current.width && height === this.current.height) return;
     const replacement = new SoftwareRenderer(width, height, this.owner);
     replacement.setOutputGamma(this.gamma);
-    try {
-      this.replay(replacement);
-    } catch (error) { replacement.close(); throw error; }
-    this.current.close();
-    this.current = replacement;
+    try { this.journal.replay(replacement); } catch (error) { replacement.close(); throw error; }
+    this.current.close(); this.current = replacement; this.executor.replaceBackend(replacement);
   }
-
-  private image(operation: ImageResourceOperation): void {
-    this.current.applyImageResource(operation);
-    switch (operation.kind) {
-      case "create-image": {
-        const updates: ResidentImage["updates"] = new Map<number, Extract<ImageResourceOperation, { readonly kind: "update-image" }>>();
-        this.resident.set(operation.image.ordinal, { creation: { ...operation, content: snapshotImage(operation.content), sampling: { ...operation.sampling } }, updates, beforeTextureMode: false }); break;
-      }
-      case "update-image": {
-        const record = this.resident.get(operation.image.ordinal);
-        if (record === undefined) throw new Error("Renderer update has no resident image");
-        const content = operation.content;
-        record.updates.set(operation.level, content.pixels instanceof Float32Array
-          ? { ...operation, content: { ...content, pixels: content.pixels.slice() } }
-          : { ...operation, content: { ...content, pixels: content.pixels.slice() } }); break;
-      }
-      case "release-image": this.resident.delete(operation.image.ordinal); break;
-      case "texture-mode": this.textureMode = operation; for (const record of this.resident.values()) record.beforeTextureMode = true; break;
-    }
+  private swap(ids: readonly number[]): void {
+    if (this.current instanceof WorkerRenderer) throw new Error("Worker swaps execute on their owning thread");
+    if (this.current instanceof SoftwareRenderer) this.current.finish();
+    if (ids.length !== 0) this.captures.complete({ width: this.current.width, height: this.current.height,
+      pixels: this.current instanceof SoftwareRenderer ? this.current.pixels : this.current.readPixels() }, ids);
+    if (this.current instanceof SoftwareRenderer) this.window.present(this.current.pixels);
+    else this.current.present();
   }
-
-  private draw(input: DrawBatch): void {
-    const batch = resolveDrawTextures(input, operation => this.image(operation));
-    const prepared = this.current.prepareGeometry(batch);
-    try {
-      prepared.begin();
-      prepared.applyTexture(0, batch.texture);
-      if (batch.texturing === "pair") prepared.applyTexture(1, batch.secondTexture.binding);
-      prepared.draw();
-    } finally { prepared.cleanup(); }
-  }
-
-  private operations(operations: readonly RenderOperation[]): void {
-    for (const operation of operations) {
-      if (operation.kind === "draw") for (const batch of operation.batches) this.draw(batch);
-      else if (operation.kind === "object-opacity") this.current.withObjectOpacity(operation.opacity, () => {
-        for (const batch of operation.batches) this.draw(batch);
-        return undefined;
-      });
-      else this.current.drawImmediate(operation);
-    }
-  }
-
-  private picture(command: Extract<RenderCommand, { readonly kind: "stretch-pic" }>): void {
-    const { width, height } = this.current;
-    this.current.beginView({ viewport: { x: 0, y: 0, width, height }, clear: null, clipPlane: null });
-    const left = command.rect.x / width * 2 - 1, right = (command.rect.x + command.rect.width) / width * 2 - 1;
-    const top = 1 - command.rect.y / height * 2, bottom = 1 - (command.rect.y + command.rect.height) / height * 2;
-    this.draw({ primitive: "triangles", texturing: "single", texture: { kind: "bind-image", image: command.image }, lighting: { kind: "vertex" },
-      vertices: [
-        { position: { x: left, y: top, z: 0, w: 1 }, texCoord: { x: command.uv.s1, y: command.uv.t1 }, color: this.color },
-        { position: { x: right, y: top, z: 0, w: 1 }, texCoord: { x: command.uv.s2, y: command.uv.t1 }, color: this.color },
-        { position: { x: right, y: bottom, z: 0, w: 1 }, texCoord: { x: command.uv.s2, y: command.uv.t2 }, color: this.color },
-        { position: { x: left, y: bottom, z: 0, w: 1 }, texCoord: { x: command.uv.s1, y: command.uv.t2 }, color: this.color },
-      ], indices: [0, 1, 2, 0, 2, 3], state: { blend: { source: "src-alpha", destination: "one-minus-src-alpha" },
-        depthTest: "always", depthWrite: false, alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null } });
-  }
-
   execute(frame: RenderFrame): undefined {
     this.writable();
     if (frame.owner.identity !== this.owner.identity || frame.owner.session !== this.owner.session || frame.owner.generation !== this.owner.generation)
       throw new Error("Frame belongs to another renderer lifetime");
     this.resize();
-    for (const command of frame.commands) {
-      switch (command.kind) {
-        case "draw-buffer": this.current.selectDrawBuffer(command.buffer, command.clear); break;
-        case "image-resource": this.image(command.operation); break;
-        case "set-color": this.color = command.color; break;
-        case "stretch-pic": this.picture(command); break;
-        case "view":
-          this.operations(command.view.beforeView);
-          this.current.beginView(command.view);
-          this.operations(command.view.operations);
-          break;
-        case "swap-buffers":
-          if (this.current instanceof SoftwareRenderer) this.current.finish();
-          if (this.captures.length !== 0) {
-            const pixels = this.current instanceof SoftwareRenderer ? this.current.pixels : this.current.readPixels();
-            for (const capture of this.captures.splice(0)) capture.resolve(pixels.slice());
-          }
-          if (this.current instanceof SoftwareRenderer) this.window.present(this.current.pixels);
-          else this.current.present();
-          break;
+    if (this.current instanceof WorkerRenderer) {
+      const captures = frame.commands.some(command => command.kind === "swap-buffers") ? this.captures.take() : [];
+      this.current.execute(frame.commands, captures, this.images.drainPendingOperations());
+      for (const command of frame.commands) if (command.kind === "set-color") this.color = { ...command.color };
+    } else {
+      for (const command of frame.commands) {
+        if (command.kind === "set-color") this.color = command.color;
+        this.executor.execute(command.kind === "swap-buffers" ? { kind: "swap-buffers", captures: this.captures.take() } : command);
       }
+      for (const operation of this.images.drainPendingOperations()) this.image(operation);
     }
-    for (const operation of this.images.drainPendingOperations()) this.image(operation);
     return undefined;
   }
-
   readPixels(): Uint8Array {
-    if (!(this.current instanceof SoftwareRenderer)) throw new Error("GL captures must be requested before presentation with captureNextFrame()");
-    this.current.finish();
-    return this.current.pixels.slice();
+    if (this.window.backend !== "cpu") throw new Error("GL captures must be requested before presentation with captureNextFrame()");
+    if (this.current instanceof WorkerRenderer) return this.current.readPixels().pixels;
+    if (!(this.current instanceof SoftwareRenderer)) throw new Error("CPU renderer backend is unavailable");
+    this.current.finish(); return this.current.pixels.slice();
   }
-
-  captureNextFrame(signal?: AbortSignal): Promise<Uint8Array> {
-    if (this.closed) return Promise.reject(new Error("Native renderer is closed"));
-    const abortReason = (): Error => { const reason: unknown = signal?.reason; return reason instanceof Error ? reason : new Error("Frame capture aborted"); };
-    if (signal?.aborted) return Promise.reject(abortReason());
-    return new Promise((resolve, reject) => {
-      const clear = (): void => { signal?.removeEventListener("abort", abort); };
-      const capture = { resolve: (pixels: Uint8Array): void => { clear(); resolve(pixels); },
-        reject: (reason: Error): void => { clear(); reject(reason); } };
-      const abort = (): void => {
-        const index = this.captures.indexOf(capture);
-        if (index >= 0) this.captures.splice(index, 1);
-        capture.reject(abortReason());
-      };
-      this.captures.push(capture);
-      signal?.addEventListener("abort", abort, { once: true });
-    });
+  captureNextFrame(signal?: AbortSignal): Promise<ImageLevel> {
+    return this.closed ? Promise.reject(new Error("Native renderer is closed")) : this.captures.request(signal);
   }
-
   close(): undefined {
     if (this.closed) return undefined;
     this.closed = true;
     const errors: unknown[] = [];
     try { this.pendingRestart?.discard(); } catch (error) { errors.push(error); }
-    for (const capture of this.captures.splice(0)) {
-      try { capture.reject(new Error("Renderer closed before the requested frame was presented")); } catch (error) { errors.push(error); }
-    }
-    try { this.images.close(); } catch (error) { errors.push(error); }
-    try { if (this.currentWindow.backend === "gl") this.currentWindow.makeCurrent(); } catch (error) { errors.push(error); }
+    this.captures.close();
+    try { if (this.currentWindow.backend === "gl" && !(this.current instanceof WorkerRenderer)) this.currentWindow.makeCurrent(); } catch (error) { errors.push(error); }
     try { this.current.close(); } catch (error) { errors.push(error); }
-    try { this.images.drainPendingOperations(); } catch (error) { errors.push(error); }
-    this.resident.clear();
-    try { this.window.close(); } catch (error) { errors.push(error); }
-    for (const retire of this.retirements) {
-      try { retire(); } catch (error) { errors.push(error); }
-    }
+    try { this.images.close(); this.images.drainPendingOperations(); } catch (error) { errors.push(error); }
+    this.journal.clear();
+    try { WorkerRenderer.withParkedContexts(() => this.window.close()); } catch (error) { errors.push(error); }
+    for (const retire of this.retirements) { try { retire(); } catch (error) { errors.push(error); } }
     if (errors.length !== 0) throw new AggregateError(errors, "Native renderer cleanup failed");
     return undefined;
   }

@@ -460,7 +460,15 @@ test("Q1 entity lights retain keyed precedence, rerelease colors and paused-fram
       const rerelease = content.catalog.require("q1-rerelease-id1").id;
       await effects.prepare(snapshot(1.1), [{ ...source, content: rerelease, effects: 16 | 32 }]);
       expect(frame().lights).toHaveLength(1); expect(frame().lights[0]?.color).toEqual({ x: 1, y: 0.25, z: 0.25 });
-      await effects.prepare(snapshot(1.2), [{ ...source, effects: 16 | 32 }]);
+      await effects.prepare(snapshot(1.15), [{ ...source, content: rerelease, effects: 16 | 32 | 64 }]);
+      const candle = frame().lights;
+      expect(candle).toHaveLength(1); expect(candle[0]?.origin).toEqual(source.origin);
+      expect(candle[0]?.color).toEqual({ x: 1, y: 192 / 255, z: 120 / 255 });
+      expect(candle[0]?.radius).toBeGreaterThanOrEqual(64); expect(candle[0]?.radius).toBeLessThanOrEqual(95);
+      await effects.prepare(snapshot(1.15), [{ ...source, content: rerelease, effects: 64 }]);
+      expect(frame().lights).toEqual(candle);
+      await effects.prepare(snapshot(1.16), []); expect(frame().lights).toHaveLength(0);
+      await effects.prepare(snapshot(1.2), [{ ...source, effects: 16 | 32 | 64 }]);
       expect(frame().lights).toHaveLength(0);
       effects.resetRound(); await effects.prepare(snapshot(0), [{ ...source, effects: 2 }]);
       expect(frame().lights[0]?.origin).toEqual({ x: 98, y: 0, z: 16 });

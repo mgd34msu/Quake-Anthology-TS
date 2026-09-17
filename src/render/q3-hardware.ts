@@ -1,5 +1,14 @@
 /** Q3 linux_glimp.c startup classification; the shared SDL context uses the ICD driver path. */
 export type Q3Hardware = "generic" | "3dfx" | "riva128" | "ragepro" | "permedia2";
+export function q3EffectHardware(read: () => Q3Hardware): {
+  readonly hardware: "generic" | "ragepro";
+  readonly hardwareType: "generic" | "rage-pro";
+} {
+  return {
+    get hardware() { return read() === "ragepro" ? "ragepro" : "generic"; },
+    get hardwareType() { return read() === "ragepro" ? "rage-pro" : "generic"; },
+  };
+}
 export function q3Hardware(renderer: string): Q3Hardware {
   const name = renderer.toLowerCase();
   if (name.includes("banshee") || name.includes("voodoo_graphics")) return "3dfx";

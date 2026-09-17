@@ -68,7 +68,8 @@ export async function buildWorkspace(directory: string, kind: BuildKind): Promis
     const builtEntries: BuiltEntry[] = [];
     for (const entry of entries) {
       const result = await Bun.build({
-        entrypoints: [join(snapshotPath, entry.source)],
+        entrypoints: [join(snapshotPath, entry.source), ...(kind === "runtime" ? [join(snapshotPath, "src/render/worker-entry.ts")] : [])],
+        naming: { entry: "[name].ts" },
         target: "bun",
         loader: { ".png": "file" },
         compile: { outfile: join(candidate, entry.executable), autoloadDotenv: false, autoloadBunfig: false },

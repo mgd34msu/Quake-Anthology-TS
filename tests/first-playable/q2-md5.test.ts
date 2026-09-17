@@ -84,7 +84,7 @@ test("application loader selects Q2 MD5 pairs and preserves rank, fallback and o
 
 for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.skipIf(process.env["QUAKE_MD5_RENDER"] !== "1")(`application-loaded Q2 MD5 renders real male, soldier, blaster and joint scales through ${backend}`, async () => {
   const f = await fixture();
-  const renderer = NativeRenderer.open({ renderer: backend, width: 320, height: 240, hidden: true, gamma: 1 }, f.owner);
+  const renderer = await NativeRenderer.open({ renderer: backend, width: 320, height: 240, hidden: true, gamma: 1 }, f.owner);
   try {
     const map = await f.required("maps/base1.bsp"), world = await WorldScene.load(decodeQ2Map(map.bytes), f.provider.shaders, { q2SkyName: "unit1_" });
     const scene = new SceneModelRenderer(f.provider, world), frames = new SceneFrameBuilder(f.images);
@@ -114,7 +114,7 @@ for (const backend of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) test.sk
         const batches = sceneModelBatches(scene.prepare([animated], input, options)); expect(batches.length).toBeGreaterThan(0);
         frames.begin(); frames.view({ target: input.target, time: input.time, viewport: camera.viewport, clear: input.clear,
           clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
-        const capture = renderer.captureNextFrame(); renderer.execute(frames.finish()); const pixels = await capture;
+        const capture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish()); const pixels = await capture;
         const visibleChannels = pixels.filter((value, index) => index % 4 !== 3 && value > 5).length;
         if (small && frame === 112) { expect(skeletal.frames[frame]?.joints.some(joint => joint.scale === 0)).toBe(true); expect(visibleChannels).toBe(0); }
         else expect(visibleChannels).toBeGreaterThan(100);

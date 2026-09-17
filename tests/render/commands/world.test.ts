@@ -286,9 +286,9 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
     target.execute(commands);
     if (fixture.map === "maps/q3test1.bsp" && process.env["QUAKE_BSP44_GL"] === "1") {
       const { NativeRenderer } = await import("../../../src/app/bootstrap/renderer.ts");
-      const renderer = NativeRenderer.open({ renderer: "gl", width: 160, height: 120, hidden: true, gamma: 1 }, owner);
+      const renderer = await NativeRenderer.open({ renderer: "gl", width: 160, height: 120, hidden: true, gamma: 1 }, owner);
       try {
-        const captured = renderer.captureNextFrame();
+        const captured = renderer.captureNextFrame().then(frame => frame.pixels);
         renderer.execute({ ...commands, commands: [...commands.commands, { kind: "swap-buffers" }] });
         const pixels = await captured;
         const diagnostics = renderer.diagnostics();
@@ -484,7 +484,7 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
               expect(movieBatches.every(batch => batch.lighting.kind === "vertex")).toBe(true);
             }
             frames.world(prepared);
-            const capture = renderer.captureNextFrame(); renderer.execute(frames.finish(true)); const pixels = await capture;
+            const capture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish(true)); const pixels = await capture;
             let total = 0; for (let offset = 0; offset < pixels.length; offset += 4) total += (pixels[offset] ?? 0) + (pixels[offset + 1] ?? 0) + (pixels[offset + 2] ?? 0);
             values.push(total);
             if (label === "unlit") {
@@ -496,11 +496,11 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
           return values;
         };
         let nativeLighting: number[] = [];
-        const drawControl = NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, firstOwner);
+        const drawControl = await NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, firstOwner);
         try {
           const frames = new SceneFrameBuilder(controlAssets.images); frames.begin();
           frames.world(control.prepareView({ camera, target: { kind: "preview", id: "stock-control" }, time: { kind: "milliseconds", value: 0 } }));
-          const capture = drawControl.captureNextFrame(); drawControl.execute(frames.finish(true));
+          const capture = drawControl.captureNextFrame().then(frame => frame.pixels); drawControl.execute(frames.finish(true));
           const pixels = await capture;
           if (process.env["QUAKE_SCENE_CAPTURE"] === "1") await Bun.write(`.artifacts/tmp/authored-video/${family}-${rendererKind}-stock.png`, encodePng(640, 400, pixels));
           if (family === "q2") nativeLighting = await lightingFrames(control, controlAssets.images, drawControl, "native");
@@ -511,7 +511,7 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
         await Bun.write(join(directory, "scripts", "fixture.shader"), `${name}\n{\n cull none\n {\n  videoMap mpteam1.roq\n  rgbGen identity\n  tcMod transform ${scaleS} 0 0 ${scaleT} ${-minS * scaleS} ${-minT * scaleT}\n }\n}\n`);
         const identity = createIdentityOwner("authored-video"), owner = { identity: Symbol("authored-video"), session: identity.session, generation: 0 };
         const assets = new ApplicationAssets(content, owner, { sample: () => now });
-        const renderer = NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
+        const renderer = await NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
         try {
           const scene = await assets.loadWorld(), surface = scene.surfaces[candidate.index];
           if (surface === undefined || surface.shader === null) throw new Error("Missing authored shader surface");
@@ -529,7 +529,7 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
             expect(provenance.resource.provenance.mount.identity.content).toBe(content.recipe.presentation.assets);
             expect(provenance.resource.requestedPath).toBe("video/mpteam1.roq");
             frames.world(prepared);
-            const capture = renderer.captureNextFrame(); renderer.execute(frames.finish(true)); const pixels = await capture;
+            const capture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish(true)); const pixels = await capture;
             if (time === 68 || time === 136) {
               hashes.push(new Bun.CryptoHasher("sha256").update(pixels).digest("hex"));
               const decoded = binding.source.playback.currentFrame;
@@ -548,7 +548,7 @@ for (const family of ["q1", "q2"] satisfies readonly ("q1" | "q2")[]) for (const
         if (family === "q2") for (const variant of [{ label: "authored", color: 1 }, { label: "colored", color: 0.5 }]) {
           await Bun.write(join(directory, "scripts", "fixture.shader"), `${name}\n{\n {\n map ${name}\n }\n {\n map $lightmap\n blendFunc filter\n rgbGen const ( ${variant.color} ${variant.color} ${variant.color} )\n alphaGen const 0.5\n }\n}\n`);
           const identity = createIdentityOwner("authored-lighting"), owner = { identity: Symbol("authored-lighting"), session: identity.session, generation: 0 };
-          const assets = new ApplicationAssets(content, owner), renderer = NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
+          const assets = new ApplicationAssets(content, owner), renderer = await NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
           try {
             const scene = await assets.loadWorld();
             const authored = await lightingFrames(scene, assets.images, renderer, variant.label);

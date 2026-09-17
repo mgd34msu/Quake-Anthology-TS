@@ -12,6 +12,7 @@ export function bindEffectsVolume(audio: UnifiedAudio, read: () => number): Sett
 }
 export function bindRendererSettings(options: {
   readonly current: () => SdlWindow["backend"];
+  readonly worker?: { read(): boolean; write(value: boolean): void };
   readonly apply: (backend: SdlWindow["backend"]) => void;
   readonly report: (message: string) => void;
   readonly enabled?: () => boolean;
@@ -21,7 +22,13 @@ export function bindRendererSettings(options: {
     const current = options.current();
     if (current !== active) { active = current; draft = current; }
   };
-  return [
+  const worker: SettingBinding[] = options.worker === undefined ? [] : [{ id: "ui:video:render-worker", category: "display", kind: "toggle", label: "Render worker",
+    enabled: () => options.enabled?.() ?? true, read: () => options.worker?.read() ?? false, write: value => {
+      if (!(options.enabled?.() ?? true)) return;
+      try { options.worker?.write(value); options.apply(options.current()); options.report("Render worker change queued."); }
+      catch (error) { options.report(error instanceof Error ? error.message : String(error)); }
+    } }];
+  return [...worker,
     { id: "ui:video:renderer", category: "display", kind: "choice", label: "Renderer",
       enabled: () => options.enabled?.() ?? true,
       read: () => { refresh(); return draft; }, choices: () => [{ id: "cpu", label: "CPU" }, { id: "gl", label: "OpenGL" }],
@@ -37,7 +44,8 @@ export function bindRendererSettings(options: {
 }
 
 /** Display controls use window pixels and the same output gamma on both renderers. */
-export function bindNativeVideoSettings(currentWindow: () => SdlWindow, registry: SettingCvars | null, report: (message: string) => void): readonly SettingBinding[] {
+export function bindNativeVideoSettings(currentWindow: () => SdlWindow, registry: SettingCvars | null, report: (message: string) => void,
+  mutate: (operation: () => void) => void = operation => operation()): readonly SettingBinding[] {
   let draftWindow = currentWindow();
   let width = String(draftWindow.logicalSize.width), height = String(draftWindow.logicalSize.height);
   const window = (): SdlWindow => {
@@ -62,7 +70,7 @@ export function bindNativeVideoSettings(currentWindow: () => SdlWindow, registry
   const resize = (w: number, h: number): void => {
     if (!validSize(w, h))
       throw new RangeError("Use a width of 320-8192 and a height of 200-8192 pixels.");
-    window().setSize(w, h); width = String(w); height = String(h);
+    mutate(() => window().setSize(w, h)); width = String(w); height = String(h);
   };
   const brightness: SettingBinding[] = registry === null ? [] : [{ id: "ui:video:brightness", category: "display", kind: "slider", label: "Brightness",
     minimum: 0.5, maximum: 3, step: 0.05, enabled: () => true, read: () => registry.variableValue("r_gamma"), write: value => { registry.set("r_gamma", String(value)); } },
@@ -70,7 +78,7 @@ export function bindNativeVideoSettings(currentWindow: () => SdlWindow, registry
       activate: () => { registry.set("r_gamma", "1"); } }];
   return [...brightness,
     { id: "ui:video:fullscreen", category: "display", kind: "toggle", label: "Borderless fullscreen", enabled: () => true,
-      read: () => window().fullscreen, write: value => apply(() => window().setFullscreen(value)) },
+      read: () => window().fullscreen, write: value => apply(() => mutate(() => window().setFullscreen(value))) },
     { id: "ui:video:resolution", category: "display", kind: "choice", label: "Window resolution", enabled: () => !window().fullscreen,
       read: () => `${window().logicalSize.width}x${window().logicalSize.height}`, choices,
       write: value => apply(() => { const selected = choices().find(choice => choice.id === value); if (selected === undefined) throw new RangeError("Unavailable resolution");
@@ -81,8 +89,8 @@ export function bindNativeVideoSettings(currentWindow: () => SdlWindow, registry
       read: () => { window(); return height; }, write: value => { window(); height = value; } },
     { id: "ui:video:custom-apply", category: "display", kind: "button", label: "Apply custom window size", enabled: () => !window().fullscreen && validSize(Number(width), Number(height)),
       activate: () => apply(() => resize(Number(width), Number(height))) },
-    { id: "ui:video:vsync", category: "display", kind: "toggle", label: "Vertical sync", enabled: () => window().backend === "gl",
-      read: () => window().backend === "gl" && window().swapInterval !== 0, write: (value: boolean) => apply(() => { const current = window(); if (current.backend === "gl") current.setSwapInterval(value ? 1 : 0); }) },
+    { id: "ui:video:vsync", category: "display", kind: "toggle", label: "Vertical sync", enabled: () => window().backend === "gl" && registry !== null,
+      read: () => window().backend === "gl" && (registry?.variableValue("r_swapInterval") ?? 0) !== 0, write: (value: boolean) => apply(() => { if (window().backend === "gl") registry?.set("r_swapInterval", value ? "1" : "0"); }) },
   ];
 }
 export interface LanguageChoice extends UiChoice {

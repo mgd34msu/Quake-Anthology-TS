@@ -1,4 +1,5 @@
 import { Q1MapFog } from "./q1-fog.ts";
+import { q3Hardware } from "../../render/q3-hardware.ts";
 import { prepareDebugShapes } from "../../render/scene/debug-shapes.ts";
 import { q1ChaseCamera, q1ViewCamera, q1ViewRectangle, type Q1ViewSettings } from "./q1-client-settings.ts";
 import type { DebugShapePresentationAccess } from "./simulation/types.ts";
@@ -93,6 +94,9 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly graphOverlay: ((draw: Draw2D, view: Rect) => void) | null = null,
     private readonly nativeQ2?: { readonly frame: () => NativeQ2HudFrame; readonly ownsEffects: boolean }) {
     this.layoutIndex = local.player.seat.id.index;
+    effects.bindRendererHardware(() => {
+      return q3Hardware(native.driver?.renderer ?? "");
+    });
     this.layoutCount = seatCount;
     this.q1Fog = assets.content.world.kind === "q1-bsp" ? new Q1MapFog(assets.content.world.entities, local.player.actor, assets.content.recipe.map.entities.content) : null;
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets, () => this.rerelease?.selectedLanguage(local.player.seat.id) ?? "english");

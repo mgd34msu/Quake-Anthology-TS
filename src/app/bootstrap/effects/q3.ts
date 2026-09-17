@@ -18,6 +18,7 @@ import type { DynamicLight } from "../../../materials/q3-lighting.ts";
 import { GameRandom } from "../../../core/game-numeric.ts";
 import { cross3, length3, vec4, normalize3OrZero, perpendicularVector, sub3, vec3 } from "../../../core/math.ts";
 import { ClientEffects } from "../../../content/q3/presentation/effects.ts";
+import { q3EffectHardware, type Q3Hardware } from "../../../render/q3-hardware.ts";
 import type { EffectMedia } from "../../../content/q3/presentation/effects.ts";
 import { LocalEntityPool, LocalEntitySystem } from "../../../content/q3/presentation/local-entities.ts";
 import type { LocalEntityMedia } from "../../../content/q3/presentation/local-entities.ts";
@@ -83,7 +84,9 @@ export class Q3ApplicationEffects {
     readonly system: LocalEntitySystem, readonly marks: ImpactMarkSystem, readonly shaders: ReadonlyMap<string, RegisteredSceneMaterial>,
     readonly renderer: SceneModelRenderer, readonly sounds: SourceEffectSound[], readonly loadWeapons: () => Promise<WeaponEffects>, bloodOwners: WeakMap<RefEntity, ActorId>) { this.bloodOwners = bloodOwners; }
 
-  static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId, isPlayer: (actor: ActorId) => boolean, preload?: "character" | "weapons"): Promise<Q3ApplicationEffects> {
+  static async create(assets: ApplicationAssets, queries: SceneQueries, content: ContentId, isPlayer: (actor: ActorId) => boolean,
+    preload?: "character" | "weapons", readHardware: () => Q3Hardware = () => "generic"): Promise<Q3ApplicationEffects> {
+    const hardware = q3EffectHardware(readHardware);
     const provider = await assets.provider(content), product: Product = assets.content.catalog.product(content).expectation.campaign === "missionpack" ? "missionpack" : "baseq3";
     const renderer = new SceneModelRenderer(provider, assets.world);
     const bank = new SoundBank(provider.mounts), sounds: SourceEffectSound[] = [], names = new Map<PcmSound, string>(), shaders = new Map<string, RegisteredSceneMaterial>();
@@ -123,7 +126,7 @@ export class Q3ApplicationEffects {
     } } };
     await shader("smokePuff");
     const pool = new LocalEntityPool(product), random = new GameRandom();
-    const effects = new ClientEffects(state, pool, media, { noProjectileTrail: false, blood: true, gibs: true, scorePlum: true, hardware: "generic" },
+    const effects = new ClientEffects(state, pool, media, { noProjectileTrail: false, blood: true, gibs: true, scorePlum: true, get hardware() { return hardware.hardware; } },
       { randomInteger: () => random.rand(), startSound: (origin, _entity, channel, pcm) => sourceSound(pcm, origin, channel, 1) });
     const marks = new ImpactMarkSystem(worldMarkProjector(assets.world), { clock: () => state.time, enabled: () => true, energyShader: () => null });
     const localMedia: LocalEntityMedia = { bloodTrailShader: await shader("bloodTrail"), bloodMarkShader: await shader("bloodMark"), burnMarkShader: await shader("burnMark"),
@@ -156,7 +159,7 @@ export class Q3ApplicationEffects {
       const particles = new ParticleSystem({ get time() { return state.time; }, refdef: view, snap: null }, {
         animations: await loadParticleAnimations({ registerShader: shader }),
         media: { tracerShader: await shader("gfx/misc/tracer"), smokePuffShader: await shader("smokePuff"), waterBubbleShader: common.waterBubbleShader },
-        prediction: shared.prediction, random, hardwareType: "generic", configString: () => "", print: message => { throw new Error(message); },
+        prediction: shared.prediction, random, get hardwareType() { return hardware.hardwareType; }, configString: () => "", print: message => { throw new Error(message); },
       });
       const missionSound = (path: string) => product === "missionpack" ? sound(path) : Promise.resolve(null);
       const host: ImpactHost = {

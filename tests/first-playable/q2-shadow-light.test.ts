@@ -104,7 +104,7 @@ for (const game of ["q1-classic-id1", "q2-rerelease-baseq2", "q3-baseq3"]) for (
     if (command.kind !== "run") throw new Error("Expected render fixture");
     const content = await loadApplicationContent(command.options), identity = createIdentityOwner(`flashlight-${game}-${backend}`);
     const owner = { identity: Symbol("flashlight-render"), session: identity.session, generation: 0 };
-    const assets = new ApplicationAssets(content, owner), renderer = NativeRenderer.open({ renderer: backend, width: 96, height: 96, hidden: true, gamma: 1 }, owner);
+    const assets = new ApplicationAssets(content, owner), renderer = await NativeRenderer.open({ renderer: backend, width: 96, height: 96, hidden: true, gamma: 1 }, owner);
     try {
       const world = await assets.loadWorld();
       const surface = world.surfaces.find(surface => surface.geometry.vertices.length >= 3 && surface.geometry.vertices.every(vertex => Math.abs(vertex.normal.z) < 0.5)
@@ -129,7 +129,7 @@ for (const game of ["q1-classic-id1", "q2-rerelease-baseq2", "q3-baseq3"]) for (
         if (mode === "unshadowed") expect(shadows.lighting.lights[0]?.cone).not.toBeNull();
         frames.begin();
         frames.world(world.prepareView(enabled ? { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations } : input));
-        const capture = renderer.captureNextFrame(); renderer.execute(frames.finish(true)); const pixels = await capture; captures.push(pixels);
+        const capture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute(frames.finish(true)); const pixels = await capture; captures.push(pixels);
         const output = process.env["QUALIFICATION_OUTPUT"];
         if (output !== undefined) {
           const { encodePng } = await import("../../src/formats/images/png.ts");

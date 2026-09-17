@@ -34,6 +34,8 @@ function loadSdlRenderContext() {
     SDL_GL_GetDrawableSize: { args: ["ptr", "buffer", "buffer"], returns: "void" },
     SDL_GL_GetProcAddress: { args: ["buffer"], returns: "ptr" },
     SDL_GL_SwapWindow: { args: ["ptr"], returns: "void" },
+    SDL_GL_SetSwapInterval: { args: ["i32"], returns: "i32" },
+    SDL_GL_GetSwapInterval: { args: [], returns: "i32" },
   }));
 }
 let library: ReturnType<typeof loadSdlRenderContext> | null = null;
@@ -47,12 +49,14 @@ function pointer(value: Pointer | null, operation: string): Pointer {
 }
 function cString(value: string): Buffer { return Buffer.from(`${value}\0`); }
 
-const offered = 0, adopted = 1, released = 2, restoring = 3, restored = 4;
+const offered = 0, adopted = 1, released = 2, restoring = 3, restored = 4, parked = 5;
 
 /** The window owner keeps this lease until cancellation or worker release. */
 export class SdlRenderContextLease {
   private constructor(private readonly window: Pointer, private readonly context: Pointer,
     readonly transfer: SdlRenderContextTransfer, private readonly state: Int32Array) {}
+
+  get parked(): boolean { return Atomics.load(this.state, 0) === parked; }
 
   static detach(window: Pointer, context: Pointer, windowId: number): SdlRenderContextLease {
     if (!isMainThread) throw new Error("SDL window lifetime belongs to the main thread");
@@ -138,6 +142,24 @@ export class SdlWorkerRenderContext implements SdlRenderContext {
     checked(sdl().SDL_GL_MakeCurrent(this.window, this.renderEnabled ? this.context : null), "SDL_GL_MakeCurrent worker");
   }
 
+  park(): void {
+    if (this.closed) throw new Error("SDL worker render context is released");
+    if (Atomics.load(this.state, 0) === parked) return;
+    if (Atomics.load(this.state, 0) !== adopted) throw new Error("SDL worker render context is not adopted");
+    checked(sdl().SDL_GL_MakeCurrent(this.window, null), "SDL_GL_MakeCurrent worker park");
+    Atomics.store(this.state, 0, parked);
+    Atomics.notify(this.state, 0);
+  }
+
+  resume(): void {
+    if (this.closed) throw new Error("SDL worker render context is released");
+    if (Atomics.load(this.state, 0) === adopted) return;
+    if (Atomics.compareExchange(this.state, 0, parked, adopted) !== parked)
+      throw new Error("SDL worker render context is not parked");
+    try { checked(sdl().SDL_GL_MakeCurrent(this.window, this.renderEnabled ? this.context : null), "SDL_GL_MakeCurrent worker resume"); }
+    catch (error) { Atomics.store(this.state, 0, parked); throw error; }
+  }
+
   get renderingEnabled(): boolean { return this.renderEnabled; }
 
   setRenderingEnabled(enabled: boolean): void {
@@ -178,6 +200,18 @@ export class SdlWorkerRenderContext implements SdlRenderContext {
     if (!this.renderEnabled) checked(sdl().SDL_GL_MakeCurrent(this.window, this.context), "SDL_GL_MakeCurrent worker swap");
     sdl().SDL_GL_SwapWindow(this.window);
     if (!this.renderEnabled) checked(sdl().SDL_GL_MakeCurrent(this.window, null), "SDL_GL_MakeCurrent worker restore diagnostic");
+  }
+
+  setSwapInterval(interval: -1 | 0 | 1): void {
+    this.makeCurrent();
+    checked(sdl().SDL_GL_SetSwapInterval(interval), "SDL_GL_SetSwapInterval worker");
+  }
+
+  get swapInterval(): -1 | 0 | 1 {
+    this.makeCurrent();
+    const value = sdl().SDL_GL_GetSwapInterval();
+    if (value !== -1 && value !== 0 && value !== 1) throw new Error(`Unsupported SDL swap interval: ${value}`);
+    return value;
   }
 
   release(): void {

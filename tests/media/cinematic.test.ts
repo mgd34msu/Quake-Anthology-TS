@@ -272,7 +272,7 @@ for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) te
   const identity = createIdentityOwner(`world-video-${rendererKind}`), owner = { identity: Symbol("world-video"), session: identity.session, generation: 0 };
   let now = 0;
   const assets = new ApplicationAssets(content, owner, { sample: () => now });
-  const renderer = NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
+  const renderer = await NativeRenderer.open({ renderer: rendererKind, width: 640, height: 400, hidden: true, gamma: 1 }, owner);
   const frames = new SceneFrameBuilder(assets.images);
   try {
     const world = content.world;
@@ -304,7 +304,7 @@ for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) te
       if (source?.kind !== "dynamic-image" || !(source.source instanceof MaterialCinematic)) throw new Error("Missing actual shared material movie");
       if (sharedMovie === null) sharedMovie = source.source; else expect(source.source).toBe(sharedMovie);
       frames.world(prepared);
-      const capture = renderer.captureNextFrame();
+      const capture = renderer.captureNextFrame().then(frame => frame.pixels);
       try { renderer.execute(frames.finish(true)); } catch (error: unknown) { renderer.close(); await capture.catch(() => undefined); throw error; }
       const pixels = await capture;
       if (time === 68 || time === 136) {
@@ -341,7 +341,7 @@ for (const rendererKind of ["cpu", "gl"] satisfies readonly ("cpu" | "gl")[]) te
     const draw = renderer.backend.prepareGeometry(paired);
     try { draw.begin(); draw.applyTexture(0, paired.texture); draw.applyTexture(1, paired.secondTexture.binding); draw.draw(); }
     finally { draw.cleanup(); }
-    const pairCapture = renderer.captureNextFrame(); renderer.execute({ owner, sequence: 7, commands: [{ kind: "swap-buffers" }] });
+    const pairCapture = renderer.captureNextFrame().then(frame => frame.pixels); renderer.execute({ owner, sequence: 7, commands: [{ kind: "swap-buffers" }] });
     const pairPixels = await pairCapture, centerPixel = (200 * 640 + 320) * 4;
     expect(pairPixels[centerPixel]).toBeGreaterThan(200);
     expect(pairPixels[centerPixel + 1]).toBeGreaterThan(200);

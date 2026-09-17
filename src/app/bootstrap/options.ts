@@ -28,6 +28,7 @@ export interface ApplicationOptions {
   readonly character: GameFamily;
   readonly characterModel: string;
   readonly renderer: "cpu" | "gl";
+  readonly renderWorker?: boolean;
   readonly rendererSelection?: "default" | "explicit";
   readonly gamma: number;
   readonly displayOverrides?: { readonly width?: number; readonly height?: number; readonly gamma?: number };
@@ -67,6 +68,7 @@ Usage: bun run src/main.ts [options]
   --character q1|q2|q3       Player character provider
   --model NAME               Character model (e.g. sarge or male)
   --renderer cpu|gl          Renderer (default gl)
+  --render-worker 0|1       Execute rendering on a worker (default 0)
   --gamma N                 Display gamma, 0.5 through 3 (default 1; higher is brighter)
   --width N --height N       Window dimensions (default 960 by 600)
   --seats N                  Local seats, 1 through 4
@@ -129,7 +131,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       const command = readStartupCommand(argv, index); startupCommands.push(command.text); index = command.end; continue;
     }
     if (flag === "--menu") { menu = true; continue; }
-    if (flag !== undefined && !["--content-root", "--user-content-root", "--renderer", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
+    if (flag !== undefined && !["--content-root", "--user-content-root", "--renderer", "--render-worker", "--gamma", "--width", "--height", "--hidden", "--list-content"].includes(flag)) explicitLaunch = true;
     if (flag === "--help" || flag === "-h") return { kind: "help" };
     if (flag === "--dedicated") { options = { ...options, dedicated: true }; continue; }
     if (flag === "--hidden") { options = { ...options, hidden: true }; continue; }
@@ -165,6 +167,9 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--model":
         if (!/^[a-zA-Z0-9_-]+$/.test(value)) throw new Error(`Invalid character model: ${value}`);
         options = { ...options, characterModel: value }; break;
+      case "--render-worker":
+        if (value !== "0" && value !== "1") throw new RangeError("Render worker must be 0 or 1");
+        options = { ...options, renderWorker: value === "1" }; break;
       case "--renderer":
         if (value !== "cpu" && value !== "gl") throw new Error(`Unknown renderer: ${value}`);
         options = { ...options, renderer: value, rendererSelection: "explicit" }; break;

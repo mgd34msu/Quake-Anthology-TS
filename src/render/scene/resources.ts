@@ -100,6 +100,18 @@ export class SceneImageRegistry {
     return result;
   }
 
+  /** Reached render callbacks must not consume a later frontend frame's queue. */
+  isolatePendingOperations<T>(operation: () => T, collect: (operations: readonly ImageResourceOperation[]) => void): T {
+    const previous = this.lifetime.operations;
+    this.lifetime.operations = [];
+    try { return operation(); }
+    finally {
+      const reached = this.lifetime.operations;
+      this.lifetime.operations = previous;
+      collect(reached);
+    }
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;

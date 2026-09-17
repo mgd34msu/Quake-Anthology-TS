@@ -13,6 +13,7 @@ export interface PreparedVideoPresentation {
 
 export interface VideoRestartHost {
   capture(): ApplicationCapture | null;
+  renderWorker?(): boolean;
   prepare(): Promise<PreparedVideoPresentation | null>;
   publishWindow(window: SdlWindow): void;
   published(kind: "cpu" | "gl"): void | Promise<void>;
@@ -23,7 +24,7 @@ export interface VideoRestartHost {
 
 /** Video requests run between source frames on the retained client. */
 export class ApplicationVideoRestart {
-  private requested: { readonly kind: "cpu" | "gl"; readonly source?: CommandContext } | null = null;
+  private requested: { readonly kind: "cpu" | "gl"; readonly renderWorker: boolean; readonly source?: CommandContext } | null = null;
   private running = false;
   private closed = false;
   private unregister: (() => void) | null = null;
@@ -36,7 +37,7 @@ export class ApplicationVideoRestart {
 
   request(kind = this.renderer.window.backend, source?: CommandContext): void {
     if (this.closed) throw new Error("Video restart owner has retired");
-    this.requested = { kind, ...(source === undefined ? {} : { source }) };
+    this.requested = { kind, renderWorker: this.host.renderWorker?.() ?? this.renderer.renderWorker, ...(source === undefined ? {} : { source }) };
   }
 
   register(commands: CommandBuffer): void {
@@ -63,14 +64,14 @@ export class ApplicationVideoRestart {
     if (this.closed || request === null || this.host.capture()?.pendingReadback) return false;
     const { kind, source } = request;
     this.requested = null; this.running = true;
-    let surface: ReturnType<NativeRenderer["prepareRestart"]> | null = null;
+    let surface: Awaited<ReturnType<NativeRenderer["prepareRestart"]>> | null = null;
     let presentation: PreparedVideoPresentation | null = null;
     let retire: (() => void) | null = null;
     const previousWindow = this.renderer.window;
     let inputPublished = false;
     try {
       await this.host.capture()?.drain();
-      surface = this.renderer.prepareRestart(kind);
+      surface = await this.renderer.prepareRestart(kind, request.renderWorker);
       presentation = await this.host.prepare();
       if (this.closed) throw new Error("Video restart was cancelled during preparation");
       presentation?.validatePublication();

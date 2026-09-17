@@ -125,7 +125,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     }
   }
 
-  constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput,
+  constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput, mutateWindow: (operation: () => void) => void,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
     private readonly command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi, private readonly guestUi = false, teamArena?: TeamArenaResultService, options?: { readonly baseArena?: BaseArenaMenuService; readonly gameplay?: GameplaySettingsSource; readonly localize?: (content: ContentId, text: string, args?: readonly string[]) => Promise<string> }) {
     const seat = local.player.seat.id;
@@ -172,9 +172,10 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     const shared = input.sharedSettings();
     const reportDisplay = (message: string): void => local.console.print(`${message}\n`);
     const display = [...bindRendererSettings({ current: () => input.window.backend, report: reportDisplay,
+      ...(shared === null ? {} : { worker: { read: () => shared.variableValue("r_smp") !== 0, write: (value: boolean) => { shared.set("r_smp", value ? "1" : "0"); } } }),
       apply: backend => input.commands.append(`vid_restart ${backend}\n`, { session: seat.session,
         origin: { kind: "local-seat", seat, client: local.player.seat.client.id } }) }),
-      ...bindNativeVideoSettings(() => input.window, shared, reportDisplay)];
+      ...bindNativeVideoSettings(() => input.window, shared, reportDisplay, mutateWindow)];
     const images = shared === null ? [] : [...bindImageSettings(shared), ...bindModelSettings(shared), ...bindConsoleSettings(shared)];
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",

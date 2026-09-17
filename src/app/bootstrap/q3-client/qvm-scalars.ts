@@ -5,7 +5,6 @@ import type { Vec3 } from '../../../contracts/math.ts';
 import type { LightingSample } from '../../../materials/q3-lighting.ts';
 import { QvmCgameImport, QvmUiImport } from '../../../compat/qvm/abi.ts';
 import type { QvmHostCall, QvmHostResult } from '../../../compat/qvm/syscalls.ts';
-import { GlRenderer } from '../../../render/gl/renderer.ts';
 import { q3Hardware, q3HardwareNumber } from '../../../render/q3-hardware.ts';
 import { keynumToString } from '../../../input/keys.ts';
 import { KeyCode } from '../../../input/key-codes.ts';
@@ -20,7 +19,7 @@ import type { SeatInput } from '../../../input/seat.ts';
 export interface QvmClientInput extends BindingCommandSeat, Pick<SeatInput, "isDown"> { clearStates(): void; }
 
 export interface QvmApplicationScalarOptions {
-  readonly renderer: Pick<NativeRenderer, "backend">;
+  readonly renderer: Pick<NativeRenderer, "backend" | "driver" | "glConfig">;
   viewport(): { readonly width: number; readonly height: number };
   readonly local: LocalInput;
   readonly input: QvmClientInput;
@@ -72,13 +71,13 @@ export class QvmApplicationScalars {
     if (code === (ui ? QvmUiImport.UI_GETGLCONFIG : QvmCgameImport.CG_GETGLCONFIG)) {
       const pointer = words.getInt32(4, true), record = guest.view(pointer, 11332), renderer = o.renderer.backend, viewport = o.viewport();
       guest.span(pointer, 11332).fill(0);
-      const gl = renderer instanceof GlRenderer ? renderer : null;
-      guest.writeString(pointer, gl?.driver.renderer ?? 'Quake Anthology software renderer', 1024);
-      guest.writeString(pointer + 1024, gl?.driver.vendor ?? 'Quake Anthology', 1024);
-      guest.writeString(pointer + 2048, gl?.driver.version ?? 'software', 1024);
+      const gl = o.renderer.glConfig, driver = o.renderer.driver;
+      guest.writeString(pointer, driver?.renderer ?? 'Quake Anthology software renderer', 1024);
+      guest.writeString(pointer + 1024, driver?.vendor ?? 'Quake Anthology', 1024);
+      guest.writeString(pointer + 2048, driver?.version ?? 'software', 1024);
       record.setInt32(11264, gl?.maxTextureSize ?? 0, true); record.setInt32(11268, gl?.textureUnits ?? 0, true);
       record.setInt32(11272, gl?.colorBits ?? 24, true); record.setInt32(11276, gl?.depthBits ?? 64, true); record.setInt32(11280, renderer.stencilBits, true);
-      record.setInt32(11288, q3HardwareNumber(q3Hardware(gl?.driver.renderer ?? "")), true);
+      record.setInt32(11288, q3HardwareNumber(q3Hardware(driver?.renderer ?? "")), true);
       record.setInt32(11304, viewport.width, true); record.setInt32(11308, viewport.height, true);
       record.setFloat32(11312, viewport.width / viewport.height, true); record.setInt32(11324, Number(gl?.stereoEnabled ?? false), true);
       return 0;

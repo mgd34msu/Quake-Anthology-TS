@@ -432,7 +432,7 @@ export class SdlWindow {
 
   private static requireWindowListOwnership(): void {
     for (const window of windows.values()) {
-      if (window.renderContextLease !== null) throw new Error("SDL window list is reserved for the render worker");
+      if (window.renderContextLease !== null && !window.renderContextLease.parked) throw new Error("SDL window list is reserved for the render worker");
     }
   }
 
@@ -643,13 +643,13 @@ export class SdlWindow {
       if (!Number.isInteger(dimension) || dimension <= 0 || dimension > 16384)
         throw new RangeError("SDL window dimensions must be integers in 1..16384");
     }
-    if (this.renderContextLease !== null) throw new Error("SDL render context is reserved for the worker");
+    if (this.renderContextLease !== null && !this.renderContextLease.parked) throw new Error("SDL render context is reserved for the worker");
     sdl().SDL_SetWindowSize(this.opened().window, width, height);
   }
 
   get fullscreen(): boolean { return (this.flags & 1) !== 0; }
   setFullscreen(enabled: boolean): void {
-    if (this.renderContextLease !== null) throw new Error("SDL render context is reserved for the worker");
+    if (this.renderContextLease !== null && !this.renderContextLease.parked) throw new Error("SDL render context is reserved for the worker");
     checked(sdl().SDL_SetWindowFullscreen(this.opened().window, enabled ? 0x1001 : 0), "SDL_SetWindowFullscreen");
   }
 

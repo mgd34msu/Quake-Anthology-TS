@@ -687,7 +687,7 @@ export class Application {
           if (startup === null && ownership.kind === "owned") await application.viewSettings.load(application.inputConfig);
           const frontend = application;
           application.imageSettings ??= await ApplicationImageSettings.open({ audioOutputFormat: (await loadAudioSettings(application.inputConfig)).outputFormat ?? defaultAudioOutputFormat, deferPersistence: true, context: { session: session.session, origin: { kind: "local-console" } },
-            dialect: application.sourceDialect(), gamma: options.gamma, ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
+            dialect: application.sourceDialect(), gamma: options.gamma, ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }), ...(options.displayOverrides === undefined ? {} : { displayOverrides: options.displayOverrides }), ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => {
               host.print(text); for (const local of frontend.graphical?.input.locals ?? []) local.console.print(text);
             } });
           application.releaseViewCvars = application.imageSettings.bindViewSettings(application.viewSettings);
@@ -1412,7 +1412,7 @@ export class Application {
       const font = await assets.loadConsoleFont(), typography = await assets.loadMenuTypography();
       const characters = this.options.character === "q3" ? await loadQ3Character(await this.content.forContent(this.content.recipe.character.appearance.content),
         { model: this.options.characterModel, skin: "default", headModel: "", headSkin: "default", team: null, teamName: "" }) : null;
-      renderer = client?.renderer ?? NativeRenderer.open(this.host.loading?.deferWindowVisibility ? { ...this.options, hidden: true } : this.options, owner, rootImages);
+      renderer = client?.renderer ?? await NativeRenderer.open({ ...this.options, renderWorker: (this.imageSettings?.cvars.variableValue("r_smp") ?? 0) !== 0, ...(this.host.loading?.deferWindowVisibility ? { hidden: true } : {}) }, owner, rootImages);
       if (client === null) await this.imageSettings?.refreshDisplay(renderer);
       const players: LocalPlayer[] = [];
       if (restoring) for (const seat of this.localSeats.values()) {
@@ -1510,7 +1510,7 @@ export class Application {
         if (restoring && sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
         const nativeSeat = await this.prepareNativeQ2Seat(local, assets, this.simulation, this.clientCvars.get(local.player.seat.id));
         if (nativeSeat !== null) nativeQ2.set(local.player.seat.id, nativeSeat);
-        const ui = new ApplicationSeatUi(local, menuArt, inputOwner, this.simulation, font, audioOwner, () => this.requestQuit(),
+        const ui = new ApplicationSeatUi(local, menuArt, inputOwner, operation => native.mutateWindow(operation), this.simulation, font, audioOwner, () => this.requestQuit(),
           (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => this.simulation.serverSettings(), store: this.serverProfileStore },
           await rerelease.languageBinding(local.player.seat.id, this.content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(this.simulation, this.options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(this.simulation, local.player.seat), this.uiSourceOptions(this.simulation, rerelease, local.player.seat.id));
         const presentation = new WorldSeatPresentation(local, assets, native, this.simulation, this.options.seats, font, characters, ui, nativeSeat?.effects ?? worldEffects, sourceClient?.client ?? null, rerelease, () => this.imageSettings?.cvars.variableValue("gl_debug_distfrac") ?? 0.004, () => this.viewSettings.fieldOfView, { lines: () => this.simulation.debugLines(), lineWidth: () => this.imageSettings?.debugLineWidth ?? 2 }, () => this.imageSettings?.cvars.variableValue("con_scale") ?? 0, () => readQ1ViewSettings(this.imageSettings?.cvars ?? null, this.sourceDialect()), () => (this.imageSettings?.cvars.variableValue("r_shadows") ?? 0) !== 0, camera => this.tools?.applyCamera(camera) ?? camera, await this.createDebugGraphOverlay(assets), nativeSeat?.descriptor);
@@ -1523,6 +1523,7 @@ export class Application {
       if (client === null) {
         this.capture.activate();
         const video = new ApplicationVideoRestart(renderer, {
+          renderWorker: () => (this.imageSettings?.cvars.variableValue("r_smp") ?? 0) !== 0,
           capture: () => this.capture, prepare: () => this.prepareVideoRestart(),
           publishWindow: window => { const current = this.graphical; if (current === null) throw new Error("Video input has retired"); current.input.publishWindow(window); },
           published: renderer => { this.launchOptions = { ...this.launchOptions, renderer }; },
@@ -2361,7 +2362,7 @@ export class Application {
           if (sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
           const nativeSeat = await this.prepareNativeQ2Seat(local, worldAssets, current, nextClientCvars.get(local.player.seat.id));
           if (nativeSeat !== null) nextNativeQ2.set(local.player.seat.id, nativeSeat);
-          const ui = new ApplicationSeatUi(local, menuArt, input, current, font, audio, () => this.requestQuit(),
+          const ui = new ApplicationSeatUi(local, menuArt, input, operation => previous.renderer.mutateWindow(operation), current, font, audio, () => this.requestQuit(),
             (name, args) => this.queueCommand(name, args, local.player.seat.id), typography, { bindings: () => current.serverSettings(), store: this.serverProfileStore },
             await rerelease.languageBinding(local.player.seat.id, content.recipe.map.entities.content, error => local.console.print(`Language reload failed: ${String(error)}\n`)), this.saveMenu(current, options), this.viewSettings.binding(), this.host.llm, sourceClient?.kind === "qvm", this.teamArenaResults(current, local.player.seat), this.uiSourceOptions(current, rerelease, local.player.seat.id));
           const preference = preferences[index]; if (preference !== undefined) ui.preferences.values = preference;
@@ -3010,7 +3011,7 @@ export class Application {
         if(this.viewSettings.override!==null){if(sourceClient?.kind!=="qvm")this.simulation.setPlayerFieldOfView(local.player.actor,this.viewSettings.fieldOfView,"change");sourceClient?.client.cvars.set("cg_fov",String(this.viewSettings.fieldOfView));}
         const nativeSeat = await this.prepareNativeQ2Seat(local, graphical.assets, this.simulation, this.clientCvars.get(local.player.seat.id));
         stagedNativeSeat = nativeSeat;
-        const ui=new ApplicationSeatUi(local,graphical.art,graphical.input,this.simulation,font,graphical.audio,()=>this.requestQuit(),
+        const ui=new ApplicationSeatUi(local,graphical.art,graphical.input,operation=>graphical.renderer.mutateWindow(operation),this.simulation,font,graphical.audio,()=>this.requestQuit(),
           (name,args)=>this.queueCommand(name,args,local.player.seat.id),typography,{bindings:()=>this.simulation.serverSettings(),store:this.serverProfileStore},
           await graphical.rerelease.languageBinding(local.player.seat.id,this.content.recipe.map.entities.content,error=>local.console.print(`Language reload failed: ${String(error)}\n`)),this.saveMenu(this.simulation,this.options),this.viewSettings.binding(),this.host.llm,sourceClient?.kind==="qvm",this.teamArenaResults(this.simulation,local.player.seat),this.uiSourceOptions(this.simulation,graphical.rerelease,local.player.seat.id));
         stagedUi=ui;
@@ -3600,7 +3601,7 @@ export class Application {
 
   captureNextFrame(): Promise<Uint8Array> {
     if (this.graphical === null) return Promise.reject(new Error("Dedicated applications have no framebuffer"));
-    return this.graphical.renderer.captureNextFrame();
+    return this.graphical.renderer.captureNextFrame().then(frame => frame.pixels);
   }
 
   close(): Promise<void> {

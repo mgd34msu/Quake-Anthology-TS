@@ -261,7 +261,7 @@ export class StartupApplication {
       const fontSource = font.font.classic.picture.image.source;
       if (fontSource.kind !== "resource") throw new Error("Startup font has no mounted resource identity");
       art = await loadNativeUiArt(fontSource.resource.id, images, loadMenuArtImage);
-      renderer = NativeRenderer.open(options, owner, images);
+      renderer = await NativeRenderer.open({ ...options, renderWorker: imageSettings.cvars.variableValue("r_smp") !== 0 }, owner, images);
       const native = renderer;
       await imageSettings.refreshDisplay(renderer);
       controllers = SdlControllers.open();
@@ -306,8 +306,9 @@ export class StartupApplication {
           ...bindGamepadSettings(() => this.client?.prepared.seats[0]?.input ?? primary.input),
           ...bindAudioGeometrySettings(imageSettings.cvars),
           ...bindMusicPlaylistSettings(imageSettings.cvars, () => activeAudio.musicTracks),
-          ...bindNativeVideoSettings(() => native.window, imageSettings.cvars, message => this.graphics?.menu.setStatus(message)),
-          ...bindRendererSettings({ current: () => native.window.backend, enabled: () => this.graphics !== null && !this.graphics.menu.isBusy,
+          ...bindNativeVideoSettings(() => native.window, imageSettings.cvars, message => this.graphics?.menu.setStatus(message), operation => native.mutateWindow(operation)),
+          ...bindRendererSettings({ current: () => native.window.backend,
+            worker: { read: () => imageSettings.cvars.variableValue("r_smp") !== 0, write: value => { imageSettings.cvars.set("r_smp", value ? "1" : "0"); } }, enabled: () => this.graphics !== null && !this.graphics.menu.isBusy,
             report: message => this.graphics?.menu.setStatus(message), apply: backend => {
               const client = this.captureClient(), primary = client.locals[0];
               if (primary === undefined) throw new Error("Renderer selection requires the retained primary seat");
@@ -392,6 +393,7 @@ export class StartupApplication {
           this.host.print(text); if (local !== undefined) client.consoles.get(local.seat)?.print(text); },
       }, native);
       const videoRestart = new ApplicationVideoRestart(native, {
+        renderWorker: () => imageSettings.cvars.variableValue("r_smp") !== 0,
         capture: () => capture,
         prepare: async () => await this.client?.source.current?.prepareVideoRestart() ?? null,
         publishWindow: window => {
@@ -465,7 +467,7 @@ export class StartupApplication {
   }
   requestQuit(): void { this.stopping = true; this.game?.requestQuit(); this.remote?.requestQuit(); }
   readPixels(): Uint8Array { if (this.graphics === null) throw new Error("Startup menu is not visible"); return this.graphics.renderer.readPixels(); }
-  captureNextFrame(): Promise<Uint8Array> { if (this.graphics === null) return Promise.reject(new Error("Startup menu is not visible")); return this.graphics.renderer.captureNextFrame(); }
+  captureNextFrame(): Promise<Uint8Array> { if (this.graphics === null) return Promise.reject(new Error("Startup menu is not visible")); return this.graphics.renderer.captureNextFrame().then(frame => frame.pixels); }
 
   private bindDemoCommands(prepared: PreparedStartup): void {
     const recording = new ClientDemoRecording({

@@ -73,8 +73,7 @@ export class ApplicationCapture {
     const controller = new AbortController();
     this.reads.add(controller);
     try {
-      const pixels = await this.renderer.captureNextFrame(controller.signal);
-      return { width: this.renderer.backend.width, height: this.renderer.backend.height, pixels };
+      return await this.renderer.captureNextFrame(controller.signal);
     } finally { this.reads.delete(controller); }
   }
 
