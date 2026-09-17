@@ -25,7 +25,7 @@ test('native QuakeWorld Application hosts real source players, movement, weapons
         const launch = parseApplicationCommand(['--game', 'q1-quakeworld', '--map', 'e1m1', '--movement', 'q1', '--character', 'q1', '--dedicated', '--listen', '0', '--bind', '127.0.0.1', '--user-content-root', root]);
         if (launch.kind !== 'run') throw new Error('Missing native host options');
         const app = await Application.open(launch.options, { print: text => { prints.push(text); } }); application = app;
-        const address = app.networkAddress, source = app.simulation.quakecSource(); if (address === null || source === null) throw new Error('Missing native QW host');
+        const address = app.networkAddress, source = app.simulation.quakecSource(); if (address === null || address.kind === "ipx" || source === null) throw new Error('Missing native QW host');
         expect(app.options.mode).toBe('deathmatch'); expect(app.simulation.options.maxClients).toBe(8); expect(source.reservedClientSlots).toBe(32);
         expect(source.prepared.program.api.kind).toBe('q1-quakeworld'); expect(app.simulation.q1Source()).toBeNull();
         for (let index = 0; index < 3; index++) {

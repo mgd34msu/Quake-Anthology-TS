@@ -1,7 +1,7 @@
 /* NetQuake net_dgrm.c and cl_main.c client progression. GPL-2.0-or-later. */
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { Q1UserCommand } from '../../../contracts/protocol.ts';
-import type { IpAddress } from '../../../network/common/endpoint.ts';
+import type { IpAddress, IpxAddress } from '../../../network/common/endpoint.ts';
 import { sameAddress } from '../../../network/common/endpoint.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
 import { NetQuakeChannel } from '../../../network/q1/channels.ts';
@@ -23,8 +23,8 @@ export interface Q1ApplicationClientHost {
     disconnected(reason: string): void;
 }
 export interface Q1ClientNetworkOptions {
-    readonly transport: DatagramTransport<IpAddress>;
-    readonly remote: IpAddress;
+    readonly transport: DatagramTransport<IpAddress | IpxAddress>;
+    readonly remote: IpAddress | IpxAddress;
     readonly host: Q1ApplicationClientHost;
     readonly seat: NetQuakeSeatIdentity;
     readonly timeoutMilliseconds?: number;
@@ -52,7 +52,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
     private readonly decoder = new NetQuakeDecoder();
     private readonly signon: NetQuakeSignon;
     private state: ApplicationNetworkPhase = 'connecting';
-    private peer: IpAddress | null = null;
+    private peer: IpAddress | IpxAddress | null = null;
     private lastReceived = 0;
     private movementMessages = 0;
     private readonly reliable: Uint8Array[] = [];
@@ -62,7 +62,7 @@ export class Q1ClientNetwork implements ApplicationNetwork {
         this.signon = new NetQuakeSignon(options.seat);
     }
     get phase(): ApplicationNetworkPhase { return this.state; }
-    get serverAddress(): IpAddress | null { return this.peer; }
+    get serverAddress(): IpAddress | IpxAddress | null { return this.peer; }
     command(text: string): void {
         if (this.peer === null)
             throw new Error('NetQuake client is not connected');

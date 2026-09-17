@@ -31,7 +31,7 @@ export class Q3ServerAuthorization {
     }
     async request(challenge: Readonly<Q3Challenge>): Promise<void> {
         const client = challenge.address, number = challenge.challenge;
-        if (client === null || client.kind === 'loopback' || !this.options.enabled()) return;
+        if (client === null || client.kind !== 'ipv4' || !this.options.enabled()) return;
         this.lookup ??= this.resolve();
         const authority = await this.lookup;
         if (authority === null || !this.options.enabled() || challenge.address !== client || challenge.challenge !== number) return;

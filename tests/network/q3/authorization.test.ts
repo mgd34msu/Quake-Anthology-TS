@@ -8,6 +8,18 @@ import { decodeConnectionless, encodeConnectionlessText } from '../../../src/net
 const authority: Ipv4Address = { kind: 'ipv4', host: [192, 0, 2, 1], port: 27952 };
 const client: Q3Address = { kind: 'ipv4', host: [198, 51, 100, 2], port: 30000 };
 
+test('Q3 IPX cannot invoke IPv4 authorization even when requested directly', async () => {
+    const owner = new Q3ServerAuthorization({
+        resolve() { throw new Error('IPX must not resolve IPv4 authorization'); }, enabled: () => true,
+        gameDirectory: () => '', strictAuth: () => '1',
+        send() { throw new Error('IPX must not send IPv4 authorization'); },
+        print() { throw new Error('IPX must bypass lookup rather than recover from failure'); },
+    });
+    await owner.request({ address: { kind: 'ipx', network: 1, node: [1, 2, 3, 4, 5, 6], port: 27960 },
+        challenge: 17, time: 0, firstTime: 0, pingTime: 0, connected: false });
+    expect(owner.address).toBeNull();
+});
+
 test('Q3 WAN challenge uses the native authorization exchange and rejects a forged authority', async () => {
     const sent: Q3OutgoingDatagram[] = [];
     let lookups = 0;

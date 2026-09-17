@@ -36,7 +36,7 @@ test('retail NetQuake UDP shares actors, sound precaches, scoreboard, effects an
     const prints: string[] = [], app = await Application.open(launch.options, { print: text => { prints.push(text); return undefined; } });
     const first = await client('First UDP'), second = await client('Second UDP'), peers = [first, second];
     const address = app.networkAddress;
-    if (address === null)
+    if (address === null || address.kind === "ipx")
         throw new Error('No server address');
     let now = 0;
     const command = (peer: Awaited<ReturnType<typeof client>>, text: string): void => { const bytes = new SizeBuf(256); writeClientStringCommand(bytes, text); peer.queued.push(bytes.bytes()); };

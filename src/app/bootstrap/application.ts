@@ -90,9 +90,10 @@ import type { Rect, SceneCamera } from "../../contracts/render.ts";
 import { createIdentityOwner } from "../../contracts/identity.ts";
 import type { SaveImage, SimulationOutput } from "../../contracts/session.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
-import type { IpAddress } from "../../network/common/endpoint.ts";
+import { openApplicationTransport } from "./network/transport.ts";
+import type { ApplicationNetworkAddress } from "./network/transport.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
-import { UdpTransport, Q2_DATAGRAM_LIMITS, Q3_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS } from "../../network/common/transport.ts";
+import { Q2_DATAGRAM_LIMITS, Q3_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS } from "../../network/common/transport.ts";
 import { CommandBuffer, tokenizeCommand, type CommandBufferOptions, type CommandHandler } from "../../core/commands/index.ts";
 import { nativeAtoi } from "../../core/numeric.ts";
 import { CvarRegistry, CvarFlag } from "../../core/cvars/index.ts";
@@ -160,10 +161,10 @@ type NativeServerHost = { readonly kind: "q1"; readonly host: Q1ApplicationServe
   | { readonly kind: "qw"; readonly host: QwApplicationServerHost }
   | { readonly kind: "q2"; readonly host: Q2ApplicationServerHost }
   | { readonly kind: "q3"; readonly host: Q3ApplicationServerHost };
-type NativeServer = { readonly address: IpAddress } & (
-  { readonly kind: "q1"; readonly server: Q1ServerNetwork<IpAddress> }
+type NativeServer = { readonly address: ApplicationNetworkAddress } & (
+  { readonly kind: "q1"; readonly server: Q1ServerNetwork<ApplicationNetworkAddress> }
   | { readonly kind: "qw"; readonly server: QwServerNetwork }
-  | { readonly kind: "q2"; readonly server: Q2ServerNetwork<IpAddress> }
+  | { readonly kind: "q2"; readonly server: Q2ServerNetwork<ApplicationNetworkAddress> }
   | { readonly kind: "q3"; readonly server: Q3ServerNetwork });
 
 type SavedBotClientId = ApplicationBotTransportCheckpoint["connections"][number]["client"];
@@ -794,7 +795,7 @@ export class Application {
   get window(): NativeRenderer["window"] | null { return this.graphical?.renderer.window ?? null; }
   get presentationEvents(): readonly SimulationPresentationEvent[] { return this.sourceEvents; }
   get unhandledPresentationEffects(): readonly UnhandledApplicationEffect[] { return this.unhandledEffects; }
-  get networkAddress(): IpAddress | null { return this.network?.address ?? null; }
+  get networkAddress(): ApplicationNetworkAddress | null { return this.network?.address ?? null; }
   get networkClients(): readonly ApplicationNetworkPlayer[] {
     return this.network?.kind === "qw" ? this.network.server.clients.map(player => ({ ...player, sourceEntity: player.slot + 1 })) : this.network?.server.clients ?? [];
   }
@@ -1373,12 +1374,12 @@ export class Application {
     this.validateNetworkHost(selected);
     this.recordingHost = selected;
     const limits = selected.kind === "q1" ? UNIFIED_DATAGRAM_LIMITS : selected.kind === "q2" ? Q2_DATAGRAM_LIMITS : Q3_DATAGRAM_LIMITS;
-    const transport = await UdpTransport.bind({ host: selection.host, port: selection.port, limits });
+    const transport = await openApplicationTransport({ selection: this.options.networkTransport ?? { kind: "udp" }, family: selected.kind, host: selection.host, port: selection.port, limits });
     const random = (): number => crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
     try {
       switch (selected.kind) {
         case "q1": this.network = { kind: "q1", address: transport.address, server: new Q1ServerNetwork({ transport, host: selected.host }) }; break;
-        case "qw": this.network = { kind: "qw", address: transport.address, server: new QwServerNetwork({ transport, host: selected.host, random: () => Math.trunc(Math.random() * 0x7fffffff) }) }; break;
+        case "qw": this.network = { kind: "qw", address: transport.address, server: new QwServerNetwork({ transport: transport.udpSocket(), host: selected.host, random: () => Math.trunc(Math.random() * 0x7fffffff) }) }; break;
         case "q2": this.network = { kind: "q2", address: transport.address, server: new Q2ServerNetwork({ transport, host: selected.host, random }) }; break;
         case "q3": this.network = { kind: "q3", address: transport.address, server: new Q3ServerNetwork({ transport, host: selected.host, random }) }; break;
       }

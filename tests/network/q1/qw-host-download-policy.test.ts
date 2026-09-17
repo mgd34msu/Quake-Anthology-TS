@@ -34,7 +34,7 @@ nativeTest('dedicated QW user mod advertises its directory and enforces every do
     if (launch.kind !== 'run') throw new Error('Missing QW mod launch');
     const app = await Application.open(launch.options, { print() {} }); application = app;
     const source = app.simulation.quakecSource(), address = app.networkAddress;
-    if (source === null || address === null) throw new Error('Missing real QW source/listener');
+    if (source === null || address === null || address.kind === "ipx") throw new Error('Missing real QW source/listener');
     expect(source.prepared.program.api.kind).toBe('q1-quakeworld');
     expect(app.options.mode).toBe('deathmatch');
     const program = await app.content.mounts.resolve('qwprogs.dat');

@@ -6,7 +6,10 @@ import type { Q1ProtocolIdentity, Q2ProtocolIdentity } from "../../contracts/pro
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 
+import type { ApplicationNetworkTransport } from "./network/transport.ts";
+
 export interface ApplicationOptions {
+  readonly networkTransport?: ApplicationNetworkTransport;
   readonly q3MapLaunch?: import("./q3-map-command.ts").Q3MapLaunch;
   readonly q3Product?: import("../../core/q3-product-policy.ts").Q3ApplicationProduct;
   readonly authoredCampaignStart?: true;
@@ -87,6 +90,8 @@ Usage: bun run src/main.ts [options]
   --connect-q3 ADDRESS       Join a baseq3 protocol 68 server (sv_pure 0)
   --q2-protocol 34|35[:1904|1905]|36[:revision]|4038|1038 Q2 client/server protocol (35 defaults to 1904; 36 to 1026)
   --connect-q2 ADDRESS       Join a native Quake II server
+  --ipx-dosbox HOST[:PORT]   Use DOSBox IPXNET relay (default relay port 213)
+  --ipx-native               Require a host AF_IPX socket capability
   --seed N                   Gameplay random seed
   --frames N                 Close after N simulation steps
   --hidden                   Start a hidden native window
@@ -136,9 +141,17 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     if (flag === "--dedicated") { options = { ...options, dedicated: true }; continue; }
     if (flag === "--hidden") { options = { ...options, hidden: true }; continue; }
     if (flag === "--list-content") { list = true; continue; }
+    if (flag === "--ipx-native") {
+      if (options.networkTransport !== undefined) throw new Error("Choose one IPX transport");
+      options = { ...options, networkTransport: { kind: "ipx-native" } }; continue;
+    }
     const value = argv[++index];
     if (value === undefined) throw new Error(`Missing value for ${flag}`);
     switch (flag) {
+      case "--ipx-dosbox":
+        if (options.networkTransport !== undefined) throw new Error("Choose one IPX transport");
+        if (value.trim().length === 0 || value.startsWith("--")) throw new Error("--ipx-dosbox requires a relay hostname or IPv4 address");
+        options = { ...options, networkTransport: { kind: "ipx-dosbox", relay: value } }; break;
       case "--preset":
         if (value === "q2-q1-q3") options = { ...options, product: "q2-classic-baseq2", map: "maps/base1.bsp", movement: "q1", character: "q3", characterModel: "sarge" };
         else if (value === "q1-q2") options = { ...options, product: "q1-rerelease-id1", map: "maps/e1m1.bsp", movement: "q2", character: "q2", characterModel: "male" };
@@ -233,6 +246,9 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
     if (options.botSkill !== undefined) throw new Error("--bot-skill is not a native Quake II client setting");
     options = { ...options, network: { kind: remoteKind, remote } };
   }
+  if (options.networkTransport !== undefined && options.network.kind === "offline") throw new Error("IPX selection requires --listen, --listen-q2 or a native client connection");
+  if (options.networkTransport?.kind === "ipx-native" && bind !== "0.0.0.0") throw new Error("--bind selects an IP interface and cannot bind native AF_IPX");
+  if (options.networkTransport !== undefined && options.network.kind === "qw-client") throw new Error("QuakeWorld uses UDP; IPX is not a QuakeWorld transport");
   if (options.q2Protocol !== undefined && options.network.kind !== "q2-client" && options.network.kind !== "q2-server") throw new Error("--q2-protocol requires --connect-q2 or --listen-q2");
   if (options.q1Protocol !== undefined && options.network.kind !== "native-server") throw new Error("--q1-protocol requires --listen for a Quake I host");
   if (options.q1Protocol !== undefined && options.product === "q1-quakeworld") throw new Error("--q1-protocol selects NetQuake; QuakeWorld uses native protocol 28");

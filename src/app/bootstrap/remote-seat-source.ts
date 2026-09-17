@@ -9,8 +9,8 @@ import { CvarFlag, type CvarRegistry } from '../../core/cvars/index.ts';
 import { nextActorGeneration } from '../../world/actors/registry.ts';
 import type { EngineSession, SessionSeat } from '../../world/session/index.ts';
 import { CollisionMapSettings } from '../../world/collision/q3/settings.ts';
-import type { UdpTransport } from '../../network/common/transport.ts';
-import type { IpAddress } from '../../network/common/endpoint.ts';
+import type { ApplicationTransport, ApplicationNetworkAddress } from './network/transport.ts';
+
 import { quakeWorldMapChecksum2 } from '../../network/q1/checksum.ts';
 import { q3InfoValue } from '../../network/q3/admission.ts';
 import type { Q3ClientConnection } from '../../network/q3/client.ts';
@@ -37,7 +37,7 @@ import { Q3ApplicationPackages } from './network/q3-downloads.ts';
 import { Q3ClientContent } from './network/q3-client-content.ts';
 
 export type RemoteSeatPresentation = Q1RemotePresentation | QwRemotePresentation | Q2RemotePresentation | Q3RemotePresentation;
-export type RemoteSeatNetwork = Q1ClientNetwork | QwClientNetwork | Q2ClientNetwork<IpAddress> | Q3ClientNetwork;
+export type RemoteSeatNetwork = Q1ClientNetwork | QwClientNetwork | Q2ClientNetwork<ApplicationNetworkAddress> | Q3ClientNetwork;
 export interface RemoteSeatSourceHooks {
   options(): ApplicationOptions;
   mounts(): LoadedApplicationContent['mounts'];
@@ -62,8 +62,8 @@ interface RemoteSeatSourceCommon {
   readonly seat: SessionSeat;
   readonly cvars: () => CvarRegistry;
   readonly clock: PresentationTime;
-  readonly transport: UdpTransport;
-  readonly address: IpAddress;
+  readonly transport: ApplicationTransport;
+  readonly address: ApplicationNetworkAddress;
   readonly qport: number;
   readonly downloadPermission: ClientDownloadPermission | null;
   readonly hooks: RemoteSeatSourceHooks;
@@ -95,6 +95,7 @@ export class RemoteSeatSource {
       disconnected: (reason: string) => hooks.disconnected(reason) };
     const qport = owner.qport;
     if (owner.family === 'qw') {
+      if (address.kind === 'ipx') throw new Error('QuakeWorld requires UDP');
       const remote = new QwRemotePresentation({ ...common, seat: seat.id,
         cameraOptions: { hightrack: () => owner.cvars().variableValue('cl_hightrack'), chasecam: () => owner.cvars().variableValue('cl_chasecam') },
         skinOptions: { read: async path => (await hooks.mounts().open(path))?.bytes ?? null,
@@ -105,7 +106,7 @@ export class RemoteSeatSource {
         loadContent: world => hooks.loadQ1World(world, true),
         mapChecksum: async world => quakeWorldMapChecksum2(await hooks.content().mounts.read(world.map)) });
       this.remote = remote;
-      this.network = new QwClientNetwork({ transport: transport, remote: address, host: remote, qport,
+      this.network = new QwClientNetwork({ transport: transport.udpSocket(), remote: address, host: remote, qport,
         userinfo: () => owner.cvars().propagatedInfo('client-userinfo') });
     } else if (owner.family === 'q1') {
       const remote = new Q1RemotePresentation({ ...common, loadContent: world => hooks.loadQ1World(world, false) });
@@ -113,7 +114,7 @@ export class RemoteSeatSource {
       this.network = new Q1ClientNetwork({ transport: transport, remote: address, host: remote,
         seat: { name: owner.cvars().variableString('name') || 'Player', color: owner.cvars().get('color')?.integerValue ?? 0, spawnParameters: '', extensionFlags: null } });
     } else if (owner.family === 'q3') {
-      if (address.kind !== 'ipv4') throw new Error('Native Q3 remote requires IPv4');
+      if (address.kind !== 'ipv4' && address.kind !== 'ipx') throw new Error('Native Q3 remote requires IPv4');
       const remote = new Q3RemotePresentation({ ...common,
         timescale: () => owner.cvars().variableValue('timescale'), timeNudge: () => owner.cvars().get('cl_timeNudge')?.integerValue ?? 0,
         userinfo: () => owner.cvars().infoString(CvarFlag.UserInfo),
@@ -138,7 +139,7 @@ export class RemoteSeatSource {
   }
 
   get qport(): number { return this.owner.qport; }
-  get transport(): UdpTransport { return this.owner.transport; }
+  get transport(): ApplicationTransport { return this.owner.transport; }
   setAllSkins(value: string): void { this.allSkins = value; }
   pureCommand(serverId: number): string | null { return this.q3Content?.referencedPureCommand(serverId) ?? null; }
   get downloadProgress(): readonly ClientDownloadProgress[] {

@@ -16,6 +16,7 @@ export type ReceiveEvent<TAddress extends NetworkAddress = NetworkAddress> =
 export interface DatagramTransport<TAddress extends NetworkAddress> {
   readonly address: TAddress;
   readonly closed: boolean;
+  readonly maxDatagramBytes?: number;
   send(to: TAddress, payload: Uint8Array): boolean;
   poll(): ReceiveEvent<TAddress> | null;
   subscribeReadable(listener: () => void): () => void;

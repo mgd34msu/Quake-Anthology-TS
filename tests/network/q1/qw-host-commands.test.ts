@@ -32,7 +32,7 @@ test('actual QW host routes native chat, message filters, pings and source Clien
         const launch = parseApplicationCommand(['--game', 'q1-quakeworld', '--map', 'dm2', '--movement', 'q1', '--character', 'q1', '--dedicated', '--listen', '0', '--bind', '127.0.0.1', '--user-content-root', root]);
         if (launch.kind !== 'run') throw new Error('Missing host options');
         const app = await Application.open(launch.options, { print: text => { hostPrints.push(text); } }); application = app;
-        const address = app.networkAddress; if (address === null) throw new Error('Missing QW listener');
+        const address = app.networkAddress; if (address === null || address.kind === "ipx") throw new Error('Missing QW listener');
         for (let index = 0; index < 3; index++) {
             const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
             clients.push(new QwClientNetwork({ transport, remote: address, qport: 28100 + index,

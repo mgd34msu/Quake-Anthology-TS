@@ -70,9 +70,10 @@ import type { SceneCamera } from "../../contracts/render.ts";
 import type { SceneQueries } from "../../contracts/scene.ts";
 import type { SimulationOutput } from "../../contracts/session.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
-import type { IpAddress } from "../../network/common/endpoint.ts";
-import { addressKey, resolveAddress } from "../../network/common/endpoint.ts";
-import { Q2_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS, UdpTransport } from "../../network/common/transport.ts";
+import { openApplicationTransport, resolveApplicationAddress } from "./network/transport.ts";
+import type { ApplicationTransport, ApplicationNetworkAddress } from "./network/transport.ts";
+import { addressKey } from "../../network/common/endpoint.ts";
+import { Q2_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS } from "../../network/common/transport.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
@@ -158,7 +159,7 @@ interface RemoteConfiguration {
   readonly downloadPermissions: ReadonlyMap<SeatId, ClientDownloadPermission | null>;
   readonly source: CvarRegistry;
   readonly routing: CommandCvarRouting;
-  prepareTransport(transport: UdpTransport): Promise<void>;
+  prepareTransport(transport: Pick<ApplicationTransport, "connectSocks">): Promise<void>;
   validateSource(): void;
   publishSource(): void;
 }
@@ -179,10 +180,10 @@ type RemoteCinematic = { readonly movie: CampaignCinematic; readonly images: Sce
 
 type RemoteBrowser = { readonly kind: "owned" | "borrowed"; readonly browser: StartupServerBrowser };
 
-type LiveNetwork = QwClientNetwork | Q2ClientNetwork<IpAddress> | Q1ClientNetwork | Q3ClientNetwork;
+type LiveNetwork = QwClientNetwork | Q2ClientNetwork<ApplicationNetworkAddress> | Q1ClientNetwork | Q3ClientNetwork;
 type DemoLaunch = { readonly kind: "recorded"; readonly playback: { readonly resource: DemoResource; readonly timedemo: boolean }; readonly complete: (reason: DemoCompletion) => void };
-type RemoteLaunch = { readonly kind: "live"; readonly family: DemoFamily; readonly transport: UdpTransport; readonly address: IpAddress } | DemoLaunch;
-type RemoteSource = { readonly kind: "live"; readonly network: LiveNetwork; readonly transport: UdpTransport }
+type RemoteLaunch = { readonly kind: "live"; readonly family: DemoFamily; readonly transport: ApplicationTransport; readonly address: ApplicationNetworkAddress } | DemoLaunch;
+type RemoteSource = { readonly kind: "live"; readonly network: LiveNetwork; readonly transport: ApplicationTransport }
   | { readonly kind: "recorded"; readonly playback: RecordedRemoteSource };
 
 /** One native seat presents received server state; its session has no authoritative world. */
@@ -319,7 +320,7 @@ export class RemoteApplication {
         loadContent: world => this.loadServerWorld(world, undefined, true),
         mapChecksum: async world => quakeWorldMapChecksum2(await this.content.mounts.read(world.map)) });
       this.initialRemote = remote;
-      this.initialSource = launch.kind === "live" ? { kind: "live", transport: launch.transport, network: new QwClientNetwork({ transport: launch.transport, remote: launch.address, host: remote, qport: this.initialQport = this.allocateQport(), userinfo: () => this.clientCommands?.cvars.propagatedInfo("client-userinfo") ?? "" }) } : this.recordedSource(launch, remote);
+      this.initialSource = launch.kind === "live" ? { kind: "live", transport: launch.transport, network: new QwClientNetwork({ transport: launch.transport.udpSocket(), remote: requireQwAddress(launch.address), host: remote, qport: this.initialQport = this.allocateQport(), userinfo: () => this.clientCommands?.cvars.propagatedInfo("client-userinfo") ?? "" }) } : this.recordedSource(launch, remote);
     } else if (this.family === "q1") {
       const remote = new Q1RemotePresentation({ identity, session, client, nextGeneration, content: null,
         publish: output => this.publishRemote(output), disconnected: reason => { this.print(`${reason}\n`); this.disconnectSource(); },
@@ -354,7 +355,7 @@ export class RemoteApplication {
       this.initialRemote = remote;
       if (launch.kind === "live") {
         const address = launch.address;
-        if (address.kind !== "ipv4") throw new Error("Native Q3 remote requires IPv4");
+        if (address.kind !== "ipv4" && address.kind !== "ipx") throw new Error("Native Q3 remote requires IPv4");
         this.initialSource = { kind: "live", transport: launch.transport, network: new Q3ClientNetwork({ transport: launch.transport, remote: address, host: remote, cvars: this.clientCommands.cvars, authorization: this.keys.authorization, qport: this.initialQport = this.allocateQport() }) };
       } else this.initialSource = this.recordedSource(launch, remote);
     } else {
@@ -424,13 +425,13 @@ export class RemoteApplication {
       throw new Error("Remote Q2 character selection requires an installed male, female or cyborg player appearance");
     const network = options.network;
     const address = recording !== undefined ? null : network.kind === "qw-client" || network.kind === "q1-client" || network.kind === "q2-client" || network.kind === "q3-client"
-      ? await resolveAddress(network.remote, qw ? 27500 : q1 ? 26000 : q3 ? 27960 : 27910, q3 ? 4 : 0) : null;
+      ? await resolveApplicationAddress(network.remote, qw ? 27500 : q1 ? 26000 : q3 ? 27960 : 27910, options.networkTransport ?? { kind: "udp" }, qw ? "qw" : family) : null;
     if (recording === undefined && address === null) throw new Error("Missing remote address");
     const content = await openRemoteApplicationContent(options);
     if (content.q3Product !== null) options = { ...options, q3Product: content.q3Product };
     const identity = ownership.kind === "borrowed" ? ownership.client.identity : createIdentityOwner(`quake:remote:${address === null ? recording?.playback.resource.path : addressKey(address)}`);
     const session = ownership.kind === "borrowed" ? ownership.client.session : new EngineSession(identity, { kind: "local" });
-    let renderer: NativeRenderer | null = null, transport: UdpTransport | null = null, application: RemoteApplication | null = null, imageSettings: ApplicationImageSettings | null = null;
+    let renderer: NativeRenderer | null = null, transport: ApplicationTransport | null = null, application: RemoteApplication | null = null, imageSettings: ApplicationImageSettings | null = null;
     let browser: RemoteBrowser | null = null;
     let configuration: RemoteConfiguration | null = null;
     try {
@@ -444,7 +445,7 @@ export class RemoteApplication {
         print: text => { if (application === null) host.print(text); else application.print(text); } });
       renderer = ownership.kind === "borrowed" ? ownership.client.renderer : await NativeRenderer.open({ ...options, renderWorker: imageSettings.cvars.variableValue("r_smp") !== 0 }, { identity: Symbol("remote application renderer"), session: session.session, generation: 0 });
       if (ownership.kind === "owned") await imageSettings.refreshDisplay(renderer);
-      if (address !== null) transport = await UdpTransport.bind({ host: address.kind === "ipv4" ? "0.0.0.0" : "::", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
+      if (address !== null) transport = await openApplicationTransport({ selection: options.networkTransport ?? { kind: "udp" }, family: qw ? "qw" : family, host: address.kind === "ipv6" ? "::" : "0.0.0.0", port: 0, limits: q1 || q3 ? UNIFIED_DATAGRAM_LIMITS : Q2_DATAGRAM_LIMITS });
       const browserSettings = host.saveDirectory !== undefined ? join(host.saveDirectory, "..", "settings")
         : join(homedir(), ".local", "share", "quake-typescript", "settings");
       browser = host.serverBrowser === undefined
@@ -808,7 +809,7 @@ export class RemoteApplication {
   get frameCount(): number { return this.frames; }
   get timeMilliseconds(): number { return this.elapsed; }
   get window(): NativeRenderer["window"] { return this.renderer.window; }
-  get networkAddress(): IpAddress { if (this.source.kind !== "live") throw new Error("Recorded source has no network address"); return this.source.transport.address; }
+  get networkAddress(): ApplicationNetworkAddress { if (this.source.kind !== "live") throw new Error("Recorded source has no network address"); return this.source.transport.address; }
   get networkPhase(): ApplicationNetworkPhase { return this.source.kind === "live" ? this.source.network.phase : this.source.playback.phase; }
   readClientResource(path: string): Promise<Uint8Array | undefined> { return this.mounts.open(path).then(resource => resource?.bytes); }
   get localPlayers(): readonly LocalPlayer[] { return this.controls?.locals.map(local => local.player) ?? []; }
@@ -1730,8 +1731,8 @@ export class RemoteApplication {
       if (seat.id.equals(this.seatId) || this.remoteSeats.some(peer => !peer.closed && peer.seat === seat)) continue;
       const cvars = configuration.seatSources.get(seat.id);
       if (cvars === undefined) throw new Error("Remote seat has no source registry");
-      const address = await resolveAddress(network.remote, this.family === "q1" ? 26000 : this.family === "qw" ? 27500 : this.family === "q3" ? 27960 : 27910, this.family === "q3" ? 4 : 0);
-      const transport = await UdpTransport.bind({ host: address.kind === "ipv6" ? "::" : "0.0.0.0", port: 0,
+      const address = await resolveApplicationAddress(network.remote, this.family === "q1" ? 26000 : this.family === "qw" ? 27500 : this.family === "q3" ? 27960 : 27910, this.options.networkTransport ?? { kind: "udp" }, this.family);
+      const transport = await openApplicationTransport({ selection: this.options.networkTransport ?? { kind: "udp" }, family: this.family, host: address.kind === "ipv6" ? "::" : "0.0.0.0", port: 0,
         limits: this.family === "q2" ? Q2_DATAGRAM_LIMITS : UNIFIED_DATAGRAM_LIMITS });
       let qport: number | null = null;
       try {
@@ -2211,4 +2212,9 @@ async function prepareRemoteConfiguration(options: ApplicationOptions, content: 
     if(failures.length>1)throw new AggregateError(failures,"Remote configuration preparation cleanup failed");
     throw error;
   } finally {await seedScripts?.close();}
+}
+
+function requireQwAddress(address: ApplicationNetworkAddress) {
+  if (address.kind === "ipx") throw new Error("QuakeWorld requires UDP");
+  return address;
 }

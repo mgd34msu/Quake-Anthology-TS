@@ -6,8 +6,9 @@ import { q3DemoGamestate } from '../../../network/q3/recording.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
 import { sameAddress } from '../../../network/common/endpoint.ts';
-import type { Ipv4Address, IpAddress } from '../../../network/common/endpoint.ts';
-import { Q3ClientAdmission } from '../../../network/q3/admission.ts';
+import type { IpxAddress, IpAddress } from '../../../network/common/endpoint.ts';
+import type { Q3RemoteAddress } from '../../../network/q3/admission.ts';
+import { Q3ClientAdmission, q3IsLanAddress } from '../../../network/q3/admission.ts';
 import { Q3ClientConnection } from '../../../network/q3/client.ts';
 import type { Q3ClientBindings, Q3ConnectionIdentity } from '../../../network/q3/client.ts';
 import { q3ChannelDelivery } from '../../../network/q3/transport.ts';
@@ -45,8 +46,8 @@ export function q3ApplicationClientBindings(host: Q3ApplicationClientHost, lifec
   };
 }
 export interface Q3ClientNetworkOptions {
-  readonly transport: DatagramTransport<IpAddress>;
-  readonly remote: Ipv4Address;
+  readonly transport: DatagramTransport<IpAddress | IpxAddress>;
+  readonly remote: Q3RemoteAddress;
   readonly host: Q3ApplicationClientHost;
   readonly qport: number;
   readonly cvars?: CvarRegistry;
@@ -74,7 +75,7 @@ export class Q3ClientNetwork implements ApplicationNetwork {
   readonly wire: ApplicationNetwork['wire'] = { kind: 'source', protocol: { kind: 'q3', version: 68 } };
   private readonly admission: Q3ClientAdmission;
   private connection: Q3ClientConnection | null = null;
-  private peer: Ipv4Address;
+  private peer: Q3RemoteAddress;
   private state: ApplicationNetworkPhase = 'connecting';
   private primed = false;
   private entered = false;
@@ -96,14 +97,14 @@ export class Q3ClientNetwork implements ApplicationNetwork {
   private send(now: number): void {
     const connection = this.connection;
     if (connection === null) return;
-    connection.transmit({ realTime: now, packetDup: this.options.cvars?.get("cl_packetdup")?.integerValue ?? 1, noDelta: false }, q3ChannelDelivery<Ipv4Address>(this.options.transport, () => this.peer, connection.sourceState, text => this.options.host.print(text)));
+    connection.transmit({ realTime: now, packetDup: this.options.cvars?.get("cl_packetdup")?.integerValue ?? 1, noDelta: false }, q3ChannelDelivery<Q3RemoteAddress>(this.options.transport, () => this.peer, connection.sourceState, text => this.options.host.print(text)));
   }
   async poll(now: number): Promise<readonly ActorCommand[]> {
     if (this.state === 'closed' || this.state === 'rejected') return [];
     const request = this.admission.resend(now, this.options.host.userinfo());
-    if (request !== null && request.to.kind === 'ipv4') {
+    if (request !== null && request.to.kind !== 'loopback') {
       const peer = request.to;
-      const lan = peer.host[0] === 127 || peer.host[0] === 10 || peer.host[0] === 192 && peer.host[1] === 168 || peer.host[0] === 172 && peer.host[1] >= 16 && peer.host[1] <= 31;
+      const lan = q3IsLanAddress(peer);
       if (this.admission.phase === 'connecting' && !lan) {
         const authorization = this.options.authorization;
         if (authorization === undefined) throw new Error('Q3 WAN admission requires the client key authorization owner');
@@ -115,10 +116,10 @@ export class Q3ClientNetwork implements ApplicationNetwork {
     }
     for (;;) {
       const packet = this.options.transport.poll(); if (packet === null) break;
-      if (packet.kind !== 'packet' || packet.from.kind !== 'ipv4') continue;
+      if (packet.kind !== 'packet' || (packet.from.kind !== 'ipv4' && packet.from.kind !== 'ipx')) continue;
       const result = this.admission.receive(packet.from, packet.payload, now);
       if (result.kind === 'admitted') {
-        if (result.address.kind !== 'ipv4') throw new Error('Q3 application requires IPv4');
+        if (result.address.kind === 'loopback') throw new Error('Q3 remote application requires IPv4 or IPX');
         this.peer = result.address; this.state = 'loading'; this.lastReceived = now;
         const host = this.options.host;
         const assertCurrent = (): void => { if (this.connection !== connection || this.state === 'closed' || this.state === 'rejected') throw new Error('Q3 callback belongs to a retired connection'); };
@@ -154,7 +155,7 @@ export class Q3ClientNetwork implements ApplicationNetwork {
         connection.commands.append({ serverTime: 0, angles: [0, 0, 0], forwardmove: 0, rightmove: 0, upmove: 0, buttons: 0, weapon: 0 });
         this.entered = true;
       }
-      if (connection.readyToSend({ realTime: now, active: this.state === 'active', primed: this.primed, cinematic: false, downloading: this.options.host.downloading, local: false, lan: this.peer.host[0] === 127 || this.peer.host[0] === 10 || (this.peer.host[0] === 192 && this.peer.host[1] === 168) || (this.peer.host[0] === 172 && this.peer.host[1] >= 16 && this.peer.host[1] <= 31), maximumPackets: this.options.cvars?.get("cl_maxpackets")?.integerValue ?? 30 })) this.send(now);
+      if (connection.readyToSend({ realTime: now, active: this.state === 'active', primed: this.primed, cinematic: false, downloading: this.options.host.downloading, local: false, lan: q3IsLanAddress(this.peer), maximumPackets: this.options.cvars?.get("cl_maxpackets")?.integerValue ?? 30 })) this.send(now);
     }
     return [];
   }
@@ -166,7 +167,7 @@ export class Q3ClientNetwork implements ApplicationNetwork {
   publish(_output: SimulationOutput, _events: readonly SimulationPresentationEvent[], _now: number): void { throw new Error('Remote client cannot publish authoritative state'); }
   close(): void {
     if (this.options.transport.closed) return;
-    if (this.connection !== null && this.state !== 'closed' && this.state !== 'rejected') this.connection.disconnectPackets({ realTime: performance.now(), packetDup: this.options.cvars?.get("cl_packetdup")?.integerValue ?? 1, noDelta: false }, q3ChannelDelivery<Ipv4Address>(this.options.transport, () => this.peer, this.connection.sourceState, text => this.options.host.print(text)));
+    if (this.connection !== null && this.state !== 'closed' && this.state !== 'rejected') this.connection.disconnectPackets({ realTime: performance.now(), packetDup: this.options.cvars?.get("cl_packetdup")?.integerValue ?? 1, noDelta: false }, q3ChannelDelivery<Q3RemoteAddress>(this.options.transport, () => this.peer, this.connection.sourceState, text => this.options.host.print(text)));
     this.state = 'closed'; this.admission.disconnect(); this.options.transport.close();
   }
 }

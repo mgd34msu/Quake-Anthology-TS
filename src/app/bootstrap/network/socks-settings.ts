@@ -24,7 +24,7 @@ export class ClientSocksSettings {
       visible: source => [...base.visible(source), this.cvars],
     };
   }
-  async connect(transport: UdpTransport, cvars = this.cvars): Promise<void> {
+  async connect(transport: Pick<UdpTransport, 'connectSocks'>, cvars = this.cvars): Promise<void> {
     cvars.applyLatched();
     if ((cvars.get('net_socksEnabled')?.integerValue ?? 0) === 0) return;
     await transport.connectSocks({ server: cvars.variableString('net_socksServer'),

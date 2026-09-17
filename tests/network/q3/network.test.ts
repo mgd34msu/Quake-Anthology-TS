@@ -23,6 +23,67 @@ import { EntityStateRecord } from "../../../src/network/q3/state/entity.ts";
 import { PlayerStateRecord } from "../../../src/network/q3/state/player.ts";
 import { q3ChannelDelivery } from "../../../src/network/q3/transport.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
+import { ipxAddress, sameAddress } from "../../../src/network/common/endpoint.ts";
+import type { NetworkAddress, IpAddress, IpxAddress } from "../../../src/network/common/endpoint.ts";
+import { PacketQueue } from "../../../src/network/common/transport.ts";
+import type { DatagramTransport } from "../../../src/network/common/transport.ts";
+import { Q3ClientNetwork } from "../../../src/app/bootstrap/network/q3-client.ts";
+import { q3IsLanAddress } from "../../../src/network/q3/admission.ts";
+
+test("Q3 application IPX admission, gamestate, command delivery and lifetime preserve native LAN policy", async () => {
+  const serverAddress = ipxAddress(0x12345678, [1, 2, 3, 4, 5, 6], 27960);
+  const clientAddress = ipxAddress(0x12345678, [10, 11, 12, 13, 14, 15], 31000);
+  const serverQueue = new PacketQueue<NetworkAddress>({ maxBytes: 16384, queuePackets: 32 }, () => 0);
+  const clientQueue = new PacketQueue<IpAddress | IpxAddress>({ maxBytes: 16384, queuePackets: 32 }, () => 0);
+  const sent: NetworkAddress[] = [], diagnostics: string[] = [], userinfo: string[] = [], commands: string[] = [];
+  let serverClosed = false, clientClosed = false, loaded = false, serverTime = 0;
+  const serverTransport: DatagramTransport<NetworkAddress> = {
+    address: serverAddress, get closed() { return serverClosed; },
+    send(to, payload) { sent.push(to); expect(sameAddress(to, clientAddress)).toBe(true); clientQueue.accept(serverAddress, payload); return true; },
+    poll: () => serverQueue.poll(), subscribeReadable: listener => serverQueue.subscribe(listener),
+    close() { serverClosed = true; serverQueue.close(); },
+  };
+  const owner = createIdentityOwner("q3-ipx-application"), player = { client: owner.client(0, 0), actor: owner.actor(0, 0), sourceEntity: 0 };
+  const host: Q3ApplicationServerHost = {
+    product: "baseq3", maxClients: 1, async prepare() {},
+    pure: () => ({ enabled: false, checksumFeed: 0, checksumFeedServerId: 1, cgameChecksum: undefined, uiChecksum: undefined, loadedPureChecksums: [] }),
+    downloadsEnabled: () => false, openDownload: () => null,
+    rate: () => ({ rate: 10000, maxRate: 0, snapshotMsec: 50, local: false, forceLan: true, lan: true }),
+    supportsSourceWire: () => ({ kind: "supported" }), time: () => serverTime, occupiedSlots: () => [],
+    admit(request) { userinfo.push(request.userinfo); return { kind: "accepted", player }; }, carriedPlayer: () => player,
+    disconnect() {}, gameState: () => ({ kind: "gamestate", commandSequence: 0, entries: [{ kind: "configstring", index: 1, value: "\\sv_serverid\\1" }], clientNumber: 0, checksumFeed: 0 }),
+    snapshot: () => ({ player: new PlayerStateRecord("baseq3", 0, 0, 0), areaMask: new Uint8Array(), entities: [] }),
+    input: () => null, command(_player, name) { commands.push(name); }, userinfo() {}, status: () => "", print: text => diagnostics.push(text),
+    administration: { rconPassword: () => '', async execute() {}, rejects: () => false,
+      masters: () => [{ kind: 'ipv4', host: [192, 0, 2, 1], port: 27950 }], record() {} },
+  };
+  const server = new Q3ServerNetwork({ transport: serverTransport, host, random: () => 0,
+    resolveAuthorization() { throw new Error("IPX must not resolve IPv4 authorization"); } });
+  const client = new Q3ClientNetwork({ remote: serverAddress, qport: 77, host: {
+    identity: { client: player.client, seat: null }, downloading: false, userinfo: () => "\\name\\IPX",
+    attach() {}, command() { throw new Error("No fixture input"); }, disconnected() {}, print() {}, clearActive() {},
+    async systemInfo() {}, async gamestate() { loaded = true; }, snapshot() {}, downloadSize: size => size, async download() {}, mapRestart() {},
+  }, transport: {
+    address: clientAddress, get closed() { return clientClosed; },
+    send(to, payload) { expect(sameAddress(to, serverAddress)).toBe(true); serverQueue.accept(clientAddress, payload); return true; },
+    poll: () => clientQueue.poll(),
+    subscribeReadable: listener => clientQueue.subscribe(listener), close() { clientClosed = true; clientQueue.close(); },
+  } });
+  try {
+    expect(q3IsLanAddress(clientAddress)).toBe(true);
+    await client.poll(0); await server.poll(0);
+    await client.poll(10); await client.poll(11); await server.poll(11); await client.poll(20);
+    client.sendPacket(); await server.poll(20); await client.poll(30);
+    expect(server.clients).toHaveLength(1); expect(loaded).toBe(true);
+    expect(userinfo[0]).toContain("\\ip\\12345678.0a0b0c0d0e0f:31000");
+    client.sendPacket(); await server.poll(40);
+    serverTime = 1400; client.command("say ipx"); client.sendPacket(); await server.poll(serverTime);
+    server.heartbeat(1401);
+    expect(commands).toContain("say"); expect(sent.length).toBeGreaterThan(2);
+    expect(diagnostics).toContain("Q3 IPX transport supports LAN play; IPv4 master advertisement is unavailable.\n");
+  } finally { client.close(); await server.close(); }
+  expect(clientClosed && serverClosed).toBe(true);
+});
 
 test("Q3 mixed-bit message matches the unchanged original msg.c fixture", () => {
   // Retained source fixture from quake-3-ts/tests/message.test.ts.

@@ -8,7 +8,7 @@ import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { ConfigStore } from '../../../src/settings/config.ts';
 import { Q3ClientAuthorization } from '../../../src/network/q3/client-authorization.ts';
 import { decodeConnectionless } from '../../../src/network/q3/connectionless.ts';
-import type { Ipv4Address } from '../../../src/network/common/endpoint.ts';
+import type { Ipv4Address, IpxAddress } from '../../../src/network/common/endpoint.ts';
 
 const fixtureBase = '2'.repeat(16), fixtureUnique = '3'.repeat(16);
 function cvars(): CvarRegistry { return new CvarRegistry({ dialect: 'q3', context: { session: createIdentityOwner('q3-key-test').session, origin: { kind: 'local-console' } } }); }
@@ -79,7 +79,7 @@ test('Q3 admission authorizes before WAN challenge, retains resend interval and 
   const { PacketQueue } = await import('../../../src/network/common/transport.ts');
   const registry = cvars(), keys = new Q3CdKeyState(registry);
   keys.writeUi(0, '', new TextEncoder().encode(fixtureBase));
-  const packets: { readonly to: import('../../../src/network/common/endpoint.ts').IpAddress; readonly bytes: Uint8Array }[] = [];
+  const packets: { readonly to: import('../../../src/network/common/endpoint.ts').IpAddress | IpxAddress; readonly bytes: Uint8Array }[] = [];
   let lookups = 0;
   const authorization = new Q3ClientAuthorization({ cvars: registry, keys, demoRestricted: () => false,
     async resolve() { lookups++; return authority; }, print() {} });
@@ -88,7 +88,7 @@ test('Q3 admission authorizes before WAN challenge, retains resend interval and 
     attach() {}, command() { throw new Error('No fixture gameplay'); }, disconnected() {}, print() {}, clearActive() {},
     async systemInfo() {}, async gamestate() {}, snapshot() {}, downloadSize: size => size, async download() {}, mapRestart() {},
   };
-  function connection(remote: Ipv4Address) {
+  function connection(remote: Ipv4Address | IpxAddress) {
     const queue = new PacketQueue<import('../../../src/network/common/endpoint.ts').IpAddress>({ maxBytes: 16383, queuePackets: 8 }, () => 0);
     let closed = false;
     return new Q3ClientNetwork({ remote, host, qport: 77, authorization, transport: {
@@ -109,4 +109,8 @@ test('Q3 admission authorizes before WAN challenge, retains resend interval and 
   const lan = connection({ kind: 'ipv4', host: [192, 168, 1, 2], port: 27960 });
   try { await lan.poll(0); expect(packets.map(packet => decodeConnectionless(packet.bytes, 'server').command)).toEqual(['getchallenge']); }
   finally { lan.close(); }
+  packets.length = 0;
+  const ipx = connection({ kind: 'ipx', network: 0x12345678, node: [1, 2, 3, 4, 5, 6], port: 27960 });
+  try { await ipx.poll(0); expect(packets.map(packet => decodeConnectionless(packet.bytes, 'server').command)).toEqual(['getchallenge']); expect(packets[0]?.to.kind).toBe('ipx'); expect(lookups).toBe(1); }
+  finally { ipx.close(); }
 });

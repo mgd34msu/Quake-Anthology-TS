@@ -32,7 +32,7 @@ test('native Q2 UDP signon admits and moves the actual Application player', asyn
     const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     const discovery = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
     const address = server.networkAddress;
-    if (address === null)
+    if (address === null || address.kind === "ipx")
         throw new Error('Server did not bind UDP');
     let client: Q2ClientNetwork<typeof address> | null = null;
     let otherClient: Q2ClientNetwork<typeof address> | null = null;

@@ -244,3 +244,26 @@ test('native connectionless exchange dispatches admission and status through the
     expect(connected).toBe(true);
     expect(readQ2OutOfBand(replies[1] ?? new Uint8Array())?.command).toBe('client_connect');
 });
+
+test('IPX packet ceiling preserves native Q2 fragmentation and classic reliable capacity', () => {
+    const protocol = { kind: 'q2-q2pro', version: 36, revision: 1026 } satisfies Q2ProtocolIdentity;
+    const sender = new Q2Channel({ protocol, side: 'client', channel: 'new', qport: 17, maxDatagramBytes: 1394 });
+    const receiver = new Q2Channel({ protocol, side: 'server', channel: 'new', qport: 17 });
+    const reliable = Uint8Array.from({ length: 4096 }, (_, index) => index & 255);
+    sender.queueReliable(reliable);
+    let packet = sender.transmit(new Uint8Array(), 0), received: Uint8Array | null = null;
+    for (;;) {
+        expect(packet.length).toBeLessThanOrEqual(1394);
+        const result = receiver.receive(packet, 0);
+        if (result.kind === 'message') received = result.bytes;
+        const next = sender.nextFragment(0); if (next === null) break; packet = next;
+    }
+    expect(received).toEqual(reliable);
+    const classic = new Q2Channel({ protocol: { kind: 'q2-classic', version: 34 }, side: 'client', channel: 'old', qport: 17, maxDatagramBytes: 1394 });
+    expect(classic.capacity).toBe(1384);
+    classic.queueReliable(new Uint8Array(classic.capacity));
+    expect(classic.transmit(new Uint8Array(100), 0).length).toBe(1394);
+    const rerelease = new Q2Channel({ protocol: { kind: 'q2-rerelease', version: 1038 }, side: 'server', channel: 'old', qport: 17, maxDatagramBytes: 1394 });
+    rerelease.queueReliable(new Uint8Array(rerelease.capacity));
+    expect(rerelease.transmit(new Uint8Array(4096), 0).length).toBeLessThanOrEqual(1394);
+});

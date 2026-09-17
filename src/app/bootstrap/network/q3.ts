@@ -6,7 +6,7 @@ import type { ActorCommand, SimulationOutput } from '../../../contracts/session.
 import type { NetworkAddress } from '../../../network/common/endpoint.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
 import { tokenizeCommand } from '../../../core/commands/text.ts';
-import { Q3ServerAdmission, routeQ3SequencedPacket } from '../../../network/q3/admission.ts';
+import { Q3ServerAdmission, routeQ3SequencedPacket, q3IsLanAddress } from '../../../network/q3/admission.ts';
 import type { Q3Address, Q3AdmissionSlot, Q3AcceptedConnect } from '../../../network/q3/admission.ts';
 import { checkQ3DownloadName } from '../../../network/q3/pure.ts';
 import { nativeAtoi } from '../../../core/numeric.ts';
@@ -52,10 +52,11 @@ export class Q3ServerNetwork implements ApplicationNetwork {
       execute: async (command, output) => { const administration = this.host.administration; if (administration === undefined) throw new Error('Server administration is unavailable'); await administration.execute(command, output); },
       reply: (address, text) => { options.transport.send(address, encodeConnectionlessText(`print\n${text}`)); } });
     this.masterHeartbeat = new MasterHeartbeat(q3DiscoveryWire(), options.transport);
+    if (options.transport.address.kind === 'ipx') this.host.print('Q3 IPX transport supports LAN play; IPv4 master advertisement is unavailable.\n');
     const authorization = new Q3ServerAuthorization({ ...(options.resolveAuthorization === undefined ? {} : { resolve: options.resolveAuthorization }), enabled: () => !this.ended, gameDirectory: () => this.host.admission?.gameDirectory() ?? '', strictAuth: () => this.host.admission?.strictAuth() ?? '1', send: (address, packet) => { options.transport.send(address, packet); }, print: text => this.host.print(text) });
     this.admission = new Q3ServerAdmission({ enabled: () => !this.ended && (this.host.admission?.enabled() ?? true), slots: () => this.slots(), privateClients: () => this.host.admission?.privateClients() ?? 0,
       privatePassword: () => this.host.admission?.privatePassword() ?? '', reconnectLimitSeconds: () => this.host.admission?.reconnectLimitSeconds() ?? 3, minimumPing: () => this.host.admission?.minimumPing() ?? 0, maximumPing: () => this.host.admission?.maximumPing() ?? 0,
-      authorizeAddress: () => authorization.address, demoRestricted: () => this.host.admission?.demoRestricted() ?? false, isLan: address => address.kind === 'loopback' || address.host[0] === 127 || address.host[0] === 10 || (address.host[0] === 192 && address.host[1] === 168) || (address.host[0] === 172 && address.host[1] >= 16 && address.host[1] <= 31), random: options.random,
+      authorizeAddress: () => authorization.address, demoRestricted: () => this.host.admission?.demoRestricted() ?? false, isLan: q3IsLanAddress, random: options.random,
       authorize: challenge => authorization.request(challenge), send: (to, bytes) => { options.transport.send(to, bytes); }, admit: request => this.admit(request),
       dropBot: () => { throw new Error('Native Q3 admission cannot evict an application bot'); }, print: text => this.host.print(text),
       query: (from, packet) => {
@@ -65,7 +66,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
         }
       } });
   }
-  heartbeat(nowMilliseconds: number): void { if (!this.ended) this.masterHeartbeat.send(this.host.administration?.masters() ?? [], Math.trunc(nowMilliseconds), true, true); }
+  heartbeat(nowMilliseconds: number): void { if (!this.ended && this.options.transport.address.kind !== 'ipx') this.masterHeartbeat.send(this.host.administration?.masters() ?? [], Math.trunc(nowMilliseconds), true, true); }
   get recordingSource(): { readonly host: Q3ApplicationServerHost; readonly serverId: number; readonly snapshotServerBit: 0 | 4 } {
     if (this.ended) throw new Error('Q3 recording source is retired');
     return { host: this.host, serverId: this.serverId, snapshotServerBit: this.serverFlags };
@@ -150,7 +151,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     for (let event = this.options.transport.poll(); event !== null; event = this.options.transport.poll()) {
       if (this.ended) break;
       if (event.kind === 'error') { this.host.print(event.error.message); continue; }
-      if (event.kind !== 'packet' || (event.from.kind !== 'ipv4' && event.from.kind !== 'loopback')) continue;
+      if (event.kind !== 'packet' || (event.from.kind !== 'ipv4' && event.from.kind !== 'loopback' && event.from.kind !== 'ipx')) continue;
       if (this.host.administration?.rejects(event.from)) continue;
       try {
         const bytes = event.payload;
@@ -169,7 +170,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     }
     if (this.ended) { this.pending = []; return []; }
     const masters = this.host.administration?.masters() ?? [];
-    if (masters.length > 0) this.masterHeartbeat.send(masters, this.now, true);
+    if (masters.length > 0 && this.options.transport.address.kind !== 'ipx') this.masterHeartbeat.send(masters, this.now, true);
     for (const peer of this.peers.values()) if (this.now - peer.lastReceived > (this.options.timeoutMilliseconds ?? 30000)) await this.disconnectClient(peer.player.client, 'timed out');
     const commands = this.pending; this.pending = []; return commands;
   }

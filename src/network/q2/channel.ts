@@ -12,6 +12,7 @@ export interface Q2ChannelOptions {
     /** Writable payload limit negotiated by q2pro; excludes the 10-byte reserve. */
     readonly payloadBytes?: number;
     readonly messageBytes?: number;
+    readonly maxDatagramBytes?: number;
     readonly compress?: boolean;
     /** Original id and q2pro record the resend sequence on opposite sides of increment. */
     readonly sequenceRecording?: 'id' | 'q2pro';
@@ -54,8 +55,11 @@ export class Q2Channel {
     lastSentMilliseconds = 0;
     lastReceivedMilliseconds = 0;
     constructor(readonly options: Q2ChannelOptions) {
-        this.payloadBytes = options.payloadBytes ?? 1390;
-        this.capacity = options.messageBytes ?? (options.channel === 'new' ? 32768 : (options.sequenceRecording ?? (options.protocol.version === 34 ? 'id' : 'q2pro')) === 'id' ? 1384 : this.payloadBytes);
+        const datagramBytes = options.maxDatagramBytes ?? 65507;
+        if (!Number.isInteger(datagramBytes) || datagramBytes < 524 || datagramBytes > 65507) throw new RangeError("Invalid Q2 transport datagram limit");
+        this.payloadBytes = Math.min(options.payloadBytes ?? 1390, datagramBytes - 12);
+        const capacity = options.messageBytes ?? (options.channel === 'new' ? 32768 : (options.sequenceRecording ?? (options.protocol.version === 34 ? 'id' : 'q2pro')) === 'id' ? 1384 : this.payloadBytes);
+        this.capacity = options.channel === 'new' ? capacity : Math.min(capacity, datagramBytes - 10);
         if (!Number.isInteger(this.payloadBytes) || this.payloadBytes < 512 || this.payloadBytes > 4086 || !Number.isInteger(this.capacity) || this.capacity < 1 || this.capacity > 32768)
             throw new RangeError('Invalid Q2 channel limits');
         if (!Number.isInteger(options.qport) || options.qport < 0 || options.qport > 65535)
@@ -81,7 +85,7 @@ export class Q2Channel {
     private qportBytes(): number { return this.options.channel === 'old' && this.options.protocol.version < 35 ? 2 : this.options.qport === 0 ? 0 : 1; }
     private header(reliable: boolean, fragmented: boolean) {
         const classicId = this.options.channel === 'old' && (this.options.sequenceRecording ?? (this.options.protocol.version === 34 ? 'id' : 'q2pro')) === 'id';
-        const message = createMessage(classicId ? 1400 : 4096);
+        const message = createMessage(Math.min(classicId ? 1400 : 4096, this.options.maxDatagramBytes ?? 4096));
         const mask = this.options.channel === 'old' ? 0x7fffffff : 0x3fffffff;
         MSG_WriteLong(message, (this.outgoing & mask) | (reliable ? 0x80000000 : 0) | (fragmented ? 0x40000000 : 0));
         MSG_WriteLong(message, (this.incoming & mask) | (this.incomingReliable ? 0x80000000 : 0));

@@ -171,7 +171,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 const protocol = configured.kind === 'q2-r1q2' && offered.kind === 'q2-r1q2' && configured.revision < offered.revision ? configured
                     : configured.kind === 'q2-q2pro' && offered.kind === 'q2-q2pro' && configured.revision < offered.revision ? configured : offered;
                 const peer: ServerPeer<TAddress> = { remote, player: admitted.player, download: new Q2PeerDownload(), downloadFailure: null,
-                    channel: new Q2Channel({ side: 'server', protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes, compress: request.compression }),
+                    channel: new Q2Channel({ maxDatagramBytes: this.options.transport.maxDatagramBytes ?? 65507, side: 'server', protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes, compress: request.compression }),
                     wire: new Q2WireCodec(protocol), replay: new Q2CommandReplay(), frames: new Map<number, Q2WireFrame>(), gameState: null, active: false, sequence: 0, lastReceived: now, datagram: [], userinfo: request.userinfo };
                 this.peers.set(addressKey(remote), peer);
                 this.acceptConnection(remote);
@@ -462,7 +462,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
             closed: () => options.transport.closed, command: text => this.command(text), resetCommands: () => {
                 this.previous = new UsercmdT(); this.oldest = new UsercmdT(); this.pendingCommands = [];
             } });
-        this.handshake = new Q2ClientHandshake(options.remote, [options.host.protocol], options.qport, options.host.userinfo);
+        this.handshake = new Q2ClientHandshake(options.remote, [options.host.protocol], options.qport, options.host.userinfo, Math.min(1390, (options.transport.maxDatagramBytes ?? 65507) - 12));
     }
     get phase(): ApplicationNetworkPhase { return this.channel === null || this.state === 'closed' || this.state === 'rejected' ? this.state : this.receiver.phase; }
     get acknowledgedFrame(): number { return this.receiver.acknowledgedFrame; }
@@ -505,7 +505,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                 if (this.handshake.state.kind === 'connected' && this.channel === null) {
                     const request = this.handshake.state.request;
                     this.options.host.downloads?.setHttpServer(this.handshake.state.downloadServer);
-                    this.channel = new Q2Channel({ side: 'client', protocol: request.protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes });
+                    this.channel = new Q2Channel({ maxDatagramBytes: this.options.transport.maxDatagramBytes ?? 65507, side: 'client', protocol: request.protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes });
                     this.state = 'loading';
                     this.command('new');
                 }

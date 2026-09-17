@@ -34,6 +34,7 @@ for (const renderer of ['cpu', 'gl']) test(`hidden ${renderer} QW player skins f
         app = await RemoteApplication.open(launch.options, { print: text => { prints.push(text); return undefined; } });
         const remote = app, cvars = remote.clientCommands?.cvars;
         if (cvars === undefined || !(remote.remote instanceof QwRemotePresentation)) throw new Error('No QW client controls');
+        const remoteAddress = () => { const address = remote.networkAddress; if (address.kind === "ipx") throw new Error("Expected UDP client address"); return address; };
         const presentation = remote.remote;
         let channel: QuakeWorldChannel | null = null, begun = false, downloadOffset = 0;
         const download = pcx(36);
@@ -42,7 +43,7 @@ for (const renderer of ['cpu', 'gl']) test(`hidden ${renderer} QW player skins f
             if (channel === null) throw new Error('No QW channel');
             const bytes = new SizeBuf(1450); for (const record of records) writeQuakeWorldMessage(bytes, profile, record);
             if (snapshot) { const entity = new QwEntityStateT(); entity.number = 40; entity.modelindex = 2; entity.origin[0] = 800; entity.origin[1] = -304; entity.origin[2] = 88; writeQuakeWorldEntities(bytes, profile, [entity], new Map<number, QwEntityStateT>(), null); }
-            server.send(remote.networkAddress, channel.transmit(bytes.bytes(), performance.now()));
+            server.send(remoteAddress(), channel.transmit(bytes.bytes(), performance.now()));
         };
         const snapshot = (): void => send([{ kind: 'stat', index: 0, value: 100 }, { kind: 'player', state: player(3) }, { kind: 'player', state: player(7) }], true);
         const chunk = (): void => { const bytes = download.subarray(downloadOffset, downloadOffset + 768); downloadOffset += bytes.length; send([{ kind: 'download', result: { kind: 'data', percent: Math.floor(downloadOffset * 100 / download.length), bytes } }]); };
@@ -52,8 +53,8 @@ for (const renderer of ['cpu', 'gl']) test(`hidden ${renderer} QW player skins f
                 const packet = server.poll(); if (packet === null) break; if (packet.kind !== 'packet') continue;
                 if (new DataView(packet.payload.buffer, packet.payload.byteOffset).getInt32(0, true) === -1) {
                     const text = readQuakeWorldOutOfBand(packet.payload);
-                    if (text.startsWith('getchallenge')) server.send(remote.networkAddress, quakeWorldOutOfBand('c42'));
-                    else { const args = quakeWorldCommandArguments(text); expect(quakeWorldInfo(args[4] ?? '').get('name')).toBe('Configured'); channel = new QuakeWorldChannel('server', Number(args[2])); server.send(remote.networkAddress, quakeWorldOutOfBand('j')); }
+                    if (text.startsWith('getchallenge')) server.send(remoteAddress(), quakeWorldOutOfBand('c42'));
+                    else { const args = quakeWorldCommandArguments(text); expect(quakeWorldInfo(args[4] ?? '').get('name')).toBe('Configured'); channel = new QuakeWorldChannel('server', Number(args[2])); server.send(remoteAddress(), quakeWorldOutOfBand('j')); }
                     continue;
                 }
                 const delivery = channel?.receive(packet.payload, performance.now()); if (delivery === null || delivery === undefined) continue;

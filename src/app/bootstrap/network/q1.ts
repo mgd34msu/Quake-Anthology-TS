@@ -177,25 +177,26 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 this.options.transport.send(peer.remote, reliable);
             if (peer.stage !== 4)
                 continue;
-            const buffer = new SizeBuf(this.codec.maxDatagram);
+            const maxDatagram = Math.min(this.codec.maxDatagram, (this.options.transport.maxDatagramBytes ?? 65507) - 8);
+            const buffer = new SizeBuf(maxDatagram);
             writeNetQuakeMessage(buffer, this.host.protocol, { kind: 'time', seconds: frame.seconds });
             for (const message of frame.messages)
                 writeNetQuakeMessage(buffer, this.host.protocol, message);
             for (const state of frame.entities) {
                 const encoded = new SizeBuf(128);
                 writeNetQuakeEntity(encoded, this.host.protocol, state, peer.state.baselines.get(state.number) ?? entityState(state.number, new EntityStateT()), frame.seconds);
-                if (buffer.cursize + encoded.cursize > this.codec.maxDatagram)
+                if (buffer.cursize + encoded.cursize > maxDatagram)
                     break;
                 SZ_Write(buffer, encoded.bytes());
             }
-            const datagram = new SizeBuf(this.codec.maxDatagram);
+            const datagram = new SizeBuf(maxDatagram);
             for (const message of frame.datagram) {
                 const encoded = this.bytes([message]);
-                if (datagram.cursize + encoded.length > this.codec.maxDatagram)
+                if (datagram.cursize + encoded.length > maxDatagram)
                     break;
                 SZ_Write(datagram, encoded);
             }
-            if (buffer.cursize + datagram.cursize <= this.codec.maxDatagram)
+            if (buffer.cursize + datagram.cursize <= maxDatagram)
                 SZ_Write(buffer, datagram.bytes());
             this.options.transport.send(peer.remote, peer.channel.unreliable(buffer.bytes()));
         }

@@ -5,14 +5,32 @@ import { sourceCommandText } from "../../core/commands/text.ts";
 import { setInfoValue } from "../../core/cvars/info.ts";
 import { nativeAtoi } from "../../core/numeric.ts";
 import { sameAddress } from "../common/endpoint.ts";
-import type { Ipv4Address, LoopbackAddress } from "../common/endpoint.ts";
+import type { Ipv4Address, IpxAddress, LoopbackAddress } from "../common/endpoint.ts";
 import { decodeConnectionless, encodeConnect, encodeConnectionlessText } from "./connectionless.ts";
 import type { ConnectionlessPacket } from "./connectionless.ts";
 
-export type Q3Address = Ipv4Address | LoopbackAddress;
+export type Q3RemoteAddress = Ipv4Address | IpxAddress;
+export type Q3Address = Q3RemoteAddress | LoopbackAddress;
 export interface Q3OutgoingDatagram { readonly to: Q3Address; readonly payload: Uint8Array; }
-function copyAddress(address: Q3Address): Q3Address { return address.kind === "loopback" ? { ...address } : { ...address, host: [...address.host] }; }
-function addressText(address: Q3Address): string { return address.kind === "loopback" ? "loopback" : `${address.host.join(".")}:${address.port}`; }
+function copyAddress(address: Q3Address): Q3Address {
+  switch (address.kind) {
+    case "loopback": return { ...address };
+    case "ipv4": return { ...address, host: [...address.host] };
+    case "ipx": return { ...address, node: [...address.node] };
+  }
+}
+function addressText(address: Q3Address): string {
+  switch (address.kind) {
+    case "loopback": return "loopback";
+    case "ipv4": return `${address.host.join(".")}:${address.port}`;
+    case "ipx": return `${address.network.toString(16).padStart(8, "0")}.${address.node.map(byte => byte.toString(16).padStart(2, "0")).join("")}:${address.port}`;
+  }
+}
+export function q3IsLanAddress(address: Q3Address): boolean {
+  return address.kind !== "ipv4" || address.host[0] === 127 || address.host[0] === 10
+    || (address.host[0] === 192 && address.host[1] === 168)
+    || (address.host[0] === 172 && address.host[1] >= 16 && address.host[1] <= 31);
+}
 export function q3InfoValue(info: string, key: string): string {
   if (info.length >= 8192) throw new CommonError("drop", "Info_ValueForKey: oversize infostring");
   const fields = sourceCommandText(info).split("\\");
@@ -130,7 +148,7 @@ export class Q3ServerAdmission {
   }
   private authorize(from: Q3Address, packet: ConnectionlessPacket, now: number): void {
     const authority = this.bindings.authorizeAddress();
-    if (authority === null || !sameAddress(from, authority, false)) return;
+    if (from.kind !== "ipv4" || authority === null || authority.kind !== "ipv4" || !sameAddress(from, authority, false)) return;
     const number = nativeAtoi(packet.arguments[0] ?? ""), challenge = this.challenges.find(value => value.challenge === number);
     if (challenge === undefined || challenge.address === null) return;
     challenge.pingTime = now;
@@ -148,7 +166,7 @@ export class Q3ServerAdmission {
     const qport = nativeAtoi(q3InfoValue(userinfo, "qport")), challengeNumber = nativeAtoi(q3InfoValue(userinfo, "challenge"));
     if (qport < 0 || qport > 65535) { this.reply(from, "print\nInvalid qport.\n"); return; }
     const matches = (slot: Q3AdmissionSlot): boolean => slot.address !== null && sameAddress(from, slot.address, false)
-      && (slot.qport === qport || (from.kind === "ipv4" && slot.address.kind === "ipv4" && from.port === slot.address.port));
+      && (slot.qport === qport || (from.kind !== "loopback" && slot.address.kind !== "loopback" && from.port === slot.address.port));
     const slots = host.slots(), existing = slots.find(slot => slot.phase !== "free" && matches(slot));
     if (existing !== undefined && ((now - existing.lastConnectTime) | 0) < Math.imul(host.reconnectLimitSeconds(), 1000)) return;
     if (from.kind !== "loopback") {

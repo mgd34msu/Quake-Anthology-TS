@@ -29,6 +29,7 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
         if (launch.kind !== 'run') throw new Error('Expected QW run');
         app = await RemoteApplication.open(launch.options, { print: text => { prints.push(text); return undefined; } });
         let remote = app;
+        const remoteAddress = () => { const address = remote.networkAddress; if (address.kind === "ipx") throw new Error("Expected UDP client address"); return address; };
         const session = remote.session;
         expect(session.world).toBeNull(); expect(remote.localPlayers).toHaveLength(0);
         expect(() => remote.content).toThrow('Remote server has not supplied a world');
@@ -44,7 +45,7 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
             if (channel === null) throw new Error('No QW channel');
             const bytes = new SizeBuf(1450); for (const record of records) writeQuakeWorldMessage(bytes, profile, record);
             if (entities) { const door = new QwEntityStateT(); door.number = 40; door.modelindex = 3; writeQuakeWorldEntities(bytes, profile, [door], new Map<number, QwEntityStateT>(), null); }
-            server.send(remote.networkAddress, channel.transmit(bytes.bytes(), performance.now()));
+            server.send(remoteAddress(), channel.transmit(bytes.bytes(), performance.now()));
         };
         const serverData = (): QwServerData => ({ kind: 'server-data', protocol: profile, serverCount, gameDirectory: servedDirectory, playerSlot: 3, spectator: false, level: servedMap,
           moveVariables: { gravity: 800, stopSpeed: 100, maxSpeed: 320, spectatorMaxSpeed: 500, accelerate: 10, airAccelerate: 0.7, waterAccelerate: 10, friction: 4, waterFriction: 4, entityGravity: 1 } });
@@ -59,8 +60,8 @@ for (const gameDirectory of ['qw', 'id1', 'mod-alpha']) test(`hidden QW ${gameDi
                 const packet = server.poll(); if (packet === null) break; if (packet.kind !== 'packet') continue;
                 if (new DataView(packet.payload.buffer, packet.payload.byteOffset).getInt32(0, true) === -1) {
                     const text = readQuakeWorldOutOfBand(packet.payload);
-                    if (text.startsWith('getchallenge')) server.send(remote.networkAddress, quakeWorldOutOfBand('c42'));
-                    else { const args = quakeWorldCommandArguments(text); channel = new QuakeWorldChannel('server', Number(args[2])); server.send(remote.networkAddress, quakeWorldOutOfBand('j')); }
+                    if (text.startsWith('getchallenge')) server.send(remoteAddress(), quakeWorldOutOfBand('c42'));
+                    else { const args = quakeWorldCommandArguments(text); channel = new QuakeWorldChannel('server', Number(args[2])); server.send(remoteAddress(), quakeWorldOutOfBand('j')); }
                     continue;
                 }
                 const delivery = channel?.receive(packet.payload, performance.now()); if (delivery === null || delivery === undefined) continue;
