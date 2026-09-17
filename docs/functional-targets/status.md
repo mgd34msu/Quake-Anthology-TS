@@ -1,8 +1,8 @@
 # Functional target status
 
-At accepted source `6d6f60ba0096c43c455341cb6582c27d334f6ea0`: **1/23 targets complete; 22/23 open.** These are the functional targets defined in [the shared-engine plan](README.md), not source inventory counts. Integrated source changes do not close a target until its required behavior and public consumers are qualified together.
+At accepted source `6103c976f2abd315176206ebe190661173204fb4`: **1/23 targets complete; 22/23 open.** These are the functional targets defined in [the shared-engine plan](README.md), not source inventory counts. Integrated source changes do not close a target until its required behavior and public consumers are qualified together.
 
-Installed executable is `6d6f60ba0096c43c455341cb6582c27d334f6ea0`, including the accepted `af7be7f` integrations and `189118b` stream fix; see [execution status](../execution-status.md#installed-executable-and-recent-fixes) for exact identity and bounded delivery evidence.
+Installed executable is `6103c976f2abd315176206ebe190661173204fb4`, including the prior integrations and current delivery fixes; see [execution status](../execution-status.md#installed-executable-and-recent-fixes) for exact identity and bounded delivery evidence.
 
 The accepted [Application](../../src/app/bootstrap/application.ts) now consumes substantial content, local-input, HUD, progression, mode, campaign, save and tool work. The table separates those integrations from remaining implementation and verification. It does not repeat obsolete blanket instructions to join code that already has callers.
 
@@ -11,7 +11,7 @@ The accepted [Application](../../src/app/bootstrap/application.ts) now consumes 
 | T01 | Session and resource lifetime | Complete in source | Retained client/profile publication and the current executable are delivered; remaining feature-specific public workflows keep their own acceptance boundaries. |
 | T02 | Content and asset loading | Open | Codecs, product policy and restricted-content resolution are integrated. Qualify required products, remounting and public frontend selection, including independent prerelease rules. |
 | T03 | Rendering and visual effects | Open | Source effects, shadows, Q64 materials and diagnostics have consumers. The installed proof still shows a black triangular pillar defect. Inspect combined CPU/GL output; remaining fidelity and whole-frame performance are unqualified. |
-| T04 | Audio and music | Open | Acoustics, music commands and voice timing are integrated. Qualify physical output and relative weapon/explosion loudness; component checks do not establish audibility or FPS. |
+| T04 | Audio and music | Open | Acoustics, music commands and voice timing are integrated. Generalized jump audio remains in progress: model lookup coverage does not close private Q3 event-routing/Q2 voice-selection defects. Qualify physical output and relative weapon/explosion loudness. |
 | T05 | Input and local players | Open | Device assignment, source look controls and live local-seat paths are integrated. Complete joined-seat camera/angle checks and the protocol-specific remote-seat matrix. |
 | T06 | Console, cvars and profiles | Open | Shared command/profile consumers are integrated. Finish public library/frontend callers and verify script routing and persistence across source changes. |
 | T07 | Network connections and prediction | Open | Retained connection foundations are accepted; additional admission/transport work remains separately qualified. Complete native peers in both directions, prediction and KEX 2023 transport. |
@@ -23,7 +23,7 @@ The accepted [Application](../../src/app/bootstrap/application.ts) now consumes 
 | T13 | Bots, AI and navigation | Open | Selected-arsenal observations, native knowledge and navigation consumers are integrated. Qualify routes, objectives, mixed rosters and saved continuation. |
 | T14 | Maps, campaigns and authored interactions | Open | Unit history, revisits, authored starting inventory and campaign presentation are integrated. Qualify full travel chains and restored authored world state. |
 | T15 | Match modes and objectives | Open | Source-selected mode/objective and rerelease-item consumers are integrated. Qualify native and mixed mode workflows, including public setup and completion. |
-| T16 | Saves and recovery | Open | Original Q1 save and timed/source autosave paths are integrated. Installed `6d6f60b` passed named save/load, exact player-position restoration and fresh input after an 8-second corrective run; separate Main/Quit passed. Older-save compatibility, native-format Application joins and broader recovery remain open. |
+| T16 | Saves and recovery | Open | Original Q1 save and timed/source autosave paths are integrated. Earlier installed `6d6f60b` passed named save/load, exact player-position restoration and fresh input after an 8-second corrective run; separate Main/Quit passed. Older-save compatibility, native-format Application joins and broader recovery remain open. |
 | T17 | Menus, HUD and user experience | Open | Source HUD, guidance, settings and postgame menus have callers. Finish public libraries and progression browsing; inspect full workflows at supported sizes and seat layouts. |
 | T18 | Localization and accessibility | Open | Font fallback, accessibility controls and media/voice caption consumers are integrated. Verify actual rendered language coverage, control usability and caption timing. |
 | T19 | Progression and player services | Open | Durable local records, source arena progression and postgame consumers are integrated. Finish generic progress browsing and TA demo playback callers, then verify fresh-profile persistence. External ranking/native-peer service compatibility remains explicitly limited. |

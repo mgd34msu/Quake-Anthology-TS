@@ -2,7 +2,15 @@
 
 ## Installed executable and recent fixes
 
-Installed source is `6d6f60ba0096c43c455341cb6582c27d334f6ea0`, tree `a97e64cc7fcdd8dbd95e441434b4d083a2006292`. Installed at `2026-09-17T02:49:29.109Z`: SHA-256 `0af03c500c2912e051feea9be3064c08e4da2fcf7c26a1e3aefa17860965be8f`, 124,557,440 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260916/final-6d6f60b/installed-build.json).
+Installed source is `6103c976f2abd315176206ebe190661173204fb4`, tree `ec2b8e3352e7fd2b3ebfa4fe6af5e7b43ea5e532`. Installed at `2026-09-17T03:57:00.369Z`: SHA-256 `04bf9f0d533d36ddc939bbaea148ff1e8c6c30a1f66aa42a3ee65282c493f0c7`, 124,565,632 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260916/final-6103c97/installed-build.json).
+
+The compiled public check selected a Q1 classic world, QuakeWorld movement, Q2 classic weapons/monsters and Q3 Ranger. It passed 8.251 seconds of controls, an `e1m5` round trip, named save, Main return and normal Quit; root inspected the captures. This is separate from the 30.416-second source proof, not a compiled 30-second claim. Earlier failed harness attempts remain recorded. A tank actor exists in the checkpoint, but the pictured monster was not identified as a tank; no tank appearance-parity claim follows. Evidence: [compiled proof](../.artifacts/resume-20260916/final-6103c97/runtime-ready4-proof.json).
+
+This delivery includes the earlier Application integrations and `451a905` model-material preparation optimization. Its 19.55% aggregate component improvement across three pairs does not establish an FPS gain. Generalized jump audio remains in progress: a private lookup check covered 136 model entries across 25 installed products, but newly found Q3 event-routing and Q2 voice-selection defects remain private work, not installed fixes or all-model gameplay qualification. Physical audio, full campaigns, FPS and broad visual/native-peer parity remain unqualified. The earlier T03 black pillar defect remains open. Functional completion stays **1/23 complete, 22/23 open**; see [target status](functional-targets/status.md).
+
+## Historical 6d6f60b recovery proof
+
+Previously installed source was `6d6f60ba0096c43c455341cb6582c27d334f6ea0`, tree `a97e64cc7fcdd8dbd95e441434b4d083a2006292`. Installed at `2026-09-17T02:49:29.109Z`: SHA-256 `0af03c500c2912e051feea9be3064c08e4da2fcf7c26a1e3aefa17860965be8f`, 124,557,440 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260916/final-6d6f60b/installed-build.json).
 
 This includes the accepted `af7be7f` Application integrations, `189118b` LLM stream correction and subsequent delivery fixes. Content, local input, HUD, progression, modes, campaign, saves and tools now have installed consumers. This is bounded delivery, not closure of those functional targets: **1/23 complete, 22/23 open**. See [functional target status](functional-targets/status.md).
 
