@@ -1,8 +1,8 @@
 # Functional target status
 
-After the accepted T06 console/profile implementation: **7/23 targets complete; 16/23 open. T07 is active.** The installed executable remains `ed1ceac`; T05 and T06 have not yet been built into that executable. These are the functional targets defined in [the shared-engine plan](README.md), not source inventory counts. Integrated source changes do not close a target until its required behavior and public consumers are qualified together.
+After the accepted T06 console/profile implementation: **7/23 targets complete; 16/23 open. T07 is active.** Installed `3b1c9b2` includes T05 and T06. These are the functional targets defined in [the shared-engine plan](README.md), not source inventory counts. Integrated source changes do not close a target until its required behavior and public consumers are qualified together.
 
-Installed executable is `ed1ceac94d28f0e8ec7abe3eb4dab90e79251d40`, including accepted T04 and prior integrations; see [execution status](../execution-status.md#installed-executable-and-recent-fixes) for exact identity and bounded delivery evidence.
+Installed executable is `3b1c9b2b2cfdea1b7f47c29463e4e8a2a6f69a75`, including accepted T05, T06 and prior integrations; see [execution status](../execution-status.md#installed-executable-and-recent-fixes) for exact identity and bounded delivery evidence. T05 native source verification passed 39 assertions in 31.7 seconds; T06 existing checks passed 96 tests/918 assertions in 195 ms. The compiled delivery passed `--help` only; no compiled gameplay, physical-audio or FPS qualification is claimed.
 
 The accepted [Application](../../src/app/bootstrap/application.ts) now consumes substantial content, local-input, HUD, progression, mode, campaign, save and tool work. The table separates those integrations from remaining implementation and verification. It does not repeat obsolete blanket instructions to join code that already has callers.
 
