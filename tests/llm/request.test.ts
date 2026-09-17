@@ -36,10 +36,10 @@ async function seedSubscription(directory: string, expiresAt = Date.now() + 3600
 function codex(): Response { return stream(data({ type: "response.output_text.delta", delta: "answer" }) + data({ type: "response.completed", response: { status: "completed" } })); }
 function refreshed(): Response { return Response.json({ access_token: subscriptionToken("new"), refresh_token: "new-refresh", token_type: "Bearer", expires_in: 3600 }); }
 
-test("API uses Chat Completions and streams complete Unicode text", async () => {
+test("OpenAI API uses Responses and streams complete Unicode text", async () => {
   const deltas: string[] = [];
   const { service } = await fixture({ request: { fetch: async (url, init) => {
-    expect(url).toBe("https://api.openai.com/v1/chat/completions");
+    expect(url).toBe("https://api.openai.com/v1/responses");
     expect(init.redirect).toBe("error");
     const headers = new Headers(init.headers);
     expect(headers.get("authorization")).toBe("Bearer api-secret");
@@ -47,8 +47,8 @@ test("API uses Chat Completions and streams complete Unicode text", async () => 
     const body: unknown = init.body;
     if (typeof body !== "string") throw new Error("Expected request body");
     const parsed: unknown = JSON.parse(body);
-    expect(parsed).toEqual({ model: "test-model", messages: [{ role: "system", content: "answer" }, { role: "user", content: "hello" }], stream: true });
-    return stream(completion());
+    expect(parsed).toEqual({ model: "test-model", instructions: "answer", input: [{ role: "user", content: [{ type: "input_text", text: "hello" }] }], store: false, stream: true });
+    return stream(data({ type: "response.output_text.delta", delta: "café 🎮" }) + data({ type: "response.completed", response: { status: "completed" } }));
   } } });
   await service.saveApiKey("chatgpt-api", "api-secret");
   await service.setModel("chatgpt-api", "test-model");
@@ -230,4 +230,15 @@ test("API keeps the SSE media requirement and cancels rejected response bodies",
     }), { headers: { "content-type": "application/json; secret=do-not-reflect" } })))
     .rejects.toThrow("LLM service did not return an event stream (HTTP 200, JSON).");
   expect(cancelled).toBe(true);
+});
+
+test("unsupported persisted effort fails before sending a paid request", async () => {
+  let requests = 0;
+  const { service, directory } = await fixture({ request: { fetch: async () => { requests++; return codex(); } } });
+  await service.saveApiKey("chatgpt-api", "fixture-key"); await service.setModel("chatgpt-api", "gpt-5.5-pro"); await service.selectProvider("chatgpt-api");
+  const preferences: unknown = JSON.parse(await readFile(join(directory, "llm.json"), "utf8"));
+  if (typeof preferences !== "object" || preferences === null) throw new Error("Missing test preferences");
+  await writeFile(join(directory, "llm.json"), JSON.stringify({ ...preferences, reasoningEfforts: { "chatgpt-api": "low", "chatgpt-subscription": null, "other-api": null } }));
+  await expect(service.request({ prompt: "hello", instructions: "answer" })).rejects.toThrow("Model default");
+  expect(requests).toBe(0);
 });

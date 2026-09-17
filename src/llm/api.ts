@@ -1,3 +1,4 @@
+import { readResponses } from "./responses.ts";
 import { record } from "./auth.ts";
 import { LlmHttpError, LlmSettingsError } from "./errors.ts";
 import { cancelResponseBody, fetchLlmResponse, type LlmFetch, type TransportRequest } from "./request.ts";
@@ -41,3 +42,13 @@ export async function requestChatCompletions(input: TransportRequest, credential
 }
 
 function isArray(value: unknown): value is unknown[] { return Array.isArray(value); }
+
+export async function requestOpenAiResponses(input: TransportRequest, apiKey: string, fetcher: LlmFetch): Promise<string> {
+  const response = await fetchLlmResponse("https://api.openai.com/v1/responses", {
+    method: "POST", headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json", accept: "text/event-stream" },
+    body: JSON.stringify({ model: input.model, instructions: input.instructions, input: [{ role: "user", content: [{ type: "input_text", text: input.prompt }] }],
+      store: false, stream: true, ...(input.reasoningEffort === undefined ? {} : { reasoning: { effort: input.reasoningEffort } }) }),
+  }, fetcher, input.signal);
+  if (!response.ok) { cancelResponseBody(response); throw new LlmHttpError(response.status); }
+  return readResponses(input, response, "OpenAI API", true);
+}

@@ -62,7 +62,7 @@ async function tokenRequest(options: SubscriptionAuthOptions, form: URLSearchPar
   const timeout = setTimeout(stop, options.fetchTimeoutMs ?? 30_000);
   try {
     const response = await abortable((options.fetch ?? fetch)(options.tokenUrl ?? "https://auth.openai.com/oauth/token", {
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form.toString(), signal: controller.signal,
+      method: "POST", redirect: "error", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form.toString(), signal: controller.signal,
     }), controller.signal);
     if (!response.ok) throw new LlmSettingsError("Subscription token request failed.");
     const value: unknown = await abortable(response.json(), controller.signal);

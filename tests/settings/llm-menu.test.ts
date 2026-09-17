@@ -146,7 +146,7 @@ test("provider model pages select a real ID and persist supported effort while r
   let hold = false;
   const service = await LlmSettingsService.open({ baseDirectory: directory, request: { fetch: async (_url, init) => {
     if (hold) await new Promise<void>((_resolve, reject) => { init?.signal?.addEventListener("abort", () => reject(new Error("canceled")), { once: true }); });
-    return Response.json({ data: Array.from({ length: 12 }, (_, index) => ({ id: `gpt-5-${String(index).padStart(2, "0")}` })) });
+    return Response.json({ data: Array.from({ length: 12 }, (_, index) => ({ id: index === 8 ? "gpt-6-astra" : `${index < 8 ? "a" : "z"}-test-${index}` })) });
   } } });
   try {
     await service.selectProvider("chatgpt-api"); await service.saveApiKey("chatgpt-api", "dummy");
@@ -166,7 +166,7 @@ test("provider model pages select a real ID and persist supported effort while r
     expect(service.read().catalogs["chatgpt-api"].status).toBe("loading");
     focus("ui:llm:save"); key(KeyCode.Enter);
     for (let index = 0; index < 100 && service.read().reasoningEffort !== "low"; index++) await Bun.sleep(2);
-    expect(service.read().model).toBe("gpt-5-08"); expect(service.read().reasoningEffort).toBe("low");
+    expect(service.read().model).toBe("gpt-6-astra"); expect(service.read().reasoningEffort).toBe("low");
     expect(service.read().catalogs["chatgpt-api"].status).toBe("loading");
     menu.dispose();
   } finally { await service.close(); await rm(directory, { recursive: true, force: true }); }

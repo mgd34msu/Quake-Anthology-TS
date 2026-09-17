@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LlmSettingsService, type LlmSettingsOptions } from "../../src/llm/settings.ts";
-import { parseApiModels, parseCodexModels } from "../../src/llm/models.ts";
+import { apiModel, parseApiModels, parseCodexModels } from "../../src/llm/models.ts";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -35,7 +35,7 @@ test("Codex live fields determine names, visible order, default model and reason
 test("API model listing capability is reference metadata, while Other receives no guessed effort", async () => {
   const value = await parsed("api"), api = parseApiModels(value, true), other = parseApiModels(value, false);
   expect(api.map(entry => entry.id)).not.toContain("text-embedding-test");
-  expect(api.find(entry => entry.id === "gpt-5")).toMatchObject({ reasoningSource: "reference", reasoningEfforts: ["low", "medium", "high"], recommended: false });
+  expect(api.find(entry => entry.id === "gpt-5")).toMatchObject({ reasoningSource: "reference", reasoningEfforts: ["minimal", "low", "medium", "high"], recommended: false });
   expect(api.find(entry => entry.id === "unknown-chat")?.reasoningEfforts).toEqual([]);
   expect(other.every(entry => entry.reasoningSource === "unknown" && entry.reasoningEfforts.length === 0)).toBe(true);
 });
@@ -68,7 +68,7 @@ test("API discovery uses v1/models and selected effort uses reasoning_effort onl
     expect(new Headers(init.headers).has("chatgpt-account-id")).toBe(false);
     if (init.method === "GET") { expect(url).toBe("https://api.openai.com/v1/models"); return await response("api"); }
     const body: unknown = init.body; if (typeof body !== "string") throw new Error("Expected body");
-    const value: unknown = JSON.parse(body); expect(value).toHaveProperty("reasoning_effort", "high"); expect(value).not.toHaveProperty("reasoning"); return answer(false);
+    const value: unknown = JSON.parse(body); expect(value).toHaveProperty("reasoning", { effort: "high" }); expect(value).not.toHaveProperty("reasoning_effort"); return answer(true);
   } } });
   await service.saveApiKey("chatgpt-api", "fake-key"); await service.selectProvider("chatgpt-api"); await service.refreshModels();
   expect(service.read().model).toBe("");
@@ -136,4 +136,13 @@ test("saving a selected Other model retains its loaded catalog until the service
   expect(reopened.read().providers["other-api"].model).toBe("gpt-4.1");
   await service.saveOtherService({ baseUrl: "http://127.0.0.1:11435/v1", model: "", transport: "openai-chat-completions" });
   expect(service.read().catalogs["other-api"]).toEqual({ status: "idle", models: [] });
+});
+
+
+test("official API reasoning choices do not guess capabilities for lookalike models", () => {
+  expect(apiModel("gpt-6-astra").reasoningEfforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  expect(apiModel("gpt-5.5-pro").reasoningEfforts).toEqual(["medium", "high", "xhigh"]);
+  expect(apiModel("gpt-5-2025-08-07").reasoningEfforts).toContain("minimal");
+  expect(apiModel("gpt-5-future").reasoningEfforts).toEqual([]);
+  expect(apiModel("gpt-5-future").reasoningSource).toBe("unknown");
 });

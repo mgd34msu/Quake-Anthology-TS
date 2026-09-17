@@ -26,12 +26,28 @@ export function parseReasoningEffort(value: unknown): string | null {
   return effort;
 }
 
-// GoodVibes SDK reasoning-effort-families.ts, OpenAI row, verified there 2026-07-25.
-// Model-list API entries carry no reasoning-capability declaration.
+// Official model pages verified 2026-09-16. Unknown model IDs keep Model default.
+const apiReasoning: Readonly<Record<string, readonly string[]>> = {
+  "gpt-5": ["minimal", "low", "medium", "high"],
+  "gpt-5-pro": ["high"],
+  "gpt-5.2-pro": ["medium", "high", "xhigh"],
+  "gpt-5.4": ["none", "low", "medium", "high", "xhigh"],
+  "gpt-5.4-pro": ["medium", "high", "xhigh"],
+  "gpt-5.4-mini": ["none", "low", "medium", "high", "xhigh"],
+  "gpt-5.4-nano": ["none", "low", "medium", "high", "xhigh"],
+  "gpt-5.6-sol": ["none", "low", "medium", "high", "xhigh", "max"],
+  "gpt-5.1": ["none", "low", "medium", "high"],
+  "gpt-5.2": ["none", "low", "medium", "high", "xhigh"],
+  "gpt-5.5": ["none", "low", "medium", "high", "xhigh"],
+  "gpt-5.5-pro": ["medium", "high", "xhigh"],
+  "gpt-6-astra": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.6-terra": ["none", "low", "medium", "high", "xhigh", "max"],
+  "gpt-5.6-luna": ["none", "low", "medium", "high", "xhigh", "max"],
+};
 export function apiModel(id: string): LlmModel {
-  const knownReasoning = /^(?:gpt-5|o1|o3|o4)(?:$|[.-])/.test(id);
-  return { id, name: id, reasoningEfforts: knownReasoning ? ["low", "medium", "high"] : [],
-    defaultReasoningEffort: null, reasoningSource: knownReasoning ? "reference" : "unknown", recommended: false };
+  const efforts = apiReasoning[id.replace(/-\d{4}-\d{2}-\d{2}$/, "")];
+  return { id, name: id, reasoningEfforts: efforts ?? [], defaultReasoningEffort: null,
+    reasoningSource: efforts === undefined ? "unknown" : "reference", recommended: false };
 }
 const NON_CHAT = /embedding|whisper|tts|dall-e|davinci|babbage|^ada|moderation|text-search|similarity|transcribe|speech|realtime|image/i;
 export function parseApiModels(value: unknown, openai: boolean): readonly LlmModel[] {

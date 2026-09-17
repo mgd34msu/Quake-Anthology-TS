@@ -1,5 +1,5 @@
 import { apiModel, discoverApiModels, discoverCodexModels, parseReasoningEffort, type LlmModel, type LlmModelCatalog } from "./models.ts";
-import { requestChatCompletions } from "./api.ts";
+import { requestChatCompletions, requestOpenAiResponses } from "./api.ts";
 import { requestCodex } from "./codex.ts";
 import { checkRequestAbort, withRequestAbort, type LlmRequestInput, type LlmRequestOptions, type TransportRequest } from "./request.ts";
 import { LlmHttpError, LlmSettingsError } from "./errors.ts";
@@ -19,7 +19,7 @@ export interface LlmSettingsSnapshot {
   readonly catalogs: Readonly<Record<LlmProvider, LlmModelCatalog>>;
   readonly providers: {
     readonly "chatgpt-subscription": { readonly configured: boolean; readonly model: string; readonly transport: "openai-codex-responses-sse"; readonly expiresAt: number | null };
-    readonly "chatgpt-api": { readonly configured: boolean; readonly model: string; readonly transport: "openai-chat-completions" };
+    readonly "chatgpt-api": { readonly configured: boolean; readonly model: string; readonly transport: "openai-responses-sse" };
     readonly "other-api": OtherService & { readonly configured: boolean };
   };
   readonly subscriptionAuth: SubscriptionAuthState;
@@ -108,7 +108,7 @@ export class LlmSettingsService {
   read(): LlmSettingsSnapshot {
     const providers: LlmSettingsSnapshot["providers"] = {
       "chatgpt-subscription": { configured: this.chatgpt.subscription !== null, model: this.preferences.models["chatgpt-subscription"], transport: "openai-codex-responses-sse", expiresAt: this.chatgpt.subscription?.expiresAt ?? null },
-      "chatgpt-api": { configured: this.chatgpt.apiKey !== null, model: this.preferences.models["chatgpt-api"], transport: "openai-chat-completions" },
+      "chatgpt-api": { configured: this.chatgpt.apiKey !== null, model: this.preferences.models["chatgpt-api"], transport: "openai-responses-sse" },
       "other-api": { ...this.other, configured: this.otherKey !== null },
     };
     return { provider: this.preferences.provider, model: providers[this.preferences.provider].model,
@@ -392,7 +392,8 @@ export class LlmSettingsService {
       const selectedEffort = preferences.reasoningEfforts[selected];
       if (selectedEffort !== null && this.modelMetadata(selected, selectedModel) === undefined) await this.refreshModels(selected, signal);
       const metadata = this.modelMetadata(selected, selectedModel);
-      const effort = selectedEffort !== null && metadata?.reasoningEfforts.includes(selectedEffort) ? selectedEffort : undefined;
+      if (selectedEffort !== null && !metadata?.reasoningEfforts.includes(selectedEffort)) throw new LlmSettingsError("The selected reasoning effort is not supported by this model. Choose a supported effort or Model default in LLM options.");
+      const effort = selectedEffort ?? undefined;
       const request: TransportRequest = { prompt: input.prompt, instructions: input.instructions, model: selectedModel, signal, ...(effort === undefined ? {} : { reasoningEffort: effort }),
         ...(input.onText === undefined ? {} : { onText: input.onText }) };
       if (selected === "chatgpt-subscription") {
@@ -406,7 +407,9 @@ export class LlmSettingsService {
       }
       const key = selected === "chatgpt-api" ? parseChatgpt(await this.load("chatgpt.key")).apiKey : await this.load("other.key");
       if (key === null) throw new LlmSettingsError("Paste an API key for the selected provider in LLM options first.");
-      return await requestChatCompletions(request, { apiKey: apiKey(key), baseUrl: other?.baseUrl ?? "https://api.openai.com/v1" }, fetcher);
+      if (selected === "chatgpt-api") return await requestOpenAiResponses(request, apiKey(key), fetcher);
+      if (other === null) throw new LlmSettingsError("Configure Other API before sending a request.");
+      return await requestChatCompletions(request, { apiKey: apiKey(key), baseUrl: other.baseUrl }, fetcher);
     }, input.signal);
   }
   cancelSignIn(): void { this.active?.controller.abort(); this.authState = { status: "idle" }; }

@@ -2,7 +2,7 @@ import type { CommandContext } from "../contracts/common.ts";
 import { asciiFold, tokenizeCommand, type CommandBuffer } from "../core/commands/index.ts";
 import { queryConsoleEntries } from "./discovery.ts";
 
-const indirect = new Set(["llm_ask", "llm_exec", "exec", "vstr", "alias", "bind", "stuffcmds", "cmd", "wait"]);
+const indirect = new Set(["llm_ask", "llm_exec", "llm_cancel", "exec", "vstr", "alias", "bind", "stuffcmds", "cmd", "wait"]);
 const maxText = 4096;
 
 function lines(text: string, commands: CommandBuffer): readonly string[] {

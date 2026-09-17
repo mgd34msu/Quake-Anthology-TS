@@ -54,7 +54,7 @@ for (const type of ["response.failed", "response.incomplete", "error"]) test(`su
 
 test("subscription rejects truncated and malformed streams", async () => {
   await expect(requestCodex(input(), credential, async () => response(event({ type: "response.output_text.delta", delta: "quit" })))).rejects.toThrow("before completion");
-  await expect(requestCodex(input(), credential, async () => response("data: secret-invalid-json\n\n"))).rejects.toThrow("Invalid subscription response.");
+  await expect(requestCodex(input(), credential, async () => response("data: secret-invalid-json\n\n"))).rejects.toThrow("Invalid LLM response.");
 });
 
 test("subscription rejects completion with no usable text", async () => {

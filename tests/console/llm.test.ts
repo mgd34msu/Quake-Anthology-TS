@@ -31,7 +31,7 @@ test("LLM asks route answers independently to the invoking seats and reject dupl
   expect(f.requests).toHaveLength(2);
   f.requests[1]?.resolve("second answer"); f.requests[0]?.resolve("first answer"); await settle();
   expect(f.output.map(entry => [entry.text, entry.source])).toEqual([
-    ["LLM request started.\n", f.source], ["LLM request started.\n", f.second], ["An LLM request is already running in this console.\n", f.source], ["second answer\n", f.second], ["first answer\n", f.source],
+    ["LLM request started. Use llm_cancel to cancel.\n", f.source], ["LLM request started. Use llm_cancel to cancel.\n", f.second], ["An LLM request is already running in this console.\n", f.source], ["second answer\n", f.second], ["first answer\n", f.source],
   ]);
   expect(f.requests[0]?.input.prompt).toBe("first question"); expect(f.requests[0]?.input.instructions).toContain("Examples: game_action"); f.remove();
 });
@@ -96,7 +96,7 @@ test("LLM disposal aborts transport and ignores late commands and answers", asyn
   const f = fixture(); f.send('llm_exec "do it"'); f.send('llm_ask "question"', f.second); f.remove();
   expect(f.requests.every(request => request.input.signal?.aborted)).toBe(true);
   f.requests[0]?.resolve("game_action"); f.requests[1]?.resolve("late answer"); await settle();
-  expect(f.effects).toHaveLength(0); expect(f.output.map(entry => entry.text)).toEqual(["LLM request started.\n", "LLM request started.\n"]);
+  expect(f.effects).toHaveLength(0); expect(f.output.map(entry => entry.text)).toEqual(["LLM request started. Use llm_cancel to cancel.\n", "LLM request started. Use llm_cancel to cancel.\n"]);
 });
 
 test("LLM rejects malformed, recursive, script, oversized, and macro batches wholesale", async () => {
@@ -157,4 +157,19 @@ test("saved key bindings cannot start LLM requests", () => {
   input.input({ kind: "key", seat, timeMilliseconds: 10, code: 119, down: true, repeat: false }); f.commands.execute();
   input.input({ kind: "key", seat, timeMilliseconds: 20, code: 119, down: false, repeat: false }); f.commands.execute();
   expect(f.requests).toHaveLength(0); expect(f.output[0]?.text).toContain("require direct input"); f.remove();
+});
+
+
+test("direct cancel affects only its seat and late answers never execute", async () => {
+  const f = fixture();
+  f.send('llm_exec "first"'); f.send('llm_exec "second"', f.second);
+  f.send("llm_cancel", { ...f.source, origin: { kind: "script", name: "injected.cfg", caller: f.source.origin } });
+  expect(f.requests[0]?.input.signal?.aborted).toBe(false);
+  f.send("llm_cancel");
+  expect(f.requests[0]?.input.signal?.aborted).toBe(true);
+  expect(f.requests[1]?.input.signal?.aborted).toBe(false);
+  f.requests[0]?.resolve("game_action"); f.requests[1]?.resolve("game_action"); await settle();
+  expect(f.effects).toHaveLength(1);
+  f.send('llm_ask "retry"'); expect(f.requests).toHaveLength(3);
+  f.remove(); expect(f.requests[2]?.input.signal?.aborted).toBe(true);
 });
