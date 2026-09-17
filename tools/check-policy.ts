@@ -215,7 +215,7 @@ function isDynamicImplementation(symbol: ts.Symbol | undefined): boolean {
     && (symbol?.declarations?.some((declaration) => declaration.getSourceFile().isDeclarationFile) ?? false);
 }
 
-type PlatformLibrary = "sdl" | "gl" | "unix" | "darwin" | "ucrt" | "msvcrt" | "ntdll" | "kernel32" | "bun-files" | "freetype" | "vorbisfile" | "theoradec";
+type PlatformLibrary = "sdl" | "gl" | "unix" | "darwin" | "ucrt" | "msvcrt" | "ntdll" | "kernel32" | "winsock" | "bun-files" | "freetype" | "vorbisfile" | "theoradec";
 
 const glSymbols = new Set([
   "glLockArraysEXT", "glUnlockArraysEXT", "glCallList", "glNewList", "glEndList", "glDeleteLists", "glGetString", "glGetError",
@@ -267,6 +267,7 @@ function platformLibrary(node: ts.Expression | undefined): PlatformLibrary | und
     if (node.text === "msvcrt.dll") return "msvcrt";
     if (node.text === "ntdll.dll") return "ntdll";
     if (node.text === "kernel32.dll") return "kernel32";
+    if (node.text === "ws2_32.dll") return "winsock";
     if (["libfreetype.so.6", "libfreetype.so"].includes(node.text)) return "freetype";
     if (["libvorbisfile.so.3", "libvorbisfile.so"].includes(node.text)) return "vorbisfile";
   }
@@ -326,6 +327,7 @@ function platformLibraries(node: ts.Expression | undefined): readonly PlatformLi
 function platformLibraryAllowed(library: PlatformLibrary, projectPath: string): boolean {
   switch (library) {
     case "sdl": case "gl": case "unix": return true;
+    case "winsock": return projectPath === "src/platform/ipx-native.ts";
     case "freetype": case "msvcrt": return projectPath === "src/platform/freetype.ts";
     case "vorbisfile": return projectPath === "src/platform/vorbis.ts";
     case "theoradec": return projectPath === "src/platform/theora.ts";
@@ -340,7 +342,10 @@ function platformSymbolAllowed(library: PlatformLibrary, symbol: string, project
     case "sdl": return /^SDL_/.test(symbol) && !["SDL_LoadObject", "SDL_LoadFunction", "SDL_UnloadObject"].includes(symbol);
     case "gl": return glSymbols.has(symbol);
     case "unix": return ["tcgetattr", "tcsetattr", "sigaction", "localtime_r", "tzset", "_exit"].includes(symbol)
-      || (projectPath === "src/platform/freetype.ts" || projectPath === "src/platform/theora.ts") && symbol === "memcpy";
+      || (projectPath === "src/platform/freetype.ts" || projectPath === "src/platform/theora.ts") && symbol === "memcpy"
+      || projectPath === "src/platform/ipx-native.ts" && ["socket", "close", "bind", "getsockname", "setsockopt", "sendto", "recvfrom", "poll", "__errno_location"].includes(symbol);
+    case "winsock": return projectPath === "src/platform/ipx-native.ts"
+      && ["WSAStartup", "WSACleanup", "WSAGetLastError", "socket", "closesocket", "ioctlsocket", "bind", "getsockname", "setsockopt", "getsockopt", "sendto", "recvfrom", "select"].includes(symbol);
     case "freetype": return ["FT_Init_FreeType", "FT_Done_FreeType", "FT_New_Memory_Face", "FT_Done_Face",
       "FT_Set_Char_Size", "FT_Get_Char_Index", "FT_Load_Glyph", "FT_Select_Charmap", "FT_Render_Glyph",
       "FT_Outline_Translate", "FT_Outline_Get_Bitmap"].includes(symbol);

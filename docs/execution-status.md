@@ -18,6 +18,8 @@ T07 now includes mixed-game UDP composition negotiation, movement prediction, co
 
 Previous delivery identity: Source was `3b1c9b2b2cfdea1b7f47c29463e4e8a2a6f69a75`, tree `d7f828d435a4e4822e82249f354efe4f3cea33d3`. Installed at `2026-09-17T13:17:58.832Z`: SHA-256 `db90db706ca45b08d59439941b436d0fe503a002a643305205404783daab7c0e`, 126,724,224 bytes, mode `0755`. [Installed receipt](../.artifacts/resume-20260917/final-3b1c9b2/installed-build.json).
 
+Native IPX socket bindings are now implemented in accepted source for Linux/glibc and Windows/Winsock, with explicit OS-provider requirements and lazy library ownership. The actual Linux capability bind reported `EAFNOSUPPORT (97)`; successful IPX exchange and Windows execution remain unverified. This source update is newer than installed `5781b0d`. KEX 2023's lower lobby transport remains T07 implementation work. [Native backend evidence](functional-targets/status.md#native-ipx-socket-backend).
+
 ## Historical 6103c97 delivery
 
 Previously installed source was `6103c976f2abd315176206ebe190661173204fb4`, tree `ec2b8e3352e7fd2b3ebfa4fe6af5e7b43ea5e532`. Installed at `2026-09-17T03:57:00.369Z`: SHA-256 `04bf9f0d533d36ddc939bbaea148ff1e8c6c30a1f66aa42a3ee65282c493f0c7`, 124,565,632 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260916/final-6103c97/installed-build.json).

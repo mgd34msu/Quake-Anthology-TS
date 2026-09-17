@@ -1,3 +1,4 @@
+import { bunNativeIpxCapability } from "../../../platform/ipx.ts";
 import { ipxAddress, resolveAddress } from "../../../network/common/endpoint.ts";
 import type { IpAddress, IpxAddress } from "../../../network/common/endpoint.ts";
 import { DosBoxIpxNetwork } from "../../../network/common/ipx-dosbox.ts";
@@ -16,7 +17,7 @@ export interface ApplicationTransportCapabilities {
   bindUdp(options: UdpBindOptions): Promise<ApplicationUdpSocket>;
 }
 export const bunApplicationTransports: ApplicationTransportCapabilities = {
-  nativeIpx: { kind: "unavailable", reason: "This Bun host does not provide an AF_IPX socket adapter" },
+  nativeIpx: bunNativeIpxCapability(),
   bindUdp: options => UdpTransport.bind(options),
 };
 
