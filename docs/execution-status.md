@@ -2,15 +2,21 @@
 
 ## Installed executable and recent fixes
 
-Installed source is `68219cce77608429be92462a377ccbb07854a524`, tree `170115bdecb96fb87bad5841aa9947a57bfec6b2`. Installed at `2026-09-16T23:20:17.969Z`: SHA-256 `0246a9ab79b236d8ba0de08bd0c5db9f5ca3f3bf7df3abdd650c50bd34cb7dca`, 123,504,768 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260916/final-68219cc/installed-build.json).
+Installed source is `6d6f60ba0096c43c455341cb6582c27d334f6ea0`, tree `a97e64cc7fcdd8dbd95e441434b4d083a2006292`. Installed at `2026-09-17T02:49:29.109Z`: SHA-256 `0af03c500c2912e051feea9be3064c08e4da2fcf7c26a1e3aefa17860965be8f`, 124,557,440 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260916/final-6d6f60b/installed-build.json).
+
+This includes the accepted `af7be7f` Application integrations, `189118b` LLM stream correction and subsequent delivery fixes. Content, local input, HUD, progression, modes, campaign, saves and tools now have installed consumers. This is bounded delivery, not closure of those functional targets: **1/23 complete, 22/23 open**. See [functional target status](functional-targets/status.md).
+
+The corrective compiled run exercised 8.162 seconds of movement/jump/crouch/fire, named save/load, exact saved player-position restoration and two seconds of fresh post-load controls, then returned to Main. Its original final navigation clicked Library instead of Quit and timed out; that failure remains recorded. A separate same-binary Main/Quit check exited normally with guards passing, without replaying gameplay. Root inspected all four gameplay/restoration/Main captures. Evidence: [runtime proof](../.artifacts/resume-20260916/final-6d6f60b/runtime-proof.json), [Quit supplement](../.artifacts/resume-20260916/final-6d6f60b/quit-supplement.json), [visual acceptance](../.artifacts/resume-20260916/final-6d6f60b/root-visual-acceptance.json).
+
+The earlier [30-second gameplay proof](../.artifacts/resume-20260916/final-189118b/contained-runtime-proof.json) belongs to `189118b`, whose load failed; it is not a 30-second proof of this corrected executable. Older-save compatibility was not exercised. The black triangular patch at the pillar remains an open T03 visual defect. Physical audio, FPS, complete campaigns and the required native-peer matrix remain unqualified. Real existing-subscription LLM ask/validated echo execution passed separately; fresh browser sign-in remains unverified.
+
+## Historical 68219cc audio and gameplay proof
+
+Previously installed source was `68219cce77608429be92462a377ccbb07854a524`, tree `170115bdecb96fb87bad5841aa9947a57bfec6b2`. Installed at `2026-09-16T23:20:17.969Z`: SHA-256 `0246a9ab79b236d8ba0de08bd0c5db9f5ca3f3bf7df3abdd650c50bd34cb7dca`, 123,504,768 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260916/final-68219cc/installed-build.json).
 
 This adds retained music selection/shuffle and the scrolling Sound menu to the earlier shared audio/video/settings controls. It also includes accepted inventory, model preparation, cvar snapshot, actor registry, model-light and Q1 collision component optimizations. Component measurements do not establish an overall FPS improvement.
 
 The compiled mixed-world check completed 30.169 seconds of controls, map restart and public settings persistence. Its later menu driver navigated the wrong menu and failed; that original result remains recorded. A separate check on the same binary restored the exact saved audio settings, showed `music/D_DDTBLU.ogg` and Shuffle On in the full Sound menu, returned to Main and quit normally. Root inspected the gameplay and menu captures. Evidence: [original run](../.artifacts/resume-20260916/final-68219cc/runtime-proof.json), [menu supplement](../.artifacts/resume-20260916/final-68219cc/menu-supplement.json), [visual acceptance](../.artifacts/resume-20260916/final-68219cc/root-visual-acceptance.json).
-
-Accepted source is now `189118bcbc0ef26308eb333134cf3f6b02cd2a1d`. In addition to completed **T01 session and resource lifetime**, Application now consumes substantial content, local-input, HUD, progression, modes, campaign, save and tool work. These changes are committed and pushed but are **not yet in the installed executable**. Real existing-subscription public LLM ask and validated echo execution now pass; fresh browser sign-in remains unverified. Required public workflows, broader native compatibility and remaining subsystem work stay open; see [functional target status](functional-targets/status.md): **1/23 complete in source, 22/23 open**.
-
-Physical audibility, whole-frame performance, complete campaigns and the required native-peer matrix remain open. Dummy output and component timing do not qualify those claims.
 
 ## Historical 74119b8 audio and startup proof
 
