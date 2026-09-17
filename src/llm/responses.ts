@@ -56,7 +56,7 @@ export async function readResponses(input: TransportRequest, response: Response,
       if (output !== undefined) {
         if (!isArray(output)) throw new LlmSettingsError("Invalid LLM response.");
         const finalText = output.map(entry => outputItem(entry, label)).join("");
-        if (text !== "" && finalText !== text) throw new LlmSettingsError(`${label} returned inconsistent response text.`);
+        if (output.length > 0 && text !== "" && finalText !== text) throw new LlmSettingsError(`${label} returned inconsistent response text.`);
         if (text === "" && finalText !== "") { text = finalText; input.onText?.(finalText); }
       }
       completed = true;

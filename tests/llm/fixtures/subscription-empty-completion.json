@@ -1,0 +1,127 @@
+[
+  {
+    "type": "response.created",
+    "response": {
+      "status": "in_progress",
+      "output": []
+    }
+  },
+  {
+    "type": "response.in_progress",
+    "response": {
+      "status": "in_progress",
+      "output": []
+    }
+  },
+  {
+    "type": "response.output_item.added",
+    "output_index": 0,
+    "item": {
+      "type": "message",
+      "id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+      "status": "in_progress",
+      "role": "assistant",
+      "content": []
+    }
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": "The"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": " echo"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": " command"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": " prints"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": " specified"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": " text"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": " to"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": " the"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": " console"
+  },
+  {
+    "type": "response.output_text.delta",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "delta": "."
+  },
+  {
+    "type": "response.output_text.done",
+    "output_index": 0,
+    "content_index": 0,
+    "item_id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+    "text": "The echo command prints specified text to the console."
+  },
+  {
+    "type": "response.output_item.done",
+    "output_index": 0,
+    "item": {
+      "type": "message",
+      "id": "msg_0c7d7687ab44638d016aab4ba60d6c87d19b78115262227ea4",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The echo command prints specified text to the console."
+        }
+      ]
+    }
+  },
+  {
+    "type": "response.completed",
+    "response": {
+      "status": "completed",
+      "output": []
+    }
+  }
+]

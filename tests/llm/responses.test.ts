@@ -1,3 +1,4 @@
+import { readResponses } from "../../src/llm/responses.ts";
 import { expect, test } from "bun:test";
 import { requestOpenAiResponses } from "../../src/llm/api.ts";
 import type { TransportRequest } from "../../src/llm/request.ts";
@@ -40,4 +41,21 @@ test("Responses refuses tools, refusals, incomplete results and provider error t
     if (!(error instanceof Error)) throw new Error("Expected fixture failure");
     expect(error.message).not.toContain("provider-secret");
   }
+});
+
+
+test("real subscription completion may omit output already delivered in the stream", async () => {
+  const parsed: unknown = JSON.parse(await Bun.file(new URL("./fixtures/subscription-empty-completion.json", import.meta.url)).text());
+  function isEvents(value: unknown): value is readonly unknown[] { return Array.isArray(value); }
+  if (!isEvents(parsed)) throw new Error("Invalid captured event fixture");
+  const capturedSubscription = parsed;
+  const captured = capturedSubscription.map(event).join("");
+  const answer = "The echo command prints specified text to the console.";
+  expect(await readResponses(input(), stream(captured), "Subscription", false)).toBe(answer);
+  const prefix = capturedSubscription.slice(0, -1).map(event).join("");
+  await expect(readResponses(input(), stream(prefix), "Subscription", false)).rejects.toThrow("before completion");
+  await expect(readResponses(input(), stream(prefix + completed("quit")), "Subscription", false)).rejects.toThrow("inconsistent");
+  await expect(readResponses(input(), stream(event({ type: "response.completed", response: { status: "completed", output: [] } })), "Subscription", false)).rejects.toThrow("no text");
+  const controller = new AbortController(); controller.abort();
+  await expect(readResponses({ ...input(), signal: controller.signal }, stream(captured), "Subscription", false)).rejects.toThrow("cancelled");
 });
