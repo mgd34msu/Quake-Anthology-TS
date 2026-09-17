@@ -1,6 +1,7 @@
 import { cdCommandDocumentation, musicCommandDocumentation } from "./audio/commands.ts";
 import { startupCommandPhases } from "./startup-commands.ts";
 import { registerQ1ViewCommands } from "./q1-client-settings.ts";
+import { registerRunCvar } from "./shared-setting-cvars.ts";
 import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { InputBinding } from "../../contracts/ui.ts";
@@ -83,6 +84,7 @@ export class PreparedStartup {
       readonly forward: (name: string, args: readonly string[], source: CommandContext) => undefined;
     }) {
     this.forward = options.forward;
+    for (const seat of options.seats) registerRunCvar(seat.mouse.cvars, options.movementDialect);
     this.fallback = movement.dialect === options.dialect ? movement : new CvarRegistry({ dialect: options.dialect, context: source.context, print: text => this.print(text) });
     this.routing = new ApplicationConsoleRouting({ fallback: this.fallback, sourceDialect: () => options.dialect,
       server: () => ({ cvars: this.source, sharedNames: options.sharedNames }),

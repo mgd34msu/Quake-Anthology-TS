@@ -1,3 +1,4 @@
+import { movementJumped } from "./player-jump.ts";
 import { prepareNetQuake, physicsNetQuake } from "../../../movement/q1/netquake.ts";
 import type { Q1MovementOptions } from "../../../movement/q1/types.ts";
 import type { Q1MovementState, Q1MovementResult, QwMovementState, QwMovementProfile } from "../../../contracts/movement.ts";
@@ -310,7 +311,7 @@ export class MovementPlayer {
     const base = { actor: this.actor, commandSequence: input.sequence, frame, shape: { kind: "box", bounds: this.profile.kind === "q1-quakeworld" && this.host.quakeWorld === undefined ? this.bounds : this.standingBounds },
       environment: playerMovementEnvironment(this, combat),
       arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
-    const state = this.state, selectedProfile = selectedMovementProfile(this), command = input.command;
+    const state = this.state, priorGround = this.ground, selectedProfile = selectedMovementProfile(this), command = input.command;
     const profile = selectedProfile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(selectedProfile) ?? selectedProfile : selectedProfile;
     const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id);
     const q1Options = { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight, hooks: {
@@ -362,6 +363,7 @@ export class MovementPlayer {
       result = provider.move(move, this.services);
     } else throw new Error(`Command ${command.kind} does not match movement ${profile.kind}`);
     if (result.status === "active" && this.host.actors.isLive(this.actor.id)) {
+      if (this.host.quakeWorld === undefined && movementJumped(state, priorGround, command, result)) this.host.jump(this.actor, "jump");
       this.accept(result);
       this.commit(result.state, true, result.kind === "q3");
     }

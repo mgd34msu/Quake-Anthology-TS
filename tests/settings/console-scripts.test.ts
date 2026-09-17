@@ -1,3 +1,4 @@
+import { discoverInstalledContent, expectedProducts } from "../../src/content/catalog/index.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,7 +10,7 @@ import { CvarRegistry } from "../../src/core/cvars/index.ts";
 import { SeatConsole } from "../../src/console/session.ts";
 import { registerConsoleCommands } from "../../src/console/commands.ts";
 import { ConfigStore } from "../../src/settings/config.ts";
-import { ConsoleScriptFiles, readConsoleScript, seatConsoleConfig } from "../../src/app/bootstrap/config-scripts.ts";
+import { ConsoleScriptFiles, readConsoleScript, seatConsoleConfig, sourceScriptReader } from "../../src/app/bootstrap/config-scripts.ts";
 import { openMountPlan } from "../../src/content/mounts/index.ts";
 
 const identity = createIdentityOwner("config-scripts");
@@ -143,5 +144,46 @@ test("script reader rejects escapes and symlinks without falling through to moun
     expect(reads).toBe(0);
     expect(await read("absent.cfg")).toBeUndefined();
     expect(reads).toBe(1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("mixed assets cannot supply another game's configuration or override expansion script precedence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "mixed-script-owner-"));
+  try {
+    const selected = ["q1-classic-id1", "q1-classic-hipnotic", "q2-classic-baseq2", "q3-baseq3"];
+    const products = expectedProducts.filter(product => selected.includes(product.id))
+      .map(product => ({ ...product, requiredContentArchives: [], requiredPrograms: [], mapWitness: null }));
+    for (const product of products) await mkdir(join(root, product.contentDirectory), { recursive: true });
+    await writeFile(join(root, "q2/baseq2/config.cfg"), "set name ForeignConfig\n");
+    await writeFile(join(root, "q2/baseq2/autoexec.cfg"), "echo foreign-autoexec\n");
+    await writeFile(join(root, "q2/baseq2/shared.cfg"), "echo foreign-nested\n");
+    await writeFile(join(root, "q1/id1/autoexec.cfg"), "echo base-autoexec\n");
+    await writeFile(join(root, "q1/id1/shared.cfg"), "echo inherited-script\n");
+    await writeFile(join(root, "q1/hipnotic/autoexec.cfg"), "echo expansion-autoexec\nexec shared.cfg\n");
+    await writeFile(join(root, "q3a/baseq3/foreign.dm_68"), "foreign-demo");
+    const catalog = await discoverInstalledContent({ corpusRoot: root, products, discoverMods: false });
+    const mounts = [...new Map((await Promise.all(["q2-classic-baseq2", "q3-baseq3", "q1-classic-id1", "q1-classic-hipnotic"]
+      .map(id => catalog.mountsFor(catalog.require(id).id)))).flat().map(mount => [mount.identity.id, mount])).values()];
+    using mixed = await openMountPlan({ id: "mount-plan:mixed-script:1", mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+    const mounted = (name: string) => mixed.open(name).then(resource => resource?.bytes);
+    expect(new TextDecoder().decode(await mounted("config.cfg"))).toContain("ForeignConfig");
+    const read = sourceScriptReader(catalog, mixed, catalog.require("q1-classic-hipnotic").id);
+    const scripts = new ConsoleScriptFiles({ consoleRoot: join(root, "console"), settings: new ConfigStore(join(root, "settings")), mounted, mountedScript: read });
+    expect(await scripts.read("config.cfg", context(0))).toBeUndefined();
+    expect(await scripts.readMountedScript("config.cfg")).toBeUndefined();
+    expect(await scripts.read("autoexec.cfg", context(0))).toContain("expansion-autoexec");
+    expect(new TextDecoder().decode(await scripts.readMounted("foreign.dm_68"))).toBe("foreign-demo");
+    const output: string[] = [], source = context(0);
+    const commands = new CommandBuffer({ dialect: "q1-netquake", context: source, cvars: new CvarRegistry({ dialect: "q1-netquake", context: source }),
+      readScript: (name, caller) => scripts.read(name, caller), print: text => { output.push(text); } });
+    commands.append("exec autoexec.cfg\n"); await commands.executeScriptsAsync(async () => {});
+    expect(output.join("")).toContain("expansion-autoexec");
+    expect(output.join("")).toContain("inherited-script");
+    expect(output.join("")).not.toContain("foreign");
+    expect(output.join("")).not.toContain("base-autoexec");
+    await seatConsoleConfig(join(root, "console"), identity.seat(0)).dump("config.cfg", "echo explicit-seat\n");
+    expect(await scripts.read("config.cfg", context(0))).toBe("echo explicit-seat\n");
+    await scripts.close(); await expect(scripts.readMountedScript("default.cfg")).rejects.toThrow("retired");
+    mixed.close(); await expect(read("default.cfg")).rejects.toThrow("closed");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

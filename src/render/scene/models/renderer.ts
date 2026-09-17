@@ -15,6 +15,7 @@ import { createQ1Material, createQ2Material, prepareLegacyMaterialBatches } from
 import type { SceneShaderRegistry } from "../shaders.ts";
 import type { SceneTexture, SceneTextureLoader } from "../textures.ts";
 import { floodSkin } from "../skin.ts";
+import { modelImagePath } from "./image-path.ts";
 import { cameraFrustum, createViewProjector } from "../view.ts";
 import type { WorldScene, WorldViewInput } from "../world.ts";
 import { entityCastsShadow, shadowMaterialGeometry } from "../shadow-geometry.ts";
@@ -186,7 +187,7 @@ export class SceneModelRenderer {
 
   private async externalTexture(entity: ModelResource, name: string, options: ModelSourceOptions): Promise<SceneTexture> {
     const sprite = entity.model.kind === "q2-sp2";
-    const texture = await this.provider.textures.load(name, { family: this.provider.family, usage: sprite ? "sprite" : "skin", mipmap: !sprite }) ?? this.provider.textures.missing;
+    const texture = await this.provider.textures.load(modelImagePath(name), { family: this.provider.family, usage: sprite ? "sprite" : "skin", mipmap: !sprite }) ?? this.provider.textures.missing;
     const colors = options.playerColors;
     if (entity.model.kind === "md5" && entity.model.skinSelection.kind === "q1-mdl-replacement" && colors !== undefined && texture.content.kind === "indexed8") {
       return this.provider.textures.register(`${name}:${colors.top}:${colors.bottom}`,

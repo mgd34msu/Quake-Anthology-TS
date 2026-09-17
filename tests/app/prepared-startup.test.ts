@@ -2,7 +2,9 @@ import { SeatConsole } from "../../src/console/session.ts";
 import { registerDiscoveryCommands } from "../../src/console/discovery.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
-import type { CommandContext } from "../../src/contracts/common.ts";
+import type { CommandContext, CommandDialect } from "../../src/contracts/common.ts";
+import { InputCommandBuilder } from "../../src/input/user-command.ts";
+import { bindRunCvar } from "../../src/app/bootstrap/shared-setting-cvars.ts";
 import { ApplicationConsoleRouting, q1ConsoleServer } from "../../src/app/bootstrap/console.ts";
 import { CvarFlag, CvarRegistry } from "../../src/core/cvars/index.ts";
 import { MouseSettings } from "../../src/input/mouse-settings.ts";
@@ -19,6 +21,34 @@ function options(args: readonly string[] = []) {
   if (command.kind !== "run") throw new Error("Expected launch");
   return command.options;
 }
+
+test("startup run setting belongs to the seat before scripts and reaches its later movement builder", async () => {
+  const dialects: readonly CommandDialect[] = ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"];
+  for (const dialect of dialects) {
+    const identity = createIdentityOwner(`startup-run-${dialect}`), output: string[] = [];
+    const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } };
+    const source = new CvarRegistry({ dialect, context, print: text => { output.push(text); } });
+    const mouse = new MouseSettings(new CvarRegistry({ dialect, context, print: text => { output.push(text); } }));
+    const prepared = new PreparedStartup(source, new CvarRegistry({ dialect: "q3", context }),
+      new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined }), {
+        dialect, movementDialect: "q3", shared: null, sharedNames: [],
+        seats: [{ id: identity.seat(0), context, cvars: new CvarRegistry({ dialect, context }), mouse, profile: null, archive: [], mouseArchive: [] }],
+        print: text => { output.push(text); }, forward: () => undefined,
+      });
+    expect(mouse.cvars.get("cl_run")?.resetValue).toBe("1");
+    await prepared.execute({ nextFrame: async () => {}, hasMod: false, sourceArchive: [], movementArchive: [], fallbackArchive: [], sharedArchive: [],
+      read: async name => name === "quake.rc" ? "exec default.cfg\nexec config.cfg\nexec autoexec.cfg\n" : name === "autoexec.cfg" ? "set cl_run 0\n" : "", applyLaunchOptions: () => {} });
+    const seat = prepared.seats[0]; if (seat === undefined) throw new Error("Missing prepared seat");
+    const builder = new InputCommandBuilder("q3"), release = bindRunCvar(mouse.cvars, builder);
+    expect(builder.tuning.alwaysRun).toBe(false);
+    seat.input.commandButton("forward", "w", true, 0);
+    expect(builder.build(seat.input.sample(100, 100), { kind: "q3", serverTimeMilliseconds: 100, weapon: 0, sensitivity: 1 }).forwardMove).toBe(64);
+    expect(source.find("cl_run")).toBeUndefined();
+    expect(output.join("")).not.toContain("variable cl_run not found");
+    expect(output.join("")).not.toContain("allready defined");
+    release();
+  }
+});
 
 test("menu binding defaults are previewed without publishing or overwriting explicit bindings", async () => {
   const identity = createIdentityOwner("menu-candidate-defaults");

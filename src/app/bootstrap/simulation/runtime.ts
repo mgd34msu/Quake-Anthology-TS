@@ -2554,13 +2554,15 @@ export class SharedSimulation implements Simulation {
 
   private jump(actor: OwnedActor, action: "jump" | "swim"): undefined {
     if (action === "jump") {
+      const player = this.requirePlayer(actor.id);
+      if (this.source.kind === "q3" && player.profile.kind === "q3" && player.character === "q3") return undefined;
       const character = this.characters.get(actor);
       if (character !== undefined) return character.jump();
       if (this.requirePlayer(actor.id).character === "q2") return this.events.emit(this.recipe.character.definition.content,
         { kind: "q2", event: { kind: "sound", actor: actor.id, origin: this.requirePlayer(actor.id).view().origin, path: "*jump1.wav", channel: 2,
           volume: 1, attenuation: 1, reliable: false, loop: "once" } });
     }
-    return this.events.emit(this.recipe.movement.content, { kind: "q1", event: { kind: "sound", actor: actor.id,
+    return this.events.emit(action === "jump" ? this.recipe.character.definition.content : this.recipe.movement.content, { kind: "q1", event: { kind: "sound", actor: actor.id,
       path: action === "jump" ? "player/plyrjmp8.wav" : "misc/water1.wav", channel: "body", volume: 1, attenuation: 1 } });
   }
 

@@ -20,7 +20,7 @@ import { captureTeamArenaOverrides, readTeamArenaOverrides, saveTeamArenaOverrid
 import { ApplicationConsoleRouting, q1ConsoleServer } from "./console.ts";
 import { PreparedStartup } from "./prepared-startup.ts";
 import { resolveStartupRules } from "./startup-source.ts";
-import { ConsoleScriptFiles } from "./config-scripts.ts";
+import { ConsoleScriptFiles, sourceScriptReader } from "./config-scripts.ts";
 import { consoleConfigRoot } from "./config-scripts.ts";
 import { createStartupScriptReader } from "./startup-config.ts";
 import { frameTimeCvarNames, readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "./frame-time.ts";
@@ -784,6 +784,7 @@ export class Application {
       for (let slot = 0; slot < simulation.options.maxClients; slot++) if (this.session.clientAt(slot) === null) available++;
       return this.localSeats.size + available;
     }, readScript: path => content.mounts.open(path).then(resource => resource?.bytes),
+    readMountedScript: sourceScriptReader(content.catalog, content.mounts, content.recipe.engineBehavior.content),
       startupReader: (scripts, options) => Application.startupScriptReader(content, options, scripts),
       ...(this.host.llm === undefined ? {} : { llm: this.host.llm }), quit: () => { if (localGuest !== null && localGuest !== this.localGuest) throw new Error("Guest candidate requested quit"); return this.requestQuit(); },
       execute: (name, arguments_, seat, source) => candidateAction !== undefined ? candidateAction({ target: "application", name, arguments_: [...arguments_], seat, ...(source === undefined ? {} : { source }) })
@@ -904,9 +905,10 @@ export class Application {
     let program: ReturnType<CommandBuffer["prepareProgram"]> | null = null;
     let options: CommandBufferOptions | null = null;
     const bindings: ((commands: CommandBuffer) => () => void)[] = [];
+    const readSourceScript = sourceScriptReader(content.catalog, content.mounts, content.recipe.engineBehavior.content);
     const create = (selected: CommandBufferOptions): CommandBuffer => {
       options = { ...selected, readScript: selected.readScript ?? (async name => {
-        const resource = await content.mounts.open(name); return resource === null ? undefined : new TextDecoder().decode(resource.bytes);
+        const bytes = await readSourceScript(name); return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
       }) };
       if (this.sourceCommands === null) return new CommandBuffer(options);
       program = this.sourceCommands.prepareProgram(options); return program.commands;
@@ -931,11 +933,16 @@ export class Application {
     const timeCvars = this.sourceCvars(simulation);
     if (timeCvars !== null) {
       registerFrameTimeCvars(timeCvars);
-      timeCvars.register("cl_avidemo", "0", 0);
-      timeCvars.register("cl_forceavidemo", "0", 0);
+      const register = (name: string, defaultValue: string, flags: number): void => {
+        if (!timeCvars.dialect.startsWith("q1") || timeCvars.find(name) === undefined || timeCvars.isConsoleCreated(name))
+          timeCvars.register(name, defaultValue, flags);
+        else timeCvars.addFlags(name, flags);
+      };
+      register("cl_avidemo", "0", 0);
+      register("cl_forceavidemo", "0", 0);
       if (this.levelRecoveryAvailable(simulation, this.options)) {
-        timeCvars.register("sv_autosave", "1", CvarFlag.Archive);
-        timeCvars.register("sv_autosave_interval", "30", CvarFlag.Archive);
+        register("sv_autosave", "1", CvarFlag.Archive);
+        register("sv_autosave_interval", "30", CvarFlag.Archive);
       }
     }
     let sourceCommands: CommandBuffer | null = null;
@@ -1447,7 +1454,7 @@ export class Application {
     const product = content.catalog.product(content.recipe.engineBehavior.content);
     const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
     const roots = (selected: typeof product): readonly string[] => [selected.userContent?.root, selected.looseRoot].filter((root): root is string => root !== undefined && root !== null);
-    return createStartupScriptReader({ mounted: name => scripts.readMounted(name),
+    return createStartupScriptReader({ mounted: name => scripts.readMountedScript(name),
       user: (name, source) => scripts.read(name, source), baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(options.userContentRoot) });
   }
 
@@ -1455,6 +1462,7 @@ export class Application {
     const mounts = content.mounts, release = content.retainMainMounts();
     return new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content),
       consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+      mountedScript: sourceScriptReader(content.catalog, mounts, content.recipe.engineBehavior.content),
       mounted: name => mounts.open(name).then(resource => resource?.bytes) }, async () => { release(); });
   }
 
@@ -2096,6 +2104,7 @@ export class Application {
         if (nextGraphical !== null || prepared === null) return () => {};
         const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.recipe.engineBehavior.content),
           consoleRoot: consoleConfigRoot(options.userContentRoot), settings: this.inputConfig,
+          mountedScript: sourceScriptReader(content.catalog, content.mounts, content.recipe.engineBehavior.content),
           mounted: name => content.mounts.open(name).then(resource => resource?.bytes) });
         const source = this.sourceCvars(nextSimulation);
         if (source === null) throw new Error("Prepared authority requires a source registry");

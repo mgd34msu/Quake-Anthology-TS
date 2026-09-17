@@ -1,3 +1,4 @@
+import { registerRunCvar } from "./shared-setting-cvars.ts";
 import { inputDeviceStore, loadInputDeviceSettings } from "./input-devices.ts";
 import { audioOutputCvarNames, writeAudioOutputCvars } from "./audio/output-settings.ts";
 import { defaultAudioOutputFormat } from "../../audio/output.ts";
@@ -32,7 +33,7 @@ import { loadAudioSettings } from "./audio-settings.ts";
 import { loadCvarArchive } from "./cvar-archives.ts";
 import { initializeQ3ClientCvars } from "./q3-client/userinfo.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
-import { ConsoleScriptFiles, consoleConfigRoot } from "./config-scripts.ts";
+import { ConsoleScriptFiles, consoleConfigRoot, sourceScriptReader } from "./config-scripts.ts";
 import { createStartupScriptReader } from "./startup-config.ts";
 import { TeamArenaLaunchOverrides } from "./team-arena-skirmish.ts";
 
@@ -83,6 +84,7 @@ export async function prepareProfileConfiguration(args: {
       throw new Error("Client configuration requires its actual primary seat cvar owner");
     if (args.clientSource === undefined && dialect === "q3") initializeQ3ClientCvars(cvars, { name: `Player ${seat.id.index + 1}`, model: options.characterModel });
     const mouse = new MouseSettings(new CvarRegistry({ dialect, context, print: host.print }));
+    registerRunCvar(mouse.cvars, movementDialect);
     const [profile, archive, mouseArchive] = await Promise.all([
       settings.loadSeat(`input/seat-${seat.id.index + 1}.json`),
       loadCvarArchive(configurationStore(options, content, content.selection.engineBehavior.content), ["client", content.selection.engineBehavior.content, content.selection.engineBehavior.provider, String(seat.id.index)], dialect),
@@ -102,6 +104,7 @@ export async function prepareProfileConfiguration(args: {
     movement: () => movement, shared: () => published?.sharedCvars ?? shared });
   const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
     consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+    mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
     mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
   const read = configurationScriptReader(content, options, scripts);
   const requests: ConfigurationCommandRequest[] = [];
@@ -293,7 +296,7 @@ function configurationScriptReader(content: ApplicationConfigurationContent, opt
   const product = content.catalog.product(content.selection.engineBehavior.content);
   const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
   const roots = (selected: typeof product): readonly string[] => [selected.userContent?.root, selected.looseRoot].filter((root): root is string => root !== undefined && root !== null);
-  return createStartupScriptReader({ mounted: name => scripts.readMounted(name), user: (name, source) => scripts.read(name, source),
+  return createStartupScriptReader({ mounted: name => scripts.readMountedScript(name), user: (name, source) => scripts.read(name, source),
     baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(options.userContentRoot) });
 }
 
@@ -313,6 +316,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
     ...(options.userContentRoot === undefined ? {} : { userContentRoot: options.userContentRoot }), print: text => host.print(text) });
   const scripts = new ConsoleScriptFiles({ ...legacyConfigurationOptions(options, content.catalog, content.selection.engineBehavior.content),
     consoleRoot: consoleConfigRoot(options.userContentRoot), settings,
+    mountedScript: sourceScriptReader(content.catalog, content.mounts, content.selection.engineBehavior.content),
     mounted: name => content.mounts.open(name).then(resource => resource?.bytes) }, () => content.close());
   try {
     const sharedArchive = [...image?.persistedEntries ?? [], ...await loadInputDeviceSettings(inputDeviceStore(options.userContentRoot))];

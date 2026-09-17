@@ -469,7 +469,7 @@ export class RemoteApplication {
     const catalog = this.remoteContent?.catalog ?? this.loadedContent?.catalog ?? this.mountedContent.catalog, product = catalog.product(this.options.product);
     const base = product.expectation.baseProduct === null ? product : catalog.product(product.expectation.baseProduct);
     const roots = (selected: typeof product): readonly string[] => [selected.userContent?.root, selected.looseRoot].filter((root): root is string => root !== null && root !== undefined);
-    return createStartupScriptReader({ mounted: name => scripts.readMounted(name),
+    return createStartupScriptReader({ mounted: name => scripts.readMountedScript(name),
       user: (name, source) => scripts.read(name, source), baseLooseRoots: roots(base), gameLooseRoots: roots(product), seatRoot: consoleConfigRoot(this.options.userContentRoot) });
   }
 

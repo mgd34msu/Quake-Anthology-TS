@@ -67,6 +67,7 @@ export interface ApplicationInputCommands {
   readonly configuration?: PreparedProfileConfiguration;
   readonly scripts?: ConsoleScriptFiles;
   readScript?(name: string): Promise<Uint8Array | undefined>;
+  readMountedScript?(name: string): Promise<Uint8Array | undefined>;
   startupReader?(scripts: ConsoleScriptFiles, options: ApplicationOptions): StartupConfigOptions["read"];
   readonly llm?: LlmCommandRequester;
   localPlayerCapacity?(): number;
@@ -403,7 +404,8 @@ export class ApplicationInput {
     this.consoleRouting = owner === undefined ? new ApplicationConsoleRouting({ fallback: consoleCvars,
       sourceDialect: () => actions.console?.dialect() ?? sourceDialect, server: () => actions.console?.server() ?? null,
       seat: id => actions.console?.seat(id) ?? null, input: id => this.inputCvars(id), movement: () => this.cvars, shared: () => this.sharedOwner }) : null;
-    this.scripts = configuration?.scripts ?? actions.scripts ?? prepared?.scripts ?? owner?.scripts ?? new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings, mounted: actions.readScript });
+    this.scripts = configuration?.scripts ?? actions.scripts ?? prepared?.scripts ?? owner?.scripts ?? new ConsoleScriptFiles({ consoleRoot: consoleConfigRoot(options.userContentRoot), settings, mounted: actions.readScript,
+      ...(actions.readMountedScript === undefined ? {} : { mountedScript: actions.readMountedScript }) });
     this.commands = this.startup?.commands ?? owner?.commands ?? new CommandBuffer({ dialect: sourceDialect, context, cvars: consoleCvars,
       readScript: (name, source) => this.startup?.readScript(name, source) ?? this.scripts.read(name, source),
       onScriptComplete: event => this.startup?.onScriptComplete(event),
