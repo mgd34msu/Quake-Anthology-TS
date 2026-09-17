@@ -2,7 +2,19 @@
 
 ## Installed executable and recent fixes
 
-Accepted and installed source is `74119b8d58fa1a9832bbb1464d8e32aaf0d6d725`, tree `d1cbffd518156cde6fbbbc36be930c8cc34c337e`. Installed at `2026-09-16T12:02:42.748Z`: SHA-256 `275a9970fe87a1b895a733ea6ca6e1b0e315d0c2397d26875be9bff6858eaf88`, 123,480,192 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260915/final-74119b8/installed-build.json).
+Installed source is `68219cce77608429be92462a377ccbb07854a524`, tree `170115bdecb96fb87bad5841aa9947a57bfec6b2`. Installed at `2026-09-16T23:20:17.969Z`: SHA-256 `0246a9ab79b236d8ba0de08bd0c5db9f5ca3f3bf7df3abdd650c50bd34cb7dca`, 123,504,768 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260916/final-68219cc/installed-build.json).
+
+This adds retained music selection/shuffle and the scrolling Sound menu to the earlier shared audio/video/settings controls. It also includes accepted inventory, model preparation, cvar snapshot, actor registry, model-light and Q1 collision component optimizations. Component measurements do not establish an overall FPS improvement.
+
+The compiled mixed-world check completed 30.169 seconds of controls, map restart and public settings persistence. Its later menu driver navigated the wrong menu and failed; that original result remains recorded. A separate check on the same binary restored the exact saved audio settings, showed `music/D_DDTBLU.ogg` and Shuffle On in the full Sound menu, returned to Main and quit normally. Root inspected the gameplay and menu captures. Evidence: [original run](../.artifacts/resume-20260916/final-68219cc/runtime-proof.json), [menu supplement](../.artifacts/resume-20260916/final-68219cc/menu-supplement.json), [visual acceptance](../.artifacts/resume-20260916/final-68219cc/root-visual-acceptance.json).
+
+Accepted source is now `e3eea6a123ddae4ab13c2dd1378cb2f9e1da2333`, completing **T01 session and resource lifetime**. Changes after the installed build prepare initial and peer-selected remote profiles through retained client owners, and remove an unused Q2 jukebox implementation. These changes are committed and pushed but are **not yet in the installed executable**. See [functional target status](functional-targets/status.md): **1/23 complete in source, 22/23 open**.
+
+Physical audibility, whole-frame performance, complete campaigns and the required native-peer matrix remain open. Dummy output and component timing do not qualify those claims.
+
+## Historical 74119b8 audio and startup proof
+
+Previously installed source was `74119b8d58fa1a9832bbb1464d8e32aaf0d6d725`, tree `d1cbffd518156cde6fbbbc36be930c8cc34c337e`. Installed at `2026-09-16T12:02:42.748Z`: SHA-256 `275a9970fe87a1b895a733ea6ca6e1b0e315d0c2397d26875be9bff6858eaf88`, 123,480,192 bytes, mode `0755`. The previous executable and receipt are preserved for rollback. Receipt: [installed build](../.artifacts/resume-20260915/final-74119b8/installed-build.json).
 
 This installs shared output-rate, mono/stereo, sample-format and device settings with persistence, restart and session transfer; the SDL3 audio adapter; Main recovery when the frontend menu stack is empty; and the accepted PCM conversion, material projection and lazy clip-plane changes. SDL2 remains the fallback when SDL3 cannot be loaded; its native fallback execution is not qualified by the SDL3 tests.
 

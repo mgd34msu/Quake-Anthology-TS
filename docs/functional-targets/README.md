@@ -2,7 +2,9 @@
 
 This plan groups remaining work by engine function. Each target defines the shared service, the source behavior that must survive, and the user-visible result needed for completion. It covers Quake, QuakeWorld, both rereleases, Quake II, Quake III Arena, their required expansions, and the already requested mod integrations.
 
-Current installed source is `74119b8`, adding shared audio-format controls and persistence, SDL3 audio, frontend Main recovery, and accepted mixer/material/clip-plane optimizations. Its compiled GL run passed actual low-rate/default audio switching, 10.165 seconds of controls, public save progression, Main return and normal Quit; root reviewed four captures. Separate SDL3 checks passed all 16 selected format combinations. Dummy output does not establish physical audibility. The earlier `94d7f5b` CPU source-clock lag and broader performance, campaigns and native-peer coverage remain open. Component speedups do not establish FPS gains. See [current execution evidence](../execution-status.md#installed-executable-and-recent-fixes).
+**Functional targets: 1 of 23 complete in accepted source; 22 remain open.** T01 session and resource lifetime is complete at `e3eea6a`; see [target status and remaining work](status.md). This is a count of the T01–T23 targets, independent of the historical source-row inventory below.
+
+The installed executable remains `68219cc`, with retained music selection/shuffle, the scrolling Sound menu, and accepted component optimizations. Its mixed gameplay and separate menu-persistence checks are recorded in [execution status](../execution-status.md#installed-executable-and-recent-fixes). T01's final remote configuration/profile changes are committed and pushed but are not yet in that executable. Physical audibility, campaign completeness and overall FPS remain unqualified.
 
 The existing 184 open checklist rows retain assessment cutoff `167bfbf`; this plan was prepared against `a8269fa`. They remain grouped in [remaining-source-rows.md](remaining-source-rows.md), with exact source IDs in [remaining-source-rows.json](remaining-source-rows.json). These historical counts provide traceability, not a new completion assessment. Reconcile each row's remaining scope and evidence before implementing or closing it.
 
@@ -98,7 +100,9 @@ The frame-time budget and reference workload should be explicit before a perform
 
 ## Implementation order
 
-Current work extends the installed shared-client workflow: finish command, settings and capture lifetimes across local play, network clients, demos and the frontend, while retaining the installed initial `--menu` behavior. These are bounded T01/T06/T20 improvements. The verified local/demo/menu/save/console flow does not close those targets or the full source and native matrix. Performance work remains open under T03/T11/T13.
+T01's shared-client lifetime implementation is complete in accepted source `e3eea6a`. The retained client owns input, console programs, settings, renderer/audio and resources through local play, network connections, demos, save restoration and menus. Source configuration is prepared before publication, including a server-selected mod; profile scripts can wait or disconnect without deadlocking the packet decoder. Separate compiled and native runs cover these transitions; [the completion record](status.md#t01-session-and-resource-lifetime) states their scope and delivery status.
+
+The other 22 targets remain open. Their candidates are being joined to the shared application and menus; supporting modules alone do not count as completed targets. Performance remains active under T03/T11/T13.
 
 The shared font path now connects TrueType generation and optional font export to the same material registry used by retail DAT fonts. Both appeared correctly in an inspected rendered image. This advances T03/T18; it does not complete international text, captions, or every mod UI workflow.
 
@@ -108,7 +112,7 @@ The historical checklist counts above remain unchanged pending requirement-level
 
 The next functional units follow dependencies and user impact:
 
-1. Finish retained session publication and command/settings ownership, then complete demo/startup use of those owners.
+1. Retain the completed T01 lifetime contract while joining the remaining input, console, network, demo and media features to it.
 2. Fix measured frame-time and hitch causes while checking actual gameplay and visual/audio behavior.
 3. Complete core play contracts: movement, combat/death, roster placement, authored map interactions, campaign transitions, and save recovery.
 4. Complete native connection and download/discovery/administration workflows, with the peer matrix attached to each change.
