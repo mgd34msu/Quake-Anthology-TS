@@ -2,9 +2,11 @@
 
 ## Installed executable and recent fixes
 
-Current installed source is `3ef462f5e2ffd86cd2c7588e293f5ffb9c1f1594`, tree `5e44f5c7d402debdf87ba2954bca0148603e104f`. Installed at `2026-09-18T03:21:28.717Z`: SHA-256 `664c922ac311f4c815fa6828e17c010ec6d143f59f5eadf9f2993f2c00a533bb`, 127,445,120 bytes, mode `0755`. [Installed receipt](../.artifacts/resume-20260917/final-3ef462f/installed-build.json). This delivery includes accepted T07/T09 source integrations and the preceding fixes. Exact build inputs and compiled `--help` passed; no new final-binary gameplay, physical-audio, or FPS qualification is claimed.
+Current installed source is `0ea0ef001abc33a00cf9cb4c0d8d0f901f58ccd5`, tree `731abcd7714051f90ee7bb2c1a5071e380ce9479`. Installed at `2026-09-18T06:34:39.182Z`: SHA-256 `9c8cc1c3836e9e36bd36533c05e7c296b05581e1fb60d20dabdc5cfcc9e133d4`, 128,317,568 bytes, mode `0755`. [Installed receipt](../.artifacts/resume-20260917/final-0ea0ef0/installed-build.json). This delivery includes the T10 integration of native/QVM execution, declared QuakeC projectile behaviors, foreign-map selection, source HUD and recipient-specific presentation. All 188 changed files passed combined strict TypeScript and source-policy checks. Exact build inputs and compiled `--help` passed; final-binary gameplay and FPS are not newly qualified.
 
-**9/23 targets complete, 14 open; T10 active.** Current private T10 work on rerelease native execution, QVM bots, foreign geometry, and weapon-behavior composition is not part of this executable. Community Q1/Q2/Q3 maps have separately passed actual Application loading, admission, and short input-driven stepping; that is not a full-map playthrough or arbitrary-mod compatibility claim.
+**9/23 targets complete, 14 open; T10 active.** Native weapon components, further rerelease save/load corrections, early QVM client interfaces and performance work continue after this delivery. Original Homefix, Copper and Instagib code passed bounded source Application workflows on foreign Q2 geometry, including firing and save/load. Community Q1/Q2/Q3 maps separately passed loading and short input-driven stepping. These results do not establish full-map playthroughs or arbitrary-mod compatibility.
+
+Previous `3ef462f` executable and receipt are retained in [the new delivery directory](../.artifacts/resume-20260917/final-0ea0ef0/previous-3ef462f/).
 
 ### Previous 5781b0d delivery
 

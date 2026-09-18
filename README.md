@@ -77,6 +77,8 @@ Writable content is separate by default:
 
 The writable `content/` tree mirrors the game-data layout, including `rerelease/` where appropriate. Change that root with `--user-content-root /path/to/writable-content`. Mods can live there without changing the installed base data. Startup scripts such as `config.cfg` and `autoexec.cfg` are loaded from the selected content, so existing personal configs can affect a launch. LLM credentials and preferences use the separate executable-directory rules below.
 
+The current local build includes original QuakeC and QVM mod execution, separate map selection, and declared QuakeC projectile behaviors. Homefix, Copper and early Instagib have passed bounded foreign-map play/save/load workflows. Native rerelease execution is available, with save/load performance and independent native weapon components still under active work. See [current delivery and open targets](docs/execution-status.md#installed-executable-and-recent-fixes).
+
 Directory discovery does not establish full mod compatibility. QuakeC, QVM, native modules, rerelease interfaces, and independently mixed mod components are tracked under T10. Inspect discovery and available options with:
 
 ```sh
