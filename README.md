@@ -215,7 +215,7 @@ Generated menu artwork is present in the source. The complete menu asset pack ma
 
 **Current work**
 
-Q2 classic and rerelease movement now apply ground friction on Q1 maps. The shared collision adapter supplies ordinary surface metadata, so releasing movement keys stops the player in both Q1 editions. Background work is paused; unfinished patches and agent sessions are preserved in the [recovery checkpoint](docs/recovery/20260918/README.md) on `main`.
+Q2 classic and rerelease movement now apply ground friction on Q1 maps. The shared collision adapter supplies ordinary surface metadata, so releasing movement keys stops the player in both Q1 editions.
 
 The [shared functional task list](docs/functional-targets/status.md) records **21 of 23 targets accepted in source**. T12 is active again: supported expansion arsenals still need menu integration, and Team Arena weapon/supply mixing has unfinished backend paths. T10 now includes external artifact-pinned native weapon declarations and full saved-profile identity. The public declaration-installation and native component save/load workflow passed; this extension is included in the current executable. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
 
