@@ -43,3 +43,7 @@ Evidence: [MD5 cache](../../.artifacts/resume-20260918/md5-frame-pose-indexed), 
 ## Remaining T19 service boundary
 
 The original Quake III server calls external GRank SDK functions for login, match creation and submission. The current client implements the typed lifecycle and source reports, but it does not bundle a compatible SDK transport/provider. Enabling that service reports its unavailability. Local lobby rooms and durable progress records do not establish compatibility with the original online service. [Original server interface](https://github.com/id-Software/Quake-III-Arena/blob/master/code/server/sv_rankings.c).
+
+## Latest executable delivery
+
+Installed `065259c` includes external native declaration loading/full saved identity and the conservative MD3/MD2 preparation optimizations. The exact executable passed the [bounded mixed-game GL follow-up](../../.artifacts/resume-20260918/compiled-mixed-065259c/RESULT.md): complete Custom summary, two five-second control segments, an inspected visible scene, menu return and normal Quit. Source/assets/binary guards passed and processes were reaped. This is separate from the source native component save/load proof; it does not claim every model replacement, physical audio, whole campaigns, or improved desktop FPS.

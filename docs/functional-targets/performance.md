@@ -88,3 +88,7 @@ The existing model suite passed 14 tests with 1,286 assertions. There were 151 e
 Qualified source reuses the existing immutable MD2 topology to construct local material vertices directly from the interpolated pose. It removes the intermediate expanded vertex wrappers on warm preparations. First-use topology construction, corner order, texture coordinates, lighting calls, transforms, and public geometry-builder behavior are retained.
 
 Forty-five exact prepared-output comparisons and a per-corner lighting trace matched. The existing model and alias-format checks passed 22 tests with 3,987 assertions; the two changed production roots passed strict/policy checks with 272 loaded dependencies. Seven alternating warmed component samples measured median MD2 preparation at 0.1546 → 0.1322 ms (14.5% less) and a mixed Q1/Q2 workload at 0.1359 → 0.1210 ms (11% less). The small Q1-only difference is treated as noise. These results are not an overall frame-rate claim. [Source and measurements](../../.artifacts/resume-20260918/md2-corner-preparation/receipt.md), [scoped check](../../.artifacts/resume-20260918/md2-corner-preparation/scoped-check.json).
+
+## Installed optimization delivery
+
+`065259c` includes the MD3 and MD2 changes above. Its [exact-binary GL follow-up](../../.artifacts/resume-20260918/compiled-mixed-065259c/RESULT.md) passed a bounded mixed scene and normal Quit with unchanged guards. This establishes delivery and the inspected runtime result, not a performance comparison. The component gains above remain the measured performance evidence.
