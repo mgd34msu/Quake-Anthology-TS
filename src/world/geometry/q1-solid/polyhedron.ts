@@ -4,6 +4,27 @@ import type { Bounds, Plane, Vec3 } from "../../../contracts/math.ts";
 
 export interface CellFace { readonly plane: Plane; readonly vertices: readonly Vec3[]; }
 export interface ConvexCell { readonly faces: readonly CellFace[]; }
+interface CellBounds {
+  readonly minX: number; readonly minY: number; readonly minZ: number;
+  readonly maxX: number; readonly maxY: number; readonly maxZ: number;
+}
+const cellBounds = new WeakMap<ConvexCell, CellBounds | null>();
+function boundsForCell(cell: ConvexCell): CellBounds | null {
+  const cached = cellBounds.get(cell);
+  if (cached !== undefined) return cached;
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const face of cell.faces) for (const point of face.vertices) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
+      cellBounds.set(cell, null);
+      return null;
+    }
+    minX = Math.min(minX, point.x); minY = Math.min(minY, point.y); minZ = Math.min(minZ, point.z);
+    maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y); maxZ = Math.max(maxZ, point.z);
+  }
+  const bounds = minX === Infinity ? null : { minX, minY, minZ, maxX, maxY, maxZ };
+  cellBounds.set(cell, bounds);
+  return bounds;
+}
 export const dot = (a: Vec3, b: Vec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
 export const add = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
 export const sub = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
@@ -82,6 +103,19 @@ function capContainsPoint(cap: readonly Vec3[], point: Vec3): boolean {
 
 /** Both BSP children share each edge intersection and its cap insertion order. */
 export function splitCell(cell: ConvexCell, plane: Plane): { readonly front: ConvexCell | null; readonly back: ConvexCell | null } {
+  const n = plane.normal;
+  if (Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z) && Number.isFinite(plane.distance)) {
+    const bounds = boundsForCell(cell);
+    if (bounds !== null) {
+      const lower = (n.x < 0 ? bounds.maxX : bounds.minX) * n.x + (n.y < 0 ? bounds.maxY : bounds.minY) * n.y + (n.z < 0 ? bounds.maxZ : bounds.minZ) * n.z - plane.distance;
+      const upper = (n.x < 0 ? bounds.minX : bounds.maxX) * n.x + (n.y < 0 ? bounds.minY : bounds.maxY) * n.y + (n.z < 0 ? bounds.minZ : bounds.maxZ) * n.z - plane.distance;
+      if (Number.isFinite(lower) && Number.isFinite(upper)) {
+        if (upper < -1e-8) return { front: null, back: cell };
+        if (lower > 1e-8) return { front: cell, back: null };
+        if (lower >= -1e-8 && upper <= 1e-8) return { front: cell, back: cell };
+      }
+    }
+  }
   let outside = false, inside = false;
   classify: for (const face of cell.faces) for (const point of face.vertices) {
     const distance = dot(point, plane.normal) - plane.distance;

@@ -1,3 +1,4 @@
+import { MountPreparationScope } from "../../content/mounts/index.ts";
 import { applicationWeaponBehaviorChoices, readWeaponBehaviorRequest, selectApplicationWeaponBehavior } from "./weapon-behavior-selection.ts";
 import { sourceProgramProduct } from "../../content/catalog/source-program.ts";
 import { liveQ2Protocol } from "./options.ts";
@@ -183,13 +184,14 @@ export class StartupSelectionModel {
     }
   }
   async prepareMaps(): Promise<void> {
+    await using mounts = new MountPreparationScope();
     this.eligibleMaps.clear();
     await this.prepareQ3Catalog();
     await this.prepareTeamArena();
     const behaviors: StartupSelectionChoice[] = [];
     for (const product of this.catalog.products) {
       if (unavailable(product) !== null) continue;
-      try { for (const entry of await applicationWeaponBehaviorChoices(this.catalog, product.expectation.id)) behaviors.push(choice(entry.id, entry.title, entry.unavailable)); }
+      try { for (const entry of await applicationWeaponBehaviorChoices(this.catalog, product.expectation.id, mounts.open)) behaviors.push(choice(entry.id, entry.title, entry.unavailable)); }
       catch (error) { behaviors.push(choice(`${product.expectation.id}/unavailable`, product.expectation.title, error instanceof Error ? error.message : String(error))); }
     }
     this.behaviorChoices = behaviors;
@@ -243,7 +245,7 @@ export class StartupSelectionModel {
             choices.push(choice(map.path, map.path, error instanceof Error ? error.message : String(error)));
           }
         }
-        const authored = await this.catalog.authoredStartsFor(product.id);
+        const authored = await this.catalog.authoredStartsFor(product.id, mounts.open);
         const starts: StartupSelectionChoice[] = [];
         for (const start of authored?.starts ?? []) {
           if (starts.some(choice => choice.id.toLowerCase() === start.path.toLowerCase())) continue;

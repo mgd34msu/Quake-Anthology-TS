@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { createContentDigest, createMountIdentity, createMountPlanId } from "../../../src/contracts/content.ts";
@@ -8,7 +8,7 @@ import type { ArchiveMount, ContentMount, ResolvedMountPlan, ResolvedResourceRef
 import { userProductDirectory } from "../../../src/content/user-data.ts";
 import type { ProductExpectation } from "../../../src/content/catalog/products.ts";
 import { discoverInstalledContent, expectedProducts, remoteContentSelection, remoteContentProduct } from "../../../src/content/catalog/index.ts";
-import { canDownloadResource, digestBytes, digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
+import { MountPreparationScope, canDownloadResource, digestBytes, digestFile, openMountPlan } from "../../../src/content/mounts/index.ts";
 import { SoundBank } from "../../../src/audio/bank.ts";
 import { UnifiedAudio } from "../../../src/audio/engine.ts";
 import type { PcmStream } from "../../../src/audio/streams.ts";
@@ -705,4 +705,52 @@ test('remote Q2 rerelease directories retain their selected edition', () => {
   expect(remoteContentProduct(selected)).toBe('q2-rerelease-baseq2');
   expect(remoteContentProduct(remoteContentSelection('q2-rerelease-baseq2', 'custom'))).toBe('q2-rerelease-baseq2-mod-custom');
   expect(remoteContentProduct(remoteContentSelection('q2-classic-baseq2', 'xatrix'))).toBe('q2-classic-xatrix');
+});
+
+
+test("preparation scope shares verified archives while retaining product order, identity and lifetime", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "mount-preparation-"));
+  const scope = new MountPreparationScope();
+  try {
+    const path = resolve(root, "base.pak"); await writeFile(path, pak("shared.txt", "archive"));
+    const first: ArchiveMount = { kind: "archive", format: "pak", archivePath: path, archiveDigest: await digestFile(path), identity: createMountIdentity("mount:scope:first", "q1:classic:id1:installed", 0) };
+    const second: ArchiveMount = { ...first, identity: createMountIdentity("mount:scope:second", "q1:classic:other:installed", 0) };
+    const loose: ContentMount = { kind: "loose", rootPath: root, identity: createMountIdentity("mount:scope:loose", "q1:classic:other:installed", 0) };
+    await writeFile(resolve(root, "shared.txt"), "loose");
+    const plan: ResolvedMountPlan = { id: "mount-plan:scope:first", mounts: [first], defaultOrder: [first.identity.id], prefixOrders: [] };
+    const descriptors = async (): Promise<number> => {
+      const entries = await readdir("/proc/self/fd");
+      const paths = await Promise.all(entries.map(async entry => { try { return await readlink(`/proc/self/fd/${entry}`); } catch { return ""; } }));
+      return paths.filter(value => value === path).length;
+    };
+    using a = await scope.open(plan);
+    using b = await scope.open({ ...plan, mounts: [second, loose], defaultOrder: [loose.identity.id, second.identity.id] });
+    if (existsSync("/proc/self/fd")) expect(await descriptors()).toBe(1);
+    expect(new TextDecoder().decode(await a.read("shared.txt"))).toBe("archive");
+    expect(new TextDecoder().decode(await b.read("shared.txt"))).toBe("loose");
+    expect((await b.open("shared.txt", mount => mount.kind === "archive"))?.reference.provenance.mount.identity.content).toBe(second.identity.content);
+    a.close();
+    expect(new TextDecoder().decode(await b.read("shared.txt"))).toBe("loose");
+    await expect(scope.open({ ...plan, mounts: [{ ...first, archiveDigest: digestBytes(new Uint8Array()) }] })).rejects.toThrow("Archive bytes changed");
+    expect(await b.open("shared.txt")).not.toBeNull();
+    using c = await scope.open(plan);
+    await writeFile(path, pak("shared.txt", "mutated"));
+    await expect(c.read("shared.txt")).rejects.toThrow("source changed");
+    await scope[Symbol.asyncDispose]();
+    if (existsSync("/proc/self/fd")) expect(await descriptors()).toBe(0);
+    await expect(b.read("shared.txt")).rejects.toThrow("scope is closed");
+    await expect(scope.open(plan)).rejects.toThrow("scope is closed");
+  } finally { await scope[Symbol.asyncDispose](); await rm(root, { recursive: true, force: true }); }
+});
+
+test("preparation scope closes an in-flight acquisition before publishing a borrowed view", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "mount-pending-"));
+  const scope = new MountPreparationScope();
+  try {
+    const path = resolve(root, "base.pak"); await writeFile(path, pak("shared.txt", "archive"));
+    const mount: ArchiveMount = { kind: "archive", format: "pak", archivePath: path, archiveDigest: await digestFile(path), identity: createMountIdentity("mount:scope:pending", "q1:classic:id1:installed", 0) };
+    const pending = scope.open({ id: "mount-plan:scope:pending", mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] });
+    const result = pending.then(() => "published", (error: unknown) => error instanceof Error ? error.message : String(error));
+    await scope[Symbol.asyncDispose](); expect(await result).toContain("scope is closed");
+  } finally { await scope[Symbol.asyncDispose](); await rm(root, { recursive: true, force: true }); }
 });

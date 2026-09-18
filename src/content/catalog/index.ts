@@ -4,7 +4,7 @@ import { basename, dirname, extname, relative, resolve } from "node:path";
 import { createContentId, createMountId, createMountIdentity } from "../../contracts/content.ts";
 import type { ArchiveFormat, ContentDigest, ContentId, ContentMount, MountPlanId, ResolvedMountPlan } from "../../contracts/content.ts";
 import { openArchive } from "../archive/index.ts";
-import { digestFile, openMountPlan } from "../mounts/index.ts";
+import { type MountPlanOpener, digestFile, openMountPlan } from "../mounts/index.ts";
 import { findContentPath, normalizeResourcePath } from "../mounts/paths.ts";
 import { userProductDirectory } from "../user-data.ts";
 import { expectedProducts } from "./products.ts";
@@ -364,12 +364,12 @@ export class InstalledCatalog {
     return await opened.read(path);
   }
 
-  async authoredStartsFor(id: ContentId | string): Promise<AuthoredStartCatalog | null> {
+  async authoredStartsFor(id: ContentId | string, openPlan: MountPlanOpener = openMountPlan): Promise<AuthoredStartCatalog | null> {
     const product = this.require(id);
     if (product.expectation.family !== "q2" || product.expectation.edition !== "rerelease") return null;
     const mounts = await this.mountsFor(product.id);
     const plan: ResolvedMountPlan = { id: `mount-plan:catalog:${this.generation}`, mounts, defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] };
-    using opened = await openMountPlan(plan);
+    using opened = await openPlan(plan);
     const resource = await opened.open("mapdb.json");
     if (resource === null) return null;
     return { resource: resource.reference, ...parseAuthoredStarts(resource.bytes, product.expectation.campaign) };

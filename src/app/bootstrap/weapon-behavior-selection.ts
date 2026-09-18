@@ -1,3 +1,4 @@
+import type { MountPlanOpener } from "../../content/mounts/index.ts";
 import { discoverQvmWeaponBehaviors } from "../../content/catalog/qvm-weapon-behaviors.ts";
 import type { QvmModuleOptions } from "../../compat/qvm/module.ts";
 import type { QvmWeaponProfile } from "../../compat/qvm/weapon-behavior-profile.ts";
@@ -93,9 +94,9 @@ async function choicesFromMounts(catalog: InstalledCatalog, productId: string, m
     : { id: `${productId}/${value.definition.id}`, title: `${title} — ${value.definition.title} (${value.definition.role})`, unavailable: null,
         selection: { source: { provider: module.id, content: product.id }, artifact: artifact.reference, definition: value.definition } });
 }
-export async function applicationWeaponBehaviorChoices(catalog: InstalledCatalog, productId: string): Promise<readonly ApplicationWeaponBehaviorChoice[]> {
+export async function applicationWeaponBehaviorChoices(catalog: InstalledCatalog, productId: string, openPlan: MountPlanOpener = openMountPlan): Promise<readonly ApplicationWeaponBehaviorChoice[]> {
   const product = catalog.require(productId), mounts = await catalog.mountsFor(product.id);
-  using mounted = await openMountPlan({ id: createMountPlanId("weapon-behavior", Buffer.from(product.id).toString("hex")), mounts,
+  using mounted = await openPlan({ id: createMountPlanId("weapon-behavior", Buffer.from(product.id).toString("hex")), mounts,
     defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
   return await choicesFromMounts(catalog, productId, mounted);
 }

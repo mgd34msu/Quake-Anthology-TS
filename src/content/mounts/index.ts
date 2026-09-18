@@ -3,7 +3,8 @@ import { open, readdir, stat } from "node:fs/promises";
 import { relative } from "node:path";
 import { createContentDigest, createResourceId } from "../../contracts/content.ts";
 import type { ArchiveMount, ContentDigest, ContentMount, LooseMount, MountId, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../../contracts/content.ts";
-import { openArchive, readLooseEntry } from "../archive/index.ts";
+import { FileSource } from "../archive/source.ts";
+import { openArchiveSource, openArchive, readLooseEntry } from "../archive/index.ts";
 import type { ArchiveHandle } from "../archive/index.ts";
 import { findContentPath, isMissingFile, normalizeResourcePath } from "./paths.ts";
 import { q3ArchiveChecksums } from "../../network/q3/pure.ts";
@@ -129,9 +130,10 @@ export class MountedContent {
   readonly #referenced = new Map<MountId, ArchiveMount>();
   readonly #openedResources = new Map<string, ResolvedResourceReference>();
   #closed = false;
-  #ownership: { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly parent: MountedContent } = { kind: "owned" };
+  #ownership: { readonly kind: "owned" } | { readonly kind: "borrowed"; readonly parent: { assertOpen(): void } } = { kind: "owned" };
 
-  constructor(readonly plan: ResolvedMountPlan, sources: readonly MountedSource[], readonly options: OpenMountOptions = {}) {
+  constructor(readonly plan: ResolvedMountPlan, sources: readonly MountedSource[], readonly options: OpenMountOptions = {}, owner?: { assertOpen(): void }) {
+    if (owner !== undefined) this.#ownership = { kind: "borrowed", parent: owner };
     for (const source of sources) this.#sources.set(source.mount.identity.id, source);
   }
 
@@ -375,4 +377,66 @@ export async function openMountPlan(plan: ResolvedMountPlan, options: OpenMountO
 export function canDownloadResource(resource: ResolvedResourceReference): boolean {
   return !(resource.provenance.mount.identity.content.startsWith("q2:") && resource.provenance.kind === "archive"
     && resource.requestedPath.toLowerCase().startsWith("maps/"));
+}
+
+export type MountPlanOpener = (plan: ResolvedMountPlan, options?: OpenMountOptions) => Promise<MountedContent>;
+
+/** A single preparation operation owns verified descriptors shared by product views. */
+export class MountPreparationScope {
+  private readonly archives = new Map<string, Promise<ArchiveHandle>>();
+  private closed = false;
+  private disposal: Promise<void> | null = null;
+  assertOpen(): void { if (this.closed) throw new Error("Mount preparation scope is closed"); }
+  private archive(mount: ArchiveMount): Promise<ArchiveHandle> {
+    this.assertOpen();
+    const key = JSON.stringify([mount.archivePath, mount.archiveDigest, mount.format]);
+    const previous = this.archives.get(key);
+    if (previous !== undefined) return previous;
+    const opened = this.openVerified(mount);
+    this.archives.set(key, opened);
+    return opened;
+  }
+  private async openVerified(mount: ArchiveMount): Promise<ArchiveHandle> {
+    const storage = new FileSource(mount.archivePath);
+    try {
+      const hash = createHash("sha256");
+      for (let offset = 0; offset < storage.byteLength; offset += 1024 * 1024)
+        hash.update(await storage.read(offset, Math.min(1024 * 1024, storage.byteLength - offset)));
+      if (createContentDigest(hash.digest("hex")) !== mount.archiveDigest) throw new Error(`Archive bytes changed before mount: ${mount.archivePath}`);
+      this.assertOpen();
+      return await openArchiveSource(storage, mount.format);
+    } catch (error) { storage.close(); throw error; }
+  }
+  readonly open: MountPlanOpener = async (plan, options = {}) => {
+    this.assertOpen();
+    const resolved = resolveMountPlan(plan, options), sources: MountedSource[] = [];
+    for (const mount of plan.mounts) {
+      if (mount.kind === "loose") sources.push({ kind: "loose", mount });
+      else {
+        const archive = await this.archive(mount);
+        this.assertOpen();
+        if (options.q3Restriction === "demo") {
+          if (archive.format !== "pk3") throw new Error(`Restricted Q3 content requires PK3 archives: ${mount.archivePath}`);
+          if ((q3ArchiveChecksums(archive, 0).checksum >>> 0) !== 437558517) throw new Error(`Corrupted demo pak0.pk3: ${mount.archivePath}`);
+        }
+        sources.push({ kind: "archive", mount, archive });
+      }
+    }
+    this.assertOpen();
+    return new MountedContent(resolved, sources, options, this);
+  };
+  [Symbol.asyncDispose](): Promise<void> {
+    if (this.disposal !== null) return this.disposal;
+    this.closed = true;
+    this.disposal = this.closeArchives();
+    return this.disposal;
+  }
+  private async closeArchives(): Promise<void> {
+    await Promise.all([...this.archives.values()].map(async pending => {
+      let archive: ArchiveHandle;
+      try { archive = await pending; } catch { return; }
+      archive.close();
+    }));
+    this.archives.clear();
+  }
 }

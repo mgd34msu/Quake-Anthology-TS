@@ -106,7 +106,12 @@ export function decodeArchive(bytes: Uint8Array, format?: ArchiveFormat, source 
 
 /** Reads only the header/tail and directory; asset payloads are read on demand. */
 export async function openArchive(path: string, format?: ArchiveFormat): Promise<ArchiveHandle> {
-  const storage = new FileSource(path);
+  return openArchiveSource(new FileSource(path), format);
+}
+
+/** Takes ownership of the retained source, including on parse failure. */
+export async function openArchiveSource(storage: ArchiveSource, format?: ArchiveFormat): Promise<ArchiveHandle> {
+  const path = storage.source;
   try {
     const header = await storage.read(0, Math.min(12, storage.byteLength));
     const selected = format ?? detectFormat(header, path);
