@@ -82,7 +82,7 @@ Writable content is separate by default:
 
 The writable `content/` tree mirrors the game-data layout, including `rerelease/` where appropriate. Change that root with `--user-content-root /path/to/writable-content`. Mods can live there without changing the installed base data. Startup scripts such as `config.cfg` and `autoexec.cfg` are loaded from the selected content, so existing personal configs can affect a launch. LLM credentials and preferences use the separate executable-directory rules below.
 
-The source checkout includes original QuakeC and QVM mod execution, separate map selection, declared QuakeC and QVM projectile behaviors, and an artifact-qualified native Faster rockets behavior. Homefix, Copper and early Instagib have passed bounded foreign-map play/save/load workflows. Native rerelease execution is available; its performance and broader compatibility remain under active work. An installed executable may lag the source checkout. See [current delivery and open targets](docs/execution-status.md#installed-executable-and-recent-fixes).
+The source checkout includes original QuakeC and QVM mod execution, separate map selection, declared QuakeC and QVM projectile behaviors, and an artifact-qualified native Faster rockets behavior. Homefix, Copper and early Instagib have passed bounded foreign-map play/save/load workflows. Native rerelease execution is available; its performance and broader compatibility remain under active work. The `07d54ae` Linux executable includes these source changes. See [current delivery and open targets](docs/execution-status.md#installed-executable-and-recent-fixes).
 
 Directory discovery does not establish full mod compatibility. QuakeC, QVM, native modules, rerelease interfaces, and independently mixed mod components are tracked under T10. Inspect discovery and available options with:
 
@@ -199,9 +199,11 @@ Generated menu artwork is present in the source. The complete menu asset pack ma
 
 The [shared functional task list](docs/functional-targets/status.md) records **22 of 23 targets accepted in source**. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
 
-Recent source work adds original Q1 save export/import, native and QVM projectile components, authored travel and mode preflight, bot navigation/save continuation, source pickup preferences, binding reset, live per-seat language, and public recording/replay. The installed executable may lag these changes. Check [the installed build identity](docs/execution-status.md#installed-executable-and-recent-fixes) before comparing behavior.
+The Custom game summary adapts to its available space so its final field stays visible.
 
-Performance work reuses MD5 poses between passes, skips unused shadow color computation, and reduces native interpreter address-check cost while preserving output. The measured gains apply to those components. Native rerelease loads are still slow, and whole-game FPS remains unqualified. [Integration scope and evidence](docs/functional-targets/integration-20260918.md) records these limits and the actual mod/save workflows.
+Recent source work adds original Q1 save export/import, native and QVM projectile components, authored travel and mode preflight, bot navigation/save continuation, source pickup preferences, binding reset, live per-seat language, and public recording/replay. The `07d54ae` Linux executable includes these changes. Check [the installed build identity](docs/execution-status.md#installed-executable-and-recent-fixes) before comparing behavior.
+
+Performance work reuses MD5 poses between passes, skips unused shadow color computation, and reduces native interpreter address-check and instruction-fetch cost while preserving output. The measured gains apply to those components. Native rerelease loads are still slow, and whole-game FPS remains unqualified. [Integration scope and evidence](docs/functional-targets/integration-20260918.md) records these limits and the actual mod/save workflows.
 
 **Development**
 

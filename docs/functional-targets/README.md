@@ -110,7 +110,7 @@ The historical source-row checklist remains unchanged. Subsequent functional wor
 
 Remaining work follows these priorities:
 
-1. Deliver and check the combined executable, preserving the accepted lifetime and source contracts.
+1. Continue from delivered `07d54ae`, preserving the accepted lifetime and source contracts and recording actual executable workflows.
 2. Fix measured frame-time, loading and hitch causes without reducing required visual, audio or gameplay behavior.
 3. Resolve the external ranking-provider boundary if a compatible documented implementation becomes available.
 4. Address defects exposed by live playthroughs and new mod/map inputs through shared adapters; keep native-peer, physical-device and full-campaign coverage limits explicit.

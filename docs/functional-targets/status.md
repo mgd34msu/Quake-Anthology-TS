@@ -2,7 +2,7 @@
 
 **22/23 functional targets complete in accepted source; T19 progression and player services remains open.** Source acceptance covers implementations and their public consumers. Full campaigns, native peers, physical devices, and whole-game performance retain the explicit limits below.
 
-Installed executable is still `0ea0ef001abc33a00cf9cb4c0d8d0f901f58ccd5`. The newly accepted source changes are pending executable delivery. Exact installed identity is recorded in [execution status](../execution-status.md).
+Installed executable is `07d54ae859ee757d6e446fa8f29a7eb3ec20ed7b` and includes the accepted source changes. Exact installed identity is recorded in [execution status](../execution-status.md).
 
 The accepted [Application](../../src/app/bootstrap/application.ts) now consumes substantial content, local-input, HUD, progression, mode, campaign, save and tool work. The table separates those integrations from remaining implementation and verification. It does not repeat obsolete blanket instructions to join code that already has callers.
 
@@ -10,7 +10,7 @@ The accepted [Application](../../src/app/bootstrap/application.ts) now consumes 
 |---|---|---|---|
 | T01 | Session and resource lifetime | Complete in source | Retained client/profile publication and the current executable are delivered; remaining feature-specific public workflows keep their own acceptance boundaries. |
 | T02 | Content and asset loading | Complete in accepted source | Product starts, mounted catalogs, replacement dimensions, add-on management and independent product restrictions are integrated; public add-on and authored arena workflows passed. Delivered in executable `30ea85d`. |
-| T03 | Rendering and visual effects | Complete in accepted source | Shared CPU/GL rendering, live hardware profiles, source candle effects and renderer-worker restart/capture are qualified. Worker execution defaults off; exact source `333f011` is installed. No FPS or exhaustive pixel-parity claim. |
+| T03 | Rendering and visual effects | Complete in accepted source | Shared CPU/GL rendering, live hardware profiles, source candle effects and renderer-worker restart/capture are qualified. Worker execution defaults off; the previously delivered `333f011` changes are included in the current executable. No FPS or exhaustive pixel-parity claim. |
 | T04 | Audio and music | Complete in accepted source | Shared commands, source voices/music, PCM output and geometry policy are integrated and installed. Quiet-rocket perception and physical listening remain open validation, not claimed fixes. |
 | T05 | Input and local players | Complete in accepted source | Local tuning/devices and remote per-seat connections, prediction, views, promotion/rejoin and startup seat preservation are joined. The actual Q2 two-peer workflow passed; physical devices and other native-peer combinations retain their validation limits. |
 | T06 | Console, cvars and profiles | Complete in accepted source | Command/profile/library consumers, dedicated binding persistence, actual menu save/exec results and Q1 initial command-line script ordering are joined. Focused combined console/configuration checks passed; exhaustive native-console interaction coverage remains unclaimed. |
@@ -176,7 +176,7 @@ QuakeC mods support selected Q2/Q3 movement and character presentation. Native Q
 
 Homefix, Copper 1.30, Q2Eaks v0.21, and the original Instagib package are installed separately in writable content, with author files preserved. Homefix has an exact-artifact projectile declaration, and Instagib has an exact legacy SDK declaration. Copper now passes actual public launch on Q2 `base1`, movement, firing with source ammo display, save/load and resumed play. The host corrections cover damage observation, inline models, local client messages and source linking of freed edicts. [Public workflow evidence](../../.artifacts/resume-20260918/t10-copper-local-continuation2/receipt.json). [Installed package files](../../.artifacts/resume-20260917/mod-corpus/installed-mods.json). See [mod compatibility](../mod-compatibility.md) for declaration and execution boundaries.
 
-The QC damage observer follows the program's typed source calls and writes, including helper functions and additional damage parameters. Armor projection reads the declared inventory field and bit constants, including Rogue's separate `items2` armor; direct VM versus observed damage bytes match across the four selected base/expansion programs. Local QC service state now retains per-client stats, view/intermission state and saved presentation, with recipient-aware events and effects. These source changes are included in the installed `0ea0ef0` executable; later component and restore fixes are accepted in source and await executable delivery.
+The QC damage observer follows the program's typed source calls and writes, including helper functions and additional damage parameters. Armor projection reads the declared inventory field and bit constants, including Rogue's separate `items2` armor; direct VM versus observed damage bytes match across the four selected base/expansion programs. Local QC service state now retains per-client stats, view/intermission state and saved presentation, with recipient-aware events and effects. These source changes are included in the installed `0ea0ef0` executable; later component and restore fixes are accepted in source and are included in the `07d54ae` executable.
 
 ## T11 collision, movement and scale
 
@@ -184,7 +184,7 @@ T11 is accepted in source and included in `0ea0ef0`. The shared collision path r
 
 The Q2 remote adapter separates physical origin and stance from camera offsets, subtracts float source delta angles before wire encoding, and preserves the source 100 ms stance transition, including reversals and teleport discontinuities. The final remote correction passed strict/policy checks and four focused cases; it was included in the combined source qualification before delivery. [Movement/view evidence](../../.artifacts/resume-20260917/t11-remote-height/RECEIPT.md). [Corpse/gib policy and focused checks](../../.artifacts/resume-20260916/targets/t11/RECEIPT.md).
 
-No physical scale conversion was justified by the inspected source dimensions. Native pairs keep factor 1, and selected body/view dimensions remain source-owned. The original closed engine's corpse behavior and exhaustive native-peer/body combinations are not claimed as verified. Those coverage limits do not represent missing movement handlers. T10 and T12 are accepted in the current source; their newer component and pickup changes await delivery.
+No physical scale conversion was justified by the inspected source dimensions. Native pairs keep factor 1, and selected body/view dimensions remain source-owned. The original closed engine's corpse behavior and exhaustive native-peer/body combinations are not claimed as verified. Those coverage limits do not represent missing movement handlers. T10 and T12 are accepted in the current source; their newer component and pickup changes are included in `07d54ae`.
 
 ## T12 combat, rosters, pickups and equipment
 
@@ -192,7 +192,7 @@ All eleven retained source rows now have implementations and consumers: the thre
 
 The final pickup correction applies the source autoswitch policy before routed foreign-weapon grants. It preserves Rogue's held grapple and distinguishes an already owned destination weapon from a new pickup. The focused actual Rogue case passed four assertions; production was included in integration8's strict check with no T12 diagnostic. That combined check found three unrelated type issues, which were corrected separately. Earlier Hipnotic/Rogue/MG3/Xatrix supply and firing evidence remains bounded to its recorded cases; it is not an exhaustive every-weapon or every-monster claim.
 
-Machine-local evidence: [source reconciliation and correction](../../.artifacts/resume-20260918/t12-pickup-policy/freeze/reconciliation.md), [prior expansion workflows](../../.artifacts/resume-20260916/targets/t12/final-expansion-evidence.json). This acceptance includes a source change after installed `0ea0ef0`; delivery of that correction is pending.
+Machine-local evidence: [source reconciliation and correction](../../.artifacts/resume-20260918/t12-pickup-policy/freeze/reconciliation.md), [prior expansion workflows](../../.artifacts/resume-20260916/targets/t12/final-expansion-evidence.json). This correction is included in installed `07d54ae`.
 
 ## T13 through T23 integration
 

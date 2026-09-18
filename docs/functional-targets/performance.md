@@ -1,5 +1,10 @@
 # Performance and fidelity acceptance
 
+The current executable is `07d54ae`. Older installed/pending labels below describe their recorded checkpoints. Current whole-game FPS is not established by those component experiments.
+
+The September 18 delivery reuses MD5 poses between color/shadow passes, indexes pose lookup, skips unused shadow-only color work, and replaces native interpreter canonical-address shifts with equivalent range checks. Paired component results and exact-output boundaries are recorded in [the integration evidence](integration-20260918.md#performance-changes). These gains are not additive and do not establish gameplay FPS. Native Q2 rerelease saved-world opening still took 155.206 seconds in its last actual continuation workflow; load performance needs further work.
+
+
 Performance is a primary requirement of the shared engine. Every functional target owns its runtime cost, loading cost, memory use, and effect on responsiveness. Improvements must preserve required behavior across native and mixed configurations.
 
 ## What qualifies as an optimization
@@ -39,6 +44,10 @@ For a 60 Hz reference workload the whole-frame budget is 16.67 ms; for 120 Hz it
 | Network play and multiple local seats | Native packet/prediction semantics, per-seat input and views, load contention, download progress, and cancellation. No reduction in authoritative work to improve a local frame result. |
 
 Collision changes require complete trace results and error behavior, not just matching hit fractions. Rendering changes require triangle/surface order, UV seams, interpolation, lighting, transparency and visibility to remain correct. Compare prepared geometry where appropriate, then inspect corresponding CPU/GL frames. Audio changes require correct events, positions, gains, timing, and PCM delivery; dummy-device output alone does not prove physical audibility.
+
+The final instruction-fetch change uses a live, lazy executable span and invalidates it when mappings change. It preserves aliases, self-modifying writes, per-byte faults, canonical-address boundaries and the 15-byte instruction limit. Three paired 120,003-instruction measurements reduced elapsed time by 18.9–25.1%, with matching complete interpreter state. This is a component result, not a measured native restore or gameplay improvement. [Fetch evidence](../../.artifacts/resume-20260918/instruction-fetch-cursor/freeze/RESULT.md).
+
+The `4e82c5a` compiled mixed-game run completed 29.467 seconds of active input. Its public timer window recorded 731 frames over 45.002 seconds including console and capture overhead: mean simulation 11.343 ms, presentation preparation 0.866 ms, and rendering 19.476 ms. These stages omit other work and do not explain the whole elapsed interval. The private display, diagnostics and unpaired workload do not establish user-desktop FPS or an improvement over an earlier build. [Runtime scope and failure boundary](../../.artifacts/resume-20260918/compiled-mixed-gameplay/RESULT.md).
 
 ## Current evidence and remaining work
 
