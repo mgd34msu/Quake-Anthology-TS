@@ -1,13 +1,22 @@
 import type { Vec3, Vec4 } from "../../../../contracts/math.ts";
 import { add, dot, normalize, scale, subtract, zero } from "../../foundation/fields.ts";
 import { angleVectors } from "../../foundation/weapons/vectors.ts";
-import type { Q2CharacterContext, Q2PlayerView } from "./types.ts";
+import type { Q2CharacterContext, Q2PlayerView, Q2PlayerState } from "./types.ts";
 
 const clamp = (value: number, minimum: number, maximum: number): number => Math.max(minimum, Math.min(maximum, value));
 export function addQ2Blend(blend: Vec4, color: Vec3, alpha: number): Vec4 {
   if (alpha <= 0) return blend;
   const total = blend.w + (1 - blend.w) * alpha, old = blend.w / total;
   return { x: blend.x * old + color.x * (1 - old), y: blend.y * old + color.y * (1 - old), z: blend.z * old + color.z * (1 - old), w: total };
+}
+
+export function q2PainAnimationFrames(ducked: boolean, index: number) {
+  return ducked ? { first: 168, last: 172 } : { first: 53 + index * 4, last: 57 + index * 4 };
+}
+
+export function q2DeathAnimationFrames(ducked: boolean, index: number) {
+  return ducked ? { first: 172, last: 177 } : index === 0 ? { first: 177, last: 183 }
+    : index === 1 ? { first: 183, last: 189 } : { first: 189, last: 197 };
 }
 
 export function q2DamageFeedback(context: Q2CharacterContext, painIndex: number): { readonly flashes: number; readonly painIndex: number } {
@@ -20,8 +29,9 @@ export function q2DamageFeedback(context: Q2CharacterContext, painIndex: number)
   let nextPain = painIndex;
   if (movement.animateQ2 && state.animationPriority < 3) {
     state.animationPriority = 3;
-    if (movement.ducked) { entity.frame = 168; state.animationEnd = 172; }
-    else { nextPain = (painIndex + 1) % 3; entity.frame = 53 + nextPain * 4; state.animationEnd = 57 + nextPain * 4; }
+    if (!movement.ducked) nextPain = (painIndex + 1) % 3;
+    const frames = q2PainAnimationFrames(movement.ducked, nextPain);
+    entity.frame = frames.first; state.animationEnd = frames.last;
   }
   const count = Math.max(total, 10), health = game.host.combat.read(entity.actor.id)?.health ?? 0;
   if (now > state.painDebounce && !state.god && powers.invulnerabilityUntil <= now) {
@@ -111,16 +121,21 @@ export function q2BuildView(context: Q2CharacterContext, flashes: number, interm
 export function q2ClientAnimation(context: Q2CharacterContext): undefined {
   const { state, movement, entity, game } = context;
   if (!movement.animateQ2 || state.gibbed) return undefined;
-  const run = Math.hypot(game.body(entity).velocity.x, game.body(entity).velocity.y) !== 0, duck = movement.ducked;
-  const changed = duck !== state.animationDuck && state.animationPriority < 5 || run !== state.animationRun && state.animationPriority === 0 || !movement.grounded && state.animationPriority <= 1;
+  return advanceQ2PlayerAnimation(state, entity, movement.grounded, movement.ducked,
+    Math.hypot(game.body(entity).velocity.x, game.body(entity).velocity.y) !== 0);
+}
+
+export function advanceQ2PlayerAnimation(state: Pick<Q2PlayerState, "animationPriority" | "animationDuck" | "animationRun" | "animationEnd">,
+  entity: { frame: number }, grounded: boolean, duck: boolean, run: boolean): undefined {
+  const changed = duck !== state.animationDuck && state.animationPriority < 5 || run !== state.animationRun && state.animationPriority === 0 || !grounded && state.animationPriority <= 1;
   if (!changed) {
     if (state.animationPriority === 6) { if (entity.frame > state.animationEnd) { entity.frame--; return undefined; } }
     else if (entity.frame < state.animationEnd) { entity.frame++; return undefined; }
     if (state.animationPriority === 5) return undefined;
-    if (state.animationPriority === 2) { if (!movement.grounded) return undefined; state.animationPriority = 1; entity.frame = 68; state.animationEnd = 71; return undefined; }
+    if (state.animationPriority === 2) { if (!grounded) return undefined; state.animationPriority = 1; entity.frame = 68; state.animationEnd = 71; return undefined; }
   }
   state.animationPriority = 0; state.animationDuck = duck; state.animationRun = run;
-  if (!movement.grounded) { state.animationPriority = 2; if (entity.frame !== 67) entity.frame = 66; state.animationEnd = 67; }
+  if (!grounded) { state.animationPriority = 2; if (entity.frame !== 67) entity.frame = 66; state.animationEnd = 67; }
   else if (run) { entity.frame = duck ? 154 : 40; state.animationEnd = duck ? 159 : 45; }
   else { entity.frame = duck ? 135 : 0; state.animationEnd = duck ? 153 : 39; }
   return undefined;

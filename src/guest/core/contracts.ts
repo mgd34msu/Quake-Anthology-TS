@@ -68,6 +68,8 @@ export interface MappedGuestMemory extends GuestMemory {
   observeWrites(address: GuestAddress, byteLength: number, afterWrite: () => void): () => void;
   check(address: GuestAddress, byteLength: number, access: GuestAccess): undefined;
   fetch(address: GuestAddress, byteLength: number): Uint8Array;
+  /** Execute one live byte at this memory owner's processor instruction pointer. */
+  fetchByte(byteOffset: bigint): number;
   checkpoint(): GuestMemorySnapshot;
 }
 

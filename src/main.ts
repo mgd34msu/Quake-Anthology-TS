@@ -6,6 +6,10 @@ export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise
   try {
     const command = parseApplicationCommand(argv);
     if (command.kind === "help") { process.stdout.write(applicationHelp); return 0; }
+    if (command.kind === "weapon-behavior") {
+      await (await import("./app/bootstrap/weapon-behavior-tool.ts")).runWeaponBehaviorTool(command.command, text => { process.stdout.write(text); });
+      return 0;
+    }
     if (command.kind === "list-content") {
       const { discoverInstalledContent } = await import("./content/catalog/index.ts");
       const catalog = await discoverInstalledContent({ corpusRoot: command.corpusRoot });

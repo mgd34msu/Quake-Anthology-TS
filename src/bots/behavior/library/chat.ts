@@ -929,10 +929,10 @@ export class BotChatLibrary {
   }
   nextConsoleMessage(handle: number): ConsoleChatMessage | null { return this.state(handle)?.firstMessage?.snapshot() ?? null; }
   numConsoleMessages(handle: number): number { return this.state(handle)?.numConsoleMessages ?? 0; }
-  setName(handle: number, name: ChatTextSource, client: number): void {
+  setName(handle: number, name: ChatTextSource, client?: number): void {
     const state = this.state(handle); if (state === undefined) return;
-    if (!Number.isInteger(client)) throw new RangeError("chat client must be integer");
-    state.client = client; state.name = "";
+    if (client !== undefined && !Number.isInteger(client)) throw new RangeError("chat client must be integer");
+    if (client !== undefined) state.client = client; state.name = "";
     state.name = boundedChatText(name, 32).slice(0, 31);
   }
   setGender(handle: number, gender: number): void { const state = this.state(handle); if (state !== undefined) state.gender = gender === 1 || gender === 2 ? gender : 0; }
@@ -951,16 +951,16 @@ export class BotChatLibrary {
     write(readMessage(state.message));
     state.message[0] = 0;
   }
-  enterChat(handle: number, clientTo: number, sendTo: number): void {
-    finishCalls(this.enterChatCalls(handle, clientTo, sendTo));
+  enterChat(handle: number, clientTo: number, sendTo: number, sourceClient?: number): void {
+    finishCalls(this.enterChatCalls(handle, clientTo, sendTo, sourceClient));
   }
-  *enterChatCalls(handle: number, clientTo: number, sendTo: number): CallSteps {
+  *enterChatCalls(handle: number, clientTo: number, sendTo: number, sourceClient?: number): CallSteps {
     const state = this.state(handle); if (state === undefined || readMessage(state.message).length === 0) return;
     writeMessage(state.message, removeTildes(readMessage(state.message)));
     if (this.options.testInitialChats?.()) this.report("info", "test-output", readMessage(state.message));
     else {
       const message = readMessage(state.message);
-      yield* this.host.clientCommand(state.client, sendTo === ChatDestination.Team ? `say_team ${message}` : sendTo === ChatDestination.Tell ? `tell ${clientTo} ${message}` : `say ${message}`);
+      yield* this.host.clientCommand(sourceClient ?? state.client, sendTo === ChatDestination.Team ? `say_team ${message}` : sendTo === ChatDestination.Tell ? `tell ${clientTo} ${message}` : `say ${message}`);
     }
     state.message[0] = 0;
   }

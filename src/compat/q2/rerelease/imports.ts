@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, GuestCallResult } from "../../../contracts/execution.ts";
 import type { CvarRegistry, CvarSnapshot } from "../../../core/cvars/index.ts";
 import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
@@ -38,7 +39,7 @@ export class RereleaseCoreImports {
     const previous = this.#strings.get(text);
     if (previous !== undefined) return previous;
     const bytes = new TextEncoder().encode(text);
-    const address = this.memory.allocate({ byteLength: bytes.length + 1, label: "Q2 engine string" });
+    const address = allocateNativeMemory(this.memory, bytes.length + 1, "Q2 engine string");
     this.memory.write(address, bytes);
     this.#strings.set(text, address);
     return address;
@@ -74,7 +75,7 @@ export class RereleaseCoreImports {
     this.memory.check(address, 1, "write");
     const record = this.#allocations.get(address.byteOffset);
     if (record === undefined) throw new Error("Q2 TagFree received an unowned or already freed allocation");
-    this.memory.unmap(address, record.size);
+    this.memory.unmap(address, nativeAllocationBytes(record.size));
     this.#allocations.delete(address.byteOffset);
   }
   invoke(call: RereleaseImportCall): GuestCallResult {
@@ -127,7 +128,7 @@ export class RereleaseCoreImports {
         const rawSize = integer(args, 0);
         if (rawSize < 0n || rawSize > 0x1000_0000n) throw new RangeError("Q2 TagMalloc size exceeds mapped-memory allocation limit");
         const size = Math.max(1, Number(rawSize)), tag = number(1);
-        const address = this.memory.allocate({ byteLength: size, alignment: 16n, label: `Q2 tag ${tag}` });
+        const address = allocateNativeMemory(this.memory, size, `Q2 tag ${tag}`);
         this.#allocations.set(address.byteOffset, { address, size, tag });
         return guestPointer(address);
       }

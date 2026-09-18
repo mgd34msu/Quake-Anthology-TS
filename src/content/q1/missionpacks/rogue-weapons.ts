@@ -29,7 +29,8 @@ function ignoreTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): b
 export function launchRogueLavaSpike(game: Q1EntityServices, owner: ActorId, origin: Vec3, direction: Vec3, powered = false): Q1Actor {
   const entity = missile(game, "lava_spike", owner, origin, vscale(direction, 1000), "progs/lspike.mdl");
   entity.count = powered ? 1 : 0; entity.projectileWeapon = powered ? "rogue:lava-supernailgun" : "rogue:lava-nailgun";
-  entity.touch = game.named.touch(entity, "rogue:lava-touch"); game.schedule(entity, 6, game.named.action(entity, "SUB_Remove")); return entity;
+  entity.touch = game.named.touch(entity, "rogue:lava-touch"); game.schedule(entity, 6, game.named.action(entity, "SUB_Remove"));
+  game.launchProjectileBehavior(entity, owner, entity.projectileWeapon, "nail"); return entity;
 }
 export function fireRogueLava(game: Q1EntityServices, player: Q1PlayerState): boolean {
   const nails = game.host.inventory.count(player.actor.id, "rogue:ammo/lava-nails");
@@ -60,7 +61,8 @@ export function launchRogueMultiGrenade(game: Q1EntityServices, owner: ActorId, 
   const grenade = missile(game, "MultiGrenade", owner, origin, velocity, "progs/mervup.mdl");
   grenade.movement = "bounce"; grenade.mangle = angles; grenade.angularVelocity = { x: 300, y: 300, z: 300 }; grenade.projectileWeapon = "rogue:multi-grenade";
   grenade.touch = game.named.touch(grenade, "rogue:multi-grenade-touch");
-  game.schedule(grenade, 1, game.named.action(grenade, "rogue:multi-grenade-split")); return grenade;
+  game.schedule(grenade, 1, game.named.action(grenade, "rogue:multi-grenade-split"));
+  game.launchProjectileBehavior(grenade, owner, "rogue:multi-grenade", "grenade"); return grenade;
 }
 export function fireRogueMultiGrenade(game: Q1EntityServices, player: Q1PlayerState): boolean {
   if (!game.host.inventory.consume(player.actor, "rogue:ammo/multi-rockets", 1)) return false;
@@ -85,6 +87,7 @@ function splitGrenade(game: Q1EntityServices, grenade: Q1Actor): undefined {
     const mini = missile(game, "MiniGrenade", grenade.owner, game.body(grenade).origin, velocity, "progs/mervup.mdl");
     mini.movement = "bounce"; mini.mangle = angles; mini.angularVelocity = { x: 300, y: 300, z: 300 }; mini.projectileWeapon = "rogue:multi-grenade";
     mini.touch = game.named.touch(mini, "rogue:multi-grenade-touch");
+    game.launchProjectileBehavior(mini, grenade.owner, "rogue:multi-grenade", "grenade");
     game.schedule(mini, 1 + (game.host.random() * 2 - 1) * 0.5, game.named.action(mini, "rogue:mini-grenade-explode"));
   }
   return game.remove(grenade);
@@ -119,7 +122,8 @@ function acquireRocket(game: Q1EntityServices, rocket: Q1Actor): undefined {
 function homeRocket(game: Q1EntityServices, rocket: Q1Actor): undefined {
   const target = missionReference(game, rocket, "rogue:enemy"), body = target === null ? null : game.host.bodies.read(target);
   if (body === null || target === null || game.health(target) < 1) return game.remove(rocket);
-  moveMissile(game, rocket, vscale(normalize(vsub(body.origin, game.body(rocket).origin)), 1000));
+  if (game.host.weaponBehavior?.controlsTrajectory(rocket.actor.id) !== true)
+    moveMissile(game, rocket, vscale(normalize(vsub(body.origin, game.body(rocket).origin)), 1000));
   return game.schedule(rocket, 0.1, game.named.action(rocket, "rogue:rocket-home"));
 }
 export function fireRogueMultiRocket(game: Q1EntityServices, player: Q1PlayerState): boolean {
@@ -134,6 +138,7 @@ export function fireRogueMultiRocket(game: Q1EntityServices, player: Q1PlayerSta
     const rocket = missile(game, "MultiRocket", player.actor.id, origin, velocity, multiplayer ? "progs/rockup_d.mdl" : "progs/rockup.mdl");
     rocket.projectileWeapon = "rogue:multi-rocket"; rocket.frame = shot.frame; rocket.delay = Math.fround(game.time + 4); rocket.mangle = player.viewAngles;
     rocket.touch = game.named.touch(rocket, "rogue:rocket-touch");
+    game.launchProjectileBehavior(rocket, player.actor.id, "rogue:multi-rocket", "rocket");
     if (multiplayer) game.schedule(rocket, 4, game.named.action(rocket, "rogue:rocket-explode"));
     else {
       const trace = game.host.trace({ start: origin, end: vadd(origin, velocity), bounds: POINT, ignore: player.actor.id, monsters: true });
@@ -151,7 +156,8 @@ export function launchRoguePlasma(game: Q1EntityServices, owner: ActorId, origin
   plasma.angularVelocity = { x: 300, y: 300, z: 300 }; plasma.projectileWeapon = "rogue:plasma";
   if (!game.options.coop && game.options.deathmatch === 0) plasma.effects = 4;
   plasma.touch = game.named.touch(plasma, "rogue:plasma-touch"); game.sound(plasma, "plasma/flight.wav", "weapon");
-  game.schedule(plasma, 0.1, game.named.action(plasma, "rogue:plasma-launch")); return plasma;
+  game.schedule(plasma, 0.1, game.named.action(plasma, "rogue:plasma-launch"));
+  game.launchProjectileBehavior(plasma, owner, "rogue:plasma", "plasma"); return plasma;
 }
 export function fireRoguePlasma(game: Q1EntityServices, player: Q1PlayerState): boolean {
   const ammo = game.host.inventory.count(player.actor.id, "rogue:ammo/plasma"); if (ammo < 1) return false;
@@ -210,6 +216,8 @@ export function registerRogueWeaponCallbacks(game: Q1EntityServices): undefined 
   } });
   game.named.register("rogue:plasma-touch", { touch: plasmaTouch });
   game.named.register("rogue:plasma-launch", { action: (runtime, plasma) => {
-    moveMissile(runtime, plasma, vscale(normalize(runtime.body(plasma).velocity), 1250)); return runtime.schedule(plasma, 5, runtime.named.action(plasma, "SUB_Remove"));
+    if (runtime.host.weaponBehavior?.controlsTrajectory(plasma.actor.id) !== true)
+      moveMissile(runtime, plasma, vscale(normalize(runtime.body(plasma).velocity), 1250));
+    return runtime.schedule(plasma, 5, runtime.named.action(plasma, "SUB_Remove"));
   } }); return undefined;
 }

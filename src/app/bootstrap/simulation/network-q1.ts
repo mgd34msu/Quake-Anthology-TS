@@ -1,3 +1,4 @@
+import { createQuakeCNetQuakeHost } from "./network-q1-quakec.ts";
 import type { ResourceId } from '../../../contracts/content.ts';
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { Q1ProtocolIdentity, Q1ExtendedEntityState } from '../../../contracts/protocol.ts';
@@ -20,6 +21,7 @@ export interface Q1ApplicationServerBindingOptions {
     print(text: string): void;
 }
 export async function createQ1ApplicationServerHost(options: Q1ApplicationServerBindingOptions): Promise<Q1ApplicationServerHost> {
+    if (options.simulation.quakecSource()?.kind === "netquake") return createQuakeCNetQuakeHost(options);
     const simulation = options.simulation, source = simulation.q1Source();
     if (source === null)
         throw new Error('Q1 network requires the Q1 source game');

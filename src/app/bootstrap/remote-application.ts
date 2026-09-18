@@ -2105,7 +2105,8 @@ export class RemoteApplication {
         if (!this.reportedEffectGaps.has(key)) { this.reportedEffectGaps.add(key); this.print(`Unresolved ${effect.source.kind} effect: ${effect.reason}\n`); }
       }
       const primaryBatch = this.primaryPeer?.view === null || this.primaryPeer === null ? null : await this.primaryPeer.view.prepareFrame(output);
-      const audioBatches: ApplicationAudioSeatEvents[] = [primaryBatch === null ? {seat:this.seatId,snapshot:output.snapshot,events:this.sourceEvents,music:true,scene:this.remote.scene,effectSounds:frontend.effects.drainSounds()} : { ...primaryBatch, music: true }];
+      const audioBatches: ApplicationAudioSeatEvents[] = [primaryBatch === null ? {seat:this.seatId,snapshot:output.snapshot,events:this.sourceEvents,music:true,scene:this.remote.scene,effectSounds:[...frontend.effects.drainSounds(), ...frontend.effects.drainRecipientSounds()
+        .filter(batch => batch.recipient.equals(presentation.local.player.actor)).flatMap(batch => batch.sounds)]} : { ...primaryBatch, music: true }];
       if (primaryBatch === null) { presentation.sourceEvents(this.sourceEvents); await presentation.prepare(output.snapshot, models, characters); }
       else this.sourceEvents = primaryBatch.events;
       presentation.local.player.seat.present(output.snapshot, this.renderer.backend);

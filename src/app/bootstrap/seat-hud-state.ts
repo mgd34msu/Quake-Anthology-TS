@@ -2,8 +2,10 @@ import type { ContentId, ResourceId } from "../../contracts/content.ts";
 import type { Vec3, Vec4 } from "../../contracts/math.ts";
 import type { ApplicationWeaponHudAssets } from "./weapon-hud.ts";
 import type { ActorId } from "../../contracts/identity.ts";
-import type { CommonHudData, HudHealthBar, HudHelp, HudPrompt, HudInventoryItem, HudPointOfInterest } from "../../ui/hud/index.ts";
+import type { CommonHudData, HudHealthBar, HudHelp, HudPrompt, HudInventoryItem, HudPointOfInterest, HudDamageIndicator } from "../../ui/hud/index.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
+
+type HudAssets = Pick<ApplicationWeaponHudAssets, "load" | "picture"> & { readonly assets: { provider(content: ContentId): Promise<Pick<Awaited<ReturnType<ApplicationWeaponHudAssets["assets"]["provider"]>>, "palette">> } };
 
 /** State addressed to one local actor; source events remain authoritative. */
 export class SeatSourceHud {
@@ -21,7 +23,7 @@ export class SeatSourceHud {
   private scoreRows: readonly string[] = [];
   private readonly clients = new Map<number, { readonly name: string; readonly frags: number; readonly team: number; readonly observer: boolean }>();
   private report: { readonly lines: readonly string[]; readonly ready: number } | null = null;
-  private poi: { readonly content: ContentId; readonly path: string; image: ResourceId | null; readonly origin: Vec3; readonly expiresMilliseconds: number; readonly color: number; tint: Vec4 } | null = null;
+  private readonly pois: { readonly key: number; readonly flags: number; width: number; height: number; readonly content: ContentId; readonly path: string; image: ResourceId | null; readonly origin: Vec3; readonly expiresMilliseconds: number; readonly color: number; tint: Vec4 }[] = [];
   private path: { readonly origin: Vec3; readonly direction: Vec3; readonly expiresMilliseconds: number } | null = null;
   inventoryItems(): readonly HudInventoryItem[] | null { return this.inventory; }
   scores(down: boolean): void { this.scoresHeld = down; }
@@ -32,12 +34,13 @@ export class SeatSourceHud {
   private blue = 0;
   private ctf = false;
   private pickup: { readonly name: string; readonly path: string; readonly content: ContentId; icon: ResourceId | null; readonly expiresMilliseconds: number } | null = null;
-  private readonly damage: { readonly origin: Vec3; readonly amount: number; readonly expiresMilliseconds: number }[] = [];
+  private readonly damage: HudDamageIndicator[] = [];
+  private damagePicture: { readonly content: ContentId; image: ResourceId | null; width: number; height: number } | null = null;
   private capture = "";
   private captureUntil = 0;
   constructor(private readonly actor: ActorId, private readonly localize?: (content: ContentId, text: string, args?: readonly string[]) => Promise<string>) {}
 
-  async prepare(icons: ApplicationWeaponHudAssets): Promise<void> {
+  async prepare(icons: HudAssets): Promise<void> {
     for (const source of this.pending.splice(0)) {
       if (source.kind !== "q2-rerelease" || this.localize === undefined) { this.apply(source); continue; }
       const event = source.event;
@@ -46,20 +49,25 @@ export class SeatSourceHud {
       else if (event.kind === "mission-objective") this.apply({ ...source, event: { ...event, text: await this.localize(source.content, event.text, event.args), args: [] } });
       else this.apply(source);
     }
-    const poi = this.poi;
-    if (poi !== null && poi.image === null) {
+    for (const poi of this.pois) if (poi.image === null) {
       poi.image = await icons.load({ kind: "image", resource: { content: poi.content, path: `pics/${poi.path}.pcx` } });
+      const picture = icons.picture(poi.image);
+      if (picture?.kind === "image") { poi.width = picture.image.width; poi.height = picture.image.height; }
       const palette = (await icons.assets.provider(poi.content)).palette;
       if (palette !== null) poi.tint = { x: (palette.colors[poi.color * 3] ?? 255) / 255, y: (palette.colors[poi.color * 3 + 1] ?? 255) / 255, z: (palette.colors[poi.color * 3 + 2] ?? 255) / 255, w: 1 };
+    }
+    const damagePicture = this.damagePicture;
+    if (damagePicture !== null && damagePicture.image === null) {
+      damagePicture.image = await icons.load({ kind: "image", resource: { content: damagePicture.content, path: "pics/damage_indicator.pcx" } });
+      const picture = icons.picture(damagePicture.image);
+      if (picture?.kind === "image") { damagePicture.width = picture.image.width; damagePicture.height = picture.image.height; }
     }
     const pickup = this.pickup;
     if (pickup !== null && pickup.icon === null && pickup.path !== "") pickup.icon = await icons.load({ kind: "image", resource: { content: pickup.content, path: `pics/${pickup.path}.pcx` } });
   }
   points(): readonly HudPointOfInterest[] {
-    const poi = this.poi;
-    return poi === null || poi.image === null ? [] : [{ id: 1, origin: poi.origin, image: poi.image, width: 32, height: 32,
-      color: poi.tint,
-      hideOnAim: true, expiresMilliseconds: poi.expiresMilliseconds }];
+    return this.pois.flatMap(poi => poi.image === null ? [] : [{ id: poi.key, origin: poi.origin, image: poi.image, width: poi.width, height: poi.height,
+      color: poi.tint, hideOnAim: (poi.flags & 1) !== 0, expiresMilliseconds: poi.expiresMilliseconds }]);
   }
   receive(source: SimulationPresentationEvent): void {
     if (this.localize !== undefined && source.kind === "q2-rerelease" && (source.event.kind === "healthbar" || source.event.kind === "help-computer" || source.event.kind === "mission-objective")) this.pending.push(source);
@@ -93,7 +101,31 @@ export class SeatSourceHud {
       const event = source.event;
       if (event.kind === "mission-objective" && event.actor.equals(this.actor)) { this.objective = event.text; this.objectivePrints.push({ text: event.text, seconds: source.seconds }); }
       if (event.kind === "mission-status" && event.actor.equals(this.actor)) this.missionVisible = event.iconVisible;
-      if (event.kind === "poi" && event.actor.equals(this.actor)) this.poi = { content: source.content, path: event.image, image: null, origin: event.position, color: event.color, tint: { x: 1, y: 1, z: 1, w: 1 }, expiresMilliseconds: source.seconds * 1000 + event.duration };
+      if ((event.kind === "poi" || event.kind === "keyed-poi") && event.actor.equals(this.actor)) {
+        const key = event.kind === "poi" ? 1 : event.key, now = source.seconds * 1000;
+        let index = key === 0 ? -1 : this.pois.findIndex(poi => poi.key === key);
+        if (index < 0) index = this.pois.findIndex(poi => poi.expiresMilliseconds <= now);
+        if (index < 0 && this.pois.length < 32) index = this.pois.length;
+        if (index < 0) {
+          let oldest = Infinity;
+          for (const [candidate, poi] of this.pois.entries()) if (poi.key === 0 && poi.expiresMilliseconds < oldest) { oldest = poi.expiresMilliseconds; index = candidate; }
+        }
+        if (index >= 0) this.pois[index] = { key, width: 32, height: 32, flags: event.kind === "poi" ? 1 : event.flags, content: source.content, path: event.image, image: null, origin: event.position, color: event.color & 255, tint: { x: 1, y: 1, z: 1, w: 1 }, expiresMilliseconds: now + event.duration };
+      }
+      if (event.kind === "remove-poi" && event.actor.equals(this.actor) && event.key !== 0) {
+        const index = this.pois.findIndex(poi => poi.key === event.key); if (index >= 0) this.pois.splice(index, 1);
+      }
+      if (event.kind === "directional-damage" && event.actor.equals(this.actor)) {
+        if (this.damagePicture?.content !== source.content) this.damagePicture = { content: source.content, image: null, width: 0, height: 0 };
+        const now = source.seconds * 1000, direction = event.direction;
+        let index = this.damage.findIndex(value => value.expiresMilliseconds <= now || "direction" in value && value.direction.x * direction.x + value.direction.y * direction.y + value.direction.z * direction.z >= 0.95);
+        if (index < 0) index = this.damage.length < 32 ? this.damage.length : 0;
+        const previous = this.damage[index];
+        const retain = previous !== undefined && previous.expiresMilliseconds > now && "direction" in previous && previous.direction.x * direction.x + previous.direction.y * direction.y + previous.direction.z * direction.z >= 0.95 ? previous : null;
+        const normalize = (value: Vec3): Vec3 => { const length = Math.hypot(value.x, value.y, value.z) || 1; return { x: value.x / length, y: value.y / length, z: value.z / length }; };
+        const color = normalize({ x: Number(event.health) + Number(event.armor), y: Number(event.shield) + Number(event.armor), z: Number(event.armor) });
+        this.damage[index] = { direction, amount: event.damage + (retain?.amount ?? 0), color: normalize({ x: color.x + (retain?.color.x ?? 0), y: color.y + (retain?.color.y ?? 0), z: color.z + (retain?.color.z ?? 0) }), health: event.health || (retain?.health ?? false), armor: event.armor || (retain?.armor ?? false), shield: event.shield || (retain?.shield ?? false), expiresMilliseconds: now + 1000 };
+      }
       if (event.kind === "help-path" && event.actor.equals(this.actor)) this.path = { origin: event.position, direction: event.direction, expiresMilliseconds: source.seconds * 1000 + 10000 };
       if (event.kind === "end-of-unit") this.report = { ready: event.buttonTime * 1000, lines: [...event.levels].sort((a,b) => a.visitOrder - b.visitOrder).map(level => `${level.name || level.map}: ${level.killedMonsters}/${level.totalMonsters} kills  ${level.foundSecrets}/${level.totalSecrets} secrets  ${Math.floor(level.time / 60)}:${String(Math.floor(level.time % 60)).padStart(2, "0")}`) };
       if (event.kind === "healthbar" && event.actor.equals(this.actor)) {
@@ -133,7 +165,7 @@ export class SeatSourceHud {
     }
     if (this.captureUntil > nowMilliseconds) prompts.push({ action: this.capture, binding: "", icon: null });
     const scores = this.scoreVisible ? this.scoreRows : this.scoresHeld && this.clients.size > 0 ? [...this.clients.values()].sort((a,b) => b.frags - a.frags).map(client => `${client.frags}  ${client.name}${client.team === 0 ? "" : `  Team ${client.team}`}${client.observer ? "  Spectator" : ""}`) : null;
-    return { helpPath: this.path !== null && this.path.expiresMilliseconds > nowMilliseconds ? this.path : null, pickup: this.pickup, damageIndicators: this.damage.filter(damage => damage.expiresMilliseconds > nowMilliseconds), inventory: this.inventory, healthBars: [...this.bars.entries()].sort(([a], [b]) => a - b).map(([, bar]) => bar),
+    return { helpPath: this.path !== null && this.path.expiresMilliseconds > nowMilliseconds ? this.path : null, pickup: this.pickup, damageIndicators: this.damage.filter(damage => damage.expiresMilliseconds > nowMilliseconds).map(damage => "direction" in damage && this.damagePicture !== null && this.damagePicture.image !== null && this.damagePicture.width > 0 ? { ...damage, picture: { image: this.damagePicture.image, width: this.damagePicture.width, height: this.damagePicture.height } } : damage), inventory: this.inventory, healthBars: [...this.bars.entries()].sort(([a], [b]) => a - b).map(([, bar]) => bar),
       help: this.report !== null ? { title: "Unit complete", lines: this.report.lines, objectives: [{ text: nowMilliseconds >= this.report.ready ? "Press attack to continue" : "", complete: false }] } : scores !== null ? { title: "Scores", lines: scores, objectives: [] } : this.helpVisible ? this.helpComputer ?? { title: "Help computer", lines: [...this.helpText.entries()].sort(([a], [b]) => a - b).map(([, text]) => text), objectives: [] } : null,
       prompts };
   }

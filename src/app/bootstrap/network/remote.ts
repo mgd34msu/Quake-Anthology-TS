@@ -1,3 +1,5 @@
+import { q2RereleaseViewContinuous, Q2RereleaseViewHeight, q2RemoteViewHeight, q2RemoteViewPosition, q2RemoteBodyBounds, q2RemoteCommand } from "./q2-remote-view.ts";
+import { interpolateQ2DamageBlend } from "../q2-damage-blend.ts";
 import type { ClientDownloadProgress } from './client-download-policy.ts';
 import { RemoteWorldContent } from './remote-world.ts';
 import type { RemoteContentMounts } from "../content.ts";
@@ -16,7 +18,7 @@ import { blockChecksum } from '../../../core/md4.ts';
 import { Q2_BASE_WEAPONS } from '../../../content/q2/foundation/weapons/index.ts';
 import { muzzleOffset } from '../../../content/q2/foundation/monsters/muzzle.ts';
 import { anglesVectors } from '../../../content/q2/foundation/monsters/ai.ts';
-import { fromQ2Command, readElement, toQ2Command, toQ2RereleaseCommand, toQ2Player, toQ2RereleasePlayer } from '../../../network/q2/index.ts';
+import { readElement, toQ2Command, toQ2RereleaseCommand, toQ2Player, toQ2RereleasePlayer } from '../../../network/q2/index.ts';
 import type { Q2ServerRecord, Q2WireFrame, UsercmdT } from '../../../network/q2/index.ts';
 import type { EngineSession, SessionClient } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
@@ -83,6 +85,8 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     private previousFrame: Q2WireFrame | null = null;
     private receivedAt = 0;
     private fraction = 1;
+    private viewTime = 0;
+    private readonly viewHeight = new Q2RereleaseViewHeight();
     private currentPlayer: Q2ApplicationPlayer | null = null;
     private published: SimulationOutput | null = null;
     private eventSequence = 0;
@@ -151,7 +155,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         if (data.clientnum < 0) {
             const cinematic = this.options.cinematic;
             if (cinematic === undefined) throw new Error('Q2 cinematic serverdata requires the shared media owner');
-            this.current = null; this.previousFrame = null; this.published = null; this.currentPlayer = null;
+            this.current = null; this.viewHeight.reset(); this.viewTime = 0; this.previousFrame = null; this.published = null; this.currentPlayer = null;
             this.predictionOwner = null; this.predicted = null;
             let completed = false;
             await cinematic.start(data.levelname, () => {
@@ -185,7 +189,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         if (owner !== null) this.downloadContent = { ...owner, catalog: content.catalog, product: content.catalog.product(owner.product.id), mounts: content.mounts };
         this.actors.clear();
         this.configs.clear();
-        this.current = null;
+        this.current = null; this.viewHeight.reset(); this.viewTime = 0;
         this.previousFrame = null;
         this.published = null;
         this.predictionOwner = null;
@@ -216,18 +220,28 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     }
     private nativePlayer(frame: Q2WireFrame) { return (this.protocol.kind === 'q2-rerelease' || this.protocol.kind === 'q2-kex') ? toQ2RereleasePlayer(frame.player) : toQ2Player(frame.player); }
     private playerOrigin(frame: Q2WireFrame): Vec3 { const movement = this.nativePlayer(frame).movement; return movement.kind === 'q2-rerelease' ? movement.origin : { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 }; }
+    private sampledPlayerOrigin(frame: Q2WireFrame): Vec3 {
+        const predicted = this.predicted;
+        if (predicted?.status === 'predicted' || predicted?.status === 'disabled') return movementOrigin(predicted.player.state);
+        const origin = this.playerOrigin(frame), previous = this.previousFrame;
+        if (previous === null) return origin;
+        const before = this.playerOrigin(previous), teleport = Math.max(Math.abs(origin.x - before.x), Math.abs(origin.y - before.y), Math.abs(origin.z - before.z)) > 256;
+        return teleport ? origin : interpolate(before, origin, this.fraction);
+    }
     worldText(): readonly WorldText[] { return []; }
 
     playerView(actor: ActorId): PlayerView {
-        const { frame } = this.requirePlayer(actor), origin = this.playerOrigin(frame), previous = this.previousFrame;
+        const { frame } = this.requirePlayer(actor), origin = this.sampledPlayerOrigin(frame), previous = this.previousFrame;
         const fieldOfView = previous === null ? frame.player.fov : previous.player.fov + (frame.player.fov - previous.player.fov) * this.fraction;
-        const predicted = this.predicted;
-        if (predicted?.status === 'predicted' || predicted?.status === 'disabled') return { origin: movementOrigin(predicted.player.state), angles: predicted.player.viewAngles,
-            viewHeight: predicted.player.viewHeight, fieldOfView };
-        if (previous === null)
-            return { origin, fieldOfView, angles: vector(frame.player.viewangles), viewHeight: readElement(frame.player.viewoffset, 2) };
-        const before = this.playerOrigin(previous), teleport = Math.max(Math.abs(origin.x - before.x), Math.abs(origin.y - before.y), Math.abs(origin.z - before.z)) > 256;
-        return { fieldOfView, origin: teleport ? origin : interpolate(before, origin, this.fraction), angles: interpolateAngles(vector(previous.player.viewangles), vector(frame.player.viewangles), this.fraction), viewHeight: readElement(previous.player.viewoffset, 2) + (readElement(frame.player.viewoffset, 2) - readElement(previous.player.viewoffset, 2)) * this.fraction };
+        const native = this.nativePlayer(frame), priorNative = previous === null ? null : this.nativePlayer(previous);
+        const sourceBlend = native.kind === 'q2-rerelease' ? { damageBlend: interpolateQ2DamageBlend(priorNative?.kind === 'q2-rerelease' ? priorNative.damageBlend : null, native.damageBlend, this.fraction) } : {};
+        const predicted = this.predicted, offset = priorNative === null ? native.viewOffset : interpolate(priorNative.viewOffset, native.viewOffset, this.fraction);
+        const height = q2RemoteViewHeight(native), priorHeight = priorNative === null ? height : q2RemoteViewHeight(priorNative);
+        const sourceHeight = native.kind === 'q2-rerelease' ? this.viewHeight.sample(height, this.viewTime) : null;
+        if (predicted?.status === 'predicted' || predicted?.status === 'disabled') return { ...sourceBlend,
+            ...q2RemoteViewPosition(native, origin, offset, sourceHeight ?? predicted.player.viewHeight), angles: predicted.player.viewAngles, fieldOfView };
+        return { ...sourceBlend, ...q2RemoteViewPosition(native, origin, offset, sourceHeight ?? priorHeight + (height - priorHeight) * this.fraction), fieldOfView,
+            angles: previous === null ? native.viewAngles : interpolateAngles(vector(previous.player.viewangles), vector(frame.player.viewangles), this.fraction) };
     }
     playerUi(actor: ActorId): PlayerUi {
         const { frame } = this.requirePlayer(actor), weaponModel = this.configs.get(this.layout.models + frame.player.gunindex), weapon = Q2_BASE_WEAPONS.find(item => item.viewModel === weaponModel);
@@ -279,10 +293,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         const { frame } = this.requirePlayer(command.actor);
         if (command.command.kind !== 'q2-classic' && command.command.kind !== 'q2-rerelease')
             throw new Error('Native Q2 client requires Q2 movement commands');
-        const wire = fromQ2Command(command.command);
-        for (let index = 0; index < 3; index++)
-            wire.angles[index] = (readElement(wire.angles, index) - readElement(frame.player.pmove.delta_angles, index)) & 65535;
-        return wire;
+        return q2RemoteCommand(command.command, this.nativePlayer(frame));
     }
     frame(frame: Q2WireFrame, records: readonly Q2ServerRecord[], nowMilliseconds: number): void {
         for (const { event } of records)
@@ -292,17 +303,20 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         if (player === null)
             throw new Error('Q2 frame precedes application signon');
         const previous = this.current;
-        this.previousFrame = previous;
+        const native = this.nativePlayer(frame), priorNative = previous === null ? null : this.nativePlayer(previous);
+        const continuous = native.kind !== 'q2-rerelease' || previous !== null && previous.valid !== false && priorNative?.kind === 'q2-rerelease' && q2RereleaseViewContinuous(priorNative, native, previous.serverFrame, frame.serverFrame, frame.entities.find(entity => entity.number === player.sourceEntity)?.event ?? 0);
+        this.previousFrame = continuous ? previous : null;
         this.current = frame;
         this.predicted = null;
         this.fraction = 1;
+        this.viewTime = Math.max(this.viewTime, (frame.serverFrame - 1) * this.frameMilliseconds);
         this.receivedAt = this.options.presentationTime?.() ?? nowMilliseconds;
         const movement = this.nativePlayer(frame).movement, view = this.playerView(player.actor), velocity = movement.kind === 'q2-rerelease' ? movement.velocity : { x: movement.velocityEighths[0] / 8, y: movement.velocityEighths[1] / 8, z: movement.velocityEighths[2] / 8 };
         const bodies: BodySnapshot[] = frame.entities.filter(entity => entity.number !== player.sourceEntity).map(entity => {
             const bounds = unpackQ2Solid(entity.solid, q2SolidEncoding(this.protocol, this.extendedGame));
             return { actor: this.actor(entity.number), body: { origin: vector(entity.origin), angles: vector(entity.angles), velocity: zero, bounds, ground: null } };
         });
-        bodies.push({ actor: player.actor, body: { origin: view.origin, angles: view.angles, velocity, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: view.viewHeight + 10 } }, ground: null } });
+        bodies.push({ actor: player.actor, body: { origin: this.playerOrigin(frame), angles: view.angles, velocity, bounds: q2RemoteBodyBounds(this.nativePlayer(frame)), ground: null } });
         const time = frame.serverFrame * this.frameMilliseconds, recipe = this.world.content.recipe;
         const lightStyles: SceneLightStyle[] = [];
         for (let style = 0; style < 256; style++) {
@@ -344,7 +358,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         const n64Physics = (): boolean => this.layout.n64Physics !== null && Number(this.configs.get(this.layout.n64Physics) ?? '0') !== 0;
         const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
         const snapshot: MovementPredictionSnapshot = { sequence: this.packetAcknowledged, commandTimeMilliseconds: frame.serverFrame * this.frameMilliseconds,
-            state: native.movement, viewAngles: native.viewAngles, viewHeight: native.viewOffset.z, viewOffset: native.viewOffset, bounds,
+            state: native.movement, viewAngles: native.viewAngles, viewHeight: q2RemoteViewHeight(native), viewOffset: native.viewOffset, bounds: q2RemoteBodyBounds(native),
             environment: { health: native.stats[1] ?? 0, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 },
             arsenal: { provider: recipe.inventory.provider, activeWeapon: this.playerUi(player.actor).activeWeapon,
                 ammo: this.playerUi(player.actor).inventory, state: { kind: 'q2', gunFrame: native.gunFrame, state: 0, pendingWeapon: null,
@@ -391,15 +405,16 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         const current = this.current, output = this.published, player = this.currentPlayer;
         if (current === null || output === null || player === null) return null;
         this.fraction = Math.max(0, Math.min(1, fraction));
-        const presentations = this.presentations(), view = this.playerView(player.actor);
         const time = (current.serverFrame - 1 + this.fraction) * this.frameMilliseconds;
+        this.viewTime = time;
+        const presentations = this.presentations(), view = this.playerView(player.actor);
         const priorTime = output.snapshot.frame.time.kind === 'milliseconds' ? output.snapshot.frame.time.value : output.snapshot.frame.time.value * 1000;
         const sampled: SimulationOutput = { ...output, snapshot: { ...output.snapshot,
                 frame: { ...output.snapshot.frame, time: { kind: 'milliseconds', value: time }, elapsed: { kind: 'milliseconds', value: Math.max(0, time - priorTime) } },
                 scene: { ...output.snapshot.scene, time: { kind: 'milliseconds', value: time } },
                 bodies: output.snapshot.bodies.map(body => {
                     if (body.actor.equals(player.actor))
-                        return { ...body, body: { ...body.body, origin: view.origin, angles: view.angles } };
+                        return { ...body, body: { ...body.body, origin: this.sampledPlayerOrigin(current), angles: view.angles, bounds: this.predicted?.status === "predicted" || this.predicted?.status === "disabled" ? this.predicted.player.bounds : q2RemoteBodyBounds(this.nativePlayer(current)) } };
                     const presentation = presentations.find(value => value.actor.equals(body.actor) && !value.viewWeapon);
                     return presentation === undefined ? body : { ...body, body: { ...body.body, origin: presentation.origin, angles: presentation.angles } };
                 }) } };

@@ -4,7 +4,7 @@ import { GuestCallRunner } from "../../abi/index.ts";
 import type { GuestCallSignature, GuestImage, GuestImport, GuestImportResolution, GuestImportResolver, GuestHostCallback, MappedGuestMemory } from "../../core/index.ts";
 import { bindPeImports, resolvePeExport } from "../../pe/index.ts";
 import type { PeImage } from "../../pe/index.ts";
-import { readUnsigned, writePointer, writeUnsigned } from "../common/memory.ts";
+import { allocateNativeMemory, nativeAllocationBytes, readUnsigned, writePointer, writeUnsigned } from "../common/memory.ts";
 import { UnsupportedWindowsImport } from "./contracts.ts";
 import type { WindowsCapabilities, WindowsImportCoverage, WindowsImportImplementation, WindowsInitializeOptions, WindowsRuntimeOptions, WindowsServiceHost } from "./contracts.ts";
 import { installKernel } from "./kernel.ts";
@@ -30,6 +30,7 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   readonly #requested = new Set<string>();
   readonly #libraries = new Map<string, GuestAddress>();
   readonly #images: PeImage[] = [];
+  readonly #libraryReferences = new Map<bigint, number>();
   readonly #prepared = new Set<PeImage>();
   readonly #initialized = new Set<PeImage>();
   readonly #allocations = new Map<bigint, HeapAllocation>();
@@ -89,7 +90,9 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation): void { this.#register(library, name, signature, invoke, true); }
   registerData(library: string, name: string, bytes: Uint8Array): GuestAddress {
     const key = `${canonical(library)}!${name}`; if (this.#data.has(key) || this.#imports.has(key)) throw new Error(`Duplicate Windows data export ${key}`);
-    const address = this.memory.allocate({ byteLength: bytes.length, alignment: 16n, label: key }); this.memory.write(address, bytes); this.#data.set(key, address); return address;
+    const address = this.memory.allocate({ byteLength: bytes.length, alignment: 16n, label: key }); this.memory.write(address, bytes); this.#data.set(key, address);
+    const normalized = canonical(library); if (!this.#libraries.has(normalized)) this.#libraries.set(normalized, this.memory.allocate({ byteLength: 16, label: `Windows library handle ${normalized}` }));
+    return address;
   }
   #register(library: string, name: string, signature: GuestCallSignature, invoke: WindowsImportImplementation, supported: boolean): ImportEntry {
     const normalized = canonical(library), key = `${normalized}!${name}`;
@@ -119,12 +122,41 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     if (entry === undefined) entry = this.#register(library, name, this.signature(library, [], "void"), context => { throw new UnsupportedWindowsImport(library, name, context); }, false);
     return { kind: "host", address: entry.address, callback: entry.callback };
   }
-  resolveAddress(library: string, name: string): GuestAddress | null { const key = `${canonical(library)}!${name}`; return this.#imports.get(key)?.address ?? this.#data.get(key) ?? null; }
-  libraryHandle(library: string): GuestAddress | null { return this.#libraries.get(canonical(library)) ?? this.#images.find(image => canonical(image.module.artifactPath) === canonical(library))?.base ?? null; }
+  resolveAddress(library: string, name: string): GuestAddress | null {
+    const seen = new Set<string>();
+    for (let depth = 0; depth < 128; depth++) {
+      const normalized = canonical(library), key = `${normalized}!${name}`;
+      if (seen.has(key)) return null; seen.add(key);
+      const image = this.#images.find(value => canonical(value.module.artifactPath) === normalized);
+      if (image === undefined) { const entry = this.#imports.get(key); return entry?.supported === true ? entry.address : this.#data.get(key) ?? null; }
+      const exported = image.exports.find(value => value.symbol.kind === "name" ? value.symbol.name === name : `#${value.symbol.ordinal}` === name);
+      if (exported === undefined) return null;
+      if (exported.target.kind === "address") return exported.target.address;
+      library = exported.target.library; name = exported.target.symbol.kind === "name" ? exported.target.symbol.name : `#${exported.target.symbol.ordinal}`;
+    }
+    return null;
+  }
+  libraryHandle(library: string): GuestAddress | null {
+    const normalized = canonical(library), image = this.#images.find(value => canonical(value.module.artifactPath) === normalized);
+    if (image !== undefined) return image.base;
+    return ([...this.#imports.values()].some(value => value.library === normalized && value.supported) || [...this.#data.keys()].some(key => key.startsWith(`${normalized}!`))) ? this.#libraries.get(normalized) ?? null : null;
+  }
+  loadLibrary(library: string): GuestAddress | null {
+    const handle = this.libraryHandle(library);
+    if (handle === null) { this.lastError = 126; return null; }
+    this.#libraryReferences.set(handle.byteOffset, (this.#libraryReferences.get(handle.byteOffset) ?? 0) + 1); return handle;
+  }
+  freeLibrary(handle: GuestAddress): boolean {
+    const count = this.#libraryReferences.get(handle.byteOffset) ?? 0;
+    if (count === 0) { this.lastError = 6; return false; }
+    if (count === 1) this.#libraryReferences.delete(handle.byteOffset); else this.#libraryReferences.set(handle.byteOffset, count - 1);
+    // Prepared images and built-in services retain their owner's initial reference.
+    return true;
+  }
   libraryName(handle: GuestAddress): string | null { return [...this.#libraries].find(([, address]) => address.byteOffset === handle.byteOffset)?.[0] ?? this.#images.find(image => image.base.byteOffset === handle.byteOffset)?.module.artifactPath ?? null; }
   allocate(size: number, heap = 0n): GuestAddress | null {
     if (!Number.isSafeInteger(size) || size < 0 || size > 0x10000000) { this.lastError = 8; return null; }
-    const address = this.memory.allocate({ byteLength: Math.max(size, 1), alignment: 16n, label: "Windows guest heap" });
+    const address = allocateNativeMemory(this.memory, size, "Windows guest heap");
     this.#allocations.set(address.byteOffset, { address, size: Math.max(size, 1), heap });
     return address;
   }
@@ -132,7 +164,7 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     if (address === null) return true;
     const allocation = this.#allocations.get(address.byteOffset);
     if (allocation === undefined || allocation.heap !== heap) { this.lastError = 87; return false; }
-    this.memory.unmap(allocation.address, allocation.size); this.#allocations.delete(address.byteOffset); return true;
+    this.memory.unmap(allocation.address, nativeAllocationBytes(allocation.size)); this.#allocations.delete(address.byteOffset); return true;
   }
   allocationSize(address: GuestAddress, heap = 0n): number | null { const entry = this.#allocations.get(address.byteOffset); return entry?.heap === heap ? entry.size : null; }
   destroyHeap(heap: bigint): void { for (const entry of this.#allocations.values()) if (entry.heap === heap) this.free(entry.address, heap); }
@@ -156,7 +188,7 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
   }
   #prepareCfg(image: PeImage): void {
     const config = image.loadConfiguration;
-    if (config === null || (config.guardFlags & 0x100) === 0) return;
+    if (config === null || (image.pe.dllCharacteristics & 0x4000) === 0 || (config.guardFlags & 0x100) === 0) return;
     const width = this.memory.pointerBytes, tableOffset = width === 4 ? 80 : 128;
     if (config.bytes.length < tableOffset + width * 2) throw new Error("Truncated CFG load configuration");
     const table = readUnsigned(this.memory, this.memory.offset(config.address, BigInt(tableOffset)), width);
@@ -211,9 +243,10 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     if (!valid || address === null) throw new UnsupportedWindowsImport("quake-runtime.dll", "control-flow-guard", context, `invalid indirect target 0x${target.toString(16)}`);
     this.memory.check(address, 1, "execute");
   }
-  invoke(context: GuestCallContext, target: GuestAddress, parameters: readonly GuestStorage[], result: GuestStorage | "void", args: readonly GuestCallValue[]): GuestCallResult {
-    return this.runner.invoke({ target, signature: this.signature("ucrtbase.dll", parameters, result), arguments: args,
-      context: { ...context, callback: { kind: "native-guest", module: context.module, address: target, abi: this.signature("ucrtbase.dll", [], "void").abi } }, instructionBudget: this.#budget });
+  invoke(context: GuestCallContext, target: GuestAddress, parameters: readonly GuestStorage[], result: GuestStorage | "void", args: readonly GuestCallValue[], convention?: "system"): GuestCallResult {
+    const library = convention === "system" ? "kernel32.dll" : "ucrtbase.dll";
+    return this.runner.invoke({ target, signature: this.signature(library, parameters, result), arguments: args,
+      context: { ...context, callback: { kind: "native-guest", module: context.module, address: target, abi: this.signature(library, [], "void").abi } }, instructionBudget: this.#budget });
   }
   initialize(image: PeImage, options: WindowsInitializeOptions): void {
     if (this.#initialized.has(image)) return;

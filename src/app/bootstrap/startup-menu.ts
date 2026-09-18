@@ -76,10 +76,10 @@ const rosterMenu: UiMenuId = "menu:startup:roster";
 const categoryMenu: UiMenuId = "menu:startup:category";
 const loadMenu: UiMenuId = "menu:startup:load";
 const groups: readonly { readonly title: string; readonly fields: readonly StartupSelectionField[] }[] = [
-  { title: "World", fields: ["product", "map"] },
+  { title: "World", fields: ["product", "mapProduct", "map"] },
   { title: "Player", fields: ["movement", "character", "model", "seats"] },
   { title: "Combat", fields: ["weapons", "enemies", "skill", "mode", "rules"] },
-  { title: "Equipment", fields: ["grapple", "grenades"] },
+  { title: "Equipment", fields: ["grapple", "grenades", "weaponBehavior"] },
 ];
 
 export class StartupMenu {
@@ -463,7 +463,7 @@ export class StartupMenu {
 
     if (active === session) {
       text("Your game", 316, 118, 2, true);
-      const fields: readonly StartupSelectionField[] = ["product", "map", "movement", "character", "model", "weapons", "enemies", "grapple", "grenades", "mode"];
+      const fields: readonly StartupSelectionField[] = ["product", "mapProduct", "map", "movement", "character", "model", "weapons", "weaponBehavior", "enemies", "grapple", "grenades", "mode"];
       for (const [index, row] of this.options.model.rows().filter(row => fields.includes(row.id)).entries()) {
         const value = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
         text(this.fit(row.label, 260, 1.35), 316, 150 + index * 28, 1.35, true);

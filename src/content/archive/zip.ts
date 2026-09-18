@@ -87,7 +87,8 @@ export function readZipLocalHeader(bytes: Uint8Array, source: string, entry: Zip
   const crc32 = view.getUint32(14, true);
   const compressedSize = view.getUint32(18, true);
   const byteLength = view.getUint32(22, true);
-  if (flags !== entry.flags || method !== entry.compressionMethod) throw new ArchiveError(source, entry.localHeaderOffset, "local header disagrees with central directory");
+  // APPNOTE 4.4.4 reserves bit 15; legacy writers may leave it set in only one header.
+  if (((flags ^ entry.flags) & 0x7fff) !== 0 || method !== entry.compressionMethod) throw new ArchiveError(source, entry.localHeaderOffset, "local header disagrees with central directory");
   const usesDescriptor = (flags & 8) !== 0;
   if ((!usesDescriptor || crc32 !== 0) && crc32 !== entry.crc32
     || (!usesDescriptor || compressedSize !== 0) && compressedSize !== entry.compressedSize

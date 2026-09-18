@@ -12,7 +12,7 @@ import type { Q2PlayerPowerups } from "../../foundation/items.ts";
 import { add, dot, zero } from "../../foundation/fields.ts";
 import { angleVectors } from "../../foundation/weapons/vectors.ts";
 import { q2WorldEffects, q2FallingDamage } from "./environment.ts";
-import { q2BuildView, q2ClientAnimation, q2ClientEffects, q2DamageFeedback } from "./view.ts";
+import { q2BuildView, q2ClientAnimation, q2ClientEffects, q2DamageFeedback, q2DeathAnimationFrames } from "./view.ts";
 import { createQ2PlayerRules, Q2PlayerState } from "./types.ts";
 import type { Q2CharacterContext, Q2CharacterWeapon, Q2PlayerMovement, Q2PlayerRules, Q2PlayerView } from "./types.ts";
 import { saveQ2Actor, saveQ2Attack, restoreQ2Attack } from "../../foundation/checkpoint.ts";
@@ -141,8 +141,8 @@ export class Q2CharacterActor {
     } else if (first) {
       this.deathIndex = (this.deathIndex + 1) % 3; state.animationPriority = 5;
       const ducked = host.movement(actor.id).ducked;
-      entity.frame = ducked ? 172 : this.deathIndex === 0 ? 177 : this.deathIndex === 1 ? 183 : 189;
-      state.animationEnd = ducked ? 177 : this.deathIndex === 0 ? 183 : this.deathIndex === 1 ? 189 : 197;
+      const frames = q2DeathAnimationFrames(ducked, this.deathIndex);
+      entity.frame = frames.first; state.animationEnd = frames.last;
       this.sound(`*death${Math.floor(host.random() * 4) + 1}.wav`, 2);
     }
     host.bodies.link(actor); this.show(); return undefined;

@@ -208,15 +208,16 @@ async function discoverMods(root: string, products: readonly ProductExpectation[
       const variants = [base];
       const quakeworld = base.family === "q1" ? products.find(product => product.edition === "quakeworld" && dirname(product.contentDirectory) === directory) : undefined;
       if (quakeworld !== undefined && programNames.includes("qwprogs.dat")) variants.push(quakeworld);
-      const q2WindowsGame = base.family === "q2" && base.edition === "classic" && programNames.includes("gamex86.dll");
-      const q2OtherGame = base.family === "q2" && base.edition === "classic" && programNames.some(name => /^game[^/]*\.(?:dll|so)$/.test(name));
+      const q2Library = base.edition === "rerelease" ? "game_x64.dll" : "gamex86.dll";
+      const q2WindowsGame = base.family === "q2" && programNames.includes(q2Library);
+      const q2OtherGame = base.family === "q2" && programNames.some(name => /^game[^/]*\.(?:dll|so)$/.test(name));
       for (const variant of variants.filter(candidate => !known.some(product => product.edition === candidate.edition))) found.push({ id: `${variant.family}-${variant.edition}-${entry.name}`, family: variant.family, edition: variant.edition, campaign: entry.name,
         title: await managedAddonTitle(root, contentDirectory) ?? (variant.edition === "quakeworld" ? `${entry.name} (QuakeWorld)` : entry.name), contentDirectory, baseProduct: variant.id,
         requiredContentArchives: archives.map(archive => `${contentDirectory}/${archive.name}`),
-        requiredPrograms: variant.edition === "quakeworld" ? ["qwprogs.dat"] : q2WindowsGame ? ["gamex86.dll"]
+        requiredPrograms: variant.edition === "quakeworld" ? ["qwprogs.dat"] : q2WindowsGame ? [q2Library]
           : variant.family === "q1" && programNames.includes("progs.dat") ? ["progs.dat"]
           : variant.family === "q3" && programNames.includes("vm/qagame.qvm") ? ["vm/qagame.qvm"] : [], mapWitness: null,
-        unresolvedReason: q2OtherGame && !q2WindowsGame ? "This Quake II add-on needs a Windows i386 gamex86.dll; its installed game module is unsupported." : null });
+        unresolvedReason: q2OtherGame && !q2WindowsGame ? `This Quake II add-on needs ${base.edition === "rerelease" ? "a Windows x64 game_x64.dll" : "a Windows i386 gamex86.dll"}; its installed game module is unsupported.` : null });
     }
   }
   return found;

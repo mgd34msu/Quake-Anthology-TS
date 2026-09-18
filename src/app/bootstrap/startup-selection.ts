@@ -1,3 +1,4 @@
+import { applicationWeaponBehaviorChoices, readWeaponBehaviorRequest, selectApplicationWeaponBehavior } from "./weapon-behavior-selection.ts";
 import { liveQ2Protocol } from "./options.ts";
 import { readArenaSelection, type ArenaSelection } from "./base-arena-selection.ts";
 import { prepareQ3ApplicationProduct } from "./q3-product.ts";
@@ -30,7 +31,7 @@ import type { ApplicationOptions } from "./options.ts";
 import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
-export type StartupSelectionField = "doppler" | "environment" | "product" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
+export type StartupSelectionField = "doppler" | "environment" | "product" | "mapProduct" | "map" | "movement" | "character" | "model" | "weapons" | "weaponBehavior" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
 export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
 export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
 export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly effectiveLabel: string; readonly choices: readonly StartupSelectionChoice[]; }
@@ -136,6 +137,7 @@ export class StartupSelectionModel {
     this.initial = { ...this.initial, q3Product: prepared.q3Product };
   }
   private readonly values: Record<StartupSelectionField, string>;
+  private behaviorChoices: readonly StartupSelectionChoice[] = [];
   private display: Pick<ApplicationOptions, "width" | "height" | "gamma">;
   private displayOverridesConsumed = false;
   private readonly playableMaps = new Map<string, readonly StartupSelectionChoice[]>();
@@ -153,9 +155,9 @@ export class StartupSelectionModel {
     this.display = { width: initial.width, height: initial.height, gamma: initial.gamma };
     const product = catalog.product(initial.product), campaign = product.expectation.campaign;
     const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
-    this.values = { product: initial.product, map: initial.map,
+    this.values = { product: initial.product, mapProduct: initial.mapProduct ?? initial.product, map: initial.map,
       movement: baseProduct(initial.movement), character: baseProduct(initial.character), model: initial.characterModel,
-      doppler: "source", environment: "audio-content", weapons: "native", enemies: "native", grapple: "native", grenades: "native", mode: initial.mode, rules,
+      doppler: "source", environment: "audio-content", weaponBehavior: initial.weaponBehavior === undefined ? "native" : `${initial.weaponBehavior.product}/${initial.weaponBehavior.id}`, weapons: "native", enemies: "native", grapple: "native", grenades: "native", mode: initial.mode, rules,
       skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer };
     this.selectedModels.set(this.values.character, initial.characterModel);
   }
@@ -166,7 +168,7 @@ export class StartupSelectionModel {
     if (initialProduct === undefined) throw new Error("No installed game content remains");
     const candidate = new StartupSelectionModel(catalog, { ...this.initial, product: initialProduct.expectation.id });
     await candidate.prepareMaps();
-    this.currentCatalog = candidate.catalog; this.initial = candidate.initial; this.teamArenaCampaign = candidate.teamArenaCampaign;
+    this.currentCatalog = candidate.catalog; this.initial = candidate.initial; this.teamArenaCampaign = candidate.teamArenaCampaign; this.behaviorChoices = candidate.behaviorChoices;
     this.playableMaps.clear(); for (const [id, value] of candidate.playableMaps) this.playableMaps.set(id, value);
     this.authoredDefaultMaps.clear(); for (const [id, value] of candidate.authoredDefaultMaps) this.authoredDefaultMaps.set(id, value);
     this.looseModels.clear(); for (const [id, value] of candidate.looseModels) this.looseModels.set(id, value);
@@ -174,14 +176,22 @@ export class StartupSelectionModel {
     this.mapClassnames.clear(); for (const [id, value] of candidate.mapClassnames) this.mapClassnames.set(id, value);
     this.monsterClasses.clear(); for (const [id, value] of candidate.monsterClasses) this.monsterClasses.set(id, value);
     this.modelChoices.clear();
+    if (!catalog.products.some(product => product.expectation.id === this.values.mapProduct)) this.values.mapProduct = initialProduct.expectation.id;
     if (!catalog.products.some(product => product.expectation.id === this.values.product)) {
-      this.values.product = initialProduct.expectation.id; this.values.map = this.defaultMap();
+      this.values.product = initialProduct.expectation.id; this.values.mapProduct = this.values.product; this.values.map = this.defaultMap();
     }
   }
   async prepareMaps(): Promise<void> {
     this.eligibleMaps.clear();
     await this.prepareQ3Catalog();
     await this.prepareTeamArena();
+    const behaviors: StartupSelectionChoice[] = [];
+    for (const product of this.catalog.products) {
+      if (product.expectation.family !== "q1" || unavailable(product) !== null) continue;
+      try { for (const entry of await applicationWeaponBehaviorChoices(this.catalog, product.expectation.id)) behaviors.push(choice(entry.id, entry.title, entry.unavailable)); }
+      catch (error) { behaviors.push(choice(`${product.expectation.id}/unavailable`, product.expectation.title, error instanceof Error ? error.message : String(error))); }
+    }
+    this.behaviorChoices = behaviors;
     const archives = new Map<string, ArchiveHandle>(), files = new Map<string, FileSource>(), playable = new Map<string, boolean>();
     try {
       for (const product of this.catalog.products) {
@@ -298,7 +308,7 @@ export class StartupSelectionModel {
     const model = this.modelsFor(product).find(model => model.id === characterModel);
     if (model === undefined || model.unavailable !== null) throw new Error(`${selected.label}: native ${characterModel} model is unavailable`);
     const { teamArenaSkirmish: _teamArenaSkirmish, botSkill: _botSkill, serverProfile: _serverProfile, serverProfilePath: _serverProfilePath,
-      quakeCProgram: _quakeCProgram, remoteContent: _remoteContent, q1Protocol: _q1Protocol, q2Protocol: _q2Protocol, ...preferences } = this.initial;
+      mapProduct: _mapProduct, quakeCProgram: _quakeCProgram, weaponBehavior: _weaponBehavior, remoteContent: _remoteContent, q1Protocol: _q1Protocol, q2Protocol: _q2Protocol, ...preferences } = this.initial;
     const skill = family === "q3" ? 1 : level;
     if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid campaign difficulty");
     const bot: Pick<ApplicationOptions, "botSkill"> = family === "q3" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5) ? { botSkill: level } : {};
@@ -337,7 +347,7 @@ export class StartupSelectionModel {
     return maps.find(map => map.id === preferred)?.id ?? "";
   }
   private product(field: "product" | "movement" | "character"): CatalogProduct { return this.catalog.product(this.values[field]); }
-  private geometry(): CatalogProduct { return this.product("product"); }
+  private geometry(): CatalogProduct { return this.catalog.require(this.values.mapProduct); }
   private files(product: CatalogProduct): ReadonlySet<string> {
     const paths = new Set([...product.archives.flatMap(archive => archive.entries.map(entry => entry.path.toLowerCase())), ...this.looseModels.get(product.expectation.id) ?? []]);
     if (product.expectation.baseProduct !== null) for (const path of this.files(this.catalog.product(product.expectation.baseProduct))) paths.add(path);
@@ -525,7 +535,8 @@ export class StartupSelectionModel {
     }
     const environmentProduct = this.catalog.product("q2-rerelease-baseq2");
     return [row("environment", "Environment", [choice("disabled", "Off"), choice("audio-content", "Game default"),
-      choice("q2-rerelease-baseq2", "Quake II environments", unavailable(environmentProduct) === null ? null : "Requires Quake II rerelease data")]), row("doppler", "Doppler", [choice("source", "Game default"), choice("disabled", "Off")]), row("product", "Campaign / map pack", this.catalog.products.map(productChoice)),
+      choice("q2-rerelease-baseq2", "Quake II environments", unavailable(environmentProduct) === null ? null : "Requires Quake II rerelease data")]), row("doppler", "Doppler", [choice("source", "Game default"), choice("disabled", "Off")]), row("product", "Game / mod", this.catalog.products.map(productChoice)),
+      row("mapProduct", "Map content", this.catalog.products.map(productChoice)),
       row("map", "Starting map", this.maps()),
       row("movement", "Movement", [...this.baseChoices(), productChoice(this.catalog.product("q1-quakeworld"))]),
       row("character", "Character source", this.baseChoices()), row("model", "Character model", this.models()),
@@ -534,6 +545,7 @@ export class StartupSelectionModel {
         return option.unavailable === null && product.expectation.family === current.expectation.family && product.id !== current.id && !baseArsenalPair(current, product)
           ? { ...option, unavailable: "Another edition or campaign within this weapon family is not implemented; use campaign defaults." } : option;
       })]), row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
+      row("weaponBehavior", "Projectile trajectory", [choice("native", "Selected weapon default"), ...this.behaviorChoices]),
       row("grapple", "Grapple", grapples), row("grenades", "Offhand grenades", [nativeGrenades, choice("disabled", "Disabled"),
         ...this.catalog.products.filter(product => product.expectation.family === "q2" && product.expectation.campaign === "baseq2").map(productChoice)]),
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
@@ -556,9 +568,10 @@ export class StartupSelectionModel {
         const { q1Protocol: _q1Protocol, ...initial } = this.initial;
         this.initial = initial;
       }
-      this.values.map = this.defaultMap();
+      this.values.mapProduct = id; this.values.map = this.defaultMap();
       if (this.product("product").expectation.family === "q3") this.values.enemies = "native";
     }
+    if (field === "mapProduct") this.values.map = this.defaultMap();
     if (field === "mode" || field === "product") {
       const product = this.product("product");
       const rules = this.values.rules;
@@ -583,9 +596,9 @@ export class StartupSelectionModel {
     const mode = this.values.mode, renderer = this.values.renderer, rules = this.values.rules, skill = Number(this.values.skill);
     if (mode !== "singleplayer" && mode !== "coop" && mode !== "deathmatch" || renderer !== "gl" && renderer !== "cpu"
       || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" && rules !== "tag" && rules !== "deathball" && rules !== "horde" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
-    const { q1Protocol, ...initial } = this.initial;
+    const { q1Protocol, weaponBehavior: _initialWeaponBehavior, ...initial } = this.initial;
     const protocol = initial.network.kind === "native-server" && this.hosting().q1Protocol !== null && q1Protocol !== undefined ? { q1Protocol } : {};
-    return this.applySelectedServerProfile({ ...initial, ...protocol, product: this.values.product, map: this.values.map, movement: this.product("movement").expectation.family,
+    return this.applySelectedServerProfile({ ...initial, ...(this.values.weaponBehavior === "native" ? {} : { weaponBehavior: readWeaponBehaviorRequest(this.values.weaponBehavior) }), ...protocol, product: this.values.product, mapProduct: this.values.mapProduct, map: this.values.map, movement: this.product("movement").expectation.family,
       character: this.product("character").expectation.family, characterModel: this.values.model, mode, rules, skill,
       seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) });
   }
@@ -663,7 +676,9 @@ export class StartupSelectionModel {
       selections = { ...selections, enemies: { kind: "selected", value: this.effectiveMonsterRoster() } };
     }
     selections = { ...selections, equipment: { kind: "selected", value: this.selectedEquipment(base.equipment) } };
-    return { options: { ...options, explicitRules: { skill: true, mode: true, capacity: true } }, recipe: await resolveLaunch({ catalog: this.catalog, preset, choice: selections }) };
+    let recipe = await resolveLaunch({ catalog: this.catalog, preset, choice: selections });
+    if (options.weaponBehavior !== undefined) recipe = await selectApplicationWeaponBehavior(this.catalog, recipe, options.weaponBehavior);
+    return { options: { ...options, explicitRules: { skill: true, mode: true, capacity: true } }, recipe };
   }
 }
 export async function createStartupSelection(options: ApplicationOptions): Promise<StartupSelectionModel> {

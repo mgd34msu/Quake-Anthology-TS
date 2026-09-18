@@ -1,3 +1,4 @@
+import { q3GuestPlayerUi } from "../simulation/q3/guest-player.ts";
 import { RemoteWorldContent } from './remote-world.ts';
 import type { CollisionMapSettings } from '../../../world/collision/q3/settings.ts';
 import type { WorldText } from "../../../text/world.ts";
@@ -6,7 +7,6 @@ import { remoteContentSelection } from "../../../content/catalog/index.ts";
 import type { ActorId, IdentityOwner, SeatId } from '../../../contracts/identity.ts';
 import type { ContentId, ResolvedResourceReference } from '../../../contracts/content.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
-import type { ItemId } from '../../../contracts/gameplay.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
 import type { Q3ClientConnection } from '../../../network/q3/client.ts';
 import { q3InfoValue } from '../../../network/q3/admission.ts';
@@ -16,11 +16,10 @@ import type { WireUserCommand } from '../../../network/q3/message.ts';
 import type { Download, Gamestate, Snapshot } from '../../../network/q3/server-message.ts';
 import { HistorySnapshotSource } from '../../../content/q3/presentation/snapshots.ts';
 import { retailSnapshot } from '../../../content/q3/presentation/retail-snapshot.ts';
-import { Q3_WEAPON_ITEMS, q3WeaponItem } from '../../../content/q3/foundation/arsenal.ts';
+import { q3WeaponItem } from '../../../content/q3/foundation/arsenal.ts';
 import type { EngineSession, SessionClient } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { PlayerUi, PlayerView, SimulationPresentation, SimulationPresentationEvent } from '../simulation/types.ts';
-import { q3ArsenalWarning, q3WeaponStatus } from '../simulation/arsenal/weapon-status.ts';
 import { relativeQ3SourceCommand } from '../simulation/q3-commands.ts';
 import { presentationSourceCommand } from '../simulation/prediction/presentation.ts';
 import { movementProfile } from '../simulation/players.ts';
@@ -160,16 +159,9 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
 
   playerView(actor: ActorId): PlayerView { if (this.current === null && this.admittedPlayer.actor.equals(actor)) return { origin: zero, angles: zero, viewHeight: 0 }; const ps = this.requirePlayer(actor).playerState; return { origin: ps.origin, angles: ps.viewangles, viewHeight: ps.viewheight }; }
   playerUi(actor: ActorId): PlayerUi {
-    const ps = this.requirePlayer(actor).playerState, weapon = q3WeaponItem(ps.weapon), source = this.world.content.recipe.weapons[0];
+    const ps = this.requirePlayer(actor).playerState, source = this.world.content.recipe.weapons[0];
     if (source === undefined) throw new Error('Q3 remote has no native weapon provider');
-    const definitions = Q3_WEAPON_ITEMS.filter(value => value.weapon <= 10);
-    const count = (item: ItemId): number => { const definition = definitions.find(value => value.item === item || value.ammo === item); return definition === undefined ? 0 : definition.item === item ? (ps.stats.get(2) & (1 << definition.weapon)) !== 0 ? 1 : 0 : ps.ammo.get(definition.weapon); };
-    const inventory = definitions.flatMap(value => [{ item: value.item, count: count(value.item), capacity: 1 }, ...(value.ammo === null ? [] : [{ item: value.ammo, count: count(value.ammo), capacity: 200 }])]);
-    return { powerups: [], health: ps.stats.get(0), armor: ps.stats.get(3) === 0 ? { kind: 'none' } : { kind: 'q3', points: ps.stats.get(3), protection: Math.fround(0.66) },
-      activeWeapon: weapon?.item ?? null, ammo: weapon?.ammo === null || weapon === null ? null : { item: weapon.ammo, count: ps.ammo.get(weapon.weapon) },
-      inventory, weaponStatus: q3WeaponStatus(weapon?.item ?? null, 'baseq3', count, source), arsenalWarning: q3ArsenalWarning('baseq3', count),
-      items: definitions.map(value => ({ id: value.item, label: value.item.slice('q3:weapon/'.length), kind: 'weapon', sourceOrdinal: value.weapon, owned: count(value.item) > 0,
-        hasAmmo: value.ammo === null || count(value.ammo) > 0, count: value.ammo === null ? null : count(value.ammo), warningCount: 0 })) };
+    return q3GuestPlayerUi(toQ3PlayerState(ps), source, this.current?.serverTime ?? ps.commandTime);
   }
   characterViews(): ReturnType<RemotePresentationAccess['characterViews']> { return []; }
   presentations(): readonly SimulationPresentation[] { return []; }

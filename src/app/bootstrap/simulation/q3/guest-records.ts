@@ -29,7 +29,6 @@ export class Q3GuestRecords {
   private readonly unobserve: () => undefined;
 
   constructor(readonly data: QvmGameData, readonly host: Q3GuestRecordHost) {
-    if (host.scene.nativeQ3ClipModels() === null) throw new Error('Q3 guest records require the native shared Q3 scene');
     host.scene.bindActorCollision(actor => {
       const slot = this.slot(actor);
       return slot === null || slot >= data.numEntities ? null : this.collision(slot);
@@ -119,8 +118,11 @@ export class Q3GuestRecords {
     shared.absmin = sub3(rotated ? sub3(origin, extent) : add3(origin, shared.mins), epsilon);
     shared.absmax = add3(rotated ? add3(origin, extent) : add3(origin, shared.maxs), epsilon);
     const models = scene.nativeQ3ClipModels();
-    if (models === null) throw new Error('Q3 guest scene retired');
-    const leaves = models.world.boxLeafnums({ min: shared.absmin, max: shared.absmax }, 128);
+    const bounds = { min: shared.absmin, max: shared.absmax };
+    const nativeLeaves = models?.world.boxLeafnums(bounds, 128);
+    const leaves = nativeLeaves ?? scene.boxLeaves(bounds, scene.geometry.leaves.length);
+    const clusterLeaves = nativeLeaves === undefined ? [...leaves.leaves].sort((a, b) => scene.leafCluster(a) - scene.leafCluster(b)) : leaves.leaves;
+    const lastLeaf = nativeLeaves?.lastLeaf ?? clusterLeaves.at(-1) ?? 0;
     let areanum = -1, areanum2 = -1, lastCluster = 0;
     const clusters: number[] = [];
     for (const leaf of leaves.leaves) {
@@ -129,11 +131,11 @@ export class Q3GuestRecords {
       if (areanum !== -1 && areanum !== area) areanum2 = area;
       else areanum = area;
     }
-    for (const leaf of leaves.leaves) {
+    for (const leaf of clusterLeaves) {
       const cluster = scene.leafCluster(leaf);
       if (cluster === -1) continue;
       clusters.push(cluster);
-      if (clusters.length === 16) { lastCluster = scene.leafCluster(leaves.lastLeaf); break; }
+      if (clusters.length === 16) { lastCluster = scene.leafCluster(lastLeaf); break; }
     }
     this.links.set(slot, { areanum, areanum2, clusters, lastCluster });
     if (leaves.leaves.length === 0) return;

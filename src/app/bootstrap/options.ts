@@ -1,3 +1,4 @@
+import { parseWeaponBehaviorTool, type WeaponBehaviorToolCommand } from "./weapon-behavior-tool-options.ts";
 import { readStartupCommand, startupRequestsWorld } from "./startup-commands.ts";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -24,9 +25,11 @@ export interface ApplicationOptions {
   readonly corpusRoot: string;
   readonly userContentRoot?: string;
   readonly product: string;
+  readonly mapProduct?: string;
   readonly map: string;
   readonly quakeCProgram?: string;
   readonly q2GameLibrary?: string;
+  readonly weaponBehavior?: { readonly product: string; readonly id: string };
   readonly movement: GameFamily;
   readonly character: GameFamily;
   readonly characterModel: string;
@@ -55,6 +58,7 @@ export function liveQ2Protocol(options: Pick<ApplicationOptions, "q2Protocol">, 
 }
 
 export type ApplicationCommand = { readonly kind: "help" }
+  | { readonly kind: "weapon-behavior"; readonly command: WeaponBehaviorToolCommand }
   | { readonly kind: "list-content"; readonly corpusRoot: string }
   | { readonly kind: "run" | "menu"; readonly options: ApplicationOptions };
 
@@ -68,9 +72,11 @@ Usage: bun run src/main.ts [options]
   --content-root PATH        Game data root (default ~/Projects/qfiles)
   --user-content-root PATH   Writable user content root (default ~/.local/share/quake-typescript/content)
   --game PRODUCT             Installed catalog product, e.g. q2-classic-baseq2
+  --map-game PRODUCT         Select map content independently from the game module
   --map NAME                 Map name or maps/path.bsp
   --progs MOUNTED_PATH       Validated mounted QuakeC .dat artifact
-  --q2-game MOUNTED_PATH     Explicit classic Quake II Windows i386 game DLL
+  --q2-game MOUNTED_PATH     Explicit Quake II game DLL (classic i386 / rerelease x64)
+  --weapon-behavior PRODUCT/ID  Overlay a declared projectile trajectory
   --movement q1|q2|q3        Player movement provider
   --character q1|q2|q3       Player character provider
   --model NAME               Character model (e.g. sarge or male)
@@ -102,6 +108,7 @@ Usage: bun run src/main.ts [options]
   --frames N                 Close after N simulation steps
   --hidden                   Start a hidden native window
   --list-content             Show installed games and expansions
+  weapon-behavior --help     Inspect and author mounted source behavior declarations
   --help                     Show these options
 `;
 
@@ -126,6 +133,7 @@ export function mapResourcePath(name: string): string {
 }
 
 export function parseApplicationCommand(argv: readonly string[]): ApplicationCommand {
+  if (argv[0] === "weapon-behavior") return { kind: "weapon-behavior", command: parseWeaponBehaviorTool(argv.slice(1)) };
   let options: ApplicationOptions = {
     corpusRoot: resolve(homedir(), "Projects/qfiles"), product: "q2-classic-baseq2", map: "maps/base1.bsp",
     movement: "q1", character: "q3", characterModel: "sarge", renderer: "gl", rendererSelection: "default", gamma: 1, dedicated: false,
@@ -165,8 +173,15 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         break;
       case "--user-content-root": options = { ...options, userContentRoot: resolve(value) }; break;
       case "--content-root": options = { ...options, corpusRoot: resolve(value) }; break;
+      case "--map-game": options = { ...options, mapProduct: value }; break;
       case "--game": options = { ...options, product: value }; break;
       case "--map": options = { ...options, map: mapResourcePath(value) }; break;
+      case "--weapon-behavior": {
+        const selected = value, slash = selected.indexOf("/");
+        if (slash <= 0 || slash === selected.length - 1 || /\s/.test(selected) || !selected.slice(slash + 1).includes(":"))
+          throw new Error("Weapon behavior must be PRODUCT/DECLARED_ID");
+        options = { ...options, weaponBehavior: { product: selected.slice(0, slash), id: selected.slice(slash + 1) } }; break;
+      }
       case "--q2-game": {
         const path = normalizeResourcePath(value);
         if (!path.endsWith(".dll")) throw new Error("--q2-game requires a mounted .dll artifact");

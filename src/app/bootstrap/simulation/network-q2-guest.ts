@@ -15,7 +15,7 @@ import type { ClassicGuestWorld } from './classic-guest-world.ts';
 import type { ClassicGuestMessage } from './classic-guest-services.ts';
 
 export async function createClassicQ2ApplicationServerHost(options: Q2ApplicationServerBindingOptions & { readonly world: ClassicGuestWorld }): Promise<Q2ApplicationServerHost> {
-    if (options.protocol.kind !== 'q2-classic' || options.content.world.kind !== 'q2-bsp') throw new Error('Classic guest server requires native Q2 geometry and protocol 34');
+    if (options.protocol.kind !== 'q2-classic') throw new Error('Classic guest server requires protocol 34');
     const { simulation, world } = options, scene = simulation.scene, geometry = options.content.world;
     const cvars = world.services.options.cvars, maxClients = world.services.options.maxClients, numeric = world.services.options.numeric;
     const map = world.services.options.mapPath.replace(/^maps\//, '').replace(/\.bsp$/, '');
@@ -55,6 +55,7 @@ export async function createClassicQ2ApplicationServerHost(options: Q2Applicatio
         ...(options.administration === undefined ? {} : { administration: options.administration }), ...(options.masters === undefined ? {} : { masters: options.masters }),
         supportsSourceWire: () => {
             const reasons: string[] = [];
+            if (options.content.world.kind !== "q2-bsp") reasons.push("Original Quake II peers require Quake II BSP geometry; use local or unified presentation for foreign maps");
             if (!simulation.recipe.movement.provider.startsWith('q2:')) reasons.push('Guest native wire requires Q2 movement');
             if (!simulation.recipe.character.definition.provider.startsWith('q2:')) reasons.push('Guest native wire requires Q2 character state');
             return reasons.length === 0 ? { kind: 'supported' } : { kind: 'unsupported', reasons };

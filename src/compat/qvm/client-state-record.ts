@@ -1,3 +1,4 @@
+import type { QvmAbiProfile } from "../../contracts/execution.ts";
 // Q3 cl_cgame.c snapshot copies and q_shared.h guest ABI. GPL-2.0-or-later.
 import type { SourceGameStateRecord } from "../../network/q3/game-state.ts";
 import type { WireUserCommand } from "../../network/q3/message.ts";
@@ -50,9 +51,15 @@ export function writeQvmSnapshot(view: DataView, snapshot: Snapshot, ping: numbe
   view.setInt32(53768, snapshot.serverCommandNumber, true);
 }
 
-export function writeQvmUserCommand(view: DataView, command: WireUserCommand): void {
+export function writeQvmUserCommand(view: DataView, command: WireUserCommand, profile: QvmAbiProfile = "q3-modern"): void {
   requireBytes(view, QVM_USER_COMMAND_BYTES);
   view.setInt32(0, command.serverTime, true);
+  if (profile !== "q3-modern") {
+    view.setUint8(4, (command.buttons & 31) | ((command.buttons & 2048) !== 0 ? 128 : 0)); view.setUint8(5, command.weapon);
+    command.angles.forEach((angle, index) => view.setInt32(8 + index * 4, angle, true));
+    view.setInt8(20, command.forwardmove); view.setInt8(21, command.rightmove); view.setInt8(22, command.upmove);
+    return;
+  }
   command.angles.forEach((angle, index) => view.setInt32(4 + index * 4, angle, true));
   view.setInt32(16, command.buttons, true); view.setUint8(20, command.weapon);
   view.setInt8(21, command.forwardmove); view.setInt8(22, command.rightmove); view.setInt8(23, command.upmove);

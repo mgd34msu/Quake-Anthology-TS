@@ -65,9 +65,7 @@ export class X86Decoder {
   byte(): number {
     if (this.bytes.length >= 15) throw new X86ProcessorFault(13, "Instruction exceeds the 15-byte architectural limit", 0n);
     if (this.cursor > this.state.segments.cs.limit) throw new X86ProcessorFault(13, "Instruction exceeds CS limit", 0n);
-    const address = guestAddress(this.memory, BigInt.asUintN(32, this.state.segments.cs.base + this.cursor), "execute");
-    const byte = this.memory.fetch(address, 1)[0];
-    if (byte === undefined) throw new Error("Guest memory returned an empty instruction fetch");
+    const byte = this.memory.fetchByte(BigInt.asUintN(32, this.state.segments.cs.base + this.cursor));
     this.bytes.push(byte);
     this.cursor = BigInt.asUintN(32, this.cursor + 1n);
     return byte;

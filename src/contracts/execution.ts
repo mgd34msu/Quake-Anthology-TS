@@ -12,7 +12,7 @@ export type Q2GameApiIdentity =
   | { readonly kind: "q2-rerelease-game"; readonly version: 2023 };
 export interface Q2CgameApiIdentity { readonly kind: "q2-rerelease-cgame"; readonly version: 2022; }
 export type Q3ApiIdentity =
-  | { readonly kind: "q3-qagame"; readonly version: 8 }
+  | { readonly kind: "q3-qagame"; readonly version: 7 | 8 }
   | { readonly kind: "q3-cgame"; readonly version: 4 }
   | { readonly kind: "q3-ui"; readonly version: 4 | 6 };
 export type GameApiIdentity = QuakeCApiIdentity | Q2GameApiIdentity | Q2CgameApiIdentity | Q3ApiIdentity;
@@ -197,7 +197,10 @@ export interface QuakeCCheckpoint extends CheckpointBase {
   readonly locals: Uint8Array;
   readonly hostState: GuestPrivateState;
 }
+export type QvmAbiProfile = "q3-modern" | "q3-1.16n-base";
+
 export interface QvmCheckpoint extends CheckpointBase {
+  readonly abiProfile?: QvmAbiProfile;
   readonly kind: "qvm";
   readonly api: Q3ApiIdentity;
   readonly data: Uint8Array;

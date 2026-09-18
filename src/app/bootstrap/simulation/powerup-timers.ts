@@ -44,9 +44,14 @@ const q3Timers = [
   { powerup: Powerup.PW_FLIGHT, item: "q3:item_flight", label: "Flight" },
 ] satisfies readonly { readonly powerup: Powerup; readonly item: ActivePowerupTimer["item"]; readonly label: string }[];
 
+export function q3PublicPowerupTimers(expires: (powerup: number) => number, nowMilliseconds: number): readonly ActivePowerupTimer[] {
+  return q3Timers.map(({ powerup, ...timer }) => ({ ...timer, remainingSeconds: (expires(powerup) - nowMilliseconds) / 1000 }))
+    .filter(timer => timer.remainingSeconds > 0);
+}
+
 export function q3PowerupTimers(client: Readonly<GameClient>, nowMilliseconds: number, clientAt: (clientNumber: number) => Readonly<GameClient>): readonly ActivePowerupTimer[] {
   const viewed = (client.ps.pmFlags & MoveFlags.FOLLOW) !== 0 ? clientAt(client.ps.clientNum) : client;
-  const timers: ActivePowerupTimer[] = q3Timers.map(({ powerup, ...timer }) => ({ ...timer, remainingSeconds: (viewed.ps.powerups.get(powerup) - nowMilliseconds) / 1000 }));
+  const timers: ActivePowerupTimer[] = [...q3PublicPowerupTimers(powerup => viewed.ps.powerups.get(powerup), nowMilliseconds)];
   timers.push({ item: "q3:holdable_invulnerability", label: "Invulnerability", remainingSeconds: (viewed.invulnerabilityTime - nowMilliseconds) / 1000 });
   return timers.filter(timer => timer.remainingSeconds > 0);
 }

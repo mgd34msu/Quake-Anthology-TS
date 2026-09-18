@@ -1,3 +1,4 @@
+import type { WeaponTrajectoryUpdate } from "../../../../contracts/weapon-behavior.ts";
 /* Xatrix g_weapon.c and Rogue g_newweap.c projectile callbacks. GPL-2.0-or-later. */
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
@@ -12,7 +13,13 @@ import { effect, explode, freeProjectile, projectile, projectileMask, publishPro
 export class Q2MissionPackBolts {
   constructor(readonly hooks: Q2MissionPackProjectileHooks) {}
 
+  private readonly projectSteering = (entity: Q2Entity, update: WeaponTrajectoryUpdate): void => {
+    entity.movedir = normalize(update.velocity); entity.speed = length(update.velocity);
+  };
+
   get callbacks(): Q2CallbackDefinitions { return {
+    trajectory: [{ touch: this.ionTouch, project: this.projectSteering }, { touch: this.plasmaTouch, project: this.projectSteering },
+      { touch: this.flechetteTouch, project: this.projectSteering }, { touch: this.trackerTouch, project: this.projectSteering }],
     think: { "missionpack.free": freeProjectile, "ionripper_sparks": this.ionSparks,
       "heat_think": this.heatThink, "rerelease/heat_think": this.heatThinkRerelease, "tracker_fly": this.trackerFly, "tracker_pain_daemon_think": this.trackerPain },
     touch: { "ionripper_touch": this.ionTouch, "plasma_touch": this.plasmaTouch,
@@ -63,7 +70,7 @@ export class Q2MissionPackBolts {
     const bolt = projectile(self, game, "ion", start, normalize(direction), speed, "models/objects/boomrang/tris.md2", "wall-bounce", effects);
     this.playerCollision(self, game, bolt);
     bolt.damage = damage; bolt.damageRadius = 100; bolt.renderFlags = 8; bolt.touch = this.ionTouch;
-    game.schedule(bolt, 3, this.ionSparks); publishProjectile(bolt, game, "misc/lasfly.wav");
+    game.schedule(bolt, 3, this.ionSparks); publishProjectile(bolt, game, "misc/lasfly.wav", { weapon: "q2:weapon_boomer", role: "bolt" });
     this.hooks.base.checkDodge(self, game, start, bolt.movedir, speed); this.initialTouch(self, game, bolt);
     return bolt;
   }
@@ -87,9 +94,12 @@ export class Q2MissionPackBolts {
     }
     const target = nearest === null ? null : game.host.bodies.read(nearest);
     if (target !== null) {
-      entity.enemy = nearest; entity.movedir = normalize(subtract(target.origin, origin));
-      game.move(entity, { angles: vectorAngles(entity.movedir), velocity: scale(entity.movedir, 500) });
-      game.motion(entity, entity.motion);
+      entity.enemy = nearest;
+      if (game.host.weaponBehavior?.controlsTrajectory(entity.actor.id) !== true) {
+        entity.movedir = normalize(subtract(target.origin, origin));
+        game.move(entity, { angles: vectorAngles(entity.movedir), velocity: scale(entity.movedir, 500) });
+        game.motion(entity, entity.motion);
+      }
     }
     return game.schedule(entity, 0.1, this.heatThink);
   };
@@ -108,6 +118,7 @@ export class Q2MissionPackBolts {
     const target = acquire === null ? null : game.host.bodies.read(acquire);
     if (target === null) entity.enemy = null;
     else {
+      if (game.host.weaponBehavior?.controlsTrajectory(entity.actor.id) !== true) {
       let desired = normalize(subtract(target.origin, origin));
       const alignment = dot(entity.movedir, desired);
       if (alignment < 0.45 && alignment > -0.45) desired = scale(desired, -1);
@@ -116,9 +127,12 @@ export class Q2MissionPackBolts {
       const to = Math.abs(cosine) > 0.9995 ? entity.accel : Math.sin(entity.accel * angle) / sine;
       entity.movedir = normalize(add(scale(entity.movedir, from), scale(desired, to)));
       game.move(entity, { angles: vectorAngles(entity.movedir) });
+      }
       if (entity.enemy === null) { game.sound(entity, "weapons/railgr1a.wav", 1, 1, 0.25); entity.enemy = acquire; }
     }
-    game.move(entity, { velocity: scale(entity.movedir, entity.speed) }); game.motion(entity, entity.motion);
+    if (game.host.weaponBehavior?.controlsTrajectory(entity.actor.id) !== true) {
+      game.move(entity, { velocity: scale(entity.movedir, entity.speed) }); game.motion(entity, entity.motion);
+    }
     return game.schedule(entity, game.host.frameSeconds(), this.heatThinkRerelease);
   };
 
@@ -149,7 +163,7 @@ export class Q2MissionPackBolts {
     const bolt = projectile(self, game, "plasma", start, direction, speed, "sprites/s_photon.sp2", "fly-missile", 0x1000000 | 0x2000);
     this.playerCollision(self, game, bolt);
     bolt.damage = damage; bolt.damageRadius = radius; bolt.radiusDamage = radiusDamage; bolt.touch = this.plasmaTouch;
-    game.schedule(bolt, 8000 / speed, freeProjectile); publishProjectile(bolt, game, "weapons/rockfly.wav");
+    game.schedule(bolt, 8000 / speed, freeProjectile); publishProjectile(bolt, game, "weapons/rockfly.wav", { weapon: "q2:weapon_phalanx", role: "plasma" });
     this.hooks.base.checkDodge(self, game, start, direction, speed); return bolt;
   }
 
@@ -168,7 +182,7 @@ export class Q2MissionPackBolts {
     const bolt = projectile(self, game, "flechette", start, normalize(direction), speed, "models/proj/flechette/tris.md2", "fly-missile", 0);
     this.playerCollision(self, game, bolt);
     bolt.damage = damage; bolt.damageRadius = kick; bolt.renderFlags = 8; bolt.touch = this.flechetteTouch;
-    game.schedule(bolt, 8000 / speed, freeProjectile); publishProjectile(bolt, game);
+    game.schedule(bolt, 8000 / speed, freeProjectile); publishProjectile(bolt, game, "", { weapon: "q2:weapon_etf_rifle", role: "nail" });
     if (game.options.edition === "rerelease") this.initialTouch(self, game, bolt);
     else this.hooks.base.checkDodge(self, game, start, bolt.movedir, speed);
     return bolt;
@@ -211,9 +225,12 @@ export class Q2MissionPackBolts {
     const min = add(target.origin, target.bounds.min), max = add(target.origin, target.bounds.max);
     const destination = game.host.isPlayer(enemy) ? add(target.origin, { x: 0, y: 0, z: game.entity(enemy)?.viewHeight ?? 22 })
       : length(min) === 0 || length(max) === 0 ? target.origin : scale(add(min, max), 0.5);
-    entity.movedir = normalize(subtract(destination, game.body(entity).origin));
-    game.move(entity, { velocity: scale(entity.movedir, entity.speed), angles: vectorAngles(entity.movedir) });
-    game.motion(entity, entity.motion); return game.schedule(entity, 0.1, this.trackerFly);
+    if (game.host.weaponBehavior?.controlsTrajectory(entity.actor.id) !== true) {
+      entity.movedir = normalize(subtract(destination, game.body(entity).origin));
+      game.move(entity, { velocity: scale(entity.movedir, entity.speed), angles: vectorAngles(entity.movedir) });
+      game.motion(entity, entity.motion);
+    }
+    return game.schedule(entity, 0.1, this.trackerFly);
   };
 
   private readonly trackerPain: Q2Think = (entity, game) => {
@@ -260,7 +277,7 @@ export class Q2MissionPackBolts {
     const bolt = projectile(self, game, "tracker", start, normalize(direction), speed, "models/proj/disintegrator/tris.md2", "fly-missile", 0x4000000);
     this.playerCollision(self, game, bolt);
     bolt.damage = damage; bolt.enemy = enemy; bolt.touch = this.trackerTouch;
-    game.schedule(bolt, enemy === null ? 10 : 0.1, enemy === null ? freeProjectile : this.trackerFly); publishProjectile(bolt, game, "weapons/disrupt.wav");
+    game.schedule(bolt, enemy === null ? 10 : 0.1, enemy === null ? freeProjectile : this.trackerFly); publishProjectile(bolt, game, "weapons/disrupt.wav", { weapon: "q2:weapon_disintegrator", role: "energy" });
     this.hooks.base.checkDodge(self, game, start, bolt.movedir, speed); this.initialTouch(self, game, bolt); return bolt;
   }
 

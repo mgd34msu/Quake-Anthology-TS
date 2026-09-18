@@ -1,6 +1,6 @@
 import { createContentDigest } from "../../contracts/content.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
-import type { ModuleIdentity } from "../../contracts/execution.ts";
+import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import { parseQvm } from "./image.ts";
 import type { QvmImage } from "./image.ts";
@@ -35,7 +35,7 @@ export interface QvmReplacement {
   readonly implementation: ProviderId;
   readonly create: (module: ModuleIdentity, host: QvmHost) => QvmReplacementInstance;
 }
-export type ResolvedQvmArtifact = { readonly module: ModuleIdentity; readonly role: QvmRole; readonly known: KnownQvmArtifact | null } & (
+export type ResolvedQvmArtifact = { readonly abiProfile?: QvmAbiProfile; readonly module: ModuleIdentity; readonly role: QvmRole; readonly known: KnownQvmArtifact | null } & (
   | { readonly kind: "bytecode"; readonly image: QvmImage }
   | { readonly kind: "typescript"; readonly replacement: QvmReplacement }
 );
@@ -46,7 +46,9 @@ export function resolveQvmArtifact(options: {
   readonly role: QvmRole;
   readonly bytes: Uint8Array;
   readonly replacements?: readonly QvmReplacement[];
+  readonly abiProfile?: QvmAbiProfile;
 }): ResolvedQvmArtifact {
+  if (options.abiProfile === "q3-1.16n-base" && options.role !== "qagame") throw new Error("Legacy QVM client and UI profiles are not implemented");
   const digest = createContentDigest(new Bun.CryptoHasher("sha256").update(options.bytes).digest("hex"));
   if (options.module.digest !== digest) throw new Error("QVM artifact bytes do not match their module identity");
   const known = knownQvmArtifacts.find(entry => entry.digest === digest && entry.byteLength === options.bytes.length) ?? null;
@@ -54,5 +56,5 @@ export function resolveQvmArtifact(options: {
   const replacement = options.replacements?.find(entry => entry.artifact.digest === digest
     && entry.artifact.role === options.role && entry.artifact.byteLength === options.bytes.length);
   if (replacement !== undefined) return { kind: "typescript", module: options.module, role: options.role, known, replacement };
-  return { kind: "bytecode", module: options.module, role: options.role, known, image: parseQvm(options.bytes, options.module.artifactPath) };
+  return { kind: "bytecode", abiProfile: options.abiProfile ?? "q3-modern", module: options.module, role: options.role, known, image: parseQvm(options.bytes, options.module.artifactPath) };
 }

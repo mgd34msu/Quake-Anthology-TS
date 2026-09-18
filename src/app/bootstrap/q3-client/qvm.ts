@@ -1,3 +1,5 @@
+import { SharedQvmClientClipModels } from './guest-collision.ts';
+import type { QvmClientClipModels } from '../../../compat/qvm/client-collision-syscalls.ts';
 import type { ApplicationKeyProfile } from "../keys.ts";
 import { qvmUiKeySyscall } from "../../../compat/qvm/ui-key-syscalls.ts";
 import { ScriptGlobalDefines } from "../../../ui/common/legacy/script/preprocessor.ts";
@@ -66,6 +68,7 @@ export class ApplicationQvmClient {
   private readonly commandServices: { readonly ui: ReturnType<typeof qvmClientCommands>; readonly cgame: ReturnType<typeof qvmClientCommands> };
   private readonly files: { readonly cgame: QvmFiles; readonly ui: QvmFiles };
   private readonly generation: number;
+  private readonly collisionModels: QvmClientClipModels;
   private readonly globals = new ScriptGlobalDefines();
   private readonly scripts: { readonly cgame: QvmClientScripts; readonly ui: QvmClientScripts };
   private readonly marks: ReturnType<typeof worldMarkProjector>;
@@ -80,6 +83,7 @@ export class ApplicationQvmClient {
     this.commandServices = { ui: qvmClientCommands(options.commands, options.commandContext, 'ui'),
       cgame: qvmClientCommands(options.commands, options.commandContext, 'cgame') };
     this.generation = options.connection.generation;
+    this.collisionModels = options.queries.nativeQ3ClipModels() ?? new SharedQvmClientClipModels(options.queries, options.cvars);
     this.marks = worldMarkProjector(options.media.assets.world);
     const userContent = options.media.assets.content.catalog.product(options.media.content).userContent;
     const fileOptions = { mounts: options.media.provider.mounts, writable: userContent === null ? null : new UserFileStore(userContent.root),
@@ -110,9 +114,7 @@ export class ApplicationQvmClient {
       ?? qvmClientStateSyscall(call, { connection: o.connection, snapshots: session.snapshots, snapshotPing: number => o.connection.snapshotPing(number),
         getServerCommand: async number => { const argv = await o.connection.getServerCommand(number); this.assertCurrent(); if (argv !== null) this.arguments = argv; return argv; },
         setUserCommandValue: session.setUserCommandValue })
-      ?? qvmClientCollisionSyscall(call, { models: () => {
-        const models = o.queries.nativeQ3ClipModels(); if (models === null) throw new Error('Native QVM collision requires a Q3 map'); return models;
-      }, loadMap: name => { if (name !== o.map) throw new Error(`Cgame requested a different collision map: ${name}`); this.assertCurrent(); } })
+      ?? qvmClientCollisionSyscall(call, { models: () => this.collisionModels, loadMap: name => { if (name !== o.map) throw new Error(`Cgame requested a different collision map: ${name}`); this.assertCurrent(); } })
       ?? qvmClientMarkSyscall(call, this.marks)
       ?? qvmClientCinematicSyscall(call, { cinematics: o.services.cinematics, draw: o.services.draw, developerPrint: session.print })
       ?? qvmClientBrowserSyscall(call, o.browser)

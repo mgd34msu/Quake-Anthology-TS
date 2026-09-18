@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import type { MappedGuestMemory } from "../../core/contracts.ts";
 import type { GuestAddress, GuestCallValue, GuestMemory } from "../../../contracts/execution.ts";
 
 export function argument(args: readonly GuestCallValue[], index: number): GuestCallValue {
@@ -61,4 +62,14 @@ export function stringBytes(value: string, wide = false): Uint8Array {
     if (wide) bytes[i * width + 1] = code >>> 8;
   }
   return bytes;
+}
+
+/** Native CRT routines probe page boundaries, not heap chunk boundaries, before vector reads. */
+export function nativeAllocationBytes(logicalBytes: number): number {
+  if (!Number.isSafeInteger(logicalBytes) || logicalBytes < 0 || logicalBytes > Number.MAX_SAFE_INTEGER - 4095) throw new RangeError("Invalid native allocation size");
+  return Math.max(4096, Math.ceil(logicalBytes / 4096) * 4096);
+}
+
+export function allocateNativeMemory(memory: MappedGuestMemory, logicalBytes: number, label: string): GuestAddress {
+  return memory.allocate({ byteLength: nativeAllocationBytes(logicalBytes), alignment: 4096n, label });
 }

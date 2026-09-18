@@ -1,3 +1,4 @@
+import type { ProjectileRole, WeaponTrajectoryUpdate } from "../../../../contracts/weapon-behavior.ts";
 import type { Q2WeaponsCheckpoint } from "./checkpoint.ts";
 import { restoreQ2Actor } from "../checkpoint.ts";
 import type { Q2WeaponOwner } from "./types.ts";
@@ -296,6 +297,14 @@ export class Q2Ballistics {
     return projectile;
   }
 
+  private launchBehavior(projectile: Q2Entity, game: Q2GameServices, weapon: ItemId, role: ProjectileRole): WeaponTrajectoryUpdate | null {
+    if (projectile.owner === null || !game.host.isPlayer(projectile.owner)) return null;
+    const update = game.host.weaponBehavior?.launch({ projectile: projectile.actor,
+      shooter: projectile.owner, weapon, role, timeSeconds: game.host.now(), body: game.body(projectile) }) ?? null;
+    if (update !== null) { game.projectTrajectory(projectile, update); }
+    return update;
+  }
+
   private loop(projectile: Q2Entity, game: Q2GameServices, path: string, start: boolean): undefined {
     return game.host.emit({ kind: "sound", actor: projectile.actor.id, origin: game.body(projectile).origin, path, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: start ? "start" : "stop" });
   }
@@ -305,11 +314,14 @@ export class Q2Ballistics {
     const bolt = this.projectile(self, game, "bolt", start, dir, speed, "models/objects/laser/tris.md2", effects);
     bolt.damage = damage;
     this.blasterCauses.set(bolt.actor.id, meansOfDeath); bolt.touch = this.blasterTouch;
-    game.schedule(bolt, 2, free); game.solid(bolt, "box"); game.motion(bolt, "fly-missile"); game.show(bolt); this.loop(bolt, game, "misc/lasfly.wav", true);
+    game.schedule(bolt, 2, free); game.solid(bolt, "box"); game.motion(bolt, "fly-missile");
+    const trajectory = this.launchBehavior(bolt, game, hyper ? "q2:weapon_hyperblaster" : "q2:weapon_blaster", "bolt");
+    const launchOrigin = game.body(bolt).origin, launchDirection = trajectory === null ? dir : normalize(trajectory.velocity);
+    game.show(bolt); this.loop(bolt, game, "misc/lasfly.wav", true);
     this.checkDodge(self, game, start, dir, speed);
-    const trace = game.host.trace({ start: game.body(self).origin, end: start, bounds: null, ignore: bolt.actor.id, mask: bolt.clipMask });
+    const trace = game.host.trace({ start: game.body(self).origin, end: launchOrigin, bounds: null, ignore: bolt.actor.id, mask: bolt.clipMask });
     if (trace.fraction < 1) {
-      game.move(bolt, { origin: game.options.edition === "classic" ? add(start, scale(dir, -10)) : add(trace.end, normal(trace)) });
+      game.move(bolt, { origin: game.options.edition === "classic" ? add(launchOrigin, scale(launchDirection, -10)) : add(trace.end, normal(trace)) });
       this.blasterImpact(bolt, game, hit(trace), game.options.edition === "classic" ? zero : normal(trace), game.options.edition !== "classic" && sky(trace));
     }
     return bolt;
@@ -348,7 +360,8 @@ export class Q2Ballistics {
         if (body === null) throw new Error("Q2 grenade thrower has no shared body");
         game.host.emit({ kind: "sound", actor: owner, origin: body.origin, path: "weapons/hgrent1a.wav", channel: 1, volume: 1, attenuation: 1, reliable: false, loop: "once" });
       }
-      game.solid(grenade, "box"); game.motion(grenade, "bounce"); game.show(grenade);
+      game.solid(grenade, "box"); game.motion(grenade, "bounce");
+      this.launchBehavior(grenade, game, hand ? "q2:ammo_grenades" : "q2:weapon_grenadelauncher", "grenade"); game.show(grenade);
     }
     return grenade;
   }
@@ -357,7 +370,8 @@ export class Q2Ballistics {
     const rocket = this.projectile(self, game, "rocket", start, direction, speed, "models/objects/rocket/tris.md2", 16);
     rocket.damage = damage; rocket.damageRadius = radius; rocket.radiusDamage = radiusDamage;
     rocket.touch = this.rocketTouch;
-    game.schedule(rocket, 8000 / speed, free); game.solid(rocket, "box"); game.motion(rocket, "fly-missile"); game.show(rocket);
+    game.schedule(rocket, 8000 / speed, free); game.solid(rocket, "box"); game.motion(rocket, "fly-missile");
+    this.launchBehavior(rocket, game, "q2:weapon_rocketlauncher", "rocket"); game.show(rocket);
     this.loop(rocket, game, "weapons/rockfly.wav", true); this.checkDodge(self, game, start, direction, speed);
     return rocket;
   }
@@ -380,7 +394,8 @@ export class Q2Ballistics {
     bfg.touch = this.bfgTouch;
 
     this.checkDodge(self, game, start, direction, speed);
-    game.schedule(bfg, game.host.frameSeconds(), this.bfgThink); game.solid(bfg, "box"); game.motion(bfg, "fly-missile"); game.show(bfg); this.loop(bfg, game, "weapons/bfg__l1a.wav", true);
+    game.schedule(bfg, game.host.frameSeconds(), this.bfgThink); game.solid(bfg, "box"); game.motion(bfg, "fly-missile");
+    this.launchBehavior(bfg, game, "q2:weapon_bfg", "energy"); game.show(bfg); this.loop(bfg, game, "weapons/bfg__l1a.wav", true);
     return bfg;
   }
 

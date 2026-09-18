@@ -79,6 +79,7 @@ export interface Q3SourceHost extends ClientMovementHost {
 }
 
 export interface Q3SourceOptions {
+  readonly weaponBehavior?: import("../../../../contracts/weapon-behavior.ts").WeaponBehaviorProjectilePort;
   readonly recipe: ExecutableRecipe;
   readonly weaponProvider: ProviderReference;
   readonly product: Product;

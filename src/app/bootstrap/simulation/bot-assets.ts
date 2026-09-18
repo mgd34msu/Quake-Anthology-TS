@@ -10,7 +10,7 @@ export type ApplicationBotAssets = { readonly kind: "q3"; readonly files: BotSou
 /** Authored map bot definitions win. Classic products without these files keep their existing policy. */
 export async function loadApplicationBotAssets(content: LoadedApplicationContent, simulation: SharedSimulation): Promise<ApplicationBotAssets> {
   let native = await loadMountedBotAssetFiles(await content.forContent(content.recipe.map.entities.content), content.catalog);
-  if (simulation.q3Source() !== null) return { kind: "q3", files: native };
+  if (simulation.q3Source() !== null || simulation.q3Guest() !== null) return { kind: "q3", files: native };
   const family = simulation.q1Source() !== null ? "q1" : "q2";
   if (native.read("bots/weapons.txt") === null) {
     const sibling = content.catalog.products.find(product => product.expectation.id === (family === "q1" ? "q1-rerelease-id1" : "q2-rerelease-baseq2") && product.availability.kind === "installed");

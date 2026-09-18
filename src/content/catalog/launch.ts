@@ -1,3 +1,4 @@
+import { readQvmCompatibility } from '../../compat/qvm/compatibility.ts';
 import type { CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, EquipmentSelection, ExecutableRecipe, ExecutionSelection, LaunchChoice, LaunchSelection, MapSelection, MountId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceRequest } from "../../contracts/content.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
 import { openMountPlan } from "../mounts/index.ts";
@@ -145,7 +146,16 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
     switch (module.kind) {
       case "typescript": execution.push(module); break;
       case "quakec": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
-      case "qvm": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
+      case "qvm": {
+        const artifact = await resolveResource(module.artifact, "artifact");
+        const order = await orderForContent(options.catalog, mounted.plan, module.artifact.content);
+        const scoped = mounted.borrowOrderedReader({ id: createMountPlanId("qvm-abi", Buffer.from(module.artifact.content).toString("hex")), defaultOrder: order, prefixOrders: [] });
+        const role = module.api.kind === "q3-qagame" ? "qagame" : module.api.kind === "q3-cgame" ? "cgame" : "ui";
+        const profile = await readQvmCompatibility(scoped, { artifactPath: artifact.requestedPath, digest: artifact.digest }, role);
+        if (module.role === "server-game") execution.push({ ...module, artifact, api: { kind: "q3-qagame", version: profile === "q3-modern" ? 8 : 7 } });
+        else execution.push({ ...module, artifact });
+        break;
+      }
       case "native": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
     }
   }

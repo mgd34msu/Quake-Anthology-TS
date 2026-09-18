@@ -1,3 +1,4 @@
+import { Q3GuestWorld } from './guest-world.ts';
 // Q3 server spatial traps from id Software's sv_game.c and sv_world.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { Bounds, Vec3 } from '../../../../contracts/math.ts';
@@ -12,7 +13,9 @@ import type { Q3VisibilityBindings } from '../../../../network/q3/visibility.ts'
 import type { Q3GuestRecords } from './guest-records.ts';
 
 export class Q3GuestSpatial implements QvmServerSpatialOperations {
+  readonly world: Q3GuestWorld;
   constructor(readonly records: Q3GuestRecords, readonly scene: SharedSceneQueries, readonly cvars: CvarRegistry) {
+    this.world = new Q3GuestWorld(scene);
     if (records.host.scene !== scene) throw new Error('Q3 guest spatial operations must use the record owner scene');
   }
 
@@ -33,18 +36,25 @@ export class Q3GuestSpatial implements QvmServerSpatialOperations {
   }
 
   pointContents(point: Vec3, passEntityNum: number): number {
-    const models = this.scene.nativeQ3ClipModels();
-    if (models === null) throw new Error('Q3 guest scene retired');
-    let contents = models.world.pointContents(point);
+    const models = this.scene.nativeQ3ClipModels(), zero = { x: 0, y: 0, z: 0 };
+    const sample = this.scene.pointContents({ point, target: { kind: 'model', model: 0, origin: zero, angles: zero }, passActor: null, numeric: Q3_BINARY32_PROFILE,
+      policy: { kind: 'q3', contentsMask: -1, curves: true, playerCurveClip: true } });
+    if (sample.kind !== 'q3') throw new Error('Guest contents query lost its Q3 policy');
+    let contents = sample.contents;
     for (const actor of this.scene.queryActors({ min: point, max: point })) {
       const slot = this.records.requireSlot(actor.body.actor);
       if (slot === passEntityNum) continue;
       const entity = this.records.entity(slot), model = entity.r.model;
-      if (model.kind === 'inline') contents |= models.world.transformedPointContents(point, model.index, entity.s.origin, entity.s.angles);
+      if (model.kind === 'inline') {
+        const value = this.scene.pointContents({ point, target: { kind: 'model', model: model.index, origin: entity.r.currentOrigin, angles: entity.r.currentAngles }, passActor: null, numeric: Q3_BINARY32_PROFILE,
+          policy: { kind: 'q3', contentsMask: -1, curves: true, playerCurveClip: true } });
+        if (value.kind !== 'q3') throw new Error('Guest inline contents query lost its Q3 policy');
+        contents |= value.contents;
+      }
       else {
         const bounds = { min: entity.r.mins, max: entity.r.maxs };
-        const temporary = model.kind === 'capsule' ? createCapsuleModel(bounds, models.world.counters) : createBoxModel(bounds, models.world.counters);
-        contents |= temporary.transformedPointContents(point, entity.s.origin, entity.s.angles);
+        const temporary = model.kind === 'capsule' ? createCapsuleModel(bounds, models?.world.counters) : createBoxModel(bounds, models?.world.counters);
+        contents |= temporary.transformedPointContents(point, entity.r.currentOrigin, entity.r.currentAngles);
       }
     }
     return contents;
@@ -65,9 +75,8 @@ export class Q3GuestSpatial implements QvmServerSpatialOperations {
       return result.startSolid || result.allSolid;
     }
     const models = this.scene.nativeQ3ClipModels();
-    if (models === null) throw new Error('Q3 guest scene retired');
     const targetBounds = { min: shared.mins, max: shared.maxs };
-    const temporary = model.kind === 'capsule' ? createCapsuleModel(targetBounds, models.world.counters) : createBoxModel(targetBounds, models.world.counters);
+    const temporary = model.kind === 'capsule' ? createCapsuleModel(targetBounds, models?.world.counters) : createBoxModel(targetBounds, models?.world.counters);
     const result = temporary.transformedTraceSource({ start: origin, end: origin, mask: -1,
       shape: { kind: capsule ? 'capsule' : 'box', mins: bounds.min, maxs: bounds.max } }, shared.currentOrigin, shared.currentAngles);
     return result.startSolid || result.allSolid;
@@ -84,8 +93,8 @@ export class Q3GuestSpatial implements QvmServerSpatialOperations {
 
   adjustAreaPortalState(slot: number, open: boolean): void {
     const link = this.records.visibility(slot);
-    if (link === undefined) { this.scene.adjustAreaPortalState(0, 0, open); return; }
-    if (link.areanum2 !== -1) this.scene.adjustAreaPortalState(link.areanum, link.areanum2, open);
+    if (link === undefined) { this.world.adjustAreaPortalState(0, 0, open); return; }
+    if (link.areanum2 !== -1) this.world.adjustAreaPortalState(link.areanum, link.areanum2, open);
   }
 
   areasConnected(first: number, second: number): boolean { return this.scene.areasConnected(first, second); }

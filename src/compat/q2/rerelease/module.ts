@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestLayout, RawEntityTable, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Q2RereleaseUserCommand } from "../../../contracts/protocol.ts";
@@ -23,6 +24,9 @@ export interface RereleaseModuleOptions {
   readonly invokeImport: (call: RereleaseImportCall) => GuestCallResult;
   readonly actorAtSlot: (slot: number) => ActorId | null;
   readonly instructionBudget?: number;
+  readonly loadingInstructionBudget?: number;
+  readonly saveInstructionBudget?: number;
+  readonly frameMilliseconds?: number;
 }
 export class MissingRereleaseImport extends Error {
   constructor(readonly call: RereleaseImportCall) {
@@ -53,9 +57,11 @@ export class RereleaseGuestModule {
   }
   #imports(api: "game" | "cgame", entries: readonly { readonly name: RereleaseImportName; readonly signature: GuestCallSignature }[], layout: GuestLayout): GuestAddress {
     const address = this.memory.allocate({ byteLength: layout.byteLength, alignment: 8n, label: `Q2 ${api} imports` });
-    this.memory.writeUint32(address, 40);
-    this.memory.writeFloat32(this.memory.offset(address, 4n), 0.025);
-    this.memory.writeUint32(this.memory.offset(address, 8n), 25);
+    const milliseconds = this.options.frameMilliseconds ?? 25;
+    if (!Number.isInteger(milliseconds) || milliseconds <= 0 || 1000 % milliseconds !== 0) throw new RangeError("Q2 source frame duration requires an integral tick rate");
+    this.memory.writeUint32(address, 1000 / milliseconds);
+    this.memory.writeFloat32(this.memory.offset(address, 4n), milliseconds / 1000);
+    this.memory.writeUint32(this.memory.offset(address, 8n), milliseconds);
     for (const entry of entries) {
       const callback = this.options.runner.options.callbacks.bind({ id: `${this.memory.module.id}:q2-${api}-${entry.name}`, signature: entry.signature,
         invoke: (context, arguments_) => this.options.invokeImport({ api, name: entry.name, context, arguments: arguments_ }) });
@@ -90,6 +96,23 @@ export class RereleaseGuestModule {
     if (entry === undefined) throw new Error(`Unknown game export ${name}`);
     return this.invoke(this.#function(this.bindGame(), gameExportLayout, name), entry.signature, arguments_, self, other);
   }
+  private invokeLoading(target: GuestAddress, signature: GuestCallSignature, arguments_: readonly GuestCallValue[], nextFrame: () => Promise<void>, instructionBudget = this.options.loadingInstructionBudget ?? this.options.instructionBudget ?? 50_000_000): Promise<GuestCallResult> {
+    return this.options.runner.invokeLoading({ target, signature, arguments: arguments_, instructionBudget,
+      context: { module: this.memory.module, callback: { kind: "native-guest", module: this.memory.module, address: target, abi: rereleaseAbi }, parent: null, self: null, other: null } }, nextFrame);
+  }
+  async callGameLoading(name: GameExportName, arguments_: readonly GuestCallValue[], nextFrame: () => Promise<void>): Promise<GuestCallResult> {
+    if (this.#game === null) {
+      const address = resultPointer(await this.invokeLoading(this.options.getGameApi, getApiSignature, [guestPointer(this.gameImportAddress)], nextFrame));
+      if (address === null) throw new Error("GetGameAPI returned null");
+      this.memory.check(address, gameExportLayout.byteLength, "read");
+      if (this.memory.readInt32(address) !== 2023) throw new Error("Q2 rerelease game API must be 2023");
+      this.#game = address;
+    }
+    const entry = gameExports.find(value => value.name === name);
+    if (entry === undefined) throw new Error(`Unknown game export ${name}`);
+    const saveBudget = name === "WriteGameJson" || name === "WriteLevelJson" ? this.options.saveInstructionBudget ?? 100_000_000 : undefined;
+    return await this.invokeLoading(this.#function(this.#game, gameExportLayout, name), entry.signature, arguments_, nextFrame, saveBudget);
+  }
   callCgame(name: CgameExportName, arguments_: readonly GuestCallValue[] = []): GuestCallResult {
     const entry = cgameExports.find(value => value.name === name);
     if (entry === undefined) throw new Error(`Unknown cgame export ${name}`);
@@ -117,7 +140,7 @@ export class RereleaseGuestModule {
       const output = this.memory.copy(info, 2048), end = output.indexOf(0);
       if (end < 0) throw new Error("ClientConnect returned unterminated userinfo");
       return { accepted: result.value !== 0, userinfo: new TextDecoder().decode(output.subarray(0, end)) };
-    } finally { this.memory.unmap(info, 2048); this.memory.unmap(social, socialBytes.length + 1); }
+    } finally { this.memory.unmap(info, 2048); this.memory.unmap(social, nativeAllocationBytes(socialBytes.length + 1)); }
   }
   clientBegin(slot: number): void { const client = this.entities().atSlot(slot); this.callGame("ClientBegin", [guestPointer(client.address)], client); }
   clientThink(slot: number, command: Q2RereleaseUserCommand): void {
@@ -129,11 +152,11 @@ export class RereleaseGuestModule {
   spawnEntities(map: string, entities: string, spawnpoint: string): void {
     const strings = [map, entities, spawnpoint].map(value => this.string(value));
     try { this.callGame("SpawnEntities", strings.map(guestPointer)); }
-    finally { for (let index = 0; index < strings.length; index++) { const address = strings[index], text = [map, entities, spawnpoint][index]; if (address !== undefined && text !== undefined) this.memory.unmap(address, new TextEncoder().encode(text).length + 1); } }
+    finally { for (let index = 0; index < strings.length; index++) { const address = strings[index], text = [map, entities, spawnpoint][index]; if (address !== undefined && text !== undefined) this.memory.unmap(address, nativeAllocationBytes(new TextEncoder().encode(text).length + 1)); } }
   }
   string(text: string): GuestAddress {
     const bytes = new TextEncoder().encode(text);
-    const address = this.memory.allocate({ byteLength: bytes.length + 1, label: "Q2 API string" });
+    const address = allocateNativeMemory(this.memory, bytes.length + 1, "Q2 API string");
     this.memory.write(address, bytes);
     return address;
   }

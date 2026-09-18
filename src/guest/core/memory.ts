@@ -55,6 +55,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
   readonly #limit: bigint;
   readonly #allocationBase: bigint;
   #mappings: Mapping[] = [];
+  readonly #allocationHints = new Map<bigint, { readonly base: bigint; readonly byteLength: number }>();
+  readonly #recentMappings = new Map<GuestAccess | null, { readonly mapping: Mapping; readonly end: bigint }>();
   readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: () => void }>();
 
   constructor(options: SparseGuestMemoryOptions) {
@@ -95,14 +97,20 @@ export class SparseGuestMemory implements MappedGuestMemory {
     if (alignment <= 0n || (alignment & (alignment - 1n)) !== 0n) throw new RangeError("Guest allocation alignment must be a positive power of two");
     this.#range(this.#allocationBase, options.byteLength, "map");
     if (options.byteLength === 0) throw new RangeError("Guest allocations must contain at least one byte");
-    let base = (this.#allocationBase + alignment - 1n) & -alignment;
+    const hint = this.#allocationHints.get(alignment);
+    const start = hint !== undefined && options.byteLength >= hint.byteLength ? hint.base : this.#allocationBase;
+    let base = (start + alignment - 1n) & -alignment;
     const length = BigInt(options.byteLength);
-    for (const mapping of this.#mappings) {
+    for (let index = this.#firstEndAfter(base); index < this.#mappings.length; index++) {
+      const mapping = this.#mappings[index];
+      if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
       if (base + length <= mapping.base) break;
       const end = mapping.base + BigInt(mapping.byteLength);
       if (base < end) base = (end + alignment - 1n) & -alignment;
     }
-    return this.map({ base, byteLength: options.byteLength, permissions: options.permissions ?? "read-write", label: options.label ?? "allocation" });
+    const result = this.map({ base, byteLength: options.byteLength, permissions: options.permissions ?? "read-write", label: options.label ?? "allocation" });
+    this.#allocationHints.set(alignment, { base: base + length, byteLength: options.byteLength });
+    return result;
   }
 
   mapAlias(options: Omit<GuestMapOptions, "bytes"> & { readonly source: GuestAddress }): GuestAddress {
@@ -147,6 +155,25 @@ export class SparseGuestMemory implements MappedGuestMemory {
   fetch(address: GuestAddress, byteLength: number): Uint8Array {
     return this.#copyChunks(this.#chunks(address, byteLength, "execute"), byteLength);
   }
+
+  fetchByte(byteOffset: bigint): number {
+    this.#range(byteOffset, 1, "execute");
+    const recent = this.#recentMappings.get("execute");
+    let mapping: Mapping | undefined;
+    if (recent !== undefined && byteOffset >= recent.mapping.base && byteOffset < recent.end) mapping = recent.mapping;
+    else {
+      mapping = this.#mappings[this.#firstEndAfter(byteOffset)];
+      if (mapping === undefined || byteOffset < mapping.base)
+        this.#fault("unmapped", byteOffset, 1, "execute", "range includes unmapped bytes");
+      this.#recentMappings.set("execute", { mapping, end: mapping.base + BigInt(mapping.byteLength) });
+    }
+    if (!allows(mapping.permissions, "execute"))
+      this.#fault("permission", byteOffset, 1, "execute", `mapping '${mapping.label}' permits ${mapping.permissions}`);
+    const byte = mapping.bytes[Number(byteOffset - mapping.base)];
+    if (byte === undefined) throw new Error("Guest mapping backing is inconsistent");
+    return byte;
+  }
+
 
   write(address: GuestAddress, bytes: Uint8Array): undefined {
     const chunks = this.#chunks(address, bytes.byteLength, "write");
@@ -267,31 +294,41 @@ export class SparseGuestMemory implements MappedGuestMemory {
     this.#range(base, byteLength, "map");
     if (byteLength === 0) this.#fault("invalid-length", base, byteLength, "map", "mapping must contain at least one byte");
     const end = base + BigInt(byteLength);
-    if (this.#mappings.some(mapping => mapping.base < end && mapping.base + BigInt(mapping.byteLength) > base)) {
+    const overlapping = this.#mappings[this.#firstEndAfter(base)];
+    if (overlapping !== undefined && overlapping.base < end) {
       this.#fault("overlap", base, byteLength, "map", "mapping overlaps an existing guest range");
     }
     return undefined;
   }
   #insert(mapping: Mapping): undefined {
-    this.#mappings.push(mapping);
-    this.#mappings.sort((left, right) => left.base < right.base ? -1 : left.base > right.base ? 1 : 0);
+    this.#recentMappings.clear();
+    this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mapping);
     return undefined;
   }
-  #chunks(address: GuestAddress, byteLength: number, access: GuestAccess | null): Chunk[] {
-    this.#owned(address, byteLength, access ?? "map");
-    const chunks: Chunk[] = [];
-    let cursor = address.byteOffset;
-    let remaining = byteLength;
-    // Mappings are disjoint and sorted. Start at the first range whose end can
-    // contain this address, retaining the same forward scan across aliases/holes.
+  #firstEndAfter(address: bigint): number {
     let low = 0, high = this.#mappings.length;
     while (low < high) {
       const middle = Math.floor((low + high) / 2);
       const mapping = this.#mappings[middle];
       if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
-      if (mapping.base + BigInt(mapping.byteLength) <= cursor) low = middle + 1;
+      if (mapping.base + BigInt(mapping.byteLength) <= address) low = middle + 1;
       else high = middle;
     }
+    return low;
+  }
+  #chunks(address: GuestAddress, byteLength: number, access: GuestAccess | null): Chunk[] {
+    this.#owned(address, byteLength, access ?? "map");
+    const recent = this.#recentMappings.get(access);
+    if (byteLength > 0 && recent !== undefined && address.byteOffset >= recent.mapping.base && address.byteOffset + BigInt(byteLength) <= recent.end) {
+      if (access !== null && !allows(recent.mapping.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.mapping.label}' permits ${recent.mapping.permissions}`);
+      return [{ mapping: recent.mapping, offset: Number(address.byteOffset - recent.mapping.base), byteLength }];
+    }
+    const chunks: Chunk[] = [];
+    let cursor = address.byteOffset;
+    let remaining = byteLength;
+    // Mappings are disjoint and sorted. Start at the first range whose end can
+    // contain this address, retaining the same forward scan across aliases/holes.
+    const low = this.#firstEndAfter(cursor);
     for (let index = low; index < this.#mappings.length; index++) {
       const mapping = this.#mappings[index];
       if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
@@ -303,6 +340,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const offset = Number(cursor - mapping.base);
       const length = Math.min(remaining, mapping.byteLength - offset);
       chunks.push({ mapping, offset, byteLength: length });
+      this.#recentMappings.set(access, { mapping, end });
       remaining -= length;
       cursor += BigInt(length);
     }
@@ -324,6 +362,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
     return new Uint8Array(buffer, start, byteLength);
   }
   #copyChunks(chunks: readonly Chunk[], byteLength: number): Uint8Array {
+    const first = chunks[0];
+    if (chunks.length === 1 && first !== undefined) return first.mapping.bytes.slice(first.offset, first.offset + first.byteLength);
     const result = new Uint8Array(byteLength);
     let consumed = 0;
     for (const chunk of chunks) {
@@ -334,11 +374,14 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
   #replaceRange(base: bigint, byteLength: number, permissions: GuestPermissions | null): undefined {
     if (byteLength === 0) return undefined;
-    const end = base + BigInt(byteLength);
+    const end = base + BigInt(byteLength), first = this.#firstEndAfter(base);
     const next: Mapping[] = [];
-    for (const mapping of this.#mappings) {
+    let last = first;
+    for (; last < this.#mappings.length; last++) {
+      const mapping = this.#mappings[last];
+      if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
+      if (mapping.base >= end) break;
       const mappingEnd = mapping.base + BigInt(mapping.byteLength);
-      if (mappingEnd <= base || mapping.base >= end) { next.push(mapping); continue; }
       const startOffset = Number((base > mapping.base ? base : mapping.base) - mapping.base);
       const endOffset = Number((end < mappingEnd ? end : mappingEnd) - mapping.base);
       if (startOffset > 0) next.push({ ...mapping, byteLength: startOffset, bytes: mapping.bytes.subarray(0, startOffset) });
@@ -347,7 +390,17 @@ export class SparseGuestMemory implements MappedGuestMemory {
       if (endOffset < mapping.byteLength) next.push({ ...mapping, base: mapping.base + BigInt(endOffset), byteLength: mapping.byteLength - endOffset,
         bytes: mapping.bytes.subarray(endOffset) });
     }
-    this.#mappings = next;
+    if (permissions === null) {
+      const touched = this.#mappings[first], previous = this.#mappings[first - 1];
+      const gapStart = touched !== undefined && touched.base < base ? base
+        : previous === undefined ? this.#allocationBase : previous.base + BigInt(previous.byteLength);
+      const lowerBound = gapStart < this.#allocationBase ? this.#allocationBase : gapStart;
+      for (const [alignment, hint] of this.#allocationHints) if (lowerBound < hint.base)
+        this.#allocationHints.set(alignment, { ...hint, base: lowerBound });
+    }
+    this.#recentMappings.clear();
+    if (next.length <= 3) this.#mappings.splice(first, last - first, ...next);
+    else this.#mappings = this.#mappings.slice(0, first).concat(next, this.#mappings.slice(last));
     return undefined;
   }
   #readView(address: GuestAddress, byteLength: number): DataView {

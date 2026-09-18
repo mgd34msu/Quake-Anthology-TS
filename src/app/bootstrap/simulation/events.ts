@@ -39,7 +39,7 @@ export class SimulationEvents {
   get nextSequence(): number { return this.sequence; }
 
   resource(id: ResourceId): ResolvedResourceReference | null { return this.resourcesById.get(id) ?? null; }
-  persistentPresentation(): readonly SimulationPresentationEvent[] { return [...this.persistent.values()]; }
+  persistentPresentation(): readonly SimulationPresentationEvent[] { return [...this.persistent.values()].sort((a, b) => a.sequence - b.sequence); }
 
   registerResource(content: ContentId, path: string, resource: ResolvedResourceReference): undefined {
     if (resource.requestedPath !== path) throw new Error("Registered resource path does not match its source request");
@@ -48,17 +48,20 @@ export class SimulationEvents {
     return undefined;
   }
 
-  emit(content: ContentId, source: SourcePresentationEvent, time: SourceTime = this.now()): undefined {
+  emit(content: ContentId, source: SourcePresentationEvent, time: SourceTime = this.now(), recipient?: ActorId): undefined {
     if (source.kind === "q1" && source.event.kind === "static-model") source = { kind: "q1", event: { ...source.event,
       frame: Math.trunc(source.event.frame), colorMap: Math.trunc(source.event.colorMap), skin: Math.trunc(source.event.skin),
       origin: { ...source.event.origin }, angles: { ...source.event.angles } } };
     const seconds = time.kind === "seconds" ? time.value : time.value / 1000;
     const event = source.kind === "view-reset" ? source : source.kind === "q2-composition" ? "event" in source.event ? source.event.event : source.event : source.event;
     const actor = "actor" in event ? event.actor : null;
-    const presentation = { ...source, sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
+    const presentation = { ...source, ...(recipient === undefined ? {} : {recipient}), sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
     this.source.push(presentation);
     if (source.kind === "q1-composition" && source.event.kind === "addon" && source.event.event.kind === "fog")
       this.source.push(...(this.fog?.update(presentation, source.event.event) ?? []));
+    const recipientKey = recipient === undefined ? "world" : `${recipient.slot}:${recipient.generation}`;
+    if (source.kind === "q1" && source.event.kind === "finale") this.persistent.set(`q1-finale:${recipientKey}`, presentation);
+    if (source.kind === "music") this.persistent.set(`source-music:${source.event.kind}:${recipientKey}`, presentation);
     if (source.kind === "q1" && source.event.kind === "ambient") this.persistent.set(`ambient:${this.presentationSequence}`, presentation);
     if (source.kind === "q1" && source.event.kind === "static-model") this.persistent.set(`static-model:${this.presentationSequence}`, presentation);
     if (source.kind === "q2" && source.event.kind === "music") this.persistent.set("music", presentation);
@@ -72,7 +75,7 @@ export class SimulationEvents {
         this.message({ kind: "q2-layout", program: event.layout }, event.actor);
       else if (event.kind === "match-status") this.message({ kind: "print", level: 2, text: event.text });
     }
-    if (source.kind === "q1") this.q1(content, source.event, presentation.sequence);
+    if (source.kind === "q1") this.q1(content, source.event, presentation.sequence, recipient);
     else if (source.kind === "q2") this.q2(content, source.event, presentation.sequence);
     else if (source.kind === "q2-weapon" && source.event.kind === "muzzleflash") {
       const entityNumber = this.sourceSlot(source.event.actor);
@@ -83,6 +86,7 @@ export class SimulationEvents {
 
   append(payload: SimulationEventPayload, actor: ActorId | null = null): undefined {
     const client = actor === null ? null : this.clientFor(actor);
+    if (actor !== null && client === null) return undefined;
     this.emitted.push({ sequence: this.sequence++, time: this.now(), payload,
       audience: client === null ? { kind: "world" } : { kind: "client", client } });
     return undefined;
@@ -102,9 +106,10 @@ export class SimulationEvents {
 
   capture() {
     return { q1Fog: this.fog?.capture() ?? null, sequence: this.sequence, presentationSequence: this.presentationSequence, styles: [...this.styles].map(([style, value]) => ({ style, ...value })),
-      persistent: [...this.persistent].map(([key, value]) => {
+      persistent: [...this.persistent].sort((a, b) => a[1].sequence - b[1].sequence).map(([key, original]) => {
+        const value = {...original, ...(original.recipient === undefined ? {} : {recipient:savedActorId(original.recipient)})};
         if (value.kind === "q2" && value.event.kind === "sound") return { key, ...value, event: { ...value.event, actor: value.event.actor === null ? null : savedActorId(value.event.actor) } };
-        if (value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && (value.event.kind === "ambient" || value.event.kind === "static-model")) return { key, ...value };
+        if (value.kind === "music" || value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && (value.event.kind === "ambient" || value.event.kind === "static-model" || value.event.kind === "finale")) return { key, ...value };
         throw new Error("Unsupported persistent source event");
       }) };
   }
@@ -118,10 +123,14 @@ export class SimulationEvents {
     } else this.fog?.reset();
     reader.field("styles").list(value => this.styles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
     reader.field("persistent").list(value => {
-      const event = value.field("event"), family = value.field("kind").choice("q1", "q2"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model");
-      const base = { sequence: value.field("sequence").integer(0), content: readContentId(value.field("content")), seconds: value.field("seconds").number(), sourceEntity: value.field("sourceEntity").nullable(v => v.integer(0)) };
+      const event = value.field("event"), family = value.field("kind").choice("q1", "q2", "music"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model", "finale", "cd-track", "pause");
+      const recipient = value.field("recipient");
+      const base = { ...(recipient.value === undefined ? {} : {recipient:reference(readSavedActor(recipient))}), sequence: value.field("sequence").integer(0), content: readContentId(value.field("content")), seconds: value.field("seconds").number(), sourceEntity: value.field("sourceEntity").nullable(v => v.integer(0)) };
       let restored: SimulationPresentationEvent;
-      if (family === "q1" && kind === "ambient") restored = { ...base, kind: "q1", event: { kind, origin: readVector(event.field("origin")), path: event.field("path").string(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number() } };
+      if (family === "music" && kind === "cd-track") restored = {...base, kind:"music",event:{kind,track:event.field("track").integer(0)}};
+      else if (family === "music" && kind === "pause") restored = {...base,kind:"music",event:{kind,paused:event.field("paused").boolean()}};
+      else if (family === "q1" && kind === "finale") restored = {...base,kind:"q1",event:{kind,text:event.field("text").string(),stage:event.field("stage").choice(1,2,3,4,5,6)}};
+      else if (family === "q1" && kind === "ambient") restored = { ...base, kind: "q1", event: { kind, origin: readVector(event.field("origin")), path: event.field("path").string(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number() } };
       else if (family === "q1" && kind === "static-model") restored = { ...base, kind: "q1", event: { kind, path: event.field("path").string(), frame: event.field("frame").integer(),
         colorMap: event.field("colorMap").integer(), skin: event.field("skin").integer(), origin: readVector(event.field("origin")), angles: readVector(event.field("angles")) } };
       else if (family === "q2" && kind === "music") restored = { ...base, kind: "q2", event: { kind, track: event.field("track").string() } };
@@ -129,6 +138,7 @@ export class SimulationEvents {
       else return event.fail("Invalid persistent source event family");
       this.persistent.set(value.field("key").string(), restored); this.source.push(restored);
     });
+    this.source.sort((a, b) => a.sequence - b.sequence);
     return undefined;
   }
 
@@ -143,13 +153,13 @@ export class SimulationEvents {
     });
   }
 
-  private sound(content: ContentId, path: string, actor: ActorId | null, origin: Vec3, channel: number, volume: number, attenuation: number): undefined {
+  private sound(content: ContentId, path: string, actor: ActorId | null, origin: Vec3, channel: number, volume: number, attenuation: number, recipient?: ActorId): undefined {
     const resource = this.resources.get(`${content}/${path}`) ?? this.resources.get(`${content}/sound/${path}`);
-    if (resource !== undefined) this.append({ kind: "sound", resource: resource.id, actor, origin, channel, volume, attenuation });
+    if (resource !== undefined) this.append({ kind: "sound", resource: resource.id, actor, origin, channel, volume, attenuation }, recipient ?? null);
     return undefined;
   }
 
-  private q1(content: ContentId, event: Q1Event, sequence: number): undefined {
+  private q1(content: ContentId, event: Q1Event, sequence: number, recipient?: ActorId): undefined {
     if (event.kind === "sound") {
       const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
       const body = this.bodies.read(event.actor);
@@ -159,8 +169,8 @@ export class SimulationEvents {
         y: Math.fround(body.origin.y + Math.fround(body.bounds.min.y + body.bounds.max.y) * 0.5),
         z: Math.fround(body.origin.z + Math.fround(body.bounds.min.z + body.bounds.max.z) * 0.5),
       };
-      this.sound(content, event.path, event.actor, center, channel, event.volume, event.attenuation);
-    } else if (event.kind === "ambient") this.sound(content, event.path, null, event.origin, 0, event.volume, event.attenuation);
+      this.sound(content, event.path, event.actor, event.origin ?? center, channel, event.volume, event.attenuation, recipient);
+    } else if (event.kind === "ambient") this.sound(content, event.path, null, event.origin, 0, event.volume, event.attenuation, recipient);
     else if (event.kind === "message") this.message(event.center ? { kind: "center-print", text: event.text } : { kind: "print", level: 2, text: event.text }, event.player, sequence);
     else if (event.kind === "lightstyle") this.styles.set(event.style, { family: "q1", pattern: event.pattern });
     return undefined;

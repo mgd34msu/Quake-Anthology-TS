@@ -285,7 +285,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     this.text.bind(this.art.skin.font, this.hudFont); this.menuText.bind(this.art.skin.font, this.menuFont);
     if (!this.guestUi) {
       const player = this.simulation.playerUi(this.local.player.actor);
-      for (const point of this.sourceHud.points()) this.messages.addPoint(this.local.player.seat.id, point, context.timeMilliseconds);
+      this.messages.setSourcePoints(this.local.player.seat.id, this.sourceHud.points());
       const sourceHud = this.sourceHud.presentation(context.timeMilliseconds);
       const armor = player.armor.kind === "none" ? 0 : player.armor.points;
       const base = emptyHudData(this.local.player.seat.id);

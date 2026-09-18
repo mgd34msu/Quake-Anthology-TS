@@ -102,6 +102,11 @@ export interface Q3CommandSelection { readonly weapon: number; readonly sensitiv
 
 export function movementDialect(options: Pick<ApplicationOptions, "movement"> & Partial<Pick<ApplicationOptions, "network">>, recipe?: ExecutableRecipe): CommandDialect {
   if (recipe !== undefined) {
+    for (const module of recipe.execution) {
+      if (module.kind !== "native" || module.role !== "server-game") continue;
+      if (module.api.kind === "q2-rerelease-game") return "q2-rerelease";
+      if (module.api.kind === "q2-classic-game") return "q2-classic";
+    }
     const timing = recipe.timing.find(profile => profile.provider === recipe.movement.provider);
     if (timing === undefined) throw new Error(`Recipe has no timing for ${recipe.movement.provider}`);
     return timing.clock.kind;

@@ -56,7 +56,7 @@ test('selected LRCTF application executes actual qagame on the shared scene and 
       expect(guest.state.cvars.variableString('fs_game')).toBe('lrctf');
       expect(guest.state.cvars.variableValue('sv_fps')).toBe(20);
       expect(guest.state.cvars.variableValue('g_gametype')).toBe(4);
-      expect(guest.state.cvars.variableValue('bot_enable')).toBe(0);
+      expect(guest.state.cvars.variableValue('bot_enable')).toBe(1);
       expect(guest.records.host.scene).toBe(app.simulation.scene);
       expect(guest.records.host.bodies).toBe(app.simulation.bodies);
       expect(guest.game.data.numEntities).toBeGreaterThan(64);
@@ -67,10 +67,14 @@ test('selected LRCTF application executes actual qagame on the shared scene and 
       expect(() => app.simulation.step({ elapsedMilliseconds: 50, commands: [] })).toThrow('awaited');
       await expect(app.loadGame(join(root, 'missing.sav'))).rejects.toThrow('hosting a network game');
       await expect(app.saveGame(join(root, 'missing.sav'))).rejects.toThrow('hosting a network game');
-      app.queueCommand('addbot', [], null);
-      await app.step(50);
-      expect(printed.some(text => text.includes('Q3 guest command addbot is unsupported'))).toBe(true);
-      expect(guest.state.cvars.variableValue('bot_enable')).toBe(0);
+      app.queueCommand('addbot', ['Sarge', '3', 'red', '0'], null);
+      for (let frame = 0; frame < 100; frame++) await app.step(50);
+      const bot = guest.players().find(player => guest.isBot(player.client));
+      if (bot === undefined) throw new Error('Source module did not admit its bot');
+      const initial = guest.records.player(bot.sourceEntity).origin;
+      for (let frame = 0; frame < 100; frame++) await app.step(50);
+      expect(guest.records.player(bot.sourceEntity).origin).not.toEqual(initial);
+      expect(guest.state.cvars.variableValue('bot_enable')).toBe(1);
     } finally { await app.close(); }
     expect(() => guest.records.entity(0)).toThrow('retired');
   } finally { inserted.mockRestore(); await rm(root, { recursive: true, force: true }); }

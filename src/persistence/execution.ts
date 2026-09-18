@@ -10,7 +10,7 @@ export function readApi(reader: SaveReader): GameApiIdentity {
     case "q2-classic-game": return { kind: "q2-classic-game", version: reader.field("version").literal(3) };
     case "q2-rerelease-game": return { kind: "q2-rerelease-game", version: reader.field("version").literal(2023) };
     case "q2-rerelease-cgame": return { kind: "q2-rerelease-cgame", version: reader.field("version").literal(2022) };
-    case "q3-qagame": return { kind: "q3-qagame", version: reader.field("version").literal(8) };
+    case "q3-qagame": return { kind: "q3-qagame", version: reader.field("version").choice(7, 8) };
     case "q3-cgame": return { kind: "q3-cgame", version: reader.field("version").literal(4) };
     case "q3-ui": return { kind: "q3-ui", version: reader.field("version").choice(4, 6) };
   }
@@ -70,7 +70,7 @@ export function readGuest(reader: SaveReader): GuestCheckpoint {
     case "qvm": {
       const api = readApi(reader.field("api"));
       if (api.kind !== "q3-qagame" && api.kind !== "q3-cgame" && api.kind !== "q3-ui") return reader.fail("QVM checkpoint requires a Q3 API");
-      return { ...common, kind: "qvm", api, data: reader.field("data").bytes(), instructionIndex: reader.field("instructionIndex").integer(), programStack: reader.field("programStack").integer(0),
+      return { ...common, kind: "qvm", api, abiProfile: reader.field("abiProfile").value === undefined ? "q3-modern" : reader.field("abiProfile").choice("q3-modern", "q3-1.16n-base"), data: reader.field("data").bytes(), instructionIndex: reader.field("instructionIndex").integer(), programStack: reader.field("programStack").integer(0),
         operandStack: reader.field("operandStack").list(value => value.integer()), hostState: readPrivate(reader.field("hostState")) };
     }
     case "native-guest": return { ...common, kind: "native-guest", abi: readNativeAbi(reader.field("abi")), regions: reader.field("regions").list(region => ({

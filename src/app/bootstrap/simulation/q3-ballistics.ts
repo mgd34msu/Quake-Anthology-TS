@@ -1,3 +1,5 @@
+import { q3ProjectileBehavior } from "../../../content/q3/foundation/weapon-behavior.ts";
+import type { WeaponBehaviorProjectilePort } from "../../../contracts/weapon-behavior.ts";
 import { q3ExplodeProjectile, q3LaunchProjectile, q3StepProjectile } from "../../../content/q3/base/game/projectile.ts";
 import type { Q3Projectile, Q3ProjectileHost, Q3ProjectileImpact } from "../../../content/q3/base/game/projectile.ts";
 import { savedActorId, readSavedActor } from "../../../persistence/save-image.ts";
@@ -41,6 +43,7 @@ type Q3BallisticEventPayload = Q3BallisticEventFields & (
 export type Q3SharedBallisticEvent = Q3BallisticEventPayload & { readonly timeMilliseconds: number };
 
 export interface Q3SharedBallisticsHost {
+  readonly weaponBehavior?: WeaponBehaviorProjectilePort;
   readonly actors: SessionActorRegistry; readonly bodies: SharedBodyTable; readonly scene: SharedSceneQueries; readonly combat: GameplayAuthority;
   readonly weaponProvider: ProviderId; readonly numeric: NumericProfile; readonly random: Pick<GameRandom, "rand" | "random" | "crandom">;
   pose(actor: OwnedActor): Q3BallisticPose;
@@ -211,8 +214,15 @@ export class Q3SharedBallistics {
       method: spec.method, splashMethod: spec.splashMethod,
       expires: launch.expires };
     this.projectiles.set(actor, projectile);
+    const body = this.host.bodies.read(actor.id);
+    if (body === null) throw new Error("Launched Q3 projectile lost its body");
+    const behavior = this.host.weaponBehavior?.launch({ projectile: actor, shooter: owner.id, ...q3ProjectileBehavior(weapon), timeSeconds: time / 1000, body });
+    if (behavior !== undefined && behavior !== null) {
+      this.host.bodies.write(actor, { ...body, ...behavior });
+      projectile.trajectory = { ...projectile.trajectory, base: behavior.origin, delta: behavior.velocity, time };
+    }
     this.host.projectile(actor, owner.id, (previous, current) => this.stepActor(projectile, previous, current));
-    this.event({ kind: "projectile", trajectory: { ...trajectory }, actor: actor.id, weapon, origin: attack.muzzle, end: attack.muzzle, normal: zero, target: null, surfaceFlags: 0 });
+    this.event({ kind: "projectile", trajectory: { ...projectile.trajectory }, actor: actor.id, weapon, origin: projectile.trajectory.base, end: projectile.trajectory.base, normal: zero, target: null, surfaceFlags: 0 });
   }
   private impactEvent(projectile: Q3ProjectileState, impact: Extract<Q3ProjectileImpact, { readonly kind: "impact" }>, time: number): void {
     const body = this.host.bodies.read(projectile.actor.id); if (body === null) return;
@@ -272,6 +282,16 @@ export class Q3SharedBallistics {
     };
   }
   private stepActor(projectile: Q3ProjectileState, previousTime: number, time: number): void {
+    if (projectile.phase.kind === "flight") {
+      const body = this.host.bodies.read(projectile.actor.id);
+      if (body !== null) {
+        const update = this.host.weaponBehavior?.step(projectile.actor, body, previousTime / 1000);
+        if (update !== undefined && update !== null) {
+          this.host.bodies.write(projectile.actor, { ...body, ...update });
+          projectile.trajectory = { ...projectile.trajectory, base: update.origin, delta: update.velocity, time: previousTime };
+        }
+      }
+    }
     q3StepProjectile(projectile, this.projectileHost(projectile, previousTime, time));
   }
   private radius(projectile: Q3ProjectileState, origin: Vec3, ignore: ActorId | null): boolean {

@@ -1,6 +1,6 @@
 import type { SharedSimulation } from "./runtime.ts";
-import { movementOrigin, type MovementPlayer } from "./players.ts";
-import { createPlayerMovementPrediction, movementObservation } from "./player-movement.ts";
+import { movementOrigin } from "./players.ts";
+import { createPlayerMovementPrediction, movementObservation, type MovementPredictionPlayer } from "./player-movement.ts";
 import { projectBotMovement } from "../../../bots/behavior/prediction.ts";
 import type { BotMovementPrediction } from "../../../bots/behavior/q3/navigation-types.ts";
 import { NavigationRuntime } from "../../../bots/navigation/runtime.ts";
@@ -8,7 +8,7 @@ import { aasPointArea, type AasAsset } from "../../../bots/navigation/aas.ts";
 import { aasPredictionStop } from "../../../bots/navigation/aas-prediction-stop.ts";
 
 /** Gameplay and AAS authoring share detached selected movement and the caller's exact area graph. */
-export function predictApplicationBotMovement(simulation: SharedSimulation, player: Readonly<MovementPlayer>, query: BotMovementPrediction, navigation: NavigationRuntime | AasAsset) {
+export function predictApplicationBotMovement(simulation: SharedSimulation, player: MovementPredictionPlayer, query: BotMovementPrediction, navigation: NavigationRuntime | AasAsset) {
   const projection = createPlayerMovementPrediction(simulation, player, query.origin, query.velocity, Math.round(query.frameTime * 1000), query.presence === 4);
   const asset = navigation instanceof NavigationRuntime ? navigation.graph.asset : navigation;
   const areaAt = (origin: typeof query.origin): number | null => navigation instanceof NavigationRuntime ? navigation.areaAt(origin) : aasPointArea(navigation, origin);

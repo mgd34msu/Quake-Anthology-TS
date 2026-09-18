@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestValueLayout, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, CallbackId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
@@ -265,8 +266,8 @@ export class ClassicQ2GuestHost {
         const requested = number(0), tag = number(1);
         if (!Number.isInteger(requested) || requested < 0) throw new RangeError("TagMalloc requires a nonnegative byte count");
         // MSVC's word-at-a-time string routines access the allocator's rounded tail.
-        const bytes = Math.max(16, Math.ceil(requested / 16) * 16);
-        const address = memory.allocate({ byteLength: bytes, label: `API 3 tag ${tag}` });
+        const bytes = nativeAllocationBytes(requested);
+        const address = allocateNativeMemory(memory, requested, `API 3 tag ${tag}`);
         this.#allocations.set(address.byteOffset, { address, bytes, tag }); return pointerResult(address);
       }
       case "TagFree": {

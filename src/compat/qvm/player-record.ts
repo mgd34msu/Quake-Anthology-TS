@@ -1,3 +1,5 @@
+import { qvmEvent, qvmPersistent, qvmPowerups } from "./legacy-presentation.ts";
+import type { QvmAbiProfile } from "../../contracts/execution.ts";
 // Ported from id Software's code/game/q_shared.h playerState_t.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
@@ -8,7 +10,10 @@ import type { Q3PlayerState } from "../../contracts/protocol.ts";
 /** Selected 32-bit QVM ABI: 117 four-byte words, including the non-network tail. */
 export const QVM_PLAYER_STATE_BYTES = 468;
 
-function checkRecord(view: DataView): void {
+export function qvmPlayerStateBytes(profile: QvmAbiProfile): number { return profile === "q3-modern" ? 468 : 444; }
+
+function checkRecord(view: DataView, profile: QvmAbiProfile): void {
+  const QVM_PLAYER_STATE_BYTES = qvmPlayerStateBytes(profile);
   if (view.byteLength < QVM_PLAYER_STATE_BYTES) {
     throw new BinaryError("QVM playerState_t", 0, `requires ${QVM_PLAYER_STATE_BYTES} bytes, got ${view.byteLength}`);
   }
@@ -32,8 +37,8 @@ function writeSlots(view: DataView, offset: number, slots: readonly number[]): v
 }
 
 /** The caller resolves the VM pointer; this view starts at the complete C record. */
-export function readQvmPlayerState(view: DataView): Q3PlayerState {
-  checkRecord(view);
+export function readQvmPlayerState(view: DataView, profile: QvmAbiProfile = "q3-modern"): Q3PlayerState {
+  checkRecord(view, profile);
   return {
     commandTimeMilliseconds: view.getInt32(0, true),
     movementType: view.getInt32(4, true),
@@ -55,9 +60,9 @@ export function readQvmPlayerState(view: DataView): Q3PlayerState {
     grapplePoint: readVector(view, 92),
     flags: view.getInt32(104, true),
     eventSequence: view.getInt32(108, true),
-    events: [view.getInt32(112, true), view.getInt32(116, true)],
+    events: [qvmEvent(view.getInt32(112, true), profile), qvmEvent(view.getInt32(116, true), profile)],
     eventParameters: [view.getInt32(120, true), view.getInt32(124, true)],
-    externalEvent: view.getInt32(128, true),
+    externalEvent: qvmEvent(view.getInt32(128, true), profile),
     externalEventParameter: view.getInt32(132, true),
     externalEventTimeMilliseconds: view.getInt32(136, true),
     clientNumber: view.getInt32(140, true),
@@ -70,22 +75,22 @@ export function readQvmPlayerState(view: DataView): Q3PlayerState {
     damagePitch: view.getInt32(176, true),
     damageCount: view.getInt32(180, true),
     stats: readSlots(view, 184),
-    persistent: readSlots(view, 248),
-    powerups: readSlots(view, 312),
+    persistent: qvmPersistent(readSlots(view, 248), profile),
+    powerups: qvmPowerups(readSlots(view, 312), profile),
     ammo: readSlots(view, 376),
-    generic1: view.getInt32(440, true),
-    loopSound: view.getInt32(444, true),
-    jumpPadEntity: view.getInt32(448, true),
-    pingMilliseconds: view.getInt32(452, true),
-    movementFrameCount: view.getInt32(456, true),
-    jumpPadFrame: view.getInt32(460, true),
-    entityEventSequence: view.getInt32(464, true),
+    generic1: profile === "q3-modern" ? view.getInt32(440, true) : 0,
+    loopSound: profile === "q3-modern" ? view.getInt32(444, true) : 0,
+    jumpPadEntity: profile === "q3-modern" ? view.getInt32(448, true) : 0,
+    pingMilliseconds: view.getInt32(profile === "q3-modern" ? 452 : 440, true),
+    movementFrameCount: profile === "q3-modern" ? view.getInt32(456, true) : 0,
+    jumpPadFrame: profile === "q3-modern" ? view.getInt32(460, true) : 0,
+    entityEventSequence: profile === "q3-modern" ? view.getInt32(464, true) : 0,
   };
 }
 
 /** Writes exactly playerState_t, preserving surrounding VM memory. */
 export function writeQvmPlayerState(view: DataView, state: Q3PlayerState): void {
-  checkRecord(view);
+  checkRecord(view, "q3-modern");
   for (const slots of [state.stats, state.persistent, state.powerups, state.ammo]) {
     if (slots.length !== 16) throw new RangeError("QVM player-state arrays require 16 slots");
   }

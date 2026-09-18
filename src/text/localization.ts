@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Quake rerelease localization grammar and substitutions, with seat-owned tables.
+// Quake rerelease localization grammar and substitutions.
 import type { SeatId } from "../contracts/identity.ts";
 export interface LibLog { warn(text: string): void; info?(text: string): void; }
 const MAX_LOC_KEY = 64;
@@ -299,9 +299,13 @@ export function Loc_LanguageFromLocale(tag: string | null | undefined): string {
     const primary = (stripped.split(/[-_]/)[0] ?? "").toLowerCase();
     return LOCALE_LANGUAGE_TABLE.get(primary) ?? "english";
 }
-export class LocalizationCatalog {
+export class LocalizationTable {
 private readonly locTable = new Map<string, LocString>();
-constructor(readonly seat: SeatId, readonly profile: "q1-rerelease" | "q2-rerelease" = "q1-rerelease") {}
+constructor(readonly profile: "q1-rerelease" | "q2-rerelease" = "q1-rerelease") {}
+lookup(key: string, args: readonly string[] = []): string | null {
+    const name = key.startsWith("$") ? key.slice(1) : key;
+    return this.find(name) === undefined ? null : this.localize("$" + name, args);
+}
 find(base: string): LocString | undefined {
     return this.locTable.get(base);
 }
@@ -419,4 +423,9 @@ localizeBytes(base: string, args: readonly string[] = [], allowInPlace = true, o
     const text = this.localizeSource(base, allowInPlace, args, args.length, Number.MAX_SAFE_INTEGER);
     return utf8.encode(text).slice(0, Math.max(0, outputBytes - 1));
 }
+}
+
+/** Presentation binds a shared localization table to its viewing seat. */
+export class LocalizationCatalog extends LocalizationTable {
+  constructor(readonly seat: SeatId, profile: "q1-rerelease" | "q2-rerelease" = "q1-rerelease") { super(profile); }
 }

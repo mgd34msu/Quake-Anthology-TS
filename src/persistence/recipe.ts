@@ -1,6 +1,6 @@
 import type { ArchiveMount, EnvironmentSelection, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, MonsterSelectionTarget, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
 import { createMountId, createMountPlanId, createRecipeId, createResourceId, isContentId } from "../contracts/content.ts";
-import { readApi, readNativeAbi } from "./execution.ts";
+import { readApi, readNativeAbi, readModule } from "./execution.ts";
 import { readClock, readDigest, readNumeric, readOrdering } from "./shared.ts";
 import { namespaced, SaveReader } from "./value.ts";
 
@@ -157,8 +157,23 @@ function readHandGrenades(reader: SaveReader): HandGrenadeSelection {
 export function readEquipment(reader: SaveReader): EquipmentSelection {
   return { grapple: readGrapple(reader.field("grapple")), handGrenades: readHandGrenades(reader.field("handGrenades")) };
 }
+function readWeaponBehavior(reader: SaveReader): NonNullable<ExecutableRecipe["weaponBehaviors"]>[number] {
+  const value = reader.field("definition"), module = readModule(value.field("module"));
+  const callback = (entry: SaveReader) => {
+    const kind = entry.field("kind").literal("quakec"), owner = readModule(entry.field("module"));
+    if (owner.id !== module.id || owner.digest !== module.digest || owner.revision !== module.revision || owner.artifactPath !== module.artifactPath)
+      return entry.fail("weapon behavior callback differs from selected module");
+    return { kind, module: owner, functionIndex: entry.field("functionIndex").integer(1) };
+  };
+  const source = readProvider(reader.field("source")), artifact = readResource(reader.field("artifact"));
+  if (source.provider !== module.id || artifact.digest !== module.digest || artifact.requestedPath !== module.artifactPath)
+    return reader.fail("weapon behavior source differs from selected artifact");
+  return { source, artifact, definition: { id: namespaced(value.field("id")), title: value.field("title").string(), module,
+    role: value.field("role").choice("rocket", "grenade", "nail", "bolt", "plasma", "energy", "grapple"), aspect: value.field("aspect").literal("trajectory"),
+    fire: callback(value.field("fire")), activate: value.field("activate").nullable(callback) } };
+}
 export function readRecipe(reader: SaveReader): ExecutableRecipe {
-  return { schemaVersion: reader.field("schemaVersion").literal(3), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
+  return { ...(reader.field("weaponBehaviors").value === undefined ? {} : { weaponBehaviors: reader.field("weaponBehaviors").list(readWeaponBehavior) }), schemaVersion: reader.field("schemaVersion").literal(3), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
     map: { geometryContent: readContentId(reader.field("map").field("geometryContent")), geometry: readResource(reader.field("map").field("geometry")), entities: readProvider(reader.field("map").field("entities")) },
     campaign: readCampaign(reader.field("campaign")), movement: readProvider(reader.field("movement")), character: readCharacter(reader.field("character")),
     weapons: reader.field("weapons").list(readProvider), equipment: readEquipment(reader.field("equipment")), enemies: readEnemies(reader.field("enemies")), presentation: readPresentation(reader.field("presentation")),

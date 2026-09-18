@@ -21,6 +21,7 @@ function loadSdl() {
     SDL_GetError: { args: [], returns: "cstring" },
     SDL_OpenURL: { args: ["buffer"], returns: "i32" },
     SDL_GetClipboardText: { args: [], returns: "ptr" },
+    SDL_SetClipboardText: { args: ["buffer"], returns: "i32" },
     SDL_free: { args: ["ptr"], returns: "void" },
     SDL_ShowWindow: { args: ["ptr"], returns: "void" },
     SDL_GetWindowPosition: { args: ["ptr", "buffer", "buffer"], returns: "void" },
@@ -147,6 +148,10 @@ export function sourceClipboardBytes(bytes: Uint8Array): Uint8Array {
 }
 
 /** SDL replaces the platform clipboard API; its UTF-8 bytes enter source byte fields. */
+export function writeSdlClipboard(text: string): void {
+  checked(sdl().SDL_SetClipboardText(cString(text)), "SDL_SetClipboardText");
+}
+
 export function readSdlClipboard(): Uint8Array | null {
   const api = sdl(), allocation = api.SDL_GetClipboardText();
   if (allocation === null) return null;

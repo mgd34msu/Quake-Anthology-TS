@@ -174,7 +174,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
       mine.classname = "prox_mine"; mine.flags = (mine.flags | 0x20000) + 2 ** 32; mine.timestamp = game.host.now() + mineLife(multiplier);
       game.schedule(mine, 0, this.proxFlight);
     } else game.schedule(mine, mineLife(multiplier), this.proxExplode);
-    publishProjectile(mine, game); return mine;
+    publishProjectile(mine, game, "", { weapon: "q2:weapon_proxlauncher", role: "grenade" }); return mine;
   }
 
   protected grenadeEffect(entity: Q2Entity, game: Q2GameServices): undefined {
@@ -265,6 +265,6 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     if (game.options.edition === "rerelease") { mine.classname = "tesla_mine"; mine.clipMask &= ~0x4000000; mine.flags = (mine.flags | 0x20000) + 2 ** 32; }
     game.move(mine, { angles: zero, bounds: { min: { x: -12, y: -12, z: 0 }, max: { x: 12, y: 12, z: 20 } } }, false);
     game.host.combat.create(mine.actor, { health: game.options.mode === "deathmatch" ? 20 : game.options.edition === "rerelease" ? 50 : 30, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
-    mine.wait = game.host.now() + 30; game.schedule(mine, 3, this.teslaOpen); publishProjectile(mine, game); return mine;
+    mine.wait = game.host.now() + 30; game.schedule(mine, 3, this.teslaOpen); publishProjectile(mine, game, "", { weapon: "q2:ammo_tesla", role: "grenade" }); return mine;
   }
 }

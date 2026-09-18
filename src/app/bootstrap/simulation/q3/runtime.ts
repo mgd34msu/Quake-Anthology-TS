@@ -149,9 +149,10 @@ export class Q3SourceRuntime {
     this.bridge = this.createCombatBridge();
     this.combat = this.bridge.context;
     const combat = this.combat;
+    const behavior = options.weaponBehavior === undefined ? {} : { weaponBehavior: options.weaponBehavior };
     this.missiles = new MissileRuntime(combat.product === "baseq3"
-      ? { combat, world: this.world, bodies: host.bodies, actors: host.actors, get previousTime() { return runtime.level.previousTime; }, missionpack: null }
-      : { combat, world: this.world, bodies: host.bodies, actors: host.actors, get previousTime() { return runtime.level.previousTime; }, missionpack: {
+      ? { ...behavior, combat, world: this.world, bodies: host.bodies, actors: host.actors, get previousTime() { return runtime.level.previousTime; }, missionpack: null }
+      : { ...behavior, combat, world: this.world, bodies: host.bodies, actors: host.actors, get previousTime() { return runtime.level.previousTime; }, missionpack: {
         get proxMineTimeout() { return runtime.integer("g_proxMineTimeout"); }, random: this.random,
         soundIndex: path => this.config.soundIndex(path), invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } });
     this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return runtime.number("g_quadfactor"); } });

@@ -26,7 +26,7 @@ export function createStartupSource(options: ApplicationOptions, selection: Pick
     for (const definition of q3GameCvarDefinitions(selection.source.content.includes("missionpack") ? "missionpack" : "baseq3"))
       cvars.register(definition.name, definition.value, definition.flags);
   } else for (const [name, value] of Object.entries({ skill: "1", deathmatch: "0", coop: "0", teamplay: "0", sv_cheats: "0", sv_aim: "0.93",
-    pausable: "1", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1", footsteps: "1" })) cvars.register(name, value);
+    developer: "0", pausable: "1", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1", footsteps: "1" })) cvars.register(name, value);
   for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0",
     coop: options.mode === "coop" ? "1" : "0", g_gametype: options.mode === "singleplayer" ? "2" : "0",
     [dialect === "q3" ? "sv_maxclients" : "maxclients"]: String(maxClients) })) {
@@ -37,6 +37,7 @@ export function createStartupSource(options: ApplicationOptions, selection: Pick
   if (dialect === "q3") registerQ3ServerCvars(cvars, { maxClients, mapName: options.map });
   registerFrameTimeCvars(cvars);
   registerSourceAdministrationCvars(cvars);
+  cvars.register("qts_weaponBehavior", "", CvarFlag.Archive);
   return cvars;
 }
 

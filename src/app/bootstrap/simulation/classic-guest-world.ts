@@ -19,6 +19,7 @@ interface CommandContext { value: { readonly arguments: readonly string[]; reado
 
 /** API 3 owns time, movement and private gameplay data. The facade only sequences its exported calls. */
 export class ClassicGuestWorld {
+  readonly edition = "classic";
   #phase: "created" | "initialized" | "running" | "transferred" | "closed" = "created";
   #busy = false;
   readonly #clients = new Map<number, ClassicGuestClient>();

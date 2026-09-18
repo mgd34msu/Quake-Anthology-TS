@@ -60,6 +60,7 @@ export interface HudPointOfInterest {
   readonly hideOnAim: boolean;
   readonly expiresMilliseconds: number;
 }
+export type HudDamageIndicator = { readonly origin: Vec3; readonly amount: number; readonly expiresMilliseconds: number } | { readonly picture?: { readonly image: ResourceId; readonly width: number; readonly height: number }; readonly direction: Vec3; readonly amount: number; readonly color: Vec3; readonly health: boolean; readonly armor: boolean; readonly shield: boolean; readonly expiresMilliseconds: number };
 export interface CommonHudData {
   readonly powerups: readonly import("../../contracts/gameplay.ts").ActivePowerupTimer[];
   readonly weapon?: CommonWeaponHud;
@@ -75,7 +76,7 @@ export interface CommonHudData {
   readonly carousel: CarouselPresentation | null;
   readonly crosshair: { readonly visible: boolean; readonly color: Vec4; readonly image: ResourceId | null };
   readonly helpPath?: { readonly origin: Vec3; readonly direction: Vec3 } | null;
-  readonly damageIndicators?: readonly { readonly origin: Vec3; readonly amount: number; readonly expiresMilliseconds: number }[];
+  readonly damageIndicators?: readonly HudDamageIndicator[];
   readonly pickup?: { readonly name: string; readonly icon: ResourceId | null; readonly expiresMilliseconds: number } | null;
   readonly hitMarker: { readonly damage: number; readonly expiresMilliseconds: number } | null;
 }
@@ -94,6 +95,8 @@ export class SeatHudMessages {
   private center: CenterPrintState | null = null;
   private readonly queuedCenters: CenterPrintState[] = [];
   private readonly points: HudPointOfInterest[] = [];
+  private sourcePoints: readonly HudPointOfInterest[] = [];
+  setSourcePoints(seat: SeatId, points: readonly HudPointOfInterest[]): void { this.requireSeat(seat); this.sourcePoints = points; }
   constructor(readonly seat: SeatId) {}
   notify(seat: SeatId, text: string, chat: boolean, starts: SourceTime, duration: SourceTime): void {
     this.requireSeat(seat); this.notices.push({ sequence: this.sequence++, text, chat, starts, duration });
@@ -109,7 +112,7 @@ export class SeatHudMessages {
   }
   clearNotify(): void { this.notices = []; }
   clearCenterPrint(): void { this.center = null; this.queuedCenters.length = 0; }
-  clear(): void { this.clearNotify(); this.clearCenterPrint(); this.points.length = 0; }
+  clear(): void { this.clearNotify(); this.clearCenterPrint(); this.points.length = 0; this.sourcePoints = []; }
   /** Keyed POIs replace matching IDs; unkeyed POIs replace only expired or oldest unkeyed entries. */
   addPoint(seat: SeatId, point: HudPointOfInterest, nowMilliseconds: number, capacity = 64): boolean {
     this.requireSeat(seat);
@@ -134,7 +137,7 @@ export class SeatHudMessages {
     while (this.center !== null && milliseconds(this.center.starts) + milliseconds(this.center.duration) <= nowMilliseconds) this.center = this.queuedCenters.shift() ?? null;
     return { notifications: this.notices.filter(notice => alive(notice.starts, notice.duration, nowMilliseconds)),
       centerPrint: this.center !== null && alive(this.center.starts, this.center.duration, nowMilliseconds) ? this.center : null,
-      points: this.points.filter(point => point.expiresMilliseconds > nowMilliseconds) };
+      points: [...this.points, ...this.sourcePoints].filter(point => point.expiresMilliseconds > nowMilliseconds) };
   }
   private requireSeat(seat: SeatId): void { if (!seat.equals(this.seat)) throw new Error("HUD message belongs to another seat"); }
 }
@@ -239,10 +242,17 @@ export function drawCommonHud(context: UiDrawContext, data: CommonHudData, optio
     const camera = options.camera;
     for (const damage of data.damageIndicators ?? []) {
       if (damage.expiresMilliseconds <= context.timeMilliseconds) continue;
-      const delta = { x: damage.origin.x - camera.origin.x, y: damage.origin.y - camera.origin.y, z: damage.origin.z - camera.origin.z };
+      const delta = "direction" in damage ? { x: -damage.direction.x, y: -damage.direction.y, z: -damage.direction.z } : { x: damage.origin.x - camera.origin.x, y: damage.origin.y - camera.origin.y, z: damage.origin.z - camera.origin.z };
       const dot = (axis: Vec3): number => delta.x * axis.x + delta.y * axis.y + delta.z * axis.z;
       const horizontal = -dot(camera.axis[1]), vertical = dot(camera.axis[0]), length = Math.hypot(horizontal, vertical) || 1;
-      const tint = { x: 1, y: 0.15, z: 0.05, w: Math.min(1, (damage.expiresMilliseconds - context.timeMilliseconds) / 400) };
+      const tint = { ...("color" in damage ? damage.color : { x: 1, y: 0.15, z: 0.05 }), w: Math.min(1, (damage.expiresMilliseconds - context.timeMilliseconds) / ("direction" in damage ? 1000 : 400)) };
+      if ("direction" in damage && damage.picture !== undefined) {
+        const yaw = Math.atan2(camera.axis[0].y, camera.axis[0].x) - Math.atan2(damage.direction.y, damage.direction.x) - Math.PI;
+        const width = Math.min(damage.picture.width, 3 * damage.amount), height = damage.picture.height;
+        const radius = (preferences.crosshair ? preferences.crosshairSize : 0) + height / 2;
+        image(damage.picture.image, { x: 320 + radius * Math.sin(yaw) - width / 2, y: 240 - radius * Math.cos(yaw) - height / 2, width, height }, tint);
+        continue;
+      }
       for (let step = 0; step < 3; step++) fill({ x: 317 + horizontal / length * (55 + step * 7), y: 237 - vertical / length * (55 + step * 7), width: 6, height: 6 }, tint);
     }
   }

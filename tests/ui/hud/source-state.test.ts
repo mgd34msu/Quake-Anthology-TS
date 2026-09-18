@@ -85,3 +85,29 @@ test("source mission objectives queue explicit typewriter messages once per addr
   expect(hud.drainObjectivePrints()).toEqual([{ text: "Disable reactor", seconds: 2 }]);
   expect(hud.drainObjectivePrints()).toEqual([]);
 });
+
+test("rerelease keyed POIs update and remove without crossing seats or duplicating unkeyed entries", async () => {
+ const hud = new SeatSourceHud(actor);
+ const assets = { load: async (): Promise<`resource:${string}`> => "resource:poi", picture: () => undefined, assets: { provider: async () => ({ palette: null }) } };
+ const event = { kind: "keyed-poi", actor, key: 7, position: { x: 1, y: 2, z: 3 }, image: "marker", duration: 1000, color: 208, flags: 0 } satisfies Extract<SimulationPresentationEvent, { kind: "q2-rerelease" }>["event"];
+ hud.receive({ ...stamp, kind: "q2-rerelease", event }); await hud.prepare(assets);
+ expect(hud.points()).toHaveLength(1); expect(hud.points()[0]?.hideOnAim).toBe(false);
+ hud.receive({ ...stamp, kind: "q2-rerelease", event: { ...event, position: { x: 4, y: 5, z: 6 }, flags: 1 } }); await hud.prepare(assets);
+ expect(hud.points()).toHaveLength(1); expect(hud.points()[0]).toMatchObject({ id: 7, origin: { x: 4, y: 5, z: 6 }, hideOnAim: true, expiresMilliseconds: 3000 });
+ hud.receive({ ...stamp, kind: "q2-rerelease", event: { kind: "remove-poi", actor: other, key: 7 } }); expect(hud.points()).toHaveLength(1);
+ hud.receive({ ...stamp, kind: "q2-rerelease", event: { kind: "remove-poi", actor, key: 7 } }); expect(hud.points()).toHaveLength(0);
+ for (let i=0;i<2;i++) hud.receive({ ...stamp, kind: "q2-rerelease", event: { ...event, key: 0 } }); await hud.prepare(assets);
+ expect(hud.points()).toHaveLength(2);
+ hud.receive({ ...stamp, kind: "q2-rerelease", event: { kind: "remove-poi", actor, key: 0 } }); expect(hud.points()).toHaveLength(2);
+});
+test("rerelease damage retains direction and material flags, accumulating matching directions", () => {
+ const hud = new SeatSourceHud(actor);
+ const event = { kind: "directional-damage", actor, direction: { x: 1, y: 0, z: 0 }, damage: 12, health: true, armor: false, shield: false } satisfies Extract<SimulationPresentationEvent, { kind: "q2-rerelease" }>["event"];
+ hud.receive({ ...stamp, kind: "q2-rerelease", event });
+ hud.receive({ ...stamp, kind: "q2-rerelease", event: { ...event, damage: 4, health: false, shield: true } });
+ expect(hud.presentation(2500).damageIndicators).toMatchObject([{ direction: event.direction, amount: 16, health: true, shield: true, armor: false, expiresMilliseconds: 3000 }]);
+ const damage = hud.presentation(2500).damageIndicators?.[0];
+ if (damage === undefined || !("color" in damage)) throw new Error("Expected directional damage");
+ expect(damage.color.x).toBeCloseTo(Math.SQRT1_2); expect(damage.color.y).toBeCloseTo(Math.SQRT1_2);
+ expect(hud.presentation(3000).damageIndicators).toEqual([]);
+});

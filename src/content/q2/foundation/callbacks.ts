@@ -1,8 +1,10 @@
+import type { WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 import type { Q2Die, Q2Entity, Q2Pain, Q2Think, Q2Touch, Q2Use } from "./host.ts";
 
 export const freeQ2Entity: Q2Think = (entity, game) => game.remove(entity);
 
 export interface Q2CallbackDefinitions {
+  readonly trajectory?: readonly { readonly touch: Q2Touch; readonly project: (entity: Q2Entity, update: WeaponTrajectoryUpdate) => void }[];
   readonly think?: Readonly<Record<string, Q2Think>>;
   readonly use?: Readonly<Record<string, Q2Use>>;
   readonly touch?: Readonly<Record<string, Q2Touch>>;
@@ -43,6 +45,11 @@ class SourceCallbacks<T> {
 
 /** Q2 saves store source function names, exactly as the original game save tables do. */
 export class Q2SourceCallbacks {
+  private readonly trajectories = new Map<string, (entity: Q2Entity, update: WeaponTrajectoryUpdate) => void>();
+  projectTrajectory(entity: Q2Entity, update: WeaponTrajectoryUpdate): void {
+    const name = this.touch.name(entity.touch);
+    if (name !== null) this.trajectories.get(name)?.(entity, update);
+  }
   readonly think = new SourceCallbacks<Q2Think>();
   readonly use = new SourceCallbacks<Q2Use>();
   readonly touch = new SourceCallbacks<Q2Touch>();
@@ -53,6 +60,13 @@ export class Q2SourceCallbacks {
   register(definitions: Q2CallbackDefinitions): undefined {
     this.think.register(definitions.think); this.use.register(definitions.use); this.touch.register(definitions.touch);
     this.pain.register(definitions.pain); this.die.register(definitions.die); this.blocked.register(definitions.blocked);
+    for (const projection of definitions.trajectory ?? []) {
+      const name = this.touch.name(projection.touch);
+      if (name === null) throw new Error("Trajectory projection requires a named source touch callback");
+      const previous = this.trajectories.get(name);
+      if (previous !== undefined && previous !== projection.project) throw new Error(`Duplicate Q2 trajectory projection ${name}`);
+      this.trajectories.set(name, projection.project);
+    }
     return undefined;
   }
 }

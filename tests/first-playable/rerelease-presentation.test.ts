@@ -90,6 +90,31 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/rerelease/Q2Game.kpf"
       colored++; minX = Math.min(minX, x); maxX = Math.max(maxX, x); if (x >= 320) otherSeat++;
     }
     expect(colored).toBeGreaterThan(100); expect(Math.abs((minX + maxX) / 2 - 160)).toBeLessThan(8); expect(otherSeat).toBe(0);
+    const beforeSecondFog = presentation.view(second.actor, 1).q2Fog;
+    presentation.receive([
+      { kind: "q2-rerelease", content: contentId, seconds: 1, sequence: 10001, recipient: first.actor, event: { kind: "story", text: "" } },
+      { kind: "q2-rerelease", content: contentId, seconds: 1, sequence: 10002, recipient: first.actor, sourceEntity: 17,
+        event: { kind: "localized-print", actor: null, level: "chat", text: "Private text", args: [] } },
+      { kind: "q2-rerelease", content: contentId, seconds: 1, sequence: 10003, recipient: first.actor,
+        event: { kind: "sky", name: "unit1_", rotation: 45, autoRotate: true, axis: { x: 0, y: 0, z: 1 } } },
+      { kind: "q2-rerelease", content: contentId, seconds: 1, sequence: 10004, recipient: first.actor,
+        event: { kind: "item-visibility", actor: second.actor, item: first.actor, visible: false } },
+      { kind: "q2-rerelease", content: contentId, seconds: 1, sequence: 10005, recipient: first.actor,
+        event: { kind: "fog", actor: second.actor, value: createQ2Fog(), transitionMilliseconds: 0 } },
+      { kind: "q2-rerelease", content: contentId, seconds: 1, sequence: 10006, recipient: first.actor,
+        event: { kind: "item-visibility", actor: first.actor, item: second.actor, visible: false } },
+    ]);
+    const userinfo = events.find(source => source.kind === "q2-player" && source.event.kind === "userinfo");
+    if (userinfo?.kind !== "q2-player" || userinfo.event.kind !== "userinfo") throw new Error("Missing source player name");
+    presentation.receive([{ ...userinfo, recipient: first.actor, sequence: 10007, event: { ...userinfo.event, name: "Private alias" } }]);
+    await presentation.prepare();
+    expect(presentation.storyActive(first.actor)).toBe(false); expect(presentation.storyActive(second.actor)).toBe(true);
+    expect(presentation.view(first.actor, 1).q2Sky?.rotation).toBe(45); expect(presentation.view(second.actor, 1).q2Sky?.rotation).toBe(90);
+    expect(presentation.view(second.actor, 1).q2Fog).toEqual(beforeSecondFog);
+    expect(presentation.itemVisible(second.actor, first.actor)).toBe(true); expect(presentation.itemVisible(first.actor, second.actor)).toBe(false);
+    const targeted = presentation.drainPrints(); expect(targeted).toHaveLength(1); expect(targeted[0]?.recipient).toBe(first.actor); expect(targeted[0]?.sourceEntity).toBe(17);
+    expect(await presentation.localizeMessage(identity.seat(0), contentId, `##P${userinfo.event.slot}`)).toBe("Private alias");
+    expect(await presentation.localizeMessage(identity.seat(1), contentId, `##P${userinfo.event.slot}`)).toBe(userinfo.event.name);
     presentation.receive([{ kind: "q2-rerelease", content: contentId, seconds: 1, sequence: 10001, event: { kind: "story", text: "" } }]);
     await presentation.prepare(); expect(presentation.storyActive(first.actor)).toBe(false); expect(presentation.storyActive(second.actor)).toBe(false);
     target.close();

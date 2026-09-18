@@ -79,6 +79,7 @@ function projectile(game: Q1EntityServices, player: Q1PlayerState, kind: "rocket
   entity.touch = game.named.touch(entity, "projectile_touch");
   game.schedule(entity, kind === "grenade" ? 2.5 : kind === "rocket" ? 5 : 6,
     game.named.action(entity, kind === "grenade" ? "GrenadeExplode" : "SUB_Remove"));
+  game.launchProjectileBehavior(entity, player.actor.id, player.weapon, kind === "rocket" ? "rocket" : kind === "grenade" ? "grenade" : "nail");
   return entity;
 }
 export function projectileTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null, _normal: Vec3, surface?: TouchContact["surface"]): undefined {

@@ -181,3 +181,66 @@ test("range write observers follow aliases and stop after removal or backing rep
   memory.writeInt32(base, 9); removeFirst();
   expect(lateCalls).toBe(0);
 });
+
+test("mapping locality preserves live code, protection splits, holes and remapped backing", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const base = memory.map({ base: 0x10000n, byteLength: 32, permissions: "read-write-execute" });
+  memory.writeUint8(base, 0x90);
+  expect(memory.fetch(base, 1)[0]).toBe(0x90);
+  const copied = memory.fetch(base, 1); copied[0] = 0xcc;
+  expect(memory.fetch(base, 1)[0]).toBe(0x90);
+  memory.writeUint8(base, 0xc3);
+  expect(memory.fetch(base, 1)[0]).toBe(0xc3);
+  memory.protect(base, 16, "read");
+  expect(() => memory.fetch(base, 1)).toThrow(GuestMemoryFault);
+  expect(memory.readUint8(base)).toBe(0xc3);
+  expect(() => memory.writeUint8(base, 0)).toThrow(GuestMemoryFault);
+  const middle = memory.offset(base, 16n);
+  memory.writeUint8(middle, 7); expect(memory.readUint8(middle)).toBe(7);
+  memory.unmap(middle, 16);
+  expect(() => memory.readUint8(middle)).toThrow(GuestMemoryFault);
+  expect(() => memory.copy(memory.offset(base, 15n), 2)).toThrow(GuestMemoryFault);
+  memory.map({ base: middle.byteOffset, byteLength: 16, permissions: "read-write-execute", bytes: new Uint8Array([9]) });
+  expect(memory.fetch(middle, 1)[0]).toBe(9);
+  expect(memory.copy(memory.offset(base, 15n), 2)).toEqual(new Uint8Array([0, 9]));
+  const foreign = new SparseGuestMemory({ module, pointerBytes: 8 });
+  expect(() => memory.fetch(at(foreign, middle.byteOffset), 1)).toThrow(GuestMemoryFault);
+});
+
+test("first-fit hints revisit coalesced holes and preserve alignment after range edits", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const first = memory.allocate({ byteLength: 8, alignment: 8n });
+  const second = memory.allocate({ byteLength: 8, alignment: 8n });
+  const third = memory.allocate({ byteLength: 16, alignment: 8n });
+  memory.unmap(first, 8);
+  const tail = memory.allocate({ byteLength: 16, alignment: 8n });
+  expect(tail.byteOffset).toBe(third.byteOffset + 16n);
+  memory.unmap(second, 8);
+  const merged = memory.allocate({ byteLength: 16, alignment: 8n });
+  expect(merged.byteOffset).toBe(first.byteOffset);
+  memory.protect(merged, 8, "read");
+  memory.unmap(memory.offset(merged, 8n), 8);
+  expect(memory.allocate({ byteLength: 8, alignment: 8n }).byteOffset).toBe(first.byteOffset + 8n);
+  expect(memory.allocate({ byteLength: 8, alignment: 16n }).byteOffset % 16n).toBe(0n);
+  expect(() => memory.map({ base: third.byteOffset + 4n, byteLength: 1, permissions: "read" })).toThrow(GuestMemoryFault);
+});
+
+test("scalar instruction fetch observes live aliases, permission changes and remapped bytes", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const code = memory.map({ base: 0x10000n, byteLength: 2, permissions: "read-write-execute", bytes: new Uint8Array([0x90, 0xc3]) });
+  const alias = memory.mapAlias({ base: 0x20000n, byteLength: 2, permissions: "read-write", source: code });
+  expect(memory.fetchByte(code.byteOffset)).toBe(0x90);
+  memory.writeUint8(alias, 0xcc);
+  expect(memory.fetchByte(code.byteOffset)).toBe(0xcc);
+  expect(() => memory.fetchByte(alias.byteOffset)).toThrow(GuestMemoryFault);
+  memory.protect(code, 1, "read");
+  expect(() => memory.fetchByte(code.byteOffset)).toThrow(GuestMemoryFault);
+  expect(memory.fetchByte(code.byteOffset + 1n)).toBe(0xc3);
+  memory.unmap(code, 2);
+  expect(() => memory.fetchByte(code.byteOffset)).toThrow(GuestMemoryFault);
+  memory.map({ base: code.byteOffset, byteLength: 1, permissions: "execute", bytes: new Uint8Array([0xf4]) });
+  expect(memory.fetchByte(code.byteOffset)).toBe(0xf4);
+  expect(() => memory.fetchByte(code.byteOffset + 1n)).toThrow(GuestMemoryFault);
+  expect(() => memory.fetchByte(0n)).toThrow(GuestMemoryFault);
+  expect(() => memory.fetchByte(1n << 64n)).toThrow(GuestMemoryFault);
+});

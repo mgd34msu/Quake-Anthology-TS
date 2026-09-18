@@ -98,6 +98,12 @@ export function createPlayerMovementProvider(player: Pick<MovementPlayer, "profi
         curves: true, playerCurveClip: true } satisfies Extract<TracePolicy, { readonly kind: "q3" }>) }) });
   }
 }
+export type MovementPredictionPlayer = Readonly<Pick<MovementPlayer,
+  "client" | "actor" | "profile" | "standingBounds" | "bounds" | "sourceMovement" | "character" | "worldGravity" | "q2MovementConfig" | "flight"
+  | "sourceEnvironment" | "gravityMultiplier" | "state" | "arsenal" | "animation" | "viewHeight">> & {
+  readonly services: Pick<MovementServices, "numeric">;
+  readonly q3Arsenal?: import("../../../content/q3/foundation/arsenal.ts").Q3ArsenalRuntimeState;
+};
 export interface PlayerMovementPrediction {
   readonly provider: MovementProvider;
   readonly services: MovementServices;
@@ -105,10 +111,10 @@ export interface PlayerMovementPrediction {
 }
 
 /** Providers receive detached movement and hook state, while all traces read the active shared scene. */
-export function createPlayerMovementPrediction(simulation: SharedSimulation, player: Readonly<MovementPlayer>, origin: Vec3, velocity: Vec3,
+export function createPlayerMovementPrediction(simulation: SharedSimulation, player: MovementPredictionPlayer, origin: Vec3, velocity: Vec3,
   milliseconds: number, crouched = false, selectedProfile: MovementProfile = selectedMovementProfile(player)): PlayerMovementPrediction {
   const profile = selectedProfile, source = simulation.q3Source(), entity = source?.pool.at(player.client.slot);
-  const combat = simulation.combat.read(player.actor.id);
+  const combat = simulation.combat.read(player.actor.id) ?? player.sourceEnvironment;
   if (combat === null) throw new Error("Player has no combat state during movement prediction");
   const environment = playerMovementEnvironment(player, combat);
   const baseline = entity !== undefined && source !== null && profile.kind === "q3" ? readQ3MovementState(entity, source.records) : player.state;
@@ -116,7 +122,7 @@ export function createPlayerMovementPrediction(simulation: SharedSimulation, pla
   if (initial.kind === "q3") initial = { ...initial, movementFlags: (initial.movementFlags & ~2) | (crouched ? 1 : 0) };
   let q3Hooks: Q3MovementHooks;
   if (player.arsenal.state.kind === "q3") {
-    let runtime = entity !== undefined && source !== null ? readQ3ArsenalRuntime(entity, q3SpawnArsenalRuntime(source.options.product, 100)) : q3SpawnArsenalRuntime("baseq3", 100);
+    let runtime = entity !== undefined && source !== null ? readQ3ArsenalRuntime(entity, q3SpawnArsenalRuntime(source.options.product, 100)) : player.q3Arsenal ?? q3SpawnArsenalRuntime("baseq3", 100);
     q3Hooks = createQ3SourceMovementHooks({ read: () => runtime, write: (_actor, _execution, next) => { runtime = next; return undefined; }, gauntletHit: () => false });
   } else {
     q3Hooks = { firing: () => false,
@@ -153,7 +159,7 @@ export function createPlayerMovementPrediction(simulation: SharedSimulation, pla
         command: { kind: profile.kind, milliseconds, angles: { x: -state.deltaAngles.x, y: angles.y - state.deltaAngles.y, z: -state.deltaAngles.z }, forwardMove: horizontal, sideMove: 0, buttons: up > 0 ? 8 : up < 0 ? 16 : 0, serverFrame: index } };
       if (profile.kind === "q3" && state.kind === profile.kind) return { ...base, kind: profile.kind, profile, state,
         command: { kind: profile.kind, serverTimeMilliseconds: time, angleWords: [-state.deltaAngleWords[0], (words[1] - state.deltaAngleWords[1]) & 65535, -state.deltaAngleWords[2]],
-          forwardMove: Math.round(horizontal * 127 / 400), rightMove: 0, upMove: Math.round(up * 127 / 400), buttons: 0, weapon: entity?.client?.ps.weapon ?? 0 } };
+          forwardMove: Math.round(horizontal * 127 / 400), rightMove: 0, upMove: Math.round(up * 127 / 400), buttons: 0, weapon: entity?.client?.ps.weapon ?? (player.arsenal.state.kind === "q3" ? player.arsenal.state.sourceWeapon : 0) } };
       throw new Error("Player state differs from selected movement");
     } };
 }

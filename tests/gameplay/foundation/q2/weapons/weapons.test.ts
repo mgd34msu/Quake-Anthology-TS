@@ -1,3 +1,5 @@
+import { Q2MissionPackProjectiles } from "../../../../../src/content/q2/missionpacks/projectiles/index.ts";
+import type { WeaponBehaviorLaunch, WeaponBehaviorProjectilePort } from "../../../../../src/contracts/weapon-behavior.ts";
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../../../src/contracts/identity.ts";
@@ -28,7 +30,7 @@ const input: Q2WeaponInput = {
   haste: false, noStackDouble: false, instantSwitch: false, quickSwitch: true, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false,
 };
 
-function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, infiniteAmmo = false, mode: "singleplayer" | "deathmatch" = "singleplayer") {
+function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, infiniteAmmo = false, mode: "singleplayer" | "deathmatch" = "singleplayer", weaponBehavior?: WeaponBehaviorProjectilePort) {
   let now = 0;
   const actors = new SessionActorRegistry(createIdentityOwner(`q2-weapons-${edition}-${name}`));
   const callbacks = new ActorCallbackTable(actors);
@@ -55,7 +57,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
   const monsters = new Set<ActorId>();
   const tracing = { trace: clearTrace };
   const host: Q2FoundationHost = {
-    actors, callbacks, bodies, combat, inventory,
+    actors, callbacks, bodies, combat, inventory, ...(weaponBehavior === undefined ? {} : { weaponBehavior }),
     now: () => now, gravity: () => 800, frameSeconds: () => frameSeconds, random: () => 0.5, schedule: () => undefined, touchTriggers: () => undefined,
     trace: request => tracing.trace(request), pointContents: () => 0, inPvs: () => true, inPhs: () => true, areasConnected: () => true,
     nearby: (origin, radius) => [...actors.ownedBy("q3:character"), ...actors.ownedBy("q2:game")].map(actor => actor.id).filter(actor => {
@@ -484,5 +486,49 @@ test("BFG explosion requires owner visibility for native and foreign shared owne
     visible.think?.(visible, scene.game);
     expect(scene.combat.read(target.actor.id)?.health ?? 500).toBeLessThan(before ?? 500);
     scene.actors.close();
+  }
+});
+
+test("selected Q2 rocket behavior uses the foreign shooter and keeps primary presentation and impact", () => {
+  const launches: WeaponBehaviorLaunch[] = [];
+  let steps = 0;
+  const scene = fixture("rerelease", "rocketlauncher", 0.025, false, "singleplayer", {
+    controlsTrajectory: () => true,
+    launch: input => { launches.push(input); return { origin: { x: 8, y: 2, z: 16 }, velocity: { x: 300, y: 0, z: 0 }, angles: zero }; },
+    step: (_projectile, body, time) => { steps++; expect(time).toBe(0.25); return { origin: body.origin, velocity: { x: 0, y: 500, z: 0 }, angles: { x: 0, y: 90, z: 0 } }; },
+  });
+  const rocket = scene.weapons.fireRocket(scene.self, scene.game, zero, forward, 100, 650, 120, 120);
+  expect(launches).toHaveLength(1);
+  expect(launches[0]?.shooter.equals(scene.player.id)).toBe(true);
+  expect(launches[0]?.weapon).toBe("q2:weapon_rocketlauncher"); expect(launches[0]?.role).toBe("rocket");
+  expect(launches[0]?.body.velocity).toEqual({ x: 650, y: 0, z: 0 });
+  expect(scene.game.body(rocket).velocity).toEqual({ x: 300, y: 0, z: 0 });
+  expect(scene.game.body(rocket).origin).toEqual({ x: 8, y: 2, z: 16 });
+  const touch = rocket.touch;
+  scene.game.applyProjectileBehavior(rocket.actor.id, 0.25);
+  expect(scene.game.body(rocket).velocity).toEqual({ x: 0, y: 500, z: 0 });
+  expect(rocket.model).toBe("models/objects/rocket/tris.md2"); expect(rocket.damage).toBe(100); expect(rocket.touch).toBe(touch);
+  expect(steps).toBe(1);
+  const monster = scene.target(256);
+  scene.weapons.fireRocket(monster, scene.game, zero, forward, 100, 650, 120, 120);
+  expect(launches).toHaveLength(1);
+});
+
+test("selected trajectory survives tracker primary aim while unselected tracker keeps source steering", () => {
+  for (const selected of [false, true]) {
+    const attached = new Set<ActorId>();
+    const scene = fixture("rerelease", "blaster", 0.025, false, "singleplayer", {
+      controlsTrajectory: actor => attached.has(actor),
+      launch: input => { if (!selected) return null; attached.add(input.projectile.id); return { origin: input.body.origin, velocity: { x: 0, y: 300, z: 0 }, angles: { x: 0, y: 90, z: 0 } }; },
+      step: () => null,
+    });
+    try {
+      const projectiles = new Q2MissionPackProjectiles({ base: scene.weapons, monster: () => null, playerEffect: () => undefined });
+      const target = scene.target(256), bolt = projectiles.fireTracker(scene.self, scene.game, zero, forward, 50, 1000, target.actor.id);
+      const think = bolt.think, touch = bolt.touch; if (think === null) throw new Error("Missing source tracker think");
+      think(bolt, scene.game); scene.game.applyProjectileBehavior(bolt.actor.id, 0.1);
+      expect(scene.game.body(bolt).velocity).toEqual(selected ? { x: 0, y: 300, z: 0 } : { x: 1000, y: 0, z: 0 });
+      expect(bolt.damage).toBe(50); expect(bolt.touch).toBe(touch); expect(bolt.nextThink).toBe(0.1);
+    } finally { scene.actors.close(); }
   }
 });

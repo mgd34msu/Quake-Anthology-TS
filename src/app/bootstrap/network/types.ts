@@ -66,6 +66,8 @@ export interface Q2ApplicationServerHost {
     carriedPlayer(client: ClientId): Q2ApplicationPlayer;
     begin?(player: Q2ApplicationPlayer): void;
     rawMessages?(player: Q2ApplicationPlayer): readonly { readonly bytes: Uint8Array; readonly reliable: boolean }[];
+    /** Game-import records for local source presentation, before native peer wire conversion. */
+    sourceMessages?(player: Q2ApplicationPlayer): readonly { readonly bytes: Uint8Array; readonly reliable: boolean }[];
     gameState(player: Q2ApplicationPlayer, protocol?: Q2ProtocolIdentity): Q2ApplicationGameState;
     frame(player: Q2ApplicationPlayer, output: SimulationOutput, protocol?: Q2ProtocolIdentity): Q2WireFrame;
     events(player: Q2ApplicationPlayer, output: SimulationOutput, events: readonly SimulationPresentationEvent[]): readonly Q2ApplicationServerEvent[];

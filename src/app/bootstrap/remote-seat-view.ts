@@ -139,7 +139,8 @@ export class RemoteSeatView {
     this.presentation.sourceEvents(events);
     await this.presentation.prepare(output.snapshot, models, characters);
     return { seat: this.presentation.local.player.seat.id, snapshot: output.snapshot, events, scene: remote.scene, music: false,
-      effectSounds: this.effects.drainSounds() };
+      effectSounds: [...this.effects.drainSounds(), ...this.effects.drainRecipientSounds()
+        .filter(batch => batch.recipient.equals(this.presentation.local.player.actor)).flatMap(batch => batch.sounds)] };
   }
 
   async close(): Promise<void> {

@@ -1,6 +1,7 @@
 // Source be_ai_move.c decisions borrow shared navigation and selected movement prediction.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { Bounds, Vec3 } from "../../../../contracts/math.ts";
+import type { TraceQuery, TraceResult } from "../../../../contracts/scene.ts";
 import type { ServerTraceResult } from "../../../../content/q3/base/world.ts";
 import type { NavigationRuntime } from "../../../navigation/runtime.ts";
 import type { NavigationEdge } from "../../../navigation/types.ts";
@@ -15,6 +16,9 @@ export interface BotTravelPredictionResult {
   /** Explicit crossing area wins over classifying an endpoint exactly on a BSP plane. */
   readonly endArea: number | null;
   readonly trajectory: readonly Vec3[]; readonly seconds: number; readonly grounded: boolean; readonly waterLevel: number;
+  /** Last collision query actually executed by the selected movement provider. */
+  readonly trace: { readonly query: TraceQuery; readonly result: TraceResult } | null;
+  readonly bounds: Bounds | null;
 }
 export interface BotTravelModel {
   readonly entity: number; readonly origin: Vec3; readonly bounds: Bounds;

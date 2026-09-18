@@ -1,3 +1,4 @@
+import { prepareQ2DamageBlend } from "./q2-damage-blend.ts";
 import { Q1MapFog } from "./q1-fog.ts";
 import { q3Hardware } from "../../render/q3-hardware.ts";
 import { prepareDebugShapes } from "../../render/scene/debug-shapes.ts";
@@ -184,7 +185,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     return undefined;
   }
 
-  sourceEvents(events: readonly SimulationPresentationEvent[]): void {
+  sourceEvents(incoming: readonly SimulationPresentationEvent[]): void {
+    const events = incoming.filter(event => event.recipient === undefined || event.recipient.equals(this.local.player.actor));
     this.q1Fog?.receive(events);
     for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.push(source);
     if (this.q3Client !== null) {
@@ -318,9 +320,14 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
       this.frames.command(command);
     }, material), "pixels");
-    const blend = this.simulation.playerView(this.local.player.actor).blend ?? playerView.blend;
+    const sourceView = this.simulation.playerView(this.local.player.actor);
+    const blend = sourceView.blend ?? playerView.blend;
     if (this.q3Client === null && blend !== null) draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height },
       blend, { kind: "image", name: "white", image: this.assets.world.shaders.textures.white.image });
+    if (this.q3Client === null && sourceView.damageBlend !== undefined) {
+      const batches = prepareQ2DamageBlend(sourceView.damageBlend, camera.viewport, this.assets.world.shaders.textures.white.image);
+      if (batches.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
+    }
     this.finale.draw(draw, this.preparedTime);
     this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, this.viewport.height / 480));
     this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,

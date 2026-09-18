@@ -30,17 +30,32 @@ export function projectBotMovement(query: BotMovementPrediction, projection: Bot
   let previous: MovementResult | null = null, end = { ...query.origin }, velocity = { ...query.velocity };
   let seconds = 0, frames = 0, stopEvent = 0, grounded = query.onGround, waterLevel = 0;
   let endArea: number | null = null;
+  const observation: { trace: BotTravelPredictionResult["trace"] } = { trace: null };
+  let bounds: BotTravelPredictionResult["bounds"] = null;
+  const scene = projection.services.scene;
+  const observed: BotMovementProjection = { ...projection, services: { ...projection.services, scene: {
+    trace(request) {
+      const result = scene.trace(request);
+      observation.trace = { query: request, result };
+      return result;
+    },
+    pointContents: request => scene.pointContents(request),
+    boxLeaves: (bounds, limit) => scene.boxLeaves(bounds, limit),
+    areasConnected: (first, second) => scene.areasConnected(first, second),
+    clusterVisible: (from, to, kind) => scene.clusterVisible(from, to, kind),
+  } } };
   const trajectory: Vec3[] = [end], noCommand = { x: 0, y: 0, z: 0 };
   for (let frame = 0; frame < query.maxFrames; frame++) {
     const input = projection.input(previous, frame, frame < query.commandFrames ? query.commandMove : noCommand);
     const elapsed = input.frame.elapsed.kind === "milliseconds" ? input.frame.elapsed.value / 1000 : input.frame.elapsed.value;
     if (!(elapsed > 0)) throw new RangeError("Bot movement projection must advance detached source time");
-    const result = move(input, projection);
+    const result = move(input, observed);
     if (result.status === "actor-removed") throw new Error("Movement projection attempted to remove the authoritative actor");
     const state = result.state;
     end = state.kind === "q2-classic" ? { x: state.originEighths[0] / 8, y: state.originEighths[1] / 8, z: state.originEighths[2] / 8 } : { ...state.origin };
     velocity = state.kind === "q2-classic" ? { x: state.velocityEighths[0] / 8, y: state.velocityEighths[1] / 8, z: state.velocityEighths[2] / 8 } : { ...state.velocity };
     grounded = result.ground.kind !== "none"; waterLevel = result.waterLevel;
+    bounds = result.bounds;
     const stop = projection.stop(previous, result, frame);
     endArea = stop.area;
     stopEvent = stop.events & query.stopEvents;
@@ -48,5 +63,6 @@ export function projectBotMovement(query: BotMovementPrediction, projection: Bot
     seconds += elapsed; frames++; trajectory.push(end); previous = result;
     if (stopEvent !== 0) break;
   }
-  return { end, endArea, velocity, frames, stopEvent, trajectory, seconds, grounded, waterLevel };
+  return { end, endArea, velocity, frames, stopEvent, trajectory, seconds, grounded, waterLevel,
+    trace: observation.trace, bounds };
 }

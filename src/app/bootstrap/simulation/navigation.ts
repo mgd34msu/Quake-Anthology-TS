@@ -10,7 +10,9 @@ import type { NavigationPredictionDriver, NavigationProfile, NavigationWorld } f
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { LoadedApplicationContent } from "../content.ts";
 import { movementOrigin } from "./players.ts";
-import type { MovementPlayer } from "./players.ts";
+import type { MovementPredictionPlayer } from "./player-movement.ts";
+import { guestMovementProjection } from "./q3/guest-movement.ts";
+import type { ClientId } from "../../../contracts/identity.ts";
 import type { SharedSimulation } from "./runtime.ts";
 import { capturePlayerLocomotion, playerLocomotionMatches, createPlayerMovementPrediction, locomotionTemplate, playerCrouchedBounds, playerTracePolicy, selectedMovementProfile } from "./player-movement.ts";
 import type { LocomotionPlayer } from "./player-movement.ts";
@@ -41,14 +43,26 @@ export interface ApplicationBotNavigation extends SelectedBotNavigation {
 export interface ApplicationBotNavigationOptions { readonly content: LoadedApplicationContent; readonly simulation: SharedSimulation; }
 export async function createApplicationBotNavigation({ content, simulation }: ApplicationBotNavigationOptions): Promise<ApplicationBotNavigation> {
   if (content.recipe !== simulation.recipe) throw new Error("Navigation and simulation must use the same loaded recipe");
-  const firstPlayer = () => simulation.players().map(actor => simulation.movementPlayer(actor)).find(player => player !== null) ?? null;
+  const guestPlayers = new Map<ClientId, MovementPredictionPlayer>();
+  const players = (): readonly MovementPredictionPlayer[] => {
+    const guest = simulation.q3Guest();
+    if (guest === null) return simulation.players().flatMap(actor => { const player = simulation.movementPlayer(actor); return player === null ? [] : [player]; });
+    const current = guest.players();
+    for (const client of guestPlayers.keys()) if (!current.some(player => player.client.equals(client))) guestPlayers.delete(client);
+    return current.map(player => {
+      let projection = guestPlayers.get(player.client);
+      if (projection === undefined) { projection = guestMovementProjection(guest, player, content.recipe); guestPlayers.set(player.client, projection); }
+      return projection;
+    });
+  };
+  const firstPlayer = () => players()[0] ?? null;
   const first = firstPlayer() ?? locomotionTemplate(content.recipe);
-  const playerFor = (client: number): Readonly<MovementPlayer> => {
-    const player = simulation.players().map(actor => simulation.movementPlayer(actor)).find(value => value?.client.slot === client);
+  const playerFor = (client: number): MovementPredictionPlayer => {
+    const player = players().find(value => value.client.slot === client);
     if (player === undefined || player === null) throw new Error(`Navigation client ${client} is not admitted`);
     return player;
   };
-  const worldFor = (selectedPlayer: Readonly<MovementPlayer> | null): NavigationWorld => {
+  const worldFor = (selectedPlayer: MovementPredictionPlayer | null): NavigationWorld => {
     const boundModels = new Map<NavigationEntityBinding, number>();
     const driver: NavigationPredictionDriver = { begin: (request, selected) => {
       const player = selectedPlayer ?? firstPlayer();
@@ -137,7 +151,7 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
     navigationContent: content.recipe.map.geometry.provenance.mount.identity.content,
     mapBytes: await content.mounts.read(content.recipe.map.geometry) });
   let baseRuntime = loaded.runtime;
-  type CachedNavigation = { readonly player: Readonly<MovementPlayer> | null; readonly runtime: NavigationRuntime; readonly locomotion: LocomotionPlayer };
+  type CachedNavigation = { readonly player: MovementPredictionPlayer | null; readonly runtime: NavigationRuntime; readonly locomotion: LocomotionPlayer };
   const clients = new Map<number, CachedNavigation>();
   const forClient = (client: number): NavigationRuntime => {
     const player = playerFor(client), cached = clients.get(client);
@@ -153,7 +167,7 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
     },
     checkpoint() {
       return { version: 1, base: baseRuntime.checkpoint(), clients: Array.from(clients, ([client, cached]) => {
-        const current = simulation.players().map(actor => simulation.movementPlayer(actor)).find(player => player?.client.slot === client);
+        const current = players().find(player => player.client.slot === client);
         return { client, reusable: current !== undefined && current !== null && current === cached.player
           && playerLocomotionMatches(current, cached.locomotion), runtime: cached.runtime.checkpoint() };
       }) };

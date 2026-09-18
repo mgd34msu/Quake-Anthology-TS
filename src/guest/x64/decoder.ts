@@ -115,8 +115,7 @@ export class X64DecodeCursor {
 
   readByte(): number {
     if (this.bytes.length >= 15) throw new X64ProcessorFault(13, "Instruction exceeds 15 bytes");
-    const byte = this.memory.fetch(guestAddress(this.memory, this.nextIP, "execute"), 1)[0];
-    if (byte === undefined) throw new Error("Guest fetch returned no byte");
+    const byte = this.memory.fetchByte(canonicalAddress(this.nextIP));
     this.bytes.push(byte);
     return byte;
   }

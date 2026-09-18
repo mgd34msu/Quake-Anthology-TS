@@ -1,3 +1,4 @@
+import type { WeaponBehaviorProjectilePort, WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 /* Q2 gameplay provider boundary. Gameplay logic is adapted from id Software's
  * Quake II game and the rerelease game DLL. GPL-2.0-or-later. */
 import type { AttackProvenance, DamageOutcome, ItemId, TransitionIntent } from "../../../contracts/gameplay.ts";
@@ -92,6 +93,7 @@ export interface Q2WeaponTarget {
 }
 
 export interface Q2FoundationHost {
+  readonly weaponBehavior?: WeaponBehaviorProjectilePort;
   weaponTarget?(actor: ActorId): Q2WeaponTarget | null;
   monsterTarget?(actor: ActorId): import("../../monsters/target.ts").MonsterTargetObservation | null;
   registerEntity?(entity: Q2Entity, services: Q2EntityServices): undefined;
@@ -263,6 +265,7 @@ export interface Q2GameServices {
   pushTeam(actor: ActorId): readonly OwnedActor[];
   body(entity: Pick<Q2Entity, "actor">): BodyState;
   move(entity: Q2Entity, changes: Partial<BodyState>, link?: boolean): undefined;
+  projectTrajectory(entity: Q2Entity, update: WeaponTrajectoryUpdate): void;
   link(entity: Q2Entity): undefined;
   solid(entity: Q2Entity, solid: Q2Entity["solid"]): undefined;
   motion(entity: Q2Entity, kind: Q2Motion["kind"]): undefined;

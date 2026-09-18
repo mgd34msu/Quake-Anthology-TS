@@ -88,6 +88,9 @@ export type Q2RereleaseEvent =
   | { readonly kind: "help-computer"; readonly actor: ActorId; readonly visible: boolean; readonly primary: string; readonly secondary: string; readonly slowTime: boolean }
   | { readonly kind: "fog"; readonly actor: ActorId; readonly value: Q2FogState; readonly transitionMilliseconds: number }
   | { readonly kind: "flashlight"; readonly actor: ActorId; readonly enabled: boolean; readonly hand: Q2PlayerState["hand"] }
+  | { readonly kind: "keyed-poi"; readonly actor: ActorId; readonly key: number; readonly position: Vec3; readonly image: string; readonly duration: number; readonly color: number; readonly flags: number }
+  | { readonly kind: "remove-poi"; readonly actor: ActorId; readonly key: number }
+  | { readonly kind: "directional-damage"; readonly actor: ActorId; readonly direction: Vec3; readonly damage: number; readonly health: boolean; readonly armor: boolean; readonly shield: boolean }
   | { readonly kind: "poi"; readonly actor: ActorId; readonly position: Vec3; readonly image: string; readonly duration: number; readonly color: number }
   | { readonly kind: "help-path"; readonly actor: ActorId; readonly first: boolean; readonly position: Vec3; readonly direction: Vec3 }
   | { readonly kind: "coop-respawn"; readonly actor: ActorId; readonly state: Q2CoopRespawnState; readonly lives: number }

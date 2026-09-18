@@ -116,6 +116,40 @@ Use `llm_ask "How do I change mouse sensitivity?"` to print an answer in your co
 
 Only direct local console input can start LLM requests. Scripts, aliases, key bindings, game modules, and server commands cannot trigger them. Closing the session cancels pending requests. API requests use the selected provider and may incur that provider's charges.
 
+**Choosing a mod and map independently**
+
+In **Play a game → Custom game → World**, choose the game or mod for its rules and **Map content** for the installed product that supplies the map. The command-line equivalent is `--game PRODUCT --map-game MAP_PRODUCT --map MAP`. Omitting `--map-game` uses the selected game's maps.
+
+For example, an installed LRCTF Q3 module can run locally on Q2's `base1`:
+
+```sh
+./quake-typescript --game q3-classic-lrctf --map-game q2-classic-baseq2 \
+  --map base1 --movement q3 --character q3 --mode deathmatch +set bot_enable 0
+```
+
+The selected module still owns its rules and authored entity interpretation. A map must supply the entities and objectives those rules need; changing geometry does not invent missing CTF flags or mission scripts. Native clients also need a map format their original engine supports. Compatibility limits for guest modules and independent components remain below.
+
+QuakeC mods retain their source damage calculations, inventory constants, inline models, client messages, and saved state. Homefix and Copper have completed local launch, firing, save/load, and resumed play on Q2 geometry in source checks. These are bounded compatibility results; full campaign playthroughs remain open.
+
+Early Q3 server modules can use an explicit, artifact-pinned SDK profile. See [mod compatibility](docs/mod-compatibility.md) for the declaration format and supported boundaries. A profile must match the module's actual bytes; a mod's filename does not establish its ABI.
+
+**Mod projectile behaviors**
+
+A declared QuakeC trajectory can run on a selected Q1, Q2, or Q3 projectile launcher. Choose **Custom game → Equipment → Projectile trajectory**, or pass `--weapon-behavior PRODUCT/BEHAVIOR_ID`. The source module controls the projectile's trajectory and scheduled callbacks; the selected launcher retains its ammo, damage, impact, model, and sound. Saved games retain the module identity, private state, pending callbacks, and projectile attachments.
+
+For older packages without declarations, inspect the mounted program first:
+
+```sh
+./quake-typescript weapon-behavior inspect q1-classic-homefix --content /path/to/qfiles
+./quake-typescript weapon-behavior declare q1-classic-homefix --content /path/to/qfiles \
+  --id homefix:rocket --role rocket --fire CheckHomingRocket --activate ActivateHoming \
+  --title "Homefix homing rockets"
+```
+
+This example uses Homefix's actual callback names. Use the callbacks from the selected mod's source; inspection does not infer their purpose from their names. Declarations are written atomically to `weapon-behaviors.json` in the writable mod directory. They bind an exact module digest and do not modify installed packages. `--artifact` selects another mounted program path; `--user-content` changes the tooling command's writable content root. Run `weapon-behavior --help` for the complete syntax.
+
+This component adapter currently supports declared QuakeC projectile trajectories on the built-in arsenals. It does not automatically extract arbitrary weapon, monster, or rule changes from native DLLs or QVMs, and opaque primary game modules do not yet expose these projectile hooks. Whole-module execution and independent component composition have separate compatibility requirements.
+
 **Selections and current limits**
 
 The menu offers installed campaigns and starting maps, movement, character source and model, weapons, supported monster replacements, grapple placement, and offhand grenades. It resolves these choices through the same content and recipe system used by the application. Unsupported combinations can still fail preflight or return a runtime error to the menu.

@@ -1,3 +1,4 @@
+import type { WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 import type { AttackProvenance, DamageOutcome, ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -191,6 +192,20 @@ export class Q2EntityServices implements Q2GameServices {
 
   /** Keep level.current_entity scoped around the session's existing entity physics step. */
   runActor(actor: ActorId, callback: () => undefined): undefined { return this.invoke(actor, callback); }
+
+  applyProjectileBehavior(actor: ActorId, seconds: number): void {
+    const entity = this.entity(actor);
+    if (entity === null || this.host.bodies.attachment(actor) !== null) return;
+    const update = this.host.weaponBehavior?.step(entity.actor, this.body(entity), seconds);
+    if (update !== undefined && update !== null) {
+      this.projectTrajectory(entity, update);
+    }
+  }
+
+  projectTrajectory(entity: Q2Entity, update: WeaponTrajectoryUpdate): void {
+    this.sourceCallbacks.projectTrajectory(entity, update);
+    this.move(entity, update); this.motion(entity, entity.motion);
+  }
 
   prePhysics(actor: ActorId): undefined {
     const entity = this.entity(actor);

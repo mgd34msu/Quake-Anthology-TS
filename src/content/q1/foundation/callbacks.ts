@@ -1,3 +1,4 @@
+import type { WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 /* Named QC continuations. Only names are saved; handlers are registered by source modules. */
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -6,6 +7,7 @@ import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 
 export interface Q1CallbackHandlers {
+  trajectory?(game: Q1EntityServices, entity: Q1Actor, update: WeaponTrajectoryUpdate): void;
   action?(game: Q1EntityServices, entity: Q1Actor): undefined;
   use?(game: Q1EntityServices, entity: Q1Actor, other: ActorId | null, activator: ActorId | null): undefined;
   touch?(game: Q1EntityServices, entity: Q1Actor, other: ActorId, normal: Vec3 | null, surface?: TouchContact["surface"]): undefined;
@@ -36,6 +38,10 @@ export class Q1CallbackRegistry {
   }
   private get(name: string): Q1CallbackHandlers {
     const handlers = this.handlers.get(name); if (handlers === undefined) throw new Error(`Unknown Q1 saved callback: ${name}`); return handlers;
+  }
+  projectTrajectory(entity: Q1Actor, update: WeaponTrajectoryUpdate): void {
+    const name = callbackName(entity.touch);
+    if (name !== null) this.get(name).trajectory?.(this.game, entity, update);
   }
   action(entity: Q1Actor, name: string): () => undefined {
     const handler = this.get(name).action; if (handler === undefined) throw new Error(`Q1 callback is not an action: ${name}`);

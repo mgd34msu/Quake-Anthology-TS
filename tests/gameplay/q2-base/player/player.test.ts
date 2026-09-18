@@ -333,3 +333,25 @@ test("rotation resumes the owned MT stream and older player checkpoints default 
   expect(legacy.rules.mapListShuffle).toBe(false);
 });
 import { encodeCheckpointValue } from "../../../../src/persistence/value.ts";
+
+
+import { quakeCCharacterAnimation } from "../../../../src/app/bootstrap/simulation/quakec-character-animation.ts";
+import { advanceQ2PlayerAnimation } from "../../../../src/content/q2/base/player/view.ts";
+import type { ActorAnimationState } from "../../../../src/contracts/movement.ts";
+
+test("QC-owned actions select Q2 attack pain death and source respawn clips without combat ownership", () => {
+  const idle: ActorAnimationState = { provider: "q2:character/male", state: { kind: "q2", frame: 0, endFrame: 39, priority: 0, duck: false, run: false } };
+  const attack = quakeCCharacterAnimation(idle, "attack", false);
+  expect(attack.state).toMatchObject({ frame: 45, endFrame: 53, priority: 4 });
+  expect(quakeCCharacterAnimation(attack, "pain", false)).toBe(attack);
+  expect(quakeCCharacterAnimation(idle, "pain", true).state).toMatchObject({ frame: 168, endFrame: 172, priority: 3 });
+  const dead = quakeCCharacterAnimation(attack, "death", false);
+  expect(dead.state).toMatchObject({ frame: 183, endFrame: 189, priority: 5 });
+  expect(quakeCCharacterAnimation(dead, "attack", false)).toBe(dead);
+  if (dead.state.kind !== "q2") throw new Error("Wrong animation family");
+  const state = { animationPriority: dead.state.priority, animationEnd: dead.state.endFrame, animationDuck: false, animationRun: false };
+  const entity = { frame: dead.state.frame };
+  for (let tick = 0; tick < 20; tick++) advanceQ2PlayerAnimation(state, entity, true, false, false);
+  expect(entity.frame).toBe(189); expect(state.animationPriority).toBe(5);
+  expect(quakeCCharacterAnimation(dead, "alive", false).state).toMatchObject({ frame: 0, endFrame: 39, priority: 0 });
+});

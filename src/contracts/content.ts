@@ -286,8 +286,15 @@ export interface ProviderTiming {
   readonly numeric: NumericProfile;
 }
 
+export interface ResolvedWeaponBehaviorSelection {
+  readonly source: ProviderReference;
+  readonly artifact: ResolvedResourceReference;
+  readonly definition: import("./weapon-behavior.ts").WeaponBehaviorDefinition;
+}
+
 /** Resolved before session construction; renderer and window settings live elsewhere. */
 export interface ExecutableRecipe {
+  readonly weaponBehaviors?: readonly ResolvedWeaponBehaviorSelection[];
   readonly schemaVersion: 3;
   readonly id: RecipeId;
   readonly preset: RecipeId;

@@ -381,7 +381,7 @@ export class ApplicationAudio {
         await play(`*death${(event.event & ~0x300) - EntityEvent.EV_DEATH1 + 1}.wav`, 3); break;
       case EntityEvent.EV_JUMP_PAD: {
         const origin = this.snapshot?.bodies.find(body => body.actor.equals(actor))?.body.origin;
-        if (origin !== undefined) await this.play(content, "q3", "world/jumppad.wav", null, origin, 3, 1, 1);
+        if (origin !== undefined) await this.play(content, "q3", "world/jumppad.wav", null, origin, 3, 1, 1, 0, audience);
         await play("*jump1.wav", 3); break;
       }
       case EntityEvent.EV_JUMP: await play("*jump1.wav", 3); break;
@@ -425,7 +425,10 @@ export class ApplicationAudio {
   async receive(events: readonly SimulationPresentationEvent[], audience: AudioAudience = { kind: "world" }, music = true): Promise<void> {
     for (const source of events) {
       if (source.kind === "music") {
-        if (music) await this.playMusic(source.content, String(source.event.track));
+        if (music) {
+          if (source.event.kind === "cd-track") await this.playMusic(source.content, String(source.event.track));
+          else await this.music.cdCommand([source.event.paused ? "pause" : "resume"]);
+        }
       } else if (source.kind === "q1") {
         const event = source.event;
         if (event.kind === "sound") {

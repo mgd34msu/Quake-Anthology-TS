@@ -155,10 +155,14 @@ export class Q2CtfGrappleEquipment {
     }
     hook.projectile = true; hook.effects = effects; hook.model = "models/weapons/grapple/hook/tris.md2"; hook.owner = owner; hook.touch = this.sourceTouch; hook.damage = damage;
     game.move(hook, { origin: start, angles: vectorAngles(normalized), velocity: scale(normalized, speed), bounds: { min: zero, max: zero } }, false);
-    source.grapple = hook.actor.id; source.grappleState = "fly"; game.solid(hook, "box"); game.motion(hook, "fly-missile"); game.show(hook);
-    const trace = game.host.trace({ start: grappleBody(owner, game).origin, end: start, bounds: null, ignore: hook.actor.id, mask: hook.clipMask });
+    source.grapple = hook.actor.id; source.grappleState = "fly"; game.solid(hook, "box"); game.motion(hook, "fly-missile");
+    const trajectory = game.host.isPlayer(owner) ? game.host.weaponBehavior?.launch({ projectile: hook.actor, shooter: owner, weapon: "q2:weapon_grapple", role: "grapple", timeSeconds: game.host.now(), body: game.body(hook) }) ?? null : null;
+    if (trajectory !== null) { game.projectTrajectory(hook, trajectory); }
+    const launchOrigin = game.body(hook).origin;
+    game.show(hook);
+    const trace = game.host.trace({ start: grappleBody(owner, game).origin, end: launchOrigin, bounds: null, ignore: hook.actor.id, mask: hook.clipMask });
     if (trace.fraction < 1) {
-      game.move(hook, { origin: game.options.edition === "classic" ? add(start, scale(normalized, -10)) : add(trace.end, trace.sourcePlane.normal) });
+      game.move(hook, { origin: game.options.edition === "classic" ? add(launchOrigin, scale(trajectory === null ? normalized : normalize(trajectory.velocity), -10)) : add(trace.end, trace.sourcePlane.normal) });
       const other = trace.hit.kind === "actor" ? trace.hit.actor : game.host.worldActor();
       const surface = trace.kind === "q2" ? trace.surface === null ? null : { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value }
         : { name: "", nativeFlags: trace.surfaceFlags ?? 0, nativeValue: 0 };

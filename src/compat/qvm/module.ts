@@ -1,4 +1,4 @@
-import type { ExecutionProfile, GuestCallContext, GuestCallResult, GuestCallValue, GuestCheckpoint, GuestExecutor, GuestPrivateState, ModuleIdentity, Q3ApiIdentity, QvmCheckpoint, SavedGuestCallbackBinding } from "../../contracts/execution.ts";
+import type { ExecutionProfile, GuestCallContext, GuestCallResult, GuestCallValue, GuestCheckpoint, GuestExecutor, GuestPrivateState, ModuleIdentity, Q3ApiIdentity, QvmCheckpoint, SavedGuestCallbackBinding, QvmAbiProfile } from "../../contracts/execution.ts";
 import type { NumericProfile, RandomState } from "../../contracts/numeric.ts";
 import { float32ToBits } from "../../core/numeric.ts";
 import { CommonError } from "../../core/common-error.ts";
@@ -18,9 +18,9 @@ export const qvmNumericProfile: NumericProfile = {
   id: "q3:qvm-interpreted", arithmetic: { kind: "binary32", round: "each-operation" },
   scalarStorage: "binary32", floatToInt: "qvm-indefinite", integerOverflow: "wrap32",
 };
-export function qvmApi(role: QvmRole): Q3ApiIdentity {
+export function qvmApi(role: QvmRole, profile: QvmAbiProfile = "q3-modern"): Q3ApiIdentity {
   switch (role) {
-    case "qagame": return { kind: "q3-qagame", version: 8 };
+    case "qagame": return { kind: "q3-qagame", version: profile === "q3-modern" ? 8 : 7 };
     case "cgame": return { kind: "q3-cgame", version: 4 };
     case "ui": return { kind: "q3-ui", version: 6 };
   }
@@ -55,6 +55,7 @@ const deferredUiInitialization = Symbol("deferred UI API validation");
 /** One source VM instance. Reentry is scoped to the suspended host call. */
 export class QvmModule implements GuestExecutor {
   private executionProfile: Extract<ExecutionProfile, { readonly kind: "qvm" }>;
+  get abiProfile(): QvmAbiProfile { return this.options.artifact.abiProfile ?? "q3-modern"; }
   get profile(): Extract<ExecutionProfile, { readonly kind: "qvm" }> { return this.executionProfile; }
   readonly interpreter: QvmInterpreter;
   readonly memory: QvmMemory;
@@ -65,8 +66,9 @@ export class QvmModule implements GuestExecutor {
 
   constructor(private readonly options: QvmModuleOptions, initialization?: typeof deferredUiInitialization) {
     const artifact = options.artifact;
-    this.executionProfile = { kind: "qvm", module: artifact.module, api: qvmApi(artifact.role), magic: 0x12721444, numeric: qvmNumericProfile };
-    const systemCall = createQvmSystemCall(artifact.role, options.host, () => this.currentCommandArguments);
+    if (this.abiProfile !== "q3-modern" && artifact.role !== "qagame") throw new Error("Legacy QVM client and UI profiles are not implemented");
+    this.executionProfile = { kind: "qvm", module: artifact.module, api: qvmApi(artifact.role, this.abiProfile), magic: 0x12721444, numeric: qvmNumericProfile };
+    const systemCall = createQvmSystemCall(artifact.role, options.host, () => this.currentCommandArguments, this.abiProfile);
     this.interpreter = new QvmInterpreter(artifact.image, call => {
       const previous = this.currentSyscall;
       this.currentSyscall = call;
@@ -174,7 +176,7 @@ export class QvmModule implements GuestExecutor {
     const host = state.checkpoint();
     if (!sameModule(host.state.module, this.profile.module)) throw new Error("QVM host checkpoint belongs to another module");
     return {
-      kind: "qvm", module: this.profile.module, api: this.profile.api,
+      kind: "qvm", module: this.profile.module, api: this.profile.api, abiProfile: this.abiProfile,
       data: this.memory.bytes.slice(), instructionIndex: 0, programStack: this.interpreter.stackPointer,
       operandStack: [], random: host.random, callbacks: host.callbacks,
       hostState: { ...host.state, bytes: host.state.bytes.slice() },
@@ -184,7 +186,7 @@ export class QvmModule implements GuestExecutor {
   restore(checkpoint: GuestCheckpoint): undefined {
     this.live();
     if (this.interpreter.isActive) throw new Error("Cannot restore an active QVM");
-    if (checkpoint.kind !== "qvm" || !sameModule(checkpoint.module, this.profile.module)
+    if (checkpoint.kind !== "qvm" || (checkpoint.abiProfile ?? "q3-modern") !== this.abiProfile || !sameModule(checkpoint.module, this.profile.module)
       || checkpoint.api.kind !== this.profile.api.kind || checkpoint.api.version !== this.profile.api.version
       || !sameModule(checkpoint.hostState.module, this.profile.module)) throw new Error("QVM checkpoint artifact or API mismatch");
     if (checkpoint.instructionIndex !== 0 || checkpoint.operandStack.length !== 0 || checkpoint.programStack !== this.memory.bytes.length) {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
+import type { TraceHit } from "../../../../src/contracts/scene.ts";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
 import type { GuestAddress, GuestCallValue, ModuleIdentity } from "../../../../src/contracts/execution.ts";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
@@ -12,7 +13,7 @@ import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/g
 import { cgameExportLayout, edictLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestInt, guestPointer, privateClientPrefixLayout, RereleaseQ2GuestHost, RereleaseSourceClient, RereleaseSourceEdict, sourceRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/index.ts";
 
 function unavailable(): never { throw new Error("This binding check does not provide gameplay, assets or transport"); }
-function stateFixture() {
+function stateFixture(budgets: { readonly instructionBudget?: number; readonly loadingInstructionBudget?: number } = {}) {
   const module: ModuleIdentity = { id: "test:rr-bindings", artifactPath: "authored-abi-bytes", revision: "1", digest: createContentDigest("58".repeat(32)) };
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const callbacks = new GuestCallbackTable(memory);
@@ -34,7 +35,7 @@ function stateFixture() {
   const combat = new GameplayAuthority(actors, actorCallbacks, { impulse: unavailable, beforeReaction: unavailable, confirmed: unavailable });
   const inventory = new SharedInventoryTable(actors);
   const cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: actors.session, origin: { kind: "server-console" } } });
-  const host = new RereleaseQ2GuestHost({ runner, getGameApi: getter(game), getCgameApi: getter(cgame),
+  const host = new RereleaseQ2GuestHost({ ...budgets, runner, getGameApi: getter(game), getCgameApi: getter(cgame),
     engine: { actors, callbacks: actorCallbacks, bodies, combat, inventory, trace: unavailable, pointContents: unavailable, setAreaPortal: unavailable, setSolid: () => undefined, inlineModelBounds: unavailable, worldActor: unavailable },
     services: { cvars, print: unavailable, getConfigstring: unavailable, setConfigstring: unavailable, resourceIndex: unavailable, serverFrame: () => 17, commandArguments: () => [], commandTail: () => "", addCommand: unavailable, extension: () => null },
     spatial: { areasConnected: unavailable, visibility: unavailable, surfaceId: unavailable, boxEdicts: () => actors.ownedBy(module.id).map(value => value.id), inlineModel: unavailable, linkMetadata: () => ({ area: 0, area2: 0, networkSolid: 0 }) },
@@ -137,3 +138,82 @@ test("source info lookup compares exact keys and returns full byte length after 
   expect(memory.copy(output, 4)).toEqual(new Uint8Array([0xc3, 0, 0xa7, 0xa7]));
   expect(invokeImport("Info_ValueForKey", [guestPointer(info), guestPointer(host.core.string("NAME")), guestPointer(null), { kind: "uint64", value: 0n }])).toEqual({ kind: "uint64", value: 0n });
 });
+
+test("rerelease loading resumes x64 lifecycle calls between pump slices and unwinds cancellation", async () => {
+  const { host, memory, runner, code } = stateFixture({ instructionBudget: 1000, loadingInstructionBudget: 30_000 });
+  const game = host.module.bindGame(), returned = code(new Uint8Array([0xc3]));
+  const instructions = new Uint8Array(20_001).fill(0x90); instructions[20_000] = 0xc3;
+  const expensive = code(instructions);
+  for (const name of ["PreInit", "Shutdown"]) memory.writePointer(memory.offset(game, BigInt(fieldOffset(gameExportLayout, name))), returned);
+  for (const name of ["Init", "SpawnEntities"]) memory.writePointer(memory.offset(game, BigInt(fieldOffset(gameExportLayout, name))), expensive);
+  let pumps = 0;
+  const pump = async (): Promise<void> => {
+    pumps++; expect(runner.depth).toBe(1);
+    expect(() => host.module.callGame("PreInit")).toThrow("suspended");
+    await Promise.resolve();
+  };
+  expect(() => host.module.callGame("SpawnEntities", [guestPointer(null), guestPointer(null), guestPointer(null)])).toThrow("budget");
+  expect(runner.depth).toBe(0);
+  await host.initLoading(pump);
+  await host.spawnEntitiesLoading("base1", "{}", "", pump);
+  expect(pumps).toBe(2); expect(runner.depth).toBe(0);
+  const cancellation = new Error("loading cancelled");
+  await expect(host.spawnEntitiesLoading("base2", "{}", "", async () => { throw cancellation; })).rejects.toBe(cancellation);
+  expect(runner.depth).toBe(0);
+  await host.spawnEntitiesLoading("base2", "{}", "", pump);
+  expect(pumps).toBe(3); host.shutdown();
+});
+
+
+test("native tagged strings expose aligned backing and release the complete owned allocation", () => {
+  const { host, memory, invokeImport } = stateFixture();
+  const before = memory.mappings().length;
+  const result = invokeImport("TagMalloc", [{ kind: "uint64", value: 6n }, guestInt(766)]);
+  if (result.kind !== "pointer" || result.value === null) throw new Error("Missing tag allocation");
+  const address = result.value;
+  memory.write(address, new TextEncoder().encode("hello\0"));
+  expect(memory.copy(address, 16)).toEqual(new Uint8Array([104, 101, 108, 108, 111, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+  expect(address.byteOffset % 4096n).toBe(0n);
+  expect(memory.copy(memory.offset(address, 10n), 16)).toEqual(new Uint8Array(16));
+  expect(() => memory.copy(address, 4097)).toThrow();
+  invokeImport("TagFree", [guestPointer(address)]);
+  expect(memory.mappings().length).toBe(before);
+  expect(() => memory.copy(address, 1)).toThrow();
+  expect(memory.copy(host.core.string("hello"), 16)[5]).toBe(0);
+});
+
+
+test("source traces return the actual world edict before the shared world is published", () => {
+  const { host } = stateFixture();
+  for (const hit of [{ kind: "none" }, { kind: "world", model: 0 }] satisfies readonly TraceHit[]) {
+    const result = host.encodeTrace({ kind: "q2", fraction: 1, end: { x: 0, y: 0, z: 0 }, startSolid: false, allSolid: false,
+      contact: { kind: "none" }, hit, contents: 0, surface: null, secondary: null,
+      sourcePlane: { normal: { x: 0, y: 0, z: 0 }, distance: 0, type: 0, signbits: 0 } });
+    if (result.kind !== "aggregate") throw new Error("Expected source trace aggregate");
+    expect(new DataView(result.bytes.buffer, result.bytes.byteOffset, result.bytes.byteLength).getBigUint64(56, true)).toBe(host.module.entities().atSlot(0).address.byteOffset);
+  }
+});
+
+ test("native JSON save yields independently of frame budget and frees its returned source buffer", async () => {
+  const { host, memory, runner, code, invokeImport } = stateFixture({ instructionBudget: 1000, loadingInstructionBudget: 30_000 });
+  const allocation = invokeImport("TagMalloc", [{ kind: "uint64", value: 3n }, guestInt(766)]);
+  if (allocation.kind !== "pointer" || allocation.value === null) throw new Error("Missing source save allocation");
+  const output = allocation.value;
+  memory.write(output, new TextEncoder().encode("{}\0"));
+  const instructions = new Uint8Array(20_018).fill(0x90);
+  instructions.set([0x48, 0xc7, 0x02, 2, 0, 0, 0, 0x48, 0xb8], 20_000);
+  new DataView(instructions.buffer).setBigUint64(20_009, output.byteOffset, true);
+  instructions[20_017] = 0xc3;
+  const game = host.module.bindGame();
+  memory.writePointer(memory.offset(game, BigInt(fieldOffset(gameExportLayout, "WriteGameJson"))), code(instructions));
+  const before = memory.mappings().length; let pumps = 0;
+  const saved = await host.writeSaveLoading("game", false, async () => {
+    pumps++; expect(runner.depth).toBe(1);
+    expect(() => host.module.callGame("WriteGameJson")).toThrow("suspended");
+    await Promise.resolve();
+  });
+  expect(pumps).toBe(1); expect(runner.depth).toBe(0);
+  expect(new TextDecoder().decode(saved.native)).toBe("{}");
+  expect(memory.mappings().length).toBe(before - 1);
+  expect(() => memory.copy(output, 1)).toThrow();
+ });

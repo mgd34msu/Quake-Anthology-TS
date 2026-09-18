@@ -156,8 +156,8 @@ export class QcWorldHost {
     };
   }
   link(slot: number): void {
+    if (slot === 0 || this.isFreeEntity(slot)) return;
     const actor = this.actor(slot);
-    if (slot === 0) return;
     this.options.bodies.link(actor);
   }
   private setSize(vm: QcMachine, slot: number, bounds: Bounds): void {

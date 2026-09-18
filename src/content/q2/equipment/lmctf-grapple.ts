@@ -95,10 +95,14 @@ export class LmctfGrappleEquipment {
     hook.owner = player; hook.touch = this.touch; hook.die = this.die; hook.damage = 2; hook.maxHealth = 59; hook.model = "models/objects/ghook/tris.md2"; hook.clipMask = 0x6000003;
     game.move(hook, { origin: start, angles: { ...angles, x: angles.x + 90 }, velocity: scale(normalize(direction), 800) });
     game.solid(hook, "box"); game.motion(hook, "fly-missile"); game.host.combat.create(hook.actor, { health: 59, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
-    game.show(hook); game.schedule(hook, 1, this.think); game.host.emit({ kind: "sound", actor: player, origin: grappleBody(player, game).origin, path: "weapons/grapple/grfire.wav", channel: 0, volume: 0.8, attenuation: 1, reliable: false, loop: "once" });
-    const trace = game.host.trace({ start: grappleBody(player, game).origin, end: start, bounds: null, ignore: player, mask: 0x6000003 });
+    game.schedule(hook, 1, this.think); game.host.emit({ kind: "sound", actor: player, origin: grappleBody(player, game).origin, path: "weapons/grapple/grfire.wav", channel: 0, volume: 0.8, attenuation: 1, reliable: false, loop: "once" });
+    const trajectory = game.host.isPlayer(player) ? game.host.weaponBehavior?.launch({ projectile: hook.actor, shooter: player, weapon: "q2:weapon_hook", role: "grapple", timeSeconds: game.host.now(), body: game.body(hook) }) ?? null : null;
+    if (trajectory !== null) { game.projectTrajectory(hook, trajectory); }
+    const launchOrigin = game.body(hook).origin;
+    game.show(hook);
+    const trace = game.host.trace({ start: grappleBody(player, game).origin, end: launchOrigin, bounds: null, ignore: player, mask: 0x6000003 });
     if (trace.fraction < 1) {
-      game.move(hook, { origin: add(start, scale(direction, -10)) });
+      game.move(hook, { origin: add(launchOrigin, scale(trajectory === null ? direction : normalize(trajectory.velocity), -10)) });
       const other = trace.hit.kind === "actor" ? trace.hit.actor : game.host.worldActor();
       this.touch(hook, game, { self: hook.actor, other, plane: null, surface: null });
     }

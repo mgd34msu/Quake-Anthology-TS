@@ -1,3 +1,5 @@
+import type { ItemId } from "../../../../contracts/gameplay.ts";
+import type { ProjectileRole } from "../../../../contracts/weapon-behavior.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { Q2Entity, Q2GameServices, Q2Motion, Q2Think } from "../../foundation/host.ts";
@@ -18,8 +20,13 @@ export function projectile(self: Pick<Q2Entity, "actor">, game: Q2GameServices, 
   return entity;
 }
 
-export function publishProjectile(entity: Q2Entity, game: Q2GameServices, sound = ""): undefined {
-  game.solid(entity, "box"); game.motion(entity, entity.motion); game.show(entity);
+export function publishProjectile(entity: Q2Entity, game: Q2GameServices, sound = "", behavior?: { readonly weapon: ItemId; readonly role: ProjectileRole }): undefined {
+  game.solid(entity, "box"); game.motion(entity, entity.motion);
+  if (behavior !== undefined && entity.owner !== null && game.host.isPlayer(entity.owner)) {
+    const update = game.host.weaponBehavior?.launch({ projectile: entity.actor, shooter: entity.owner, ...behavior, timeSeconds: game.host.now(), body: game.body(entity) });
+    if (update !== undefined && update !== null) { game.projectTrajectory(entity, update); }
+  }
+  game.show(entity);
   return sound === "" ? undefined : game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin,
     path: sound, channel: 0, volume: 1, attenuation: 1, reliable: false, loop: "start" });
 }

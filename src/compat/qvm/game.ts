@@ -7,7 +7,7 @@ import type { QvmModuleOptions } from "./module.ts";
 export class QvmGame {
   readonly module: QvmModule;
   readonly data: QvmGameData;
-  readonly api = { kind: "q3-qagame", version: 8 } satisfies Extract<QvmModule["profile"]["api"], { readonly kind: "q3-qagame" }>;
+  get api(): Extract<QvmModule["profile"]["api"], { readonly kind: "q3-qagame" }> { return { kind: "q3-qagame", version: this.module.abiProfile === "q3-modern" ? 8 : 7 }; }
 
   constructor(options: QvmModuleOptions) {
     if (options.artifact.role !== "qagame") throw new Error("QvmGame requires a qagame artifact");
@@ -18,7 +18,7 @@ export class QvmGame {
       }
       return options.host(call);
     } });
-    this.data = new QvmGameData(this.module.memory);
+    this.data = new QvmGameData(this.module.memory, this.module.abiProfile);
   }
 
   initialize(levelTime: number, randomSeed: number, restart = false): undefined {

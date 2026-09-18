@@ -1,3 +1,5 @@
+import type { WeaponBehaviorProjectilePort } from "../../../src/contracts/weapon-behavior.ts";
+import { launchHipnoticLaser } from "../../../src/content/q1/missionpacks/hipnotic-weapons.ts";
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
 import { expansionSourceSupply } from "../../../src/content/composition/expansion-source-supply.ts";
 import { Q1_Q2_SUPPLY_PROFILE } from "../../../src/content/composition/q1-q2-supply.ts";
@@ -30,7 +32,7 @@ import { missionPackObituary } from "../../../src/content/q1/missionpacks/obitua
 import type { Q1ObituaryActor } from "../../../src/content/q1/base/rules.ts";
 
 const archivePath = "/home/buzzkill/Projects/qfiles/q1/rerelease/id1/pak0.pak";
-async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0, teamplay = 0) {
+async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "rerelease", deathmatch = 0, teamplay = 0, weaponBehavior?: WeaponBehaviorProjectilePort) {
   const archive = await openArchive(archivePath);
   const entry = archive.findEntries("maps/start.bsp")[0]; if (entry === undefined) throw new Error("Retail start.bsp missing");
   const map = readQ1Bsp(await archive.readEntry(entry), { source: "maps/start.bsp" }); archive.close();
@@ -45,7 +47,7 @@ async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "
   } });
   const combat = new GameplayAuthority(actors, callbacks, { impulse: (actor, impulse) => { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, velocity: vadd(body.velocity, impulse) }); return undefined; }, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors);
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4, trace: request => {
+  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, ...(weaponBehavior === undefined ? {} : { weaponBehavior }), random: () => 0.4, trace: request => {
     const trace = scene.trace({ start: request.start, end: request.end, shape: { kind: "box", bounds: request.bounds }, target: { kind: "world" }, policy: { kind: "q1", move: request.monsters ? "normal" : "no-monsters", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: request.ignore });
     if (trace.kind !== "q1") throw new Error("Q1 trace expected");
     return { fraction: trace.fraction, end: trace.end, normal: trace.sourcePlane.normal, actor: trace.hit.kind === "actor" ? trace.hit.actor : trace.hit.kind === "world" ? active?.world?.actor.id ?? null : null, startSolid: trace.startSolid, allSolid: trace.allSolid, sky: false, inOpen: trace.inOpen, inWater: trace.inWater };
@@ -287,4 +289,29 @@ for (const pack of ["hipnotic", "rogue"] satisfies readonly Q1MissionPack[]) tes
     } else expect(scene.inventory.count(scene.player.actor.id, "rogue:ammo/lava-nails")).toBe(0);
     expect<string>(entity.solid).toBe("none");
   } finally { scene.actors.close(); }
+});
+
+test.skipIf(!existsSync(archivePath))("Hipnotic source think retains projected launch and steering between donor callbacks", async () => {
+  let steer = true;
+  const { game, player, actors } = await session("hipnotic", "rerelease", 0, 0, {
+    controlsTrajectory: () => true,
+    launch: input => ({ origin: input.body.origin, velocity: { x: 300, y: 0, z: 0 }, angles: ZERO }),
+    step: (_projectile, body) => { if (!steer) return null; steer = false; return { origin: body.origin, velocity: { x: 0, y: 250, z: 0 }, angles: { x: 0, y: 90, z: 0 } }; },
+  });
+  try {
+    const laser = launchHipnoticLaser(game, player.actor.id, game.host.bodies.read(player.actor.id)?.origin ?? ZERO, { x: 1, y: 0, z: 0 });
+    const think = laser.think; if (think === null) throw new Error("Hipnotic laser think missing");
+    think(); expect(game.body(laser).velocity).toEqual({ x: 300, y: 0, z: 0 }); expect(laser.speed).toBe(300);
+    game.applyProjectileBehavior(laser.actor, 0.2);
+    expect(laser.movedir).toEqual({ x: 0, y: 250, z: 0 }); expect(laser.speed).toBe(250);
+    game.time = 0.3; think(); game.applyProjectileBehavior(laser.actor, 0.3);
+    expect(game.body(laser).velocity).toEqual({ x: 0, y: 250, z: 0 });
+    expect(laser.model).toBe("progs/lasrspik.mdl"); expect(laser.damage).toBe(18);
+    const world = game.world, touch = laser.touch; if (world === null || touch === null) throw new Error("Missing source bounce receiver");
+    touch(world.actor.id, { x: 0, y: -1, z: 0 });
+    expect(laser.movedir).toEqual({ x: 0, y: -250, z: 0 });
+    game.time = 0.4; think(); game.applyProjectileBehavior(laser.actor, 0.4);
+    expect(game.body(laser).velocity).toEqual({ x: 0, y: -250, z: 0 });
+    expect(laser.speed).toBe(250);
+  } finally { actors.close(); }
 });

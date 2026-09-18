@@ -29,6 +29,7 @@ export function launchHipnoticLaser(game: Q1EntityServices, shooter: ActorId, or
   game.setBounds(laser, POINT); game.setBody(laser, { origin, velocity, angles: velocityAngles(velocity) }); game.link(laser);
   game.schedule(laser, 0, game.named.action(laser, "hipnotic:laser-think"));
   const owner = game.host.actors.resolveOwned(shooter); if (owner !== null) game.sound(owner, "hipweap/laserg.wav", "weapon");
+  game.launchProjectileBehavior(laser, shooter, profile.weapon, "bolt");
   return laser;
 }
 export function fireHipnoticLaser(game: Q1EntityServices, player: Q1PlayerState): boolean {
@@ -73,6 +74,7 @@ export function launchHipnoticProximity(game: Q1EntityServices, owner: ActorId, 
   game.setBounds(mine, { min: { x: -1, y: -1, z: -1 }, max: { x: 1, y: 1, z: 1 } });
   game.setBody(mine, { origin, velocity, angles: velocityAngles(velocity) }); game.link(mine);
   game.schedule(mine, 2, game.named.action(mine, "hipnotic:proximity-watch"));
+  game.launchProjectileBehavior(mine, owner, "hipnotic:proximity", "grenade");
   return mine;
 }
 export function fireHipnoticProximity(game: Q1EntityServices, player: Q1PlayerState): boolean {
@@ -221,10 +223,13 @@ const laserRegistrations = new WeakSet<Q1EntityServices>();
 export function registerHipnoticLaserCallbacks(game: Q1EntityServices): undefined {
   if (laserRegistrations.has(game)) return undefined;
   laserRegistrations.add(game);
-  game.named.register("hipnotic:laser-touch", { touch: laserTouch });
+  game.named.register("hipnotic:laser-touch", { touch: laserTouch, trajectory: (_runtime, laser, update) => {
+    laser.movedir = update.velocity; laser.speed = length(update.velocity);
+  } });
   game.named.register("hipnotic:laser-think", { action: (runtime, laser) => {
     if (runtime.time > laser.attackFinished) return runtime.remove(laser);
-    moveMissile(runtime, laser, laser.movedir); return runtime.schedule(laser, 0.1, runtime.named.action(laser, "hipnotic:laser-think"));
+    if (runtime.host.weaponBehavior?.controlsTrajectory(laser.actor.id) !== true) moveMissile(runtime, laser, laser.movedir);
+    return runtime.schedule(laser, 0.1, runtime.named.action(laser, "hipnotic:laser-think"));
   } });
   return undefined;
 }

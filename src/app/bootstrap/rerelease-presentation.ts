@@ -26,6 +26,8 @@ interface SeatState {
   story: string;
   storySource: { readonly content: ContentId; readonly text: string } | null;
   readonly hiddenItems: Set<ActorId>;
+  readonly names: Map<number, string>;
+  sky: { readonly source: { readonly content: ContentId; readonly name: string }; readonly view: RereleaseSkyView } | null;
 }
 
 /** Player name tokens are resolved after localized argument expansion, as in CL_ParseLocPrint. */
@@ -46,18 +48,20 @@ export class ApplicationRereleasePresentation {
   async prepareImageRefresh(providers: Pick<ApplicationAssets, "provider">): Promise<() => void> {
     const next = this.sky === null || this.skySource === null ? null
       : { ...this.sky, images: await this.loadSkyImages(providers, this.skySource.content, this.skySource.name) };
-    return () => { this.skies.clear(); this.sky = next; };
+    const seats = await Promise.all(this.seats.map(async seat => ({ seat, sky: seat.sky === null ? null
+      : { source: seat.sky.source, view: { ...seat.sky.view, images: await this.loadSkyImages(providers, seat.sky.source.content, seat.sky.source.name) } } })));
+    return () => { this.skies.clear(); this.sky = next; for (const value of seats) value.seat.sky = value.sky; };
   }
 
   constructor(private readonly assets: Pick<ApplicationAssets, "provider">, seats: readonly RereleasePresentationSeat[]) {
-    this.seats = seats.map(binding => ({ binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(), fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>() }));
+    this.seats = seats.map(binding => ({ binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(), fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>(), names: new Map<number, string>(), sky: null }));
   }
 
   publishSeats(bindings: readonly RereleasePresentationSeat[]): void {
     this.seats = bindings.map(binding => {
       const retained = this.seats.find(seat => seat.binding.seat.equals(binding.seat) && seat.binding.actor.equals(binding.actor));
       return retained ?? { binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(),
-        fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>() };
+        fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>(), names: new Map<number, string>(), sky: null };
     });
   }
 
@@ -67,12 +71,12 @@ export class ApplicationRereleasePresentation {
       if (source.kind !== "q2-rerelease") continue;
       const event = source.event;
       if (event.kind === "item-visibility") {
-        for (const seat of this.seats) if (seat.binding.actor.equals(event.actor)) {
+        for (const seat of this.seats) if (seat.binding.actor.equals(event.actor) && (source.recipient === undefined || source.recipient.equals(seat.binding.actor))) {
           for (const hidden of seat.hiddenItems) if (hidden.equals(event.item)) seat.hiddenItems.delete(hidden);
           if (!event.visible) seat.hiddenItems.add(event.item);
         }
       }
-      if (event.kind === "fog") { for (const seat of this.seats) if (seat.binding.actor.equals(event.actor)) { seat.fog.receive(event.value, event.transitionMilliseconds, source.seconds); seat.fogReceived = true; } }
+      if (event.kind === "fog") { for (const seat of this.seats) if (seat.binding.actor.equals(event.actor) && (source.recipient === undefined || source.recipient.equals(seat.binding.actor))) { seat.fog.receive(event.value, event.transitionMilliseconds, source.seconds); seat.fogReceived = true; } }
       else if (event.kind === "story" || event.kind === "localized-print" || event.kind === "sky") this.pending.push(source);
     }
   }
@@ -88,7 +92,7 @@ export class ApplicationRereleasePresentation {
     const seat = this.seats.find(seat => seat.binding.seat.equals(id));
     if (seat === undefined) throw new Error("Unknown localization seat");
     const catalog = await this.catalog(seat, content);
-    return q2PlayerNameTokens(q2LocalizedText(catalog.localization, text, args), this.names);
+    return q2PlayerNameTokens(q2LocalizedText(catalog.localization, text, args), new Map([...this.names, ...seat.names]));
   }
 
   async languageBinding(id: SeatId, content: ContentId, failed: (error: unknown) => void): Promise<SettingBinding | undefined> {
@@ -146,15 +150,30 @@ export class ApplicationRereleasePresentation {
 
   async prepare(): Promise<void> {
     for (const source of this.pending.splice(0)) {
-      if (source.kind === "q2-player") { if (source.event.kind === "userinfo") this.names.set(source.event.slot, source.event.name); continue; }
+      if (source.kind === "q2-player") {
+        if (source.event.kind === "userinfo") {
+          const { slot, name } = source.event;
+          if (source.recipient === undefined) { this.names.set(slot, name); for (const seat of this.seats) seat.names.delete(slot); }
+          else for (const seat of this.seats) if (source.recipient.equals(seat.binding.actor)) seat.names.set(slot, name);
+        }
+        continue;
+      }
       const event = source.event;
-      if (event.kind === "sky") { this.skySource = { content: source.content, name: event.name }; this.sky = { images: await this.skyImages(source.content, event.name), rotation: event.rotation, autoRotate: event.rotation !== 0 && event.autoRotate, axis: { ...event.axis } }; continue; }
+      if (event.kind === "sky") {
+        const skySource = { content: source.content, name: event.name };
+        const sky = { images: await this.skyImages(source.content, event.name), rotation: event.rotation, autoRotate: event.rotation !== 0 && event.autoRotate, axis: { ...event.axis } };
+        if (source.recipient === undefined) { this.skySource = skySource; this.sky = sky; for (const seat of this.seats) seat.sky = null; }
+        else for (const seat of this.seats) if (source.recipient.equals(seat.binding.actor)) seat.sky = { source: skySource, view: sky };
+        continue;
+      }
       if (event.kind !== "story" && event.kind !== "localized-print") continue;
       for (const seat of this.seats) {
+        if (source.recipient !== undefined && !source.recipient.equals(seat.binding.actor)) continue;
         if (event.kind === "localized-print" && event.actor !== null && !seat.binding.actor.equals(event.actor)) continue;
         const text = await this.localizeMessage(seat.binding.seat, source.content, event.text, event.kind === "localized-print" ? event.args : []);
         if (event.kind === "story") { seat.story = text; seat.storySource = { content: source.content, text: event.text }; }
         else this.prints.push({ kind: "q2-player", content: source.content, seconds: source.seconds, sequence: source.sequence,
+          ...(source.recipient === undefined ? {} : { recipient: source.recipient }),
           ...(source.sourceEntity === undefined ? {} : { sourceEntity: source.sourceEntity }), event: { kind: "print", target: seat.binding.actor, level: event.level, text } });
       }
     }
@@ -167,7 +186,8 @@ export class ApplicationRereleasePresentation {
   storyActive(actor: ActorId): boolean { return this.seats.some(seat => seat.binding.actor.equals(actor) && seat.story !== ""); }
   view(actor: ActorId, seconds: number): Pick<WorldViewInput, "q2Fog"> & { readonly q2Sky?: RereleaseSkyView } {
     const seat = this.seats.find(seat => seat.binding.actor.equals(actor));
-    return { ...(seat?.fogReceived ? { q2Fog: seat.fog.current(seconds) } : {}), ...(this.sky === null ? {} : { q2Sky: this.sky }) };
+    const sky = seat?.sky?.view ?? this.sky;
+    return { ...(seat?.fogReceived ? { q2Fog: seat.fog.current(seconds) } : {}), ...(sky === null ? {} : { q2Sky: sky }) };
   }
   drawStory(actor: ActorId, draw: Draw2D, text: SeatTextPresentation, scale: number): void {
     const seat = this.seats.find(seat => seat.binding.actor.equals(actor)); if (seat === undefined || seat.story === "") return;

@@ -1,3 +1,4 @@
+import type { WeaponBehaviorProjectilePort } from "../../../contracts/weapon-behavior.ts";
 /* Q1 gameplay adapted from id Software Quake / Quake rerelease QuakeC.
  * Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
@@ -83,6 +84,7 @@ export interface Q1PrecacheTables {
 
 /** Engine builtins operate on the same actor/body/combat tables used by every game. */
 export interface Q1FoundationHost {
+  readonly weaponBehavior?: WeaponBehaviorProjectilePort;
   weaponImpact?(owner: ActorId, origin: Vec3): undefined;
   weaponVolume?(actor: ActorId): number;
   monsterTarget?(actor: ActorId): import("../../monsters/target.ts").MonsterTargetObservation | null;

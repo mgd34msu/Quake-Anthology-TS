@@ -1,7 +1,7 @@
-import type { LocalizationCatalog } from "../../text/localization.ts";
+import type { LocalizationTable } from "../../text/localization.ts";
 
 /** Presentation keeps unknown mod keys intact; native localization retains its byte-buffer contract. */
-export function q2LocalizedText(catalog: LocalizationCatalog, text: string, args: readonly string[] = []): string {
+export function q2LocalizedText(catalog: LocalizationTable, text: string, args: readonly string[] = []): string {
   const key = text.startsWith("$") ? text.replace(/[\r\n]+$/u, "") : text;
   const suffix = text.slice(key.length);
   const entry = key.startsWith("$") ? catalog.find(key.slice(1)) : undefined;

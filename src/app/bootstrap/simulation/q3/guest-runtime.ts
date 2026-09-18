@@ -1,3 +1,5 @@
+import { Q3GuestBots, type Q3GuestBotOptions } from './guest-bots.ts';
+import { tokenizeCommand } from '../../../../core/commands/index.ts';
 import type { QvmCheckpoint } from '../../../../contracts/execution.ts';
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from '../../../../persistence/value.ts';
 import { savedActorId, readSavedActor } from '../../../../persistence/save-image.ts';
@@ -7,8 +9,6 @@ import type { MountedContent } from '../../../../content/mounts/index.ts';
 import type { UserFileStore } from '../../../../platform/files/writable.ts';
 import type { WireUserCommand } from '../../../../network/q3/message.ts';
 import { CommonParseCursor, CommonParseState } from '../../../../core/common-parse.ts';
-import { CvarFlag } from '../../../../core/cvars/index.ts';
-import { nativeAtof } from '../../../../core/numeric.ts';
 import { QvmGame } from '../../../../compat/qvm/game.ts';
 import { QvmGameExport, QvmGameImport } from '../../../../compat/qvm/abi.ts';
 import { qvmArguments } from '../../../../compat/qvm/module.ts';
@@ -26,6 +26,13 @@ import type { Q3GuestRecordHost } from './guest-records.ts';
 import { Q3GuestSpatial } from './guest-spatial.ts';
 import type { Q3ServerState } from './server-state.ts';
 
+export interface Q3GuestBotPreparation {
+  readonly library: Omit<Q3GuestBotOptions['library'], 'clientCommand'>;
+  readonly selected: Q3GuestBotOptions['selected'];
+  createClient(slot: number): ClientId | null;
+  freeClient(client: ClientId): void;
+  snapshotEntities(player: Q3ApplicationPlayer): readonly number[];
+}
 export interface Q3GuestOutput {
   dropClient(slot: number, reason: string): Promise<void>;
   sendServerCommand(slot: number, text: string): void | Promise<void>;
@@ -46,7 +53,7 @@ export interface Q3GuestRuntimeOptions {
   assertCurrent(): void;
 }
 export type Q3SavedGuestClientId = Pick<ClientId, 'slot' | 'generation'>;
-export interface Q3GuestMapClient { readonly client: ClientId; readonly userinfo: string; }
+export interface Q3GuestMapClient { readonly client: ClientId; readonly userinfo: string; readonly bot?: boolean; }
 export interface Q3GuestMapTransition {
   /** Restore through the destination registry before applying its new map settings. */
   readonly cvars: ReturnType<Q3ServerState['cvars']['captureSaveState']>;
@@ -88,6 +95,11 @@ export class Q3QvmServerGame {
   readonly records: Q3GuestRecords;
   readonly spatial: Q3GuestSpatial;
   private readonly files: QvmFiles;
+  private bots: Q3GuestBots | null = null;
+  private savedBots: unknown = null;
+  private botPreparation: Q3GuestBotPreparation | null = null;
+  private readonly botClients = new Set<number>();
+  private readonly botMessages = new Map<number, string[]>();
   private readonly services: QvmServerGameServices;
   private readonly common: Extract<QvmCommonServices, { readonly role: 'qagame' }>;
   private lifecycle: Lifecycle = { kind: 'created' };
@@ -102,10 +114,7 @@ export class Q3QvmServerGame {
   constructor(private readonly options: Q3GuestRuntimeOptions) {
     if (!Number.isInteger(options.maxClients) || options.maxClients < 1 || options.maxClients > 64) throw new RangeError('Q3 guest requires 1..64 clients');
     this.state = options.state;
-    for (const name of ['bot_enable', 'bot_minplayers']) {
-      if (this.state.cvars.variableValue(name) !== 0) throw new Error('Q3 guest bots are unsupported');
-      this.state.cvars.set(name, '0', true); this.state.cvars.register(name, '0', CvarFlag.ReadOnly);
-    }
+    this.state.cvars.register('bot_enable', '1', 0);
     this.state.cvars.set('sv_maxclients', String(options.maxClients), true);
     this.state.cvars.set('dedicated', options.dedicated === false ? '0' : '1', true);
     this.files = new QvmFiles({ mounts: options.mounts, writable: options.writable, print: text => this.state.print(text), assertCurrent: () => this.current() });
@@ -123,19 +132,53 @@ export class Q3QvmServerGame {
       configstrings: { get: index => this.state.configstrings.get(index), set: (index, value) => this.setConfigstring(index, value) },
       getUserinfo: slot => this.state.getUserinfo(slot) ?? '', setUserinfo: (slot, value) => this.state.setUserinfo(slot, value),
       getUserCommand: slot => this.state.getUserCommand(slot) ?? { serverTime: 0, angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }, dropClient: (slot, reason) => this.drop(slot, reason),
-      sendServerCommand: (slot, text) => this.output().sendServerCommand(slot, text),
+      sendServerCommand: (slot, text) => {
+        for (const [client, messages] of this.botMessages) if (slot === -1 || slot === client) { messages.push(text); if (messages.length > 64) messages.shift(); }
+        if (this.botClients.has(slot)) return;
+        return this.output().sendServerCommand(slot, text);
+      },
       entityToken: () => ({ token: this.parser.parse(this.cursor), ended: this.cursor.offset === null }),
     };
+  }
+  attachBots(preparation: Q3GuestBotPreparation): void {
+    this.current();
+    if (this.bots !== null || (this.lifecycle.kind !== 'created' && this.lifecycle.kind !== 'restored')) throw new Error('Attach guest bot services before game initialization');
+    this.botPreparation = preparation;
+    this.bots = new Q3GuestBots({ library: { ...preparation.library, clientCommand: (slot, text) => {
+      if (!this.botClients.has(slot)) throw new Error(`Bot command has no owned client ${slot}`);
+      this.game.clientCommand(slot, tokenizeCommand(text, 'q3').argv); return undefined;
+    } }, selected: preparation.selected, records: this.records, spatial: this.spatial, entities: this.options.entityText,
+      mapName: this.state.cvars.variableString('mapname'), clients: {
+        allocateClient: () => {
+          for (let slot = 0; slot < this.options.maxClients; slot++) {
+            if (this.clients.has(slot) || this.reconnecting.has(slot)) continue;
+            const client = preparation.createClient(slot); if (client === null) continue;
+            this.records.entity(slot).s.number = slot;
+            const player = { client, actor: this.records.actor(slot).id, sourceEntity: slot };
+            this.validateClient(client); this.clients.set(slot, { player, phase: { kind: 'active' } }); this.botClients.add(slot); this.botMessages.set(slot, []); return slot;
+          }
+          return -1;
+        },
+        freeClient: slot => {
+          if (!this.botClients.delete(slot)) return;
+          this.records.entity(slot).r.svFlags &= ~8;
+          const entry = this.clients.get(slot); if (entry !== undefined) { this.release(entry); preparation.freeClient(entry.player.client); }
+          this.botMessages.delete(slot);
+        },
+        snapshotEntity: (slot, sequence) => { const entry = this.clients.get(slot); return entry === undefined ? -1 : preparation.snapshotEntities(entry.player)[sequence] ?? -1; },
+        consoleMessage: slot => this.botMessages.get(slot)?.shift() ?? null,
+        userCommand: async (slot, command) => {
+          if (!this.botClients.has(slot)) throw new Error(`Bot input has no owned client ${slot}`);
+          this.state.setUserCommand(slot, command); await this.game.clientThinkAsync(slot);
+        },
+      } });
+    if (this.savedBots !== null) { this.bots.restore(this.savedBots); this.savedBots = null; }
   }
   get isRetired(): boolean { return this.lifecycle.kind === 'retired'; }
 
   checkpoint(): QvmCheckpoint { return this.game.module.checkpoint(); }
 
-  private portalWorld() {
-    const models = this.options.records.scene.nativeQ3ClipModels();
-    if (models === null) throw new Error('Q3 guest portal state requires the Q3 scene');
-    return models.world;
-  }
+  private portalWorld() { return this.spatial.world; }
 
   private captureHost(): QvmHostCheckpoint {
     this.running();
@@ -145,6 +188,7 @@ export class Q3QvmServerGame {
     return { state: { module: this.game.module.profile.module, format: 'q3:qagame-host', bytes: encodeCheckpointValue({
       version: 1, maxClients: this.game.data.numClients, data: this.game.data.checkpoint(), server: this.state.captureSaveState(),
       entityText: this.cursor.source, cursor: this.cursor.offset, parser: this.parser.captureSaveState(),
+      bots: this.bots?.checkpoint() ?? null, botClients: [...this.botClients], botMessages: [...this.botMessages].map(([slot, messages]) => ({ slot, messages })),
       records: this.records.captureCheckpoint(), portals: this.portalWorld().capturePortalCheckpoint(), files: this.files.captureCheckpoint(),
       clients: [...this.clients.values()].map(entry => ({ sourceEntity: entry.player.sourceEntity,
         client: { slot: entry.player.client.slot, generation: entry.player.client.generation },
@@ -191,11 +235,23 @@ export class Q3QvmServerGame {
       this.clients.set(saved.sourceEntity, { player: { client, actor: actor.id, sourceEntity: saved.sourceEntity }, phase: { kind: saved.phase } });
     }
     this.files.restoreCheckpoint(reader.field('files').value);
+    this.savedBots = reader.field('bots').value ?? null;
+    const savedClients = reader.field('botClients');
+    if (savedClients.value !== undefined) for (const slot of savedClients.list(cell => cell.integer(0))) {
+      if (!this.clients.has(slot) || this.botClients.has(slot)) throw new Error('Invalid saved guest bot slot');
+      this.botClients.add(slot);
+    }
+    const messages = reader.field('botMessages');
+    if (messages.value !== undefined) for (const entry of messages.list(cell => ({ slot: cell.field('slot').integer(0), messages: cell.field('messages').list(text => text.string()) }))) {
+      if (!this.botClients.has(entry.slot) || this.botMessages.has(entry.slot)) throw new Error('Invalid saved guest bot message owner');
+      this.botMessages.set(entry.slot, [...entry.messages]);
+    }
   }
 
   completeRestore(output: Q3GuestOutput): void {
     this.current();
     if (this.lifecycle.kind !== 'restored') throw new Error('Q3 guest restore is not ready for output attachment');
+    if (this.savedBots !== null) throw new Error('Saved guest bot services must be restored before output attachment');
     this.lifecycle = { kind: 'running', output };
   }
 
@@ -203,6 +259,7 @@ export class Q3QvmServerGame {
     if (this.lifecycle.kind === 'retired') return;
     if (this.externalOperations !== 0 || this.game.module.interpreter.isActive) throw new Error('Q3 guest discard must await the active operation');
     const errors: unknown[] = [];
+    try { this.bots?.close(); } catch (error) { errors.push(error); }
     try { this.files.closeAll(); } catch (error) { errors.push(error); }
     try { this.records.close(); } catch (error) { errors.push(error); }
     this.game.retire(); this.clients.clear(); this.reconnecting.clear(); this.lifecycle = { kind: 'retired' };
@@ -212,7 +269,7 @@ export class Q3QvmServerGame {
   private current(): void {
     if (this.lifecycle.kind === 'retired') throw new Error('Q3 guest is retired');
     this.options.assertCurrent();
-    if (this.state.cvars.variableValue('bot_enable') !== 0 || this.state.cvars.variableValue('bot_minplayers') !== 0) throw new Error('Q3 guest bots are unsupported');
+
   }
   private running(): void {
     this.current();
@@ -229,12 +286,8 @@ export class Q3QvmServerGame {
     const previous = this.currentCall;
     this.currentCall = call;
     try {
-      if (call.kind === 'engine' && call.role === 'qagame' && call.code === QvmGameImport.G_CVAR_SET) {
-        const name = call.guest.readString(call.words.getInt32(4, true)).toLowerCase(), value = call.words.getInt32(8, true);
-        if ((name === 'bot_enable' || name === 'bot_minplayers') && value !== 0 && nativeAtof(call.guest.readString(value)) !== 0) throw new Error('Q3 guest bots are unsupported');
-      }
       const result = qvmCommonSyscall(call, this.common) ?? qvmFileSyscall(call, this.files)
-        ?? qvmServerGameSyscall(call, this.services) ?? this.disabledBot(call) ?? rejectQvmSyscall(call);
+        ?? qvmServerGameSyscall(call, this.services) ?? this.bots?.syscall(call) ?? this.disabledBot(call) ?? rejectQvmSyscall(call);
       if (result instanceof Promise) return result.then(value => { this.current(); return value; }).finally(() => { this.currentCall = previous; });
       this.current(); this.currentCall = previous; return result;
     } catch (error) { this.currentCall = previous; throw error; }
@@ -279,8 +332,10 @@ export class Q3QvmServerGame {
       for (const entry of start.clients) {
         this.reconnecting.set(entry.client.slot, entry);
         this.state.setUserinfo(entry.client.slot, entry.userinfo);
+        if (entry.bot === true) { this.botClients.add(entry.client.slot); this.botMessages.set(entry.client.slot, []); }
       }
     }
+    if (this.bots === null && this.state.cvars.variableValue('bot_enable') !== 0) throw new Error('Q3 guest bot services must be attached before initialization');
     this.lifecycle = { kind: 'initializing', output };
     try {
       await this.game.initializeAsync(this.options.now(), this.options.seed, start.kind === 'map-restart');
@@ -299,14 +354,14 @@ export class Q3QvmServerGame {
     this.running();
     const previous = this.reconnecting.get(client.slot);
     if (previous === undefined || !previous.client.equals(client)) throw new Error('Q3 client is not carried by this map transition');
-    try { return await this.admit(client, this.state.getUserinfo(client.slot) ?? previous.userinfo, false); }
+    try { return await this.admit(client, this.state.getUserinfo(client.slot) ?? previous.userinfo, false, previous.bot === true); }
     finally { this.reconnecting.delete(client.slot); }
   }
   private validateClient(client: ClientId): void {
     if (client.session !== this.options.records.actors.session || !Number.isInteger(client.slot) || client.slot < 0 || client.slot >= this.options.maxClients)
       throw new RangeError('Q3 client slot belongs to another server or is outside its capacity');
   }
-  private async admit(client: ClientId, userinfo: string, firstTime: boolean): Promise<Q3ApplicationAdmission> {
+  private async admit(client: ClientId, userinfo: string, firstTime: boolean, isBot = false): Promise<Q3ApplicationAdmission> {
     this.externalOperations++;
     try {
       this.running();
@@ -318,7 +373,7 @@ export class Q3QvmServerGame {
       const entry: ClientEntry = { player, phase: { kind: 'connecting' } };
       this.clients.set(slot, entry); this.state.setUserinfo(slot, userinfo);
       try {
-        const denied = await this.game.clientConnectAsync(slot, firstTime, false);
+        const denied = await this.game.clientConnectAsync(slot, firstTime, isBot);
         this.current();
         if (this.clients.get(slot) !== entry || entry.phase.kind === 'dropping') return { kind: 'rejected', reason: entry.phase.kind === 'dropping' ? entry.phase.reason : 'Client disconnected during admission.' };
         if (denied !== null) {
@@ -368,7 +423,8 @@ export class Q3QvmServerGame {
     this.reconnecting.delete(slot);
     const entry = this.clients.get(slot);
     if (entry !== undefined) entry.phase = { kind: 'dropping', reason };
-    await this.output().dropClient(slot, reason); this.current();
+    if (!this.botClients.has(slot)) await this.output().dropClient(slot, reason);
+    this.current();
     if (entry !== undefined && this.clients.get(slot) === entry) await this.disconnect(entry.player);
   }
   async disconnect(player: Q3ApplicationPlayer): Promise<void> {
@@ -385,7 +441,11 @@ export class Q3QvmServerGame {
         if (call === null) await this.game.clientDisconnectAsync(player.sourceEntity);
         else await call.invokeAsync(qvmArguments([QvmGameExport.GAME_CLIENT_DISCONNECT, player.sourceEntity]));
         this.current();
-      } finally { this.state.clearClient(player.sourceEntity); this.records.releaseClient(player.sourceEntity); }
+      } finally {
+        this.state.clearClient(player.sourceEntity); this.records.releaseClient(player.sourceEntity);
+        if (this.botClients.delete(player.sourceEntity)) this.botPreparation?.freeClient(player.client);
+        this.botMessages.delete(player.sourceEntity);
+      }
     } finally { this.externalOperations--; }
   }
   private release(entry: ClientEntry): void {
@@ -399,9 +459,12 @@ export class Q3QvmServerGame {
   }
   async runFrame(timeMilliseconds: number): Promise<void> {
     this.externalOperations++;
-    try { this.running(); await this.game.runFrameAsync(timeMilliseconds); await this.refreshServerInfo(); this.current();
+    try { this.running();
+      if (this.bots !== null && this.state.cvars.variableValue('bot_enable') !== 0) await this.game.module.callAsync([QvmGameExport.BOTAI_START_FRAME, timeMilliseconds]);
+      await this.game.runFrameAsync(timeMilliseconds); await this.refreshServerInfo(); this.current();
     } finally { this.externalOperations--; }
   }
+  isBot(client: ClientId): boolean { return this.botClients.has(client.slot) && this.player(client) !== null; }
   players(): readonly Q3ApplicationPlayer[] { return [...this.clients.values()].filter(entry => entry.phase.kind !== 'dropping').map(entry => entry.player); }
   player(client: ClientId): Q3ApplicationPlayer | null { return this.players().find(player => player.client.equals(client)) ?? null; }
   async shutdown(): Promise<void> {
@@ -422,9 +485,9 @@ export class Q3QvmServerGame {
     try {
       await this.shutdownSource(restart);
       transition = { cvars: this.state.cvars.captureSaveState(), clients: [...this.clients.values()].filter(entry => entry.phase.kind !== 'dropping')
-        .map(entry => ({ client: entry.player.client, userinfo: this.state.getUserinfo(entry.player.sourceEntity) ?? '' })) };
+        .map(entry => ({ client: entry.player.client, userinfo: this.state.getUserinfo(entry.player.sourceEntity) ?? '', bot: this.botClients.has(entry.player.sourceEntity) })) };
     } catch (error) { errors.push(error); }
-    this.releaseSource(errors);
+    this.releaseSource(errors, transition !== null);
     if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest map shutdown failed');
     if (transition === null) throw new Error('Q3 map transition did not capture source state');
     return transition;
@@ -436,9 +499,12 @@ export class Q3QvmServerGame {
       await this.game.shutdownAsync(restart);
     }
   }
-  private releaseSource(errors: unknown[]): void {
+  private releaseSource(errors: unknown[], transferClients = false): void {
+    try { this.bots?.close(); } catch (error) { errors.push(error); }
     try { this.files.closeAll(); } catch (error) { errors.push(error); }
     try { this.records.close(); } catch (error) { errors.push(error); }
+    if (!transferClients) for (const slot of this.botClients) { const entry = this.clients.get(slot); if (entry !== undefined) this.botPreparation?.freeClient(entry.player.client); }
+    this.botClients.clear(); this.botMessages.clear();
     for (const slot of new Set([...this.clients.keys(), ...this.reconnecting.keys()])) this.state.clearClient(slot);
     this.game.retire(); this.clients.clear(); this.reconnecting.clear(); this.lifecycle = { kind: 'retired' };
   }

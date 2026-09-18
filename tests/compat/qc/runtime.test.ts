@@ -645,6 +645,13 @@ test.skipIf(!haveCorpus)("retail QC spatial builtins share raw bodies, source li
     fields.setInt(field("enemy"), 0);
     const expiredGround = slots.allocate("quakec:expired-ground"), retainedGround = host.reference(expiredGround.id);
     slots.free(expiredGround);
+    vm.globals.setInt(4, retainedGround); vm.globals.setVector(7, origin);
+    expect(() => call("setorigin", 2)).not.toThrow();
+    vm.globals.setVector(7, bounds.min); vm.globals.setVector(10, bounds.max);
+    expect(() => call("setsize", 3)).not.toThrow();
+    expect(actors.isLive(expiredGround.id)).toBe(false);
+    expect(scene.spatial.get(expiredGround.id)).toBeNull();
+    expect(() => host.actor(entities.slot(retainedGround))).toThrow("free source edict");
     fields.setInt(field("goalentity"), retainedGround); vm.globals.setFloat(4, 1);
     expect(() => call("movetogoal", 1)).toThrow("free source edict");
     expect(movementRandom.checkpoint()).toEqual(randomAfterGoal);

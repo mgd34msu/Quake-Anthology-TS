@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallResult, GuestStorage } from "../../../contracts/execution.ts";
-import { count, integer, pointer, readPointer, readString, readUnsigned, requiredPointer, stringBytes, writePointer, writeUnsigned } from "../common/memory.ts";
+import { allocateNativeMemory, count, integer, pointer, readPointer, readString, readUnsigned, requiredPointer, stringBytes, writePointer, writeUnsigned } from "../common/memory.ts";
 import { UnsupportedWindowsImport } from "./contracts.ts";
 import type { WindowsFile, WindowsServiceHost } from "./contracts.ts";
 
@@ -12,12 +12,17 @@ export function installKernel(host: WindowsServiceHost): void {
   const done = (): GuestCallResult => ({ kind: "void" });
   const service = (name: string, parameters: readonly GuestStorage[], result: GuestStorage | "void", invoke: Parameters<WindowsServiceHost["service"]>[4]): void => host.service("kernel32.dll", name, parameters, result, invoke);
   const storedString = (value: string, wide = false): GuestAddress => {
-    const bytes = stringBytes(value, wide); const address = memory.allocate({ byteLength: bytes.length }); memory.write(address, bytes); return address;
+    const bytes = stringBytes(value, wide); const address = allocateNativeMemory(memory, bytes.length, "Windows process string"); memory.write(address, bytes); return address;
   };
   const commandLine = storedString(host.capabilities.commandLine ?? '"quake-typescript.exe"');
+  const commandLineW = storedString(host.capabilities.commandLine ?? '"quake-typescript.exe"', true);
   const environment = [...(host.capabilities.environment ?? new Map<string, string>())].map(([key, value]) => `${key}=${value}`).join("\0") + "\0";
   const environmentA = storedString(environment), environmentW = storedString(environment, true);
   const invalid = memory.pointer((1n << BigInt(width * 8)) - 1n);
+  const pointerSecretBytes = crypto.getRandomValues(new Uint8Array(width));
+  const pointerSecretView = new DataView(pointerSecretBytes.buffer);
+  const pointerSecret = (width === 4 ? BigInt(pointerSecretView.getUint32(0, true)) : pointerSecretView.getBigUint64(0, true)) | 1n;
+  for (const name of ["EncodePointer", "DecodePointer"]) service(name, ["pointer"], "pointer", (_context, args) => ptr(memory.pointer((pointer(args, 0)?.byteOffset ?? 0n) ^ pointerSecret)));
   const processHeap = memory.allocate({ byteLength: 16, label: "Windows process heap" });
   const heaps = new Set<bigint>([processHeap.byteOffset]);
   service("GetProcessHeap", [], "pointer", () => ptr(processHeap));
@@ -28,8 +33,10 @@ export function installKernel(host: WindowsServiceHost): void {
   service("GetCurrentProcess", [], "pointer", () => ptr(invalid));
   service("GetVersion", [], "uint32", () => u32(0x05650004));
   service("GetCommandLineA", [], "pointer", () => ptr(commandLine));
+  service("GetCommandLineW", [], "pointer", () => ptr(commandLineW));
   service("GetACP", [], "uint32", () => u32(1252));
   service("GetOEMCP", [], "uint32", () => u32(437));
+  service("IsValidCodePage", ["uint32"], "int32", (_context, args) => bool([1252, 437, 65001].includes(Number(integer(args, 0)))));
   service("GetCPInfo", ["uint32", "pointer"], "int32", (_context, args) => {
     const codepage = Number(integer(args, 0)); if (![0, 1, 1252, 437, 65001].includes(codepage)) { host.lastError = 87; return bool(false); }
     const address = requiredPointer(args, 1); memory.write(address, new Uint8Array(20)); writeUnsigned(memory, address, 4, codepage === 65001 ? 4n : 1n);
@@ -37,10 +44,23 @@ export function installKernel(host: WindowsServiceHost): void {
   });
   for (const [name, value] of [["GetEnvironmentStrings", environmentA], ["GetEnvironmentStringsA", environmentA], ["GetEnvironmentStringsW", environmentW]] satisfies readonly (readonly [string, GuestAddress])[]) service(name, [], "pointer", () => ptr(value));
   for (const name of ["FreeEnvironmentStringsA", "FreeEnvironmentStringsW"]) service(name, ["pointer"], "int32", () => bool(true));
-  service("GetModuleHandleA", ["pointer"], "pointer", (_context, args) => { const name = pointer(args, 0); return ptr(name === null ? host.images[0]?.base ?? null : host.libraryHandle(readString(memory, name))); });
-  service("LoadLibraryA", ["pointer"], "pointer", (_context, args) => {
-    const handle = host.libraryHandle(readString(memory, requiredPointer(args, 0))); if (handle === null) host.lastError = 126; return ptr(handle);
-  });
+  for (const wide of [false, true]) {
+    const suffix = wide ? "W" : "A";
+    service(`GetModuleHandle${suffix}`, ["pointer"], "pointer", (_context, args) => {
+      const name = pointer(args, 0), handle = name === null ? host.images[0]?.base ?? null : host.libraryHandle(readString(memory, name, wide));
+      if (handle === null) host.lastError = 126; return ptr(handle);
+    });
+    service(`LoadLibrary${suffix}`, ["pointer"], "pointer", (_context, args) => ptr(host.loadLibrary(readString(memory, requiredPointer(args, 0), wide))));
+    service(`LoadLibraryEx${suffix}`, ["pointer", "pointer", "uint32"], "pointer", (_context, args) => {
+      const name = pointer(args, 0), reserved = pointer(args, 1), flags = Number(integer(args, 2));
+      if (name === null || reserved !== null || (flags & ~0x3fff) !== 0) { host.lastError = 87; return ptr(null); }
+      if ((flags & ~0x1f00) !== 0) { host.lastError = 50; return ptr(null); }
+      const library = readString(memory, name, wide);
+      if (library.length === 0 || (flags & 0x100) !== 0 && !/^(?:[A-Za-z]:[\\/]|[\\/]{2})/.test(library)) { host.lastError = 87; return ptr(null); }
+      return ptr(host.loadLibrary(library));
+    });
+  }
+  service("FreeLibrary", ["pointer"], "int32", (_context, args) => { const handle = pointer(args, 0); if (handle === null) { host.lastError = 6; return bool(false); } return bool(host.freeLibrary(handle)); });
   service("GetProcAddress", ["pointer", "pointer"], "pointer", (_context, args) => {
     const handle = pointer(args, 0), name = pointer(args, 1); if (handle === null || name === null) { host.lastError = 127; return ptr(null); }
     const library = host.libraryName(handle);
@@ -49,12 +69,13 @@ export function installKernel(host: WindowsServiceHost): void {
   });
   service("DisableThreadLibraryCalls", ["pointer"], "int32", (_context, args) => { const base = pointer(args, 0); const image = host.images.find(image => image.base.byteOffset === base?.byteOffset);
     if (image === undefined || image.tls !== null) { host.lastError = 87; return bool(false); } return bool(true); });
-  service("GetModuleFileNameA", ["pointer", "pointer", "uint32"], "uint32", (_context, args) => {
-    const handle = pointer(args, 0); const name = handle === null ? "quake-typescript.exe" : host.images.find(image => image.base.byteOffset === handle.byteOffset)?.module.artifactPath;
-    if (name === undefined) { host.lastError = 126; return u32(0); }
+  for (const wide of [false, true]) service(wide ? "GetModuleFileNameW" : "GetModuleFileNameA", ["pointer", "pointer", "uint32"], "uint32", (_context, args) => {
+    const handle = pointer(args, 0), name = handle === null ? "quake-typescript.exe" : host.libraryName(handle);
+    if (name === null) { host.lastError = 126; return u32(0); }
     const size = count(args, 2); if (size === 0) { host.lastError = 122; return u32(0); }
-    const bytes = stringBytes(name); memory.write(requiredPointer(args, 1), bytes.subarray(0, size));
-    if (bytes.length > size) { host.lastError = 122; return u32(size); } return u32(bytes.length - 1);
+    const bytes = stringBytes(name, wide), unit = wide ? 2 : 1, length = bytes.length / unit - 1, copied = Math.min(length, size - 1), destination = requiredPointer(args, 1);
+    memory.write(destination, bytes.subarray(0, copied * unit)); writeUnsigned(memory, memory.offset(destination, BigInt(copied * unit)), unit, 0n);
+    if (length >= size) { host.lastError = 122; return u32(size); } return u32(length);
   });
   service("HeapCreate", ["uint32", host.pointerStorage, host.pointerStorage], "pointer", () => {
     const address = memory.allocate({ byteLength: 16, label: "Windows heap handle" }); heaps.add(address.byteOffset); return ptr(address);
@@ -116,8 +137,17 @@ export function installKernel(host: WindowsServiceHost): void {
     host.lastError = 0; return ptr(readPointer(memory, tlsSlot(index))); });
   service("TlsSetValue", ["uint32", "pointer"], "int32", (_context, args) => { const index = Number(integer(args, 0)); if (!tls.has(index)) { host.lastError = 87; return bool(false); }
     writePointer(memory, tlsSlot(index), pointer(args, 1)); return bool(true); });
+  const fls = new Map<number, { readonly callback: GuestAddress | null; value: GuestAddress | null }>();
+  service("FlsAlloc", ["pointer"], "uint32", (_context, args) => { for (let index = 0; index < 128; index++) if (!fls.has(index)) { fls.set(index, { callback: pointer(args, 0), value: null }); return u32(index); } host.lastError = 8; return u32(0xffffffff); });
+  service("FlsGetValue", ["uint32"], "pointer", (_context, args) => { const slot = fls.get(Number(integer(args, 0))); if (slot === undefined) { host.lastError = 87; return ptr(null); } host.lastError = 0; return ptr(slot.value); });
+  service("FlsSetValue", ["uint32", "pointer"], "int32", (_context, args) => { const slot = fls.get(Number(integer(args, 0))); if (slot === undefined) { host.lastError = 87; return bool(false); } slot.value = pointer(args, 1); return bool(true); });
+  service("FlsFree", ["uint32"], "int32", (context, args) => { const index = Number(integer(args, 0)), slot = fls.get(index); if (slot === undefined) { host.lastError = 87; return bool(false); } fls.delete(index); if (slot.callback !== null && slot.value !== null) host.invoke(context, slot.callback, ["pointer"], "void", [{ kind: "pointer", value: slot.value }], "system"); return bool(true); });
   const locks = new Set<bigint>();
-  service("InitializeCriticalSection", ["pointer"], "void", (_context, args) => { const address = requiredPointer(args, 0); memory.write(address, new Uint8Array(width === 4 ? 24 : 40)); writeUnsigned(memory, memory.offset(address, BigInt(width)), 4, 0xffffffffn); locks.add(address.byteOffset); return done(); });
+  const initializeLock = (address: GuestAddress, spin: bigint): void => { memory.write(address, new Uint8Array(width === 4 ? 24 : 40)); writeUnsigned(memory, memory.offset(address, BigInt(width)), 4, 0xffffffffn); writeUnsigned(memory, memory.offset(address, width === 4 ? 20n : 32n), width, spin & 0x7fffffffn); locks.add(address.byteOffset); };
+  service("InitializeCriticalSection", ["pointer"], "void", (_context, args) => { initializeLock(requiredPointer(args, 0), 0n); return done(); });
+  service("InitializeCriticalSectionAndSpinCount", ["pointer", "uint32"], "int32", (_context, args) => { initializeLock(requiredPointer(args, 0), integer(args, 1)); return bool(true); });
+  service("InitializeCriticalSectionEx", ["pointer", "uint32", "uint32"], "int32", (_context, args) => { if ((integer(args, 2) & ~0x01000000n) !== 0n) { host.lastError = 87; return bool(false); } initializeLock(requiredPointer(args, 0), integer(args, 1)); return bool(true); });
+  service("SetCriticalSectionSpinCount", ["pointer", "uint32"], "uint32", (_context, args) => { const address = requiredPointer(args, 0); if (!locks.has(address.byteOffset)) throw new Error("Uninitialized guest critical section"); const at = memory.offset(address, width === 4 ? 20n : 32n), previous = readUnsigned(memory, at, width); writeUnsigned(memory, at, width, integer(args, 1) & 0x7fffffffn); return u32(Number(previous)); });
   service("DeleteCriticalSection", ["pointer"], "void", (_context, args) => { locks.delete(requiredPointer(args, 0).byteOffset); return done(); });
   service("EnterCriticalSection", ["pointer"], "void", (context, args) => { const address = requiredPointer(args, 0); if (!locks.has(address.byteOffset)) throw new Error("Uninitialized guest critical section");
     const depth = readUnsigned(memory, memory.offset(address, BigInt(width + 4)), 4), owner = readUnsigned(memory, memory.offset(address, BigInt(width + 8)), width);
@@ -133,6 +163,12 @@ export function installKernel(host: WindowsServiceHost): void {
   service("AcquireSRWLockExclusive", ["pointer"], "void", (context, args) => { const address = requiredPointer(args, 0); if (readUnsigned(memory, address, width) !== 0n) throw new UnsupportedWindowsImport("kernel32.dll", "AcquireSRWLockExclusive", context, "contended lock requires a guest thread scheduler"); writeUnsigned(memory, address, width, 1n); return done(); });
   service("ReleaseSRWLockExclusive", ["pointer"], "void", (_context, args) => { const address = requiredPointer(args, 0); if (readUnsigned(memory, address, width) === 0n) throw new Error("Unowned guest SRW lock"); writeUnsigned(memory, address, width, 0n); return done(); });
   service("InitializeSListHead", ["pointer"], "void", (_context, args) => { memory.write(requiredPointer(args, 0), new Uint8Array(width === 4 ? 8 : 16)); return done(); });
+  service("InterlockedFlushSList", ["pointer"], "pointer", (_context, args) => {
+    const address = requiredPointer(args, 0); if (address.byteOffset % BigInt(width === 4 ? 8 : 16) !== 0n) throw new RangeError("Unaligned Windows SLIST_HEADER");
+    if (width === 4) { const next = readPointer(memory, address); if (next === null) return ptr(null); const sequence = readUnsigned(memory, memory.offset(address, 6n), 2); memory.write(address, new Uint8Array(8)); writeUnsigned(memory, memory.offset(address, 6n), 2, sequence + 1n); return ptr(next); }
+    const lower = readUnsigned(memory, address, 8), upperAt = memory.offset(address, 8n), upper = readUnsigned(memory, upperAt, 8), next = memory.pointer(upper & ~15n);
+    if (next === null) return ptr(null); writeUnsigned(memory, address, 8, (lower & ~65535n) + 65536n); writeUnsigned(memory, upperAt, 8, upper & 15n); return ptr(next);
+  });
   service("WakeAllConditionVariable", ["pointer"], "void", () => done());
   service("IsDebuggerPresent", [], "int32", () => bool(false));
   service("IsProcessorFeaturePresent", ["uint32"], "int32", (_context, args) => bool([6, 10].includes(Number(integer(args, 0)))));
@@ -174,7 +210,7 @@ function installFiles(host: WindowsServiceHost, service: (name: string, paramete
   service("SetStdHandle", ["int32", "pointer"], "int32", (_context, args) => { const address = pointer(args, 1); if (address === null) return ok(false); standards.set(Number(integer(args, 0)), address); return ok(true); });
   service("SetHandleCount", ["uint32"], "uint32", (_context, args) => ({ kind: "uint32", value: Number(integer(args, 0)) }));
   service("GetFileType", ["pointer"], "uint32", (_context, args) => { const entry = handleAt(pointer(args, 0)); return { kind: "uint32", value: entry === undefined ? 0 : typeof entry.file === "string" ? 2 : 1 }; });
-  service("GetStartupInfoA", ["pointer"], "void", (_context, args) => {
+  for (const name of ["GetStartupInfoA", "GetStartupInfoW"]) service(name, ["pointer"], "void", (_context, args) => {
     const address = requiredPointer(args, 0), size = width === 4 ? 68 : 104; memory.write(address, new Uint8Array(size)); writeUnsigned(memory, address, 4, BigInt(size));
     for (const [index, id] of [-10, -11, -12].entries()) writePointer(memory, memory.offset(address, BigInt((width === 4 ? 56 : 80) + index * width)), standards.get(id) ?? null);
     return { kind: "void" };

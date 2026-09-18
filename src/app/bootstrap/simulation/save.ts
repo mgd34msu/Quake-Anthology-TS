@@ -1,3 +1,4 @@
+import { decodeQ2RereleaseNativeSave } from "./native-q2-rerelease-save.ts";
 import { decodeQ2ClassicOriginalSave } from "../../../persistence/q2-classic-guest.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { QuakeCCheckpoint, QvmCheckpoint } from "../../../contracts/execution.ts";
@@ -20,7 +21,7 @@ export function simulationProviderCheckpoint(image: SaveImage, schema: ProviderC
 }
 
 export function savedSourceCvars(image: SaveImage): unknown {
-  const native = nativeQ2OriginalSave(image);
+  const native = nativeQ2OriginalSave(image) ?? nativeQ2RereleaseSave(image);
   if (native !== null) return decodeCheckpointValue(native.server.cvars);
   if (!image.providers.some(record => record.schema === "world:source-cvars")) return undefined;
   return decodeCheckpointValue(simulationProviderCheckpoint(image, "world:source-cvars").bytes);
@@ -54,8 +55,9 @@ export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | 
   const checkpoint = image.guests[0], name = execution.kind === "quakec" ? "QuakeC" : "QVM";
   if (image.guests.length !== 1 || checkpoint === undefined || checkpoint.kind !== execution.kind || checkpoint.kind !== "quakec" && checkpoint.kind !== "qvm")
     throw new Error(`${name} save requires exactly one complete guest checkpoint`);
-  if (execution.kind === "qvm" && (execution.api.kind !== "q3-qagame" || execution.api.version !== 8))
-    throw new Error("QVM save requires the selected qagame version 8 API");
+  if (execution.kind === "qvm" && (execution.api.kind !== "q3-qagame" || checkpoint.kind !== "qvm"
+    || execution.api.version !== ((checkpoint.abiProfile ?? "q3-modern") === "q3-modern" ? 8 : 7)))
+    throw new Error("QVM save requires matching selected qagame API and ABI profile");
   const mount = execution.artifact.provenance.mount.identity;
   const expected = { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath,
     digest: execution.artifact.digest, revision: execution.kind === "quakec" ? execution.artifact.digest : `${mount.id}:${mount.generation}` };
@@ -71,16 +73,35 @@ export function nativeQ2OriginalSave(image: SaveImage) {
     if (image.providers.some(record => record.schema === "q2:classic-native-original")) throw new Error("Original API 3 save has no matching native execution");
     return null;
   }
+  if (execution.api.kind === "q2-rerelease-game") {
+    if (image.providers.some(record => record.schema === "q2:classic-native-original")) throw new Error("Classic native save has a rerelease execution");
+    return null;
+  }
   if (execution.api.kind !== "q2-classic-game" || execution.api.version !== 3 || execution.profile.kind !== "windows-i386")
     throw new Error("Unsupported native original-save execution");
+  if (image.providers.some(record => record.schema === "q2:rerelease-native-original")) throw new Error("Rerelease native save has a classic execution");
   return decodeQ2ClassicOriginalSave(simulationProviderCheckpoint(image, "q2:classic-native-original"), {
     module: { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest, revision: execution.artifact.digest },
     map: image.recipe.map.geometry.requestedPath,
   });
 }
 
+export function nativeQ2RereleaseSave(image: SaveImage) {
+  const execution = image.recipe.execution.find(module => module.role === "server-game");
+  if (execution?.kind !== "native" || execution.api.kind !== "q2-rerelease-game") {
+    if (image.providers.some(record => record.schema === "q2:rerelease-native-original")) throw new Error("Rerelease native save has no matching execution");
+    return null;
+  }
+  if (execution.api.version !== 2023 || execution.profile.kind !== "windows-x86-64") throw new Error("Unsupported rerelease native save execution");
+  if (image.providers.some(record => record.schema === "q2:classic-native-original")) throw new Error("Classic native save has a rerelease execution");
+  return decodeQ2RereleaseNativeSave(simulationProviderCheckpoint(image, "q2:rerelease-native-original"), {
+    module: { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest, revision: execution.artifact.digest },
+    map: image.recipe.map.geometry.requestedPath,
+  });
+}
+
 export function nativeQ2SavedClients(image: SaveImage) {
-  if (nativeQ2OriginalSave(image) === null) return [];
+  if (nativeQ2OriginalSave(image) === null && nativeQ2RereleaseSave(image) === null) return [];
   const clients = simulationSaveReader(image).field("nativeClients").list(value => ({
     clientSlot: value.field("clientSlot").integer(0), phase: value.field("phase").choice("connected", "active"), userinfo: value.field("userinfo").string(),
   }));
@@ -109,8 +130,8 @@ export function validateSimulationSave(image: SaveImage): void {
   simulationProviderCheckpoint(image, "world:simulation");
   simulationProviderCheckpoint(image, "world:source-slots");
   const guest = simulationGuestCheckpoint(image);
-  const native = nativeQ2OriginalSave(image);
-  if (native !== null && simulationSaveReader(image).field("players").list(value => value.value).length !== 0) throw new Error("Native API 3 players must remain source-owned");
+  const native = nativeQ2OriginalSave(image) ?? nativeQ2RereleaseSave(image);
+  if (native !== null && simulationSaveReader(image).field("players").list(value => value.value).length !== 0) throw new Error("Native Q2 players must remain source-owned");
   if (guest?.kind === "qvm" && simulationSaveReader(image).field("players").list(value => value.value).length !== 0)
     throw new Error("QVM players must remain owned by the saved guest client records");
   const execution = image.recipe.execution.find(module => module.role === "server-game");
@@ -177,6 +198,6 @@ export function savedSimulationSettings(image: SaveImage) {
     maxClients: settings.field("maxClients").integer(1), seed: settings.field("seed").integer(0),
     startItems: settings.field("startItems").value === undefined ? "" : settings.field("startItems").string(),
     hostMilliseconds: reader.field("hostMilliseconds").finite(),
-    clientSlots: nativeQ2OriginalSave(image) !== null ? nativeQ2SavedClients(image).map(client => client.clientSlot) : guest === null ? reader.field("players").list(value => value.field("clientSlot").integer(0))
+    clientSlots: nativeQ2OriginalSave(image) !== null || nativeQ2RereleaseSave(image) !== null ? nativeQ2SavedClients(image).map(client => client.clientSlot) : guest === null ? reader.field("players").list(value => value.field("clientSlot").integer(0))
       : savedQ3GuestClients(guest).map(player => player.client.slot) };
 }

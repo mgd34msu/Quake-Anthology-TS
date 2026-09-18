@@ -16,7 +16,7 @@ import type { WindowsCapabilities } from '../../../guest/runtime/windows/contrac
 import { X64Cpu } from '../../../guest/x64/index.ts';
 
 type NativeExecution = Extract<ResolvedExecutionModule, { readonly kind: 'native' }>;
-export interface PreparedRereleaseGuest { readonly execution: NativeExecution; readonly bytes: Uint8Array; }
+export interface PreparedRereleaseGuest { readonly edition: "rerelease"; readonly execution: NativeExecution; readonly bytes: Uint8Array; }
 export async function prepareRereleaseGuest(execution: NativeExecution, mounts: MountedContent): Promise<PreparedRereleaseGuest> {
     if (execution.role !== 'server-game' || execution.api.kind !== 'q2-rerelease-game' || execution.profile.kind !== 'windows-x86-64')
         throw new Error('Rerelease guest requires the native Windows x64 game API 2023');
@@ -24,7 +24,7 @@ export async function prepareRereleaseGuest(execution: NativeExecution, mounts: 
     if (artifact === null || artifact.reference.id !== execution.artifact.id || artifact.reference.digest !== execution.artifact.digest)
         throw new Error('Selected native artifact no longer matches its resolved identity');
     if (parsePe(artifact.bytes).abi.kind !== execution.profile.kind) throw new Error('Native artifact ABI differs from the selected profile');
-    return { execution, bytes: artifact.bytes };
+    return { edition: "rerelease", execution, bytes: artifact.bytes };
 }
 export interface RereleaseGuestSourceOptions extends Omit<RereleaseQ2HostOptions, 'runner' | 'getGameApi' | 'getCgameApi' | 'services'> {
     services(memory: MappedGuestMemory): RereleaseCoreServices;
@@ -73,8 +73,17 @@ export class RereleaseGuestSource {
             throw error;
         }
     }
+    async initLoading(nextFrame: () => Promise<void>): Promise<void> {
+        if (this.closed) throw new Error('Native guest source is closed');
+        try { await this.host.initLoading(nextFrame); }
+        catch (error) {
+            try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Native guest initialization and cleanup failed'); }
+            throw error;
+        }
+    }
     close(): void {
         if (this.closed) return;
+        if (this.host.options.runner.depth !== 0) throw new Error("Native guest shutdown requires a completed game call");
         this.closed = true;
         const errors: unknown[] = [];
         try { this.host.shutdown(); } catch (error) { errors.push(error); }

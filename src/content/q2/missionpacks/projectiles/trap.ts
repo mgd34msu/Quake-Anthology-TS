@@ -176,7 +176,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
       trap.timestamp = game.host.now() + 30; trap.sound = "weapons/traploop.wav";
       game.host.combat.create(trap.actor, { health: 20, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
       game.move(trap, { angles: zero, velocity: add(body.velocity, scale(axes.up, baseUp * (gravity / 800 - 1))), bounds: { min: { x: -4, y: -4, z: 0 }, max: { x: 4, y: 4, z: 8 } } }, false);
-      game.schedule(trap, 1, this.trapRerelease); publishProjectile(trap, game, trap.sound); return trap;
+      game.schedule(trap, 1, this.trapRerelease); publishProjectile(trap, game, trap.sound, { weapon: "q2:ammo_trap", role: "grenade" }); return trap;
     }
     trap.classname = "htrap"; trap.model = "models/weapons/z_trap/tris.md2"; trap.effects = 0; trap.renderFlags = 0; trap.damageableTarget = false;
     trap.teamMaster = null; trap.damage = damage; trap.damageRadius = radius; trap.spawnflags = held ? 3 : 1;
@@ -187,7 +187,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
       this.hooks.base.playerNoise(self, game, start, "impact");
       game.radiusDamage(trap, trap.owner, trap.damage, null, radius, held ? 24 : 16, 0, "q2:ammo_trap");
       this.grenadeEffect(trap, game); game.remove(trap);
-    } else { game.schedule(trap, 1, this.trapThink); publishProjectile(trap, game, "weapons/traploop.wav"); }
+    } else { game.schedule(trap, 1, this.trapThink); publishProjectile(trap, game, "weapons/traploop.wav", { weapon: "q2:ammo_trap", role: "grenade" }); }
     return trap;
   }
 }

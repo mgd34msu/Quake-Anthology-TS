@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -28,11 +29,11 @@ export function writeClassicString(memory: MappedGuestMemory, address: GuestAddr
 }
 export function allocateClassicString(memory: MappedGuestMemory, text: string): GuestAddress {
   // The source MSVC string routines load full words containing the terminator.
-  const address = memory.allocate({ byteLength: classicStringAllocationBytes(text), label: "API 3 string" });
+  const address = allocateNativeMemory(memory, text.length + 1, "API 3 string");
   writeClassicString(memory, address, text, text.length + 1);
   return address;
 }
-export function classicStringAllocationBytes(text: string): number { return text.length + 4; }
+export function classicStringAllocationBytes(text: string): number { return nativeAllocationBytes(text.length + 1); }
 export function readClassicVector(memory: MappedGuestMemory, address: GuestAddress): Vec3 {
   return { x: memory.readFloat32(address), y: memory.readFloat32(memory.offset(address, 4n)), z: memory.readFloat32(memory.offset(address, 8n)) };
 }

@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../src/persistence/value.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SimulationEvents } from "../../../src/app/bootstrap/simulation/events.ts";
@@ -23,4 +24,23 @@ test("source message mirrors carry their exact presentation identity without tag
   expect(output[3]?.audience).toEqual({ kind: "client", client: identity.client(1, 0) });
   expect(output.every(event => event.payload.kind === "message" && "text" in event.payload.event && event.payload.event.text === "$unknown_mod")).toBe(true);
   expect(output[0]?.payload).toEqual({ kind: "message", event: { kind: "print", level: 2, text: "$unknown_mod" } });
+});
+
+
+test("persistent source replay follows sequence after replacement and retired recipients never broadcast", () => {
+  const identity = createIdentityOwner("persistent-replay"), actors = new SessionActorRegistry(identity);
+  const bodies = new SharedBodyTable(actors, { absoluteBounds: (_actor, body) => body.bounds, onLink: () => undefined, onUnlink: () => undefined });
+  const events = new SimulationEvents(bodies, () => ({ kind: "seconds", value: 1 }), () => null, actor => actor.slot);
+  const content = "q1:rerelease:id1:retail";
+  events.emit(content, {kind:"music",event:{kind:"cd-track",track:1}});
+  events.emit(content, {kind:"q1",event:{kind:"static-model",path:"progs/flame.mdl",frame:0,colorMap:0,skin:0,origin:{x:0,y:0,z:0},angles:{x:0,y:0,z:0}}});
+  events.emit(content, {kind:"music",event:{kind:"cd-track",track:2}});
+  expect(events.persistentPresentation().map(event => event.sequence)).toEqual([1,2]);
+  const saved = events.capture();
+  events.restore(new SaveReader(saved,"events"), value => identity.actor(value.slot,value.generation));
+  expect(events.takePresentation().map(event => event.sequence)).toEqual([1,2]);
+  events.message({kind:"print",level:2,text:"private"},identity.actor(1,1));
+  expect(events.take()).toEqual([]);
+  events.message({kind:"print",level:2,text:"world"});
+  expect(events.take().map(event=>event.audience.kind)).toEqual(["world"]);
 });

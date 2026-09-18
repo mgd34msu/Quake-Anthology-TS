@@ -20,8 +20,12 @@ function boundsVector(memory: QvmMemory, word: number): Vec3 {
   return word === 0 ? vec3(0, 0, 0) : vector(memory, word);
 }
 
+export type QvmClientClipModels = Pick<SourceClipModels, 'modelCount' | 'inlineModel' | 'tempBoxModel' | 'pointContents' | 'transformedPointContents' | 'traceWithoutNodes' | 'trace' | 'transformedTrace'> & {
+  readonly world: { readonly hasNodes: boolean };
+};
+
 export interface QvmClientCollisionServices {
-  models(): SourceClipModels;
+  models(): QvmClientClipModels;
   loadMap(name: string): void | Promise<void>;
 }
 

@@ -48,9 +48,11 @@ export interface WindowsServiceHost {
   free(address: GuestAddress | null, heap?: bigint): boolean;
   allocationSize(address: GuestAddress, heap?: bigint): number | null;
   destroyHeap(heap: bigint): void;
-  invoke(context: GuestCallContext, target: GuestAddress, parameters: readonly GuestStorage[], result: GuestStorage | "void", args: readonly GuestCallValue[]): GuestCallResult;
+  invoke(context: GuestCallContext, target: GuestAddress, parameters: readonly GuestStorage[], result: GuestStorage | "void", args: readonly GuestCallValue[], convention?: "system"): GuestCallResult;
   resolveAddress(library: string, name: string): GuestAddress | null;
   libraryHandle(library: string): GuestAddress | null;
+  loadLibrary(library: string): GuestAddress | null;
+  freeLibrary(handle: GuestAddress): boolean;
   libraryName(handle: GuestAddress): string | null;
 }
 export class UnsupportedWindowsImport extends Error {

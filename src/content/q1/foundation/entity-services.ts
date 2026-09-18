@@ -1,3 +1,4 @@
+import type { ProjectileRole } from "../../../contracts/weapon-behavior.ts";
 import { q1WaterTransition } from "../../../movement/q1/water-transition.ts";
 import { stepQ1Pusher } from "../../../movement/q1/pusher.ts";
 import type { NumericOperations } from "../../../contracts/numeric.ts";
@@ -446,9 +447,24 @@ export class Q1EntityServices {
     for (const player of this.players.values()) this.playerFrame(player.actor, seconds);
     return undefined;
   }
+  launchProjectileBehavior(entity: Q1Actor, shooter: ActorId, weapon: Q1Weapon, role: ProjectileRole): void {
+    if (!this.isPlayer(shooter)) return;
+    const update = this.host.weaponBehavior?.launch({ projectile: entity.actor, shooter, weapon: this.weaponItem(weapon), role,
+      timeSeconds: this.time, body: this.body(entity) });
+    if (update !== undefined && update !== null) { this.named.projectTrajectory(entity, update); this.setBody(entity, update); this.link(entity); }
+  }
+
+  applyProjectileBehavior(actor: OwnedActor, seconds: number): void {
+    const entity = this.entities.get(actor);
+    if (entity === undefined || !this.live(entity)) return;
+    const update = this.host.weaponBehavior?.step(actor, this.body(entity), seconds);
+    if (update !== undefined && update !== null) { this.named.projectTrajectory(entity, update); this.setBody(entity, update); this.link(entity); }
+  }
+
   physicsEntity(actor: OwnedActor, seconds: number, elapsedSeconds: number): undefined {
     this.time = seconds; this.frameSeconds = elapsedSeconds; const entity = this.entities.get(actor);
     if (entity === undefined || !this.live(entity)) return undefined;
+    this.applyProjectileBehavior(actor, seconds);
     if (entity.movement === "push") {
       const angular = entity.angularVelocity;
       stepQ1Pusher({ actor: actor.id, elapsedSeconds,

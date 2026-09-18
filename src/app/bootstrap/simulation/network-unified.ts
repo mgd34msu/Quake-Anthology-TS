@@ -35,6 +35,7 @@ export interface UnifiedApplicationServerHost {
 
 /** Audience projection does not execute server actions or expose another seat's private UI. */
 export function unifiedPresentationFor(actor: ActorId, client: ClientId, value: SimulationPresentationEvent): boolean {
+  if (value.recipient !== undefined && !value.recipient.equals(actor)) return false;
   const own = (target: ActorId | null): boolean => target === null || target.equals(actor);
   switch (value.kind) {
     case 'view-reset': return own(value.actor);

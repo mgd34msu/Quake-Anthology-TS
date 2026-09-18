@@ -1,11 +1,12 @@
+import type { QvmAbiProfile } from "../../contracts/execution.ts";
 // SV_LocateGameData, SV_GentityNum, SV_GameClientNum and SV_NumForGentity
 // from id Software's code/server/sv_game.c. GPL-2.0-or-later.
 // Copyright (C) 1999-2005 Id Software, Inc.
 import type { QvmSharedEntity } from "./shared-entity-record.ts";
 import type { Q3PlayerState } from "../../contracts/protocol.ts";
 import type { QvmMemory } from "./memory.ts";
-import { QVM_PLAYER_STATE_BYTES, readQvmPlayerState } from "./player-record.ts";
-import { QVM_SHARED_ENTITY_BYTES, borrowQvmSharedEntity } from "./shared-entity-record.ts";
+import { qvmPlayerStateBytes, readQvmPlayerState } from "./player-record.ts";
+import { qvmSharedEntityBytes, borrowQvmSharedEntity } from "./shared-entity-record.ts";
 
 function int32(value: number): void {
   if (!Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff) {
@@ -31,7 +32,7 @@ export class QvmGameData {
   private clientCount = 64;
   private readonly entityPointers = new Map<number, QvmSharedEntity>();
 
-  constructor(private readonly memory: QvmMemory) {}
+  constructor(private readonly memory: QvmMemory, readonly abiProfile: QvmAbiProfile = "q3-modern") {}
 
   /** Native Q3 reserves at most MAX_CLIENTS player slots; the server may narrow it. */
   setClientCount(count: number): void {
@@ -46,8 +47,8 @@ export class QvmGameData {
 
   entityBytes(number: number): DataView { return this.view(this.entityOffset(number), this.entityStride); }
   clientBytes(number: number): DataView { return this.view(this.clientOffset(number), this.clientStride); }
-  publicEntityBytes(number: number): DataView { return this.view(this.entityOffset(number), QVM_SHARED_ENTITY_BYTES); }
-  publicPlayerBytes(number: number): DataView { return this.view(this.clientOffset(number), QVM_PLAYER_STATE_BYTES); }
+  publicEntityBytes(number: number): DataView { return this.view(this.entityOffset(number), qvmSharedEntityBytes(this.abiProfile)); }
+  publicPlayerBytes(number: number): DataView { return this.view(this.clientOffset(number), qvmPlayerStateBytes(this.abiProfile)); }
 
   clear(): void { this.entities = null; this.clients = null; this.entityStride = 0; this.clientStride = 0; this.count = 0; }
 
@@ -72,8 +73,8 @@ export class QvmGameData {
     const stride = (value: number, minimum: number): void => {
       if (value < minimum || value % 4 !== 0) throw new RangeError("Game-data stride is undersized or unaligned");
     };
-    stride(entityStride, QVM_SHARED_ENTITY_BYTES);
-    stride(clientStride, QVM_PLAYER_STATE_BYTES);
+    stride(entityStride, qvmSharedEntityBytes(this.abiProfile));
+    stride(clientStride, qvmPlayerStateBytes(this.abiProfile));
     if (entities === null || clients === null || entities % 4 !== 0 || clients % 4 !== 0) {
       throw new RangeError("Game-data tables require aligned nonnull pointers");
     }
@@ -126,7 +127,7 @@ export class QvmGameData {
   private entityAt(offset: number): QvmSharedEntity {
     const existing = this.entityPointers.get(offset);
     if (existing !== undefined) return existing;
-    const entity = borrowQvmSharedEntity(this.view(offset, QVM_SHARED_ENTITY_BYTES));
+    const entity = borrowQvmSharedEntity(this.view(offset, qvmSharedEntityBytes(this.abiProfile)), this.abiProfile);
     this.entityPointers.set(offset, entity);
     return entity;
   }
@@ -149,16 +150,16 @@ export class QvmGameData {
   }
 
   copyPlayerState(number: number): Q3PlayerState {
-    return readQvmPlayerState(this.view(this.clientOffset(number), QVM_PLAYER_STATE_BYTES));
+    return readQvmPlayerState(this.view(this.clientOffset(number), qvmPlayerStateBytes(this.abiProfile)), this.abiProfile);
   }
 
   playerPing(number: number): number {
-    return this.view(this.clientOffset(number) + 452, 4).getInt32(0, true);
+    return this.view(this.clientOffset(number) + (this.abiProfile === "q3-modern" ? 452 : 440), 4).getInt32(0, true);
   }
 
   setPlayerPing(number: number, ping: number): void {
     // The server writes this field directly, without reading or copying the rest of playerState_t.
     const offset = this.clientOffset(number);
-    this.view(offset + 452, 4).setInt32(0, ping, true);
+    this.view(offset + (this.abiProfile === "q3-modern" ? 452 : 440), 4).setInt32(0, ping, true);
   }
 }

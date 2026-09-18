@@ -32,8 +32,20 @@ test("Windows heap, TLS and file services expose mutations in authoritative gues
   const call = (name: string, args: readonly GuestCallValue[]): GuestCallResult => {
     const address = runtime.resolveAddress("kernel32.dll", name); if (address === null) throw new Error(`Missing service ${name}`); return callbacks.invoke(address, context, args);
   };
+  const encodedNull = call("EncodePointer", [p(null)]);
+  expect(resultPointer(encodedNull).byteOffset).not.toBe(0n);
+  expect(call("DecodePointer", [p(resultPointer(encodedNull))])).toEqual(p(null));
+  const original = memory.pointer(0x12345678n), encoded = call("EncodePointer", [p(original)]);
+  expect(encoded).not.toEqual(p(original));
+  expect(call("EncodePointer", [p(original)])).toEqual(encoded);
+  expect(call("DecodePointer", [p(resultPointer(encoded))])).toEqual(p(original));
   const heap = resultPointer(call("HeapCreate", [u(0), u(0), u(0)]));
   const allocation = resultPointer(call("HeapAlloc", [p(heap), u(8), u(16)])); memory.writeUint32(allocation, 0x12345678);
+  const odd = resultPointer(call("HeapAlloc", [p(heap), u(8), u(6)]));
+  expect(runtime.allocationSize(odd, heap.byteOffset)).toBe(6);
+  expect(memory.copy(odd, 16)).toEqual(new Uint8Array(16));
+  expect(call("HeapFree", [p(heap), u(0), p(odd)])).toEqual({ kind: "int32", value: 1 });
+  expect(() => memory.copy(memory.offset(odd, 4095n), 1)).toThrow();
   const enlarged = resultPointer(call("HeapReAlloc", [p(heap), u(8), p(allocation), u(40)]));
   expect(memory.readUint32(enlarged)).toBe(0x12345678); expect(memory.readUint32(memory.offset(enlarged, 20n))).toBe(0);
   expect(() => memory.readUint8(allocation)).toThrow();
@@ -98,4 +110,46 @@ test("unimplemented imports retain an explicit reached failure rather than retur
   const context: GuestCallContext = { module, callback: { kind: "typescript", provider: "test:windows-services", callback: "test:entry" }, self: null, other: null, parent: null };
   expect(() => callbacks.invoke(resolution.address, context, [])).toThrow(UnsupportedWindowsImport);
   expect(runtime.coverage.find(entry => entry.name === "Missing")).toMatchObject({ supported: false, reached: 1, failed: 1 });
+});
+
+test("Windows dynamic library references, spin locks and fiber slots retain real service state", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 }), callbacks = new GuestCallbackTable(memory);
+  const runtime = new WindowsGuestRuntime({ memory, callbacks });
+  const context: GuestCallContext = { module, callback: { kind: "typescript", provider: "test:windows-services", callback: "test:entry" }, self: null, other: null, parent: null };
+  const call = (name: string, args: readonly GuestCallValue[]): GuestCallResult => { const address = runtime.resolveAddress("kernel32.dll", name); if (address === null) throw new Error(`Missing service ${name}`); return callbacks.invoke(address, context, args); };
+  const wide = memory.allocate({ byteLength: 64 }); [..."kernel32.dll"].forEach((letter, index) => memory.writeUint16(memory.offset(wide, BigInt(index * 2)), letter.charCodeAt(0)));
+  const library = resultPointer(call("LoadLibraryExW", [p(wide), p(null), u(0x800)]));
+  expect(call("GetModuleHandleW", [p(wide)])).toEqual(p(library));
+  const name = memory.allocate({ byteLength: 64 }); memory.write(name, new TextEncoder().encode("GetLastError\0"));
+  expect(call("GetProcAddress", [p(library), p(name)])).toEqual(p(runtime.resolveAddress("kernel32.dll", "GetLastError")));
+  memory.write(name, new TextEncoder().encode("UnsupportedDynamic\0")); expect(call("GetProcAddress", [p(library), p(name)])).toEqual(p(null)); expect(runtime.lastError).toBe(127);
+  expect(call("FreeLibrary", [p(library)])).toEqual({ kind: "int32", value: 1 }); expect(runtime.libraryHandle("kernel32.dll")).toEqual(library);
+  expect(call("FreeLibrary", [p(library)])).toEqual({ kind: "int32", value: 0 });
+  const lock = memory.allocate({ byteLength: 40 }); expect(call("InitializeCriticalSectionAndSpinCount", [p(lock), u(4000)])).toEqual({ kind: "int32", value: 1 });
+  expect(memory.readUint64(memory.offset(lock, 32n))).toBe(4000n); call("EnterCriticalSection", [p(lock)]); call("EnterCriticalSection", [p(lock)]);
+  expect(memory.readUint32(memory.offset(lock, 12n))).toBe(2); call("LeaveCriticalSection", [p(lock)]); call("LeaveCriticalSection", [p(lock)]); expect(memory.readUint32(memory.offset(lock, 8n))).toBe(0xffffffff);
+  const list = memory.allocate({ byteLength: 16, alignment: 16n }), entry = memory.allocate({ byteLength: 16, alignment: 16n });
+  call("InitializeSListHead", [p(list)]); expect(call("InterlockedFlushSList", [p(list)])).toEqual(p(null));
+  memory.writeUint64(list, 0x70001n); memory.writeUint64(memory.offset(list, 8n), entry.byteOffset); expect(call("InterlockedFlushSList", [p(list)])).toEqual(p(entry));
+  expect(memory.readUint16(list)).toBe(0); expect(memory.readUint64(memory.offset(list, 8n))).toBe(0n);
+  const released: GuestCallValue[] = [];
+  runtime.service("kernel32.dll", "test-fls-cleanup", ["pointer"], "void", (_context, args) => { released.push(...args); return { kind: "void" }; });
+  const stack = memory.allocate({ byteLength: 4096 }), returnAddress = memory.allocate({ byteLength: 16, permissions: "read-execute" });
+  const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: returnAddress.byteOffset, stackPointer: stack.byteOffset + 4096n, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const cpu = new X64Cpu({ memory, state, isHostCall: address => callbacks.resolve(address) !== null }); runtime.attachRunner(new GuestCallRunner({ cpu, callbacks, returnAddress }));
+  const index = call("FlsAlloc", [p(runtime.resolveAddress("kernel32.dll", "test-fls-cleanup"))]); if (index.kind !== "uint32") throw new Error("Missing FLS index"); expect(call("FlsGetValue", [index])).toEqual(p(null));
+  call("FlsSetValue", [index, p(lock)]); expect(call("FlsGetValue", [index])).toEqual(p(lock)); expect(call("FlsFree", [index])).toEqual({ kind: "int32", value: 1 }); expect(call("FlsGetValue", [index])).toEqual(p(null)); expect(runtime.lastError).toBe(87); expect(released).toEqual([p(lock)]);
+});
+
+test("dynamic lookup resolves prepared PE exports without enabling CFG on a non-CFG image", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 }), callbacks = new GuestCallbackTable(memory), runtime = new WindowsGuestRuntime({ memory, callbacks });
+  const image = mapPeImage({ bytes: peFixture(8), memory }), config = image.loadConfiguration;
+  if (config === null || config.guardCheckSlot === null || config.guardDispatchSlot === null) throw new Error("Fixture lacks CRT guard slots");
+  const original = memory.offset(image.base, 0x1010n); memory.writePointer(config.guardCheckSlot, original); memory.writePointer(config.guardDispatchSlot, original);
+  expect(config.guardFlags).toBe(0x100); expect(image.pe.dllCharacteristics & 0x4000).toBe(0);
+  runtime.prepareImage(image);
+  expect(memory.readPointer(config.guardCheckSlot)).toEqual(original); expect(memory.readPointer(config.guardDispatchSlot)).toEqual(original);
+  expect(runtime.loadLibrary(module.artifactPath)).toEqual(image.base); expect(runtime.resolveAddress(module.artifactPath, "GetGameAPI")).toEqual(original);
+  expect(runtime.resolveAddress(module.artifactPath, "missing")).toBeNull(); expect(runtime.resolveAddress(module.artifactPath, "Forward")).toBeNull();
+  expect(runtime.freeLibrary(image.base)).toBe(true); expect(runtime.libraryHandle(module.artifactPath)).toEqual(image.base);
 });

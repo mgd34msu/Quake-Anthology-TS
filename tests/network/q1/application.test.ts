@@ -1,5 +1,6 @@
 import { nextActorGeneration } from '../../../src/world/actors/registry.ts';
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import { QuakeCSource } from '../../../src/app/bootstrap/simulation/quakec-source.ts';
 import { Application } from '../../../src/app/bootstrap/application.ts';
 import { parseApplicationCommand } from '../../../src/app/bootstrap/options.ts';
 import { UdpTransport } from '../../../src/network/common/transport.ts';
@@ -425,3 +426,142 @@ expect(afterReset.every(actor=>beforeReset.every(old=>!actor.equals(old)))).toBe
 expect(afterReset.every(actor=>actor.slot<65536)).toBe(true);
 } finally {session.close();await content.close();}
 });
+
+test('external QuakeC NetQuake routes native source messages and fields through real UDP', async () => {
+    const launch = parseApplicationCommand(['--game', 'q1-classic-id1', '--progs', 'progs.dat', '--map', 'e1m1', '--movement', 'q1', '--character', 'q1', '--mode', 'coop', '--dedicated', '--listen', '0', '--bind', '127.0.0.1']);
+    if (launch.kind !== 'run') throw new Error('No QC launch');
+    const prints: string[] = [], app = await Application.open(launch.options, { print: text => { prints.push(text); return undefined; } });
+    const first = await client('QC First'), second = await client('QC Second'), peers = [first, second];
+    const address = app.networkAddress;
+    if (address === null || address.kind === 'ipx') throw new Error('Missing UDP bind');
+    let now = 0;
+    const command = (peer: Awaited<ReturnType<typeof client>>, text: string): void => { const bytes = new SizeBuf(256); writeClientStringCommand(bytes, text); peer.queued.push(bytes.bytes()); };
+    const exchange = async (): Promise<void> => {
+        now += 50;
+        for (const peer of peers) {
+            if (peer.handshake.state.kind === 'waiting') {
+                const connect = peer.handshake.next(now);
+                if (connect !== null)
+                    peer.transport.send(address, connect);
+            }
+            if (peer.channel.canSendReliable) {
+                const bytes = peer.queued.shift();
+                if (bytes !== undefined)
+                    peer.channel.queueReliable(bytes);
+            }
+            const bytes = peer.channel.next(now);
+            if (bytes !== null)
+                peer.transport.send(address, bytes);
+        }
+        await Bun.sleep(1);
+        await app.step(50);
+        await Bun.sleep(1);
+        for (const peer of peers)
+            for (;;) {
+                const packet = peer.transport.poll();
+                if (packet === null)
+                    break;
+                if (packet.kind !== 'packet')
+                    continue;
+                if (new DataView(packet.payload.buffer, packet.payload.byteOffset).getUint32(0) >>> 16 === 0x8000) {
+                    peer.handshake.receive(packet.payload);
+                    continue;
+                }
+                const result = peer.channel.receive(packet.payload, now);
+                for (const reply of result.replies)
+                    peer.transport.send(address, reply);
+                if (result.delivery !== null)
+                    for (const message of peer.decoder.decode(result.delivery.payload)) {
+                        peer.messages.push(message);
+                        peer.deliveries.push({ message, kind: result.delivery.kind });
+                        if (message.kind === 'server-info') {
+                            peer.signon.stage = 0;
+                            peer.sounds = message.sounds;
+                            peer.models = message.models;
+                        }
+                        if (message.kind === 'signon')
+                            peer.queued.push(peer.signon.receive(message.stage));
+                        if (message.kind === 'entity')
+                            peer.signon.firstEntity();
+                    }
+            }
+    };
+
+    try {
+        const source = app.simulation.quakecSource(); if (source === null) throw new Error('Missing external QC');
+        expect(app.simulation.q1Source()).toBeNull();
+        const write = (name: 'WriteByte' | 'WriteString', destination: number, value: number): void => {
+            const builtin = source.messages.host.get(name); if (builtin === undefined) throw new Error('Missing source writer');
+            source.machine.globals.setFloat(4, destination);
+            if (name === 'WriteString') source.machine.globals.setInt(7, value); else source.machine.globals.setFloat(7, value);
+            builtin(source.machine);
+        };
+        const text = (destination: number, opcode: number, value: string): void => {
+            write('WriteByte', destination, opcode);
+            write('WriteString', destination, source.machine.strings.allocate(value));
+        };
+        write('WriteByte', 3, 12); write('WriteByte', 3, 33); write('WriteString', 3, source.machine.strings.allocate('az'));
+        source.messages.flush();
+        for (let index = 0; index < 100 && peers.some(peer => !peer.signon.active); index++) await exchange();
+        for (const peer of peers) {
+            if (!peer.signon.active) throw new Error(`QC native signon failed: ${prints.join('\n')}`);
+            expect(peer.models).toEqual(source.precacheNames('model')); expect(peer.sounds).toEqual(source.precacheNames('sound'));
+            expect(peer.messages.some(message => message.kind === 'light-style' && message.index === 33 && message.value === 'az')).toBe(true);
+            expect(peer.messages.some(message => message.kind === 'client-data' && message.data.health > 0)).toBe(true);
+        }
+        const player = app.networkClients[0], other = app.networkClients[1];
+        if (player === undefined || other === undefined) throw new Error('Missing source clients');
+        expect(source.clientInfo(player.client).get('name')).toBe('QC First');
+        const words = source.entities.at(player.sourceEntity);
+        const field = (name: string): number => { const value = source.prepared.program.fieldsByName.get(name); if (value === undefined) throw new Error(`Missing ${name}`); return value.offset; };
+        expect(source.machine.strings.get(words.int(field('netname')))).toBe('QC First');
+        const before = { ...words.vector(field('origin')) };
+        for (let index = 0; index < 6; index++) {
+            const move = new SizeBuf(128);
+            writeNetQuakeMove(move, { kind: 'q1-netquake', acknowledgedServerTimeSeconds: first.decoder.timeSeconds, viewAngles: { x: 0, y: 0, z: 0 }, forwardMove: 200, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 }, { kind: 'q1-netquake', version: 15 });
+            first.transport.send(address, first.channel.unreliable(move.bytes())); await exchange();
+        }
+        expect(words.vector(field('origin'))).not.toEqual(before);
+        for (const peer of peers) { peer.messages.length = 0; peer.deliveries.length = 0; }
+        source.machine.globals.setInt(source.machine.globalOffset('msg_entity'), source.entities.reference(other.sourceEntity));
+        text(1, 26, 'qc-private'); text(2, 8, 'qc-all'); text(0, 8, 'qc-unreliable');
+        command(first, 'say qc-chat'); command(first, 'color 4 13');
+        for (let index = 0; index < 12; index++) await exchange();
+        expect(first.messages.some(message => message.kind === 'center-print' && message.text === 'qc-private')).toBe(false);
+        expect(second.deliveries.some(entry => entry.kind === 'reliable' && entry.message.kind === 'center-print' && entry.message.text === 'qc-private')).toBe(true);
+        for (const peer of peers) {
+            expect(peer.deliveries.some(entry => entry.kind === 'reliable' && entry.message.kind === 'print' && entry.message.text === 'qc-all')).toBe(true);
+            expect(peer.deliveries.some(entry => entry.kind === 'unreliable' && entry.message.kind === 'print' && entry.message.text === 'qc-unreliable')).toBe(true);
+            expect(peer.messages.some(message => message.kind === 'print' && message.text.includes('QC First: qc-chat'))).toBe(true);
+            expect(peer.messages.some(message => message.kind === 'colors' && message.slot === player.client.slot && message.value === 77)).toBe(true);
+        }
+        command(first, 'pause'); for (let index = 0; index < 6; index++) await exchange();
+        expect(app.simulation.q1Paused).toBe(true); expect(first.messages.some(message => message.kind === 'pause' && message.paused)).toBe(true);
+        command(first, 'pause'); for (let index = 0; index < 6; index++) await exchange(); expect(app.simulation.q1Paused).toBe(false);
+        const retained = app.networkClients.map(player => player.client), previousWorld = app.simulation;
+        const admissions = spyOn(QuakeCSource.prototype, 'admitClient');
+        try {
+            app.queueCommand('map', ['e1m2'], null);
+            await app.step(50);
+            expect(app.simulation).not.toBe(previousWorld);
+            const next = app.simulation.quakecSource(); if (next === null) throw new Error('Travel lost QC source');
+            expect(admissions).toHaveBeenCalledTimes(0);
+            expect(app.simulation.players()).toHaveLength(0);
+            expect(app.simulation.clientIdentities()).toEqual(retained);
+            expect(app.networkClients.map(player => player.client)).toEqual(retained);
+            for (const player of app.networkClients) {
+                expect(next.clientActor(player.client)?.equals(player.actor)).toBe(true);
+                expect(next.isActiveClient(player.actor)).toBe(false);
+            }
+            for (let index = 0; index < 100 && (app.simulation.players().length < 2 || peers.some(peer => !peer.signon.active)); index++) await exchange();
+            expect(admissions).toHaveBeenCalledTimes(2);
+            expect(app.simulation.players()).toHaveLength(2);
+            for (const peer of peers) expect(peer.signon.active).toBe(true);
+            for (const player of app.networkClients) {
+                expect(next.isActiveClient(player.actor)).toBe(true);
+                expect(next.clientInfo(player.client).get('name')).toBe(player.client.slot === retained[0]?.slot ? 'QC First' : 'QC Second');
+            }
+        } finally { admissions.mockRestore(); }
+
+    } finally { first.transport.close(); second.transport.close(); await app.close(); }
+}, 60000);

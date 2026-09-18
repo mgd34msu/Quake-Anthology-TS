@@ -1,3 +1,4 @@
+import { qvmConfigstring } from "./legacy-presentation.ts";
 /* Q3 server/sv_game.c guest ABI. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { TraceQuery } from "../../contracts/scene.ts";
@@ -74,10 +75,10 @@ export function qvmServerGameSyscall(call: QvmHostCall, services: QvmServerGameS
     }
     case QvmGameImport.G_SET_CONFIGSTRING:
       configIndex(word(1), "SV_SetConfigstring");
-      return complete(services.configstrings.set(word(1), word(2) === 0 ? "" : guest.readString(word(2))));
+      return complete(services.configstrings.set(qvmConfigstring(word(1), services.data.abiProfile), word(2) === 0 ? "" : guest.readString(word(2))));
     case QvmGameImport.G_GET_CONFIGSTRING:
       capacity(word(3), "SV_GetConfigstring"); configIndex(word(1), "SV_GetConfigstring");
-      guest.writeString(word(2), services.configstrings.get(word(1)), word(3)); return 0;
+      guest.writeString(word(2), services.configstrings.get(qvmConfigstring(word(1), services.data.abiProfile)), word(3)); return 0;
     case QvmGameImport.G_GET_USERINFO:
       capacity(word(3), "SV_GetUserinfo"); client(word(1), services, "SV_GetUserinfo");
       guest.writeString(word(2), services.getUserinfo(word(1)), word(3)); return 0;
@@ -125,7 +126,7 @@ export function qvmServerGameSyscall(call: QvmHostCall, services: QvmServerGameS
       return Number(services.spatial.entityContact(bounds(), slot(3), call.code === QvmGameImport.G_ENTITY_CONTACTCAPSULE));
     case QvmGameImport.G_GET_USERCMD:
       client(word(1), services, "SV_GetUsercmd");
-      writeQvmUserCommand(guest.view(word(2), QVM_USER_COMMAND_BYTES), services.getUserCommand(word(1))); return 0;
+      writeQvmUserCommand(guest.view(word(2), QVM_USER_COMMAND_BYTES), services.getUserCommand(word(1)), services.data.abiProfile); return 0;
     case QvmGameImport.G_GET_ENTITY_TOKEN: {
       const result = services.entityToken();
       guest.writeString(word(1), result.token, word(2)); return Number(!result.ended || result.token.length !== 0);

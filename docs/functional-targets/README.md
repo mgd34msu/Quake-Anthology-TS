@@ -102,7 +102,7 @@ The frame-time budget and reference workload should be explicit before a perform
 
 T01's shared-client lifetime implementation is complete in accepted source `e3eea6a`. The retained client owns input, console programs, settings, renderer/audio and resources through local play, network connections, demos, save restoration and menus. Source configuration is prepared before publication, including a server-selected mod; profile scripts can wait or disconnect without deadlocking the packet decoder. Separate compiled and native runs cover these transitions; [the completion record](status.md#t01-session-and-resource-lifetime) states their scope and delivery status.
 
-Sixteen targets remain open. T02 passed public add-on installation/play/recovery and authored arena gameplay; T08 retains its qualified transfer, fallback, interruption and remount workflows. See [their evidence and limits](status.md). Supporting modules alone do not count as completed targets. Performance remains active under T03/T11/T13.
+Fourteen targets remain open; T10 is active. T02 passed public add-on installation/play/recovery and authored arena gameplay; T08 retains its qualified transfer, fallback, interruption and remount workflows. See [their evidence and limits](status.md). Supporting modules alone do not count as completed targets. Performance remains active under T03/T11/T13.
 
 The shared font path now connects TrueType generation and optional font export to the same material registry used by retail DAT fonts. Both appeared correctly in an inspected rendered image. This advances T03/T18; it does not complete international text, captions, or every mod UI workflow.
 

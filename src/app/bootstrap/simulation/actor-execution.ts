@@ -151,6 +151,7 @@ function executeQ1Actor(entry: Extract<ActorExecution, { readonly kind: "q1" }>,
       physics.step(actor, elapsed);
       entity.movementFlags = (entity.movementFlags & ~512) | (bodies.read(actor.id)?.ground == null ? 0 : 512);
     } else if (entity.move === null && (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "fly" || entity.movement === "flymissile")) {
+      services.applyProjectileBehavior(actor, context.timeSeconds);
       physics.step(actor, elapsed);
     } else services.physicsEntity(actor, context.timeSeconds, elapsed);
   }
@@ -187,6 +188,7 @@ function executeQ2Actor(entry: Extract<ActorExecution, { readonly kind: "q2" }>,
     }
     const after = entity.motion === "step";
     if (!after) scheduler.run(actor.id, frame, "during-physics");
+    if (actors.isLive(actor.id)) services.applyProjectileBehavior(actor.id, context.timeSeconds);
     const moved = actors.isLive(actor.id) ? physics.step(actor, elapsed) : undefined;
     if (actors.isLive(actor.id) && (entity.motion === "new-toss" && moved === "moved" || entity.motion === "toss" || entity.motion === "bounce" || entity.motion === "fly" || entity.motion === "fly-missile" || entity.motion === "wall-bounce")) {
       const body = bodies.read(actor.id);

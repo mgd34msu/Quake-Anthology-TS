@@ -1,3 +1,4 @@
+import type { QuakeCClientMovement } from "./quakec-client-adapter.ts";
 import { movementJumped } from "./player-jump.ts";
 import { prepareNetQuake, physicsNetQuake } from "../../../movement/q1/netquake.ts";
 import type { Q1MovementOptions } from "../../../movement/q1/types.ts";
@@ -33,6 +34,11 @@ export interface NetQuakeClientBinding {
 }
 
 export interface PlayerMovementHost {
+  readonly sourceClient?: {
+    projectState(state: MovementState): MovementState;
+    beforeMovement(command: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand): QuakeCClientMovement;
+    afterMovement(player: MovementPlayer, frame: FrameContext, sourceCommand?: QwUserCommand): undefined;
+  };
   readonly q2MovementConfig?: () => { readonly airAccelerate: number; readonly n64Physics: boolean } | null;
   readonly netQuake?: NetQuakeClientBinding;
   readonly quakeWorld?: {
@@ -188,6 +194,11 @@ export class MovementPlayer {
   }
 
   readState(): MovementState {
+    const state = this.readMovementState();
+    return this.host.sourceClient?.projectState(state) ?? state;
+  }
+
+  private readMovementState(): MovementState {
     const body = this.host.bodies.read(this.actor.id);
     if (body === null) throw new Error("Player no longer has a body");
     const state = this.state;
@@ -305,8 +316,10 @@ export class MovementPlayer {
     return result;
   }
 
-  move(input: ActorCommand, frame: FrameContext): MovementResult {
+  move(input: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand): MovementResult {
     this.acceptArsenalIntent(input.arsenal);
+    const sourceMovement = this.host.sourceClient?.beforeMovement(input, frame, sourceCommand);
+    if (sourceMovement !== undefined) input = { ...input, command: sourceMovement.command };
     this.state = this.readState();
     this.previousButtons = this.buttons;
     this.buttons = input.command.buttons;
@@ -324,7 +337,7 @@ export class MovementPlayer {
     const profile = selectedProfile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(selectedProfile) ?? selectedProfile : selectedProfile;
     const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id);
     const q1Options = { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight, hooks: {
-      playerAction: (actor: OwnedActor, action: "jump" | "swim") => this.host.jump(actor, action),
+      playerAction: (actor: OwnedActor, action: "jump" | "swim") => { if (action !== "jump" || sourceMovement?.sourceJump !== true) this.host.jump(actor, action); return undefined; },
       link: (_actor: OwnedActor, next: MovementState, triggers: boolean) => this.commit(next, true, triggers),
       isBsp: (hit: TraceHit) => hit.kind === "world" || hit.kind === "actor" && this.host.isBrush(hit.actor),
       qwState: (level: number, type: number): undefined => this.host.quakeWorld?.water(level, type),
@@ -372,10 +385,11 @@ export class MovementPlayer {
       result = provider.move(move, this.services);
     } else throw new Error(`Command ${command.kind} does not match movement ${profile.kind}`);
     if (result.status === "active" && this.host.actors.isLive(this.actor.id)) {
-      if (this.host.quakeWorld === undefined && movementJumped(state, priorGround, command, result)) this.host.jump(this.actor, "jump");
+      if (sourceMovement?.sourceJump !== true && this.host.quakeWorld === undefined && movementJumped(state, priorGround, command, result)) this.host.jump(this.actor, "jump");
       this.accept(result);
       this.commit(result.state, true, result.kind === "q3");
     }
+    if (this.host.actors.isLive(this.actor.id)) this.host.sourceClient?.afterMovement(this, frame, sourceCommand);
     this.lastSequence = input.sequence;
     return result;
   }

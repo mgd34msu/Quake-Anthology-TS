@@ -11,6 +11,17 @@ import { MovementContext, NONE, ZERO } from "./common.ts";
 import { finishMovement } from "./result.ts";
 import { Q1_CONTENTS_EMPTY, Q1_CONTENTS_SLIME, Q1_CONTENTS_SOLID, Q1_CONTENTS_WATER, Q1_STEP_HEIGHT, type Q1MovementOptions } from "./types.ts";
 
+export function* quakeWorldCommandSlices(command: QwUserCommand, maximumMilliseconds: number): Generator<QwUserCommand, void, unknown> {
+  if (maximumMilliseconds < 1) throw new RangeError("QuakeWorld command interval must be positive");
+  if (!Number.isInteger(command.milliseconds) || command.milliseconds < 0 || command.milliseconds > 255)
+    throw new RangeError("QuakeWorld command milliseconds must fit its source byte");
+  if (command.milliseconds > maximumMilliseconds) {
+    const milliseconds = Math.floor(command.milliseconds / 2);
+    yield* quakeWorldCommandSlices({ ...command, milliseconds }, maximumMilliseconds);
+    yield* quakeWorldCommandSlices({ ...command, milliseconds, impulse: 0 }, maximumMilliseconds);
+  } else yield command;
+}
+
 type MutableState = { -readonly [K in keyof QwMovementState]: QwMovementState[K] };
 
 class QuakeWorldMove {
@@ -268,15 +279,12 @@ class QuakeWorldMove {
     if (this.context.removed) return;
     const clock = this.input.profile.clock;
     if (clock.kind !== "q1-quakeworld") throw new Error("QuakeWorld movement needs a QuakeWorld command clock");
-    if (clock.maximumCommandMilliseconds < 1) throw new RangeError("QuakeWorld command interval must be positive");
-    if (command.milliseconds > clock.maximumCommandMilliseconds) {
-      const milliseconds = Math.floor(command.milliseconds / 2);
-      this.runCommand({ ...command, milliseconds });
-      this.runCommand({ ...command, milliseconds, impulse: 0 });
-      return;
+    for (const slice of quakeWorldCommandSlices(command, clock.maximumCommandMilliseconds)) {
+      if (this.context.removed) break;
+      this.step(slice); this.context.substep++;
     }
-    this.step(command); this.context.substep++;
   }
+
   run(): QwMovementResult {
     if (!Number.isInteger(this.input.command.milliseconds) || this.input.command.milliseconds < 0 || this.input.command.milliseconds > 255) {
       throw new RangeError("QuakeWorld command milliseconds must fit its source byte");

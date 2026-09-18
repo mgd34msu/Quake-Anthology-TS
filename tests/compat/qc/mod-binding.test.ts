@@ -53,7 +53,7 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
     const words = entities.at(slot);
     words.setFloat(field("health"), 100); words.setFloat(field("takedamage"), 2);
     words.setFloat(field("movetype"), variant === "death" ? 0 : 3);
-    words.setFloat(field("armorvalue"), 40); words.setFloat(field("armortype"), 0.3); words.setFloat(field("items"), 8192);
+    words.setFloat(field("armorvalue"), 40); words.setFloat(field("armortype"), 0.3); words.setFloat(field(id1ProgramBinding(program).armorField), id1ProgramBinding(program).armorMasks[0]);
     words.setInt(field("th_pain"), program.functionNamed("SUB_Null").index); words.setInt(field("th_die"), program.functionNamed("SUB_Null").index);
     words.setVector(field("origin"), { x: slot * 20, y: slot * 6, z: slot * 4 });
     authority.bind(actor, { read: () => ({ health: words.float(field("health")), armor: binding.readArmor(words), mass: 200, canTakeDamage: true, invulnerable: false, team: null }),
@@ -70,10 +70,11 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
   vm.globals.setFloat(vm.globalOffset("time"), 3); vm.globals.setInt(vm.globalOffset("self"), entities.reference(2));
   vm.globals.setInt(4, entities.reference(2)); vm.globals.setInt(7, entities.reference(1)); vm.globals.setInt(10, entities.reference(1));
   vm.globals.setFloat(13, variant === "death" ? 150 : 40);
-  vm.execute(program.functionNamed("T_Damage").index, 4);
+  vm.globals.setFloat(16, 0);
+  vm.execute(program.functionNamed("T_Damage").index, program.functionNamed("T_Damage").parameterSizes.length);
   return { bytes: entities.bytes.slice(), outcomes, health: entities.at(2).float(field("health")), attackerHealth: entities.at(1).float(field("health")) };
 }
-for (const path of ["id1/PAK0.PAK", "hipnotic/pak0.pak", "rerelease/dopa/pak0.pak"]) {
+for (const path of ["id1/PAK0.PAK", "hipnotic/pak0.pak", "rerelease/dopa/pak0.pak", "rogue/pak0.pak"]) {
   test(`derived ${path} damage preserves the real VM stores and reactions`, async () => {
     const program = await readProgram(path), derived = deriveNativeProgramBinding(program);
     expect(derived.damage.index).toBe(program.functionNamed("T_Damage").index);
@@ -106,38 +107,23 @@ test("Hipnotic recursive empathy and wetsuit protection remain authored source b
     expect(observed.attackerHealth).toBe(variant === "empathy" ? 86 : 100);
   }
 });
-test("matching names and signatures do not admit changed damage arithmetic or reaction arguments", async () => {
-  const program = await readProgram("hipnotic/pak0.pak"), binding = deriveNativeProgramBinding(program);
-  const subtraction = program.statements.findIndex((statement, index) => index > binding.damage.firstStatement && index < binding.damage.healthStore && statement.opcode === QcOpcode.SubF && statement.b === binding.damage.take);
-  expect(subtraction).toBeGreaterThan(0);
-  const changed = program.statements.map((statement, index) => index === subtraction ? { ...statement, opcode: QcOpcode.AddF } : statement);
-  expect(() => id1ProgramBinding(changedProgram(program, changed))).toThrow("health store");
-  const changedPain = program.statements.map((statement, index) => index === binding.damage.pain[0] - 1 ? { ...statement, a: binding.damage.parameterStart + 3 } : statement);
-  expect(() => id1ProgramBinding(changedProgram(program, changedPain))).toThrow("pain call arguments");
-});
-
-test("a branch cannot enter a reaction while skipping the observed health store", async () => {
-  const program = await readProgram("hipnotic/pak0.pak"), binding = deriveNativeProgramBinding(program);
-  const branch = program.statements.findIndex((statement, index) => index > binding.damage.firstStatement && statement.opcode === QcOpcode.IfNot);
-  const changed = program.statements.map((statement, index) => index === branch ? { ...statement, b: binding.damage.death[0] - 2 - branch } : statement);
-  expect(() => id1ProgramBinding(changedProgram(program, changed))).toThrow("reaction is not dominated by health store");
-});
-
-test("Rogue's real items2 armor encoding is rejected until its shared armor projection exists", async () => {
+test("native armor projection requires the source inventory constants", async () => {
   const program = await readProgram("rogue/pak0.pak");
-  expect(() => id1ProgramBinding(program)).toThrow("armor inventory layout");
+  expect(id1ProgramBinding(program).armorField).toBe("items2");
+  expect(id1ProgramBinding(program).armorMasks).toEqual([1, 2, 4]);
 });
-
 test("source calls after the reaction cannot hide helper combat writes", async () => {
-  const base = await readProgram("id1/PAK0.PAK"), layout = deriveNativeProgramBinding(base);
+  const base = await readProgram("id1/PAK0.PAK"), layout = id1ProgramBinding(base);
+  const sites = layout.damage;
+  if (sites.kind !== "sites") throw new Error("Expected pinned fixture sites");
   const initial = new Uint8Array(base.initialGlobals.length + 16); initial.set(base.initialGlobals);
   const extra = base.initialGlobals.length / 4, functionIndex = base.functions.length;
   const values = new DataView(initial.buffer); values.setInt32(extra * 4, functionIndex, true); values.setFloat32((extra + 2) * 4, 1, true);
   const self = base.globalsByName.get("self"), health = base.globalsByName.get("health");
   if (self === undefined || health === undefined) throw new Error("Missing source fields");
   const end = base.functions.reduce((limit, fn) => fn.firstStatement > layout.damage.firstStatement ? Math.min(limit, fn.firstStatement) : limit, base.statements.length);
-  const tail = base.statements.findIndex((statement, index) => index > layout.damage.pain[0] && index < end && statement.opcode === QcOpcode.StoreEnt && statement.b === self.offset);
-  expect(tail).toBeGreaterThan(layout.damage.pain[0]);
+  const tail = base.statements.findIndex((statement, index) => index > sites.pain[0] && index < end && statement.opcode === QcOpcode.StoreEnt && statement.b === self.offset);
+  expect(tail).toBeGreaterThan(sites.pain[0]);
   const statements: QcStatement[] = base.statements.map((statement, index) => index === tail ? { opcode: QcOpcode.Call0, a: extra, b: 0, c: 0 } : statement);
   statements.push({ opcode: QcOpcode.Address, a: self.offset, b: health.offset, c: extra + 1 },
     { opcode: QcOpcode.StorePF, a: extra + 2, b: extra + 1, c: 0 }, { opcode: QcOpcode.Done, a: 0, b: 0, c: 0 });
@@ -145,24 +131,28 @@ test("source calls after the reaction cannot hide helper combat writes", async (
     localWords: 0, name: "AfterDamage", file: "test.qc", parameterSizes: [], namedBuiltin: false }];
   const program = new QcProgram(base.source, base.api, statements, base.globals, base.fields, functions,
     base.strings, initial, base.entityFieldWords, base.checksum, createContentDigest("1".repeat(64)));
-  expect(() => deriveNativeProgramBinding(program)).toThrow("calls another function after reaction");
+  expect(() => run(program, true, "normal")).toThrow("combat store follows its reaction continuation");
 });
 
 test("retargeting a damage parameter cannot silently damage another actor on an early return", async () => {
-  const base = await readProgram("id1/PAK0.PAK"), layout = deriveNativeProgramBinding(base);
+  const base = await readProgram("id1/PAK0.PAK"), layout = id1ProgramBinding(base);
+  const sites = layout.damage;
+  if (sites.kind !== "sites") throw new Error("Expected pinned fixture sites");
   const statements = base.statements.map((statement, index) => index === layout.damage.firstStatement + 4
     ? { opcode: QcOpcode.StoreEnt, a: layout.damage.parameterStart + 2, b: layout.damage.parameterStart, c: 0 }
-    : index === layout.damage.healthStore + 1 ? { opcode: QcOpcode.Return, a: 0, b: 0, c: 0 } : statement);
-  expect(() => deriveNativeProgramBinding(changedProgram(base, statements))).toThrow("actor parameters are reassigned");
+    : index === sites.healthStore + 1 ? { opcode: QcOpcode.Return, a: 0, b: 0, c: 0 } : statement);
+  expect(() => run(changedProgram(base, statements), true, "normal")).toThrow("redirects a combat store to another actor");
 });
 
 test("a helper that redirects the target cannot omit its subsequent combat stores", async () => {
-  const base = await readProgram("id1/PAK0.PAK"), layout = deriveNativeProgramBinding(base);
+  const base = await readProgram("id1/PAK0.PAK"), layout = id1ProgramBinding(base);
+  const sites = layout.damage;
+  if (sites.kind !== "sites") throw new Error("Expected pinned fixture sites");
   const initial = new Uint8Array(base.initialGlobals.length + 4); initial.set(base.initialGlobals);
   const extra = base.initialGlobals.length / 4, functionIndex = base.functions.length;
   new DataView(initial.buffer).setInt32(extra * 4, functionIndex, true);
   const statements: QcStatement[] = base.statements.map((statement, index) => index === layout.damage.firstStatement + 4
-    ? { opcode: QcOpcode.Call0, a: extra, b: 0, c: 0 } : index === layout.damage.healthStore + 1
+    ? { opcode: QcOpcode.Call0, a: extra, b: 0, c: 0 } : index === sites.healthStore + 1
       ? { opcode: QcOpcode.Return, a: 0, b: 0, c: 0 } : statement);
   statements.push({ opcode: QcOpcode.StoreEnt, a: layout.damage.parameterStart + 2, b: layout.damage.parameterStart, c: 0 },
     { opcode: QcOpcode.Done, a: 0, b: 0, c: 0 });
@@ -171,4 +161,18 @@ test("a helper that redirects the target cannot omit its subsequent combat store
   const program = new QcProgram(base.source, base.api, statements, base.globals, base.fields, functions,
     base.strings, initial, base.entityFieldWords, base.checksum, createContentDigest("2".repeat(64)));
   expect(() => run(program, true, "normal")).toThrow("redirects a combat store to another actor");
+});
+
+test("native arithmetic is observed without imposing an id1 subtraction template", async () => {
+  const base = await readProgram("id1/PAK0.PAK"), sites = id1ProgramBinding(base).damage;
+  if (sites.kind !== "sites") throw new Error("Expected pinned fixture sites");
+  const subtraction = base.statements.findIndex((statement, index) => index > sites.firstStatement && index < sites.healthStore
+    && statement.opcode === QcOpcode.SubF && statement.b === sites.take);
+  expect(subtraction).toBeGreaterThan(0);
+  const program = changedProgram(base, base.statements.map((statement, index) => index === subtraction ? { ...statement, opcode: QcOpcode.AddF } : statement));
+  const plain = run(program, false, "normal"), observed = run(program, true, "normal");
+  expect(observed.bytes).toEqual(plain.bytes);
+  const outcome = observed.outcomes[0];
+  if (outcome?.kind !== "committed") throw new Error("No committed source mutation");
+  expect(outcome.decision.appliedDamage).toBe(100 - observed.health);
 });

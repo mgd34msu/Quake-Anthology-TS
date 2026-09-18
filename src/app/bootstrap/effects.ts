@@ -29,7 +29,7 @@ import { q2MonsterMuzzle } from "./effects/q2-muzzle.ts";
 import { Q3ApplicationEffects } from "./effects/q3.ts";
 import type { SourceEffectSound } from "./effects/q3.ts";
 import type { Q2MissionPackEntityEvent } from "../../content/q2/missionpacks/entities/types.ts";
-import { Q2EffectViews } from "./effects/q2-view.ts";
+import { Q2EffectViews, type Q2EffectPlayerView } from "./effects/q2-view.ts";
 import { Q2_TRANSIENT_MODELS } from "../../content/q2/foundation/effect-resources.ts";
 export type { SourceEffectSound } from "./effects/q3.ts";
 
@@ -73,6 +73,8 @@ const q1BeamModels: Readonly<Record<Q1BeamStyle, string>> = {
 
 /** A world owns one event stream. Preparation advances it once; seat frames only sample it. */
 export class ApplicationEffects {
+  private readonly recipients = new Map<ActorId, ApplicationEffects>();
+  private eventsOnly = false;
   private readonly random: SourceRandom;
   private readonly groups = new Map<ContentId, Group>();
   private readonly preparedRenderers = new Map<ContentId, SceneModelRenderer>();
@@ -106,18 +108,47 @@ export class ApplicationEffects {
   private rendererHardware: () => Q3Hardware = () => "generic";
   private readonly readHardware = (): Q3Hardware => this.rendererHardware();
   bindRendererHardware(read: () => Q3Hardware): void { this.rendererHardware = read; }
-  constructor(readonly assets: ApplicationAssets, readonly queries: SceneQueries, readonly isPlayer: (actor: ActorId) => boolean, seed = 1) { this.random = new SourceRandom(seed); }
+  constructor(readonly assets: ApplicationAssets, readonly queries: SceneQueries, readonly isPlayer: (actor: ActorId) => boolean, private readonly seed = 1) { this.random = new SourceRandom(seed); }
   receive(events: readonly SimulationPresentationEvent[]): void {
     if (this.closed) throw new Error("Effect world is closed");
     for (const event of events) {
+      if (event.recipient !== undefined) {
+        const { recipient, ...shared } = event;
+        let effects = this.recipients.get(recipient);
+        if (effects === undefined) {
+          effects = new ApplicationEffects(this.assets, this.queries, this.isPlayer, this.seed);
+          effects.eventsOnly = true; effects.bindRendererHardware(this.readHardware);
+          this.recipients.set(recipient, effects);
+        }
+        effects.receive([shared]);
+        continue;
+      }
       if (event.kind === "q1-fog") continue;
       if (event.sequence <= this.sequence) continue;
       this.sequence = event.sequence; this.pending.push(event);
     }
   }
-  drainUnhandled(): readonly UnhandledApplicationEffect[] { const result = this.unhandled; this.unhandled = []; return result; }
+  drainUnhandled(): readonly UnhandledApplicationEffect[] {
+    const result = this.unhandled; this.unhandled = [];
+    for (const [recipient, effects] of this.recipients) for (const entry of effects.drainUnhandled()) result.push({ ...entry, source: { ...entry.source, recipient } });
+    return result;
+  }
+  drainRecipientSounds(): readonly { readonly recipient: ActorId; readonly sounds: readonly SourceEffectSound[] }[] {
+    const result: { recipient: ActorId; sounds: readonly SourceEffectSound[] }[] = [];
+    for (const [recipient, effects] of this.recipients) {
+      const sounds = effects.drainSounds(); if (sounds.length > 0) result.push({ recipient, sounds });
+    }
+    return result;
+  }
   drainSounds() { return [...this.sounds.splice(0), ...[...this.q3.values(), ...this.q3Weapons.values()].flatMap(effects => effects.drainSounds())]; }
-  playerView(actor: ActorId, camera: SceneCamera) {
+  playerView(actor: ActorId, camera: SceneCamera): Q2EffectPlayerView {
+    const shared = this.sharedPlayerView(actor, camera), effects = this.recipients.get(actor);
+    if (effects === undefined) return shared;
+    const local = effects.playerView(actor, shared.camera);
+    return { camera: local.camera, infrared: shared.infrared || local.infrared,
+      blend: local.blend === null ? shared.blend : addQ2Blend(shared.blend ?? { x: 0, y: 0, z: 0, w: 0 }, local.blend, local.blend.w) };
+  }
+  private sharedPlayerView(actor: ActorId, camera: SceneCamera): Q2EffectPlayerView {
     const seconds = this.time ?? 0, view = this.playerViews.frame(actor, camera, seconds, actor => this.pose(actor));
     const until = this.bonusFlashes.get(actor);
     if (until === undefined) return view;
@@ -226,13 +257,13 @@ export class ApplicationEffects {
     this.beams = this.beams.filter(beam => beam.die >= now);
     this.explosions = this.explosions.filter(explosion => Math.floor((Math.round(now * 1000) - Math.round(explosion.start * 1000)) / 100) < explosion.frames - 1);
     this.lights = this.lights.filter(light => light.die >= now && light.radius - light.decay * (now - light.born) > 0);
-    await this.q1Entities(presentations, now, elapsed > 0 || this.time === null);
+    if (!this.eventsOnly) await this.q1Entities(presentations, now, elapsed > 0 || this.time === null);
     this.sampledLights = this.lights.map(light => ({ origin: light.origin, radius: Math.max(0, light.radius - light.decay * (now - light.born)), minimum: light.minimum, color: light.color }));
     this.sampledLights.push(...this.sourceLights.values());
-    await this.q2Entities(presentations, now, elapsed > 0 || this.time === null);
+    if (!this.eventsOnly) await this.q2Entities(presentations, now, elapsed > 0 || this.time === null);
     for (const [actor, effect] of this.trackerPain) {
       if (effect.until <= now) { this.trackerPain.delete(actor); continue; }
-      if (presentations.some(entity => entity.family === "q2" && entity.actor.equals(actor) && entity.visible && !entity.viewWeapon)) continue;
+      if (!this.eventsOnly && presentations.some(entity => entity.family === "q2" && entity.actor.equals(actor) && entity.visible && !entity.viewWeapon)) continue;
       const pose = this.pose(actor);
       if (pose !== undefined) {
         if (elapsed > 0 || this.time === null) (await this.group(effect.content)).particles.q2TrackerShell(pose.origin, now);
@@ -255,6 +286,10 @@ export class ApplicationEffects {
       this.q3WeaponTimes.set(content, current);
     }
     this.time = now;
+    for (const [recipient, effects] of this.recipients) {
+      if (!liveActors.has(recipient)) { effects.close(); this.recipients.delete(recipient); }
+      else await effects.prepare(snapshot, presentations, characters, weaponClock);
+    }
   }
   frame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null = null, q1Fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): ApplicationEffectFrame {
     if (this.closed) throw new Error("Effect world is closed");
@@ -285,6 +320,8 @@ export class ApplicationEffects {
       sourceLights.push(...frame.q3Lights.map(light => ({ ...light, minimum: 0 })));
     }
     for (const light of this.sampledLights) q3Lights.push({ origin: light.origin, radius: light.radius, color: light.color });
+    const local = viewer === null ? undefined : this.recipients.get(viewer)?.frame(camera, source, viewer, q1Fog);
+    if (local !== undefined) { q3Admissions.push(...local.q3Admissions); operations.push(...local.operations); sourceLights.push(...local.lights); q3Lights.push(...local.q3Lights); }
     const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
     return { q3Admissions, operations: [...operations.filter(polygon), ...operations.filter(operation => !polygon(operation))], lights: [...this.sampledLights, ...sourceLights], q3Lights: q3Lights.slice(0, 32) };
   }
@@ -298,7 +335,7 @@ export class ApplicationEffects {
       return [{ origin, color: white, radius: 512, additive: true, profile: { kind: "q2", scale: 2,
         cone: { direction: axis[0], cosHalfAngle: Math.cos(22 * Math.PI / 180) }, shadow: { kind: "cast", resolution: 512 } } } satisfies SceneLight];
     });
-    return [...flashlights, ...[...this.shadowLights.values()].flatMap(light => {
+    return [...(viewer === null ? [] : this.recipients.get(viewer)?.shadowSceneLights(camera, style, viewer) ?? []), ...flashlights, ...[...this.shadowLights.values()].flatMap(light => {
       if (!light.visible || light.radius <= 0) return [];
       let fade = 1;
       if (!(light.fadeStart <= 1 && light.fadeEnd <= 1) && light.fadeStart <= light.fadeEnd) {
@@ -670,6 +707,7 @@ export class ApplicationEffects {
   }
   resetRound(): void {
     if (this.closed) throw new Error("Effect world is closed");
+    for (const effects of this.recipients.values()) effects.resetRound();
     this.pending = []; this.unhandled = []; this.beams = []; this.explosions = [];
     this.staticBrushes.length = 0; this.styles = []; this.lights = []; this.sampledLights = [];
     this.entityTrails.clear(); this.q1Trails.clear(); this.shadowLights.clear(); this.sourceLights.clear(); this.flashlights.clear();
@@ -682,6 +720,8 @@ export class ApplicationEffects {
   }
   close(): void {
     if (this.closed) return;
+    for (const effects of this.recipients.values()) effects.close();
+    this.recipients.clear();
     this.closed = true; this.pending = []; this.unhandled = []; this.beams = []; this.explosions = []; this.lights = []; this.sampledLights = [];
     this.staticBrushes.length = 0; this.styles = [];
     for (const effects of [...this.q3.values(), ...this.q3Weapons.values(), ...this.preparedQ3Weapons.values()]) effects.close();

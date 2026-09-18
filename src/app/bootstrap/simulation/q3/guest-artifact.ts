@@ -1,3 +1,4 @@
+import { readQvmCompatibility } from '../../../../compat/qvm/compatibility.ts';
 import type { ExecutableRecipe, ResolvedResourceReference } from '../../../../contracts/content.ts';
 import type { MountedContent } from '../../../../content/mounts/index.ts';
 import { resolveQvmArtifact } from '../../../../compat/qvm/artifacts.ts';
@@ -13,9 +14,9 @@ export interface PreparedQ3Game {
 export function assertQ3GuestRecipe(recipe: ExecutableRecipe, execution: Q3GameExecution): void {
   const owner = recipe.map.entities;
   const same = (reference: typeof owner): boolean => reference.content === owner.content && reference.provider === owner.provider;
-  if (execution.api.kind !== 'q3-qagame' || execution.api.version !== 8 || !same(execution.owner)
+  if (execution.api.kind !== 'q3-qagame' || !same(execution.owner)
     || recipe.execution.length !== 1 || recipe.execution[0] !== execution || owner.provider !== 'q3:official'
-    || recipe.map.geometryContent !== owner.content || recipe.campaign.kind !== 'none'
+    || recipe.campaign.kind !== 'none'
     || recipe.movement.provider !== 'q3:movement' || recipe.movement.content !== owner.content
     || recipe.character.definition.provider !== 'q3:character' || recipe.character.definition.content !== owner.content
     || recipe.character.appearance.content !== owner.content || !recipe.character.appearance.provider.startsWith('q3:model/')
@@ -24,17 +25,19 @@ export function assertQ3GuestRecipe(recipe: ExecutableRecipe, execution: Q3GameE
     || recipe.equipment.grapple.kind !== 'disabled' || recipe.equipment.handGrenades.kind !== 'disabled'
     || recipe.enemies.kind !== 'map-defined'
     || recipe.timing.find(timing => timing.provider === owner.provider)?.clock.kind !== 'q3') {
-    throw new Error('Q3 bytecode requires one native Q3 server game, native movement and character, map-defined actors and no mixed providers or campaign');
+    throw new Error('Q3 bytecode requires one native Q3 server game, native movement and character, map-defined actors and supported source providers without campaign');
   }
 }
 
 export async function prepareQ3Game(execution: Q3GameExecution, mounts: MountedContent): Promise<PreparedQ3Game> {
-  if (execution.api.kind !== 'q3-qagame' || execution.api.version !== 8 || execution.artifact.requestedPath.toLowerCase() !== 'vm/qagame.qvm')
-    throw new Error('Selected Q3 server artifact must provide the qagame version 8 ABI');
+  if (execution.api.kind !== 'q3-qagame' || execution.artifact.requestedPath.toLowerCase() !== 'vm/qagame.qvm')
+    throw new Error('Selected Q3 server artifact must provide a supported qagame ABI');
   const opened = await mounts.open(execution.artifact.requestedPath);
   if (opened === null || opened.reference.id !== execution.artifact.id || opened.reference.digest !== execution.artifact.digest)
     throw new Error('Selected Q3 qagame artifact no longer matches its mounted identity');
-  const artifact = resolveQvmArtifact({ role: 'qagame', bytes: opened.bytes, module: {
+  const abiProfile = await readQvmCompatibility(mounts, { artifactPath: opened.reference.requestedPath, digest: opened.reference.digest }, 'qagame');
+  if (execution.api.version !== (abiProfile === 'q3-modern' ? 8 : 7)) throw new Error('Selected QVM ABI differs from its saved or resolved recipe');
+  const artifact = resolveQvmArtifact({ abiProfile, role: 'qagame', bytes: opened.bytes, module: {
     id: execution.owner.provider, artifactPath: opened.reference.requestedPath, digest: opened.reference.digest,
     revision: `${opened.reference.provenance.mount.identity.id}:${opened.reference.provenance.mount.identity.generation}`,
   } });

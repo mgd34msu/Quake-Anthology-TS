@@ -1,3 +1,5 @@
+import type { WeaponBehaviorProjectilePort } from "../../../../contracts/weapon-behavior.ts";
+import { q3ProjectileBehavior } from "../../foundation/weapon-behavior.ts";
 import { SaveReader } from "../../../../persistence/value.ts";
 import { readSavedActor, savedActorId } from "../../../../persistence/save-image.ts";
 import type { SavedActorId } from "../../../../contracts/session.ts";
@@ -45,7 +47,7 @@ export interface MissionpackMissileServices {
 }
 
 /** Time and cvar properties must be live across scheduled think/touch callbacks. */
-export type MissileHost = { readonly actors: Pick<SessionActorRegistry, "onRelease">; readonly world: ServerWorld; readonly bodies: SharedBodyTable; readonly previousTime: number } & (
+export type MissileHost = { readonly weaponBehavior?: WeaponBehaviorProjectilePort; readonly actors: Pick<SessionActorRegistry, "onRelease">; readonly world: ServerWorld; readonly bodies: SharedBodyTable; readonly previousTime: number } & (
   | { readonly combat: Extract<CombatContext, { product: "baseq3" }>; readonly missionpack: null }
   | { readonly combat: Extract<CombatContext, { product: "missionpack" }>; readonly missionpack: MissionpackMissileServices }
 );
@@ -261,7 +263,7 @@ export class MissileRuntime {
     if (entity === null) return false;
     const projectile = this.projectiles.get(entity);
     if (projectile === undefined || !projectile.actor.id.equals(actor.id)) return false;
-    q3StepProjectile(projectile, this.projectileHost(entity, projectile)); return true;
+    this.step(entity, projectile); return true;
   }
 
   bounce(entity: GameEntity, trace: ServerTraceResult): void {
@@ -273,7 +275,21 @@ export class MissileRuntime {
     const projectile = this.projectile(entity), target = this.host.combat.entities.at(trace.entityNum);
     q3ImpactProjectile(projectile, this.projectileHost(entity, projectile), { ...trace, hit: { kind: "actor", actor: target.actor.id } });
   }
-  run(entity: GameEntity): void { const projectile = this.projectile(entity); q3StepProjectile(projectile, this.projectileHost(entity, projectile)); }
+  run(entity: GameEntity): void { this.step(entity, this.projectile(entity)); }
+  private step(entity: GameEntity, projectile: NativeProjectile): void {
+    if (entity.s.eType === EntityType.ET_MISSILE && !entity.freeAfterEvent) {
+      const body = this.host.bodies.read(projectile.actor.id);
+      if (body !== null) {
+        const update = this.host.weaponBehavior?.step(projectile.actor, body, this.host.previousTime / 1000);
+        if (update !== undefined && update !== null) {
+          this.host.bodies.write(projectile.actor, { ...body, ...update });
+          projectile.trajectory = { ...projectile.trajectory, base: update.origin, delta: update.velocity, time: this.host.previousTime };
+          entity.r.currentOrigin = update.origin;
+        }
+      }
+    }
+    q3StepProjectile(projectile, this.projectileHost(entity, projectile));
+  }
 
   private specialImpact(entity: GameEntity, trace: ActorTraceResult, actor: ActorId): boolean {
     const combat = this.host.combat, pool = combat.entities, other = pool.options.records.nativeByActor(actor), normal = normalOf(trace);
@@ -403,7 +419,18 @@ export class MissileRuntime {
     bolt.s.pos = launch.trajectory;
     bolt.r.currentOrigin = vec3(start.x, start.y, start.z);
     this.projectiles.set(bolt, this.bindProjectile(bolt, owner, owner, { kind: "none" }, null));
+    if (weapon !== Weapon.WP_NAILGUN) this.applyBehaviorLaunch(bolt, owner);
     return bolt;
+  }
+  private applyBehaviorLaunch(bolt: GameEntity, owner: ActorId): void {
+    const body = this.host.bodies.read(bolt.actor.id), time = this.host.combat.time;
+    if (body === null) throw new Error("Launched Q3 missile lost its body");
+    const behavior = this.host.weaponBehavior?.launch({ projectile: bolt.actor, shooter: owner, ...q3ProjectileBehavior(bolt.s.weapon), timeSeconds: time / 1000, body: { ...body, velocity: bolt.s.pos.delta } });
+    if (behavior !== undefined && behavior !== null) {
+      this.host.bodies.write(bolt.actor, { ...body, ...behavior });
+      bolt.s.pos = { ...bolt.s.pos, base: behavior.origin, delta: behavior.velocity, time };
+      bolt.r.currentOrigin = behavior.origin;
+    }
   }
 
   firePlasma(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
@@ -438,6 +465,7 @@ export class MissileRuntime {
     const bolt = this.launch(self, start, vec3(0, 0, 0), Weapon.WP_NAILGUN, "nail", 0, 10000, false, 20, 0, 0, 23, 0);
     const velocity = q3NailVelocity(start, forward, right, up, random);
     bolt.s.pos = { ...bolt.s.pos, time: this.host.combat.time, delta: snapVector(velocity) };
+    this.applyBehaviorLaunch(bolt, self.actor.id);
     return bolt;
   }
 

@@ -13,7 +13,7 @@ import type { WindowsCapabilities, WindowsFile } from '../../../guest/runtime/wi
 import { I386Cpu } from '../../../guest/x86/index.ts';
 
 type NativeExecution = Extract<ResolvedExecutionModule, { readonly kind: 'native' }>;
-export interface PreparedClassicGuest { readonly execution: NativeExecution; readonly bytes: Uint8Array; }
+export interface PreparedClassicGuest { readonly edition: "classic"; readonly execution: NativeExecution; readonly bytes: Uint8Array; }
 export async function prepareClassicGuest(execution: NativeExecution, mounts: MountedContent): Promise<PreparedClassicGuest> {
   if (execution.role !== 'server-game' || execution.api.kind !== 'q2-classic-game' || execution.api.version !== 3
     || execution.profile.kind !== 'windows-i386') throw new Error('Classic Q2 guest requires Windows i386 game API 3');
@@ -21,7 +21,7 @@ export async function prepareClassicGuest(execution: NativeExecution, mounts: Mo
   if (artifact === null || artifact.reference.id !== execution.artifact.id || artifact.reference.digest !== execution.artifact.digest)
     throw new Error('Selected classic native artifact no longer matches its resolved identity');
   if (parsePe(artifact.bytes).abi.kind !== execution.profile.kind) throw new Error('Classic native artifact ABI differs from the selected profile');
-  return { execution, bytes: artifact.bytes };
+  return { edition: "classic", execution, bytes: artifact.bytes };
 }
 export interface ClassicGuestSourceOptions {
   services(memory: MappedGuestMemory): ClassicQ2EngineServices;

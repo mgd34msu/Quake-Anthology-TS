@@ -1,5 +1,7 @@
 import type { NativeQ2Travel } from "./native-q2-travel.ts";
 import type { PreparedClassicGuest } from "./classic-guest-source.ts";
+import type { PreparedRereleaseGuest } from "./rerelease-guest-source.ts";
+import type { RereleaseGuestServicesOptions } from "./rerelease-guest-services-contract.ts";
 import type { WindowsCapabilities } from "../../../guest/runtime/windows/contracts.ts";
 import type { Q1FogTransition } from "../../../materials/legacy-fog.ts";
 import type { CvarArchiveEntry } from "../../../core/cvars/index.ts";
@@ -42,17 +44,24 @@ import type { Q3SourceEvent } from "./q3/host.ts";
 import type { Q3SourceSessionCarry } from "./q3/types.ts";
 import type { SaveImage } from "../../../contracts/session.ts";
 
+interface NativeQ2GuestCallbacks {
+  readonly capabilities: WindowsCapabilities;
+  print(text: string): void;
+  addCommand(text: string): undefined;
+  debugGraph(value: number, color: number): undefined;
+}
+export type NativeQ2GuestOptions = NativeQ2GuestCallbacks & (
+  | { readonly edition: "classic"; readonly prepared: PreparedClassicGuest }
+  | { readonly edition: "rerelease"; readonly prepared: PreparedRereleaseGuest } & Pick<RereleaseGuestServicesOptions,
+    "localize" | "clipboard" | "navigation" | "semanticBindings">
+);
+
 export interface SimulationOptions {
+  readonly weaponBehaviors?: readonly import("../weapon-behavior-selection.ts").PreparedWeaponBehavior[];
   readonly dedicated?: boolean;
   readonly promptSupported?: (client: ClientId) => boolean;
   readonly preparedQuakeC?: PreparedQuakeCSource;
-  readonly q2Guest?: {
-    readonly prepared: PreparedClassicGuest;
-    readonly capabilities: WindowsCapabilities;
-    print(text: string): void;
-    addCommand(text: string): undefined;
-    debugGraph(value: number, color: number): undefined;
-  };
+  readonly q2Guest?: NativeQ2GuestOptions;
   readonly nativeQ2Travel?: NativeQ2Travel;
   readonly originalSaveCandidate?: true;
   readonly startItems?: string;
@@ -102,7 +111,7 @@ export interface SimulationTravel {
 }
 
 export interface PlayerAdmission { readonly actor: ActorId; readonly viewHeight: number; }
-export interface PlayerView { readonly blend?: Vec4; readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true;
+export interface PlayerView { readonly blend?: Vec4; readonly damageBlend?: Vec4; readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true;
   readonly pitchDrift?: { readonly grounded: boolean; readonly idealPitch: number; readonly disabled: boolean }; }
 export interface PlayerUiItem {
   readonly id: ItemId;
@@ -157,7 +166,7 @@ export type Q3CharacterPresentationEvent = Omit<Q3CharacterEvent, "actor"> & { r
 
 export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1Event }
   | { readonly kind: "q1-fog"; readonly event: { readonly kind: "transition"; readonly player: ActorId | null; readonly transition: Q1FogTransition; readonly skyFactor: number } }
-  | { readonly kind: "music"; readonly event: { readonly kind: "cd-track"; readonly track: number } }
+  | { readonly kind: "music"; readonly event: { readonly kind: "cd-track"; readonly track: number } | { readonly kind: "pause"; readonly paused: boolean } }
   | { readonly kind: "q1-composition"; readonly event: Q1CompositionEvent }
   | { readonly kind: "q1-level"; readonly event: Q1IntermissionResult }
   | { readonly kind: "q2"; readonly event: Q2PresentationEvent }
@@ -169,7 +178,7 @@ export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1E
   | { readonly kind: "q3-character"; readonly event: Q3CharacterPresentationEvent }
   | { readonly kind: "q3-ballistics"; readonly event: Q3SharedBallisticEvent }
   | { readonly kind: "q3-source"; readonly event: Q3SourceEvent };
-export type SimulationPresentationEvent = SourcePresentationEvent & { readonly sequence: number; readonly content: ContentId; readonly seconds: number; readonly sourceEntity?: number | null };
+export type SimulationPresentationEvent = SourcePresentationEvent & { readonly recipient?: ActorId; readonly sequence: number; readonly content: ContentId; readonly seconds: number; readonly sourceEntity?: number | null };
 
 export interface DebugShapePresentationAccess {
   lines(): readonly DebugLine[];
