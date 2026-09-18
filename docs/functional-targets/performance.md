@@ -92,3 +92,11 @@ Forty-five exact prepared-output comparisons and a per-corner lighting trace mat
 ## Installed optimization delivery
 
 `065259c` includes the MD3 and MD2 changes above. Its [exact-binary GL follow-up](../../.artifacts/resume-20260918/compiled-mixed-065259c/RESULT.md) passed a bounded mixed scene and normal Quit with unchanged guards. This establishes delivery and the inspected runtime result, not a performance comparison. The component gains above remain the measured performance evidence.
+
+## Bounded GL array-layout reuse
+
+The shared geometry buffer now retains up to eight typed-array layouts on its existing storage. Repeated shapes reuse these views; every draw still writes and validates the actual vertex/index values. The prior same-shape fast path remains first, FIFO eviction limits retained wrappers, and storage growth invalidates the cache.
+
+Nine alternating-order component samples measured small alternating layouts at 0.413 → 0.162 microseconds per pack and medium alternating layouts at 1.007 → 0.738 microseconds. Same-layout controls were effectively unchanged. More than eight recurring layouts can miss the cache and pay the bounded scan. [Measurements and limits](../../.artifacts/resume-20260918/gl-layout-cache/receipt.md).
+
+The exact source passed strict/policy checks and three buffer tests with 805 assertions, including actual GL rendering: complete RGBA and all 256 depth values matched fresh packing on two retained-buffer frames, with failure cleanup and draw ownership preserved. [Native result](../../.artifacts/resume-20260918/gl-layout-native/RESULT.md). Installed `065259c` predates this qualified source change; it makes no whole-frame or GPU-speed claim.

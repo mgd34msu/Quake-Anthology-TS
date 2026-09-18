@@ -18,15 +18,28 @@ type AllocateGeometry = (vertices: number, indices: number, lighting: DrawBatch[
 export class GeometryBuffer {
   private storage = new ArrayBuffer(0);
   private arrays: GeometryArrays | null = null;
+  private readonly layouts: GeometryArrays[] = [];
+  private nextLayout = 0;
 
   private readonly allocate: AllocateGeometry = (vertices, indices, lighting) => {
     const world = lighting === "vertex" ? 0 : vertices * 3;
     const normals = lighting === "q2-world" ? vertices * 3 : 0;
     const bytes = (vertices * 12 + world + normals + indices) * 4;
-    if (this.storage.byteLength < bytes) this.storage = new ArrayBuffer(Math.max(bytes, this.storage.byteLength * 2));
+    if (this.storage.byteLength < bytes) {
+      this.storage = new ArrayBuffer(Math.max(bytes, this.storage.byteLength * 2));
+      this.layouts.length = 0;
+      this.nextLayout = 0;
+    }
     const previous = this.arrays;
     if (previous !== null && previous.positions.buffer === this.storage && previous.positions.length === vertices * 4
       && previous.worldPositions.length === world && previous.normals.length === normals && previous.indices.length === indices) return previous;
+    for (const layout of this.layouts) {
+      if (layout.positions.length === vertices * 4 && layout.worldPositions.length === world
+        && layout.normals.length === normals && layout.indices.length === indices) {
+        this.arrays = layout;
+        return layout;
+      }
+    }
     let offset = 0;
     const floats = (length: number): Float32Array => {
       const array = new Float32Array(this.storage, offset, length);
@@ -38,6 +51,8 @@ export class GeometryBuffer {
     const worldPositions = floats(world), normalValues = floats(normals);
     this.arrays = { positions, colors, coordinates, coordinates2, worldPositions, normals: normalValues,
       indices: new Uint32Array(this.storage, offset, indices) };
+    this.layouts[this.nextLayout] = this.arrays;
+    this.nextLayout = (this.nextLayout + 1) % 8;
     return this.arrays;
   };
 

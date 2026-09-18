@@ -63,6 +63,30 @@ test("owned GL buffer reuse preserves fresh bytes through growth, shape changes 
   equalArrays(independent, packGeometry(input));
 });
 
+test("GL layout descriptors are bounded, growth invalidates them and owners stay independent", () => {
+  const buffer = new GeometryBuffer();
+  buffer.pack(batch(200, true, "q2-world"));
+  const small = batch(3, false, "vertex"), medium = batch(17, true, "q2-world");
+  const first = buffer.pack(small), second = buffer.pack(medium);
+  for (let index = 0; index < 20; index++) {
+    expect(buffer.pack(small)).toBe(first);
+    equalArrays(first, packGeometry(small));
+    expect(buffer.pack(medium)).toBe(second);
+    equalArrays(second, packGeometry(medium));
+  }
+  const other = new GeometryBuffer().pack(small);
+  buffer.pack(medium);
+  equalArrays(other, packGeometry(small));
+  for (let count = 30; count < 39; count++) buffer.pack(batch(count, false, "vertex"));
+  expect(buffer.pack(small)).not.toBe(first);
+  const beforeGrowth = buffer.pack(medium);
+  buffer.pack(batch(1000, false, "q2-world"));
+  const afterGrowth = buffer.pack(medium);
+  expect(afterGrowth).not.toBe(beforeGrowth);
+  expect(afterGrowth.positions.buffer).not.toBe(beforeGrowth.positions.buffer);
+  equalArrays(afterGrowth, packGeometry(medium));
+});
+
 test.skipIf(process.env["QUAKE_GL_SMOKE"] !== "1")("GL retained prepared buffers, failure cleanup and close preserve fresh color and depth", () => {
   const owner: RendererResourceOwner = { identity: Symbol("buffer reuse"), session: createIdentityOwner("buffer reuse").session, generation: 0 };
   const window = SdlWindow.open({ title: "buffer reuse", width: 16, height: 16, backend: "gl", hidden: true });

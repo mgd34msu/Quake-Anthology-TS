@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { CommandContext } from "../../src/contracts/common.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CommandBuffer } from "../../src/core/commands/index.ts";
-import { CvarRegistry } from "../../src/core/cvars/index.ts";
+import { CvarFlag, CvarRegistry } from "../../src/core/cvars/index.ts";
 import { SeatConsole } from "../../src/console/session.ts";
 import { findConsoleEntries } from "../../src/console/discovery.ts";
 import { registerQ1ClientCommands } from "../../src/app/bootstrap/q1-client-commands.ts";
@@ -67,4 +67,48 @@ test("legacy NetQuake name cvars without userinfo flags still emit one canonical
   expect(q2Userinfo(value).get("name")).toBe("Existing Player");
   expect(value.match(/\\name\\/g)?.length).toBe(1);
   expect(q2Userinfo(value).get("topcolor")).toBe("5"); expect(q2Userinfo(value).get("bottomcolor")).toBe("12");
+});
+
+test("player declarations survive prepared initialization and retained world transfer without redeclaration", async () => {
+  const { registerPlayerUserinfo, playerUserinfo } = await import("../../src/app/bootstrap/player-userinfo.ts");
+  for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease"] satisfies readonly import("../../src/contracts/common.ts").CommandDialect[]) {
+    const identity = createIdentityOwner(`retained-userinfo-${dialect}`), output: string[] = [];
+    const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } };
+    const cvars = new CvarRegistry({ dialect, context, print: text => { output.push(text); } });
+    registerPlayerUserinfo(cvars, 0);
+    const name = dialect === "q1-netquake" ? "_cl_name" : "name";
+    cvars.set(name, "Retained Player"); cvars.addFlags(name, CvarFlag.ServerInfo);
+    if (dialect.startsWith("q1")) cvars.set("qts_weapon_autoswitch", "never");
+    if (dialect === "q1-netquake") cvars.set("_cl_color", "92");
+    if (dialect === "q1-quakeworld") { cvars.set("topcolor", "5"); cvars.set("bottomcolor", "12"); cvars.set("team", "red"); cvars.set("skin", "custom"); }
+    const before = cvars.snapshots(), info = playerUserinfo(cvars), archive = cvars.archiveEntries();
+    registerPlayerUserinfo(cvars, 0, "female");
+    expect(cvars.snapshots()).toEqual(before); expect(playerUserinfo(cvars)).toBe(info);
+    const restored = new CvarRegistry({ dialect, context, print: text => { output.push(text); } });
+    restored.restoreSaveState(cvars.captureWorldTransferState());
+    registerPlayerUserinfo(restored, 0, "cyborg");
+    expect(restored.snapshots()).toEqual(before); expect(restored.archiveEntries()).toEqual(archive); expect(playerUserinfo(restored)).toBe(info);
+    expect(output).toEqual([]);
+    if (dialect.startsWith("q1")) {
+      restored.register(name, "conflicting declaration");
+      expect(output.join("")).toContain("allready defined");
+      expect(restored.variableString(name)).toBe("Retained Player");
+    }
+  }
+});
+
+test("early archived Q1 player values are upgraded once to real declarations", async () => {
+  const { registerPlayerUserinfo } = await import("../../src/app/bootstrap/player-userinfo.ts");
+  for (const dialect of ["q1-netquake", "q1-quakeworld"] satisfies readonly import("../../src/contracts/common.ts").CommandDialect[]) {
+    const identity = createIdentityOwner(`early-userinfo-${dialect}`), output: string[] = [];
+    const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(0), client: identity.client(0, 0) } };
+    const cvars = new CvarRegistry({ dialect, context, print: text => { output.push(text); } }), name = dialect === "q1-netquake" ? "_cl_name" : "name";
+    cvars.setCommandFlags(name, "Configured Player", "archive"); cvars.setCommandFlags("qts_weapon_autoswitch", "new", "archive");
+    registerPlayerUserinfo(cvars, 0); registerPlayerUserinfo(cvars, 0);
+    expect(cvars.variableString(name)).toBe("Configured Player"); expect(cvars.get(name)?.resetValue).toBe("Player 1");
+    expect(cvars.isConsoleCreated(name)).toBe(false); expect(cvars.isConsoleCreated("qts_weapon_autoswitch")).toBe(false);
+    expect(cvars.get("qts_weapon_autoswitch")?.flags).toBe(CvarFlag.Archive | CvarFlag.UserInfo);
+    expect(cvars.get("qts_weapon_autoswitch")?.resetValue).toBe("always"); expect(cvars.variableString("qts_weapon_autoswitch")).toBe("new");
+    expect(output).toEqual([]);
+  }
 });
