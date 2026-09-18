@@ -1,3 +1,5 @@
+import { defaultUserContentRoot } from "../../src/content/user-data.ts";
+import { applicationWeaponBehaviorChoices } from "../../src/app/bootstrap/weapon-behavior-selection.ts";
 import { createContentId, type GameFamily, type ProviderTiming } from "../../src/contracts/content.ts";
 import { expectedProducts, type CatalogProduct } from "../../src/content/catalog/index.ts";
 import { preflightApplicationMatch } from "../../src/app/bootstrap/match-preflight.ts";
@@ -431,3 +433,34 @@ test("exact movement products resolve catalog family and edition independently o
   expect(native.timing.find(profile => profile.provider === native.engineBehavior.provider)?.clock).toEqual({ kind: "q1-quakeworld", maximumCommandMilliseconds: 50 });
   expect(native.timing.find(profile => profile.provider === native.movement.provider)?.clock).toEqual({ kind: "q1-quakeworld", maximumCommandMilliseconds: 50 });
 });
+
+
+test.skipIf(process.env["QTS_TEST_INSTALLED_WEAPON_BEHAVIORS"] !== "1" || !existsSync(corpus))("trajectory menu exposes installed declarations across provider families and retains selection", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, userContentRoot: defaultUserContentRoot(), discoverMods: true });
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2"]);
+  if (command.kind !== "run") throw new Error("Expected launch options");
+  const declared: { product: string; id: string; kind: string }[] = [];
+  for (const product of catalog.products) {
+    if (product.availability.kind !== "installed") continue;
+    for (const entry of await applicationWeaponBehaviorChoices(catalog, product.expectation.id)) {
+      if (entry.selection !== null && entry.unavailable === null) declared.push({ product: product.expectation.id, id: entry.id, kind: entry.selection.component?.kind ?? "quakec" });
+    }
+  }
+  expect(new Set(declared.map(entry => entry.kind))).toEqual(new Set(["quakec", "qvm", "rerelease-native"]));
+  const model = new StartupSelectionModel(catalog, command.options);
+  await model.prepareMaps();
+  for (const entry of declared) {
+    const choice = model.rows().find(row => row.id === "weaponBehavior")?.choices.find(choice => choice.id === entry.id);
+    expect(choice?.unavailable).toBeNull();
+    model.select("weaponBehavior", entry.id);
+    expect(model.rows().find(row => row.id === "weaponBehavior")?.value).toBe(entry.id);
+    expect(model.options.weaponBehavior?.product).toBe(entry.product);
+  }
+  const unsupported = model.rows().find(row => row.id === "weaponBehavior")?.choices.find(choice => choice.unavailable !== null);
+  expect(unsupported).toBeDefined();
+  if (unsupported === undefined) throw new Error("Expected an explicit unavailable provider");
+  expect(() => model.select("weaponBehavior", unsupported.id)).toThrow();
+  const selected = model.options.weaponBehavior;
+  await model.prepareMaps();
+  expect(model.options.weaponBehavior).toEqual(selected);
+}, 60000);

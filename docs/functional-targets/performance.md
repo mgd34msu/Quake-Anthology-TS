@@ -116,3 +116,11 @@ A 35-second source run on `1205372` used Q1 classic `e1m1`, QuakeWorld movement,
 The private NVIDIA Xvfb display also spent 26.86 ms per frame in swapping. That environment and the source instrumentation do not establish visible desktop FPS. [Profile, attribution, and limits](../../.artifacts/resume-20260918/cpu-render-1205372/RESULT.md).
 
 The first candidate omitted an immediately discarded side of each convex split. Exact collision outputs matched, but the warm real-query workload became about 17.5% slower. A second candidate delayed allocation of duplicate separating-axis normals, but its warm workload was about 9.3% slower. Both candidates were rejected and are absent from accepted source and the executable.
+
+## Exact-envelope clip-cell reuse
+
+The Q1 collision owner now retains derived clip cells for exactly matching native hulls and query envelopes. The cache preserves signed-zero coordinates, checks the active contents policy on every query, and limits retention to 128 entries, 1,024 cells, 4,096 faces, and 16,384 vertex references. Drawing geometry, trace results, and shape sweeps still use their original paths. Oversized entries and nonfinite envelopes remain uncached.
+
+A single alternating A/B/B/A replay of 15,000 chronological gameplay queries preserved every complete TraceResult. Fresh owners used 2.32% less aggregate time; warm owners used 3.32% less. A separate 3,284-query suffix with no possible cache hits used 0.89% more time. Timing drift remains visible, so these measurements support a modest component improvement, not a stable whole-game FPS estimate. The captured prefix covers about 4.53 seconds of the Q1 classic / QuakeWorld / Q3 Ranger and weapons / Q2 rerelease monster workload. [Complete measurements and limits](../../.artifacts/resume-20260918/exact-envelope-71/RESULT.md).
+
+The composed two-file change passed strict TypeScript and scoped source policy checks with 288 loaded files. All 2,578 guarded inputs were unchanged; the existing collision suite passed 10 tests with 129 assertions, including installed `start.bsp` and `e1m1` geometry. This source change is newer than installed `71f0e4`; its delivery is tracked in [execution status](../execution-status.md#installed-executable-and-recent-fixes).

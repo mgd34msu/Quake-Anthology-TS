@@ -21,6 +21,7 @@ export type Q1CollisionTrace = Extract<TraceResult, { kind: "q1" }> & { readonly
 export interface Q1CollisionOptions { readonly blocksContents?: (contents: number, policy: TracePolicy) => boolean; }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const zeroPlane: Plane = { normal: zero, distance: 0 };
+const envelopeCoordinate = (value: number): string => Object.is(value, -0) ? "-0" : String(value);
 const dimensions = (bounds: Bounds): Vec3 => sub(bounds.max, bounds.min);
 function equal(a: Vec3, b: Vec3): boolean { return a.x === b.x && a.y === b.y && a.z === b.z; }
 function basis(angles: Vec3): Axis {
@@ -43,6 +44,12 @@ export class Q1Collision implements SceneQueries {
   private readonly pvs = new Map<number, Uint8Array>();
   private readonly phs = new Map<number, Uint8Array>();
   private readonly blocks: (contents: number, policy: TracePolicy) => boolean;
+  private readonly clipHullIds = new WeakMap<readonly Q1Hull[], number>();
+  private nextClipHullId = 0;
+  private readonly clipCells = new Map<string, { readonly cells: readonly ConvexCell[]; readonly faces: number; readonly vertices: number }>();
+  private clipCellCount = 0;
+  private clipFaceCount = 0;
+  private clipVertexCount = 0;
   constructor(readonly geometry: Q1WorldGeometry, options: Q1CollisionOptions = {}) {
     this.solidSpace = new Q1SolidSpace(geometry);
     this.blocks = options.blocksContents ?? (contents => contents === -2);
@@ -149,7 +156,7 @@ export class Q1Collision implements SceneQueries {
     const authored = this.geometry.brushList?.find(entry => entry.model === model);
     if (authored === undefined) {
       yield* this.solidSpace.cells(envelope, model, contents => this.blocks(contents, policy));
-      if (this.blocks(-2, policy)) for (const cell of deriveQ1ClipSolids(this.nativeHulls(model), envelope)) yield { cell, contents: -2 };
+      if (this.blocks(-2, policy)) for (const cell of this.derivedClipCells(this.nativeHulls(model), envelope)) yield { cell, contents: -2 };
       return;
     }
     for (const brush of authored.brushes) {
@@ -158,6 +165,37 @@ export class Q1Collision implements SceneQueries {
       for (const plane of brush.planes) { cell = clipCell(cell, plane); if (cell === null) break; }
       if (cell !== null) yield { cell, contents: brush.contents };
     }
+  }
+  private derivedClipCells(hulls: readonly Q1Hull[], envelope: Bounds): readonly ConvexCell[] {
+    const { min, max } = envelope;
+    if (!Number.isFinite(min.x) || !Number.isFinite(min.y) || !Number.isFinite(min.z)
+      || !Number.isFinite(max.x) || !Number.isFinite(max.y) || !Number.isFinite(max.z)) return deriveQ1ClipSolids(hulls, envelope);
+    let hullId = this.clipHullIds.get(hulls);
+    if (hullId === undefined) { hullId = this.nextClipHullId++; this.clipHullIds.set(hulls, hullId); }
+    const key = `${hullId}:${envelopeCoordinate(min.x)},${envelopeCoordinate(min.y)},${envelopeCoordinate(min.z)},${envelopeCoordinate(max.x)},${envelopeCoordinate(max.y)},${envelopeCoordinate(max.z)}`;
+    const cached = this.clipCells.get(key);
+    if (cached !== undefined) { this.clipCells.delete(key); this.clipCells.set(key, cached); return cached.cells; }
+    const cells = deriveQ1ClipSolids(hulls, envelope);
+    if (cells.length > 1024) return cells;
+    let faces = 0, vertices = 0;
+    for (const cell of cells) {
+      faces += cell.faces.length;
+      if (faces > 4096) return cells;
+      for (const face of cell.faces) {
+        vertices += face.vertices.length;
+        if (vertices > 16384) return cells;
+      }
+    }
+    while (this.clipCells.size >= 128 || this.clipCellCount + cells.length > 1024
+      || this.clipFaceCount + faces > 4096 || this.clipVertexCount + vertices > 16384) {
+      const oldest = this.clipCells.entries().next().value;
+      if (oldest === undefined) throw new Error("Quake clip-cell cache accounting is inconsistent");
+      this.clipCells.delete(oldest[0]);
+      this.clipCellCount -= oldest[1].cells.length; this.clipFaceCount -= oldest[1].faces; this.clipVertexCount -= oldest[1].vertices;
+    }
+    this.clipCells.set(key, { cells, faces, vertices });
+    this.clipCellCount += cells.length; this.clipFaceCount += faces; this.clipVertexCount += vertices;
+    return cells;
   }
   pointContents(query: PointContentsQuery): { readonly kind: "q1"; readonly contents: number } {
     const model = query.target.kind === "world" ? 0 : query.target.model;

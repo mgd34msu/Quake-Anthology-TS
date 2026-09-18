@@ -1,7 +1,9 @@
 import { createSceneQueries } from "../../../../src/world/collision/index.ts";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { deepStrictEqual } from "node:assert";
+import * as clipspace from "../../../../src/world/geometry/q1-solid/clipspace.ts";
 import type { Bounds, Vec3 } from "../../../../src/contracts/math.ts";
 import type { BspChild, BspNode, BspPlane, Q1ClipChild, Q1ClipNode, Q1WorldGeometry, TraceQuery, TraceShape } from "../../../../src/contracts/scene.ts";
 import { Q1_DONOR_PROFILE, Q2_DONOR_PROFILE, Q3_BINARY32_PROFILE } from "../../../../src/core/numeric.ts";
@@ -49,6 +51,59 @@ function clipOnlyCube(): Q1WorldGeometry {
 }
 
 describe("Quake hulls and derived solid cells", () => {
+  test("exact derived cells retain policy checks and separate hull and collision owners", () => {
+    const derive = spyOn(clipspace, "deriveQ1ClipSolids");
+    try {
+      const map = clipOnlyCube(), first = map.models[0];
+      if (first === undefined) throw new Error("Missing fixture model");
+      const geometry: Q1WorldGeometry = { ...map, models: [first, { ...first, headnodes: [-2, -1, -1, -1] }] };
+      let enabled = true;
+      const collision = createQ1Collision(geometry, { blocksContents: contents => enabled && contents === -2 });
+      const input = query({ x: 5, y: 0, z: 0 }, zero, { kind: "box", bounds: { min: { x: -2, y: -2, z: -2 }, max: { x: 2, y: 2, z: 2 } } });
+      const firstHit = collision.trace(input);
+      expect(firstHit.fraction).toBeLessThan(1);
+      deepStrictEqual(collision.trace(input), firstHit);
+      expect(derive).toHaveBeenCalledTimes(1);
+      enabled = false;
+      expect(collision.trace(input).fraction).toBe(1);
+      expect(derive).toHaveBeenCalledTimes(1);
+      enabled = true;
+      deepStrictEqual(collision.trace(input), firstHit);
+      expect(derive).toHaveBeenCalledTimes(1);
+      expect(collision.trace({ ...input, target: { kind: "model", model: 1, origin: zero, angles: zero } }).fraction).toBe(1);
+      expect(derive).toHaveBeenCalledTimes(2);
+      deepStrictEqual(createQ1Collision(geometry).trace(input), firstHit);
+      expect(derive).toHaveBeenCalledTimes(3);
+    } finally { derive.mockRestore(); }
+  });
+  test("exact derived-cell entries evict without changing rederived results", () => {
+    const derive = spyOn(clipspace, "deriveQ1ClipSolids");
+    try {
+      const collision = createQ1Collision(clipOnlyCube());
+      const input = query({ x: 5, y: 0, z: 0 }, zero, { kind: "box", bounds: { min: { x: -2, y: -2, z: -2 }, max: { x: 2, y: 2, z: 2 } } });
+      const firstHit = collision.trace(input);
+      for (let index = 1; index <= 128; index++) collision.trace({ ...input, start: { ...input.start, y: index * 10 }, end: { ...input.end, y: index * 10 } });
+      const before = derive.mock.calls.length;
+      deepStrictEqual(collision.trace(input), firstHit);
+      expect(derive.mock.calls.length).toBe(before + 1);
+      deepStrictEqual(collision.trace(input), firstHit);
+      expect(derive.mock.calls.length).toBe(before + 1);
+    } finally { derive.mockRestore(); }
+  });
+  test("nonfinite derived envelopes retain the uncached behavior", () => {
+    const derive = spyOn(clipspace, "deriveQ1ClipSolids");
+    try {
+      const collision = createQ1Collision(cube());
+      const shape: TraceShape = { kind: "box", bounds: { min: { x: -2, y: -2, z: -2 }, max: { x: 2, y: 2, z: 2 } } };
+      for (const x of [NaN, Infinity, -Infinity]) {
+        const input = query({ x, y: 0, z: 0 }, zero, shape);
+        const before = derive.mock.calls.length;
+        const result = collision.trace(input);
+        deepStrictEqual(collision.trace(input), result);
+        expect(derive.mock.calls.length).toBe(before + 2);
+      }
+    } finally { derive.mockRestore(); }
+  });
   test("native hull zero preserves the source impact epsilon and start-solid exit", () => {
     const collision = createQ1Collision(cube());
     const hit = collision.trace(query({ x: 5, y: 0, z: 0 }, zero));

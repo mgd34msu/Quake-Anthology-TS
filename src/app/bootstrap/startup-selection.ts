@@ -188,7 +188,7 @@ export class StartupSelectionModel {
     await this.prepareTeamArena();
     const behaviors: StartupSelectionChoice[] = [];
     for (const product of this.catalog.products) {
-      if (product.expectation.family !== "q1" || unavailable(product) !== null) continue;
+      if (unavailable(product) !== null) continue;
       try { for (const entry of await applicationWeaponBehaviorChoices(this.catalog, product.expectation.id)) behaviors.push(choice(entry.id, entry.title, entry.unavailable)); }
       catch (error) { behaviors.push(choice(`${product.expectation.id}/unavailable`, product.expectation.title, error instanceof Error ? error.message : String(error))); }
     }
