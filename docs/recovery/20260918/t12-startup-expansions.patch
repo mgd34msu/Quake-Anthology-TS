@@ -1,0 +1,161 @@
+--- a/src/app/bootstrap/startup-selection.ts
++++ b/src/app/bootstrap/startup-selection.ts
+@@ -25,9 +25,9 @@
+ import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "../../content/catalog/equipment.ts";
+ import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../content/catalog/monsters.ts";
+ import { nativeProviderTiming } from "../../content/catalog/timing.ts";
+-import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
++import { canonicalWeaponSource, supportsSelectedWeaponProduct } from "../../content/catalog/weapons.ts";
+ import { loadTeamArenaCampaign, planTeamArenaSkirmish, type TeamArenaCampaign, type TeamArenaTeams } from "./team-arena-skirmish.ts";
+-import { applicationPreset } from "./content.ts";
++import { applicationConfigurationPreset, applicationPreset } from "./content.ts";
+ import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
+ import type { ApplicationOptions } from "./options.ts";
+ import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
+@@ -61,11 +61,12 @@
+   return program === "id1" || program === "baseq2" ? family === "q1" ? "Quake" : "Quake II" : title ?? program;
+ }
+ const baseProduct = (family: GameFamily): string => family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3";
+-function baseArsenalPair(map: CatalogProduct, weapon: CatalogProduct): boolean {
+-  if (weapon.expectation.family === "q1" && weapon.expectation.campaign === "hipnotic" && (weapon.expectation.edition === "classic" || weapon.expectation.edition === "rerelease")) return true;
+-  const family = map.expectation.family, program = family === "q1" ? "id1" : "baseq2";
+-  return (family === "q1" || family === "q2") && [map, weapon].every(product => product.expectation.family === family && product.expectation.campaign === program
+-    && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease"));
++function arsenalUnavailable(map: CatalogProduct, weapon: CatalogProduct, guest: boolean, program: CatalogProduct): string | null {
++  if (map.id === weapon.id) return null;
++  if (guest) return "Selected guest gamecode owns its weapons; independent arsenals are not implemented.";
++  if (program.expectation.family === "q3" && program.expectation.id !== baseProduct("q3"))
++    return "Independent arsenal pickup supply is not implemented for this campaign; choose campaign weapons.";
++  return null;
+ }
+ function unavailable(product: CatalogProduct): string | null {
+   const state = product.availability;
+@@ -525,6 +526,8 @@
+     const current = this.product("product"), currentLabel = productChoice(current).label;
+     const provider: ProviderReference = { provider: `${current.expectation.family}:official`, content: current.id };
+     const rules = this.values.rules === "ctf" || this.values.rules === "lmctf" ? this.catalog.product(`q2-classic-${this.values.rules}`) : current;
++    const guestWeapons = unavailable(current) === null && applicationConfigurationPreset(this.catalog, this.options).execution.some(module => module.role === "server-game" && module.kind !== "typescript");
++    const weaponSource = unavailable(current) === null ? sourceProgramProduct(this.catalog, current.id) : current;
+     const defaults = unavailable(current) !== null || unavailable(rules) !== null ? disabledEquipment()
+       : nativeEquipment(this.catalog, provider, this.values.rules === "standard" ? provider : { provider: `${current.expectation.family}:${this.values.rules}`, content: rules.id });
+     const nativeWeapons = choice("native", `${currentLabel} weapons`);
+@@ -545,10 +548,9 @@
+       row("map", "Starting map", this.maps()),
+       row("movement", "Movement", movementChoices),
+       row("character", "Character source", this.baseChoices()), row("model", "Character model", this.models()),
+-      row("weapons", "Weapons", [nativeWeapons, ...[...this.baseChoices(), ...this.catalog.products.filter(product => product.expectation.family === "q1" && product.expectation.campaign === "hipnotic" && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")).map(productChoice)].map(option => {
+-        const product = this.catalog.product(option.id), current = this.product("product");
+-        return option.unavailable === null && product.expectation.family === current.expectation.family && product.id !== current.id && !baseArsenalPair(current, product)
+-          ? { ...option, unavailable: "Another edition or campaign within this weapon family is not implemented; use campaign defaults." } : option;
++      row("weapons", "Weapons", [nativeWeapons, ...this.catalog.products.filter(product => supportsSelectedWeaponProduct(product.expectation) || product.expectation.id === baseProduct("q3")).map(product => {
++        const option = productChoice(product);
++        return { ...option, unavailable: option.unavailable ?? arsenalUnavailable(current, product, guestWeapons, weaponSource) };
+       })]), row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
+       row("weaponBehavior", "Projectile trajectory", [choice("native", "Selected weapon default"), ...this.behaviorChoices]),
+       row("grapple", "Grapple", grapples), row("grenades", "Offhand grenades", [nativeGrenades, choice("disabled", "Disabled"),
+@@ -613,7 +615,7 @@
+   }
+   bindingItems(): readonly WeaponBindingItem[] {
+     const product = this.values.weapons === "native" ? this.product("product") : this.catalog.require(this.values.weapons);
+-    return baseWeaponBindingItems(product.expectation.family, product.expectation.campaign);
++    return baseWeaponBindingItems(product.expectation.family, product.expectation.campaign, product.expectation.edition);
+   }
+   bindingCapabilities(): BindingCapabilities {
+     const base = applicationPreset(this.catalog, this.options), equipment = this.selectedEquipment(base.equipment);
+@@ -672,9 +674,6 @@
+     selections = { ...selections, campaign: { kind: "selected", value: campaign } };
+     if (this.values.weapons !== "native") {
+       const product = this.catalog.require(this.values.weapons);
+-      if (product.expectation.family === this.product("product").expectation.family && product.id !== base.map.entities.content
+-        && !baseArsenalPair(this.product("product"), product))
+-        throw new Error("Selecting another edition's weapons within the same game family is not implemented; choose campaign weapons or a different family.");
+       selections = { ...selections, weapons: { kind: "selected", value: [canonicalWeaponSource(base.map.entities, { provider: `${product.expectation.family}:official`, content: product.id }, this.catalog)] } };
+     }
+     if (this.values.enemies === "custom") {
+--- a/tests/first-playable/startup-selection.test.ts
++++ b/tests/first-playable/startup-selection.test.ts
+@@ -14,6 +14,75 @@
+ import { defaultNetQuakeProfile } from "../../src/network/q1/profile.ts";
+ 
+ const corpus = resolve(import.meta.dir, "../../../qfiles");
++test("startup expansion arsenal choices resolve independently and preserve the supplied world", async () => {
++  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
++  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q1", "--character", "q1"]);
++  if (command.kind !== "run") throw new Error("Missing startup options");
++  const model = new StartupSelectionModel(catalog, command.options);
++  await model.prepareMaps();
++  const choices = model.rows().find(row => row.id === "weapons")?.choices;
++  if (choices === undefined) throw new Error("Missing arsenal choices");
++  expect(new Set(choices.map(choice => choice.id)).size).toBe(choices.length);
++  for (const id of ["q1-rerelease-dopa", "q1-rerelease-mg1", "q1-rerelease-mg3", "q2-rerelease-mg2"])
++    expect(choices.find(choice => choice.id === id)?.unavailable).toBeNull();
++  const cases: readonly (readonly [string, string, string])[] = [
++    ["q1-classic-rogue", "q1:weapons/classic/rogue", "q1:weapon/rogue:lava-nailgun"],
++    ["q1-rerelease-mg3", "q1:weapons/rerelease/mg3", "q1:weapon/mg3:laser"],
++    ["q2-classic-xatrix", "q2:weapons/classic/xatrix", "q2:weapon_boomer"],
++    ["q2-classic-rogue", "q2:weapons/classic/rogue", "q2:weapon_etf_rifle"],
++  ];
++  for (const [product, provider, item] of cases) {
++    model.select("weapons", product);
++    expect(model.bindingItems().some(binding => binding.id === item)).toBe(true);
++    const launch = await model.resolve();
++    expect(launch.recipe.weapons).toEqual([{ provider, content: catalog.require(product).id }]);
++    expect(launch.recipe.timing.some(timing => timing.provider === provider)).toBe(true);
++    expect(launch.recipe.map.entities).toEqual({ provider: "q2:official", content: catalog.require("q2-classic-baseq2").id });
++    expect(launch.recipe.map.geometryContent).toBe(catalog.require("q2-classic-baseq2").id);
++    expect(launch.recipe.map.geometry.requestedPath).toBe("maps/base1.bsp");
++    expect(launch.options.movement).toBe("q1");
++    expect(launch.options.character).toBe("q1");
++  }
++  model.select("weapons", "q2-rerelease-baseq2");
++  expect(model.bindingItems().some(binding => binding.id === "q2:weapon_boomer")).toBe(true);
++  expect(model.bindingItems().some(binding => binding.id === "q2:weapon_etf_rifle")).toBe(true);
++  model.select("product", "q1-classic-id1"); await model.prepareMaps();
++  model.select("map", "maps/e1m1.bsp"); model.select("weapons", "q1-classic-rogue");
++  const sameFamily = await model.resolve();
++  expect(sameFamily.recipe.map.entities.content).toBe(catalog.require("q1-classic-id1").id);
++  expect(sameFamily.recipe.weapons).toEqual([{ provider: "q1:weapons/classic/rogue", content: catalog.require("q1-classic-rogue").id }]);
++}, 60000);
++
++test("startup expansion arsenal choices explain unsupported source combinations", async () => {
++  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
++  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q3-missionpack", "--map", "mpteam1"]);
++  if (command.kind !== "run") throw new Error("Missing startup options");
++  const model = new StartupSelectionModel(catalog, command.options);
++  for (const product of ["q1-classic-rogue", "q2-classic-xatrix", "q2-classic-rogue"]) {
++    expect(model.rows().find(row => row.id === "weapons")?.choices.find(choice => choice.id === product)?.unavailable)
++      .toBe("Independent arsenal pickup supply is not implemented for this campaign; choose campaign weapons.");
++    expect(() => model.select("weapons", product)).toThrow("Independent arsenal pickup supply");
++  }
++  expect(model.rows().find(row => row.id === "weapons")?.choices.find(choice => choice.id === "native")?.unavailable).toBeNull();
++  model.select("product", "q1-quakeworld");
++  expect(() => model.select("weapons", "q1-classic-rogue")).toThrow("Selected guest gamecode owns its weapons");
++  expect(() => model.select("weapons", "q2-classic-xatrix")).toThrow("Selected guest gamecode owns its weapons");
++  const quakeC = new StartupSelectionModel(catalog, { ...command.options, product: "q1-classic-id1", quakeCProgram: "progs.dat", movement: "q1", character: "q1" });
++  expect(() => quakeC.select("weapons", "q2-classic-rogue")).toThrow("Selected guest gamecode owns its weapons");
++  const nativeQ2 = new StartupSelectionModel(catalog, { ...command.options, product: "q2-classic-baseq2", q2GameLibrary: "gamex86.dll", movement: "q2", character: "q2" });
++  expect(() => nativeQ2.select("weapons", "q1-classic-rogue")).toThrow("Selected guest gamecode owns its weapons");
++  const baseQ3 = catalog.require("q3-baseq3");
++  const guestQ3: CatalogProduct = { ...baseQ3, id: createContentId({ family: "q3", edition: baseQ3.expectation.edition, package: "guest-fixture", revision: "test" }),
++    expectation: { ...baseQ3.expectation, id: "guest-fixture", campaign: "guest-fixture", baseProduct: "q3-baseq3", requiredPrograms: ["vm/qagame.qvm"] } };
++  const guestCatalog = new InstalledCatalog(corpus, [...catalog.products, guestQ3], catalog.rootArchives, catalog.generation);
++  const qvm = new StartupSelectionModel(guestCatalog, { ...command.options, product: "guest-fixture" });
++  expect(() => qvm.select("weapons", "q2-classic-rogue")).toThrow("Selected guest gamecode owns its weapons");
++  const mapsOnly: CatalogProduct = { ...guestQ3, expectation: { ...guestQ3.expectation, requiredPrograms: [] } };
++  const mapCatalog = new InstalledCatalog(corpus, [...catalog.products, mapsOnly], catalog.rootArchives, catalog.generation);
++  const inherited = new StartupSelectionModel(mapCatalog, { ...command.options, product: "guest-fixture" });
++  expect(() => inherited.select("weapons", "q2-classic-rogue")).not.toThrow();
++});
++
+ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("startup choices resolve independent installed source selections without starting a world", async () => {
+   const command = parseApplicationCommand(["--content-root", corpus]);
+   if (command.kind !== "run" && command.kind !== "menu") throw new Error("Expected launch options");
+@@ -285,7 +354,7 @@
+   const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+   const model = new StartupSelectionModel(catalog, { ...command.options, botSkill: 5, serverProfilePath: "/custom-match.json", quakeCProgram: "progs.dat" });
+   await model.prepareMaps();
+-  model.select("weapons", "q3-baseq3");
++  expect(() => model.select("weapons", "q3-baseq3")).toThrow("Selected guest gamecode owns its weapons");
+   model.select("grapple", "q2-classic-ctf/offhand");
+   model.select("grenades", "q2-classic-baseq2");
+   model.select("mode", "deathmatch");

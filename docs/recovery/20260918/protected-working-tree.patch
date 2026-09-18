@@ -1,0 +1,80 @@
+diff --git i/src/app/bootstrap/simulation/runtime.ts w/src/app/bootstrap/simulation/runtime.ts
+index 32afca8..ff6686f 100644
+--- i/src/app/bootstrap/simulation/runtime.ts
++++ w/src/app/bootstrap/simulation/runtime.ts
+@@ -1605,7 +1605,7 @@ export class SharedSimulation implements Simulation {
+         settings: { gameType: 0, singlePlayer: false, maxClients: this.options.maxClients,
+           mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+           ...(this.options.restore !== undefined || this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }),
+-        ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
++          ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
+           ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) } });
+       state.cvars.set("fs_game", guest.gameDirectory, true);
+       this.initializeServerSettings(state.cvars);
+@@ -1728,7 +1728,7 @@ export class SharedSimulation implements Simulation {
+       }, { gameType: this.options.mode === "singleplayer" ? 2 : 0, singlePlayer: this.options.mode === "singleplayer", maxClients: this.options.maxClients,
+         mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
+         ...(this.options.restore !== undefined || this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }),
+-        ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
++          ...(this.options.restore !== undefined || this.options.sourceArchive === undefined ? {} : { sourceArchive: this.options.sourceArchive }),
+         ...(this.options.q3Cvars === undefined ? {} : { cvars: this.options.q3Cvars }) });
+       const saved = this.options.restore;
+       if (saved === undefined) {
+@@ -4692,6 +4692,7 @@ import { readSelectedMonstersCheckpoint } from "./monster-checkpoint.ts";
+ import type { SelectedMonstersCheckpoint } from "./monster-checkpoint.ts";
+ 
+ 
++/** Source callbacks may add or release actors while the source-slot cursor advances. */
+ export function* orderedActorTurns(
+   actors: SessionActorRegistry,
+   positionOf: (actor: OwnedActor) => readonly [number, number],
+diff --git i/tests/compat/qvm/game-async.test.ts w/tests/compat/qvm/game-async.test.ts
+index 7bea34e..4678f75 100644
+--- i/tests/compat/qvm/game-async.test.ts
++++ w/tests/compat/qvm/game-async.test.ts
+@@ -70,9 +70,7 @@ test("guest-defined fly reaches the VM with its original command arguments", asy
+   const commands: string[][] = [];
+   const vm = game(call => {
+     expect(call.words.getInt32(4, true)).toBe(QvmGameExport.GAME_CLIENT_COMMAND);
+-    const arguments_ = call.commandArguments;
+-    if (arguments_ === null) throw new Error("Guest command arguments are missing");
+-    commands.push([...arguments_]);
++    commands.push([...call.commandArguments]);
+     return 0;
+   });
+   await vm.clientCommandAsync(2, ["fly", "mod-option"]);
+diff --git i/verification/reference-cases/q1/source-derived.json w/verification/reference-cases/q1/source-derived.json
+index af1cf82..d9df761 100644
+--- i/verification/reference-cases/q1/source-derived.json
++++ w/verification/reference-cases/q1/source-derived.json
+@@ -6,7 +6,7 @@
+     "measuredOriginalExecution": false,
+     "method": "Independently transcribed original-source equations evaluated in TypeScript, compared with fixed hand-derived expected steps."
+   },
+-  "capturedAt": "2026-09-11T06:02:32.972Z",
++  "capturedAt": "2026-09-11T07:20:18.768Z",
+   "command": [
+     "/home/buzzkill/.bun/bin/bun",
+     "run",
+@@ -23,7 +23,7 @@
+   "architecture": "x64",
+   "environment": {
+     "LANG": "en_US.UTF-8",
+-    "LC_ALL": "C",
++    "LC_ALL": "C.UTF-8",
+     "TZ": null
+   },
+   "arithmetic": {
+diff --git i/verification/reference-cases/q2/capture.json w/verification/reference-cases/q2/capture.json
+index 7f71020..76c5f25 100644
+--- i/verification/reference-cases/q2/capture.json
++++ w/verification/reference-cases/q2/capture.json
+@@ -2,7 +2,7 @@
+   "schemaVersion": 1,
+   "id": "q2-initial-source-derived-contracts",
+   "oracleKind": "source-derived",
+-  "capturedAt": "2026-09-11T06:02:33.321Z",
++  "capturedAt": "2026-09-11T07:20:28.980Z",
+   "captureCommand": [
+     "bun",
+     "run",

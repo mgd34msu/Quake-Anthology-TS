@@ -10,6 +10,7 @@ import type { NumericProfile } from "../../../src/contracts/numeric.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { createNumericOperations } from "../../../src/core/numeric.ts";
 import { decodeQ2Map } from "../../../src/formats/q2-map/index.ts";
+import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import { createSceneQueries } from "../../../src/world/collision/index.ts";
 import { applyQ2MovementContacts, ButtonT, createQ2ClassicMovementProvider, createQ2RereleaseMovementProvider, moveQ2Rerelease, Q2RereleaseMovementContext, PmflagsT, q2PlayerShape } from "../../../src/movement/q2/index.ts";
 
@@ -54,6 +55,42 @@ async function level() {
   } finally { archive.close(); }
 }
 const installed = await Bun.file("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak").exists();
+
+const q1ClassicArchive = await Bun.file("/home/buzzkill/Projects/qfiles/q1/id1/pak0.pak").exists()
+  ? "/home/buzzkill/Projects/qfiles/q1/id1/pak0.pak" : "/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK";
+for (const path of [q1ClassicArchive, "/home/buzzkill/Projects/qfiles/q1/rerelease/id1/pak0.pak"]) {
+test.skipIf(!await Bun.file(path).exists())(`both Q2 movement profiles stop on Q1 floors after directional input ends: ${path}`, async () => {
+  const archive = await openArchive(path);
+  try {
+    const entry = archive.findEntries("maps/start.bsp")[0];
+    if (entry === undefined) throw new Error("Q1 start map missing");
+    const world = readQ1Bsp(await archive.readEntry(entry));
+    const scene = createSceneQueries(world);
+    const services: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
+      weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+    const origin = { x: 544, y: 288, z: 28 };
+    const classicProvider = createQ2ClassicMovementProvider("q2:classic");
+    const rereleaseProvider = createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext());
+    for (const direction of [{ forwardMove: 200, sideMove: 0 }, { forwardMove: -200, sideMove: 0 },
+      { forwardMove: 0, sideMove: 200 }, { forwardMove: 0, sideMove: -200 }]) {
+      let old = classic(origin), modern = rerelease(origin);
+      for (let frame = 0; frame < 100; frame++) {
+        const movement = frame >= 20 && frame < 25 ? direction : { forwardMove: 0, sideMove: 0 };
+        const a = classicProvider.move({ ...old, command: { ...old.command, ...movement } }, services);
+        const b = rereleaseProvider.move({ ...modern, command: { ...modern.command, ...movement } }, services);
+        if (a.status !== "active" || b.status !== "active") throw new Error("Unexpected removal");
+        old = { ...old, state: a.state }; modern = { ...modern, state: b.state };
+        if (frame === 24) {
+          expect(Math.hypot(...a.state.velocityEighths)).toBeGreaterThan(0);
+          expect(Math.hypot(b.state.velocity.x, b.state.velocity.y)).toBeGreaterThan(0);
+        }
+      }
+      expect(old.state.velocityEighths).toEqual([0, 0, 0]);
+      expect(modern.state.velocity).toEqual(zero);
+    }
+  } finally { archive.close(); }
+}, 30000);
+}
 
 describe.skipIf(!installed)("Q2 movement against retail base1 geometry", () => {
   test("classic fixed-point movement, jump release, and crouch retain independent arsenal and animation", async () => {

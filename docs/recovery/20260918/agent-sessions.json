@@ -1,0 +1,2102 @@
+[
+  {
+    "id": "01a0a032-5d38-7f83-80e5-a3eca07272ce",
+    "agent_path": "/root/q3_save_core",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-54-10-01a0a032-5d38-7f83-80e5-a3eca07272ce.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a271-c8b4-7283-9df9-5d0962408419",
+    "agent_path": "/root/weapon_binding_defaults",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T19-22-41-01a0a271-c8b4-7283-9df9-5d0962408419.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a071-962c-7df0-bf43-5cb5dcba518e",
+    "agent_path": "/root/q3_bot_transform",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T10-03-13-01a0a071-962c-7df0-bf43-5cb5dcba518e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a51a-45b1-7d13-badf-14612ef4a4ee",
+    "agent_path": "/root/mixed_game_performance",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T07-45-57-01a0a51a-45b1-7d13-badf-14612ef4a4ee.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09d27-bf14-7f21-895a-c9057152ca44",
+    "agent_path": "/root/resume_performance",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T18-43-42-01a09d27-bf14-7f21-895a-c9057152ca44.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09d27-6730-7ae1-89b1-9a05621acf9f",
+    "agent_path": "/root/resume_binary",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T18-43-20-01a09d27-6730-7ae1-89b1-9a05621acf9f.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09d25-e8ef-7ba2-a50d-cf4acd971311",
+    "agent_path": "/root/resume_commit",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T18-41-42-01a09d25-e8ef-7ba2-a50d-cf4acd971311.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09feb-1431-77c3-a745-ab2f2ba435fd",
+    "agent_path": "/root/complete_order_check",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-36-18-01a09feb-1431-77c3-a745-ab2f2ba435fd.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a3e6-76ef-75f3-87b1-ae8478d6cad6",
+    "agent_path": "/root/map_rotation_shuffle",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T02-09-45-01a0a3e6-76ef-75f3-87b1-ae8478d6cad6.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a51a-9b0b-7651-9869-11979d7e3a3e",
+    "agent_path": "/root/canonical_console_routing",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T07-46-19-01a0a51a-9b0b-7651-9869-11979d7e3a3e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a06a-180c-7010-bfbe-e52786c47a9e",
+    "agent_path": "/root/qvm_host_save",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T09-55-02-01a0a06a-180c-7010-bfbe-e52786c47a9e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09fd9-cab4-7083-b02a-c31fcf900cbf",
+    "agent_path": "/root/model_surface_order",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-17-25-01a09fd9-cab4-7083-b02a-c31fcf900cbf.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a381-c1e2-72e3-b577-5e2ec4d2eb37",
+    "agent_path": "/root/startup_order_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T00-19-45-01a0a381-c1e2-72e3-b577-5e2ec4d2eb37.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a55c-1ef2-7f60-bd92-be9fe04d3ab7",
+    "agent_path": "/root/compiled_loop_hang",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T08-57-53-01a0a55c-1ef2-7f60-bd92-be9fe04d3ab7.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09f3f-8bcb-7753-9376-b18ba696e5f5",
+    "agent_path": "/root/q3_server_guest_contract",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T04-28-57-01a09f3f-8bcb-7753-9376-b18ba696e5f5.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a3ff-5c59-7293-8f27-408ce9818cfe",
+    "agent_path": "/root/q3_settings_restore",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T02-36-56-01a0a3ff-5c59-7293-8f27-408ce9818cfe.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a24e-89e4-7fe3-a2d1-5d5fb94f3ee3",
+    "agent_path": "/root/binding_commands_mouse",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T18-44-11-01a0a24e-89e4-7fe3-a2d1-5d5fb94f3ee3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a089-f8c5-7ca1-8f65-387f3eddc321",
+    "agent_path": "/root/qvm_local_client_services",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T10-29-51-01a0a089-f8c5-7ca1-8f65-387f3eddc321.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a064-b84a-79d3-b9ad-f54c3f8bb241",
+    "agent_path": "/root/save_status_refresh",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T09-49-10-01a0a064-b84a-79d3-b9ad-f54c3f8bb241.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a2b7-cb8a-78e0-836b-4c00d4c4c270",
+    "agent_path": "/root/quiet_weapon_audio",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T20-39-09-01a0a2b7-cb8a-78e0-836b-4c00d4c4c270.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a51b-1f10-70a3-bd07-72dd5897bea5",
+    "agent_path": "/root/base_directory_music",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T07-46-53-01a0a51b-1f10-70a3-bd07-72dd5897bea5.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a513-f3ba-7382-afb1-83e44188bcec",
+    "agent_path": "/root/q1_startup_parity",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T07-39-03-01a0a513-f3ba-7382-afb1-83e44188bcec.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a533-9ca7-7213-82b8-702f55f688c3",
+    "agent_path": "/root/gl_frame_submission",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T08-13-38-01a0a533-9ca7-7213-82b8-702f55f688c3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09e59-53a5-7530-84a0-2f2cbdd7655a",
+    "agent_path": "/root/fragment_clamping",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T00-17-29-01a09e59-53a5-7530-84a0-2f2cbdd7655a.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a024-11ed-7e32-8dde-26067f81f7eb",
+    "agent_path": "/root/save_design_adapter",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-38-33-01a0a024-11ed-7e32-8dde-26067f81f7eb.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a2c2-430e-7321-aff2-084bc2683b6d",
+    "agent_path": "/root/team_arena_scores",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T20-50-35-01a0a2c2-430e-7321-aff2-084bc2683b6d.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a07f-6a16-7be1-8427-1db2603ffab0",
+    "agent_path": "/root/qvm_restore_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T10-18-19-01a0a07f-6a16-7be1-8427-1db2603ffab0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a263-094f-78d0-bdd9-d66ff056992e",
+    "agent_path": "/root/cvar_archive_entries",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T19-06-34-01a0a263-094f-78d0-bdd9-d66ff056992e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a26d-9848-7cf2-a59a-879e752d1aae",
+    "agent_path": "/root/startup_bindings",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T19-18-06-01a0a26d-9848-7cf2-a59a-879e752d1aae.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a4f5-0571-7142-bb73-1cd279ab1dde",
+    "agent_path": "/root/persistent_remote_owner",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T07-05-16-01a0a4f5-0571-7142-bb73-1cd279ab1dde.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a066-af29-7ed2-9384-ceb73f5965a3",
+    "agent_path": "/root/qvm_save_join",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T09-51-19-01a0a066-af29-7ed2-9384-ceb73f5965a3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a249-f347-73a1-b5df-04d52a63b435",
+    "agent_path": "/root/native_preset_menu",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T18-39-10-01a0a249-f347-73a1-b5df-04d52a63b435.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a239-da30-7e50-9ba4-182e44f7aeeb",
+    "agent_path": "/root/startup_mod_saves",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T18-21-35-01a0a239-da30-7e50-9ba4-182e44f7aeeb.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a2d7-062d-70b1-9abe-38e31200cacf",
+    "agent_path": "/root/console_readability",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T21-13-15-01a0a2d7-062d-70b1-9abe-38e31200cacf.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09d45-56d8-7081-bd6e-d3f8cb1c4965",
+    "agent_path": "/root/recover_remaining_wip",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T19-16-02-01a09d45-56d8-7081-bd6e-d3f8cb1c4965.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a3b1-6c09-7ff3-a045-309ea6cc33e0",
+    "agent_path": "/root/remote_mapless_connect",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T01-11-48-01a0a3b1-6c09-7ff3-a045-309ea6cc33e0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a51a-df78-75c3-a2b4-1a10a12c61f9",
+    "agent_path": "/root/weapon_wheel_unbind_crash",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T07-46-36-01a0a51a-df78-75c3-a2b4-1a10a12c61f9.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a51b-50bb-7942-b8d1-f0397a6f2634",
+    "agent_path": "/root/custom_game_menu_location",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T07-47-05-01a0a51b-50bb-7942-b8d1-f0397a6f2634.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a4ee-3fa4-72d1-bed2-87ee750bcfcf",
+    "agent_path": "/root/q3_sky_visibility",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T06-57-52-01a0a4ee-3fa4-72d1-bed2-87ee750bcfcf.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a3a2-4ea0-7f90-b99c-2aff44362ca0",
+    "agent_path": "/root/monster_trace_performance",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T00-55-18-01a0a3a2-4ea0-7f90-b99c-2aff44362ca0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a044-a29b-7700-bf85-9c4cffe41b17",
+    "agent_path": "/root/bot_ai_save",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T09-14-07-01a0a044-a29b-7700-bf85-9c4cffe41b17.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a396-da2e-7822-aff2-2efebbfc30f6",
+    "agent_path": "/root/render_bright_patches",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/15/rollout-2026-09-15T00-42-47-01a0a396-da2e-7822-aff2-2efebbfc30f6.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a2f4-1436-7d62-a91e-2d6f83e82668",
+    "agent_path": "/root/console_llm_output",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T21-45-00-01a0a2f4-1436-7d62-a91e-2d6f83e82668.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a245-bf24-7021-afbb-3abe30767de9",
+    "agent_path": "/root/native_preset_model",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T18-34-35-01a0a245-bf24-7021-afbb-3abe30767de9.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a286-b141-7321-a6b1-a0a292b524d4",
+    "agent_path": "/root/settings_value_visibility",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T19-45-31-01a0a286-b141-7321-a6b1-a0a292b524d4.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a2f0-07e1-7350-ab66-dc3c57a6efb1",
+    "agent_path": "/root/console_shared_settings",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T21-40-34-01a0a2f0-07e1-7350-ab66-dc3c57a6efb1.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a030-a168-7b90-9674-e5ee01b08f87",
+    "agent_path": "/root/app_save_replacement",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-52-16-01a0a030-a168-7b90-9674-e5ee01b08f87.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a2ad-70f5-7c93-b220-b7aba5b448a8",
+    "agent_path": "/root/q2_visual_triangles",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T20-27-50-01a0a2ad-70f5-7c93-b220-b7aba5b448a8.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a075-1a50-79e1-b3d4-b319f6bcd405",
+    "agent_path": "/root/q3_runtime_warnings",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T10-07-04-01a0a075-1a50-79e1-b3d4-b319f6bcd405.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a24c-3ea7-7073-8733-e7cde2d5aef4",
+    "agent_path": "/root/bindings_interface",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T18-41-40-01a0a24c-3ea7-7073-8733-e7cde2d5aef4.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a21d-7f93-7a71-961c-0961abe9167b",
+    "agent_path": "/root/speaker_loop_semantics",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T17-50-37-01a0a21d-7f93-7a71-961c-0961abe9167b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a024-5982-7432-95e8-88f1703aa3a8",
+    "agent_path": "/root/save_design_dispatch",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-38-51-01a0a024-5982-7432-95e8-88f1703aa3a8.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a01c-d71d-7822-814f-f7b346fbe199",
+    "agent_path": "/root/impact_material_diagnosis",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-30-39-01a0a01c-d71d-7822-814f-f7b346fbe199.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a223-40fe-78c0-b691-c82b2c88d1a0",
+    "agent_path": "/root/initial_save_cases",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T17-56-54-01a0a223-40fe-78c0-b691-c82b2c88d1a0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a097-345c-7b52-bef3-4b8cf3c2d188",
+    "agent_path": "/root/shared_debug_shapes",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T10-44-19-01a0a097-345c-7b52-bef3-4b8cf3c2d188.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a067-79fc-73a2-9a8b-b39a6625ee00",
+    "agent_path": "/root/bot_final_types",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T09-52-11-01a0a067-79fc-73a2-9a8b-b39a6625ee00.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a087-14a6-7d61-86a7-69459d7e6153",
+    "agent_path": "/root/qvm_local_client_ground",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T10-26-42-01a0a087-14a6-7d61-86a7-69459d7e6153.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09ffb-2843-7c32-ae37-e6568a120030",
+    "agent_path": "/root/reported_bugs_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-53-52-01a09ffb-2843-7c32-ae37-e6568a120030.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09f49-8ddf-7271-a3c9-c6d5c03a1b4c",
+    "agent_path": "/root/q3_guest_records",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T04-39-52-01a09f49-8ddf-7271-a3c9-c6d5c03a1b4c.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a069-c2a2-7ad3-ba9c-e0c9322bcf56",
+    "agent_path": "/root/qvm_file_save",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T09-54-40-01a0a069-c2a2-7ad3-ba9c-e0c9322bcf56.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a048-beb1-7662-a83f-4a077410623a",
+    "agent_path": "/root/bot_navigation_save",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T09-18-37-01a0a048-beb1-7662-a83f-4a077410623a.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a040-42c0-7330-b640-5408f31f3ab8",
+    "agent_path": "/root/bot_save",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T09-09-21-01a0a040-42c0-7330-b640-5408f31f3ab8.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09fa3-ce7f-7da1-9e94-a8ba540f8af0",
+    "agent_path": "/root/material_order_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T06-18-27-01a09fa3-ce7f-7da1-9e94-a8ba540f8af0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a030-4db9-7980-8d5d-c9db6f00a404",
+    "agent_path": "/root/qc_full_save",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-51-55-01a0a030-4db9-7980-8d5d-c9db6f00a404.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0a032-ab1d-7f63-b46d-1f401b5dc356",
+    "agent_path": "/root/q3_save_modules",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-54-30-01a0a032-ab1d-7f63-b46d-1f401b5dc356.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09fe6-fac1-76e3-a4f2-2f0e65ac72ca",
+    "agent_path": "/root/source_order_capture",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-31-49-01a09fe6-fac1-76e3-a4f2-2f0e65ac72ca.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a01d-18e2-77b0-95bf-58882b0525df",
+    "agent_path": "/root/lrctf_hud_asset",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-30-56-01a0a01d-18e2-77b0-95bf-58882b0525df.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a01b-d117-7042-ace4-296651124ed9",
+    "agent_path": "/root/save_common_ground",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-29-32-01a0a01b-d117-7042-ace4-296651124ed9.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a01c-61bd-7a32-8ac4-9f93725690e1",
+    "agent_path": "/root/save_q3_ground",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-30-09-01a0a01c-61bd-7a32-8ac4-9f93725690e1.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09fe7-3a95-7ec2-af25-86f23d76634e",
+    "agent_path": "/root/q2_beam_patch",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-32-06-01a09fe7-3a95-7ec2-af25-86f23d76634e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0a01c-1534-7601-9beb-2b4926fa5896",
+    "agent_path": "/root/save_qc_ground",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T08-29-50-01a0a01c-1534-7601-9beb-2b4926fa5896.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09ff8-2cf3-7261-8af2-4d2aee5f0b67",
+    "agent_path": "/root/death_presentation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-50-36-01a09ff8-2cf3-7261-8af2-4d2aee5f0b67.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09ff1-e8ad-71c1-b6d3-f111a1a1aa30",
+    "agent_path": "/root/player_death_flow",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-43-46-01a09ff1-e8ad-71c1-b6d3-f111a1a1aa30.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09ff5-11c4-77c1-9764-f3cada9d4d8d",
+    "agent_path": "/root/rocket_audio",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-47-13-01a09ff5-11c4-77c1-9764-f3cada9d4d8d.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09d44-8ed6-7740-b3ea-e4c65dab62c1",
+    "agent_path": "/root/gl_submission_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T19-15-11-01a09d44-8ed6-7740-b3ea-e4c65dab62c1.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09ff2-4451-7152-96a2-a3e358d789c5",
+    "agent_path": "/root/level_autosave",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-44-09-01a09ff2-4451-7152-96a2-a3e358d789c5.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09fee-e665-7a10-ac93-effc2169a57f",
+    "agent_path": "/root/llm_response",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-40-29-01a09fee-e665-7a10-ac93-effc2169a57f.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09fef-8603-7b83-992d-6ab2600e4126",
+    "agent_path": "/root/always_run",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-41-09-01a09fef-8603-7b83-992d-6ab2600e4126.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09fef-1bab-7f43-a0ea-057b78a5021d",
+    "agent_path": "/root/llm_goodvibes",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-40-42-01a09fef-1bab-7f43-a0ea-057b78a5021d.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09fd9-76f3-7b72-b5fb-de26c35327dd",
+    "agent_path": "/root/world_surface_order",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T07-17-04-01a09fd9-76f3-7b72-b5fb-de26c35327dd.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09f95-6967-7ff1-8951-02d10d1473a9",
+    "agent_path": "/root/shared_material_order",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T06-02-44-01a09f95-6967-7ff1-8951-02d10d1473a9.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09f9b-f1cb-7b10-a98c-3dfd94400ebe",
+    "agent_path": "/root/material_callers",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T06-09-52-01a09f9b-f1cb-7b10-a98c-3dfd94400ebe.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09ec4-aa04-7d11-996a-2bac8fa087ed",
+    "agent_path": "/root/draw_batch_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T02-14-43-01a09ec4-aa04-7d11-996a-2bac8fa087ed.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09f3c-e3dd-76f3-984d-7a21c36098b1",
+    "agent_path": "/root/q3_server_mod_path",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T04-26-02-01a09f3c-e3dd-76f3-984d-7a21c36098b1.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09f49-3e87-77f1-81bd-7bcf2058ddd2",
+    "agent_path": "/root/q3_guest_server_traps",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T04-39-32-01a09f49-3e87-77f1-81bd-7bcf2058ddd2.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09ea2-1c2f-7a53-8df3-970e807259ce",
+    "agent_path": "/root/model_prepare_cost",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T01-36-59-01a09ea2-1c2f-7a53-8df3-970e807259ce.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09f16-4701-7bd0-92ca-582764bd7772",
+    "agent_path": "/root/browser_request_state",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T03-43-52-01a09f16-4701-7bd0-92ca-582764bd7772.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09e45-d7ee-7ba1-9c79-5c6c648ad529",
+    "agent_path": "/root/audio_frame_budget",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T23-56-12-01a09e45-d7ee-7ba1-9c79-5c6c648ad529.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09f25-ebce-74f0-86b4-a1c66ff8effa",
+    "agent_path": "/root/browser_lifecycle_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T04-00-57-01a09f25-ebce-74f0-86b4-a1c66ff8effa.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09e3a-9306-71c0-9ff8-4f5868edb415",
+    "agent_path": "/root/brush_lightmap_cache",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T23-43-53-01a09e3a-9306-71c0-9ff8-4f5868edb415.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09e8d-acf1-7f51-9e7a-8187cffebecc",
+    "agent_path": "/root/audio_startup_queue",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T01-14-40-01a09e8d-acf1-7f51-9e7a-8187cffebecc.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09e4e-4d5e-7033-a36f-8b7dd3a223be",
+    "agent_path": "/root/ordered_mount_view",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T00-05-26-01a09e4e-4d5e-7033-a36f-8b7dd3a223be.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09e70-46c0-7d31-bb1b-9b14bfb5ab15",
+    "agent_path": "/root/q2_lightmap_pairing",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/14/rollout-2026-09-14T00-42-33-01a09e70-46c0-7d31-bb1b-9b14bfb5ab15.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09e42-8110-7823-9ae7-6f41270b59a3",
+    "agent_path": "/root/loading_responsiveness",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T23-52-33-01a09e42-8110-7823-9ae7-6f41270b59a3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09d39-5d89-7a10-815f-1a433ba0cdb8",
+    "agent_path": "/root/classic_lighting",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T19-02-57-01a09d39-5d89-7a10-815f-1a433ba0cdb8.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09d49-d44e-72f3-8931-7c61c974915b",
+    "agent_path": "/root/shadow_preparation_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T19-20-56-01a09d49-d44e-72f3-8931-7c61c974915b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09e2e-b5ea-7312-b79e-65324d880e26",
+    "agent_path": "/root/shadow_bounds",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T23-30-56-01a09e2e-b5ea-7312-b79e-65324d880e26.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09d2f-2524-7413-86d0-e95fea1335d3",
+    "agent_path": "/root/menu_audio_review",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T18-51-47-01a09d2f-2524-7413-86d0-e95fea1335d3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09d26-ef4f-79b1-b1e8-e7daebcf802e",
+    "agent_path": "/root/menu_audio",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T18-42-49-01a09d26-ef4f-79b1-b1e8-e7daebcf802e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c0b-7782-7622-9a64-acdd6589eee2",
+    "agent_path": "/root/accepted_executable",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T13-33-12-01a09c0b-7782-7622-9a64-acdd6589eee2.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a095d8-9520-78f1-9d79-61b60fac9753",
+    "agent_path": "/root/q1_monster_roster",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T08-39-54-01a095d8-9520-78f1-9d79-61b60fac9753.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09bac-ae24-7903-bcb9-d898cc48803f",
+    "agent_path": "/root/localization_reload",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T11-49-40-01a09bac-ae24-7903-bcb9-d898cc48803f.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09c11-c3b0-7d23-be21-6e535fb9b151",
+    "agent_path": "/root/accepted_frame_profile",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T13-40-05-01a09c11-c3b0-7d23-be21-6e535fb9b151.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09b82-f289-7043-ad2a-2fd087b1a40c",
+    "agent_path": "/root/sarge_pose",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T11-04-05-01a09b82-f289-7043-ad2a-2fd087b1a40c.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c29-6755-70b1-8241-c14d5d065e0d",
+    "agent_path": "/root/shared_model_preparation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-05-54-01a09c29-6755-70b1-8241-c14d5d065e0d.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09cb2-6d8a-7240-af5c-be1384dda05e",
+    "agent_path": "/root/command_registration",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T16-35-34-01a09cb2-6d8a-7240-af5c-be1384dda05e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09b84-2bc3-7362-8e41-1935eb791bde",
+    "agent_path": "/root/quakec_mod_binding",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T11-05-25-01a09b84-2bc3-7362-8e41-1935eb791bde.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0989a-9285-7bc1-a641-3669866d3ad2",
+    "agent_path": "/root/shared_game_prompts",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T21-31-02-01a0989a-9285-7bc1-a641-3669866d3ad2.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c62-7106-73f0-bfc4-d7c49677f668",
+    "agent_path": "/root/native_crt_scan",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T15-08-12-01a09c62-7106-73f0-bfc4-d7c49677f668.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09caa-3606-7853-9651-e7626476fe40",
+    "agent_path": "/root/status_refresh",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T16-26-35-01a09caa-3606-7853-9651-e7626476fe40.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09c51-d007-7570-ab69-703a9f9ee605",
+    "agent_path": "/root/llm_settings_ui",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-50-02-01a09c51-d007-7570-ab69-703a9f9ee605.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c51-6b48-7ea1-b49b-d39a8213ec84",
+    "agent_path": "/root/llm_credentials",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-49-36-01a09c51-6b48-7ea1-b49b-d39a8213ec84.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c47-49ae-70f0-8f85-1d88c9a7f914",
+    "agent_path": "/root/llm_auth_reference",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-38-32-01a09c47-49ae-70f0-8f85-1d88c9a7f914.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09c91-0704-7470-8d30-9c91bca21065",
+    "agent_path": "/root/startup_game_timing",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T15-59-05-01a09c91-0704-7470-8d30-9c91bca21065.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c2a-e08c-7f91-8258-794dc9c2af58",
+    "agent_path": "/root/console_completion",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-07-30-01a09c2a-e08c-7f91-8258-794dc9c2af58.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09c38-dd8c-7572-baad-110430ff7b54",
+    "agent_path": "/root/shared_mouse_console",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-22-47-01a09c38-dd8c-7572-baad-110430ff7b54.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c6a-3526-7572-8f50-1493c0f6f1c4",
+    "agent_path": "/root/llm_console_execution",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T15-16-41-01a09c6a-3526-7572-8f50-1493c0f6f1c4.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09b78-c421-7ff1-893b-1260eea07731",
+    "agent_path": "/root/campaign_start_metadata",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T10-52-58-01a09b78-c421-7ff1-893b-1260eea07731.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09bac-dddc-7431-be07-7c32e08b1d5f",
+    "agent_path": "/root/progression_commands",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T11-49-52-01a09bac-dddc-7431-be07-7c32e08b1d5f.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09b78-3917-7d22-962a-e380b2a42ebe",
+    "agent_path": "/root/q2_remote_profiles",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T10-52-22-01a09b78-3917-7d22-962a-e380b2a42ebe.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c41-09a5-7e30-a498-501af03455e2",
+    "agent_path": "/root/mouse_axis_controls",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-31-43-01a09c41-09a5-7e30-a498-501af03455e2.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09c38-933c-74c3-bb2b-643681ef2491",
+    "agent_path": "/root/q2_console_catalogue",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-22-28-01a09c38-933c-74c3-bb2b-643681ef2491.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c12-00b7-76a0-9b65-ae6c74eb0300",
+    "agent_path": "/root/shared_fov_controls",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T13-40-20-01a09c12-00b7-76a0-9b65-ae6c74eb0300.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c2b-2737-7882-976a-83cc9ca6d278",
+    "agent_path": "/root/console_discovery",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T14-07-48-01a09c2b-2737-7882-976a-83cc9ca6d278.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09b78-9dcc-7522-ac59-d62bbc2239fd",
+    "agent_path": "/root/bot_moving_geometry",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T10-52-48-01a09b78-9dcc-7522-ac59-d62bbc2239fd.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c16-e909-7243-8976-35ac96a2f522",
+    "agent_path": "/root/static_lightmap_work",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T13-45-42-01a09c16-e909-7243-8976-35ac96a2f522.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c16-aace-7290-aed5-66b5017e42c2",
+    "agent_path": "/root/model_lighting_work",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T13-45-26-01a09c16-aace-7290-aed5-66b5017e42c2.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09879-0096-7873-b298-5fb9c53ae764",
+    "agent_path": "/root/source_signatures_q2",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T20-54-21-01a09879-0096-7873-b298-5fb9c53ae764.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09b78-6cea-7743-9a8a-53031a59a300",
+    "agent_path": "/root/audio_mixer_union",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T10-52-35-01a09b78-6cea-7743-9a8a-53031a59a300.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09c02-8f3d-73e2-b7da-0c0213543370",
+    "agent_path": "/root/fixbot_goal",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T13-23-28-01a09c02-8f3d-73e2-b7da-0c0213543370.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09b65-285d-7391-812a-4541f790a39e",
+    "agent_path": "/root/shared_flares",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T10-31-33-01a09b65-285d-7391-812a-4541f790a39e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09b4f-e58b-7dc2-b515-5849624dd6da",
+    "agent_path": "/root/q1_corpse_policy",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T10-08-19-01a09b4f-e58b-7dc2-b515-5849624dd6da.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09879-549f-7350-849a-fa784f95f9e3",
+    "agent_path": "/root/source_signatures_q3",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T20-54-43-01a09879-549f-7350-849a-fa784f95f9e3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0994c-4422-7f61-b124-33fdc8d50f06",
+    "agent_path": "/root/qw_application_join",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/13/rollout-2026-09-13T00-45-07-01a0994c-4422-7f61-b124-33fdc8d50f06.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09878-a742-7b60-a832-b069b46e3917",
+    "agent_path": "/root/source_signatures_q1",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T20-53-59-01a09878-a742-7b60-a832-b069b46e3917.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a098aa-0799-7023-a42d-672a711eca31",
+    "agent_path": "/root/shared_world_text",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T21-47-55-01a098aa-0799-7023-a42d-672a711eca31.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09889-50cb-7760-bad3-7f55e47129bc",
+    "agent_path": "/root/shared_http_ranges",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T21-12-11-01a09889-50cb-7760-bad3-7f55e47129bc.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0988d-8423-7052-b8a9-67e1d2d0699f",
+    "agent_path": "/root/shared_animated_images",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T21-16-46-01a0988d-8423-7052-b8a9-67e1d2d0699f.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a097e1-c62c-7412-b924-23498283d442",
+    "agent_path": "/root/fix_gl_menu_text",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T18-09-11-01a097e1-c62c-7412-b924-23498283d442.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a095d8-d6af-7302-8961-a333249995fe",
+    "agent_path": "/root/q2_monster_roster",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T08-40-11-01a095d8-d6af-7302-8961-a333249995fe.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091f9-3edf-7470-b233-4e03222e2b33",
+    "agent_path": "/root/q1_primary_handoff",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T14-37-06-01a091f9-3edf-7470-b233-4e03222e2b33.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0911c-8f01-7293-9dcf-ca18888c6663",
+    "agent_path": "/root/integrate_q1_network",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-36-03-01a0911c-8f01-7293-9dcf-ca18888c6663.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09173-29e9-7992-906a-934d6a61ee8c",
+    "agent_path": "/root/fix_audio_foundations",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-10-38-01a09173-29e9-7992-906a-934d6a61ee8c.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a091bd-a899-75e3-b91e-6ee0fedf56dd",
+    "agent_path": "/root/grapple_shared_equipment",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-32-00-01a091bd-a899-75e3-b91e-6ee0fedf56dd.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a095d9-2067-7360-bf37-91815f8b1930",
+    "agent_path": "/root/monster_cadence",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T08-40-29-01a095d9-2067-7360-bf37-91815f8b1930.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a095e7-85fa-7051-84bd-da101a30ea51",
+    "agent_path": "/root/selected_monster_projectile_save",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T08-56-13-01a095e7-85fa-7051-84bd-da101a30ea51.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a097e1-3e1f-7103-bbe7-8b7c6327cc6b",
+    "agent_path": "/root/opacity_scoped_design",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T18-08-36-01a097e1-3e1f-7103-bbe7-8b7c6327cc6b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a097e1-769d-7c53-b4b8-e9f81291a755",
+    "agent_path": "/root/opacity_targets_design",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/12/rollout-2026-09-12T18-08-50-01a097e1-769d-7c53-b4b8-e9f81291a755.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a08f2d-c109-7930-85dd-5aad91ef82be",
+    "agent_path": "/root/w54_q2_network",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-35-35-01a08f2d-c109-7930-85dd-5aad91ef82be.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a090eb-667d-79b3-98d8-685980e9631d",
+    "agent_path": "/root/recover_q2_mode_composition",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-42-21-01a090eb-667d-79b3-98d8-685980e9631d.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090e6-c289-76e2-aa21-5853abbeeade",
+    "agent_path": "/root/recover_shared_mode_damage",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-37-17-01a090e6-c289-76e2-aa21-5853abbeeade.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a091b5-2439-7732-9403-780ca848475d",
+    "agent_path": "/root/monster_design_components",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-22-42-01a091b5-2439-7732-9403-780ca848475d.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0917d-df6d-7b81-9248-a489e07e3791",
+    "agent_path": "/root/unify_weapon_authority",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-22-20-01a0917d-df6d-7b81-9248-a489e07e3791.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090e2-656a-7b93-ab5a-7653eda82932",
+    "agent_path": "/root/recover_bot_navigation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-32-31-01a090e2-656a-7b93-ab5a-7653eda82932.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0912e-6a07-7a13-8fec-c87140ded3a7",
+    "agent_path": "/root/fix_q1_key_models",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-55-33-01a0912e-6a07-7a13-8fec-c87140ded3a7.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09308-4570-74c2-8e1c-f5be4c03fc85",
+    "agent_path": "/root/q1_supply_profiles",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T19-33-07-01a09308-4570-74c2-8e1c-f5be4c03fc85.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0937c-1e79-7723-8b09-474bfbfe13a4",
+    "agent_path": "/root/locate_rr_grenade_asset",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T21-39-40-01a0937c-1e79-7723-8b09-474bfbfe13a4.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09304-7132-7503-9afd-8ec356707a4f",
+    "agent_path": "/root/inspect_berserk_material",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T19-28-57-01a09304-7132-7503-9afd-8ec356707a4f.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091b5-7869-7f30-a86f-d6b7809913e1",
+    "agent_path": "/root/monster_design_services",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-23-04-01a091b5-7869-7f30-a86f-d6b7809913e1.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a091e6-e39f-78b0-bda0-a04ab8cd914e",
+    "agent_path": "/root/q3_foreign_actor_boundary",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T14-17-03-01a091e6-e39f-78b0-bda0-a04ab8cd914e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09108-7360-7a92-90a9-377dad8d91a5",
+    "agent_path": "/root/plan_progress_status",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-14-05-01a09108-7360-7a92-90a9-377dad8d91a5.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e2-d249-7f43-8d80-7bd135e5cd3e",
+    "agent_path": "/root/recover_application_commit",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-32-59-01a090e2-d249-7f43-8d80-7bd135e5cd3e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a091e6-a032-7a12-bf67-59e49fa15779",
+    "agent_path": "/root/q2_noise_actor_save",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T14-16-45-01a091e6-a032-7a12-bf67-59e49fa15779.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091dd-9350-7ac0-91d8-a4512e86fdcb",
+    "agent_path": "/root/equipment_surface_bridge",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T14-06-52-01a091dd-9350-7ac0-91d8-a4512e86fdcb.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091df-9d14-70a1-ae15-074f15997918",
+    "agent_path": "/root/handgrenade_runtime_codec",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T14-09-06-01a091df-9d14-70a1-ae15-074f15997918.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091bd-44cd-7372-88bb-ecdfd224d210",
+    "agent_path": "/root/handgrenade_shared_action",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-31-35-01a091bd-44cd-7372-88bb-ecdfd224d210.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a091d6-3de5-72e3-afc0-33f0ad80feed",
+    "agent_path": "/root/equipment_source_timing",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-58-52-01a091d6-3de5-72e3-afc0-33f0ad80feed.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a091be-fbac-7b43-a48a-5af5e845208e",
+    "agent_path": "/root/handgrenade_actor_launch",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-33-27-01a091be-fbac-7b43-a48a-5af5e845208e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091ba-c285-7141-af5f-94cf6a322467",
+    "agent_path": "/root/handgrenade_equipment_ground",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-28-50-01a091ba-c285-7141-af5f-94cf6a322467.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091bb-1c1b-7082-817d-e84a80808f1d",
+    "agent_path": "/root/monster_design_judge",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-29-13-01a091bb-1c1b-7082-817d-e84a80808f1d.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091b7-6992-7cd1-b002-0292b24f416b",
+    "agent_path": "/root/grapple_equipment_ground",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-25-11-01a091b7-6992-7cd1-b002-0292b24f416b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091ae-ef8d-75a1-932c-1b3668bbb791",
+    "agent_path": "/root/monster_q1_ground",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-15-56-01a091ae-ef8d-75a1-932c-1b3668bbb791.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a091af-2f6a-76c3-86ce-085f30cd7c7a",
+    "agent_path": "/root/monster_q2_ground",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T13-16-12-01a091af-2f6a-76c3-86ce-085f30cd7c7a.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a0917e-2650-72a3-9ff8-074d110a00de",
+    "agent_path": "/root/integrate_weapon_authority",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-22-38-01a0917e-2650-72a3-9ff8-074d110a00de.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0919c-bdd1-78a1-8439-bddf621c11aa",
+    "agent_path": "/root/q2_selected_supply",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-56-03-01a0919c-bdd1-78a1-8439-bddf621c11aa.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09195-1e6e-7340-9beb-a82a668cd836",
+    "agent_path": "/root/shared_pickup_design",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-47-44-01a09195-1e6e-7340-9beb-a82a668cd836.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09172-ffa7-75f3-9c3c-e29eeff6fe76",
+    "agent_path": "/root/fix_render_foundations",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-10-28-01a09172-ffa7-75f3-9c3c-e29eeff6fe76.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09180-3dbf-7820-838e-6e03032c2cf0",
+    "agent_path": "/root/q3_shared_ballistics",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-24-55-01a09180-3dbf-7820-838e-6e03032c2cf0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09195-436d-7052-8a79-8c5040e65e98",
+    "agent_path": "/root/monster_selection_seams",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-47-53-01a09195-436d-7052-8a79-8c5040e65e98.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09173-549b-7021-b1a8-a555ef42af55",
+    "agent_path": "/root/fix_character_foundations",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-10-49-01a09173-549b-7021-b1a8-a555ef42af55.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a09175-e83e-78d0-a41c-f7575913122b",
+    "agent_path": "/root/profile_engine_frames",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T12-13-38-01a09175-e83e-78d0-a41c-f7575913122b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e4-67ea-7693-a893-b06c8ea078e3",
+    "agent_path": "/root/recover_bot_application",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-34-43-01a090e4-67ea-7693-a893-b06c8ea078e3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090fe-b023-7523-81a4-8ae22d4ba2b3",
+    "agent_path": "/root/recover_lmctf_weapons",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-03-25-01a090fe-b023-7523-81a4-8ae22d4ba2b3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e4-9ecc-7500-86e3-cbca444b3e65",
+    "agent_path": "/root/recover_mg3_registration",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-34-57-01a090e4-9ecc-7500-86e3-cbca444b3e65.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09110-2dbb-7c20-aaf7-0fe82f13ed59",
+    "agent_path": "/root/recover_mg3_rocket_ogre",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-22-31-01a09110-2dbb-7c20-aaf7-0fe82f13ed59.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e5-2c39-7600-842c-b60e49991bc4",
+    "agent_path": "/root/recover_guest_formatter",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-35-33-01a090e5-2c39-7600-842c-b60e49991bc4.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0911c-d26f-7071-98fb-5807abd1d078",
+    "agent_path": "/root/integrate_q3_network",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-36-20-01a0911c-d26f-7071-98fb-5807abd1d078.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09132-357f-7f01-8c49-6d29e4607f12",
+    "agent_path": "/root/explain_bot_integration",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-59-41-01a09132-357f-7f01-8c49-6d29e4607f12.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090fe-76a5-7532-a0b3-a839c83cc001",
+    "agent_path": "/root/recover_lmctf_match",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-03-10-01a090fe-76a5-7532-a0b3-a839c83cc001.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090f1-1811-7023-84e5-4200e9c4bec2",
+    "agent_path": "/root/recover_q2_mode_presentation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-48-34-01a090f1-1811-7023-84e5-4200e9c4bec2.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a0911f-d778-7981-8411-e4d2940c1db9",
+    "agent_path": "/root/integrate_lmctf_pause",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-39-38-01a0911f-d778-7981-8411-e4d2940c1db9.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09121-6d86-73d1-83ad-4062bd18ccd6",
+    "agent_path": "/root/integrate_lmctf_music",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-41-22-01a09121-6d86-73d1-83ad-4062bd18ccd6.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090eb-a48c-7112-affe-17c915bd4392",
+    "agent_path": "/root/recover_rr_contact_trace",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-42-37-01a090eb-a48c-7112-affe-17c915bd4392.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09105-849b-79c3-8d3f-4aa244c79137",
+    "agent_path": "/root/recover_mg3_navigation_host",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-10-53-01a09105-849b-79c3-8d3f-4aa244c79137.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a09105-4978-7351-bf6e-e34eca1f4b3a",
+    "agent_path": "/root/recover_mg3_path_entities",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T10-10-37-01a09105-4978-7351-bf6e-e34eca1f4b3a.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090ed-54ef-7190-a350-4835a9187c99",
+    "agent_path": "/root/recover_rr_medic",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-44-28-01a090ed-54ef-7190-a350-4835a9187c99.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090e4-c747-7231-ac6c-af95cadf5433",
+    "agent_path": "/root/recover_rr_save_fields",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-35-07-01a090e4-c747-7231-ac6c-af95cadf5433.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090f8-c127-7c81-b382-7b035e691547",
+    "agent_path": "/root/recover_rr_entity_presentation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-56-56-01a090f8-c127-7c81-b382-7b035e691547.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090e2-2ef7-77d0-858a-901a69bc7ae0",
+    "agent_path": "/root/recover_rogue_infantry",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-32-17-01a090e2-2ef7-77d0-858a-901a69bc7ae0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090f6-d261-7cf1-a114-37bb37b961c2",
+    "agent_path": "/root/recover_rr_spawn_placement",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-54-49-01a090f6-d261-7cf1-a114-37bb37b961c2.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090f1-50d8-76e2-a230-84cb24fdd8f0",
+    "agent_path": "/root/recover_mg3_ai_bindings",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-48-49-01a090f1-50d8-76e2-a230-84cb24fdd8f0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090ed-9d5e-76c0-8360-3026b48b51c1",
+    "agent_path": "/root/recover_mg3_ai",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-44-46-01a090ed-9d5e-76c0-8360-3026b48b51c1.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090eb-d136-7e91-a578-d53a2fed8870",
+    "agent_path": "/root/recover_native_sound",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-42-48-01a090eb-d136-7e91-a578-d53a2fed8870.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e2-8f19-7412-a8d5-796c14fcdab8",
+    "agent_path": "/root/recover_mg3_final",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-32-42-01a090e2-8f19-7412-a8d5-796c14fcdab8.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a090ed-22e5-7a93-b72b-26be4bad0493",
+    "agent_path": "/root/recover_rr_brain_parasite",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-44-15-01a090ed-22e5-7a93-b72b-26be4bad0493.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e4-fc16-73a2-8225-10b14b757d9e",
+    "agent_path": "/root/recover_rr_messages",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-35-20-01a090e4-fc16-73a2-8225-10b14b757d9e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e6-fa83-72e1-9764-8c6deb1f893b",
+    "agent_path": "/root/recover_rr_infrared",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-37-31-01a090e6-fa83-72e1-9764-8c6deb1f893b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e1-2a84-7052-b273-a3a9aa5ea879",
+    "agent_path": "/root/recover_host_clock",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-31-10-01a090e1-2a84-7052-b273-a3a9aa5ea879.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "low"
+  },
+  {
+    "id": "01a090e1-5d5c-7401-8358-cc074bf37c83",
+    "agent_path": "/root/recover_q2_items",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T09-31-23-01a090e1-5d5c-7401-8358-cc074bf37c83.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium"
+  },
+  {
+    "id": "01a08f09-c38d-7231-a0bf-2dc3ece6ba59",
+    "agent_path": "/root/w08_commands",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-56-16-01a08f09-c38d-7231-a0bf-2dc3ece6ba59.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f19-68d3-7a20-bff6-089fdf581d53",
+    "agent_path": "/root/w41_actors",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-13-22-01a08f19-68d3-7a20-bff6-089fdf581d53.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f37-93de-7013-8f71-05fceff45166",
+    "agent_path": "/root/w42_q1_base",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-46-19-01a08f37-93de-7013-8f71-05fceff45166.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eee-52c5-7a41-b422-d0a4eedd9b8c",
+    "agent_path": "/root/w06_platform",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-26-18-01a08eee-52c5-7a41-b422-d0a4eedd9b8c.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f3b-5f31-74f1-b386-2e7578af45f9",
+    "agent_path": "/root/w49_q3_modes",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-50-28-01a08f3b-5f31-74f1-b386-2e7578af45f9.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f09-f217-7cb0-88e8-9baca69b799a",
+    "agent_path": "/root/w08_sessions",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-56-28-01a08f09-f217-7cb0-88e8-9baca69b799a.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ef0-c2c5-7251-8660-c3d9c8a3981b",
+    "agent_path": "/root/w02_q2_reference",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-28-58-01a08ef0-c2c5-7251-8660-c3d9c8a3981b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f1e-3418-7010-8344-d10420223a0c",
+    "agent_path": "/root/w74_q1_foundation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-18-36-01a08f1e-3418-7010-8344-d10420223a0c.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f3b-96b7-7490-8de4-bcbe7b6686a5",
+    "agent_path": "/root/w59_native_ui",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-50-42-01a08f3b-96b7-7490-8de4-bcbe7b6686a5.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f3a-f08c-7d53-8582-4ffb6e4be470",
+    "agent_path": "/root/w45_q2_player",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-49-59-01a08f3a-f08c-7d53-8582-4ffb6e4be470.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f37-c992-7e63-b536-0a16fafbfe37",
+    "agent_path": "/root/w45_q2_base",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-46-33-01a08f37-c992-7e63-b536-0a16fafbfe37.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0b-4dd2-73d3-bd2b-e78a2320ecb3",
+    "agent_path": "/root/w14_q3_models",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-57-57-01a08f0b-4dd2-73d3-bd2b-e78a2320ecb3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f3b-286b-7712-8e75-8d3d1a6548d9",
+    "agent_path": "/root/w49_q3_presentation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-50-14-01a08f3b-286b-7712-8e75-8d3d1a6548d9.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08efc-2b98-76b1-a0e2-c8457412ccf6",
+    "agent_path": "/root/review_w06_platform",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-41-26-01a08efc-2b98-76b1-a0e2-c8457412ccf6.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f38-0267-7450-b063-25c3a80384f4",
+    "agent_path": "/root/w49_q3_gameplay",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-46-47-01a08f38-0267-7450-b063-25c3a80384f4.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ee0-1340-7561-b534-a24ee4109638",
+    "agent_path": "/root/plan_validator",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-10-44-01a08ee0-1340-7561-b534-a24ee4109638.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08f3a-ba80-76c1-8e70-bad41c2572b7",
+    "agent_path": "/root/w45_q2_entities",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-49-45-01a08f3a-ba80-76c1-8e70-bad41c2572b7.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f26-d503-7153-8620-2133ac4442c8",
+    "agent_path": "/root/w73_bootstrap",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-28-01-01a08f26-d503-7153-8620-2133ac4442c8.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eef-03b8-7523-8f2c-404b991cb614",
+    "agent_path": "/root/w01_q1_features",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-27-03-01a08eef-03b8-7523-8f2c-404b991cb614.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f17-c539-7cf3-aff0-56272948eb71",
+    "agent_path": "/root/w17_scene_world",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-11-34-01a08f17-c539-7cf3-aff0-56272948eb71.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0a-b212-7762-b800-80482f868c17",
+    "agent_path": "/root/w11_q2_maps",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-57-17-01a08f0a-b212-7762-b800-80482f868c17.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eef-2dc9-7f51-ab3d-df40082b2104",
+    "agent_path": "/root/w01_q2_features",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-27-14-01a08eef-2dc9-7f51-ab3d-df40082b2104.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f03-5ebe-7092-a54a-21a7943bfdab",
+    "agent_path": "/root/w05_execution_contracts",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-49-17-01a08f03-5ebe-7092-a54a-21a7943bfdab.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0b-d599-7522-bb02-04df55214266",
+    "agent_path": "/root/w18_cpu",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-58-32-01a08f0b-d599-7522-bb02-04df55214266.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f17-6e7a-7040-a861-3b741d7a18db",
+    "agent_path": "/root/w16_q1_collision",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-11-12-01a08f17-6e7a-7040-a861-3b741d7a18db.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ef0-9d30-70a3-9d49-b935bffc1ff5",
+    "agent_path": "/root/w02_q1_reference",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-28-48-01a08ef0-9d30-70a3-9d49-b935bffc1ff5.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eef-7a22-7b30-8721-5ccbf7357644",
+    "agent_path": "/root/w01_products",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-27-34-01a08eef-7a22-7b30-8721-5ccbf7357644.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ef0-ea74-7180-9163-58ff21290bab",
+    "agent_path": "/root/w02_q3_reference",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-29-08-01a08ef0-ea74-7180-9163-58ff21290bab.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f1e-6058-7ff3-8501-8f3302453740",
+    "agent_path": "/root/w74_q2_foundation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-18-47-01a08f1e-6058-7ff3-8501-8f3302453740.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f23-6cbb-7d21-b511-1bccdeb9c63f",
+    "agent_path": "/root/w74_q2_weapons",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-24-18-01a08f23-6cbb-7d21-b511-1bccdeb9c63f.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f2f-9d27-7aa1-b23c-f01eb383f553",
+    "agent_path": "/root/w55_q3_network",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-37-37-01a08f2f-9d27-7aa1-b23c-f01eb383f553.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f2d-8b14-7e12-9c38-fcf029f3f5cf",
+    "agent_path": "/root/w53_q1_network",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-35-21-01a08f2d-8b14-7e12-9c38-fcf029f3f5cf.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f17-9ab7-7ba2-9c1e-018a586b2250",
+    "agent_path": "/root/w16_collision",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-11-23-01a08f17-9ab7-7ba2-9c1e-018a586b2250.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f17-fe21-7443-ad68-630b143e8d5f",
+    "agent_path": "/root/w17_scene_models",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-11-49-01a08f17-fe21-7443-ad68-630b143e8d5f.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f1c-4df6-7633-9909-d34a120ad5ac",
+    "agent_path": "/root/w24_q1_movement",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-16-31-01a08f1c-4df6-7633-9909-d34a120ad5ac.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f19-3a4d-7803-adf2-13b927dd1641",
+    "agent_path": "/root/w22_input",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-13-10-01a08f19-3a4d-7803-adf2-13b927dd1641.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f1e-9064-7500-b621-0131057bfac4",
+    "agent_path": "/root/w74_q3_foundation",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-19-00-01a08f1e-9064-7500-b621-0131057bfac4.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0a-1cd1-7233-b6f5-652c8b64d908",
+    "agent_path": "/root/w09_archives",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-56-39-01a08f0a-1cd1-7233-b6f5-652c8b64d908.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0b-9ff1-7543-9892-8e340c8f1e04",
+    "agent_path": "/root/w15_materials",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-58-18-01a08f0b-9ff1-7543-9892-8e340c8f1e04.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f1c-cabb-7731-9398-090123bf19f4",
+    "agent_path": "/root/w52_network",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-17-03-01a08f1c-cabb-7731-9398-090123bf19f4.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f1c-7870-7b90-bcd8-798669b11143",
+    "agent_path": "/root/w25_q2_movement",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-16-42-01a08f1c-7870-7b90-bcd8-798669b11143.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0b-ffc2-7e33-a83b-8189a45fefe1",
+    "agent_path": "/root/w19_gl",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-58-43-01a08f0b-ffc2-7e33-a83b-8189a45fefe1.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f1c-a33c-7221-8592-08d7491a0e41",
+    "agent_path": "/root/w26_q3_movement",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-16-53-01a08f1c-a33c-7221-8592-08d7491a0e41.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f18-b30f-75f2-838c-a96c0e0a3b03",
+    "agent_path": "/root/w20_audio",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-12-35-01a08f18-b30f-75f2-838c-a96c0e0a3b03.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f18-309d-7c50-a417-bd831677a57b",
+    "agent_path": "/root/w27_qc",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-12-02-01a08f18-309d-7c50-a417-bd831677a57b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f18-5b64-7560-97a2-24d2bdc30c98",
+    "agent_path": "/root/w29_qvm",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-12-13-01a08f18-5b64-7560-97a2-24d2bdc30c98.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f19-0f37-7b22-9fb8-576928a3a1ee",
+    "agent_path": "/root/w21_text",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-12-59-01a08f19-0f37-7b22-9fb8-576928a3a1ee.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f18-e688-7d40-abd3-0fd8c8dd8e81",
+    "agent_path": "/root/w21_media",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-12-48-01a08f18-e688-7d40-abd3-0fd8c8dd8e81.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eee-8469-7b90-80b7-8c1ce01409ff",
+    "agent_path": "/root/execution_state",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-26-31-01a08eee-8469-7b90-80b7-8c1ce01409ff.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08eed-eeb4-7470-acdc-e2bfe439bd1e",
+    "agent_path": "/root/w03_policy",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-25-52-01a08eed-eeb4-7470-acdc-e2bfe439bd1e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ec7-7570-75f2-8aec-8ae9efe85dd2",
+    "agent_path": "/root/workspace_platform_audit",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-43-51-01a08ec7-7570-75f2-8aec-8ae9efe85dd2.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08f18-839a-7f61-9d4c-6980af3a1289",
+    "agent_path": "/root/w30_guest",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T01-12-23-01a08f18-839a-7f61-9d4c-6980af3a1289.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0b-1d85-7b42-8c44-62cc4d9cfc14",
+    "agent_path": "/root/w13_q12_models",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-57-45-01a08f0b-1d85-7b42-8c44-62cc4d9cfc14.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f03-335f-7982-8242-97f5e0710e19",
+    "agent_path": "/root/w05_scene_contracts",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-49-06-01a08f03-335f-7982-8242-97f5e0710e19.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f09-9513-7921-8fa9-04b9ad01f906",
+    "agent_path": "/root/w08_math",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-56-05-01a08f09-9513-7921-8fa9-04b9ad01f906.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0b-75df-7321-87eb-2e2051be9123",
+    "agent_path": "/root/w15_images",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-58-08-01a08f0b-75df-7321-87eb-2e2051be9123.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0a-4944-7b01-8a66-5b6f22d5cbd0",
+    "agent_path": "/root/w09_catalog",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-56-51-01a08f0a-4944-7b01-8a66-5b6f22d5cbd0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0a-775d-7e81-9fa5-ba339f5824c3",
+    "agent_path": "/root/w10_q1_maps",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-57-02-01a08f0a-775d-7e81-9fa5-ba339f5824c3.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f00-f536-7c20-a8ee-2ab058db2e5a",
+    "agent_path": "/root/w05_contracts",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-46-39-01a08f00-f536-7c20-a8ee-2ab058db2e5a.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f0a-f3bc-78c3-a987-7afa68c8b9c8",
+    "agent_path": "/root/w12_q3_maps",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-57-34-01a08f0a-f3bc-78c3-a987-7afa68c8b9c8.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08f03-041e-7480-ba63-8bdac5c3bd6e",
+    "agent_path": "/root/w05_content_contracts",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-48-54-01a08f03-041e-7480-ba63-8bdac5c3bd6e.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eed-c1d9-7c62-ab2a-599074127664",
+    "agent_path": "/root/w02_references",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-25-41-01a08eed-c1d9-7c62-ab2a-599074127664.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eef-54a8-7d41-b1b9-871db5e224f0",
+    "agent_path": "/root/w01_q3_features",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-27-24-01a08eef-54a8-7d41-b1b9-871db5e224f0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eed-930d-7c93-8eda-072b756c3fed",
+    "agent_path": "/root/w01_census",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-25-29-01a08eed-930d-7c93-8eda-072b756c3fed.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08efb-fc9b-79c0-8be9-a86c0ef7b68b",
+    "agent_path": "/root/w02_retail_q3",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-41-14-01a08efb-fc9b-79c0-8be9-a86c0ef7b68b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eee-1b2a-75b0-811e-4e1f12c5fc02",
+    "agent_path": "/root/w04_verification",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-26-04-01a08eee-1b2a-75b0-811e-4e1f12c5fc02.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ef7-5073-72c3-a9da-2007c54eb687",
+    "agent_path": "/root/w04_manifest_tests",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-36-07-01a08ef7-5073-72c3-a9da-2007c54eb687.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08efb-c7f4-78e0-9efa-db355cb8b28b",
+    "agent_path": "/root/w02_retail_q1",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-41-00-01a08efb-c7f4-78e0-9efa-db355cb8b28b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ef1-6339-7f20-b348-dfd694f0bd14",
+    "agent_path": "/root/w06_controllers",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-29-39-01a08ef1-6339-7f20-b348-dfd694f0bd14.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ef9-480e-7dd0-9940-61903315d236",
+    "agent_path": "/root/additional_fixtures",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-38-16-01a08ef9-480e-7dd0-9940-61903315d236.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ef3-4aea-7c82-aaf3-dbab4f94332a",
+    "agent_path": "/root/w02_native_q2",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-31-44-01a08ef3-4aea-7c82-aaf3-dbab4f94332a.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ef2-92e4-74e2-9b93-ebfc66be89b1",
+    "agent_path": "/root/review_w03_policy",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-30-57-01a08ef2-92e4-74e2-9b93-ebfc66be89b1.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08eef-a6c1-78a3-8b3d-309bf50b724d",
+    "agent_path": "/root/w01_lineage",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-27-45-01a08eef-a6c1-78a3-8b3d-309bf50b724d.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "xhigh"
+  },
+  {
+    "id": "01a08ef1-356a-74d2-95c5-4e283821fad5",
+    "agent_path": "/root/w06_fonts",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-29-27-01a08ef1-356a-74d2-95c5-4e283821fad5.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ef1-10a7-7041-b63a-97b785e7fbac",
+    "agent_path": "/root/w06_audio",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-29-18-01a08ef1-10a7-7041-b63a-97b785e7fbac.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ede-18fb-77f2-8c95-ada98f446172",
+    "agent_path": "/root/review_dependency_graph",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-08-35-01a08ede-18fb-77f2-8c95-ada98f446172.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ecc-f578-75a3-bba1-23b41c524a1a",
+    "agent_path": "/root/design_shared_world",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-49-51-01a08ecc-f578-75a3-bba1-23b41c524a1a.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max"
+  },
+  {
+    "id": "01a08ed0-8fa0-7432-a04b-6bf079aa9e78",
+    "agent_path": "/root/dependency_plan",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-53-48-01a08ed0-8fa0-7432-a04b-6bf079aa9e78.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max"
+  },
+  {
+    "id": "01a08edd-ab55-7271-a4ba-ce8691d0303b",
+    "agent_path": "/root/review_simulation_contracts",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-08-07-01a08edd-ab55-7271-a4ba-ce8691d0303b.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08edd-706b-7480-9bbe-63b530429694",
+    "agent_path": "/root/review_feature_union",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-07-52-01a08edd-706b-7480-9bbe-63b530429694.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08edd-e26b-78b3-a4ce-7ee8863a13a0",
+    "agent_path": "/root/review_presentation_seats",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-08-21-01a08edd-e26b-78b3-a4ce-7ee8863a13a0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ec9-90bb-7c73-b35f-b912e4df1fa0",
+    "agent_path": "/root/verification_plan",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-46-09-01a08ec9-90bb-7c73-b35f-b912e4df1fa0.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ed7-32ff-7e80-b270-4392cca47204",
+    "agent_path": "/root/architecture_judge",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/11/rollout-2026-09-11T00-01-03-01a08ed7-32ff-7e80-b270-4392cca47204.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max"
+  },
+  {
+    "id": "01a08ec8-d019-7a32-aa5c-67b042a7521c",
+    "agent_path": "/root/q2_interoperability",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-45-20-01a08ec8-d019-7a32-aa5c-67b042a7521c.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max"
+  },
+  {
+    "id": "01a08ec7-0f8e-7a71-b015-34cc39a82d06",
+    "agent_path": "/root/q2_source_audit",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-43-25-01a08ec7-0f8e-7a71-b015-34cc39a82d06.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ecd-7550-7cd3-a145-947d1eff1911",
+    "agent_path": "/root/design_family_runtimes",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-50-24-01a08ecd-7550-7cd3-a145-947d1eff1911.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max"
+  },
+  {
+    "id": "01a08ec7-2efb-71d0-8ef8-6687f26fd124",
+    "agent_path": "/root/q3_source_audit",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-43-33-01a08ec7-2efb-71d0-8ef8-6687f26fd124.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ec6-e880-7462-95cf-75c16ef92814",
+    "agent_path": "/root/q1_source_audit",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-43-15-01a08ec6-e880-7462-95cf-75c16ef92814.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ec8-a32b-78c0-8219-e5181e7d1273",
+    "agent_path": "/root/q1_interoperability",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-45-08-01a08ec8-a32b-78c0-8219-e5181e7d1273.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max"
+  },
+  {
+    "id": "01a08ec8-f86b-7371-8a5a-4595b1e70bdc",
+    "agent_path": "/root/mod_execution_contracts",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-45-30-01a08ec8-f86b-7371-8a5a-4595b1e70bdc.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  },
+  {
+    "id": "01a08ec7-5436-7e40-b8f9-aaa013d61877",
+    "agent_path": "/root/content_inventory",
+    "rollout_path": "/home/buzzkill/.codex/sessions/2026/09/10/rollout-2026-09-10T23-43-43-01a08ec7-5436-7e40-b8f9-aaa013d61877.jsonl",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high"
+  }
+]
