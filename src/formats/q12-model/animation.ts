@@ -85,6 +85,17 @@ export function buildMd2Geometry(model: Q2AliasModel, pose: readonly ModelVertex
   return { vertices, indices };
 }
 
+/** Map retained MD2 corners directly into a consumer's geometry without alias wrappers. */
+export function mapMd2Geometry<T>(model: Q2AliasModel, pose: readonly ModelVertex[],
+  map: (vertex: ModelVertex, texCoord: Vec2, corner: number) => T): { readonly vertices: readonly T[]; readonly indices: readonly number[] } {
+  const topology = md2Topologies.get(model);
+  if (topology === undefined) {
+    const geometry = buildMd2Geometry(model, pose);
+    return { indices: geometry.indices, vertices: geometry.vertices.map((vertex, corner) => map(vertex, vertex.texCoord, corner)) };
+  }
+  return { indices: topology.indices, vertices: topology.corners.map((corner, index) => map(at(pose, corner.vertex, "pose vertex"), corner.texCoord, index)) };
+}
+
 export function mdlSkinImage(model: Q1AliasModel, skin: number, palette: Palette, timeSeconds = 0, syncBase = 0): RenderImage {
   const pixels = sampleTimedFrame(at(model.skins, skin, "skin"), timeSeconds, syncBase);
   return {

@@ -6,11 +6,11 @@ import type { Bounds, Vec2, Vec4 } from "../../../contracts/math.ts";
 import type { SceneModelGroup } from "../submissions.ts";
 import type { DecodedModel, ModelVertex, Q2AliasModel, SceneEntity } from "../../../contracts/scene.ts";
 import { anglesToAxis, vectorToAngles, add3, addPointToBounds, dot3, emptyBounds, length3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
-import { buildMd2Geometry, buildMdlGeometry, interpolateAliasFrames, sampleTimedFrame } from "../../../formats/q12-model/animation.ts";
+import { mapMd2Geometry, buildMdlGeometry, interpolateAliasFrames, sampleTimedFrame } from "../../../formats/q12-model/animation.ts";
 import { interpolateMd3Frames } from "../../../formats/q3-model/md3.ts";
 import { skinMd4Surface } from "../../../formats/q3-model/md4.ts";
 import { sampleMd5Pose, skinMd5Mesh } from "../../../formats/q3-model/md5.ts";
-import type { MaterialGeometry } from "../../../materials/geometry.ts";
+import type { MaterialGeometry, MaterialVertex } from "../../../materials/geometry.ts";
 import { q2AliasLight, q2ShellColor } from "./lighting.ts";
 import { q1SpriteGeometry, spriteQuad } from "./sprites.ts";
 import { at, attachSceneEntity, modelAttachmentTag, modelLocalDelta, modelWorldBounds, modelWorldDirection, modelWorldPoint } from "./transform.ts";
@@ -145,20 +145,25 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   let lod = 0;
   let fogSphere: PreparedModelSurface["fogSphere"] = null;
   let vertexLighting: ModelVertexLighting | undefined;
+  function localVertex(vertex: ModelVertex, texCoord: Vec2, corner: number, unlit: boolean, vertexColor?: Vec4): MaterialVertex {
+    if (context.purpose === "shadow") return { position: vertex.position, normal: vertex.normal, texCoord,
+      lightmapCoord: { x: 0, y: 0 }, color: vertexColor ?? color };
+    const sampled = context.lightVertex?.(entity, vertex.normal, vertex.position);
+    const light = vertexLighting?.(vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
+      ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
+      : sampled ?? { x: 1, y: 1, z: 1 });
+    const base = vertexColor ?? color;
+    const lit = unlit && shell === null ? base : { x: base.x * light.x, y: base.y * light.y, z: base.z * light.z, w: base.w };
+    return { position: vertex.position, normal: vertex.normal, texCoord, lightmapCoord: { x: 0, y: 0 }, color: lit };
+  }
   function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
     indices: readonly number[], unlit = false, world = false): void {
     if (context.purpose !== "shadow") vertexLighting ??= context.prepareVertexLighting?.(entity, options);
-    const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => {
-      if (context.purpose === "shadow") return { position: vertex.position, normal: vertex.normal, texCoord: vertex.texCoord,
-        lightmapCoord: { x: 0, y: 0 }, color: vertex.color ?? color };
-      const sampled = context.lightVertex?.(entity, vertex.normal, vertex.position);
-      const light = vertexLighting?.(vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
-        ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
-        : sampled ?? { x: 1, y: 1, z: 1 });
-      const base = vertex.color ?? color;
-      const lit = unlit && shell === null ? base : { x: base.x * light.x, y: base.y * light.y, z: base.z * light.z, w: base.w };
-      return { position: vertex.position, normal: vertex.normal, texCoord: vertex.texCoord, lightmapCoord: { x: 0, y: 0 }, color: lit };
-    }) };
+    const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => localVertex(vertex, vertex.texCoord, corner, unlit, vertex.color)) };
+    appendGeometry(name, image, localGeometry, unlit, world);
+  }
+  function appendGeometry(name: string, image: ModelImageSelection, localGeometry: MaterialGeometry, unlit: boolean, world = false): void {
+    const indices = localGeometry.indices;
     const geometry = world ? localGeometry : { indices, vertices: localGeometry.vertices.map(vertex => ({
       position: modelWorldPoint(entity.transform, vertex.position), normal: modelWorldDirection(entity.transform, vertex.normal),
       texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord, color: vertex.color })) };
@@ -202,8 +207,11 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       break;
     }
     case "q2-md2": {
-      const geometry = buildMd2Geometry(model, interpolateSceneMd2(model, entity, frame, previousFrame, backLerp, shell !== null));
-      append("alias", shell === null ? selectedShader("alias", model.skins, entity, options) : { kind: "white" }, geometry.vertices, geometry.indices, shell !== null);
+      const vertices = interpolateSceneMd2(model, entity, frame, previousFrame, backLerp, shell !== null);
+      const image = shell === null ? selectedShader("alias", model.skins, entity, options) : { kind: "white" } satisfies ModelImageSelection;
+      if (context.purpose !== "shadow") vertexLighting ??= context.prepareVertexLighting?.(entity, options);
+      const geometry = mapMd2Geometry(model, vertices, (vertex, texCoord, corner) => localVertex(vertex, texCoord, corner, shell !== null));
+      appendGeometry("alias", image, geometry, shell !== null);
       break;
     }
     case "q3-md3": {
