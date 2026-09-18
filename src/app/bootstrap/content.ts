@@ -160,7 +160,14 @@ function selectedQuakeCProgram(catalog: InstalledCatalog, options: Pick<Applicat
     && product.expectation.requiredPrograms.includes("progs.dat") ? "progs.dat" : undefined;
 }
 
+export function resolveApplicationMovement(catalog: InstalledCatalog, options: ApplicationOptions): ApplicationOptions {
+  if (options.movementProduct === undefined) return options;
+  const product = catalog.require(options.movementProduct);
+  return { ...options, movement: product.expectation.family, movementProduct: product.expectation.id };
+}
+
 export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }, presentationSource?: ApplicationContentSource): LaunchPreset {
+  options = resolveApplicationMovement(catalog, options);
   const product = catalog.require(options.product), family = product.expectation.family;
   const q3Guest = family === "q3" && presentationSource?.family !== "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id);
   if (q3Guest && (!options.dedicated && options.network.kind !== "offline" || options.network.kind !== "native-server" && options.network.kind !== "offline" || options.mode !== "deathmatch"
@@ -183,6 +190,7 @@ export function applicationPreset(catalog: InstalledCatalog, options: Applicatio
 }
 
 export function applicationConfigurationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }): LaunchPreset {
+  options = resolveApplicationMovement(catalog, options);
   const product = catalog.require(options.product), family = product.expectation.family;
   const q3Guest = family === "q3" && !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id);
   const quakeworld = product.expectation.edition === "quakeworld";
@@ -200,16 +208,16 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   const programProduct = sourceProgramProduct(catalog, product.id);
   const equipmentSource = nativeProgram === undefined && q2GameLibrary === undefined && !q3Guest && !quakeworld
     ? { ...provider, content: programProduct.id } : provider;
-  const movement: ProviderReference = nativeSources?.movement ?? { provider: `${options.movement}:movement`, content: (quakeworld || q3Guest) && options.movement === family ? product.id : catalog.require(baseProduct(options.movement)).id };
+  const movement: ProviderReference = nativeSources?.movement ?? { provider: `${options.movement}:movement`, content: options.movementProduct !== undefined ? catalog.require(options.movementProduct).id : (quakeworld || q3Guest) && options.movement === family ? product.id : catalog.require(baseProduct(options.movement)).id };
   const character: ProviderReference = nativeSources?.character ?? { provider: `${options.character}:character`, content: (quakeworld || q3Guest) && options.character === family ? product.id : catalog.require(baseProduct(options.character)).id };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
   const rerelease = product.expectation.edition === "rerelease";
-  const timing = (reference: ProviderReference, source: GameFamily, edition: boolean) => {
+  const timing = (reference: ProviderReference, source: GameFamily, edition: boolean, movementRole = false) => {
     const native = nativeProviderTiming(reference, source, edition);
-    return quakeworld && source === "q1" && catalog.product(reference.content).expectation.edition === "quakeworld" ? { ...native, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } satisfies typeof native.clock } : native;
+    return source === "q1" && catalog.product(reference.content).expectation.edition === "quakeworld" ? { ...native, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: movementRole && (options.movementProduct !== undefined || nativeSources !== undefined) ? 255 : 50 } satisfies typeof native.clock } : native;
   };
   const providerTiming = timing(provider, family, rerelease);
-  return { id: createRecipeId("mixed", `${options.product}-${options.movement}-${options.character}-${options.characterModel}${rules === "standard" ? "" : `-${rules}`}`),
+  return { id: createRecipeId("mixed", `${options.product}-${options.movementProduct ?? options.movement}-${options.character}-${options.characterModel}${rules === "standard" ? "" : `-${rules}`}`),
     map: { geometry: { content: options.mapProduct === undefined ? product.id : catalog.require(options.mapProduct).id, path: options.map }, entities: provider },
     campaign: options.mode === "deathmatch" ? { kind: "none" } : { kind: "campaign", mission: provider, gamecode: provider }, movement,
     character: { definition: character, appearance }, weapons: [provider], equipment: nativeEquipment(catalog, equipmentSource, match), enemies: { kind: "map-defined" },
@@ -221,7 +229,7 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
       api: { kind: "q1-quakeworld", programVersion: 6, systemCrc: 54730 } } : nativeProgram !== undefined
         ? { kind: "quakec", owner: provider, role: "server-game", artifact: { content: product.id, path: nativeProgram },
           api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } } : execution(provider, family, rerelease, programProduct.id === product.id ? provider.provider : sourceProgramImplementation(programProduct.expectation))],
-    timing: [providerTiming, timing(movement, options.movement, catalog.product(movement.content).expectation.edition === "rerelease"), timing(character, options.character, catalog.product(character.content).expectation.edition === "rerelease")],
+    timing: [providerTiming, timing(movement, options.movement, catalog.product(movement.content).expectation.edition === "rerelease", true), timing(character, options.character, catalog.product(character.content).expectation.edition === "rerelease")],
     ordering: { kind: "mixed", providers: [provider.provider, movement.provider, character.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
 }
 
@@ -341,7 +349,7 @@ export function applicationOptionsForRecipe(options: ApplicationOptions, content
   const character = family(recipe.character.definition), prefix = `${character}:model/`;
   if (!recipe.character.appearance.provider.startsWith(prefix)) throw new Error(`Application character has no model selection for ${recipe.character.appearance.provider}`);
   return { ...options, product: content.catalog.product(recipe.map.entities.content).expectation.id,
-    map: recipe.map.geometry.requestedPath, mapProduct: content.catalog.product(recipe.map.geometryContent).expectation.id, movement: family(recipe.movement), character,
+    map: recipe.map.geometry.requestedPath, mapProduct: content.catalog.product(recipe.map.geometryContent).expectation.id, movement: family(recipe.movement), movementProduct: content.catalog.product(recipe.movement.content).expectation.id, character,
     characterModel: recipe.character.appearance.provider.slice(prefix.length),
     rules: recipe.match.provider === "q2:ctf" ? "ctf" : recipe.match.provider === "q2:lmctf" ? "lmctf" : recipe.match.provider === "q2:tag" ? "tag" : recipe.match.provider === "q2:deathball" ? "deathball" : recipe.match.provider === "q1:horde" ? "horde" : "standard" };
 }

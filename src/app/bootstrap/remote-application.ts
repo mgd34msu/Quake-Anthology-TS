@@ -7,7 +7,7 @@ import { liveQ2Protocol } from "./options.ts";
 import { UnifiedRemotePresentation } from "./network/remote-unified.ts";
 import { UnifiedClientNetwork } from "./network/unified-client.ts";
 import { loadUnifiedContent } from "./network/unified-content.ts";
-import { applicationOptionsForRecipe } from "./content.ts";
+import { resolveApplicationMovement, applicationOptionsForRecipe } from "./content.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import { saveCvarArchive } from "./cvar-archives.ts";
 import { RemoteSeatPump } from "./remote-seat-pump.ts";
@@ -429,7 +429,7 @@ export class RemoteApplication {
   }
 
   private static recordedOptions(options: ApplicationOptions, resource: DemoResource): ApplicationOptions {
-    const { remoteContent: priorSelection, quakeCProgram: _program, q1Protocol: _q1, q2Protocol: _q2, botSkill: _bots, ...retained } = options;
+    const { movementProduct: _movementProduct, remoteContent: priorSelection, quakeCProgram: _program, q1Protocol: _q1, q2Protocol: _q2, botSkill: _bots, ...retained } = options;
     const family = resource.kind === "qw" ? "q1" : resource.kind;
     const selected = expectedProducts.find(product => product.id === options.product);
     const netQuakeProduct = selected?.family === "q1" && selected.edition === "classic" ? selected.id : "q1-classic-id1";
@@ -455,7 +455,7 @@ export class RemoteApplication {
       const header = watch.header;
       if (header.protocol.kind === "q2-kex-demo") throw new Error("GTV MVD cannot use the KEX single-view demo protocol");
       const selection = remoteContentSelection(header.rerelease ? "q2-rerelease-baseq2" : "q2-classic-baseq2", header.data.gamedir);
-      const { quakeCProgram: _program, q1Protocol: _q1, botSkill: _bots, ...retained } = options;
+      const { movementProduct: _movementProduct, quakeCProgram: _program, q1Protocol: _q1, botSkill: _bots, ...retained } = options;
       const selected: ApplicationOptions = { ...retained, network: { kind: "offline" }, seats: 1, dedicated: false,
         rules: "standard", movement: "q2", character: "q2", characterModel: options.character === "q2" ? options.characterModel : "male",
         product: remoteContentProduct(selection), remoteContent: selection, q2Protocol: header.protocol };
@@ -484,8 +484,7 @@ export class RemoteApplication {
     const qw = selected === undefined ? options.network.kind === "qw-client" : selected === "qw", q1 = selected === undefined ? options.network.kind === "q1-client" || qw : selected === "q1" || qw, q3 = selected === undefined ? options.network.kind === "q3-client" : selected === "q3";
     if (!unified && selected === undefined && !q1 && !q3 && options.network.kind !== "q2-client") throw new Error("RemoteApplication requires a native connect address");
     const family = q1 ? "q1" : q3 ? "q3" : "q2";
-    if (options.dedicated || !Number.isInteger(options.seats) || options.seats < 1 || options.seats > 4 || !unified && (options.movement !== family || options.character !== family))
-      throw new Error(`Native ${family} remote play requires one to four graphical seats with matching movement and character providers`);
+
     if (!unified && !q1 && !q3 && !["male", "female", "cyborg"].includes(options.characterModel))
       throw new Error("Remote Q2 character selection requires an installed male, female or cyborg player appearance");
     const network = options.network;
@@ -500,6 +499,9 @@ export class RemoteApplication {
     let browser: RemoteBrowser | null = null;
     let configuration: RemoteConfiguration | null = null;
     try {
+      options = resolveApplicationMovement(content.catalog, options);
+      if (options.dedicated || !Number.isInteger(options.seats) || options.seats < 1 || options.seats > 4 || !unified && (options.movement !== family || options.character !== family))
+        throw new Error(`Native ${family} remote play requires one to four graphical seats with matching movement and character providers`);
       const product = content.catalog.product(options.product);
       if (!unified && (product.expectation.family !== family || product.expectation.edition === "rerelease" && family !== "q2" || recording === undefined && q1 && options.product !== "q1-classic-id1" && !(qw && options.product === remoteContentProduct(options.remoteContent ?? remoteContentSelection("q1-quakeworld", "qw"))) || q3 && options.product !== remoteContentProduct(options.remoteContent ?? remoteContentSelection("q3-baseq3", "baseq3"))))
         throw new Error("Remote application requires content matching the selected native protocol");

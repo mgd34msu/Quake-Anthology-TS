@@ -1,3 +1,5 @@
+import { createContentId, type GameFamily, type ProviderTiming } from "../../src/contracts/content.ts";
+import { expectedProducts, type CatalogProduct } from "../../src/content/catalog/index.ts";
 import { preflightApplicationMatch } from "../../src/app/bootstrap/match-preflight.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
@@ -5,7 +7,7 @@ import { resolve } from "node:path";
 import { discoverInstalledContent, InstalledCatalog, presetChoice, resolveLaunch } from "../../src/content/catalog/index.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { openMountPlan } from "../../src/content/mounts/index.ts";
-import { applicationPreset } from "../../src/app/bootstrap/content.ts";
+import { applicationPreset, applicationOptionsForRecipe, resolveApplicationMovement } from "../../src/app/bootstrap/content.ts";
 import { StartupSelectionModel } from "../../src/app/bootstrap/startup-selection.ts";
 import { defaultNetQuakeProfile } from "../../src/network/q1/profile.ts";
 
@@ -34,6 +36,7 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   expect(selected.options.map).toBe("maps/dm4.bsp");
   expect(selected.recipe.weapons).toEqual([{ provider: "q3:official", content: catalog.require("q3-baseq3").id }]);
   expect(selected.recipe.timing.find(profile => profile.provider === selected.recipe.movement.provider)?.clock.kind).toBe("q2-rerelease");
+  expect(applicationOptionsForRecipe(selected.options, { catalog, recipe: selected.recipe })).toMatchObject({ movement: "q2", movementProduct: "q2-rerelease-baseq2" });
   expect(selected.recipe.campaign.kind).toBe("none");
   expect(selected.recipe.equipment.grapple).toMatchObject({ kind: "enabled", mechanic: "q2-ctf", binding: "offhand" });
   expect(selected.recipe.equipment.handGrenades).toMatchObject({ kind: "enabled", edition: "classic", binding: "offhand" });
@@ -386,4 +389,45 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/missionpack/pak0.pk3")))("configure
   expect(() => preflightApplicationMatch(content, command.options, [{ name: "g_gametype", value: "4" }, { name: "g_gametype", value: "5" }])).toThrow("team_CTF_neutralflag");
   expect(() => preflightApplicationMatch(content, command.options, [{ name: "g_gametype", value: "7" }])).toThrow("team_neutralobelisk");
   expect(() => preflightApplicationMatch({ ...content, world: { ...world, entities: world.entities + ' { "classname" "team_CTF_neutralflag" "origin" "0 0 32" }' } }, command.options, [{ name: "g_gametype", value: "5" }])).not.toThrow();
+});
+
+
+test("exact movement products resolve catalog family and edition independently of world", () => {
+  const products: CatalogProduct[] = expectedProducts.map(expectation => ({ expectation,
+    id: createContentId({ family: expectation.family, edition: expectation.edition, package: expectation.campaign, revision: "movement-test" }),
+    availability: { kind: "installed" }, archives: [], looseRoot: null, userContent: null, maps: [], diagnostics: [] }));
+  const q2 = products.find(product => product.expectation.id === "q2-rerelease-baseq2");
+  if (q2 === undefined) throw new Error("Missing Q2 definition");
+  products.push({ ...q2, id: createContentId({ family: "q2", edition: "rerelease", package: "custom", revision: "movement-test" }), expectation: { ...q2.expectation, id: "custom-movement", baseProduct: "q2-rerelease-baseq2" } });
+  const catalog = new InstalledCatalog("/unused-movement-fixture", products, [], 1);
+  const cases: readonly (readonly [string, GameFamily, ProviderTiming["clock"]["kind"]])[] = [["q1-quakeworld", "q1", "q1-quakeworld"], ["q2-classic-baseq2", "q2", "q2-classic"], ["q2-rerelease-baseq2", "q2", "q2-rerelease"], ["custom-movement", "q2", "q2-rerelease"], ["q3-baseq3", "q3", "q3"]];
+  for (const [id, family, clock] of cases) {
+    const command = parseApplicationCommand(["--game", "q1-classic-id1", "--movement", id]);
+    if (command.kind !== "run") throw new Error("Expected launch");
+    const resolved = resolveApplicationMovement(catalog, command.options);
+    expect(resolved.movement).toBe(family);
+    const preset = applicationPreset(catalog, command.options);
+    expect(preset.movement.content).toBe(catalog.require(id).id);
+    const timing = preset.timing.find(profile => profile.provider === preset.movement.provider);
+    expect(timing?.clock.kind).toBe(clock);
+    if (clock === "q1-quakeworld") expect(timing?.clock).toEqual({ kind: "q1-quakeworld", maximumCommandMilliseconds: 255 });
+    const menu = new StartupSelectionModel(catalog, command.options);
+    expect(menu.options.movement).toBe(family);
+    expect(menu.options.movementProduct).toBe(id);
+    const row = menu.rows().find(row => row.id === "movement");
+    expect(row?.choices.filter(choice => choice.id === id)).toHaveLength(1);
+    expect(row?.choices.find(choice => choice.id === id)?.unavailable).toBeNull();
+    const menuPreset = applicationPreset(catalog, menu.options);
+    expect(menuPreset.movement).toEqual(preset.movement);
+    expect(menuPreset.timing).toEqual(preset.timing);
+  }
+  const command = parseApplicationCommand(["--game", "q1-classic-id1", "--movement", "q2"]);
+  if (command.kind !== "run") throw new Error("Expected launch");
+  expect(applicationPreset(catalog, command.options).movement.content).toBe(catalog.require("q2-classic-baseq2").id);
+  expect(() => applicationPreset(catalog, { ...command.options, movementProduct: "unknown" })).toThrow("Unknown requested content");
+  const unavailable = new InstalledCatalog(catalog.corpusRoot, products.map(product => product === q2 ? { ...product, availability: { kind: "unresolved", reason: "unsupported fixture" } } : product), [], 1);
+  expect(() => applicationPreset(unavailable, { ...command.options, movementProduct: "q2-rerelease-baseq2" })).toThrow("unsupported fixture");
+  const native = applicationPreset(catalog, { ...command.options, product: "q1-quakeworld", movement: "q1", character: "q1", dedicated: true, mode: "deathmatch" });
+  expect(native.timing.find(profile => profile.provider === native.engineBehavior.provider)?.clock).toEqual({ kind: "q1-quakeworld", maximumCommandMilliseconds: 50 });
+  expect(native.timing.find(profile => profile.provider === native.movement.provider)?.clock).toEqual({ kind: "q1-quakeworld", maximumCommandMilliseconds: 50 });
 });

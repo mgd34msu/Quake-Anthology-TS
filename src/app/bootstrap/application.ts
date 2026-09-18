@@ -139,7 +139,7 @@ import { ApplicationAudio } from "./audio.ts";
 import { ApplicationEffects } from "./effects.ts";
 import type { UnhandledApplicationEffect } from "./effects.ts";
 import { presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
-import { applicationPreset, applicationOptionsForRecipe, loadApplicationContent, resolveApplicationTravel } from "./content.ts";
+import { resolveApplicationMovement, applicationPreset, applicationOptionsForRecipe, loadApplicationContent, resolveApplicationTravel } from "./content.ts";
 import type { ApplicationConfigurationContent, LoadedApplicationContent } from "./content.ts";
 import { ApplicationInput, movementDialect } from "./input.ts";
 import type { ApplicationInputCommands, LocalInput, LocalPlayer } from "./input.ts";
@@ -657,7 +657,7 @@ export class Application {
       : { kind: "restored", content: await loadApplicationContent(options, recipe) };
     let catalog = preparation.content.catalog;
     try {
-      if (recipe !== undefined) options = applicationOptionsForRecipe(options, { catalog, recipe });
+      options = recipe === undefined ? resolveApplicationMovement(catalog, options) : applicationOptionsForRecipe(options, { catalog, recipe });
       const definitions = preparation.kind === "restored" ? serverDefinitionsForRecipe(preparation.content.recipe)
         : serverDefinitionsForSelection(preparation.content.selection);
       if (options.serverProfilePath !== undefined) {

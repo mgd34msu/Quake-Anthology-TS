@@ -66,3 +66,22 @@ test("startup menu precedes implicit defaults while explicit launches remain dir
   expect(() => parseApplicationCommand(["--menu", "--dedicated"])).toThrow("local, non-dedicated");
   expect(() => parseApplicationCommand(["--menu", "--connect-q2", "localhost"])).toThrow("local, non-dedicated");
 });
+
+
+test("movement CLI preserves exact products and later family or preset choices win", () => {
+  const selected = parseApplicationCommand(["--movement", "qw"]);
+  if (selected.kind !== "run") throw new Error("Expected launch");
+  expect(selected.options.movementProduct).toBe("q1-quakeworld");
+  for (const id of ["q2-classic-baseq2", "q2-rerelease-baseq2", "custom-movement"]) {
+    const command = parseApplicationCommand(["--movement", id]);
+    if (command.kind !== "run") throw new Error("Expected launch");
+    expect(command.options.movementProduct).toBe(id);
+  }
+  for (const args of [["--movement", "qw", "--movement", "q2"], ["--movement", "qw", "--preset", "q1-q2"]]) {
+    const command = parseApplicationCommand(args);
+    if (command.kind !== "run") throw new Error("Expected launch");
+    expect(command.options.movement).toBe("q2");
+    expect(command.options.movementProduct).toBeUndefined();
+  }
+  expect(() => parseApplicationCommand(["--movement", "../invalid"])).toThrow("Invalid movement product");
+});

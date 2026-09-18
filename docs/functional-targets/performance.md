@@ -108,3 +108,11 @@ The guest memory owner now writes typed scalar values directly into a validated 
 The existing memory suite passed 15 tests with 481 assertions. Three paired 120,003-instruction interpreter runs preserved complete processor and memory state and reduced component time by 12.9–20.0% (16.2% across the three pairs). The final two paths passed strict/policy checks. [Component evidence](../../.artifacts/resume-20260918/scalar-store-direct/freeze/RESULT.md).
 
 The [actual native component workflow](../../.artifacts/resume-20260918/scalar-store-native/receipt.json) also passed public external-profile installation, Q2Eaks code controlling a Q3 rocket, save/load, immediate restored state, and matching 500 ms continuation. All 2,582 inputs remained unchanged and processes were reaped. Its 56.801-second elapsed time is correctness evidence from one run, not a native performance comparison. Installed `1205372` includes this qualified source change; this source workflow is not a gameplay check of the new executable.
+
+## Mixed-game collision profile
+
+A 35-second source run on `1205372` used Q1 classic `e1m1`, QuakeWorld movement, Q3 Ranger and weapons, and Q2 rerelease monsters. The profiler covered gameplay after loading. Across 508 frames, the existing geometry timer measured 19.72 ms per frame within 24.36 ms of simulation work. Collision appeared in 43.06% of sampled stacks, chiefly Q2 monster movement checks reconstructing Q1 clip geometry. These overlapping samples identify work to optimize; they are not exact CPU durations.
+
+The private NVIDIA Xvfb display also spent 26.86 ms per frame in swapping. That environment and the source instrumentation do not establish visible desktop FPS. [Profile, attribution, and limits](../../.artifacts/resume-20260918/cpu-render-1205372/RESULT.md).
+
+The first candidate omitted an immediately discarded side of each convex split. Exact collision outputs matched, but the warm real-query workload became about 17.5% slower. A second candidate delayed allocation of duplicate separating-axis normals, but its warm workload was about 9.3% slower. Both candidates were rejected and are absent from accepted source and the executable.

@@ -157,7 +157,7 @@ export class StartupSelectionModel {
     const product = catalog.product(initial.product), campaign = product.expectation.campaign;
     const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
     this.values = { product: initial.product, mapProduct: initial.mapProduct ?? initial.product, map: initial.map,
-      movement: baseProduct(initial.movement), character: baseProduct(initial.character), model: initial.characterModel,
+      movement: initial.movementProduct === undefined ? baseProduct(initial.movement) : catalog.require(initial.movementProduct).expectation.id, character: baseProduct(initial.character), model: initial.characterModel,
       doppler: "source", environment: "audio-content", weaponBehavior: initial.weaponBehavior === undefined ? "native" : `${initial.weaponBehavior.product}/${initial.weaponBehavior.id}`, weapons: "native", enemies: "native", grapple: "native", grenades: "native", mode: initial.mode, rules,
       skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer };
     this.selectedModels.set(this.values.character, initial.characterModel);
@@ -318,7 +318,7 @@ export class StartupSelectionModel {
     const options = this.applySelectedServerProfile({ ...preferences, ...this.display,
       ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}), renderer,
       ...(teamArenaSkirmish === undefined ? {} : { teamArenaSkirmish }),
-      product: id, map: map.id, movement: family, character: family, characterModel, skill, ...bot,
+      product: id, map: map.id, movement: family, movementProduct: product.expectation.id, character: family, characterModel, skill, ...bot,
       mode: "singleplayer", rules: "standard", seats: 1, dedicated: false, network: { kind: "offline" } });
     const movement: ProviderReference = { provider: `${family}:movement`, content: product.id };
     const character: ProviderReference = { provider: `${family}:character`, content: product.id };
@@ -513,6 +513,8 @@ export class StartupSelectionModel {
       || product.expectation.id === "q3-baseq3").map(productChoice);
   }
   rows(): readonly StartupSelectionRow[] {
+    const movementChoices = [...this.baseChoices(), productChoice(this.catalog.product("q1-quakeworld"))];
+    if (!movementChoices.some(choice => choice.id === this.values.movement)) movementChoices.push(productChoice(this.product("movement")));
     const roster = this.roster(), monsterSource = this.monsterSourceRow();
     const sourceLabel = monsterSource.choices.find(source => source.id === roster.source)?.label ?? "Authored campaign monsters";
     const customized = roster.default !== "native" || roster.byClassname.size > 0;
@@ -539,7 +541,7 @@ export class StartupSelectionModel {
       choice("q2-rerelease-baseq2", "Quake II environments", unavailable(environmentProduct) === null ? null : "Requires Quake II rerelease data")]), row("doppler", "Doppler", [choice("source", "Game default"), choice("disabled", "Off")]), row("product", "Game / mod", this.catalog.products.map(productChoice)),
       row("mapProduct", "Map content", this.catalog.products.map(productChoice)),
       row("map", "Starting map", this.maps()),
-      row("movement", "Movement", [...this.baseChoices(), productChoice(this.catalog.product("q1-quakeworld"))]),
+      row("movement", "Movement", movementChoices),
       row("character", "Character source", this.baseChoices()), row("model", "Character model", this.models()),
       row("weapons", "Weapons", [nativeWeapons, ...[...this.baseChoices(), ...this.catalog.products.filter(product => product.expectation.family === "q1" && product.expectation.campaign === "hipnotic" && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")).map(productChoice)].map(option => {
         const product = this.catalog.product(option.id), current = this.product("product");
@@ -599,7 +601,7 @@ export class StartupSelectionModel {
       || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" && rules !== "tag" && rules !== "deathball" && rules !== "horde" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
     const { q1Protocol, weaponBehavior: _initialWeaponBehavior, ...initial } = this.initial;
     const protocol = initial.network.kind === "native-server" && this.hosting().q1Protocol !== null && q1Protocol !== undefined ? { q1Protocol } : {};
-    return this.applySelectedServerProfile({ ...initial, ...(this.values.weaponBehavior === "native" ? {} : { weaponBehavior: readWeaponBehaviorRequest(this.values.weaponBehavior) }), ...protocol, product: this.values.product, mapProduct: this.values.mapProduct, map: this.values.map, movement: this.product("movement").expectation.family,
+    return this.applySelectedServerProfile({ ...initial, ...(this.values.weaponBehavior === "native" ? {} : { weaponBehavior: readWeaponBehaviorRequest(this.values.weaponBehavior) }), ...protocol, product: this.values.product, mapProduct: this.values.mapProduct, map: this.values.map, movement: this.product("movement").expectation.family, movementProduct: this.product("movement").expectation.id,
       character: this.product("character").expectation.family, characterModel: this.values.model, mode, rules, skill,
       seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) });
   }
@@ -653,7 +655,7 @@ export class StartupSelectionModel {
     const character: ProviderReference = { provider: `${characterProduct.expectation.family}:character`, content: characterProduct.id };
     const movementTiming = nativeProviderTiming(movement, movementProduct.expectation.family, movementProduct.expectation.edition === "rerelease");
     const timing = base.timing.map(profile => profile.provider === movement.provider
-      ? movementProduct.expectation.id === "q1-quakeworld" ? { ...movementTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 255 } } satisfies ExecutableRecipe["timing"][number] : movementTiming
+      ? movementProduct.expectation.edition === "quakeworld" ? { ...movementTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 255 } } satisfies ExecutableRecipe["timing"][number] : movementTiming
       : profile.provider === character.provider ? nativeProviderTiming(character, characterProduct.expectation.family, characterProduct.expectation.edition === "rerelease") : profile);
     const environment: ExecutableRecipe["presentation"]["environment"] = this.values.environment === "audio-content" || this.values.environment === "disabled"
       ? { kind: this.values.environment }

@@ -127,6 +127,15 @@ Only direct local console input can start LLM requests. Scripts, aliases, key bi
 
 In **Play a game → Custom game → World**, choose the game or mod for its rules and **Map content** for the installed product that supplies the map. The command-line equivalent is `--game PRODUCT --map-game MAP_PRODUCT --map MAP`. Omitting `--map-game` uses the selected game's maps.
 
+Select a movement family with `--movement q1`, `q2`, or `q3`, or an exact installed product such as `--movement q2-rerelease-baseq2`. `--movement qw` selects `q1-quakeworld`, including its command timing. For example:
+
+```sh
+./quake-typescript --game q1-classic-id1 --map e1m1 \
+  --movement qw --character q3 --model ranger
+```
+
+Exact movement selection is available in the current source checkout; the installed `1205372` executable predates this addition.
+
 For example, an installed LRCTF Q3 module can run locally on Q2's `base1`:
 
 ```sh

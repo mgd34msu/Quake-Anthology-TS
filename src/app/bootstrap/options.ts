@@ -31,6 +31,7 @@ export interface ApplicationOptions {
   readonly q2GameLibrary?: string;
   readonly weaponBehavior?: { readonly product: string; readonly id: string };
   readonly movement: GameFamily;
+  readonly movementProduct?: string;
   readonly character: GameFamily;
   readonly characterModel: string;
   readonly renderer: "cpu" | "gl";
@@ -77,7 +78,7 @@ Usage: bun run src/main.ts [options]
   --progs MOUNTED_PATH       Validated mounted QuakeC .dat artifact
   --q2-game MOUNTED_PATH     Explicit Quake II game DLL (classic i386 / rerelease x64)
   --weapon-behavior PRODUCT/ID  Overlay a declared projectile trajectory
-  --movement q1|q2|q3        Player movement provider
+  --movement q1|q2|q3|qw|PRODUCT  Movement family or exact installed product
   --character q1|q2|q3       Player character provider
   --model NAME               Character model (e.g. sarge or male)
   --renderer cpu|gl          Renderer (default gl)
@@ -166,11 +167,14 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         if (options.networkTransport !== undefined) throw new Error("Choose one IPX transport");
         if (value.trim().length === 0 || value.startsWith("--")) throw new Error("--ipx-dosbox requires a relay hostname or IPv4 address");
         options = { ...options, networkTransport: { kind: "ipx-dosbox", relay: value } }; break;
-      case "--preset":
+      case "--preset": {
+        const { movementProduct: _movementProduct, ...retained } = options;
+        options = retained;
         if (value === "q2-q1-q3") options = { ...options, product: "q2-classic-baseq2", map: "maps/base1.bsp", movement: "q1", character: "q3", characterModel: "sarge" };
         else if (value === "q1-q2") options = { ...options, product: "q1-rerelease-id1", map: "maps/e1m1.bsp", movement: "q2", character: "q2", characterModel: "male" };
         else throw new Error(`Unknown launch preset: ${value}`);
         break;
+      }
       case "--user-content-root": options = { ...options, userContentRoot: resolve(value) }; break;
       case "--content-root": options = { ...options, corpusRoot: resolve(value) }; break;
       case "--map-game": options = { ...options, mapProduct: value }; break;
@@ -192,7 +196,15 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
         if (!path.endsWith(".dat")) throw new Error("--progs requires a mounted .dat artifact");
         options = { ...options, quakeCProgram: path }; break;
       }
-      case "--movement": options = { ...options, movement: family(value) }; break;
+      case "--movement": {
+        const { movementProduct: _movementProduct, ...retained } = options;
+        if (value === "q1" || value === "q2" || value === "q3") options = { ...retained, movement: value };
+        else {
+          if (!/^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(value)) throw new Error("Invalid movement product: " + value);
+          options = { ...retained, movementProduct: value === "qw" ? "q1-quakeworld" : value };
+        }
+        break;
+      }
       case "--character": {
         const selected = family(value);
         options = { ...options, character: selected, characterModel: selected === "q3" ? "sarge" : selected === "q2" ? "male" : "player" };

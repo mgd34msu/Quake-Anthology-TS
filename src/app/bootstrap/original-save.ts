@@ -16,7 +16,7 @@ export async function prepareApplicationSave(options: ApplicationOptions, catalo
   const product = selectQ1SaveProduct(catalog, saved.data, path, sourceProduct);
   const skill = saved.data.skill;
   if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Original save skill must be 0..3");
-  const { mapProduct, q2GameLibrary, weaponBehavior, teamArenaSkirmish, q3MapLaunch, q3Product, botSkill, serverProfile, serverProfilePath, startupCommands, explicitRules, ...sourceOptions } = loadOptions;
+  const { movementProduct: _movementProduct, mapProduct, q2GameLibrary, weaponBehavior, teamArenaSkirmish, q3MapLaunch, q3Product, botSkill, serverProfile, serverProfilePath, startupCommands, explicitRules, ...sourceOptions } = loadOptions;
   const restored: ApplicationOptions = { ...sourceOptions, product: product.expectation.id, map: `maps/${saved.data.map}.bsp`,
     skill, mode: "singleplayer", movement: "q1", character: "q1", characterModel: "player", seats: 1, rules: "standard", quakeCProgram: "progs.dat", network: { kind: "offline" } };
   const content = await loadApplicationContent(restored, undefined, undefined, catalog);
