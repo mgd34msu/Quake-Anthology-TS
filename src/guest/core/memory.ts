@@ -55,6 +55,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   readonly #limit: bigint;
   readonly #allocationBase: bigint;
   #mappings: Mapping[] = [];
+  #mappingGeneration = 0;
   readonly #allocationHints = new Map<bigint, { readonly base: bigint; readonly byteLength: number }>();
   readonly #recentMappings = new Map<GuestAccess | null, { readonly mapping: Mapping; readonly end: bigint }>();
   readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: () => void }>();
@@ -172,6 +173,31 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const byte = mapping.bytes[Number(byteOffset - mapping.base)];
     if (byte === undefined) throw new Error("Guest mapping backing is inconsistent");
     return byte;
+  }
+
+
+  fetchSequence(byteOffset: bigint): () => number {
+    let consumed = 0;
+    let generation = -1;
+    let mapping: Mapping | undefined;
+    let offset = 0;
+    return () => {
+      if (generation !== this.#mappingGeneration || mapping === undefined || offset >= mapping.byteLength) {
+        const address = byteOffset + BigInt(consumed);
+        const byte = this.fetchByte(address);
+        mapping = this.#recentMappings.get("execute")?.mapping;
+        if (mapping === undefined) throw new Error("Guest execute mapping is missing");
+        offset = Number(address - mapping.base) + 1;
+        generation = this.#mappingGeneration;
+        consumed += 1;
+        return byte;
+      }
+      const byte = mapping.bytes[offset];
+      if (byte === undefined) throw new Error("Guest mapping backing is inconsistent");
+      offset += 1;
+      consumed += 1;
+      return byte;
+    };
   }
 
 
@@ -304,6 +330,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     return undefined;
   }
   #insert(mapping: Mapping): undefined {
+    this.#mappingGeneration += 1;
     this.#recentMappings.clear();
     this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mapping);
     return undefined;
@@ -401,6 +428,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       for (const [alignment, hint] of this.#allocationHints) if (lowerBound < hint.base)
         this.#allocationHints.set(alignment, { ...hint, base: lowerBound });
     }
+    this.#mappingGeneration += 1;
     this.#recentMappings.clear();
     if (next.length <= 3) this.#mappings.splice(first, last - first, ...next);
     else this.#mappings = this.#mappings.slice(0, first).concat(next, this.#mappings.slice(last));

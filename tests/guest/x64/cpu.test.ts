@@ -330,3 +330,24 @@ test("canonical address range retains sign, wrap and exact fault boundaries", ()
     }
   }
 });
+
+test("instruction sequence preserves canonical, wrap and 15-byte fetch fault order", () => {
+  for (const start of [0x7fffffffffffn, 0xffffffffffffffffn, 0x1000n]) {
+    const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+    memory.map({ base: start, byteLength: 1, permissions: "execute", bytes: new Uint8Array([0xb8]) });
+    const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: start,
+      stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+    const cursor = new X64DecodeCursor(memory, state);
+    expect(cursor.opcode).toBe(0xb8);
+    expect(cursor.bytes).toEqual([0xb8]);
+    expect(() => cursor.readByte()).toThrow(start === 0x7fffffffffffn ? "Noncanonical" : start === 0xffffffffffffffffn ? "null" : "unmapped");
+    expect(cursor.bytes).toEqual([0xb8]);
+  }
+  for (const start of [0x1000n, 0x7ffffffffff1n, 0xfffffffffffffff1n]) {
+    const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+    memory.map({ base: start, byteLength: 15, permissions: "execute", bytes: new Uint8Array(15).fill(0x66) });
+    const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: start,
+      stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+    expect(() => new X64DecodeCursor(memory, state)).toThrow("Instruction exceeds 15 bytes");
+  }
+});

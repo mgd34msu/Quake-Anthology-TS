@@ -1,3 +1,4 @@
+import { startupSummaryLayout } from "./startup-summary.ts";
 import { registerArenaSelectionMenu } from "./base-arena-select-menu.ts";
 import { registerLocalLobbyMenu } from "../../ui/settings/local-lobby.ts";
 import type { ApplicationLocalLobby, LocalLobbySelection } from "./local-lobby.ts";
@@ -471,10 +472,14 @@ export class StartupMenu {
     if (active === session) {
       text("Your game", 316, 118, 2, true);
       const fields: readonly StartupSelectionField[] = ["product", "mapProduct", "map", "movement", "character", "model", "weapons", "weaponBehavior", "enemies", "grapple", "grenades", "mode"];
-      for (const [index, row] of this.options.model.rows().filter(row => fields.includes(row.id)).entries()) {
+      const rows = this.options.model.rows().filter(row => fields.includes(row.id));
+      const layout = startupSummaryLayout(rows.length, { x: 316, y: 142, width: 260, height: 300 });
+      for (const [index, row] of rows.entries()) {
         const value = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
-        text(this.fit(row.label, 260, 1.35), 316, 150 + index * 28, 1.35, true);
-        text(this.fit(value.replace(" (campaign default)", "").replace(" authored monsters", " monsters"), 260, 2.1), 316, 161 + index * 28, 2.1);
+        const y = layout.y + index * layout.rowHeight;
+        text(this.fit(row.label, layout.width, layout.labelScale), layout.x, y, layout.labelScale, true);
+        text(this.fit(value.replace(" (campaign default)", "").replace(" authored monsters", " monsters"), layout.width, layout.valueScale),
+          layout.x, y + layout.valueOffset, layout.valueScale);
       }
     }
     if (active === browserMenu && this.options.browser !== undefined && this.status.length === 0) {

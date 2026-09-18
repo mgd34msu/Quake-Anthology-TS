@@ -77,6 +77,7 @@ export function writeMemory(memory: MappedGuestMemory, address: GuestAddress, wi
 /** AMD APM volume 3 sections 1.2-1.7; memory addresses wait until all immediates are decoded. */
 export class X64DecodeCursor {
   readonly start: bigint;
+  readonly #fetchNext: (() => number) | null;
   readonly bytes: number[] = [];
   readonly opcode: number;
   rex: number | null = null;
@@ -88,6 +89,11 @@ export class X64DecodeCursor {
 
   constructor(readonly memory: MappedGuestMemory, readonly state: GuestProcessorState) {
     this.start = state.instructionPointer;
+    // The complete architectural instruction window stays canonical and cannot wrap.
+    // Boundary instructions retain the per-byte address/fault path below.
+    this.#fetchNext = (this.start > 0n && this.start <= 0x7ffffffffff1n)
+      || (this.start >= 0xffff800000000000n && this.start <= 0xfffffffffffffff1n)
+      ? memory.fetchSequence(this.start) : null;
     while (true) {
       const byte = this.readByte();
       if (byte >= 0x40 && byte <= 0x4f) { this.rex = byte; continue; }
@@ -114,7 +120,7 @@ export class X64DecodeCursor {
 
   readByte(): number {
     if (this.bytes.length >= 15) throw new X64ProcessorFault(13, "Instruction exceeds 15 bytes");
-    const byte = this.memory.fetchByte(canonicalAddress(this.nextIP));
+    const byte = this.#fetchNext === null ? this.memory.fetchByte(canonicalAddress(this.nextIP)) : this.#fetchNext();
     this.bytes.push(byte);
     return byte;
   }

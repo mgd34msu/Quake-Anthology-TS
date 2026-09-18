@@ -70,6 +70,8 @@ export interface MappedGuestMemory extends GuestMemory {
   fetch(address: GuestAddress, byteLength: number): Uint8Array;
   /** Execute one live byte at this memory owner's processor instruction pointer. */
   fetchByte(byteOffset: bigint): number;
+  /** Lazily execute successive live bytes; faults occur only when the byte is consumed. */
+  fetchSequence(byteOffset: bigint): () => number;
   checkpoint(): GuestMemorySnapshot;
 }
 

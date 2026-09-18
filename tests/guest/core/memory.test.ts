@@ -298,3 +298,27 @@ test("scalar stores preserve encoding and cross-mapping fault atomicity", () => 
   expect([...memory.copy(base, 16)]).toEqual([...before]); expect(notifications).toBe(0);
   remove();
 });
+
+
+test("execute sequence reads live aliases and revalidates mapping changes without speculative faults", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const base = memory.map({ base: 0x1000n, byteLength: 3, permissions: "read-execute", bytes: new Uint8Array([1, 2, 3]) });
+  const alias = memory.mapAlias({ base: 0x2000n, byteLength: 3, permissions: "read-write", source: base });
+  const next = memory.fetchSequence(base.byteOffset);
+  expect(next()).toBe(1);
+  memory.writeUint8(memory.offset(alias, 1n), 9);
+  expect(next()).toBe(9);
+  memory.protect(base, 3, "read");
+  expect(() => next()).toThrow("permits read");
+  memory.protect(base, 3, "execute");
+  expect(next()).toBe(3);
+  expect(() => next()).toThrow("unmapped");
+  memory.map({ base: 0x1003n, byteLength: 2, permissions: "execute", bytes: new Uint8Array([4, 5]) });
+  expect(next()).toBe(4);
+  memory.unmap(at(memory, 0x1004n), 1);
+  expect(() => next()).toThrow("unmapped");
+  memory.map({ base: 0x1004n, byteLength: 1, permissions: "execute", bytes: new Uint8Array([7]) });
+  expect(next()).toBe(7);
+  const missing = memory.fetchSequence(0n);
+  expect(() => missing()).toThrow("null");
+});
