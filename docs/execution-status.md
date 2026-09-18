@@ -2,7 +2,13 @@
 
 ## Installed executable and recent fixes
 
-Installed source is `5781b0db0d074bb85002c471427a8d9f1bbe7347`, tree `14e0a8f61667f4ce839a3b5166f1aa94f95caa45`. Installed at `2026-09-17T14:44:08.929Z`: SHA-256 `c31f8c7bd87abfc28991b2b7878cbe879a9475dae3481e2c6ff27a2218cab84a`, 127,223,936 bytes, mode `0755`. [Installed receipt](../.artifacts/resume-20260917/final-5781b0d/installed-build.json). The compiled delivery passed `--help` only; the approximately 30-second two-seat workflow is separate source evidence, preceding the reviewed final two-file content-publication correction.
+Current installed source is `3ef462f5e2ffd86cd2c7588e293f5ffb9c1f1594`, tree `5e44f5c7d402debdf87ba2954bca0148603e104f`. Installed at `2026-09-18T03:21:28.717Z`: SHA-256 `664c922ac311f4c815fa6828e17c010ec6d143f59f5eadf9f2993f2c00a533bb`, 127,445,120 bytes, mode `0755`. [Installed receipt](../.artifacts/resume-20260917/final-3ef462f/installed-build.json). This delivery includes accepted T07/T09 source integrations and the preceding fixes. Exact build inputs and compiled `--help` passed; no new final-binary gameplay, physical-audio, or FPS qualification is claimed.
+
+**9/23 targets complete, 14 open; T10 active.** Current private T10 work on rerelease native execution, QVM bots, foreign geometry, and weapon-behavior composition is not part of this executable. Community Q1/Q2/Q3 maps have separately passed actual Application loading, admission, and short input-driven stepping; that is not a full-map playthrough or arbitrary-mod compatibility claim.
+
+### Previous 5781b0d delivery
+
+Previously installed source was `5781b0db0d074bb85002c471427a8d9f1bbe7347`, tree `14e0a8f61667f4ce839a3b5166f1aa94f95caa45`. Installed at `2026-09-17T14:44:08.929Z`: SHA-256 `c31f8c7bd87abfc28991b2b7878cbe879a9475dae3481e2c6ff27a2218cab84a`, 127,223,936 bytes, mode `0755`. [Installed receipt](../.artifacts/resume-20260917/final-5781b0d/installed-build.json). The compiled delivery passed `--help` only; the approximately 30-second two-seat workflow is separate source evidence, preceding the reviewed final two-file content-publication correction.
 
 T05 input/local-player and T06 console/profile implementations are accepted and installed: **9/23 targets complete in source, 14 open; T10 active**. The installed executable includes both units. The new Q2 two-peer workflow passed input, promotion/rejoin, map travel and restart; a discovered telefrag collision hang is fixed. [T05 details](functional-targets/status.md#t05-input-and-local-players). T06 adds dedicated binding persistence, actual save/exec feedback and Q1 startup command ordering. [T06 details](functional-targets/status.md#t06-console-cvars-and-profiles). T05 native source verification passed 39 assertions in 31.7 seconds; T06 existing checks passed 96 tests/918 assertions in 195 ms. The compiled delivery passed `--help` only; no compiled gameplay, physical-audio or FPS qualification is claimed.
 
