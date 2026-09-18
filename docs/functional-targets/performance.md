@@ -1,6 +1,6 @@
 # Performance and fidelity acceptance
 
-The current executable is `07d54ae`. Older installed/pending labels below describe their recorded checkpoints. Current whole-game FPS is not established by those component experiments.
+The current executable is `1205372`, including GL array-layout reuse and direct native scalar stores. Its build/source guards and `--help` passed; the latest compiled gameplay check remains `065259c`. Older installed/pending labels below describe their recorded checkpoints. Current whole-game FPS is not established by those component experiments.
 
 The September 18 delivery reuses MD5 poses between color/shadow passes, indexes pose lookup, skips unused shadow-only color work, and replaces native interpreter canonical-address shifts with equivalent range checks. Paired component results and exact-output boundaries are recorded in [the integration evidence](integration-20260918.md#performance-changes). These gains are not additive and do not establish gameplay FPS. Native Q2 rerelease saved-world opening still took 155.206 seconds in its last actual continuation workflow; load performance needs further work.
 
@@ -91,7 +91,7 @@ Forty-five exact prepared-output comparisons and a per-corner lighting trace mat
 
 ## Installed optimization delivery
 
-`065259c` includes the MD3 and MD2 changes above. Its [exact-binary GL follow-up](../../.artifacts/resume-20260918/compiled-mixed-065259c/RESULT.md) passed a bounded mixed scene and normal Quit with unchanged guards. This establishes delivery and the inspected runtime result, not a performance comparison. The component gains above remain the measured performance evidence.
+Installed `1205372` includes the MD3 and MD2 changes above, plus the GL layout and scalar-store changes below. Its [delivery receipt](../../.artifacts/resume-20260918/final-1205372/installed-build.json) records build/source guards and `--help`, not a new gameplay or performance run. The preceding `065259c` [exact-binary GL follow-up](../../.artifacts/resume-20260918/compiled-mixed-065259c/RESULT.md) passed a bounded mixed scene and normal Quit with unchanged guards. This establishes delivery and the inspected runtime result, not a performance comparison. The component gains above remain the measured performance evidence.
 
 ## Bounded GL array-layout reuse
 
@@ -99,7 +99,7 @@ The shared geometry buffer now retains up to eight typed-array layouts on its ex
 
 Nine alternating-order component samples measured small alternating layouts at 0.413 → 0.162 microseconds per pack and medium alternating layouts at 1.007 → 0.738 microseconds. Same-layout controls were effectively unchanged. More than eight recurring layouts can miss the cache and pay the bounded scan. [Measurements and limits](../../.artifacts/resume-20260918/gl-layout-cache/receipt.md).
 
-The exact source passed strict/policy checks and three buffer tests with 805 assertions, including actual GL rendering: complete RGBA and all 256 depth values matched fresh packing on two retained-buffer frames, with failure cleanup and draw ownership preserved. [Native result](../../.artifacts/resume-20260918/gl-layout-native/RESULT.md). Installed `065259c` predates this qualified source change; it makes no whole-frame or GPU-speed claim.
+The exact source passed strict/policy checks and three buffer tests with 805 assertions, including actual GL rendering: complete RGBA and all 256 depth values matched fresh packing on two retained-buffer frames, with failure cleanup and draw ownership preserved. [Native result](../../.artifacts/resume-20260918/gl-layout-native/RESULT.md). Installed `1205372` includes this qualified source change. The source result makes no whole-frame or GPU-speed claim and is not a gameplay check of the new executable.
 
 ## Direct native scalar stores
 
@@ -107,4 +107,4 @@ The guest memory owner now writes typed scalar values directly into a validated 
 
 The existing memory suite passed 15 tests with 481 assertions. Three paired 120,003-instruction interpreter runs preserved complete processor and memory state and reduced component time by 12.9–20.0% (16.2% across the three pairs). The final two paths passed strict/policy checks. [Component evidence](../../.artifacts/resume-20260918/scalar-store-direct/freeze/RESULT.md).
 
-The [actual native component workflow](../../.artifacts/resume-20260918/scalar-store-native/receipt.json) also passed public external-profile installation, Q2Eaks code controlling a Q3 rocket, save/load, immediate restored state, and matching 500 ms continuation. All 2,582 inputs remained unchanged and processes were reaped. Its 56.801-second elapsed time is correctness evidence from one run, not a native performance comparison. This qualified source change is newer than installed `065259c`.
+The [actual native component workflow](../../.artifacts/resume-20260918/scalar-store-native/receipt.json) also passed public external-profile installation, Q2Eaks code controlling a Q3 rocket, save/load, immediate restored state, and matching 500 ms continuation. All 2,582 inputs remained unchanged and processes were reaped. Its 56.801-second elapsed time is correctness evidence from one run, not a native performance comparison. Installed `1205372` includes this qualified source change; this source workflow is not a gameplay check of the new executable.

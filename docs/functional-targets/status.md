@@ -1,8 +1,8 @@
 # Functional target status
 
-**22/23 functional targets complete in accepted source; T19 remains open.** T10 now includes the external native declaration path and saved profile identity. Those changes are included in installed `065259c`, alongside MD3/MD2 preparation optimizations. Source acceptance covers implementations and their public consumers. Full campaigns, native peers, physical devices, and whole-game performance retain the explicit limits below.
+**22/23 functional targets complete in accepted source; T19 remains open.** T10 now includes the external native declaration path and saved profile identity. Those changes are included in installed `1205372`, alongside MD3/MD2 preparation optimizations, the player-preference registration fix, GL array-layout reuse, and direct native scalar stores. Source acceptance covers implementations and their public consumers. Full campaigns, native peers, physical devices, and whole-game performance retain the explicit limits below.
 
-Installed executable is `065259c21ca0d663c702ea9cbbc0e05ae0adbd90` and includes the accepted source changes. Exact installed identity is recorded in [execution status](../execution-status.md).
+Installed executable is `120537263643fb303f3f6d24ed51252fd4635472` and includes the accepted source changes. Build/source guards and `--help` passed; the latest compiled gameplay check remains `065259c`. Exact installed identity and separate source qualifications are recorded in [execution status](../execution-status.md).
 
 The accepted [Application](../../src/app/bootstrap/application.ts) now consumes substantial content, local-input, HUD, progression, mode, campaign, save and tool work. The table separates those integrations from remaining implementation and verification. It does not repeat obsolete blanket instructions to join code that already has callers.
 
