@@ -2,7 +2,20 @@ import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { CommandDialect } from "../../../src/contracts/common.ts";
 import { CvarFlag, CvarRegistry, Q2CvarFlag } from "../../../src/core/cvars/index.ts";
-import { readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "../../../src/app/bootstrap/frame-time.ts";
+import { q3ServerPaused, readFrameTimeControls, registerFrameTimeCvars, sourceFrameMilliseconds } from "../../../src/app/bootstrap/frame-time.ts";
+
+test("Q3 requested pause permits one connected human and rejects a second", () => {
+  const cvars = new CvarRegistry({ dialect: "q3", context: { session: createIdentityOwner("q3-pause").session, origin: { kind: "server-console" } } });
+  expect(q3ServerPaused(cvars, false, 1)).toBe(false);
+  expect(q3ServerPaused(cvars, true, 0)).toBe(true);
+  expect(q3ServerPaused(cvars, true, 1)).toBe(true);
+  expect(cvars.variableValue("sv_paused")).toBe(1);
+  expect(q3ServerPaused(cvars, false, 1)).toBe(false);
+  expect(cvars.variableValue("sv_paused")).toBe(1);
+  expect(q3ServerPaused(cvars, true, 2)).toBe(false);
+  expect(cvars.variableValue("sv_paused")).toBe(0);
+  cvars.set("sv_paused", "1"); expect(cvars.variableValue("sv_paused")).toBe(0);
+});
 
 const defaults = { timescale: 1, fixedtime: 0, hostFramerate: 0, cameraMode: 0 };
 const local = { dedicated: false, localServer: true };

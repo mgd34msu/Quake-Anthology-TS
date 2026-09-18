@@ -10,6 +10,7 @@ export interface ServerDataParamsT {
     attractloop: boolean;
     gamedir: string;
     clientnum: number;
+    clientnums?: readonly number[];
     levelname: string;
     serverState: number;
     r1q2Version?: number;
@@ -42,6 +43,7 @@ export interface ServerDataReadResultT {
     attractloop: boolean;
     gamedir: string;
     clientnum: number;
+    clientnums?: readonly number[];
     levelname: string;
     serverState: number;
     r1q2Version?: number;

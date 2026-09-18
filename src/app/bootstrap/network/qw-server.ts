@@ -48,6 +48,10 @@ export class QwServerNetwork implements ApplicationNetwork {
     readonly wire: ApplicationNetwork['wire'] = { kind: 'source', protocol };
     private host: QwApplicationServerHost;
     private readonly peers: Peer[] = [];
+    clientPings(): ReadonlyMap<ClientId, number> { return new Map(this.peers.filter(peer => peer.active).map(peer => {
+        const samples = [...peer.pingFrames.values()].filter(frame => frame.ping > 0);
+        return [peer.player.client, samples.length === 0 ? 9999 : Math.trunc(samples.reduce((sum, frame) => sum + frame.ping, 0) / samples.length)];
+    })); }
     private readonly connectionless: QuakeWorldConnectionlessServer;
     private readonly masterHeartbeat = new QuakeWorldMasterHeartbeat();
     private ended = false;
@@ -109,6 +113,12 @@ export class QwServerNetwork implements ApplicationNetwork {
             if (args.length === 1) peer.messageLevel = nativeAtoi(args[0] ?? '');
             this.clientPrint(peer, 2, `${args.length === 1 ? 'Msg level set to' : 'Current msg level is'} ${peer.messageLevel}\n`);
             return true;
+        }
+        if (name === 'ping' || name === 'status') {
+            const pings = this.clientPings();
+            const text = name === 'ping' ? `Client ping times:\n${this.peers.filter(other => other.active).map(other => `${pings.get(other.player.client) ?? 9999} ${this.host.clientInfo(other.player).get('name') ?? 'unnamed'}\n`).join('')}`
+                : this.host.administration?.status() ?? `players: ${this.peers.length} active (${this.host.maxClients} max)\n${this.peers.map(other => `#${other.player.slot + 1} ${this.host.clientInfo(other.player).get('name') ?? 'unnamed'}\n`).join('')}`;
+            this.clientPrint(peer, 2, text); return true;
         }
         if (name === 'pings') {
             for (const other of [...this.peers]) if (other.active) {

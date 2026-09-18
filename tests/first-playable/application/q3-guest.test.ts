@@ -1,3 +1,7 @@
+import { CommonError } from '../../../src/core/common-error.ts';
+import { Q3ClientNetwork } from '../../../src/app/bootstrap/network/q3-client.ts';
+import { UdpTransport } from '../../../src/network/common/transport.ts';
+import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import { readSaveImage } from "../../../src/persistence/save-image.ts";
 import { Q3PresentationAudio } from "../../../src/content/q3/presentation/audio.ts";
 import { ApplicationAudio } from "../../../src/app/bootstrap/audio.ts";
@@ -63,10 +67,9 @@ test('selected LRCTF application executes actual qagame on the shared scene and 
       expect(() => app.simulation.step({ elapsedMilliseconds: 50, commands: [] })).toThrow('awaited');
       await expect(app.loadGame(join(root, 'missing.sav'))).rejects.toThrow('hosting a network game');
       await expect(app.saveGame(join(root, 'missing.sav'))).rejects.toThrow('hosting a network game');
-      app.queueCommand('addbot', [], null); app.queueCommand('map_restart', [], null);
+      app.queueCommand('addbot', [], null);
       await app.step(50);
       expect(printed.some(text => text.includes('Q3 guest command addbot is unsupported'))).toBe(true);
-      expect(printed.some(text => text.includes('Q3 guest command map_restart is unsupported'))).toBe(true);
       expect(guest.state.cvars.variableValue('bot_enable')).toBe(0);
     } finally { await app.close(); }
     expect(() => guest.records.entity(0)).toThrow('retired');
@@ -608,3 +611,128 @@ test('failed second local guest client preparation retires both guest module own
     for (const module of modules) await expect(module.keyEvent(27, true)).rejects.toThrow('retired');
   } finally { initialize.mockRestore(); await rm(root, { recursive: true, force: true }); }
 }, 120000);
+
+
+test('offline LRCTF Application changes maps and restarts with retained source clients', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'q3-guest-public-travel-'));
+  const launch = { ...options(root), network: { kind: 'offline' } } satisfies Parameters<typeof Application.open>[0];
+  const directory = userProductDirectory(root, 'q3a/lrctf');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'autoexec.cfg'), 'set g_gametype 4\n');
+  const app = await Application.open(launch, { print: () => undefined });
+  const initialize = spyOn(QvmGame.prototype, 'initializeAsync');
+  const connects = spyOn(QvmGame.prototype, 'clientConnectAsync');
+  const shutdown = spyOn(QvmGame.prototype, 'shutdownAsync');
+  try {
+    const initial = app.simulation.q3Guest(); if (initial === null) throw new Error('Missing qagame');
+    const client = app.session.createClient(0);
+    const admission = await initial.connect(client.id, '\\name\\Travel Player\\model\\sarge\\ip\\localhost');
+    if (admission.kind !== 'accepted') throw new Error(admission.reason);
+    await initial.begin(admission.player, { serverTime: 0, angles: [0, 0, 0], forwardmove: 0, rightmove: 0, upmove: 0, buttons: 0, weapon: 2 });
+    await initial.command(admission.player, ['team', 'red']);
+    await app.step(50);
+    connects.mockClear();
+    expect(initial.game.data.copyPlayerState(0).persistent[3]).toBe(1);
+    await app.changeLevel('q3ctf2');
+    const destination = app.simulation.q3Guest(); if (destination === null) throw new Error('Missing destination qagame');
+    expect(initial.isRetired).toBe(true);
+    expect(destination.state.cvars.variableString('mapname')).toBe('q3ctf2');
+    expect(destination.player(client.id)?.client).toBe(client.id);
+    expect(destination.game.data.copyPlayerState(0).persistent[3]).toBe(1);
+    expect(connects.mock.calls).toEqual([[0, false, false]]);
+    expect(shutdown.mock.calls).toEqual([[false]]);
+    expect(initialize.mock.calls[0]?.[2]).toBe(false);
+    await app.step(50);
+    app.queueCommand('map_restart', ['0'], null);
+    await app.step(50);
+    const restarted = app.simulation.q3Guest(); if (restarted === null) throw new Error('Missing restarted qagame');
+    expect(destination.isRetired).toBe(true);
+    expect(restarted.player(client.id)?.client).toBe(client.id);
+    expect(restarted.state.cvars.variableString('mapname')).toBe('q3ctf2');
+    expect(restarted.game.data.copyPlayerState(0).persistent[3]).toBe(1);
+    expect(shutdown.mock.calls).toEqual([[false], [true]]);
+    expect(initialize.mock.calls.map(call => call[2])).toEqual([false, true]);
+    expect(connects.mock.calls).toEqual([[0, false, false], [0, false, false]]);
+    expect(client.isClosed).toBe(false);
+    await app.step(50);
+  } finally {
+    try { await app.close(); } finally { initialize.mockRestore(); connects.mockRestore(); shutdown.mockRestore(); await rm(root, { recursive: true, force: true }); }
+  }
+}, 60000);
+
+
+test('network LRCTF map replacement retains the peer and begins once per new gamestate', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'q3-guest-network-travel-'));
+  const directory = userProductDirectory(root, 'q3a/lrctf'); mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'autoexec.cfg'), 'set g_gametype 4\nset sv_pure 0\n');
+  const app = await Application.open(options(root), { print: () => undefined });
+  const remote = app.networkAddress;
+  if (remote === null || remote.kind !== 'ipv4') throw new Error('Missing Q3 network listener');
+  const transport = await UdpTransport.bind({ host: '127.0.0.1', port: 0 });
+  let gameStates = 0, snapshots = 0, now = 0;
+  const identity = createIdentityOwner('guest-travel-peer');
+  const peer = new Q3ClientNetwork({ transport, remote, qport: 4123, host: {
+    identity: { client: identity.client(0, 0), seat: null }, downloading: false,
+    userinfo: () => '\\password\\survivor\\name\\Travel Peer\\model\\sarge/default\\rate\\25000\\snaps\\20',
+    attach() {}, command() { throw new Error('No actor command is needed for signon'); },
+    disconnected(reason) { throw new Error(reason); }, print() {}, clearActive() {}, async systemInfo() {},
+    async gamestate() { gameStates++; }, snapshot() { snapshots++; }, downloadSize: size => size,
+    async download() { throw new Error('Installed guest fixture requires no downloads'); }, mapRestart() {},
+  } });
+  let refusedPeer: Q3ClientNetwork | null = null;
+  const begin = spyOn(QvmGame.prototype, 'clientBeginAsync'), connect = spyOn(QvmGame.prototype, 'clientConnectAsync');
+  const disconnected = spyOn(QvmGame.prototype, 'clientDisconnectAsync');
+  async function exchange() { now += 50; await peer.poll(now); await refusedPeer?.poll(now); await Bun.sleep(1); await app.step(50); await Bun.sleep(1); await peer.poll(now + 1); await refusedPeer?.poll(now + 1); }
+  try {
+    for (let count = 0; count < 80 && snapshots === 0; count++) await exchange();
+    expect(gameStates).toBe(1); expect(snapshots).toBeGreaterThan(0);
+    const previous = app.simulation.q3Guest(), client = app.networkClients[0]?.client;
+    if (previous === null || client === undefined) throw new Error('Peer admission missing');
+    for (let count = 0; count < 22; count++) await exchange();
+    peer.command('team red'); for (let count = 0; count < 4; count++) await exchange();
+    expect(previous.game.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
+    begin.mockClear(); connect.mockClear();
+    await app.changeLevel('q3ctf2');
+    expect(previous.isRetired).toBe(true); expect(begin).not.toHaveBeenCalled();
+    const destination = app.simulation.q3Guest(); if (destination === null) throw new Error('Missing destination');
+    expect(destination.player(client)?.client).toBe(client);
+    for (let count = 0; count < 80 && (gameStates < 2 || begin.mock.calls.length === 0); count++) await exchange();
+    expect(gameStates).toBe(2); expect(begin.mock.calls).toEqual([[client.slot]]);
+    expect(connect.mock.calls).toEqual([[client.slot, false, false]]);
+    expect(app.networkClients[0]?.client).toBe(client);
+    expect(destination.game.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
+    expect(q3InfoValue(peer.native?.gameState.get(0) ?? '', 'mapname')).toBe('q3ctf2');
+    let refusedSnapshots = 0;
+    const refusalReasons: string[] = [];
+    refusedPeer = new Q3ClientNetwork({ remote, qport: 4124, transport: await UdpTransport.bind({ host: '127.0.0.1', port: 0 }), host: {
+      identity: { client: identity.client(1, 0), seat: null }, downloading: false,
+      userinfo: () => '\\name\\Refused Peer\\model\\sarge/default\\rate\\25000\\snaps\\20',
+      attach() {}, command() { throw new Error('No fixture actor command'); }, disconnected(reason) { refusalReasons.push(reason); },
+      print() {}, clearActive() {}, async systemInfo() {}, async gamestate() {}, snapshot() { refusedSnapshots++; },
+      downloadSize: size => size, async download() { throw new Error('No fixture download'); }, mapRestart() {},
+    } });
+    for (let count = 0; count < 80 && refusedSnapshots === 0; count++) await exchange();
+    expect(refusedSnapshots).toBeGreaterThan(0);
+    const refusedClient = app.networkClients.find(player => !player.client.equals(client))?.client;
+    if (refusedClient === undefined) throw new Error('Second peer was not admitted');
+    destination.state.cvars.set('g_password', 'survivor', true);
+    disconnected.mockClear(); begin.mockClear(); connect.mockClear();
+    await app.changeLevel('q3ctf1');
+    const finalGuest = app.simulation.q3Guest(); if (finalGuest === null) throw new Error('Surviving world missing');
+    expect(app.networkClients.map(player => player.client)).toEqual([client]);
+    expect(finalGuest.player(refusedClient)).toBeNull();
+    expect(app.session.clientAt(refusedClient.slot)).toBeNull();
+    expect(disconnected.mock.calls).toEqual([[refusedClient.slot]]);
+    for (let count = 0; count < 80 && (gameStates < 3 || begin.mock.calls.length === 0); count++) await exchange();
+    expect(gameStates).toBe(3); expect(begin.mock.calls).toEqual([[client.slot]]);
+    const rejectedConnection = refusedPeer.native;
+    if (rejectedConnection === null) throw new Error('Refused peer lost its packet decoder');
+    for (let sequence = rejectedConnection.lastExecutedServerCommand + 1; sequence <= rejectedConnection.serverCommandSequence; sequence++) {
+      try { await rejectedConnection.getServerCommand(sequence); }
+      catch (error) { if (!(error instanceof CommonError) || error.code !== 'server-disconnect') throw error; refusalReasons.push(error.message); }
+    }
+    expect(refusalReasons.join(' ')).toContain('Invalid password');
+    expect(finalGuest.game.data.copyPlayerState(client.slot).persistent[3]).toBe(1);
+
+  } finally { refusedPeer?.close(); peer.close(); try { await app.close(); } finally { begin.mockRestore(); connect.mockRestore(); disconnected.mockRestore(); await rm(root, { recursive: true, force: true }); } }
+}, 60000);

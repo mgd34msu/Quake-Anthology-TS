@@ -169,9 +169,6 @@ export class Q3ServerNetwork implements ApplicationNetwork {
       } catch (error) { if (error instanceof Q3GameCallbackError) throw error; if (this.ended) break; this.host.print(error instanceof Error ? error.message : String(error)); }
     }
     if (this.ended) { this.pending = []; return []; }
-    const masters = this.host.administration?.masters() ?? [];
-    if (masters.length > 0 && this.options.transport.address.kind !== 'ipx') this.masterHeartbeat.send(masters, this.now, true);
-    for (const peer of this.peers.values()) if (this.now - peer.lastReceived > (this.options.timeoutMilliseconds ?? 30000)) await this.disconnectClient(peer.player.client, 'timed out');
     const commands = this.pending; this.pending = []; return commands;
   }
   submit(_commands: readonly ActorCommand[], _now: number): void {}
@@ -182,6 +179,9 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     if (this.ended) return; this.now = Math.trunc(nowMilliseconds);
     await this.receiveEvents(events);
     if (this.ended) return;
+    const masters = this.host.administration?.masters() ?? [];
+    if (masters.length > 0 && this.options.transport.address.kind !== 'ipx') this.masterHeartbeat.send(masters, this.now, true);
+    for (const peer of this.peers.values()) if (this.now - peer.lastReceived > (this.options.timeoutMilliseconds ?? 30000)) await this.disconnectClient(peer.player.client, 'timed out');
     for (const peer of this.peers.values()) if (peer.connection.phase !== 'connected' && this.host.time() >= peer.connection.nextSnapshotTime) {
       this.snapshot(peer);
     }
@@ -250,7 +250,9 @@ export class Q3ServerNetwork implements ApplicationNetwork {
     while (peer.connection.channel.hasUnsentFragments) peer.connection.transmitNextFragment(delivery);
     peer.connection.phase = 'zombie';
   }
-  changeWorld(host: Q3ApplicationServerHost): Promise<void> { return this.operation(() => this.replaceWorld(host)); }
+  changeWorld(host: Q3ApplicationServerHost, rejected: readonly { readonly client: ClientId; readonly reason: string }[] = []): Promise<void> {
+    return this.operation(() => this.replaceWorld(host, rejected));
+  }
   restartSourceRound(run: (round: Q3NetworkRoundRestart) => Promise<void>, onMutation?: () => undefined): Promise<void> {
     return this.operation(async () => {
       const binding = this.host.sourceRound;
@@ -320,9 +322,18 @@ export class Q3ServerNetwork implements ApplicationNetwork {
       } finally { lifecycle.phase = 'closed'; }
     });
   }
-  private async replaceWorld(host: Q3ApplicationServerHost): Promise<void> {
-    this.requireSupported(host); const carried = [...this.peers.values()].map(peer => ({ peer, player: host.carriedPlayer(peer.player.client) }));
+  private async replaceWorld(host: Q3ApplicationServerHost, rejected: readonly { readonly client: ClientId; readonly reason: string }[]): Promise<void> {
+    this.requireSupported(host);
+    const refused = new Map<number, string>();
+    for (const entry of rejected) {
+      const peer = this.peers.get(entry.client.slot);
+      if (peer === undefined || !peer.player.client.equals(entry.client) || refused.has(peer.slot))
+        throw new Error('Q3 map rejection does not identify one carried peer');
+      refused.set(peer.slot, entry.reason);
+    }
+    const carried = [...this.peers.values()].filter(peer => !refused.has(peer.slot)).map(peer => ({ peer, player: host.carriedPlayer(peer.player.client) }));
     this.host = host; this.serverId++; this.restartedServerId = this.serverId; this.serverFlags = this.serverFlags === 0 ? 4 : 0; this.pending = []; this.checksumFeed = (this.options.random() << 16) ^ this.options.random(); this.changedWorld = true;
+    for (const entry of rejected) await this.disconnectClient(entry.client, entry.reason);
     for (const { peer, player } of carried) { peer.player = player; await q3GameCallback(() => this.host.userinfo(player, peer.userinfo)); this.assertPeer(peer); peer.download.close(); peer.connection.deltaMessage = -1; peer.connection.phase = 'connected'; }
   }
   close(): Promise<void> {

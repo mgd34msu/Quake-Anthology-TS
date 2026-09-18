@@ -1,3 +1,6 @@
+import { q2KexSeatUserinfo, q2KexClientUserinfo } from '../../../network/q2/handshake.ts';
+import { KexLanTransport } from '../../../network/q2/kex/lan.ts';
+import type { DatagramTransport } from '../../../network/common/transport.ts';
 import { Q2GameCallbackError } from './types.ts';
 import type { DemoRecordingSink } from '../demo-recording.ts';
 import { Q2ClientReceiver } from './q2-client-receiver.ts';
@@ -31,11 +34,13 @@ function joinPackets(packets: readonly Uint8Array[]): Uint8Array {
     }
     return bytes;
 }
+interface ServerSplit { player: Q2ApplicationPlayer; replay: Q2CommandReplay; sequence: number; }
 interface ServerPeer<TAddress extends NetworkAddress> {
     readonly download: Q2PeerDownload;
     downloadFailure: string | null;
     remote: TAddress;
     player: Q2ApplicationPlayer;
+    readonly splits: ServerSplit[];
     readonly channel: Q2Channel;
     readonly wire: Q2WireCodec;
     replay: Q2CommandReplay;
@@ -53,8 +58,10 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
     readonly wire: WireSelection;
     private acceptConnection(remote: TAddress): void {
         const url = this.options.host.downloads?.httpServer?.() ?? null;
-        this.reply(remote, `client_connect${url === null ? '' : ` dlserver=${url.href}`}`);
+        this.reply(remote, `client_connect${this.host.protocol.kind === 'q2-kex' ? ' 2023' : ''}${url === null ? '' : ` dlserver=${url.href}`}`);
     }
+    private readonly transport: DatagramTransport<TAddress>;
+    private readonly lan: KexLanTransport<TAddress> | null;
     private readonly masterHeartbeat: MasterHeartbeat;
     private ended = false;
     private readonly peers = new Map<string, ServerPeer<TAddress>>();
@@ -63,18 +70,20 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
     private host: Q2ApplicationServerHost;
     private serverGeneration = 1;
     constructor(readonly options: Q2ServerNetworkOptions<TAddress>) {
-        this.masterHeartbeat = new MasterHeartbeat(q2DiscoveryWire(options.host.protocol, () => { const discovery = this.host.discovery; if (discovery === undefined) throw new Error('Q2 master publication requires source status'); return discovery.status(); }), options.transport);
+        this.lan = options.host.protocol.kind === 'q2-kex' ? new KexLanTransport(options.transport, { role: 'host', localPlayers: 0, maxPlayers: options.host.maxClients, name: 'Quake II' }) : null;
+        this.transport = this.lan ?? options.transport;
+        this.masterHeartbeat = new MasterHeartbeat(q2DiscoveryWire(options.host.protocol, () => { const discovery = this.host.discovery; if (discovery === undefined) throw new Error('Q2 master publication requires source status'); return discovery.status(); }), this.transport);
         this.host = options.host;
         const supported = options.host.supportsSourceWire();
         if (supported.kind === 'unsupported')
             throw new Error(`Native Q2 wire is unavailable: ${supported.reasons.join('; ')}`);
-        if (options.host.protocol.kind === 'q2-kex' || options.host.protocol.kind === 'q2-kex-demo')
+        if (options.host.protocol.kind === 'q2-kex-demo')
             throw new Error('KEX native live transport is unbound');
         this.wire = { kind: 'source', protocol: options.host.protocol };
         this.challenges = new Q2ChallengeTable(options.random);
     }
     get phase(): ApplicationNetworkPhase { return this.ended ? 'closed' : 'active'; }
-    get clients(): readonly Q2ApplicationPlayer[] { return [...this.peers.values()].map(peer => peer.player); }
+    get clients(): readonly Q2ApplicationPlayer[] { return [...this.peers.values()].flatMap(peer => [peer.player, ...peer.splits.map(split => split.player)]); }
     changeWorld(host: Q2ApplicationServerHost): void {
         const support = host.supportsSourceWire();
         if (support.kind === 'unsupported')
@@ -88,7 +97,9 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         for (const { peer, player } of players) {
             this.closeDownload(peer);
             peer.player = player;
-            this.host.userinfo(player, peer.userinfo);
+            for (const split of peer.splits) { split.player = host.carriedPlayer(split.player.client); split.replay = new Q2CommandReplay(); }
+            this.host.userinfo(player, peer.wire.protocol.kind === 'q2-kex' ? q2KexSeatUserinfo(peer.userinfo, 0) : peer.userinfo);
+            for (let seat = 0; seat < peer.splits.length; seat++) { const split = peer.splits[seat]; if (split !== undefined) this.host.userinfo(split.player, q2KexSeatUserinfo(peer.userinfo, seat + 1)); }
             peer.active = false;
             peer.frames.clear();
             peer.gameState = null;
@@ -98,32 +109,32 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             this.reliable(peer, { kind: 'reconnect' });
         }
     }
-    private reply(remote: TAddress, text: string): void { this.options.transport.send(remote, q2OutOfBand(text)); }
+    private reply(remote: TAddress, text: string): void { this.transport.send(remote, q2OutOfBand(text, this.host.protocol.kind === 'q2-kex')); }
     heartbeat(nowMilliseconds: number): void { if (!this.ended) this.masterHeartbeat.send(this.host.masters?.() ?? [], nowMilliseconds, true, true); }
     disconnectClient(client: ClientId, reason: string): boolean {
-        const peer = [...this.peers.values()].find(peer => peer.player.client.equals(client));
+        const peer = [...this.peers.values()].find(peer => peer.player.client.equals(client) || peer.splits.some(split => split.player.client.equals(client)));
         if (peer === undefined) return false;
         try {
             this.reliable(peer, { kind: 'print', level: 2, text: `${reason}\n` });
             this.reliable(peer, { kind: 'disconnect' });
-            peer.channel.send(this.options.transport, peer.remote, new Uint8Array(0), performance.now());
+            peer.channel.send(this.transport, peer.remote, new Uint8Array(0), performance.now());
         } finally { this.drop(peer, reason); }
         return true;
     }
     private drop(peer: ServerPeer<TAddress>, reason: string): void {
         this.closeDownload(peer);
         this.peers.delete(addressKey(peer.remote));
-        this.pending = this.pending.filter(command => command.source.kind !== 'remote-client' || !command.source.client.equals(peer.player.client));
-        this.host.disconnect(peer.player, reason);
+        this.pending = this.pending.filter(command => command.source.kind !== 'remote-client' || ![peer.player, ...peer.splits.map(split => split.player)].some(player => command.source.kind === 'remote-client' && command.source.client.equals(player.client)));
+        for (const player of [peer.player, ...peer.splits.map(split => split.player)]) this.host.disconnect(player, reason);
     }
     private async connectionless(remote: TAddress, bytes: Uint8Array, now: number): Promise<boolean> {
-        const message = readQ2OutOfBand(bytes);
+        const message = readQ2OutOfBand(bytes, this.host.protocol.kind === 'q2-kex');
         if (message === null)
             return false;
         switch (message.command) {
             case 'rcon': {
                 const administration = this.host.administration;
-                if (administration !== undefined) await handleQ2Rcon({ ...administration, reply: (_to, payload) => { this.options.transport.send(remote, payload); } }, remote, message, now);
+                if (administration !== undefined) await handleQ2Rcon({ ...administration, reply: (_to, payload) => { this.transport.send(remote, payload); } }, remote, message, now);
                 return true;
             }
             case 'status':
@@ -138,7 +149,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 break;
             }
             case 'getchallenge':
-                this.options.transport.send(remote, this.challenges.reply(remote, now, [this.host.protocol]));
+                this.transport.send(remote, this.challenges.reply(remote, now, [this.host.protocol]));
                 break;
             case 'ping':
                 this.reply(remote, 'ack');
@@ -149,7 +160,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     this.reply(remote, 'print\nUnsupported protocol.\n');
                     break;
                 }
-                if (!this.challenges.validate(remote, request.challenge)) {
+                if (!(request.protocol.kind === 'q2-kex' ? this.lan?.admitted(remote) === true : this.challenges.validate(remote, request.challenge))) {
                     this.reply(remote, 'print\nBad challenge.\n');
                     break;
                 }
@@ -158,20 +169,28 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     this.acceptConnection(remote);
                     break;
                 }
-                if (this.peers.size >= this.host.maxClients) {
+                if (this.clients.length + (request.socialIds?.length ?? 1) > this.host.maxClients) {
                     this.reply(remote, 'print\nServer is full.\n');
                     break;
                 }
-                const admitted = this.host.admit(remote, request);
+                const admitted = this.host.admit(remote, { ...request, splitSeat: 0, ...(request.socialIds === undefined ? {} : { socialIds: request.socialIds.slice(0, 1) }) });
                 if (admitted.kind === 'rejected') {
                     this.reply(remote, `print\n${admitted.reason}\n`);
                     break;
                 }
+                const splits: ServerSplit[] = [];
+                let failure: string | null = null;
+                for (let seat = 1; seat < (request.socialIds?.length ?? 1); seat++) {
+                    const additional = this.host.admit(remote, { ...request, splitSeat: seat, socialIds: request.socialIds?.slice(seat, seat + 1) ?? [] });
+                    if (additional.kind === 'rejected') { failure = additional.reason; break; }
+                    splits.push({ player: additional.player, replay: new Q2CommandReplay(), sequence: 0 });
+                }
+                if (failure !== null) { for (const player of [admitted.player, ...splits.map(split => split.player)]) this.host.disconnect(player, failure); this.reply(remote, `print\n${failure}\n`); break; }
                 const configured = this.host.protocol, offered = request.protocol;
                 const protocol = configured.kind === 'q2-r1q2' && offered.kind === 'q2-r1q2' && configured.revision < offered.revision ? configured
                     : configured.kind === 'q2-q2pro' && offered.kind === 'q2-q2pro' && configured.revision < offered.revision ? configured : offered;
-                const peer: ServerPeer<TAddress> = { remote, player: admitted.player, download: new Q2PeerDownload(), downloadFailure: null,
-                    channel: new Q2Channel({ maxDatagramBytes: this.options.transport.maxDatagramBytes ?? 65507, side: 'server', protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes, compress: request.compression }),
+                const peer: ServerPeer<TAddress> = { remote, player: admitted.player, splits, download: new Q2PeerDownload(), downloadFailure: null,
+                    channel: new Q2Channel({ maxDatagramBytes: this.transport.maxDatagramBytes ?? 65507, side: 'server', protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes, compress: request.compression }),
                     wire: new Q2WireCodec(protocol), replay: new Q2CommandReplay(), frames: new Map<number, Q2WireFrame>(), gameState: null, active: false, sequence: 0, lastReceived: now, datagram: [], userinfo: request.userinfo };
                 this.peers.set(addressKey(remote), peer);
                 this.acceptConnection(remote);
@@ -201,8 +220,9 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         peer.active = false;
         peer.frames.clear();
         peer.replay = new Q2CommandReplay();
+        for (const split of peer.splits) split.replay = new Q2CommandReplay();
         peer.datagram = [];
-        const original = this.host.gameState(peer.player, peer.wire.protocol), state = { ...original, data: { ...original.data, servercount: this.serverGeneration } };
+        const original = this.host.gameState(peer.player, peer.wire.protocol), state = { ...original, data: { ...original.data, servercount: this.serverGeneration, ...(peer.splits.length === 0 ? {} : { clientnums: [peer.player, ...peer.splits.map(split => split.player)].map(player => player.sourceEntity - 1) }) } };
         peer.gameState = state;
         this.reliable(peer, { kind: 'server-data', data: state.data });
         this.stuff(peer, `cmd configstrings ${state.data.servercount} 0\n`);
@@ -234,7 +254,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         else
             this.stuff(peer, `precache ${state.data.servercount}\n`);
     }
-    private clientCommand(peer: ServerPeer<TAddress>, text: string): void {
+    private clientCommand(peer: ServerPeer<TAddress>, text: string, player = peer.player): void {
         if (this.host.expandClientCommand !== undefined) {
             const expanded = this.host.expandClientCommand(text); if (expanded === undefined) return; text = expanded;
         }
@@ -265,7 +285,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 return;
             }
             if (name === 'begin') {
-                if (!peer.active) this.host.begin?.(peer.player);
+                if (!peer.active) for (const admitted of [peer.player, ...peer.splits.map(split => split.player)]) this.host.begin?.(admitted);
                 peer.active = true;
                 return;
             }
@@ -273,27 +293,30 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             return;
         }
         if (peer.active) {
-            if (this.host.commandText !== undefined) this.host.commandText(peer.player, text);
-            else this.host.command(peer.player, name, words.slice(1));
+            if (this.host.commandText !== undefined) this.host.commandText(player, text);
+            else this.host.command(player, name, words.slice(1));
         }
     }
     private process(peer: ServerPeer<TAddress>, result: Extract<Q2ChannelReceive, {
         kind: 'message';
     }>): void {
-        const records = readQ2ClientMessages(peer.wire, result.bytes, result.sequence);
-        for (const { event } of records) {
+        const records = readQ2ClientMessages(peer.wire, result.bytes, result.sequence, peer.splits.length + 1);
+        for (const { event, seat = 0 } of records) {
+            const owner = seat === 0 ? peer : peer.splits[seat - 1];
+            if (owner === undefined) throw new Error('Missing admitted Q2 split owner');
             switch (event.kind) {
                 case 'move':
                 case 'batch-move':
                     if (peer.active)
-                        peer.replay.execute(event, result.dropped, command => { const input = this.host.input(peer.player, command, peer.sequence++); if (input !== null) this.pending.push(input); });
+                        owner.replay.execute(event, result.dropped, command => { const input = this.host.input(owner.player, command, owner.sequence++); if (input !== null) this.pending.push(input); });
                     break;
                 case 'command':
-                    this.clientCommand(peer, event.text);
+                    this.clientCommand(peer, event.text, owner.player);
                     if (this.peers.get(addressKey(peer.remote)) !== peer) return;
                     break;
                 case 'userinfo':
-                    this.host.userinfo(peer.player, event.text);
+                    this.host.userinfo(peer.player, peer.wire.protocol.kind === 'q2-kex' ? q2KexSeatUserinfo(event.text, 0) : event.text);
+                    for (let seat = 0; seat < peer.splits.length; seat++) { const split = peer.splits[seat]; if (split !== undefined) this.host.userinfo(split.player, q2KexSeatUserinfo(event.text, seat + 1)); }
                     peer.userinfo = event.text;
                     break;
                 case 'userinfo-delta':
@@ -307,13 +330,14 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         }
     }
     async poll(nowMilliseconds: number): Promise<readonly ActorCommand[]> {
+        this.lan?.tick(nowMilliseconds);
         if (this.ended)
             return [];
         const masters = this.host.masters?.() ?? [];
         if (masters.length > 0) this.masterHeartbeat.send(masters, nowMilliseconds, true);
         for (const peer of this.peers.values()) if (peer.downloadFailure !== null) this.drop(peer, peer.downloadFailure);
         for (;;) {
-            const packet = this.options.transport.poll();
+            const packet = this.transport.poll();
             if (packet === null)
                 break;
             if (packet.kind !== 'packet') {
@@ -360,7 +384,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 continue;
             }
             if (!peer.active && peer.channel.shouldUpdate(nowMilliseconds))
-                peer.channel.send(this.options.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
+                peer.channel.send(this.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
         }
         const commands = this.pending;
         this.pending = [];
@@ -376,9 +400,25 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                 if (message.reliable) peer.channel.queueReliable(message.bytes);
                 else if (peer.active) peer.datagram.push(message.bytes);
             }
+            for (let index = 0; index < peer.splits.length; index++) {
+                const split = peer.splits[index]; if (split === undefined) continue;
+                const prefix = new Uint8Array([21, index + 2]);
+                for (const message of this.host.rawMessages?.(split.player) ?? []) {
+                    const bytes = joinPackets([prefix, message.bytes, new Uint8Array([21, 1])]);
+                    if (message.reliable) peer.channel.queueReliable(bytes); else if (peer.active) peer.datagram.push(bytes);
+                }
+                if (peer.active) for (const event of this.host.events(split.player, output, events)) {
+                    const bytes = joinPackets([prefix, encodeQ2ServerEvent(peer.wire, event), new Uint8Array([21, 1])]);
+                    if (event.reliable ?? (event.kind !== 'sound' && event.kind !== 'muzzle-flash' && event.kind !== 'temporary-entity')) peer.channel.queueReliable(bytes); else peer.datagram.push(bytes);
+                }
+            }
             if (!peer.active)
                 continue;
-            const frame = this.host.frame(peer.player, output, peer.wire.protocol);
+            const primary = this.host.frame(peer.player, output, peer.wire.protocol);
+            const splitFrames = peer.splits.map(split => this.host.frame(split.player, output, peer.wire.protocol));
+            const entities = new Map(primary.entities.map(entity => [entity.number, entity]));
+            for (const additional of splitFrames) for (const entity of additional.entities) entities.set(entity.number, entity);
+            const frame = splitFrames.length === 0 ? primary : { ...primary, splitPlayers: splitFrames.map(additional => ({ areaBits: additional.areaBits, player: additional.player })), entities: [...entities.values()].sort((a, b) => a.number - b.number) };
             for (const event of this.host.events(peer.player, output, events)) {
                 const reliable = event.reliable ?? (event.kind !== 'sound' && event.kind !== 'muzzle-flash' && event.kind !== 'temporary-entity');
                 const bytes = encodeQ2ServerEvent(peer.wire, event);
@@ -388,12 +428,12 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
                     peer.datagram.push(bytes);
             }
             if (peer.channel.fragmentPending) {
-                peer.channel.send(this.options.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
+                peer.channel.send(this.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
                 continue;
             }
             if (peer.frames.has(frame.serverFrame)) {
                 if (peer.channel.shouldUpdate(nowMilliseconds))
-                    peer.channel.send(this.options.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
+                    peer.channel.send(this.transport, peer.remote, new Uint8Array(0), nowMilliseconds);
                 continue;
             }
             const old = peer.replay.lastFrame < 0 ? null : peer.frames.get(peer.replay.lastFrame) ?? null;
@@ -403,7 +443,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             const frameBytes = encodeQ2Frame(peer.wire, frame, old, baseline, this.host.maxClients);
             const datagram = joinPackets([frameBytes, ...peer.datagram]);
             peer.datagram = [];
-            peer.channel.send(this.options.transport, peer.remote, datagram, nowMilliseconds);
+            peer.channel.send(this.transport, peer.remote, datagram, nowMilliseconds);
             peer.frames.set(frame.serverFrame, structuredClone(frame));
             while (peer.frames.size > 16) {
                 const oldest = peer.frames.keys().next();
@@ -423,13 +463,13 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             cleanup(() => this.closeDownload(peer));
             cleanup(() => {
                 this.reliable(peer, { kind: 'disconnect' });
-                peer.channel.send(this.options.transport, peer.remote, new Uint8Array(0), performance.now());
+                peer.channel.send(this.transport, peer.remote, new Uint8Array(0), performance.now());
             });
-            cleanup(() => this.host.disconnect(peer.player, 'Server shutdown'));
+            for (const player of [peer.player, ...peer.splits.map(split => split.player)]) cleanup(() => this.host.disconnect(player, 'Server shutdown'));
         }
         this.peers.clear();
         this.pending = [];
-        cleanup(() => this.options.transport.close());
+        cleanup(() => this.transport.close());
         if (failures.length !== 0) throw new AggregateError(failures, 'Q2 server shutdown failed');
     }
 }
@@ -449,6 +489,8 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     readonly wire: WireSelection;
     private readonly receiver: Q2ClientReceiver;
     get reader(): Q2ClientReceiver["reader"] { return this.receiver.reader; }
+    private readonly transport: DatagramTransport<TAddress>;
+    private readonly lan: KexLanTransport<TAddress> | null;
     private readonly handshake: Q2ClientHandshake;
     private channel: Q2Channel | null = null;
     private state: ApplicationNetworkPhase = 'challenging';
@@ -457,31 +499,34 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
     private oldest: UsercmdT = new UsercmdT();
     private pendingCommands: UsercmdT[] = [];
     constructor(readonly options: Q2ClientNetworkOptions<TAddress>) {
+        this.lan = options.host.protocol.kind === 'q2-kex' ? new KexLanTransport(options.transport, { role: 'client', server: options.remote, localPlayers: 1 }) : null;
+        this.transport = this.lan ?? options.transport;
         this.wire = { kind: 'source', protocol: options.host.protocol };
         this.receiver = new Q2ClientReceiver(options.host, { kind: 'network',
             ...(options.host.downloads === undefined ? {} : { downloads: options.host.downloads }),
             closed: () => options.transport.closed, command: text => this.command(text), resetCommands: () => {
                 this.previous = new UsercmdT(); this.oldest = new UsercmdT(); this.pendingCommands = [];
             } });
-        this.handshake = new Q2ClientHandshake(options.remote, [options.host.protocol], options.qport, options.host.userinfo, Math.min(1390, (options.transport.maxDatagramBytes ?? 65507) - 12));
+        this.handshake = new Q2ClientHandshake(options.remote, [options.host.protocol], options.qport, options.host.userinfo, Math.min(1390, (options.transport.maxDatagramBytes ?? 65507) - 12), 3000, options.host.socialId);
     }
     get phase(): ApplicationNetworkPhase { return this.channel === null || this.state === 'closed' || this.state === 'rejected' ? this.state : this.receiver.phase; }
     get acknowledgedFrame(): number { return this.receiver.acknowledgedFrame; }
     command(text: string): void { const channel = this.channel; if (channel === null)
-        throw new Error('Q2 client is not connected'); channel.queueReliable(encodeQ2ClientControl({ kind: 'command', text })); }
+        throw new Error('Q2 client is not connected'); channel.queueReliable(encodeQ2ClientControl({ kind: 'command', text }, this.options.host.protocol.kind === 'q2-kex')); }
     userinfo(text: string): void {
-        this.channel?.queueReliable(encodeQ2ClientControl({ kind: 'userinfo', text }));
+        this.channel?.queueReliable(encodeQ2ClientControl({ kind: 'userinfo', text: this.options.host.protocol.kind === 'q2-kex' ? q2KexClientUserinfo(text) : text }, this.options.host.protocol.kind === 'q2-kex'));
     }
     async poll(nowMilliseconds: number): Promise<readonly ActorCommand[]> {
+        this.lan?.tick(nowMilliseconds);
         if (this.phase === 'closed' || this.phase === 'rejected')
             return [];
-        if (this.channel === null) {
+        if (this.channel === null && (this.lan === null || this.lan.ready)) {
             const packet = this.handshake.poll(nowMilliseconds);
             if (packet !== null)
-                this.options.transport.send(this.options.remote, packet);
+                this.transport.send(this.options.remote, packet);
         }
         for (;;) {
-            const packet = this.options.transport.poll();
+            const packet = this.transport.poll();
             if (packet === null)
                 break;
             if (packet.kind !== 'packet') {
@@ -492,7 +537,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
             if (!sameAddress(packet.from, this.options.remote))
                 continue;
             this.lastReceived = nowMilliseconds;
-            const oob = readQ2OutOfBand(packet.payload);
+            const oob = readQ2OutOfBand(packet.payload, this.options.host.protocol.kind === 'q2-kex');
             if (oob !== null) {
                 if (oob.command === 'print')
                     this.options.host.print(oob.body);
@@ -506,7 +551,7 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
                 if (this.handshake.state.kind === 'connected' && this.channel === null) {
                     const request = this.handshake.state.request;
                     this.options.host.downloads?.setHttpServer(this.handshake.state.downloadServer);
-                    this.channel = new Q2Channel({ maxDatagramBytes: this.options.transport.maxDatagramBytes ?? 65507, side: 'client', protocol: request.protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes });
+                    this.channel = new Q2Channel({ maxDatagramBytes: this.transport.maxDatagramBytes ?? 65507, side: 'client', protocol: request.protocol, channel: request.channel, qport: request.qport, payloadBytes: request.payloadBytes });
                     this.state = 'loading';
                     this.command('new');
                 }
@@ -549,14 +594,14 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
             for (const command of this.pendingCommands) {
                 const sequence = channel.outgoingSequence;
                 const bytes = encodeQ2Move(this.reader.wire, sequence, this.receiver.acknowledgedFrame, [this.oldest, this.previous, command]);
-                channel.send(this.options.transport, this.options.remote, bytes, nowMilliseconds);
+                channel.send(this.transport, this.options.remote, bytes, nowMilliseconds);
                 this.options.host.prediction?.sent(sequence, command, nowMilliseconds);
                 this.oldest = this.previous;
                 this.previous = command;
             }
             this.pendingCommands = [];
             if (channel.shouldUpdate(nowMilliseconds))
-                channel.send(this.options.transport, this.options.remote, new Uint8Array(0), nowMilliseconds);
+                channel.send(this.transport, this.options.remote, new Uint8Array(0), nowMilliseconds);
         }
     }
     submit(commands: readonly ActorCommand[], _nowMilliseconds: number): void {
@@ -572,14 +617,14 @@ export class Q2ClientNetwork<TAddress extends NetworkAddress> implements Applica
         this.recordingOwner = null;
         const phase = this.phase;
         this.receiver.close();
-        if (this.options.transport.closed)
+        if (this.transport.closed)
             return;
         if (this.channel !== null && phase !== 'closed') {
             this.command('disconnect');
-            this.channel.send(this.options.transport, this.options.remote, new Uint8Array(0), performance.now());
+            this.channel.send(this.transport, this.options.remote, new Uint8Array(0), performance.now());
         }
         this.state = 'closed';
         this.pendingCommands = [];
-        this.options.transport.close();
+        this.transport.close();
     }
 }

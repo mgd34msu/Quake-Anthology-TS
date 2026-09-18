@@ -9,6 +9,15 @@ export interface FrameTimeControls {
   readonly cameraMode: number;
 }
 
+/** SV_CheckPaused counts connected humans, including clients that have not begun. */
+export function q3ServerPaused(cvars: CvarRegistry, requested: boolean, connectedHumans: number): boolean {
+  if (cvars.find("sv_paused") === undefined) cvars.register("sv_paused", "0", CvarFlag.ReadOnly);
+  if (!requested) return false;
+  const paused = connectedHumans <= 1;
+  cvars.set("sv_paused", paused ? "1" : "0", true);
+  return paused;
+}
+
 export function frameTimeCvarNames(dialect: CommandDialect): readonly string[] {
   return dialect.startsWith("q1") ? ["timescale", "host_framerate"]
     : dialect.startsWith("q2") ? ["timescale", "fixedtime"] : ["timescale", "fixedtime", "com_cameraMode"];

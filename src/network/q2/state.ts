@@ -25,6 +25,7 @@ export class PmoveStateT {
     velocityF: Vec3 = new Float32Array(3);
 }
 export class UsercmdT {
+    serverFrame = 0;
     msec = 0;
     buttons = 0;
     angles: Int16Array = new Int16Array(3);

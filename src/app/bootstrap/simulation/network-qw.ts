@@ -120,15 +120,17 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         [15, Math.trunc(scalar(actor, 'items')) | Math.trunc(global('serverflags')) << 28]
     ]);
     const spawnMessages = (player: QwApplicationPlayer, start: number): readonly Uint8Array[] => encode([
+        { kind: "pause", paused: simulation.q1Paused },
                 ...[...clients.values()].filter(client => client.player.slot >= start).map(client => ({ kind: 'userinfo', slot: client.player.slot, userId: client.player.client.generation * 32 + client.player.slot + 1, value: infoText(client.info) } satisfies QwServerMessage)),
                 ...styles.map((value, index) => ({ kind: 'light-style', index, value } satisfies QwServerMessage)),
                 ...[...stats(player.actor)].map(([index, value]) => ({ kind: 'stat', index, value: Math.trunc(value) } satisfies QwServerMessage))
             ]);
+    let previousPause = simulation.q1Paused;
     return {
         ...(options.administration === undefined ? {} : { administration: options.administration }),
         ...(options.masters === undefined ? {} : { masters: options.masters }),
         authentication: { get password() { return game.cvars.variableString('password'); }, get spectatorPassword() { return game.cvars.variableString('spectator_password'); }, get highCharacters() { return game.cvars.variableValue('sv_highchars') !== 0; } },
-        maxClients: 32, paused: false, supportsSourceWire: () => ({ kind: 'supported' }),
+        maxClients: 32, get paused() { return simulation.q1Paused; }, supportsSourceWire: () => ({ kind: 'supported' }),
         clientInfo: player => requireClient(player).info,
         commandPhase: (player, action, emit) => simulation.queueQuakeWorldAction(player.client, () => {
             if (!clients.get(player.slot)?.player.actor.equals(player.actor)) return;
@@ -218,7 +220,11 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         commandGroup: (player, commands, sequence) => { const client = requireClient(player); simulation.queueQuakeWorldCommands(player.client, commands, sequence);
             client.command = commands.at(-1) ?? idle; client.commandTime = game.timeSeconds; },
         command: (player, name, args) => {
-            if (name === 'kill') {
+            if (name === 'pause') {
+                const previous = simulation.q1Paused, text = simulation.toggleQ1Pause(player.actor);
+                queued.push({ message: { kind: 'print', level: 2, text }, destination: previous === simulation.q1Paused
+                    ? { kind: 'client', actor: player.actor, reliable: true } : { kind: 'broadcast', reliable: true } });
+            } else if (name === 'kill') {
                 if (!game.clientKill(player.actor)) queued.push({ message: { kind: 'print', level: 2, text: "Can't suicide -- allready dead!\n" }, destination: { kind: 'client', actor: player.actor, reliable: true } });
             } else if (name === 'setinfo' && args.length === 2) {
                 const key = args[0], value = args[1]; if (key === undefined || value === undefined || key.startsWith('*') || /[\\"\n\r]/.test(key + value)) return;
@@ -229,6 +235,7 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         },
         observe: (_output, events) => {
             routed = queued.splice(0);
+            if (previousPause !== simulation.q1Paused) { previousPause = simulation.q1Paused; routed.push({ message: { kind: "pause", paused: previousPause }, destination: { kind: "broadcast", reliable: true } }); }
             for (const batch of game.drainMessages()) for (const entry of batch.entries) {
                 if (entry.message.kind !== 'packet-entities' && entry.message.kind !== 'invalid-delta') routed.push({ message: entry.message, destination: batch.destination });
             }

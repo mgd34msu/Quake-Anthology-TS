@@ -7,7 +7,7 @@ import type { Vec3 } from "../../contracts/math.ts";
 import type { NumericProfile } from "../../contracts/numeric.ts";
 import type { SceneQueries } from "../../contracts/scene.ts";
 import { anglesToAxis, donorAngleVectors, mutableVec3 } from "../../core/math.ts";
-import { createNumericOperations } from "../../core/numeric.ts";
+import { nativeAtoi, createNumericOperations } from "../../core/numeric.ts";
 
 export function registerQ1ViewCommands(commands: CommandBuffer): () => void {
   if (commands.dialect !== "q1-netquake" && commands.dialect !== "q1-quakeworld") return () => {};
@@ -19,6 +19,23 @@ export function registerQ1ViewCommands(commands: CommandBuffer): () => void {
       if (size !== undefined) command.insert(`viewsize ${size.numericValue + step}\n`);
     })) registered.push(name);
   }
+  if (commands.dialect === "q1-netquake") {
+    if (!commands.exists("name") && commands.findCvar("name") === undefined && commands.register("name", command => {
+      if (command.args.length === 0) { command.executeNow("_cl_name"); return; }
+      const name = (command.args.length === 1 ? command.args[0] ?? "" : command.argsText).slice(0, 15).replace(/["\n\r]/g, "");
+      command.executeNow(`_cl_name "${name}"`); return undefined;
+    })) registered.push("name");
+    if (!commands.exists("color") && commands.findCvar("color") === undefined && commands.register("color", command => {
+      if (command.args.length === 0) { command.executeNow("_cl_color"); return; }
+      const top = Math.min(13, nativeAtoi(command.args[0] ?? "") & 15), bottom = Math.min(13, nativeAtoi(command.args[1] ?? command.args[0] ?? "") & 15);
+      command.executeNow(`_cl_color ${top * 16 + bottom}`); return undefined;
+    })) registered.push("color");
+  }
+  if (commands.dialect === "q1-quakeworld" && !commands.exists("color") && commands.register("color", command => {
+    if (command.args.length === 0) { command.executeNow("topcolor"); command.executeNow("bottomcolor"); return; }
+    const top = Math.min(13, nativeAtoi(command.args[0] ?? "") & 15), bottom = Math.min(13, nativeAtoi(command.args[1] ?? command.args[0] ?? "") & 15);
+    command.executeNow(`topcolor ${top}`); command.executeNow(`bottomcolor ${bottom}`); return undefined;
+  })) registered.push("color");
   return () => { for (const name of registered) commands.unregister(name); };
 }
 

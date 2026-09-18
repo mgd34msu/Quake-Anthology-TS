@@ -25,8 +25,19 @@ test("native Q1 console god and impulse 9 affect actual damage and selected inve
     const content = await loadApplicationContent(launch.options, recipe), identity = createIdentityOwner(`q1-console-${mixed}`), client = identity.client(0, 0), seat = identity.seat(0);
     const simulation = createSimulation({ identity, recipe, world: content.world, mounts: content.mounts, skill: 1, mode: "singleplayer", seed: 1, maxClients: 1 });
     try {
-      const actor = simulation.admitPlayer(client).actor, source = simulation.q1Source();
+      const actor = simulation.admitPlayer(client, undefined, "\\name\\Local Identity\\topcolor\\5\\bottomcolor\\12").actor, source = simulation.q1Source();
       if (source === null) throw new Error("Missing native Q1 source");
+      expect(source.composition.clients.require(actor).name).toBe("Local Identity");
+      expect(source.composition.clients.require(actor).shirt).toBe(5);
+      simulation.updatePlayerUserinfo(actor, "\\name\\Updated Identity\\topcolor\\3\\bottomcolor\\4");
+      expect(source.composition.clients.require(actor).name).toBe("Updated Identity");
+      expect(source.composition.clients.require(actor).pants).toBe(4);
+      const pausedTime = simulation.timeSeconds, pausedOrigin = simulation.bodies.read(actor)?.origin;
+      expect(simulation.toggleQ1Pause(actor)).toContain("paused");
+      simulation.step({ elapsedMilliseconds: 100, commands: [] });
+      expect(simulation.timeSeconds).toBe(pausedTime); expect(simulation.bodies.read(actor)?.origin).toEqual(pausedOrigin);
+      expect(simulation.toggleQ1Pause(actor)).toContain("unpaused");
+
       const context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat, client } };
       const commands = new CommandBuffer({ dialect: "q1-netquake", context, cvars: source.cvars });
       registerQ1ClientCommands(commands, "q1-netquake", (name, args) => simulation.playerCommand(actor, name, args));

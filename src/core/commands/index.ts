@@ -664,6 +664,11 @@ export class CommandBuffer {
       previous.next = entry.next; entry.next = this.handlers; this.handlers = entry; return;
     }
   }
+  forwardToServer(command: CommandInvocation): undefined {
+    command.assertActive();
+    return this.options.forwardToServer?.(command);
+  }
+
   private fallback(command: CommandInvocation): void {
     const name = command.argv[0] ?? "", cvars = this.cvarOwner(name, command.source), variable = cvars?.find(name);
     if (variable !== undefined && cvars !== undefined) {
@@ -678,7 +683,7 @@ export class CommandBuffer {
     if (this.executionDialect === "q3") {
       if (this.options.clientGame?.(command) || this.options.serverGame?.(command) || this.options.ui?.(command)) return;
     }
-    if (this.executionDialect === "q3" || isQ2(this.executionDialect)) { this.options.forwardToServer?.(command); return; }
+    if (this.executionDialect === "q3" || isQ2(this.executionDialect)) { this.forwardToServer(command); return; }
     if (this.executionDialect !== "q1-quakeworld" || this.findCvar("cl_warncmd", command.source)?.numericValue || this.findCvar("developer", command.source)?.numericValue) this.print(`Unknown command "${name}"\n`);
   }
 
@@ -719,7 +724,7 @@ export class CommandBuffer {
     };
     register("wait", command => { this.programRevision++; this.waitDialect = command.dialect; this.waitFrames = this.executionDialect === "q3" && command.argv.length === 2 ? nativeAtoi(command.argv[1] ?? "") : 1; });
     register("echo", command => { this.print(`${command.args.join(" ")}${command.args.length > 0 ? " " : ""}\n`); }, { summary: "Print text to the console.", usage: "echo <text>", examples: ["echo hello"] });
-    register("cmd", command => { this.options.forwardToServer?.(command); });
+    register("cmd", command => { this.forwardToServer(command); });
     register("exec", command => {
       if (command.argv.length !== 2) { this.print("exec <filename> : execute a script file\n"); return; }
       if (this.scriptRead !== undefined) { this.insertFor(`${command.raw}\n`, command.source); return; }

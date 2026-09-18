@@ -12,9 +12,28 @@ import { registerConsoleCommands } from "../../src/console/commands.ts";
 import { ConfigStore } from "../../src/settings/config.ts";
 import { ConsoleScriptFiles, readConsoleScript, seatConsoleConfig, sourceScriptReader } from "../../src/app/bootstrap/config-scripts.ts";
 import { openMountPlan } from "../../src/content/mounts/index.ts";
+import { FrameCapture } from "../../src/capture/index.ts";
 
 const identity = createIdentityOwner("config-scripts");
 function context(index: number): CommandContext { return { session: identity.session, origin: { kind: "local-seat", seat: identity.seat(index), client: identity.client(index, 0) } }; }
+
+test("common Q3 levelshot forwards source authority while raw renderer levelshot remains available", async () => {
+  const root = await mkdtemp(join(tmpdir(), "q3-levelshot-routing-")), source = context(1);
+  const forwarded: CommandContext[] = [], writes: Promise<void>[] = [];
+  let reads = 0;
+  const commands = new CommandBuffer({ dialect: "q3", context: source, forwardToServer: command => {
+    expect(command.argv).toEqual(["levelshot"]); forwarded.push(command.source); return undefined;
+  } });
+  const capture = new FrameCapture(root, { readRgba: () => { reads++; return { width: 2, height: 2, pixels: new Uint8Array(16) }; } });
+  const unregister = registerConsoleCommands({ commands, config: () => new ConfigStore(root), configuration: () => "", console: () => null,
+    canChat: () => false, capture: () => capture, mapName: () => "q3dm1", print: () => undefined, queue: operation => { writes.push(operation()); } });
+  try {
+    commands.executeNow("levelshot");
+    expect(forwarded).toEqual([source]); expect(reads).toBe(0);
+    commands.executeNow("screenshot levelshot"); await Promise.all(writes);
+    expect(reads).toBe(1); expect(await Bun.file(join(root, "levelshots/q3dm1.tga")).exists()).toBe(true);
+  } finally { unregister(); await rm(root, { recursive: true, force: true }); }
+});
 
 test("mounted library listing protects its owner through queued writes and retirement", async () => {
   const writing = Promise.withResolvers<void>(), listing = Promise.withResolvers<readonly string[]>();

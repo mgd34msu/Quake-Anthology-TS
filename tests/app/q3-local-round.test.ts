@@ -16,6 +16,22 @@ function command(actor: ActorId, sequence: number): ActorCommand {
     angleWords: [0, 0, 0], buttons: 1, weapon: 2, forwardMove: 127, rightMove: 0, upMove: 0 } };
 }
 
+test("local Q3 server levelshot waits for command consumption and captures once for its seat", () => {
+  const actor = createIdentityOwner("local-levelshot").actor(0, 1);
+  let captures = 0;
+  const source = new ApplicationQ3Source(actor, state(actor, 100), () => ({ entities: [], areaMask: new Uint8Array(0) }), () => actor,
+    undefined, () => { captures++; });
+  const event = (sequence: number, client: number): SimulationPresentationEvent => ({ kind: "q3-source", sequence,
+    content: "q3:classic:missionpack:base", seconds: 0.2, event: { kind: "server-command", client, text: "clientLevelShot" } });
+  source.receiveEvents([event(1, 1), event(2, 0)]);
+  expect(captures).toBe(0);
+  expect(source.getServerCommand(1)).toEqual(["clientLevelShot"]);
+  expect(captures).toBe(1);
+  expect(source.getServerCommand(1)).toEqual(["clientLevelShot"]);
+  expect(captures).toBe(1);
+  expect(source.getServerCommand(2)).toBeNull();
+});
+
 test("local restart retains transport rings and publishes the new epoch only after rebind and settle", () => {
   const owner = createIdentityOwner("local-round"), old = owner.actor(0, 1), next = owner.actor(0, 2), third = owner.actor(0, 3);
   let currentActor = old;

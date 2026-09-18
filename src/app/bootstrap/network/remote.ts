@@ -97,12 +97,12 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
     readonly prediction = {
         acknowledged: (sequence: number, _nowMilliseconds: number): void => { this.packetAcknowledged = sequence; },
         sent: (sequence: number, command: UsercmdT, nowMilliseconds: number): void => {
-            this.predictionOwner?.submit({ sequence, timeMilliseconds: nowMilliseconds, command: this.protocol.kind === 'q2-rerelease' ? toQ2RereleaseCommand(command, this.current?.serverFrame ?? 0) : toQ2Command(command) });
+            this.predictionOwner?.submit({ sequence, timeMilliseconds: nowMilliseconds, command: (this.protocol.kind === 'q2-rerelease' || this.protocol.kind === 'q2-kex') ? toQ2RereleaseCommand(command, this.current?.serverFrame ?? 0) : toQ2Command(command) });
             this.predicted = this.predictionOwner?.replay() ?? null;
         },
     };
     constructor(readonly options: Q2RemotePresentationOptions) {
-        if (options.protocol.kind === 'q2-kex' || options.protocol.kind === 'q2-kex-demo')
+        if (options.protocol.kind === 'q2-kex-demo')
             throw new Error('KEX native live transport is not bound');
         this.selectedProtocol = options.protocol;
         this.layout = q2ApplicationLayout(options.protocol);
@@ -214,7 +214,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
             throw new Error('Remote Q2 player has no decoded frame');
         return { player: this.currentPlayer, frame: this.current };
     }
-    private nativePlayer(frame: Q2WireFrame) { return this.protocol.kind === 'q2-rerelease' ? toQ2RereleasePlayer(frame.player) : toQ2Player(frame.player); }
+    private nativePlayer(frame: Q2WireFrame) { return (this.protocol.kind === 'q2-rerelease' || this.protocol.kind === 'q2-kex') ? toQ2RereleasePlayer(frame.player) : toQ2Player(frame.player); }
     private playerOrigin(frame: Q2WireFrame): Vec3 { const movement = this.nativePlayer(frame).movement; return movement.kind === 'q2-rerelease' ? movement.origin : { x: movement.originEighths[0] / 8, y: movement.originEighths[1] / 8, z: movement.originEighths[2] / 8 }; }
     worldText(): readonly WorldText[] { return []; }
 

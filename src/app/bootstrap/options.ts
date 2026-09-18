@@ -18,7 +18,7 @@ export interface ApplicationOptions {
   readonly teamArenaSkirmish?: import("./team-arena-skirmish.ts").TeamArenaSkirmish;
   readonly remoteContent?: import("../../content/catalog/index.ts").RemoteContentSelection;
   readonly q1Protocol?: Q1ProtocolIdentity;
-  readonly q2Protocol?: Exclude<Q2ProtocolIdentity, { kind: "q2-kex" | "q2-kex-demo" }>;
+  readonly q2Protocol?: Exclude<Q2ProtocolIdentity, { kind: "q2-kex-demo" }>;
   readonly serverProfile?: import("../../settings/server/types.ts").ServerProfile;
   readonly serverProfilePath?: string;
   readonly corpusRoot: string;
@@ -48,6 +48,10 @@ export interface ApplicationOptions {
   readonly hidden: boolean;
   readonly network: { readonly kind: "offline" } | { readonly kind: "native-server" | "q2-server" | "unified-server"; readonly host: string; readonly port: number }
     | { readonly kind: "q1-client" | "qw-client" | "q2-client" | "q3-client" | "unified-client"; readonly remote: string };
+}
+
+export function liveQ2Protocol(options: Pick<ApplicationOptions, "q2Protocol">, rerelease: boolean): NonNullable<ApplicationOptions["q2Protocol"]> {
+  return options.q2Protocol ?? (rerelease ? { kind: "q2-kex", version: 2023 } : { kind: "q2-classic", version: 34 });
 }
 
 export type ApplicationCommand = { readonly kind: "help" }
@@ -90,7 +94,7 @@ Usage: bun run src/main.ts [options]
   --connect-q1 ADDRESS       Join a native Quake server (id1, protocols 15/666/999)
   --connect-qw ADDRESS       Join a base QuakeWorld protocol 28 server
   --connect-q3 ADDRESS       Join a baseq3 protocol 68 server (sv_pure 0)
-  --q2-protocol 34|35[:1904|1905]|36[:revision]|4038|1038 Q2 client/server protocol (35 defaults to 1904; 36 to 1026)
+  --q2-protocol 34|35[:1904|1905]|36[:revision]|4038|1038|2023 Q2 client/server protocol (35 defaults to 1904; 36 to 1026)
   --connect-q2 ADDRESS       Join a native Quake II server
   --ipx-dosbox HOST[:PORT]   Use DOSBox IPXNET relay (default relay port 213)
   --ipx-native               Require a host AF_IPX socket capability
@@ -252,7 +256,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
   if (options.networkTransport !== undefined && options.network.kind === "offline") throw new Error("IPX selection requires --listen, --listen-q2 or a native client connection");
   if (options.networkTransport?.kind === "ipx-native" && bind !== "0.0.0.0") throw new Error("--bind selects an IP interface and cannot bind native AF_IPX");
   if (options.networkTransport !== undefined && options.network.kind === "qw-client") throw new Error("QuakeWorld uses UDP; IPX is not a QuakeWorld transport");
-  if (options.q2Protocol !== undefined && options.network.kind !== "q2-client" && options.network.kind !== "q2-server") throw new Error("--q2-protocol requires --connect-q2 or --listen-q2");
+  if (options.q2Protocol !== undefined && options.network.kind !== "q2-client" && options.network.kind !== "q2-server" && options.network.kind !== "native-server") throw new Error("--q2-protocol requires --connect-q2, --listen-q2 or --listen");
   if (options.q1Protocol !== undefined && options.network.kind !== "native-server") throw new Error("--q1-protocol requires --listen for a Quake I host");
   if (options.q1Protocol !== undefined && options.product === "q1-quakeworld") throw new Error("--q1-protocol selects NetQuake; QuakeWorld uses native protocol 28");
   if (options.network.kind !== "offline" && options.mode === "singleplayer") options = { ...options, mode: (options.network.kind === "native-server" || options.network.kind === "unified-server") && (options.product.startsWith("q3-") || options.product === "q1-quakeworld") ? "deathmatch" : "coop" };
@@ -267,12 +271,13 @@ function parseApplicationQ2Protocol(value: string): NonNullable<ApplicationOptio
     case '35': case '35:1904': return { kind: 'q2-r1q2', version: 35, revision: 1904 };
     case '35:1905': return { kind: 'q2-r1q2', version: 35, revision: 1905 };
     case '4038': return { kind: 'q2-private-classic', version: 4038 };
+    case '2023': return { kind: 'q2-kex', version: 2023 };
     case '1038': return { kind: 'q2-rerelease', version: 1038 };
   }
   const revision = value === '36' ? 1026 : value.startsWith('36:') ? Number(value.slice(3)) : 0;
   switch (revision) {
     case 1015: case 1017: case 1018: case 1019: case 1020: case 1021: case 1022: case 1023: case 1024: case 1025: case 1026:
       return { kind: 'q2-q2pro', version: 36, revision };
-    default: throw new Error('--q2-protocol requires 34, 35:1904/1905, 36:1015/1017..1026, 4038 or 1038');
+    default: throw new Error('--q2-protocol requires 34, 35:1904/1905, 36:1015/1017..1026, 4038, 1038 or 2023');
   }
 }

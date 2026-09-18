@@ -263,7 +263,11 @@ export function createKexWriter(protocol: () => number, helpers: ReturnType<type
             MSG_WriteByte(m, to.team_id);
     }
     return {
-        writeServerData(m, params) { MSG_WriteByte(m, 12); MSG_WriteLong(m, protocol()); MSG_WriteLong(m, params.servercount); MSG_WriteByte(m, params.attractloop ? 1 : 0); MSG_WriteByte(m, params.serverFps ?? 40); MSG_WriteString(m, params.gamedir); MSG_WriteShort(m, params.clientnum); MSG_WriteString(m, params.levelname); },
+        writeServerData(m, params) { MSG_WriteByte(m, 12); MSG_WriteLong(m, protocol()); MSG_WriteLong(m, params.servercount); MSG_WriteByte(m, params.attractloop ? 1 : 0); MSG_WriteByte(m, params.serverFps ?? 40); MSG_WriteString(m, params.gamedir); if (params.clientnums !== undefined && params.clientnums.length > 1) {
+            if (params.clientnums.length > 8) throw new Error('Invalid KEX split player count');
+            MSG_WriteShort(m, -2); MSG_WriteShort(m, params.clientnums.length);
+            for (const number of params.clientnums) MSG_WriteShort(m, number);
+        } else MSG_WriteShort(m, params.clientnum); MSG_WriteString(m, params.levelname); },
         writeDeltaEntity,
         writeEntityRemove(m, number) { writeEntityBitsWide(m, 1 << 6, 0, number); },
         writePacketEntitiesEnd(m) { MSG_WriteShort(m, 0); },

@@ -31,6 +31,7 @@ import { UiTextRenderer } from "../../text/ui.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import type { MaterialTextDraw } from "../../text/draw2d.ts";
 import type { StartupHosting, StartupNativePreset, StartupSelectionField, StartupSelectionModel, StartupSelectionRow } from "./startup-selection.ts";
+import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
 export interface StartupMenuOptions {
   readonly sound?: (sound: UiSound) => void;
@@ -101,7 +102,7 @@ export class StartupMenu {
   private nativePreset: StartupNativePreset | null = null;
   private nativeSkill = "1";
   private nativeArena: string | undefined;
-  private hostDraft: StartupHosting = { kind: "offline", port: 27910 };
+  private hostDraft: StartupHosting = { kind: "offline", port: 27910, q1Protocol: null };
   private hostPort = "27910";
 
   constructor(private readonly options: StartupMenuOptions) {
@@ -188,9 +189,13 @@ export class StartupMenu {
         select: (_seat, kind) => { if (kind === "offline" || kind === "native-server" || kind === "unified-server") this.hostDraft = { ...this.hostDraft, kind }; return undefined; } },
       { id: "ui:startup:host-port", kind: "text-entry", label: "Port", text: this.hostPort, maximumLength: 5, rect: menuRow(1), visible: true, enabled: !this.busy && this.hostDraft.kind !== "offline",
         change: (_seat, value) => { this.hostPort = value; return undefined; }, submit: () => undefined },
+      { id: "ui:startup:host-q1-protocol", kind: "choice", label: "Quake protocol", rect: menuRow(2),
+        visible: this.hostDraft.kind === "native-server" && this.hostDraft.q1Protocol !== null, enabled: !this.busy,
+        selected: String(this.hostDraft.q1Protocol?.version ?? 15), choices: [{ id: "15", label: "NetQuake (15)" }, { id: "666", label: "FitzQuake (666)" }, { id: "999", label: "RMQ (999)" }],
+        select: (_seat, id) => { if (id === "15" || id === "666" || id === "999") this.hostDraft = { ...this.hostDraft, q1Protocol: defaultNetQuakeProfile(Number(id)) }; return undefined; } },
       { ...this.button("host-mode", options.model.options.mode === "singleplayer" && this.hostDraft.kind !== "offline"
         ? options.model.catalog.product(options.model.options.product).expectation.family === "q3" ? "Uses Deathmatch. Change rules in Combat." : "Uses Co-op. Change rules in Combat."
-        : "Choose game rules and difficulty in Combat.", 2, () => undefined, true), enabled: false },
+        : "Choose game rules and difficulty in Combat.", 3, () => undefined, true), enabled: false },
       this.button("host-apply", "Apply", 4, () => {
         try { options.model.setHosting({ ...this.hostDraft, port: this.hostDraft.kind === "offline" ? this.hostDraft.port : Number(this.hostPort) }); this.status = ""; this.controller.closeMenu(); }
         catch (error) { this.setStatus(error instanceof Error ? error.message : String(error)); }
@@ -231,7 +236,7 @@ export class StartupMenu {
       const choices = row?.choices ?? [], pages = Math.max(1, Math.ceil(choices.length / 7));
       this.page = Math.min(this.page, pages - 1);
       const controls = choices.slice(this.page * 7, this.page * 7 + 7).map((choice, index) => {
-        const control = this.button(`choice:${choice.id}`, `${row?.value === choice.id ? "> " : ""}${this.fit(choice.label, 466, 2.6)}`, index, () => {
+        const control = this.button(`choice:${choice.id}`, `${row?.value === choice.id ? "> " : ""}${this.fit(`${choice.label}${choice.unavailable === null ? "" : " (unavailable)"}`, 466, 2.6)}`, index, () => {
           if (this.monsterField.kind === "class") options.model.selectMonster(this.monsterField.classname, choice.id);
           else if (this.monsterField.kind === "source") options.model.selectMonsterSource(choice.id);
           else options.model.select(this.field, choice.id);
@@ -240,8 +245,8 @@ export class StartupMenu {
         }, true);
         return { ...control, enabled: choice.unavailable === null && !this.busy };
       });
-      if (pages > 1) controls.push(this.button("previous", "Previous page", 7, () => { this.page = (this.page + pages - 1) % pages; }, true),
-        this.button("next", "Next page", 8, () => { this.page = (this.page + 1) % pages; }, true));
+      if (pages > 1) controls.push(this.button("previous", "Previous page", 7, () => this.prepareChoicePage((this.page + pages - 1) % pages), true),
+        this.button("next", "Next page", 8, () => this.prepareChoicePage((this.page + 1) % pages), true));
       return [...controls, this.back()];
     });
     this.register(rosterMenu, () => {
@@ -358,7 +363,16 @@ export class StartupMenu {
   }
   private row(row: StartupSelectionRow, index: number): UiControl {
     const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
-    return this.button(row.id, this.fit(`${row.label}: ${selected}`, 486, 2.6), index, () => { this.monsterField = { kind: "none" }; this.field = row.id; this.page = 0; this.controller.openMenu(selectMenu); }, true);
+    return this.button(row.id, this.fit(`${row.label}: ${selected}`, 486, 2.6), index, () => { this.monsterField = { kind: "none" }; this.field = row.id; this.controller.openMenu(selectMenu); this.prepareChoicePage(0); }, true);
+  }
+  private prepareChoicePage(page: number): void {
+    this.page = page;
+    if (this.monsterField.kind !== "none" || this.field !== "map") return;
+    const preparation = this.options.model.prepareMapChoices(page * 7, 7);
+    if (preparation === null) return;
+    this.setStatus("Checking map rules...", true);
+    void preparation.then(() => this.setStatus(""))
+      .catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
   }
   captionCommands(captions: readonly ActiveCaption[], context: UiDrawContext): readonly RenderCommand[] {
     const appearance = this.options.appearance?.() ?? defaultUiPreferences;
@@ -393,7 +407,7 @@ export class StartupMenu {
     if (this.busy) return true;
     if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === selectMenu) {
       const choices = this.selectionRow()?.choices ?? [];
-      this.page = Math.max(0, Math.min(Math.ceil(choices.length / 7) - 1, this.page + (event.delta.y < 0 ? 1 : -1)));
+      this.prepareChoicePage(Math.max(0, Math.min(Math.ceil(choices.length / 7) - 1, this.page + (event.delta.y < 0 ? 1 : -1))));
       return true;
     }
     if (event.kind === "mouse-wheel" && event.delta.y !== 0 && this.controller.activeMenu === rosterMenu) {
@@ -438,6 +452,11 @@ export class StartupMenu {
     if (active === nativeCampaignMenu) {
       const unavailable = this.nativeCampaigns().find(preset => preset.unavailable !== null);
       if (unavailable?.unavailable) text(this.fit(unavailable.unavailable, 512, 1.8), 64, 395, 1.8, true);
+    }
+    if (active === selectMenu && this.status === "") {
+      const cursor = this.controller.state().cursor;
+      const hovered = this.selectionRow()?.choices.slice(this.page * 7, this.page * 7 + 7).find((_choice, index) => contains(menuRow(index), cursor));
+      if (hovered?.unavailable) text(this.fit(hovered.unavailable, 512, 1.5), 64, 458, 1.5, true);
     }
     if (active === rosterMenu) text("Map counts shown. * Custom override.", 64, 460, 1.5);
     commands.push({ kind: "fill", rect: { x: 64, y: 104, width: active === main ? 224 : 512, height: 1 }, color: { x: 0.6, y: 0.39, z: 0.18, w: 0.65 } });

@@ -31,23 +31,26 @@ export type Q2ClientEvent = {
 export interface Q2ClientRecord {
     readonly event: Q2ClientEvent;
     readonly raw: Uint8Array;
+    readonly seat?: number;
 }
-export function readQ2ClientMessages(wire: Q2WireCodec, bytes: Uint8Array, sequence: number): Q2ClientRecord[] {
+export function readQ2ClientMessages(wire: Q2WireCodec, bytes: Uint8Array, sequence: number, seats = 1): Q2ClientRecord[] {
     wire.begin(bytes);
     const m = wire.message, records: Q2ClientRecord[] = [];
     let moved = false;
     while (m.readcount < m.cursize) {
         const start = m.readcount, raw = MSG_ReadByte(m), op = wire.protocol.kind === 'q2-q2pro' ? raw & 31 : raw;
         let event: Q2ClientEvent;
+        let selectedSeat = 0;
         switch (op) {
             case 1:
                 event = { kind: 'nop' };
                 break;
             case 3:
-                event = { kind: 'userinfo', text: MSG_ReadString(m) };
+                event = { kind: 'userinfo', text: wire.protocol.kind === 'q2-kex' ? readKexControlString(m) : MSG_ReadString(m) };
                 break;
             case 4:
-                event = { kind: 'command', text: MSG_ReadString(m) };
+                if (wire.protocol.kind === 'q2-kex') { selectedSeat = MSG_ReadByte(m) - 1; if (selectedSeat < 0 || selectedSeat >= seats) throw new Error('Q2 connection does not own the selected split player'); }
+                event = { kind: 'command', text: wire.protocol.kind === 'q2-kex' ? readKexControlString(m) : MSG_ReadString(m) };
                 break;
             case 5: {
                 const read = wire.codec.readClientSetting;
@@ -71,15 +74,20 @@ export function readQ2ClientMessages(wire: Q2WireCodec, bytes: Uint8Array, seque
                 const readMove = wire.codec.readDeltaUsercmd;
                 if (readMove === undefined)
                     throw new Error('Selected Q2 wire has no client move decoder');
-                const lastFrame = MSG_ReadLong(m), oldest = new UsercmdT(), old = new UsercmdT(), current = new UsercmdT();
+                const lastFrame = MSG_ReadLong(m);
+                for (let seat = 0; seat < (wire.protocol.kind === 'q2-kex' ? seats : 1); seat++) {
+                const oldest = new UsercmdT(), old = new UsercmdT(), current = new UsercmdT();
+                const lightlevel = wire.protocol.kind === 'q2-kex' ? MSG_ReadByte(m) : null;
                 readMove(m, new UsercmdT(), oldest);
                 readMove(m, oldest, old);
                 readMove(m, old, current);
+                if (lightlevel !== null) { oldest.lightlevel = lightlevel; old.lightlevel = lightlevel; current.lightlevel = lightlevel; }
                 checkMessageRead(m);
                 if (checksum !== null && blockSequenceChecksum(m.data.subarray(checksumStart, m.readcount), sequence) !== checksum)
                     throw new Error('Q2 command sequence checksum mismatch');
-                event = { kind: 'move', lastFrame, commands: [oldest, old, current] };
-                break;
+                records.push({ seat, event: { kind: 'move', lastFrame, commands: [oldest, old, current] }, raw: m.data.slice(start, m.readcount) });
+                }
+                continue;
             }
             case 10:
             case 11: {
@@ -95,7 +103,7 @@ export function readQ2ClientMessages(wire: Q2WireCodec, bytes: Uint8Array, seque
             default: throw new Error(`Unknown Q2 client opcode ${op}`);
         }
         checkMessageRead(m);
-        records.push({ event, raw: m.data.slice(start, m.readcount) });
+        records.push({ seat: selectedSeat, event, raw: m.data.slice(start, m.readcount) });
     }
     return records;
 }
@@ -114,6 +122,7 @@ export function encodeQ2Move(wire: Q2WireCodec, sequence: number, lastFrame: num
         MSG_WriteByte(m, 0);
     const checksumStart = m.cursize;
     MSG_WriteLong(m, lastFrame);
+    if (wire.protocol.kind === 'q2-kex') MSG_WriteByte(m, commands[2].lightlevel);
     writeMove(m, new UsercmdT(), commands[0]);
     writeMove(m, commands[0], commands[1]);
     writeMove(m, commands[1], commands[2]);
@@ -132,7 +141,7 @@ export function encodeQ2BatchMove(wire: Q2WireCodec, lastFrame: number | null, f
 }
 export function encodeQ2ClientControl(event: Exclude<Q2ClientEvent, {
     kind: 'move' | 'batch-move';
-}>): Uint8Array {
+}>, kex = false): Uint8Array {
     const m = createMessage();
     switch (event.kind) {
         case 'nop':
@@ -140,11 +149,12 @@ export function encodeQ2ClientControl(event: Exclude<Q2ClientEvent, {
             break;
         case 'userinfo':
             MSG_WriteByte(m, 3);
-            MSG_WriteString(m, event.text);
+            if (kex) { for (const byte of new TextEncoder().encode(event.text)) MSG_WriteByte(m, byte); MSG_WriteByte(m, 0); } else MSG_WriteString(m, event.text);
             break;
         case 'command':
             MSG_WriteByte(m, 4);
-            MSG_WriteString(m, event.text);
+            if (kex) MSG_WriteByte(m, 1);
+            if (kex) { for (const byte of new TextEncoder().encode(event.text)) MSG_WriteByte(m, byte); MSG_WriteByte(m, 0); } else MSG_WriteString(m, event.text);
             break;
         case 'setting':
             MSG_WriteByte(m, 5);
@@ -229,4 +239,10 @@ export class Q2RateWindow {
     }
     sent(serverFrame: number, bytes: number): void { this.sizes[serverFrame % 10] = bytes; }
     takeSuppressed(): number { const value = this.suppressed; this.suppressed = 0; return value; }
+}
+
+function readKexControlString(message: Q2WireCodec['message']): string {
+    const bytes: number[] = [];
+    for (;;) { const byte = MSG_ReadByte(message); if (byte < 0) throw new Error('Truncated KEX control string'); if (byte === 0) break; bytes.push(byte); }
+    return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
 }

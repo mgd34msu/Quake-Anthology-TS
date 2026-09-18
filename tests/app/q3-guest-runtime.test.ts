@@ -219,3 +219,18 @@ test.skipIf(!existsSync(archivePath))('guest publishes changed canonical server 
     await f.game.runFrame(1003); f.game.checkpoint(); expect(published).toHaveLength(2);
   } finally { await f.close(); }
 });
+
+test.skipIf(!existsSync(archivePath))('engine warmup updates use the guest output owner and source clock', async () => {
+  const f = await fixture(new Map([[QvmGameExport.GAME_INIT, locate]]));
+  try {
+    const gate = Promise.withResolvers<void>(), published: string[] = [];
+    await f.game.initialize({ ...silent, configstring: async (index, value) => {
+      if (index === 5) { await gate.promise; published.push(value); }
+    } });
+    expect(f.game.timeMilliseconds).toBe(1000);
+    const publication = f.game.setConfigstring(5, String(f.game.timeMilliseconds + 5000));
+    expect(f.state.configstrings.get(5)).toBe('6000'); expect(published).toEqual([]);
+    gate.resolve(); await publication; expect(published).toEqual(['6000']);
+    await f.game.setConfigstring(5, '6000'); expect(published).toEqual(['6000']);
+  } finally { await f.close(); }
+});

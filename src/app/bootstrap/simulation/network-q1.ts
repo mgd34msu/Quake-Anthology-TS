@@ -110,8 +110,11 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
             colorMap: event.colorMap, skin: event.skin, effects: 0, origin: event.origin, angles: event.angles, alpha: 0, scale: 16, lerpFinishSeconds: 0, step: false } }];
         return [];
     });
+    let previousPause = simulation.q1Paused;
+    const operatorMessages: { recipient: ActorId | null; reliable: boolean; message: Q1ApplicationMessage }[] = [];
     const observe = (output: SimulationOutput, events: readonly SimulationPresentationEvent[]): void => {
-        routed = [];
+        routed = operatorMessages.splice(0);
+        if (previousPause !== simulation.q1Paused) { previousPause = simulation.q1Paused; routed.push({ recipient: null, reliable: true, message: { kind: "pause", paused: previousPause } }); }
         muzzleFlashes.clear();
         const capturedSounds = output.events.flatMap(event => event.payload.kind === 'sound' ? [event.payload] : []);
         const send = (message: Q1ApplicationMessage, reliable = false, recipient: ActorId | null = null): void => { routed.push({ message, reliable, recipient }); };
@@ -266,10 +269,13 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
             throw new Error('Carried Q1 player has not been admitted'); const player = { client, actor, sourceEntity: number(actor) }; clients.set(client.slot, player); return player; },
         disconnect: player => { simulation.disconnectPlayer(player.actor); options.session.closeClient(player.client); clients.delete(player.client.slot); },
         gameState: player => { const states = entities(); clientData(player); return { info: { kind: 'server-info', protocol: options.protocol, maxClients, gameType: game.options.deathmatch === 0 ? 0 : 1, level: game.world?.message || game.mapName, models: [...models.keys()], sounds: [...sounds.keys()] }, baselines: new Map(states.map(state => [state.number, baseline(state)])), signon: persistentSignon() }; },
-        spawn: player => [{ kind: 'time', seconds: game.time }, ...Array.from({ length: 64 }, (_, index) => ({ kind: 'light-style', index, value: simulation.events.lightStyle(index) } satisfies Q1ApplicationMessage)), ...[...source.composition.clients.records.values()].flatMap(client => [{ kind: 'name', slot: client.slot, value: client.name }, { kind: 'colors', slot: client.slot, value: client.shirt * 16 + client.pants }, { kind: 'frags', slot: client.slot, value: client.frags }] satisfies Q1ApplicationMessage[]), { kind: 'stat', index: 11, value: game.totalSecrets }, { kind: 'stat', index: 12, value: game.totalMonsters }, { kind: 'stat', index: 13, value: game.foundSecrets }, { kind: 'stat', index: 14, value: game.killedMonsters }, { kind: 'set-angle', angles: simulation.playerView(player.actor).angles }, clientData(player)],
+        spawn: player => [{ kind: 'pause', paused: simulation.q1Paused }, { kind: 'time', seconds: game.time }, ...Array.from({ length: 64 }, (_, index) => ({ kind: 'light-style', index, value: simulation.events.lightStyle(index) } satisfies Q1ApplicationMessage)), ...[...source.composition.clients.records.values()].flatMap(client => [{ kind: 'name', slot: client.slot, value: client.name }, { kind: 'colors', slot: client.slot, value: client.shirt * 16 + client.pants }, { kind: 'frags', slot: client.slot, value: client.frags }] satisfies Q1ApplicationMessage[]), { kind: 'stat', index: 11, value: game.totalSecrets }, { kind: 'stat', index: 12, value: game.totalMonsters }, { kind: 'stat', index: 13, value: game.foundSecrets }, { kind: 'stat', index: 14, value: game.killedMonsters }, { kind: 'set-angle', angles: simulation.playerView(player.actor).angles }, clientData(player)],
         frame: (player, _output) => { const origin = simulation.playerView(player.actor).origin, cluster = simulation.scene.leafCluster(simulation.scene.pointLeaf(origin)); return { seconds: game.time, messages: [clientData(player)], reliable: routed.filter(event => event.reliable && (event.recipient === null || event.recipient.equals(player.actor))).map(event => event.message), datagram: routed.filter(event => !event.reliable && (event.recipient === null || event.recipient.equals(player.actor))).map(event => event.message), entities: entities().filter(state => !wide || state.alpha !== ENTALPHA_ZERO || state.effects !== 0).filter(state => state.number === player.sourceEntity || simulation.scene.clusterVisible(cluster, simulation.scene.leafCluster(simulation.scene.pointLeaf(state.origin)), 'pvs')) }; },
         input: (player, command, sequence) => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command }),
-        command: (player, name, args) => { if (name === 'name') {
+        command: (player, name, args) => { if (name === 'pause') {
+            const previous = simulation.q1Paused, text = simulation.toggleQ1Pause(player.actor);
+            operatorMessages.push({ recipient: previous === simulation.q1Paused ? player.actor : null, reliable: true, message: { kind: 'print', text } });
+        } else if (name === 'name') {
             const values = new Map(source.composition.clients.require(player.actor).userinfo);
             values.set('name', (args[0] ?? 'unconnected').slice(0, 15));
             source.composition.userinfo(player.actor, values);

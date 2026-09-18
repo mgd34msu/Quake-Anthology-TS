@@ -1060,7 +1060,8 @@ export class StartupApplication {
   private async connect(connection: BrowserConnection): Promise<void> {
     const family = connection.protocol === "qw" ? "q1" : connection.protocol;
     const seats = this.game?.options.seats ?? this.remote?.options.seats ?? this.model.options.seats;
-    const options: ApplicationOptions = { ...this.model.options, product: connection.protocol === "qw" ? "q1-quakeworld" : family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3",
+    const { q1Protocol: _q1Protocol, q2Protocol: _q2Protocol, remoteContent: _remoteContent, ...base } = this.model.options;
+    const options: ApplicationOptions = { ...base, ...(connection.q2Protocol === undefined ? {} : { q2Protocol: connection.q2Protocol }), product: connection.protocol === "qw" ? "q1-quakeworld" : family === "q1" ? "q1-classic-id1" : family === "q2" ? connection.q2Protocol?.kind === "q2-kex" ? "q2-rerelease-baseq2" : "q2-classic-baseq2" : "q3-baseq3",
       map: family === "q1" ? "maps/e1m1.bsp" : family === "q2" ? "maps/base1.bsp" : "maps/q3dm1.bsp", movement: family, character: family,
       characterModel: family === "q1" ? "player" : family === "q2" ? "male" : "sarge", seats, dedicated: false, rules: "standard",
       network: { kind: connection.protocol === "qw" ? "qw-client" : family === "q1" ? "q1-client" : family === "q2" ? "q2-client" : "q3-client", remote: connection.remote } };

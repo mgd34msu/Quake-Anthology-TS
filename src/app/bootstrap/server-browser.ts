@@ -1,3 +1,4 @@
+import { KexMdns, kexDiscoveryQuery, readKexDiscovery } from "../../network/q2/kex/discovery.ts";
 import { fetchServerMasterList } from "./server-master-list.ts";
 import { ServerBrowser } from "../../network/services/discovery.ts";
 import type { BrowserEntry, DiscoverySource } from "../../network/services/discovery.ts";
@@ -15,7 +16,7 @@ import { directServerText, maximumDirectServers, readDirectServers } from "./ser
 import type { DirectServerAddress } from "./server-browser-addresses.ts";
 
 export type BrowserProtocol = "q1" | "qw" | "q2" | "q3";
-export interface BrowserConnection { readonly protocol: BrowserProtocol; readonly remote: string; }
+export interface BrowserConnection { readonly protocol: BrowserProtocol; readonly remote: string; readonly q2Protocol?: { readonly kind: "q2-kex"; readonly version: 2023 }; }
 export type BrowserSortOrder = "ping-low" | "ping-high" | "name-az" | "name-za" | "map-az" | "map-za" | "players-most" | "players-fewest";
 export const browserSortOrders: readonly { readonly id: BrowserSortOrder; readonly label: string }[] = [
   { id: "ping-low", label: "Ping: lowest first" }, { id: "ping-high", label: "Ping: highest first" },
@@ -47,6 +48,9 @@ export class StartupServerBrowser {
   private cachedView: Q3BrowserCacheView | null = null;
   private masterFetch: AbortController | null = null;
   private q2Master: { readonly address: NetworkAddress; readonly startedAt: number } | null = null;
+  private kexDiscovery: KexMdns | null = null;
+  private kexOpening: Promise<void> | null = null;
+  private readonly kexQueries = new Map<string, number>();
   private readonly pendingStatus = new Map<string, { readonly protocol: BrowserProtocol; readonly address: NetworkAddress }>();
   private readonly masterAddresses = new Map<BrowserProtocol, string>();
   get masterAddress(): string { return this.masterAddresses.get(this.protocol) ?? ""; }
@@ -289,6 +293,17 @@ export class StartupServerBrowser {
   scan(): void {
     this.assertOpen();
     if (this.protocol === "q3") { this.scanQ3(); this.status = "Searching local network..."; return; }
+    if (this.protocol === "q2") {
+      if (this.kexDiscovery !== null) this.kexDiscovery.query();
+      else if (this.kexOpening === null) this.kexOpening = KexMdns.open({ found: address => {
+        if (this.closing || this.closed) return;
+        const key = addressKey(address), now = performance.now();
+        if (now - (this.kexQueries.get(key) ?? -Infinity) < 1000 || this.kexQueries.size >= 256) return;
+        this.kexQueries.set(key, now); this.transport.send(address, kexDiscoveryQuery());
+      }, failed: error => { if (!this.closing && !this.closed) this.status = error.message; } }).then(owner => {
+        if (this.closing || this.closed) owner.close(); else { this.kexDiscovery = owner; owner.query(); }
+      }, (error: unknown) => { if (!this.closing && !this.closed) this.status = error instanceof Error ? error.message : String(error); }).finally(() => { this.kexOpening = null; });
+    }
     this.browser().broadcast([ipv4Address([255, 255, 255, 255], ports[this.protocol])], performance.now()); this.status = "Searching local network...";
   }
   async favorite(): Promise<void> {
@@ -322,7 +337,9 @@ export class StartupServerBrowser {
       await this.rememberDirect(protocol, { remote, address });
       this.assertGeneration(generation, true);
     });
-    return { protocol, remote };
+    const selected = this.browser(protocol).list().find(entry => browserAddress(entry.address) === remote);
+    const wire = selected?.status?.wire;
+    return { protocol, remote, ...(protocol === "q2" && wire?.kind === "source" && wire.protocol.kind === "q2-kex" ? { q2Protocol: wire.protocol } : {}) };
   }
   private persist(write: () => Promise<void>): Promise<void> {
     this.assertOpen();
@@ -367,6 +384,13 @@ export class StartupServerBrowser {
           continue;
         } catch { /* A queried master may also answer a direct server query. */ }
       }
+      const kexSent = this.kexQueries.get(addressKey(event.from));
+      if (kexSent !== undefined) try {
+        const status = readKexDiscovery(event.payload), core = this.browser("q2"), now = performance.now();
+        const entry = core.add(event.from, "lan", now);
+        core.restoreEntry({ ...entry, status, pingMilliseconds: Math.max(0, now - kexSent), updatedAt: now });
+        this.kexQueries.delete(addressKey(event.from)); this.status = "Server updated"; continue;
+      } catch { /* A discovered endpoint may also answer a legacy query. */ }
       for (const protocol of protocols) try {
         const decoded = protocol === "q1" ? { status: readNetQuakeDiscovery(event.payload), challenge: null }
           : protocol === "qw" ? { status: readQuakeWorldDiscovery(event.payload), challenge: null } : protocol === "q2" ? { status: (() => { const message = readQ2OutOfBand(event.payload); return message === null ? null : readQ2Status(message, { kind: "q2-classic", version: 34 }); })(), challenge: null }
@@ -397,7 +421,7 @@ export class StartupServerBrowser {
   }
   close(): Promise<void> {
     if (this.closeResult !== null) return this.closeResult;
-    this.closing = true; this.masterFetch?.abort(); this.masterFetch = null; this.q2Master = null; this.pendingStatus.clear(); this.masterEpoch++; this.master = null;
+    this.closing = true; this.kexDiscovery?.close(); this.kexDiscovery = null; this.kexQueries.clear(); this.masterFetch?.abort(); this.masterFetch = null; this.q2Master = null; this.pendingStatus.clear(); this.masterEpoch++; this.master = null;
     this.closeResult = this.writes.finally(() => { this.closed = true; this.generation++; this.transport.close(); });
     return this.closeResult;
   }

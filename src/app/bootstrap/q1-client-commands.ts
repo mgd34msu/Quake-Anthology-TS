@@ -17,6 +17,11 @@ export function registerQ1ClientCommands(commands: CommandBuffer, _dialect: Comm
     { name: "kill", summary: "Suicide through the source game's player lifecycle." },
     { name: "suicide", summary: "Alias for kill." },
     { name: "fly", summary: "Toggle flying with collision; source authority controls cheat access." },
+    ...(_dialect === "q1-netquake" || _dialect === "q1-quakeworld" ? [
+      { name: "pause", summary: "Toggle server pause when pausable permits it." },
+      { name: "status", summary: "Show the current source server and connected players." },
+      { name: "ping", summary: "Show measured client round trip times." },
+    ] : []),
   ]) {
     if (commands.exists(name)) continue;
     if (commands.register(name, invocation => {

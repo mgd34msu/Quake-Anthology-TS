@@ -11,6 +11,10 @@ import { applyServerProfile, captureServerProfile, collectServerSettings, cvarSe
 import type { BoundServerSetting } from "../../src/settings/server/index.ts";
 import { moveRotationMap, q2RotationSettings, rotationMapName } from "../../src/settings/server/rotation.ts";
 import { listServerProfiles } from "../../src/settings/server/library.ts";
+import { q1MatchSettings } from "../../src/settings/server/q1.ts";
+import { serverDefinitionsForSelection } from "../../src/settings/server/selection.ts";
+import { createStartupSource, resolveStartupRules } from "../../src/app/bootstrap/startup-source.ts";
+import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 
 function q2Bindings() {
   const identity = createIdentityOwner("server-settings"), cvars = new CvarRegistry({ dialect: "q2-classic", context: { session: identity.session, origin: { kind: "server-console" } } });
@@ -22,6 +26,33 @@ function q2Bindings() {
 function binding(bindings: readonly BoundServerSetting[], id: string): BoundServerSetting {
   const found = bindings.find(binding => binding.definition.id === id); if (found === undefined) throw new Error(`Missing ${id}`); return found;
 }
+
+test("Q1 Rogue team choices persist pending map rules and apply to the next source owner", async () => {
+  const root = await mkdtemp(join(tmpdir(), "q1-team-profile-"));
+  const source = { provider: "q1:official", content: "q1:classic:rogue:base" } satisfies Parameters<typeof serverDefinitionsForSelection>[0]["source"];
+  const definitions = serverDefinitionsForSelection({ source, match: source, combat: source });
+  const cvars = new CvarRegistry({ dialect: "q1-netquake", context: { session: createIdentityOwner("q1-team-settings").session, origin: { kind: "server-console" } } });
+  cvars.register("teamplay", "0");
+  const bindings = definitions.map(definition => ({ definition, owner: cvarServerSettingsOwner(cvars) }));
+  const teamplay = binding(bindings, "server:q1.teamplay");
+  try {
+    expect(teamplay.definition.kind).toBe("choice");
+    expect(writeServerSetting(teamplay, "6")).toEqual({ desired: "6", effective: "0", pending: true, applyAt: "next-map" });
+    const store = new ConfigStore(root);
+    await saveServerProfile(store, "rogue.json", captureServerProfile(bindings), definitions);
+    const saved = await loadServerProfile(store, "rogue.json", definitions); if (saved === null) throw new Error("Missing profile");
+    applyServerProfile(saved, definitions.map(definition => ({ definition, owner: cvarServerSettingsOwner(cvars, true) })));
+    expect(cvars.variableValue("teamplay")).toBe(6);
+    const launch = parseApplicationCommand(["--game", "q1-classic-rogue", "--mode", "deathmatch"]);
+    if (launch.kind !== "run") throw new Error("Missing Rogue launch");
+    const options = { ...launch.options, serverProfile: saved };
+    const startup = createStartupSource(options, { source, match: source }, "q1-netquake", cvars.context, 8, () => undefined);
+    const resolved = resolveStartupRules(options, startup, 8, definitions);
+    expect(resolved.options.mode).toBe("deathmatch"); expect(startup.variableValue("teamplay")).toBe(6);
+    expect(() => parseServerProfile(saved, q1MatchSettings("standard").definitions)).toThrow("Unknown");
+    expect(q1MatchSettings("ctf").definitions).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 test("independent match and combat collections preserve source defaults and reject competing semantic owners", () => {
   const definitions = collectServerSettings([q2LimitSettings(), q3CombatSettings("baseq3")]);
   expect(definitions.find(definition => definition.id === "server:frag-limit")?.defaultValue).toBe("0");

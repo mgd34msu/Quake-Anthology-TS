@@ -112,3 +112,22 @@ test("initial spmap applies to the staged source and clears conflicting latches 
   expect(staged.variableValue("g_gametype")).toBe(2); expect(staged.variableValue("g_doWarmup")).toBe(0);
   expect(current.variableValue("g_gametype")).toBe(4); expect(current.find("g_gametype")?.latchedValue).toBe("3");
 });
+
+test("guest map spawn applies mode and capacity before init, then changes cheats after init", async () => {
+  const { CvarRegistry, CvarFlag } = await import("../../src/core/cvars/index.ts");
+  const { createIdentityOwner } = await import("../../src/contracts/identity.ts");
+  const { applyQ3MapLaunch } = await import("../../src/app/bootstrap/q3-map-command.ts");
+  const identity = createIdentityOwner("guest-map-policy"), context = { session: identity.session, origin: { kind: "server-console" } } satisfies import("../../src/contracts/common.ts").CommandContext;
+  const cvars = new CvarRegistry({ dialect: "q3", context });
+  cvars.register("g_gametype", "4", CvarFlag.Latch); cvars.register("sv_maxclients", "16", CvarFlag.Latch);
+  cvars.register("sv_cheats", "0"); cvars.register("g_doWarmup", "1");
+  const dev = q3MapLaunch({ kind: "retail" }, "devmap", 4);
+  applyQ3MapLaunch(cvars, dev, "spawn"); expect(cvars.variableValue("sv_cheats")).toBe(0);
+  expect(cvars.variableValue("g_gametype")).toBe(4);
+  applyQ3MapLaunch(cvars, dev, "finish"); expect(cvars.variableValue("sv_cheats")).toBe(1);
+  const single = q3MapLaunch({ kind: "retail" }, "spdevmap", 4);
+  applyQ3MapLaunch(cvars, single, "spawn");
+  expect(cvars.variableValue("g_gametype")).toBe(2); expect(cvars.variableValue("sv_maxclients")).toBe(8);
+  expect(cvars.variableValue("g_doWarmup")).toBe(0); expect(cvars.variableValue("sv_cheats")).toBe(1);
+  applyQ3MapLaunch(cvars, single, "finish"); expect(cvars.variableValue("sv_cheats")).toBe(0);
+});

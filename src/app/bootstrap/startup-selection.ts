@@ -1,3 +1,4 @@
+import { liveQ2Protocol } from "./options.ts";
 import { readArenaSelection, type ArenaSelection } from "./base-arena-selection.ts";
 import { prepareQ3ApplicationProduct } from "./q3-product.ts";
 import { classifyBsp } from "../../formats/bsp-kind.ts";
@@ -26,6 +27,8 @@ import { loadTeamArenaCampaign, planTeamArenaSkirmish, type TeamArenaCampaign, t
 import { applicationPreset } from "./content.ts";
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { ApplicationOptions } from "./options.ts";
+import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
+import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
 export type StartupSelectionField = "doppler" | "environment" | "product" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
 export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
@@ -41,6 +44,7 @@ export interface StartupLaunch { readonly options: ApplicationOptions; readonly 
 export interface StartupHosting {
   readonly kind: "offline" | "native-server" | "unified-server";
   readonly port: number;
+  readonly q1Protocol: Q1ProtocolIdentity | null;
 }
 const choice = (id: string, label = id, unavailable: string | null = null): StartupSelectionChoice => ({ id, label, unavailable });
 const monsterNames: Readonly<Record<string, string>> = { monster_army: "Grunt", monster_demon1: "Fiend", monster_wizard: "Scrag", monster_shalrath: "Vore", monster_tarbaby: "Spawn" };
@@ -91,10 +95,11 @@ export class StartupSelectionModel {
   selectServerProfile(path: string | null): void { this.selectedServerProfile = path === null ? {} : { serverProfilePath: path }; }
   hosting(): StartupHosting {
     const network = this.initial.network;
-    if (network.kind === "native-server" || network.kind === "q2-server" || network.kind === "unified-server")
-      return { kind: network.kind === "q2-server" ? "native-server" : network.kind, port: network.port };
     const product = this.product("product").expectation;
-    return { kind: "offline", port: product.family === "q3" ? 27960 : product.family === "q2" ? 27910 : product.edition === "quakeworld" ? 27500 : 26000 };
+    const q1Protocol = product.family === "q1" && product.edition !== "quakeworld" ? this.initial.q1Protocol ?? defaultNetQuakeProfile(15) : null;
+    if (network.kind === "native-server" || network.kind === "q2-server" || network.kind === "unified-server")
+      return { kind: network.kind === "q2-server" ? "native-server" : network.kind, port: network.port, q1Protocol };
+    return { kind: "offline", port: product.family === "q3" ? 27960 : product.family === "q2" ? liveQ2Protocol(this.initial, product.edition === "rerelease").kind === "q2-kex" ? 5069 : 27910 : product.edition === "quakeworld" ? 27500 : 26000, q1Protocol };
   }
   setHosting(value: StartupHosting): void {
     if (!Number.isInteger(value.port) || value.port < 1 || value.port > 65535) throw new Error("Port must be a whole number from 1 to 65535.");
@@ -102,9 +107,10 @@ export class StartupSelectionModel {
       this.select("mode", this.product("product").expectation.family === "q3" ? "deathmatch" : "coop");
     const previous = this.initial.network;
     const host = previous.kind === "native-server" || previous.kind === "q2-server" || previous.kind === "unified-server" ? previous.host : "0.0.0.0";
-    const { networkTransport: _transport, ...initial } = this.initial;
+    const { networkTransport: _transport, q1Protocol: _q1Protocol, ...initial } = this.initial;
     this.initial = { ...initial,
       network: value.kind === "offline" ? { kind: "offline" } : { kind: value.kind, host, port: value.port },
+      ...(value.kind === "native-server" && this.hosting().q1Protocol !== null && value.q1Protocol !== null ? { q1Protocol: value.q1Protocol } : {}),
       ...(value.kind === "native-server" && this.initial.networkTransport !== undefined ? { networkTransport: this.initial.networkTransport } : {}) };
   }
   private applySelectedServerProfile(options: ApplicationOptions): ApplicationOptions {
@@ -372,9 +378,31 @@ export class StartupSelectionModel {
     if (product.expectation.family === "q3") throw new Error("This map has no supported authored monster roster");
     await this.prepareMapClassnames();
   }
-  private async prepareMapClassnames(): Promise<void> {
+  prepareMapChoices(offset: number, count: number): Promise<void> | null {
     const product = this.geometry();
-    const map = this.catalog.mapsFor(product.id).find(map => map.path.toLowerCase() === this.values.map.toLowerCase());
+    if (product.expectation.family === "q3" || this.values.mode !== "deathmatch" && this.values.rules === "standard") return null;
+    const maps = this.catalog.mapsFor(product.id);
+    const choices = this.maps().slice(offset, offset + count).filter(choice => {
+      const map = maps.find(map => map.path.toLowerCase() === choice.id.toLowerCase());
+      return choice.unavailable === null && (map === undefined || !this.mapClassnames.has(`${map.source}:${map.memberIndex}`));
+    });
+    if (choices.length === 0) return null;
+    return this.prepareMapPage(product, choices);
+  }
+  private async prepareMapPage(product: CatalogProduct, choices: readonly StartupSelectionChoice[]): Promise<void> {
+    for (const map of choices) {
+      try { await this.prepareMapClassnames(map.id); }
+      catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const current = this.playableMaps.get(product.expectation.id) ?? [];
+        this.playableMaps.set(product.expectation.id, current.map(value => value.id === map.id ? { ...value, unavailable: reason } : value));
+        this.eligibleMaps.clear();
+      }
+    }
+  }
+  private async prepareMapClassnames(path = this.values.map): Promise<void> {
+    const product = this.geometry();
+    const map = this.catalog.mapsFor(product.id).find(map => map.path.toLowerCase() === path.toLowerCase());
     if (map === undefined) throw new Error("Selected map is unavailable");
     const key = `${map.source}:${map.memberIndex}`;
     if (this.mapClassnames.has(key)) return;
@@ -523,6 +551,11 @@ export class StartupSelectionModel {
     if (field === "enemies" && id !== "native" && id !== "custom") { this.selectMonsterSource(id); return; }
     this.values[field] = id;
     if (field === "product") {
+      const selectedProduct = this.product("product").expectation;
+      if (selectedProduct.family !== "q1" || selectedProduct.edition === "quakeworld") {
+        const { q1Protocol: _q1Protocol, ...initial } = this.initial;
+        this.initial = initial;
+      }
       this.values.map = this.defaultMap();
       if (this.product("product").expectation.family === "q3") this.values.enemies = "native";
     }
@@ -550,7 +583,9 @@ export class StartupSelectionModel {
     const mode = this.values.mode, renderer = this.values.renderer, rules = this.values.rules, skill = Number(this.values.skill);
     if (mode !== "singleplayer" && mode !== "coop" && mode !== "deathmatch" || renderer !== "gl" && renderer !== "cpu"
       || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" && rules !== "tag" && rules !== "deathball" && rules !== "horde" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
-    return this.applySelectedServerProfile({ ...this.initial, product: this.values.product, map: this.values.map, movement: this.product("movement").expectation.family,
+    const { q1Protocol, ...initial } = this.initial;
+    const protocol = initial.network.kind === "native-server" && this.hosting().q1Protocol !== null && q1Protocol !== undefined ? { q1Protocol } : {};
+    return this.applySelectedServerProfile({ ...initial, ...protocol, product: this.values.product, map: this.values.map, movement: this.product("movement").expectation.family,
       character: this.product("character").expectation.family, characterModel: this.values.model, mode, rules, skill,
       seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) });
   }

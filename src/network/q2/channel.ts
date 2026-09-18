@@ -55,6 +55,9 @@ export class Q2Channel {
     lastSentMilliseconds = 0;
     lastReceivedMilliseconds = 0;
     constructor(readonly options: Q2ChannelOptions) {
+        if (options.protocol.kind === 'q2-kex') {
+            this.payloadBytes = 65527; this.capacity = 65527; this.receiving = new Uint8Array(65527); return;
+        }
         const datagramBytes = options.maxDatagramBytes ?? 65507;
         if (!Number.isInteger(datagramBytes) || datagramBytes < 524 || datagramBytes > 65507) throw new RangeError("Invalid Q2 transport datagram limit");
         this.payloadBytes = Math.min(options.payloadBytes ?? 1390, datagramBytes - 12);
@@ -116,6 +119,7 @@ export class Q2Channel {
         return messageBytes(packet);
     }
     transmit(unreliable: Uint8Array, nowMilliseconds: number): Uint8Array {
+        if (this.options.protocol.kind === 'q2-kex') return this.kexPacket(unreliable, false, nowMilliseconds);
         const next = this.nextFragment(nowMilliseconds);
         if (next !== null)
             return next;
@@ -156,6 +160,20 @@ export class Q2Channel {
         return messageBytes(packet);
     }
     receive(bytes: Uint8Array, nowMilliseconds: number): Q2ChannelReceive {
+        if (this.options.protocol.kind === 'q2-kex') {
+            if (bytes.length < 8) return { kind: 'rejected', reason: 'short' };
+            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+            const sequenceWord = view.getUint32(0, true), acknowledgmentWord = view.getUint32(4, true);
+            if (sequenceWord === 0x80000000 && acknowledgmentWord === 0x80000000) {
+                this.lastReceivedMilliseconds = nowMilliseconds;
+                return { kind: 'message', sequence: this.incoming, acknowledged: this.incomingAck, dropped: 0, bytes: bytes.slice(8) };
+            }
+            const sequence = sequenceWord & 0x7fffffff, acknowledged = acknowledgmentWord & 0x7fffffff;
+            if (sequence <= this.incoming) return { kind: 'rejected', reason: 'sequence' };
+            const dropped = sequence - this.incoming - 1; this.incoming = sequence; this.incomingAck = acknowledged;
+            this.lastReceivedMilliseconds = nowMilliseconds;
+            return { kind: 'message', sequence, acknowledged, dropped, bytes: bytes.slice(8) };
+        }
         const packet = createMessage(0);
         loadMessage(packet, bytes);
         const sequenceWord = MSG_ReadLong(packet), ackWord = MSG_ReadLong(packet);
@@ -208,7 +226,23 @@ export class Q2Channel {
         this.lastReceivedMilliseconds = nowMilliseconds;
         return { kind: 'message', sequence, acknowledged, dropped, bytes: payload };
     }
+    private kexPacket(payload: Uint8Array, reliable: boolean, now: number): Uint8Array {
+        if (payload.length > this.capacity) throw new RangeError('KEX game message overflow');
+        const bytes = new Uint8Array(payload.length + 8), view = new DataView(bytes.buffer);
+        view.setUint32(0, reliable ? 0x80000000 : this.outgoing++ & 0x7fffffff, true);
+        view.setUint32(4, reliable ? 0x80000000 : this.incoming & 0x7fffffff, true);
+        bytes.set(payload, 8); this.lastSentMilliseconds = now; return bytes;
+    }
     send<TAddress extends NetworkAddress>(transport: DatagramTransport<TAddress>, to: TAddress, unreliable: Uint8Array, nowMilliseconds: number): boolean {
+        if (this.options.protocol.kind === 'q2-kex') {
+            let sent = true;
+            if (this.queued.length !== 0) {
+                sent = transport.send(to, this.kexPacket(this.queued, true, nowMilliseconds));
+                if (sent) this.queued = new Uint8Array(0);
+            }
+            if (unreliable.length !== 0) sent = transport.send(to, this.kexPacket(unreliable, false, nowMilliseconds)) && sent;
+            return sent;
+        }
         return transport.send(to, this.transmit(unreliable, nowMilliseconds));
     }
 }

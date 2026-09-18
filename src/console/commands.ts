@@ -75,6 +75,7 @@ export function registerConsoleCommands(services: ConsoleCommandServices): () =>
     });
   }
   add("levelshot", invocation => {
+    if (invocation.dialect === "q3") return services.commands.forwardToServer(invocation);
     const id = seat(invocation), capture = id === null ? null : services.capture(id), map = services.mapName();
     if (capture !== null) services.queue(async () => { const result = await capture.levelshot(map); services.print(`Wrote ${result.path}\n`); }, true);
   });

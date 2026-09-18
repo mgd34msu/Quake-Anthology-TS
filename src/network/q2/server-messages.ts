@@ -159,7 +159,7 @@ export class Q2ServerMessageReader {
     }
     reset(): void { this.legacyDemo26 = false; this.histories.clear(); this.baselines.clear(); this.configStrings.clear(); this.stream = 'none'; this.selectedSeat = 0; this.compressedDownload = new Uint8Array(0); this.inflatedDownloadBytes = 0; }
     read(bytes: Uint8Array): Q2ServerRecord[] { this.wire.begin(bytes); const records = this.parse(); this.wire.finish(); return records; }
-    private record(opcode: number, start: number, event: Q2ServerEvent): Q2ServerRecord { checkMessageRead(this.wire.message); return { seat: this.selectedSeat, opcode, raw: this.wire.message.data.slice(start, this.wire.message.readcount), event }; }
+    private record(opcode: number, start: number, event: Q2ServerEvent): Q2ServerRecord { checkMessageRead(this.wire.message); return { seat: event.kind === 'frame' && (this.wire.protocol.kind === 'q2-kex' || this.wire.protocol.kind === 'q2-kex-demo') ? 0 : this.selectedSeat, opcode, raw: this.wire.message.data.slice(start, this.wire.message.readcount), event }; }
     private config(): Q2ServerEvent | null {
         const message = this.wire.message, index = MSG_ReadWord(message);
         if (index === this.options.maxConfigStrings)
@@ -306,7 +306,7 @@ export class Q2ServerMessageReader {
                     break;
                 }
                 case 20:
-                    event = { kind: 'frame', frame: this.history().read(this.wire, !this.legacyDemo26) };
+                    event = { kind: 'frame', frame: this.history(kex ? 0 : this.selectedSeat).read(this.wire, !this.legacyDemo26) };
                     break;
                 case 9:
                     event = { kind: 'sound', sound: this.sound() };

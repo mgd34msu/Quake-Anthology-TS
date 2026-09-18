@@ -32,6 +32,7 @@ export class ApplicationQ3Source implements SnapshotSource {
   private reliable = 0;
   private sequence = -1;
   private commandSequence = -1;
+  private levelShotSequence = -1;
   private snapshotServerBit: 0 | 4 = 0;
   private pendingRoundTime: number | null = null;
   private readonly product: Q3SourcePresentationState["product"];
@@ -40,7 +41,8 @@ export class ApplicationQ3Source implements SnapshotSource {
   constructor(private currentActor: ActorId, initial: Q3SourcePresentationState,
     private readonly select: (player: PlayerStateRecord<number, number, number>, source: Q3SourcePresentationState) => Q3VisibleEntities,
     private readonly sourceActor: (number: number) => ActorId | null,
-    private readonly predictionCommand?: (command: ActorCommand, sourceTimeMilliseconds: number) => UserCommand) {
+    private readonly predictionCommand?: (command: ActorCommand, sourceTimeMilliseconds: number) => UserCommand,
+    private readonly levelShot?: () => void) {
     const client = initial.clients.find(client => client.actor.equals(currentActor));
     if (client === undefined) throw new Error("Q3 presentation seat has no source player");
     this.clientNumber = client.slot; this.product = initial.product;
@@ -82,6 +84,10 @@ export class ApplicationQ3Source implements SnapshotSource {
   getGameState(): readonly string[] { return this.appliedStrings.slice(); }
   getServerCommand(sequence: number): readonly string[] | null {
     const command = this.serverCommands.get(sequence) ?? null;
+    if (command?.[0] === "clientLevelShot" && sequence > this.levelShotSequence) {
+      this.levelShotSequence = sequence;
+      this.levelShot?.();
+    }
     if (command?.[0] === "cs") {
       const index = Number(command[1]), value = command[2];
       if (!Number.isInteger(index) || index < 0 || index >= 1024 || value === undefined) throw new Error("Invalid local source configstring command");

@@ -1,3 +1,4 @@
+import { registerPlayerUserinfo } from "./player-userinfo.ts";
 import { sourceAdministrationCommandNames } from "./server-administration.ts";
 import { BindingStore } from "../../input/binding-store.ts";
 import { q3ProductMapCommands, registerQ3ProductPolicy, type Q3ProductPolicy } from "../../core/q3-product-policy.ts";
@@ -92,8 +93,9 @@ export class PreparedStartup {
     this.consoleBindings = options.seats.length === 0 ? new BindingStore() : null;
     this.forward = options.forward;
     this.q3Policy = options.q3Policy ?? (options.dialect === "q3" ? registerQ3ProductPolicy(source) : { kind: "retail" });
+    if (options.dialect === "q1-netquake" || options.dialect === "q1-quakeworld") this.deferredCommands.push("pause");
     if (options.dialect === "q3") this.deferredCommands.push(...q3ProductMapCommands(this.q3Policy).filter(name => name !== "map"));
-    for (const seat of options.seats) registerRunCvar(seat.mouse.cvars, options.movementDialect);
+    for (const seat of options.seats) { registerRunCvar(seat.mouse.cvars, options.movementDialect); registerPlayerUserinfo(seat.cvars, seat.id.index); }
     this.fallback = movement.dialect === options.dialect ? movement : new CvarRegistry({ dialect: options.dialect, context: source.context, print: text => this.print(text) });
     this.routing = new ApplicationConsoleRouting({ fallback: this.fallback, sourceDialect: () => options.dialect,
       server: () => ({ cvars: this.source, sharedNames: options.sharedNames }),
@@ -113,7 +115,7 @@ export class PreparedStartup {
     for (const name of this.deferredCommands) this.commands.register(name, invocation => {
       this.worldAction = true; return this.forward(name, invocation.args, invocation.source);
     });
-    const operatorNames = sourceAdministrationCommandNames(options.dialect);
+    const operatorNames = [...sourceAdministrationCommandNames(options.dialect), ...(options.dialect === "q1-netquake" || options.dialect === "q1-quakeworld" ? ["status", "ping"] : [])];
     for (const name of operatorNames) this.commands.register(name, invocation => {
       if (name === "setmaster" && options.seats.length === 0 && (options.dialect === "q2-classic" || options.dialect === "q2-rerelease"))
         this.source.set("public", "1");

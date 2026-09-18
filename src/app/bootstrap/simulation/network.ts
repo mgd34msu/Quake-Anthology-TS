@@ -1,5 +1,5 @@
 import { expandCommandMacros } from '../../../core/commands/text.ts';
-import type { ActorId } from '../../../contracts/identity.ts';
+import type { ActorId, ClientId } from '../../../contracts/identity.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
 import type { ActorCommand } from '../../../contracts/session.ts';
 import type { Q2ProtocolIdentity } from '../../../contracts/protocol.ts';
@@ -26,6 +26,7 @@ export interface Q2ApplicationServerBindingOptions {
     readonly protocol: Q2ProtocolIdentity;
     readonly administration?: Q2ApplicationServerHost['administration'];
     readonly masters?: Q2ApplicationServerHost['masters'];
+    readonly playerIdentity?: (client: ClientId, identity: { readonly seat: number; readonly socialId: string } | null) => void;
     print(text: string): void;
 }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
@@ -263,16 +264,22 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
                 reasons.push('Selected movement requires unified peer serialization');
             if (!simulation.recipe.character.definition.provider.startsWith('q2:'))
                 reasons.push('Selected character requires unified peer serialization');
-            if (options.protocol.kind === 'q2-kex' || options.protocol.kind === 'q2-kex-demo')
+            if (options.protocol.kind === 'q2-kex-demo')
                 reasons.push('KEX native live transport is not bound');
-            if (source.game.options.edition === 'classic' && (options.protocol.kind === 'q2-rerelease' || options.protocol.kind === 'q2-kex' || options.protocol.kind === 'q2-kex-demo') || source.game.options.edition === 'rerelease' && options.protocol.kind !== 'q2-rerelease')
+            if (source.game.options.edition === 'classic' && (options.protocol.kind === 'q2-rerelease' || options.protocol.kind === 'q2-kex' || options.protocol.kind === 'q2-kex-demo') || source.game.options.edition === 'rerelease' && options.protocol.kind !== 'q2-rerelease' && options.protocol.kind !== 'q2-kex')
                 reasons.push('Selected application game API and native message layout differ');
             return reasons.length === 0 ? { kind: 'supported' } : { kind: 'unsupported', reasons };
         },
         admit: (from, request) => {
             const pairs = new Map(q2Userinfo(request.userinfo));
+            if (request.protocol.kind === 'q2-kex') {
+                const suffix = `_${request.splitSeat ?? 0}`;
+                for (const [key, value] of [...pairs]) if (key.endsWith(suffix)) pairs.set(key.slice(0, -suffix.length), value);
+            }
             pairs.set('ip', addressKey(from));
             const userinfo = [...pairs].map(([key, value]) => `\\${key}\\${value}`).join('');
+            const socialId = request.socialIds?.[0] ?? '';
+            if (socialId !== '' && options.playerIdentity === undefined) return { kind: 'rejected', reason: 'Server has no rerelease social identity owner' };
             const allowed = source.players.connect(source.game, userinfo);
             if (!allowed.allowed)
                 return { kind: 'rejected', reason: allowed.reason };
@@ -284,6 +291,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
                 return { kind: 'rejected', reason: 'Server is full' };
             const client = options.session.createClient(slot);
             client.connect(from.kind === 'loopback' ? 'loopback' : 'remote');
+            options.playerIdentity?.(client.id, { seat: request.splitSeat ?? 0, socialId });
             let admittedActor: ActorId | null = null;
             try {
                 const admitted = simulation.admitPlayer(client.id), entity = source.game.entity(admitted.actor);
@@ -297,11 +305,12 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             }
             catch (error) {
                 if (admittedActor !== null) simulation.disconnectPlayer(admittedActor);
+                options.playerIdentity?.(client.id, null);
                 options.session.closeClient(client.id);
                 throw error;
             }
         },
-        disconnect: (player, _reason) => { simulation.disconnectPlayer(player.actor); options.session.closeClient(player.client); clients.delete(player.client.slot); knownConfigs.delete(player.client.slot); },
+        disconnect: (player, _reason) => { simulation.disconnectPlayer(player.actor); options.playerIdentity?.(player.client, null); options.session.closeClient(player.client); clients.delete(player.client.slot); knownConfigs.delete(player.client.slot); },
         carriedPlayer: client => { const actor = simulation.players().find(actor => simulation.movementPlayer(actor)?.client.equals(client)); if (actor === undefined)
             throw new Error('Application has not admitted carried Q2 network client'); const player = { client, actor, sourceEntity: sourceNumber(actor) }; clients.set(client.slot, player); return player; },
         gameState: (player, protocol = options.protocol) => {
@@ -369,7 +378,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
                 }
             return [...updates, ...messages];
         },
-        input: (player, command: UsercmdT, sequence): ActorCommand => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command: source.game.options.edition === 'classic' ? toQ2Command(command) : toQ2RereleaseCommand(command, sequence) }),
+        input: (player, command: UsercmdT, sequence): ActorCommand => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command: source.game.options.edition === 'classic' ? toQ2Command(command) : toQ2RereleaseCommand(command, options.protocol.kind === 'q2-kex' ? command.serverFrame : sequence) }),
         expandClientCommand: text => expandCommandMacros(text, name => cvars.variableString(name), options.print),
         command: (player, name, args) => { const entity = source.game.entity(player.actor); if (entity === null)
             throw new Error('Q2 command has no source player'); source.players.clientCommand(entity, source.game, name, args); },

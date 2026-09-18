@@ -22,6 +22,7 @@ interface Peer<TAddress extends NetworkAddress> {
     readonly reliable: Uint8Array[];
     lastReceived: number;
     sequence: number;
+    readonly pings: number[];
 }
 export class Q1ServerNetwork<TAddress extends NetworkAddress> implements ApplicationNetwork {
     readonly role = 'server';
@@ -31,13 +32,16 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
     private codec: ReturnType<typeof createNetQuakeCodec>;
     private readonly peers = new Map<string, Peer<TAddress>>();
     private pending: ActorCommand[] = [];
+    private sourceSeconds = 0;
+    private readonly playerNames = new Map<number, string>();
+    clientPings(): ReadonlyMap<ClientId, number> { return new Map([...this.peers.values()].map(peer => [peer.player.client, peer.pings.length === 0 ? 0 : Math.trunc(peer.pings.reduce((sum, value) => sum + value, 0) / peer.pings.length)])); }
     constructor(readonly options: Q1ServerNetworkOptions<TAddress>) { this.validate(options.host); this.host = options.host; this.codec = createNetQuakeCodec(this.host.protocol, new MessageReader(new Uint8Array(0))); }
     private validate(host: Q1ApplicationServerHost): void { const support = host.supportsSourceWire(); if (support.kind === 'unsupported')
         throw new Error(support.reasons.join('; ')); }
     get address(): TAddress { return this.options.transport.address; }
     get phase(): ApplicationNetworkPhase { return this.ended ? 'closed' : 'active'; }
     get clients(): readonly Q1ApplicationPlayer[] { return [...this.peers.values()].map(peer => peer.player); }
-    private bytes(messages: readonly Q1ApplicationMessage[]): Uint8Array { const buffer = new SizeBuf(this.codec.maxMsglen); for (const message of messages)
+    private bytes(messages: readonly Q1ApplicationMessage[]): Uint8Array { for (const message of messages) if (message.kind === "name") this.playerNames.set(message.slot, message.value); const buffer = new SizeBuf(this.codec.maxMsglen); for (const message of messages)
         writeNetQuakeMessage(buffer, this.host.protocol, message); return buffer.bytes(); }
     private start(peer: Peer<TAddress>): void { peer.stage = 1; peer.reliable.push(this.bytes([peer.state.info, { kind: 'set-view', entity: peer.player.sourceEntity }, { kind: 'signon', stage: 1 }])); }
     changeWorld(host: Q1ApplicationServerHost): void { this.validate(host);
@@ -55,6 +59,16 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
         const [name, ...args] = quakeWorldCommandArguments(text);
         if (name === undefined)
             return;
+        if (name === 'ping' || name === 'status') {
+            const pings = this.clientPings();
+            const rows = [...this.peers.values()].map(other => {
+                const name = this.playerNames.get(other.player.client.slot) ?? 'unconnected';
+                return name === '' ? 'unconnected' : name;
+            });
+            const text = name === 'ping' ? `Client ping times:\n${[...this.peers.values()].map((other, index) => `${pings.get(other.player.client) ?? 0} ${rows[index]}\n`).join('')}`
+                : `map: ${this.host.mapName}\nplayers: ${this.peers.size} active (${this.host.maxClients} max)\n${[...this.peers.values()].map((other, index) => `#${other.player.client.slot + 1} ${rows[index]} ${addressKey(other.remote)}\n`).join('')}`;
+            peer.reliable.push(this.bytes([{ kind: 'print', text }])); return;
+        }
         if (name === 'disconnect') {
             this.disconnectClient(peer.player.client, 'Client disconnected');
             return;
@@ -99,7 +113,7 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                             if (admitted.kind === 'rejected')
                                 return admitted;
                             try {
-                                const peer: Peer<TAddress> = { remote: packet.from, player: admitted.player, channel: new NetQuakeChannel(this.codec.maxMsglen), stage: 1, state: this.host.gameState(admitted.player), reliable: [], lastReceived: now, sequence: 0 };
+                                const peer: Peer<TAddress> = { remote: packet.from, player: admitted.player, channel: new NetQuakeChannel(this.codec.maxMsglen), stage: 1, state: this.host.gameState(admitted.player), reliable: [], lastReceived: now, sequence: 0, pings: [] };
                                 this.start(peer);
                                 this.peers.set(addressKey(packet.from), peer);
                             }
@@ -129,8 +143,11 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
                             this.command(peer, message.text);
                         else if (message.kind === 'disconnect')
                             this.disconnectClient(peer.player.client, 'Client disconnected');
-                        else if (message.kind === 'move' && peer.stage === 4)
+                        else if (message.kind === 'move' && peer.stage === 4) {
+                            peer.pings.push(Math.max(0, this.sourceSeconds - message.command.acknowledgedServerTimeSeconds) * 1000);
+                            if (peer.pings.length > 16) peer.pings.shift();
                             this.pending.push(this.host.input(peer.player, message.command, peer.sequence++));
+                        }
                     }
             }
             catch (error) {
@@ -164,6 +181,7 @@ export class Q1ServerNetwork<TAddress extends NetworkAddress> implements Applica
         if (this.ended)
             return;
         this.host.observe(output, events);
+        this.sourceSeconds = output.snapshot.frame.time.kind === "seconds" ? output.snapshot.frame.time.value : output.snapshot.frame.time.value / 1000;
         for (const peer of this.peers.values()) {
             const frame = this.host.frame(peer.player, output);
             if (frame.reliable.length !== 0)

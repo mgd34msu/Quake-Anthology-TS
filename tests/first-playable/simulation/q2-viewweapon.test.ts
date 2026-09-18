@@ -5,6 +5,29 @@ import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { add3 } from "../../../src/core/math.ts";
 
+test("Q2 chase HUD follows the watched player with a foreign character and movement", async () => {
+  const parsed = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--movement", "q1", "--character", "q3", "--mode", "deathmatch", "--dedicated"]);
+  if (parsed.kind !== "run") throw new Error("Missing launch");
+  const content = await loadApplicationContent(parsed.options), identity = createIdentityOwner("q2-chase-hud");
+  const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, mode: "deathmatch", skill: 0, seed: 17, maxClients: 2 });
+  try {
+    const target = simulation.admitPlayer(identity.client(0, 0)).actor, observer = simulation.admitPlayer(identity.client(1, 0)).actor;
+    const source = simulation.q2Source(), watched = simulation.movementPlayer(target), entity = source?.game.entity(observer);
+    if (source === null || watched === null || entity == null) throw new Error("Missing source players");
+    source.players.userinfoChanged(entity, source.game, "\\name\\Observer\\skin\\male/grunt\\spectator\\1");
+    source.players.putInServer(entity, source.game);
+    simulation.combat.setHealth(watched.actor, 37);
+    source.players.chase(entity, source.game, 1);
+    expect(source.players.states.get(observer)?.chaseTarget?.equals(target)).toBe(true);
+    expect(simulation.playerUi(observer)).toEqual(simulation.playerUi(target));
+    expect(simulation.playerUi(observer).health).toBe(37);
+    expect(simulation.combat.read(observer)?.health).toBe(100);
+    expect(simulation.playerView(observer).viewHeight).toBe(0);
+    simulation.disconnectPlayer(target);
+    expect(simulation.playerUi(observer).health).toBe(100);
+  } finally { simulation.close(); await content.close(); }
+}, 30000);
+
 for (const edition of ["classic", "rerelease"]) test(`Q2 ${edition} camera and gun consume native viewheight, world-space gun offset and view kick through crouch and death`, async () => {
   const parsed = parseApplicationCommand(["--game", `q2-${edition}-baseq2`, "--map", "base1", "--movement", "q2", "--character", "q2", "--dedicated"]);
   if (parsed.kind !== "run") throw new Error("Missing launch");

@@ -184,6 +184,9 @@ export class ApplicationQ3Client {
         if (input.kind !== "q3") throw new Error("Foreign movement requires prediction command binding");
         return { serverTime: input.serverTimeMilliseconds, angles: { x: input.angleWords[0], y: input.angleWords[1], z: input.angleWords[2] },
           buttons: input.buttons, weapon: input.weapon, forwardmove: input.forwardMove, rightmove: input.rightMove, upmove: input.upMove };
+      }, () => {
+        options.local.console.close();
+        options.commands.console("wait; wait; wait; wait; screenshot levelshot\n");
       });
     const source = (options.kind === "remote" || options.kind === "qvm") ? options.source : this.localSource;
     if (source === null) throw new Error("Local Q3 client has no snapshot source");

@@ -53,7 +53,7 @@ export interface Q3GuestMapTransition {
   readonly clients: readonly Q3GuestMapClient[];
 }
 export type Q3GuestInitialization = { readonly kind: 'new' }
-  | { readonly kind: 'map-change'; readonly clients: readonly Q3GuestMapClient[] };
+  | { readonly kind: 'map-change' | 'map-restart'; readonly clients: readonly Q3GuestMapClient[] };
 function readGuestClients(reader: SaveReader) {
   return reader.list(entry => ({ sourceEntity: entry.field('sourceEntity').integer(0),
     client: { slot: entry.field('client').field('slot').integer(0), generation: entry.field('client').field('generation').integer(0) },
@@ -120,10 +120,7 @@ export class Q3QvmServerGame {
     this.common = { ...options.common, role: 'qagame', cvars: this.state.cvars, print: text => this.state.print(text), arguments: () => [] };
     this.cursor = new CommonParseCursor(options.entityText);
     this.services = { data: this.game.data, cvars: this.state.cvars, maxClients: options.maxClients, spatial: this.spatial,
-      configstrings: { get: index => this.state.configstrings.get(index), set: (index, value) => {
-        if (this.state.configstrings.get(index) === value) return;
-        this.state.configstrings.set(index, value); return this.output().configstring(index, value);
-      } },
+      configstrings: { get: index => this.state.configstrings.get(index), set: (index, value) => this.setConfigstring(index, value) },
       getUserinfo: slot => this.state.getUserinfo(slot) ?? '', setUserinfo: (slot, value) => this.state.setUserinfo(slot, value),
       getUserCommand: slot => this.state.getUserCommand(slot) ?? { serverTime: 0, angles: [0, 0, 0], buttons: 0, weapon: 0, forwardmove: 0, rightmove: 0, upmove: 0 }, dropClient: (slot, reason) => this.drop(slot, reason),
       sendServerCommand: (slot, text) => this.output().sendServerCommand(slot, text),
@@ -255,6 +252,13 @@ export class Q3QvmServerGame {
       default: return null;
     }
   }
+  get timeMilliseconds(): number { this.current(); return this.options.now(); }
+  setConfigstring(index: number, value: string): void | Promise<void> {
+    this.current();
+    if (this.state.configstrings.get(index) === value) return;
+    this.state.configstrings.set(index, value);
+    return this.output().configstring(index, value);
+  }
   private async refreshServerInfo(): Promise<void> {
     this.current();
     const value = this.state.refreshServerInfo();
@@ -265,7 +269,7 @@ export class Q3QvmServerGame {
   async initialize(output: Q3GuestOutput, start: Q3GuestInitialization = { kind: 'new' }): Promise<void> {
     this.current();
     if (this.lifecycle.kind !== 'created') throw new Error('Q3 guest has already initialized');
-    if (start.kind === 'map-change') {
+    if (start.kind !== 'new') {
       const slots = new Set<number>();
       for (const entry of start.clients) {
         this.validateClient(entry.client);
@@ -279,7 +283,7 @@ export class Q3QvmServerGame {
     }
     this.lifecycle = { kind: 'initializing', output };
     try {
-      await this.game.initializeAsync(this.options.now(), this.options.seed, false);
+      await this.game.initializeAsync(this.options.now(), this.options.seed, start.kind === 'map-restart');
       await this.refreshServerInfo();
       this.current(); this.lifecycle = { kind: 'running', output };
     } catch (error) {
@@ -317,7 +321,10 @@ export class Q3QvmServerGame {
         const denied = await this.game.clientConnectAsync(slot, firstTime, false);
         this.current();
         if (this.clients.get(slot) !== entry || entry.phase.kind === 'dropping') return { kind: 'rejected', reason: entry.phase.kind === 'dropping' ? entry.phase.reason : 'Client disconnected during admission.' };
-        if (denied !== null) { this.release(entry); return { kind: 'rejected', reason: denied }; }
+        if (denied !== null) {
+          if (firstTime) this.release(entry); else await this.disconnect(entry.player);
+          return { kind: 'rejected', reason: denied };
+        }
         entry.phase = { kind: 'connected' }; return { kind: 'accepted', player };
       } catch (error) { if (this.clients.get(slot) === entry) this.release(entry); throw error; }
     } finally { this.externalOperations--; }
@@ -405,7 +412,7 @@ export class Q3QvmServerGame {
     this.releaseSource(errors);
     if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest shutdown failed');
   }
-  async shutdownForMapChange(): Promise<Q3GuestMapTransition> {
+  async shutdownForMapChange(restart = false): Promise<Q3GuestMapTransition> {
     this.running();
     if (this.externalOperations !== 0 || this.game.module.interpreter.isActive || this.reconnecting.size !== 0
       || [...this.clients.values()].some(entry => entry.phase.kind !== 'connected' && entry.phase.kind !== 'active'))
@@ -413,7 +420,7 @@ export class Q3QvmServerGame {
     const errors: unknown[] = [];
     let transition: Q3GuestMapTransition | null = null;
     try {
-      await this.shutdownSource();
+      await this.shutdownSource(restart);
       transition = { cvars: this.state.cvars.captureSaveState(), clients: [...this.clients.values()].filter(entry => entry.phase.kind !== 'dropping')
         .map(entry => ({ client: entry.player.client, userinfo: this.state.getUserinfo(entry.player.sourceEntity) ?? '' })) };
     } catch (error) { errors.push(error); }
@@ -422,11 +429,11 @@ export class Q3QvmServerGame {
     if (transition === null) throw new Error('Q3 map transition did not capture source state');
     return transition;
   }
-  private async shutdownSource(): Promise<void> {
+  private async shutdownSource(restart = false): Promise<void> {
     const lifecycle = this.lifecycle;
     if (lifecycle.kind === 'initializing' || lifecycle.kind === 'running' || lifecycle.kind === 'shutting-down') {
       this.lifecycle = { kind: 'shutting-down', output: lifecycle.output };
-      await this.game.shutdownAsync(false);
+      await this.game.shutdownAsync(restart);
     }
   }
   private releaseSource(errors: unknown[]): void {

@@ -1,3 +1,4 @@
+import { readKexUsercmd, writeKexUsercmd } from "./kex-usercmd.ts";
 import { createKexWriter } from "./kex-write.ts";
 import { inflateSync } from "node:zlib";
 // Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
@@ -54,6 +55,7 @@ export function createKexContext(net_message: SizeBuf) {
     const PROTOCOL_KEX_DEMOS = 2022;
     const PROTOCOL_KEX = 2023;
     let kexServerProtocol = PROTOCOL_KEX;
+    let splitPlayers = 1;
     function setKexProtocol(protocol: number): void {
         kexServerProtocol = protocol;
     }
@@ -89,12 +91,17 @@ export function createKexContext(net_message: SizeBuf) {
         const attractloop = MSG_ReadByte(net_message) !== 0;
         const serverFps = MSG_ReadByte(net_message);
         const gamedir = MSG_ReadString(net_message);
-        const clientnum = MSG_ReadShort(net_message);
+        let clientnum = MSG_ReadShort(net_message);
+        const clientnums: number[] = [];
         if (clientnum === -2) {
-            throw new ComError(ERR_DROP, "kexdemo: svc_serverdata clientnum -2 (split-screen) is not supported");
-        }
+            const count = MSG_ReadShort(net_message);
+            if (count < 1 || count > 8) throw new ComError(ERR_DROP, "Invalid KEX split count");
+            for (let index = 0; index < count; index++) clientnums.push(MSG_ReadShort(net_message));
+            clientnum = clientnums[0] ?? -1;
+        } else clientnums.push(clientnum);
+        splitPlayers = clientnums.length;
         const levelname = MSG_ReadString(net_message);
-        return { servercount, attractloop, gamedir, clientnum, levelname, serverState: 0, serverFps };
+        return { servercount, attractloop, gamedir, clientnum, clientnums, levelname, serverState: 0, serverFps };
     }
     const readEntityBits = readEntityBitsWide;
     function copyEntityState(dst: EntityStateT, src: EntityStateT): void {
@@ -413,6 +420,8 @@ export function createKexContext(net_message: SizeBuf) {
             throw new ComError(ERR_DROP, `kexdemo: CL_ParseFrame: not packetentities (got ${cmd})`);
     }
     const KEX_DEMO_CODEC: ProtocolCodec = {
+        readDeltaUsercmd: readKexUsercmd,
+        writeDeltaUsercmd: writeKexUsercmd,
         name: "kexdemo",
         ...createKexWriter(() => kexServerProtocol, createRereleaseContext(net_message)),
         readServerData,
@@ -578,5 +587,5 @@ export function createKexContext(net_message: SizeBuf) {
         }
         return results;
     }
-    return { PROTOCOL_KEX_DEMOS, PROTOCOL_KEX, setKexProtocol, HI_KEX_OWNER, HI_KEX_OLDFRAME, GUNBIT_GUNRATE, KEX_DEMO_CODEC, readDamageKex, readPoiKex, readHelpPathKex, readMuzzleflash3Kex, readAchievementKex, readLocprintKex, readSplitclientKex, isKexDemoProtocol, readSoundKex, readConfigblastKex, readSpawnbaselineblastKex };
+    return { splitPlayerCount: () => splitPlayers, PROTOCOL_KEX_DEMOS, PROTOCOL_KEX, setKexProtocol, HI_KEX_OWNER, HI_KEX_OLDFRAME, GUNBIT_GUNRATE, KEX_DEMO_CODEC, readDamageKex, readPoiKex, readHelpPathKex, readMuzzleflash3Kex, readAchievementKex, readLocprintKex, readSplitclientKex, isKexDemoProtocol, readSoundKex, readConfigblastKex, readSpawnbaselineblastKex };
 }

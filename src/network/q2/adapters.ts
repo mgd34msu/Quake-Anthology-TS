@@ -106,8 +106,10 @@ export function fromQ2Command(command: Q2UserCommand | Q2RereleaseUserCommand): 
         wire.impulse = command.impulse;
         wire.lightlevel = command.lightLevel;
     }
-    else
+    else {
         wire.angles.set([ANGLE2SHORT(command.angles.x), ANGLE2SHORT(command.angles.y), ANGLE2SHORT(command.angles.z)]);
+        wire.serverFrame = command.serverFrame;
+    }
     return wire;
 }
 export function toQ2Command(wire: UsercmdT): Q2UserCommand {

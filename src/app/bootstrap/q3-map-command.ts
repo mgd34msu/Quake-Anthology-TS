@@ -16,7 +16,10 @@ export function q3MapLaunch(policy: Q3ProductPolicy, command: string, currentGam
       ...(singlePlayer ? [{ name: "g_doWarmup", value: "0" }, { name: "sv_maxclients", value: "8" }] : [])] };
 }
 
-export function applyQ3MapLaunch(cvars: import("../../core/cvars/index.ts").CvarRegistry, launch: Q3MapLaunch): void {
-  cvars.applyLatched();
-  for (const setting of launch.cvars) cvars.set(setting.name, setting.value, true);
+export function applyQ3MapLaunch(cvars: import("../../core/cvars/index.ts").CvarRegistry, launch: Q3MapLaunch, phase: "all" | "spawn" | "finish" = "all"): void {
+  if (phase !== "finish") cvars.applyLatched();
+  for (const setting of launch.cvars) {
+    if (phase === "spawn" && setting.name === "sv_cheats" || phase === "finish" && setting.name !== "sv_cheats") continue;
+    cvars.set(setting.name, setting.value, true);
+  }
 }

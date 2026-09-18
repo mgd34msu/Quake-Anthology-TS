@@ -82,6 +82,8 @@ export interface Q2ApplicationClientHost {
     readonly protocol: Q2ProtocolIdentity;
     readonly messageOptions: Q2ServerMessageOptions;
     readonly userinfo: () => string;
+    /** Opaque platform-issued identity; absence is anonymous and never a LAN player ID. */
+    readonly socialId?: () => string;
     /** Packet command history uses channel sequence/acknowledgement, independently of serverFrame. */
     readonly prediction?: {
         sent(sequence: number, command: UsercmdT, nowMilliseconds: number): void;

@@ -1,3 +1,4 @@
+import { liveQ2Protocol } from "./options.ts";
 import { UnifiedRemotePresentation } from "./network/remote-unified.ts";
 import { UnifiedClientNetwork } from "./network/unified-client.ts";
 import { loadUnifiedContent } from "./network/unified-content.ts";
@@ -386,7 +387,7 @@ export class RemoteApplication {
     } else {
       if (this.downloadPermission === null) throw new Error("Q2 remote client has no download policy");
       const remote: Q2RemotePresentation = new Q2RemotePresentation({ cinematic: { start: (name, ended) => this.startCinematic({ name, loop: false, hold: false, silent: false }, ended), stop: () => this.stopCinematic() }, downloadPermission: this.downloadPermission, identity, session, client, seat: this.seatId,
-        publish: output => this.publishRemote(output), disconnected: () => this.disconnectSource(), nextGeneration, content: null, protocol: launch.kind === "recorded" ? readQ2DemoHeader(launch.playback.resource.bytes).protocol : launchOptions.q2Protocol ?? (mountedContent.catalog.product(launchOptions.product).expectation.edition === "rerelease" ? { kind: "q2-rerelease", version: 1038 } : { kind: "q2-classic", version: 34 }),
+        publish: output => this.publishRemote(output), disconnected: () => this.disconnectSource(), nextGeneration, content: null, protocol: launch.kind === "recorded" ? readQ2DemoHeader(launch.playback.resource.bytes).protocol : liveQ2Protocol(launchOptions, mountedContent.catalog.product(launchOptions.product).expectation.edition === "rerelease"),
         presentationTime: () => this.presentationTime.milliseconds,
         userinfo: () => cvars.infoString(CvarFlag.UserInfo),
         print: text => this.print(text), sendCommand: text => this.sendCommand(text),
@@ -440,6 +441,11 @@ export class RemoteApplication {
   private static async openSource(ownership: RemoteOwnership, options: ApplicationOptions, host: RemoteApplicationHost, recording?: DemoLaunch): Promise<RemoteApplication> {
     if (recording !== undefined && host.serverBrowser === undefined) throw new Error("Recorded playback requires the retained server browser");
     if (recording !== undefined) options = RemoteApplication.recordedOptions(options, recording.playback.resource);
+    if (recording === undefined && options.network.kind === "q2-client") {
+      const protocol = liveQ2Protocol(options, expectedProducts.find(product => product.id === (options.remoteContent?.base ?? options.product))?.edition === "rerelease");
+      const selection = options.remoteContent ?? remoteContentSelection(protocol.kind === "q2-kex" || protocol.kind === "q2-rerelease" ? "q2-rerelease-baseq2" : "q2-classic-baseq2", "baseq2");
+      options = { ...options, q2Protocol: protocol, remoteContent: selection, product: remoteContentProduct(selection) };
+    }
     const unified = recording === undefined && options.network.kind === "unified-client";
     const selected = recording?.playback.resource.kind ?? (unified ? expectedProducts.find(product=>product.id===options.product)?.family : undefined);
     const qw = selected === undefined ? options.network.kind === "qw-client" : selected === "qw", q1 = selected === undefined ? options.network.kind === "q1-client" || qw : selected === "q1" || qw, q3 = selected === undefined ? options.network.kind === "q3-client" : selected === "q3";
@@ -451,7 +457,7 @@ export class RemoteApplication {
       throw new Error("Remote Q2 character selection requires an installed male, female or cyborg player appearance");
     const network = options.network;
     const address = recording !== undefined ? null : network.kind === "qw-client" || network.kind === "q1-client" || network.kind === "q2-client" || network.kind === "q3-client" || network.kind === "unified-client"
-      ? await resolveApplicationAddress(network.remote, unified ? 27960 : qw ? 27500 : q1 ? 26000 : q3 ? 27960 : 27910, options.networkTransport ?? { kind: "udp" }, qw ? "qw" : family) : null;
+      ? await resolveApplicationAddress(network.remote, unified ? 27960 : qw ? 27500 : q1 ? 26000 : q3 ? 27960 : options.q2Protocol?.kind === "q2-kex" ? 5069 : 27910, options.networkTransport ?? { kind: "udp" }, qw ? "qw" : family) : null;
     if (recording === undefined && address === null) throw new Error("Missing remote address");
     const content = await openRemoteApplicationContent(options);
     if (content.q3Product !== null) options = { ...options, q3Product: content.q3Product };
@@ -1800,7 +1806,7 @@ export class RemoteApplication {
       if (seat.id.equals(this.seatId) || this.remoteSeats.some(peer => !peer.closed && peer.seat === seat)) continue;
       const cvars = configuration.seatSources.get(seat.id);
       if (cvars === undefined) throw new Error("Remote seat has no source registry");
-      const address = await resolveApplicationAddress(network.remote, network.kind === "unified-client" ? 27960 : this.family === "q1" ? 26000 : this.family === "qw" ? 27500 : this.family === "q3" ? 27960 : 27910, this.options.networkTransport ?? { kind: "udp" }, this.family);
+      const address = await resolveApplicationAddress(network.remote, network.kind === "unified-client" ? 27960 : this.family === "q1" ? 26000 : this.family === "qw" ? 27500 : this.family === "q3" ? 27960 : this.options.q2Protocol?.kind === "q2-kex" ? 5069 : 27910, this.options.networkTransport ?? { kind: "udp" }, this.family);
       const transport = await openApplicationTransport({ selection: this.options.networkTransport ?? { kind: "udp" }, family: this.family, host: address.kind === "ipv6" ? "::" : "0.0.0.0", port: 0,
         limits: network.kind !== "unified-client" && this.family === "q2" ? Q2_DATAGRAM_LIMITS : UNIFIED_DATAGRAM_LIMITS });
       let qport: number | null = null;
@@ -1878,7 +1884,7 @@ export class RemoteApplication {
             return (await this.frontend.assets.model(key.content,key.path)).model;
           }
         }}) : this.family === "q3" ? new RemoteSeatSource({...common,family:"q3",authorization:this.keys.authorization})
-          : this.family === "q2" ? new RemoteSeatSource({...common,family:"q2",protocol:this.options.q2Protocol ?? (this.mountedContent.catalog.product(this.options.product).expectation.edition === "rerelease" ? {kind:"q2-rerelease",version:1038} : {kind:"q2-classic",version:34})})
+          : this.family === "q2" ? new RemoteSeatSource({...common,family:"q2",protocol:liveQ2Protocol(this.options, this.mountedContent.catalog.product(this.options.product).expectation.edition === "rerelease")})
           : new RemoteSeatSource({...common,family:this.family});
         const channel = new RemoteSeatChannel(seat,clock,{network:source.network,remote:source.remote,cvars});
         created = { seat, source, channel, content:null, map:null, loadedContent:null, view:null, generation:0, closed:false, pump:new RemoteSeatPump(source), disconnected:null, cinematicEnded:null, userinfo:null };

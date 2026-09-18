@@ -6,6 +6,7 @@ import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { openMountPlan } from "../../src/content/mounts/index.ts";
 import { applicationPreset } from "../../src/app/bootstrap/content.ts";
 import { StartupSelectionModel } from "../../src/app/bootstrap/startup-selection.ts";
+import { defaultNetQuakeProfile } from "../../src/network/q1/profile.ts";
 
 const corpus = resolve(import.meta.dir, "../../../qfiles");
 test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("startup choices resolve independent installed source selections without starting a world", async () => {
@@ -59,17 +60,37 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   }
   const inferred = new StartupSelectionModel(catalog, { ...command.options, product: "q2-classic-ctf", mode: "deathmatch" });
   expect(inferred.options.rules).toBe("ctf");
-  expect(model.hosting()).toEqual({ kind: "offline", port: 27910 });
-  model.setHosting({ kind: "unified-server", port: 28123 });
+  expect(model.hosting()).toEqual({ kind: "offline", port: 27910, q1Protocol: null });
+  model.setHosting({ kind: "unified-server", port: 28123, q1Protocol: null });
   expect(model.options.mode).toBe("coop");
   expect((await model.resolve()).options.network).toEqual({ kind: "unified-server", host: "0.0.0.0", port: 28123 });
-  expect(() => model.setHosting({ kind: "native-server", port: 65536 })).toThrow("Port must");
-  expect(model.hosting()).toEqual({ kind: "unified-server", port: 28123 });
-  model.setHosting({ kind: "native-server", port: 27910 });
+  expect(() => model.setHosting({ kind: "native-server", port: 65536, q1Protocol: null })).toThrow("Port must");
+  expect(model.hosting()).toEqual({ kind: "unified-server", port: 28123, q1Protocol: null });
+  model.setHosting({ kind: "native-server", port: 27910, q1Protocol: null });
   expect((await model.resolve()).options.network.kind).toBe("native-server");
-  model.setHosting({ kind: "offline", port: 27910 });
+  model.setHosting({ kind: "offline", port: 27910, q1Protocol: null });
   expect(model.options.network.kind).toBe("offline");
 }, 60000);
+
+test("Q1 hosting selects native protocol and removes stale protocol outside NetQuake hosting", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q1-classic-id1", "--mode", "deathmatch"]);
+  if (command.kind !== "run") throw new Error("Expected launch options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const model = new StartupSelectionModel(catalog, command.options);
+  for (const version of [15, 666, 999]) {
+    const q1Protocol = defaultNetQuakeProfile(version);
+    model.setHosting({ kind: "native-server", port: 26000, q1Protocol });
+    expect(model.options.q1Protocol).toEqual(q1Protocol);
+    expect(model.hosting().q1Protocol).toEqual(q1Protocol);
+  }
+  model.setHosting({ ...model.hosting(), kind: "unified-server" }); expect(model.options.q1Protocol).toBeUndefined();
+  model.setHosting({ kind: "native-server", port: 26000, q1Protocol: defaultNetQuakeProfile(999) });
+  model.setHosting({ ...model.hosting(), kind: "offline" }); expect(model.options.q1Protocol).toBeUndefined();
+  for (const product of ["q1-quakeworld", "q2-classic-baseq2", "q3-baseq3"]) {
+    const other = new StartupSelectionModel(catalog, { ...command.options, product, q1Protocol: defaultNetQuakeProfile(666), network: { kind: "native-server", host: "0.0.0.0", port: 26000 } });
+    expect(other.hosting().q1Protocol).toBeNull(); expect(other.options.q1Protocol).toBeUndefined();
+  }
+});
 
 test.skipIf(!existsSync(resolve(corpus, "q1/id1/PAK0.PAK")))("mouse startup roster edits actual map classes with native defaults and exceptions", async () => {
   const { StartupMenu } = await import("../../src/app/bootstrap/startup-menu.ts");
