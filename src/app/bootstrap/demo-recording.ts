@@ -7,15 +7,20 @@ import { normalizeResourcePath } from "../../content/mounts/paths.ts";
 import { writeNetQuakeDemoHeader, writeNetQuakeDemoRecord, writeQuakeWorldDemoRecord } from "../../network/q1/demos.ts";
 import type { QuakeWorldDemoRecord } from "../../network/q1/demos.ts";
 import { finishQ2Demo, writeQ2DemoRecord } from "../../network/q2/demo.ts";
+import { mvdMagic, frameMvdMessage } from "../../network/q2/mvd-recording.ts";
 import { encodeDemoMessage, finishDemo } from "../../network/q3/demo.ts";
 
 export type DemoRecordingPacket =
+  | { readonly kind: "q2-server"; readonly message: Uint8Array }
+  | { readonly kind: "mvd"; readonly message: Uint8Array }
   | { readonly kind: "q1"; readonly message: Uint8Array; readonly viewAngles: Vec3 }
   | { readonly kind: "qw"; readonly record: QuakeWorldDemoRecord }
   | { readonly kind: "q2"; readonly message: Uint8Array }
   | { readonly kind: "q3"; readonly sequence: number; readonly message: Uint8Array };
 
 export type DemoRecordingIdentity =
+  | { readonly kind: "q2-server"; readonly protocol: 34 }
+  | { readonly kind: "mvd"; readonly revision: 2009 | 2010 | 2011 | 2012 | 2013 | 3038 }
   | { readonly kind: "q1"; readonly protocol: 15 | 666 | 999; readonly track: number }
   | { readonly kind: "qw"; readonly protocol: 28 }
   | { readonly kind: "q2"; readonly protocol: Q2ProtocolIdentity }
@@ -30,9 +35,9 @@ export interface DemoRecordingSeed {
 
 export function recordingPath(root: string, name: string, identity: DemoRecordingIdentity): string {
   const normalized = normalizeResourcePath(name);
-  const extension = identity.kind === "q1" ? ".dem" : identity.kind === "qw" ? ".qwd" : identity.kind === "q2" ? ".dm2" : ".dm_68";
+  const extension = identity.kind === "mvd" ? ".mvd" : identity.kind === "q1" ? ".dem" : identity.kind === "qw" ? ".qwd" : identity.kind === "q2" || identity.kind === "q2-server" ? ".dm2" : ".dm_68";
   const filename = normalized.toLowerCase().endsWith(extension) ? normalized : `${normalized}${extension}`;
-  const prefix = (identity.kind === "q2" || identity.kind === "q3") && !filename.toLowerCase().startsWith("demos/") ? "demos" : "";
+  const prefix = (identity.kind === "mvd" || identity.kind === "q2-server" || identity.kind === "q2" || identity.kind === "q3") && !filename.toLowerCase().startsWith("demos/") ? "demos" : "";
   return join(root, prefix, filename);
 }
 
@@ -52,6 +57,7 @@ export class DemoRecording implements DemoRecordingSink {
     await mkdir(dirname(path), { recursive: true });
     const recording = new DemoRecording(path, seed.identity, await open(path, "wx"));
     try {
+      if (seed.identity.kind === "mvd") await recording.write(mvdMagic());
       if (seed.identity.kind === "q1") await recording.write(writeNetQuakeDemoHeader(seed.identity.track));
       for (const packet of seed.packets) await recording.append(packet);
       return recording;
@@ -63,8 +69,10 @@ export class DemoRecording implements DemoRecordingSink {
     if (packet.kind !== this.identity.kind) return Promise.reject(new Error("Recording source protocol changed"));
     let bytes: Uint8Array;
     switch (packet.kind) {
+      case "mvd": bytes = frameMvdMessage(packet.message); break;
       case "q1": this.angles = { ...packet.viewAngles }; bytes = writeNetQuakeDemoRecord(packet); break;
       case "qw": this.seconds = packet.record.seconds; bytes = writeQuakeWorldDemoRecord(packet.record); break;
+      case "q2-server":
       case "q2": bytes = writeQ2DemoRecord(packet.message); break;
       case "q3": bytes = encodeDemoMessage({ kind: "message", sequence: packet.sequence, payload: packet.message }); break;
     }
@@ -87,7 +95,7 @@ export class DemoRecording implements DemoRecordingSink {
   stop(): Promise<void> {
     if (this.finishing !== null) return this.finishing;
     this.accepting = false;
-    const footer = this.identity.kind === "q1" ? writeNetQuakeDemoRecord({ viewAngles: this.angles, message: new Uint8Array([2]) })
+    const footer = this.identity.kind === "q2-server" ? new Uint8Array(0) : this.identity.kind === "mvd" ? new Uint8Array(2) : this.identity.kind === "q1" ? writeNetQuakeDemoRecord({ viewAngles: this.angles, message: new Uint8Array([2]) })
       : this.identity.kind === "qw" ? writeQuakeWorldDemoRecord({ kind: "packet", seconds: this.seconds,
         message: new Uint8Array([255, 255, 255, 255, 2, ...new TextEncoder().encode("EndOfDemo"), 0]) })
       : this.identity.kind === "q2" ? finishQ2Demo() : finishDemo();

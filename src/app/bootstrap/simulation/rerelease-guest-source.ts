@@ -1,5 +1,5 @@
 import type { ResolvedExecutionModule } from '../../../contracts/content.ts';
-import type { GuestCallContext, ModuleIdentity } from '../../../contracts/execution.ts';
+import type { GuestAddress, GuestCallContext, ModuleIdentity } from '../../../contracts/execution.ts';
 import type { MountedContent } from '../../../content/mounts/index.ts';
 import { RereleaseQ2GuestHost } from '../../../compat/q2/rerelease/host.ts';
 import type { RereleaseQ2HostOptions } from '../../../compat/q2/rerelease/host.ts';
@@ -32,6 +32,7 @@ export interface RereleaseGuestSourceOptions extends Omit<RereleaseQ2HostOptions
 }
 /** Owns only the guest address space and ABI lifetime; supplied engine authorities own the world. */
 export class RereleaseGuestSource {
+    get imageBase(): GuestAddress { return this.image.base; }
     private closed = false;
     private constructor(readonly host: RereleaseQ2GuestHost, readonly runtime: WindowsGuestRuntime,
         readonly memory: SparseGuestMemory, private readonly image: PeImage, private readonly context: GuestCallContext, private readonly budget: number) {}

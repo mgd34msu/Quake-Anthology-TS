@@ -1,3 +1,4 @@
+import { savedSimulationSettings } from "../../src/app/bootstrap/simulation/save.ts";
 import { expect, test } from "bun:test";
 import type { ExecutableRecipe, ProviderReference, ResolvedResourceReference, ResourceRequest } from "../../src/contracts/content.ts";
 import { createContentDigest, createResourceId } from "../../src/contracts/content.ts";
@@ -60,4 +61,14 @@ test("authored start retains cinematic chain, unit marker, spawnpoint and native
   expect(start?.target).toMatchObject({ kind: "cinematic", name: "intro.cin", next: { kind: "map", name: "base1", newUnit: true } });
   expect(start?.startItems).toBe("weapon_shotgun;ammo_shells 20");
   expect(authoredCampaignStart({ ...parsed, resource: recipe().map.geometry }, "base2")).toBeNull();
+});
+
+test("authored spawnpoint persists in common settings and old saves keep default spawn", () => {
+  const original = image("start", "world");
+  const saved = (initialSpawnPoint?: string): SaveImage => ({ ...original, providers: [...original.providers,
+    { provider: original.recipe.map.entities.provider, schema: "world:simulation", version: 11,
+      bytes: encodeCheckpointValue({ settings: { skill: 1, mode: "singleplayer", maxClients: 1, seed: 1,
+        ...(initialSpawnPoint === undefined ? {} : { initialSpawnPoint }) }, hostMilliseconds: 0, players: [] }) }] });
+  expect(savedSimulationSettings(decodeSaveImage(encodeSaveImage(saved("tram"))))).toMatchObject({ initialSpawnPoint: "tram" });
+  expect(savedSimulationSettings(saved()).initialSpawnPoint).toBe("");
 });

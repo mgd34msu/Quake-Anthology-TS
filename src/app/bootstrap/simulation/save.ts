@@ -196,6 +196,7 @@ export function savedSimulationSettings(image: SaveImage) {
   const guest = simulationQvmCheckpoint(image);
   return { skill: settings.field("skill").choice(0, 1, 2, 3), mode: settings.field("mode").choice("singleplayer", "coop", "deathmatch"),
     maxClients: settings.field("maxClients").integer(1), seed: settings.field("seed").integer(0),
+    initialSpawnPoint: settings.field("initialSpawnPoint").value === undefined ? "" : settings.field("initialSpawnPoint").string(),
     startItems: settings.field("startItems").value === undefined ? "" : settings.field("startItems").string(),
     hostMilliseconds: reader.field("hostMilliseconds").finite(),
     clientSlots: nativeQ2OriginalSave(image) !== null || nativeQ2RereleaseSave(image) !== null ? nativeQ2SavedClients(image).map(client => client.clientSlot) : guest === null ? reader.field("players").list(value => value.field("clientSlot").integer(0))

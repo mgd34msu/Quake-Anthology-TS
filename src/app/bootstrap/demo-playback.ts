@@ -18,7 +18,7 @@ function hasExtension(path: string): boolean {
 export function demoFamily(name: string, fallback: DemoFamily): DemoFamily {
   if (/\.qwd$/i.test(name)) return "qw";
   if (/\.dem$/i.test(name)) return "q1";
-  if (/\.dm2$/i.test(name)) return "q2";
+  if (/\.(dm2|mvd)$/i.test(name)) return "q2";
   if (/\.dm_\d+$/i.test(name)) return "q3";
   return fallback;
 }

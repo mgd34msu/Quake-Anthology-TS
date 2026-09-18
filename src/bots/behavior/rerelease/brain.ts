@@ -151,6 +151,7 @@ export interface BotBrainConfigT {
 
 /** The goal the caller set explicitly, through the QuakeC's bot builtins. */
 interface ExplicitGoalT {
+  readonly owner: "external" | "objective";
   kind: "point" | "entity";
   point: BotVec3;
   entityId: number;
@@ -487,10 +488,21 @@ export class BotBrain {
   // the QuakeC's own goal API
 
   /** `bot_movetopoint`: path to a world point. */
-  requestMoveToPoint(point: BotVec3): void {
-    const same = this.state.explicitGoal !== null && this.state.explicitGoal.kind === "point" && bvecDistance(this.state.explicitGoal.point, point) < 8;
+  requestMoveToPoint(point: BotVec3): void { this.setPointGoal(point, "external"); }
+
+  setObjectiveGoal(point: BotVec3 | null): void {
+    if (this.state.explicitGoal?.owner === "external") return;
+    if (point === null) {
+      if (this.state.explicitGoal?.owner === "objective") this.clearExplicitGoal();
+      return;
+    }
+    this.setPointGoal(point, "objective");
+  }
+
+  private setPointGoal(point: BotVec3, owner: ExplicitGoalT["owner"]): void {
+    const same = this.state.explicitGoal !== null && this.state.explicitGoal.owner === owner && this.state.explicitGoal.kind === "point" && bvecDistance(this.state.explicitGoal.point, point) < 8;
     if (same) return;
-    this.state.explicitGoal = { kind: "point", point: { x: point.x, y: point.y, z: point.z }, entityId: -1 };
+    this.state.explicitGoal = { owner, kind: "point", point: { x: point.x, y: point.y, z: point.z }, entityId: -1 };
     this.state.explicitGoalDone = false;
     this.state.explicitGoalFailed = false;
     clearPath(this.state.pathState);
@@ -502,7 +514,7 @@ export class BotBrain {
       this.state.explicitGoal.point = { x: origin.x, y: origin.y, z: origin.z };
       return;
     }
-    this.state.explicitGoal = { kind: "entity", point: { x: origin.x, y: origin.y, z: origin.z }, entityId };
+    this.state.explicitGoal = { owner: "external", kind: "entity", point: { x: origin.x, y: origin.y, z: origin.z }, entityId };
     this.state.explicitGoalDone = false;
     this.state.explicitGoalFailed = false;
     clearPath(this.state.pathState);
@@ -517,6 +529,11 @@ export class BotBrain {
   }
 
   clearExplicitGoal(): void {
+    if (this.state.explicitGoal !== null) {
+      clearPath(this.state.pathState);
+      this.state.goalPoint = null;
+      this.state.goalEntityId = -1;
+    }
     this.state.explicitGoal = null;
     this.state.explicitGoalDone = false;
     this.state.explicitGoalFailed = false;
@@ -704,6 +721,7 @@ export class BotBrain {
       const follow = followPath(
         this.state.pathState,
         { origin: self.origin, pitch: this.state.aim.pitch, yaw: this.state.aim.yaw, onGround: self.onGround, waterLevel: self.waterLevel,
+          transport: (link, origin) => world.nav()?.transport?.(link, origin) ?? null,
           ...(self.airSeconds === undefined ? {} : { airSeconds: self.airSeconds }),
           ...(self.waterLevel >= 3 ? { airAbove: this.airAbove(world, self) } : {}),
           velocity: self.velocity, now, stuckTime: STUCK_SECONDS,
@@ -1846,6 +1864,12 @@ export class BotBrain {
       return;
     }
 
+    const followed = this.state.pathState, currentLink = followed.path?.links[followed.index], previousLink = followed.path?.links[followed.index - 1];
+    const train = currentLink?.type === NavLinkType.Train ? currentLink : previousLink?.type === NavLinkType.Train ? previousLink : null;
+    if (train !== null) {
+      const step = nav.transport?.(train, self.origin);
+      if (step?.kind === "ride" || step?.kind === "wait" || step?.kind === "move" && step.stage === "exit") return;
+    }
     const stale = this.state.pathState.path === null || !nav.pathValid(this.state.pathState.path) || now - this.state.pathState.plannedAt > REPLAN_SECONDS;
     if (!stale) {
       // A followed entity that has walked away from the path's end needs a

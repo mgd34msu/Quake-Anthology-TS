@@ -21,7 +21,8 @@ async function regenerate(asset: AasAsset, args: readonly string[]): Promise<Aas
     const mapBytes = await content.mounts.read(content.recipe.map.geometry);
     if (asset.bspChecksum !== (blockChecksum(mapBytes) | 0)) throw new Error("Input AAS belongs to a different BSP checksum");
     const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
-      dedicated: true, mode: "deathmatch", skill: 1, seed: 1, maxClients: 1 });
+      dedicated: true, mode: "deathmatch", skill: 1, seed: 1, maxClients: 1,
+      playerIdentity: client => ({ seat: client.slot, socialId: "" }) });
     session.attachWorld(simulation);
     const client = session.createClient(0), admitted = simulation.admitPlayer(client.id), player = simulation.movementPlayer(admitted.actor);
     if (player === null) throw new Error("AAS authoring has no selected movement actor");

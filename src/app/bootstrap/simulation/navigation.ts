@@ -1,3 +1,4 @@
+import { applicationTrainConnections } from "./bot-mover-connections.ts";
 import { SaveReader } from "../../../persistence/value.ts";
 import type { NavigationRuntimeCheckpoint } from "../../../bots/navigation/runtime.ts";
 import type { SelectedBotNavigation } from "../../../bots/behavior/index.ts";
@@ -110,8 +111,13 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
           }
           const q2 = simulation.q2Source(), entity = q2?.game.entity(body.actor);
           if (q2 !== null && entity !== undefined && entity !== null) {
-            const platform = q2.baseEntities.platformState(entity);
+            const platform = q2.baseEntities.platformState(entity) ?? q2.product.expansions
+              .map(expansion => expansion.entities.movers?.platformState(entity) ?? null).find(state => state !== null) ?? null;
+            const train = q2.movers.trainRoute(entity, q2.game);
             return { ...common, enabled: entity.solid === "brush", ...(q2.baseEntities.moverTraversal(entity) ?? q2.movers.traversal(entity)),
+              ...(train === null ? {} : { train: { origin: body.state.origin, running: train.running,
+                stops: train.stops.map(stop => ({ id: stop.actor.slot, origin: stop.origin, next: stop.next?.slot ?? null,
+                  wait: stop.wait, teleport: stop.teleport })) } }),
               ...(platform === null ? {} : { elevator: { ...platform, origin: body.state.origin } }) };
           }
           const q3 = simulation.q3Source()?.records.nativeByActor(body.actor);
@@ -146,7 +152,7 @@ export async function createApplicationBotNavigation({ content, simulation }: Ap
   };
   const profile = botNavigationProfile(first), world = worldFor(firstPlayer());
   const loaded = await loadNavigation({ geometry: simulation.options.world, map: { name: content.recipe.map.geometry.requestedPath,
-    format: simulation.options.world.kind, digest: content.recipe.map.geometry.digest }, profile, world,
+    format: simulation.options.world.kind, digest: content.recipe.map.geometry.digest }, profile, world, connections: applicationTrainConnections(simulation, profile),
     resources: await content.forContent(content.recipe.map.geometry.provenance.mount.identity.content),
     navigationContent: content.recipe.map.geometry.provenance.mount.identity.content,
     mapBytes: await content.mounts.read(content.recipe.map.geometry) });

@@ -16,13 +16,15 @@ export class SeatMediaCaptions {
   private timeline: CaptionTimeline;
   private prepared = "";
   private request = 0;
-  constructor(private readonly seat: SeatId, private readonly read: (path: string) => Promise<Uint8Array | null>, private readonly localization: LocalizationCatalog | null = null, private readonly kind: "subtitle" | "caption" = "subtitle") {
+  private liveRequest = "";
+  constructor(private readonly seat: SeatId, private readonly read: (path: string) => Promise<Uint8Array | null>, private readonly localization: LocalizationCatalog | null = null, private readonly kind: "subtitle" | "caption" = "subtitle", private readonly liveLanguage?: { readonly read: () => string; readonly failed: (error: unknown) => void }) {
     this.timeline = new CaptionTimeline(seat, localization ?? new LocalizationCatalog(seat));
   }
   async prepare(source: string, language: string): Promise<void> {
     const key = `${source}:${language}`;
     if (key === this.prepared) return;
     const request = ++this.request;
+    this.prepared = "";
     this.timeline.clear();
     for (const path of subtitlePaths(source, language)) {
       const bytes = await this.read(path);
@@ -37,9 +39,19 @@ export class SeatMediaCaptions {
     this.prepared = key;
   }
   active(state: CaptionPlaybackState, preferences: CaptionPreferences): readonly ActiveCaption[] {
+    if (this.liveLanguage !== undefined) {
+      const language = this.liveLanguage.read(), key = `${state.source}:${language}`;
+      if (key !== this.prepared) {
+        if (key !== this.liveRequest) {
+          this.liveRequest = key;
+          this.prepare(state.source, language).catch(this.liveLanguage.failed);
+        }
+        return [];
+      }
+    }
     this.timeline.preferences = preferences;
     if (!this.prepared.startsWith(`${state.source}:`) || state.status === "ended" || state.status === "stopped") return [];
     return this.timeline.activeAt(state.sourceTimeMilliseconds);
   }
-  clear(): void { this.request++; this.prepared = ""; this.timeline.clear(); }
+  clear(): void { this.request++; this.prepared = ""; this.liveRequest = ""; this.timeline.clear(); }
 }

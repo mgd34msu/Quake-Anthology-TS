@@ -26,3 +26,15 @@ export function parseQ2Travel(expression: string): Q2TravelTarget {
   if (next === null) throw new Error("Q2 travel has no destination");
   return next;
 }
+
+/** Preserve the authored SV_Map suffix in the source nextserver command. */
+export function q2NextServerCommand(target: Q2TravelTarget): string {
+  if (target.next === null) return "";
+  const parts: string[] = [];
+  for (let next: Q2TravelTarget | null = target.next; next !== null; next = next.next) {
+    parts.push(`${next.newUnit ? "*" : ""}${next.name}${next.spawnPoint === "" ? "" : `$${next.spawnPoint}`}`);
+  }
+  const expression = parts.join("+");
+  parseQ2Travel(expression);
+  return `gamemap "${expression}"`;
+}

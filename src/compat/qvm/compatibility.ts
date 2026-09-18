@@ -26,7 +26,6 @@ export function parseQvmCompatibility(value: unknown, module: Pick<ModuleIdentit
     const digest = entry.field('artifactDigest').string();
     if (!/^sha256:[0-9a-f]{64}$/.test(digest)) throw entry.fail('expected exact sha256 artifact digest');
     const profile = entry.field('profile').choice('q3-modern', 'q3-1.16n-base');
-    if (profile !== 'q3-modern' && selectedRole !== 'qagame') throw entry.fail('legacy client and UI ABI support is not implemented');
     if (selectedRole !== role || path.toLowerCase() !== module.artifactPath.toLowerCase()) continue;
     if (digest !== module.digest) throw entry.fail('compatibility declaration belongs to different artifact bytes');
     selected = profile;

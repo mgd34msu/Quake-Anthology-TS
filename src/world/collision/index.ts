@@ -110,6 +110,10 @@ export class SharedSceneQueries implements SceneQueries {
             throw new RangeError('Portal identifiers belong to Quake II maps');
         this.#geometry.provider.setAreaPortalState(portal, open);
     }
+    q2PortalState(): readonly number[] {
+        if (this.#geometry.kind !== 'q2') throw new RangeError('Portal identifiers belong to Quake II maps');
+        return this.#geometry.provider.portalState();
+    }
     adjustAreaPortalState(first: number, second: number, open: boolean): void {
         if (this.#geometry.kind !== 'q3')
             throw new RangeError('Area-pair portal references belong to Quake III maps');

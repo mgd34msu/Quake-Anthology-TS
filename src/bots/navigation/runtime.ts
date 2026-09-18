@@ -1,6 +1,8 @@
 // Directed source reachabilities, NAV conditional-node checks, and movement-backed route admission.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { NavigationEstimates } from "./estimates.ts";
+import { navigationTrainRide } from "./train.ts";
+import type { ActorId } from "../../contracts/identity.ts";
 import type { NavigationEstimateQuery, NavigationEstimateResult, NavigationRoutePrediction } from "./types.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
@@ -133,6 +135,34 @@ export class NavigationRuntime {
     }
     return null;
   }
+  boardingTrain(node: number) {
+    for (const edge of this.outgoing(node)) {
+      if (edge.mode !== "mover" || edge.entity === null) continue;
+      const state = this.world.entity(edge.entity);
+      if (state === null || state.train?.running !== true) continue;
+      const ride = navigationTrainRide(state, edge, this.graph.profile);
+      if (ride !== null) return { edge, state, ride };
+    }
+    return null;
+  }
+  trainStep(edge: NavigationEdge, origin: Vec3, ground: ActorId | null): { readonly kind: "move"; readonly stage: "approach" | "exit"; readonly target: Vec3 }
+    | { readonly kind: "wait" | "ride" | "unavailable" } | null {
+    if (edge.mode !== "mover" || edge.entity === null) return null;
+    const state = this.world.entity(edge.entity);
+    if (state?.train === undefined) return null;
+    const train = state.train, ride = navigationTrainRide(state, edge, this.graph.profile);
+    const aboard = ground?.equals(state.actor) === true;
+    if (ride === null || !this.#staticEdgeAllowed(edge) || !aboard && !train.running) return { kind: "unavailable" };
+    if (this.world.hazard(translated(origin, this.graph.profile.shape.bounds))) return { kind: "unavailable" };
+    if (aboard && !train.running && distance(train.origin, ride.arrival.origin) > this.graph.profile.maximumStep) return { kind: "unavailable" };
+    if (aboard && distance(train.origin, ride.arrival.origin) > this.graph.profile.maximumStep) return { kind: "ride" };
+    const staging = edge.hint?.funnel ?? edge.start;
+    const target = aboard ? edge.end : distance(train.origin, ride.boarding.origin) <= this.graph.profile.maximumStep ? edge.start : staging;
+    if (!aboard && target === staging && distance(origin, staging) <= 8) return { kind: "wait" };
+    if (this.world.hazard(translated(target, this.graph.profile.shape.bounds))) return { kind: "unavailable" };
+    const admission = this.world.admit({ from: origin, to: target, mode: "walk", hint: null, entity: null }, this.graph.profile);
+    return admission.admitted ? { kind: "move", stage: aboard ? "exit" : "approach", target } : { kind: "unavailable" };
+  }
   enableArea(id: number, enabled: boolean): boolean {
     const node = this.node(id);
     if (node === null) throw new RangeError(`Unknown navigation area ${id}`);
@@ -237,8 +267,14 @@ export class NavigationRuntime {
   }
   #edgeAllowed(edge: NavigationEdge, query: NavigationRouteQuery | undefined, nodeAllowed: (node: NavigationNode, awaitElevator: boolean) => boolean): boolean {
     if (!this.#staticEdgeAllowed(edge, query)) return false;
-    const target = this.node(edge.to), elevator = this.boardingElevator(edge.to);
-    if (target === null || !nodeAllowed(target, elevator !== null && elevator.platform.phase !== "bottom")) return false;
+    const target = this.node(edge.to), elevator = this.boardingElevator(edge.to), train = this.boardingTrain(edge.to);
+    if (target === null) return false;
+    const sourceTrain = edge.mode === "mover" && edge.entity !== null ? this.world.entity(edge.entity) : null;
+    const ride = sourceTrain === null ? null : navigationTrainRide(sourceTrain, edge, this.graph.profile);
+    const awaitingTrain = train !== null && train.state.train !== undefined && distance(train.state.train.origin, train.ride.boarding.origin) > this.graph.profile.maximumStep
+      || sourceTrain?.train?.running === true && ride !== null && distance(sourceTrain.train.origin, ride.arrival.origin) > this.graph.profile.maximumStep;
+    if (awaitingTrain && !clear(this.world, this.graph.profile, target.origin, target.origin)) return false;
+    if (!nodeAllowed(target, awaitingTrain || elevator !== null && elevator.platform.phase !== "bottom")) return false;
     if (edge.entity !== null) {
       const state = this.world.entity(edge.entity);
       if (state === null || !state.enabled || state.locked) return false;
@@ -279,6 +315,14 @@ export class NavigationRuntime {
     return result;
   }
   #traverseEdge(edge: NavigationEdge, state: RouteTraversal): boolean {
+    const train = edge.mode === "mover" && edge.entity !== null ? this.world.entity(edge.entity) : null;
+    if (train?.train !== undefined) {
+      if (!train.train.running || navigationTrainRide(train, edge, this.graph.profile) === null) return false;
+      const staging = edge.hint?.funnel ?? edge.start;
+      if (distance(state.cursor, staging) > 1 && !this.#admit(state, { from: state.cursor, to: staging, mode: "walk", hint: null, entity: null }).admitted) return false;
+      state.points.push(edge.start, edge.end); state.cursor = edge.end; state.seconds += edge.travelSeconds;
+      state.prediction = this.world.beginRoute(this.graph.profile); return true;
+    }
     const mover = edge.mode === "mover" && (edge.source.kind === "nav3" || edge.source.kind === "nav2") && edge.sourceTravelType === 6 && edge.entity !== null ? this.world.entity(edge.entity) : null;
     if (mover?.elevator !== undefined && mover.enabled && !mover.locked) {
       const elevator = mover.elevator;
@@ -292,7 +336,10 @@ export class NavigationRuntime {
     if (distance(state.cursor, edge.start) > 1 && !this.#admit(state, { from: state.cursor, to: edge.start, mode: edge.mode === "crouch" ? "crouch" : "walk", hint: null, entity: null }).admitted) return false;
     let landing = edge.end;
     const boarding = edge.mode === "walk" && (edge.source.kind === "nav3" || edge.source.kind === "nav2") ? this.boardingElevator(edge.to) : null;
-    if (boarding !== null && boarding.platform.phase !== "bottom") landing = edge.start;
+    const trainBoarding = edge.mode === "walk" ? this.boardingTrain(edge.to) : null;
+    if (trainBoarding !== null && trainBoarding.state.train !== undefined
+      && distance(trainBoarding.state.train.origin, trainBoarding.ride.boarding.origin) > this.graph.profile.maximumStep) landing = trainBoarding.edge.hint?.funnel ?? edge.start;
+    else if (boarding !== null && boarding.platform.phase !== "bottom") landing = edge.start;
     else if (boarding !== null) {
       const floor = this.world.scene.trace({ start: edge.end, end: { ...edge.end, z: edge.end.z - 96 }, shape: this.graph.profile.shape,
         target: { kind: "world" }, policy: this.graph.profile.policy, numeric: this.graph.profile.movement.numeric, passActor: this.world.passActor });

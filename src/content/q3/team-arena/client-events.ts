@@ -50,6 +50,7 @@ export function clientEvents(context: ClientEventsContext, entity: GameEntity, o
         if (context.primaryAttackAllowed?.(entity.actor.id) !== false) context.weapons.fire(entity);
         break;
       case EntityEvent.EV_USE_ITEM1: {
+        context.combat.entities.rankings.useHoldable(entity.slot, 1);
         const powerup = client.ps.powerups.get(Powerup.PW_REDFLAG) ? Powerup.PW_REDFLAG :
           client.ps.powerups.get(Powerup.PW_BLUEFLAG) ? Powerup.PW_BLUEFLAG :
             client.ps.powerups.get(Powerup.PW_NEUTRALFLAG) ? Powerup.PW_NEUTRALFLAG : Powerup.PW_NONE;
@@ -74,6 +75,7 @@ export function clientEvents(context: ClientEventsContext, entity: GameEntity, o
         break;
       }
       case EntityEvent.EV_USE_ITEM2:
+        context.combat.entities.rankings.useHoldable(entity.slot, 2);
         // Source updates gentity health here; ClientEndFrame later copies it into ps.
         entity.health = (client.ps.stats.get(statSchema(context.product).maxHealth) + 25) | 0;
         break;

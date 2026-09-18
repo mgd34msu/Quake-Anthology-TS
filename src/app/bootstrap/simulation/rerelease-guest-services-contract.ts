@@ -1,5 +1,4 @@
-import type { RereleaseImportCall } from "../../../compat/q2/rerelease/module.ts";
-import type { GuestCallResult } from "../../../contracts/execution.ts";
+import type { RereleaseNavigationServices } from "../../../compat/q2/rerelease/navigation.ts";
 import type { RereleaseSemanticBindings } from "../../../compat/q2/rerelease/host.ts";
 import type { RereleaseDebugShapesEvent } from "../../../compat/q2/rerelease/debug-shapes.ts";
 import type { RereleaseWorldTextEvent } from "../../../compat/q2/rerelease/world-text.ts";
@@ -18,10 +17,10 @@ export interface RereleaseGuestServicesOptions extends ClassicGuestServicesOptio
   readonly clipboard: { readonly kind: "dedicated" } | { readonly kind: "client"; write(text: string): void };
   readonly debugShapes: (event: RereleaseDebugShapesEvent) => void;
   readonly worldText: (event: RereleaseWorldTextEvent) => void;
-  readonly navigation?: (call: RereleaseImportCall, host: RereleaseQ2GuestHost) => GuestCallResult;
+  readonly navigation: RereleaseNavigationServices;
   readonly semanticBindings?: RereleaseSemanticBindings;
 }
-export type RereleaseGuestMapServices = Omit<ClassicGuestMapServices, "engine"> & Pick<RereleaseGuestServicesOptions, "engine" | "localize" | "debugShapes" | "worldText">;
+export type RereleaseGuestMapServices = Omit<ClassicGuestMapServices, "engine"> & Pick<RereleaseGuestServicesOptions, "engine" | "localize" | "debugShapes" | "worldText" | "navigation">;
 export interface RereleaseGuestMessage extends ClassicGuestMessage {
   readonly sourceDialect: "q2-multicast-float";
   readonly dupeKey: number;

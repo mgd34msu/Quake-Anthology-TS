@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { NavigationRuntime } from "../../../src/bots/navigation/runtime.ts";
-import type { NavigationGraph, NavigationWorld } from "../../../src/bots/navigation/types.ts";
+import type { NavigationEdge, NavigationEntityState, NavigationGraph, NavigationProfile, NavigationWorld } from "../../../src/bots/navigation/types.ts";
+import { navigationTrainRide } from "../../../src/bots/navigation/train.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { decodeQ3World } from "../../../src/formats/q3-map/index.ts";
@@ -25,6 +26,41 @@ function fixture(rejectFirst = false) {
   };
   return { graph, world, runtime: new NavigationRuntime(graph, world), origin, checks: () => checks, danger: () => { dangerous = true; } };
 }
+test("train route follows source stops while boarding and exit use selected movement and live ground ownership", () => {
+  const f = fixture(), actor = createIdentityOwner("train-test").actor(3, 1);
+  const selected: NavigationProfile = { ...profile, capabilities: new Set([...profile.capabilities, "mover"]) };
+  const start = f.origin, end = { ...start, x: 256 }, staging = { ...start, x: -48 };
+  let x = 128, running = true, blocked = false, admissions = 0;
+  const state = (): NavigationEntityState => ({ actor, enabled: true, locked: blocked,
+    bounds: { min: { x: x - 32, y: -32, z: -16 }, max: { x: x + 32, y: 32, z: 0 } }, velocity: { x: 100, y: 0, z: 0 }, destination: { x: 256, y: 0, z: 0 },
+    train: { origin: { x, y: 0, z: 0 }, running, stops: [
+      { id: 1, origin: { x: 0, y: 0, z: 0 }, next: 2, wait: 1, teleport: false },
+      { id: 2, origin: { x: 256, y: 0, z: 0 }, next: 1, wait: 1, teleport: false },
+    ] } });
+  const edge: NavigationEdge = { id: 0, from: 1, to: 2, start, end, mode: "mover", travelSeconds: 3, sourceTravelType: 7, sourceFlags: 3,
+    hint: { funnel: staging, start, end, ladderPlane: null }, entity: { model: 1, bounds: state().bounds, raw: [] }, source: { kind: "nav3", node: 1, link: 0 } };
+  const world: NavigationWorld = { ...f.world, entity: state, admit: (request, profile) => { admissions++; return f.world.admit(request, profile); } };
+  const runtime = new NavigationRuntime({ ...f.graph, profile: selected, edges: [edge],
+    nodes: f.graph.nodes.map(node => ({ ...node, origin: node.id === 2 ? end : start })) }, world);
+  expect(navigationTrainRide(state(), edge, selected)?.boarding.id).toBe(1);
+  expect(navigationTrainRide(state(), edge, profile)).toBeNull();
+  const planned = runtime.route({ start: staging, goal: end, startNode: 1, goalNode: 2 });
+  expect(planned.kind).toBe("route");
+  if (planned.kind !== "route") throw new Error(planned.reason);
+  expect(planned.route.edges).toEqual([edge]);
+  expect(runtime.trainStep(edge, staging, null)).toEqual({ kind: "wait" }); expect(admissions).toBe(0);
+  expect(runtime.trainStep(edge, { ...start, x: 128 }, actor)).toEqual({ kind: "ride" });
+  x = 0;
+  expect(runtime.trainStep(edge, staging, null)).toEqual({ kind: "move", stage: "approach", target: start }); expect(admissions).toBe(1);
+  x = 256; running = false;
+  expect(runtime.trainStep(edge, end, actor)).toEqual({ kind: "move", stage: "exit", target: end }); expect(admissions).toBe(2);
+  expect(runtime.trainStep(edge, staging, null)).toEqual({ kind: "unavailable" });
+  expect(runtime.route({ start: staging, goal: end, startNode: 1, goalNode: 2 }).kind).toBe("unreachable");
+  blocked = true;
+  expect(runtime.trainStep(edge, end, actor)).toEqual({ kind: "unavailable" });
+  blocked = false; f.danger();
+  expect(runtime.trainStep(edge, end, actor)).toEqual({ kind: "unavailable" }); expect(admissions).toBe(2);
+});
 test("route shares node collision admission across incoming edges only within its query", () => {
   const f = fixture(), query = { start: f.origin, goal: f.origin, startNode: 1, goalNode: 3 };
   const first = f.runtime.route(query);

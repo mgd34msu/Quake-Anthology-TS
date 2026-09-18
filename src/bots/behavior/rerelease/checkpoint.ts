@@ -71,7 +71,7 @@ function memory(r: SaveReader): BotBrainCheckpointMemory {
     unreachableUntil: r.field("unreachableUntil").list(entry => ({ entity: entry.field("entity").integer(), time: entry.field("time").finite() })),
     objectiveHome: r.field("objectiveHome").list(entry => ({ entity: entry.field("entity").integer(), origin: vector(entry.field("origin")) })),
     saidThisLevel: r.field("saidThisLevel").list(entry => entry.string()),
-    explicitGoal: goal.value === null ? null : { kind: goal.field("kind").choice("point", "entity"), point: vector(goal.field("point")), entityId: goal.field("entityId").integer() },
+    explicitGoal: goal.value === null ? null : { owner: goal.field("owner").value === undefined ? "external" : goal.field("owner").choice("external", "objective"), kind: goal.field("kind").choice("point", "entity"), point: vector(goal.field("point")), entityId: goal.field("entityId").integer() },
     lastCmd: { forwardmove: cmd.field("forwardmove").finite(), sidemove: cmd.field("sidemove").finite(), upmove: cmd.field("upmove").finite(), buttons: cmd.field("buttons").integer(0), impulse: cmd.field("impulse").integer(0), viewAngles: vector(cmd.field("viewAngles")) },
   };
 }

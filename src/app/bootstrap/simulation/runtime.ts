@@ -1,3 +1,13 @@
+import { rereleasePathToGoal } from "../../../bots/navigation/rerelease-path.ts";
+import { QvmWeaponBehaviorSource, type QvmWeaponTarget } from "./qvm-weapon-behavior.ts";
+import type { ApplicationBotNavigation } from "./navigation.ts";
+import type { RereleaseNavigationServices } from "../../../compat/q2/rerelease/navigation.ts";
+import type { PreparedWeaponBehavior } from "../weapon-behavior-selection.ts";
+import { RereleaseWeaponBehaviorSource } from "./rerelease-weapon-behavior.ts";
+import { nativeProviderTiming } from "../../../content/catalog/timing.ts";
+import { loadServerLocalizationResources } from "../../../text/localization-resources.ts";
+import { q2LocalizedText } from "../q2-localization.ts";
+import type { WeaponBehaviorRuntimeCheckpoint } from "./weapon-behavior-runtime.ts";
 import { quakeCFreeMovement } from "./quakec-client-adapter.ts";
 import { quakeWorldCommandSlices } from "../../../movement/q1/quakeworld.ts";
 import { prepareNativeQ2Map } from "./native-q2-map.ts";
@@ -235,6 +245,7 @@ export class SharedSimulation implements Simulation {
   private readonly characterTicks = new Map<OwnedActor, number>();
   private readonly entryCarry = new Map<OwnedActor, Q1TravelState>();
   private readonly startItems: string;
+  private readonly initialSpawnPoint: string;
   private readonly pendingStartItems = new Set<ActorId>();
   private readonly detachedModels = new Map<OwnedActor, { readonly content: ContentId; readonly path: string }>();
   private readonly q1Characters = new Map<OwnedActor, Q1CharacterActor>();
@@ -251,6 +262,7 @@ export class SharedSimulation implements Simulation {
   private equipmentFrame: FrameContext;
   private selectedBallistics: Q3SharedBallistics | null = null;
   private readonly weaponBehavior: SimulationWeaponBehaviors;
+  private nativeNavigation: ApplicationBotNavigation | null = null;
   private readonly selectedRandom = new GameRandom();
   private selectedMilliseconds = 0;
   private selectedArsenal: Q1SelectedArsenal | Q2SelectedArsenal | Q3SelectedArsenal | null = null;
@@ -326,6 +338,8 @@ export class SharedSimulation implements Simulation {
     this.q1Campaign = new Q1CampaignState(options.travel?.source.kind === "q1" ? options.travel.source.flags : 0, options.travel?.source.kind === "q1" ? options.travel.source.skill : options.skill);
     this.recipe = options.recipe;
     this.startItems = options.restore === undefined ? options.startItems ?? "" : savedSimulationSettings(options.restore).startItems;
+    this.initialSpawnPoint = options.nativeQ2Travel?.spawnPoint ?? options.travel?.spawnPoint
+      ?? (options.restore === undefined ? options.initialSpawnPoint ?? "" : savedSimulationSettings(options.restore).initialSpawnPoint);
     const quakec = options.recipe.execution.find(module => module.kind === "quakec");
     if (quakec !== undefined) {
       const nativeMap = quakec.api.kind === "q1-quakeworld" ? options.recipe.map.entities.content.startsWith("q1:quakeworld:")
@@ -427,7 +441,7 @@ export class SharedSimulation implements Simulation {
         return undefined;
       } });
     this.inventory = new SharedInventoryTable(this.actors);
-    this.events = new SimulationEvents(this.physics.bodies, () => this.sourceFrame.time, actor => this.player(actor)?.client ?? null, actor => this.actors.sourceOf(actor)?.slot ?? null, options.world.kind === "q1-bsp" ? { content: this.recipe.map.entities.content, entities: options.world.entities, alive: actor => this.actors.resolveOwned(actor) !== null } : null);
+    this.events = new SimulationEvents(this.physics.bodies, () => this.sourceFrame.time, actor => this.player(actor)?.client ?? null, actor => this.actors.sourceOf(actor)?.slot ?? null, { content: this.recipe.map.entities.content, acceptedContents: new Set(this.recipe.mounts.mounts.map(mount => mount.identity.content)), entities: options.world.kind === "q1-bsp" ? options.world.entities : "", alive: actor => this.actors.resolveOwned(actor) !== null });
     this.combat = new GameplayAuthority(this.actors, this.callbacks, {
       impulse: (actor, impulse, movement) => {
         const body = this.physics.bodies.read(actor.id);
@@ -494,7 +508,9 @@ export class SharedSimulation implements Simulation {
         return body === null ? [] : [{ actor: actor.id, body, health: combat?.health ?? 0, classname: this.classname(actor.id), name: this.player(actor.id) === null ? "" : this.sourcePlayerName(actor.id),
           solid: this.bodies.linked(actor.id) !== null }];
       }), aim: actor => { const forward = { x: 0, y: 0, z: 0 }; donorAngleVectors(this.playerView(actor).angles, forward, null, null); return forward; },
-      print: (actor, text) => { this.events.message({ kind: "print", level: 2, text }, actor); } });
+      print: (actor, text) => { this.events.message({ kind: "print", level: 2, text }, actor); },
+      qvm: entry => this.createQvmWeaponBehavior(entry),
+      native: (entry, nextFrame) => this.createNativeWeaponBehavior(entry, nextFrame) });
     try {
     this.source = this.createSource(loading);
     this.handGrenades = this.source.kind === "q2-native" ? null : this.createHandGrenades();
@@ -616,6 +632,9 @@ export class SharedSimulation implements Simulation {
   static async load(options: SimulationOptions, nextFrame: () => Promise<void>): Promise<SharedSimulation> {
     const simulation = new SharedSimulation(options, nativeLoading);
     try {
+      if (options.prepareRereleaseNavigation !== undefined && (simulation.q2Source()?.game.options.edition === "rerelease" || options.q2Guest?.edition === "rerelease"
+        || options.weaponBehaviors?.some(entry => entry.kind === "rerelease-native") === true))
+        simulation.installRereleaseNavigation(await options.prepareRereleaseNavigation(simulation));
       if (simulation.source.kind === "q2-native") {
         const travel = simulation.pendingNativeTravel;
         simulation.pendingNativeTravel = null;
@@ -630,6 +649,7 @@ export class SharedSimulation implements Simulation {
           await simulation.source.game.spawnLoading(options.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), options.world.entities, nextFrame);
         }
       }
+      await simulation.weaponBehavior.initializeLoading(nextFrame);
       return simulation;
     } catch (error) {
       try { simulation.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Native loading and cleanup failed"); }
@@ -1449,6 +1469,69 @@ export class SharedSimulation implements Simulation {
         { hand: q2.hand, viewHeight: player.viewHeight, playersCollide: q2.playersCollide }, angles, offset) }, !player.intermission && player.cutscene === null && !q2.spectator && !(player.state.kind === "q3" && player.state.movementType === MoveType.PM_SPECTATOR));
   }
 
+  installRereleaseNavigation(navigation: ApplicationBotNavigation): void {
+    this.assertOpen();
+    if (this.nativeNavigation !== null && this.nativeNavigation !== navigation) throw new Error("Native navigation already belongs to this world");
+    this.nativeNavigation = navigation;
+  }
+  rereleaseNavigation(): ApplicationBotNavigation | null { return this.nativeNavigation; }
+  private rereleaseNavigationServices(): RereleaseNavigationServices {
+    return { runtime: () => this.nativeNavigation?.runtime ?? null,
+      moveToPoint: (actor, point, tolerance) => this.botServices.moveToPoint(actor, point, tolerance),
+      followActor: (actor, target) => this.botServices.followActor(actor, target) };
+  }
+  private async createQvmWeaponBehavior(entry: Extract<PreparedWeaponBehavior, { readonly kind: "qvm" }>): Promise<QvmWeaponBehaviorSource> {
+    const realTime = this.options.weaponBehaviorRealTime;
+    if (realTime === undefined) throw new Error("QVM weapon components require host calendar services");
+    const teamMode = this.teamGame();
+    return QvmWeaponBehaviorSource.create({ artifact: entry.artifact, profile: entry.profile, mounts: entry.mounts,
+      scene: this.scene, context: { session: this.session, origin: { kind: "server-console" } }, seed: this.options.seed,
+      entityText: this.options.world.entities, mode: this.options.mode, teamMode, realTime,
+      assertCurrent: () => this.assertOpen(), print: text => { this.events.message({ kind: "print", level: 2, text }); },
+      targets: () => this.actors.observations().flatMap<QvmWeaponTarget>(owned => {
+        const actor = owned.id, body = this.bodies.read(actor), combat = this.combat.read(actor);
+        if (body === null) return [];
+        const target = { actor, body, health: combat?.health ?? 0 }, client = this.playerClient(actor);
+        if (client === null) return [{ ...target, kind: "actor" }];
+        const userinfo = this.sourcePlayerUserinfo(actor) ?? "", info = q2Userinfo(userinfo);
+        const spectator = info.get("spectator") === "1" || info.get("team") === "spectator" || info.get("team") === "s";
+        const sourceTeam = combat?.team?.toLowerCase();
+        const team = spectator ? "spectator" : !teamMode ? "free" : sourceTeam === "red" ? "red" : sourceTeam === "blue" ? "blue" : null;
+        if (team === null) throw new Error(`QVM weapon component cannot represent source team ${combat?.team ?? "unassigned"}`);
+        return [{ ...target, kind: "player", userinfo, team }];
+      }) });
+  }
+
+  private async createNativeWeaponBehavior(entry: Extract<PreparedWeaponBehavior, { readonly kind: "rerelease-native" }>, nextFrame: () => Promise<void>): Promise<RereleaseWeaponBehaviorSource> {
+    const clock = this.options.weaponBehaviorClock;
+    if (clock === undefined) throw new Error("Native weapon components require host clock capabilities");
+    const reference = entry.selection.source, timing = nativeProviderTiming(reference, "q2", true);
+    const cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: this.session, origin: { kind: "server-console" } },
+      print: text => this.events.message({ kind: "print", level: 2, text }) });
+    for (const [name, value] of Object.entries({ maxclients: String(this.options.maxClients), skill: String(this.options.skill),
+      deathmatch: this.options.mode === "deathmatch" ? "1" : "0", coop: this.options.mode === "coop" ? "1" : "0", sv_gravity: String(this.physics.gravity) })) cvars.register(name, value);
+    const random = new SourceRandom(this.options.seed, "q2-rerelease");
+    const runtime: ActorHostRuntime = { numeric: timing.numeric, random, now: () => this.timeSeconds, frameSeconds: () => 0.025,
+      schedule: () => { throw new Error("Native weapon callbacks must use their component's source scheduler"); } };
+    const localization = await loadServerLocalizationResources("english", async path => (await entry.mounts.open(path))?.bytes ?? null, "q2-rerelease");
+    const unsupported = (): never => { throw new Error("Native weapon component cannot mutate primary world ownership"); };
+    return RereleaseWeaponBehaviorSource.create({ prepared: entry.prepared, clock, nextFrame,
+      map: { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, "rerelease", this.options.mode), spawnPoint: "" },
+      ownership: { inventory: "source-private", presentation: "selected-weapon" },
+      services: { engine: this.q2ActorHost(reference, runtime, () => undefined), scene: this.scene, cvars, numeric: createNumericOperations(timing.numeric),
+        mapPath: this.recipe.map.geometry.requestedPath, maxClients: this.options.maxClients, frameMilliseconds: 25,
+        admit: unsupported, collision: unsupported, command: () => ({ arguments: [], args: "" }), addCommand: unsupported, debugGraph: unsupported,
+        print: text => this.events.message({ kind: "print", level: 2, text }), localize: (key, arguments_) => q2LocalizedText(localization, key, arguments_),
+        clipboard: { kind: "dedicated" }, debugShapes: unsupported, worldText: unsupported, navigation: this.rereleaseNavigationServices() },
+      actor: id => {
+        const actor = this.actors.resolveOwned(id), body = this.bodies.read(id);
+        if (actor === null || body === null) throw new Error("Native weapon component references an unavailable shared actor");
+        const player = this.playerClient(id) !== null, view = player ? this.playerView(id) : null;
+        return { actor, body, viewAngles: view?.angles ?? body.angles, viewHeight: view?.viewHeight ?? 0,
+          userinfo: player ? this.sourcePlayerUserinfo(id) ?? "" : "" };
+      } });
+  }
+
   private createSource(loading?: typeof nativeLoading): SourceRuntime {
     const recipe = this.recipe, content = recipe.map.entities.content, campaign = recipe.campaign.kind === "campaign" ? recipe.campaign.mission.provider : recipe.map.entities.provider;
     const timing = providerTiming(recipe, recipe.map.entities.provider);
@@ -1462,6 +1545,7 @@ export class SharedSimulation implements Simulation {
         if (cvars.find(name) === undefined) cvars.register(name, value);
         cvars.set(name, value, true);
       }
+      if (this.options.restore === undefined) cvars.set("nextserver", this.options.q2NextServer ?? "", true);
       this.q2ServerRegistry = cvars;
       this.initializeServerSettings(cvars);
       if (this.options.restore !== undefined) restoreQ2ServerCvars(cvars, savedSourceCvars(this.options.restore));
@@ -1474,14 +1558,14 @@ export class SharedSimulation implements Simulation {
         collision: (actor, collision) => this.physics.setCollision(actor, collision), print: native.print,
         command: () => ({ arguments: [], args: "" }), addCommand: native.addCommand, debugGraph: native.debugGraph,
       };
-      const map = { map: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, native.edition, this.options.mode), spawnPoint: retained?.spawnPoint ?? "" };
+      const map = { map: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, native.edition, this.options.mode), spawnPoint: this.initialSpawnPoint };
       if (native.edition === "rerelease") {
         if (retained !== undefined && retained.edition !== "rerelease") throw new Error("Native travel edition changed");
         const rrServices: RereleaseGuestServicesOptions = { ...services, engine: this.q2ActorHost(recipe.map.entities, runtime, () => undefined, "primary-world"),
           frameMilliseconds: 25, localize: native.localize, clipboard: native.clipboard,
           debugShapes: event => this.submitDebugShapes(event),
           worldText: event => this.worldTextStore.submit({ ...event.text, content }, this.timeSeconds, event.lifetime),
-          ...(native.navigation === undefined ? {} : { navigation: native.navigation }),
+          navigation: this.rereleaseNavigationServices(),
           ...(native.semanticBindings === undefined ? {} : { semanticBindings: native.semanticBindings }) };
         const visited = new Map<string, Q2RereleaseVisitedLevel>(retained?.visited ?? []);
         const level = cvars.variableValue("deathmatch") === 0 ? visited.get(recipe.map.geometry.requestedPath) : undefined;
@@ -1776,10 +1860,11 @@ export class SharedSimulation implements Simulation {
     serverCvars.set("deathmatch", this.options.mode === "deathmatch" ? "1" : "0", true);
     serverCvars.set("coop", this.options.mode === "coop" ? "1" : "0", true);
     this.initializeServerSettings(serverCvars);
+    if (this.options.restore === undefined) serverCvars.set("nextserver", this.options.q2NextServer ?? "", true);
     const savedCvars = this.options.restore === undefined ? undefined : savedSourceCvars(this.options.restore);
     if (savedCvars !== undefined) restoreQ2ServerCvars(serverCvars, savedCvars);
     const common: Q2CompositionCommon = { host, weapons, itemHooks, playerHooks, entityHooks,
-      match: sourceQ2MatchSelection(recipe.match.provider, serverCvars, this.options.travel?.source.kind === "q2" ? this.options.travel.source.lmctf : undefined), playerRules: { spawnPoint: this.options.travel?.spawnPoint ?? "" },
+      match: sourceQ2MatchSelection(recipe.match.provider, serverCvars, this.options.travel?.source.kind === "q2" ? this.options.travel.source.lmctf : undefined), playerRules: { spawnPoint: this.initialSpawnPoint },
       options: { mapName: recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""),
         skill: this.options.skill, mode: this.options.mode, deathmatchFlags: q2SourceDeathmatchFlags(serverCvars), maxClients: this.options.maxClients, provider: recipe.map.entities.provider,
         campaign, combatProvider: recipe.combat.provider, movementProvider: recipe.movement.provider, inventoryProvider: recipe.inventory.provider },
@@ -1816,7 +1901,12 @@ export class SharedSimulation implements Simulation {
             target: { kind: "model", model, origin: brush.origin, angles: brush.angles }, policy: { kind: "q2", contentsMask: -1, leafContents: "stored" },
             numeric: providerTiming(recipe, recipe.map.entities.provider).numeric, passActor: actor });
           return trace.startSolid || trace.allSolid;
-        }, navigation: (start, goal, actor) => actor === null ? { kind: "no-navigation" } : this.botServices.navigation(actor, start, goal),
+        }, navigation: (start, goal, _actor) => {
+          if (this.nativeNavigation === null) return { kind: "no-navigation" };
+          const path = rereleasePathToGoal(this.nativeNavigation.runtime, { start, goal, flags: 0xffffffff, moveDistance: 0,
+            ignoreNodeFlags: true, minHeight: 0, maxHeight: 0, radius: 0, dropHeight: 0, jumpHeight: 0 });
+          return path.code < 5 ? { kind: "path", distanceSquared: path.distanceSquared, points: path.points } : { kind: "unreachable" };
+        },
         monstersSearching: player => { if (this.source.kind !== "q2") return false;
           for (const entity of this.source.game.entities.values()) {
             if ((entity.serverFlags & 4) === 0 || (this.combat.read(entity.actor.id)?.health ?? 0) <= 0) continue;
@@ -3395,6 +3485,28 @@ export class SharedSimulation implements Simulation {
     return { powerups, health: combat.health, armor: combat.armor, activeWeapon: arsenal.activeWeapon, ammo, inventory, items, weaponStatus, arsenalWarning };
   }
 
+  setSourcePlayerIdentity(actor: ActorId, identity: { readonly name?: string; readonly skin?: string; readonly shirt?: number; readonly pants?: number }): void {
+    this.requirePlayer(actor);
+    const source = this.source;
+    if (source.kind === "q1") {
+      const client = source.composition.clients.require(actor), info = new Map(client.userinfo);
+      if (identity.name !== undefined) info.set("name", identity.name);
+      source.composition.clients.update(actor, info);
+      if (identity.shirt !== undefined || identity.pants !== undefined)
+        source.composition.clients.colors(actor, identity.shirt ?? client.shirt, identity.pants ?? client.pants);
+      return;
+    }
+    if (source.kind === "q2") {
+      const entity = source.game.entity(actor), state = source.players.states.get(actor);
+      if (entity === null || state === undefined) throw new Error("Q2 source identity requires an admitted player");
+      const info = new Map(q2Userinfo(state.userinfo));
+      if (identity.name !== undefined) info.set("name", identity.name);
+      if (identity.skin !== undefined) info.set("skin", identity.skin);
+      source.players.userinfoChanged(entity, source.game, [...info].map(([key, value]) => `\\${key}\\${value}`).join(""));
+      return;
+    }
+    throw new Error("Source identity updates require a native Q1 or Q2 player");
+  }
   setPlayerFieldOfView(actor: ActorId, fieldOfView: number, mode: "change" | "restore" = "change"): void {
     if (this.source.kind === "q2-native") {
       const slot = this.nativeQ2Client(actor).slot + 1, source = this.source.game;
@@ -3449,6 +3561,10 @@ export class SharedSimulation implements Simulation {
     const source = this.source;
     if (source.kind === "q1") return [...source.composition.clients.require(actor).userinfo].map(([name, value]) => `\\${name}\\${value}`).join("");
     if (source.kind === "q2") return source.players.states.get(actor)?.userinfo ?? null;
+    if (source.kind === "q3" || source.kind === "q3-qvm") {
+      const client = this.playerClient(actor);
+      return client === null ? null : source.kind === "q3" ? source.game.host.engine.getUserinfo(client.slot) : source.game.state.getUserinfo(client.slot) ?? null;
+    }
     if (source.kind === "q2-native") return source.game.clients.find(client => client.slot === this.nativeQ2Client(actor).slot + 1)?.userinfo ?? null;
     if (source.kind === "quakec") {
       const client = this.playerClient(actor);
@@ -3728,6 +3844,8 @@ export class SharedSimulation implements Simulation {
     if (source.kind === "quakec") return source.game.cvars.variableValue("teamplay") !== 0;
     if (source.kind === "q3") return source.game.gameType >= 3;
     if (source.kind === "q3-qvm") return source.game.state.cvars.variableValue("g_gametype") >= 3;
+    if (source.kind === "q2-native") return this.q2ServerRegistry !== null && (this.q2ServerRegistry.variableValue("ctf") !== 0
+      || (this.q2ServerRegistry.variableValue("dmflags") & (64 | 128)) !== 0);
     if (source.kind !== "q2") throw new Error("Team match policy requires an initialized source");
     const selected = source.product.match;
     if (selected.source instanceof Q2Lmctf) return (selected.source.rules.ctfFlags & 128) === 0;
@@ -3831,7 +3949,7 @@ export class SharedSimulation implements Simulation {
           origin: state.origin, previousOrigin: state.oldOrigin, angles: state.angles,
           scale: "scale" in state && state.scale !== 0 ? state.scale : 1, alpha: "alpha" in state ? state.alpha !== 0 ? state.alpha : (state.renderEffects & 32) !== 0 ? 0.3 : 1 : 1, visible: true, viewWeapon: false } satisfies Omit<SimulationPresentation, "path">;
         if (appearance.path !== "") result.push({ ...model, path: appearance.path });
-        for (const path of appearance.attachedModels) result.push({ ...model, path, skin: 0, skinPath: null });
+        for (const path of appearance.attachedModels) if (path !== "") result.push({ ...model, path, skin: 0, skinPath: null });
       }
       for (const [client, actor] of source.clients) {
         const state = source.game.playerState(client.slot + 1), view = this.playerView(actor.id), path = source.game.configstrings().get((source.edition === "classic" ? 32 : 62) + state.gunIndex);
@@ -4143,6 +4261,24 @@ export class SharedSimulation implements Simulation {
     this.resumeQ2Presentation();
   }
 
+  captureOriginalSave(format: import("../../../persistence/q1.ts").Q1SaveData["format"], comment: string): import("../../../persistence/q1.ts").Q1SaveData {
+    this.assertCheckpointReady();
+    if (this.source.kind !== "quakec") throw new Error("Original Quake export requires an idle NetQuake source");
+    const recipe = this.recipe, owner = recipe.map.entities;
+    const sourceOwned = (reference: ProviderReference): boolean => reference.content === owner.content && reference.provider === owner.provider;
+    if (this.playerStates.size !== 1 || recipe.map.geometryContent !== owner.content
+      || recipe.movement.provider !== "q1:movement" || !recipe.movement.content.startsWith("q1:")
+      || recipe.character.definition.provider !== "q1:character" || !recipe.character.definition.content.startsWith("q1:")
+      || recipe.character.appearance.provider !== "q1:model/player" || !recipe.character.appearance.content.startsWith("q1:")
+      || recipe.weapons.length !== 1 || !recipe.weapons.every(sourceOwned)
+      || ![recipe.combat, recipe.inventory, recipe.engineBehavior, recipe.transition, recipe.presentation.hud, recipe.presentation.effects, recipe.presentation.audio].every(sourceOwned)
+      || recipe.presentation.assets !== owner.content
+      || recipe.enemies.kind !== "map-defined" || (recipe.weaponBehaviors?.length ?? 0) !== 0
+      || recipe.equipment.grapple.kind !== "disabled" || recipe.equipment.handGrenades.kind !== "disabled")
+      throw new Error("Original Quake formats cannot preserve this mixed composition; use a shared save");
+    return this.source.game.captureOriginalSave(format, comment);
+  }
+
   restoreOriginalSave(save: import("../../../persistence/q1.ts").Q1SaveData): void {
     this.assertOpen();
     if (this.options.originalSaveCandidate !== true || this.source.kind !== "quakec" || this.stepping || this.timeSeconds !== save.time)
@@ -4179,16 +4315,18 @@ export class SharedSimulation implements Simulation {
   async checkpointLoading(nextFrame: () => Promise<void>): Promise<SaveImage> {
     this.assertCheckpointReady();
     const source = this.source;
-    if (source.kind !== "q2-native" || source.edition !== "rerelease") return this.checkpoint();
-    if (this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0)
+    if (source.kind === "q2-native" && source.edition === "rerelease" && (this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0))
       throw new Error("Native Quake II original saves require a non-deathmatch source game");
     this.checkpointInProgress = true;
-    let captured: Awaited<ReturnType<typeof source.game.writeSaveLoading>>;
-    try { captured = await source.game.writeSaveLoading(false, nextFrame); }
-    finally { this.checkpointInProgress = false; }
-    return this.checkpointFromSource(captured);
+    let captured: import("./rerelease-guest-world.ts").RereleaseGuestSave | undefined;
+    let behaviors: WeaponBehaviorRuntimeCheckpoint;
+    try {
+      behaviors = await this.weaponBehavior.checkpointLoading(nextFrame);
+      if (source.kind === "q2-native" && source.edition === "rerelease") captured = await source.game.writeSaveLoading(false, nextFrame);
+    } finally { this.checkpointInProgress = false; }
+    return this.checkpointFromSource(captured, behaviors);
   }
-  private checkpointFromSource(rereleaseSave?: import("./rerelease-guest-world.ts").RereleaseGuestSave): SaveImage {
+  private checkpointFromSource(rereleaseSave?: import("./rerelease-guest-world.ts").RereleaseGuestSave, weaponBehaviors?: WeaponBehaviorRuntimeCheckpoint): SaveImage {
     this.assertCheckpointReady();
     const source = this.source;
     if (source.kind === "loading") throw new Error("The selected source world has not completed loading");
@@ -4229,7 +4367,7 @@ export class SharedSimulation implements Simulation {
     }
     const guests: SaveImage["guests"] = source.kind === "quakec" || source.kind === "q3-qvm" ? [source.game.checkpoint()] : [];
 
-    add("world:simulation", encodeCheckpointValue({ settings: { skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients, seed: this.options.seed, startItems: this.startItems },
+    add("world:simulation", encodeCheckpointValue({ settings: { skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients, seed: this.options.seed, startItems: this.startItems, initialSpawnPoint: this.initialSpawnPoint },
       players: [...this.playerStates.values()].map(captureMovementPlayer), hostMilliseconds: this.hostMilliseconds, q1Paused: this.q1PauseState,
       sourceSchedulingMilliseconds: this.sourceSchedulingMilliseconds,
       nativeClients: source.kind === "q2-native" ? source.game.clients.map(client => ({ clientSlot: client.slot - 1, phase: client.phase, userinfo: client.userinfo })) : null,
@@ -4241,7 +4379,7 @@ export class SharedSimulation implements Simulation {
         weaponStatistics: this.selectedBallistics.checkpointWeaponStatistics().map(state => ({ ...state, actor: savedActorId(state.actor.id) })),
         projectiles: this.selectedBallistics.checkpoint() },
       handGrenades: this.handGrenades?.capture() ?? null, grapple: this.grapple?.capture() ?? null, weaponSlots: [...this.weaponSlots].map(([actor, slot]) => ({ actor: savedActorId(actor), state: slot.snapshot() })),
-      selectedMonsters: this.captureSelectedMonsters(), weaponBehaviors: this.weaponBehavior.checkpoint(),
+      selectedMonsters: this.captureSelectedMonsters(), weaponBehaviors: weaponBehaviors ?? this.weaponBehavior.checkpoint(),
       selectedWeaponSource: this.selectedWeaponSource === null ? null : this.selectedWeaponSource.kind === "q1" ? {
         kind: "q1", entities: this.selectedWeaponSource.game.capture(), random: this.selectedWeaponSource.random.checkpoint() } : {
         kind: "q2", entities: this.selectedWeaponSource.game.capture(), weapons: this.selectedWeaponSource.weapons.capture(this.selectedWeaponSource.game),
@@ -4286,7 +4424,7 @@ export class SharedSimulation implements Simulation {
       for (const level of original.visitedLevels) source.visited.set(level.map, level);
       await source.game.initLoading(nextFrame);
       if (this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves");
-      await source.game.readSaveLoading(original, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), spawnPoint: "" }, () => {
+      await source.game.readSaveLoading(original, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), spawnPoint: this.initialSpawnPoint }, () => {
         source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
         for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
       }, nextFrame);
@@ -4298,7 +4436,7 @@ export class SharedSimulation implements Simulation {
       await source.game.initLoading(nextFrame);
       if (this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves");
       await source.files.restoreLoading(original, { module: source.game.module, map: this.recipe.map.geometry.requestedPath }, async (game, level) => {
-        await source.game.restoreOriginalLoading(game, level, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), spawnPoint: "" }, () => {
+        await source.game.restoreOriginalLoading(game, level, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), spawnPoint: this.initialSpawnPoint }, () => {
           source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
           for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
         }, nextFrame);
@@ -4315,7 +4453,7 @@ export class SharedSimulation implements Simulation {
       for (const level of original.visitedLevels) source.visited.set(level.map, level);
       source.game.init();
       if (this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves");
-      source.game.readSave(original, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), spawnPoint: "" }, () => {
+      source.game.readSave(original, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), spawnPoint: this.initialSpawnPoint }, () => {
         source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
         for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
       });
@@ -4327,7 +4465,7 @@ export class SharedSimulation implements Simulation {
       source.game.init();
       if (this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Selected DLL does not support non-deathmatch original saves");
       source.files.restore(original, { module: source.game.module, map: this.recipe.map.geometry.requestedPath }, (game, level) => {
-        source.game.restoreOriginal(game, level, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), spawnPoint: "" }, () => {
+        source.game.restoreOriginal(game, level, { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, source.edition, this.options.mode), spawnPoint: this.initialSpawnPoint }, () => {
           source.game.restoreConfigstrings(new Map(original.server.configstrings.map(entry => [entry.index, entry.value])));
           for (const { portal, open } of original.server.portals) { this.areaPortals.set(portal, open); this.scene.setAreaPortalState(portal, open); }
         });
@@ -4498,8 +4636,11 @@ export class SharedSimulation implements Simulation {
     reader.field("q2Views").list(value => this.q2Views.set(reference(value.field("actor")), readQ2View(value.field("view"))));
     reader.field("sourceModels").list(value => {
       const attached = value.field("attachedModels").list(value => value.string()), [first, second, third] = attached;
-      if (attached.length !== 3 || first === undefined || second === undefined || third === undefined) return value.fail("Q2 attached models must retain three slots");
       const actor = reference(value.field("actor"));
+      if (attached.length > 3) return value.fail("Q2 attached models exceed three slots");
+      // Native original saves reconstruct authoritative model slots; older caches compacted empty slots.
+      if (reconstructed(actor)) return;
+      if (attached.length !== 3 || first === undefined || second === undefined || third === undefined) return value.fail("Q2 attached models must retain three slots");
       this.sourceModels.set(actor, { kind: "model", actor, path: value.field("path").string(), attachedModels: [first, second, third], frame: value.field("frame").number(), oldFrame: value.field("oldFrame").number(),
         scale: value.field("scale").number(), skin: value.field("skin").number(), effects: value.field("effects").number(), renderFlags: value.field("renderFlags").number(), alpha: value.field("alpha").value === undefined ? 1 : value.field("alpha").finite() });
     });
@@ -4531,7 +4672,7 @@ export class SharedSimulation implements Simulation {
     const guest = this.q3Guest();
     if (guest !== null && !guest.isRetired) throw new Error("Q3 guest shutdown must be awaited before closing its shared world");
     const errors: unknown[] = [];
-    this.weaponBehavior.close();
+    try { this.weaponBehavior.close(); } catch (error) { errors.push(error); }
     try { this.q2Native()?.close(); } catch (error) { errors.push(error); }
     this.closed = true;
     this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = [];

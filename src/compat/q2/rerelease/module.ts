@@ -25,7 +25,7 @@ export interface RereleaseModuleOptions {
   readonly actorAtSlot: (slot: number) => ActorId | null;
   readonly instructionBudget?: number;
   readonly loadingInstructionBudget?: number;
-  readonly saveInstructionBudget?: number;
+  readonly serializationInstructionBudget?: number;
   readonly frameMilliseconds?: number;
 }
 export class MissingRereleaseImport extends Error {
@@ -110,8 +110,9 @@ export class RereleaseGuestModule {
     }
     const entry = gameExports.find(value => value.name === name);
     if (entry === undefined) throw new Error(`Unknown game export ${name}`);
-    const saveBudget = name === "WriteGameJson" || name === "WriteLevelJson" ? this.options.saveInstructionBudget ?? 100_000_000 : undefined;
-    return await this.invokeLoading(this.#function(this.#game, gameExportLayout, name), entry.signature, arguments_, nextFrame, saveBudget);
+    const serializationBudget = name === "WriteGameJson" || name === "WriteLevelJson" || name === "ReadGameJson" || name === "ReadLevelJson"
+      ? this.options.serializationInstructionBudget ?? 100_000_000 : undefined;
+    return await this.invokeLoading(this.#function(this.#game, gameExportLayout, name), entry.signature, arguments_, nextFrame, serializationBudget);
   }
   callCgame(name: CgameExportName, arguments_: readonly GuestCallValue[] = []): GuestCallResult {
     const entry = cgameExports.find(value => value.name === name);

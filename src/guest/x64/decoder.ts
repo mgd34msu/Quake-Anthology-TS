@@ -45,8 +45,7 @@ export interface X64ModRM {
 
 export function canonicalAddress(value: bigint): bigint {
   const raw = BigInt.asUintN(64, value);
-  const high = raw >> 47n;
-  if (high !== 0n && high !== 0x1ffffn) throw new X64ProcessorFault(13, `Noncanonical 48-bit virtual address 0x${raw.toString(16)}`);
+  if (raw > 0x7fffffffffffn && raw < 0xffff800000000000n) throw new X64ProcessorFault(13, `Noncanonical 48-bit virtual address 0x${raw.toString(16)}`);
   return raw;
 }
 
@@ -120,6 +119,10 @@ export class X64DecodeCursor {
     return byte;
   }
   readUnsigned(byteLength: number): bigint {
+    if (byteLength === 1) return BigInt(this.readByte());
+    if (byteLength === 2) return BigInt(this.readByte() + this.readByte() * 0x100);
+    if (byteLength === 4) return BigInt(this.readByte() + this.readByte() * 0x100
+      + this.readByte() * 0x10000 + this.readByte() * 0x1000000);
     let result = 0n;
     for (let index = 0; index < byteLength; index += 1) result |= BigInt(this.readByte()) << BigInt(index * 8);
     return result;

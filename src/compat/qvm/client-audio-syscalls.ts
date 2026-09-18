@@ -26,7 +26,7 @@ export function qvmClientAudioSyscall(call: QvmHostCall, services: QvmClientAudi
     return result;
   };
   if (call.code === (ui ? QvmUiImport.UI_S_REGISTERSOUND : QvmCgameImport.CG_S_REGISTERSOUND)) {
-    const name = words.getInt32(4, true), compressed = words.getInt32(8, true) !== 0;
+    const name = words.getInt32(4, true), compressed = (call.abiProfile ?? "q3-modern") === "q3-modern" && words.getInt32(8, true) !== 0;
     return sound.bank.registerSound(name === 0 ? null : guest.readString(name), compressed).then(value => sound.bank.indexForSound(value));
   }
   if (call.code === (ui ? QvmUiImport.UI_S_STARTLOCALSOUND : QvmCgameImport.CG_S_STARTLOCALSOUND)) {
@@ -50,7 +50,7 @@ export function qvmClientAudioSyscall(call: QvmHostCall, services: QvmClientAudi
       return 0;
     }
     case QvmCgameImport.CG_S_CLEARLOOPINGSOUNDS:
-      sound.clearLoopingSounds(words.getInt32(4, true) !== 0); return 0;
+      sound.clearLoopingSounds((call.abiProfile ?? "q3-modern") !== "q3-modern" || words.getInt32(4, true) !== 0); return 0;
     case QvmCgameImport.CG_S_ADDLOOPINGSOUND:
     case QvmCgameImport.CG_S_ADDREALLOOPINGSOUND: {
       const value = pcm(words.getInt32(16, true));

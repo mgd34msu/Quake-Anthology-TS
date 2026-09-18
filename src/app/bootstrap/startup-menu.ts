@@ -1,4 +1,6 @@
 import { registerArenaSelectionMenu } from "./base-arena-select-menu.ts";
+import { registerLocalLobbyMenu } from "../../ui/settings/local-lobby.ts";
+import type { ApplicationLocalLobby, LocalLobbySelection } from "./local-lobby.ts";
 import { captionCommands as mediaCaptionCommands } from "../../ui/common/captions.ts";
 import type { ActiveCaption } from "../../text/captions.ts";
 import { accessibleColors } from "../../ui/common/accessibility.ts";
@@ -34,6 +36,7 @@ import type { StartupHosting, StartupNativePreset, StartupSelectionField, Startu
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
 export interface StartupMenuOptions {
+  readonly lobby?: { current(): ApplicationLocalLobby | null; selection(): Promise<LocalLobbySelection>; seats(): number };
   readonly sound?: (sound: UiSound) => void;
   readonly llm?: LlmSettingsUi;
   readonly clipboard?: () => string | null;
@@ -87,6 +90,8 @@ export class StartupMenu {
   private readonly text: UiTextRenderer;
   private gyroMenu: UiMenuId | null = null;
   private bindingMenu: UiMenuId | null = null;
+  private lobbyMenu: UiMenuId | null = null;
+  openLocalLobby(): void { if (this.lobbyMenu !== null) this.controller.openMenu(this.lobbyMenu); }
   private readonly disposers: (() => void)[] = [];
   private status = "";
   private busy = false;
@@ -178,7 +183,9 @@ export class StartupMenu {
     this.register(browserMenu, () => this.browserControls());
     this.register(browserOptionsMenu, () => this.browserOptionsControls());
     this.register(browserDetailsMenu, () => this.browserDetailsControls());
-    this.register(session, () => [...(options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu))] : []), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
+    const lobby = options.lobby === undefined ? null : registerLocalLobbyMenu(this.controller, options.lobby.current, options.lobby.selection, options.lobby.seats);
+    if (lobby !== null) { this.lobbyMenu = lobby.root; this.disposers.push(lobby.dispose); }
+    this.register(session, () => [...(options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu))] : []), ...(lobby === null ? [] : [this.button("local-lobby", "Local lobby", 9, () => this.controller.openMenu(lobby.root))]), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
       this.group = group; this.controller.openMenu(categoryMenu);
     })), this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", 4, () => {
       this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
@@ -500,8 +507,8 @@ export class StartupMenu {
   bindGyro(settings: GyroSettingsUi): void {
     const menu = registerGyroSettingsMenu(this.controller, settings, ""); this.gyroMenu = menu.root; this.disposers.push(menu.dispose);
   }
-  bindInput(input: SeatInput, actions: () => readonly BindingAction[]): void {
-    const menu = registerBindingMenus(this.controller, input, actions); this.bindingMenu = menu.root; this.disposers.push(menu.dispose);
+  bindInput(input: SeatInput, actions: () => readonly BindingAction[], reset?: import("../../ui/settings/bindings.ts").BindingReset): void {
+    const menu = registerBindingMenus(this.controller, input, actions, reset); this.bindingMenu = menu.root; this.disposers.push(menu.dispose);
   }
   close(): void { this.controller.closeAll(); for (const dispose of this.disposers) dispose(); this.text.clear(); }
 }

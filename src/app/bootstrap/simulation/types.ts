@@ -1,3 +1,5 @@
+import type { SharedSimulation } from "./runtime.ts";
+import type { ApplicationBotNavigation } from "./navigation.ts";
 import type { NativeQ2Travel } from "./native-q2-travel.ts";
 import type { PreparedClassicGuest } from "./classic-guest-source.ts";
 import type { PreparedRereleaseGuest } from "./rerelease-guest-source.ts";
@@ -53,10 +55,13 @@ interface NativeQ2GuestCallbacks {
 export type NativeQ2GuestOptions = NativeQ2GuestCallbacks & (
   | { readonly edition: "classic"; readonly prepared: PreparedClassicGuest }
   | { readonly edition: "rerelease"; readonly prepared: PreparedRereleaseGuest } & Pick<RereleaseGuestServicesOptions,
-    "localize" | "clipboard" | "navigation" | "semanticBindings">
+    "localize" | "clipboard" | "semanticBindings">
 );
 
 export interface SimulationOptions {
+  readonly prepareRereleaseNavigation?: (simulation: SharedSimulation) => Promise<ApplicationBotNavigation>;
+  readonly weaponBehaviorRealTime?: Q3GuestRuntimeOptions["common"]["realTime"];
+  readonly weaponBehaviorClock?: Required<Pick<WindowsCapabilities, "nowMilliseconds" | "performanceCounter" | "performanceFrequency">>;
   readonly weaponBehaviors?: readonly import("../weapon-behavior-selection.ts").PreparedWeaponBehavior[];
   readonly dedicated?: boolean;
   readonly promptSupported?: (client: ClientId) => boolean;
@@ -65,6 +70,8 @@ export interface SimulationOptions {
   readonly nativeQ2Travel?: NativeQ2Travel;
   readonly originalSaveCandidate?: true;
   readonly startItems?: string;
+  readonly initialSpawnPoint?: string;
+  readonly q2NextServer?: string;
   readonly q3Guest?: Pick<Q3GuestRuntimeOptions, "writable" | "common"> & {
     readonly prepared: PreparedQ3Game;
     readonly gameDirectory: string;
@@ -164,7 +171,12 @@ export interface SimulationPresentation {
 
 export type Q3CharacterPresentationEvent = Omit<Q3CharacterEvent, "actor"> & { readonly actor: ActorId };
 
+export type Q1ClientMetadataEvent = { readonly kind: "name" | "social" | "player-info"; readonly slot: number; readonly value: string }
+  | { readonly kind: "colors" | "frags" | "ping"; readonly slot: number; readonly value: number };
 export type SourcePresentationEvent = { readonly kind: "q1"; readonly event: Q1Event }
+  | { readonly kind: "q1-sky"; readonly event: { readonly kind: "skybox"; readonly name: string } }
+  | { readonly kind: "q1-client"; readonly event: Q1ClientMetadataEvent }
+  | { readonly kind: "q1-session"; readonly event: { readonly kind: "level-completed" | "back-to-lobby" } }
   | { readonly kind: "q1-fog"; readonly event: { readonly kind: "transition"; readonly player: ActorId | null; readonly transition: Q1FogTransition; readonly skyFactor: number } }
   | { readonly kind: "music"; readonly event: { readonly kind: "cd-track"; readonly track: number } | { readonly kind: "pause"; readonly paused: boolean } }
   | { readonly kind: "q1-composition"; readonly event: Q1CompositionEvent }

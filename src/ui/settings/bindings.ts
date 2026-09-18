@@ -5,6 +5,7 @@ import type { SeatInput } from "../../input/seat.ts";
 import type { NativeUiController } from "../common/controller.ts";
 import { menuRow } from "../common/layout.ts";
 
+export interface BindingReset { available(): boolean; reset(): void; }
 export interface BindingAction { readonly id: string; readonly label: string; readonly target: InputBindingTarget; readonly matches?: (target: InputBindingTarget) => boolean; }
 export function physicalInputLabel(input: PhysicalInput): string {
   return physicalInputName(input);
@@ -17,7 +18,7 @@ export function bindingMatchesAction(target: InputBindingTarget, action: Binding
   return sameTarget(target, action.target) || action.matches?.(target) === true;
 }
 /** Binding edits remain seat-owned and conflicts require explicit replacement. */
-export function registerBindingMenus(controller: NativeUiController, input: SeatInput, source: readonly BindingAction[] | (() => readonly BindingAction[])): { readonly root: UiMenuId; dispose(): void } {
+export function registerBindingMenus(controller: NativeUiController, input: SeatInput, source: readonly BindingAction[] | (() => readonly BindingAction[]), reset?: BindingReset): { readonly root: UiMenuId; dispose(): void } {
   if (!controller.seat.equals(input.seat)) throw new Error("Binding menu belongs to another input seat");
   const root: UiMenuId = "menu:bindings:0", conflict: UiMenuId = "menu:bindings:conflict";
   const unregister: (() => void)[] = [];
@@ -58,6 +59,15 @@ export function registerBindingMenus(controller: NativeUiController, input: Seat
     ];
     return { id: conflict, title: `${physicalInputLabel(request.physical)} is already bound`, fullScreen: false, controls, open: () => undefined, close: () => { pending = null; return undefined; } };
   }));
+  const confirmation: UiMenuId = "menu:bindings:reset";
+  if (reset !== undefined) unregister.push(controller.register(confirmation, () => ({
+    id: confirmation, title: "Restore this player's default bindings?", fullScreen: false,
+    controls: [
+      { id: "ui:bindings:keep", kind: "button", label: "Keep bindings", rect: menuRow(3), enabled: true, visible: true, activate: () => controller.closeMenu() },
+      { id: "ui:bindings:restore", kind: "button", label: "Restore defaults", rect: menuRow(4), enabled: reset.available(), visible: true,
+        activate: () => { reset.reset(); selected = null; return controller.closeMenu(); } },
+    ], open: () => undefined, close: () => undefined,
+  })));
   unregister.push(controller.register(root, () => {
     const terms = query.toLocaleLowerCase().trim().split(/\s+/u);
     const rows: BindingRow[] = [];
@@ -93,6 +103,8 @@ export function registerBindingMenus(controller: NativeUiController, input: Seat
           if (current !== undefined) for (const binding of input.bindings) if (bindingMatchesAction(binding.target, current.action)) input.unbind(binding.input);
           return undefined;
         } },
+      ...(reset === undefined ? [] : [{ id: "ui:bindings:reset", kind: "button", label: "Reset bindings", rect: { x: 416, y: 420, width: 176, height: 28 },
+        enabled: reset.available(), visible: true, activate: () => controller.openMenu(confirmation) } satisfies UiControl]),
       { id: "ui:bindings:back", kind: "button", label: "Back", rect: { x: 48, y: 420, width: 100, height: 28 }, enabled: true, visible: true, activate: () => controller.closeMenu() },
     ];
     return { id: root, title: "Bindings", fullScreen: false, controls, open: () => undefined, close: () => undefined };

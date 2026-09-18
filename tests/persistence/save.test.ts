@@ -253,3 +253,16 @@ test("Doppler choice survives saves and legacy omission preserves source behavio
   expect(readRecipe(new SaveReader({ ...base, presentation })).presentation.doppler).toEqual({ kind: "source" });
   expect(() => readRecipe(new SaveReader({ ...base, presentation: { ...presentation, doppler: { kind: "realistic" } } }))).toThrow();
 });
+
+test("QVM behavior recipes preserve declared private layout and reject missing or aliased fields",()=>{
+  const base=recipe(),raw={...base.map.geometry,requestedPath:"vm/qagame.qvm"},artifact={...raw,id:createResourceId(raw)};
+  const module:import("../../src/contracts/execution.ts").ModuleIdentity={id:"weapon-behavior:fixture",artifactPath:artifact.requestedPath,digest:artifact.digest,revision:artifact.digest};
+  const selection:NonNullable<ExecutableRecipe["weaponBehaviors"]>[number]={source:{provider:module.id,content:base.map.geometryContent},artifact,
+    definition:{id:"qvm:declared",title:"Declared ABI",module,role:"rocket",aspect:"trajectory",fire:{kind:"qvm",module,instructionIndex:9},activate:null},
+    component:{kind:"qvm",abiProfile:"q3-modern",layout:{entityStride:544,levelTime:4,allocate:3,free:6,fields:{inuse:516,nextthink:520,think:524,health:528},fireAbi:"entity-pointer-start-direction"}}};
+  const restore=(value:unknown)=>readRecipe(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(value)),"recipe"));
+  expect(restore({...base,weaponBehaviors:[selection]}).weaponBehaviors?.[0]).toEqual(selection);
+  expect(()=>restore({...base,weaponBehaviors:[{source:selection.source,artifact,definition:selection.definition}]})).toThrow("source layout");
+  const component=selection.component;if(component === undefined)throw new Error("Missing test layout");
+  expect(()=>restore({...base,weaponBehaviors:[{...selection,component:{...component,layout:{...component.layout,fields:{...component.layout.fields,think:528}}}}]})).toThrow("overlapping");
+});

@@ -23,7 +23,16 @@ function serverName(memory: QvmMemory, word: number): string {
 }
 
 export function qvmClientBrowserSyscall(call: QvmHostCall, browser: Q3BrowserView): QvmHostResult | null {
-  if (call.kind !== "engine" || call.role !== "ui") return null;
+  if (call.role !== "ui") return null;
+  if (call.kind === "extension" && call.abiProfile === "q3-1.16n-base" && call.code >= 46 && call.code <= 49) {
+    const source = call.code <= 47 ? 0 : 2;
+    if (call.code === 46 || call.code === 48) return browser.getServerCount(source);
+    const index = call.words.getInt32(4, true), pointer = call.words.getInt32(8, true), capacity = call.words.getInt32(12, true);
+    if (capacity !== 0) call.guest.view(pointer, 1).setUint8(0, 0);
+    browser.getServerAddressString(source, index, capacity, text => { call.guest.writeString(pointer, text, capacity); });
+    return 0;
+  }
+  if (call.kind !== "engine") return null;
   const { words, guest: memory } = call, trap = call.code;
   switch (trap) {
     case 46: return browser.getPingQueueCount();

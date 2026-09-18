@@ -122,6 +122,7 @@ export class WeaponRuntime {
     this.owned(entity);
     const client = clientOf(entity), missiles = this.host.missiles, combat = missiles.host.combat;
     const quad = this.quad(entity);
+    combat.entities.rankings.fireWeapon(entity.slot, entity.s.weapon);
     if (entity.s.weapon !== Weapon.WP_GRAPPLING_HOOK && entity.s.weapon !== Weapon.WP_GAUNTLET) {
       client.accuracyShots = (client.accuracyShots + (combat.product === "missionpack" && entity.s.weapon === Weapon.WP_NAILGUN ? 15 : 1)) | 0;
     }
@@ -219,6 +220,7 @@ export class WeaponRuntime {
       impressiveCount: client.ps.persistant.get(PersistentIndex.PERS_IMPRESSIVE_COUNT), rewardUntil: client.rewardTime }, hits, combat.time);
     client.accurateCount = state.streak; client.accuracyHits = state.hits;
     if (state.awarded) {
+      pool.rankings.reward(entity.slot, 0x8000);
       client.ps.persistant.set(PersistentIndex.PERS_IMPRESSIVE_COUNT, state.impressiveCount);
       client.ps.eFlags = (client.ps.eFlags & ~AWARD_FLAGS) | 0x8000; client.rewardTime = state.rewardUntil;
     }

@@ -15,13 +15,15 @@ type Phase = { readonly kind: "created" } | { readonly kind: "retired" }
   | { readonly kind: "initializing" | "initialized"; readonly generation: number };
 
 export class QvmCgame implements Q3CgameExports {
-  readonly api = { kind: "q3-cgame", version: 4 } satisfies Q3CgameExports["api"];
+  readonly api: Q3CgameExports["api"];
   readonly module: QvmModule;
+  get supportsInputEvents(): boolean { return this.api.version >= 4; }
   private phase: Phase = { kind: "created" };
 
   constructor(readonly seat: SeatId, options: QvmModuleOptions, private readonly lifetime: QvmCgameLifetime) {
     if (options.artifact.role !== "cgame") throw new Error("QvmCgame requires a cgame artifact");
     this.module = new QvmModule(options);
+    this.api = { kind: "q3-cgame", version: this.module.abiProfile === "q3-modern" ? 4 : 3 };
   }
 
   private current(command: QvmCgameExport): void {
@@ -37,6 +39,7 @@ export class QvmCgame implements Q3CgameExports {
 
   private async call(command: QvmCgameExport, values: readonly number[] = []): Promise<number> {
     this.current(command);
+    if (this.module.abiProfile !== "q3-modern" && command > QvmCgameExport.CG_LAST_ATTACKER) throw new Error(`Legacy cgame does not export ${command}`);
     const result = await this.module.callAsync([command, ...values], 0, () => this.current(command));
     this.current(command);
     return result;

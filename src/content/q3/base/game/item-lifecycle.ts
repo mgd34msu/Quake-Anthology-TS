@@ -329,6 +329,18 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
     if (item.type === ItemType.IT_POWERUP) predict = false;
   }
   if (respawn === 0) return;
+  if (admission.kind === "native") {
+    const reports = context.entities.rankings, quantity = entity.count !== 0 ? entity.count : item.quantity;
+    switch (item.type) {
+      case ItemType.IT_WEAPON: reports.pickupWeapon(other.slot, item.tag); break;
+      case ItemType.IT_AMMO: reports.pickupAmmo(other.slot, item.tag, quantity); break;
+      case ItemType.IT_HEALTH: reports.pickupHealth(other.slot, quantity); break;
+      case ItemType.IT_ARMOR: reports.pickupArmor(other.slot, item.quantity); break;
+      case ItemType.IT_POWERUP: reports.pickupPowerup(other.slot, item.tag); break;
+      case ItemType.IT_HOLDABLE: reports.pickupHoldable(other.slot, item.tag); break;
+    }
+  }
+
 
   if (predict) context.entities.addPredictableEvent(other, EntityEvent.EV_ITEM_PICKUP, entity.s.modelindex);
   else context.entities.addEvent(other, EntityEvent.EV_ITEM_PICKUP, entity.s.modelindex);

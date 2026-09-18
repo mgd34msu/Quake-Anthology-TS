@@ -43,7 +43,8 @@ const missionpackCvars = [
   cvar("ui_singlePlayerActive", ""), cvar("g_enableDust", "0", S, true), cvar("g_enableBreath", "0", S, true),
   cvar("g_proxMineTimeout", "20000"),
 ];
-const finalCvars = [cvar("g_smoothClients", "1"), cvar("pmove_fixed", "0", Y), cvar("pmove_msec", "8", Y), cvar("g_rankings", "0")];
+const finalCvars = [cvar("g_smoothClients", "1"), cvar("pmove_fixed", "0", Y), cvar("pmove_msec", "8", Y), cvar("g_rankings", "0"),
+  cvar("sv_enableRankings", "0"), cvar("sv_rankingsActive", "0", R)];
 
 
 export function q3GameCvarDefinitions(product: Product): readonly CvarDefinition[] {

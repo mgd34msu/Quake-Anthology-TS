@@ -1,3 +1,4 @@
+import type { RereleaseMessages } from "../../network/q1/profile.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
 import { quakeWorldProfile, protocolFlags } from "../../network/q1/profile.ts";
@@ -29,6 +30,7 @@ export type QcMessageDestination =
   | { readonly kind: "multicast"; readonly origin: Vec3; readonly visibility: "all" | "pvs" | "phs"; readonly reliable: boolean };
 export interface QcRoutedMessage { readonly message: QuakeWorldMessage; readonly actor: ActorId | null; }
 export interface QcNetQuakeMessageServices {
+  readonly messageDialect?: RereleaseMessages;
   native(): boolean;
   local?(): boolean;
   loading(): boolean;
@@ -218,11 +220,12 @@ export class QcBroadcastMessages {
   readonly host: ReadonlyMap<QcHostBuiltinName, QcBuiltin>;
   private readonly buffer = new SizeBuf(1024);
   private readonly owners = new Map<number, ActorId | null>();
-  private readonly decoder = new NetQuakeDecoder({ kind: "q1-netquake", version: 15 });
+  private readonly decoder: NetQuakeDecoder;
   private signonBuffers = 1;
   private readonly qwDecoder = new QuakeWorldDecoder();
   private readonly routedBuffers = new Map<string, { readonly buffer: SizeBuf; readonly owners: Map<number, ActorId | null>; readonly destination: QcMessageDestination | null }>();
   constructor(world: QcWorldHost, private readonly emit: (effect: QcBroadcastEvent, recipient?: ActorId) => undefined, private readonly qw?: QcQuakeWorldMessageServices, private readonly nq?: QcNetQuakeMessageServices) {
+    this.decoder = new NetQuakeDecoder({ kind: "q1-netquake", version: 15 }, nq?.messageDialect ?? "known-retail");
     const isQw = world.options.program.api.kind === "q1-quakeworld";
     if (isQw && qw === undefined) throw new Error("QuakeWorld messages require routed message services");
     if (!isQw && qw !== undefined) throw new Error("NetQuake messages cannot use QuakeWorld routes");
@@ -317,12 +320,12 @@ export class QcBroadcastMessages {
     const buffer = new SizeBuf(8000);
     for (const message of messages) {
       if (message.kind === "entity") throw new Error("QC cannot write host entity snapshots");
-      writeNetQuakeMessage(buffer, this.decoder.protocol, message);
+      writeNetQuakeMessage(buffer, this.decoder.protocol, message, this.decoder.rereleaseMessages);
     }
     return buffer.bytes();
   }
   restoreNetQuakeMessages(bytes: Uint8Array): readonly NetQuakeMessage[] {
-    return new NetQuakeDecoder({ kind: "q1-netquake", version: 15 }).decode(bytes);
+    return new NetQuakeDecoder({ kind: "q1-netquake", version: 15 }, this.decoder.rereleaseMessages).decode(bytes);
   }
   captureEntries(entries: readonly QcRoutedMessage[]) {
     return { version: this.qwDecoder.protocol.version, flags: protocolFlags(this.qwDecoder.protocol), entries: entries.map(entry => {
@@ -391,7 +394,7 @@ export class QcBroadcastMessages {
     const effects = messages.map((message): QcBroadcastEvent | null => {
       const offset = encoded.cursize;
       if (message.kind === "entity") throw new Error("QC cannot write host entity snapshots");
-      writeNetQuakeMessage(encoded, this.decoder.protocol, message);
+      writeNetQuakeMessage(encoded, this.decoder.protocol, message, this.decoder.rereleaseMessages);
       if (message.kind !== "temporary-entity") {
         if (routed) return null;
         throw new Error(`Unsupported QC broadcast message ${message.kind}`);

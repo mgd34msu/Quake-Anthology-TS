@@ -3,32 +3,38 @@ import type { QvmAbiProfile } from "../../contracts/execution.ts";
 import type { SourceGameStateRecord } from "../../network/q3/game-state.ts";
 import type { WireUserCommand } from "../../network/q3/message.ts";
 import type { Snapshot } from "../../network/q3/server-message.ts";
+import { qvmConfigstring } from "./legacy-presentation.ts";
 import { writeQvmEntityState } from "./entity-record.ts";
 import { writeQvmPlayerState } from "./player-record.ts";
 
 export const QVM_GAME_STATE_BYTES = 20100;
 export const QVM_SNAPSHOT_BYTES = 53772;
+export function qvmSnapshotBytes(profile: QvmAbiProfile): number { return profile === "q3-modern" ? QVM_SNAPSHOT_BYTES : 52724; }
 export const QVM_USER_COMMAND_BYTES = 24;
 
 function requireBytes(view: DataView, size: number): void {
   if (view.byteLength < size) throw new RangeError(`QVM client record requires ${size} bytes`);
 }
 
-export function writeQvmGameState(view: DataView, state: SourceGameStateRecord): void {
+export function writeQvmGameState(view: DataView, state: SourceGameStateRecord, profile: QvmAbiProfile = "q3-modern"): void {
   requireBytes(view, QVM_GAME_STATE_BYTES);
   if (state.stringOffsets.length !== 1024 || state.stringData.length !== 16000) throw new RangeError("Invalid source gameState_t extent");
-  state.stringOffsets.forEach((offset, index) => view.setInt32(index * 4, offset, true));
+  for (let index = 0; index < 1024; index++) {
+    const source = profile !== "q3-modern" && index >= 16 && index <= 26 ? -1 : qvmConfigstring(index, profile);
+    view.setInt32(index * 4, source < 0 ? 0 : state.stringOffsets[source] ?? 0, true);
+  }
   new Uint8Array(view.buffer, view.byteOffset + 4096, 16000).set(state.stringData);
   view.setInt32(20096, state.dataCount, true);
 }
 
-export function writeQvmSnapshot(view: DataView, snapshot: Snapshot, ping: number): void {
-  requireBytes(view, QVM_SNAPSHOT_BYTES);
+export function writeQvmSnapshot(view: DataView, snapshot: Snapshot, ping: number, profile: QvmAbiProfile = "q3-modern"): void {
+  requireBytes(view, qvmSnapshotBytes(profile));
+  const psBytes = profile === "q3-modern" ? 468 : 444, entityBytes = profile === "q3-modern" ? 208 : 204;
   if (snapshot.areaMask.length !== 32 || snapshot.entities.length > 256) throw new RangeError("Invalid source snapshot_t extent");
   const ps = snapshot.playerState;
   view.setInt32(0, snapshot.flags, true); view.setInt32(4, ping, true); view.setInt32(8, snapshot.serverTime, true);
   new Uint8Array(view.buffer, view.byteOffset + 12, 32).set(snapshot.areaMask);
-  writeQvmPlayerState(new DataView(view.buffer, view.byteOffset + 44, 468), {
+  writeQvmPlayerState(new DataView(view.buffer, view.byteOffset + 44, psBytes), {
     commandTimeMilliseconds: ps.commandTime, movementType: ps.pmType, bobCycle: ps.bobCycle,
     movementFlags: ps.pmFlags, movementTimeMilliseconds: ps.pmTime, origin: ps.origin, velocity: ps.velocity,
     weaponTimeMilliseconds: ps.weaponTime, gravity: ps.gravity, speed: ps.speed,
@@ -44,11 +50,11 @@ export function writeQvmSnapshot(view: DataView, snapshot: Snapshot, ping: numbe
     powerups: Array.from(ps.powerups.copy()), ammo: Array.from(ps.ammo.copy()), generic1: ps.generic1,
     loopSound: ps.loopSound, jumpPadEntity: ps.jumppadEnt, pingMilliseconds: ps.ping,
     movementFrameCount: ps.pmoveFramecount, jumpPadFrame: ps.jumppadFrame, entityEventSequence: ps.entityEventSequence,
-  });
-  view.setInt32(512, snapshot.entities.length, true);
-  snapshot.entities.forEach((entity, index) => writeQvmEntityState(new DataView(view.buffer, view.byteOffset + 516 + index * 208, 208), entity));
+  }, profile);
+  view.setInt32(44 + psBytes, snapshot.entities.length, true);
+  snapshot.entities.forEach((entity, index) => writeQvmEntityState(new DataView(view.buffer, view.byteOffset + 48 + psBytes + index * entityBytes, entityBytes), entity, profile));
   // CL_GetSnapshot leaves numServerCommands and unused entity slots untouched.
-  view.setInt32(53768, snapshot.serverCommandNumber, true);
+  view.setInt32(qvmSnapshotBytes(profile) - 4, snapshot.serverCommandNumber, true);
 }
 
 export function writeQvmUserCommand(view: DataView, command: WireUserCommand, profile: QvmAbiProfile = "q3-modern"): void {

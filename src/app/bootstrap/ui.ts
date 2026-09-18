@@ -1,3 +1,6 @@
+import { registerRankingAccountMenu } from "../../ui/settings/ranking-account.ts";
+import type { RankingAccountActions } from "../../ui/settings/rankings.ts";
+import { readSeatLanguage } from "../../ui/settings/language.ts";
 import { ApplicationQ2NativeHud } from "./q2-native-hud.ts";
 import type { NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
 import { registerInventoryMenu } from "../../ui/library/inventory.ts";
@@ -76,6 +79,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private readonly settings: SettingsMenus;
   private readonly gyroSettings: SettingsMenus;
   private readonly serverSettings: SettingsMenus | null;
+  private readonly rankingMenu: ReturnType<typeof registerRankingAccountMenu> | null;
+  private readonly takeRankingMenuRequest: () => boolean;
   private readonly bindings: ReturnType<typeof registerBindingMenus>;
   private readonly disposeInput: () => void;
   private readonly disposeMenu: () => void;
@@ -103,6 +108,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   async prepare(assets: ApplicationAssets): Promise<void> {
     if (this.guestUi) return;
+    if (this.takeRankingMenuRequest() && this.rankingMenu !== null) this.controller.openMenu(this.rankingMenu.root);
     this.teamArena?.update();
     this.baseArena?.update();
     if (this.teamArena === null) this.death.observe(this.simulation.playerUi(this.local.player.actor).health);
@@ -127,8 +133,9 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput, mutateWindow: (operation: () => void) => void,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
-    private readonly command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi, private readonly guestUi = false, teamArena?: TeamArenaResultService, options?: { readonly baseArena?: BaseArenaMenuService; readonly gameplay?: GameplaySettingsSource; readonly localize?: (content: ContentId, text: string, args?: readonly string[]) => Promise<string> }) {
+    private readonly command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi, private readonly guestUi = false, teamArena?: TeamArenaResultService, options?: { readonly baseArena?: BaseArenaMenuService; readonly gameplay?: GameplaySettingsSource; readonly lobby?: { readonly returnToLobby: () => void }; readonly rankings?: { readonly current: () => RankingAccountActions | null; readonly takeMenuRequest: () => boolean }; readonly localize?: (content: ContentId, text: string, args?: readonly string[]) => Promise<string> }) {
     const seat = local.player.seat.id;
+    const readLanguage = (): string => { const shared = input.sharedSettings(); return shared === null ? "english" : readSeatLanguage(shared, seat.index); };
     this.font = font; this.typography = typography;
     this.now = input.now;
     this.measureHudText = (text, scale) => layoutText({ text, font: this.hudFont, scale, color: { x: 1, y: 1, z: 1, w: 1 } }).width;
@@ -146,13 +153,13 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); },
       sound: (sound, owner) => audio.uiSound(sound, owner),
       executeScript: script => { throw new Error(`Legacy UI module ${script.module} is not attached to this native menu`); } });
-    this.soundCaptions = new SeatSoundCaptions(seat, audio.engine, () => language?.kind === "choice" ? language.read() : "english");
+    this.soundCaptions = new SeatSoundCaptions(seat, audio.engine, readLanguage);
     this.sourceHud = new SeatSourceHud(local.player.actor, options?.localize);
     this.inventoryMenu = registerInventoryMenu(this.controller, () => this.sourceHud.inventoryItems(), command);
     this.matchMenu = local.builder.dialect === "q3" ? registerMatchMenu(this.controller, command) : null;
     this.baseArena = options?.baseArena === undefined ? null : new BaseArenaMenus(this.controller, options.baseArena);
     this.teamArena = teamArena === undefined ? null : new TeamArenaResults(this.controller, teamArena);
-    this.prompt = new SeatGamePrompt(seat, () => local.player.actor, this.controller, value => local.input.setImpulse(value), () => language?.kind === "choice" ? language.read() : "english");
+    this.prompt = new SeatGamePrompt(seat, () => local.player.actor, this.controller, value => local.input.setImpulse(value), readLanguage);
     this.match = new Q2MatchUi(local.player.actor, this.controller, command, text => local.console.print(text));
     this.weaponWheel = new SeatWeaponWheel({ seat, now: input.now,
       items: mode => (mode === "weapons" && !this.guestUi ? this.authoredWheel.items(simulation.playerUi(local.player.actor)) : null) ?? (this.guestUi ? [] : simulation.playerUi(local.player.actor).items).filter(item => item.kind === (mode === "weapons" ? "weapon" : "powerup"))
@@ -160,7 +167,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       activeItem: () => this.guestUi ? null : simulation.playerUi(local.player.actor).activeWeapon,
       select: id => { command("use", [id]); }, changed: owner => audio.uiSound("move", owner) });
     this.bindings = registerBindingMenus(this.controller, local.input,
-      () => sharedBindingActions(local.builder.dialect, this.guestUi ? [] : simulation.playerUi(local.player.actor).items, input.bindingCapabilities));
+      () => sharedBindingActions(local.builder.dialect, this.guestUi ? [] : simulation.playerUi(local.player.actor).items, input.bindingCapabilities),
+      { available: () => input.canResetBindings(seat), reset: () => input.resetBindings(seat) });
     const bindingMenu: SettingBinding = { id: "ui:input:bindings", label: "Key and controller bindings", kind: "button", category: "input", enabled: () => true,
       activate: () => { this.controller.openMenu(this.bindings.root); } };
     const volumes = bindAudioSettings({ read: () => ({ effectsVolume: audio.effectsVolume, musicVolume: audio.musicVolume }),
@@ -177,11 +185,15 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         origin: { kind: "local-seat", seat, client: local.player.seat.client.id } }) }),
       ...bindNativeVideoSettings(() => input.window, shared, reportDisplay, mutateWindow)];
     const images = shared === null ? [] : [...bindImageSettings(shared), ...bindModelSettings(shared), ...bindConsoleSettings(shared)];
+    this.rankingMenu = options?.rankings === undefined ? null : registerRankingAccountMenu(this.controller, options.rankings.current);
+    this.takeRankingMenuRequest = options?.rankings?.takeMenuRequest ?? (() => false);
+    const rankingSettings: SettingBinding[] = this.rankingMenu === null ? [] : [{ id: "ui:network:rankings", label: "Ranking account", kind: "button", category: "network",
+      enabled: () => options?.rankings?.current() !== null, activate: () => { if (this.rankingMenu !== null) this.controller.openMenu(this.rankingMenu.root); } }];
     this.serverSettings = hostSettings === undefined ? null : registerServerSettingsMenu(this.controller, hostSettings);
     const serverMenu: SettingBinding[] = this.serverSettings === null ? [] : [{ id: "ui:network:server-settings", label: "Server settings", kind: "button", category: "network",
       enabled: () => (hostSettings?.bindings().length ?? 0) > 0, activate: () => { if (this.serverSettings !== null) this.controller.openMenu(this.serverSettings.root); } }];
     const gyro = this.gyroSettings = registerGyroSettingsMenu(this.controller, input.controllerSettings.ui(local.input.seat));
-    this.settings = registerSettingsMenus(this.controller, [...display, ...(viewSetting === undefined ? [] : [viewSetting]), ...images, ...(language === undefined ? [] : [language]), bindingMenu, { id: "ui:settings:gyro", label: "Gyro controls", kind: "button", category: "input", enabled: () => true, activate: () => { this.controller.openMenu(gyro.root); } }, ...serverMenu, ...input.inputDevices.bindings(), ...bindInputRoutingSettings(() => input.router, () => input.controllers.devices), ...([
+    this.settings = registerSettingsMenus(this.controller, [...display, ...(viewSetting === undefined ? [] : [viewSetting]), ...images, ...(language === undefined ? [] : [language]), bindingMenu, { id: "ui:settings:gyro", label: "Gyro controls", kind: "button", category: "input", enabled: () => true, activate: () => { this.controller.openMenu(gyro.root); } }, ...serverMenu, ...rankingSettings, ...input.inputDevices.bindings(), ...bindInputRoutingSettings(() => input.router, () => input.controllers.devices), ...([
       {id:"ui:input:local-join",label:"Add local player",kind:"button",category:"input",enabled:()=>input.locals.length<Math.min(4,input.localPlayerCapacity),activate:()=>{command("local_join",[]);}},
       {id:"ui:input:local-drop",label:"Remove this player",kind:"button",category:"input",enabled:()=>input.canRemoveLocalPlayer(seat),activate:()=>{command("local_drop",[String(seat.index+1)]);}},
     ] satisfies readonly SettingBinding[]), ...bindInputSettings(local.input, local.builder, { read: () => ({ controllerVibration: local.haptics.enabled, controllerVibrationStrength: local.haptics.strength }),
@@ -198,7 +210,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
         button("console", "Console", 5, () => { this.controller.closeAll(); local.console.toggle(); return undefined; }),
         ...(this.baseArena === null ? [] : [button("progress", "Arena progress", 6, () => this.controller.openMenu("menu:application:arena-progress"))]),
         ...(this.matchMenu === null ? [] : [button("match", "Match controls", 7, () => this.controller.openMenu("menu:application:match"))]),
-        button("quit", "End game", 8, quit)], open: () => { this.manualPause = true; return undefined; }, close: () => { this.manualPause = false; return undefined; } }));
+        ...(options?.lobby === undefined ? [] : [button("lobby", "Return to lobby", 8, () => { options.lobby?.returnToLobby(); return undefined; })]),
+        button("quit", "End game", options?.lobby === undefined ? 8 : 9, quit)], open: () => { this.manualPause = true; return undefined; }, close: () => { this.manualPause = false; return undefined; } }));
     this.disposeInput = input.attachUi(seat, this);
   }
 
@@ -328,5 +341,5 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     return commands;
   }
 
-  close(): void { this.inventoryMenu.dispose(); this.soundCaptions.close(); this.matchMenu?.dispose(); this.baseArena?.close(); this.teamArena?.close(); this.death.close(); this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.saves.dispose(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
+  close(): void { this.inventoryMenu.dispose(); this.soundCaptions.close(); this.matchMenu?.dispose(); this.baseArena?.close(); this.teamArena?.close(); this.death.close(); this.prompt.close(); this.match.close(); this.disposeInput(); this.controller.closeAll(); this.disposeMenu(); this.saves.dispose(); this.settings.dispose(); this.gyroSettings.dispose(); this.serverSettings?.dispose(); this.rankingMenu?.dispose(); this.bindings.dispose(); this.text.clear(); this.menuText.clear(); this.messages.clear(); }
 }

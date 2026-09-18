@@ -26,6 +26,39 @@ const options: Q2GameOptions = { edition: "classic", mapName: "base1", skill: 1,
   maxClients: 4, provider: "q2:official", campaign: "q2:base", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" };
 const zero = { x: 0, y: 0, z: 0 };
 
+test("source train route observes real corner offsets, stops and ambiguous targets without mutation", () => {
+  const fixture = targetGame({ ...options, edition: "rerelease" }), { game, movers } = fixture;
+  const a = game.spawn({ classname: "path_corner", ordinal: 10, values: new Map([
+    ["targetname", "station-a"], ["target", "station-b"], ["origin", "0 0 0"], ["wait", "1"],
+  ]) });
+  const b = game.spawn({ classname: "path_corner", ordinal: 11, values: new Map([
+    ["targetname", "station-b"], ["target", "station-a"], ["origin", "256 0 0"], ["wait", "2"],
+  ]) });
+  const train = game.spawn({ classname: "func_train", ordinal: 12, values: new Map([["target", "station-a"], ["speed", "100"]]) });
+  game.move(train, { bounds: { min: { x: -32, y: -32, z: -8 }, max: { x: 32, y: 32, z: 8 } } });
+  const before = movers.capture(game), body = game.body(train);
+  const initial = movers.trainRoute(train, game);
+  expect(initial?.running).toBe(false);
+  expect(initial?.stops).toEqual([
+    { actor: a.actor.id, origin: { x: 32, y: 32, z: 8 }, next: b.actor.id, wait: 1, teleport: false },
+    { actor: b.actor.id, origin: { x: 288, y: 32, z: 8 }, next: a.actor.id, wait: 2, teleport: false },
+  ]);
+  expect(movers.capture(game)).toEqual(before); expect(game.body(train)).toEqual(body);
+  fixture.advance(0.1); fixture.advance(0.2);
+  expect(movers.trainRoute(train, game)?.running).toBe(true);
+  expect(movers.trainRoute(train, game)?.destination).toBe(b.actor.id);
+  const boardingX = game.body(train).origin.x;
+  fixture.advance(0.3); fixture.advance(0.4);
+  expect(game.body(train).origin.x).toBeGreaterThan(boardingX);
+  train.use?.(train, game, null, null);
+  expect(movers.trainRoute(train, game)?.running).toBe(true);
+  train.spawnflags |= 2;
+  train.use?.(train, game, null, null);
+  expect(movers.trainRoute(train, game)?.running).toBe(false);
+  game.spawn({ classname: "path_corner", ordinal: 13, values: new Map([["targetname", "station-a"], ["origin", "512 0 0"]]) });
+  expect(movers.trainRoute(train, game)).toBeNull();
+});
+
 function targetGame(selected: Q2GameOptions = options) {
   const actors = new SessionActorRegistry(createIdentityOwner("q2-foundation"));
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });

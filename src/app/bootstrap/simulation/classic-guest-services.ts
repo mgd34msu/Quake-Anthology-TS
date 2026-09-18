@@ -229,7 +229,7 @@ export class ClassicGuestServices {
     const weapon = weapons[(state.skin >>> 8) & 255] ?? weapons[0] ?? "weapon.md2";
     return { path: state.modelIndexes[0] === 255 ? `players/${model}/tris.md2` : this.resource("model", state.modelIndexes[0]),
       skin: state.modelIndexes[0] === 255 ? 0 : state.skin, skinPath: state.modelIndexes[0] === 255 ? `players/${model}/${skin}.pcx` : null,
-      attachedModels: state.modelIndexes.slice(1).map(index => index === 255 ? `players/${model}/${weapon}` : this.resource("model", index)).filter(path => path !== "") };
+      attachedModels: state.modelIndexes.slice(1).map(index => index === 255 ? `players/${model}/${weapon}` : this.resource("model", index)) };
   }
   publishEntities(): void {
     for (const actor of this.options.engine.actors.ownedBy(this.host.options.provider)) {

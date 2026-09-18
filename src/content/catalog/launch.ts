@@ -153,7 +153,8 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
         const role = module.api.kind === "q3-qagame" ? "qagame" : module.api.kind === "q3-cgame" ? "cgame" : "ui";
         const profile = await readQvmCompatibility(scoped, { artifactPath: artifact.requestedPath, digest: artifact.digest }, role);
         if (module.role === "server-game") execution.push({ ...module, artifact, api: { kind: "q3-qagame", version: profile === "q3-modern" ? 8 : 7 } });
-        else execution.push({ ...module, artifact });
+        else if (module.role === "client-game") execution.push({ ...module, artifact, api: { kind: "q3-cgame", version: profile === "q3-modern" ? 4 : 3 } });
+        else execution.push({ ...module, artifact, api: { kind: "q3-ui", version: profile === "q3-modern" ? module.api.version : 4 } });
         break;
       }
       case "native": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;

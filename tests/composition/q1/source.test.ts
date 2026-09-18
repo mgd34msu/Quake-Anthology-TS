@@ -79,10 +79,10 @@ function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved) {
     game.restore(decodeQ1FoundationCheckpoint(saved.source), { scheduleThinks: false }); restoreSharedBodyLinks(saved, { actors, bodies }); game.resumeThinks();
     for (const client of source.clients.records.values()) players.push(client.actor.id);
   }
-  function admit(name: string, color: number) {
+  function admit(name: string, color: number, autoSwitch?: string) {
     const slot = players.length, actor = actors.allocateAtSource("q1:official", slot + 1, "q3:sarge");
     bodies.create(actor, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null }); combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(actor, []); players.push(actor.id);
-    source.attach(actor, { slot, userinfo: new Map([["name", name], ["topcolor", String(color)], ["bottomcolor", String(color)]]) }); game.attachPlayer(actor); source.admitTravel(actor, source.newTravel()); source.spawned(actor.id, true);
+    source.attach(actor, { slot, userinfo: new Map([["name", name], ["topcolor", String(color)], ["bottomcolor", String(color)], ...(autoSwitch === undefined ? [] : [["qts_weapon_autoswitch", autoSwitch] satisfies [string, string]])]) }); game.attachPlayer(actor); source.admitTravel(actor, source.newTravel()); source.spawned(actor.id, true);
     const point = source.selectSpawn(actor.id); if (point !== null) { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, origin: game.body(point).origin }); } return actor;
   }
   function advance(until: number) { for (;;) { const next = [...pending].filter(([, due]) => due <= until).sort((a, b) => a[1] - b[1])[0]; if (next === undefined) break; pending.delete(next[0]); callbacks.think(next[0], { frame: 0, time: { kind: "seconds", value: next[1] }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" }); } game.time = until; }
@@ -189,4 +189,19 @@ test("official campaign selection joins base, mission packs and rerelease addons
     }
     expect(() => world.capture()).not.toThrow(); world.actors.close();
   }
+});
+
+
+test("pickup preference reaches actual Q1 source players on admission update respawn and saved restore", async () => {
+  const level = await map("id1", "e1m1"), world = sourceWorld(level, "id1");
+  try {
+    const first = world.admit("First", 0, "never"), second = world.admit("Second", 0, "new");
+    expect(world.game.player(first.id)?.autoSwitch).toBe("never"); expect(world.game.player(second.id)?.autoSwitch).toBe("new");
+    const values = new Map(world.source.clients.require(first.id).userinfo); values.set("qts_weapon_autoswitch", "new"); world.source.userinfo(first.id, values);
+    expect(world.game.player(first.id)?.autoSwitch).toBe("new");
+    world.game.attachPlayer(first); world.source.spawned(first.id, false); expect(world.game.player(first.id)?.autoSwitch).toBe("new");
+    const restored = sourceWorld(level, "id1", world.capture());
+    try { expect([...restored.source.clients.records.values()].map(client => restored.game.player(client.actor.id)?.autoSwitch)).toEqual(["new", "new"]); }
+    finally { restored.actors.close(); }
+  } finally { world.actors.close(); }
 });

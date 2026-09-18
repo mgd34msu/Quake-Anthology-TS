@@ -6,6 +6,8 @@ export function registerPlayerUserinfo(cvars: CvarRegistry, index: number, model
   const dialect = cvars.dialect;
   if (dialect === "q3") return;
   const flags = CvarFlag.Archive | CvarFlag.UserInfo;
+  if (dialect === "q1-netquake" || dialect === "q1-quakeworld") cvars.register("qts_weapon_autoswitch", "always", flags);
+  if (dialect === "q2-rerelease") cvars.register("autoswitch", "0", flags);
   if (dialect === "q1-netquake") {
     cvars.register("_cl_name", cvars.find("name")?.value ?? `Player ${index + 1}`, CvarFlag.Archive);
     cvars.register("_cl_color", cvars.find("color")?.value ?? "0", CvarFlag.Archive); return;

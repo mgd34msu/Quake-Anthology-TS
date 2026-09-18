@@ -102,7 +102,7 @@ function takeWeapon(game: Q1EntityServices, player: Q1PlayerState, weapon: Q1Wea
   const offer = weaponOffer(weapon), { leave, owned } = weaponEligibility(game, player, offer.item);
   if (leave && owned) return "refused";
   if (game.pickupAdmission !== null) {
-    const autoSwitch = player.autoSwitch === "always" || player.autoSwitch === "new" && !owned;
+    const autoSwitch = game.pickupRules?.autoSwitch?.(game, player, owned) ?? (player.autoSwitch === "always" || player.autoSwitch === "new" && !owned);
     const accepted = game.pickupAdmission.weapon(player.actor, offer, !autoSwitch ? "never" : game.options.deathmatch === 0 ? "always" : "better");
     return !accepted ? "refused" : leave ? "leave" : "taken";
   }

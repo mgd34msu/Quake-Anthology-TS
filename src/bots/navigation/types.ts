@@ -65,6 +65,9 @@ export interface NavigationEntityState {
   readonly velocity: Vec3; readonly destination: Vec3 | null;
   readonly elevator?: { readonly origin: Vec3; readonly bottom: Vec3; readonly top: Vec3;
     readonly phase: "bottom" | "up" | "top" | "down" };
+  readonly train?: { readonly origin: Vec3; readonly running: boolean;
+    readonly stops: readonly { readonly id: number; readonly origin: Vec3; readonly next: number | null;
+      readonly wait: number; readonly teleport: boolean }[] };
 }
 /** Reads shared world state. Prediction must use the selected movement provider without committing actors. */
 export interface NavigationWorld {

@@ -43,7 +43,7 @@ function readDamage(reader: SaveReader): RereleaseDeferredDamageSave {
     blood: reader.field("blood").finite(), knockback: reader.field("knockback").finite(), point: readVector(reader.field("point")),
     mod: reader.field("mod").list(value => boundedInteger(value, 255)), attackerSlot: reader.field("attackerSlot").integer(0), inflictorSlot: reader.field("inflictorSlot").integer(0) };
 }
-function readSource(reader: SaveReader): RereleaseSourceSave {
+export function readRereleaseSourceSave(reader: SaveReader): RereleaseSourceSave {
   const source = { native: reader.field("native").bytes(), deferredDamage: reader.field("deferredDamage").list(readDamage),
     projections: reader.field("projections").list(value => ({ slot: value.field("slot").integer(0), actor: readSavedActor(value.field("actor")) })) };
   if (source.native.length === 0 || source.native.includes(0)) throw new Error("Native API 2023 save requires unterminated JSON bytes");
@@ -82,14 +82,14 @@ export function decodeQ2RereleaseNativeSave(record: ProviderCheckpoint, expected
   decodeCheckpointValue(cvars);
   const visitedLevels = reader.field("visitedLevels").list(value => {
     value.field("version").literal(1);
-    return { version: 1, ...readLevel(value), map: mapPath(value.field("map")), level: readSource(value.field("level")) } satisfies Q2RereleaseVisitedLevel;
+    return { version: 1, ...readLevel(value), map: mapPath(value.field("map")), level: readRereleaseSourceSave(value.field("level")) } satisfies Q2RereleaseVisitedLevel;
   });
   if (new Set(visitedLevels.map(value => value.map)).size !== visitedLevels.length || visitedLevels.some(value => value.map === map))
     throw new Error("Duplicate native API 2023 visited map");
-  const game = readSource(reader.field("game"));
+  const game = readRereleaseSourceSave(reader.field("game"));
   if (game.deferredDamage.length !== 0 || game.projections.length !== 0) throw new Error("Native game save cannot own level projections");
   return { module, map, api: { kind: "q2-rerelease-game", version: 2023 }, abi: "windows-x86-64", autosave: reader.field("autosave").boolean(),
-    server: { ...readLevel(state), cvars }, game, level: readSource(reader.field("level")), visitedLevels };
+    server: { ...readLevel(state), cvars }, game, level: readRereleaseSourceSave(reader.field("level")), visitedLevels };
 }
 export function encodeQ2RereleaseNativeSave(save: Q2RereleaseNativeSave): ProviderCheckpoint {
   const record: ProviderCheckpoint = { provider: save.module.id, schema: "q2:rerelease-native-original", version: 1, bytes: encodeCheckpointValue(save) };

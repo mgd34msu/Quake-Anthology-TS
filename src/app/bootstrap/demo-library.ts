@@ -15,11 +15,11 @@ export class DemoLibrary {
   async list(): Promise<readonly DemoLibraryEntry[]> {
     const names = new Map<string, string>();
     const add = (path: string): void => {
-      if (!/\.(dem|qwd|dm2|dm_\d+)$/i.test(path)) return;
+      if (!/\.(dem|qwd|dm2|mvd|dm_\d+)$/i.test(path)) return;
       const normalized = normalizeResourcePath(path);
       names.set(normalized.toLowerCase(), normalized);
     };
-    for (const [directory, extension] of [["", ".dem"], ["", ".qwd"], ["demos", ".dm2"], ["demos", ".dm_66"], ["demos", ".dm_67"], ["demos", ".dm_68"]] satisfies readonly (readonly [string, string])[]) {
+    for (const [directory, extension] of [["", ".dem"], ["", ".qwd"], ["demos", ".dm2"], ["demos", ".mvd"], ["demos", ".dm_66"], ["demos", ".dm_67"], ["demos", ".dm_68"]] satisfies readonly (readonly [string, string])[]) {
       for (const name of await this.mounts.listFiles(directory, extension)) add(directory === "" ? name : `${directory}/${name}`);
     }
     const scan = async (directory: string): Promise<void> => {

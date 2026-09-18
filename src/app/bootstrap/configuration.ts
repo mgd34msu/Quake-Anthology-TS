@@ -3,6 +3,7 @@ import { startupCommandPhases } from "./startup-commands.ts";
 import { applyQ3MapLaunch } from "./q3-map-command.ts";
 import { q3ProductMapCommands } from "../../core/q3-product-policy.ts";
 import { registerRunCvar } from "./shared-setting-cvars.ts";
+import { registerGtvCvars } from "./gtv-commands.ts";
 import { inputDeviceStore, loadInputDeviceSettings } from "./input-devices.ts";
 import { audioOutputCvarNames, writeAudioOutputCvars } from "./audio/output-settings.ts";
 import { defaultAudioOutputFormat } from "../../audio/output.ts";
@@ -56,7 +57,7 @@ export interface PreparedProfileConfiguration {
   readonly options: ApplicationOptions;
   readonly maxClients: number;
   readonly requests: readonly ConfigurationCommandRequest[];
-  readonly bindingChoices: readonly { readonly id: SeatId; readonly overriddenKeys: readonly string[]; readonly allBindingsChosen: boolean; readonly selectedBindings: readonly InputBinding[] }[];
+  readonly bindingChoices: readonly { readonly id: SeatId; readonly overriddenKeys: readonly string[]; readonly allBindingsChosen: boolean; readonly selectedBindings: readonly InputBinding[]; readonly authoredBindings: readonly InputBinding[] | null }[];
   publishContinuation(owner: PreparedStartup): void;
   applyBindingDefaults(seat: SeatId, defaults: readonly InputBinding[]): void;
   forwardCommands(forward: (request: ConfigurationCommandRequest) => void): void;
@@ -80,6 +81,7 @@ export async function prepareProfileConfiguration(args: {
   const dialect = configurationDialect(content), movementDialect = configurationMovementDialect(content);
   const phases = args.clientSource?.startupCommands === undefined ? null : startupCommandPhases(args.clientSource.startupCommands, dialect);
   const source = args.clientSource?.cvars ?? createStartupSource(options, content.selection, dialect, prepared.source.context, args.defaultCapacity, host.print);
+  registerGtvCvars(source);
   if (source.dialect !== dialect) throw new Error("Configuration source dialect differs from its selected product");
   const movement = new CvarRegistry({ dialect: movementDialect, context: prepared.movement.context, print: host.print });
   const fallback = args.clientSource?.cvars ?? (movementDialect === dialect ? movement : new CvarRegistry({ dialect, context: prepared.commands.context, print: host.print }));
@@ -136,13 +138,13 @@ export async function prepareProfileConfiguration(args: {
       forwardToServer: command => dispatch(command.argv[0] ?? "", command.args, command.source),
     }, seats);
     for (const name of [...(dialect === "q3" ? q3ProductMapCommands(options.q3Product?.policy ?? { kind: "retail" }) : ["map"]), "save", "load", "weapnext", "weapprev", "use", "weapon", "say", "say_team", "connect", "disconnect", "quit",
-      "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause", "cinematic", "cinematicpause", "stopcinematic", "record", "rerecord", "stop", "stoprecord", "playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : [])])
+      "mvdconnect", "mvdisconnect", "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause", "cinematic", "cinematicpause", "stopcinematic", "record", "rerecord", "stop", "stoprecord", "mvdrecord", "mvdstop", "serverrecord", "serverstop", "playdemo", "demo", "demomap", "startdemos", "demos", "stopdemo", ...(dialect === "q1-netquake" || dialect === "q1-quakeworld" ? ["timedemo"] : [])])
       program.commands.register(name, command => dispatch(name, command.args, command.source));
     registerQ1ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
     registerQ2ClientCommands(program.commands, dialect, (name, args_, _seat, context) => dispatch(name, args_, context));
     const product = content.catalog.product(content.selection.engineBehavior.content);
     const base = product.expectation.baseProduct === null ? product : content.catalog.product(product.expectation.baseProduct);
-    const bindingChoices = new Map(seats.map((seat, index) => [seat.id, { overridden: new Set<string>(), all: false, selected: args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect) }]));
+    const bindingChoices = new Map<SeatId, { authored: readonly InputBinding[] | null; overridden: Set<string>; all: boolean; selected: readonly InputBinding[] }>(seats.map((seat, index) => [seat.id, { authored: null, overridden: new Set<string>(), all: false, selected: args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect) }]));
     const currentCommands = () => published?.commands ?? program.commands;
     const currentSeat = (id: SeatId) => {
       const seat = (published?.seats ?? seats).find(seat => seat.id.equals(id));
@@ -160,7 +162,7 @@ export async function prepareProfileConfiguration(args: {
     const publishChoices = (id: SeatId): void => {
       const seat = published?.seats.find(seat => seat.id.equals(id)), choices = bindingChoices.get(id);
       if (seat === undefined || choices === undefined) return;
-      seat.allBindingsChosen = choices.all; seat.selectedBindings = choices.selected;
+      seat.allBindingsChosen = choices.all; seat.selectedBindings = choices.selected; seat.authoredBindings = choices.authored;
       for (const key of choices.overridden) seat.overriddenKeys.add(key);
     };
     const applyBindingDefaults = (id: SeatId, defaults: readonly InputBinding[]): void => {
@@ -198,12 +200,25 @@ export async function prepareProfileConfiguration(args: {
         const retained = retainedConfigurations[index];
         let collectingBindings = index !== 0;
         const defaults = args.seats[index]?.selectedBindings ?? defaultBindings(0, movementDialect);
-        if (index !== 0) applyBindingDefaults(seat.id, defaults);
+        if (index !== 0) {
+          applyBindingDefaults(seat.id, defaults);
+          const primary = seats[0];
+          const inherited = primary === undefined ? [] : bindingChoices.get(primary.id)?.authored ?? [];
+          const baseline = new Map(inherited.map(binding => [physicalInputKey(binding.input), binding]));
+          for (const binding of defaults) if (!baseline.has(physicalInputKey(binding.input))) baseline.set(physicalInputKey(binding.input), binding);
+          choices.authored = [...baseline.values()];
+        }
+        if (index === 0) bindings().unbindAll();
         active = new StartupConfig({ ...(phases === null ? {} : { safeMode: phases.safe }), dialect, context: seat.context, hasMod: product.expectation.contentDirectory !== base.expectation.contentDirectory,
           scope: index === 0 ? "source" : "seat", read: (name, context, scope) => published === undefined ? read(name, context, scope) : published.readConfiguration(name, context, scope),
           applySelectedDefaults: () => {
             for (const binding of bindings().bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) bindings().unbind(binding.input);
-            for (const binding of defaults) bindings().bind(binding);
+            const authored = new Map(bindings().bindings.map(binding => [physicalInputKey(binding.input), binding]));
+            for (const binding of defaults) {
+              bindings().bind(binding);
+              if (!authored.has(physicalInputKey(binding.input))) authored.set(physicalInputKey(binding.input), binding);
+            }
+            choices.authored = [...authored.values()];
             collectingBindings = true;
             publishChoices(seat.id);
           },
@@ -276,7 +291,7 @@ export async function prepareProfileConfiguration(args: {
           },
         });
       },
-      get bindingChoices() { return [...bindingChoices].map(([id, choices]) => ({ id, overriddenKeys: [...choices.overridden], allBindingsChosen: choices.all, selectedBindings: choices.selected })); },
+      get bindingChoices() { return [...bindingChoices].map(([id, choices]) => ({ id, overriddenKeys: [...choices.overridden], allBindingsChosen: choices.all, selectedBindings: choices.selected, authoredBindings: choices.authored })); },
       forwardCommands: handler => { forward = handler; } };
   } catch (error) {
     routing.close();
@@ -341,6 +356,7 @@ export async function prepareInitialConfiguration(options: ApplicationOptions, c
   const dialect = configurationDialect(content), movement = configurationMovementDialect(content);
   const context: CommandContext = { session: session.session, origin: { kind: "server-console" } };
   const source = createStartupSource(options, { source: content.selection.source, match: content.selection.match }, dialect, context, defaultCapacity, text => host.print(text));
+  registerGtvCvars(source);
   const inputCvars = new CvarRegistry({ dialect: movement, context, print: text => host.print(text) });
   const image = options.dedicated ? null : await ApplicationImageSettings.open({ deferPersistence: true, context, dialect,
     ...(options.renderWorker === undefined ? {} : { renderWorker: options.renderWorker }),

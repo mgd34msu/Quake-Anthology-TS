@@ -112,6 +112,12 @@ function positiveInteger(value: number, label: string): number {
   return value;
 }
 
+function copyContext(context: CommandContext, origin = context.origin): CommandContext {
+  return Object.freeze({ session: context.session, origin: copyOrigin(origin, context),
+    ...(context.producer === undefined ? {} : { producer: Object.freeze({ kind: context.producer.kind,
+      module: Object.freeze({ ...context.producer.module }) }) }) });
+}
+
 export class CommandBuffer {
   private currentDialect: CommandDialect;
   get dialect(): CommandDialect { return this.currentDialect; }
@@ -146,7 +152,7 @@ export class CommandBuffer {
     this.currentDialect = options.dialect;
     this.fallbackCvars = options.cvars;
     this.startupCommandText = options.startupCommandText;
-    this.context = Object.freeze({ session: options.context.session, origin: copyOrigin(options.context.origin, options.context) });
+    this.context = copyContext(options.context);
     if (options.cvars !== undefined && (options.cvars.context.session !== this.context.session || options.cvars.dialect !== this.executionDialect)) {
       throw new RangeError("Commands and cvars require the same session and dialect");
     }
@@ -405,7 +411,7 @@ export class CommandBuffer {
   private inputContext(source: CommandContext | undefined): CommandContext {
     if (source === undefined) return this.frame?.source ?? this.context;
     if (source.session !== this.context.session) throw new RangeError("Command input belongs to another session");
-    return Object.freeze({ session: source.session, origin: copyOrigin(source.origin, source) });
+    return copyContext(source);
   }
   private inputTextMode(source: CommandContext, direct: boolean): CommandTextMode {
     if (source.origin.kind !== "local-seat" && source.origin.kind !== "local-console") return "source";
@@ -688,8 +694,7 @@ export class CommandBuffer {
   }
 
   private scriptCompletion(name: string, caller: CommandContext, result: ScriptCompletion["result"]): ScriptCompletion {
-    const source: CommandContext = Object.freeze({ session: caller.session,
-      origin: Object.freeze({ kind: "script", name, caller: caller.origin }) });
+    const source: CommandContext = copyContext(caller, { kind: "script", name, caller: caller.origin });
     return Object.freeze({ name, source, result });
   }
 

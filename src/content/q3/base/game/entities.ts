@@ -1,6 +1,7 @@
 // Ported from id Software's code/game/g_utils.c and g_main.c event/think timing.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
+import { Q3RankingReports } from "./rankings.ts";
 import { Q3CallbackCatalog } from "./save-callbacks.ts";
 import { vec3 } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
@@ -70,6 +71,7 @@ export function runThink(entity: GameEntity, time: number): void {
 
 /** Loaded-module g_entities/g_clients storage. Construction has no link/unlink effects. */
 export class EntityPool {
+  readonly rankings = new Q3RankingReports();
   readonly callbacks = new Q3CallbackCatalog();
   readonly clients: readonly GameClient[];
   readonly utilities: GameUtilityScratch;

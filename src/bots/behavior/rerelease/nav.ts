@@ -1,5 +1,6 @@
 // Rerelease brain path vocabulary; searches and movement admission belong to NavigationRuntime.
 import { NavigationRuntime } from "../../navigation/runtime.ts";
+import type { ActorId } from "../../../contracts/identity.ts";
 import type { NavigationEdge, NavigationNode } from "../../navigation/types.ts";
 import { bvec, bvecDistance, bvecNormalized, bvecSub, type BotVec3 } from "./math.ts";
 
@@ -37,7 +38,9 @@ export interface BotNavigation {
   readonly nodes: readonly NavGraphNodeT[];
   planPath(start: BotVec3, goal: BotVec3, options?: NavPlanOptions): NavPathT | null;
   pathValid(path: NavPathT): boolean;
+  transport?(link: NavGraphLinkT, origin: BotVec3): BotTransportStep | null;
 }
+export type BotTransportStep = { readonly kind: "move"; readonly stage: "approach" | "exit"; readonly target: BotVec3 } | { readonly kind: "wait" } | { readonly kind: "ride" } | { readonly kind: "unavailable" };
 export function defaultTraverseCaps(): NavTraverseCapsT {
   return { jump: true, walkOffLedge: true, entityTraversal: true, swim: true, maxDrop: 0, maxJumpHeight: 0 };
 }
@@ -78,7 +81,13 @@ function linkView(edge: NavigationEdge, type: NavLinkType): NavGraphLinkT {
 
 /** Holds only a borrowed runtime. No source graph, reachability cache, or world state is recreated. */
 export class SourceRereleaseNavigation implements BotNavigation {
-  constructor(readonly runtime: NavigationRuntime) {}
+  constructor(readonly runtime: NavigationRuntime, private readonly ground: () => ActorId | null = () => null) {}
+  transport(link: NavGraphLinkT, origin: BotVec3): BotTransportStep | null {
+    if (link.type !== NavLinkType.Train) return null;
+    const edge = this.runtime.outgoing(link.from).find(candidate => candidate.to === link.to && linkType(candidate) === NavLinkType.Train
+      && (link.traversal === null || bvecDistance(candidate.start, link.traversal.start) === 0 && bvecDistance(candidate.end, link.traversal.end) === 0));
+    return edge === undefined ? { kind: "unavailable" } : this.runtime.trainStep(edge, origin, this.ground()) ?? { kind: "unavailable" };
+  }
   get nodes(): readonly NavGraphNodeT[] { return this.runtime.graph.nodes.map(nodeView); }
   get nodeCount(): number { return this.runtime.graph.nodes.length; }
   pathValid(path: NavPathT): boolean {
@@ -91,7 +100,7 @@ export class SourceRereleaseNavigation implements BotNavigation {
       const type = linkType(edge);
       if (type === null || !caps.jump && navLinkIsJump(type) || !caps.entityTraversal && navLinkIsEntity(type)
         || !caps.walkOffLedge && type === NavLinkType.WalkOffLedge || !caps.swim && edge.mode === "swim") return false;
-      if (caps.maxDrop > 0 && edge.start.z - edge.end.z >= caps.maxDrop) return false;
+      if (caps.maxDrop > 0 && edge.mode !== "mover" && edge.start.z - edge.end.z >= caps.maxDrop) return false;
       if (caps.maxJumpHeight > 0 && navLinkIsJump(type) && edge.end.z - edge.start.z >= caps.maxJumpHeight) return false;
       return true;
     };

@@ -1,6 +1,7 @@
+import type { WeaponBehaviorCallback } from "../contracts/weapon-behavior.ts";
 import type { ArchiveMount, EnvironmentSelection, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, MonsterSelectionTarget, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
 import { createMountId, createMountPlanId, createRecipeId, createResourceId, isContentId } from "../contracts/content.ts";
-import { readApi, readNativeAbi, readModule } from "./execution.ts";
+import { readApi, readNativeAbi, readNativeCallAbi, readModule } from "./execution.ts";
 import { readClock, readDigest, readNumeric, readOrdering } from "./shared.ts";
 import { namespaced, SaveReader } from "./value.ts";
 
@@ -159,18 +160,46 @@ export function readEquipment(reader: SaveReader): EquipmentSelection {
 }
 function readWeaponBehavior(reader: SaveReader): NonNullable<ExecutableRecipe["weaponBehaviors"]>[number] {
   const value = reader.field("definition"), module = readModule(value.field("module"));
-  const callback = (entry: SaveReader) => {
-    const kind = entry.field("kind").literal("quakec"), owner = readModule(entry.field("module"));
+  const callback = (entry: SaveReader): WeaponBehaviorCallback => {
+    const kind = entry.field("kind").choice("quakec", "qvm", "native-artifact"), owner = readModule(entry.field("module"));
     if (owner.id !== module.id || owner.digest !== module.digest || owner.revision !== module.revision || owner.artifactPath !== module.artifactPath)
       return entry.fail("weapon behavior callback differs from selected module");
-    return { kind, module: owner, functionIndex: entry.field("functionIndex").integer(1) };
+    switch (kind) {
+      case "quakec": return { kind, module: owner, functionIndex: entry.field("functionIndex").integer(1) };
+      case "qvm": return { kind, module: owner, instructionIndex: entry.field("instructionIndex").integer(0) };
+      case "native-artifact": {
+        const abi = readNativeCallAbi(entry.field("abi")), imageOffset = entry.field("imageOffset").bigint();
+        const maximum = abi.pointerBytes === 4 ? 0xffffffffn : 0xffffffffffffffffn;
+        if (imageOffset < 0n || imageOffset > maximum) return entry.fail("native behavior image offset is outside its ABI address width");
+        return { kind, module: owner, imageOffset, abi };
+      }
+    }
   };
   const source = readProvider(reader.field("source")), artifact = readResource(reader.field("artifact"));
   if (source.provider !== module.id || artifact.digest !== module.digest || artifact.requestedPath !== module.artifactPath)
     return reader.fail("weapon behavior source differs from selected artifact");
-  return { source, artifact, definition: { id: namespaced(value.field("id")), title: value.field("title").string(), module,
-    role: value.field("role").choice("rocket", "grenade", "nail", "bolt", "plasma", "energy", "grapple"), aspect: value.field("aspect").literal("trajectory"),
-    fire: callback(value.field("fire")), activate: value.field("activate").nullable(callback) } };
+  const fire = callback(value.field("fire")), activate = value.field("activate").nullable(callback), savedComponent = reader.field("component");
+  let component: NonNullable<ExecutableRecipe["weaponBehaviors"]>[number]["component"];
+  if (savedComponent.value !== undefined) {
+    savedComponent.field("kind").literal("qvm");
+    const layout = savedComponent.field("layout"), fields = layout.field("fields");
+    const entityStride = layout.field("entityStride").integer(4), levelTime = layout.field("levelTime").integer(4);
+    if (entityStride % 4 !== 0 || levelTime % 4 !== 0) return layout.fail("unaligned QVM behavior layout");
+    const occupied = new Set<number>();
+    const offset = (name: string): number => {
+      const field = fields.field(name), result = field.integer(0);
+      if (result % 4 !== 0 || result > entityStride - 4 || occupied.has(result)) return field.fail("overlapping or out-of-range QVM behavior field");
+      occupied.add(result); return result;
+    };
+    component = {kind:"qvm",abiProfile:savedComponent.field("abiProfile").choice("q3-modern","q3-1.16n-base"),
+      layout:{entityStride,levelTime,allocate:layout.field("allocate").integer(1),free:layout.field("free").integer(1),
+        fields:{inuse:offset("inuse"),nextthink:offset("nextthink"),think:offset("think"),health:offset("health")},
+        fireAbi:layout.field("fireAbi").literal("entity-pointer-start-direction")}};
+  }
+  if (fire.kind === "qvm" ? component === undefined || activate !== null && activate.kind !== "qvm" : component !== undefined)
+    return reader.fail("QVM behavior requires its source layout and QVM callbacks");
+  return { source, artifact, ...(component === undefined ? {} : {component}), definition: { id: namespaced(value.field("id")), title: value.field("title").string(), module,
+    role: value.field("role").choice("rocket", "grenade", "nail", "bolt", "plasma", "energy", "grapple"), aspect: value.field("aspect").literal("trajectory"), fire, activate } };
 }
 export function readRecipe(reader: SaveReader): ExecutableRecipe {
   return { ...(reader.field("weaponBehaviors").value === undefined ? {} : { weaponBehaviors: reader.field("weaponBehaviors").list(readWeaponBehavior) }), schemaVersion: reader.field("schemaVersion").literal(3), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),

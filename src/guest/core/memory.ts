@@ -178,7 +178,10 @@ export class SparseGuestMemory implements MappedGuestMemory {
   write(address: GuestAddress, bytes: Uint8Array): undefined {
     const chunks = this.#chunks(address, bytes.byteLength, "write");
     // Source may itself alias guest memory. Take one snapshot before the first store.
-    const source = bytes.slice();
+    return this.#commitWrite(chunks, bytes.slice());
+  }
+
+  #commitWrite(chunks: readonly Chunk[], source: Uint8Array): undefined {
     let consumed = 0;
     for (const chunk of chunks) {
       chunk.mapping.bytes.set(source.subarray(consumed, consumed + chunk.byteLength), chunk.offset);
@@ -415,6 +418,6 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #writeScalar(address: GuestAddress, byteLength: number, write: (view: DataView) => void): undefined {
     const bytes = new Uint8Array(byteLength);
     write(new DataView(bytes.buffer));
-    return this.write(address, bytes);
+    return this.#commitWrite(this.#chunks(address, byteLength, "write"), bytes);
   }
 }

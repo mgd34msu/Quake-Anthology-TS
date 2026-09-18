@@ -1,3 +1,4 @@
+import type { RereleaseGoalStatus } from "../../../compat/q2/rerelease/navigation.ts";
 import type { SourceBotDirectorHost } from "../../../bots/behavior/director.ts";
 import { createBotArsenalBinding, type BotArsenalBinding } from "./bot-arsenal.ts";
 import { SaveReader } from "../../../persistence/value.ts";
@@ -28,10 +29,12 @@ import type { Q3SourceBots } from "./q3/types.ts";
 import type { SharedSimulation } from "./runtime.ts";
 import type { SimulationPresentationEvent } from "./types.ts";
 
-export type ApplicationBotService = Pick<ApplicationBots, "options" | "configuration" | "isBot" | "actor" | "frame" | "receive" | "clients" | "consoleCommand" | "disconnect" | "close" | "checkpoint" | "beginRoundRestart" | "bindRestartedRound" | "reconnectRestartedClient" | "resumeRoundBots">;
+export type ApplicationBotService = Pick<ApplicationBots, "options" | "configuration" | "moveToPoint" | "followActor" | "isBot" | "actor" | "frame" | "receive" | "clients" | "consoleCommand" | "disconnect" | "close" | "checkpoint" | "beginRoundRestart" | "bindRestartedRound" | "reconnectRestartedClient" | "resumeRoundBots">;
 
 /** Stable source imports are installed before the game and bound before bot admission. */
 export class SimulationBotServices {
+  moveToPoint(actor: ActorId, point: Vec3, tolerance: number): RereleaseGoalStatus { return this.transport?.moveToPoint(actor, point, tolerance) ?? 0; }
+  followActor(actor: ActorId, target: ActorId): RereleaseGoalStatus { return this.transport?.followActor(actor, target) ?? 0; }
   isBot(actor: ActorId): boolean { return this.transport?.isBot(actor) ?? false; }
   get configuration(): CvarRegistry | null { return this.transport?.configuration ?? null; }
   checkpoint(): ApplicationBotsCheckpoint | null { return this.transport?.checkpoint() ?? null; }
@@ -526,6 +529,8 @@ export class ApplicationBots {
     for (const [client, snapshot] of snapshots) this.snapshots.set(client, snapshot);
     this.elapsedMilliseconds = image.elapsedMilliseconds;
   }
+  moveToPoint(_actor: ActorId, _point: Vec3, _tolerance: number): RereleaseGoalStatus { return 0; }
+  followActor(_actor: ActorId, _target: ActorId): RereleaseGoalStatus { return 0; }
   isBot(actor: ActorId): boolean { return [...this.connections.values()].some(connection => connection.actor.id.equals(actor)); }
   actor(client: ClientId): ActorId | null {
     const connection = this.connections.get(client.slot);

@@ -1,3 +1,7 @@
+import { randomBytes } from "node:crypto";
+import type { Account } from "../../network/services/online.ts";
+import type { ApplicationLocalLobby } from "./local-lobby.ts";
+
 import type { ApplicationKeys } from "./keys.ts";
 import type { ActiveCaption } from "../../text/captions.ts";
 import type { Rect, RenderCommand } from "../../contracts/render.ts";
@@ -60,6 +64,7 @@ export interface ClientSourceLifetime {
 
 /** Source borrowers receive the existing client objects without their final close authority. */
 export interface ClientBootstrap {
+  readonly localLobby?: ApplicationLocalLobby;
   readonly keys: ApplicationKeys;
   captionCommands(captions: readonly ActiveCaption[], viewport: Rect, timeMilliseconds: number): readonly RenderCommand[];
   readonly recording: ClientDemoRecording;
@@ -86,4 +91,13 @@ export interface ClientBootstrap {
   routeCommand(name: string, args: readonly string[], source: CommandContext): boolean;
   dispatchApplicationRequest(request: ConfigurationCommandRequest): Promise<void>;
   readonly hasPendingSource: boolean;
+}
+
+const localAccounts = new WeakMap<IdentityOwner, Account>();
+export function localClientAccount(identity: IdentityOwner): Account {
+  const previous = localAccounts.get(identity);
+  if (previous !== undefined) return previous;
+  const account: Account = { id: `account:${randomBytes(16).toString("hex")}`, name: identity.session.name };
+  localAccounts.set(identity, account);
+  return account;
 }

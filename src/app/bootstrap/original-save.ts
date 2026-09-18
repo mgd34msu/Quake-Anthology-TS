@@ -7,17 +7,18 @@ import { loadApplicationContent } from "./content.ts";
 import type { ApplicationOptions } from "./options.ts";
 import { createSimulation } from "./simulation/index.ts";
 
-export async function prepareApplicationSave(options: ApplicationOptions, catalog: InstalledCatalog, path: string): Promise<{
+export async function prepareApplicationSave(options: ApplicationOptions, catalog: InstalledCatalog, path: string, sourceProduct?: string): Promise<{
   readonly image: SaveImage; readonly options: ApplicationOptions;
 }> {
   const saved = await readSavedGame(path);
   const { authoredCampaignStart: consumedCampaignStart, ...loadOptions } = options;
   if (saved.kind === "shared") return { image: saved.image, options: loadOptions };
-  const product = selectQ1SaveProduct(catalog, saved.data, path);
+  const product = selectQ1SaveProduct(catalog, saved.data, path, sourceProduct);
   const skill = saved.data.skill;
   if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Original save skill must be 0..3");
-  const restored: ApplicationOptions = { ...loadOptions, product: product.expectation.id, map: `maps/${saved.data.map}.bsp`,
-    skill, mode: "singleplayer", movement: "q1", character: "q1", rules: "standard", quakeCProgram: "progs.dat", network: { kind: "offline" } };
+  const { mapProduct, q2GameLibrary, weaponBehavior, teamArenaSkirmish, q3MapLaunch, q3Product, botSkill, serverProfile, serverProfilePath, startupCommands, explicitRules, ...sourceOptions } = loadOptions;
+  const restored: ApplicationOptions = { ...sourceOptions, product: product.expectation.id, map: `maps/${saved.data.map}.bsp`,
+    skill, mode: "singleplayer", movement: "q1", character: "q1", characterModel: "player", seats: 1, rules: "standard", quakeCProgram: "progs.dat", network: { kind: "offline" } };
   const content = await loadApplicationContent(restored, undefined, undefined, catalog);
   try {
     if (content.preparedQuakeC === null) throw new Error("Original save requires its native QuakeC program");

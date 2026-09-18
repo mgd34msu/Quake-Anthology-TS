@@ -422,7 +422,7 @@ export class ApplicationQ3Client {
         case "controller-axis": case "focus": break;
       }
   }
-  get capturesInput(): boolean { return this.keyCatcher !== 0; }
+  get capturesInput(): boolean { return this.backend?.kind === "qvm" ? this.backend.game.capturesInput : this.keyCatcher !== 0; }
   private renderer(provider: ProviderSceneAssets): SceneModelRenderer { let renderer = this.renderers.get(provider); if (renderer === undefined) { renderer = new SceneModelRenderer(provider, this.options.assets.world); this.renderers.set(provider, renderer); } return renderer; }
   private models(scene: Q3PresentedScene): ReadonlyMap<ProviderSceneAssets, readonly PresentedModel[]> {
     const groups = new Map<ProviderSceneAssets, PresentedModel[]>();
@@ -512,7 +512,8 @@ export class ApplicationQ3Client {
     }
     return null;
   }
-  frame(additionalEffects?: (camera: SceneCamera, source: SourceSceneOrder) => ApplicationEffectFrame, transformCamera?: (camera: SceneCamera) => SceneCamera): RenderFrame {
+  frame(additionalEffects?: (camera: SceneCamera, source: SourceSceneOrder) => ApplicationEffectFrame, transformCamera?: (camera: SceneCamera) => SceneCamera,
+    environment: Pick<WorldViewInput, "q1Fog" | "sourceSky"> = {}): RenderFrame {
     this.requireBackend(); this.frames.begin();
     const seat = this.options.local.player.seat.id, world = this.options.assets.world, time = { kind: "milliseconds", value: this.source.time } satisfies WorldViewInput["time"];
     for (const submission of this.submissions) {
@@ -545,9 +546,10 @@ export class ApplicationQ3Client {
           world.prepareWorldOperations(combined);
           this.frames.world(world.prepareView({ ...combined, operations: this.operations(scene, combined, firstEntity, effects?.operations) }));
         };
-        const child = this.portal(scene, input);
+        const worldInput = { ...input, ...environment };
+        const child = this.portal(scene, worldInput);
         if (child !== null) publish(child);
-        publish(input);
+        publish(worldInput);
       }
     }
     return this.frames.finish(false);

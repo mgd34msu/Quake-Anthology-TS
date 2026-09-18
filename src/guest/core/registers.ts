@@ -8,10 +8,10 @@ const registerIndex: Readonly<Record<GuestRegister, number>> = {
   rax: 0, rcx: 1, rdx: 2, rbx: 3, rsp: 4, rbp: 5, rsi: 6, rdi: 7,
   r8: 8, r9: 9, r10: 10, r11: 11, r12: 12, r13: 13, r14: 14, r15: 15,
 };
-const flagBit: Readonly<Record<GuestFlag, bigint>> = {
-  carry: 0n, parity: 2n, "auxiliary-carry": 4n, zero: 6n, sign: 7n, trap: 8n,
-  interrupt: 9n, direction: 10n, overflow: 11n, resume: 16n, "virtual-8086": 17n,
-  "alignment-check": 18n, "virtual-interrupt": 19n, "virtual-interrupt-pending": 20n, identification: 21n,
+const flagMask: Readonly<Record<GuestFlag, bigint>> = {
+  carry: 0x1n, parity: 0x4n, "auxiliary-carry": 0x10n, zero: 0x40n, sign: 0x80n, trap: 0x100n,
+  interrupt: 0x200n, direction: 0x400n, overflow: 0x800n, resume: 0x10000n, "virtual-8086": 0x20000n,
+  "alignment-check": 0x40000n, "virtual-interrupt": 0x80000n, "virtual-interrupt-pending": 0x100000n, identification: 0x200000n,
 };
 
 /** Physical 64-bit register slots, including the legacy low/high byte aliases. */
@@ -38,7 +38,12 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
     }
     return undefined;
   }
-  checkpoint(): Uint8Array { return this.#bytes.slice(); }
+  checkpoint(destination?: Uint8Array): Uint8Array {
+    if (destination === undefined) return this.#bytes.slice();
+    if (destination.byteLength !== this.#bytes.byteLength) throw new RangeError("Guest register snapshot has the wrong architecture or length");
+    destination.set(this.#bytes);
+    return destination;
+  }
   restore(bytes: Uint8Array): undefined {
     if (bytes.byteLength !== this.#bytes.byteLength) throw new RangeError("Guest register snapshot has the wrong architecture or length");
     if (this.architecture === "i386") {
@@ -65,9 +70,9 @@ export class ProcessorFlags implements GuestFlags {
   constructor(value: bigint) { this.#value = BigInt.asUintN(64, value); }
   get value(): bigint { return this.#value; }
   set value(value: bigint) { this.#value = BigInt.asUintN(64, value); }
-  get(flag: GuestFlag): boolean { return (this.#value & (1n << flagBit[flag])) !== 0n; }
+  get(flag: GuestFlag): boolean { return (this.#value & flagMask[flag]) !== 0n; }
   set(flag: GuestFlag, value: boolean): undefined {
-    const mask = 1n << flagBit[flag];
+    const mask = flagMask[flag];
     this.#value = value ? this.#value | mask : this.#value & ~mask;
     return undefined;
   }

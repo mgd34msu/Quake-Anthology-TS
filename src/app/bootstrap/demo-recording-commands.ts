@@ -3,6 +3,14 @@ import type { CommandBuffer, CommandHandler } from "../../core/commands/index.ts
 import { DemoRecording, type DemoRecordingSeed, type DemoRecordingSink } from "./demo-recording.ts";
 
 export interface DemoRecordingHost {
+  readonly serverRecording?: {
+    seed(source: CommandContext): Promise<DemoRecordingSeed>;
+    attach(sink: DemoRecordingSink): () => void;
+  };
+  readonly mvdRecording?: {
+    seed(source: CommandContext): Promise<DemoRecordingSeed>;
+    attach(sink: DemoRecordingSink): () => void;
+  };
   root(): string;
   seed(source: CommandContext): Promise<DemoRecordingSeed>;
   /** Returns an identity-checked disposer for this sink alone. */
@@ -12,18 +20,24 @@ export interface DemoRecordingHost {
   stage(intent: DemoRecordingIntent): void;
 }
 export type DemoRecordingIntent = { readonly kind: 'record'; readonly name: string | undefined; readonly source: CommandContext }
+  | { readonly kind: 'serverrecord'; readonly name: string; readonly source: CommandContext }
+  | { readonly kind: 'serverstop'; readonly source: CommandContext }
+  | { readonly kind: 'mvdrecord'; readonly name: string; readonly source: CommandContext }
   | { readonly kind: 'rerecord'; readonly name: string; readonly source: CommandContext }
+  | { readonly kind: 'mvdstop'; readonly source: CommandContext }
   | { readonly kind: 'stop'; readonly source: CommandContext };
 
 /** Lives on the retained client; its feed is detached before source retirement. */
 export class ClientDemoRecording {
   private current: { readonly recording: DemoRecording; readonly detach: () => void } | null = null;
+  private currentServer: { readonly recording: DemoRecording; readonly detach: () => void } | null = null;
   private busy = false;
   constructor(private readonly host: DemoRecordingHost) {}
   get path(): string | null { return this.current?.recording.path ?? null; }
+  get serverPath(): string | null { return this.currentServer?.recording.path ?? null; }
   attach(commands: CommandBuffer): () => void {
     const handlers = new Map<string, CommandHandler>();
-    for (const name of ["record", "rerecord", "stop", "stoprecord"]) {
+    for (const name of ["record", "rerecord", "stop", "stoprecord", "mvdrecord", "mvdstop", "serverrecord", "serverstop"]) {
       const handler: CommandHandler = command => {
         let origin = command.source.origin;
         while (origin.kind === "script") origin = origin.caller;
@@ -31,15 +45,15 @@ export class ClientDemoRecording {
         if (name === 'record') {
           if (command.args.length > 1) { this.host.print('Usage: record [name]\n'); return; }
           this.host.stage({ kind: 'record', name: command.args[0], source: command.source });
-        } else if (name === "rerecord") {
+        } else if (name === "rerecord" || name === "mvdrecord" || name === "serverrecord") {
           const filename = command.args[0];
           if (filename === undefined || command.args.length !== 1) { this.host.print(`Usage: ${name} <name>\n`); return; }
           this.host.stage({ kind: name, name: filename, source: command.source });
         } else if (command.args.length !== 0) this.host.print(`Usage: ${name}\n`);
-        else this.host.stage({ kind: 'stop', source: command.source });
+        else this.host.stage({ kind: name === 'serverstop' ? 'serverstop' : name === 'mvdstop' ? 'mvdstop' : 'stop', source: command.source });
       };
-      const starts = name === 'record' || name === 'rerecord';
-      if (commands.register(name, handler, { summary: name === 'rerecord' ? 'Reconnect to the QuakeWorld server and record its signon.' : name === "record" ? "Record the current session to a demo." : "Finish the current demo recording.",
+      const starts = name === 'record' || name === 'rerecord' || name === 'mvdrecord' || name === 'serverrecord';
+      if (commands.register(name, handler, { summary: name === 'serverrecord' ? 'Record native Quake II server entity footage.' : name === 'mvdrecord' ? 'Record the hosted Quake II world as a native multiview demo.' : name === 'rerecord' ? 'Reconnect to the QuakeWorld server and record its signon.' : name === "record" ? "Record the current session to a demo." : "Finish the current demo recording.",
         usage: name === 'record' ? 'record [name]' : starts ? `${name} <name>` : name, examples: [starts ? `${name} session1` : name] })) handlers.set(name, handler);
       else this.host.print(`Recording command ${name} is already owned by another command.\n`);
     }
@@ -57,6 +71,49 @@ export class ClientDemoRecording {
       catch (error) { await recording.abort(); throw error; }
       this.host.print(`Recording ${recording.path}\n`);
     } finally { this.busy = false; }
+  }
+  async startMvd(name: string, source: CommandContext): Promise<void> {
+    if (this.busy) throw new Error("Recording operation is already in progress");
+    const feed = this.host.mvdRecording;
+    if (feed === undefined) throw new Error('mvdrecord requires a hosted Quake II multiview source');
+    this.busy = true;
+    try {
+      const seed = await feed.seed(source);
+      if (seed.identity.kind !== 'mvd') throw new Error('Multiview source supplied a different recording format');
+      await this.finish();
+      const recording = await this.open(name, seed);
+      try { this.current = { recording, detach: feed.attach(this.sink(recording)) }; }
+      catch (error: unknown) { await recording.abort(); throw error; }
+      this.host.print(`Recording ${recording.path}\n`);
+    } finally { this.busy = false; }
+  }
+  async startServer(name: string, source: CommandContext): Promise<void> {
+    if (this.busy) throw new Error('Recording operation is already in progress');
+    if (this.currentServer !== null) throw new Error('Already doing a serverrecord');
+    const feed = this.host.serverRecording;
+    if (feed === undefined) throw new Error('serverrecord requires a hosted classic Quake II source');
+    this.busy = true;
+    try {
+      const seed = await feed.seed(source);
+      if (seed.identity.kind !== 'q2-server') throw new Error('Server source supplied a different recording format');
+      const recording = await this.open(name, seed);
+      try { this.currentServer = { recording, detach: feed.attach({ append: packet => recording.append(packet) }) }; }
+      catch (error: unknown) { await recording.abort(); throw error; }
+      this.host.print(`Recording server footage ${recording.path}\n`);
+    } finally { this.busy = false; }
+  }
+  async stopServer(): Promise<void> {
+    if (this.busy) throw new Error('Recording operation is already in progress');
+    this.busy = true;
+    try {
+      const current = this.currentServer;
+      if (current === null) { this.host.print('Not doing a serverrecord.\n'); return; }
+      this.currentServer = null; current.detach(); await current.recording.stop();
+      this.host.print(`Completed server footage ${current.recording.path}\n`);
+    } finally { this.busy = false; }
+  }
+  async stopAll(): Promise<void> {
+    try { await this.stop(); } finally { if (this.currentServer !== null) await this.stopServer(); }
   }
   private async open(name: string | undefined, seed: DemoRecordingSeed): Promise<DemoRecording> {
     if (name !== undefined) return DemoRecording.open(this.host.root(), name, seed);
@@ -100,6 +157,10 @@ export class ClientDemoRecording {
     current.detach();
     await current.recording.stop();
     this.host.print(`Completed demo ${current.recording.path}\n`);
+  }
+  async stopMvd(): Promise<void> {
+    if (this.current?.recording.identity.kind !== 'mvd') { this.host.print('Not recording a multiview demo.\n'); return; }
+    await this.stop();
   }
   async stop(): Promise<void> {
     if (this.busy) throw new Error("Recording operation is already in progress");

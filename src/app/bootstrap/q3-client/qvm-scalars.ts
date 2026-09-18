@@ -69,17 +69,18 @@ export class QvmApplicationScalars {
     if (call.kind !== 'engine' || call.role !== 'ui' && call.role !== 'cgame') return null;
     const o = this.options, { guest, words } = call, ui = call.role === 'ui', code = call.code;
     if (code === (ui ? QvmUiImport.UI_GETGLCONFIG : QvmCgameImport.CG_GETGLCONFIG)) {
-      const pointer = words.getInt32(4, true), record = guest.view(pointer, 11332), renderer = o.renderer.backend, viewport = o.viewport();
-      guest.span(pointer, 11332).fill(0);
+      const legacy = (call.abiProfile ?? "q3-modern") !== "q3-modern", bytes = legacy ? 4164 : 11332, shift = legacy ? 7168 : 0;
+      const pointer = words.getInt32(4, true), record = guest.view(pointer, bytes), renderer = o.renderer.backend, viewport = o.viewport();
+      guest.span(pointer, bytes).fill(0);
       const gl = o.renderer.glConfig, driver = o.renderer.driver;
       guest.writeString(pointer, driver?.renderer ?? 'Quake Anthology software renderer', 1024);
       guest.writeString(pointer + 1024, driver?.vendor ?? 'Quake Anthology', 1024);
       guest.writeString(pointer + 2048, driver?.version ?? 'software', 1024);
-      record.setInt32(11264, gl?.maxTextureSize ?? 0, true); record.setInt32(11268, gl?.textureUnits ?? 0, true);
-      record.setInt32(11272, gl?.colorBits ?? 24, true); record.setInt32(11276, gl?.depthBits ?? 64, true); record.setInt32(11280, renderer.stencilBits, true);
-      record.setInt32(11288, q3HardwareNumber(q3Hardware(driver?.renderer ?? "")), true);
-      record.setInt32(11304, viewport.width, true); record.setInt32(11308, viewport.height, true);
-      record.setFloat32(11312, viewport.width / viewport.height, true); record.setInt32(11324, Number(gl?.stereoEnabled ?? false), true);
+      record.setInt32(11264 - shift, gl?.maxTextureSize ?? 0, true); record.setInt32(11268 - shift, gl?.textureUnits ?? 0, true);
+      record.setInt32(11272 - shift, gl?.colorBits ?? 24, true); record.setInt32(11276 - shift, gl?.depthBits ?? 64, true); record.setInt32(11280 - shift, renderer.stencilBits, true);
+      record.setInt32(11288 - shift, q3HardwareNumber(q3Hardware(driver?.renderer ?? "")), true);
+      record.setInt32(11304 - shift, viewport.width, true); record.setInt32(11308 - shift, viewport.height, true);
+      record.setFloat32(11312 - shift, viewport.width / viewport.height, true); record.setInt32(11324 - shift, Number(gl?.stereoEnabled ?? false), true);
       return 0;
     }
     if (ui && code === QvmUiImport.UI_GETCLIENTSTATE) {

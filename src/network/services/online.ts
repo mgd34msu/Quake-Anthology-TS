@@ -2,7 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { ContentId } from "../../contracts/content.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import type { NetworkAddress } from "../common/endpoint.ts";
-import type { CompositionIdentity } from "../common/session.ts";
+import type { CompositionIdentity, WireSelection } from "../common/session.ts";
 import { isRecord as record, isUnknownArray } from "../common/value.ts";
 
 export type AccountId = `account:${string}`;
@@ -56,24 +56,28 @@ export class LocalAuthorization implements AuthorizationProvider {
 function isAccountId(value: unknown): value is AccountId { return typeof value === "string" && /^account:[a-f0-9]{32}$/.test(value); }
 
 export interface LobbyMember { readonly account: Account; readonly seats: number; readonly ready: boolean; }
-export interface Lobby {
+interface LobbyIdentity {
   readonly id: LobbyId;
   readonly owner: AccountId;
   readonly name: string;
   readonly capacity: number;
   readonly composition: CompositionIdentity;
-  readonly endpoint: NetworkAddress;
   readonly members: readonly LobbyMember[];
-  readonly phase: "open" | "playing";
   readonly matchGeneration: number;
 }
 
+export type Lobby = LobbyIdentity & (
+  | { readonly phase: "open"; readonly endpoint: null; readonly wire: null }
+  | { readonly phase: "starting"; readonly endpoint: null; readonly wire: null }
+  | { readonly phase: "playing"; readonly endpoint: NetworkAddress; readonly wire: WireSelection }
+);
+
 export class LocalLobbyService {
   private readonly lobbies = new Map<LobbyId, Lobby>();
-  create(owner: Account, name: string, capacity: number, composition: CompositionIdentity, endpoint: NetworkAddress): Lobby {
-    if (!Number.isSafeInteger(capacity) || capacity < 1 || name.length === 0) throw new RangeError("Invalid lobby settings");
-    const lobby: Lobby = { id: `lobby:${randomBytes(16).toString("hex")}`, owner: owner.id, name, capacity, composition, endpoint,
-      members: [{ account: owner, seats: 1, ready: false }], phase: "open", matchGeneration: 0 };
+  create(owner: Account, name: string, capacity: number, composition: CompositionIdentity, seats = 1): Lobby {
+    if (!Number.isSafeInteger(capacity) || capacity < 1 || !Number.isSafeInteger(seats) || seats < 1 || seats > capacity || name.trim().length === 0) throw new RangeError("Invalid lobby settings");
+    const lobby: Lobby = { id: `lobby:${randomBytes(16).toString("hex")}`, owner: owner.id, name, capacity, composition, endpoint: null, wire: null,
+      members: [{ account: owner, seats, ready: false }], phase: "open", matchGeneration: 0 };
     this.lobbies.set(lobby.id, lobby); return lobby;
   }
   private require(id: LobbyId): Lobby { const lobby = this.lobbies.get(id); if (lobby === undefined) throw new Error("Lobby no longer exists"); return lobby; }
@@ -91,16 +95,26 @@ export class LocalLobbyService {
     const updated = { ...lobby, members: lobby.members.map(member => member.account.id === account ? { ...member, ready } : member) };
     this.lobbies.set(id, updated); return updated;
   }
-  start(id: LobbyId, owner: AccountId): Lobby {
+  start(id: LobbyId, owner: AccountId): Lobby & { readonly phase: "starting" } {
     const lobby = this.require(id);
     if (lobby.owner !== owner || lobby.phase !== "open" || lobby.members.some(member => !member.ready)) throw new Error("Lobby is not ready to start");
-    const updated: Lobby = { ...lobby, phase: "playing", matchGeneration: lobby.matchGeneration + 1 }; this.lobbies.set(id, updated); return updated;
+    const updated: Lobby & { readonly phase: "starting" } = { ...lobby, phase: "starting", endpoint: null, wire: null, matchGeneration: lobby.matchGeneration + 1 };
+    this.lobbies.set(id, updated); return updated;
+  }
+  publish(id: LobbyId, owner: AccountId, matchGeneration: number, endpoint: NetworkAddress, wire: WireSelection): Extract<Lobby, { readonly phase: "playing" }> {
+    const lobby = this.require(id);
+    if (lobby.owner !== owner || lobby.phase !== "starting" || lobby.matchGeneration !== matchGeneration)
+      throw new Error("Lobby launch is no longer current");
+    if (wire.kind === "unified" && (wire.composition !== lobby.composition.digest || wire.snapshotSchema !== lobby.composition.composition.snapshotSchema))
+      throw new Error("Bound lobby wire does not match its prepared composition");
+    const updated: Extract<Lobby, { readonly phase: "playing" }> = { ...lobby, phase: "playing", endpoint, wire };
+    this.lobbies.set(id, updated); return updated;
   }
   complete(id: LobbyId, owner: AccountId, matchGeneration: number): Lobby {
     const lobby = this.require(id);
     if (lobby.owner !== owner) throw new Error("Only the lobby owner can complete its match");
     if (lobby.phase === "open" || lobby.matchGeneration !== matchGeneration) return lobby;
-    const updated: Lobby = { ...lobby, phase: "open", members: lobby.members.map(member => ({ ...member, ready: false })) };
+    const updated: Lobby = { ...lobby, phase: "open", endpoint: null, wire: null, members: lobby.members.map(member => ({ ...member, ready: false })) };
     this.lobbies.set(id, updated); return updated;
   }
   leave(id: LobbyId, account: AccountId): void {

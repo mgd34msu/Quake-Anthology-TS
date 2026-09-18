@@ -44,6 +44,8 @@ export interface RereleaseSourceSave {
 }
 /** Private layouts and native gameplay policy are identified by the actual guest artifact. */
 export interface RereleaseSemanticBindings {
+  /** An isolated component borrows identities without binding or releasing primary authorities. */
+  project?(view: RawEntityView, module: RereleaseGuestModule): OwnedActor | null;
   generation?(view: RawEntityView): number;
   bound?(view: RawEntityView, actor: OwnedActor): void;
   bind(view: RawEntityView, actor: OwnedActor, module: RereleaseGuestModule): RereleaseActorBindings;
@@ -72,6 +74,8 @@ export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "in
   readonly sound?: (event: RereleaseSoundEvent) => void;
   readonly nativeEntries?: RereleaseNativeEntries;
   readonly foreignDamage?: RereleaseForeignDamageServices;
+  /** Explicit component capability policy runs before imports can publish source side effects. */
+  readonly interceptImport?: (call: RereleaseImportCall, host: RereleaseQ2GuestHost) => GuestCallResult | undefined;
 }
 
 /** Source bytes back the shared actor authorities. This class owns no simulation clock. */
@@ -96,7 +100,9 @@ export class RereleaseQ2GuestHost {
       throw new Error("Headless Q2 debug drawing cannot bind renderer callbacks");
     this.core = new RereleaseCoreImports(options.runner.options.cpu.memory, options.services);
     this.module = new RereleaseGuestModule({ ...options,
-      actorAtSlot: slot => options.engine.actors.atSource(options.runner.options.cpu.memory.module.id, slot)?.id ?? null,
+      actorAtSlot: slot => options.semantics.project === undefined
+        ? options.engine.actors.atSource(options.runner.options.cpu.memory.module.id, slot)?.id ?? null
+        : this.actor(this.module.entities().atSlot(slot))?.id ?? null,
       invokeImport: call => this.#import(call) });
     this.#debugShapes = options.debugShapes === undefined ? null : new RereleaseDebugShapeImports(this.module.memory, options.debugShapes);
     this.#worldText = options.worldText === undefined ? null : new RereleaseWorldTextImports(this.module.memory, options.worldText);
@@ -116,6 +122,7 @@ export class RereleaseQ2GuestHost {
     memory.writeFloat32(address, vector.x); memory.writeFloat32(memory.offset(address, 4n), vector.y); memory.writeFloat32(memory.offset(address, 8n), vector.z);
   }
   actor(view: RawEntityView): OwnedActor | null {
+    if (this.options.semantics.project !== undefined) return this.options.semantics.project(view, this.module);
     const projected = this.foreignActors?.lookup(view);
     if (projected !== undefined) return projected;
     const { memory } = this.module, engine = this.options.engine;
@@ -173,6 +180,7 @@ export class RereleaseQ2GuestHost {
   /** Bot registration indexes the same live actors and raw server records. */
   botEntities(): readonly RawEntityView[] { return [...this.#botEntities.values()]; }
   addressForActor(actor: ActorId): GuestAddress {
+    if (this.options.semantics.project !== undefined) return this.options.semantics.foreignAddress(actor);
     const source = this.options.engine.actors.sourceOf(actor);
     if (source !== null && source.provider === this.module.memory.module.id) return this.module.entities().atSlot(source.slot).address;
     return this.foreignActors?.address(actor) ?? this.options.semantics.foreignAddress(actor);
@@ -223,7 +231,12 @@ export class RereleaseQ2GuestHost {
     finally { try { this.#releaseActors(); } finally { this.#unsubscribe(); } }
   }
   #releaseActors(): void {
-    for (const entry of this.#lifetimes.values()) if (this.options.engine.actors.isLive(entry.actor.id)) this.options.engine.actors.release(entry.actor);
+    const registry = this.options.engine.actors;
+    // Restore creates source placeholders before this host encounters their edicts.
+    // Projected components borrow actors and must never retire their primary owner.
+    const actors = this.options.semantics.project === undefined ? registry.ownedBy(this.module.memory.module.id)
+      : [...this.#lifetimes.values()].map(entry => entry.actor);
+    for (const actor of actors) if (registry.isLive(actor.id)) registry.release(actor);
     this.#lifetimes.clear();
   }
   spawnEntities(map: string, entities: string, spawnpoint = ""): void { this.core.refreshCvars(); this.module.spawnEntities(map, entities, spawnpoint); this.reconcile(); }
@@ -274,6 +287,8 @@ export class RereleaseQ2GuestHost {
     } finally { if (restoring) this.foreignActors?.endRestore(); memory.unmap(address, nativeAllocationBytes(bytes.length + 1)); }
   }
   #import(call: RereleaseImportCall): GuestCallResult {
+    const intercepted = this.options.interceptImport?.(call, this);
+    if (intercepted !== undefined) return intercepted;
     if (this.options.debugDrawing === "headless" && call.api === "game") {
       switch (call.name) {
         case "Draw_Line": case "Draw_Point": case "Draw_Circle": case "Draw_Bounds": case "Draw_Sphere":

@@ -599,3 +599,50 @@ test("dedicated writeconfig snapshots its profile and drains writes before retir
     expect(await next.read("rejected.cfg", context)).toBeUndefined();
   } finally { await scripts.close(); await next.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+
+test("authored binding reset restores mounted defaults for only the confirmed seat", async () => {
+  const identity = createIdentityOwner("authored-binding-reset"), dialect = "q2-classic";
+  const seats = [0, 1].map(index => {
+    const id = identity.seat(index), context: CommandContext = { session: identity.session, origin: { kind: "local-seat", seat: id, client: identity.client(index, 0) } };
+    return { id, context, cvars: new CvarRegistry({ dialect, context }), mouse: new MouseSettings(new CvarRegistry({ dialect, context })), profile: null, archive: [], mouseArchive: [] };
+  });
+  const first = seats[0]; if (first === undefined) throw new Error("Missing first seat");
+  const prepared = new PreparedStartup(new CvarRegistry({ dialect, context: first.context }), new CvarRegistry({ dialect, context: first.context }),
+    new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined }),
+    { dialect, movementDialect: dialect, shared: null, sharedNames: [], seats, print: () => {}, forward: () => undefined });
+  expect(() => prepared.resetBindings(first.id)).toThrow("not ready");
+  await prepared.execute({ nextFrame: async () => {}, hasMod: true, sourceArchive: [], movementArchive: [], fallbackArchive: [], sharedArchive: [],
+    read: async name => name === "default.cfg" ? 'bind F8 "echo authored-mod-action"\nbind w "echo authored-movement"\n' : name === "config.cfg" ? 'bind F8 "echo custom-action"\nbind F9 "echo custom-only"\n' : "",
+    applyLaunchOptions: () => {} });
+  const primary = prepared.seats[0], secondary = prepared.seats[1]; if (primary === undefined || secondary === undefined) throw new Error("Missing seats");
+  const before = primary.input.bindings;
+  expect(secondary.authoredBindings).toEqual(primary.authoredBindings);
+  const { NativeUiController } = await import("../../src/ui/common/controller.ts"), { defaultUiSkin } = await import("../../src/ui/common/skin.ts"),
+    { registerBindingMenus } = await import("../../src/ui/settings/bindings.ts");
+  const controller = new NativeUiController({ seat: secondary.id, skin: () => defaultUiSkin("resource:default-font"), now: () => 0,
+    bindings: () => secondary.input.bindings, focus: () => {}, sound: () => {}, executeScript: () => { throw new Error("No guest UI in this fixture"); } });
+  const factories = new Map<import("../../src/contracts/ui.ts").UiMenuId, () => import("../../src/contracts/ui.ts").UiMenu>();
+  const original = controller.register.bind(controller);
+  const { spyOn } = await import("bun:test");
+  const spy = spyOn(controller, "register").mockImplementation((id, factory) => { factories.set(id, factory); return original(id, factory); });
+  const menus = registerBindingMenus(controller, secondary.input, [], { available: () => secondary.authoredBindings !== null, reset: () => prepared.resetBindings(secondary.id) });
+  const activate = (menu: import("../../src/contracts/ui.ts").UiMenuId, id: string): void => {
+    const control = factories.get(menu)?.().controls.find(control => control.id === id);
+    if (control?.kind !== "button") throw new Error("Missing button");
+    control.activate(secondary.id);
+  };
+  controller.openMenu(menus.root);
+  activate(menus.root, "ui:bindings:reset");
+  expect(secondary.input.bindings.some(binding => binding.target.kind === "command" && binding.target.text === "echo custom-only")).toBe(true);
+  activate("menu:bindings:reset", "ui:bindings:keep");
+  expect(secondary.input.bindings.some(binding => binding.target.kind === "command" && binding.target.text === "echo custom-only")).toBe(true);
+  activate(menus.root, "ui:bindings:reset"); activate("menu:bindings:reset", "ui:bindings:restore");
+  const authored = secondary.authoredBindings; if (authored === null) throw new Error("Missing authored defaults");
+  expect(secondary.input.bindings).toEqual(authored);
+  expect(secondary.input.bindings.some(binding => binding.target.kind === "command" && binding.target.text === "echo authored-mod-action")).toBe(true);
+  expect(secondary.input.binding({ kind: "key", code: 119 })).toEqual({ kind: "command", text: "echo authored-movement" });
+  expect(primary.input.bindings).toEqual(before);
+  expect(secondary.allBindingsChosen).toBe(true);
+  menus.dispose(); spy.mockRestore();
+});

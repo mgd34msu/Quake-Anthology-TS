@@ -1,3 +1,4 @@
+import { readSeatLanguage, writeSeatLanguage } from "../../ui/settings/language.ts";
 /* Q2 rerelease configstrings, svc_locprint and cg_screen.cpp story draws. GPL-2.0-or-later. */
 import type { ContentId } from "../../contracts/content.ts";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
@@ -11,7 +12,7 @@ import type { ApplicationAssets } from "./assets.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import { RereleaseFog } from "./rerelease-presentation/fog.ts";
 import { NativeLanguageSettings } from "../../ui/settings/services.ts";
-import type { SettingBinding } from "../../ui/settings/index.ts";
+import type { SettingBinding, SettingCvars } from "../../ui/settings/index.ts";
 import { q2LocalizedText } from "./q2-localization.ts";
 
 export interface RereleasePresentationSeat { readonly seat: SeatId; readonly actor: ActorId; readonly language?: string; }
@@ -53,7 +54,7 @@ export class ApplicationRereleasePresentation {
     return () => { this.skies.clear(); this.sky = next; for (const value of seats) value.seat.sky = value.sky; };
   }
 
-  constructor(private readonly assets: Pick<ApplicationAssets, "provider">, seats: readonly RereleasePresentationSeat[]) {
+  constructor(private readonly assets: Pick<ApplicationAssets, "provider">, seats: readonly RereleasePresentationSeat[], private readonly languageSettings: SettingCvars | null = null) {
     this.seats = seats.map(binding => ({ binding, language: binding.language ?? "english", catalogs: new Map<ContentId, Promise<NativeLanguageSettings>>(), fog: new RereleaseFog(), fogReceived: false, story: "", storySource: null, hiddenItems: new Set<ActorId>(), names: new Map<number, string>(), sky: null }));
   }
 
@@ -81,7 +82,13 @@ export class ApplicationRereleasePresentation {
     }
   }
 
-  selectedLanguage(id: SeatId): string { return this.seats.find(seat => seat.binding.seat.equals(id))?.language ?? "english"; }
+  selectedLanguage(id: SeatId): string {
+    return this.languageSettings === null ? this.seats.find(seat => seat.binding.seat.equals(id))?.language ?? "english" : readSeatLanguage(this.languageSettings, id.index);
+  }
+  private syncLanguage(seat: SeatState): void {
+    const language = this.selectedLanguage(seat.binding.seat);
+    if (language !== seat.language) { seat.language = language; seat.catalogs.clear(); }
+  }
 
   itemVisible(actor: ActorId, item: ActorId): boolean {
     const seat = this.seats.find(seat => seat.binding.actor.equals(actor));
@@ -102,19 +109,26 @@ export class ApplicationRereleasePresentation {
     if (seat === undefined) throw new Error("Unknown localization seat");
     const settings = await this.catalog(seat, content), binding = settings.binding();
     if (binding.kind !== "choice") throw new Error("Language setting must be a choice");
-    return { ...binding, write: (value: string) => {
-      settings.select(value).then(() => {
-        seat.language = binding.read();
-        for (const key of seat.catalogs.keys()) if (key !== content) seat.catalogs.delete(key);
-      }).catch(failed);
+    return { ...binding, read: () => this.selectedLanguage(id), write: (value: string) => {
+      if (!binding.choices().some(choice => choice.id === value)) throw new Error(`Language is not installed: ${value}`);
+      if (this.languageSettings !== null) writeSeatLanguage(this.languageSettings, id.index, value);
+      else seat.language = value;
+      seat.catalogs.clear();
+      this.catalog(seat, content).catch(failed);
     } };
   }
 
-  private catalog(seat: SeatState, content: ContentId): Promise<NativeLanguageSettings> {
-    const existing = seat.catalogs.get(content); if (existing !== undefined) return existing;
+  private async catalog(seat: SeatState, content: ContentId): Promise<NativeLanguageSettings> {
+    this.syncLanguage(seat);
+    const languageSelection = seat.language;
+    const existing = seat.catalogs.get(content);
+    if (existing !== undefined) {
+      const result = await existing;
+      return this.selectedLanguage(seat.binding.seat) === languageSelection ? result : this.catalog(seat, content);
+    }
     const pending = (async (): Promise<NativeLanguageSettings> => {
       const provider = await this.assets.provider(content);
-      const languages = new Set(["english", seat.language]);
+      const languages = new Set(["english", languageSelection]);
       for (const file of await provider.mounts.listFiles("localization", ".txt")) {
         const match = /^loc_([a-z]+)\.txt$/iu.exec(file), language = match?.[1];
         if (language !== undefined) languages.add(language.toLowerCase());
@@ -125,11 +139,16 @@ export class ApplicationRereleasePresentation {
             language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english.txt"), language === "english" ? Promise.resolve(null) : provider.mounts.open("localization/loc_english_mod.txt")]);
           return { primary: { base: primary?.bytes ?? null, mods: mod === null ? [] : [mod.bytes] }, fallback: { base: english?.bytes ?? null, mods: englishMod === null ? [] : [englishMod.bytes] } };
         },
-      })), seat.language, () => undefined);
-      await result.select(seat.language);
+      })), languageSelection, () => undefined);
+      await result.select(languageSelection);
       return result;
     })();
-    seat.catalogs.set(content, pending); return pending;
+    seat.catalogs.set(content, pending);
+    try {
+      const result = await pending;
+      if (this.selectedLanguage(seat.binding.seat) !== languageSelection) return this.catalog(seat, content);
+      return result;
+    } catch (error) { if (seat.catalogs.get(content) === pending) seat.catalogs.delete(content); throw error; }
   }
 
   private skyImages(content: ContentId, name: string): Promise<readonly RendererImage[]> {

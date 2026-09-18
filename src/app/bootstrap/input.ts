@@ -697,6 +697,13 @@ export class ApplicationInput {
       this.configurationPublished = true;
     }
   }
+  canResetBindings(id: SeatId): boolean {
+    return this.startup?.seats.some(seat => seat.id.equals(id) && seat.authoredBindings !== null) ?? false;
+  }
+  resetBindings(id: SeatId): void {
+    if (this.startup === undefined) throw new Error("Authored binding defaults are unavailable");
+    this.startup.resetBindings(id);
+  }
   advanceStartup(): Promise<boolean> { return this.startup?.advanceFrame() ?? Promise.resolve(false); }
 
   pump(executeCommands = true): void {
@@ -897,6 +904,7 @@ export class ApplicationInput {
       for (const key of choices.overriddenKeys) seat.overriddenKeys.add(key);
       seat.allBindingsChosen = choices.allBindingsChosen;
       seat.selectedBindings = choices.selectedBindings;
+      seat.authoredBindings = choices.authoredBindings;
     }
     const locals = this.locals.map(local => {
       const prepared = client.prepared.seats.find(seat => seat.id.equals(local.player.seat.id));

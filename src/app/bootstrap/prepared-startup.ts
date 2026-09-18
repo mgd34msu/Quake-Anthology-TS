@@ -2,6 +2,7 @@ import { registerPlayerUserinfo } from "./player-userinfo.ts";
 import { sourceAdministrationCommandNames } from "./server-administration.ts";
 import { BindingStore } from "../../input/binding-store.ts";
 import { q3ProductMapCommands, registerQ3ProductPolicy, type Q3ProductPolicy } from "../../core/q3-product-policy.ts";
+import { registerGtvCvars } from "./gtv-commands.ts";
 import { cdCommandDocumentation, musicCommandDocumentation } from "./audio/commands.ts";
 import { startupCommandPhases } from "./startup-commands.ts";
 import { registerQ1ViewCommands } from "./q1-client-settings.ts";
@@ -29,6 +30,7 @@ export interface PreparedSeat {
   allBindingsChosen: boolean;
   collectingBindings: boolean;
   selectedBindings: readonly InputBinding[] | undefined;
+  authoredBindings: readonly InputBinding[] | null;
 }
 export interface PreparedSeatConfiguration {
   readonly context: CommandContext;
@@ -96,6 +98,7 @@ export class PreparedStartup {
     if (options.dialect === "q1-netquake" || options.dialect === "q1-quakeworld") this.deferredCommands.push("pause");
     if (options.dialect === "q3") this.deferredCommands.push(...q3ProductMapCommands(this.q3Policy).filter(name => name !== "map"));
     for (const seat of options.seats) { registerRunCvar(seat.mouse.cvars, options.movementDialect); registerPlayerUserinfo(seat.cvars, seat.id.index); }
+    registerGtvCvars(source);
     this.fallback = movement.dialect === options.dialect ? movement : new CvarRegistry({ dialect: options.dialect, context: source.context, print: text => this.print(text) });
     this.routing = new ApplicationConsoleRouting({ fallback: this.fallback, sourceDialect: () => options.dialect,
       server: () => ({ cvars: this.source, sharedNames: options.sharedNames }),
@@ -110,7 +113,7 @@ export class PreparedStartup {
       allowCommand: command => this.allowCommand(command),
       forwardToServer: invocation => { this.worldAction = true; return this.forward(invocation.argv[0] ?? "", invocation.args, invocation.source); } });
     this.seatOwners = options.seats.map(seat => ({ ...seat, input: new SeatInput({ seat: seat.id, dialect: options.movementDialect,
-      context: seat.context, commands: this.commands, uiEvent: () => false }), overriddenKeys: new Set<string>(), allBindingsChosen: false, collectingBindings: false, selectedBindings: undefined }));
+      context: seat.context, commands: this.commands, uiEvent: () => false }), overriddenKeys: new Set<string>(), allBindingsChosen: false, collectingBindings: false, selectedBindings: undefined, authoredBindings: null }));
     this.activeSeatIds = this.seats.map(seat => seat.id);
     for (const name of this.deferredCommands) this.commands.register(name, invocation => {
       this.worldAction = true; return this.forward(name, invocation.args, invocation.source);
@@ -121,7 +124,7 @@ export class PreparedStartup {
         this.source.set("public", "1");
       return this.forward(name, name === "addlrconcmd" || name === "dellrconcmd" ? [invocation.argsText] : invocation.args, invocation.source);
     });
-    for (const name of ["in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause"])
+    for (const name of ["mvdconnect", "mvdisconnect", "in_restart", "midiinfo", "local_join", "local_drop", "downloadstatus", "stopdownload", "retrydownload", "demopause"])
       this.commands.register(name, invocation => this.forward(name, invocation.args, invocation.source));
     this.commands.register("snd_restart", invocation => this.forward("snd_restart", invocation.args, invocation.source));
     this.commands.register("cd", invocation => this.forward("cd", invocation.args, invocation.source), cdCommandDocumentation);
@@ -206,7 +209,7 @@ export class PreparedStartup {
     this.seatOwners = seats.map(seat => {
       const previous = this.seats.find(prior => prior.id.equals(seat.id) && prior.input === seat.input);
       if (previous !== undefined) { previous.cvars = seat.cvars; previous.mouse = seat.mouse; return previous; }
-      return { ...seat, overriddenKeys: new Set<string>(), allBindingsChosen: true, collectingBindings: false, selectedBindings: undefined };
+      return { ...seat, overriddenKeys: new Set<string>(), allBindingsChosen: true, collectingBindings: false, selectedBindings: undefined, authoredBindings: this.seats[0]?.authoredBindings ?? null };
     });
     this.setActiveSeats(activeSeatIds);
   }
@@ -260,6 +263,18 @@ export class PreparedStartup {
   adoptBindingDefaults(id: SeatId, selectedDefaults: readonly InputBinding[]): void {
     const seat = this.seats.find(seat => seat.id.equals(id));
     if (seat !== undefined) seat.selectedBindings = selectedDefaults;
+  }
+  resetBindings(id: SeatId): void {
+    const seat = this.seats.find(seat => seat.id.equals(id));
+    if (seat === undefined || seat.authoredBindings === null) throw new Error("Authored binding defaults are not ready");
+    const defaults = new Map(seat.authoredBindings.map(binding => [physicalInputKey(binding.input), binding]));
+    if (seat.selectedBindings !== undefined) {
+      for (const [key, binding] of defaults) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) defaults.delete(key);
+      for (const binding of seat.selectedBindings) if (!defaults.has(physicalInputKey(binding.input))) defaults.set(physicalInputKey(binding.input), binding);
+    }
+    seat.input.unbindAll();
+    for (const binding of defaults.values()) seat.input.bind(binding);
+    seat.allBindingsChosen = true; seat.overriddenKeys.clear();
   }
   previewBindings(id: SeatId, selectedDefaults: readonly InputBinding[]): readonly InputBinding[] {
     const seat = this.seats.find(seat => seat.id.equals(id));
@@ -323,6 +338,11 @@ export class PreparedStartup {
     for (const [index, seat] of configurations.entries()) {
       const saved = this.options.seats[index];
       if (seat !== undefined && saved === undefined) throw new Error("Startup seat configuration is missing");
+      if (index !== 0 && seat !== undefined) {
+        const defaults = new Map((this.seats[0]?.authoredBindings ?? []).map(binding => [physicalInputKey(binding.input), binding]));
+        for (const binding of seat.selectedBindings ?? defaultBindings(0, this.options.movementDialect)) if (!defaults.has(physicalInputKey(binding.input))) defaults.set(physicalInputKey(binding.input), binding);
+        seat.authoredBindings = [...defaults.values()];
+      }
       const startup = new StartupConfig({ safeMode: phases.safe, dialect: this.options.dialect, context: seat?.context ?? this.source.context, hasMod: options.hasMod,
         scope: index === 0 ? "source" : "seat", read: (name, context, scope) => {
           const read = this.scopedReader;
@@ -332,7 +352,12 @@ export class PreparedStartup {
         applySelectedDefaults: () => {
           if (seat === undefined) return;
           for (const binding of seat.input.bindings) if (binding.target.kind === "command" && /^(?:weapon|impulse|use)\s/i.test(binding.target.text)) seat.input.unbind(binding.input);
-          for (const binding of seat.selectedBindings ?? defaultBindings(0, this.options.movementDialect)) seat.input.bind(binding);
+          const authored = new Map(seat.input.bindings.map(binding => [physicalInputKey(binding.input), binding]));
+          for (const binding of seat.selectedBindings ?? defaultBindings(0, this.options.movementDialect)) {
+            seat.input.bind(binding);
+            if (!authored.has(physicalInputKey(binding.input))) authored.set(physicalInputKey(binding.input), binding);
+          }
+          seat.authoredBindings = [...authored.values()];
           seat.collectingBindings = true;
         },
         applyArchive: () => {

@@ -1,3 +1,4 @@
+import { SaveReader } from "../../src/persistence/value.ts";
 import { expect, test } from 'bun:test';
 import { createIdentityOwner } from '../../src/contracts/identity.ts';
 import type { SimulationPresentationEvent } from '../../src/app/bootstrap/simulation/types.ts';
@@ -16,8 +17,8 @@ function event(owner: SimulationQ1Fog, player: typeof actor | null, seconds: num
 }
 test('Q1 fog source time, interrupted transitions, seat targeting and fresh world reset', () => {
   const owner = new SimulationQ1Fog({ content, entities: '{"classname" "worldspawn" "_fog " "0.2 0 0 1"}', alive: () => true });
-  const first = new Q1MapFog('{"classname" "worldspawn" "_fog " "0.2 0 0 1"}', actor, content);
-  const second = new Q1MapFog('{}', other, content);
+  const first = new Q1MapFog('{"classname" "worldspawn" "_fog " "0.2 0 0 1"}', new Set([content]), actor);
+  const second = new Q1MapFog('{}', new Set([content]), other);
   first.receive(event(owner, other, 10, 1, 0));
   expect(first.current(10).density).toBe(0.2);
   first.receive(event(owner, actor, 10, 1, 4));
@@ -27,7 +28,7 @@ test('Q1 fog source time, interrupted transitions, seat targeting and fresh worl
   expect(first.current(14).density).toBe(0);
   second.receive(event(owner, null, 20, 0.8, 0));
   expect(second.current(20).density).toBe(0.8);
-  expect(new Q1MapFog('{}', actor, content).current(20).density).toBe(0);
+  expect(new Q1MapFog('{}', new Set([content]), actor).current(20).density).toBe(0);
 });
 
 test('Q1 fog shades translucent fragments at their own depth before blending, within the seat', () => {
@@ -38,7 +39,7 @@ test('Q1 fog shades translucent fragments at their own depth before blending, wi
     renderer.applyImageResource({ kind: 'create-image', image, content: { kind: 'rgba8', borderColor: { x: 0, y: 0, z: 0, w: 0 }, levels: [{ width: 1, height: 1, pixels: new Uint8Array([255,255,255,255]) }] }, sampling: { filter: 'nearest', wrap: 'repeat' } });
     renderer.beginView({ viewport: { x: 0, y: 0, width: 4, height: 2 }, clipPlane: null, clear: { color: { x: 0, y: 1, z: 0, w: 1 }, depth: 0.9, stencil: false } });
     renderer.beginView({ viewport: { x: 0, y: 0, width: 2, height: 2 }, clipPlane: null, clear: null });
-    const fog = new Q1MapFog('{"fog" "0.5 1 0 0"}', actor, content);
+    const fog = new Q1MapFog('{"fog" "0.5 1 0 0"}', new Set([content]), actor);
     const batch: DrawBatch = { primitive: 'triangles', texturing: 'single', lighting: { kind: 'vertex' }, texture: { kind: 'bind-image', image }, indices: [0,1,2,0,2,3],
       state: { ...CPU_OPAQUE_STATE, cull: 'none', blend: { source: 'src-alpha', destination: 'one-minus-src-alpha' }, depthWrite: false },
       vertices: [{x:-64,y:-64},{x:64,y:-64},{x:64,y:64},{x:-64,y:64}].map(p=>({position:{...p,z:0,w:64},texCoord:{x:0,y:0},color:{x:0,y:0,z:1,w:0.5}})) };
@@ -109,4 +110,19 @@ test('Q1-world fog composes legacy lightmaps before fog without changing the no-
   expect(fogged[0]?.texturing).toBe('pair');
   const foreign = createQ2Material('stone',[image],{kind:'lightmap',image,styles:[0]});
   expect(prepareLegacyMaterialBatches(foreign,geometry,{...context,q1FogActive:true})[0]?.texturing).toBe('pair');
+});
+
+
+test('selected source fog reaches foreign geometry and retains recipient through restoration', () => {
+  const owner = new SimulationQ1Fog({ content: 'q2:classic:baseq2:base', entities: '', acceptedContents: new Set(['q1:classic:hipnotic:base']), alive: () => true });
+  const first = new Q1MapFog('', new Set(['q1:classic:hipnotic:base']), actor, false), second = new Q1MapFog('', new Set(['q1:classic:hipnotic:base']), other, false);
+  expect(first.active).toBe(false); expect(second.active).toBe(false);
+  const output = owner.update({ content: 'q1:classic:hipnotic:base', sequence: 2, seconds: 3, sourceEntity: null },
+    { kind: 'fog', player: actor, density: 0.6, color: { x: 0.1, y: 0.2, z: 0.3 }, duration: 0, skyFactor: 0.4 });
+  first.receive(output); second.receive(output);
+  expect(first.active).toBe(true); expect(first.current(3).density).toBe(0.6); expect(second.active).toBe(false);
+  const restored = new SimulationQ1Fog({ content: 'q2:classic:baseq2:base', entities: '', acceptedContents: new Set(['q1:classic:hipnotic:base']), alive: () => true });
+  const events = restored.restore(new SaveReader(owner.capture()), saved => saved.slot === actor.slot ? actor : other);
+  const loaded = new Q1MapFog('', new Set(['q1:classic:hipnotic:base']), actor, false); loaded.receive(events);
+  expect(loaded.active).toBe(true); expect(loaded.current(3)).toEqual(first.current(3));
 });

@@ -1,6 +1,11 @@
 import { q2KexSeatUserinfo, q2KexClientUserinfo } from '../../../network/q2/handshake.ts';
 import { KexLanTransport } from '../../../network/q2/kex/lan.ts';
 import type { DatagramTransport } from '../../../network/common/transport.ts';
+import { encodeQ2ServerDemoSignon, encodeQ2ServerDemoFrame } from '../../../network/q2/server-demo.ts';
+import { MvdEncoder } from '../../../network/q2/mvd-encoding.ts';
+import type { MvdCapture } from '../../../network/q2/mvd-encoding.ts';
+import { MvdBroadcast } from '../../../network/q2/mvd-broadcast.ts';
+import type { DemoRecordingSeed } from '../demo-recording.ts';
 import { Q2GameCallbackError } from './types.ts';
 import type { DemoRecordingSink } from '../demo-recording.ts';
 import { Q2ClientReceiver } from './q2-client-receiver.ts';
@@ -54,6 +59,69 @@ interface ServerPeer<TAddress extends NetworkAddress> {
 }
 /** Native packet work surrounds the application's simulation step; it owns no game clock. */
 export class Q2ServerNetwork<TAddress extends NetworkAddress> implements ApplicationNetwork {
+    private mvdFrame: { readonly output: SimulationOutput; readonly events: readonly SimulationPresentationEvent[] } | null = null;
+    private mvdSeed: MvdCapture | null = null;
+    private mvdTick: number | null = null;
+    private mvdMessages: MvdCapture['messages'][number][] = [];
+    private mvdOwner: { readonly sink: DemoRecordingSink; readonly encoder: MvdEncoder; writes: Promise<void> } | null = null;
+    private mvdBroadcast: MvdBroadcast | null = null;
+    private serverDemoSeed: MvdCapture | null = null;
+    private serverDemoOwner: { readonly sink: DemoRecordingSink; readonly generation: number; configs: ReadonlyMap<number, string>; writes: Promise<void> } | null = null;
+    readonly serverRecording = {
+        seed: (): DemoRecordingSeed => {
+            const capture = this.captureMvd();
+            if (capture.revision !== 2010) throw new Error('serverrecord requires classic Quake II; use mvdrecord for other source revisions');
+            if (this.serverDemoOwner !== null) throw new Error('Already doing a serverrecord');
+            this.serverDemoSeed = capture;
+            return { identity: { kind: 'q2-server', protocol: 34 }, packets: [{ kind: 'q2-server', message: encodeQ2ServerDemoSignon(capture) }] };
+        },
+        attach: (sink: DemoRecordingSink): (() => void) => {
+            const seed = this.serverDemoSeed;
+            if (this.ended || seed === null || this.serverDemoOwner !== null || seed.servercount !== this.serverGeneration) throw new Error('Server recording requires a current unused seed');
+            const owner = { sink, generation: seed.servercount, configs: seed.configStrings, writes: Promise.resolve() };
+            this.serverDemoSeed = null; this.serverDemoOwner = owner;
+            return () => { if (this.serverDemoOwner === owner) this.serverDemoOwner = null; };
+        },
+    };
+    readonly mvdRecording = {
+        seed: (): DemoRecordingSeed => {
+            const capture = this.captureMvd(), revision = capture.revision;
+            if (revision !== 2009 && revision !== 2010 && revision !== 2011 && revision !== 2012 && revision !== 2013 && revision !== 3038) throw new Error('Unsupported MVD recording revision');
+            const packets = new MvdEncoder().capture({ ...capture, messages: [] }).map(message => ({ kind: 'mvd', message } satisfies Parameters<DemoRecordingSink['append']>[0]));
+            this.mvdSeed = capture;
+            return { identity: { kind: 'mvd', revision }, packets };
+        },
+        attach: (sink: DemoRecordingSink): (() => void) => {
+            if (this.ended || this.mvdOwner !== null || this.mvdSeed === null) throw new Error('MVD recording requires an unused server seed');
+            const encoder = new MvdEncoder(); encoder.capture({ ...this.mvdSeed, messages: [] }); this.mvdSeed = null;
+            const owner = { sink, encoder, writes: Promise.resolve() }; this.mvdOwner = owner;
+            if (this.mvdBroadcast === null) { this.mvdTick = this.mvdTime(); this.mvdMessages = []; }
+            return () => { if (this.mvdOwner === owner) this.mvdOwner = null; };
+        },
+    };
+    private mvdTime(): number {
+        const time = this.mvdFrame?.output.snapshot.frame.time;
+        if (time === undefined) throw new Error('MVD capture has no source clock');
+        return Math.floor((time.kind === 'seconds' ? time.value * 10 : time.value / 100) + 1e-7);
+    }
+    private captureMvd(): MvdCapture {
+        if (this.ended || this.mvdFrame === null || this.host.mvdCapture === undefined) throw new Error('MVD recording requires an active authoritative Q2 capture source');
+        return this.host.mvdCapture(this.mvdFrame.output, this.mvdFrame.events, this.serverGeneration);
+    }
+    private async configureMvd(): Promise<void> {
+        const settings = this.host.mvdSettings?.();
+        if (settings?.enabled !== true) { const old = this.mvdBroadcast; this.mvdBroadcast = null; await old?.close(); return; }
+        if (this.mvdBroadcast !== null) return;
+        const address = this.options.transport.address;
+        if (address.kind !== 'ipv4' && address.kind !== 'ipv6') throw new Error('GTV broadcast requires an IP server transport');
+        if (this.host.mvdCapture === undefined) throw new Error('GTV broadcast requires an authoritative Q2 capture source');
+        const broadcast = new MvdBroadcast({ maxViewers: settings.maxViewers, authorize: hello => hello.password === (this.host.mvdSettings?.().password ?? '') });
+        try {
+            await broadcast.listen(address.kind === 'ipv4' ? address.host.join('.') : address.host, address.port);
+            if (this.ended) { await broadcast.close(); return; }
+            this.mvdBroadcast = broadcast;
+        } catch (error) { await broadcast.close(); throw error; }
+    }
     readonly role = 'server';
     readonly wire: WireSelection;
     private acceptConnection(remote: TAddress): void {
@@ -90,8 +158,11 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             throw new Error(`Native Q2 map transition is unavailable: ${support.reasons.join('; ')}`);
         if (host.protocol.kind !== this.host.protocol.kind || host.protocol.version !== this.host.protocol.version)
             throw new Error('Native Q2 map transition cannot change protocol');
+        if (this.serverDemoOwner !== null) throw new Error('Finish serverrecord with serverstop before changing maps');
+        this.serverDemoSeed = null;
         const players = [...this.peers.values()].map(peer => ({ peer, player: host.carriedPlayer(peer.player.client) }));
         this.host = host;
+        this.mvdFrame = null; this.mvdSeed = null; this.mvdTick = null; this.mvdMessages = [];
         this.serverGeneration++;
         this.pending = [];
         for (const { peer, player } of players) {
@@ -333,6 +404,7 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         this.lan?.tick(nowMilliseconds);
         if (this.ended)
             return [];
+        await this.configureMvd();
         const masters = this.host.masters?.() ?? [];
         if (masters.length > 0) this.masterHeartbeat.send(masters, nowMilliseconds, true);
         for (const peer of this.peers.values()) if (peer.downloadFailure !== null) this.drop(peer, peer.downloadFailure);
@@ -395,6 +467,40 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         if (this.ended)
             return;
         this.host.observe(output, events);
+        this.mvdFrame = { output, events };
+        const mvdOwner = this.mvdOwner, serverOwner = this.serverDemoOwner;
+        const current = mvdOwner !== null || this.mvdBroadcast !== null || serverOwner !== null ? this.captureMvd() : null;
+        if (serverOwner !== null && current !== null) {
+            const wire = new Q2WireCodec({ kind: 'q2-classic', version: 34 });
+            const multicasts = current.messages.filter(message => message.recipient.kind !== 'player' && [1, 2, 3, 9].includes(message.bytes[0] ?? -1)).map(message => message.bytes);
+            for (const [index, value] of current.configStrings) if (serverOwner.configs.get(index) !== value) multicasts.push(encodeQ2ServerEvent(wire, { kind: 'config-string', index, value }));
+            serverOwner.configs = current.configStrings;
+            const write = serverOwner.sink.append({ kind: 'q2-server', message: encodeQ2ServerDemoFrame(output.snapshot.frame.frame, current.entities, multicasts) });
+            serverOwner.writes = Promise.all([serverOwner.writes, write]).then(() => {}).catch((error: unknown) => {
+                if (this.serverDemoOwner === serverOwner) this.serverDemoOwner = null;
+                this.host.print(`Server recording failed: ${error instanceof Error ? error.message : String(error)}\n`);
+            });
+        }
+        if ((mvdOwner !== null || this.mvdBroadcast !== null) && current !== null) {
+            const tick = this.mvdTime();
+            this.mvdMessages.push(...current.messages);
+            // Native SV_MvdEndFrame publishes only SV_FRAMESYNC, the fixed 10 Hz MVD clock.
+            if (tick !== this.mvdTick) {
+                this.mvdTick = tick;
+                const capture = { ...current, messages: this.mvdMessages }; this.mvdMessages = [];
+                this.mvdBroadcast?.observe(capture);
+                if (mvdOwner !== null) {
+                    const packets = mvdOwner.encoder.capture(capture);
+                    // Admit immediately: the shared sink owns ordering, including a stop in this turn.
+                    const writes = packets.map(message => mvdOwner.sink.append({ kind: 'mvd', message }));
+                    mvdOwner.writes = Promise.all([mvdOwner.writes, ...writes]).then(() => {}).catch((error: unknown) => {
+                        if (this.mvdOwner === mvdOwner) this.mvdOwner = null;
+                        this.host.print(`MVD recording failed: ${error instanceof Error ? error.message : String(error)}\n`);
+                    });
+                }
+            }
+        } else { this.mvdTick = null; this.mvdMessages = []; }
+
         for (const peer of this.peers.values()) {
             for (const message of this.host.rawMessages?.(peer.player) ?? []) {
                 if (message.reliable) peer.channel.queueReliable(message.bytes);
@@ -453,9 +559,12 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
             }
         }
     }
-    close(): void {
+    async close(): Promise<void> {
         if (this.ended) return;
         this.ended = true;
+        const owner = this.mvdOwner, broadcast = this.mvdBroadcast, serverOwner = this.serverDemoOwner;
+        this.serverDemoOwner = null; this.serverDemoSeed = null;
+        this.mvdOwner = null; this.mvdBroadcast = null; this.mvdSeed = null; this.mvdFrame = null; this.mvdTick = null; this.mvdMessages = [];
         const failures: unknown[] = [];
         const cleanup = (operation: () => void): void => { try { operation(); } catch (error) { failures.push(error); } };
         cleanup(() => this.masterHeartbeat.send(this.host.masters?.() ?? [], performance.now(), false, true));
@@ -470,6 +579,8 @@ export class Q2ServerNetwork<TAddress extends NetworkAddress> implements Applica
         this.peers.clear();
         this.pending = [];
         cleanup(() => this.transport.close());
+        const results = await Promise.allSettled([owner?.writes, serverOwner?.writes, Promise.resolve().then(() => broadcast?.close())]);
+        for (const result of results) if (result.status === 'rejected') { const reason: unknown = result.reason; failures.push(reason); }
         if (failures.length !== 0) throw new AggregateError(failures, 'Q2 server shutdown failed');
     }
 }

@@ -1,10 +1,16 @@
+import { discoverQvmWeaponBehaviors } from "../../content/catalog/qvm-weapon-behaviors.ts";
+import type { QvmModuleOptions } from "../../compat/qvm/module.ts";
+import type { QvmWeaponProfile } from "../../compat/qvm/weapon-behavior-profile.ts";
+import { rereleaseWeaponDefinition } from "../../compat/q2/rerelease/weapon-behavior-profile.ts";
+import { parsePe } from "../../guest/pe/index.ts";
+import { prepareRereleaseGuest, type PreparedRereleaseGuest } from "./simulation/rerelease-guest-source.ts";
 import { readWeaponBehaviorDocument } from "../../content/catalog/weapon-behavior-document.ts";
 import { type CvarRegistry } from "../../core/cvars/index.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { ExecutableRecipe, ResolvedWeaponBehaviorSelection, ContentId } from "../../contracts/content.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
-import { sameWeaponBehavior } from "../../contracts/weapon-behavior.ts";
+import { sameWeaponBehavior, sameQvmWeaponLayout } from "../../contracts/weapon-behavior.ts";
 import { discoverQcWeaponBehaviors } from "../../content/catalog/weapon-behaviors.ts";
 import { discoverInstalledContent, type InstalledCatalog } from "../../content/catalog/index.ts";
 import { openMountPlan, type MountedContent } from "../../content/mounts/index.ts";
@@ -17,12 +23,24 @@ export interface ApplicationWeaponBehaviorChoice {
   readonly id: string; readonly title: string; readonly unavailable: string | null;
   readonly selection: ResolvedWeaponBehaviorSelection | null;
 }
-export interface PreparedWeaponBehavior {
+export type PreparedWeaponBehavior = {
+  readonly kind: "qvm";
+  readonly selection: ResolvedWeaponBehaviorSelection;
+  readonly artifact: QvmModuleOptions["artifact"];
+  readonly profile: QvmWeaponProfile;
+  readonly mounts: MountedContent;
+} | {
+  readonly kind: "quakec";
   readonly selection: ResolvedWeaponBehaviorSelection;
   readonly program: QcProgram;
   readonly resources: PreparedQuakeCSource["resources"];
   readonly mounts: MountedContent;
-}
+} | {
+  readonly kind: "rerelease-native";
+  readonly selection: ResolvedWeaponBehaviorSelection;
+  readonly prepared: PreparedRereleaseGuest;
+  readonly mounts: MountedContent;
+};
 export function readWeaponBehaviorRequest(value: string): WeaponBehaviorRequest {
   const slash = value.indexOf("/");
   if (slash <= 0 || slash === value.length - 1 || /\s/.test(value) || !value.slice(slash + 1).includes(":"))
@@ -40,7 +58,25 @@ function behaviorModule(content: ContentId, path: string, digest: ModuleIdentity
 async function choicesFromMounts(catalog: InstalledCatalog, productId: string, mounts: MountedContent): Promise<readonly ApplicationWeaponBehaviorChoice[]> {
   const product = catalog.require(productId), title = product.expectation.title;
   const unavailable = (reason: string): readonly ApplicationWeaponBehaviorChoice[] => [{ id: `${productId}/unavailable`, title, unavailable: reason, selection: null }];
-  if (product.expectation.family !== "q1") return unavailable("This provider has no declared QuakeC trajectory adapter");
+  if (product.expectation.family === "q3") {
+    const entries = await discoverQvmWeaponBehaviors(mounts, `weapon-behavior:${product.id}`);
+    if (entries === null) return unavailable("No authored qvm-weapon-behaviors.json declaration with exact artifact and source layout");
+    if (entries.length === 0) return unavailable("The source declares no QVM trajectory behaviors");
+    return entries.map(entry => ({id:`${productId}/${entry.profile.definition.id}`,title:`${title} — ${entry.profile.definition.title} (${entry.profile.definition.role})`,unavailable:null,
+      selection:{source:{provider:entry.artifact.module.id,content:product.id},artifact:entry.resource,definition:entry.profile.definition,
+        component:{kind:"qvm",abiProfile:entry.artifact.abiProfile ?? "q3-modern",layout:{entityStride:entry.profile.entityStride,levelTime:entry.profile.levelTime,
+          allocate:entry.profile.allocate,free:entry.profile.free,fields:entry.profile.fields,fireAbi:entry.profile.fireAbi}}}}));
+  }
+  if (product.expectation.family === "q2" && product.expectation.edition === "rerelease") {
+    const artifact = await mounts.open("game_x64.dll");
+    if (artifact === null) return unavailable("This provider has no mounted API2023 Windows x64 game artifact");
+    const module = behaviorModule(product.id, artifact.reference.requestedPath, artifact.reference.digest);
+    const definition = rereleaseWeaponDefinition(module);
+    if (definition === null) return unavailable("This native artifact has no validated executable trajectory profile");
+    return [{ id: `${productId}/${definition.id}`, title: `${title} — ${definition.title} (${definition.role})`, unavailable: null,
+      selection: { source: { provider: module.id, content: product.id }, artifact: artifact.reference, definition } }];
+  }
+  if (product.expectation.family !== "q1") return unavailable("This provider has no supported declared or artifact-qualified trajectory adapter");
   const descriptor = await mounts.open("weapon-behaviors.json");
   if (descriptor === null) return unavailable("No authored weapon-behaviors.json trajectory declaration; use weapon-behavior inspect to inspect source callbacks");
   const document = readWeaponBehaviorDocument(descriptor.bytes);
@@ -85,9 +121,25 @@ export async function prepareApplicationWeaponBehavior(catalog: InstalledCatalog
   if (current === undefined || current === null || current.artifact.requestedPath !== selection.artifact.requestedPath || current.artifact.digest !== selection.artifact.digest
     || current.source.provider !== selection.source.provider || !sameWeaponBehavior(current.definition, selection.definition))
     throw new Error("Selected weapon behavior differs from its mounted declaration or artifact");
+  if (current.component?.kind !== selection.component?.kind || current.component !== undefined && selection.component !== undefined
+    && (current.component.abiProfile !== selection.component.abiProfile || !sameQvmWeaponLayout(current.component.layout,selection.component.layout)))
+    throw new Error("Selected QVM behavior layout differs from its mounted declaration");
+  if (selection.definition.fire.kind === "qvm") {
+    const entries = await discoverQvmWeaponBehaviors(mounts,selection.source.provider), entry = entries?.find(entry => entry.profile.definition.id === selection.definition.id);
+    if (entry === undefined || selection.component === undefined || !sameWeaponBehavior(entry.profile.definition,selection.definition)
+      || (entry.artifact.abiProfile ?? "q3-modern") !== selection.component.abiProfile || !sameQvmWeaponLayout(entry.profile,selection.component.layout))
+      throw new Error("QVM behavior declaration changed during preparation");
+    return {kind:"qvm",selection,artifact:entry.artifact,profile:entry.profile,mounts};
+  }
   const artifact = await mounts.open(selection.artifact.requestedPath);
   if (artifact === null) throw new Error("Selected weapon behavior program is missing");
+  if (selection.definition.fire.kind === "native-artifact") {
+    const prepared = await prepareRereleaseGuest({ kind: "native", owner: selection.source, artifact: artifact.reference,
+      role: "server-game", api: { kind: "q2-rerelease-game", version: 2023 }, profile: parsePe(artifact.bytes).abi }, mounts);
+    return { kind: "rerelease-native", selection, prepared, mounts };
+  }
+  if (selection.definition.fire.kind !== "quakec") throw new Error("Selected behavior has no executable preparation adapter");
   const program = loadQcProgram(artifact.bytes);
-  return { selection, program, resources: await prepareQuakeCResources(program, mounts), mounts };
+  return { kind: "quakec", selection, program, resources: await prepareQuakeCResources(program, mounts), mounts };
 }
 

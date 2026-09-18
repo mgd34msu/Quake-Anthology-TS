@@ -1,3 +1,4 @@
+import { updateQ1ClientMetadata, type Q1ClientRow } from "../q1-service-presentation.ts";
 import { asciiFold, commandSeparatorOffset, tokenizeCommand } from "../../../core/commands/text.ts";
 import { RemoteWorldContent } from './remote-world.ts';
 import type { WorldText } from "../../../text/world.ts";
@@ -81,16 +82,15 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
     private readonly events: SimulationPresentationEvent[] = [];
     private readonly soundsPending: SimulationEvent[] = [];
     private published: SimulationOutput | null = null;
-    readonly scoreboard = new Map<number, {
-        readonly name: string;
-        readonly colors: number;
-        readonly frags: number;
-    }>();
+    readonly scoreboard = new Map<number, Q1ClientRow>();
     private records: readonly NetQuakeMessage[] = [];
     constructor(readonly options: Q1RemotePresentationOptions) {
         this.world = new RemoteWorldContent(options.content);
 
         this.client = options.client;
+    }
+    private sourceContent() {
+        return this.world.content.recipe.execution.find(execution => execution.kind === 'quakec')?.owner.content ?? this.world.content.recipe.map.entities.content;
     }
     get scene() { return this.world.scene; }
     get output(): SimulationOutput | null { return this.published; }
@@ -184,16 +184,14 @@ export class Q1RemotePresentation implements Q1ApplicationClientHost, RemotePres
                     this.events.push({ kind: 'music', event: { kind: 'cd-track', track: message.track },
                         content: this.world.content.recipe.map.entities.content, seconds: this.seconds, sequence: this.sequence++ });
                     break;
-                case 'name':
-                case 'colors':
-                case 'frags': {
-                    const old = this.scoreboard.get(message.slot) ?? { name: '', colors: 0, frags: 0 };
-                    if (typeof message.value === 'string')
-                        this.scoreboard.set(message.slot, { ...old, name: message.value });
-                    else
-                        this.scoreboard.set(message.slot, message.kind === 'colors' ? { ...old, colors: message.value } : { ...old, frags: message.value });
+                case 'name': case 'colors': case 'frags': case 'ping': case 'social': case 'player-info': {
+                    updateQ1ClientMetadata(this.scoreboard,message);
+                    this.events.push({kind:'q1-client',event:message,content:this.sourceContent(),seconds:this.seconds,sequence:this.sequence++});
                     break;
                 }
+                case 'skybox':
+                    this.events.push({kind:'q1-sky',event:{kind:'skybox',name:message.text},content:this.sourceContent(),seconds:this.seconds,sequence:this.sequence++});
+                    break;
                 case 'print':
                     this.options.print(message.text);
                     break;

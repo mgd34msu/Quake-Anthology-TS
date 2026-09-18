@@ -5,6 +5,7 @@ import type { GuestAddress, ModuleIdentity } from "../../../src/contracts/execut
 import { createGuestProcessorState, SparseGuestMemory } from "../../../src/guest/core/index.ts";
 import { mapPeImage, resolvePeExport } from "../../../src/guest/pe/index.ts";
 import { X64Cpu } from "../../../src/guest/x64/index.ts";
+import { canonicalAddress, X64ProcessorFault, X64DecodeCursor } from "../../../src/guest/x64/decoder.ts";
 
 const module: ModuleIdentity = { id: "test:x64", artifactPath: "authored-x64-bytes", revision: "1", digest: createContentDigest("34".repeat(32)) };
 const base = 0x10000n;
@@ -40,6 +41,23 @@ function fixture(bytes: readonly number[], start = base) {
   const run = (instructionBudget = 100) => cpu.run({ instructionBudget, returnAddress: pointer(memory, returned) });
   return { memory, state, cpu, run };
 }
+
+test("immediate decoding retains unsigned widths and exact partial fault bytes", () => {
+  for (const width of [1, 2, 4, 8]) {
+    const { memory, state } = fixture([0x90, ...new Array<number>(width).fill(255)]);
+    const cursor = new X64DecodeCursor(memory, state);
+    expect(cursor.readUnsigned(width)).toBe((1n << BigInt(width * 8)) - 1n);
+    expect(cursor.nextIP).toBe(base + BigInt(width + 1));
+    expect(cursor.bytes).toEqual([0x90, ...new Array<number>(width).fill(255)]);
+  }
+  const signed = fixture([0x90, 0xff, 0xff, 0xff, 0xff]);
+  expect(new X64DecodeCursor(signed.memory, signed.state).readSigned(4)).toBe(-1n);
+  const truncated = fixture([0x90, 0x12, 0x34]), partial = new X64DecodeCursor(truncated.memory, truncated.state);
+  expect(() => partial.readUnsigned(4)).toThrow(); expect(partial.bytes).toEqual([0x90, 0x12, 0x34]);
+  const long = fixture([0x90, ...new Array<number>(15).fill(255)]), limited = new X64DecodeCursor(long.memory, long.state);
+  limited.readUnsigned(8); limited.readUnsigned(4);
+  expect(() => limited.readUnsigned(4)).toThrow("15 bytes"); expect(limited.bytes.length).toBe(15);
+});
 
 test("MOV widths preserve byte/word aliases and zero-extend dword writes", () => {
   const { state, run } = fixture([0x48, 0xb8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xb4, 0x12, 0x66, 0xb8, 0x34, 0x56, 0xc3]);
@@ -195,6 +213,26 @@ test("memory write faults roll back integer state and report exact address", () 
   expect(memory.readUint64(pointer(memory, 0x50000n))).toBe(7n);
 });
 
+test("nested CPU runs keep independent rollback snapshots", () => {
+  const { memory, state } = fixture([0xb8, 1, 0, 0, 0, 0x90]);
+  const nested = base + 0x1000n;
+  memory.map({ base: nested, byteLength: 11, permissions: "read-execute", bytes: new Uint8Array([0xb8, 2, 0, 0, 0, 0xbb, 3, 0, 0, 0, 0xf4]) });
+  let cpu: X64Cpu | null = null, entered = false;
+  cpu = new X64Cpu({ state, memory, isHostCall: address => {
+    if (address.byteOffset !== base + 5n || entered) return false;
+    entered = true; state.instructionPointer = nested;
+    if (cpu === null) throw new Error("Missing recursive CPU");
+    expect(cpu.run({ instructionBudget: 2, returnAddress: null }).kind).toBe("budget");
+    expect(state.registers.read("rax", 64)).toBe(2n); expect(state.registers.read("rbx", 64)).toBe(3n);
+    memory.readUint8(pointer(memory, 0x50000n));
+    return false;
+  } });
+  const stopped = cpu.run({ instructionBudget: 2, returnAddress: null });
+  expect(stopped.kind).toBe("exception"); expect(stopped.instructions).toBe(1);
+  expect(state.instructionPointer).toBe(base + 5n); expect(state.registers.read("rax", 64)).toBe(1n);
+  expect(state.registers.read("rbx", 64)).toBe(0n);
+});
+
 test("unsupported opcode and noncanonical access preserve exact failing RIP", () => {
   const invalid = fixture([0x0f, 0x05]);
   const stopped = invalid.run();
@@ -275,4 +313,20 @@ test.skipIf(!await Bun.file(dllPath).exists())("actual relocated rerelease GetGa
   expect(memory.readUint64(pointer(memory, imageBase + 0x1ea878n))).toBe(25n);
   expect(memory.copy(pointer(memory, imageBase + 0x1da620n), 576)).toEqual(expectedImports);
   expect(state.registers.read("rsp", 64)).toBe(stack + 8n);
+});
+
+
+test("canonical address range retains sign, wrap and exact fault boundaries", () => {
+  const values = [0n, 1n, -1n, -(1n << 47n), -(1n << 47n) - 1n,
+    (1n << 47n) - 1n, 1n << 47n, (1n << 47n) + 1n,
+    0xffff7fffffffffffn, 0xffff800000000000n, 0xffff800000000001n,
+    (1n << 64n) - 1n, 1n << 64n, (1n << 64n) + 1n, -(1n << 64n), -(1n << 64n) - 1n];
+  for (const value of values) for (const offset of [-1n, 0n, 1n]) {
+    const input = value + offset, raw = BigInt.asUintN(64, input), high = raw >> 47n;
+    if (high === 0n || high === 0x1ffffn) expect(canonicalAddress(input)).toBe(raw);
+    else {
+      expect(() => canonicalAddress(input)).toThrow(X64ProcessorFault);
+      expect(() => canonicalAddress(input)).toThrow(`Noncanonical 48-bit virtual address 0x${raw.toString(16)}`);
+    }
+  }
 });

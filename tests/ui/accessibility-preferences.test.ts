@@ -1,3 +1,4 @@
+import { readSeatLanguage, writeSeatLanguage } from "../../src/ui/settings/language.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { CvarRegistry } from "../../src/core/cvars/index.ts";
@@ -28,4 +29,14 @@ test("color alternatives retain readable text, explicit focus and opaque high co
   const alternate = accessibleColors(base, { highContrast: false, colorMode: "blue-yellow" });
   expect(alternate.accent.x).toBeGreaterThan(alternate.accent.z);
   expect(alternate.focused.z).toBeGreaterThan(alternate.focused.x);
+});
+
+test("seat language uses the same archived owner and observes console changes", () => {
+  const owner = createIdentityOwner("language-archive"), context = { session: owner.session, origin: { kind: "server-console" } } satisfies ConstructorParameters<typeof CvarRegistry>[0]["context"];
+  const cvars = new CvarRegistry({ dialect: "q3", context }); registerAccessibilitySettings(cvars);
+  writeSeatLanguage(cvars, 0, "french");
+  const restored = new CvarRegistry({ dialect: "q3", context }); registerAccessibilitySettings(restored); restored.applyArchive(cvars.archiveEntries());
+  expect(readSeatLanguage(restored, 0)).toBe("french"); expect(readSeatLanguage(restored, 1)).toBe("english");
+  restored.set("ui_seat1_language", "german"); expect(readSeatLanguage(restored, 0)).toBe("german");
+  restored.set("ui_seat1_language", "../bad"); expect(readSeatLanguage(restored, 0)).toBe("german");
 });

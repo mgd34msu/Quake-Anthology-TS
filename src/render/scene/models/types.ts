@@ -6,11 +6,15 @@ import type { RenderImage, RenderState, SceneCamera } from "../../../contracts/r
 import type { IndexedModelSkin, ModelTransform, Q3MeshModel, SceneEntity } from "../../../contracts/scene.ts";
 import type { MaterialGeometry } from "../../../materials/geometry.ts";
 import type { ModelReplacementPolicy } from "./replacements.ts";
-import type { skinMd5Mesh } from "../../../formats/q3-model/md5.ts";
+import type { sampleMd5Pose, skinMd5Mesh } from "../../../formats/q3-model/md5.ts";
 import type { ShadowSphere } from "../shadows.ts";
 
-export type ModelSkinningFrame = WeakMap<Parameters<typeof skinMd5Mesh>[0],
-  WeakMap<Parameters<typeof skinMd5Mesh>[1], readonly (ReturnType<typeof skinMd5Mesh>[number] & { readonly texCoord: Vec2 })[]>>;
+export interface ModelSkinningFrame {
+  readonly meshes: WeakMap<Parameters<typeof skinMd5Mesh>[0],
+    WeakMap<Parameters<typeof skinMd5Mesh>[1], readonly (ReturnType<typeof skinMd5Mesh>[number] & { readonly texCoord: Vec2 })[]>>;
+  readonly poses: WeakMap<Parameters<typeof sampleMd5Pose>[0],
+    Map<number | "-0", Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>>>;
+}
 
 export type ModelImageSelection = { readonly kind: "external"; readonly name: string }
   | { readonly kind: "indexed"; readonly name: string; readonly width: number; readonly height: number;

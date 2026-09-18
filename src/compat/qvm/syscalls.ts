@@ -44,7 +44,7 @@ function classify(role: QvmRole, call: QvmSyscall, guest: QvmMemory, commandArgu
       break;
     }
     case "ui": {
-      const code = decodeQvmUiImport(word);
+      const code = abiProfile === "q3-modern" ? decodeQvmUiImport(word) : word >= 46 && word <= 49 ? null : decodeQvmUiImport(word >= 50 && word <= 58 ? word - 4 : word);
       if (code !== null) return { ...call, kind: "engine", role, code, guest, abiProfile, commandArguments };
       break;
     }
@@ -61,13 +61,16 @@ export function createQvmSystemCall(role: QvmRole, host: QvmHost = rejectQvmSysc
   return call => {
     if (abiProfile !== "q3-modern") {
       const trap = call.words.getInt32(0, true);
-      if (role !== "qagame" || !(trap >= 0 && trap <= 40 || trap >= 100 && trap <= 106 || trap === 110 || trap === 111 || decodeLegacyQvmGameImport(trap) !== null || trap >= 402 && trap <= 405))
+      const supported = role === "qagame"
+        ? trap >= 0 && trap <= 40 || trap >= 100 && trap <= 106 || trap === 110 || trap === 111 || decodeLegacyQvmGameImport(trap) !== null || trap >= 402 && trap <= 405
+        : trap >= 0 && trap <= 58 || trap >= 100 && trap <= 106 || (role === "cgame" ? trap === 107 || trap === 108 : trap === 110 || trap === 111);
+      if (!supported)
         throw new Error(`Legacy QVM ABI service ${role}/${trap} is not implemented`);
     }
     if (current === null || current.bytes !== call.memory) current = new QvmMemory(call.memory);
     const sourceRole = role === "qagame" ? "game" : role;
     const intrinsic = qvmMemorySyscall(sourceRole, call.words, current)
-      ?? qvmMathSyscall(sourceRole, call.words)
+      ?? qvmMathSyscall(abiProfile !== "q3-modern" && role === "ui" ? "game" : sourceRole, call.words)
       ?? qvmVectorSyscall(sourceRole, call.words, current)
       ?? qvmSnapVectorSyscall(sourceRole, call.words, current);
     return intrinsic ?? host(classify(role, call, current, commandArguments(), abiProfile));

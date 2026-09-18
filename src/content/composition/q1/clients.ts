@@ -36,17 +36,17 @@ export class Q1SourceClients {
     this.game.host.actors.assertOwned(actor);
     if (this.records.has(actor) || [...this.records.values()].some(client => client.slot === admission.slot)) throw new Error("Q1 source client slot is already admitted");
     if (!Number.isSafeInteger(admission.slot) || admission.slot < 0 || admission.slot >= (this.game.options.maxClients ?? 1)) throw new Error("Q1 source client slot is out of range");
-    const client = new Q1SourceClient(actor, admission.slot, admission.userinfo); client.team = client.pants + 1; this.records.set(actor, client); this.applyTeam(client); this.publish(client); return client;
+    const client = new Q1SourceClient(actor, admission.slot, admission.userinfo); client.team = client.pants + 1; this.records.set(actor, client); this.applyPlayerSettings(client); this.publish(client); return client;
   }
   update(actor: ActorId, userinfo: ReadonlyMap<string, string>): undefined {
     const client = this.require(actor), previous = client.pants; client.userinfo.clear(); for (const [key, value] of userinfo) client.userinfo.set(key, value);
     if (client.pants !== previous) client.team = client.pants + 1;
-    this.applyTeam(client); return this.publish(client);
+    this.applyPlayerSettings(client); return this.publish(client);
   }
   colors(actor: ActorId, shirt: number, pants: number): undefined {
     const client = this.require(actor); client.userinfo.set("topcolor", String(color(String(shirt)))); client.userinfo.set("bottomcolor", String(color(String(pants))));
     client.team = client.pants + 1;
-    this.applyTeam(client); return this.publish(client);
+    this.applyPlayerSettings(client); return this.publish(client);
   }
   teamColor(actor: ActorId): number { return this.require(actor).team; }
   spawned(actor: ActorId): undefined {
@@ -56,11 +56,14 @@ export class Q1SourceClients {
       if (this.game.options.coop) client.team = 1;
       else if (this.program === "id1") client.team = -1;
     }
-    this.applyTeam(client); return this.publish(client);
+    this.applyPlayerSettings(client); return this.publish(client);
   }
-  private applyTeam(client: Q1SourceClient): undefined {
+  private applyPlayerSettings(client: Q1SourceClient): undefined {
     const team = this.program === "ctf" ? client.team === 5 ? "red" : client.team === 14 ? "blue" : null : client.team > 0 ? String(client.team) : null;
-    this.game.host.combat.setTraits(client.actor, { team }); return undefined;
+    this.game.host.combat.setTraits(client.actor, { team });
+    const player = this.game.player(client.actor.id), autoSwitch = client.userinfo.get("qts_weapon_autoswitch");
+    if (player !== null && autoSwitch !== undefined) player.autoSwitch = autoSwitch === "new" || autoSwitch === "never" ? autoSwitch : "always";
+    return undefined;
   }
   addScore(actor: ActorId, delta: number): undefined { const client = this.require(actor); client.frags = Math.fround(client.frags + delta); return this.publish(client); }
   setObserver(actor: ActorId, observer: boolean): undefined {

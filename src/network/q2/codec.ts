@@ -77,6 +77,12 @@ export class Q2WireCodec {
         this.selectedCodec = this.r1.createR1Q2Codec(protocol.revision);
         this.selectedProtocol = protocol;
     }
+    acceptQ2ProFeatures(revision: Extract<Q2ProtocolIdentity, { kind: 'q2-q2pro' }>['revision'], flags: number): void {
+        if (this.protocol.kind !== 'q2-q2pro' || this.protocol.revision !== revision || !Number.isInteger(flags) || flags < 0 || flags > 65535)
+            throw new Error('Recorded Q2PRO features disagree with protocol identity');
+        this.q2pro.features.revision = revision;
+        this.q2pro.features.flags = flags;
+    }
     get q2proRevision(): number { return this.q2pro.features.revision; }
     get q2proExtended(): boolean { return this.protocol.kind === 'q2-q2pro' && q2proExtensions(this.q2pro.features); }
     get q2proExtendedV2(): boolean { return this.protocol.kind === 'q2-q2pro' && q2proExtensionsV2(this.q2pro.features); }

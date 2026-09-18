@@ -13,7 +13,7 @@ import { GameplayAuthority, SharedInventoryTable } from "../../../../src/world/g
 import { cgameExportLayout, edictLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestInt, guestPointer, privateClientPrefixLayout, RereleaseQ2GuestHost, RereleaseSourceClient, RereleaseSourceEdict, sourceRereleaseClientProfile } from "../../../../src/compat/q2/rerelease/index.ts";
 
 function unavailable(): never { throw new Error("This binding check does not provide gameplay, assets or transport"); }
-function stateFixture(budgets: { readonly instructionBudget?: number; readonly loadingInstructionBudget?: number } = {}) {
+function stateFixture(budgets: { readonly instructionBudget?: number; readonly loadingInstructionBudget?: number } = {}, registry?: SessionActorRegistry) {
   const module: ModuleIdentity = { id: "test:rr-bindings", artifactPath: "authored-abi-bytes", revision: "1", digest: createContentDigest("58".repeat(32)) };
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const callbacks = new GuestCallbackTable(memory);
@@ -28,7 +28,7 @@ function stateFixture(budgets: { readonly instructionBudget?: number; readonly l
   const cgame = memory.allocate({ byteLength: cgameExportLayout.byteLength, alignment: 8n }); memory.writeInt32(cgame, 2022);
   const code = (bytes: Uint8Array): GuestAddress => { const address = memory.allocate({ byteLength: bytes.length }); memory.write(address, bytes); memory.protect(address, bytes.length, "read-execute"); return address; };
   const getter = (address: GuestAddress): GuestAddress => { const bytes = new Uint8Array(11); bytes.set([0x48, 0xb8]); new DataView(bytes.buffer).setBigUint64(2, address.byteOffset, true); bytes[10] = 0xc3; return code(bytes); };
-  const actors = new SessionActorRegistry(createIdentityOwner("native-body-bindings"));
+  const actors = registry ?? new SessionActorRegistry(createIdentityOwner("native-body-bindings"));
   const actorCallbacks = new ActorCallbackTable(actors);
   const links: string[] = [];
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: value => { links.push(`link:${value.actor.slot}`); return undefined; }, onUnlink: value => { links.push(`unlink:${value.slot}`); return undefined; } });
@@ -104,6 +104,31 @@ test("source tag cleanup retires raw actors before a native level may reuse its 
   host.reconcile();
   expect(first.raw.currentActor()?.generation).not.toBe(previous.generation);
   expect(memory.readUint8(memory.offset(first.raw.address, BigInt(fieldOffset(edictLayout, "inuse"))))).toBe(1);
+});
+
+test("original source reconstruction retires saved edicts never materialized by the candidate", () => {
+  const identity = createIdentityOwner("native-original-placeholders"), original = new SessionActorRegistry(identity);
+  const world = original.allocateAtSource("q1:world", 0, "q1:worldspawn");
+  const firstSaved = original.allocateAtSource("test:rr-bindings", 1, "q2-rerelease:native-edict");
+  const secondSaved = original.allocateAtSource("test:rr-bindings", 2, "q2-rerelease:native-edict");
+  const actors = SessionActorRegistry.restore(identity, original.checkpoint(), original.sourceCheckpoint());
+  const restoredWorld = actors.resolveSaved(world.id), unseen = actors.resolveSaved(secondSaved.id);
+  if (restoredWorld === null || unseen === null) throw new Error("Missing restored placeholders");
+  const { host, first, second, invokeImport } = stateFixture({}, actors);
+  try {
+    host.actor(first.raw);
+    expect(() => actors.rebindRestoredSource("test:rr-bindings")).toThrow("not been retired");
+    invokeImport("FreeTags", [guestInt(766)]);
+    expect(actors.isLive(unseen.id)).toBe(false);
+    expect(actors.resolveSaved(firstSaved.id)).toBeNull(); expect(actors.resolveSaved(secondSaved.id)).toBeNull();
+    expect(actors.isLive(restoredWorld.id)).toBe(true);
+    host.reconcile(); actors.rebindRestoredSource("test:rr-bindings");
+    expect(actors.resolveSaved(firstSaved.id)?.id ?? null).toBe(first.raw.currentActor());
+    expect(actors.resolveSaved(secondSaved.id)?.id ?? null).toBe(second.raw.currentActor());
+    expect(actors.resolveSaved(secondSaved.id)?.id.generation).not.toBe(unseen.id.generation);
+    expect(actors.resolveSaved(world.id)).toBe(restoredWorld);
+  } finally { host.shutdown(); }
+  expect(actors.isLive(restoredWorld.id)).toBe(true);
 });
 
 test("power armor and shared inventory consume the same private client cells, preserving the server mirror", () => {

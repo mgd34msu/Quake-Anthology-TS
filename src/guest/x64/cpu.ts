@@ -33,11 +33,13 @@ export class X64Cpu implements GuestCpu {
   run(options: { readonly instructionBudget: number; readonly returnAddress: GuestAddress | null }): GuestExecutionStop {
     if (!Number.isSafeInteger(options.instructionBudget) || options.instructionBudget < 0) throw new RangeError("Instruction budget must be a nonnegative safe integer");
     if (options.returnAddress !== null && options.returnAddress.addressSpace !== this.memory.addressSpace) throw new RangeError("Return address belongs to another guest address space");
+    let checkpoint: Uint8Array | undefined;
     for (let instructions = 0; instructions < options.instructionBudget; instructions += 1) {
       const start = this.state.instructionPointer;
       const address = this.#evidenceAddress(start);
       if (options.returnAddress?.byteOffset === start) return { kind: "return", instructions, address };
-      const registers = this.state.registers.checkpoint();
+      const registers = this.state.registers.checkpoint(checkpoint);
+      checkpoint = registers;
       const flags = this.state.flags.value;
       let cursor: X64DecodeCursor | null = null;
       try {

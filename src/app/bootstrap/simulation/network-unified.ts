@@ -87,7 +87,7 @@ export function unifiedPresentationFor(actor: ActorId, client: ClientId, value: 
     }
     case 'q3-ballistics': return value.event.kind !== 'rail-award' || own(value.event.actor);
     case 'q2-weapon': return value.event.kind !== 'view-weapon' || own(value.event.actor);
-    case 'q3-character': case 'music': case 'q1-level': return true;
+    case 'q3-character': case 'music': case 'q1-level': case 'q1-session': case 'q1-sky': case 'q1-client': return true;
   }
 }
 

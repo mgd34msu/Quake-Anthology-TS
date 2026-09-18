@@ -82,7 +82,7 @@ export interface GuestIntegerRegisters {
   read(register: GuestRegister, width: GuestIntegerWidth, highByte?: boolean): bigint;
   /** A 32-bit write clears the upper half in x86-64 mode. */
   write(register: GuestRegister, width: GuestIntegerWidth, value: bigint, highByte?: boolean): undefined;
-  checkpoint(): Uint8Array;
+  checkpoint(destination?: Uint8Array): Uint8Array;
   restore(bytes: Uint8Array): undefined;
 }
 export type GuestFlag = "carry" | "parity" | "auxiliary-carry" | "zero" | "sign" | "trap" | "interrupt"

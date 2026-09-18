@@ -1,3 +1,4 @@
+import { RereleaseNavigationImports } from "../../../compat/q2/rerelease/navigation.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallResult, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -133,7 +134,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     for (let index = 1; index < 8192; index++) { const name = this.resource("model", index); if (name.startsWith("#")) weapons.push(name.slice(1)); }
     const weapon = weapons[(state.skin >>> 8) & 255] ?? "weapon.md2";
     return { path: state.modelIndexes[0] === 255 ? `players/${model}/tris.md2` : this.resource("model", state.modelIndexes[0]), skin: state.modelIndexes[0] === 255 ? 0 : state.skin, skinPath: state.modelIndexes[0] === 255 ? `players/${model}/${skin}.pcx` : null,
-      attachedModels: state.modelIndexes.slice(1).map(index => index === 255 ? `players/${model}/${weapon}` : this.resource("model", index)).filter(path => path !== "") };
+      attachedModels: state.modelIndexes.slice(1).map(index => index === 255 ? `players/${model}/${weapon}` : this.resource("model", index)) };
   }
   publishEntities(): void {
     const table = this.host.module.entities();
@@ -179,7 +180,9 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
       case "DebugGraph": { const value = argument(args, 0); if (value.kind !== "float32") throw new TypeError("API2023 graph requires a float"); this.options.debugGraph(value.value, number(1)); break; }
       case "SendToClipBoard": if (this.options.clipboard.kind === "client") this.options.clipboard.write(text(0)); break;
       case "ReportMatchDetails_Multicast": SZ_Clear(this.#buffer); break;
-      case "Bot_MoveToPoint": case "Bot_FollowActor": case "GetPathToGoal": return this.options.navigation?.(call, this.host);
+      case "Bot_MoveToPoint": case "Bot_FollowActor": case "GetPathToGoal":
+        return new RereleaseNavigationImports(this.memory, this.options.navigation, address =>
+          this.host.actor(this.host.module.entities().fromPointer(address))?.id ?? null).invoke(call.name, call.arguments);
       case "Info_RemoveKey": case "Info_SetValueForKey": return this.info(call);
       case "clip": {
         const view = this.host.module.entities().fromPointer(requiredPointer(args, 0)), actor = this.host.actor(view), min = pointer(args, 2), max = pointer(args, 3);

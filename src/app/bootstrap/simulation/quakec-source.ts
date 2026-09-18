@@ -1,3 +1,5 @@
+import { readQuakeCCompatibility } from "../../../compat/qc/compatibility.ts";
+import type { RereleaseMessages } from "../../../network/q1/profile.ts";
 import { QuakeCLocalMessages, presentQuakeCLocalMessage } from "./quakec-local-messages.ts";
 import { quakeCMapEntities } from './quakec-map.ts';
 import { q1WeaponDisplayName } from "../../../content/q1/foundation/weapon-names.ts";
@@ -83,6 +85,7 @@ function nativeWeapons(program: QcProgram): readonly NativeWeapon[] {
     { item: weaponItem("hipnotic:proximity"), label: q1WeaponDisplayName("hipnotic:proximity"), bit: 65536, impulse: 6, via: 16 }];
 }
 export interface PreparedQuakeCSource {
+  readonly messageDialect?: RereleaseMessages;
   readonly execution: QuakeCExecution;
   readonly program: QcProgram;
   readonly resources: ReadonlyMap<string, { readonly resource: ResolvedResourceReference; readonly modelBounds: Bounds | null }>;
@@ -97,7 +100,10 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
   id1ProgramBinding(program);
   if (execution.api.kind !== program.api.kind || execution.api.programVersion !== program.api.programVersion || execution.api.systemCrc !== program.api.systemCrc)
     throw new Error("Shared QuakeC artifact API differs from the selected execution");
-  return { execution, program, resources: await prepareQuakeCResources(program, resourceMounts, entityText) };
+  const compatibility = await mounts.open("quakec-compatibility.json");
+  const messageDialect = readQuakeCCompatibility(compatibility?.bytes ?? null, program.digest);
+  if (program.api.kind === "q1-quakeworld" && messageDialect !== "known-retail") throw new Error("Private NetQuake messages cannot be selected for QuakeWorld");
+  return { execution, program, messageDialect, resources: await prepareQuakeCResources(program, resourceMounts, entityText) };
 }
 
 export async function prepareQuakeCResources(program: QcProgram, mounts: MountedContent, entityText = ""): Promise<PreparedQuakeCSource["resources"]> {
@@ -226,6 +232,7 @@ export class QuakeCSource {
       route: (entries, destination) => { if (destination.kind === "signon") this.signon.push(...entries); else this.routed.push({ entries, destination }); return undefined; },
     } : undefined;
     const nq: QcNetQuakeMessageServices | undefined = binding.kind === "netquake" ? {
+      messageDialect: prepared.messageDialect ?? "known-retail",
       native: () => this.netQuakeWireAttached,
       local: () => this.localMessagesStarted,
       loading: () => this.spawning, client: actor => this.isReservedClient(actor),
@@ -339,7 +346,7 @@ export class QuakeCSource {
   }
   private checkpointHost(): QcExecutorHost {
     return { checkpoint: () => ({ state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
-      kind: this.kind, maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
+      kind: this.kind, messageDialect: this.prepared.messageDialect ?? "known-retail", maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
       changeLevelIssued: this.changeLevelIssued, spawning: this.spawning, activeClients: [...this.activeClients].map(savedQcActor),
       pendingWeapons: [...this.pendingWeapons].map(([actor, pending]) => ({ actor: savedQcActor(actor), weapon: pending.weapon.item, following: pending.following })),
       userInfo: [...this.userInfo].map(([slot, values]) => ({ slot, values: [...values].map(([key, value]) => ({ key, value })) })),
@@ -364,6 +371,8 @@ export class QuakeCSource {
   private restoreHost(value: unknown): void {
     const reader = new SaveReader(value, "quakec.source"), restore = this.options.restore;
     if (restore === undefined) return reader.fail("missing restore clients");
+    const dialect = reader.field("messageDialect");
+    if ((dialect.value === undefined ? "known-retail" : dialect.choice("known-retail", "quake-1-re-ts-private")) !== (this.prepared.messageDialect ?? "known-retail")) return dialect.fail("QuakeC message dialect changed");
     reader.field("kind").literal(this.kind); reader.field("maxClients").literal(this.options.maxClients);
     reader.field("reservedClientSlots").literal(this.reservedClientSlots); reader.field("spawning").literal(false);
     this.spawning = false; this.currentTime = reader.field("currentTime").finite();
@@ -798,7 +807,9 @@ export class QuakeCSource {
     const words = this.entities.at(slot);
     words.setVector(this.field("v_angle"), command.viewAngles);
     words.setFloat(this.field("button0"), command.buttons & 1); words.setFloat(this.field("button2"), (command.buttons >> 1) & 1);
-    if (command.impulse !== 0) { this.pendingWeapons.delete(actor); words.setFloat(this.field("impulse"), command.impulse); }
+    if (command.impulse !== 0) {
+      if (this.localMessages.answerPrompt(actor, command.impulse)) this.options.events.emit(this.prepared.execution.owner.content, {kind:"q1-composition",event:{kind:"clear-prompt",actor}}, undefined, actor);
+      this.pendingWeapons.delete(actor); words.setFloat(this.field("impulse"), command.impulse); }
     return undefined;
   }
   readQuakeWorldState(actor: ActorId, state: QwMovementState): QwMovementState {
@@ -965,6 +976,7 @@ export class QuakeCSource {
     const words = this.entities.at(slot);
     return { provider: this.options.recipe.character.definition.provider, state: { kind: "q1", frame: words.float(this.field("frame")), nextFrameSeconds: words.float(this.field("nextthink")) } };
   }
+  localClientSession(actor: ActorId) { return this.localMessages.sessionState(actor); }
   localClientIntermission(actor: ActorId): boolean | null { return this.localMessages.hasClient(actor) ? this.localMessages.intermission(actor) : null; }
   localClientView(actor: ActorId): { readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number } | null {
     const intermission = this.localMessages.intermission(actor);
@@ -993,6 +1005,12 @@ export class QuakeCSource {
         music: track => this.options.events.emit(this.prepared.execution.owner.content,{kind:"music",event:{kind:"cd-track",track}}, undefined, target ?? undefined),
         angles: (actor, angles) => this.options.events.emit(this.prepared.execution.owner.content,{kind:"view-reset",reason:"source",actor,angles}, undefined, target ?? undefined),
         pause: paused => this.options.events.emit(this.prepared.execution.owner.content,{kind:"music",event:{kind:"pause",paused}}, undefined, target ?? undefined),
+        sky: (name, recipient) => this.options.events.emit(this.prepared.execution.owner.content, {kind:"q1-sky",event:{kind:"skybox",name}}, undefined, recipient ?? undefined),
+        clientMetadata: (event, recipient) => this.options.events.emit(this.prepared.execution.owner.content, {kind:"q1-client",event}, undefined, recipient ?? undefined),
+        session: (kind, recipient) => this.options.events.emit(this.prepared.execution.owner.content, {kind:"q1-session",event:{kind}}, undefined, recipient ?? undefined),
+        prompt: event => this.options.events.emit(this.prepared.execution.owner.content, {kind:"q1-composition",event}, undefined, event.actor),
+        fog: (value, recipient) => this.options.events.emit(this.prepared.execution.owner.content, {kind:"q1-composition",event:{kind:"addon",event:{kind:"fog",
+          player:recipient,density:value.density,color:value.color,duration:Math.max(0,value.transitionSeconds),skyFactor:0.5}}}, undefined, recipient ?? undefined),
       });
     }
   }

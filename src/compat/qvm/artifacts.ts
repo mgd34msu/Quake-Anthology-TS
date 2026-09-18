@@ -48,7 +48,6 @@ export function resolveQvmArtifact(options: {
   readonly replacements?: readonly QvmReplacement[];
   readonly abiProfile?: QvmAbiProfile;
 }): ResolvedQvmArtifact {
-  if (options.abiProfile === "q3-1.16n-base" && options.role !== "qagame") throw new Error("Legacy QVM client and UI profiles are not implemented");
   const digest = createContentDigest(new Bun.CryptoHasher("sha256").update(options.bytes).digest("hex"));
   if (options.module.digest !== digest) throw new Error("QVM artifact bytes do not match their module identity");
   const known = knownQvmArtifacts.find(entry => entry.digest === digest && entry.byteLength === options.bytes.length) ?? null;

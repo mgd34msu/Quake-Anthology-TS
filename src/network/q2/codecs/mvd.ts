@@ -1,3 +1,5 @@
+import { MSG_ReadFloat } from '../message.ts';
+import { readQ2ProInt23, readQ2ProVar64, readQ2ProFog } from './q2pro-fields.ts';
 import { readElement } from '../state.ts';
 // Quake II / q2proto algorithms ported from quake-2-re-ts and original id Software sources. GPL-2.0-or-later.
 import type { SizeBuf } from "../message.ts";
@@ -582,4 +584,46 @@ export function MSG_ReadDeltaMvdPlayerstateRereleaseBody(msg: SizeBuf, from: Pla
         }
     }
     return { number, removed: false, ps };
+}
+
+/** Native packet-player flags; extended coordinates and fog share Q2PRO primitives. */
+export function readMvdPlayer(message: SizeBuf, from: PlayerStateT | null, number: number, profile: import('../mvd-profile.ts').MvdProfile): MvdPlayerReadResultT {
+    if (!profile.extended) return MSG_ReadDeltaMvdPlayerstateBody(message, from, number);
+    let flags = MSG_ReadWord(message);
+    if (flags & PPS_MOREBITS) {
+        if (profile.fog) flags |= MSG_ReadByte(message) << 16;
+        else return { number, removed: true, ps: from ?? new PlayerStateT() };
+    }
+    const ps = new PlayerStateT();
+    if (from !== null) {
+        ps.pmove.pm_type = from.pmove.pm_type; ps.pmove.origin.set(from.pmove.origin); ps.pmove.originF.set(from.pmove.originF);
+        ps.viewoffset.set(from.viewoffset); ps.viewangles.set(from.viewangles); ps.kick_angles.set(from.kick_angles); ps.gunoffset.set(from.gunoffset); ps.gunangles.set(from.gunangles);
+        ps.gunindex = from.gunindex; ps.gunskin = from.gunskin; ps.gunframe = from.gunframe; ps.blend.set(from.blend); ps.damage_blend.set(from.damage_blend); ps.stats.set(from.stats); ps.fov = from.fov; ps.rdflags = from.rdflags; ps.q2proFog = { ...from.q2proFog };
+    }
+    if (flags & PPS_M_TYPE) ps.pmove.pm_type = MSG_ReadByte(message);
+    for (let axis = 0; axis < 3; axis++) if (flags & (axis === 2 ? PPS_M_ORIGIN2 : PPS_M_ORIGIN)) {
+        if (profile.rerelease) ps.pmove.originF[axis] = MSG_ReadFloat(message);
+        else ps.pmove.origin[axis] = profile.v2 ? readQ2ProInt23(message, ps.pmove.origin[axis] ?? 0) : MSG_ReadShort(message);
+    }
+    const vector = (target: Float32Array, scale: number, short: boolean): void => { for (let axis = 0; axis < 3; axis++) target[axis] = (short ? MSG_ReadShort(message) : MSG_ReadChar(message)) / scale; };
+    if (flags & PPS_VIEWOFFSET) vector(ps.viewoffset, profile.rerelease ? 16 : 4, profile.rerelease);
+    if (flags & PPS_VIEWANGLES) { ps.viewangles[0] = SHORT2ANGLE(MSG_ReadShort(message)); ps.viewangles[1] = SHORT2ANGLE(MSG_ReadShort(message)); }
+    if (flags & PPS_VIEWANGLE2) ps.viewangles[2] = SHORT2ANGLE(MSG_ReadShort(message));
+    if (flags & PPS_KICKANGLES) vector(ps.kick_angles, profile.rerelease ? 1024 : 4, profile.rerelease);
+    if (flags & PPS_WEAPONINDEX) { const packed = MSG_ReadWord(message); ps.gunindex = packed & 8191; ps.gunskin = packed >>> 13; }
+    if (flags & PPS_WEAPONFRAME) ps.gunframe = profile.rerelease ? MSG_ReadWord(message) : MSG_ReadByte(message);
+    if (flags & PPS_GUNOFFSET) vector(ps.gunoffset, profile.rerelease ? 512 : 8, true);
+    if (flags & PPS_GUNANGLES) vector(ps.gunangles, profile.rerelease ? 4096 : 65536 / 360, true);
+    if (flags & PPS_BLEND) {
+        if (profile.rerelease || profile.v2) readDeltaBlend(message, ps);
+        else for (let axis = 0; axis < 4; axis++) ps.blend[axis] = MSG_ReadByte(message) / 255;
+    }
+    if (flags & (1 << 17)) ps.q2proFog = readQ2ProFog(message, ps.q2proFog);
+    if (flags & PPS_FOV) ps.fov = MSG_ReadByte(message);
+    if (flags & PPS_RDFLAGS) ps.rdflags = MSG_ReadByte(message);
+    if (flags & PPS_STATS) {
+        const bits = profile.rerelease ? MSG_ReadLong64(message) : profile.v2 ? readQ2ProVar64(message) : BigInt(MSG_ReadLong(message) >>> 0);
+        for (let index = 0; index < (profile.rerelease || profile.v2 ? 64 : 32); index++) if (bits & (1n << BigInt(index))) ps.stats[index] = MSG_ReadShort(message);
+    }
+    return { number, removed: (flags & (1 << 16)) !== 0, ps };
 }

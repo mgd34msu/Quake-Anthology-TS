@@ -6,7 +6,7 @@ import type { SettingBinding } from "./index.ts";
 export interface GameplaySettingsSource {
   readonly cvars: CvarRegistry;
   readonly client?: CvarRegistry;
-  readonly autoSwitch?: { read(): "always" | "new" | "never"; write(value: "always" | "new" | "never"): void };
+  readonly weaponPickupPolicy?: "shared" | "source-owned";
 }
 export function bindGameplaySettings(source: GameplaySettingsSource): readonly SettingBinding[] {
   const settings: SettingBinding[] = [], client = source.client ?? source.cvars;
@@ -14,10 +14,18 @@ export function bindGameplaySettings(source: GameplaySettingsSource): readonly S
     const cvars = name === "sv_autosave" ? source.cvars : client;
     if (name !== undefined && label !== undefined && cvars.find(name) !== undefined) settings.push(bindCvarSetting(cvars, { name, label, kind: "toggle", category: "accessibility", restart: null }, null));
   }
-  const autoSwitch = source.autoSwitch;
-  if (autoSwitch !== undefined) settings.push({ id: "ui:gameplay:autoswitch", label: "Switch to picked-up weapons", category: "input", kind: "choice", enabled: () => true,
-    read: () => autoSwitch.read(), choices: () => [{ id: "always", label: "Always" }, { id: "new", label: "New weapons" }, { id: "never", label: "Never" }],
-    write: value => { if (value === "always" || value === "new" || value === "never") autoSwitch.write(value); } });
+  const autoSwitch = client.dialect === "q3" ? "cg_autoswitch" : client.dialect === "q2-rerelease" ? "autoswitch"
+    : client.dialect === "q1-netquake" || client.dialect === "q1-quakeworld" ? "qts_weapon_autoswitch" : null;
+  if (autoSwitch !== null && client.find(autoSwitch) !== undefined) {
+    if (autoSwitch === "qts_weapon_autoswitch" && source.weaponPickupPolicy !== "shared") settings.push({
+      id: "ui:gameplay:source-weapon-switching", label: "This game controls weapon pickup switching", kind: "button", category: "input",
+      enabled: () => false, activate: () => {},
+    });
+    else if (client.dialect === "q3") settings.push(bindCvarSetting(client, { name: autoSwitch, label: "Switch to picked-up weapons", kind: "toggle", category: "input", restart: null }, null));
+    else settings.push(bindCvarSetting(client, { name: autoSwitch, label: "Switch to picked-up weapons", kind: "choice", category: "input", restart: null,
+      choices: client.dialect === "q2-rerelease" ? [{ id: "0", label: "Smart" }, { id: "1", label: "Always" }, { id: "2", label: "Except consumable weapons" }, { id: "3", label: "Never" }]
+        : [{ id: "always", label: "Always" }, { id: "new", label: "New weapons" }, { id: "never", label: "Never" }] }, null));
+  }
   const playerName = client.dialect === "q1-netquake" && client.find("name") === undefined ? "_cl_name" : "name";
   const identity = client.dialect === "q3" ? [[playerName, "Player name"], ["model", "Player model / skin"], ["headmodel", "Head model / skin"]]
     : client.dialect.startsWith("q2") ? [[playerName, "Player name"], ["skin", "Player skin (model/skin)"]] : [[playerName, "Player name"]];

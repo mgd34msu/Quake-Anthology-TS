@@ -1,3 +1,4 @@
+import { registerLanguageSettings } from "./language.ts";
 import { CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import type { UiPreferenceValues, SettingCvars } from "./index.ts";
@@ -7,6 +8,7 @@ const ranges = { hudScale: [0.5, 1.5], textScale: [0.75, 2], menuScale: [0.75, 1
 const toggles = ["highContrast", "reducedFlashes", "captions", "crosshair"] satisfies readonly (keyof UiPreferenceValues)[];
 function name(seat: number, key: keyof UiPreferenceValues): string { return `ui_seat${seat + 1}_${key}`; }
 export function registerAccessibilitySettings(cvars: CvarRegistry): void {
+  registerLanguageSettings(cvars);
   for (let seat = 0; seat < 4; seat++) {
     for (const key of ["hudScale", "textScale", "menuScale", "crosshairSize"] satisfies readonly (keyof typeof ranges)[]) {
       const bounds = ranges[key], low = bounds[0], high = bounds[1];

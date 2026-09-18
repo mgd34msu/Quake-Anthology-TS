@@ -44,3 +44,21 @@ test("persistent source replay follows sequence after replacement and retired re
   events.message({kind:"print",level:2,text:"world"});
   expect(events.take().map(event=>event.audience.kind)).toEqual(["world"]);
 });
+
+
+test("Q1 recipient light styles leave shared lighting intact and replay to the same seat", () => {
+  const identity = createIdentityOwner("seat-light-styles"), actors = new SessionActorRegistry(identity);
+  const bodies = new SharedBodyTable(actors, { absoluteBounds: (_actor, body) => body.bounds, onLink: () => undefined, onUnlink: () => undefined });
+  const events = new SimulationEvents(bodies, () => ({ kind: "seconds", value: 1 }), actor => identity.client(actor.slot,0), actor => actor.slot);
+  const content = "q1:rerelease:id1:retail", recipient = identity.actor(1,1);
+  events.emit(content, {kind:"q1",event:{kind:"lightstyle",style:7,pattern:"m"}});
+  events.emit(content, {kind:"q1",event:{kind:"lightstyle",style:7,pattern:"az"}}, undefined, recipient);
+  expect(events.lightStyle(7)).toBe("m");
+  const saved = events.capture(); events.restore(new SaveReader(saved,"events"), value=>identity.actor(value.slot,value.generation));
+  const restored=events.takePresentation();
+  expect(restored.map(event=>event.recipient?.slot)).toEqual([undefined,1]);
+  expect(restored.filter(event=>event.recipient===undefined||event.recipient.equals(recipient)).map(event=>event.kind==='q1'&&event.event.kind==='lightstyle'?event.event.pattern:null)).toEqual(['m','az']);
+  expect(events.lightStyle(7)).toBe("m");
+  events.retire(recipient);
+  expect(events.persistentPresentation().map(event=>event.recipient)).toEqual([undefined]);
+});

@@ -1,3 +1,7 @@
+import { readQ2ServerDemo } from '../../../src/network/q2/server-demo.ts';
+import { writeQ2DemoRecord } from '../../../src/network/q2/demo.ts';
+import { MvdPlayback } from '../../../src/network/q2/mvd-playback.ts';
+import type { MvdCapture } from '../../../src/network/q2/mvd-encoding.ts';
 import { Q2GameCallbackError, q2GameCallback } from '../../../src/app/bootstrap/network/types.ts';
 import { CvarRegistry } from '../../../src/core/cvars/index.ts';
 import { expandCommandMacros } from '../../../src/core/commands/text.ts';
@@ -83,4 +87,64 @@ test('Q2 recording preserves reliable messages while waiting for a requested ful
         if (!(failure instanceof Q2GameCallbackError)) throw new Error('Guest failure was swallowed as a packet error');
         expect(failure.cause).toBe(guestFailure);
     } finally { client.close(); server.close(); hub.close(); }
+});
+
+test('authoritative MVD recording captures all players once, retains subframe messages and flushes across travel', async () => {
+    const identity = createIdentityOwner('mvd-host'), hub = new LoopbackHub(), transport = hub.bind('server');
+    const player = { client: identity.client(0, 0), actor: identity.actor(1, 0), sourceEntity: 1 };
+    const players = new Map([[0, new PlayerStateT()], [1, new PlayerStateT()]]);
+    const entity = new EntityStateT(); entity.number = 99; entity.modelindex = 1;
+    const order: string[] = [], packets: Uint8Array[] = [];
+    let observed = 0, captured = 0, messages: MvdCapture['messages'] = [];
+    const host: Q2ApplicationServerHost = {
+        protocol: { kind: 'q2-classic', version: 34 }, messageOptions: { maxConfigStrings: 2080, inventorySlots: 256 }, maxClients: 2,
+        downloads: { allowed: () => false, open: async () => null }, supportsSourceWire: () => ({ kind: 'supported' }), observe: () => { observed++; order.push('observe'); },
+        mvdCapture: (_output, _events, servercount) => { captured++; order.push('capture'); return { revision: 2010, flags: 0, servercount, gamedir: 'baseq2', dummy: -1,
+            configStrings: new Map([[30, '2']]), players, entities: [entity], portalBits: Uint8Array.of(5), messages }; },
+        admit: () => ({ kind: 'accepted', player }), disconnect() {}, carriedPlayer: () => player,
+        gameState: () => { throw new Error('No per-client gamestate needed'); }, frame: () => { throw new Error('No culled per-client frame needed'); },
+        events: () => [], input: () => { throw new Error('No player movement needed'); }, command() {}, userinfo() {}, print: text => { throw new Error(text); },
+    };
+    const output = (seconds: number): SimulationOutput => ({ events: [], snapshot: { session: identity.session,
+        frame: { frame: Math.round(seconds * 40), time: { kind: 'seconds', value: seconds }, elapsed: { kind: 'seconds', value: .025 }, phase: 'frame-exit' },
+        actors: [], bodies: [], inventories: [], configurations: [], scene: { session: identity.session, time: { kind: 'seconds', value: seconds }, world: null, entities: [], lights: [], particles: [], lightStyles: [], areaBits: null } } });
+    const server = new Q2ServerNetwork({ transport, host, random: () => .5 });
+    const reader = new MvdPlayback({ entities: entities => entities, visible: leaf => leaf === 2, areaBits: (_player, bits) => bits, soundAudible: () => true, soundOrigin: () => [0, 0, 0] });
+    let release: (() => void) | undefined;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    try {
+        server.publish(output(.1), [], 100); expect(captured).toBe(0);
+        const seed = server.mvdRecording.seed();
+        expect(seed.identity).toEqual({ kind: 'mvd', revision: 2010 });
+        for (const packet of seed.packets) { if (packet.kind !== 'mvd') throw new Error('Wrong recording'); reader.read(packet.message); }
+        expect(reader.players.size).toBe(2); expect(reader.projection.frame.entities[0]?.number).toBe(99);
+        expect(reader.projection.frame.areaBits).toEqual(Uint8Array.of(5));
+        const serverSeed = server.serverRecording.seed(), serverPackets: Uint8Array[] = [];
+        for (const packet of serverSeed.packets) { if (packet.kind !== 'q2-server') throw new Error('Wrong server format'); serverPackets.push(packet.message); }
+        const detachServer = server.serverRecording.attach({ append: packet => { if (packet.kind !== 'q2-server') throw new Error('Wrong server format'); serverPackets.push(packet.message); return Promise.resolve(); } });
+        server.mvdRecording.attach({ append: packet => { if (packet.kind !== 'mvd') throw new Error('Wrong recording'); packets.push(packet.message); return pending; } });
+        messages = [{ recipient: { kind: 'phs', leaf: 2 }, reliable: false, bytes: Uint8Array.of(10, 2, 111, 107, 0) }];
+        server.publish(output(.125), [], 125); messages = [];
+        server.publish(output(.15), [], 150); server.publish(output(.175), [], 175);
+        expect(packets).toHaveLength(0);
+        server.publish(output(.2), [], 200);
+        expect(packets.length).toBeGreaterThan(0); // Admission is synchronous before a same-turn stop.
+        const records = packets.flatMap(packet => reader.read(packet)); packets.length = 0;
+        expect(records.filter(record => record.event.kind === 'frame')).toHaveLength(1);
+        expect(records.flatMap(record => record.event.kind === 'print' ? [record.event.text] : [])).toEqual(['ok']);
+        expect(() => server.changeWorld(host)).toThrow('serverstop');
+        detachServer();
+        const footage = [...readQ2ServerDemo(Uint8Array.from(serverPackets.flatMap(packet => [...writeQ2DemoRecord(packet)])))];
+        expect(footage.filter(record => record.kind === 'frame')).toHaveLength(4);
+        expect(footage.flatMap(record => record.kind === 'frame' ? record.multicasts : [])).toHaveLength(0); // Broadcast prints are not source multicasts.
+        server.changeWorld(host); server.publish(output(.025), [], 225);
+        for (const packet of packets) reader.read(packet);
+        expect(reader.header?.servercount).toBe(2); expect(reader.players.size).toBe(2);
+        expect(observed).toBe(6); expect(captured).toBe(7);
+        expect(order.slice(-2)).toEqual(['observe', 'capture']);
+        let closed = false; const closing = server.close().then(() => { closed = true; });
+        await Promise.resolve(); expect(closed).toBe(false);
+        release?.(); await closing; expect(closed).toBe(true);
+        expect(() => server.mvdRecording.seed()).toThrow();
+    } finally { release?.(); await server.close(); hub.close(); }
 });

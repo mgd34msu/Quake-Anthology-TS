@@ -25,14 +25,14 @@ function fixture() {
 }
 
 test('fog save retains interrupted global/actor transitions without restarting or map activation', () => {
-  const source = fixture(), seat = new Q1MapFog(entities, source.first.id, content), other = new Q1MapFog(entities, source.second.id, content);
+  const source = fixture(), seat = new Q1MapFog(entities, new Set([content]), source.first.id), other = new Q1MapFog(entities, new Set([content]), source.second.id);
   const global = source.emit(null, 10, 1, 4); seat.receive(global); other.receive(global);
   const targeted = source.emit(source.first.id, 12, 0, 4); seat.receive(targeted); other.receive(targeted);
   expect(seat.current(12).density).toBeCloseTo(0.6);
   expect(seat.current(13).density).toBeCloseTo(0.45);
   expect(other.current(13).density).toBeCloseTo(0.8);
   const image = decodeCheckpointValue(encodeCheckpointValue(source.events.capture()));
-  const restored = fixture(), loaded = new Q1MapFog(entities, restored.first.id, content), loadedOther = new Q1MapFog(entities, restored.second.id, content);
+  const restored = fixture(), loaded = new Q1MapFog(entities, new Set([content]), restored.first.id), loadedOther = new Q1MapFog(entities, new Set([content]), restored.second.id);
   restored.events.restore(new SaveReader(image), saved => restored.identity.actor(saved.slot, saved.generation));
   const replay = restored.events.takePresentation(); loaded.receive(replay); loadedOther.receive(replay);
   for (const time of [12,13,14,15,16,20]) {
@@ -52,11 +52,11 @@ test('fog save retains interrupted global/actor transitions without restarting o
   expect(saved?.actors).toHaveLength(1);
   expect(saved?.global.context?.content).toBe(content);
   expect(saved?.actors[0]?.transition.start).toBe(13);
-  expect(new Q1MapFog(entities, restored.first.id, content).current(14).density).toBe(0.2);
+  expect(new Q1MapFog(entities, new Set([content]), restored.first.id).current(14).density).toBe(0.2);
 });
 
 test('fog retirement, foreign content and old saves do not leak actor/world state', () => {
-  const source = fixture(), seat = new Q1MapFog(entities, source.first.id, content);
+  const source = fixture(), seat = new Q1MapFog(entities, new Set([content]), source.first.id);
   seat.receive(source.emit(source.first.id, 1, 0.9, 0));
   const original = seat.current(2);
   seat.receive(source.emit(source.first.id, 2, 0, 0, 'q1:classic:id1:retail'));
@@ -67,7 +67,7 @@ test('fog retirement, foreign content and old saves do not leak actor/world stat
   const replacement = source.actors.allocate('q1:base', 'q1:player');
   expect(replacement.id.slot).toBe(source.first.id.slot);
   expect(replacement.id.generation).not.toBe(source.first.id.generation);
-  const fresh = new Q1MapFog(entities, replacement.id, content);
+  const fresh = new Q1MapFog(entities, new Set([content]), replacement.id);
   fresh.receive(source.emit(source.first.id, 3, 1, 0));
   expect(source.events.capture().q1Fog?.actors).toHaveLength(0);
   fresh.receive(source.emit(replacement.id, 3, 1, 2));
@@ -76,7 +76,7 @@ test('fog retirement, foreign content and old saves do not leak actor/world stat
   const legacy = { sequence: retained.sequence, presentationSequence: retained.presentationSequence, styles: retained.styles, persistent: retained.persistent };
   const restored = fixture(); restored.emit(restored.first.id, 0, 1, 0);
   restored.events.restore(new SaveReader(legacy), saved => restored.identity.actor(saved.slot, saved.generation));
-  const old = new Q1MapFog(entities, restored.first.id, content); old.receive(restored.events.takePresentation());
+  const old = new Q1MapFog(entities, new Set([content]), restored.first.id); old.receive(restored.events.takePresentation());
   expect(old.current(100).density).toBe(0.2);
   expect(restored.events.capture().q1Fog?.actors).toHaveLength(0);
   const fog = retained.q1Fog; if (fog === null) throw Error('Missing fog checkpoint');

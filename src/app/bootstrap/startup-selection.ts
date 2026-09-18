@@ -1,4 +1,5 @@
 import { applicationWeaponBehaviorChoices, readWeaponBehaviorRequest, selectApplicationWeaponBehavior } from "./weapon-behavior-selection.ts";
+import { sourceProgramProduct } from "../../content/catalog/source-program.ts";
 import { liveQ2Protocol } from "./options.ts";
 import { readArenaSelection, type ArenaSelection } from "./base-arena-selection.ts";
 import { prepareQ3ApplicationProduct } from "./q3-product.ts";
@@ -326,17 +327,17 @@ export class StartupSelectionModel {
   }
   private maps(): readonly StartupSelectionChoice[] {
     const product = this.geometry(), choices = this.playableMaps.get(product.expectation.id) ?? [];
-    if (product.expectation.family === "q3") return choices;
+    const source = sourceProgramProduct(this.catalog, this.product("product").id);
     const { mode, rules = "standard" } = this.options;
     if (mode !== "deathmatch" && rules === "standard") return choices;
-    const key = `${product.id}:${mode}:${rules}`, cached = this.eligibleMaps.get(key);
+    const key = `${source.id}:${product.id}:${mode}:${rules}`, cached = this.eligibleMaps.get(key);
     if (cached !== undefined) return cached;
     const metadata = new Map(this.catalog.mapsFor(product.id).map(map => [map.path.toLowerCase(), map]));
     const result = choices.map(option => {
       if (option.unavailable !== null) return option;
       const map = metadata.get(option.id.toLowerCase());
       const classnames = map === undefined ? undefined : this.mapClassnames.get(`${map.source}:${map.memberIndex}`);
-      return classnames === undefined ? option : { ...option, unavailable: matchMapUnavailable({ ...product.expectation, mode, rules }, classnames) };
+      return classnames === undefined ? option : { ...option, unavailable: matchMapUnavailable({ ...source.expectation, mode, rules }, classnames) };
     });
     this.eligibleMaps.set(key, result);
     return result;
@@ -390,7 +391,7 @@ export class StartupSelectionModel {
   }
   prepareMapChoices(offset: number, count: number): Promise<void> | null {
     const product = this.geometry();
-    if (product.expectation.family === "q3" || this.values.mode !== "deathmatch" && this.values.rules === "standard") return null;
+    if (this.values.mode !== "deathmatch" && this.values.rules === "standard") return null;
     const maps = this.catalog.mapsFor(product.id);
     const choices = this.maps().slice(offset, offset + count).filter(choice => {
       const map = maps.find(map => map.path.toLowerCase() === choice.id.toLowerCase());
@@ -549,7 +550,7 @@ export class StartupSelectionModel {
       row("grapple", "Grapple", grapples), row("grenades", "Offhand grenades", [nativeGrenades, choice("disabled", "Disabled"),
         ...this.catalog.products.filter(product => product.expectation.family === "q2" && product.expectation.campaign === "baseq2").map(productChoice)]),
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
-      row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...this.product("product").expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Q2 Capture the Flag" : "Loki's Minions CTF",
+      row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...sourceProgramProduct(this.catalog, this.product("product").id).expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Q2 Capture the Flag" : "Loki's Minions CTF",
         this.product("product").expectation.family !== "q2" || this.product("product").expectation.edition !== "classic" ? "Requires a classic Quake II campaign"
           : this.values.mode !== "deathmatch" ? "Requires deathmatch mode" : unavailable(this.catalog.product(`q2-classic-${rule}`))))]),
       row("skill", "Difficulty", [choice("0", "Easy"), choice("1", "Normal"), choice("2", "Hard"), choice("3", "Nightmare")]),
@@ -573,7 +574,7 @@ export class StartupSelectionModel {
     }
     if (field === "mapProduct") this.values.map = this.defaultMap();
     if (field === "mode" || field === "product") {
-      const product = this.product("product");
+      const product = sourceProgramProduct(this.catalog, this.product("product").id);
       const rules = this.values.rules;
       if (rules === "standard" || rules === "ctf" || rules === "lmctf" || rules === "tag" || rules === "deathball" || rules === "horde")
         if (matchModeUnavailable({ ...product.expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules }) !== null) this.values.rules = "standard";
@@ -640,7 +641,7 @@ export class StartupSelectionModel {
     return equipment;
   }
   async resolve(): Promise<StartupLaunch> {
-    if (this.geometry().expectation.family !== "q3" && (this.values.mode === "deathmatch" || this.values.rules !== "standard"))
+    if (this.values.mode === "deathmatch" || this.values.rules !== "standard")
       await this.prepareMapClassnames();
     for (const row of this.rows()) {
       const selected = row.choices.find(choice => choice.id === row.value);

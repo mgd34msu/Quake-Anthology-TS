@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
+import type { QueryTarget } from "../../contracts/scene.ts";
 import type { NavigationNode, NavigationProfile, NavigationWorld } from "./types.ts";
 export function at<T>(values: readonly T[], index: number): T {
   const value = values[index];
@@ -21,19 +22,19 @@ export function nodeProfile(profile: NavigationProfile, node: NavigationNode): N
     : node.source.kind === "nav3" ? (node.flags & 512) !== 0 : node.source.kind === "constructed" && node.presence === 4;
   return crouched ? crouchedProfile(profile) : profile;
 }
-export function contents(world: NavigationWorld, profile: NavigationProfile, point: Vec3): number {
-  const sample = world.scene.pointContents({ point, target: { kind: "world" }, policy: profile.policy, numeric: profile.movement.numeric, passActor: world.passActor });
+export function contents(world: NavigationWorld, profile: NavigationProfile, point: Vec3, target: QueryTarget = { kind: "world" }): number {
+  const sample = world.scene.pointContents({ point, target, policy: profile.policy, numeric: profile.movement.numeric, passActor: world.passActor });
   if (sample.kind === "q1") return sample.contents === -3 ? 1 : sample.contents === -4 ? 2 : sample.contents === -5 ? 4 : 0;
   const value = sample.kind === "q2" ? sample.merged : sample.contents;
   return ((value & 32) !== 0 ? 1 : 0) | ((value & 16) !== 0 ? 2 : 0) | ((value & 8) !== 0 ? 4 : 0)
     | (sample.kind === "q2" && (value & 0x20000000) !== 0 ? 8 : 0);
 }
-export function trace(world: NavigationWorld, profile: NavigationProfile, start: Vec3, end: Vec3) {
-  return world.scene.trace({ start, end, shape: profile.shape, target: { kind: "world" }, policy: profile.policy,
+export function trace(world: NavigationWorld, profile: NavigationProfile, start: Vec3, end: Vec3, target: QueryTarget = { kind: "world" }) {
+  return world.scene.trace({ start, end, shape: profile.shape, target, policy: profile.policy,
     numeric: profile.movement.numeric, passActor: world.passActor });
 }
-export function clear(world: NavigationWorld, profile: NavigationProfile, start: Vec3, end: Vec3): boolean {
-  const result = trace(world, profile, start, end);
+export function clear(world: NavigationWorld, profile: NavigationProfile, start: Vec3, end: Vec3, target: QueryTarget = { kind: "world" }): boolean {
+  const result = trace(world, profile, start, end, target);
   return !result.startSolid && !result.allSolid && result.fraction === 1;
 }
 export function validateProfile(profile: NavigationProfile): void {

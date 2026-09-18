@@ -76,6 +76,7 @@ export class RereleaseBotBehavior implements RereleaseOrders {
     for (const entry of ready) callbacks.chat({ ...entry.event });
     return command;
   }
+  setObjectiveGoal(point: BotVec3 | null): void { this.brain.setObjectiveGoal(point); }
   requestMoveToPoint(point: BotVec3): void { this.brain.requestMoveToPoint(point); }
   requestFollowEntity(entity: number, origin: BotVec3): void { this.brain.requestFollowEntity(entity, origin); }
   clearExplicitGoal(): void { this.brain.clearExplicitGoal(); }

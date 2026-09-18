@@ -1,3 +1,6 @@
+import { q1BotChatText } from "../../../bots/behavior/rerelease/chat-text.ts";
+import type { RereleaseGoalStatus } from "../../../compat/q2/rerelease/navigation.ts";
+import type { Vec3 } from "../../../contracts/math.ts";
 import type { ActorId, ClientId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ActorCommand } from "../../../contracts/session.ts";
 import { RereleaseBotBehavior, type RereleaseBehaviorCheckpoint } from "../../../bots/behavior/rerelease/profile.ts";
@@ -80,7 +83,14 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
         maximumLandingRise: 18, startAbove: 56, bodyMins: player.standingBounds.min, bodyMaxs: player.standingBounds.max },
       callbacks: { time: () => simulation.timeSeconds,
         preThink: () => {}, postThink: () => {},
-        chat: event => this.options.print(`${name}: ${event.locstring}\n`),
+        chat: event => {
+          const connection = this.connections.get(saved.client.id.slot);
+          if (connection === undefined) throw new Error("Native bot chat lost its admitted client");
+          const lookup = (key: string): string | null => this.assets.localization.lookup(key);
+          const text = this.assets.source === "q1-rerelease" ? q1BotChatText(event.locstring, lookup, connection.behavior.random)
+            : lookup(event.locstring) ?? event.locstring;
+          simulation.playerCommand(actor.id, event.teamOnly ? "say_team" : "say", [text]);
+        },
         selectWeapon: number => { selection.number = number; }, weaponImpulse: number => { selection.number = number; return 0; },
         humanTeammateNear: () => simulation.players().some(other => !this.isBot(other) && this.objectives.team(other) === this.objectives.team(actor.id)
           && (() => { const body = simulation.bodies.read(other), own = simulation.bodies.read(actor.id); return body !== null && own !== null && Math.hypot(body.origin.x-own.origin.x, body.origin.y-own.origin.y, body.origin.z-own.origin.z) < 256; })()) } });
@@ -89,11 +99,10 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
     const connection: Connection = { ...saved, userinfo: saved.userinfo ?? `\\name\\${name}`, actor, behavior, world, name, skill, selection, sequence: 0 };
     this.connections.set(saved.client.id.slot, connection);
     if (restoredActor === undefined) {
-      simulation.playerCommand(actor.id, "name", [name]);
-      if (!this.objectives.mode().hasTeams) {
-        if (character !== undefined && character.skin !== "") simulation.playerCommand(actor.id, "skin", [character.skin]);
-        if (character !== undefined && this.assets.source === "q1-rerelease") simulation.playerCommand(actor.id, "color", [String(character.shirtColor), String(character.pantsColor)]);
-      }
+      const cosmetic = !this.objectives.mode().hasTeams && character !== undefined;
+      simulation.setSourcePlayerIdentity(actor.id, { name,
+        ...(cosmetic && this.assets.source === "q2-rerelease" && character.skin !== "" ? { skin: character.skin } : {}),
+        ...(cosmetic && this.assets.source === "q1-rerelease" ? { shirt: character.shirtColor, pants: character.pantsColor } : {}) });
       this.objectives.admit(actor.id);
     }
     return connection;
@@ -141,7 +150,7 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
       if (player === null || !simulation.actors.isLive(connection.actor.id)) throw new Error("Native bot command targets a retired actor");
       connection.behavior.brain.setGameMode(this.objectives.mode());
       const objective = this.objectives.goal(connection.actor.id);
-      if (objective !== null) connection.behavior.requestMoveToPoint(objective);
+      connection.behavior.setObjectiveGoal(objective);
       const source = connection.behavior.think(connection.world);
       const command = this.command(source, connection);
       commands.push({ actor: connection.actor.id, source: { kind: "bot", provider: this.assets.source === "q1-rerelease" ? "q1:bot" : "q2:bot" }, sequence: connection.sequence++, command,
@@ -164,6 +173,25 @@ export class ApplicationRereleaseBots implements ApplicationBotService {
     }
   }
   clients(): readonly ApplicationBotClient[] { return [...this.connections.values()].map(({ client, reliable, userinfo }) => ({ client, reliable, ...(userinfo === undefined ? {} : { userinfo }) })); }
+  moveToPoint(actor: ActorId, point: Vec3, tolerance: number): RereleaseGoalStatus {
+    const connection = [...this.connections.values()].find(value => value.actor.id.equals(actor));
+    const body = this.options.simulation.bodies.read(actor);
+    if (connection === undefined || body === null) return 0;
+    const before = connection.behavior.goalStatus();
+    connection.behavior.requestMoveToPoint(point);
+    if (Math.hypot(body.origin.x - point.x, body.origin.y - point.y, body.origin.z - point.z) <= tolerance) return 3;
+    const status = connection.behavior.goalStatus();
+    return status === 0 ? 0 : status === 1 ? 3 : before === 0 ? 1 : 2;
+  }
+  followActor(actor: ActorId, target: ActorId): RereleaseGoalStatus {
+    const connection = [...this.connections.values()].find(value => value.actor.id.equals(actor));
+    const body = this.options.simulation.bodies.read(target);
+    if (connection === undefined || body === null) return 0;
+    const before = connection.behavior.goalStatus();
+    connection.behavior.requestFollowEntity(this.identify(target), body.origin);
+    const status = connection.behavior.goalStatus();
+    return status === 0 ? 0 : status === 1 ? 3 : before === 0 ? 1 : 2;
+  }
   isBot(actor: ActorId): boolean { return [...this.connections.values()].some(connection => connection.actor.id.equals(actor)); }
   actor(client: ClientId): ActorId | null { return this.connections.get(client.slot)?.client.id.equals(client) === true ? this.connections.get(client.slot)?.actor.id ?? null : null; }
   disconnect(slot: number): boolean {

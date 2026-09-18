@@ -34,7 +34,10 @@ export class SimulationEvents {
   constructor(private readonly bodies: SharedBodyTable, private readonly now: () => SourceTime,
     private readonly clientFor: (actor: ActorId) => ClientId | null, private readonly sourceSlot: (actor: ActorId) => number | null, fog: SimulationQ1FogOptions | null = null) { this.fog = fog === null ? null : new SimulationQ1Fog(fog); }
 
-  retire(actor: ActorId): void { this.fog?.retire(actor); }
+  retire(actor: ActorId): void {
+    this.fog?.retire(actor);
+    for (const [key, event] of this.persistent) if (event.recipient?.equals(actor) === true) this.persistent.delete(key);
+  }
 
   get nextSequence(): number { return this.sequence; }
 
@@ -60,6 +63,9 @@ export class SimulationEvents {
     if (source.kind === "q1-composition" && source.event.kind === "addon" && source.event.event.kind === "fog")
       this.source.push(...(this.fog?.update(presentation, source.event.event) ?? []));
     const recipientKey = recipient === undefined ? "world" : `${recipient.slot}:${recipient.generation}`;
+    if (source.kind === "q1-sky") this.persistent.set(`q1-sky:${content}:${recipientKey}`, presentation);
+    if (source.kind === "q1-client") this.persistent.set(`q1-client:${content}:${source.event.slot}:${source.event.kind}:${recipientKey}`, presentation);
+    if (source.kind === "q1" && source.event.kind === "lightstyle") this.persistent.set(`q1-style:${source.event.style}:${recipientKey}`, presentation);
     if (source.kind === "q1" && source.event.kind === "finale") this.persistent.set(`q1-finale:${recipientKey}`, presentation);
     if (source.kind === "music") this.persistent.set(`source-music:${source.event.kind}:${recipientKey}`, presentation);
     if (source.kind === "q1" && source.event.kind === "ambient") this.persistent.set(`ambient:${this.presentationSequence}`, presentation);
@@ -109,7 +115,7 @@ export class SimulationEvents {
       persistent: [...this.persistent].sort((a, b) => a[1].sequence - b[1].sequence).map(([key, original]) => {
         const value = {...original, ...(original.recipient === undefined ? {} : {recipient:savedActorId(original.recipient)})};
         if (value.kind === "q2" && value.event.kind === "sound") return { key, ...value, event: { ...value.event, actor: value.event.actor === null ? null : savedActorId(value.event.actor) } };
-        if (value.kind === "music" || value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && (value.event.kind === "ambient" || value.event.kind === "static-model" || value.event.kind === "finale")) return { key, ...value };
+        if (value.kind === "q1-sky" || value.kind === "q1-client" || value.kind === "music" || value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && (value.event.kind === "ambient" || value.event.kind === "static-model" || value.event.kind === "finale" || value.event.kind === "lightstyle")) return { key, ...value };
         throw new Error("Unsupported persistent source event");
       }) };
   }
@@ -123,12 +129,16 @@ export class SimulationEvents {
     } else this.fog?.reset();
     reader.field("styles").list(value => this.styles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
     reader.field("persistent").list(value => {
-      const event = value.field("event"), family = value.field("kind").choice("q1", "q2", "music"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model", "finale", "cd-track", "pause");
+      const event = value.field("event"), family = value.field("kind").choice("q1", "q2", "music", "q1-sky", "q1-client"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model", "finale", "cd-track", "pause", "lightstyle", "skybox", "name", "social", "player-info", "colors", "frags", "ping");
       const recipient = value.field("recipient");
       const base = { ...(recipient.value === undefined ? {} : {recipient:reference(readSavedActor(recipient))}), sequence: value.field("sequence").integer(0), content: readContentId(value.field("content")), seconds: value.field("seconds").number(), sourceEntity: value.field("sourceEntity").nullable(v => v.integer(0)) };
       let restored: SimulationPresentationEvent;
       if (family === "music" && kind === "cd-track") restored = {...base, kind:"music",event:{kind,track:event.field("track").integer(0)}};
+      else if (family === "q1-sky" && kind === "skybox") restored = {...base,kind:"q1-sky",event:{kind,name:event.field("name").string()}};
+      else if (family === "q1-client" && (kind === "name" || kind === "social" || kind === "player-info")) restored = {...base,kind:"q1-client",event:{kind,slot:sourceClientInteger(event.field("slot"),0,255),value:event.field("value").string()}};
+      else if (family === "q1-client" && (kind === "colors" || kind === "frags" || kind === "ping")) restored = {...base,kind:"q1-client",event:{kind,slot:sourceClientInteger(event.field("slot"),0,255),value:sourceClientInteger(event.field("value"),-32768,32767)}};
       else if (family === "music" && kind === "pause") restored = {...base,kind:"music",event:{kind,paused:event.field("paused").boolean()}};
+      else if (family === "q1" && kind === "lightstyle") restored = {...base,kind:"q1",event:{kind,style:event.field("style").integer(0),pattern:event.field("pattern").string()}};
       else if (family === "q1" && kind === "finale") restored = {...base,kind:"q1",event:{kind,text:event.field("text").string(),stage:event.field("stage").choice(1,2,3,4,5,6)}};
       else if (family === "q1" && kind === "ambient") restored = { ...base, kind: "q1", event: { kind, origin: readVector(event.field("origin")), path: event.field("path").string(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number() } };
       else if (family === "q1" && kind === "static-model") restored = { ...base, kind: "q1", event: { kind, path: event.field("path").string(), frame: event.field("frame").integer(),
@@ -172,7 +182,7 @@ export class SimulationEvents {
       this.sound(content, event.path, event.actor, event.origin ?? center, channel, event.volume, event.attenuation, recipient);
     } else if (event.kind === "ambient") this.sound(content, event.path, null, event.origin, 0, event.volume, event.attenuation, recipient);
     else if (event.kind === "message") this.message(event.center ? { kind: "center-print", text: event.text } : { kind: "print", level: 2, text: event.text }, event.player, sequence);
-    else if (event.kind === "lightstyle") this.styles.set(event.style, { family: "q1", pattern: event.pattern });
+    else if (event.kind === "lightstyle" && recipient === undefined) this.styles.set(event.style, { family: "q1", pattern: event.pattern });
     return undefined;
   }
 
@@ -183,4 +193,8 @@ export class SimulationEvents {
     else if (event.kind === "lightstyle") this.styles.set(event.style, { family: "q2", pattern: event.pattern });
     return undefined;
   }
+}
+
+function sourceClientInteger(reader: SaveReader, minimum: number, maximum: number): number {
+  const value=reader.integer(minimum);return value>maximum ? reader.fail('source client value out of range') : value;
 }

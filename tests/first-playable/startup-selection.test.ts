@@ -1,3 +1,4 @@
+import { preflightApplicationMatch } from "../../src/app/bootstrap/match-preflight.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -356,3 +357,33 @@ test.skipIf(!existsSync(resolve(corpus, "q2/rerelease/baseq2/pak0.pak")))("nativ
     expect(launch.recipe.map.geometryContent).toBe(content);
   }
 }, 60000);
+
+
+test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")))("mixed match eligibility uses source rules on Q3 geometry before launch", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-rerelease-baseq2", "--mode", "deathmatch", "--rules", "deathball"]);
+  if (command.kind !== "run") throw new Error("Expected launch options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const model = new StartupSelectionModel(catalog, command.options);
+  await model.prepareMaps();
+  model.select("mapProduct", "q3-baseq3");
+  await expect(model.resolve()).rejects.toThrow("DeathBall map is missing:");
+  model.select("rules", "standard");
+  await model.prepareMapChoices(0, 1);
+  const map = model.rows().find(row => row.id === "map")?.choices.find(row => row.id === model.options.map);
+  expect(map?.unavailable).toBeNull();
+}, 30000);
+
+
+test.skipIf(!existsSync(resolve(corpus, "q3a/missionpack/pak0.pk3")))("configured Team Arena objectives preflight preserves explicit foreign anchors", async () => {
+  const command = parseApplicationCommand(["--content-root", corpus, "--game", "q3-missionpack", "--map", "mpteam1", "--mode", "deathmatch"]);
+  if (command.kind !== "run") throw new Error("Expected launch options");
+  const catalog = await discoverInstalledContent({ corpusRoot: corpus, discoverMods: false });
+  const preset = applicationPreset(catalog, command.options);
+  const recipe = await resolveLaunch({ catalog, preset, choice: presetChoice(preset.id) });
+  const world = { kind: "q2-bsp", entities: '{ "classname" "worldspawn" } { "classname" "item_flag_team1" } { "classname" "item_flag_team2" } { "classname" "info_player_deathmatch" }' } satisfies Parameters<typeof preflightApplicationMatch>[0]["world"];
+  const content = { catalog, recipe, world };
+  expect(() => preflightApplicationMatch(content, command.options, [{ name: "g_gametype", value: "4" }])).not.toThrow();
+  expect(() => preflightApplicationMatch(content, command.options, [{ name: "g_gametype", value: "4" }, { name: "g_gametype", value: "5" }])).toThrow("team_CTF_neutralflag");
+  expect(() => preflightApplicationMatch(content, command.options, [{ name: "g_gametype", value: "7" }])).toThrow("team_neutralobelisk");
+  expect(() => preflightApplicationMatch({ ...content, world: { ...world, entities: world.entities + ' { "classname" "team_CTF_neutralflag" "origin" "0 0 32" }' } }, command.options, [{ name: "g_gametype", value: "5" }])).not.toThrow();
+});

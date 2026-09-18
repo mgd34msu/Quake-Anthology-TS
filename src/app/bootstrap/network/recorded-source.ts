@@ -4,7 +4,7 @@ import { DemoReader } from '../../../network/q3/demo.ts';
 import type { DemoResource } from '../demo-playback.ts';
 import type { DemoCompletion } from '../demo-commands.ts';
 import { NetQuakeDemoInput, QuakeWorldDemoInput } from './q1-demo.ts';
-import { Q2DemoPlayback } from './q2-demo.ts';
+import { Q2DemoPlayback, readQ2PlaybackHeader } from './q2-demo.ts';
 import { Q3DemoPlayback } from './q3-demo.ts';
 import { Q1RemotePresentation } from './remote-q1.ts';
 import { QwRemotePresentation } from './remote-qw.ts';
@@ -40,9 +40,13 @@ export class RecordedRemoteSource {
     private readonly timedemo: boolean, private readonly cvars: CvarRegistry, private readonly complete: (reason: DemoCompletion, timing: DemoTiming | null) => void) {
     if (resource.kind === 'q1' && remote instanceof Q1RemotePresentation) this.playback = { kind: 'q1', input: new NetQuakeDemoInput(new NetQuakeDemoReader(resource.bytes), remote) };
     else if (resource.kind === 'qw' && remote instanceof QwRemotePresentation) this.playback = { kind: 'qw', input: new QuakeWorldDemoInput(new QuakeWorldDemoReader(resource.bytes), remote) };
-    else if (resource.kind === 'q2' && remote instanceof Q2RemotePresentation) this.playback = { kind: 'q2', input: new Q2DemoPlayback(resource.bytes, remote), remote };
+    else if (resource.kind === 'q2' && remote instanceof Q2RemotePresentation) this.playback = { kind: 'q2', input: new Q2DemoPlayback(resource.bytes, remote, readQ2PlaybackHeader(resource.bytes).kind === 'mvd' ? remote.mvdPresentation : undefined, clientnum => remote.selectRecordedView(clientnum)), remote };
     else if (resource.kind === 'q3' && remote instanceof Q3RemotePresentation) this.playback = { kind: 'q3', input: new Q3DemoPlayback({ host: remote, clock: remote.clock, reader: new DemoReader(resource.bytes, resource.path) }), remote };
     else throw new Error('Recording and remote presentation families differ');
+  }
+  selectPlayer(clientnum: number): void {
+    if (this.playback.kind !== 'q2') throw new Error('View selection requires a multiview Q2 recording');
+    this.playback.input.selectPlayer(clientnum);
   }
   get phase(): 'loading' | 'active' | 'closed' { return this.state; }
   get timing(): DemoTiming | null { return this.resultTiming; }

@@ -315,3 +315,28 @@ test.skipIf(!existsSync(archivePath))("Hipnotic source think retains projected l
     expect(laser.speed).toBe(250);
   } finally { actors.close(); }
 });
+
+
+test.skipIf(!existsSync(archivePath))("routed base weapon pickups retain Rogue grapple and pregrant autoswitch rules", async () => {
+  const scene = await session("rogue");
+  try {
+    const selections: string[] = [];
+    for (const entry of q2BaseWeaponInventory()) scene.inventory.configure(scene.player.actor, { ...entry, count: 0 });
+    scene.game.pickupAdmission = new SharedPickupAdmission({ inventory: scene.inventory, profile: expansionSourceSupply(Q1_Q2_SUPPLY_PROFILE),
+      ammoGranted: () => undefined, weaponGranted: (_actor, _weapons, selection) => { selections.push(selection); return undefined; } });
+    const pickup = () => {
+      const entity = scene.game.create("weapon_rocketlauncher"); scene.game.spawnEntity(entity); entity.solid = "trigger";
+      scene.callbacks.touch({ self: entity.actor, other: scene.player.actor.id, plane: null, surface: null });
+    };
+    scene.player.weapon = "rogue:grapple"; scene.player.attackHeld = true; scene.player.autoSwitch = "always";
+    pickup();
+    expect(selections).toEqual(["never"]);
+    expect(scene.inventory.count(scene.player.actor.id, "q2:weapon_rocketlauncher")).toBe(1);
+    scene.player.attackHeld = false; scene.player.autoSwitch = "new";
+    pickup();
+    expect(selections).toEqual(["never", "never"]);
+    scene.inventory.configure(scene.player.actor, { item: "q2:weapon_rocketlauncher", count: 0, capacity: 1 });
+    pickup();
+    expect(selections).toEqual(["never", "never", "always"]);
+  } finally { scene.actors.close(); }
+});

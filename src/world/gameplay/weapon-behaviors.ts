@@ -1,11 +1,11 @@
 import { SaveReader, namespaced } from '../../persistence/value.ts';
-import { readModule } from '../../persistence/execution.ts';
+import { readModule, readNativeCallAbi } from '../../persistence/execution.ts';
 import { readSavedActor } from '../../persistence/save-image.ts';
-import type { ModuleIdentity, GuestCallbackReference } from '../../contracts/execution.ts';
+import type { ModuleIdentity } from '../../contracts/execution.ts';
 import type { ActorId, OwnedActor } from '../../contracts/identity.ts';
 import type { BodyState } from '../../contracts/world.ts';
 import { sameWeaponBehavior } from '../../contracts/weapon-behavior.ts';
-import type { WeaponBehaviorDefinition, WeaponBehaviorAttachmentCheckpoint, WeaponBehaviorInstance, WeaponBehaviorLaunch, WeaponBehaviorSource, WeaponTrajectoryUpdate } from '../../contracts/weapon-behavior.ts';
+import type { WeaponBehaviorCallback, WeaponBehaviorDefinition, WeaponBehaviorAttachmentCheckpoint, WeaponBehaviorInstance, WeaponBehaviorLaunch, WeaponBehaviorSource, WeaponTrajectoryUpdate } from '../../contracts/weapon-behavior.ts';
 import type { SessionActorRegistry } from '../actors/registry.ts';
 
 /** One separately owned trajectory contribution; no replacement of launcher damage, visuals or sound. */
@@ -75,11 +75,20 @@ export function readWeaponBehaviorDefinition(reader: SaveReader, expected: Weapo
     if (found.id !== wanted.id || found.artifactPath !== wanted.artifactPath || found.digest !== wanted.digest || found.revision !== wanted.revision) source.fail('weapon behavior module differs from the loaded artifact');
   };
   module(reader.field('module'), expected.module);
-  const callback = (source: SaveReader, wanted: GuestCallbackReference | null): void => {
+  const callback = (source: SaveReader, wanted: WeaponBehaviorCallback | null): void => {
     if (wanted === null) { if (source.value !== null) source.fail('unexpected activation callback'); return; }
-    if (wanted.kind !== 'quakec') source.fail('unsupported source weapon callback kind');
-    source.field('kind').literal('quakec'); module(source.field('module'), wanted.module);
-    source.field('functionIndex').literal(wanted.functionIndex);
+    source.field('kind').literal(wanted.kind); module(source.field('module'), wanted.module);
+    switch (wanted.kind) {
+      case 'quakec': source.field('functionIndex').literal(wanted.functionIndex); break;
+      case 'qvm': source.field('instructionIndex').literal(wanted.instructionIndex); break;
+      case 'native-artifact': {
+        if (source.field('imageOffset').bigint() !== wanted.imageOffset) source.fail('native weapon entry differs from the loaded artifact');
+        const abi = readNativeCallAbi(source.field('abi'));
+        if (abi.kind !== wanted.abi.kind || abi.call !== wanted.abi.call || abi.image !== wanted.abi.image || abi.pointerBytes !== wanted.abi.pointerBytes)
+          source.fail('native weapon callback ABI differs from the loaded artifact');
+        break;
+      }
+    }
   };
   callback(reader.field('fire'), expected.fire); callback(reader.field('activate'), expected.activate);
   return expected;

@@ -1,3 +1,4 @@
+import type { MvdCapture } from '../../../network/q2/mvd-encoding.ts';
 import type { DemoRecordingSeed, DemoRecordingSink } from '../demo-recording.ts';
 import type { ActorId, ClientId } from '../../../contracts/identity.ts';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
@@ -13,6 +14,8 @@ import type { Q2ConnectionlessHost, Q2RconHost } from '../../../network/q2/conne
 export type RemotePresentationAccess = Pick<SimulationPresentationAccess, 'worldText' | 'playerUi' | 'characterViews' | 'presentations' | 'registerResource' | 'playerView' | 'playerCommand'>;
 export type ApplicationNetworkPhase = 'challenging' | 'connecting' | 'loading' | 'active' | 'closed' | 'rejected';
 export interface ApplicationNetwork {
+    readonly serverRecording?: { seed(): DemoRecordingSeed; attach(sink: DemoRecordingSink): () => void };
+    readonly mvdRecording?: { seed(): DemoRecordingSeed; attach(sink: DemoRecordingSink): () => void };
     readonly recording?: { seed(): DemoRecordingSeed; attach(sink: DemoRecordingSink): () => void };
     heartbeat?(nowMilliseconds: number): void;
     readonly role: 'server' | 'client';
@@ -60,6 +63,8 @@ export interface Q2ApplicationServerHost {
     /** Unified composition negotiation remains separate from this native source wire binding. */
     supportsSourceWire(): WireAdmission;
     observe(output: SimulationOutput, events: readonly SimulationPresentationEvent[]): void;
+    mvdCapture?(output: SimulationOutput, events: readonly SimulationPresentationEvent[], servercount: number): MvdCapture;
+    mvdSettings?(): { readonly enabled: boolean; readonly maxViewers: number; readonly password: string };
     admit(from: NetworkAddress, request: Q2ConnectRequest): Q2ApplicationAdmission;
     disconnect(player: Q2ApplicationPlayer, reason: string): void;
     /** Resolve a carried client after the application's existing travel owner admits the new actor. */

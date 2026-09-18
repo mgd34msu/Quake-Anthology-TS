@@ -89,8 +89,8 @@ export function readQvmPlayerState(view: DataView, profile: QvmAbiProfile = "q3-
 }
 
 /** Writes exactly playerState_t, preserving surrounding VM memory. */
-export function writeQvmPlayerState(view: DataView, state: Q3PlayerState): void {
-  checkRecord(view, "q3-modern");
+export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profile: QvmAbiProfile = "q3-modern"): void {
+  checkRecord(view, profile);
   for (const slots of [state.stats, state.persistent, state.powerups, state.ammo]) {
     if (slots.length !== 16) throw new RangeError("QVM player-state arrays require 16 slots");
   }
@@ -116,9 +116,9 @@ export function writeQvmPlayerState(view: DataView, state: Q3PlayerState): void 
   writeVector(view, 92, state.grapplePoint);
   view.setInt32(104, state.flags, true);
   view.setInt32(108, state.eventSequence, true);
-  writeSlots(view, 112, state.events);
+  writeSlots(view, 112, state.events.map(event => qvmEvent(event, profile, true)));
   writeSlots(view, 120, state.eventParameters);
-  view.setInt32(128, state.externalEvent, true);
+  view.setInt32(128, qvmEvent(state.externalEvent, profile, true), true);
   view.setInt32(132, state.externalEventParameter, true);
   view.setInt32(136, state.externalEventTimeMilliseconds, true);
   view.setInt32(140, state.clientNumber, true);
@@ -131,9 +131,16 @@ export function writeQvmPlayerState(view: DataView, state: Q3PlayerState): void 
   view.setInt32(176, state.damagePitch, true);
   view.setInt32(180, state.damageCount, true);
   writeSlots(view, 184, state.stats);
-  writeSlots(view, 248, state.persistent);
-  writeSlots(view, 312, state.powerups);
+  if (profile === "q3-modern") writeSlots(view, 248, state.persistent);
+  else {
+    const values = Array<number>(16).fill(0);
+    for (const index of [0, 1, 2, 3, 4, 8, 9, 10]) values[index] = state.persistent[index] ?? 0;
+    values[7] = state.persistent[6] ?? 0; values[11] = state.persistent[13] ?? 0;
+    writeSlots(view, 248, values);
+  }
+  writeSlots(view, 312, qvmPowerups(state.powerups, profile));
   writeSlots(view, 376, state.ammo);
+  if (profile !== "q3-modern") { view.setInt32(440, state.pingMilliseconds, true); return; }
   view.setInt32(440, state.generic1, true);
   view.setInt32(444, state.loopSound, true);
   view.setInt32(448, state.jumpPadEntity, true);

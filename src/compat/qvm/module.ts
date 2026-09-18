@@ -21,8 +21,8 @@ export const qvmNumericProfile: NumericProfile = {
 export function qvmApi(role: QvmRole, profile: QvmAbiProfile = "q3-modern"): Q3ApiIdentity {
   switch (role) {
     case "qagame": return { kind: "q3-qagame", version: profile === "q3-modern" ? 8 : 7 };
-    case "cgame": return { kind: "q3-cgame", version: 4 };
-    case "ui": return { kind: "q3-ui", version: 6 };
+    case "cgame": return { kind: "q3-cgame", version: profile === "q3-modern" ? 4 : 3 };
+    case "ui": return { kind: "q3-ui", version: profile === "q3-modern" ? 6 : 4 };
   }
 }
 export interface QvmHostCheckpoint {
@@ -66,7 +66,6 @@ export class QvmModule implements GuestExecutor {
 
   constructor(private readonly options: QvmModuleOptions, initialization?: typeof deferredUiInitialization) {
     const artifact = options.artifact;
-    if (this.abiProfile !== "q3-modern" && artifact.role !== "qagame") throw new Error("Legacy QVM client and UI profiles are not implemented");
     this.executionProfile = { kind: "qvm", module: artifact.module, api: qvmApi(artifact.role, this.abiProfile), magic: 0x12721444, numeric: qvmNumericProfile };
     const systemCall = createQvmSystemCall(artifact.role, options.host, () => this.currentCommandArguments, this.abiProfile);
     this.interpreter = new QvmInterpreter(artifact.image, call => {
@@ -93,6 +92,7 @@ export class QvmModule implements GuestExecutor {
   }
 
   private validateUiVersion(version: number): void {
+    if (this.abiProfile !== "q3-modern" && version !== 4) throw new CommonError("drop", `Legacy User Interface is version ${version}, expected 4`);
     if (version !== 4 && version !== 6) throw new CommonError("drop", `User Interface is version ${version}, expected 6`);
     this.executionProfile = { ...this.executionProfile, api: { kind: "q3-ui", version } };
   }

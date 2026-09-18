@@ -146,8 +146,10 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
   let vertexLighting: ModelVertexLighting | undefined;
   function append(name: string, image: ModelImageSelection, vertices: readonly (ModelVertex & { readonly texCoord: Vec2; readonly color?: Vec4 })[],
     indices: readonly number[], unlit = false, world = false): void {
-    vertexLighting ??= context.prepareVertexLighting?.(entity, options);
+    if (context.purpose !== "shadow") vertexLighting ??= context.prepareVertexLighting?.(entity, options);
     const localGeometry: MaterialGeometry = { indices, vertices: vertices.map((vertex, corner) => {
+      if (context.purpose === "shadow") return { position: vertex.position, normal: vertex.normal, texCoord: vertex.texCoord,
+        lightmapCoord: { x: 0, y: 0 }, color: vertex.color ?? color };
       const sampled = context.lightVertex?.(entity, vertex.normal, vertex.position);
       const light = vertexLighting?.(vertex.normal, vertex.position, corner) ?? (flags.kind === "q2"
         ? q2AliasLight(bits, sampled ?? { x: 1, y: 1, z: 1 }, context.timeSeconds, false, options.infrared)
@@ -232,8 +234,20 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       const elapsed = selection.kind === "q1-mdl-replacement" && selection.timing.kind === "elapsed-time"
         ? Math.floor((context.timeSeconds + (options.syncBase ?? 0)) * selection.timing.frameRate) : null;
       const elapsedFrame = elapsed === null ? null : ((elapsed % model.frames.length) + model.frames.length) % model.frames.length;
-      const joints = entity.pose.kind === "skeleton" ? entity.pose.joints : elapsedFrame === null
-        ? sampleMd5Pose(model, frame, previousFrame, backLerp) : sampleMd5Pose(model, elapsedFrame);
+      const poseFrame = elapsedFrame ?? frame, posePrevious = elapsedFrame ?? previousFrame, poseLerp = elapsedFrame === null ? backLerp : 0;
+      const frameKey = Object.is(poseFrame, -0) ? "-0" : poseFrame;
+      const previousKey = Object.is(posePrevious, -0) ? "-0" : posePrevious;
+      const lerpKey = Object.is(poseLerp, -0) ? "-0" : poseLerp;
+      let frames = context.skinningFrame?.poses.get(model), previous = frames?.get(frameKey), lerps = previous?.get(previousKey);
+      const cachedPose = entity.pose.kind === "skeleton" ? undefined : lerps?.get(lerpKey);
+      const joints = entity.pose.kind === "skeleton" ? entity.pose.joints
+        : cachedPose ?? sampleMd5Pose(model, poseFrame, posePrevious, poseLerp);
+      if (entity.pose.kind !== "skeleton" && cachedPose === undefined && context.skinningFrame !== undefined) {
+        if (frames === undefined) { frames = new Map<number | "-0", Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>>(); context.skinningFrame.poses.set(model, frames); }
+        if (previous === undefined) { previous = new Map<number | "-0", Map<number | "-0", ReturnType<typeof sampleMd5Pose>>>(); frames.set(frameKey, previous); }
+        if (lerps === undefined) { lerps = new Map<number | "-0", ReturnType<typeof sampleMd5Pose>>(); previous.set(previousKey, lerps); }
+        lerps.set(lerpKey, joints);
+      }
       const images = model.meshes.map((mesh, index): ModelImageSelection => {
         let shaders: readonly string[];
         if (selection.kind === "q2-md2-replacement") shaders = selection.skins;
@@ -248,13 +262,13 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
         if (envelope !== null && !context.retainShadowBody(entity, envelope, images, options)) break;
       }
       for (const [index, mesh] of model.meshes.entries()) {
-        let poses = context.skinningFrame?.get(mesh);
+        let poses = context.skinningFrame?.meshes.get(mesh);
         let skinned = poses?.get(joints);
         if (skinned === undefined) {
           skinned = skinMd5Mesh(mesh, joints).map((vertex, index) => ({ ...vertex,
             texCoord: at(mesh.vertices, index, "MD5 UV").texCoord }));
           if (context.skinningFrame !== undefined) {
-            if (poses === undefined) { poses = new WeakMap(); context.skinningFrame.set(mesh, poses); }
+            if (poses === undefined) { poses = new WeakMap(); context.skinningFrame.meshes.set(mesh, poses); }
             poses.set(joints, skinned);
           }
         }

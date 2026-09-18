@@ -394,7 +394,7 @@ test("native alias bounds reject geometry before lighting while retaining replac
   expect(culled.cull).toBe("out"); expect(culled.surfaces).toHaveLength(0); expect(parentLights).toBe(0);
   expect(culled.attachments[0]?.cull).not.toBe("out"); expect(childLights).toBeGreaterThan(0);
   const shadow = prepareSceneEntity(source, { ...context, noCull: true, purpose: "shadow" });
-  expect(shadow.surfaces.length).toBeGreaterThan(0); expect(parentLights).toBeGreaterThan(0);
+  expect(shadow.surfaces.length).toBeGreaterThan(0); expect(parentLights).toBe(0);
   const native = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
   const q2 = entity(parseMd2(native.bytes), native.resource, "q2");
   const hidden = prepareSceneEntity(q2, context);
@@ -409,28 +409,69 @@ test("MD5 frame-local skinning reuses a pose without retaining animated monster 
   const model = createMd5Model(parseMd5Mesh(new TextDecoder().decode(meshAsset.bytes)), parseMd5Anim(new TextDecoder().decode(animation.bytes)));
   const mesh = model.meshes[0], firstPose = model.frames[0]?.joints, nextPose = model.frames[1]?.joints;
   if (mesh === undefined || firstPose === undefined || nextPose === undefined) throw new Error("Missing animated soldier fixture");
-  const skinningFrame: import("../../../../src/render/scene/models/types.ts").ModelSkinningFrame = new WeakMap();
+  const skinningFrame: import("../../../../src/render/scene/models/types.ts").ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() };
   const source: SceneEntity = { ...entity(model, meshAsset.resource, "q1"), pose: { kind: "skeleton", joints: firstPose } };
   const context = { camera, timeSeconds: 0, skinningFrame };
-  const prepared = prepareSceneEntity(source, context), first = skinningFrame.get(mesh)?.get(firstPose);
+  const prepared = prepareSceneEntity(source, context), first = skinningFrame.meshes.get(mesh)?.get(firstPose);
   expect(first).toBeDefined();
   for (const [index, vertex] of (first ?? []).entries()) expect(mesh.vertices[index]?.texCoord).toBe(vertex.texCoord);
   expect(prepareSceneEntity(source, context)).toEqual(prepared);
-  expect(skinningFrame.get(mesh)?.get(firstPose)).toBe(first);
+  expect(skinningFrame.meshes.get(mesh)?.get(firstPose)).toBe(first);
   expect(prepared).toEqual(prepareSceneEntity(source, { camera, timeSeconds: 0 }));
   const animated = { ...source, pose: { kind: "skeleton", joints: nextPose } } satisfies SceneEntity;
-  const changed = prepareSceneEntity(animated, context), next = skinningFrame.get(mesh)?.get(nextPose);
+  const changed = prepareSceneEntity(animated, context), next = skinningFrame.meshes.get(mesh)?.get(nextPose);
   expect(next).toBeDefined(); expect(next).not.toBe(first); expect(next).not.toEqual(first);
   expect(changed).toEqual(prepareSceneEntity(animated, { camera, timeSeconds: 0 }));
-  const nextFrame: import("../../../../src/render/scene/models/types.ts").ModelSkinningFrame = new WeakMap();
+  const nextFrame: import("../../../../src/render/scene/models/types.ts").ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() };
   expect(prepareSceneEntity(source, { ...context, skinningFrame: nextFrame })).toEqual(prepared);
-  expect(nextFrame.get(mesh)?.get(firstPose)).not.toBe(first);
+  expect(nextFrame.meshes.get(mesh)?.get(firstPose)).not.toBe(first);
   for (const backLerp of [0, 0.25, 0.75, 1]) {
     const interpolated = { ...source, pose: { kind: "frame", frame: 1, previousFrame: 0, backLerp } } satisfies SceneEntity;
     expect(prepareSceneEntity(interpolated, context)).toEqual(prepareSceneEntity(interpolated, { camera, timeSeconds: 0 }));
+    const cached = skinningFrame.poses.get(model)?.get(1)?.get(0)?.get(backLerp);
+    expect(cached).toBeDefined();
+    if (cached === undefined) throw new Error("Missing interpolated pose");
+    const retained = skinningFrame.meshes.get(mesh)?.get(cached);
+    expect(retained).toBeDefined();
+    const shadow = { ...interpolated, pose: { ...interpolated.pose } } satisfies SceneEntity;
+    expect(prepareSceneEntity(shadow, { ...context, purpose: "shadow" })).toEqual(prepareSceneEntity(shadow, { camera, timeSeconds: 0, purpose: "shadow" }));
+    expect(skinningFrame.meshes.get(mesh)?.get(cached)).toBe(retained);
+    expect(skinningFrame.poses.get(model)?.get(1)?.get(0)?.get(backLerp)).toBe(cached);
+    expect(prepareSceneEntity(interpolated, { ...context, skinningFrame: nextFrame })).toEqual(prepareSceneEntity(interpolated, context));
+    expect(nextFrame.poses.get(model)?.get(1)?.get(0)?.get(backLerp) === cached).toBe(backLerp === 0);
+
   }
+  const crowdFrame: import("../../../../src/render/scene/models/types.ts").ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() };
+  for (let index = 1; index <= 64; index++) {
+    const crowded: SceneEntity = { ...source, pose: { kind: "frame", frame: 1 + index % 7, previousFrame: index % 7, backLerp: index / 65 } };
+    const cached = prepareSceneEntity(crowded, { ...context, skinningFrame: crowdFrame });
+    expect(cached).toEqual(prepareSceneEntity(crowded, { camera, timeSeconds: 0 }));
+    expect(prepareSceneEntity(crowded, { ...context, skinningFrame: crowdFrame, purpose: "shadow" })).toEqual(cached);
+  }
+  let selections = 0;
+  for (const previous of crowdFrame.poses.get(model)?.values() ?? []) for (const lerps of previous.values()) selections += lerps.size;
+  expect(selections).toBe(64);
+  for (const backLerp of [0, -0]) prepareSceneEntity({ ...source, pose: { kind: "frame", frame: 1, previousFrame: 0, backLerp } }, { ...context, skinningFrame: crowdFrame });
+  expect(crowdFrame.poses.get(model)?.get(1)?.get(0)?.has(0)).toBe(true);
+  expect(crowdFrame.poses.get(model)?.get(1)?.get(0)?.has("-0")).toBe(true);
   const shell = { ...source, flags: { kind: "q2", bits: 1024 } } satisfies SceneEntity;
   expect(prepareSceneEntity(shell, context)).toEqual(prepareSceneEntity(shell, { camera, timeSeconds: 0 }));
-  expect(skinningFrame.get(mesh)?.get(firstPose)).toBe(first);
+  expect(skinningFrame.meshes.get(mesh)?.get(firstPose)).toBe(first);
   expect(prepareSceneEntity(source, context)).toEqual(prepared);
+});
+
+
+test("shadow preparation skips vertex color evaluation and preserves silhouette inputs", async () => {
+  const native = await asset("/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak", "models/monsters/soldier/tris.md2", "q2");
+  const source = { ...entity(parseMd2(native.bytes), native.resource, "q2"), flags: { kind: "q2", bits: 512 } } satisfies SceneEntity;
+  let calls = 0;
+  const context = { camera, timeSeconds: 0.3, lightVertex: () => { calls++; return { x: 0.2, y: 0.4, z: 0.6 }; } };
+  const visible = prepareSceneEntity(source, context); expect(calls).toBeGreaterThan(0); calls = 0;
+  const shadow = prepareSceneEntity(source, { ...context, purpose: "shadow", prepareVertexLighting: () => { throw new Error("Shadow prepared vertex lighting"); } });
+  expect(calls).toBe(0);
+  const silhouette = (prepared: ReturnType<typeof prepareSceneEntity>) => prepared.surfaces.map(surface => ({ indices: surface.geometry.indices,
+    vertices: surface.geometry.vertices.map(vertex => ({ position: vertex.position, normal: vertex.normal, texCoord: vertex.texCoord, lightmapCoord: vertex.lightmapCoord })),
+    alphaTest: surface.alphaTest, translucent: surface.translucent }));
+  expect(silhouette(shadow)).toEqual(silhouette(visible));
+  expect(prepareSceneEntity(source, context)).toEqual(visible);
 });

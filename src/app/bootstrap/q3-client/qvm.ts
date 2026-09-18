@@ -19,6 +19,8 @@ import { QvmCgame } from '../../../compat/qvm/cgame.ts';
 import { QvmUi } from '../../../compat/qvm/ui.ts';
 import type { Q3BrowserView } from '../../../network/q3/browser-view.ts';
 import { qvmClientBrowserSyscall } from '../../../compat/qvm/client-browser-syscalls.ts';
+import { readQvmCompatibility } from '../../../compat/qvm/compatibility.ts';
+import { legacyClientCommand } from '../../../compat/qvm/legacy-client-abi.ts';
 import { resolveQvmArtifact } from '../../../compat/qvm/artifacts.ts';
 import { qvmCommonSyscall } from '../../../compat/qvm/common-syscalls.ts';
 import { qvmClientCinematicSyscall } from '../../../compat/qvm/client-cinematic-syscalls.ts';
@@ -112,7 +114,7 @@ export class ApplicationQvmClient {
       ?? qvmClientRenderSyscall(call, o.services.resources, o.services.draw)
       ?? qvmClientAudioSyscall(call, { role: call.role, sound: o.services.sound, print: session.print })
       ?? qvmClientStateSyscall(call, { connection: o.connection, snapshots: session.snapshots, snapshotPing: number => o.connection.snapshotPing(number),
-        getServerCommand: async number => { const argv = await o.connection.getServerCommand(number); this.assertCurrent(); if (argv !== null) this.arguments = argv; return argv; },
+        getServerCommand: async number => { const argv = await o.connection.getServerCommand(number); this.assertCurrent(); if (argv !== null) this.arguments = legacyClientCommand(argv, call.abiProfile ?? "q3-modern"); return argv; },
         setUserCommandValue: session.setUserCommandValue })
       ?? qvmClientCollisionSyscall(call, { models: () => this.collisionModels, loadMap: name => { if (name !== o.map) throw new Error(`Cgame requested a different collision map: ${name}`); this.assertCurrent(); } })
       ?? qvmClientMarkSyscall(call, this.marks)
@@ -131,7 +133,9 @@ export class ApplicationQvmClient {
     const path = `vm/${role}.qvm`, opened = await this.options.media.provider.mounts.open(path);
     this.assertCurrent();
     if (opened === null) throw new Error(`Missing native module: ${path}`);
-    const artifact = resolveQvmArtifact({ module: { id: `q3:${role}`, artifactPath: path, digest: opened.reference.digest,
+    const abiProfile = await readQvmCompatibility(this.options.media.provider.mounts, { artifactPath: path, digest: opened.reference.digest }, role);
+    this.assertCurrent();
+    const artifact = resolveQvmArtifact({ abiProfile, module: { id: `q3:${role}`, artifactPath: path, digest: opened.reference.digest,
       revision: `${opened.reference.provenance.mount.identity.id}:${opened.reference.provenance.mount.identity.generation}` }, role, bytes: opened.bytes });
     if (artifact.kind !== 'bytecode' || artifact.known !== null && artifact.known.product !== 'baseq3') throw new Error(`Unsupported native baseq3 module: ${path}`);
     this.artifacts.set(role, artifact);
@@ -170,9 +174,17 @@ export class ApplicationQvmClient {
     if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.refresh(Math.trunc(this.options.now()));
   }
   async command(argv: readonly string[]): Promise<boolean> { this.assertCurrent(); if (await this.cgame?.consoleCommand(argv)) return true; return await this.ui?.consoleCommand(Math.trunc(this.options.now()), argv) ?? false; }
-  async keyEvent(key: number, down: boolean): Promise<void> { this.assertCurrent(); if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.keyEvent(key, down); else await this.cgame?.keyEvent(key, down); }
-  async mouseEvent(x: number, y: number): Promise<void> { this.assertCurrent(); if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.mouseEvent(x, y); else await this.cgame?.mouseEvent(x, y); }
-  async eventHandling(mode: Q3CgameEventHandling): Promise<void> { this.assertCurrent(); await this.cgame?.eventHandling(mode); }
+  async keyEvent(key: number, down: boolean): Promise<void> { this.assertCurrent(); if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.keyEvent(key, down); else if (this.cgame?.supportsInputEvents) await this.cgame.keyEvent(key, down); }
+  async mouseEvent(x: number, y: number): Promise<void> { this.assertCurrent(); if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.mouseEvent(x, y); else if (this.cgame?.supportsInputEvents) await this.cgame.mouseEvent(x, y); }
+  get capturesInput(): boolean {
+    const catcher = this.options.keyCatcher();
+    return this.cgame?.supportsInputEvents ? catcher !== 0 : (catcher & 2) !== 0;
+  }
+  async eventHandling(mode: Q3CgameEventHandling): Promise<void> {
+    this.assertCurrent();
+    if (mode === 'none' && this.cgame !== null && !this.cgame.supportsInputEvents) return;
+    await this.cgame?.eventHandling(mode);
+  }
   async shutdown(): Promise<void> { if (this.retired) return; try { await this.cgame?.shutdown(); await this.ui?.shutdown(); } finally { this.close(); } }
   close(): void {
     if (this.retired) return;

@@ -11,7 +11,7 @@ export function readApi(reader: SaveReader): GameApiIdentity {
     case "q2-rerelease-game": return { kind: "q2-rerelease-game", version: reader.field("version").literal(2023) };
     case "q2-rerelease-cgame": return { kind: "q2-rerelease-cgame", version: reader.field("version").literal(2022) };
     case "q3-qagame": return { kind: "q3-qagame", version: reader.field("version").choice(7, 8) };
-    case "q3-cgame": return { kind: "q3-cgame", version: reader.field("version").literal(4) };
+    case "q3-cgame": return { kind: "q3-cgame", version: reader.field("version").choice(3, 4) };
     case "q3-ui": return { kind: "q3-ui", version: reader.field("version").choice(4, 6) };
   }
 }

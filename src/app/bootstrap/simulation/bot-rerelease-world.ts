@@ -35,7 +35,7 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
   if (numeric === undefined) throw new Error("Native bot world requires source numeric policy");
   const policy = { kind: "q3", contentsMask: -1, curves: true, playerCurveClip: true } satisfies import("../../../contracts/scene.ts").TracePolicy;
   const player = () => { const value = simulation.movementPlayer(actor); if (value === null) throw new Error("Native bot lost shared player"); return value; };
-  const nav = new SourceRereleaseNavigation(options.navigation.forClient(player().client.slot));
+  const nav = new SourceRereleaseNavigation(options.navigation.forClient(player().client.slot), () => simulation.bodies.read(actor)?.ground ?? null);
   const trace = (start: Vec3, end: Vec3, shape: import("../../../contracts/scene.ts").TraceShape) => {
     const result = simulation.scene.trace({ start, end, shape, target: { kind: "world" }, policy, numeric, passActor: actor });
     return { fraction: result.fraction, endpos: result.end, startsolid: result.startSolid || result.allSolid, hitId: result.hit.kind === "actor" ? options.identify(result.hit.actor) : -1 };
@@ -45,6 +45,7 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
     self: () => {
       const movement = player(), body = simulation.bodies.read(actor), ui = simulation.playerUi(actor);
       if (body === null) throw new Error("Native bot lost shared body");
+      const groundClass = body.ground === null ? null : simulation.botEntity(body.ground)?.classname;
       let items = 0, currentWeapon = 0;
       const ammo: Record<string, number> = {};
       for (const weapon of knowledge.weapons) {
@@ -58,7 +59,8 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
       return { id: options.identify(actor), origin: body.origin, velocity: body.velocity, viewAngles: movement.viewAngles,
         eye: { ...body.origin, z: body.origin.z + movement.viewHeight }, health: ui.health,
         armor: ui.armor.kind === "none" ? 0 : ui.armor.points, items, ammo, currentWeapon,
-        onGround: body.ground !== null, waterLevel: movement.waterLevel, team: objectives.team(actor), dead: ui.health <= 0,
+        onGround: body.ground !== null, onLift: groundClass === "func_plat" || groundClass === "func_plat2" || groundClass === "func_train",
+        waterLevel: movement.waterLevel, team: objectives.team(actor), dead: ui.health <= 0,
         hasProtection: simulation.combat.read(actor)?.invulnerable ?? false, carryingObjective: objectives.carrying(actor) };
     },
     traceLine: (start, end) => trace(start, end, { kind: "point" }),

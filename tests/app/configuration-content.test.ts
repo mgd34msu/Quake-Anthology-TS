@@ -118,6 +118,8 @@ test('profile scripts stage rules bindings and aliases before map admission with
       if (original === undefined || actual === undefined || initial.image === null) throw new Error('Initial client owners missing');
       const shared = new CvarRegistry({ dialect: initial.image.cvars.dialect, context: initial.image.cvars.context });
       shared.restoreSaveState(initial.image.cvars.captureWorldTransferState());
+      original.input.bind({ input: { kind: 'key', code: 120 }, target: { kind: 'command', text: 'echo old-profile-custom' } });
+      const oldAuthored = original.authoredBindings;
       const oldBindings = original.input.bindings, oldMouse = original.mouse.read();
       initial.prepared.commands.append('echo original-tail\n', original.context);
       const addedClient = session.prepareClient(1), addedSeat = session.prepareSeat(1, addedClient);
@@ -129,6 +131,8 @@ test('profile scripts stage rules bindings and aliases before map admission with
         options: selected, content, settings, shared, host: { print() {} }, sourceArchive: [], defaultCapacity: 1,
         nextFrame: async () => { loadingFrames++; } });
       try {
+        expect(profile.bindingChoices[0]?.authoredBindings?.some(binding => binding.target.kind === 'command' && binding.target.text === 'echo old-profile-custom')).toBe(false);
+        expect(original.authoredBindings).toBe(oldAuthored);
         expect(profile.options.skill).toBe(1);
         expect(profile.seats[0]?.mouse.read().sensitivity).toBe(9);
         expect(profile.program.input(actual.id)?.binding({ kind: 'mouse-button', button: 3 })).toEqual({ kind: 'command', text: '+jump' });

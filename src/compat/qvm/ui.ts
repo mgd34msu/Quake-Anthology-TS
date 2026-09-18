@@ -58,7 +58,8 @@ export class QvmUi implements Q3UiExports {
   async mouseEvent(dx: number, dy: number): Promise<undefined> { await this.call([QvmUiExport.UI_MOUSE_EVENT, dx, dy]); }
   async refresh(time: number): Promise<undefined> { await this.call([QvmUiExport.UI_REFRESH, time]); }
   async isFullscreen(): Promise<boolean> { return await this.call([QvmUiExport.UI_IS_FULLSCREEN]) !== 0; }
-  async setActiveMenu(menu: Q3MenuCommand): Promise<undefined> { await this.call([QvmUiExport.UI_SET_ACTIVE_MENU, menuNumber(menu)]); }
+  async setActiveMenu(menu: Q3MenuCommand): Promise<undefined> {     if (this.module.abiProfile !== "q3-modern" && menuNumber(menu) > QvmUiMenu.UIMENU_BAD_CD_KEY) throw new Error(`Legacy UI does not implement menu ${menu}`);
+    await this.call([QvmUiExport.UI_SET_ACTIVE_MENU, menuNumber(menu)]); }
   async consoleCommand(time: number, arguments_: readonly string[]): Promise<boolean> {
     this.current();
     const result = await this.module.commandAsync([QvmUiExport.UI_CONSOLE_COMMAND, time], arguments_, () => this.current()) !== 0;
@@ -66,5 +67,5 @@ export class QvmUi implements Q3UiExports {
     return result;
   }
   async drawConnectScreen(overlay: boolean): Promise<undefined> { await this.call([QvmUiExport.UI_DRAW_CONNECT_SCREEN, Number(overlay)]); }
-  async hasUniqueCdKey(): Promise<boolean> { return await this.call([QvmUiExport.UI_HASUNIQUECDKEY]) !== 0; }
+  async hasUniqueCdKey(): Promise<boolean> { if (this.module.abiProfile !== "q3-modern") throw new Error("Legacy UI does not export UI_HASUNIQUECDKEY"); return await this.call([QvmUiExport.UI_HASUNIQUECDKEY]) !== 0; }
 }

@@ -65,3 +65,29 @@ test("console size choices persist in the shared local archive", async () => {
     await restored.close();
   } finally { await rm(userContentRoot, { recursive: true, force: true }); }
 });
+
+
+test("pickup switching menus share each seat's archived userinfo and reset the same value", async () => {
+  const { registerPlayerUserinfo, playerUserinfo } = await import("../../src/app/bootstrap/player-userinfo.ts");
+  const owner = createIdentityOwner("pickup-settings"), context = { session: owner.session, origin: { kind: "local-console" } } satisfies ConstructorParameters<typeof CvarRegistry>[0]["context"];
+  for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-rerelease"] satisfies readonly ConstructorParameters<typeof CvarRegistry>[0]["dialect"][]) {
+    const first = new CvarRegistry({ dialect, context }), second = new CvarRegistry({ dialect, context });
+    registerPlayerUserinfo(first, 0); registerPlayerUserinfo(second, 1);
+    const source = { cvars: first, weaponPickupPolicy: "shared" } satisfies import("../../src/ui/settings/gameplay.ts").GameplaySettingsSource;
+    const setting = bindGameplaySettings(source).find(value => value.label === "Switch to picked-up weapons");
+    if (setting?.kind !== "choice") throw new Error("Missing actual pickup preference");
+    const name = dialect === "q2-rerelease" ? "autoswitch" : "qts_weapon_autoswitch", selected = dialect === "q2-rerelease" ? "3" : "never", initial = dialect === "q2-rerelease" ? "0" : "always";
+    setting.write(selected); expect(first.variableString(name)).toBe(selected); expect(second.variableString(name)).toBe(initial);
+    expect(playerUserinfo(first)).toContain(`\\${name}\\${selected}`); expect(first.archiveEntries()).toContainEqual({ name, value: selected });
+    resetGameplaySettings(source); expect(setting.read()).toBe(initial);
+    if (dialect !== "q2-rerelease") {
+      const opaque = bindGameplaySettings({ cvars: first, weaponPickupPolicy: "source-owned" });
+      expect(opaque.some(value => value.label === "Switch to picked-up weapons")).toBe(false);
+      expect(opaque.find(value => value.id === "ui:gameplay:source-weapon-switching")?.enabled()).toBe(false);
+    }
+  }
+  const q3 = new CvarRegistry({ dialect: "q3", context }); q3.register("cg_autoswitch", "1", CvarFlag.Archive);
+  const setting = bindGameplaySettings({ cvars: q3 }).find(value => value.label === "Switch to picked-up weapons");
+  if (setting?.kind !== "toggle") throw new Error("Missing Q3 pickup preference");
+  setting.write(false); expect(q3.variableValue("cg_autoswitch")).toBe(0); resetGameplaySettings({ cvars: q3 }); expect(setting.read()).toBe(true);
+});

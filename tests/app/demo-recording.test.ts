@@ -1,3 +1,4 @@
+import { MvdMessageFramer } from '../../src/network/q2/mvd-recording.ts';
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +11,7 @@ import { DemoReader } from "../../src/network/q3/demo.ts";
 import { DemoLibrary } from "../../src/app/bootstrap/demo-library.ts";
 
 const seeds: readonly DemoRecordingSeed[] = [
+  { identity: { kind: "mvd", revision: 2010 }, packets: [{ kind: "mvd", message: Uint8Array.of(1, 2) }] },
   { identity: { kind: "q1", protocol: 999, track: -1 }, packets: [{ kind: "q1", message: new Uint8Array([1]), viewAngles: { x: 1, y: 2, z: 3 } }] },
   { identity: { kind: "qw", protocol: 28 }, packets: [{ kind: "qw", record: { kind: "sequences", seconds: 1, outgoing: 5, incoming: 7 } }] },
   { identity: { kind: "q2", protocol: { kind: "q2-rerelease", version: 1038 } }, packets: [{ kind: "q2", message: new Uint8Array([1, 2]) }] },
@@ -27,7 +29,11 @@ for (const seed of seeds) test(`streamed ${seed.identity.kind} recording closes 
     await expect(recording.append(packet)).rejects.toThrow("stopped");
     await expect(DemoRecording.open(root, "session", seed)).rejects.toThrow();
     const bytes = await readFile(recording.path);
-    if (seed.identity.kind === "q1") {
+    if (seed.identity.kind === "mvd") {
+      const messages: Uint8Array[] = [], reader = new MvdMessageFramer();
+      reader.push(bytes, packet => { messages.push(packet); }); reader.finish();
+      expect(messages).toEqual([Uint8Array.of(1, 2), Uint8Array.of(1, 2)]); expect(reader.finished).toBe(true);
+    } else if (seed.identity.kind === "q1") {
       const reader = new NetQuakeDemoReader(bytes);
       expect(reader.forcedTrack).toBe(-1);
       expect(reader.next()).toEqual(reader.next());
@@ -55,7 +61,7 @@ test("recording names cannot escape the source user directory", () => {
 test("demo library discovers actual recordings and reads them through the playback lookup", async () => {
   const root = await mkdtemp(join(tmpdir(), "demo-library-"));
   try {
-    const seed = seeds[3]; if (seed === undefined) throw new Error("Missing Q3 seed");
+    const seed = seeds.find(value => value.identity.kind === "q3"); if (seed === undefined) throw new Error("Missing Q3 seed");
     const recording = await DemoRecording.open(root, "session", seed); await recording.stop();
     const mounted = new Uint8Array([7]);
     const library = new DemoLibrary(root, { listFiles: async (directory, extension) => directory === "" && extension === ".dem" ? ["demo1.dem"] : [],

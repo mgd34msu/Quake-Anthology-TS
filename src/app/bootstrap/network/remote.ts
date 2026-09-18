@@ -1,5 +1,8 @@
 import { q2RereleaseViewContinuous, Q2RereleaseViewHeight, q2RemoteViewHeight, q2RemoteViewPosition, q2RemoteBodyBounds, q2RemoteCommand } from "./q2-remote-view.ts";
 import { interpolateQ2DamageBlend } from "../q2-damage-blend.ts";
+import type { MvdProfile } from '../../../network/q2/mvd-profile.ts';
+import type { Q2MvdPresentation } from './q2-demo.ts';
+import { q2MvdLayout, q2MvdVisibility } from './q2-mvd-presentation.ts';
 import type { ClientDownloadProgress } from './client-download-policy.ts';
 import { RemoteWorldContent } from './remote-world.ts';
 import type { RemoteContentMounts } from "../content.ts";
@@ -32,6 +35,7 @@ import { SelectedMovementPrediction } from '../simulation/prediction.ts';
 import type { MovementPredictionResult, MovementPredictionSnapshot } from '../simulation/prediction.ts';
 import { movementOrigin, movementProfile } from '../simulation/players.ts';
 export interface Q2RemotePresentationOptions {
+    readonly recordedProfile?: MvdProfile;
     readonly seat: import('../../../contracts/identity.ts').SeatId;
     publish(output: SimulationOutput): void;
     disconnected(reason: string): void;
@@ -109,7 +113,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
         if (options.protocol.kind === 'q2-kex-demo')
             throw new Error('KEX native live transport is not bound');
         this.selectedProtocol = options.protocol;
-        this.layout = q2ApplicationLayout(options.protocol);
+        this.layout = options.recordedProfile === undefined ? q2ApplicationLayout(options.protocol) : q2MvdLayout(options.recordedProfile);
         this.messageOptions = { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 };
         this.userinfo = options.userinfo;
         this.world = new RemoteWorldContent(options.content);
@@ -125,6 +129,22 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
 
         this.client = options.client;
     }
+    get mvdPresentation(): Q2MvdPresentation {
+        const profile = this.options.recordedProfile;
+        if (profile === undefined) throw new Error('MVD presentation requires its recorded profile');
+        return { visibility: q2MvdVisibility({ profile, scene: () => this.world.scene,
+            modelPath: index => this.configs.get(this.layout.models + index) }),
+            selectView: clientnum => this.selectRecordedView(clientnum) };
+    }
+    selectRecordedView(clientnum: number): void {
+        const maximum = Number(this.configs.get(this.layout.maxClients));
+        if (!Number.isInteger(clientnum) || clientnum < 0 || !Number.isInteger(maximum) || clientnum >= maximum)
+            throw new Error('Recorded viewpoint is outside its admitted player range');
+        if (this.currentPlayer?.sourceEntity !== clientnum + 1) { this.current = null; this.previousFrame = null; this.viewHeight.reset(); }
+        this.currentPlayer = { client: this.client.id, actor: this.actor(clientnum + 1), sourceEntity: clientnum + 1 };
+        this.predictionOwner = null; this.predicted = null;
+    }
+    get configLayout(): ReturnType<typeof q2ApplicationLayout> { return this.layout; }
     get player(): Q2ApplicationPlayer | null { return this.currentPlayer; }
     get output(): SimulationOutput | null { return this.published; }
     /** Retained native fields include records whose specialized UI/effect handler is still unbound. */
@@ -331,7 +351,7 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
                 scene: { session: this.options.session.session, time: { kind: 'milliseconds', value: time }, world: { resource: recipe.map.geometry, geometry: this.world.content.world }, entities: [], lights: [], particles: [], lightStyles, areaBits: frame.areaBits } }, events: [] };
         this.options.publish(this.published);
         this.linkSolids(frame, bodies);
-        this.receivePrediction(frame);
+        if (this.options.recordedProfile === undefined) this.receivePrediction(frame);
         for (const entity of frame.entities)
             if (entity.event !== 0)
                 this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: this.world.content.recipe.map.entities.content, seconds: time / 1000, sourceEntity: entity.number, event: { kind: 'entity-event', actor: this.actor(entity.number), event: entity.event } });

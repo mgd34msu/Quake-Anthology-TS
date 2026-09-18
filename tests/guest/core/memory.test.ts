@@ -7,6 +7,22 @@ import {
   signedGuestPointer, SparseGuestMemory, wrapGuestPointer,
 } from "../../../src/guest/core/index.ts";
 import type { GuestHostCallback } from "../../../src/guest/core/index.ts";
+import { ProcessorFlags } from "../../../src/guest/core/registers.ts";
+import type { GuestFlag } from "../../../src/guest/core/contracts.ts";
+
+test("processor flag masks preserve unrelated and reserved bits", () => {
+  const positions: readonly (readonly [GuestFlag, number])[] = [["carry", 0], ["parity", 2], ["auxiliary-carry", 4],
+    ["zero", 6], ["sign", 7], ["trap", 8], ["interrupt", 9], ["direction", 10], ["overflow", 11],
+    ["resume", 16], ["virtual-8086", 17], ["alignment-check", 18], ["virtual-interrupt", 19],
+    ["virtual-interrupt-pending", 20], ["identification", 21]];
+  for (const initial of [0n, -1n, 0x123456789abcdef0n, 1n << 80n]) for (const [flag, bit] of positions) {
+    const flags = new ProcessorFlags(initial), normalized = BigInt.asUintN(64, initial), mask = 1n << BigInt(bit);
+    expect(flags.get(flag)).toBe((normalized & mask) !== 0n);
+    flags.set(flag, true); expect(flags.value).toBe(normalized | mask); expect(flags.get(flag)).toBe(true);
+    flags.set(flag, false); expect(flags.value).toBe(normalized & ~mask); expect(flags.get(flag)).toBe(false);
+    flags.value = initial; expect(flags.value).toBe(normalized);
+  }
+});
 
 const module: ModuleIdentity = {
   id: "test:guest", artifactPath: "authored-memory-fixture", revision: "1", digest: createContentDigest("12".repeat(32)),
@@ -149,6 +165,18 @@ test("integer register aliases preserve high bits and 32-bit writes clear the x6
   expect(cpu.registers.read("rsp", 64)).toBe(0x20000n);
 });
 
+test("register checkpoint scratch is caller-owned and ordinary snapshots stay independent", () => {
+  for (const architecture of ["i386", "x86-64"] satisfies readonly ("i386" | "x86-64")[]) {
+    const registers = new IntegerRegisterFile(architecture), destination = new Uint8Array(architecture === "i386" ? 64 : 128);
+    registers.write("rax", 32, 7n); const retained = registers.checkpoint();
+    expect(registers.checkpoint(destination)).toBe(destination); expect([...destination]).toEqual([...retained]);
+    registers.write("rax", 32, 19n); registers.checkpoint(destination);
+    expect([...destination]).not.toEqual([...retained]); registers.restore(retained); expect(registers.read("rax", 32)).toBe(7n);
+    expect(() => registers.checkpoint(new Uint8Array(1))).toThrow("architecture or length");
+    expect(registers.read("rax", 32)).toBe(7n);
+  }
+});
+
 test("range write observers follow aliases and stop after removal or backing replacement", () => {
   const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
   const base = memory.allocate({ byteLength: 16 }), alias = memory.mapAlias({ source: base, base: 0x200000n, byteLength: 16, permissions: "read-write" });
@@ -243,4 +271,30 @@ test("scalar instruction fetch observes live aliases, permission changes and rem
   expect(() => memory.fetchByte(code.byteOffset + 1n)).toThrow(GuestMemoryFault);
   expect(() => memory.fetchByte(0n)).toThrow(GuestMemoryFault);
   expect(() => memory.fetchByte(1n << 64n)).toThrow(GuestMemoryFault);
+});
+
+
+test("scalar stores preserve encoding and cross-mapping fault atomicity", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const base = memory.map({ base: 0x10000n, byteLength: 4, permissions: "read-write" });
+  const second = memory.map({ base: 0x10004n, byteLength: 12, permissions: "read-write" });
+  const cases: readonly { width: number; store: () => void; encode: (view: DataView) => void }[] = [
+    { width: 1, store: () => memory.writeUint8(base, 257), encode: v => v.setUint8(0, 257) },
+    { width: 2, store: () => memory.writeInt16(base, -32769), encode: v => v.setInt16(0, -32769, true) },
+    { width: 4, store: () => memory.writeUint32(base, -1), encode: v => v.setUint32(0, -1, true) },
+    { width: 8, store: () => memory.writeUint64(base, -1n), encode: v => v.setBigUint64(0, -1n, true) },
+    { width: 4, store: () => memory.writeFloat32(base, -0), encode: v => v.setFloat32(0, -0, true) },
+    { width: 8, store: () => memory.writeFloat64(base, NaN), encode: v => v.setFloat64(0, NaN, true) },
+    { width: 8, store: () => memory.writeFloat64(base, Infinity), encode: v => v.setFloat64(0, Infinity, true) },
+  ];
+  for (const value of cases) {
+    const expected = new Uint8Array(value.width); value.encode(new DataView(expected.buffer)); value.store();
+    expect([...memory.copy(base, value.width)]).toEqual([...expected]);
+  }
+  const before = memory.copy(base, 16); let notifications = 0;
+  const remove = memory.observeWrites(base, 16, () => { notifications++; });
+  memory.protect(second, 12, "read");
+  expect(() => memory.writeUint64(base, 42n)).toThrow(GuestMemoryFault);
+  expect([...memory.copy(base, 16)]).toEqual([...before]); expect(notifications).toBe(0);
+  remove();
 });

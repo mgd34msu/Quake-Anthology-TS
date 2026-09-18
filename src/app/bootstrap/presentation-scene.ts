@@ -187,7 +187,7 @@ export class ApplicationWorldScene {
 
   view(input: WorldViewInput, operations: readonly SceneOperation[], shadowLights: readonly SceneLight[], infrared: boolean, weaponCamera: SceneCamera = input.camera): ReturnType<WorldScene["prepareView"]> {
     input = { ...input, source: input.source ?? createWorldSurfaceAdmission(createSourceSceneOrder(this.assets.materialRegistrations)), inlineModels: this.inlineModels, ...this.styles() };
-    const skinningFrame: ModelSkinningFrame = new WeakMap();
+    const skinningFrame: ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() };
 
     if (shadowLights.length > 0) {
       const retainBody = shadowBodyFilter(shadowLights);

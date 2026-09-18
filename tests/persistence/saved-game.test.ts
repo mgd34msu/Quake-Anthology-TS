@@ -1,3 +1,4 @@
+import { parseSaveRequest, parseLoadRequest, saveCommandDocumentation } from "../../src/app/bootstrap/save-requests.ts";
 import { expect, test } from "bun:test";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -37,4 +38,16 @@ test("explicit native save content selection wins over a directory label", async
   const product = selectQ1SaveProduct(catalog, save(5), "q1-rerelease-id1/manual.sav", "q1-classic-id1");
   expect(product.expectation.id).toBe("q1-classic-id1");
   expect(() => selectQ1SaveProduct(catalog, save(5), "manual.sav", "q2-classic-baseq2")).toThrow("match");
+});
+
+test("public save commands select original versions and explicit recovery content", () => {
+  expect(parseSaveRequest(["manual"])).toEqual({ name: "manual", format: "shared" });
+  expect(parseSaveRequest(["original", "v5"]).format).toBe("v5");
+  expect(parseSaveRequest(["original", "v6"]).format).toBe("v6");
+  expect(parseLoadRequest(["original", "q1-classic-id1"])).toEqual({ name: "original", sourceProduct: "q1-classic-id1" });
+  expect(parseLoadRequest(["shared"])).toEqual({ name: "shared" });
+  expect(() => parseSaveRequest(["original", "v7"])).toThrow("Usage");
+  expect(() => parseLoadRequest(["original", ""])).toThrow("Usage");
+  expect(saveCommandDocumentation("save")?.usage).toContain("v5|v6");
+  expect(saveCommandDocumentation("load")?.usage).toContain("source-product");
 });

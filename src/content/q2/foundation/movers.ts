@@ -28,6 +28,12 @@ interface DoorState {
   debounce: number;
 }
 interface TrainState { destination: Q2Entity | null; debounce: number; readonly ship: boolean; }
+export interface Q2TrainRoute {
+  readonly running: boolean;
+  readonly destination: ActorId | null;
+  readonly stops: readonly { readonly actor: ActorId; readonly origin: Vec3; readonly next: ActorId | null;
+    readonly wait: number; readonly teleport: boolean }[];
+}
 export interface Q2MoversCheckpoint {
   readonly doors: readonly { readonly actor: SavedActorId; readonly state: Omit<DoorState, "master" | "team">;
     readonly master: SavedActorId; readonly team: readonly SavedActorId[] }[];
@@ -46,6 +52,30 @@ export class Q2MoverModule implements Q2SpawnModule {
   private doors = new WeakMap<Q2Entity, DoorState>();
   private trains = new WeakMap<Q2Entity, TrainState>();
   constructor(private readonly hooks: Q2MoverHooks) {}
+
+  /** Observes the deterministic source route without advancing callbacks or consuming target-selection randomness. */
+  trainRoute(entity: Q2Entity, game: Q2GameServices): Q2TrainRoute | null {
+    const state = this.trains.get(entity);
+    if (state === undefined || state.ship) return null;
+    const targets = new Map<string, Q2Entity | null>();
+    for (const candidate of game.entities.values()) {
+      if (candidate.targetname === "") continue;
+      targets.set(candidate.targetname, targets.has(candidate.targetname) || candidate.classname !== "path_corner" ? null : candidate);
+    }
+    const target = (name: string): Q2Entity | null => targets.get(name) ?? null;
+    let corner = target(entity.spawn.values.get("target") ?? entity.target);
+    const stops: Q2TrainRoute["stops"][number][] = [], visited = new Set<ActorId>();
+    while (corner !== null && !visited.has(corner.actor.id)) {
+      visited.add(corner.actor.id);
+      const next = target(corner.target);
+      if (corner.target !== "" && next === null) return null;
+      stops.push({ actor: corner.actor.id, origin: this.trainDestination(entity, corner, game), next: next?.actor.id ?? null,
+        wait: corner.wait, teleport: (corner.spawnflags & 1) !== 0 });
+      corner = next;
+    }
+    if (state.destination !== null && !visited.has(state.destination.actor.id)) return null;
+    return { running: (entity.spawnflags & 1) !== 0, destination: state.destination?.actor.id ?? null, stops };
+  }
 
   traversal(entity: Q2Entity): { readonly locked: boolean; readonly destination: Vec3 | null } {
     const state = this.doors.get(entity);

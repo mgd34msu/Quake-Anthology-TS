@@ -2,7 +2,7 @@
 // All occupancy and support decisions use shared collision; movement admission happens in routing.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { Vec3 } from "../../contracts/math.ts";
-import type { DecodedWorld } from "../../contracts/scene.ts";
+import type { DecodedWorld, QueryTarget } from "../../contracts/scene.ts";
 import type { NavigationEdge, NavigationGraph, NavigationMapIdentity, NavigationNode, NavigationProfile, NavigationSource, NavigationWorld, TraversalRequest } from "./types.ts";
 import { at, clear, contents, crouchedProfile, distance, midpoint, trace, translated, validateProfile } from "./helpers.ts";
 import { navigationClusters } from "./graph.ts";
@@ -10,6 +10,8 @@ import { navigationClusters } from "./graph.ts";
 export interface NavigationConnection extends TraversalRequest {
   /** Source entity ordinal or host-owned connection identifier, retained in diagnostics. */
   readonly id: number;
+  readonly sourceTravelType: number;
+  readonly travelSeconds: number;
 }
 export interface NavigationConstruction {
   readonly geometry: DecodedWorld; readonly map: NavigationMapIdentity; readonly profile: NavigationProfile; readonly world: NavigationWorld;
@@ -18,6 +20,7 @@ export interface NavigationConstruction {
   readonly connections?: readonly NavigationConnection[];
 }
 interface Candidate { readonly point: Vec3; readonly source: NavigationSource; }
+const mapTarget: QueryTarget = { kind: "model", model: 0, origin: { x: 0, y: 0, z: 0 }, angles: { x: 0, y: 0, z: 0 } };
 function triangleNormal(a: Vec3, b: Vec3, c: Vec3): Vec3 {
   const x = (b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y);
   const y = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
@@ -95,8 +98,8 @@ function geometryCandidates(world: DecodedWorld, spacing: number, slope: number,
 function grounded(world: NavigationWorld, profile: NavigationProfile, point: Vec3): Vec3 | null {
   const height = -profile.shape.bounds.min.z;
   const end = { ...point, z: point.z + height - profile.maximumStep - 4 };
-  let result = trace(world, profile, { ...point, z: point.z + height + profile.maximumStep + 2 }, end);
-  if (result.startSolid) result = trace(world, profile, { ...point, z: point.z + height + 1 }, end);
+  let result = trace(world, profile, { ...point, z: point.z + height + profile.maximumStep + 2 }, end, mapTarget);
+  if (result.startSolid) result = trace(world, profile, { ...point, z: point.z + height + 1 }, end, mapTarget);
   if (result.startSolid || result.allSolid || result.fraction === 1 || result.contact.kind !== "plane" || result.contact.plane.normal.z < profile.minimumFloorNormal) return null;
   return result.end;
 }
@@ -112,8 +115,8 @@ export function constructNavigation(options: NavigationConstruction): Navigation
   const crouched = crouchedProfile(profile);
   const insert = (origin: Vec3, source: NavigationSource, posture = profile): void => {
     const key = `${Math.round(origin.x / 8)}:${Math.round(origin.y / 8)}:${Math.round(origin.z / 4)}`;
-    if (seen.has(key) || !clear(world, posture, origin, origin)) return;
-    const medium = contents(world, profile, origin);
+    if (seen.has(key) || !clear(world, posture, origin, origin, mapTarget)) return;
+    const medium = contents(world, profile, origin, mapTarget);
     if ((medium & 6) !== 0) return;
     if (nodes.length >= maximumNodes) throw new RangeError(`Navigation construction exceeds ${maximumNodes} nodes; no partial graph was published`);
     seen.add(key);
@@ -129,7 +132,7 @@ export function constructNavigation(options: NavigationConstruction): Navigation
     }
   });
   for (const [index, leaf] of geometry.leaves.entries()) {
-    const center = midpoint(leaf.bounds.min, leaf.bounds.max), medium = contents(world, profile, center);
+    const center = midpoint(leaf.bounds.min, leaf.bounds.max), medium = contents(world, profile, center, mapTarget);
     if ((medium & 9) !== 0 && (medium & 6) === 0) insert(center, { kind: "constructed", surface: null, leaf: index });
   }
   const bins = new Map<string, number[]>();
@@ -146,11 +149,11 @@ export function constructNavigation(options: NavigationConstruction): Navigation
     if (mode === "walk" || mode === "crouch") {
       const posture = mode === "crouch" ? crouched ?? profile : profile;
       const up = profile.maximumStep + 1;
-      if (!clear(world, posture, node.origin, other.origin)
-        && !clear(world, posture, { ...node.origin, z: node.origin.z + up }, { ...other.origin, z: other.origin.z + up })) continue;
+      if (!clear(world, posture, node.origin, other.origin, mapTarget)
+        && !clear(world, posture, { ...node.origin, z: node.origin.z + up }, { ...other.origin, z: other.origin.z + up }, mapTarget)) continue;
       const middle = midpoint(node.origin, other.origin), foot = { ...middle, z: middle.z + profile.shape.bounds.min.z };
       if (grounded(world, posture, foot) === null) continue;
-    } else if (mode === "swim" && !clear(world, profile, node.origin, other.origin)) continue;
+    } else if (mode === "swim" && !clear(world, profile, node.origin, other.origin, mapTarget)) continue;
     edges.push({ id: edges.length, from: node.id, to: other.id, mode, start: node.origin, end: other.origin,
       travelSeconds: Math.max(0.01, distance(node.origin, other.origin) / 320), sourceTravelType: 0, sourceFlags: 0, hint: null, entity: null, source: node.source });
   }
@@ -166,7 +169,8 @@ export function constructNavigation(options: NavigationConstruction): Navigation
       continue;
     }
     edges.push({ id: edges.length, from: from.id, to: to.id, mode: connection.mode, start: connection.from, end: connection.to,
-      travelSeconds: 0.01, sourceTravelType: connection.id, sourceFlags: 0, hint: connection.hint, entity: connection.entity,
+      travelSeconds: connection.travelSeconds, sourceTravelType: connection.sourceTravelType, sourceFlags: 0,
+      hint: connection.hint ?? (connection.mode === "mover" ? { funnel: from.origin, start: connection.from, end: connection.to, ladderPlane: null } : null), entity: connection.entity,
       source: { kind: "constructed", surface: null, leaf: null } });
   }
   return { map, profile, asset: null, nodes, edges, clusters: navigationClusters(nodes, edges), rejected };

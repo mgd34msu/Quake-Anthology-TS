@@ -1,3 +1,4 @@
+import type { ModuleIdentity } from "./execution.ts";
 import type { ClientId, SeatId, SessionId } from "./identity.ts";
 
 /** Command and cvar dialects are independent of the selected network codec. */
@@ -14,6 +15,8 @@ export type CommandOrigin =
 export interface CommandContext {
   readonly session: SessionId;
   readonly origin: CommandOrigin;
+  /** Source producer is provenance, not permission to bypass the authority origin. */
+  readonly producer?: { readonly kind: "game-module"; readonly module: ModuleIdentity };
 }
 
 export type CvarInfoTarget = "client-userinfo" | "server-info";

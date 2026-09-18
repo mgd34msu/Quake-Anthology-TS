@@ -5,6 +5,7 @@ test("recording suffix selects its family and mounted lookup retains its bytes",
   expect(demoFamily("test.qwd", "q3")).toBe("qw");
   expect(demoFamily("test.dem", "q2")).toBe("q1");
   expect(demoFamily("test.dm2", "q1")).toBe("q2");
+  expect(demoFamily("test.mvd", "q3")).toBe("q2");
   expect(demoFamily("test.dm_68", "q1")).toBe("q3");
   expect(demoFamily("test", "qw")).toBe("qw");
   const bytes = new Uint8Array([1, 2, 3]);
@@ -37,4 +38,11 @@ test("missing files differ from failed reads and invalid paths never reach mount
   for (const name of ["../escape", "/absolute", "C:\\absolute", "bad\0name"])
     await expect(openDemoResource({ ...request, name }, async () => { reads++; return undefined; }, () => {})).rejects.toThrow("Invalid relative resource path");
   expect(reads).toBe(0);
+});
+
+
+test("MVD explicit resource names retain their suffix and source packet family", async () => {
+  const bytes = Uint8Array.of(77, 86, 68, 50), paths: string[] = [];
+  const resource = await openDemoResource({ family: demoFamily('match.mvd', 'q3'), name: 'match.mvd', timedemo: false }, async path => { paths.push(path); return bytes; }, () => {});
+  expect(paths).toEqual(['demos/match.mvd']); expect(resource).toEqual({ kind: 'q2', path: 'demos/match.mvd', bytes });
 });

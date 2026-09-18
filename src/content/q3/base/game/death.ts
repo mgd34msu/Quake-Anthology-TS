@@ -265,6 +265,8 @@ export class DeathRuntime {
     let killer = attacker instanceof GameEntity ? attacker.s.number : ENTITYNUM_WORLD;
     let killerName = attacker === null ? "<world>" : attacker instanceof GameEntity && attacker.client !== null ? attacker.client.pers.netname : "<non-client>";
     if (killer < 0 || killer >= MAX_CLIENTS) { killer = ENTITYNUM_WORLD; killerName = "<world>"; }
+    this.host.pool.rankings.playerDie(self.slot, killer,
+      this.host.product === "missionpack" && meansOfDeath >= 23 ? (meansOfDeath === 28 ? 23 : 0) : meansOfDeath);
     const obituary = this.#modNames[meansOfDeath] ?? "<bad obituary>";
     this.host.log(gameFormat("Kill: %i %i %i: %s killed %s by %s\n", [killer, self.s.number, meansOfDeath, killerName, client.pers.netname, obituary]));
     const obituaryEvent = this.host.pool.tempEntity(self.r.currentOrigin, EntityEvent.EV_OBITUARY);
@@ -287,6 +289,7 @@ export class DeathRuntime {
           client.ps.persistant.set(PersistentIndex.PERS_PLAYEREVENTS, client.ps.persistant.get(PersistentIndex.PERS_PLAYEREVENTS) ^ 2);
         }
         if (((frame.time - killerClient.lastKillTime) | 0) < 3000) {
+          this.host.pool.rankings.reward(attacker.slot, 0x8);
           killerClient.ps.persistant.set(PersistentIndex.PERS_EXCELLENT_COUNT, killerClient.ps.persistant.get(PersistentIndex.PERS_EXCELLENT_COUNT) + 1);
           killerClient.ps.eFlags = (killerClient.ps.eFlags & ~AWARD_MASK) | 0x8;
           killerClient.rewardTime = (frame.time + 2000) | 0;

@@ -1,3 +1,4 @@
+import { Q1ServicePresentation } from "./q1-service-presentation.ts";
 import { prepareQ2DamageBlend } from "./q2-damage-blend.ts";
 import { Q1MapFog } from "./q1-fog.ts";
 import { q3Hardware } from "../../render/q3-hardware.ts";
@@ -75,7 +76,8 @@ export class WorldSeatPresentation implements SeatPresentation {
   private worldText: readonly WorldText[] = [];
   private readonly worldFonts = new Map<ContentId, Awaited<ReturnType<typeof loadMenuFont>>>();
   private readonly scene: ApplicationWorldScene;
-  private readonly q1Fog: Q1MapFog | null;
+  private readonly q1Fog: Q1MapFog;
+  private readonly q1Services = new Q1ServicePresentation();
   private layoutIndex: number;
   private layoutCount: number;
   private nativeQ2Frame: NativeQ2HudFrame | null = null;
@@ -99,7 +101,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       return q3Hardware(native.driver?.renderer ?? "");
     });
     this.layoutCount = seatCount;
-    this.q1Fog = assets.content.world.kind === "q1-bsp" ? new Q1MapFog(assets.content.world.entities, local.player.actor, assets.content.recipe.map.entities.content) : null;
+    this.q1Fog = new Q1MapFog(assets.content.world.kind === "q1-bsp" ? assets.content.world.entities : "", new Set(assets.content.recipe.mounts.mounts.map(mount => mount.identity.content)), local.player.actor, assets.content.world.kind === "q1-bsp");
     this.q1Messages = new Q1MessageLocalization(local.player.seat.id, assets, () => this.rerelease?.selectedLanguage(local.player.seat.id) ?? "english");
     this.scene = new ApplicationWorldScene(assets, characterAssets, planarShadows);
     this.frames = new SceneFrameBuilder(assets.images);
@@ -126,8 +128,9 @@ export class WorldSeatPresentation implements SeatPresentation {
           imagePolicy: images.policy }));
       }
       const hud = await this.ui.prepareImageRefresh(images);
+      const sky = await this.q1Services.prepareImageRefresh(images);
       return { commit: () => {
-        this.text.font = font; this.ui.refreshImages(font, typography); hud();
+        this.text.font = font; this.ui.refreshImages(font, typography); hud(); sky();
         for (const font of this.worldFonts.values()) font.close();
         this.worldFonts.clear(); for (const [content, font] of replacements) this.worldFonts.set(content, font);
       }, discard: () => { for (const font of replacements.values()) font.close(); } };
@@ -187,7 +190,8 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   sourceEvents(incoming: readonly SimulationPresentationEvent[]): void {
     const events = incoming.filter(event => event.recipient === undefined || event.recipient.equals(this.local.player.actor));
-    this.q1Fog?.receive(events);
+    this.q1Fog.receive(events);
+    this.q1Services.receive(events);
     for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.push(source);
     if (this.q3Client !== null) {
       if (this.local.builder.dialect === "q3") return;
@@ -251,6 +255,7 @@ export class WorldSeatPresentation implements SeatPresentation {
         this.ui.receive([{ ...source, event: { ...source.event, text } }]);
       }
     }
+    await this.q1Services.prepare(this.assets);
     await this.ui.prepare(this.assets);
     this.worldText = this.simulation.worldText();
     for (const text of this.worldText) if (!this.worldFonts.has(text.content)) {
@@ -275,20 +280,22 @@ export class WorldSeatPresentation implements SeatPresentation {
   frame(snapshot: WorldSnapshot): RenderFrame {
     const viewer = this.chaseSettings === null ? this.local.player.actor : null;
     const time = snapshot.frame.time, camera = this.camera(), source = this.q3Client === null ? createSourceSceneOrder(this.assets.materialRegistrations) : null,
-      effects = source === null ? null : this.effects.frame(camera, source, viewer, this.q1Fog?.current(this.preparedTime));
+      fog = this.q1Fog.active ? this.q1Fog.current(this.preparedTime) : undefined,
+      effects = source === null ? null : this.effects.frame(camera, source, viewer, fog);
     const playerView = this.effects.playerView(this.local.player.actor, camera);
     const style = (index: number, absent: number): number => this.scene.style(index, absent);
     const input: WorldViewInput = { ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }), camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
       ...this.rerelease?.view(this.local.player.actor, this.preparedTime),
-      ...(this.q1Fog === null ? {} : { q1Fog: this.q1Fog.current(this.preparedTime) }),
+      ...this.q1Services.view(this.local.player.actor),
+      ...(fog === undefined ? {} : { q1Fog: fog }),
       clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
       lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
       ...this.scene.styles() };
-    const nativeFrame = this.q3Client?.frame((camera, source) => this.effects.frame(camera, source, this.local.player.actor), camera => {
+    const nativeFrame = this.q3Client?.frame((camera, source) => this.effects.frame(camera, source, this.local.player.actor, fog), camera => {
       if (this.q3Client?.options.kind === "qvm") return this.cameraOverride(camera);
       const player = this.simulation.playerView(this.local.player.actor);
       return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));
-    });
+    }, { ...this.q1Services.view(this.local.player.actor), ...(fog === undefined ? {} : { q1Fog: fog }) });
     this.frames.begin();
     const area = this.viewport;
     if (camera.viewport.x !== area.x || camera.viewport.y !== area.y || camera.viewport.width !== area.width || camera.viewport.height !== area.height)
@@ -367,6 +374,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     close(() => this.q3Client?.close());
     close(() => this.ui.close());
     close(() => this.scene.close());
+    close(() => this.q1Services.close());
     if (this.nativeQ2?.ownsEffects === true) close(() => this.effects.close());
     if (errors.length > 0) throw new AggregateError(errors, "Failed to close seat presentation");
     return undefined;

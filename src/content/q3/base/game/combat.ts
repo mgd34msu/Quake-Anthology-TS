@@ -197,6 +197,9 @@ function q3CommittedDamageFeedback(context: CombatContext, target: GameEntity, n
   for (const mutation of decision.mutations) {
     if (mutation.kind === "armor" && mutation.before.kind !== "none" && mutation.after.kind !== "none") armor += mutation.before.points - mutation.after.points;
   }
+  if (client !== null) context.entities.rankings.damage(target.slot, nativeOwner?.slot ?? ENTITYNUM_WORLD,
+    decision.appliedDamage + armor, context.product === "missionpack" && methodOfDeath >= 23 ? (methodOfDeath === 28 ? 23 : 0) : methodOfDeath,
+    context.time, ownerClient !== null, nativeOwner !== null && onSameTeam(context, target, nativeOwner));
   const previousHealth = decision.mutations.find(mutation => mutation.kind === "health")?.before ?? target.health;
   if (ownerClient !== null && target !== nativeOwner && previousHealth > 0 && target.s.eType !== EntityType.ET_MISSILE && target.s.eType !== EntityType.ET_GENERAL) {
     const persistent = ownerClient.ps.persistant;

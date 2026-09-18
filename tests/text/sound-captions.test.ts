@@ -1,3 +1,4 @@
+import { SeatMediaCaptions } from "../../src/text/media-captions.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,4 +40,20 @@ test("authored sound captions follow delivered voice time, seat identity and que
     await captions.prepare({ forContent: async () => mounts });
   } finally { captions.close(); mounts.close(); await rm(root, { recursive: true, force: true }); }
   expect(disposed).toBe(true);
+});
+
+test("active movie captions replace their locale after a live preference change", async () => {
+  const owner = createIdentityOwner("movie-language"); let language = "english";
+  const failures: unknown[] = [];
+  const captions = new SeatMediaCaptions(owner.seat(0), async path => path.endsWith(".srt")
+    ? new TextEncoder().encode(`1\n00:00:00,000 --> 00:00:02,000\n${path.includes("_fr") ? "Bonjour" : "Hello"}\n`) : null,
+    null, "subtitle", { read: () => language, failed: error => { failures.push(error); } });
+  await captions.prepare("intro.cin", language);
+  const state = { source: "intro.cin", sourceTimeMilliseconds: 100, status: "playing" } satisfies Parameters<SeatMediaCaptions["active"]>[0];
+  const preferences = { subtitles: true, soundCaptions: true, speakers: true };
+  expect(captions.active(state, preferences)[0]?.localizedText).toBe("Hello");
+  language = "french"; expect(captions.active(state, preferences)).toEqual([]);
+  await captions.prepare("intro.cin", language);
+  expect(captions.active(state, preferences)[0]?.localizedText).toBe("Bonjour"); expect(failures).toEqual([]);
+  captions.clear();
 });

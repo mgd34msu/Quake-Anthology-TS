@@ -32,6 +32,7 @@ test("API2023 services retain public records, ordered native messages and exact 
   services = new RereleaseGuestServices({ scene: world.scene, cvars, numeric: createNumericOperations(Q2_DONOR_PROFILE), maxClients: 2, mapPath: "maps/base1.bsp", frameMilliseconds: 25,
     engine: { ...world.engine, emit: () => undefined, inPvs: (a, b) => world.spatial.visibility("pvs", a, b, true), inPhs: (a, b) => world.spatial.visibility("phs", a, b, true) },
     admit: () => undefined, collision: () => undefined, print: text => { prints.push(text); }, command: () => ({ arguments: [], args: "" }), addCommand: () => undefined, debugGraph: () => undefined,
+    navigation: { runtime: () => null, moveToPoint: () => 0, followActor: () => 0 },
     clipboard: { kind: "dedicated" }, localize: (key, args) => [key, ...args].join(":"), debugShapes: () => undefined, worldText: () => undefined,
   });
   const adapter = services, host = new RereleaseQ2GuestHost({ ...adapter.hostOptions, services: adapter.bindMemory(memory), runner, getGameApi: getter, getCgameApi: cgetter }); adapter.bindHost(host); world.attach(host);
@@ -51,6 +52,13 @@ test("API2023 services retain public records, ordered native messages and exact 
     memory.writeFloat32(end, 4200); memory.writeFloat32(memory.offset(end, 4n), 4000); memory.writeFloat32(memory.offset(end, 8n), 4000);
     const trace = invoke("clip", [guestPointer(view.record.address), guestPointer(start), guestPointer(null), guestPointer(null), guestPointer(end), { kind: "uint32", value: 0xffffffff }]);
     if (trace.kind !== "aggregate") throw new Error("Missing trace result"); expect(new DataView(trace.bytes.buffer).getBigUint64(56, true)).toBe(view.record.address.byteOffset); expect(new DataView(trace.bytes.buffer).getFloat32(4, true)).toBe(1);
+    expect(adapter.modelAppearance(1).attachedModels).toEqual(["", "", ""]);
+    const attachment = adapter.resourceIndex("model", "models/objects/laser/tris.md2");
+    memory.writeInt32(view.address("s.modelindex3"), attachment);
+    expect(adapter.modelAppearance(1).attachedModels).toEqual(["", "models/objects/laser/tris.md2", ""]);
+    memory.writeInt32(view.address("s.modelindex3"), 0); memory.writeInt32(view.address("s.modelindex4"), attachment);
+    expect(adapter.modelAppearance(1).attachedModels).toEqual(["", "", "models/objects/laser/tris.md2"]);
+    memory.writeInt32(view.address("s.modelindex4"), 0);
     const info = string("\\name\\old\\name\\duplicate"); expect(invoke("Info_RemoveKey", [guestPointer(info), guestPointer(string("name"))])).toEqual({ kind: "uint32", value: 1 }); expect(readGuestString(memory, info)).toBe("");
     const longValue = "v".repeat(200); invoke("Info_SetValueForKey", [guestPointer(info), guestPointer(string("name")), guestPointer(string(longValue))]); expect(readGuestString(memory, info)).toBe(`\\name\\${longValue}`);
     host.reserveClient(1); adapter.completeSpawn(); adapter.setConfigstring(60, "2"); invoke("WriteByte", [guestInt(42)]); invoke("unicast", [guestPointer(view.record.address), { kind: "uint32", value: 1 }, { kind: "uint32", value: 7 }]);

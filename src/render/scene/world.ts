@@ -85,6 +85,7 @@ export interface WorldViewInput extends WorldVisibilityOptions {
   readonly q1Fog?: Extract<SceneFog, { readonly kind: "q1" }>;
   readonly q2Fog?: Extract<SceneFog, { readonly kind: "q2" }>;
   readonly q2Sky?: Q2SkyView;
+  readonly sourceSky?: Q2SkyView;
   readonly q3Lights?: readonly DynamicLight[];
   readonly animationFrame?: number;
   readonly alternateAnimation?: boolean;
@@ -492,6 +493,7 @@ export class WorldScene {
     if (surface.shader === null) {
       if (material.kind === "q2" && (material.surfaceFlags & 128) !== 0 && (material.surfaceFlags & 4) === 0) return [];
       if (surface.plane !== null && dot3(context.localViewOrigin, surface.plane.normal) - surface.plane.distance < -0.01) return [];
+      if (surface.q1Sky !== null && input.sourceSky !== undefined) return [{ kind: "scene-group", order: { kind: "sequence", phase: "sky" }, operations: this.q2SkyOperations(surface.geometry, input, context) }];
       if (surface.q1Sky !== null) return [sequenceDrawGroup("sky", this.q1SkyBatches(surface, surface.q1Sky, input, context))];
       if (material.kind === "q2" && (material.surfaceFlags & 4) !== 0) return [{ kind: "scene-group", order: { kind: "sequence", phase: "sky" }, operations: this.q2SkyOperations(surface.geometry, input, context) }];
     }
@@ -589,6 +591,7 @@ export class WorldScene {
   }
 
   private skyOperations(shader: CompiledMaterial, geometry: MaterialGeometry, input: WorldViewInput, context: MaterialDrawContext): readonly RenderOperation[] {
+    if (input.sourceSky !== undefined) return this.q2SkyOperations(geometry, input, context);
     this.shaders.sky.clip([geometry], input.camera.origin);
     const built = this.shaders.sky.build(input.camera.origin, Math.max(2048, farClip(input.camera.origin, this.bounds)));
     const operations: RenderOperation[] = [{ kind: "depth-range", range: [1, 1] }];
@@ -605,7 +608,7 @@ export class WorldScene {
   }
 
   private q2SkyOperations(geometry: MaterialGeometry, input: WorldViewInput, context: MaterialDrawContext): readonly RenderOperation[] {
-    const sky = input.q2Sky ?? { images: this.q2Sky, rotation: 0, autoRotate: false, axis: { x: 0, y: 0, z: 1 } };
+    const sky = input.sourceSky ?? input.q2Sky ?? { images: this.q2Sky, rotation: 0, autoRotate: false, axis: { x: 0, y: 0, z: 1 } };
     const seconds = input.time.kind === "seconds" ? input.time.value : input.time.value / 1000;
     return [{ kind: "depth-range", range: [1, 1] }, ...q2SkySides(geometry, input.camera.origin, sky, seconds, context.project), { kind: "depth-range", range: context.depthRange }];
   }

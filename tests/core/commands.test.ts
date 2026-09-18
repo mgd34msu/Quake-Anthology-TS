@@ -1,3 +1,5 @@
+import { createContentDigest } from "../../src/contracts/content.ts";
+import type { ModuleIdentity } from "../../src/contracts/execution.ts";
 import { SharedCvarMirror } from "../../src/core/cvars/mirror.ts";
 import { q3ClientCollision } from "../../src/app/bootstrap/q3-client/collision.ts";
 import type { SceneQueries, TracePolicy } from "../../src/contracts/scene.ts";
@@ -852,4 +854,19 @@ test("nested profile prefixes keep native deferred state and caller append order
   await live.advanceProgramFrame(); live.finishPreparation();
   await live.advanceProgramFrame();
   expect(effects).toEqual(["immediate", "inner", "outer", "inherited", "new"]);
+});
+
+test("game module provenance survives exec alias and wait without granting it to operator invocation", () => {
+  const module = {id:"q2:test",artifactPath:"gamex86.dll",digest:createContentDigest("a".repeat(64)),revision:"initial"} satisfies ModuleIdentity;
+  const source: CommandContext = {session:owner.session,origin:{kind:"server-console"},producer:{kind:"game-module",module}};
+  const seen: CommandContext[] = [];
+  const commands = new CommandBuffer({dialect:"q2-classic",context:{session:owner.session,origin:{kind:"server-console"}},
+    readScript: () => 'alias leave "wait;gamemap base2";leave\n'});
+  commands.register("gamemap", command => { seen.push(command.source); });
+  commands.append("exec exit.cfg\n",source); module.revision = "changed-after-queue";
+  commands.execute(); commands.execute();
+  expect(seen).toHaveLength(1); expect(seen[0]?.producer?.module.revision).toBe("initial");
+  expect(seen[0]?.origin.kind).toBe("script");
+  commands.append("leave\n"); commands.execute(); commands.execute();
+  expect(seen).toHaveLength(2); expect(seen[1]?.producer).toBeUndefined(); expect(seen[1]?.origin.kind).toBe("server-console");
 });

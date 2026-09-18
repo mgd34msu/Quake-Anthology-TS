@@ -26,7 +26,7 @@ export function q1WeaponBit(weapon: Q1BaseWeapon): number {
 export type Q1Weapon = Q1BaseWeapon | "hipnotic:laser" | "hipnotic:mjolnir" | "hipnotic:proximity" | "rogue:lava-nailgun" | "rogue:lava-supernailgun" | "rogue:multi-grenade" | "rogue:multi-rocket" | "rogue:plasma" | "rogue:grapple" | "mg3:laser" | "mg3:mjolnir" | "ctf:grapple";
 export type Q1Powerup = "quad" | "invulnerability" | "invisibility" | "suit" | "hipnotic:wetsuit" | "hipnotic:empathy" | "rogue:shield" | "rogue:antigrav" | "mg3:lavasuit";
 export const Q1_POWERUP_IDS: readonly Q1Powerup[] = ["quad", "invulnerability", "invisibility", "suit", "hipnotic:wetsuit", "hipnotic:empathy", "rogue:shield", "rogue:antigrav", "mg3:lavasuit"];
-export type Q1SoundChannel = "auto" | "weapon" | "voice" | "item" | "body" | 5 | 6 | 7;
+export type Q1SoundChannel = "auto" | "weapon" | "voice" | "item" | "body" | -1 | 5 | 6 | 7;
 export type Q1BeamStyle = "lightning1" | "lightning2" | "lightning3" | "grapple";
 export type Q1Solid = "none" | "trigger" | "bbox" | "slidebox" | "bsp" | "corpse";
 export type Q1MoveType = "none" | "push" | "step" | "toss" | "bounce" | "fly" | "flymissile" | "noclip" | "gib";

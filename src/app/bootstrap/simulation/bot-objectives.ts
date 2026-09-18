@@ -45,6 +45,7 @@ export function rereleaseBotObjectives(simulation: SharedSimulation, knowledge: 
       return match instanceof Q2Tag && match.ownerActor()?.equals(actor) === true;
     },
     goal: actor => {
+      if (simulation.options.mode !== "deathmatch") return q2?.product.rerelease?.entities.poi?.origin ?? null;
       const target = match instanceof Q2Tag ? match.ownerActor() : match instanceof Q2DeathBall ? match.ballActor() : null;
       return target === null || target.equals(actor) ? null : simulation.bodies.read(target)?.origin ?? null;
     },

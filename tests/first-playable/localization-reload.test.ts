@@ -1,3 +1,5 @@
+import { CvarRegistry } from "../../src/core/cvars/index.ts";
+import { registerAccessibilitySettings } from "../../src/ui/settings/accessibility.ts";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -59,7 +61,9 @@ test("mounted language binding reloads tables per seat and preserves selection a
     const mount: ContentMount = { kind: "loose", identity: createMountIdentity("mount:test:language", contentId, 0), rootPath: root };
     using mounts = await openMountPlan({ id: "mount-plan:test:language", mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] });
     const provider = await assets.provider(contentId), mountedAssets = { provider: async () => ({ ...provider, mounts }) };
-    const mounted = new ApplicationRereleasePresentation(mountedAssets, [first, second]);
+    const cvars = new CvarRegistry({ dialect: "q3", context: { session: identity.session, origin: { kind: "server-console" } } });
+    registerAccessibilitySettings(cvars);
+    const mounted = new ApplicationRereleasePresentation(mountedAssets, [first, second], cvars);
     const mountedBinding = await mounted.languageBinding(first.seat, contentId, error => errors.push(error));
     expect(await prints(mounted, "$message")).toEqual(["English mod", "English mod"]);
     mounted.receive([{ kind: "q2-rerelease", content: contentId, sequence: 2, seconds: 0, event: { kind: "story", text: "$story" } }]);
@@ -76,6 +80,12 @@ test("mounted language binding reloads tables per seat and preserves selection a
     expect(mounted.storyActive(first.actor)).toBe(true);
     const replacement = new ApplicationRereleasePresentation(mountedAssets, [{ ...first, language: mounted.selectedLanguage(first.seat) }, second]);
     expect(await prints(replacement, "$message")).toEqual(["English mod", "English mod"]);
+    cvars.set("ui_seat1_language", "english");
+    expect(mountedBinding?.kind === "choice" ? mountedBinding.read() : "").toBe("english");
+    expect(await prints(mounted, "$message")).toEqual(["English mod", "English mod"]);
+    const archived = new CvarRegistry({ dialect: "q3", context: { session: identity.session, origin: { kind: "server-console" } } });
+    registerAccessibilitySettings(archived); archived.applyArchive(cvars.archiveEntries());
+    expect(new ApplicationRereleasePresentation(mountedAssets, [first, second], archived).selectedLanguage(first.seat)).toBe("english");
     expect(errors).toEqual([]);
   } finally { assets.close(); await content.close(); await rm(root, { recursive: true, force: true }); }
 }, 60000);

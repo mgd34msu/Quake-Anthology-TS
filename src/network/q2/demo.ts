@@ -96,6 +96,7 @@ export function readQ2DemoHeader(bytes: Uint8Array): Q2DemoHeader {
                     wire.begin(record.bytes);
                     wire.message.readcount = body;
                     const data = wire.codec.readServerData();
+                    if (recordedVersion === 34 && record.bytes[body + 4] === 2) throw new Error("Native serverrecord footage has no player view; use the Q2 server-demo reader, not ordinary demo playback");
                     wire.finish();
                     return { recordedVersion, protocol, data };
                 }

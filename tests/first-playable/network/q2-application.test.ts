@@ -476,3 +476,38 @@ test('Q2 source movement settings follow Q64 travel and valid wire layouts', asy
         } finally { await app.close(); }
     } finally { await rm(userRoot, { recursive: true, force: true }); }
 }, 30000);
+
+test('Q2 authoritative MVD capture includes local players, unculled entities and live portal state', async () => {
+    const parsed = parseApplicationCommand(['--game', 'q2-classic-baseq2', '--map', 'base1', '--movement', 'q2', '--character', 'q2', '--dedicated', '--mode', 'coop']);
+    if (parsed.kind !== 'run') throw new Error('No Q2 launch');
+    const content = await loadApplicationContent(parsed.options), identity = createIdentityOwner('Q2 source MVD');
+    const session = new EngineSession(identity, { kind: 'headless' });
+    const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 1, mode: 'coop', seed: 1, maxClients: 2, playerIdentity: client => ({ seat: client.slot, socialId: '' }) });
+    try {
+        const first = simulation.admitPlayer(session.createClient(0).id), second = simulation.admitPlayer(session.createClient(1).id);
+        const source = simulation.q2Source();
+        if (source === null) throw new Error('No Q2 source');
+        const entity = source.game.create('mvd_unculled_probe'); entity.model = 'models/objects/barrels/tris.md2';
+        source.game.move(entity, { origin: { x: 16000, y: 16000, z: 16000 } });
+        const host = await createQ2ApplicationServerHost({ session, simulation, content, protocol: { kind: 'q2-classic', version: 34 }, print: () => undefined });
+        const output = simulation.step({ elapsedMilliseconds: 100, commands: [] });
+        host.observe(output, []);
+        const capture = host.mvdCapture?.(output, [], 7);
+        if (capture === undefined) throw new Error('No authoritative MVD source');
+        expect(capture.servercount).toBe(7); expect(capture.players.size).toBe(2);
+        for (const actor of [first.actor, second.actor]) { const address = simulation.actors.sourceOf(actor); if (address === null) throw new Error('No source player'); expect(capture.players.has(address.slot - 1)).toBe(true); }
+        const address = simulation.actors.sourceOf(entity.actor.id);
+        if (address === null) throw new Error('No source entity');
+        expect(capture.entities.some(state => state.number === address.slot)).toBe(true);
+        const geometry = simulation.scene.geometry;
+        if (geometry.kind !== 'q2-bsp') throw new Error('No Q2 portal topology');
+        const portal = geometry.areaPortals[0]?.portal;
+        if (portal === undefined) throw new Error('Retail base1 has no area portals');
+        simulation.scene.setAreaPortalState(portal, true);
+        const opened = host.mvdCapture?.(output, [], 7);
+        expect((opened?.portalBits[portal >>> 3] ?? 0) & 1 << (portal & 7)).not.toBe(0);
+        simulation.scene.setAreaPortalState(portal, false);
+        const closed = host.mvdCapture?.(output, [], 7);
+        expect((closed?.portalBits[portal >>> 3] ?? 0) & 1 << (portal & 7)).toBe(0);
+    } finally { simulation.close(); session.close(); await content.close(); }
+}, 30000);

@@ -343,6 +343,7 @@ export class TeamRuntime {
     this.addTeamScore(entity.s.pos.base, client.sess.sessionTeam, 1);
     this.forceGesture(client.sess.sessionTeam);
     client.pers.teamState.captures = (client.pers.teamState.captures + 1) | 0;
+    this.host.pool.rankings.capture(other.slot);
     this.award(other, 0x800);
     client.ps.persistant.set(PersistentIndex.PERS_CAPTURES, client.ps.persistant.get(PersistentIndex.PERS_CAPTURES) + 1);
     this.host.addScore(other, entity.r.currentOrigin, mission ? 100 : 5);
@@ -379,6 +380,7 @@ export class TeamRuntime {
     } else {
       this.printMessage(null, `${client.pers.netname}^7 got the ${teamName(team)} flag!\n`);
       client.ps.powerups.set(team === Team.TEAM_RED ? Powerup.PW_REDFLAG : Powerup.PW_BLUEFLAG, 2147483647);
+      this.host.pool.rankings.pickupPowerup(other.slot, team === Team.TEAM_RED ? Powerup.PW_REDFLAG : Powerup.PW_BLUEFLAG);
       this.setFlagStatus(team, FlagStatus.TAKEN);
     }
     this.host.addScore(other, entity.r.currentOrigin, mission ? 10 : 0);

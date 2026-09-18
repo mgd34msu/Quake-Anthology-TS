@@ -1,6 +1,17 @@
+import { ApplicationLocalLobby } from "./local-lobby.ts";
+import { LocalLobbyService } from "../../network/services/online.ts";
+import type { Lobby } from "../../network/services/online.ts";
+import { buildUnifiedComposition } from "./network/unified-content.ts";
+import { applicationOptionsForRecipe, loadApplicationContent } from "./content.ts";
+import { addressKey } from "../../network/common/endpoint.ts";
+import { localClientAccount } from "./client-bootstrap.ts";
+import { readSeatLanguage } from "../../ui/settings/language.ts";
+import { parseLoadRequest } from "./save-requests.ts";
 import { q3MapLaunch } from "./q3-map-command.ts";
 import { AddonLibrary } from "./addon-library.ts";
 import type { ConfigurationWriteStarted } from "../../console/commands.ts";
+import { parseGtvConnect, matchesGtvDisconnect, type GtvConnectRequest } from "./gtv-commands.ts";
+import { resolveAddress, addressHost } from "../../network/common/endpoint.ts";
 import { PlayerProgressLibrary } from "./player-progress-library.ts";
 import { PlayerProgressStore } from "./player-progress.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
@@ -65,7 +76,7 @@ import { loadMenuArtImage } from "./menu-art.ts";
 import { loadMenuFont, loadMenuTypography } from "./menu-font.ts";
 import { StartupMenu } from "./startup-menu.ts";
 import { createStartupSelection } from "./startup-selection.ts";
-import type { StartupSelectionModel } from "./startup-selection.ts";
+import type { StartupSelectionModel, StartupLaunch } from "./startup-selection.ts";
 import { FrontendPreferences } from "./frontend-preferences.ts";
 import { movementDialect } from "./input.ts";
 import { StartupSaves } from "./startup-saves.ts";
@@ -85,8 +96,9 @@ import { CvarRegistry } from "../../core/cvars/index.ts";
 import { MouseSettings } from "../../input/mouse-settings.ts";
 import { ApplicationConsoleRouting } from "./console.ts";
 
-type StartupAction = { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "initial"; readonly options: ApplicationOptions }
-  | { readonly kind: "frontend" } | { readonly kind: "play" } | { readonly kind: "preset"; readonly id: string; readonly skill: number; readonly arenaMap?: string } | { readonly kind: "load"; readonly path: string };
+type StartupAction = { readonly kind: "gtv"; readonly request: GtvConnectRequest } | { readonly kind: "connect"; readonly connection: BrowserConnection } | { readonly kind: "initial"; readonly options: ApplicationOptions }
+  | { readonly kind: "lobby-host"; readonly selection: StartupLaunch }
+  | { readonly kind: "frontend" } | { readonly kind: "play" } | { readonly kind: "preset"; readonly id: string; readonly skill: number; readonly arenaMap?: string } | { readonly kind: "load"; readonly path: string; readonly sourceProduct?: string };
 type StartupDisplay = Pick<ApplicationOptions, "renderer" | "gamma" | "width" | "height" | "hidden">;
 interface StartupGraphics {
   readonly audio: StartupAudio;
@@ -125,6 +137,11 @@ export class StartupApplication {
   private baselineInput = "";
   private preferenceStore: ConfigStore | null = null;
   private client: ClientBootstrap | null = null;
+  private readonly lobby: ApplicationLocalLobby;
+  private lobbySelection: StartupLaunch | null = null;
+  private lobbyTransition: { run(): Promise<void>; cancel(error: Error): void } | null = null;
+  private lobbyPoll: Promise<void> | null = null;
+  private lobbySource: ClientSourceLifetime | null = null;
   private readonly keys = new ApplicationKeys(text => this.print(text));
   private readonly musicControls = new MusicControls();
   private scripts: ConsoleScriptFiles | null = null;
@@ -142,15 +159,39 @@ export class StartupApplication {
   private movieGeneration = 0;
   private readonly moviePreparations = new Set<Promise<void>>();
 
+  private gtv: { readonly source: RemoteApplication; readonly id: number; readonly label: string } | null = null;
+  private gtvId = 0;
+  private gtvAbort: AbortController | null = null;
+  private gtvPreparation: Promise<void> | null = null;
   private recording: ClientDemoRecording | null = null;
   private recordingOwner: ClientSourceLifetime | null = null;
+  private serverRecordingOwner: Application | null = null;
+  private serverRecordingPreparation: { readonly source: Application; readonly feed: ClientRecordingFeed } | null = null;
+  private recordingRoot: string | null = null;
   private recordingPreparation: { readonly source: ClientSourceLifetime; readonly feed: ClientRecordingFeed } | null = null;
   private pendingRecording: DemoRecordingIntent | null = null;
 
   private readonly releaseSourceCommands: (() => void)[] = [];
   private frontendRouting: ApplicationConsoleRouting | null = null;
 
-  private constructor(readonly model: StartupSelectionModel, private readonly host: ApplicationHost, saveDirectory: string, private readonly entry: "menu" | "run") {
+  private constructor(readonly model: StartupSelectionModel, private readonly host: ApplicationHost & { readonly localLobbies?: LocalLobbyService }, saveDirectory: string, private readonly entry: "menu" | "run") {
+    this.lobby = new ApplicationLocalLobby(host.localLobbies ?? new LocalLobbyService(), localClientAccount(this.identity), {
+      host: async () => {
+        const selection = this.lobbySelection;
+        if (selection === null) throw new Error("Select a game before starting the lobby");
+        await this.stageLobbyLaunch({ kind: "lobby-host", selection });
+        const game = this.game, endpoint = game?.networkAddress, wire = game?.networkWire;
+        if (game === null || endpoint == null || wire == null) throw new Error("The selected game did not open a listening server");
+        this.lobbySource = game;
+        return { endpoint, wire };
+      },
+      join: async lobby => {
+        await this.stageLobbyLaunch({ kind: "initial", options: this.lobbyJoinOptions(lobby) });
+        this.lobbySource = this.remote;
+      },
+      leave: async () => { if (!this.closed && this.lobbySource !== null) this.pending = { kind: "frontend" }; this.lobbySource = null; },
+      completed: async () => undefined,
+    });
     this.preferences = new FrontendPreferences(() => movementDialect(model.options));
     this.saves = new StartupSaves(model.catalog, saveDirectory);
     this.addons = new AddonLibrary({ edition: model.catalog.products.some(product => product.expectation.id === "q1-classic-id1" && product.availability.kind === "installed") ? "classic" : "rerelease", root: model.options.userContentRoot ?? defaultUserContentRoot(),
@@ -159,7 +200,7 @@ export class StartupApplication {
     });
   }
 
-  static async open(options: ApplicationOptions, host: ApplicationHost, saveDirectory = join(homedir(), ".local", "share", "quake-typescript", "saves"), entry: "menu" | "run" = "menu"): Promise<StartupApplication> {
+  static async open(options: ApplicationOptions, host: ApplicationHost & { readonly localLobbies?: LocalLobbyService }, saveDirectory = join(homedir(), ".local", "share", "quake-typescript", "saves"), entry: "menu" | "run" = "menu"): Promise<StartupApplication> {
     const application = new StartupApplication(await createStartupSelection(options), host, saveDirectory, entry);
     try { application.browser = await StartupServerBrowser.open(new ConfigStore(join(saveDirectory, "..", "settings"))); await application.openGraphics(); return application; }
     catch (error) { await application.close(); throw error; }
@@ -280,7 +321,18 @@ export class StartupApplication {
       const activeAudio = audio;
       const currentAudio = (): StartupAudio["engine"] => this.client?.output.current ?? activeAudio.engine;
       const accessibility = new SeatUiPreferences(seat, imageSettings.cvars);
-      menu = new StartupMenu({ appearance: () => accessibility.values, teamArena: this.model.teamArena, libraries: { addons: this.addons, playerProgress: this.playerProgressLibrary(), movies: this.movieLibraryMenu(), demos: this.demoLibraryMenu(), configurations: this.configurationLibrary(), serverProfiles: this.serverProfileLibrary() }, sound: sound => { const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.sound(sound); }, ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
+      menu = new StartupMenu({ lobby: { current: () => this.lobby, seats: () => this.model.options.seats,
+        selection: async () => {
+          const selected = await this.model.resolve();
+          if (selected.options.network.kind !== "native-server" && selected.options.network.kind !== "q2-server" && selected.options.network.kind !== "unified-server")
+            throw new Error("Choose a hosting connection in Network settings before creating a lobby");
+          const content = await loadApplicationContent(selected.options, selected.recipe, undefined, this.model.catalog);
+          try {
+            const composition = await buildUnifiedComposition(content);
+            this.lobbySelection = { options: selected.options, recipe: content.recipe };
+            return { composition };
+          } finally { await content.close(); }
+        } }, appearance: () => accessibility.values, teamArena: this.model.teamArena, libraries: { addons: this.addons, playerProgress: this.playerProgressLibrary(), movies: this.movieLibraryMenu(), demos: this.demoLibraryMenu(), configurations: this.configurationLibrary(), serverProfiles: this.serverProfileLibrary() }, sound: sound => { const volume = this.preferences.audioValues; activeAudio.setVolumes(volume.effectsVolume, volume.musicVolume); activeAudio.sound(sound); }, ...(this.host.llm === undefined ? {} : { llm: this.host.llm }),
         clipboard: () => { const bytes = readSdlClipboard(); return bytes === null ? null : new TextDecoder().decode(bytes); }, seat, model: this.model, art, font: typography.body, titleFont: typography.title, now: () => performance.now(),
         ...(this.browser === null ? {} : { browser: this.browser, connect: (connection: BrowserConnection) => { this.pending = { kind: "connect", connection }; } }),
         playPreset: (id, skill, arenaMap) => { this.pending = { kind: "preset", id, skill, ...(arenaMap === undefined ? {} : { arenaMap }) }; },
@@ -322,7 +374,9 @@ export class StartupApplication {
       const input = primary.input;
       const inputProfile = StartupInputProfile.retained(settings, input);
 
-      activeMenu.bindInput(input, () => sharedBindingActions(movementDialect(this.model.options), this.model.bindingItems(), this.model.bindingCapabilities()));
+      activeMenu.bindInput(input, () => sharedBindingActions(movementDialect(this.model.options), this.model.bindingItems(), this.model.bindingCapabilities()), {
+        available: () => (this.client?.prepared ?? initial.prepared).seats.find(seat => seat.id.equals(primary.id))?.authoredBindings != null,
+        reset: () => (this.client?.prepared ?? initial.prepared).resetBindings(primary.id) });
       input.setFocus({ kind: "menu", menu: activeMenu.controller.activeMenu ?? "menu:startup:main", control: null }, performance.now());
       router = new InputRouter({ seats: [{ input, controller: (await settings.loadSeat(`input/seat-${seat.index + 1}.json`))?.controller ?? { kind: "automatic" } }], keyboardSeat: seat, controllers,
         now: () => performance.now(), ticks: () => native.window.ticks, subframe: false,
@@ -382,7 +436,7 @@ export class StartupApplication {
         if (local === undefined) throw new Error("Prepared startup seat has no session owner");
         return { client: local.client, seat: local, prepared };
       });
-      const hasPendingSource = (): boolean => this.pending !== null || this.pendingDemo !== null || this.pendingRecording !== null || this.pendingMovie !== null;
+      const hasPendingSource = (): boolean => this.pending !== null || this.lobbyTransition !== null || this.pendingDemo !== null || this.pendingRecording !== null || this.pendingMovie !== null;
       const capture = new ApplicationCapture({ commands: initial.prepared.commands,
         configurationWriteStarted: (source, path) => this.configurationWriteStarted?.(source, path),
         root: () => applicationCaptureRoot(this.captureClient().configuration.current.options.userContentRoot),
@@ -430,8 +484,13 @@ export class StartupApplication {
       const recording = this.recording;
       if (recording === null) throw new Error("Client recording commands were not prepared");
       this.keys.publish(await this.keys.prepare(initial.options, configuration.catalog, initial.prepared.source), initial.prepared.source);
-      this.client = { keys: this.keys, captionCommands: (captions, viewport, time) => this.graphics?.captionCommands(captions, viewport, time) ?? [], recording, stopRecording: async source => {
-        try { if (this.recordingOwner === source) await recording.stop(); }
+      this.client = { localLobby: this.lobby, keys: this.keys, captionCommands: (captions, viewport, time) => this.graphics?.captionCommands(captions, viewport, time) ?? [], recording, stopRecording: async source => {
+        try {
+          const errors: unknown[] = [];
+          try { if (this.recordingOwner === source) await recording.stop(); } catch (error: unknown) { errors.push(error); }
+          try { if (this.serverRecordingOwner === source) await recording.stopServer(); } catch (error: unknown) { errors.push(error); }
+          if (errors.length !== 0) throw new AggregateError(errors, "Recording retirement failed");
+        }
         finally {
           if (this.recordingOwner === source) this.recordingOwner = null;
           if (this.recordingPreparation?.source === source) this.recordingPreparation = null;
@@ -468,25 +527,53 @@ export class StartupApplication {
     return this.client?.platform.current?.kind === "world" ? (this.game ?? this.remote)?.input(event) ?? false
       : this.client?.locals[0]?.prepared.input.input(event) ?? false;
   }
-  requestQuit(): void { this.stopping = true; this.game?.requestQuit(); this.remote?.requestQuit(); }
+  requestQuit(): void { this.gtvAbort?.abort(); this.stopping = true; this.game?.requestQuit(); this.remote?.requestQuit(); }
   readPixels(): Uint8Array { if (this.graphics === null) throw new Error("Startup menu is not visible"); return this.graphics.renderer.readPixels(); }
   captureNextFrame(): Promise<Uint8Array> { if (this.graphics === null) return Promise.reject(new Error("Startup menu is not visible")); return this.graphics.renderer.captureNextFrame().then(frame => frame.pixels); }
 
   private bindDemoCommands(prepared: PreparedStartup): void {
     const recording = new ClientDemoRecording({
-      root: () => { if (this.recordingPreparation === null) throw new Error("Recording has no selected source"); return this.recordingPreparation.feed.root; },
+      root: () => { if (this.recordingRoot === null) throw new Error("Recording has no selected source"); return this.recordingRoot; },
       seed: async context => {
         const source = this.client?.source.current;
         if (source === null || source === undefined) throw new Error("Recording requires an active source");
         const feed = await source.prepareRecording(context);
         if (this.client?.source.current !== source) throw new Error("Recording source changed during preparation");
-        this.recordingPreparation = { source, feed }; return feed.seed();
+        this.recordingPreparation = { source, feed }; this.recordingRoot = feed.root; return feed.seed();
       },
       attach: sink => {
         const captured = this.recordingPreparation;
         if (captured === null || this.client?.source.current !== captured.source) throw new Error("Recording source was retired before attachment");
         const selected = captured, detach = selected.feed.attach(sink); this.recordingOwner = selected.source;
         return () => { detach(); if (this.recordingOwner === selected.source) this.recordingOwner = null; if (this.recordingPreparation === selected) this.recordingPreparation = null; };
+      },
+      serverRecording: {
+        seed: async context => {
+          const source = this.client?.source.current;
+          if (!(source instanceof Application)) throw new Error("serverrecord requires a hosted classic Quake II server");
+          const feed = source.prepareServerRecording(context);
+          this.serverRecordingPreparation = { source, feed }; this.recordingRoot = feed.root; return feed.seed();
+        },
+        attach: sink => {
+          const selected = this.serverRecordingPreparation;
+          if (selected === null || this.client?.source.current !== selected.source) throw new Error("Server demo source was retired before attachment");
+          const detach = selected.feed.attach(sink); this.serverRecordingOwner = selected.source;
+          return () => { detach(); if (this.serverRecordingOwner === selected.source) this.serverRecordingOwner = null; if (this.serverRecordingPreparation === selected) this.serverRecordingPreparation = null; };
+        },
+      },
+      mvdRecording: {
+        seed: async context => {
+          const source = this.client?.source.current;
+          if (!(source instanceof Application)) throw new Error("mvdrecord requires a hosted Quake II server");
+          const feed = source.prepareMvdRecording(context);
+          this.recordingPreparation = { source, feed }; this.recordingRoot = feed.root; return feed.seed();
+        },
+        attach: sink => {
+          const selected = this.recordingPreparation;
+          if (selected === null || this.client?.source.current !== selected.source) throw new Error("Multiview source was retired before attachment");
+          const detach = selected.feed.attach(sink); this.recordingOwner = selected.source;
+          return () => { detach(); if (this.recordingOwner === selected.source) this.recordingOwner = null; if (this.recordingPreparation === selected) this.recordingPreparation = null; };
+        },
       },
       reconnectRecording: async (_context, sink) => {
         const previous = this.recordingPreparation?.source;
@@ -528,14 +615,14 @@ export class StartupApplication {
     let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
     if (origin.kind === "remote-client") return false;
     if (this.demos?.handle(name, args, source)) return true;
-    if (name === "record" || name === "rerecord" || name === "stop" || name === "stoprecord") {
-      if (name === "record" || name === "rerecord") {
+    if (name === "record" || name === "rerecord" || name === "stop" || name === "stoprecord" || name === "mvdrecord" || name === "mvdstop" || name === "serverrecord" || name === "serverstop") {
+      if (name === "record" || name === "rerecord" || name === "mvdrecord" || name === "serverrecord") {
         const filename = args[0];
-        if (args.length > 1 || name === "rerecord" && filename === undefined) { this.print(`Usage: ${name} <name>\n`); return true; }
-        this.pendingRecording = name === "rerecord" && filename !== undefined ? { kind: "rerecord", name: filename, source } : { kind: "record", name: filename, source };
+        if (args.length > 1 || name !== "record" && filename === undefined) { this.print(`Usage: ${name} <name>\n`); return true; }
+        this.pendingRecording = (name === "rerecord" || name === "mvdrecord" || name === "serverrecord") && filename !== undefined ? { kind: name, name: filename, source } : { kind: "record", name: filename, source };
       } else {
-        if (args.length !== 0) { this.print("Usage: stop\n"); return true; }
-        this.pendingRecording = { kind: "stop", source };
+        if (args.length !== 0) { this.print(`Usage: ${name}\n`); return true; }
+        this.pendingRecording = { kind: name === "serverstop" ? "serverstop" : name === "mvdstop" ? "mvdstop" : "stop", source };
       }
       prepared?.noteWorldAction(); return true;
     }
@@ -565,6 +652,23 @@ export class StartupApplication {
       return true;
     }
     if (name === "quit") { this.requestQuit(); return true; }
+    if (name === "mvdconnect") {
+      try {
+        const cvars = prepared?.source;
+        const request = parseGtvConnect(args, { username: cvars?.find("mvd_username") === undefined ? "unnamed" : cvars.variableString("mvd_username"), password: cvars?.variableString("mvd_password") ?? "" });
+        if (request === null) this.print("Usage: mvdconnect [-u user] [-p password] [-n name] <address[:port]>\n");
+        else { this.pending = { kind: "gtv", request }; prepared?.noteWorldAction(); }
+      } catch (error: unknown) { this.print(`${error instanceof Error ? error.message : String(error)}\n`); }
+      return true;
+    }
+    if (name === "mvdisconnect") {
+      try {
+        const current = this.gtv?.source === this.client?.source.current ? this.gtv : null;
+        if (matchesGtvDisconnect(args, current)) { this.pending = { kind: "frontend" }; prepared?.noteWorldAction(); }
+        else this.print("Usage: mvdisconnect [-a|--all] [conn_id]\n");
+      } catch (error: unknown) { this.print(`${error instanceof Error ? error.message : String(error)}\n`); }
+      return true;
+    }
     if (name === "disconnect") { this.pending = { kind: "frontend" }; return true; }
     const options = this.game?.options ?? this.remote?.options ?? this.model.options;
     if (name === "connect") {
@@ -587,9 +691,8 @@ export class StartupApplication {
       return true;
     }
     if (this.game === null && name === "load") {
-      const saved = args[0];
-      if (args.length !== 1 || saved === undefined || saved.length === 0) { this.print("Usage: load <name or path>\n"); return true; }
-      this.pending = { kind: "load", path: saveCommandPath(this.saves.directory, saved) }; return true;
+      const request = parseLoadRequest(args);
+      this.pending = { kind: "load", path: saveCommandPath(this.saves.directory, request.name), ...(request.sourceProduct === undefined ? {} : { sourceProduct: request.sourceProduct }) }; return true;
     }
     return false;
   }
@@ -735,7 +838,7 @@ export class StartupApplication {
     try {
       const captions = new SeatMediaCaptions(seat.seat.id, async path => {
         assertCurrent(); const bytes = await scripts.readMounted(path); assertCurrent(); return bytes ?? null;
-      });
+      }, null, "subtitle", { read: () => readSeatLanguage(client.imageSettings.cvars, seat.seat.id.index), failed: error => this.print(`Caption language reload failed: ${String(error)}\n`) });
       const preferences = new SeatUiPreferences(seat.seat.id, client.imageSettings.cvars);
       prepared = await CampaignCinematic.openMedia(request, { mounts: { open: async path => {
         assertCurrent();
@@ -744,7 +847,7 @@ export class StartupApplication {
         return resource;
       } } },
         { images }, { engine: output }, client.renderer, seat.seat.id, {
-          prepare: async source => { assertCurrent(); await captions.prepare(source, "english"); assertCurrent(); },
+          prepare: async source => { assertCurrent(); await captions.prepare(source, readSeatLanguage(client.imageSettings.cvars, seat.seat.id.index)); assertCurrent(); },
           commands: (timeline, viewport) => client.captionCommands(captions.active(timeline,
             { subtitles: preferences.values.captions, soundCaptions: preferences.values.captions, speakers: true }), viewport, timeline.elapsedMilliseconds),
         });
@@ -921,7 +1024,9 @@ export class StartupApplication {
       this.frontendRoutingBaseline = this.frontendRoutingState(router);
       graphics.controllerSettings = new ControllerSettings(router, [primary.id], () => client.controllers.devices, client.settings, this.host.print);
       graphics.inputProfile = StartupInputProfile.retained(client.settings, primary.input);
-      graphics.menu.bindInput(primary.input, () => sharedBindingActions(movementDialect(this.model.options), this.model.bindingItems(), this.model.bindingCapabilities()));
+      graphics.menu.bindInput(primary.input, () => sharedBindingActions(movementDialect(this.model.options), this.model.bindingItems(), this.model.bindingCapabilities()), {
+        available: () => client.prepared.seats.find(seat => seat.id.equals(primary.id))?.authoredBindings != null,
+        reset: () => client.prepared.resetBindings(primary.id) });
       graphics.menu.bindGyro(graphics.controllerSettings.ui(primary.id));
     }
     const platform = client.platform.current;
@@ -947,6 +1052,8 @@ export class StartupApplication {
     if (client === null) throw new Error("Retained client is unavailable");
     const localPlayerCount = this.activeDemo === null ? (this.game ?? this.remote)?.options.seats : undefined;
     const source = client.source.current;
+    const room = this.lobby.current();
+    if (source !== null && source === this.lobbySource && room?.owner === this.lobby.account.id && room.phase === "playing") await this.lobby.complete();
     await source?.prepareRetirement();
     this.activateFrontend();
     source?.releaseSettings();
@@ -958,6 +1065,7 @@ export class StartupApplication {
     this.activeDemo = null;
     this.graphics?.menu.setStatus(this.status);
     this.demos?.refresh();
+    if (this.lobby.current() !== null) this.graphics?.menu.openLocalLobby();
   }
 
   private publishFrontendRouting(client: ClientBootstrap): void {
@@ -994,7 +1102,46 @@ export class StartupApplication {
     this.frontendRouting?.close(); this.frontendRouting = routing;
   }
 
-  private async launch(action: StartupAction): Promise<void> {
+  private stageLobbyLaunch(action: StartupAction): Promise<void> {
+    if (this.closed || this.stopping || this.lobbyTransition !== null) return Promise.reject(new Error("The client cannot start another lobby transition"));
+    return new Promise((resolve, reject) => {
+      this.lobbyTransition = { cancel: reject, run: async () => {
+        try { await this.launch(action, true); resolve(); }
+        catch (error: unknown) { reject(error); }
+      } };
+    });
+  }
+
+  private lobbyJoinOptions(lobby: Extract<Lobby, { readonly phase: "playing" }>): ApplicationOptions {
+    if (lobby.endpoint.kind === "loopback") throw new Error("This lobby endpoint requires an in-process transport");
+    const selected = applicationOptionsForRecipe(this.model.options, { catalog: this.model.catalog, recipe: lobby.composition.composition.recipe });
+    const remote = addressKey(lobby.endpoint);
+    const seats = lobby.members.find(member => member.account.id === this.lobby.account.id)?.seats;
+    if (seats === undefined) throw new Error("The local client is not a member of this lobby");
+    const { q1Protocol: _q1, q2Protocol: _q2, networkTransport: _transport, ...options } = selected;
+    const base = { ...options, dedicated: false, seats };
+    if (lobby.wire.kind === "unified") return { ...base, network: { kind: "unified-client", remote } };
+    const transport = lobby.endpoint.kind === "ipx" ? this.model.options.networkTransport : undefined;
+    if (lobby.endpoint.kind === "ipx" && (transport === undefined || transport.kind === "udp")) throw new Error("Choose an IPX transport to join this lobby");
+    const native = { ...base, ...(transport === undefined ? {} : { networkTransport: transport }) };
+    const protocol = lobby.wire.protocol;
+    switch (protocol.kind) {
+      case "q1-netquake": case "q1-fitzquake": case "q1-rmq":
+        return { ...native, q1Protocol: protocol, network: { kind: "q1-client", remote } };
+      case "q1-quakeworld": return { ...native, network: { kind: "qw-client", remote } };
+      case "q1-quakeworld-donor-wide": throw new Error("This lobby uses a replay-only QuakeWorld wire format");
+      case "q2-classic": case "q2-r1q2": case "q2-q2pro": case "q2-rerelease": case "q2-kex": case "q2-private-classic":
+        return { ...native, q2Protocol: protocol, network: { kind: "q2-client", remote } };
+      case "q2-kex-demo": throw new Error("This lobby advertises a recorded-only Quake II protocol");
+      case "q3": return { ...native, network: { kind: "q3-client", remote } };
+    }
+  }
+
+  private async launch(action: StartupAction, propagateFailure = false): Promise<void> {
+    if (!propagateFailure && action.kind !== "frontend" && this.lobby.current() !== null) {
+      await this.lobby.leave();
+      if (this.pending?.kind === "frontend") this.pending = null;
+    }
     await this.addons.suspend();
     this.closeFrontendMovie();
     const previous = this.client?.source.current;
@@ -1004,6 +1151,7 @@ export class StartupApplication {
     this.graphics?.menu.setStatus("Loading...", true);
     this.graphics?.draw(previous ?? null);
     try {
+      if (action.kind === "gtv") { await this.connectGtv(action.request); return; }
       if (action.kind === "frontend") { await this.returnToFrontend(); return; }
       if (action.kind === "connect") { await this.connect(action.connection); return; }
       if (action.kind === "initial" && (action.options.network.kind === "q1-client" || action.options.network.kind === "qw-client"
@@ -1015,10 +1163,10 @@ export class StartupApplication {
       if (client === null) throw new Error("Startup has no retained client");
       const game = await serviceLoading(async nextFrame => {
         loading?.menu.setStatus("Loading map...", true);
-        const selected = action.kind === "initial" ? { options: action.options, recipe: undefined, image: undefined }
+        const selected = action.kind === "lobby-host" ? { ...action.selection, image: undefined } : action.kind === "initial" ? { options: action.options, recipe: undefined, image: undefined }
           : action.kind === "preset" ? { ...await this.model.resolvePreset(action.id, action.skill, action.arenaMap), image: undefined }
           : action.kind === "play" ? { ...await this.model.resolve(), image: undefined } : await (async () => {
-          const saved = await prepareApplicationSave(this.model.options, this.model.catalog, action.path);
+          const saved = await prepareApplicationSave(this.model.options, this.model.catalog, action.path, action.sourceProduct);
           const image = saved.image, settings = savedSimulationSettings(image);
           const bots = savedBotCheckpoint(image);
           const seats = settings.clientSlots.filter(slot => !bots?.transport.connections.some(connection => connection.client.slot === slot)).length;
@@ -1028,7 +1176,13 @@ export class StartupApplication {
             seats } };
         })();
         loading?.menu.setStatus("Preparing world...", true);
-        const game = await Application.openBorrowed(client, { ...selected.options, renderer: loading?.display.renderer ?? selected.options.renderer }, { ...this.host, saveDirectory: this.saves.directory, loading: { deferWindowVisibility: true, nextFrame: async () => {
+        const game = await Application.openBorrowed(client, { ...selected.options, renderer: loading?.display.renderer ?? selected.options.renderer }, { ...this.host, ...(action.kind === "lobby-host" ? { lobby: {
+          complete: async () => { if (this.lobbySource !== null && this.client?.source.current === this.lobbySource) await this.lobby.complete(); },
+          returnToLobby: async () => {
+            if (this.lobbySource === null || this.client?.source.current !== this.lobbySource) return;
+            await this.lobby.complete(); this.pending = { kind: "frontend" };
+          },
+        } } : {}), saveDirectory: this.saves.directory, loading: { deferWindowVisibility: true, nextFrame: async () => {
           await nextFrame(); if (this.stopping) throw new Error("Startup cancelled");
         },
           stage: message => loading?.menu.setStatus(message, true) } }, selected.recipe, this.preferences.values, selected.image);
@@ -1054,6 +1208,7 @@ export class StartupApplication {
       this.print(`${this.status}\n`);
       this.graphics?.menu.setStatus(this.status);
       if (error instanceof ClientSourcePublicationError || this.client?.source.current !== previous) { this.stopping = true; throw error; }
+      if (propagateFailure) throw error;
     }
   }
 
@@ -1066,6 +1221,38 @@ export class StartupApplication {
       characterModel: family === "q1" ? "player" : family === "q2" ? "male" : "sarge", seats, dedicated: false, rules: "standard",
       network: { kind: connection.protocol === "qw" ? "qw-client" : family === "q1" ? "q1-client" : family === "q2" ? "q2-client" : "q3-client", remote: connection.remote } };
     await this.connectOptions(options);
+  }
+
+  private async connectGtv(request: GtvConnectRequest): Promise<void> {
+    const client = this.client, browser = this.browser;
+    if (client === null || browser === null || this.closed || this.stopping) throw new Error("GTV client is unavailable");
+    const abort = new AbortController(); this.gtvAbort = abort;
+    const previous = client.source.current;
+    const operation = serviceLoading(async (): Promise<void> => {
+      const address = await resolveAddress(request.address, 27910);
+      if (abort.signal.aborted) throw new Error("GTV connection canceled");
+      const options = { ...this.model.options, renderer: this.graphics?.display.renderer ?? this.model.options.renderer };
+      const remote = await RemoteApplication.openGtvBorrowed(client, options, { ...this.host, saveDirectory: this.saves.directory, serverBrowser: browser, print: text => { this.print(text); return undefined; } },
+        { host: addressHost(address), port: address.port, identity: { username: request.username, password: request.password, version: "quake-typescript" }, signal: abort.signal });
+      if (this.closed || this.stopping || abort.signal.aborted) { await remote.close(); return; }
+      const id = this.gtvId++, label = request.label ?? `net${id}`;
+      this.gtv = { source: remote, id, label }; this.remote = remote; this.game = null; this.activeDemo = null;
+      this.demos?.manualGame(); this.demos?.refresh(); this.lastFrame = performance.now();
+      this.print(`GTV ${id}: ${label} (${request.address})\n`);
+    }, () => {
+      if (this.closed || this.stopping) { abort.abort(); return; }
+      const graphics = this.graphics;
+      if (graphics === null) { abort.abort(); return; }
+      try {
+        for (const event of graphics.renderer.window.pollEvents()) {
+          if (event.kind === "quit" || event.kind === "window" && event.event === 14) this.requestQuit();
+        }
+        if (!this.stopping && client.source.current === previous) graphics.draw(previous);
+      } catch (error: unknown) { abort.abort(); throw error; }
+    });
+    this.gtvPreparation = operation;
+    try { await operation; }
+    finally { if (this.gtvAbort === abort) this.gtvAbort = null; if (this.gtvPreparation === operation) this.gtvPreparation = null; }
   }
 
   private async connectOptions(options: ApplicationOptions): Promise<void> {
@@ -1093,10 +1280,16 @@ export class StartupApplication {
       try {
         if (recording.kind === "record") await this.recording?.start(recording.name, recording.source);
         else if (recording.kind === "rerecord") await this.recording?.rerecord(recording.name, recording.source);
+        else if (recording.kind === "mvdrecord") await this.recording?.startMvd(recording.name, recording.source);
+        else if (recording.kind === "serverrecord") await this.recording?.startServer(recording.name, recording.source);
+        else if (recording.kind === "serverstop") await this.recording?.stopServer();
+        else if (recording.kind === "mvdstop") await this.recording?.stopMvd();
         else await this.recording?.stop();
       } catch (error) { this.print(`${error instanceof Error ? error.message : String(error)}\n`); }
       finally { if (this.recording?.path === null) this.recordingPreparation = null; }
     }
+    const lobbyTransition = this.lobbyTransition; this.lobbyTransition = null;
+    if (lobbyTransition !== null) await lobbyTransition.run();
     const action = this.pending; this.pending = null;
     if (action !== null && !this.stopping) await this.launch(action);
     if (!this.stopping) await this.publishDemoIntent();
@@ -1130,6 +1323,10 @@ export class StartupApplication {
     if (this.closed || this.stopping) return;
     const now = performance.now(), elapsed = Math.max(4, now - this.lastFrame); this.lastFrame = now;
     this.browser?.poll();
+    if (this.lobbyPoll === null) {
+      this.lobbyPoll = this.lobby.poll().catch((error: unknown) => { this.print("Local lobby: " + (error instanceof Error ? error.message : String(error)) + "\n"); })
+        .finally(() => { this.lobbyPoll = null; });
+    }
     const graphics = this.graphics, client = this.client;
     if (graphics === null || client === null) throw new Error("Startup frame has no client");
     const source = this.game ?? this.remote;
@@ -1173,6 +1370,7 @@ export class StartupApplication {
         await this.returnToFrontend();
       }
     }
+    await this.publishPendingSource();
     this.frames++;
     if (client.platform.current?.kind !== "menu" || this.remote?.presentedCinematic) return;
     const movie = this.frontendMovie;
@@ -1207,7 +1405,11 @@ export class StartupApplication {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true; this.stopping = true;
+    this.lobbyTransition?.cancel(new Error("Startup closed before lobby launch")); this.lobbyTransition = null;
     await this.addons.close();
+    this.gtvAbort?.abort();
+    try { await this.gtvPreparation; } catch { /* Connection preparation reports its own failure. */ }
+    this.gtv = null;
     this.movieGeneration++; this.pendingMovie = null;
     await Promise.all(this.moviePreparations);
     try { await this.saveFrontendInput(); }
@@ -1215,10 +1417,11 @@ export class StartupApplication {
     try { if (this.preferenceStore !== null) await this.preferences.saveAudioBaseline(this.preferenceStore); }
     catch (error) { this.print(`Could not save audio settings: ${error instanceof Error ? error.message : String(error)}\n`); }
     const errors: unknown[] = [];
+    try { await this.lobby.close(); } catch (error: unknown) { errors.push(error); }
     try { await this.client?.inputDevices.save(); } catch (error) { errors.push(error); }
     try { await this.keys.save(); } catch (error) { errors.push(error); }
     try { this.closeFrontendMovie(); } catch (error) { errors.push(error); }
-    try { await this.recording?.stop(); } catch (error) { errors.push(error); }
+    try { await this.recording?.stopAll(); } catch (error) { errors.push(error); }
     this.game?.requestQuit(); this.remote?.requestQuit();
     this.client?.videoRestart.close();
     try { await this.client?.capture.close(); } catch (error) { errors.push(error); }

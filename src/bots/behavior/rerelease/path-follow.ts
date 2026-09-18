@@ -10,7 +10,7 @@
 
 import { angleVectors, bvecDistance, bvecDistance2D, clamp, type BotVec3 } from "./math.ts";
 import type { BotMovementSettings } from "./data/botdata.ts";
-import { navLinkIsEntity, navLinkIsJump, NavLinkType, steerDirection, type NavGraphLinkT, type NavPathT } from "./nav.ts";
+import { navLinkIsEntity, navLinkIsJump, NavLinkType, steerDirection, type BotTransportStep, type NavGraphLinkT, type NavPathT } from "./nav.ts";
 import { randomChance, type BotRandomT } from "./rng.ts";
 
 /**
@@ -138,6 +138,7 @@ export interface BotMoveOutputT {
 }
 
 export interface BotFollowInputT {
+  transport?: (link: NavGraphLinkT, origin: BotVec3) => BotTransportStep | null;
   origin: BotVec3;
   /** The view the movement is expressed relative to. */
   pitch: number;
@@ -182,6 +183,11 @@ export function followPath(state: BotPathStateT, input: BotFollowInputT, movemen
     const point = path.points[state.index];
     if (point === undefined) throw new Error("Bot path point is absent");
     const link = path.links[state.index] ?? null;
+    const arrivingTrain = state.index > 0 ? path.links[state.index - 1] : null;
+    if (arrivingTrain?.type === NavLinkType.Train) {
+      const step = input.transport?.(arrivingTrain, input.origin);
+      if (step?.kind !== "move" || step.stage !== "exit") break;
+    }
     const tolerance = link !== null && link.type !== NavLinkType.Walk ? BOT_TRAVERSAL_REACHED : BOT_POINT_REACHED;
     // Height is checked loosely: a steering point sits at node height and
     // the bot's origin sits at its own, and a plat ride moves it a long way.
@@ -202,6 +208,22 @@ export function followPath(state: BotPathStateT, input: BotFollowInputT, movemen
   let target = path.points[state.index];
   if (target === undefined) throw new Error("Bot path target is absent");
   const link = path.links[state.index] ?? null;
+  const previousTransport = state.index > 0 ? path.links[state.index - 1] ?? null : null;
+  const train = link?.type === NavLinkType.Train ? link : previousTransport?.type === NavLinkType.Train ? previousTransport : null;
+  if (train !== null) {
+    const step = input.transport?.(train, input.origin);
+    if (step == null || step.kind === "unavailable") return { ...idle, status: BotPathStatus.Stuck, target, link: train };
+    if (step.kind === "wait" || step.kind === "ride") {
+      if (state.liftWaitSince < 0 || bvecDistance(input.origin, state.stuckOrigin) > 8) {
+        state.liftWaitSince = input.now; state.stuckOrigin = { ...input.origin };
+      }
+      if (input.now - state.liftWaitSince > LIFT_WAIT_SECONDS) return { ...idle, status: BotPathStatus.Stuck, target, link: train };
+      state.stuckSince = input.now;
+      return { ...idle, status: BotPathStatus.Moving, riding: step.kind === "ride", target, link: train };
+    }
+    target = step.target;
+    state.liftWaitSince = -1;
+  }
 
   // A walk-off-ledge link names where the bot lands, not where it steps off.
   // On ctf4 the landing node sits under a grated bridge, straight below the

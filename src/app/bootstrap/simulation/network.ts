@@ -1,3 +1,5 @@
+import { Q2WireCodec, encodeQ2ServerEvent } from '../../../network/q2/index.ts';
+import type { MvdCapture, MvdEmission, MvdRecipient } from '../../../network/q2/mvd-encoding.ts';
 import { expandCommandMacros } from '../../../core/commands/text.ts';
 import type { ActorId, ClientId } from '../../../contracts/identity.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
@@ -38,6 +40,9 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         throw new Error('Q2 server network host requires the Q2 source game provider');
     const cvars = simulation.q2ServerCvars();
     if (cvars === null) throw new Error('Q2 server network host requires the source cvar registry');
+    cvars.register('sv_mvd_enable', '0', Q2CvarFlag.Latch);
+    cvars.register('sv_mvd_maxclients', '8', Q2CvarFlag.Latch);
+    cvars.register('sv_mvd_password', '', Q2CvarFlag.Private);
     cvars.register('hostname', 'noname', Q2CvarFlag.ServerInfo | Q2CvarFlag.Archive);
     for (const [name, value] of [['protocol', String(options.protocol.version)], ['mapname', source.game.options.mapName], ['maxclients', String(source.game.options.maxClients)]] satisfies readonly (readonly [string, string])[]) {
         cvars.register(name, value, Q2CvarFlag.ServerInfo | (name === 'maxclients' ? Q2CvarFlag.Latch : Q2CvarFlag.NoSet));
@@ -167,7 +172,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
             return state.modelindex !== 0 || Math.hypot(origin.x - body.origin.x, origin.y - body.origin.y, origin.z - body.origin.z) <= 400;
         });
     };
-    const playerState = (player: Q2ApplicationPlayer): PlayerStateT => {
+    const playerState = (player: Pick<Q2ApplicationPlayer, 'actor'>): PlayerStateT => {
         const movement = simulation.movementPlayer(player.actor), view = simulation.q2PlayerView(player.actor);
         if (movement === null)
             throw new Error('Network player has no movement state');
@@ -224,10 +229,61 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         state.stats[17] = view?.spectator ? 1 : 0;
         return state;
     };
+    const captureMvd = (_output: Parameters<Q2ApplicationServerHost['observe']>[0], events: Parameters<Q2ApplicationServerHost['observe']>[1], servercount: number): MvdCapture => {
+        updateMovementConfigs();
+        const rerelease = source.game.options.edition === 'rerelease';
+        const protocol: Q2ProtocolIdentity = rerelease ? { kind: 'q2-rerelease', version: 1038 } : { kind: 'q2-classic', version: 34 };
+        const wire = new Q2WireCodec(protocol), players = new Map<number, PlayerStateT>(), messages: MvdEmission[] = [];
+        for (const [actor, state] of source.players.states) {
+            if (!state.connected || simulation.movementPlayer(actor) === null) continue;
+            const number = sourceNumber(actor) - 1;
+            players.set(number, playerState({ actor }));
+        }
+        const entities = entityStates(protocol), geometry = simulation.scene.geometry;
+        if (geometry.kind !== 'q2-bsp') throw new Error('MVD source capture requires Quake II portal topology');
+        const maxPortal = geometry.areaPortals.reduce((maximum, value) => Math.max(maximum, value.portal), -1);
+        const portalBits = new Uint8Array(Math.ceil((maxPortal + 1) / 8));
+        for (const portal of simulation.scene.q2PortalState()) portalBits[portal >>> 3] = (portalBits[portal >>> 3] ?? 0) | 1 << (portal & 7);
+        const target = (actor: ActorId | null): MvdRecipient => actor === null ? { kind: 'all' } : { kind: 'player', number: sourceNumber(actor) - 1 };
+        const emit = (event: Q2ServerWriteEvent, recipient: MvdRecipient, reliable: boolean): void => { messages.push({ bytes: encodeQ2ServerEvent(wire, event), recipient, reliable }); };
+        for (const item of events) {
+            if (item.kind === 'q2-player') {
+                const event = item.event;
+                if (event.kind === 'print') emit({ kind: 'print', level: event.level === 'chat' ? 3 : event.level === 'high' ? 2 : event.level === 'medium' ? 1 : 0, text: event.text }, target(event.target), true);
+                else if (event.kind === 'stufftext') emit({ kind: 'command-text', text: event.text }, target(event.actor), true);
+                else if (event.kind === 'inventory') {
+                    const counts = new Array<number>(256).fill(0);
+                    for (const entry of event.entries) { const ordinal = inventoryOrdinal(entry.item); if (ordinal > 0 && ordinal < 256) counts[ordinal] = entry.count; }
+                    emit({ kind: 'inventory', counts }, target(event.actor), true);
+                }
+            } else if (item.kind === 'q2') {
+                const event = item.event;
+                if (event.kind === 'print') emit({ kind: 'print', level: event.level === 'chat' ? 3 : event.level === 'high' ? 2 : event.level === 'medium' ? 1 : 0, text: event.text }, target(event.actor), true);
+                else if (event.kind === 'centerprint') emit({ kind: 'center-print', text: event.text }, target(event.actor), true);
+                else if (event.kind === 'effect') {
+                    const value = q2EffectToWire(event);
+                    // Presentation effects currently retain no native multicast scope; preserve existing server routing.
+                    if (value !== null) emit({ kind: 'temporary-entity', value }, { kind: 'all' }, false);
+                } else if (event.kind === 'sound' && event.loop === 'once') {
+                    const recipient: MvdRecipient = event.attenuation === 0 || (event.channel & 8) !== 0 ? { kind: 'all' } : { kind: 'phs', leaf: simulation.scene.pointLeaf(event.origin) };
+                    emit({ kind: 'sound', sound: { flags: 0, index: sound(event.path), entity: event.actor === null ? 0 : item.sourceEntity ?? sourceNumber(event.actor), channel: event.channel & 7, position: event.origin, volume: event.volume, attenuation: event.attenuation, delaySeconds: 0 } }, recipient, event.reliable || (event.channel & 16) !== 0);
+                } else if (event.kind === 'monster-muzzleflash') {
+                    const entity = item.sourceEntity ?? sourceNumber(event.actor), body = simulation.bodies.read(event.actor);
+                    if (body !== null) emit({ kind: 'muzzle-flash', entity, flash: event.flash, monster: true, silenced: false }, { kind: 'pvs', leaf: simulation.scene.pointLeaf(body.origin) }, false);
+                }
+            } else if (item.kind === 'q2-weapon' && item.event.kind === 'muzzleflash') {
+                const event = item.event, body = simulation.bodies.read(event.actor);
+                if (body !== null) emit({ kind: 'muzzle-flash', entity: item.sourceEntity ?? sourceNumber(event.actor), flash: event.flash, monster: false, silenced: event.silenced }, { kind: 'pvs', leaf: simulation.scene.pointLeaf(body.origin) }, false);
+            }
+        }
+        return { revision: rerelease ? 3038 : 2010, flags: 0, servercount, gamedir: options.content.catalog.product(simulation.recipe.map.entities.content).expectation.contentDirectory.split('/').at(-1) ?? 'baseq2', dummy: -1, configStrings: new Map(configs), portalBits, players, entities, messages };
+    };
     const knownConfigs = new Map<number, Map<number, string>>();
     return {
         downloads,
         ...(options.rejects === undefined ? {} : { rejects: options.rejects }),
+        mvdCapture: captureMvd,
+        mvdSettings: () => ({ enabled: cvars.variableValue('sv_mvd_enable') !== 0, maxViewers: Math.max(1, Math.min(256, Math.trunc(cvars.variableValue('sv_mvd_maxclients')))), password: cvars.variableString('sv_mvd_password') }),
         ...(options.administration === undefined ? {} : { administration: options.administration }),
         ...(options.masters === undefined ? {} : { masters: options.masters }),
         discovery: {

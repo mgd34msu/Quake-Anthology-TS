@@ -19,7 +19,7 @@ export function resolveQcWeaponBehavior(module: ModuleIdentity, program: QcProgr
   if (module.digest !== program.digest || metadata.artifactDigest !== program.digest) return { kind: 'unsupported', reason: 'Behavior metadata belongs to a different source artifact' };
   const capability = qcWeaponBehaviorCapabilityError(program);
   if (capability !== null) return { kind: "unsupported", reason: capability };
-  const callback = (name: string): GuestCallbackReference | null => {
+  const callback = (name: string): Extract<GuestCallbackReference, { readonly kind: "quakec" }> | null => {
     const fn = program.functionsByName.get(name);
     return fn === undefined || fn.index === 0 || fn.firstStatement < 0 || fn.parameterSizes.length !== 0 ? null : { kind: 'quakec', module, functionIndex: fn.index };
   };

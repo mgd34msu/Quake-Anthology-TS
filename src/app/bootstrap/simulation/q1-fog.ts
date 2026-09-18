@@ -12,7 +12,7 @@ type Context = Pick<SimulationPresentationEvent, 'content' | 'sequence' | 'secon
 type FogEvent = Extract<Q1AddonEvent, { readonly kind: 'fog' }>;
 type ResolvedFog = Extract<SimulationPresentationEvent, { readonly kind: 'q1-fog' }>;
 interface RetainedFog { readonly player: ActorId | null; readonly state: Q1FogState; skyFactor: number; context: Context | null; }
-export interface SimulationQ1FogOptions { readonly content: ContentId; readonly entities: string; readonly alive: (actor: ActorId) => boolean; }
+export interface SimulationQ1FogOptions { readonly content: ContentId; readonly acceptedContents?: ReadonlySet<ContentId>; readonly entities: string; readonly alive: (actor: ActorId) => boolean; }
 
 function bounded(reader: SaveReader, minimum: number, maximum = Infinity): number {
   const value = reader.finite(); return value < minimum || value > maximum ? reader.fail('fog value out of range') : value;
@@ -44,8 +44,9 @@ export class SimulationQ1Fog {
     const retained = this.actors.get(key(actor));
     if (retained?.player?.equals(actor)) this.actors.delete(key(actor));
   }
+  private accepts(content: ContentId): boolean { return content === this.options.content || this.options.acceptedContents?.has(content) === true; }
   update(context: Context, event: FogEvent): readonly ResolvedFog[] {
-    if (context.content !== this.options.content) return [];
+    if (!this.accepts(context.content)) return [];
     const apply = (value: RetainedFog): readonly ResolvedFog[] => {
       value.state.update({ density: event.density, color: event.color }, context.seconds, event.duration);
       value.skyFactor = Math.max(0, Math.min(1, event.skyFactor));
@@ -80,7 +81,7 @@ export class SimulationQ1Fog {
       const state = new Q1FogState(); state.install(readTransition(entry.field('transition')));
       const context = entry.field('context').nullable(value => {
         const content = readContentId(value.field('content'));
-        if (content !== this.options.content) return value.fail('fog event belongs to another content');
+        if (!this.accepts(content)) return value.fail('fog source content is not selected');
         return { content, sequence: value.field('sequence').integer(0), seconds: value.field('seconds').finite(), sourceEntity: value.field('sourceEntity').nullable(v => v.integer(0)) };
       });
       if (player !== null && context === null) return entry.fail('actor fog requires its source context');
