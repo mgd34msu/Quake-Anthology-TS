@@ -75,3 +75,28 @@ export function q2EaksWeaponEntries(module: Pick<RereleaseGuestModule, "memory">
     rocketTouch: registered(0x21e1e8n, "rocket_touch", 21, 0x98060n), levelTime,
   };
 }
+
+/** Built-in evidence is expressed through the same declaration contract as mounted profiles. */
+export function q2EaksWeaponDeclaration(artifactPath: string): import('../../../contracts/native-weapon-behavior.ts').NativeWeaponBehaviorDeclaration {
+  const layout = { byteLength: 24, name: 0, tag: 8, callback: 16 };
+  const entry = (rva: number): import('../../../contracts/native-weapon-behavior.ts').NativeWeaponEntry => ({ rva, registration: null });
+  return {
+    version: 1, kind: 'q2-api2023-trajectory', abi: 'windows-x86-64', artifactPath, artifactDigest: q2EaksWeaponDigest,
+    id: 'native:rocket-trajectory', title: 'Faster rockets', role: 'rocket', aspect: 'trajectory',
+    entity: { byteLength: 0x7a8, origin: 4, angles: 16, velocity: 0x694, client: 0x78, owner: 0x5b8, viewHeight: 0x7a0,
+      generation: 0x5c0, nextThink: 0x6d8, thinkCallback: 0x700, thinkRegistration: 0x708, touchCallback: 0x710 },
+    client: { byteLength: 0x19b0, weapon: 0xbe8, viewAngles: 0x1998, forward: 0x19a4 },
+    equippedWeapon: { byteLength: 0x30, callback: 0x28, expected: entry(0xefaf0) },
+    time: { storage: 'int64-milliseconds', rva: 0x2999c8 },
+    think: { signature: 'entity-void', tag: 20, registration: layout },
+    allocate: { signature: 'void-pointer', entry: entry(0x95010) },
+    free: { signature: 'entity-void', entry: { rva: 0x95140, registration: { rva: 0x21e0c8, name: 'G_FreeEdict', tag: 20, layout } } },
+    projectileTouch: { rva: 0x98060, registration: { rva: 0x21e1e8, name: 'rocket_touch', tag: 21, layout } },
+    equip: { signature: 'entity-void', calls: [entry(0xed4d0)] },
+    launch: { signature: 'entity-void', calls: [entry(0xed420), entry(0xef900)] },
+    activateRva: 0xed4d0, fireRva: 0xef900,
+    initializationClasses: ['worldspawn', 'info_player_start', 'info_player_deathmatch', 'info_player_coop', 'info_player_team1', 'info_player_team2', 'info_player_intermission'],
+    equipment: [{ arguments: ['give', 'Rocket Launcher'], tail: 'Rocket Launcher' }, { arguments: ['give', 'Rockets'], tail: 'Rockets' }, { arguments: ['use', 'Rocket Launcher'], tail: 'Rocket Launcher' }],
+    ammunition: { arguments: ['give', 'Rockets'], tail: 'Rockets' }, initialCvars: [{ name: 'g_faster_rockets', value: '1' }], provisioningCvars: [{ name: 'cheats', value: '1' }],
+  };
+}

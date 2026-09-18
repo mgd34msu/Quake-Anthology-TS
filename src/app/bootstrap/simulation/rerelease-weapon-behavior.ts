@@ -1,3 +1,5 @@
+import type { NativeWeaponBehaviorDeclaration } from "../../../contracts/native-weapon-behavior.ts";
+import { readNativeWeaponDeclaration, sameNativeWeaponDeclaration } from "../../../compat/q2/rerelease/native-weapon-declaration.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestCallResult, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -21,6 +23,7 @@ export interface RereleaseWeaponActor extends RereleaseWeaponShooter {
 }
 export interface RereleaseWeaponBehaviorOptions {
   readonly prepared: PreparedRereleaseGuest;
+  readonly declaration: NativeWeaponBehaviorDeclaration;
   readonly services: RereleaseGuestServicesOptions;
   readonly clock: RereleaseGuestSourceOptions["clock"];
   readonly map: ClassicGuestMap;
@@ -45,6 +48,7 @@ export function retireRereleaseWeaponActor(actor: ActorId, state: {
 }
 export interface RereleaseWeaponBehaviorCheckpoint {
   readonly version: 1;
+  readonly declaration: NativeWeaponBehaviorDeclaration;
   readonly definition: WeaponBehaviorDefinition;
   readonly map: ClassicGuestMap;
   readonly time: number;
@@ -74,7 +78,10 @@ export class RereleaseWeaponBehaviorSource implements WeaponBehaviorSource {
   private initializationEntities = "";
   private constructor(private readonly options: RereleaseWeaponBehaviorOptions) {}
   static async create(options: RereleaseWeaponBehaviorOptions): Promise<RereleaseWeaponBehaviorSource> {
-    const owner = new RereleaseWeaponBehaviorSource(options);
+    const execution = options.prepared.execution;
+    const declaration = readNativeWeaponDeclaration(options.declaration, { id: execution.owner.provider,
+      artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest, revision: execution.artifact.digest });
+    const owner = new RereleaseWeaponBehaviorSource({ ...options, declaration });
     try {
       const services = new RereleaseGuestServices({ ...options.services,
         engine: { ...options.services.engine, emit: () => undefined },
@@ -91,7 +98,7 @@ export class RereleaseWeaponBehaviorSource implements WeaponBehaviorSource {
       const source = RereleaseGuestSource.create(options.prepared, { ...services.hostOptions, clock: options.clock,
         interceptImport: (call, host) => owner.intercept(call, host), services: memory => services.bindMemory(memory) });
       owner.source = source; services.bindHost(source.host);
-      owner.profile = rereleaseWeaponProfile(source.host.module, source.imageBase);
+      owner.profile = rereleaseWeaponProfile(source.host.module, source.imageBase, declaration);
       owner.initializationEntities = rereleaseWeaponInitializationEntities(options.map.entities, owner.profile);
       for (const preset of owner.profile.initialCvars) options.services.cvars.set(preset.name, preset.value, true);
       await source.initLoading(options.nextFrame);
@@ -111,6 +118,7 @@ export class RereleaseWeaponBehaviorSource implements WeaponBehaviorSource {
     if (this.closed || this.source === null || this.services === null || this.profile === null) throw new Error("Native weapon component is not initialized");
     return { source: this.source, services: this.services, profile: this.profile, host: this.source.host };
   }
+  get declaration(): NativeWeaponBehaviorDeclaration { return this.options.declaration; }
   get definition(): WeaponBehaviorDefinition { return this.retained().profile.definition; }
   private operation<T>(run: () => T): T {
     if (this.busy) throw new Error("Native weapon component operation is already active");
@@ -277,7 +285,7 @@ export class RereleaseWeaponBehaviorSource implements WeaponBehaviorSource {
       const { host, services } = this.retained();
       const game = await host.writeSaveLoading("game", false, nextFrame), level = await host.writeSaveLoading("level", false, nextFrame);
       if (this.pendingReleases.size !== 0) throw new Error("Primary actors changed during native component capture");
-      return { version: 1, definition: this.definition, map: this.options.map, time: this.time, game, level,
+      return { version: 1, declaration: this.declaration, definition: this.definition, map: this.options.map, time: this.time, game, level,
         cvars: encodeCheckpointValue(this.options.services.cvars.captureWorldTransferState()),
         configstrings: [...services.configstrings()].map(([index, value]) => ({ index, value })),
         retired: [...this.retired].map(([actor, trajectory]) => ({ actor: { slot: actor.slot, generation: actor.generation }, trajectory })),
@@ -286,6 +294,7 @@ export class RereleaseWeaponBehaviorSource implements WeaponBehaviorSource {
   }
   async restore(saved: RereleaseWeaponBehaviorCheckpoint, actor: (saved: SavedActorId) => OwnedActor, nextFrame: () => Promise<void>): Promise<void> {
     if (this.busy || this.bindings.size !== 0 || saved.version !== 1 || !sameWeaponBehavior(saved.definition, this.definition)
+      || !sameNativeWeaponDeclaration(saved.declaration, this.declaration)
       || saved.map.map !== this.options.map.map || saved.map.entities !== this.options.map.entities || saved.map.spawnPoint !== this.options.map.spawnPoint
       || !Number.isFinite(saved.time) || saved.time < 0) throw new Error("Incompatible native trajectory checkpoint");
     this.busy = true;

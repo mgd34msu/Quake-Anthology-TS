@@ -1515,7 +1515,7 @@ export class SharedSimulation implements Simulation {
       schedule: () => { throw new Error("Native weapon callbacks must use their component's source scheduler"); } };
     const localization = await loadServerLocalizationResources("english", async path => (await entry.mounts.open(path))?.bytes ?? null, "q2-rerelease");
     const unsupported = (): never => { throw new Error("Native weapon component cannot mutate primary world ownership"); };
-    return RereleaseWeaponBehaviorSource.create({ prepared: entry.prepared, clock, nextFrame,
+    return RereleaseWeaponBehaviorSource.create({ prepared: entry.prepared, declaration: entry.declaration, clock, nextFrame,
       map: { map: this.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), entities: prepareNativeQ2Map(this.options.world, "rerelease", this.options.mode), spawnPoint: "" },
       ownership: { inventory: "source-private", presentation: "selected-weapon" },
       services: { engine: this.q2ActorHost(reference, runtime, () => undefined), scene: this.scene, cvars, numeric: createNumericOperations(timing.numeric),

@@ -3,7 +3,10 @@ import type { GuestAddress, ModuleIdentity, RawEntityView } from "../../../contr
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { BodyState } from "../../../contracts/world.ts";
 import type { WeaponBehaviorDefinition, WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
-import { q2EaksWeaponDigest, q2EaksWeaponEntries, q2EaksWeaponThinkSignature, q2EaksProjectileLayout, q2EaksWeaponClientLayout } from "./q2eaks-weapon-profile.ts";
+import { q2EaksWeaponDigest, q2EaksWeaponDeclaration } from "./q2eaks-weapon-profile.ts";
+import type { NativeWeaponBehaviorDeclaration, NativeWeaponEntry } from "../../../contracts/native-weapon-behavior.ts";
+import { readNativeWeaponDeclaration } from "./native-weapon-declaration.ts";
+import { readGuestString } from "./imports.ts";
 import { edictLayout, fieldOffset } from "./layouts.ts";
 import { rereleaseAbi, signature } from "./api.ts";
 import { guestPointer, resultPointer, type RereleaseGuestModule } from "./module.ts";
@@ -36,22 +39,20 @@ export interface RereleaseWeaponProfile {
   free(record: RawEntityView): void;
 }
 
-type Factory = (module: RereleaseGuestModule, imageBase: GuestAddress) => RereleaseWeaponProfile;
-const profiles: readonly { readonly digest: ModuleIdentity["digest"]; readonly create: Factory; readonly definition: (module: ModuleIdentity) => WeaponBehaviorDefinition }[] = [
-  { digest: q2EaksWeaponDigest, create: q2EaksRocketProfile, definition: q2EaksRocketDefinition },
-];
-export function rereleaseWeaponDefinition(module: ModuleIdentity): WeaponBehaviorDefinition | null {
-  return profiles.find(value => value.digest === module.digest)?.definition(module) ?? null;
+export function builtInRereleaseWeaponDeclaration(module: ModuleIdentity): NativeWeaponBehaviorDeclaration | null {
+  return module.digest === q2EaksWeaponDigest ? readNativeWeaponDeclaration(q2EaksWeaponDeclaration(module.artifactPath), module) : null;
 }
-function q2EaksRocketDefinition(module: ModuleIdentity): WeaponBehaviorDefinition {
-  return { id: "native:rocket-trajectory", title: "Faster rockets", module, role: "rocket", aspect: "trajectory",
-    activate: { kind: "native-artifact", module, imageOffset: 0xed4d0n, abi: rereleaseAbi },
-    fire: { kind: "native-artifact", module, imageOffset: 0xef900n, abi: rereleaseAbi } };
+export function rereleaseWeaponDefinition(module: ModuleIdentity, declaration?: NativeWeaponBehaviorDeclaration): WeaponBehaviorDefinition | null {
+  const profile = declaration === undefined ? builtInRereleaseWeaponDeclaration(module) : readNativeWeaponDeclaration(declaration, module);
+  if (profile === null) return null;
+  return { id: profile.id, title: profile.title, module, role: profile.role, aspect: profile.aspect,
+    activate: profile.activateRva === null ? null : { kind: "native-artifact", module, imageOffset: BigInt(profile.activateRva), abi: rereleaseAbi },
+    fire: { kind: "native-artifact", module, imageOffset: BigInt(profile.fireRva), abi: rereleaseAbi } };
 }
-export function rereleaseWeaponProfile(module: RereleaseGuestModule, imageBase: GuestAddress): RereleaseWeaponProfile {
-  const entry = profiles.find(value => value.digest === module.memory.module.digest);
-  if (entry === undefined) throw new Error("Native trajectory behavior requires an artifact-qualified executable profile");
-  return entry.create(module, imageBase);
+export function rereleaseWeaponProfile(module: RereleaseGuestModule, imageBase: GuestAddress, declaration?: NativeWeaponBehaviorDeclaration): RereleaseWeaponProfile {
+  const profile = declaration === undefined ? builtInRereleaseWeaponDeclaration(module.memory.module) : readNativeWeaponDeclaration(declaration, module.memory.module);
+  if (profile === null) throw new Error("Native trajectory behavior requires an artifact-qualified executable profile");
+  return bindNativeWeaponProfile(module, imageBase, profile);
 }
 export function rereleaseWeaponInitializationEntities(text: string, profile: Pick<RereleaseWeaponProfile, "initializationClasses">): string {
   const entities = parseQ1Entities(text).filter(entity => profile.initializationClasses.includes(q1EntityValue(entity, "classname") ?? ""));
@@ -75,62 +76,89 @@ export function withRereleaseWeaponProvisioning<T>(profile: Pick<RereleaseWeapon
   } finally { cvars.restoreSaveState(saved); refresh(); }
 }
 
-function q2EaksRocketProfile(module: RereleaseGuestModule, imageBase: GuestAddress): RereleaseWeaponProfile {
-  const memory = module.memory, entries = q2EaksWeaponEntries(module, imageBase);
-  const changeWeapon = memory.offset(imageBase, 0xed4d0n), weaponThink = memory.offset(imageBase, 0xefaf0n);
-  memory.check(changeWeapon, 1, "execute"); memory.check(weaponThink, 1, "execute");
-  const at = (record: RawEntityView, field: string) => memory.offset(record.address, BigInt(fieldOffset(q2EaksProjectileLayout, field)));
+function bindNativeWeaponProfile(module: RereleaseGuestModule, imageBase: GuestAddress, profile: NativeWeaponBehaviorDeclaration): RereleaseWeaponProfile {
+  const memory = module.memory;
+  if (memory.pointerBytes !== 8) throw new Error("Native trajectory declaration requires Windows x64 pointers");
+  const definition = rereleaseWeaponDefinition(memory.module, profile);
+  if (definition === null) throw new Error("Native trajectory declaration has no definition");
+  const image = (rva: number) => memory.offset(imageBase, BigInt(rva));
+  const entry = (value: NativeWeaponEntry): GuestAddress => {
+    const address = image(value.rva); memory.check(address, 1, "execute");
+    if (value.registration !== null) {
+      const declared = value.registration, record = image(declared.rva), layout = declared.layout;
+      memory.check(record, layout.byteLength, "read");
+      const name = memory.readPointer(memory.offset(record, BigInt(layout.name)));
+      const callback = memory.readPointer(memory.offset(record, BigInt(layout.callback)));
+      if (name === null || readGuestString(memory, name, new TextEncoder().encode(declared.name).length + 1) !== declared.name
+        || memory.readUint32(memory.offset(record, BigInt(layout.tag))) !== declared.tag || callback?.byteOffset !== address.byteOffset)
+        throw new Error(`Native typed source callback registration differs: ${declared.name}`);
+    }
+    return address;
+  };
+  const equip = profile.equip.calls.map(entry), launch = profile.launch.calls.map(entry), allocate = entry(profile.allocate.entry),
+    free = entry(profile.free.entry), touch = entry(profile.projectileTouch), weaponThink = entry(profile.equippedWeapon.expected), time = image(profile.time.rva);
+  memory.check(time, 8, "write");
+  const recordAddress = (record: RawEntityView): GuestAddress => {
+    if (record.module.digest !== memory.module.digest || record.module.id !== memory.module.id || record.address.addressSpace !== memory.addressSpace
+      || profile.entity.byteLength > record.strideBytes) throw new Error("Native trajectory record differs from declared source layout");
+    return record.address;
+  };
+  const at = (record: RawEntityView, offset: number) => memory.offset(recordAddress(record), BigInt(offset));
   const vector = (address: GuestAddress): Vec3 => ({ x: memory.readFloat32(address), y: memory.readFloat32(memory.offset(address, 4n)), z: memory.readFloat32(memory.offset(address, 8n)) });
   const writeVector = (address: GuestAddress, value: Vec3): void => { memory.writeFloat32(address, value.x); memory.writeFloat32(memory.offset(address, 4n), value.y); memory.writeFloat32(memory.offset(address, 8n), value.z); };
-  const client = (record: RawEntityView): GuestAddress => { const value = memory.readPointer(at(record, "client")); if (value === null) throw new Error("Native weapon context requires an admitted source client"); return value; };
-  const clientField = (record: RawEntityView, name: string) => memory.offset(client(record), BigInt(fieldOffset(q2EaksWeaponClientLayout, name)));
-  const project = (record: RawEntityView, body: BodyState): void => {
-    writeVector(at(record, "s.origin"), body.origin); writeVector(at(record, "s.angles"), body.angles); writeVector(at(record, "velocity"), body.velocity);
-    writeVector(memory.offset(record.address, BigInt(fieldOffset(edictLayout, "mins"))), body.bounds.min);
-    writeVector(memory.offset(record.address, BigInt(fieldOffset(edictLayout, "maxs"))), body.bounds.max);
+  const clientField = (record: RawEntityView, offset: number): GuestAddress => {
+    const client = memory.readPointer(at(record, profile.entity.client));
+    if (client === null) throw new Error("Native weapon context requires an admitted source client");
+    memory.check(client, profile.client.byteLength, "read"); return memory.offset(client, BigInt(offset));
   };
-  const invoke = (entry: GuestAddress, record: RawEntityView): void => { module.invoke(entry, q2EaksWeaponThinkSignature, [guestPointer(record.address)], record); };
+  const project = (record: RawEntityView, body: BodyState): void => {
+    writeVector(at(record, profile.entity.origin), body.origin); writeVector(at(record, profile.entity.angles), body.angles); writeVector(at(record, profile.entity.velocity), body.velocity);
+    writeVector(at(record, fieldOffset(edictLayout, "mins")), body.bounds.min);
+    writeVector(at(record, fieldOffset(edictLayout, "maxs")), body.bounds.max);
+  };
+  const thinkSignature = signature([{ kind: "scalar", storage: "pointer" }]);
+  const invoke = (address: GuestAddress, record: RawEntityView): void => { module.invoke(address, thinkSignature, [guestPointer(recordAddress(record))], record); };
   return {
-    initializationClasses: ["worldspawn", "info_player_start", "info_player_deathmatch", "info_player_coop", "info_player_team1", "info_player_team2", "info_player_intermission"],
-    definition: q2EaksRocketDefinition(memory.module),
-    equipment: [{ arguments: ["give", "Rocket Launcher"], tail: "Rocket Launcher" }, { arguments: ["give", "Rockets"], tail: "Rockets" }, { arguments: ["use", "Rocket Launcher"], tail: "Rocket Launcher" }],
-    ammunition: { arguments: ["give", "Rockets"], tail: "Rockets" },
-    initialCvars: [{ name: "g_faster_rockets", value: "1" }],
-    provisioningCvars: [{ name: "cheats", value: "1" }],
+    definition, initializationClasses: profile.initializationClasses, equipment: profile.equipment, ammunition: profile.ammunition,
+    initialCvars: profile.initialCvars, provisioningCvars: profile.provisioningCvars,
     equip: record => {
-      invoke(changeWeapon, record);
-      const weapon = memory.readPointer(clientField(record, "pers.weapon"));
-      if (weapon === null || memory.readPointer(memory.offset(weapon, 0x28n))?.byteOffset !== weaponThink.byteOffset)
-        throw new Error("Native source did not equip the artifact-qualified rocket launcher");
+      for (const address of equip) invoke(address, record);
+      const weapon = memory.readPointer(clientField(record, profile.client.weapon));
+      if (weapon === null) throw new Error("Native source did not equip the artifact-qualified weapon");
+      memory.check(weapon, profile.equippedWeapon.byteLength, "read");
+      if (memory.readPointer(memory.offset(weapon, BigInt(profile.equippedWeapon.callback)))?.byteOffset !== weaponThink.byteOffset)
+        throw new Error("Native source did not equip the artifact-qualified weapon");
     },
-    launch: record => { invoke(entries.weaponRunThink, record); invoke(entries.rocketLauncherFire, record); },
-    matches: (record, shooter) => memory.readPointer(at(record, "owner"))?.byteOffset === shooter.address.byteOffset
-      && memory.readPointer(at(record, "touch.value"))?.byteOffset === entries.rocketTouch.byteOffset,
+    launch: record => { for (const address of launch) invoke(address, record); },
+    matches: (record, shooter) => memory.readPointer(at(record, profile.entity.owner))?.byteOffset === recordAddress(shooter).byteOffset
+      && memory.readPointer(at(record, profile.entity.touchCallback))?.byteOffset === touch.byteOffset,
     projectShooter: (record, shooter) => {
-      project(record, shooter.body); writeVector(clientField(record, "v_angle"), shooter.viewAngles);
+      project(record, shooter.body); writeVector(clientField(record, profile.client.viewAngles), shooter.viewAngles);
       const pitch = shooter.viewAngles.x * Math.PI / 180, yaw = shooter.viewAngles.y * Math.PI / 180;
-      writeVector(clientField(record, "v_forward"), { x: Math.cos(pitch) * Math.cos(yaw), y: Math.cos(pitch) * Math.sin(yaw), z: -Math.sin(pitch) });
-      memory.writeInt32(at(record, "viewheight"), shooter.viewHeight);
+      writeVector(clientField(record, profile.client.forward), { x: Math.cos(pitch) * Math.cos(yaw), y: Math.cos(pitch) * Math.sin(yaw), z: -Math.sin(pitch) });
+      memory.writeInt32(at(record, profile.entity.viewHeight), shooter.viewHeight);
     },
     project,
-    trajectory: record => ({ origin: vector(at(record, "s.origin")), angles: vector(at(record, "s.angles")), velocity: vector(at(record, "velocity")) }),
-    // G_FreeEdict preserves and increments this exact field around its record clear.
-    generation: record => memory.readInt32(memory.offset(record.address, 0x5c0n)),
-    time: milliseconds => memory.writeInt64(entries.levelTime, milliseconds),
-    nextThink: record => memory.readInt64(at(record, "nextthink")),
+    trajectory: record => ({ origin: vector(at(record, profile.entity.origin)), angles: vector(at(record, profile.entity.angles)), velocity: vector(at(record, profile.entity.velocity)) }),
+    generation: record => memory.readInt32(at(record, profile.entity.generation)),
+    time: milliseconds => memory.writeInt64(time, milliseconds),
+    nextThink: record => memory.readInt64(at(record, profile.entity.nextThink)),
     think: record => {
-      const callback = memory.readPointer(at(record, "think.value")), registration = memory.readPointer(at(record, "think.list"));
+      const callback = memory.readPointer(at(record, profile.entity.thinkCallback)), registration = memory.readPointer(at(record, profile.entity.thinkRegistration));
       if (callback === null) throw new Error("Native projectile has a due think with no callback");
-      if (registration === null || memory.readUint32(memory.offset(registration, 8n)) !== 20
-        || memory.readPointer(memory.offset(registration, 16n))?.byteOffset !== callback.byteOffset)
+      const layout = profile.think.registration;
+      if (registration === null) throw new Error("Native projectile think lacks its typed source save registration");
+      memory.check(registration, layout.byteLength, "read"); memory.check(callback, 1, "execute");
+      if (memory.readUint32(memory.offset(registration, BigInt(layout.tag))) !== profile.think.tag
+        || memory.readPointer(memory.offset(registration, BigInt(layout.callback)))?.byteOffset !== callback.byteOffset)
         throw new Error("Native projectile think lacks its typed source save registration");
-      memory.writeInt64(at(record, "nextthink"), 0n); invoke(callback, record);
+      memory.writeInt64(at(record, profile.entity.nextThink), 0n); invoke(callback, record);
     },
     allocate: () => {
-      const address = resultPointer(module.invoke(entries.spawn, signature([], { kind: "scalar", storage: "pointer" }), []));
+      const address = resultPointer(module.invoke(allocate, signature([], { kind: "scalar", storage: "pointer" }), []));
       if (address === null) throw new Error("Native source entity allocation returned null");
-      return module.entities().fromPointer(address);
+      const record = module.entities().fromPointer(address); recordAddress(record); return record;
     },
-    free: record => { if (memory.readUint8(memory.offset(record.address, BigInt(fieldOffset(edictLayout, "inuse")))) !== 0) invoke(entries.free, record); },
+    free: record => { if (memory.readUint8(at(record, fieldOffset(edictLayout, "inuse")))) invoke(free, record); },
   };
 }

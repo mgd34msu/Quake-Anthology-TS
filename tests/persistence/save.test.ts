@@ -1,3 +1,5 @@
+import { builtInRereleaseWeaponDeclaration, rereleaseWeaponDefinition } from "../../src/compat/q2/rerelease/weapon-behavior-profile.ts";
+import { q2EaksWeaponDigest } from "../../src/compat/q2/rerelease/q2eaks-weapon-profile.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -263,6 +265,19 @@ test("QVM behavior recipes preserve declared private layout and reject missing o
   const restore=(value:unknown)=>readRecipe(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(value)),"recipe"));
   expect(restore({...base,weaponBehaviors:[selection]}).weaponBehaviors?.[0]).toEqual(selection);
   expect(()=>restore({...base,weaponBehaviors:[{source:selection.source,artifact,definition:selection.definition}]})).toThrow("source layout");
-  const component=selection.component;if(component === undefined)throw new Error("Missing test layout");
+  const component=selection.component;if(component?.kind !== "qvm")throw new Error("Missing test layout");
   expect(()=>restore({...base,weaponBehaviors:[{...selection,component:{...component,layout:{...component.layout,fields:{...component.layout.fields,think:528}}}}]})).toThrow("overlapping");
+});
+
+test("native recipe saves retain declaration identity and normalize only the known legacy profile", () => {
+  const base = recipe(), raw = { ...base.map.geometry, requestedPath: "game_x64.dll", digest: q2EaksWeaponDigest }, artifact = { ...raw, id: createResourceId(raw) };
+  const module = { id: "weapon-behavior:fixture", artifactPath: artifact.requestedPath, digest: artifact.digest, revision: artifact.digest } satisfies import("../../src/contracts/execution.ts").ModuleIdentity;
+  const declaration = builtInRereleaseWeaponDeclaration(module), definition = rereleaseWeaponDefinition(module);
+  if (declaration === null || definition === null) throw new Error("Missing builtin profile");
+  const legacy = { source: { provider: module.id, content: base.map.geometryContent }, artifact, definition };
+  const selection = { ...legacy, component: { kind: "rerelease-native", declaration } } satisfies NonNullable<ExecutableRecipe["weaponBehaviors"]>[number];
+  const restore = (value: unknown) => readRecipe(new SaveReader(decodeCheckpointValue(encodeCheckpointValue(value)), "recipe")).weaponBehaviors?.[0];
+  expect(restore({ ...base, weaponBehaviors: [selection] })).toEqual(selection);
+  expect(restore({ ...base, weaponBehaviors: [legacy] })).toEqual(selection);
+  expect(() => restore({ ...base, weaponBehaviors: [{ ...selection, component: { ...selection.component, declaration: { ...declaration, id: "test:changed" } } }] })).toThrow("differs");
 });

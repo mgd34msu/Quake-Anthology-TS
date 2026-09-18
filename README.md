@@ -144,7 +144,7 @@ Early Q3 server modules can use an explicit, artifact-pinned SDK profile. See [m
 
 A declared QuakeC or QVM trajectory, or a supported native trajectory, can run on a selected Q1, Q2, or Q3 projectile launcher. Choose the arsenal under **Custom game → Combat → Weapons**, then choose **Equipment → Projectile trajectory**. The command-line behavior selector is `--weapon-behavior PRODUCT/BEHAVIOR_ID`. The source module controls the matching projectile's trajectory and scheduled callbacks; the selected launcher retains its ammo, damage, impact, model, and sound. Saved games retain the module identity, private state, pending callbacks, and projectile attachments.
 
-The supported Q2Eaks v0.21 native artifact offers **Faster rockets**. Installing it under `q2/rerelease/q2eaks/` makes that behavior available without a QuakeC declaration. Selection enables the author's `g_faster_rockets` setting inside the private component. For example, launch from the source checkout with Q3 weapons:
+The supported Q2Eaks v0.21 native artifact offers **Faster rockets** through a built-in declaration using the same binder as external native declarations. Installing it under `q2/rerelease/q2eaks/` makes that behavior available unless an explicit `native-weapon-behaviors.json` replaces the built-in selection. Selection enables the author's `g_faster_rockets` setting inside the private component. For example, launch from the source checkout with Q3 weapons:
 
 ```sh
 bun run start --content-root /path/to/qfiles --game q3-baseq3 --map q3dm1 \
@@ -153,6 +153,15 @@ bun run start --content-root /path/to/qfiles --game q3-baseq3 --map q3dm1 \
 ```
 
 The base game data and the mod must both be installed. See [native component requirements](docs/mod-compatibility.md#native-projectile-components) for the exact supported artifact. Choose **Selected weapon default** to keep the launcher's own trajectory.
+
+Other API2023 Windows x64 native mods can supply a source-backed trajectory declaration. To install an author's profile mounted as `profiles/rocket.json` in an installed `q2/rerelease/mymod/` package, run from the source checkout:
+
+```sh
+bun run start weapon-behavior declare-native q2-rerelease-mymod \
+  --profile profiles/rocket.json --content /path/to/qfiles
+```
+
+The command validates the profile against its DLL and writes `native-weapon-behaviors.json` atomically into that mod's writable overlay. Use `--user-content` to change the tooling command's writable root. Authors can also ship the document with their package. An explicit document is authoritative; `{"version":1,"profiles":[]}` disables built-in choices for that mounted product. Native inspection reports image metadata, not inferred weapon callbacks or private layouts. See the [declaration workflow and limits](docs/mod-compatibility.md#native-declarations).
 
 For older packages without declarations, inspect the mounted program first:
 
@@ -197,7 +206,7 @@ Generated menu artwork is present in the source. The complete menu asset pack ma
 
 **Current work**
 
-The [shared functional task list](docs/functional-targets/status.md) records **21 of 23 targets accepted in source**. T10 is reopened for external native weapon declarations: the installed native component currently has only a built-in Q2Eaks profile. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
+The [shared functional task list](docs/functional-targets/status.md) records **22 of 23 targets accepted in source**. T10 now includes external artifact-pinned native weapon declarations and full saved-profile identity. The public declaration-installation and native component save/load workflow passed; this extension is newer than installed `07d54ae` and is being packaged. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
 
 The Custom game summary adapts to its available space so its final field stays visible.
 

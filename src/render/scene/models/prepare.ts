@@ -1,3 +1,4 @@
+import { md3WorldEnvelope } from "./md3-bounds.ts";
 /* Scene model assembly from Q1 r_alias.c/r_sprite.c, Q2 gl_mesh.c and
  * Q3 tr_mesh.c/tr_surface.c. Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
 import { GameRandom } from "../../../core/game-numeric.ts";
@@ -212,6 +213,10 @@ function prepareEntityAtTransform(entity: SceneEntity, source: SceneEntity, cont
       if (selected === null) throw new RangeError(`Missing source MD3 LOD slot ${lod}`);
       const fogFrame = at(selected.frames, frame, "MD3 fog frame");
       fogSphere = { localOrigin: fogFrame.localOrigin, radius: fogFrame.radius };
+      if (context.noCull !== true && context.frustum !== undefined && sourceCull !== "in" && Number.isInteger(entity.skin) && entity.skin >= 0) {
+        const envelope = md3WorldEnvelope(selected, frame, previousFrame, backLerp, entity.transform);
+        if (envelope !== null && cullGeometry(envelope, context) === "out") { bounds = envelope; break; }
+      }
       for (const surface of selected.surfaces) {
         const current = at(surface.frames, frame, "MD3 frame");
         const vertices = backLerp === 0 ? current : interpolateMd3Frames(current, at(surface.frames, previousFrame, "MD3 old frame"), backLerp);

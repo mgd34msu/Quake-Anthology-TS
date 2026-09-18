@@ -1,3 +1,4 @@
+import { readSavedNativeWeaponDeclaration } from "./native-weapon.ts";
 import type { WeaponBehaviorCallback } from "../contracts/weapon-behavior.ts";
 import type { ArchiveMount, EnvironmentSelection, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, MonsterSelectionTarget, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
 import { createMountId, createMountPlanId, createRecipeId, createResourceId, isContentId } from "../contracts/content.ts";
@@ -179,9 +180,16 @@ function readWeaponBehavior(reader: SaveReader): NonNullable<ExecutableRecipe["w
   if (source.provider !== module.id || artifact.digest !== module.digest || artifact.requestedPath !== module.artifactPath)
     return reader.fail("weapon behavior source differs from selected artifact");
   const fire = callback(value.field("fire")), activate = value.field("activate").nullable(callback), savedComponent = reader.field("component");
+  const definition: NonNullable<ExecutableRecipe["weaponBehaviors"]>[number]["definition"] = {
+    id: namespaced(value.field("id")), title: value.field("title").string(), module,
+    role: value.field("role").choice("rocket", "grenade", "nail", "bolt", "plasma", "energy", "grapple"),
+    aspect: value.field("aspect").literal("trajectory"), fire, activate };
   let component: NonNullable<ExecutableRecipe["weaponBehaviors"]>[number]["component"];
-  if (savedComponent.value !== undefined) {
-    savedComponent.field("kind").literal("qvm");
+  const componentKind = savedComponent.value === undefined ? undefined : savedComponent.field("kind").choice("qvm", "rerelease-native");
+  if (componentKind === "rerelease-native" || componentKind === undefined && fire.kind === "native-artifact") {
+    component = { kind: "rerelease-native", declaration: readSavedNativeWeaponDeclaration(
+      componentKind === undefined ? savedComponent : savedComponent.field("declaration"), definition) };
+  } else if (componentKind === "qvm") {
     const layout = savedComponent.field("layout"), fields = layout.field("fields");
     const entityStride = layout.field("entityStride").integer(4), levelTime = layout.field("levelTime").integer(4);
     if (entityStride % 4 !== 0 || levelTime % 4 !== 0) return layout.fail("unaligned QVM behavior layout");
@@ -196,10 +204,12 @@ function readWeaponBehavior(reader: SaveReader): NonNullable<ExecutableRecipe["w
         fields:{inuse:offset("inuse"),nextthink:offset("nextthink"),think:offset("think"),health:offset("health")},
         fireAbi:layout.field("fireAbi").literal("entity-pointer-start-direction")}};
   }
-  if (fire.kind === "qvm" ? component === undefined || activate !== null && activate.kind !== "qvm" : component !== undefined)
+  if (fire.kind === "qvm" && (component?.kind !== "qvm" || activate !== null && activate.kind !== "qvm"))
     return reader.fail("QVM behavior requires its source layout and QVM callbacks");
-  return { source, artifact, ...(component === undefined ? {} : {component}), definition: { id: namespaced(value.field("id")), title: value.field("title").string(), module,
-    role: value.field("role").choice("rocket", "grenade", "nail", "bolt", "plasma", "energy", "grapple"), aspect: value.field("aspect").literal("trajectory"), fire, activate } };
+  if (fire.kind === "native-artifact" && (component?.kind !== "rerelease-native" || activate !== null && activate.kind !== "native-artifact")
+    || fire.kind === "quakec" && (component !== undefined || activate !== null && activate.kind !== "quakec"))
+    return reader.fail("weapon behavior callbacks and component declaration do not match");
+  return { source, artifact, ...(component === undefined ? {} : { component }), definition };
 }
 export function readRecipe(reader: SaveReader): ExecutableRecipe {
   return { ...(reader.field("weaponBehaviors").value === undefined ? {} : { weaponBehaviors: reader.field("weaponBehaviors").list(readWeaponBehavior) }), schemaVersion: reader.field("schemaVersion").literal(3), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),

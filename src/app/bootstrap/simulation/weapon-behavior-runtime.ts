@@ -102,7 +102,7 @@ export class SimulationWeaponBehaviors implements WeaponBehaviorProjectilePort {
       seen.add(id);
       if (entry.kind === "quakec") return { kind: entry.kind, source: entry.source, checkpoint: readQuakeCWeaponBehaviorCheckpoint(value, entry.source.definition) };
       if (entry.kind === "qvm") return { kind: entry.kind, source: entry.source, checkpoint: readQvmWeaponBehaviorCheckpoint(value, entry.source.definition) };
-      return { kind: entry.kind, source: entry.source, checkpoint: readRereleaseWeaponBehaviorCheckpoint(value, entry.source.definition) };
+      return { kind: entry.kind, source: entry.source, checkpoint: readRereleaseWeaponBehaviorCheckpoint(value, entry.source.definition, entry.source.declaration) };
     });
     if (seen.size !== this.sources.size) reader.fail("Saved weapon behavior source is missing");
     return checkpoints;

@@ -1,3 +1,6 @@
+import type { NativeWeaponBehaviorDeclaration } from "../../contracts/native-weapon-behavior.ts";
+import { discoverNativeWeaponBehaviors, loadNativeWeaponBehavior, readNativeWeaponBehaviorDocument } from "../../content/catalog/native-weapon-behaviors.ts";
+import { parsePe } from "../../guest/pe/index.ts";
 import { discoverQvmWeaponBehaviors, loadQvmWeaponBehavior, readQvmWeaponBehaviorDocument } from "../../content/catalog/qvm-weapon-behaviors.ts";
 import { parseQvm, QvmOpcode } from "../../compat/qvm/image.ts";
 import { SaveReader } from "../../persistence/value.ts";
@@ -21,12 +24,14 @@ export async function runWeaponBehaviorTool(command: WeaponBehaviorToolCommand, 
   if (command.action === "help") { print(weaponBehaviorToolHelp); return; }
   const catalog = await discoverInstalledContent({ corpusRoot: command.corpusRoot, userContentRoot: command.userContentRoot, discoverMods: true });
   const product = catalog.require(command.product);
-  if (product.expectation.family !== "q1" && product.expectation.family !== "q3") throw new Error("Behavior authoring supports QuakeC declarations and explicit QVM source profiles");
+  if (product.expectation.family === "q2" && product.expectation.edition !== "rerelease")
+    throw new Error("Native weapon declarations currently require the Q2 rerelease API2023 Windows x64 adapter");
   const mounts = await catalog.mountsFor(product.id);
   using content = await openMountPlan({ id: createMountPlanId("weapon-authoring", Buffer.from(product.id).toString("hex")), mounts,
     defaultOrder: mounts.map(mount => mount.identity.id), prefixOrders: [] });
+  if (product.expectation.family === "q2") { await runNativeBehaviorTool(command, product, content, print); return; }
   if (product.expectation.family === "q3") { await runQvmBehaviorTool(command,product,content,print); return; }
-  if (command.action === "declare-qvm") throw new Error("declare-qvm requires a Q3 provider");
+  if (command.action === "declare-qvm" || command.action === "declare-native") throw new Error(`${command.action} requires its matching Q3 or Q2 rerelease provider`);
   const existing = await content.open("weapon-behaviors.json"), document = existing === null ? null : readWeaponBehaviorDocument(existing.bytes);
   const path = command.artifact ?? document?.artifactPath ?? (product.expectation.edition === "quakeworld" ? "qwprogs.dat" : "progs.dat");
   const artifact = await content.open(path);
@@ -97,4 +102,34 @@ async function runQvmBehaviorTool(command: Exclude<WeaponBehaviorToolCommand,{re
   const directory=userProductDirectory(command.userContentRoot,product.expectation.contentDirectory);
   const destination=await writeBehaviorDocument(directory,"qvm-weapon-behaviors.json",JSON.stringify({version:1,profiles:[...retained,declaration]},null,2)+"\n");
   print(`Saved ${entry.profile.definition.id} to ${destination}\nSelect with --weapon-behavior ${product.expectation.id}/${entry.profile.definition.id}\n`);
+}
+
+async function runNativeBehaviorTool(command: Exclude<WeaponBehaviorToolCommand, { readonly action: "help" }>, product: CatalogProduct,
+  content: MountedContent, print: (text: string) => void): Promise<void> {
+  const provider: ProviderId = `weapon-behavior:${product.id}`;
+  if (command.action === "inspect") {
+    const declarations = await discoverNativeWeaponBehaviors(content, provider);
+    const path = command.artifact ?? declarations?.[0]?.resource.requestedPath ?? "game_x64.dll", opened = await content.open(path);
+    if (opened === null) throw new Error(`Mounted native artifact is missing: ${path}`);
+    const image = parsePe(opened.bytes);
+    print(JSON.stringify({ product: product.expectation.id, artifact: path, digest: opened.reference.digest, abi: image.abi.kind,
+      scope: "PE sections identify image ranges only. Private weapon layout, callback signatures and provisioning require an explicit source-backed declaration pinned to this artifact.",
+      entryPointRva: image.entryPointRva, sections: image.sections.map(section => ({ name: section.name, rva: section.rva, byteLength: section.mappedSize, permissions: section.permissions })),
+      declared: declarations?.map(entry => entry.declaration) ?? [] }, null, 2) + "\n");
+    return;
+  }
+  if (command.action !== "declare-native") throw new Error("Native declarations require declare-native --profile MOUNTED_PROFILE_JSON");
+  const opened = await content.open(command.profile);
+  if (opened === null) throw new Error(`Mounted native author profile is missing: ${command.profile}`);
+  const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(opened.bytes));
+  const entry = await loadNativeWeaponBehavior(content, provider, value);
+  if (command.artifact !== undefined && command.artifact !== entry.resource.requestedPath) throw new Error("--artifact differs from the authored native profile");
+  const existing = await content.open("native-weapon-behaviors.json"), retained: NativeWeaponBehaviorDeclaration[] = [];
+  for (const old of existing === null ? [] : readNativeWeaponBehaviorDocument(existing.bytes)) {
+    if (new SaveReader(old, "native-profile").field("id").string() === entry.definition.id) continue;
+    retained.push((await loadNativeWeaponBehavior(content, provider, old)).declaration);
+  }
+  const directory = userProductDirectory(command.userContentRoot, product.expectation.contentDirectory);
+  const destination = await writeBehaviorDocument(directory, "native-weapon-behaviors.json", JSON.stringify({ version: 1, profiles: [...retained, entry.declaration] }, null, 2) + "\n");
+  print(`Saved ${entry.definition.id} to ${destination}\nSelect with --weapon-behavior ${product.expectation.id}/${entry.definition.id}\n`);
 }

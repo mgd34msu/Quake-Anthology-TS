@@ -1,7 +1,9 @@
 import { discoverQvmWeaponBehaviors } from "../../content/catalog/qvm-weapon-behaviors.ts";
 import type { QvmModuleOptions } from "../../compat/qvm/module.ts";
 import type { QvmWeaponProfile } from "../../compat/qvm/weapon-behavior-profile.ts";
-import { rereleaseWeaponDefinition } from "../../compat/q2/rerelease/weapon-behavior-profile.ts";
+import { discoverNativeWeaponBehaviors } from "../../content/catalog/native-weapon-behaviors.ts";
+import type { NativeWeaponBehaviorDeclaration } from "../../contracts/native-weapon-behavior.ts";
+import { sameNativeWeaponDeclaration } from "../../compat/q2/rerelease/native-weapon-declaration.ts";
 import { parsePe } from "../../guest/pe/index.ts";
 import { prepareRereleaseGuest, type PreparedRereleaseGuest } from "./simulation/rerelease-guest-source.ts";
 import { readWeaponBehaviorDocument } from "../../content/catalog/weapon-behavior-document.ts";
@@ -39,6 +41,7 @@ export type PreparedWeaponBehavior = {
   readonly kind: "rerelease-native";
   readonly selection: ResolvedWeaponBehaviorSelection;
   readonly prepared: PreparedRereleaseGuest;
+  readonly declaration: NativeWeaponBehaviorDeclaration;
   readonly mounts: MountedContent;
 };
 export function readWeaponBehaviorRequest(value: string): WeaponBehaviorRequest {
@@ -68,13 +71,12 @@ async function choicesFromMounts(catalog: InstalledCatalog, productId: string, m
           allocate:entry.profile.allocate,free:entry.profile.free,fields:entry.profile.fields,fireAbi:entry.profile.fireAbi}}}}));
   }
   if (product.expectation.family === "q2" && product.expectation.edition === "rerelease") {
-    const artifact = await mounts.open("game_x64.dll");
-    if (artifact === null) return unavailable("This provider has no mounted API2023 Windows x64 game artifact");
-    const module = behaviorModule(product.id, artifact.reference.requestedPath, artifact.reference.digest);
-    const definition = rereleaseWeaponDefinition(module);
-    if (definition === null) return unavailable("This native artifact has no validated executable trajectory profile");
-    return [{ id: `${productId}/${definition.id}`, title: `${title} — ${definition.title} (${definition.role})`, unavailable: null,
-      selection: { source: { provider: module.id, content: product.id }, artifact: artifact.reference, definition } }];
+    const entries = await discoverNativeWeaponBehaviors(mounts, `weapon-behavior:${product.id}`);
+    if (entries === null) return unavailable("No authored native-weapon-behaviors.json declaration or matching built-in native profile");
+    if (entries.length === 0) return unavailable("The source declares no native trajectory behaviors");
+    return entries.map(entry => ({ id: `${productId}/${entry.definition.id}`, title: `${title} — ${entry.definition.title} (${entry.definition.role})`, unavailable: null,
+      selection: { source: { provider: entry.definition.module.id, content: product.id }, artifact: entry.resource, definition: entry.definition,
+        component: { kind: "rerelease-native", declaration: entry.declaration } } }));
   }
   if (product.expectation.family !== "q1") return unavailable("This provider has no supported declared or artifact-qualified trajectory adapter");
   const descriptor = await mounts.open("weapon-behaviors.json");
@@ -121,12 +123,17 @@ export async function prepareApplicationWeaponBehavior(catalog: InstalledCatalog
   if (current === undefined || current === null || current.artifact.requestedPath !== selection.artifact.requestedPath || current.artifact.digest !== selection.artifact.digest
     || current.source.provider !== selection.source.provider || !sameWeaponBehavior(current.definition, selection.definition))
     throw new Error("Selected weapon behavior differs from its mounted declaration or artifact");
-  if (current.component?.kind !== selection.component?.kind || current.component !== undefined && selection.component !== undefined
-    && (current.component.abiProfile !== selection.component.abiProfile || !sameQvmWeaponLayout(current.component.layout,selection.component.layout)))
+  if (current.component?.kind !== selection.component?.kind)
+    throw new Error("Selected behavior component differs from its mounted declaration");
+  if (current.component?.kind === "qvm" && selection.component?.kind === "qvm"
+    && (current.component.abiProfile !== selection.component.abiProfile || !sameQvmWeaponLayout(current.component.layout, selection.component.layout)))
     throw new Error("Selected QVM behavior layout differs from its mounted declaration");
+  if (current.component?.kind === "rerelease-native" && selection.component?.kind === "rerelease-native"
+    && !sameNativeWeaponDeclaration(current.component.declaration, selection.component.declaration))
+    throw new Error("Selected native behavior profile differs from its mounted declaration");
   if (selection.definition.fire.kind === "qvm") {
     const entries = await discoverQvmWeaponBehaviors(mounts,selection.source.provider), entry = entries?.find(entry => entry.profile.definition.id === selection.definition.id);
-    if (entry === undefined || selection.component === undefined || !sameWeaponBehavior(entry.profile.definition,selection.definition)
+    if (entry === undefined || selection.component?.kind !== "qvm" || !sameWeaponBehavior(entry.profile.definition,selection.definition)
       || (entry.artifact.abiProfile ?? "q3-modern") !== selection.component.abiProfile || !sameQvmWeaponLayout(entry.profile,selection.component.layout))
       throw new Error("QVM behavior declaration changed during preparation");
     return {kind:"qvm",selection,artifact:entry.artifact,profile:entry.profile,mounts};
@@ -134,9 +141,10 @@ export async function prepareApplicationWeaponBehavior(catalog: InstalledCatalog
   const artifact = await mounts.open(selection.artifact.requestedPath);
   if (artifact === null) throw new Error("Selected weapon behavior program is missing");
   if (selection.definition.fire.kind === "native-artifact") {
+    if (selection.component?.kind !== "rerelease-native") throw new Error("Native weapon behavior is missing its retained declaration");
     const prepared = await prepareRereleaseGuest({ kind: "native", owner: selection.source, artifact: artifact.reference,
       role: "server-game", api: { kind: "q2-rerelease-game", version: 2023 }, profile: parsePe(artifact.bytes).abi }, mounts);
-    return { kind: "rerelease-native", selection, prepared, mounts };
+    return { kind: "rerelease-native", selection, prepared, declaration: selection.component.declaration, mounts };
   }
   if (selection.definition.fire.kind !== "quakec") throw new Error("Selected behavior has no executable preparation adapter");
   const program = loadQcProgram(artifact.bytes);

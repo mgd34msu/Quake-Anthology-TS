@@ -475,3 +475,45 @@ test("shadow preparation skips vertex color evaluation and preserves silhouette 
   expect(silhouette(shadow)).toEqual(silhouette(visible));
   expect(prepareSceneEntity(source, context)).toEqual(visible);
 });
+
+test("MD3 early rejection retains attachments and leaves survivor geometry unchanged", async () => {
+  const mdl = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/players/sarge/lower.md3", "q3");
+  const source = entity(toSceneMd3(parseMd3(mdl.bytes)), mdl.resource, "q3");
+  const child: SceneEntity = { ...source, transform: { ...source.transform, origin: { x: 4000, y: 0, z: 0 } } };
+  const parent: SceneEntity = { ...source, transform: { ...source.transform, origin: { x: -2000, y: 0, z: 0 } }, attachments: [{ tag: "tag_torso", entity: child }] };
+  const frustum = [{ normal: { x: 1, y: 0, z: 0 }, distance: 0 }];
+  let lights = 0;
+  const prepared = prepareSceneEntity(parent, { camera, timeSeconds: 1, frustum, lightVertex: target => { if (target === parent) lights++; return { x: 1, y: 1, z: 1 }; } });
+  expect(prepared.cull).toBe("out"); expect(prepared.surfaces).toHaveLength(0); expect(lights).toBe(0);
+  expect(prepared.attachments).toHaveLength(1); expect(prepared.attachments[0]?.cull).not.toBe("out");
+  expect(prepared.attachments[0]?.surfaces.length).toBeGreaterThan(0);
+  expect(prepareSceneEntity(parent, { camera, timeSeconds: 1, frustum, noCull: true, purpose: "shadow" }).surfaces.length).toBeGreaterThan(0);
+  const repaired = prepareSceneEntity({ ...parent, pose: { kind: "frame", frame: 100000, previousFrame: -1, backLerp: 0.5 } }, { camera, timeSeconds: 1, frustum });
+  expect(repaired.frame).toBe(0); expect(repaired.previousFrame).toBe(0); expect(repaired.frameFallback).toBe(true);
+  expect(prepareSceneEntity(source, { camera, timeSeconds: 1, frustum }).surfaces).toEqual(prepareSceneEntity(source, { camera, timeSeconds: 1 }).surfaces);
+});
+
+test("MD3 envelopes contain rounded extrapolated positions under mirrored shear", async () => {
+  const { md3WorldEnvelope } = await import("../../../../src/render/scene/models/md3-bounds.ts");
+  const { interpolateMd3Frames } = await import("../../../../src/formats/q3-model/md3.ts");
+  const { modelWorldPoint } = await import("../../../../src/render/scene/models/transform.ts");
+  const mdl = await asset("/home/buzzkill/Projects/qfiles/q3a/baseq3/pak0.pk3", "models/players/sarge/lower.md3", "q3");
+  const model = toSceneMd3(parseMd3(mdl.bytes));
+  const transform = { origin: { x: 100000, y: -30000, z: 0.015625 }, axis: [{ x: 1, y: 0.25, z: -0.5 }, { x: -0.75, y: 1, z: 0.125 }, { x: 0.25, y: -0.5, z: 1 }] satisfies SceneCamera["axis"], scale: { x: -3, y: 0.125, z: 4 } };
+  for (const backLerp of [-3, -0, 0.1, 0.5, 1, 4, 100000]) {
+    const bounds = md3WorldEnvelope(model, 1, 0, backLerp, transform);
+    if (bounds === null) throw new Error("Expected envelope");
+    let escaped = 0;
+    for (const surface of model.surfaces) {
+      const current = surface.frames[1], previous = surface.frames[0];
+      if (current === undefined || previous === undefined) throw new Error("Missing frames");
+      for (const vertex of backLerp === 0 ? current : interpolateMd3Frames(current, previous, backLerp)) {
+        const point = modelWorldPoint(transform, vertex.position);
+        if (point.x < bounds.min.x || point.x > bounds.max.x || point.y < bounds.min.y || point.y > bounds.max.y || point.z < bounds.min.z || point.z > bounds.max.z) escaped++;
+      }
+    }
+    expect(escaped).toBe(0);
+  }
+  expect(md3WorldEnvelope(model, 1, 0, Infinity, transform)).toBeNull();
+  expect(md3WorldEnvelope(model, 1, 0, 0.5, { ...transform, origin: { x: NaN, y: 0, z: 0 } })).toBeNull();
+});

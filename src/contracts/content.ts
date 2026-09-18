@@ -287,7 +287,8 @@ export interface ProviderTiming {
 }
 
 export interface ResolvedWeaponBehaviorSelection {
-  readonly component?: { readonly kind: "qvm"; readonly abiProfile: import("./execution.ts").QvmAbiProfile; readonly layout: import("./weapon-behavior.ts").QvmWeaponBehaviorLayout };
+  readonly component?: { readonly kind: "qvm"; readonly abiProfile: import("./execution.ts").QvmAbiProfile; readonly layout: import("./weapon-behavior.ts").QvmWeaponBehaviorLayout }
+    | { readonly kind: "rerelease-native"; readonly declaration: import("./native-weapon-behavior.ts").NativeWeaponBehaviorDeclaration };
   readonly source: ProviderReference;
   readonly artifact: ResolvedResourceReference;
   readonly definition: import("./weapon-behavior.ts").WeaponBehaviorDefinition;
