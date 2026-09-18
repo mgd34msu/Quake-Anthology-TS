@@ -100,3 +100,11 @@ The shared geometry buffer now retains up to eight typed-array layouts on its ex
 Nine alternating-order component samples measured small alternating layouts at 0.413 → 0.162 microseconds per pack and medium alternating layouts at 1.007 → 0.738 microseconds. Same-layout controls were effectively unchanged. More than eight recurring layouts can miss the cache and pay the bounded scan. [Measurements and limits](../../.artifacts/resume-20260918/gl-layout-cache/receipt.md).
 
 The exact source passed strict/policy checks and three buffer tests with 805 assertions, including actual GL rendering: complete RGBA and all 256 depth values matched fresh packing on two retained-buffer frames, with failure cleanup and draw ownership preserved. [Native result](../../.artifacts/resume-20260918/gl-layout-native/RESULT.md). Installed `065259c` predates this qualified source change; it makes no whole-frame or GPU-speed claim.
+
+## Direct native scalar stores
+
+The guest memory owner now writes typed scalar values directly into a validated single mapping, avoiding a temporary byte buffer and copy. It retains full-range checks, fragmented-write atomicity, alias visibility and the same after-write observer delivery, including observer errors after committed writes.
+
+The existing memory suite passed 15 tests with 481 assertions. Three paired 120,003-instruction interpreter runs preserved complete processor and memory state and reduced component time by 12.9–20.0% (16.2% across the three pairs). The final two paths passed strict/policy checks. [Component evidence](../../.artifacts/resume-20260918/scalar-store-direct/freeze/RESULT.md).
+
+The [actual native component workflow](../../.artifacts/resume-20260918/scalar-store-native/receipt.json) also passed public external-profile installation, Q2Eaks code controlling a Q3 rocket, save/load, immediate restored state, and matching 500 ms continuation. All 2,582 inputs remained unchanged and processes were reaped. Its 56.801-second elapsed time is correctness evidence from one run, not a native performance comparison. This qualified source change is newer than installed `065259c`.

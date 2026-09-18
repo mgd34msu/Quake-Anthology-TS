@@ -322,3 +322,25 @@ test("execute sequence reads live aliases and revalidates mapping changes withou
   const missing = memory.fetchSequence(0n);
   expect(() => missing()).toThrow("null");
 });
+
+test("direct scalar stores retain unaligned float bits and committed observer aggregation", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const base = memory.allocate({ byteLength: 32 });
+  const value = memory.offset(base, 1n);
+  for (const number of [-0, NaN, Infinity, -Infinity, Number.MIN_VALUE, Math.PI]) {
+    const expected = new Uint8Array(8); new DataView(expected.buffer).setFloat64(0, number, true);
+    memory.writeFloat64(value, number);
+    expect(memory.copy(value, 8)).toEqual(expected);
+  }
+  const first = new Error('first observer'), second = new Error('second observer'), observed: bigint[] = [];
+  memory.observeWrites(value, 8, () => { observed.push(memory.readUint64(value)); throw first; });
+  memory.observeWrites(value, 8, () => { observed.push(memory.readUint64(value)); throw second; });
+  let caught: unknown;
+  try { memory.writeUint64(value, 0x123456789abcdef0n); } catch (error) { caught = error; }
+  expect(caught).toBeInstanceOf(AggregateError);
+  if (!(caught instanceof AggregateError)) throw new Error('Missing aggregate observer error');
+  const errors: unknown = caught.errors;
+  expect(errors).toEqual([first, second]);
+  expect(observed).toEqual([0x123456789abcdef0n, 0x123456789abcdef0n]);
+  expect(memory.readUint64(value)).toBe(0x123456789abcdef0n);
+});

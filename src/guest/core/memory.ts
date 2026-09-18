@@ -213,6 +213,10 @@ export class SparseGuestMemory implements MappedGuestMemory {
       chunk.mapping.bytes.set(source.subarray(consumed, consumed + chunk.byteLength), chunk.offset);
       consumed += chunk.byteLength;
     }
+    return this.#notifyWrite(chunks);
+  }
+
+  #notifyWrite(chunks: readonly Chunk[]): undefined {
     if (this.#writeObservers.size === 0) return undefined;
     const errors: unknown[] = [];
     for (const observer of [...this.#writeObservers]) {
@@ -444,8 +448,14 @@ export class SparseGuestMemory implements MappedGuestMemory {
     return new DataView(bytes.buffer, bytes.byteOffset, byteLength);
   }
   #writeScalar(address: GuestAddress, byteLength: number, write: (view: DataView) => void): undefined {
+    const chunks = this.#chunks(address, byteLength, "write"), first = chunks[0];
+    if (chunks.length === 1 && first !== undefined) {
+      const bytes = first.mapping.bytes;
+      write(new DataView(bytes.buffer, bytes.byteOffset + first.offset, byteLength));
+      return this.#notifyWrite(chunks);
+    }
     const bytes = new Uint8Array(byteLength);
     write(new DataView(bytes.buffer));
-    return this.#commitWrite(this.#chunks(address, byteLength, "write"), bytes);
+    return this.#commitWrite(chunks, bytes);
   }
 }
