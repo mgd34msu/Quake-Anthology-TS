@@ -82,7 +82,7 @@ Writable content is separate by default:
 
 The writable `content/` tree mirrors the game-data layout, including `rerelease/` where appropriate. Change that root with `--user-content-root /path/to/writable-content`. Mods can live there without changing the installed base data. Startup scripts such as `config.cfg` and `autoexec.cfg` are loaded from the selected content, so existing personal configs can affect a launch. LLM credentials and preferences use the separate executable-directory rules below.
 
-The source checkout includes original QuakeC and QVM mod execution, separate map selection, declared QuakeC, QVM, and API2023 native projectile behaviors. Homefix, Copper and early Instagib have passed bounded foreign-map play/save/load workflows. Native rerelease execution is available; its performance and broader compatibility remain under active work. The installed `1205372` Linux executable includes these source changes. See [current delivery and open targets](docs/execution-status.md#installed-executable-and-recent-fixes).
+The source checkout includes original QuakeC and QVM mod execution, separate map selection, declared QuakeC, QVM, and API2023 native projectile behaviors. Homefix, Copper and early Instagib have passed bounded foreign-map play/save/load workflows. Native rerelease execution is available; its performance and broader compatibility remain under active work. The installed `71f0e4` Linux executable includes these source changes. See [current delivery and open targets](docs/execution-status.md#installed-executable-and-recent-fixes).
 
 Directory discovery does not establish full mod compatibility. QuakeC, QVM, native modules, rerelease interfaces, and independently mixed mod components are tracked under T10. Inspect discovery and available options with:
 
@@ -134,7 +134,7 @@ Select a movement family with `--movement q1`, `q2`, or `q3`, or an exact instal
   --movement qw --character q3 --model ranger
 ```
 
-Exact movement selection is available in the current source checkout; the installed `1205372` executable predates this addition.
+These movement selectors are included in the current executable and use the same normalized selection as the menu and restored saves.
 
 For example, an installed LRCTF Q3 module can run locally on Q2's `base1`:
 
@@ -215,11 +215,11 @@ Generated menu artwork is present in the source. The complete menu asset pack ma
 
 **Current work**
 
-The [shared functional task list](docs/functional-targets/status.md) records **22 of 23 targets accepted in source**. T10 now includes external artifact-pinned native weapon declarations and full saved-profile identity. The public declaration-installation and native component save/load workflow passed; this extension is included in installed `1205372`. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
+The [shared functional task list](docs/functional-targets/status.md) records **22 of 23 targets accepted in source**. T10 now includes external artifact-pinned native weapon declarations and full saved-profile identity. The public declaration-installation and native component save/load workflow passed; this extension is included in installed `71f0e4`. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
 
 The Custom game summary adapts to its available space so its final field stays visible.
 
-Recent source work adds original Q1 save export/import, native and QVM projectile components, authored travel and mode preflight, bot navigation/save continuation, source pickup preferences, binding reset, live per-seat language, and public recording/replay. Installed `1205372` includes these changes, the player-preference registration fix, GL array-layout reuse, and direct native scalar stores. Its build/source guards and `--help` passed; the latest compiled gameplay check remains the preceding `065259c` mixed-game GL session with normal Quit. Check [the installed build identity](docs/execution-status.md#installed-executable-and-recent-fixes) before comparing behavior.
+The current executable includes original Q1 save export/import, declared native and QVM projectile components, authored travel, source pickup preferences, per-seat language, public recording/replay, and exact movement-product selection. The exact executable passed a direct `--movement qw` launch, fresh movement/jump/fire, a public save retaining QuakeWorld movement, and normal Quit. See [installed identity and runtime evidence](docs/execution-status.md#installed-executable-and-recent-fixes) for the delivery and its qualification limits.
 
 Performance work reuses MD5 poses between passes, skips unused shadow color computation, rejects off-camera MD3 preparation conservatively, removes redundant MD2 vertex wrappers, and reduces native interpreter address-check and instruction-fetch cost while preserving output. The measured gains apply to those components. Native rerelease loads are still slow, and whole-game FPS remains unqualified. [Integration scope and evidence](docs/functional-targets/integration-20260918.md) records these limits and the actual mod/save workflows.
 

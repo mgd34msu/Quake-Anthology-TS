@@ -1,8 +1,8 @@
 # Functional target status
 
-**22/23 functional targets complete in accepted source; T19 remains open.** T10 now includes the external native declaration path and saved profile identity. Those changes are included in installed `1205372`, alongside MD3/MD2 preparation optimizations, the player-preference registration fix, GL array-layout reuse, and direct native scalar stores. Source acceptance covers implementations and their public consumers. Full campaigns, native peers, physical devices, and whole-game performance retain the explicit limits below.
+**22/23 functional targets complete in accepted source; T19 remains open.** T10 now includes the external native declaration path and saved profile identity. Those changes are included in installed `71f0e4`, alongside MD3/MD2 preparation optimizations, the player-preference registration fix, GL array-layout reuse, and direct native scalar stores. Source acceptance covers implementations and their public consumers. Full campaigns, native peers, physical devices, and whole-game performance retain the explicit limits below.
 
-Installed executable is `120537263643fb303f3f6d24ed51252fd4635472` and includes the accepted source changes. Build/source guards and `--help` passed; the latest compiled gameplay check remains `065259c`. Exact installed identity and separate source qualifications are recorded in [execution status](../execution-status.md).
+Installed `71f0e4` also includes movement selection by family, exact installed product, or `qw`, normalized through catalog, menu, and restore. Build/source guards, `--help`, and a bounded exact-binary direct QuakeWorld-movement gameplay/save/Quit check passed. See [execution status](../execution-status.md#installed-executable-and-recent-fixes) for the exact delivery identity and runtime evidence.
 
 The accepted [Application](../../src/app/bootstrap/application.ts) now consumes substantial content, local-input, HUD, progression, mode, campaign, save and tool work. The table separates those integrations from remaining implementation and verification. It does not repeat obsolete blanket instructions to join code that already has callers.
 
