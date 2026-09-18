@@ -69,7 +69,9 @@ export function prepareBrushFace(map: Q1WorldGeometry | Q2WorldGeometry, face: B
   const projection: LightmapProjection = mapping === null ? { kind: "classic", texture: info.projection, textureMins: mins } : { kind: "decoupled", mapping };
   const width = mapping?.width ?? Math.ceil(maxS / 16) - Math.floor(minS / 16) + 1;
   const height = mapping?.height ?? Math.ceil(maxT / 16) - Math.floor(minT / 16) + 1;
-  const offset = mapping === null ? face.lightingOffset : mapping.lightingOffset;
+  const sampleOffset = mapping === null ? face.lightingOffset : mapping.lightingOffset;
+  // Q1 offsets count samples; Q2 offsets already count bytes in RGB data.
+  const offset = sampleOffset === null ? null : sampleOffset * (map.kind === "q1-bsp" && map.lighting.kind === "rgb8" ? 3 : 1);
   const lightmap: LightmapFace = { width, height, plane, projection, lighting: offset === null ? null : map.lighting, offset: offset ?? 0, styles: face.styles };
   const polygons = warp ? splitWater(points, subdivision) : [points];
   const vertices: MaterialVertex[] = [], indices: number[] = [];
