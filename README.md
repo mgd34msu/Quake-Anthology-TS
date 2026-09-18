@@ -197,7 +197,7 @@ Generated menu artwork is present in the source. The complete menu asset pack ma
 
 **Current work**
 
-The [shared functional task list](docs/functional-targets/status.md) records **22 of 23 targets accepted in source**. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
+The [shared functional task list](docs/functional-targets/status.md) records **21 of 23 targets accepted in source**. T10 is reopened for external native weapon declarations: the installed native component currently has only a built-in Q2Eaks profile. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
 
 The Custom game summary adapts to its available space so its final field stays visible.
 
