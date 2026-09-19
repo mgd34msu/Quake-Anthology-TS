@@ -123,6 +123,17 @@ Use `llm_ask "How do I change mouse sensitivity?"` to print an answer in your co
 
 Only direct local console input can start LLM requests. Scripts, aliases, key bindings, game modules, and server commands cannot trigger them. Closing the session cancels pending requests. API requests use the selected provider and may incur that provider's charges.
 
+**Mod interoperability requirements**
+
+General mod interoperability remains unfinished. The required behavior includes:
+
+- A dedicated menu for mods that do not define the game type, with individual enable/disable controls.
+- Multiple enabled mods running together in one session, including mods from different source games.
+- Mods from Quake 1, Quake 2, Quake 3, their expansions, and their rereleases usable in any supported destination game or mixed-game configuration.
+- Shared support for authored mod behavior across weapons, monsters and AI, items, rules, events, and other game systems.
+
+The source game must not restrict a mod to that game's worlds or equipment. Homing rockets are one example for checking interoperability. Existing projectile adapters cover part of this work; they do not establish general mod compatibility or simultaneous mod composition. The dedicated mod menu and broader composition requirements are still pending.
+
 **Choosing a mod and map independently**
 
 In **Play a game → Custom game → World**, choose the game or mod for its rules and **Map content** for the installed product that supplies the map. The command-line equivalent is `--game PRODUCT --map-game MAP_PRODUCT --map MAP`. Omitting `--map-game` uses the selected game's maps.
@@ -219,7 +230,9 @@ Q2 classic and rerelease movement now apply ground friction on Q1 maps. The shar
 
 Q1 colored lightmap offsets now address complete RGB samples. This fixes striped lighting in the rerelease and other Q1 maps with colored lighting, for both GL and CPU rendering.
 
-The [shared functional task list](docs/functional-targets/status.md) records **21 of 23 targets accepted in source**. T12 is active again: supported expansion arsenals still need menu integration, and Team Arena weapon/supply mixing has unfinished backend paths. T10 now includes external artifact-pinned native weapon declarations and full saved-profile identity. The public declaration-installation and native component save/load workflow passed; this extension is included in the current executable. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
+The [shared functional task list](docs/functional-targets/status.md) records **21 of 23 targets accepted in source** under its earlier acceptance scope. That count does not establish completion of the general mod interoperability requirements above. T10 still needs the dedicated mod menu and simultaneous composition of mods across games and game systems. Its existing native weapon declarations and component save/load workflow cover a narrower part of that requirement.
+
+T12 is active again: supported expansion arsenals still need menu integration, and Team Arena weapon/supply mixing has unfinished backend paths. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
 
 The Custom game summary adapts to its available space so its final field stays visible.
 
