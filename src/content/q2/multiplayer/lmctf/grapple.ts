@@ -7,6 +7,7 @@ import type { Q2Entity, Q2GameServices } from "../../foundation/host.ts";
 import { LmctfGrappleEquipment } from "../../equipment/lmctf-grapple.ts";
 import { lmctfActive, lmctfPrint } from "./types.ts";
 import type { LmctfContext } from "./types.ts";
+import { q2WeaponRecoil, setQ2WeaponRecoil } from "../../foundation/weapons/presentation.ts";
 
 export { LMCTF_GRAPPLE as hookDefinition } from "../../equipment/grapple-weapon.ts";
 
@@ -53,7 +54,8 @@ export class LmctfGrapple {
     const weapon = this.context.hooks.weapons.states.get(player.actor.id);
     if (weapon === undefined) return this.equipment.fire(player.actor.id, game);
     return fireLmctfGrappleWeapon(player.actor.id, game, this.equipment, weapon, {
-      kick: (origin, pitch) => { weapon.kickOrigin = origin; weapon.kickAngles = { ...weapon.kickAngles, x: pitch }; return undefined; },
+      kick: (origin, pitch) => setQ2WeaponRecoil(weapon, game.options.edition, game.host.now(), origin,
+        { ...q2WeaponRecoil(weapon, game.options.edition, game.host.now()).kickAngles, x: pitch }),
     });
   }
   command(player: Q2Entity, game: Q2GameServices, pressed: boolean): undefined {

@@ -97,6 +97,7 @@ export class Q2WeaponState {
   grenadeBlewUp = false;
   kickOrigin: Vec3 = { x: 0, y: 0, z: 0 };
   kickAngles: Vec3 = { x: 0, y: 0, z: 0 };
+  kickTime = 0;
   kickUntil = 0;
   kickDuration = 0.2;
   loopSound = "";

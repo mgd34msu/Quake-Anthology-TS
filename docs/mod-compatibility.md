@@ -94,6 +94,12 @@ The native component adapter executes declared original API3/API2023 callbacks w
 
 Shared equipment on a native primary game needs that module's original combat interface. Currently verified destinations are the admitted Xatrix API3 DLL, retail Q2 rerelease API2023 DLL, and LRCTF/Threewave QVMs. The shared attack enters the original damage routine, preserving source armor and reaction logic. Unknown private layouts remain unsupported; the public game ABI alone does not describe them.
 
+### Component files and server information
+
+QVM components use the existing QVM file service with separate output directories at `<user-content-root>/.mods/<encoded-product>/<encoded-component>/`. Source read, write, append, seek, list and saved handle operations retain their original behavior. Each component sees its output before its installed resources and scripts; it borrows verified package handles without owning them. The location remains stable across maps and executable updates.
+
+Server-info and configstring imports share the primary QVM implementation, including source flags, buffer rules and legacy ABI index translation. Original LR initialization opened its log, wrote its own server-info values, and resumed logging after saving. Full initialization remains separate: its next unsupported component service was map entity tokens. Client-specific services still need the shared client identity and userinfo storage interfaces; component source slots must not be treated as primary client numbers.
+
 ### Component console commands
 
 `modcmd PRODUCT/COMPONENT_ID <command>` selects one enabled component explicitly. Component-generated commands enter the same Application command program with their source dialect and instance identity. Cvars and script files resolve within that component; aliases and deferred commands retain the same owner. Disabling an instance cancels its pending commands, waits and script reads while preserving the other components and the primary world. Prepared worlds stage engine actions until publication.

@@ -25,6 +25,7 @@ import { QvmModule, qvmApi } from "./module.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import { QvmGameExport, QvmGameImport } from "./abi.ts";
 import { qvmCommonSyscall } from "./common-syscalls.ts";
+import { qvmServerInformationSyscall, type QvmServerInformationServices } from "./server-info-syscalls.ts";
 import { QvmFiles, qvmFileSyscall } from "./file-syscalls.ts";
 import { rejectQvmSyscall } from "./syscalls.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
@@ -184,6 +185,7 @@ export class QvmModProvider {
   private readonly defaults = new Map<string, Uint8Array>();
   private readonly frames: Frame[] = [];
   readonly cvars: CvarRegistry;
+  private readonly information: QvmServerInformationServices;
   private commands: ModCommandPort | null = null;
   private files: QvmFiles | null;
   private readonly unsubscribe: () => undefined;
@@ -200,6 +202,13 @@ export class QvmModProvider {
     this.scratchStart = Math.ceil((artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength) / 16) * 16;
     this.scratch = this.scratchStart;
     this.cvars = this.newCvars();
+    this.information = { abiProfile: declaration.abiProfile, cvars: this.cvars, configstrings: {
+      get: index => this.configstrings.get(index) ?? "",
+      set: (index, value) => {
+        if ((this.configstrings.get(index) ?? "") === value) return;
+        this.configstrings.set(index, value); this.emit({ kind: "configstring", index, value });
+      },
+    } };
     const scene = services.engine?.scene, topology = scene?.geometry, adjust = scene?.adjustAreaPortalState,
       contribution = scene?.adjustAreaPortalContribution, native = scene?.nativeQ3ClipModels;
     this.portals = topology === undefined || adjust === undefined || contribution === undefined || native === undefined ? null : new Q3GuestWorld({
@@ -595,12 +604,6 @@ export class QvmModProvider {
         }
         this.link(slot); return 0;
       }
-      case QvmGameImport.G_SET_CONFIGSTRING: case QvmGameImport.G_GET_CONFIGSTRING: {
-        const index = word(1); if (index < 0 || index >= 1024) throw new Error("QVM configstring index outside source range");
-        if (call.code === QvmGameImport.G_GET_CONFIGSTRING) call.guest.writeString(word(2), this.configstrings.get(index) ?? "", word(3));
-        else { const value = call.guest.readString(word(2)); this.configstrings.set(index, value); this.emit({ kind: "configstring", index, value }); }
-        return 0;
-      }
       case QvmGameImport.G_SEND_SERVER_COMMAND: this.emit({ kind: "server-command", client: word(1), text: call.guest.readString(word(2)) }); return 0;
       case QvmGameImport.G_ADJUST_AREA_PORTAL_STATE: {
         const scene = this.services.engine?.scene, actor = this.actorAt(this.pointerSlot(word(1)));
@@ -676,6 +679,7 @@ export class QvmModProvider {
     const result = qvmCommonSyscall(call, { role: "qagame", cvars: this.cvars, milliseconds: () => Math.trunc(seconds(this.services) * 1000), arguments: () => [],
       print: text => { if (this.services.engine === undefined) throw new Error("QVM print requires destination engine services"); this.services.engine.print(text); },
       commands: { executeNow: text => { this.commandPort().executeNow(text); }, append: text => this.commandPort().append(text), insert: text => this.commandPort().insert(text) }, realTime: () => { throw new Error("QVM real-time service is not bound"); } })
+      ?? qvmServerInformationSyscall(call, this.information)
       ?? (this.files === null ? null : qvmFileSyscall(call, this.files)) ?? this.engine(call) ?? this.spatial(call);
     if (result === null) return rejectQvmSyscall(call);
     const refresh = (): void => { this.current(); this.refresh(); const frame = this.frames.at(-1); if (frame !== undefined) frame.observations = this.observe(); };

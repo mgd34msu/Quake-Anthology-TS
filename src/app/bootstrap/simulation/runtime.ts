@@ -81,7 +81,7 @@ import { monsterSource } from "../../../content/monsters/definitions.ts";
 import type { MonsterMission } from "../../../content/monsters/authored.ts";
 import { setMonsterRoute } from "../../../content/q1/foundation/monsters.ts";
 import type { GrappleSlotHost } from "./grapple-runtime.ts";
-import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound } from "../../../content/q2/foundation/weapons/presentation.ts";
+import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound, q2WeaponRecoil } from "../../../content/q2/foundation/weapons/presentation.ts";
 import { readGrappleRuntimeCheckpoint } from "./grapple-checkpoint.ts";
 import type { SharedGrappleControl } from "../../../contracts/equipment.ts";
 import { Q1EntityServices } from "../../../content/q1/foundation/entity-services.ts";
@@ -2077,9 +2077,9 @@ export class SharedSimulation implements Simulation {
       persistentInventoryInitialized: entity => { this.pendingStartItems.add(entity.actor.id); return undefined; },
       grantSelectedArsenal: (actor, category) => this.grantSelectedArsenal(actor, category),
       giveSelectedItem: (actor, args) => this.giveSelectedItem(actor, args),
-      weaponState: actor => { const active = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource.weapons : weapons;
-        const state = active.states.get(actor); return state === undefined ? null : { q2Name: state.weapon,
-          ammo: state.weapon === null ? null : active.definition(state.weapon).ammo, kickAngles: state.kickAngles, kickOrigin: state.kickOrigin, loopSound: state.loopSound }; },
+      weaponState: actor => { const source = this.q2ItemWeaponSource(), state = source?.weapons.states.get(actor);
+        return source === null || state === undefined ? null : { q2Name: state.weapon,
+          ammo: state.weapon === null ? null : source.weapons.definition(state.weapon).ammo, ...q2WeaponRecoil(state, source.game.options.edition, source.game.host.now()), loopSound: state.loopSound }; },
       movement: actor => { const player = this.requirePlayer(actor); return { viewAngles: player.viewAngles, commandAngles: player.commandAngles,
         waterLevel: player.waterLevel, waterType: player.waterType < 0 ? player.waterType === -3 ? 32 : player.waterType === -4 ? 16 : player.waterType === -5 ? 8 : 0 : player.waterType,
         grounded: player.ground.kind !== "none", ducked: player.bounds.max.z < player.standingBounds.max.z, buttons: player.buttons,
@@ -3928,7 +3928,8 @@ export class SharedSimulation implements Simulation {
     const punch = this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? zero;
     // Classic viewoffset includes eye height; rerelease sends it separately in pmove.viewheight.
     return player.character !== "q2" || source === undefined ? { ...view, kickAngles: punch, ...(source === undefined ? {} : { fieldOfView: source.fov }) }
-      : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }), angles: add(source.angles, source.kickAngles), kickAngles: punch,
+      : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }),
+        angles: add(!player.intermission && (this.combat.read(actor)?.health ?? 0) > 0 ? view.angles : source.angles, source.kickAngles), kickAngles: punch,
         ...(this.source.kind === "q3" && this.q2Characters.get(player.actor)?.state.dead === true && !player.intermission ? { foreignCharacterDeath: true } : {}),
         fieldOfView: source.fov, viewHeight: source.offset.z + (this.source.kind === "q2" && this.source.product.rerelease !== null && !player.intermission ? view.viewHeight : 0) };
   }

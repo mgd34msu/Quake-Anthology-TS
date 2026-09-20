@@ -1,5 +1,5 @@
 import type { Q2WeaponOwner } from "./types.ts";
-import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound } from "./presentation.ts";
+import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound, q2WeaponRecoil, setQ2WeaponRecoil } from "./presentation.ts";
 /* Quake II p_weapon.c / rerelease p_weapon.cpp. Copyright id Software.
  * GPL-2.0-or-later. The caller supplies the source clock and shared actor state. */
 import type { Vec3 } from "../../../../contracts/math.ts";
@@ -418,10 +418,8 @@ export class Q2Weapons extends Q2Ballistics {
     return this.projectSource(context.self, context.game, context.input, angles, offset);
   }
 
-  kick(context: Q2WeaponContext, origin: Vec3, angles: Vec3, duration = 0.2): undefined {
-    const state = context.state;
-    state.kickOrigin = origin; state.kickAngles = angles; state.kickDuration = duration; state.kickUntil = context.rerelease ? millisecondSum(context.now, duration) : context.now + duration;
-    return undefined;
+  kick(context: Q2WeaponContext, origin: Vec3, angles: Vec3, duration = context.rerelease ? 0.2 : 0): undefined {
+    return setQ2WeaponRecoil(context.state, context.game.options.edition, context.now, origin, angles, duration);
   }
 
   flash(context: Q2WeaponContext, flash: number): undefined { return this.hooks.emit({ kind: "muzzleflash", actor: context.self.actor.id, flash, silenced: context.silenced }); }
@@ -437,8 +435,7 @@ export class Q2Weapons extends Q2Ballistics {
 
   private present(self: Q2WeaponOwner, game: Q2GameServices, state: Q2WeaponState): undefined {
     const definition = state.weapon === null ? null : this.definition(state.weapon);
-    const factor = game.options.edition === "classic" ? 1 : Math.max(0, (state.kickUntil - game.host.now()) / state.kickDuration);
-    return this.hooks.emit({ kind: "view-weapon", actor: self.actor.id, weapon: state.weapon, model: state.primaryHandoff === "holstered" ? "" : state.viewModel ?? definition?.viewModel ?? "", playerModel: definition?.playerModel ?? 0, frame: state.frame, skin: state.viewSkin, rate: state.gunRate, kickOrigin: scale(state.kickOrigin, factor), kickAngles: scale(state.kickAngles, factor) });
+    return this.hooks.emit({ kind: "view-weapon", actor: self.actor.id, weapon: state.weapon, model: state.primaryHandoff === "holstered" ? "" : state.viewModel ?? definition?.viewModel ?? "", playerModel: definition?.playerModel ?? 0, frame: state.frame, skin: state.viewSkin, rate: state.gunRate, ...q2WeaponRecoil(state, game.options.edition, game.host.now()) });
   }
 
   private fire(context: Q2WeaponContext): undefined {

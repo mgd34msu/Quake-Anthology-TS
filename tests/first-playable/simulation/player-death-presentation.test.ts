@@ -1,24 +1,55 @@
 import { expect, test } from "bun:test";
 import { loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+import { StartupSelectionModel } from "../../../src/app/bootstrap/startup-selection.ts";
+import { discoverInstalledContent } from "../../../src/content/catalog/index.ts";
 import { createSimulation } from "../../../src/app/bootstrap/simulation/index.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { decodeSaveImage, encodeSaveImage } from "../../../src/persistence/index.ts";
 import type { UserCommand } from "../../../src/contracts/protocol.ts";
+import type { Vec3 } from "../../../src/contracts/math.ts";
 import { cameraWithCharacterDeath } from "../../../src/app/bootstrap/presentation.ts";
 import { anglesToAxis } from "../../../src/core/math.ts";
 import { perspectiveProjection } from "../../../src/render/scene/view.ts";
 import type { SceneCamera } from "../../../src/contracts/render.ts";
 
-function idleCommand(kind: UserCommand["kind"], time: number): UserCommand {
-  const angles = { x: 0, y: 90, z: 0 };
+function idleCommand(kind: UserCommand["kind"], time: number, angles: Vec3 = { x: 0, y: 90, z: 0 }, milliseconds = 100): UserCommand {
+  const word = (angle: number): number => Math.trunc(angle * 65536 / 360);
+  const angleWords: readonly [number, number, number] = [word(angles.x), word(angles.y), word(angles.z)];
   switch (kind) {
     case "q1-netquake": return { kind, acknowledgedServerTimeSeconds: time / 1000, viewAngles: angles, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
-    case "q1-quakeworld": return { kind, milliseconds: 100, angles, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
-    case "q2-classic": return { kind, milliseconds: 100, angleShorts: [0, 16384, 0], forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0, lightLevel: 0 };
-    case "q2-rerelease": return { kind, milliseconds: 100, angles, forwardMove: 0, sideMove: 0, buttons: 0, serverFrame: Math.round(time / 100) };
-    case "q3": return { kind, serverTimeMilliseconds: time, angleWords: [0, 16384, 0], forwardMove: 0, rightMove: 0, upMove: 0, buttons: 0, weapon: 0 };
+    case "q1-quakeworld": return { kind, milliseconds, angles, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
+    case "q2-classic": return { kind, milliseconds, angleShorts: angleWords, forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0, lightLevel: 0 };
+    case "q2-rerelease": return { kind, milliseconds, angles, forwardMove: 0, sideMove: 0, buttons: 0, serverFrame: Math.round(time / 100) };
+    case "q3": return { kind, serverTimeMilliseconds: time, angleWords, forwardMove: 0, rightMove: 0, upMove: 0, buttons: 0, weapon: 0 };
   }
+}
+
+for (const character of ["q2-classic-baseq2", "q2-rerelease-baseq2"]) {
+  const movement = character;
+  test(`${character} camera follows each ${movement} command between character ticks`, async () => {
+    const parsed = parseApplicationCommand(["--game", "q1-rerelease-id1", "--map", "start", "--movement", movement, "--character", "q2", "--dedicated"]);
+    if (parsed.kind !== "run") throw new Error("Missing launch");
+    const catalog = await discoverInstalledContent({ corpusRoot: parsed.options.corpusRoot, discoverMods: false });
+    const selection = new StartupSelectionModel(catalog, parsed.options);
+    await selection.prepareMaps(); selection.select("character", character);
+    const launch = await selection.resolve();
+    const content = await loadApplicationContent(launch.options, launch.recipe, undefined, catalog), identity = createIdentityOwner(`live-camera-${character}-${movement}`);
+    const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts, mode: "singleplayer", skill: 1, seed: 17, maxClients: 1 });
+    try {
+      const client = identity.client(0, 0), actor = simulation.admitPlayer(client).actor, player = simulation.movementPlayer(actor);
+      if (player === null) throw new Error("Missing player");
+      simulation.step({ elapsedMilliseconds: 100, commands: [] });
+      for (let frame = 0; frame < 8; frame++) {
+        const aim = { x: frame + 1, y: 100 + frame * 2, z: 0 };
+        simulation.step({ elapsedMilliseconds: 16, commands: [{ actor, source: { kind: "remote-client", client }, sequence: frame,
+          command: idleCommand(player.profile.kind, Math.round(simulation.timeSeconds * 1000) + 16, aim, 16) }] });
+        const view = simulation.playerView(actor);
+        expect(view.angles.x).toBeCloseTo(player.viewAngles.x, 2);
+        expect(view.angles.y).toBeCloseTo(player.viewAngles.y, 5);
+      }
+    } finally { simulation.close(); await content.close(); }
+  }, 30000);
 }
 
 for (const movement of ["q1", "q2", "q3"]) for (const character of ["q1", "q2", "q3"]) {

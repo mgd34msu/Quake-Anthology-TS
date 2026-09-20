@@ -4,6 +4,7 @@ import type { Q2CallbackDefinitions } from "../../foundation/callbacks.ts";
 import type { Q2Entity, Q2GameServices, Q2Think, Q2Touch } from "../../foundation/host.ts";
 import type { Q2WeaponContext, Q2Weapons } from "../../foundation/weapons/player.ts";
 import type { Q2WeaponDefinition } from "../../foundation/weapons/types.ts";
+import { q2WeaponRecoil } from "../../foundation/weapons/presentation.ts";
 import { add, scale, zero } from "../../foundation/fields.ts";
 import { angleVectors, vectorAngles } from "../../foundation/weapons/vectors.ts";
 import { lmctfPlayer, lmctfPrint } from "./types.ts";
@@ -40,7 +41,7 @@ export class LmctfWeapons {
     }
     if (state.frame === 4) {
       const projection = weapons.project(current, { x: 8, y: 8, z: -8 }), reflect = lmctfPlayer(this.context, self.actor.id).plasmaMode;
-      state.kickOrigin = scale(angleVectors(input.angles).forward, -2);
+      weapons.kick(current, scale(angleVectors(input.angles).forward, -2), q2WeaponRecoil(state, game.options.edition, now).kickAngles);
       game.sound(self, reflect ? "weapons/plasma/fire1.wav" : "weapons/plasma/fire2.wav", 1);
       this.launch(self, game, projection.start, projection.direction, reflect);
       const cells = game.host.inventory.entries(self.actor.id).find(entry => entry.item === "q2:ammo_cells");

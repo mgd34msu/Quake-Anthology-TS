@@ -1,14 +1,13 @@
-import { qvmConfigstring } from "./legacy-presentation.ts";
 /* Q3 server/sv_game.c guest ABI. GPL-2.0-or-later. */
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { TraceQuery } from "../../contracts/scene.ts";
 import { CommonError } from "../../core/common-error.ts";
-import { CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { QvmGameImport } from "./abi.ts";
 import { QVM_USER_COMMAND_BYTES, writeQvmUserCommand } from "./client-state-record.ts";
 import type { QvmGameData } from "./game-data.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
+import { qvmServerInformationSyscall } from "./server-info-syscalls.ts";
 import { QVM_TRACE_BYTES, writeQvmTrace } from "./trace-record.ts";
 import type { QvmTraceRecord } from "./trace-record.ts";
 
@@ -45,9 +44,6 @@ function complete(result: void | Promise<void>): QvmHostResult { return result =
 function capacity(size: number, operation: string): void {
   if (size < 1) throw new CommonError("drop", `${operation}: bufferSize == ${size}`);
 }
-function configIndex(index: number, operation: string): void {
-  if (index < 0 || index >= 1024) throw new CommonError("drop", `${operation}: bad index ${index}\n`);
-}
 function client(slot: number, services: QvmServerGameServices, operation: string): void {
   if (slot < 0 || slot >= services.maxClients) throw new CommonError("drop", operation === "SV_GetUsercmd"
     ? `${operation}: bad clientNum:${slot}` : `${operation}: bad index ${slot}\n`);
@@ -74,20 +70,15 @@ export function qvmServerGameSyscall(call: QvmHostCall, services: QvmServerGameS
       return number !== -1 && (number < 0 || number >= services.maxClients) ? 0 : complete(services.sendServerCommand(number, guest.readString(word(2))));
     }
     case QvmGameImport.G_SET_CONFIGSTRING:
-      configIndex(word(1), "SV_SetConfigstring");
-      return complete(services.configstrings.set(qvmConfigstring(word(1), services.data.abiProfile), word(2) === 0 ? "" : guest.readString(word(2))));
     case QvmGameImport.G_GET_CONFIGSTRING:
-      capacity(word(3), "SV_GetConfigstring"); configIndex(word(1), "SV_GetConfigstring");
-      guest.writeString(word(2), services.configstrings.get(qvmConfigstring(word(1), services.data.abiProfile)), word(3)); return 0;
+    case QvmGameImport.G_GET_SERVERINFO:
+      return qvmServerInformationSyscall(call, { abiProfile: services.data.abiProfile, cvars: services.cvars, configstrings: services.configstrings });
     case QvmGameImport.G_GET_USERINFO:
       capacity(word(3), "SV_GetUserinfo"); client(word(1), services, "SV_GetUserinfo");
       guest.writeString(word(2), services.getUserinfo(word(1)), word(3)); return 0;
     case QvmGameImport.G_SET_USERINFO:
       client(word(1), services, "SV_SetUserinfo");
       services.setUserinfo(word(1), word(2) === 0 ? "" : guest.readString(word(2))); return 0;
-    case QvmGameImport.G_GET_SERVERINFO:
-      capacity(word(2), "SV_GetServerinfo");
-      guest.writeString(word(1), services.cvars.infoString(CvarFlag.ServerInfo), word(2)); return 0;
     case QvmGameImport.G_SET_BRUSH_MODEL: {
       if (word(2) === 0) throw new CommonError("drop", "SV_SetBrushModel: NULL");
       const name = guest.readString(word(2));

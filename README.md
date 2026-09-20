@@ -200,6 +200,8 @@ Generated menu artwork is present in the source. The complete menu asset pack ma
 
 Q2 classic and rerelease movement now apply ground friction on Q1 maps. The shared collision adapter supplies ordinary surface metadata, so releasing movement keys stops the player in both Q1 editions.
 
+Newer source fixes choppy aiming with Q2 characters in mixed worlds: the camera uses live movement angles every frame while retaining source kick, death and intermission behavior. Classic Q2 weapon recoil also expires correctly in mixed worlds, including the BFG's timed kick. These corrections are not yet in the installed executable.
+
 Q1 colored lightmap offsets now address complete RGB samples. This fixes striped lighting in the rerelease and other Q1 maps with colored lighting, for both GL and CPU rendering.
 
 The [shared functional task list](docs/functional-targets/status.md) records **20 of 23 targets accepted in source** after reopening T10 for the general mod interoperability requirements above. T10 is the first unfinished target. The dedicated mod menu is connected to existing components; general source adapters and simultaneous composition across game systems remain unfinished. Its existing native weapon declarations and component save/load workflow cover a narrower part of that requirement.

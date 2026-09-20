@@ -1,4 +1,5 @@
 import { latchQ2WeaponButtons, earlyQ2WeaponTurn, beginQ2WeaponTurn } from "../../foundation/weapons/turn.ts";
+import { q2WeaponRecoil } from "../../foundation/weapons/presentation.ts";
 /* Source player phases are invoked by the common simulation. This is not a second G_RunFrame. */
 import type { DamageDecision, InventoryEntry } from "../../../../contracts/gameplay.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
@@ -111,7 +112,7 @@ export class Q2Players implements Q2SpawnModule {
       powerups: () => this.items.playerPowerups(entity.actor.id),
       weaponState: () => { if (this.hooks.weaponState !== undefined) return this.hooks.weaponState(entity.actor.id);
         const weapon = this.weapons.states.get(entity.actor.id); return weapon === undefined ? null : {
-        q2Name: weapon.weapon, ammo: weapon.weapon === null ? null : this.weapons.definition(weapon.weapon).ammo, kickAngles: weapon.kickAngles, kickOrigin: weapon.kickOrigin, loopSound: weapon.loopSound }; },
+        q2Name: weapon.weapon, ammo: weapon.weapon === null ? null : this.weapons.definition(weapon.weapon).ammo, ...q2WeaponRecoil(weapon, game.options.edition, game.host.now()), loopSound: weapon.loopSound }; },
       environmentDamage: (amount, means, flags) => {
         const world = game.host.worldActor();
         const attack = { ...game.attack(entity, world, means, flags, null), inflictor: world };
@@ -471,8 +472,6 @@ export class Q2Players implements Q2SpawnModule {
     q2ClientEffects(context); this.clientAnimation(context);
     if (context.movement.animateQ2) game.show(entity);
     state.oldVelocity = body.velocity; state.oldViewAngles = view.angles;
-    const weapon = this.weapons.states.get(entity.actor.id);
-    if (weapon !== undefined) { weapon.kickOrigin = zero; weapon.kickAngles = zero; }
     if (state.showScores && (Math.round(now * 10) & 31) === 0) this.scoreboard(entity, game, false);
     return undefined;
   }

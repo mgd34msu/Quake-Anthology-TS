@@ -7,6 +7,7 @@ import type { TouchContact } from "../../../../contracts/world.ts";
 import type { Q2Entity, Q2GameServices } from "../../foundation/host.ts";
 import { nativeGrappleHooks } from "./native-grapple-hooks.ts";
 import type { Q2WeaponContext } from "../../foundation/weapons/index.ts";
+import { q2WeaponRecoil } from "../../foundation/weapons/presentation.ts";
 import { Q2CtfGrappleEquipment } from "../../equipment/ctf-grapple.ts";
 import type { Q2CtfContext } from "./types.ts";
 export { Q2_CTF_GRAPPLE } from "../../equipment/grapple-weapon.ts";
@@ -54,7 +55,8 @@ export class Q2CtfGrapple {
   fire(context: Q2WeaponContext): undefined {
     if (this.equipment === null) return undefined;
     return fireCtfGrappleWeapon(context.self.actor.id, context.game, this.equipment, context.state, context.game.options.edition, {
-      kick: (origin, pitch) => this.context.hooks.weapons.kick(context, origin, { ...context.state.kickAngles, x: pitch }),
+      kick: (origin, pitch) => this.context.hooks.weapons.kick(context, origin,
+        { ...q2WeaponRecoil(context.state, context.game.options.edition, context.now).kickAngles, x: pitch }),
     });
   }
 

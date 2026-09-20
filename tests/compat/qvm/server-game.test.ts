@@ -8,6 +8,7 @@ import { QvmUnboundSyscallError, rejectQvmSyscall } from "../../../src/compat/qv
 import type { QvmHostCall } from "../../../src/compat/qvm/syscalls.ts";
 import { qvmServerGameSyscall } from "../../../src/compat/qvm/server-game-syscalls.ts";
 import type { QvmServerGameServices, QvmServerTraceQuery } from "../../../src/compat/qvm/server-game-syscalls.ts";
+import { qvmServerInformationSyscall, type QvmServerInformationServices } from "../../../src/compat/qvm/server-info-syscalls.ts";
 
 function fixture() {
   const guest = new QvmMemory(new Uint8Array(16384)), data = new QvmGameData(guest);
@@ -74,6 +75,19 @@ test("server ABI awaits reliable lifecycle owners and preserves token EOF", asyn
   await Promise.resolve(); expect(done).toBe(false); gate.resolve(); expect(await result).toEqual([0, 0, 0]);
   expect(f.run(QvmGameImport.G_GET_ENTITY_TOKEN, [512, 16])).toBe(1); expect(f.guest.readString(512)).toBe("last");
   expect(f.run(QvmGameImport.G_GET_ENTITY_TOKEN, [512, 16])).toBe(0); expect(f.guest.readString(512)).toBe("");
+});
+
+test("shared information traps retain source capacity, null configstrings, flags and legacy indices", () => {
+  const f = fixture(), services = { abiProfile: "q3-1.16n-base", cvars: f.services.cvars, configstrings: f.services.configstrings } satisfies QvmServerInformationServices;
+  const run = (code: QvmGameImport, words: readonly number[]) => qvmServerInformationSyscall(f.call(code, words), services);
+  expect(() => run(QvmGameImport.G_GET_CONFIGSTRING, [1024, 0, 0])).toThrow("bufferSize");
+  expect(() => run(QvmGameImport.G_GET_SERVERINFO, [0, 0])).toThrow("bufferSize");
+  expect(run(QvmGameImport.G_SET_CONFIGSTRING, [12, 0])).toBe(0); expect(f.calls).toEqual([["config", 20, ""]]);
+  run(QvmGameImport.G_GET_CONFIGSTRING, [12, 512, 32]); expect(f.guest.readString(512)).toBe("config 20");
+  f.services.cvars.register("hostname", "component", CvarFlag.ServerInfo); f.services.cvars.register("private_value", "unpublished");
+  run(QvmGameImport.G_GET_SERVERINFO, [512, 128]); expect(f.guest.readString(512)).toBe("\\hostname\\component");
+  f.guest.bytes[513] = 0xcc; run(QvmGameImport.G_GET_SERVERINFO, [512, 1]);
+  expect(f.guest.readString(512)).toBe(""); expect(f.guest.bytes[513]).toBe(0xcc);
 });
 
 test("trace pointers, capsule contacts, table slots and area output retain source ABI", () => {
