@@ -57,14 +57,24 @@ export function readQvmModCallbacks(bytes: Uint8Array): QvmModCallbackDeclaratio
 }
 
 export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclaration {
-  const program = reader.field("program"), actors = reader.field("sourceActors");
+  const program = reader.field("program"), actors = reader.field("sourceActors"), combat = reader.field("combat");
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("qvm"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
     abiProfile: reader.field("abiProfile").choice("q3-modern", "q3-1.16n-base"),
     entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     ...(actors.value === undefined ? {} : { sourceActors: { allocate: actors.field("allocate").integer(0),
       release: { entry: actors.field("release").field("entry").integer(0), argument: actors.field("release").field("argument").integer(0) },
-      inuse: actors.field("inuse").integer(0), eventEntityType: actors.field("eventEntityType").integer(0), update: actors.field("update").nullable(sourceCall) } }),
+      inuse: actors.field("inuse").integer(0), eventEntityType: actors.field("eventEntityType").integer(0), update: actors.field("update").nullable(sourceCall),
+      ...(actors.field("callbacks").value === undefined ? {} : { callbacks: {
+        touch: actors.field("callbacks").field("touch").nullable(field => field.integer(0)), use: actors.field("callbacks").field("use").nullable(field => field.integer(0)),
+        pain: actors.field("callbacks").field("pain").nullable(field => field.integer(0)), die: actors.field("callbacks").field("die").nullable(field => field.integer(0)),
+      } }) } }),
+    ...(combat.value === undefined ? {} : { combat: { abi: combat.field("abi").literal("q3-g-damage"), entry: combat.field("entry").integer(0),
+      health: combat.field("health").integer(0), takedamage: combat.field("takedamage").integer(0), flags: combat.field("flags").integer(0),
+      godmode: combat.field("godmode").integer(1), noKnockback: combat.field("noKnockback").integer(1),
+      globals: combat.field("globals").list(global => ({ address: global.field("address").integer(0), value: argument(global.field("value")) })),
+      client: combat.field("client").nullable(client => ({ pointer: client.field("pointer").integer(0), record: client.field("record").string(),
+        health: client.field("health").integer(0), armor: client.field("armor").integer(0), protection: client.field("protection").number(), team: client.field("team").integer(0) })) } }),
     actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(), address: record.field("address").integer(1),
       stride: record.field("stride").integer(4), capacity: record.field("capacity").integer(1), fields: record.field("fields").list(field) })),
     initialize: reader.field("initialize").list(sourceCall), callbacks: reader.field("callbacks").list(reader => ({ ...binding(reader), ...sourceCall(reader) })) };

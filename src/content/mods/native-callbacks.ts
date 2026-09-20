@@ -1,5 +1,5 @@
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
-import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue } from "../../contracts/native-mod-callbacks.ts";
+import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors } from "../../contracts/native-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -55,6 +55,16 @@ function field(reader: SaveReader): NativeModActorField {
     default: return { offset, binding };
   }
 }
+function sourceActors(reader: SaveReader): NativeModSourceActors {
+  const fields = reader.field("fields"), nextthink = fields.field("nextthink"), update = reader.field("update");
+  const encoding = (reader: SaveReader) => reader.choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64");
+  return { allocate: entry(reader.field("allocate")), release: entry(reader.field("release")),
+    update: { entry: entry(update.field("entry")), returns: update.field("returns").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "void") },
+    frameSeconds: reader.field("frameSeconds").number(),
+    clock: reader.field("clock").list(value => ({ address: address(value.field("address")), input: value.field("input").choice("time", "frame"), encoding: encoding(value.field("encoding")), units: value.field("units").choice("seconds", "milliseconds") })),
+    fields: { velocity: fields.field("velocity").integer(0), ground: fields.field("ground").integer(0), use: fields.field("use").nullable(value => value.integer(0)),
+      think: fields.field("think").integer(0), nextthink: { offset: nextthink.field("offset").integer(0), encoding: encoding(nextthink.field("encoding")), units: nextthink.field("units").choice("seconds", "milliseconds") } } };
+}
 export function readNativeModCallbacks(bytes: Uint8Array): NativeModDeclaration {
   const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   return readNativeModDeclaration(new SaveReader(value));
@@ -67,6 +77,7 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
     : { api: { kind: targetKind, version: api.field("version").literal(2023) }, abi: { kind: abi.field("kind").literal("windows-x86-64"), image: abi.field("image").literal("pe32+"), pointerBytes: abi.field("pointerBytes").literal(8), call: abi.field("call").literal("microsoft-x64") } };
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("native"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) }, target: parsedTarget,
+    ...(reader.field("sourceActors").value === undefined ? {} : { sourceActors: sourceActors(reader.field("sourceActors")) }),
     cvars: reader.field("cvars").list(value => ({ name: value.field("name").string(), value: value.field("value").string() })),
     spawnEntities: reader.field("spawnEntities").nullable(value => value.string()), entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(),

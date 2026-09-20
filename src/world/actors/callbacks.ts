@@ -68,7 +68,20 @@ export class ActorCallbackTable {
     return this.operations.die.active ? this.compose(reaction.self, this.operations.die, [reaction], canonical) : canonical([reaction]);
   }
 
-  private invokeSource(self: OwnedActor, kind: "pain" | "die", execute: () => undefined): boolean {
+  sourceUse(self: OwnedActor, other: ActorId | null, activator: ActorId | null, execute: (self: OwnedActor, other: ActorId | null, activator: ActorId | null) => undefined): boolean {
+    const canonical = (args: readonly [OwnedActor, ActorId | null, ActorId | null]) => this.invokeSource(args[0], "use", () => execute(...args));
+    return this.operations.use.active ? this.compose(self, this.operations.use, [self, other, activator], canonical) : canonical([self, other, activator]);
+  }
+
+  sourceTouch(contact: TouchContact, execute: (contact: TouchContact) => undefined): boolean {
+    const canonical = (args: readonly [TouchContact]) => {
+      if (!this.actors.isLive(args[0].other) && args[0].sourceTrace?.inverted !== true) return false;
+      return this.invokeSource(args[0].self, "touch", () => execute(args[0]));
+    };
+    return this.operations.touch.active ? this.compose(contact.self, this.operations.touch, [contact], canonical) : canonical([contact]);
+  }
+
+  private invokeSource(self: OwnedActor, kind: "pain" | "die" | "touch" | "use", execute: () => undefined): boolean {
     if (!this.actors.isLive(self.id)) return false;
     this.actors.assertOwned(self);
     const parent = this.invocation;

@@ -44,6 +44,7 @@ export class SharedSceneQueries implements SceneQueries {
     readonly #geometry: GeometryCollision;
     #readActorState: ((actor: ActorId) => BodyState | null) | null = null;
     #readActorCollision: ((actor: ActorId) => ActorCollision | null) | null = null;
+    readonly #q2PortalContributions = new Map<number, { primary: boolean; count: number }>();
     nativeQ3ClipModels(): SourceClipModels | null {
         return this.#geometry.kind === 'q3' ? this.#geometry.provider.world.sourceClipModels() : null;
     }
@@ -108,7 +109,18 @@ export class SharedSceneQueries implements SceneQueries {
     setAreaPortalState(portal: number, open: boolean): void {
         if (this.#geometry.kind !== 'q2')
             throw new RangeError('Portal identifiers belong to Quake II maps');
-        this.#geometry.provider.setAreaPortalState(portal, open);
+        const contribution = this.#q2PortalContributions.get(portal);
+        if (contribution !== undefined) contribution.primary = open;
+        this.#geometry.provider.setAreaPortalState(portal, open || (contribution?.count ?? 0) > 0);
+    }
+    adjustAreaPortalContribution(portal: number, delta: 1 | -1): void {
+        if (this.#geometry.kind !== 'q2') throw new RangeError('Portal identifiers belong to Quake II maps');
+        const contribution = this.#q2PortalContributions.get(portal) ?? { primary: this.#geometry.provider.portalState().includes(portal), count: 0 };
+        const count = contribution.count + delta;
+        if (count < 0) throw new Error('Area portal contribution underflow');
+        this.#geometry.provider.setAreaPortalState(portal, contribution.primary || count > 0);
+        contribution.count = count;
+        if (count === 0) this.#q2PortalContributions.delete(portal); else this.#q2PortalContributions.set(portal, contribution);
     }
     q2PortalState(): readonly number[] {
         if (this.#geometry.kind !== 'q2') throw new RangeError('Portal identifiers belong to Quake II maps');

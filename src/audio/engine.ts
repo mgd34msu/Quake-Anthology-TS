@@ -1,7 +1,7 @@
 import { audioOutputFormat, defaultAudioOutputFormat, encodeOutputPcm, resampleQueuedPcm, type AudioOutputFormat } from "./output.ts";
 import { sourceSoundChannel } from "./types.ts";
 import type { SharedSoundChannel } from "./types.ts";
-import type { ActorId, SeatId } from "../contracts/identity.ts";
+import type { ActorId, ProviderId, SeatId } from "../contracts/identity.ts";
 import type { Vec3 } from "../contracts/math.ts";
 import { SdlAudioDevice, SdlAudioUnavailableError } from "../platform/audio.ts";
 import type { SdlAudioOptions } from "../platform/audio.ts";
@@ -251,7 +251,7 @@ export class UnifiedAudio {
             if (!selected(request.audience, state.listener.seat))
                 continue;
             const origin = this.loopPosition(request, state.listener);
-            state.loops.set(`${request.family}:${entity}`, request);
+            state.loops.set(`${request.family}:${entity}${request.owner === undefined ? "" : `:${request.owner}`}`, request);
             if (request.family === "q3") this.q3Loop(state, request, origin);
         }
     }
@@ -278,13 +278,12 @@ export class UnifiedAudio {
             state.mixer.setListener(entity, state.listener.origin, state.listener.axis);
         }
     }
-    stopLoop(actor: ActorId, audience: AudioAudience = { kind: "world" }): void {
+    stopLoop(actor: ActorId, audience: AudioAudience = { kind: "world" }, owner?: ProviderId): void {
         const entity = this.entity(actor);
         for (const state of this.seats) {
             if (!selected(audience, state.listener.seat)) continue;
-            for (const family of ["q1", "q2", "q3"])
-                state.loops.delete(`${family}:${entity}`);
-            state.mixer.stopLoopingSound(entity);
+            for (const [key, loop] of state.loops) if (loop.actor.equals(actor) && loop.owner === owner) state.loops.delete(key);
+            if (owner === undefined) state.mixer.stopLoopingSound(entity);
         }
         this.endLoopFrame();
     }

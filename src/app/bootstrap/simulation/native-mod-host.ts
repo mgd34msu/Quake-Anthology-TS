@@ -20,6 +20,8 @@ import { ClassicGuestServices, type ClassicGuestServicesOptions } from "./classi
 import { RereleaseGuestServices } from "./rerelease-guest-services.ts";
 import type { ActorHostRuntime } from "./source-hosts.ts";
 import { SourceRandom } from "./random.ts";
+import type { GuestCallRunnerOptions } from "../../../guest/abi/runner.ts";
+import { RereleasePublicEdict } from "../../../compat/q2/rerelease/public-state.ts";
 import { NativeModPresentation } from "./native-mod-presentation.ts";
 
 export interface NativeModHostContext {
@@ -52,6 +54,10 @@ export interface NativeModHost {
   readonly imageBase: GuestAddress;
   readonly cvars: CvarRegistry;
   readonly presentation: NativeModPresentation;
+  readonly entries: Pick<GuestCallRunnerOptions, "callbacks" | "cpu">;
+  entity(slot: number): RawEntityView;
+  active(slot: number): boolean;
+  clearEntityEvent(slot: number): void;
   entry(name: string): GuestAddress;
   entities(): { readonly base: GuestAddress; readonly stride: number; readonly count: number; readonly capacity: number };
   invoke(entry: GuestAddress, signature: GuestCallSignature, values: readonly GuestCallValue[]): GuestCallResult;
@@ -100,12 +106,15 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
     const spawn = async (): Promise<void> => { if (declaration.spawnEntities !== null) await source.host.spawnEntitiesLoading(map, declaration.spawnEntities, "", options.nextFrame); retained.completeSpawn(); };
     const identity = { module: source.memory.module, map: context.mapPath };
     const presentation = new NativeModPresentation({ edition: "classic", configstrings: () => retained.configstrings(), drainMessages: () => retained.drainMessages(),
+      state(slot) { const state = retained.entityState(slot), record = source.host.edicts.at(slot); return { active: record.bytes.getInt32(88, true) !== 0 && (record.bytes.getInt32(184, true) & 1) === 0, sound: state.sound, event: state.event, origin: state.origin, volume: 1, attenuation: 1 }; },
       signature(slot) { const state = retained.entityState(slot); return JSON.stringify([state.modelIndexes, state.skin]); },
       appearance(slot) { const state = retained.entityState(slot), record = source.host.edicts.at(slot);
         return { ...retained.modelAppearance(slot), frame: state.frame, oldFrame: state.frame, effects: state.effects, renderFlags: state.renderEffects,
           scale: 1, alpha: (state.renderEffects & 32) !== 0 ? 0.3 : 1, visible: record.bytes.getInt32(88, true) !== 0 && (record.bytes.getInt32(184, true) & 1) === 0,
-          origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context);
+          origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
     return { memory: source.memory, imageBase: source.imageBase, cvars, presentation, entry: name => source.entry(name),
+      clearEntityEvent: slot => { source.host.edicts.at(slot).bytes.setInt32(80, 0, true); },
+      entries: source.host.options.runner.options, entity: slot => source.host.edicts.at(slot), active: slot => source.host.edicts.at(slot).bytes.getInt32(88, true) !== 0,
       entities: () => source.host.edicts.descriptor(), invoke: (entry, signature, values) => source.host.invoke(entry, signature, values),
       async initialize(restoring) { await source.initLoading(options.nextFrame); if (!restoring) await spawn(); },
       async checkpoint() { return { edition: "classic", original: encodeQ2ClassicOriginalSave(files.capture(identity,
@@ -129,13 +138,16 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
   adapter.bindHost(source.host);
   const spawn = async (): Promise<void> => { if (declaration.spawnEntities !== null) await source.host.spawnEntitiesLoading(map, declaration.spawnEntities, "", options.nextFrame); adapter.completeSpawn(); };
   const presentation = new NativeModPresentation({ edition: "rerelease", configstrings: () => adapter.configstrings(), drainMessages: () => adapter.drainMessages(),
+    state(slot) { const state = adapter.entityState(slot), info = adapter.entityInfo(slot); return { active: info.active && (info.serverFlags & 1) === 0, sound: state.sound, event: state.event, origin: state.origin, volume: state.loopVolume, attenuation: state.loopAttenuation }; },
     signature(slot) { const state = adapter.entityState(slot); return JSON.stringify([state.modelIndexes, state.skin]); },
     appearance(slot) { const state = adapter.entityState(slot), info = adapter.entityInfo(slot);
       if (state.effects > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Native mod effects exceed lossless shared presentation");
       return { ...adapter.modelAppearance(slot), frame: state.frame, oldFrame: state.oldFrame, effects: Number(state.effects), renderFlags: state.renderEffects,
         scale: state.scale === 0 ? 1 : state.scale, alpha: state.alpha === 0 ? (state.renderEffects & 32) !== 0 ? 0.3 : 1 : state.alpha,
-        visible: info.active && (info.serverFlags & 1) === 0, origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context);
+        visible: info.active && (info.serverFlags & 1) === 0, origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
   return { memory: source.memory, imageBase: source.imageBase, cvars, presentation, entry: name => source.entry(name),
+    clearEntityEvent: slot => { const record = new RereleasePublicEdict(source.memory, source.host.module.entities().atSlot(slot)); source.memory.writeUint8(record.address("s.event"), 0); },
+    entries: source.host.module.options.runner.options, entity: slot => source.host.module.entities().atSlot(slot), active: slot => adapter.entityInfo(slot).active,
     entities() { const table = source.host.module.entities(); return { base: table.base, stride: table.strideBytes, count: table.count, capacity: table.capacity }; },
     invoke: (entry, signature, values) => source.host.module.invoke(entry, signature, values),
     async initialize(restoring) { await source.initLoading(options.nextFrame); if (!restoring) await spawn(); },

@@ -7,7 +7,7 @@ import type { ResolvedQvmArtifact } from "./artifacts.ts";
 import type { QvmAllocationProfile } from "./allocation.ts";
 import { QvmGuestMemory } from "./guest-memory.ts";
 import { QvmInterpreter } from "./interpreter.ts";
-import type { QvmArguments, QvmFunctionHook, QvmFunctionObserver, QvmSyscall } from "./interpreter.ts";
+import type { QvmArguments, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall } from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
 import { QvmMemory } from "./memory.ts";
 import type { VmRegistration } from "./registry.ts";
@@ -110,6 +110,24 @@ export class QvmModule implements GuestExecutor {
       this.currentEntry = call;
       try { return hook(call); }
       finally { this.currentEntry = previous; }
+    });
+  }
+
+  bindFunctionResolver(resolve: QvmFunctionResolver): () => void {
+    this.live();
+    const wrappers = new WeakMap<QvmFunctionHook, QvmFunctionHook>();
+    return this.interpreter.bindFunctionResolver((entry, firstArgument) => {
+      const hook = resolve(entry, firstArgument); if (hook === undefined) return undefined;
+      let wrapped = wrappers.get(hook);
+      if (wrapped === undefined) {
+        wrapped = call => {
+          this.live();
+          const previous = this.currentEntry; this.currentEntry = call;
+          try { return hook(call); } finally { this.currentEntry = previous; }
+        };
+        wrappers.set(hook, wrapped);
+      }
+      return wrapped;
     });
   }
 

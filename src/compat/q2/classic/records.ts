@@ -116,6 +116,7 @@ export class ClassicQ2Edicts {
     return undefined;
   }
   reconcile(): undefined {
+    if (this.projection !== undefined) return undefined;
     const descriptor = this.descriptor();
     for (const actor of this.actors.ownedBy(this.provider)) {
       const source = this.actors.sourceOf(actor.id);

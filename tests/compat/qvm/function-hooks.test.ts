@@ -21,6 +21,36 @@ function bytecode(operations: readonly Operation[]): Uint8Array {
 }
 function unexpectedTrap(): never { throw new Error("Unexpected syscall"); }
 
+test("live callback resolver sees assignments immediately and preserves explicit hooks, observers and direct entries", () => {
+  const bytes = bytecode([
+    [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 19], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_ARG, 8], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CALL],
+    [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 22], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_ARG, 8], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CALL],
+    [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
+    [QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, 7], [QvmOpcode.OP_LEAVE, 0],
+    [QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, 11], [QvmOpcode.OP_LEAVE, 0],
+  ]);
+  const vm = new QvmInterpreter(parseQvm(bytes), unexpectedTrap, undefined, null, "compiled"), memory = new DataView(vm.memory.buffer);
+  let resolved = 0, observed = 0;
+  const hook: QvmFunctionHook = call => call.proceed() + 1;
+  const remove = vm.bindFunctionResolver((entry, pointer) => {
+    resolved++; return pointer === 64 && memory.getInt32(pointer, true) === entry ? hook : undefined;
+  });
+  vm.observeFunction(19, () => { observed++; return undefined; });
+  vm.observeFunction(22, () => { observed++; return undefined; });
+  expect(vm.invoke(qvmArguments([]))).toBe(20);
+  expect([resolved, observed]).toEqual([2, 2]);
+  const explicit = vm.bindFunction(19, () => 100);
+  expect(vm.invoke(qvmArguments([]))).toBe(112);
+  expect([resolved, observed]).toEqual([3, 4]);
+  expect(vm.invoke(qvmArguments([64]), 19)).toBe(7);
+  expect([resolved, observed]).toEqual([3, 4]);
+  explicit(); remove(); remove();
+  expect(vm.invoke(qvmArguments([]))).toBe(18);
+  expect([resolved, observed]).toEqual([3, 6]);
+});
+
 // The caller keeps an operand and passes a pointer to its local alongside a value.
 const source = bytecode([
   [QvmOpcode.OP_ENTER, 32], [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_CONST, 7], [QvmOpcode.OP_STORE4],

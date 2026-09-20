@@ -36,6 +36,21 @@ export interface NativeModActorRecord {
   readonly capacity: number;
   readonly fields: readonly NativeModActorField[];
 }
+/** Original q2 allocator/free and per-entity update ABIs; offsets belong to the pinned module. */
+export interface NativeModSourceActors {
+  readonly allocate: NativeModEntry;
+  readonly release: NativeModEntry;
+  readonly update: { readonly entry: NativeModEntry; readonly returns: NativeModScalar | "void" };
+  readonly frameSeconds: number;
+  readonly clock: readonly { readonly address: NativeModAddress; readonly input: "time" | "frame"; readonly encoding: NativeModScalar; readonly units: "seconds" | "milliseconds" }[];
+  readonly fields: {
+    readonly velocity: number;
+    readonly ground: number;
+    readonly use: number | null;
+    readonly think: number;
+    readonly nextthink: { readonly offset: number; readonly encoding: NativeModScalar; readonly units: "seconds" | "milliseconds" };
+  };
+}
 export interface NativeModDeclaration {
   readonly version: 1;
   readonly runtime: "native";
@@ -43,6 +58,7 @@ export interface NativeModDeclaration {
   readonly target:
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-classic-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-i386" }> }
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-rerelease-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-x86-64" }> };
+  readonly sourceActors?: NativeModSourceActors;
   readonly cvars: readonly { readonly name: string; readonly value: string }[];
   readonly spawnEntities: string | null;
   readonly actorRecords: readonly NativeModActorRecord[];

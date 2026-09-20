@@ -26,6 +26,8 @@ import { QvmFiles, qvmFileSyscall } from "./file-syscalls.ts";
 import { rejectQvmSyscall } from "./syscalls.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 import { writeQvmTrace, QVM_TRACE_BYTES } from "./trace-record.ts";
+import { QvmModActors, validateQvmModActors } from "./mod-actors.ts";
+import { Q3GuestWorld } from "../../app/bootstrap/simulation/q3/guest-world.ts";
 
 type Artifact = QvmModuleOptions["artifact"];
 type Inputs = ReadonlyMap<ModCallbackInput, ModRuntimeValue>;
@@ -113,6 +115,8 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
     if (lifecycle.update !== null) checkCall(lifecycle.update, new Set(["self", "time", "elapsed"]));
   }
   for (const call of declaration.initialize) checkCall(call, new Set(["time"]));
+  if (declaration.combat !== undefined) checkCall({ entry: declaration.combat.entry, arguments: [], globals: declaration.combat.globals, returns: "void" }, new Set(["time"]));
+  validateQvmModActors(artifact, declaration);
   const ids = new Set<string>();
   for (const call of declaration.callbacks) {
     if (ids.has(call.id) || call.stage !== "observe" && call.returns === "void") throw new Error("Duplicate QVM callback or missing source return value"); ids.add(call.id);
@@ -170,6 +174,8 @@ export class QvmModProvider {
   private readonly physics = new Map<ActorId, () => undefined>();
   private readonly removing = new Set<ActorId>();
   private readonly hooks: (() => void)[] = [];
+  private readonly actorSemantics: QvmModActors | null;
+  private readonly portals: Q3GuestWorld | null;
   private readonly configstrings = new Map<number, string>();
   private readonly eventKeys = new Map<ActorId, string>();
   private readonly defaults = new Map<string, Uint8Array>();
@@ -189,22 +195,32 @@ export class QvmModProvider {
     this.scratchStart = Math.ceil((artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength) / 16) * 16;
     this.scratch = this.scratchStart;
     this.cvars = this.newCvars();
+    const scene = services.engine?.scene, topology = scene?.geometry, adjust = scene?.adjustAreaPortalState,
+      contribution = scene?.adjustAreaPortalContribution, native = scene?.nativeQ3ClipModels;
+    this.portals = topology === undefined || adjust === undefined || contribution === undefined || native === undefined ? null : new Q3GuestWorld({
+      geometry: topology, adjustAreaPortalState: (first, second, open) => adjust.call(scene, first, second, open),
+      adjustAreaPortalContribution: (portal, delta) => contribution.call(scene, portal, delta), nativeQ3ClipModels: () => native.call(scene),
+    });
     this.files = mounts === undefined ? null : new QvmFiles({ mounts, writable: null, print: text => services.engine?.print(text), assertCurrent: () => this.current() });
     this.module = new QvmModule({ artifact, host: call => this.syscall(call), hostState: {
       checkpoint: () => ({ state: { module: artifact.module, format: "qvm:mod-host-v1", bytes: encodeCheckpointValue({ version: 1,
         projections: [...this.projections].map(([actor, slot]) => ({ actor: savedActorId(actor), slot, owned: this.owned.has(actor), event: this.eventKeys.get(actor) ?? null })), nextSlot: this.nextSlot,
         defaults: [...this.defaults].map(([id, bytes]) => ({ id, bytes })),
         configstrings: [...this.configstrings].map(([index, value]) => ({ index, value })),
-        cvars: this.cvars.captureSaveState(), files: this.files?.captureCheckpoint() ?? null }) }, random: [], callbacks: [] }),
+        cvars: this.cvars.captureSaveState(), files: this.files?.captureCheckpoint() ?? null, portals: this.portals?.capturePortalCheckpoint() ?? null }) }, random: [], callbacks: [] }),
       restore: state => {
         const decoded = new SaveReader(decodeCheckpointValue(state.state.bytes));
+        if (decoded.field("portals").value !== undefined && decoded.field("portals").value !== null) {
+          if (this.portals === null) throw new Error("Saved QVM mod portals require destination topology");
+          this.portals.restorePortalCheckpoint(decoded.field("portals").value);
+        }
         const files = mounts === undefined ? null : new QvmFiles({ mounts, writable: null, assertCurrent: () => this.current() });
         try { files?.restoreCheckpoint(decoded.field("files").value); this.cvars.restoreSaveState(decoded.field("cvars").value); }
         catch (error) { files?.closeAll(); throw error; }
         this.files?.closeAll(); this.files = files; this.nextSlot = decoded.field("nextSlot").integer(0);
         this.defaults.clear();
         for (const entry of decoded.field("defaults").list(entry => ({ id: entry.field("id").string(), bytes: entry.field("bytes").bytes() }))) this.defaults.set(entry.id, entry.bytes.slice());
-        for (const unbind of this.physics.values()) unbind(); this.physics.clear(); this.owned.clear(); this.projections.clear(); this.eventKeys.clear();
+        for (const unbind of this.physics.values()) unbind(); this.physics.clear(); this.actorSemantics?.clearActors(); this.owned.clear(); this.projections.clear(); this.eventKeys.clear();
         this.configstrings.clear();
         for (const entry of decoded.field("configstrings").list(entry => ({ index: entry.field("index").integer(), value: entry.field("value").string() }))) this.configstrings.set(entry.index, entry.value);
         for (const entry of decoded.field("projections").list(entry => ({ actor: readSavedActor(entry.field("actor")), slot: entry.field("slot").integer(0), owned: entry.field("owned").boolean(), event: entry.field("event").nullable(value => value.string()) }))) {
@@ -216,6 +232,16 @@ export class QvmModProvider {
         return undefined;
       },
     } });
+    this.actorSemantics = declaration.sourceActors?.callbacks === undefined && declaration.combat === undefined ? null : new QvmModActors({
+      module: this.module, declaration, services, owned: this.owned,
+      pointer: actor => {
+        if (declaration.entityRecord === null) throw new Error("QVM actor semantics require an entity record");
+        return this.pointer(actor, declaration.entityRecord);
+      },
+      actor: pointer => pointer === 0 ? null : this.actorAt(this.pointerSlot(pointer)) ?? (this.pointerSlot(pointer) === 1022 ? services.engine?.world() ?? null : null),
+      invoke: (call, inputs) => this.invoke(call, inputs),
+      scratch: (size, execute) => { const previous = this.scratch; try { return execute(this.allocate(size)); } finally { this.scratch = previous; } },
+    });
     this.rememberDefaults();
     this.unsubscribe = services.actors.onRelease(actor => {
       const slot = this.projections.get(actor.id), owned = this.owned.has(actor.id);
@@ -336,6 +362,7 @@ export class QvmModProvider {
         const pointer = words[source.release.argument]; if (pointer === undefined) throw new Error("Missing source release argument");
         const actor = this.actorAt(this.pointerSlot(pointer));
         if (actor !== null && !this.owned.has(actor)) throw new Error("QVM source removal of a foreign actor requires its owner continuation");
+        if (actor !== null) this.actorSemantics?.beforeRelease(actor);
       }
       this.refresh(); const frame: Frame = { observations: this.observe() }; this.frames.push(frame);
       return { words, finish: () => { try { if (!this.closed) { this.current(); this.flush(); } } finally { this.frames.pop(); for (const global of globals) this.module.memory.bytes.set(global.bytes, global.address); this.scratch = scratch; } } };
@@ -394,6 +421,7 @@ export class QvmModProvider {
       waterTransition: () => undefined,
     }));
     physics.setCollision(actor, this.collision(slot));
+    this.actorSemantics?.admit(actor);
     if (entity.r.linked) this.services.bodies.restoreLinkState(actor, { linkCount: entity.r.linkcount,
       linked: { state: this.services.bodies.read(actor.id) ?? { origin: entity.r.currentOrigin, angles: entity.r.currentAngles,
         velocity: entity.s.pos.delta, bounds: { min: entity.r.mins, max: entity.r.maxs }, ground: null },
@@ -409,6 +437,7 @@ export class QvmModProvider {
     this.hooks.push(this.module.bindFunction(reference(source.release.entry), call => {
       const pointer = call.words.getInt32(source.release.argument * 4, true), slot = this.pointerSlot(pointer), actor = this.actorAt(slot);
       if (actor !== null && !this.owned.has(actor)) throw new Error("QVM source removal of a foreign actor requires its owner continuation");
+      if (actor !== null) this.actorSemantics?.beforeRelease(actor);
       const result = call.proceed();
       this.retireSource(slot);
       return result;
@@ -548,6 +577,21 @@ export class QvmModProvider {
         return 0;
       }
       case QvmGameImport.G_SEND_SERVER_COMMAND: this.emit({ kind: "server-command", client: word(1), text: call.guest.readString(word(2)) }); return 0;
+      case QvmGameImport.G_ADJUST_AREA_PORTAL_STATE: {
+        const scene = this.services.engine?.scene, actor = this.actorAt(this.pointerSlot(word(1)));
+        if (this.portals === null || scene?.boxLeaves === undefined || scene.leafArea === undefined) throw new Error("QVM portal state requires destination topology services");
+        const bounds = actor === null ? undefined : this.services.bodies.linked(actor)?.absoluteBounds;
+        if (bounds === undefined) return 0;
+        const areas = [...new Set(scene.boxLeaves(bounds, 128).leaves.map(leaf => scene.leafArea?.(leaf)))].filter(area => area !== undefined);
+        const first = areas[0], second = areas[1];
+        if (first !== undefined && second !== undefined) this.portals.adjustAreaPortalState(first, second, word(2) !== 0);
+        return 0;
+      }
+      case QvmGameImport.G_AREAS_CONNECTED: {
+        const scene = this.services.engine?.scene;
+        if (scene?.areasConnected === undefined) throw new Error("QVM area connectivity requires destination topology services");
+        return Number(scene.areasConnected(word(1), word(2)));
+      }
       default: return null;
     }
   }
@@ -639,6 +683,8 @@ export class QvmModProvider {
       try { this.services.actors.release(actor); } catch (error) { errors.push(error); }
     }
     this.unsubscribe();
+    try { this.portals?.close(); } catch (error) { errors.push(error); }
+    try { this.actorSemantics?.close(); } catch (error) { errors.push(error); }
     for (const remove of this.hooks) try { remove(); } catch (error) { errors.push(error); }
     this.projections.clear(); this.owned.clear(); this.eventKeys.clear();
     try { this.files?.closeAll(); } catch (error) { errors.push(error); }

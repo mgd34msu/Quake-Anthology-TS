@@ -11,12 +11,17 @@ import type { Q2PresentationEvent } from "../../../content/q2/foundation/host.ts
 import type { SharedBodyTable } from "../../../world/actors/index.ts";
 import type { SimulationPresentationEvent, SourcePresentationEvent } from "./types.ts";
 import { readSavedActor, savedActorId } from "../../../persistence/save-image.ts";
-import { SaveReader } from "../../../persistence/value.ts";
+import { namespaced, SaveReader } from "../../../persistence/value.ts";
 import { readContentId } from "../../../persistence/recipe.ts";
 import { readVector } from "../../../persistence/shared.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
+function q2LoopKey(event: Extract<Q2PresentationEvent, { readonly kind: "sound" }>, recipient?: ActorId): string {
+  return event.loopOwner === undefined ? `sound:${event.actor?.slot ?? -1}:${event.channel}:${event.path}`
+    : JSON.stringify(["sound", event.loopOwner, event.actor?.slot ?? -1, event.actor?.generation ?? -1, event.channel, event.path,
+      recipient === undefined ? null : [recipient.slot, recipient.generation]]);
+}
 
 /** Retains source events until the application resolves their content-owned media. */
 export class SimulationEvents {
@@ -72,7 +77,7 @@ export class SimulationEvents {
     if (source.kind === "q1" && source.event.kind === "static-model") this.persistent.set(`static-model:${this.presentationSequence}`, presentation);
     if (source.kind === "q2" && source.event.kind === "music") this.persistent.set("music", presentation);
     if (source.kind === "q2" && source.event.kind === "sound" && source.event.loop !== "once") {
-      const key = `sound:${source.event.actor?.slot ?? -1}:${source.event.channel}:${source.event.path}`;
+      const key = q2LoopKey(source.event, recipient);
       if (source.event.loop === "stop") this.persistent.delete(key); else this.persistent.set(key, presentation);
     }
     if (source.kind === "q2-composition" && (source.event.kind === "ctf" || source.event.kind === "lmctf")) {
@@ -144,9 +149,13 @@ export class SimulationEvents {
       else if (family === "q1" && kind === "static-model") restored = { ...base, kind: "q1", event: { kind, path: event.field("path").string(), frame: event.field("frame").integer(),
         colorMap: event.field("colorMap").integer(), skin: event.field("skin").integer(), origin: readVector(event.field("origin")), angles: readVector(event.field("angles")) } };
       else if (family === "q2" && kind === "music") restored = { ...base, kind: "q2", event: { kind, track: event.field("track").string() } };
-      else if (family === "q2" && kind === "sound") restored = { ...base, kind: "q2", event: { kind, actor: event.field("actor").nullable(v => reference(readSavedActor(v))), origin: readVector(event.field("origin")), path: event.field("path").string(), channel: event.field("channel").number(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number(), reliable: event.field("reliable").boolean(), loop: event.field("loop").literal("start") } };
+      else if (family === "q2" && kind === "sound") restored = { ...base, kind: "q2", event: { kind, actor: event.field("actor").nullable(v => reference(readSavedActor(v))), origin: readVector(event.field("origin")), path: event.field("path").string(), channel: event.field("channel").number(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number(), reliable: event.field("reliable").boolean(), loop: event.field("loop").literal("start"),
+        ...(event.field("loopOwner").value === undefined ? {} : { loopOwner: namespaced(event.field("loopOwner")) }) } };
       else return event.fail("Invalid persistent source event family");
-      this.persistent.set(value.field("key").string(), restored); this.source.push(restored);
+      const key = restored.kind === "q2" && restored.event.kind === "sound" && restored.event.loopOwner !== undefined
+        ? q2LoopKey(restored.event, restored.recipient)
+        : value.field("key").string();
+      this.persistent.set(key, restored); this.source.push(restored);
     });
     this.source.sort((a, b) => a.sequence - b.sequence);
     return undefined;

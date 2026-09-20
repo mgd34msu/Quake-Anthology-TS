@@ -17,6 +17,7 @@ import type { FrameContext, SourceTime } from "../../contracts/time.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { SceneQueries } from "../../contracts/scene.ts";
+import type { SharedSceneQueries } from "../collision/index.ts";
 import type { QcPresentationServices } from "../../compat/qc/presentation-host.ts";
 import type { SharedPhysics } from "../../app/bootstrap/simulation/physics.ts";
 import type { SimulationPresentation } from "../../app/bootstrap/simulation/types.ts";
@@ -76,7 +77,8 @@ export interface ModHostServices {
     message?(event: NetworkEvent, actor: ActorId | null): undefined;
     readonly presentation?: Pick<QuakeCLocalMessageHost, "map" | "camera"> & { players(): readonly ActorId[]; };
     readonly events: Pick<SimulationEvents, "emit" | "registerResource">;
-    readonly scene: Pick<SceneQueries, "trace" | "pointContents">;
+    readonly scene: Pick<SceneQueries, "trace" | "pointContents"> & Partial<Pick<SharedSceneQueries,
+      "geometry" | "boxLeaves" | "leafArea" | "areasConnected" | "adjustAreaPortalState" | "adjustAreaPortalContribution" | "nativeQ3ClipModels">>;
     world(): ActorId | null;
     readonly physics?: Pick<SharedPhysics, "bindSource" | "setCollision" | "step" | "touchTriggers" | "q1PusherServices" | "readQ1Pusher" | "writeQ1Pusher">;
   };

@@ -9,7 +9,7 @@ import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { Q3_FOOTSTEP_PATHS } from "../../content/q3/presentation/character-resources.ts";
 import type { ApplicationInput } from "./input.ts";
 import type { ContentId, GameFamily } from "../../contracts/content.ts";
-import type { ActorId, SeatId } from "../../contracts/identity.ts";
+import type { ActorId, ProviderId, SeatId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { WorldSnapshot } from "../../contracts/session.ts";
 import { parseEnvironments } from "../../audio/environments.ts";
@@ -408,9 +408,9 @@ export class ApplicationAudio {
     }
   }
 
-  private stopLoop(actor: ActorId, audience: AudioAudience = { kind: "world" }): void {
-    for (let index = this.loops.length - 1; index >= 0; index--) { const loop = this.loops[index]; if (loop?.actor.equals(actor) && (audience.kind === "world" || loop.audience.kind === "seat" && loop.audience.seat.equals(audience.seat))) this.loops.splice(index, 1); }
-    this.engine.stopLoop(actor, audience);
+  private stopLoop(actor: ActorId, audience: AudioAudience = { kind: "world" }, owner?: ProviderId): void {
+    for (let index = this.loops.length - 1; index >= 0; index--) { const loop = this.loops[index]; if (loop?.actor.equals(actor) && loop.owner === owner && (audience.kind === "world" || loop.audience.kind === "seat" && loop.audience.seat.equals(audience.seat))) this.loops.splice(index, 1); }
+    this.engine.stopLoop(actor, audience, owner);
   }
 
   private async chat(content: ContentId, family: GameFamily, target: ActorId | null, audience: AudioAudience = { kind: "world" }): Promise<void> {
@@ -449,12 +449,12 @@ export class ApplicationAudio {
         const event = source.event;
         if (event.kind === "music") { if (music) await this.playMusic(source.content, event.track); }
         else if (event.kind === "sound") {
-          if (event.loop === "stop" && event.actor !== null) this.stopLoop(event.actor, audience);
+          if (event.loop === "stop" && event.actor !== null) this.stopLoop(event.actor, audience, event.loopOwner);
           else if (event.loop === "start" && event.actor !== null) {
             const sound = await this.sound(source.content, event.path, "q2", event.actor);
-            this.stopLoop(event.actor, audience);
+            this.stopLoop(event.actor, audience, event.loopOwner);
             this.engine.updateActor(event.actor, event.origin);
-            if (sound !== null) this.loops.push({ sound, family: "q2", actor: event.actor, origin: { kind: "actor", actor: event.actor },
+            if (sound !== null) this.loops.push({ sound, family: "q2", actor: event.actor, ...(event.loopOwner === undefined ? {} : { owner: event.loopOwner }), origin: { kind: "actor", actor: event.actor },
               audience, volume: event.volume, attenuation: event.attenuation, velocity: { x: 0, y: 0, z: 0 },
               frameNumber: 0, lifetime: "frame" });
           } else {
@@ -532,7 +532,7 @@ export class ApplicationAudio {
       return { ...listener, underwater: followed.underwater ?? listener.underwater };
     }));
     for (const loop of [...this.loops]) {
-      if (!this.snapshot.actors.some(actor => actor.id.equals(loop.actor))) { this.stopLoop(loop.actor, loop.audience); continue; }
+      if (!this.snapshot.actors.some(actor => actor.id.equals(loop.actor))) { this.stopLoop(loop.actor, loop.audience, loop.owner); continue; }
       this.engine.loop({ ...loop, frameNumber: snapshot.frame.frame });
     }
     for (const sound of this.statics) {

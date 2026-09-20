@@ -1,4 +1,4 @@
-import type { ActorId, SeatId } from "../contracts/identity.ts";
+import type { ActorId, ProviderId, SeatId } from "../contracts/identity.ts";
 import type { ResolvedResourceReference, ResourceId } from "../contracts/content.ts";
 import type { Axis, Vec3 } from "../contracts/math.ts";
 import type { PcmSound } from "./wav.ts";
@@ -47,6 +47,7 @@ export interface PlaySound {
 }
 export interface LoopSound extends Omit<PlaySound, "channel" | "delaySeconds" | "serverMilliseconds"> {
     readonly actor: ActorId;
+    readonly owner?: ProviderId;
     readonly velocity: Vec3;
     readonly frameNumber: number;
     readonly lifetime: "frame" | "persistent";

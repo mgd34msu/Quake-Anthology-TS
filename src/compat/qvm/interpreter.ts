@@ -39,6 +39,7 @@ export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsyn
   proceedAsync(): Promise<number>;
 }
 export type QvmFunctionHook = (call: QvmFunctionCall) => QvmSystemCallResult;
+export type QvmFunctionResolver = (instructionIndex: number, firstArgument: number) => QvmFunctionHook | undefined;
 export interface QvmFunctionObservation extends Pick<QvmSyscall, "invoke" | "invokeAsync"> {
   readonly instructionIndex: number;
   argument(index: number): number;
@@ -150,6 +151,7 @@ export class QvmInterpreter {
   private debug = false;
   private functionHooks: Map<number, { readonly hook: QvmFunctionHook }> | null = null;
   private functionObservers: Map<number, readonly FunctionObserver[]> | null = null;
+  private functionResolver: { readonly resolve: QvmFunctionResolver } | undefined;
 
   constructor(image: QvmImage, private readonly systemCall: QvmSystemCall,
     profile: QvmAllocationProfile = { kind: "unaccounted" },
@@ -212,6 +214,14 @@ export class QvmInterpreter {
       hooks.delete(instructionIndex);
       if (hooks.size === 0 && this.functionHooks === hooks) this.functionHooks = null;
     };
+  }
+
+  /** Resolve live guest callback pointers only for modules that explicitly request it. */
+  bindFunctionResolver(resolve: QvmFunctionResolver): () => void {
+    this.live();
+    if (this.functionResolver !== undefined) throw new Error("QVM already has a function resolver");
+    const binding = { resolve }; this.functionResolver = binding;
+    return () => { if (this.functionResolver === binding) this.functionResolver = undefined; };
   }
 
   /** Observers share an entry with each other and with its optional replacement hook. */
@@ -563,12 +573,15 @@ export class QvmInterpreter {
             const target = operands.pop();
             if (target >= 0) {
               const binding = this.functionHooks?.get(target), observers = this.functionObservers?.get(target);
-              if (binding === undefined && observers === undefined) { returns?.push(sp, returnPC); pc = this.targetPC(target); }
+              const hook = binding?.hook ?? this.functionResolver?.resolve(target, this.readWord(sp + 8));
+              if (binding === undefined && hook !== undefined && this.codeWord(this.targetPC(target)) !== QvmOpcode.OP_ENTER)
+                throw new Error("QVM resolver requires a function entry instruction");
+              if (hook === undefined && observers === undefined) { returns?.push(sp, returnPC); pc = this.targetPC(target); }
               else {
                 const savedCallLevel = this.callLevel, savedStack = this.programStack;
                 this.programStack = sp - 4;
                 try {
-                  const result = this.intercept(frame, sp, returnPC, target, binding?.hook, observers);
+                  const result = this.intercept(frame, sp, returnPC, target, hook, observers);
                   operands.push(typeof result === "number" ? result : yield result);
                   pc = returns === null ? this.readWord(sp) : returnPC;
                 } finally { this.callLevel = savedCallLevel; this.programStack = savedStack; }

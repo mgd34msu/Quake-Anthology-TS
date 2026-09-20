@@ -42,6 +42,20 @@ export interface QvmModSourceActors {
   readonly inuse: number;
   readonly eventEntityType: number;
   readonly update: QvmModSourceCall | null;
+  /** gentity_t function-pointer fields; null means this source has no such callback. */
+  readonly callbacks?: { readonly touch: number | null; readonly use: number | null; readonly pain: number | null; readonly die: number | null };
+}
+/** Private layout and entry are admitted by the enclosing executable digest. */
+export interface QvmModCombat {
+  readonly abi: "q3-g-damage";
+  readonly entry: number;
+  readonly health: number;
+  readonly takedamage: number;
+  readonly flags: number;
+  readonly godmode: number;
+  readonly noKnockback: number;
+  readonly globals: QvmModSourceCall["globals"];
+  readonly client: { readonly pointer: number; readonly record: string; readonly health: number; readonly armor: number; readonly protection: number; readonly team: number } | null;
 }
 export interface QvmModCallbackDeclaration {
   readonly version: 1;
@@ -51,6 +65,7 @@ export interface QvmModCallbackDeclaration {
   readonly actorRecords: readonly QvmModActorRecord[];
   readonly entityRecord: string | null;
   readonly sourceActors?: QvmModSourceActors;
+  readonly combat?: QvmModCombat;
   readonly initialize: readonly QvmModSourceCall[];
   readonly callbacks: readonly QvmModCallback[];
 }

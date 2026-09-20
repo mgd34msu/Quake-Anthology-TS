@@ -1,5 +1,5 @@
 import type { ContentId } from "../../../contracts/content.ts";
-import type { ActorId } from "../../../contracts/identity.ts";
+import type { ActorId, ProviderId } from "../../../contracts/identity.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import type { Q2ProtocolIdentity } from "../../../contracts/protocol.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -36,9 +36,17 @@ export interface NativeModPresentationSource {
   drainMessages(): readonly ClassicGuestMessage[];
   appearance(slot: number): NativeModAppearance;
   signature(slot: number): string;
+  state(slot: number): { readonly active: boolean; readonly sound: number; readonly event: number; readonly origin: Vec3;
+    readonly volume: number; readonly attenuation: number };
 }
 export interface NativeModPresentationCheckpoint {
   readonly fog: readonly { readonly actor: SavedActorId; readonly value: Q2FogState }[];
+}
+interface NativeLoop {
+  readonly path: string;
+  readonly volume: number;
+  readonly attenuation: number;
+  readonly origin: Vec3;
 }
 export function readNativeModPresentation(reader: SaveReader): NativeModPresentationCheckpoint {
   const fog = reader.field("fog").list(entry => ({ actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) }, value: readQ2FogState(entry.field("value")) }));
@@ -52,12 +60,59 @@ export class NativeModPresentation {
   private readonly layout;
   private readonly fog = new Map<ActorId, Q2FogState>();
   private readonly configs = new Map<number, string>();
+  private readonly loops = new Map<ActorId, NativeLoop>();
+  private readonly entityEvents = new Map<ActorId, number>();
   constructor(private readonly source: NativeModPresentationSource, private readonly content: ContentId,
-    private readonly projection: NativeModProjection, private readonly services: ModHostServices, private readonly context: NativeModHostContext) {
+    private readonly projection: NativeModProjection, private readonly services: ModHostServices, private readonly context: NativeModHostContext,
+    private readonly owner: ProviderId) {
     const protocol: Q2ProtocolIdentity = source.edition === "classic" ? { kind: "q2-classic", version: 34 } : { kind: "q2-rerelease", version: 1038 };
     this.layout = q2ApplicationLayout(protocol);
     this.reader = new Q2ServerMessageReader(protocol, { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 });
   }
+  publish(actors: readonly { readonly actor: ActorId; readonly slot: number }[], events = true): void {
+    this.drain();
+    const time = this.services.time();
+    const activeActors = new Set(actors.map(entry => entry.actor));
+    for (const actor of new Set([...this.entityEvents.keys(), ...this.loops.keys()])) if (!activeActors.has(actor)) this.release(actor);
+    for (const { actor, slot } of actors) {
+      const state = this.source.state(slot);
+      if (!state.active || !this.services.actors.isLive(actor)) { this.release(actor); continue; }
+      const previous = this.entityEvents.get(actor);
+      if (events && state.event !== 0 && previous !== state.event) {
+        const engine = this.services.engine; if (engine === undefined) throw new Error("Native mod output requires presentation services");
+        engine.events.emit(this.content, { kind: "q2", event: { kind: "entity-event", actor, event: state.event } }, time);
+      }
+      this.entityEvents.set(actor, state.event);
+      const loop = this.loops.get(actor);
+      if (state.sound === 0) { if (loop !== undefined) this.stop(actor, loop); continue; }
+      const path = this.source.configstrings().get(this.layout.sounds + state.sound);
+      if (path === undefined || path === "") throw new Error(`Native mod loop sound ${state.sound} has no configstring`);
+      const volume = this.source.edition === "rerelease" && state.volume === 0 ? 1 : state.volume;
+      const attenuation = this.source.edition === "classic" ? state.attenuation : state.attenuation === -1 ? 0
+        : state.attenuation > 0 && state.attenuation !== 3 ? state.attenuation / 5 : 1;
+      const origin = this.services.bodies.read(actor)?.origin ?? state.origin;
+      if (loop !== undefined && loop.path === path && loop.volume === volume && loop.attenuation === attenuation) {
+        this.loops.set(actor, { ...loop, origin });
+        continue;
+      }
+      if (loop !== undefined) this.stop(actor, loop);
+      const next = { path, volume, attenuation, origin }; this.loops.set(actor, next);
+      this.sound(actor, next, "start");
+    }
+  }
+  beginFrame(): void { this.entityEvents.clear(); }
+  private sound(actor: ActorId, loop: NativeLoop, state: "start" | "stop"): void {
+    const engine = this.services.engine; if (engine === undefined) throw new Error("Native mod output requires presentation services");
+    engine.events.emit(this.content, { kind: "q2", event: { kind: "sound", actor, ...loop, channel: 0, reliable: false, loop: state, loopOwner: this.owner } }, this.services.time());
+  }
+  private stop(actor: ActorId, loop: NativeLoop): void {
+    this.sound(actor, loop, "stop"); this.loops.delete(actor);
+  }
+  release(actor: ActorId): void {
+    const loop = this.loops.get(actor); if (loop !== undefined) this.stop(actor, loop);
+    this.entityEvents.delete(actor); this.fog.delete(actor);
+  }
+  close(): void { for (const actor of this.loops.keys()) this.release(actor); this.entityEvents.clear(); }
   private recipients(message: ClassicGuestMessage): readonly (ActorId | null)[] {
     if (message.audience.kind === "unicast") {
       const actor = this.projection.actorAt(message.audience.slot);
@@ -112,6 +167,6 @@ export class NativeModPresentation {
   restore(saved: NativeModPresentationCheckpoint): void {
     const entries = saved.fog.map(entry => ({ actor: this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current"), value: entry.value }));
     if (entries.some(entry => !this.services.actors.isLive(entry.actor))) throw new Error("Native mod fog recipient is unavailable");
-    this.source.drainMessages(); this.fog.clear(); this.configs.clear(); for (const entry of entries) this.fog.set(entry.actor, entry.value);
+    this.close(); this.source.drainMessages(); this.fog.clear(); this.configs.clear(); for (const entry of entries) this.fog.set(entry.actor, entry.value);
   }
 }

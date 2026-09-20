@@ -53,6 +53,7 @@ export function prepareNativeMod(options: PrepareNativeModOptions): PreparedMod 
       return { register: registrations => registerModCallbacks(declaration.callbacks, registrations, () => services.time(), (callback, inputs) => provider.invoke(callback, inputs)),
         async checkpoint() { return { guests: [], providers: [await provider.checkpoint()] }; },
         async restore(state) { const record = state.providers[0]; if (record === undefined) throw new Error("Missing native gameplay mod checkpoint"); await provider.restore(record); },
+        advance: frame => provider.advance(frame), presentations: () => provider.presentations(),
         appearanceOverrides: () => provider.appearanceOverrides(),
         close: () => provider.close() };
     } };
