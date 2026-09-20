@@ -51,6 +51,32 @@ function clipOnlyCube(): Q1WorldGeometry {
 }
 
 describe("Quake hulls and derived solid cells", () => {
+  test("drawing hits bound clip reconstruction without losing earlier clips or solid exits", () => {
+    const map = clipOnlyCube(), model = map.models[0];
+    if (model === undefined) throw new Error("Missing fixture model");
+    const geometry: Q1WorldGeometry = { ...map,
+      planes: map.planes.map((plane, index) => index < 6 ? plane : { ...plane, distance: plane.distance + plane.normal.x * 4 }),
+      models: [{ ...model, headnodes: [0, 0, 6, -1] }] };
+    const derive = spyOn(clipspace, "deriveQ1ClipSolids");
+    try {
+      for (const kind of ["box", "capsule"] satisfies readonly TraceShape["kind"][]) {
+        const collision = createQ1Collision(geometry);
+        const shape: TraceShape = { kind, bounds: { min: { x: -2, y: -2, z: -2 }, max: { x: 2, y: 2, z: 2 } } };
+        const before = derive.mock.calls.length;
+        const hit = collision.trace(query({ x: 10, y: 0, z: 0 }, { x: -10000, y: 0, z: 0 }, shape));
+        expect(hit.end.x).toBeCloseTo(7 + 1 / 32, 5);
+        expect(hit.startSolid).toBe(false);
+        expect(derive.mock.calls[before]?.[1].min.x).toBeGreaterThan(-1);
+        const exiting = collision.trace(query({ x: 5, y: 0, z: 0 }, { x: -10, y: 0, z: 0 }, shape));
+        expect(exiting.startSolid).toBe(true);
+        expect(exiting.allSolid).toBe(false);
+        expect(exiting.fraction).toBe(1);
+        const trapped = collision.trace(query({ x: 5, y: 0, z: 0 }, zero, shape));
+        expect(trapped.startSolid).toBe(true);
+        expect(trapped.allSolid).toBe(true);
+      }
+    } finally { derive.mockRestore(); }
+  });
   test("exact derived cells retain policy checks and separate hull and collision owners", () => {
     const derive = spyOn(clipspace, "deriveQ1ClipSolids");
     try {

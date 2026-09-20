@@ -12,9 +12,10 @@ import { q3BounceProjectile, q3ExplodeProjectile, q3ImpactProjectile, q3LaunchPr
 import type { Q3Projectile, Q3ProjectileHost } from "./projectile.ts";
 import type { ActorTraceResult } from "../world.ts";
 import { q3MissileParameters, q3NailVelocity } from "./ballistics-math.ts";
+import { Q3_GRAPPLE_SPEED, Q3_GRAPPLE_LIFETIME, Q3_GRAPPLE_THINK_INTERVAL, q3GrappleTarget } from "./grapple.ts";
 // Ported from id Software's game/g_missile.c and g_weapon.c grapple helpers.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
-import { add3, length3, normalize3, scale3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
+import { length3, normalize3, sub3, vec3, vectorToAngles } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
 import type { ServerTraceResult, ServerWorld } from "../world.ts";
@@ -83,7 +84,7 @@ function normalizeDirection(direction: MissileDirection): Vec3 {
 }
 
 function center(entity: GameEntity): Vec3 {
-  return add3(entity.r.currentOrigin, scale3(add3(entity.r.mins, entity.r.maxs), 0.5));
+  return q3GrappleTarget(entity.r.currentOrigin, { min: entity.r.mins, max: entity.r.maxs });
 }
 
 interface NativeProjectile extends Q3Projectile {
@@ -317,7 +318,7 @@ export class MissileRuntime {
       position = snapVectorTowards(position, entity.s.pos.base);
       event.freeAfterEvent = true; event.s.eType = EntityType.ET_GENERAL; entity.s.eType = EntityType.ET_GRAPPLE;
       setOrigin(entity, position); setOrigin(event, position);
-      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.hookThink"); entity.nextthink = (combat.time + 100) | 0;
+      entity.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.hookThink"); entity.nextthink = (combat.time + Q3_GRAPPLE_THINK_INTERVAL) | 0;
       const client = this.ownerClient(this.projectile(entity)); if (client === null) { pool.free(entity); pool.free(event); return true; } client.ps.pmFlags |= MoveFlags.GRAPPLE_PULL;
       client.ps.grapplePoint = { ...entity.r.currentOrigin };
       this.host.world.link(entity); this.host.world.link(event); return true;
@@ -451,7 +452,7 @@ export class MissileRuntime {
     return this.launch(self, start, normalizeDirection(direction), Weapon.WP_BFG, "bfg", spec.speed, spec.duration, spec.gravity, spec.direct, spec.splash, spec.radius, spec.method, spec.splashMethod);
   }
   fireGrapple(self: GameEntity, start: Vec3, direction: MissileDirection): GameEntity {
-    const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_GRAPPLING_HOOK, "hook", 800, 10000, false, 0, 0, 0,
+    const bolt = this.launch(self, start, normalizeDirection(direction), Weapon.WP_GRAPPLING_HOOK, "hook", Q3_GRAPPLE_SPEED, Q3_GRAPPLE_LIFETIME, false, 0, 0, 0,
       this.host.combat.product === "baseq3" ? 23 : 28, 0);
     bolt.think = this.host.combat.entities.callbacks.think.resolve("q3.base.game.missile.fireGrapple.think"); bolt.s.otherEntityNum = self.s.number; clientOf(self).hook = bolt; return bolt;
   }

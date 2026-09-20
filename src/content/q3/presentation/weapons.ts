@@ -1,4 +1,5 @@
 import { q3ShotgunEndpoints } from "../base/game/ballistics-math.ts";
+import { q3GrappleCable } from "../base/game/grapple.ts";
 import type { Q3ShotgunEvent } from "../base/game/hitscan.ts";
 // Weapon registration and presentation from id Software's code/cgame/cg_weapons.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -237,9 +238,9 @@ export class ClientWeaponRuntime extends ClientWeaponSelection {
   }
   grappleTrail(cent: ClientEntity, _weapon: PacketWeaponInfo): void {
     const origin = evaluateTrajectory(cent.currentState.pos, this.state.time); cent.trailTime = this.state.time;
-    const owner = this.state.entityAt(cent.currentState.otherEntityNum), beam = createLightningEntity();
-    beam.origin = ma(add3(owner.lerpOrigin, vec3(0, 0, 26)), -6, angleVectors(owner.lerpAngles).up); beam.oldOrigin = origin;
-    if (length3(sub3(beam.origin, beam.oldOrigin)) < 64) return;
+    const owner = this.state.entityAt(cent.currentState.otherEntityNum), cable = q3GrappleCable(owner.lerpOrigin, angleVectors(owner.lerpAngles).up, origin);
+    if (cable === null) return;
+    const beam = createLightningEntity(); beam.origin = cable.start; beam.oldOrigin = cable.end;
     beam.customShader = this.registry.effects.lightningShader; beam.shaderRGBA = WHITE_BYTES; this.host.addRefEntity(beam);
   }
   missileHitWall(weapon: Weapon, clientNum: number, origin: Vec3, direction: Vec3, soundType: ImpactSound): void {
@@ -595,6 +596,7 @@ export class ClientWeaponMediaRegistry {
         this.effects.lightningExplosionModel = await model("models/weaphits/crackle.md3");
         this.effects.lightningHitSounds = [await sound("sound/weapons/lightning/lg_hit.wav"), await sound("sound/weapons/lightning/lg_hit2.wav"), await sound("sound/weapons/lightning/lg_hit3.wav")]; break;
       case Weapon.WP_GRAPPLING_HOOK:
+        this.effects.lightningShader = await shader("lightningBoltNew");
         weapon.flashDlightColor = vec3(0.6, 0.6, 1); weapon.missileModel = await model("models/ammo/rocket/rocket.md3");
         weapon.missileTrail = "grapple"; weapon.missileDlight = 200; weapon.trailTime = 2000; weapon.trailRadius = 64;
         weapon.missileDlightColor = vec3(1, 0.75, 0); weapon.readySound = await sound("sound/weapons/melee/fsthum.wav");

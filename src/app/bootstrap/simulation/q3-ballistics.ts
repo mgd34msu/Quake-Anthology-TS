@@ -22,10 +22,12 @@ import { qvmFloatToInt } from "../../../core/numeric.ts";
 import { q3MissileParameters, q3NailVelocity } from "../../../content/q3/base/game/ballistics-math.ts";
 import { q3AccuracyHit, q3BulletFire, q3GauntletAttack, q3LightningFire, q3ShotgunFire, q3RailFire, q3RailStatistics } from "../../../content/q3/base/game/hitscan.ts";
 import type { Q3BulletAttack, Q3ContactHost, Q3ContactEvent, Q3ShotgunEvent, Q3RailTrail, Q3RailStatistics } from "../../../content/q3/base/game/hitscan.ts";
-import { snapVector } from "../../../content/q3/base/game/missile.ts";
+import { snapVector, snapVectorTowards } from "../../../content/q3/base/game/missile.ts";
+import { Q3_GRAPPLE_SPEED, Q3_GRAPPLE_LIFETIME, Q3_GRAPPLE_THINK_INTERVAL, q3GrappleTarget, q3GrappleCable, q3GrappleVelocity } from "../../../content/q3/base/game/grapple.ts";
 import { TrajectoryType } from "../../../content/q3/base/shared/trajectory.ts";
 import type { Trajectory } from "../../../content/q3/base/shared/trajectory.ts";
 import type { GameRandom } from "../../../content/q3/base/game/numeric.ts";
+import type { ActorTraceResult } from "../../../content/q3/base/world.ts";
 
 export interface Q3BallisticPose { readonly origin: Vec3; readonly angles: Vec3; readonly viewheight: number; readonly quad: number; readonly quadActive: boolean; }
 interface Q3BallisticEventFields { readonly actor: ActorId; readonly weapon: number; readonly origin: Vec3; readonly end: Vec3; readonly normal: Vec3; readonly target: ActorId | null; readonly surfaceFlags: number; }
@@ -62,25 +64,47 @@ export interface Q3WeaponStatistics extends Q3RailStatistics { readonly actor: O
 
 export interface Q3ProjectileState extends Q3Projectile {
   readonly expires: number;
-  phase: { readonly kind: "flight" } | { readonly kind: "event"; readonly time: number; readonly impact: Extract<Q3ProjectileImpact, { readonly kind: "impact" }> };
+  phase: { readonly kind: "flight" } | { readonly kind: "event"; readonly time: number; readonly impact: Extract<Q3ProjectileImpact, { readonly kind: "impact" }> }
+    | { readonly kind: "attached"; readonly target: ActorId | null; readonly nextThink: number };
 }
 const zero = vec3(0, 0, 0);
-function normal(trace: TraceResult): Vec3 { return trace.contact.kind === "plane" ? trace.contact.plane.normal : zero; }
+function normal(trace: Pick<ActorTraceResult, "contact">): Vec3 { return trace.contact.kind === "plane" ? trace.contact.plane.normal : zero; }
 
 /** Q3 weapon trajectories and damage over the session's existing actors and collision scene. */
 export class Q3SharedBallistics {
   private readonly projectiles = new Map<OwnedActor, Q3ProjectileState>();
   private readonly weaponCounters = new Map<OwnedActor, Q3WeaponStatistics>();
-  constructor(readonly host: Q3SharedBallisticsHost) { host.actors.onRelease(actor => { this.weaponCounters.delete(actor); const projectile = this.projectiles.get(actor); if (projectile !== undefined) { this.event({ kind: "remove", actor: actor.id, weapon: projectile.weapon, origin: projectile.trajectory.base, end: projectile.trajectory.base, normal: zero, target: null, surfaceFlags: 0 }); this.projectiles.delete(actor); } return undefined; }); }
+  private readonly hooks = new Map<ActorId, Q3ProjectileState>();
+  private readonly hookHeld = new Set<OwnedActor>();
+  constructor(readonly host: Q3SharedBallisticsHost) { host.actors.onRelease(actor => {
+    this.weaponCounters.delete(actor); this.hookHeld.delete(actor); this.releaseHook(actor.id);
+    const projectile = this.projectiles.get(actor);
+    if (projectile !== undefined) {
+      if (this.hooks.get(projectile.owner) === projectile) this.hooks.delete(projectile.owner);
+      this.event({ kind: "remove", actor: actor.id, weapon: projectile.weapon, origin: projectile.trajectory.base, end: projectile.trajectory.base, normal: zero, target: null, surfaceFlags: 0 });
+      this.projectiles.delete(actor);
+    }
+    return undefined;
+  }); }
   private event(payload: Q3BallisticEventPayload): undefined { return this.host.event({ ...payload, timeMilliseconds: this.host.time() }); }
   checkpoint() { return [...this.projectiles.values()].map(value => ({ ...value, actor: savedActorId(value.actor.id), owner: savedActorId(value.owner),
     pass: value.pass === null ? null : savedActorId(value.pass), trajectory: { ...value.trajectory },
-    phase: value.phase.kind === "flight" ? value.phase : { ...value.phase, impact: { ...value.phase.impact,
+    phase: value.phase.kind === "flight" ? value.phase : value.phase.kind === "attached" ? { ...value.phase, target: value.phase.target === null ? null : savedActorId(value.phase.target) }
+      : { ...value.phase, impact: { ...value.phase.impact,
       target: value.phase.impact.target === null ? null : savedActorId(value.phase.impact.target) } } })); }
+  checkpointHookHeld(): readonly SavedActorId[] { return [...this.hookHeld].map(actor => savedActorId(actor.id)); }
+  restoreHookHeld(actors: readonly OwnedActor[]): void {
+    this.hookHeld.clear();
+    for (const actor of actors) { this.host.actors.assertOwned(actor); this.hookHeld.add(actor); }
+  }
   restore(states: readonly Q3ProjectileState[]): void {
-    this.projectiles.clear();
+    this.projectiles.clear(); this.hooks.clear();
     for (const state of states) {
       this.host.actors.assertOwned(state.actor); const projectile = { ...state }; this.projectiles.set(state.actor, projectile);
+      if (state.weapon === 10) {
+        if (this.hooks.has(state.owner)) throw new Error("Saved Q3 player has multiple grappling hooks");
+        this.hooks.set(state.owner, projectile);
+      }
       this.host.projectile(state.actor, state.owner, (previous, time) => this.stepActor(projectile, previous, time));
       if (state.phase.kind === "event") this.impactEvent(projectile, state.phase.impact, state.phase.time);
     }
@@ -93,8 +117,27 @@ export class Q3SharedBallistics {
   }
   respawn(actor: ActorId): undefined {
     const owner = this.host.actors.resolveOwned(actor), state = owner === null ? undefined : this.weaponCounters.get(owner);
+    this.releaseHook(actor); if (owner !== null) this.hookHeld.delete(owner);
     if (owner !== null && state !== undefined) this.weaponCounters.set(owner, { ...state, streak: 0, rewardUntil: 0 });
     return undefined;
+  }
+  releaseHook(actor: ActorId): void {
+    const hook = this.hooks.get(actor); if (hook === undefined) return;
+    this.hooks.delete(actor);
+    if (this.host.actors.isLive(hook.actor.id)) this.host.actors.release(hook.actor);
+  }
+  command(actor: OwnedActor, attack: boolean, selected: boolean, alive: boolean): void {
+    if (!attack || !alive) this.hookHeld.delete(actor);
+    if (!attack || !selected || !alive) this.releaseHook(actor.id);
+  }
+  grapplePoint(actor: ActorId): Vec3 | null {
+    const hook = this.hooks.get(actor);
+    return hook?.phase.kind === "attached" ? this.host.bodies.read(hook.actor.id)?.origin ?? null : null;
+  }
+  pull(actor: OwnedActor): Vec3 | null {
+    const point = this.grapplePoint(actor.id), body = this.host.bodies.read(actor.id);
+    if (point === null || body === null) return null;
+    return q3GrappleVelocity(body.origin, point, qvmAngleVectors(this.host.pose(actor).angles).forward);
   }
   private bullet(actor: OwnedActor, weapon: number, attack: Q3BulletAttack, spread: number, amount: number): void {
     const state = this.host.combat.read(actor.id), attacker = { actor: actor.id, damageable: state?.canTakeDamage ?? false,
@@ -161,6 +204,10 @@ export class Q3SharedBallistics {
     return q3GauntletAttack(this.contactHost(actor, 1, attack, 2), actor.id, attack, this.host.pose(actor).quadActive);
   }
   fire(actor: OwnedActor, weapon: number, _input: WeaponStepInput): undefined {
+    if (weapon === 10) {
+      const held = this.hookHeld.has(actor); this.hookHeld.add(actor);
+      if (held || this.hooks.has(actor.id)) return undefined;
+    }
     if (weapon !== 1 && weapon !== 10) {
       const previous = this.weaponStatistics(actor);
       this.weaponCounters.set(actor, { ...previous, shots: (previous.shots + (weapon === 11 ? 15 : 1)) | 0 });
@@ -195,14 +242,15 @@ export class Q3SharedBallistics {
           normal: zero, target: null, surfaceFlags: 0, count: next.impressiveCount, until: next.rewardUntil });
         return undefined;
       }
-      case 4: case 5: case 8: case 9: this.launch(actor, weapon, attack); return undefined;
+      case 4: case 5: case 8: case 9: case 10: this.launch(actor, weapon, attack); return undefined;
       case 11: for (let index = 0; index < 15; index++) this.launch(actor, weapon, attack); return undefined;
       case 13: this.bullet(actor, weapon, attack, 600, 7); return undefined;
       default: throw new Error(`Q3 shared ballistics does not yet support weapon ${weapon}`);
     }
   }
   private launch(owner: OwnedActor, weapon: number, attack: ReturnType<Q3SharedBallistics["attack"]>): void {
-    const spec = weapon === 11 ? { speed: 0, duration: 10000, gravity: false, direct: 20, splash: 0, radius: 0, method: 23, splashMethod: 0 } : q3MissileParameters(weapon), grenade = weapon === 4;
+    const spec = weapon === 10 ? { speed: Q3_GRAPPLE_SPEED, duration: Q3_GRAPPLE_LIFETIME, gravity: false, direct: 0, splash: 0, radius: 0, method: 23, splashMethod: 0 }
+      : weapon === 11 ? { speed: 0, duration: 10000, gravity: false, direct: 20, splash: 0, radius: 0, method: 23, splashMethod: 0 } : q3MissileParameters(weapon), grenade = weapon === 4;
     const direction = normalize3(grenade ? vec3(attack.forward.x, attack.forward.y, Math.fround(attack.forward.z + Math.fround(0.2))) : attack.forward);
     const actor = this.host.actors.allocate(this.host.weaponProvider, "q3:projectile"), time = this.host.time();
     const launch = q3LaunchProjectile(attack.muzzle, direction, spec.speed, spec.gravity, spec.duration, time);
@@ -214,6 +262,7 @@ export class Q3SharedBallistics {
       method: spec.method, splashMethod: spec.splashMethod,
       expires: launch.expires };
     this.projectiles.set(actor, projectile);
+    if (weapon === 10) this.hooks.set(owner.id, projectile);
     const body = this.host.bodies.read(actor.id);
     if (body === null) throw new Error("Launched Q3 projectile lost its body");
     const behavior = this.host.weaponBehavior?.launch({ projectile: actor, shooter: owner.id, ...q3ProjectileBehavior(weapon), timeSeconds: time / 1000, body });
@@ -228,6 +277,41 @@ export class Q3SharedBallistics {
     const body = this.host.bodies.read(projectile.actor.id); if (body === null) return;
     this.host.event({ kind: "impact", hitKind: impact.flesh ? "flesh" : "wall", actor: projectile.actor.id, weapon: projectile.weapon,
       origin: body.origin, end: body.origin, normal: impact.normal, target: impact.target, surfaceFlags: impact.surfaceFlags, timeMilliseconds: time });
+  }
+
+  private attachHook(projectile: Q3ProjectileState, trace: ActorTraceResult, target: ActorId, time: number): boolean {
+    const targetBody = this.host.bodies.read(target), player = targetBody !== null && this.host.isPlayer(target) && this.host.combat.read(target)?.canTakeDamage === true;
+    const point = snapVectorTowards(player ? snapVectorTowards(q3GrappleTarget(targetBody.origin, targetBody.bounds), projectile.trajectory.base) : trace.end, projectile.trajectory.base);
+    const body = this.host.bodies.read(projectile.actor.id);
+    if (body === null) throw new Error("Attached Q3 hook lost its body");
+    projectile.phase = { kind: "attached", target: player ? target : null, nextThink: (time + Q3_GRAPPLE_THINK_INTERVAL) | 0 };
+    projectile.trajectory = { ...projectile.trajectory, type: TrajectoryType.TR_STATIONARY, base: point, delta: zero, time: 0, duration: 0 };
+    this.host.bodies.write(projectile.actor, { ...body, origin: point, velocity: zero }); this.host.bodies.link(projectile.actor);
+    this.impactEvent(projectile, { kind: "impact", target: player ? target : null, flesh: player, normal: normal(trace), surfaceFlags: trace.surfaceFlags }, time);
+    return true;
+  }
+
+  private thinkHook(projectile: Q3ProjectileState, time: number): void {
+    const phase = projectile.phase;
+    if (phase.kind !== "attached") { if (time >= projectile.expires) this.releaseHook(projectile.owner); return; }
+    if (phase.nextThink === 0 || time < phase.nextThink) return;
+    projectile.phase = { ...phase, nextThink: 0 };
+    if (phase.target === null) return;
+    const target = this.host.bodies.read(phase.target), body = this.host.bodies.read(projectile.actor.id);
+    if (target === null || body === null) { this.releaseHook(projectile.owner); return; }
+    const point = snapVectorTowards(q3GrappleTarget(target.origin, target.bounds), body.origin);
+    projectile.trajectory = { ...projectile.trajectory, base: point };
+    this.host.bodies.write(projectile.actor, { ...body, origin: point }); this.host.bodies.link(projectile.actor);
+  }
+
+  private presentHook(projectile: Q3ProjectileState): void {
+    const owner = this.host.actors.resolveOwned(projectile.owner), body = this.host.bodies.read(projectile.actor.id);
+    if (owner === null || body === null) return;
+    if (projectile.phase.kind === "attached") this.event({ kind: "projectile", trajectory: { ...projectile.trajectory }, actor: projectile.actor.id, weapon: 10,
+      origin: body.origin, end: body.origin, normal: zero, target: null, surfaceFlags: 0 });
+    const pose = this.host.pose(owner), cable = q3GrappleCable(pose.origin, qvmAngleVectors(pose.angles).up, body.origin);
+    this.event({ kind: "trail", actor: projectile.actor.id, weapon: 10, origin: cable?.start ?? body.origin, end: cable?.end ?? body.origin,
+      normal: zero, target: projectile.owner, surfaceFlags: 0 });
   }
 
   private projectileHost(projectile: Q3ProjectileState, previousTime: number, time: number): Q3ProjectileHost {
@@ -276,12 +360,18 @@ export class Q3SharedBallistics {
         const owner = this.host.actors.resolveOwned(projectile.owner); if (owner === null) return;
         const current = this.weaponStatistics(owner); this.weaponCounters.set(owner, { ...current, hits: (current.hits + 1) | 0 });
       },
-      think: () => { if (time >= projectile.expires) q3ExplodeProjectile(projectile, this.projectileHost(projectile, previousTime, time)); },
+      think: () => { if (projectile.weapon === 10) this.thinkHook(projectile, time);
+        else if (time >= projectile.expires) q3ExplodeProjectile(projectile, this.projectileHost(projectile, previousTime, time)); },
       moved: () => { this.event({ kind: "projectile", trajectory: { ...projectile.trajectory }, actor: projectile.actor.id, weapon: projectile.weapon,
-        origin, end: body().origin, normal: zero, target: null, surfaceFlags: 0 }); }, reflection: null, special: null
+        origin, end: body().origin, normal: zero, target: null, surfaceFlags: 0 }); }, reflection: null,
+      special: projectile.weapon === 10 ? { impact: (trace, target) => this.attachHook(projectile, trace, target, time), afterMove: () => undefined, noImpact: () => undefined } : null,
     };
   }
   private stepActor(projectile: Q3ProjectileState, previousTime: number, time: number): void {
+    if (projectile.weapon === 10 && (!this.host.actors.isLive(projectile.owner) || (this.host.combat.read(projectile.owner)?.health ?? 0) <= 0
+      || projectile.phase.kind === "attached" && projectile.phase.target !== null && !this.host.actors.isLive(projectile.phase.target))) {
+      this.releaseHook(projectile.owner); return;
+    }
     if (projectile.phase.kind === "flight") {
       const body = this.host.bodies.read(projectile.actor.id);
       if (body !== null) {
@@ -293,6 +383,7 @@ export class Q3SharedBallistics {
       }
     }
     q3StepProjectile(projectile, this.projectileHost(projectile, previousTime, time));
+    if (projectile.weapon === 10 && this.host.actors.isLive(projectile.actor.id)) this.presentHook(projectile);
   }
   private radius(projectile: Q3ProjectileState, origin: Vec3, ignore: ActorId | null): boolean {
     return q3RadiusDamage({ spatial: {
@@ -323,12 +414,14 @@ export function readQ3ProjectileStates(reader: SaveReader, actor: (reader: SaveR
   return reader.list(value => {
     const trajectory = value.field("trajectory"), phaseReader = value.field("phase");
     const type = trajectory.field("type").choice(TrajectoryType.TR_STATIONARY, TrajectoryType.TR_LINEAR, TrajectoryType.TR_GRAVITY);
-    const phase: Q3ProjectileState["phase"] = phaseReader.field("kind").choice("flight", "event") === "flight" ? { kind: "flight" } : {
+    const kind = phaseReader.field("kind").choice("flight", "event", "attached");
+    const phase: Q3ProjectileState["phase"] = kind === "flight" ? { kind } : kind === "attached"
+      ? { kind, target: phaseReader.field("target").nullable(identity), nextThink: phaseReader.field("nextThink").integer(0) } : {
       kind: "event", time: phaseReader.field("time").integer(), impact: { kind: phaseReader.field("impact").field("kind").choice("impact"),
         normal: readVector(phaseReader.field("impact").field("normal")), target: phaseReader.field("impact").field("target").nullable(identity),
         flesh: phaseReader.field("impact").field("flesh").boolean(), surfaceFlags: phaseReader.field("impact").field("surfaceFlags").integer() } };
     return { actor: actor(value.field("actor")), owner: identity(value.field("owner")), pass: value.field("pass").nullable(identity), phase,
-      damagePoint: readVector(value.field("damagePoint")), flags: value.field("flags").integer(), weapon: value.field("weapon").choice(4, 5, 8, 9, 11),
+      damagePoint: readVector(value.field("damagePoint")), flags: value.field("flags").integer(), weapon: value.field("weapon").choice(4, 5, 8, 9, 10, 11),
       direct: value.field("direct").integer(0), splash: value.field("splash").integer(0), radius: value.field("radius").finite(),
       method: value.field("method").integer(0), splashMethod: value.field("splashMethod").integer(0), expires: value.field("expires").finite(),
       trajectory: { type, time: trajectory.field("time").finite(), duration: trajectory.field("duration").finite(),

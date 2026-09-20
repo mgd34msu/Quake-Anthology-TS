@@ -3021,7 +3021,7 @@ export class SharedSimulation implements Simulation {
     const player = this.requirePlayer(actor), body = this.bodies.read(actor);
     if (body === null) throw new Error("Player has no body");
     const state = player.readState();
-    if (change.kind === "teleport") this.grapple?.release(actor);
+    if (change.kind === "teleport") { this.grapple?.release(actor); this.selectedBallistics?.releaseHook(actor); }
     if (change.kind === "noclip") {
       player.setFlight(false);
       player.state = state.kind === "q1-netquake" ? { ...state, moveType: change.enabled ? 8 : 3 }
@@ -3169,6 +3169,21 @@ export class SharedSimulation implements Simulation {
       command = { ...command, arsenal: { ...intent, provider: this.weaponProvider.provider, weapon: null } };
     }
     if (!paused && this.grapple?.selection.binding === "slot") this.grapple.input(player.actor.id, (command.command.buttons & 1) !== 0);
+    if (!paused && this.selectedBallistics !== null) {
+      const arsenal = this.arsenal(player), primary = slot?.primarySelected() ?? true;
+      this.selectedBallistics.command(player.actor, (command.command.buttons & 1) !== 0
+        && (command.command.kind !== "q3" || (command.command.buttons & CommandButtons.TALK) === 0),
+      primary && arsenal.state.kind === "q3" && arsenal.state.sourceWeapon === 10,
+      !player.intermission && player.cutscene === null && (this.combat.read(player.actor.id)?.health ?? 0) > 0);
+      const point = this.selectedBallistics.grapplePoint(player.actor.id);
+      if (player.state.kind === "q3") player.state = { ...player.state,
+        movementFlags: point === null ? player.state.movementFlags & ~MoveFlags.GRAPPLE_PULL : player.state.movementFlags | MoveFlags.GRAPPLE_PULL,
+        grapplePoint: point ?? zero };
+      else {
+        const velocity = this.selectedBallistics.pull(player.actor), body = this.bodies.read(player.actor.id);
+        if (velocity !== null && body !== null) this.bodies.write(player.actor, { ...body, velocity, ground: null });
+      }
+    }
     return command;
   }
 
@@ -4709,6 +4724,7 @@ export class SharedSimulation implements Simulation {
       portals: [...this.areaPortals].map(([portal, open]) => ({ portal, open })),
       selectedBallistics: this.selectedBallistics === null ? null : { milliseconds: this.selectedMilliseconds, randomSeed: this.selectedRandom.seed,
         weaponStatistics: this.selectedBallistics.checkpointWeaponStatistics().map(state => ({ ...state, actor: savedActorId(state.actor.id) })),
+        hookHeld: this.selectedBallistics.checkpointHookHeld(),
         projectiles: this.selectedBallistics.checkpoint() },
       handGrenades: this.handGrenades?.capture() ?? null, grapple: this.grapple?.capture() ?? null, weaponSlots: [...this.weaponSlots].map(([actor, slot]) => ({ actor: savedActorId(actor), state: slot.snapshot() })),
       nativeEquipmentVelocity: [...this.nativeEquipmentVelocity].map(([actor, velocity]) => ({ actor: savedActorId(actor), velocity })),
@@ -4879,6 +4895,8 @@ export class SharedSimulation implements Simulation {
       this.selectedRandom.reset(selectedBallistics.field("randomSeed").integer());
       this.selectedBallistics.restore(readQ3ProjectileStates(selectedBallistics.field("projectiles"), owner, saved => this.actors.referenceSaved(saved)));
       this.selectedBallistics.restoreWeaponStatistics(readQ3WeaponStatistics(selectedBallistics.field("weaponStatistics"), owner));
+      const hookHeld = selectedBallistics.field("hookHeld");
+      this.selectedBallistics.restoreHookHeld(hookHeld.value === undefined ? [] : hookHeld.list(owner));
     } else if (selectedBallistics.value !== undefined && selectedBallistics.value !== null) selectedBallistics.fail("Saved selected ballistics has no matching authority");
     const selectedSource = reader.field("selectedWeaponSource"), weaponSource = this.selectedWeaponSource;
     if (weaponSource !== null) {

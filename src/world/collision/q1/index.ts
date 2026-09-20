@@ -129,12 +129,30 @@ export class Q1Collision implements SceneQueries {
       ? { kind: "capsule", axis: localAxes[2], radius, halfSegment: Math.max(0, extents.z - radius) }
       : { kind: "box", axes: localAxes, extents };
     const pad = { x: shapeSupport(shape, AXES[0]) + 1, y: shapeSupport(shape, AXES[1]) + 1, z: shapeSupport(shape, AXES[2]) + 1 };
-    const envelope: Bounds = { min: { x: Math.min(centerStart.x, centerEnd.x) - pad.x, y: Math.min(centerStart.y, centerEnd.y) - pad.y, z: Math.min(centerStart.z, centerEnd.z) - pad.z },
-      max: { x: Math.max(centerStart.x, centerEnd.x) + pad.x, y: Math.max(centerStart.y, centerEnd.y) + pad.y, z: Math.max(centerStart.z, centerEnd.z) + pad.z } };
+    const envelopeTo = (end: Vec3): Bounds => ({ min: { x: Math.min(centerStart.x, end.x) - pad.x, y: Math.min(centerStart.y, end.y) - pad.y, z: Math.min(centerStart.z, end.z) - pad.z },
+      max: { x: Math.max(centerStart.x, end.x) + pad.x, y: Math.max(centerStart.y, end.y) + pad.y, z: Math.max(centerStart.z, end.z) + pad.z } });
+    const envelope = envelopeTo(centerEnd);
     const intervals: (SweepInterval & { readonly contents: number })[] = [];
     for (const solid of this.cells(envelope, model, query.policy)) {
       const interval = shape.kind === "box" ? sweepBoxCell(solid.cell, centerStart, centerEnd, shape, Q1_DISTANCE_EPSILON) : sweepCapsuleCell(solid.cell, centerStart, centerEnd, shape, Q1_DISTANCE_EPSILON);
       if (interval !== null) intervals.push({ ...interval, contents: solid.contents });
+    }
+    if (this.geometry.brushList?.some(entry => entry.model === model) !== true && this.blocks(-2, query.policy)) {
+      const drawingCount = intervals.length;
+      let first = 1;
+      for (const interval of intervals) first = Math.min(first, interval.enter);
+      const prefix = first > 0 && first < 1 ? envelopeTo(lerp(centerStart, centerEnd, first)) : envelope;
+      const collect = (bounds: Bounds): boolean => {
+        let startsSolid = false;
+        for (const cell of this.derivedClipCells(this.nativeHulls(model), bounds)) {
+          const interval = shape.kind === "box" ? sweepBoxCell(cell, centerStart, centerEnd, shape, Q1_DISTANCE_EPSILON) : sweepCapsuleCell(cell, centerStart, centerEnd, shape, Q1_DISTANCE_EPSILON);
+          if (interval !== null) { intervals.push({ ...interval, contents: -2 }); startsSolid ||= interval.enter <= 0; }
+        }
+        return startsSolid;
+      };
+      // A known drawing-surface hit bounds the only clip geometry that can hit first.
+      // Starting in clip-only solid still needs the full segment to establish its exit/allsolid.
+      if (collect(prefix) && prefix !== envelope) { intervals.length = drawingCount; collect(envelope); }
     }
     intervals.sort((a, b) => a.enter - b.enter);
     let startSolid = false, covered = -Infinity, fraction = 1, plane = zeroPlane, contents = -1;
@@ -156,7 +174,6 @@ export class Q1Collision implements SceneQueries {
     const authored = this.geometry.brushList?.find(entry => entry.model === model);
     if (authored === undefined) {
       yield* this.solidSpace.cells(envelope, model, contents => this.blocks(contents, policy));
-      if (this.blocks(-2, policy)) for (const cell of this.derivedClipCells(this.nativeHulls(model), envelope)) yield { cell, contents: -2 };
       return;
     }
     for (const brush of authored.brushes) {

@@ -218,7 +218,7 @@ export class Q3ApplicationEffects {
   }
   async ballistic(event: Q3SharedBallisticEvent): Promise<void> {
     this.state.time = Math.trunc(event.timeMilliseconds);
-    if (event.kind === "remove") { this.projectiles.delete(event.actor); return; }
+    if (event.kind === "remove") { this.projectiles.delete(event.actor); this.bolts.delete(event.actor); return; }
     this.weaponEffects ??= this.loadWeapons();
     const media = await this.weaponEffects; this.readyWeapons = media;
     await media.registry.registerWeapon(event.weapon);
@@ -276,6 +276,10 @@ export class Q3ApplicationEffects {
       case "bounce": media.sound(media.bounce[media.host.random.rand() & 1] ?? null, event.end, 0, 1); return;
       case "trail":
         if (event.weapon === Weapon.WP_LIGHTNING) this.bolts.set(event.actor, { event, time });
+        if (event.weapon === Weapon.WP_GRAPPLING_HOOK) {
+          if (length3(sub3(event.end, event.origin)) < 64) this.bolts.delete(event.actor);
+          else this.bolts.set(event.actor, { event, time });
+        }
         if (event.weapon === Weapon.WP_RAILGUN) emitRailTrail(time, media.registry, { localEntities: this.effects.pool,
           settings: () => ({ oldRail: false, railTrailTime: 400 }), clientInfo: media.host.clientInfo }, 0, { ...event.origin }, event.end);
         return;
