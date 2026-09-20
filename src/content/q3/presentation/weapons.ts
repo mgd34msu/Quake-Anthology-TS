@@ -76,7 +76,7 @@ export interface ClientWeaponInfo extends PacketWeaponInfo {
 }
 
 export class ClientWeaponSelection {
-  constructor(readonly state: ClientGameState) {}
+  constructor(readonly state: ClientGameState, private readonly selected?: (weapon: number) => void) {}
   private selectable(number: number): boolean {
     const snap = this.state.snap;
     if (snap === null) throw new Error("CG_WeaponSelectable: cg.snap == NULL");
@@ -91,7 +91,7 @@ export class ClientWeaponSelection {
     const original = this.state.weaponSelect;
     for (let i = 0; i < 16; i++) {
       this.state.weaponSelect = (this.state.weaponSelect + direction + 16) % 16;
-      if (this.state.weaponSelect !== Weapon.WP_GAUNTLET && this.selectable(this.state.weaponSelect)) return;
+      if (this.state.weaponSelect !== Weapon.WP_GAUNTLET && this.selectable(this.state.weaponSelect)) { this.selected?.(this.state.weaponSelect); return; }
     }
     this.state.weaponSelect = original;
   }
@@ -99,7 +99,9 @@ export class ClientWeaponSelection {
     const snap = this.state.snap;
     if (snap === null || (snap.playerState.pmFlags & MoveFlags.FOLLOW) !== 0 || number < 1 || number > 15) return;
     this.state.weaponSelectTime = this.state.time;
-    if ((snap.playerState.stats.get(statSchema(this.state.product).weapons) & (1 << number)) !== 0) this.state.weaponSelect = number;
+    if ((snap.playerState.stats.get(statSchema(this.state.product).weapons) & (1 << number)) !== 0) {
+      this.state.weaponSelect = number; this.selected?.(number);
+    }
   }
   outOfAmmoChange(): void {
     this.state.weaponSelectTime = this.state.time;

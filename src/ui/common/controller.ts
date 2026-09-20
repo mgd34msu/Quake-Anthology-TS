@@ -425,8 +425,19 @@ export class NativeUiController implements SeatUiController {
             for (const [column, value] of row.cells.entries()) {
               const width = Math.min(control.columnWidths[column] ?? contentWidth, control.rect.x + contentWidth - (row.action === undefined ? 0 : 28) - x);
               const measured = this.options.measureText?.(value, skin.fontScale) ?? Array.from(value).length * 8 * skin.fontScale;
-              const scale = skin.fontScale * Math.min(1, Math.max(1, width - 16) / Math.max(1, measured));
-              commands.push({ kind: "text", origin: { x: x + 8, y: y + (layout.height - 8 * scale) / 2 }, text: value,
+              const available = Math.max(0, width - 16);
+              const scale = skin.fontScale * Math.max(0.75, Math.min(1, available / Math.max(1, measured)));
+              let label = value;
+              if (measured * scale / skin.fontScale > available) {
+                const glyphs = Array.from(value), measure = (text: string): number => this.options.measureText?.(text, scale) ?? Array.from(text).length * 8 * scale;
+                let low = 0, high = glyphs.length;
+                while (low < high) {
+                  const middle = Math.ceil((low + high) / 2);
+                  if (measure(`${glyphs.slice(0, middle).join("")}…`) <= available) low = middle; else high = middle - 1;
+                }
+                label = measure("…") <= available ? `${glyphs.slice(0, low).join("")}…` : "";
+              }
+              commands.push({ kind: "text", origin: { x: x + 8, y: y + (layout.height - 8 * scale) / 2 }, text: label,
                 font: skin.font, scale, color: rowColor, align: "left", shadow: true });
               x += width;
             }

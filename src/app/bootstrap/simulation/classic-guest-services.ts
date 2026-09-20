@@ -1,6 +1,7 @@
+import type { EquipmentMovement } from "../../../contracts/movement.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
-import type { OwnedActor } from "../../../contracts/identity.ts";
+import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { NumericOperations } from "../../../contracts/numeric.ts";
 import type { Q2EntityState, Q2PlayerState } from "../../../contracts/protocol.ts";
@@ -11,6 +12,8 @@ import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
 import { classicNumber, classicPointer, classicRequiredPointer, type ClassicQ2EngineServices, type ClassicQ2GuestHost, type ClassicQ2WorldLink } from "../../../compat/q2/classic/host.ts";
 import { readClassicString, readClassicVector } from "../../../compat/q2/classic/records.ts";
 import { runClassicGuestPmove } from "../../../compat/q2/classic/pmove.ts";
+import { ClassicCombatBindings } from "../../../compat/q2/classic/combat-binding.ts";
+import { classicGrenadeInventory } from "../../../compat/q2/classic/grenade-inventory.ts";
 import { SizeBuf, SZ_Init, SZ_Clear, MSG_WriteChar, MSG_WriteByte, MSG_WriteShort, MSG_WriteLong, MSG_WriteFloat, MSG_WriteString, MSG_WritePos, MSG_WriteDir, MSG_WriteAngle } from "../../../network/q2/message.ts";
 import type { ActorCollision, SharedSceneQueries } from "../../../world/collision/index.ts";
 
@@ -23,6 +26,7 @@ export interface ClassicGuestServicesOptions {
   readonly numeric: NumericOperations;
   readonly mapPath: string;
   readonly maxClients: number;
+  readonly acceptsClient?: (slot: number) => boolean;
   readonly admit: (record: RawEntityView, actor: OwnedActor) => undefined;
   readonly collision: (actor: OwnedActor, collision: ActorCollision) => undefined;
   readonly print: (text: string) => void;
@@ -43,6 +47,10 @@ export class ClassicGuestServices {
   readonly #messages: ClassicGuestMessage[] = [];
   readonly #buffer = new SizeBuf();
   #host: ClassicQ2GuestHost | null = null;
+  #combat: ClassicCombatBindings | null = null;
+  #playerMovement: EquipmentMovement | undefined;
+  #writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
+  #readPlayerVelocity: ((actor: ActorId) => Vec3 | undefined) | null = null;
   #loading = true;
   #options: ClassicGuestServicesOptions;
   get options(): ClassicGuestServicesOptions { return this.#options; }
@@ -68,7 +76,10 @@ export class ClassicGuestServices {
       boxEdicts: (bounds, kind) => this.options.scene.queryActors(bounds, kind).map(item => item.body.actor),
       message: (operation, values) => this.message(operation, values),
       command: () => this.options.command(), addCommand: text => this.options.addCommand(text), debugGraph: (value, color) => this.options.debugGraph(value, color),
-      pmove: (address, host) => runClassicGuestPmove(address, host, { numeric: options.numeric, airAccelerate: options.cvars.variableValue("sv_airaccelerate") }),
+      pmove: (address, host) => {
+        const equipment = this.#playerMovement; this.#playerMovement = undefined;
+        return runClassicGuestPmove(address, host, { numeric: options.numeric, airAccelerate: options.cvars.variableValue("sv_airaccelerate"), ...(equipment === undefined ? {} : { equipment }) });
+      },
     };
   }
   validateMap(binding: ClassicGuestMapServices): void {
@@ -82,12 +93,22 @@ export class ClassicGuestServices {
     this.#configstrings.set(33, binding.mapPath);
     for (let model = 1; model < binding.scene.geometry.models.length; model++) this.#configstrings.set(33 + model, `*${model}`);
   }
-  bindHost(host: ClassicQ2GuestHost): void {
+  bindHost(host: ClassicQ2GuestHost, imageBase?: GuestAddress): void {
     if (this.#host !== null || host.memory !== this.memory) throw new Error("API 3 services already bound or guest memory mismatch");
     this.#host = host;
+    this.#combat = imageBase === undefined ? null : ClassicCombatBindings.create(host, imageBase);
   }
   get host(): ClassicQ2GuestHost { if (this.#host === null) throw new Error("API 3 services have no guest host"); return this.#host; }
+  notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.edicts.at(slot)) ?? null; }
+  equipmentInventory(slot: number) { return classicGrenadeInventory(this.host, this.host.edicts.at(slot)); }
   completeSpawn(): void { this.#loading = false; }
+  setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined, read: (actor: ActorId) => Vec3 | undefined): void {
+    this.#writePlayerVelocity = write; this.#readPlayerVelocity = read;
+  }
+  withPlayerMovement<T>(movement: EquipmentMovement | undefined, run: () => T): T {
+    const previous = this.#playerMovement; this.#playerMovement = movement;
+    try { return run(); } finally { this.#playerMovement = previous; }
+  }
   configstrings(): ReadonlyMap<number, string> { return new Map(this.#configstrings); }
   drainMessages(): readonly ClassicGuestMessage[] { return this.#messages.splice(0); }
   resource(kind: "model" | "sound" | "image", index: number): string { return this.#configstrings.get((kind === "model" ? 32 : kind === "sound" ? 288 : 544) + index) ?? ""; }
@@ -112,13 +133,23 @@ export class ClassicGuestServices {
   }
   private body(record: RawEntityView): BodyState {
     const view = record.bytes;
-    return { origin: vector(view, 4), angles: vector(view, 16), velocity: zero, bounds: { min: vector(view, 188), max: vector(view, 200) }, ground: null };
+    const client = record.slot > 0 && record.slot <= this.options.maxClients ? this.host.edicts.clientPrefix(record.slot) : null;
+    const actor = record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
+    const velocity = pending ?? (client === null ? zero : { x: client.getInt16(10, true) * 0.125, y: client.getInt16(12, true) * 0.125, z: client.getInt16(14, true) * 0.125 });
+    return { origin: vector(view, 4), angles: vector(view, 16), velocity, bounds: { min: vector(view, 188), max: vector(view, 200) }, ground: null };
   }
   private bindEntity(record: RawEntityView, actor: OwnedActor): undefined {
     this.options.engine.bodies.bind(actor, { read: () => this.body(record), write: state => {
+      const velocity = this.body(record).velocity;
+      if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
+        if (record.slot < 1 || record.slot > this.options.maxClients || this.#writePlayerVelocity === null)
+          throw new Error("API3 velocity writes require a source semantic binding");
+        this.#writePlayerVelocity(actor, state.velocity);
+      }
       storeVector(record.bytes, 4, state.origin); storeVector(record.bytes, 16, state.angles);
       storeVector(record.bytes, 188, state.bounds.min); storeVector(record.bytes, 200, state.bounds.max); return undefined;
     } });
+    this.#combat?.bind(record, actor);
     return this.options.admit(record, actor);
   }
   private linkBody(record: RawEntityView, actor: OwnedActor): undefined {
@@ -151,7 +182,7 @@ export class ClassicGuestServices {
   private unicast(entity: GuestAddress | null, reliable: boolean): void {
     if (entity === null) return;
     const record = this.host.edicts.fromPointer(entity);
-    if (record.slot < 1 || record.slot > this.options.maxClients) return;
+    if (!(this.options.acceptsClient?.(record.slot) ?? (record.slot >= 1 && record.slot <= this.options.maxClients))) return;
     this.enqueue({ kind: "unicast", slot: record.slot }, reliable);
   }
   private message(operation: string, values: readonly GuestCallValue[]): undefined {
@@ -177,7 +208,7 @@ export class ClassicGuestServices {
     if (destination !== "broadcast" && entity === null) return undefined;
     if (destination !== "broadcast" && entity !== null) {
       const slot = this.host.edicts.fromPointer(entity).slot;
-      if (slot < 1 || slot > this.options.maxClients) { if (destination === "center") return undefined; throw new Error("API 3 cprintf on non-client edict"); }
+      if (!(this.options.acceptsClient?.(slot) ?? (slot >= 1 && slot <= this.options.maxClients))) { if (destination === "center") return undefined; throw new Error("API 3 cprintf on non-client edict"); }
     }
     const packet = new SizeBuf(); SZ_Init(packet, new Uint8Array(1400), 1400);
     MSG_WriteByte(packet, destination === "center" ? 15 : 10);
@@ -221,6 +252,7 @@ export class ClassicGuestServices {
   }
   modelAppearance(slot: number): { readonly path: string; readonly skin: number; readonly skinPath: string | null; readonly attachedModels: readonly string[] } {
     const state = this.entityState(slot);
+    if (state.modelIndexes.every(index => index !== 255)) return { path: this.resource("model", state.modelIndexes[0]), skin: state.skin, skinPath: null, attachedModels: state.modelIndexes.slice(1).map(index => this.resource("model", index)) };
     const value = this.#configstrings.get(1312 + (state.skin & 255)) ?? "player\\male/grunt";
     const appearance = value.slice(value.indexOf("\\") + 1), slash = appearance.indexOf("/");
     const model = slash < 0 ? "male" : appearance.slice(0, slash), skin = slash < 0 ? "grunt" : appearance.slice(slash + 1);

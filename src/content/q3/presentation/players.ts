@@ -104,6 +104,7 @@ export interface PlayerPresentationSettings {
 }
 export interface PlayerPolyVertex extends RefPolyVertex { color: Vec4 }
 interface PlayerServices {
+  readonly bodyHidden?: (entity: number) => boolean;
   readonly state: ClientGameState;
   readonly media: PlayerMedia;
   readonly clients: Pick<ClientInfoStore, "clientInfo">;
@@ -161,6 +162,7 @@ export class PlayerPresenter {
     if (this.host.settings().debugPosition) this.host.print(gameFormat("%i ResetPlayerEntity yaw=%i\n", [entity.currentState.number, float32ToBits(entity.player.torso.yawAngle) | 0]));
   }
   addRefEntityWithPowerups(entity: RefModelEntity, state: EntityState, team: Team): void {
+    if (this.host.bodyHidden?.(state.number) === true) return;
     const media = this.host.media;
     if (powered(state, Powerup.PW_INVIS)) { entity.customShader = media.invisShader; this.host.addEntity(entity); return; }
     this.host.addEntity(entity);

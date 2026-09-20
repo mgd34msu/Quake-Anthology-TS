@@ -88,6 +88,9 @@ export interface Q3ClientSound {
   startBackgroundTrack(intro: string, loop: string): Promise<void>;
 }
 export interface Q3ClientPresentationOptions {
+  readonly weaponSelection?: (weapon: number) => void;
+  readonly bodyHidden?: (entity: number) => boolean;
+  readonly bodyPose?: (entity: ClientEntity) => void;
   readonly weaponHud?: WeaponHudReader;
   readonly session: Q3PresentationSession; readonly commandContext: CommandContext;
   readonly assets: SoundAssetReader; readonly resources: RendererResources; readonly scene: Q3SceneRecorder;
@@ -221,7 +224,7 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
     const status = new ClientDrawStatus(state, staticState, tools, menus === null ? { kind: "baseq3" } : { kind: "missionpack", fonts: menus.fonts },
       { commands: session.commands, readVmCvar: readVm });
     const frameAudio = new ClientFrameAudio(state, media.sounds, { startSound, startLocalSound });
-    const console = new ClientConsoleRuntime(state, staticState, { cvars: session.cvars, view, weapons: new ClientWeaponSelection(state), clients, serverCommands,
+    const console = new ClientConsoleRuntime(state, staticState, { cvars: session.cvars, view, weapons: new ClientWeaponSelection(state, options.weaponSelection), clients, serverCommands,
       hud: menus === null ? { kind: "unavailable", reason: "Base cgame has no mission menu console commands" } : menus,
       teamOrders: menus === null ? { kind: "unavailable", reason: "Base cgame has no mission team-order console commands" } : menus,
       readVmCvar: readVm, resetPlayerEntity: entity => players.resetPlayerEntity(entity), addCommand: name => session.registerCgameCommand(name),
@@ -282,6 +285,7 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
         tracerLength: numeric("cg_tracerLength"), tracerWidth: numeric("cg_tracerWidth"), tracerChance: numeric("cg_tracerChance"), hardware: options.hardware }),
     });
     const players = new PlayerPresenter({ state, media: media.players, clients, collision, effects, random, marks,
+      ...(options.bodyHidden === undefined ? {} : { bodyHidden: options.bodyHidden }),
       ...(session.product === "baseq3" ? { product: "baseq3" } satisfies { product: "baseq3" }
         : { product: "missionpack", missionMedia: media.missionPlayers } satisfies { product: "missionpack"; missionMedia: typeof media.missionPlayers }),
       trace: (start, end, bounds, skip, mask) => prediction.trace(start, end, bounds, skip, mask),
@@ -294,6 +298,8 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
         enableBreath: missionEnabled("cg_enableBreath"), enableDust: missionEnabled("cg_enableDust"), debugPosition: enabled("cg_debugPosition"), debugAnimation: enabled("cg_debugAnim") }),
     });
     const packet = new PacketEntityPresenter(state, media.packet, {
+      ...(options.bodyHidden === undefined ? {} : { bodyHidden: options.bodyHidden }),
+      ...(options.bodyPose === undefined ? {} : { pose: options.bodyPose }),
       addRefEntity: entity => resources.addRefEntity(entity), addLight: light => resources.addLight(light),
       updateSoundPosition: (number, position) => sound.updateSoundPosition(number, position), addLoopSound, startSound,
       randomInteger: () => random.rand(), player: entity => options.character(entity, () => players.player(entity)),

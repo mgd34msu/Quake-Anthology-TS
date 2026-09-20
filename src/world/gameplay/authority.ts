@@ -4,6 +4,7 @@ import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorCallbackTable } from "../actors/callbacks.ts";
 import { copyVector } from "../actors/body.ts";
 import type { SessionActorRegistry } from "../actors/registry.ts";
+import { ModOperation } from "./mod-composition.ts";
 
 export type CombatTraits = Pick<CombatState, "canTakeDamage" | "mass" | "invulnerable" | "team" | "noKnockback">;
 export interface PowerArmorCellBinding { read(): number; write(count: number): undefined; }
@@ -12,8 +13,10 @@ export interface SourceDamageObserver {
   stored(write: Exclude<DamageMutation, { readonly kind: "impulse" }>): undefined;
   beforeReaction(result: SourceDamageResult): undefined;
 }
+interface SourceDamageCursor { health: number; armor: ArmorState; velocity: Vec3 | null; }
 
 export interface CombatStateBinding {
+  sourceDamage?(request: DamageRequest): DamageOutcome;
   admitDamage?(request: DamageRequest): "continue" | "handled";
   adjustDamage?(request: DamageRequest): Pick<DamageRequest, "amount" | "knockback"> | null;
   read(): CombatState;
@@ -71,6 +74,9 @@ function captureDecision(proposed: DamageDecision, request: DamageRequest): Dama
 
 /** Combat decisions are pure. Their stores commit synchronously before source callbacks may reenter. */
 export class GameplayAuthority implements DamageAuthority {
+  readonly damageOperation = new ModOperation<DamageRequest, DamageOutcome>("damage");
+  private readonly dispatchedDamage = new WeakSet<DamageRequest>();
+  private readonly sourceCursors = new Map<OwnedActor, Set<SourceDamageCursor>>();
   private readonly bindings = new Map<OwnedActor, CombatStateBinding>();
   private readonly powerArmorCells = new Map<OwnedActor, PowerArmorCellBinding>();
   private readonly policies = new Map<ProviderId, CombatPolicy>();
@@ -88,6 +94,12 @@ export class GameplayAuthority implements DamageAuthority {
   bind(actor: OwnedActor, binding: CombatStateBinding): undefined {
     this.actors.assertOwned(actor);
     if (this.bindings.has(actor)) throw new Error("Actor already has a combat binding");
+    this.bindings.set(actor, binding);
+    return undefined;
+  }
+
+  rebind(actor: OwnedActor, binding: CombatStateBinding): undefined {
+    this.actors.assertOwned(actor);
     this.bindings.set(actor, binding);
     return undefined;
   }
@@ -144,12 +156,20 @@ export class GameplayAuthority implements DamageAuthority {
     return binding.writeTraits(traits);
   }
 
-  runSourceDamage(input: DamageRequest, execute: (observer: SourceDamageObserver) => SourceDamageResult): DamageOutcome {
-    const request = captureRequest(input), target = this.actors.resolveOwned(request.target);
+  runSourceDamage(input: DamageRequest, execute: (observer: SourceDamageObserver, request: DamageRequest) => SourceDamageResult): DamageOutcome {
+    return this.damageOperation.active && !this.dispatchedDamage.has(input)
+      ? this.composeDamage(input, request => this.runSourceDamageCanonical(request, execute)) : this.runSourceDamageCanonical(input, execute);
+  }
+
+  private runSourceDamageCanonical(input: DamageRequest, execute: (observer: SourceDamageObserver, request: DamageRequest) => SourceDamageResult): DamageOutcome {
+    const request = this.dispatchedDamage.has(input) ? input : captureRequest(input), target = this.actors.resolveOwned(request.target);
     if (target === null) return { kind: "stale-target", request };
     const binding = this.binding(target), initial = this.readState(target, binding);
     const mutations: DamageMutation[] = [];
-    let health = initial.health, armor = initial.armor, velocity: Vec3 | null = null;
+    const cursor: SourceDamageCursor = { health: initial.health, armor: initial.armor, velocity: null };
+    let cursors = this.sourceCursors.get(target);
+    if (cursors === undefined) { cursors = new Set(); this.sourceCursors.set(target, cursors); }
+    cursors.add(cursor);
     let active = true;
     const observed: { reaction: SourceDamageResult | null } = { reaction: null };
     const assertActive = (): void => { if (!active) throw new Error("Source damage observer is closed"); };
@@ -165,16 +185,17 @@ export class GameplayAuthority implements DamageAuthority {
           if (observed.reaction !== null) throw new Error("Source damage store follows its reaction boundary");
           switch (write.kind) {
             case "health":
-              if (write.before !== health || !Number.isFinite(write.after) || binding.read().health !== write.after) throw new Error("Invalid observed source health store");
-              health = write.after; break;
+              if (write.before !== cursor.health || !Number.isFinite(write.after) || binding.read().health !== write.after) throw new Error("Invalid observed source health store");
+              break;
             case "armor":
-              if (!armorEqual(write.before, armor) || !armorEqual(this.readState(target, binding).armor, write.after)) throw new Error("Invalid observed source armor store");
-              armor = copyArmor(write.after); break;
+              if (!armorEqual(write.before, cursor.armor) || !armorEqual(this.readState(target, binding).armor, write.after)) throw new Error("Invalid observed source armor store");
+              break;
             case "source-velocity":
               if (![write.before.x, write.before.y, write.before.z, write.after.x, write.after.y, write.after.z].every(Number.isFinite)
-                || velocity !== null && (velocity.x !== write.before.x || velocity.y !== write.before.y || velocity.z !== write.before.z)) throw new Error("Invalid observed source velocity store");
-              velocity = copyVector(write.after); break;
+                || cursor.velocity !== null && (cursor.velocity.x !== write.before.x || cursor.velocity.y !== write.before.y || cursor.velocity.z !== write.before.z)) throw new Error("Invalid observed source velocity store");
+              break;
           }
+          this.advanceSourceCursors(target, write);
           const captured = captureDecision({ request, mutations: [write], appliedDamage: 0, reaction: "none" }, request).mutations[0];
           if (captured === undefined) throw new Error("Missing source damage store");
           mutations.push(captured);
@@ -188,8 +209,11 @@ export class GameplayAuthority implements DamageAuthority {
           this.hooks.beforeReaction(target, captured);
           return undefined;
         },
-      });
-    } finally { active = false; }
+      }, request);
+    } finally {
+      active = false; cursors.delete(cursor);
+      if (cursors.size === 0) this.sourceCursors.delete(target);
+    }
     const completed = decision(result);
     if (observed.reaction !== null && (observed.reaction.appliedDamage !== completed.appliedDamage || observed.reaction.reaction !== completed.reaction)) throw new Error("Source damage result disagrees with its reaction boundary");
     if (observed.reaction === null) {
@@ -212,10 +236,23 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   apply(input: DamageRequest): DamageOutcome {
-    let request = captureRequest(input);
+    return this.damageOperation.active ? this.composeDamage(input, request => this.applyCanonical(request)) : this.applyCanonical(input);
+  }
+
+  private composeDamage(input: DamageRequest, canonical: (request: DamageRequest) => DamageOutcome): DamageOutcome {
+    return this.damageOperation.dispatch(captureRequest(input), request => {
+      const captured = captureRequest(request);
+      this.dispatchedDamage.add(captured);
+      try { return canonical(captured); } finally { this.dispatchedDamage.delete(captured); }
+    });
+  }
+
+  private applyCanonical(input: DamageRequest): DamageOutcome {
+    let request = this.dispatchedDamage.has(input) ? input : captureRequest(input);
     const target = this.actors.resolveOwned(request.target);
     if (target === null) return { kind: "stale-target", request };
     const binding = this.binding(target);
+    if (binding.sourceDamage !== undefined) return binding.sourceDamage(request);
     const policy = this.policies.get(request.attack.combatProvider);
     if (policy === undefined) throw new Error(`Missing combat policy: ${request.attack.combatProvider}`);
     const admission = binding.admitDamage?.(request);
@@ -285,6 +322,19 @@ export class GameplayAuthority implements DamageAuthority {
     return binding.writeArmor(copyArmor(armor));
   }
 
+  private advanceSourceCursors(target: OwnedActor, mutation: DamageMutation): void {
+    const cursors = this.sourceCursors.get(target);
+    if (cursors === undefined) return;
+    for (const cursor of cursors) {
+      switch (mutation.kind) {
+        case "health": cursor.health = mutation.after; break;
+        case "armor": cursor.armor = copyArmor(mutation.after); break;
+        case "source-velocity": cursor.velocity = copyVector(mutation.after); break;
+        case "impulse": cursor.velocity = null; break;
+      }
+    }
+  }
+
   private commitMutations(target: OwnedActor, binding: CombatStateBinding, initial: CombatState, mutations: readonly DamageMutation[]): undefined {
     this.validateMutations(initial, mutations);
     for (const mutation of mutations) {
@@ -301,6 +351,7 @@ export class GameplayAuthority implements DamageAuthority {
           break;
         case "impulse": this.hooks.impulse(target, mutation.impulse, mutation.movementProvider); break;
       }
+      this.advanceSourceCursors(target, mutation);
     }
     return undefined;
   }

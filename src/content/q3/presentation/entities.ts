@@ -73,6 +73,8 @@ export interface PacketEntityMedia {
 
 /** Real renderer/audio traps and separately-owned cg_players/cg_weapons effects. */
 export interface PacketEntityImports {
+  readonly bodyHidden?: (entity: number) => boolean;
+  readonly pose?: (entity: ClientEntity) => void;
   addRefEntity(entity: RefEntity): void;
   addLight(light: DynamicLight): void;
   updateSoundPosition(entity: number, origin: Vec3): void;
@@ -169,6 +171,9 @@ function missileDirection(delta: Vec3): Vec3 {
 }
 
 export class PacketEntityPresenter {
+  private body(entity: ClientEntity, reference: RefEntity): void {
+    if (this.imports.bodyHidden?.(entity.currentState.number) !== true) this.imports.addRefEntity(reference);
+  }
   constructor(readonly state: ClientGameState, readonly media: PacketEntityMedia, readonly imports: PacketEntityImports) {
     if (state.product !== media.variant.product) throw new Error("packet entity media product differs from cgame state");
   }
@@ -220,7 +225,7 @@ export class PacketEntityPresenter {
     ref.origin = entity.lerpOrigin; ref.oldOrigin = entity.lerpOrigin;
     if (this.state.snap !== null && current.number === this.state.snap.playerState.clientNum) ref.renderFlags |= RF_THIRD_PERSON;
     ref.axis = qvmAnglesToAxis(entity.lerpAngles);
-    this.imports.addRefEntity(ref);
+    this.body(entity, ref);
   }
 
   private speaker(entity: ClientEntity): void {
@@ -241,7 +246,7 @@ export class PacketEntityPresenter {
     if (options.simpleItems && item.type !== ItemType.IT_TEAM) {
       const ref = createSpriteEntity();
       ref.origin = entity.lerpOrigin; ref.radius = 14; ref.customShader = visual.icon; ref.shaderRGBA = vec4(255, 255, 255, 255);
-      this.imports.addRefEntity(ref);
+      this.body(entity, ref);
       return;
     }
     const scale = f(f(0.005) + f(f(current.number) * f(0.00001)));
@@ -272,13 +277,13 @@ export class PacketEntityPresenter {
     if (this.media.variant.product === "missionpack" && item.type === ItemType.IT_HOLDABLE && item.tag === Holdable.HI_KAMIKAZE) {
       ref.axis = scaleAxis(ref.axis, 2); ref.nonNormalizedAxes = true;
     }
-    this.imports.addRefEntity({ ...ref });
+    this.body(entity, { ...ref });
     if (this.media.variant.product === "missionpack" && weapon !== null && weapon.barrelModel !== null && weapon.barrelModel.kind !== "default") {
       const barrel = createModelEntity(weapon.barrelModel);
       barrel.lightingOrigin = ref.lightingOrigin; barrel.shadowPlane = ref.shadowPlane; barrel.renderFlags = ref.renderFlags;
       positionRotatedEntityOnTag(barrel, ref, weapon.weaponModel, "tag_barrel");
       barrel.axis = ref.axis; barrel.nonNormalizedAxes = ref.nonNormalizedAxes;
-      this.imports.addRefEntity(barrel);
+      this.body(entity, barrel);
     }
     if (!options.simpleItems && (item.type === ItemType.IT_HEALTH || item.type === ItemType.IT_POWERUP) && visual.models[1] !== null && visual.models[1].kind !== "default") {
       ref.model = visual.models[1];
@@ -289,7 +294,7 @@ export class PacketEntityPresenter {
       }
       ref.axis = qvmAnglesToAxis(vec3(0, yaw, 0));
       if (fraction !== 1) { ref.axis = scaleAxis(ref.axis, fraction); ref.nonNormalizedAxes = true; }
-      this.imports.addRefEntity(ref);
+      this.body(entity, ref);
     }
   }
 
@@ -309,7 +314,7 @@ export class PacketEntityPresenter {
     if (current.weapon === Weapon.WP_PLASMAGUN) {
       const ref = createSpriteEntity();
       ref.origin = entity.lerpOrigin; ref.radius = 16; ref.customShader = this.media.plasmaBallShader;
-      this.imports.addRefEntity(ref);
+      this.body(entity, ref);
       return;
     }
     const ref = createModelEntity(weapon.missileModel);
@@ -320,7 +325,7 @@ export class PacketEntityPresenter {
     if (current.pos.type !== TrajectoryType.TR_STATIONARY) ref.axis = directionAxis(direction, (this.state.time / 4) | 0);
     else if (this.state.product === "missionpack" && current.weapon === Weapon.WP_PROX_LAUNCHER) ref.axis = qvmAnglesToAxis(entity.lerpAngles);
     else ref.axis = directionAxis(direction, current.time);
-    this.imports.addEntityWithPowerups(ref, current, Team.TEAM_FREE);
+    if (this.imports.bodyHidden?.(current.number) !== true) this.imports.addEntityWithPowerups(ref, current, Team.TEAM_FREE);
   }
 
   private grapple(entity: ClientEntity): void {
@@ -332,7 +337,7 @@ export class PacketEntityPresenter {
     ref.skinNum = this.state.clientFrame & 1; ref.renderFlags = weapon.missileRenderfx | RF_NOSHADOW;
     // CG_Grapple only fills axis[0]; the two cleared axes remain zero.
     ref.axis = [missileDirection(current.pos.delta), ref.axis[1], ref.axis[2]];
-    this.imports.addRefEntity(ref);
+    this.body(entity, ref);
   }
 
   private mover(entity: ClientEntity): void {
@@ -341,10 +346,10 @@ export class PacketEntityPresenter {
     const ref = createModelEntity(model);
     ref.origin = entity.lerpOrigin; ref.oldOrigin = entity.lerpOrigin; ref.axis = qvmAnglesToAxis(entity.lerpAngles);
     ref.renderFlags = RF_NOSHADOW; ref.skinNum = (this.state.time >> 6) & 1;
-    this.imports.addRefEntity({ ...ref });
+    this.body(entity, { ...ref });
     if (current.modelindex2 !== 0) {
       ref.skinNum = 0; ref.model = indexed(this.media.gameModels, current.modelindex2, "game model");
-      this.imports.addRefEntity(ref);
+      this.body(entity, ref);
     }
   }
 
@@ -352,7 +357,7 @@ export class PacketEntityPresenter {
     const ref = createBeamEntity();
     ref.origin = entity.currentState.pos.base; ref.oldOrigin = entity.currentState.origin2; ref.renderFlags = RF_NOSHADOW;
     ref.axis = [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)];
-    this.imports.addRefEntity(ref);
+    this.body(entity, ref);
   }
 
   private portal(entity: ClientEntity): void {
@@ -362,7 +367,7 @@ export class PacketEntityPresenter {
     ref.axis = [forward, side, cross3(forward, side)];
     ref.oldFrame = current.powerups; ref.frame = current.frame;
     ref.skinNum = qvmFloatToInt(f(f(f(current.clientNum) / 256) * 360));
-    this.imports.addRefEntity(ref);
+    this.body(entity, ref);
   }
 
   private team(entity: ClientEntity, options: PacketEntityOptions): void {
@@ -371,7 +376,7 @@ export class PacketEntityPresenter {
     ref.origin = entity.lerpOrigin; ref.lightingOrigin = entity.lerpOrigin; ref.axis = qvmAnglesToAxis(current.angles);
     if (options.gameType === GameType.GT_CTF || (this.state.product === "missionpack" && options.gameType === GameType.GT_1FCTF)) {
       ref.model = current.modelindex === Team.TEAM_RED ? this.media.redFlagBaseModel : current.modelindex === Team.TEAM_BLUE ? this.media.blueFlagBaseModel : this.media.neutralFlagBaseModel;
-      this.imports.addRefEntity(ref);
+      this.body(entity, ref);
       return;
     }
     if (this.media.variant.product !== "missionpack") return;
@@ -379,23 +384,23 @@ export class PacketEntityPresenter {
     if (options.gameType === GameType.GT_HARVESTER) {
       ref.model = current.modelindex === Team.TEAM_RED || current.modelindex === Team.TEAM_BLUE ? media.harvesterModel : media.harvesterNeutralModel;
       ref.customSkin = current.modelindex === Team.TEAM_RED ? media.harvesterRedSkin : current.modelindex === Team.TEAM_BLUE ? media.harvesterBlueSkin : null;
-      this.imports.addRefEntity(ref);
+      this.body(entity, ref);
       return;
     }
     if (options.gameType !== GameType.GT_OBELISK) return;
     ref.model = media.overloadBaseModel;
-    this.imports.addRefEntity({ ...ref });
+    this.body(entity, { ...ref });
     const health = qvmFloatToInt(f(current.modelindex2)) & 255;
     if (current.frame === 1) {
       ref.shaderRGBA = vec4(255, health, health, 255); ref.model = media.overloadEnergyModel;
-      this.imports.addRefEntity({ ...ref });
+      this.body(entity, { ...ref });
     }
     if (current.frame !== 2) {
       entity.miscTime = 0; entity.muzzleFlashTime = 0;
       ref.shaderRGBA = vec4(255, health, health, 255); ref.model = media.overloadLightsModel;
-      this.imports.addRefEntity({ ...ref });
+      this.body(entity, { ...ref });
       ref.origin = add3(ref.origin, vec3(0, 0, 56)); ref.model = media.overloadTargetModel;
-      this.imports.addRefEntity(ref);
+      this.body(entity, ref);
       return;
     }
     if (entity.miscTime === 0) entity.miscTime = this.state.time;
@@ -403,7 +408,7 @@ export class PacketEntityPresenter {
     const scale = elapsed > threshold ? Math.min(1, f(f((elapsed - threshold) | 0) / f(threshold))) : 0;
     const color = qvmFloatToInt(f(scale * 255)) & 255;
     ref.shaderRGBA = vec4(color, color, color, color); ref.model = media.overloadLightsModel;
-    this.imports.addRefEntity({ ...ref });
+    this.body(entity, { ...ref });
     if (elapsed > threshold) {
       if (entity.muzzleFlashTime === 0) {
         this.imports.startSound(entity.lerpOrigin, 1023, CHAN_BODY, media.obeliskRespawnSound);
@@ -414,7 +419,7 @@ export class PacketEntityPresenter {
       // Source leaves nonNormalizedAxes false even while scaling this target.
       ref.shaderRGBA = vec4(255, 255, 255, 255);
       ref.origin = add3(ref.origin, vec3(0, 0, 56)); ref.model = media.overloadTargetModel;
-      this.imports.addRefEntity(ref);
+      this.body(entity, ref);
     }
   }
 
@@ -422,6 +427,7 @@ export class PacketEntityPresenter {
     const type = entity.currentState.eType;
     if (type >= EntityType.ET_EVENTS) return;
     this.calculateLerpPositions(entity, options.smoothClients);
+    this.imports.pose?.(entity);
     this.effects(entity);
     switch (type) {
       case EntityType.ET_INVISIBLE: case EntityType.ET_PUSH_TRIGGER: case EntityType.ET_TELEPORT_TRIGGER: return;

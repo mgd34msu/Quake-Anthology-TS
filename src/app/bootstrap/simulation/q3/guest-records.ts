@@ -4,6 +4,7 @@ import { readSavedActor, savedActorId } from '../../../../persistence/save-image
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import type { ActorId, OwnedActor, ProviderId } from '../../../../contracts/identity.ts';
 import type { BodyState } from '../../../../contracts/world.ts';
+import type { Vec3 } from '../../../../contracts/math.ts';
 import type { Q3PlayerState } from '../../../../contracts/protocol.ts';
 import type { QvmGameData } from '../../../../compat/qvm/game-data.ts';
 import type { QvmSharedEntity } from '../../../../compat/qvm/shared-entity-record.ts';
@@ -19,10 +20,13 @@ export interface Q3GuestRecordHost {
   readonly scene: SharedSceneQueries;
   readonly provider: ProviderId;
   collision(actor: OwnedActor, collision: ActorCollision): undefined;
+  admit?(actor: OwnedActor): undefined;
 }
 
 /** Identities denote VM slots. The ABI exposes unlink, but no game-private free event. */
 export class Q3GuestRecords {
+  private writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
+  setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined): void { this.writePlayerVelocity = write; }
   private readonly actors = new Map<number, OwnedActor>();
   private readonly links = new Map<number, ReturnType<Q3VisibilityBindings['link']>>();
   private closed = false;
@@ -66,6 +70,7 @@ export class Q3GuestRecords {
       read: () => this.body(slot),
       write: body => {
         const entity = this.entity(slot);
+        if (slot < this.data.numClients) this.writePlayerVelocity?.(actor, body.velocity);
         entity.r.currentOrigin = body.origin; entity.r.currentAngles = body.angles;
         entity.r.mins = body.bounds.min; entity.r.maxs = body.bounds.max;
         entity.s.pos = { ...entity.s.pos, delta: body.velocity };
@@ -73,6 +78,7 @@ export class Q3GuestRecords {
         return undefined;
       },
     });
+    this.host.admit?.(actor);
   }
 
   slot(actor: ActorId): number | null {
@@ -93,7 +99,7 @@ export class Q3GuestRecords {
 
   body(slot: number): BodyState {
     const entity = this.entity(slot), shared = entity.r;
-    return { origin: shared.currentOrigin, angles: shared.currentAngles, velocity: entity.s.pos.delta,
+    return { origin: shared.currentOrigin, angles: shared.currentAngles, velocity: slot < this.data.numClients ? this.player(slot).velocity : entity.s.pos.delta,
       bounds: { min: shared.mins, max: shared.maxs }, ground: this.actors.get(entity.s.groundEntityNum)?.id ?? null };
   }
 
@@ -180,7 +186,7 @@ export class Q3GuestRecords {
       slots.add(entry.slot); actors.add(actor);
       return { ...entry, actor };
     });
-    if (actors.size !== this.host.actors.ownedBy(this.host.provider).length) reader.fail('guest record checkpoint omits owned actors');
+    if (actors.size !== this.host.actors.ownedBy(this.host.provider).filter(actor => this.host.actors.sourceOf(actor.id)?.slot !== 1022).length) reader.fail('guest record checkpoint omits owned actors');
     for (const entry of bindings) {
       this.bind(entry.slot, entry.actor);
       if (entry.visibility !== null) this.links.set(entry.slot, entry.visibility);

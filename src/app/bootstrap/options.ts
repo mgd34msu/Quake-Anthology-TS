@@ -3,6 +3,7 @@ import { readStartupCommand, startupRequestsWorld } from "./startup-commands.ts"
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { GameFamily } from "../../contracts/content.ts";
+import { readModSelection, type ModSelection } from "../../contracts/mods.ts";
 import type { Q1ProtocolIdentity, Q2ProtocolIdentity } from "../../contracts/protocol.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 import { normalizeResourcePath } from "../../content/mounts/paths.ts";
@@ -30,6 +31,7 @@ export interface ApplicationOptions {
   readonly quakeCProgram?: string;
   readonly q2GameLibrary?: string;
   readonly weaponBehavior?: { readonly product: string; readonly id: string };
+  readonly mods?: readonly ModSelection[];
   readonly movement: GameFamily;
   readonly movementProduct?: string;
   readonly character: GameFamily;
@@ -78,6 +80,7 @@ Usage: bun run src/main.ts [options]
   --progs MOUNTED_PATH       Validated mounted QuakeC .dat artifact
   --q2-game MOUNTED_PATH     Explicit Quake II game DLL (classic i386 / rerelease x64)
   --weapon-behavior PRODUCT/ID  Overlay a declared projectile trajectory
+  --mod PRODUCT/ID           Enable a declared mod component (repeat to combine)
   --movement q1|q2|q3|qw|PRODUCT  Movement family or exact installed product
   --character q1|q2|q3       Player character provider
   --model NAME               Character model (e.g. sarge or male)
@@ -179,6 +182,7 @@ export function parseApplicationCommand(argv: readonly string[]): ApplicationCom
       case "--content-root": options = { ...options, corpusRoot: resolve(value) }; break;
       case "--map-game": options = { ...options, mapProduct: value }; break;
       case "--game": options = { ...options, product: value }; break;
+      case "--mod": options = { ...options, mods: [...options.mods ?? [], readModSelection(value)] }; break;
       case "--map": options = { ...options, map: mapResourcePath(value) }; break;
       case "--weapon-behavior": {
         const selected = value, slash = selected.indexOf("/");

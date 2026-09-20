@@ -44,12 +44,17 @@ export function writeClassicVector(memory: MappedGuestMemory, address: GuestAddr
 }
 
 export interface ClassicQ2EdictDescriptor { readonly base: GuestAddress; readonly stride: number; readonly count: number; readonly capacity: number }
+export interface ClassicQ2ActorProjection {
+  project(record: RawEntityView): OwnedActor | null;
+  address(actor: ActorId): GuestAddress;
+}
 
 /** Reads the DLL's current export descriptor and borrows complete source-owned edicts. */
 export class ClassicQ2Edicts {
   readonly #retainedClients = new Set<number>();
   constructor(readonly memory: MappedGuestMemory, readonly exports: GuestAddress, readonly actors: SessionActorRegistry,
-    readonly provider: ProviderId, readonly bind: (record: RawEntityView, actor: OwnedActor) => undefined) {
+    readonly provider: ProviderId, readonly bind: (record: RawEntityView, actor: OwnedActor) => undefined,
+    readonly projection?: ClassicQ2ActorProjection) {
     memory.check(exports, CLASSIC_Q2_EXPORT_BYTES, "read");
     if (memory.readInt32(exports) !== 3) throw new RangeError("GetGameAPI returned an API version other than 3");
   }
@@ -67,8 +72,10 @@ export class ClassicQ2Edicts {
     const { base, stride, count } = this.descriptor();
     if (!Number.isInteger(slot) || slot < 0 || slot >= count) throw new RangeError("API 3 edict slot exceeds num_edicts");
     const address = this.memory.offset(base, BigInt(slot * stride));
-    return { module: this.memory.module, slot, address, strideBytes: stride, publicLayout: CLASSIC_Q2_EDICT_LAYOUT,
-      bytes: this.memory.borrow(address, stride), currentActor: () => this.actors.atSource(this.provider, slot)?.id ?? null };
+    const record: RawEntityView = { module: this.memory.module, slot, address, strideBytes: stride, publicLayout: CLASSIC_Q2_EDICT_LAYOUT,
+      bytes: this.memory.borrow(address, stride), currentActor: () => this.projection === undefined
+        ? this.actors.atSource(this.provider, slot)?.id ?? null : this.projection.project(record)?.id ?? null };
+    return record;
   }
   fromPointer(address: GuestAddress): RawEntityView {
     if (address.addressSpace !== this.memory.addressSpace) throw new RangeError("Foreign guest edict address space");
@@ -77,11 +84,13 @@ export class ClassicQ2Edicts {
     return this.at(Number(difference / BigInt(descriptor.stride)));
   }
   pointer(actor: ActorId): GuestAddress {
+    if (this.projection !== undefined) return this.projection.address(actor);
     const source = this.actors.sourceOf(actor);
     if (source === null || source.provider !== this.provider) throw new Error("Foreign actor requires an explicit native semantic edict adapter");
     return this.at(source.slot).address;
   }
   observe(address: GuestAddress): OwnedActor | null {
+    if (this.projection !== undefined) return this.projection.project(this.fromPointer(address));
     const record = this.fromPointer(address), existing = this.actors.atSource(this.provider, record.slot);
     if (record.bytes.getInt32(88, true) === 0 && !this.#retainedClients.has(record.slot)) {
       if (existing !== null) this.actors.release(existing);

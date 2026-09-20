@@ -5,6 +5,7 @@ import { readRandom, readVector } from "../../../persistence/shared.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 import type { GrappleRuntimeCheckpoint } from "./grapple-runtime.ts";
 import { readGrappleWeaponState } from "./weapon-slot-checkpoint.ts";
+import { readQvmGrappleSourceCheckpoint } from "./qvm-grapple-source.ts";
 
 export function readGrappleRuntimeCheckpoint(reader: SaveReader): GrappleRuntimeCheckpoint {
   const random = readRandom(reader.field("random"));
@@ -16,8 +17,9 @@ export function readGrappleRuntimeCheckpoint(reader: SaveReader): GrappleRuntime
     controls: reader.field("controls").list(entry => ({ actor: readSavedActor(entry.field("actor")), held: entry.field("held").boolean(), jump: entry.field("jump").boolean(), teleportBit: entry.field("teleportBit").nullable(value => value.choice(0, 4)),
       pressed: entry.field("pressed").boolean(), released: entry.field("released").boolean(), previousVelocity: readVector(entry.field("previousVelocity")),
       predictionSuppressed: entry.field("predictionSuppressed").boolean() })) };
-  const source = reader.field("source"), kind = source.field("kind").choice("q1-threewave", "q2-ctf", "q2-lmctf");
+  const source = reader.field("source"), kind = source.field("kind").choice("q1-threewave", "q2-ctf", "q2-lmctf", "q3-qvm");
   switch (kind) {
+    case "q3-qvm": return { ...common, source: { kind, component: readQvmGrappleSourceCheckpoint(source.field("component")), holstered: source.field("holstered").list(readSavedActor) } };
     case "q1-threewave": return { ...common, source: { kind, entities: readQ1FoundationCheckpoint(source.field("entities")) } };
     case "q2-ctf": return { ...common, source: { kind, entities: readQ2FoundationCheckpoint(source.field("entities")),
       states: source.field("states").list(entry => { const state = entry.field("state"); return { actor: readSavedActor(entry.field("actor")),

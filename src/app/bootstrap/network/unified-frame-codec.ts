@@ -72,7 +72,7 @@ export function encodeUnifiedFrame(frame: UnifiedPresentationFrame): Uint8Array 
       configurations:snapshot.configurations.map(c=>({...c,actor:wireActor(c.actor)})),
       scene:{time:scene.time,world:scene.world===null?null:resourceKey(scene.world.resource),entities:scene.entities.map(encodeEntity),lights:scene.lights,particles:scene.particles,lightStyles:scene.lightStyles,areaBits:scene.areaBits}},
       events:frame.output.events.map(writeUnifiedSimulationEvent)},
-    models:frame.models.map(m=>({...m,actor:wireActor(m.actor)})),characters:frame.characters.map(c=>({...c,actor:wireActor(c.actor)})),worldText:frame.worldText,
+    models:frame.models.map(m=>({...m,actor:wireActor(m.actor),...(m.q3GrappleCable===undefined?{}:{q3GrappleCable:{...m.q3GrappleCable,owner:wireActor(m.q3GrappleCable.owner)}})})),characters:frame.characters.map(c=>({...c,actor:wireActor(c.actor)})),worldText:frame.worldText,
     player:{actor:wireActor(frame.player.actor),view:frame.player.view,ui:frame.player.ui}});
   if(value.length>32*1024*1024)throw new RangeError('Unified frame exceeds byte limit');
   return deflateRawSync(value,{level:1});

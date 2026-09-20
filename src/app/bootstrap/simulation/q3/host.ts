@@ -1,5 +1,6 @@
 import type { CvarArchiveEntry } from "../../../../core/cvars/index.ts";
 import type { ActorId } from "../../../../contracts/identity.ts";
+import type { Vec3 } from "../../../../contracts/math.ts";
 import { Q3ServerState } from "./server-state.ts";
 import type { Q3SourceHost, Q3SourceBots, Q3SourceEntityEvent } from "./types.ts";
 
@@ -9,6 +10,7 @@ export type Q3SourceEvent =
   | { readonly kind: "console-command"; readonly execution: "append" | "now"; readonly text: string }
   | { readonly kind: "drop-client"; readonly client: number; readonly reason: string }
   | { readonly kind: "configstring"; readonly index: number; readonly value: string }
+  | { readonly kind: "sound"; readonly actor: ActorId; readonly origin: Vec3; readonly velocity: Vec3; readonly path: string; readonly channel: number; readonly volume: number; readonly loop: boolean }
   | Q3SourceEntityEvent;
 
 export interface Q3HostOperations extends Omit<Q3SourceHost, "engine" | "cvars" | "configstrings" | "bots" | "entityEvent" | "serverState"> {

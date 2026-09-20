@@ -1,5 +1,8 @@
 import { MountPreparationScope } from "../../content/mounts/index.ts";
-import { applicationWeaponBehaviorChoices, readWeaponBehaviorRequest, selectApplicationWeaponBehavior } from "./weapon-behavior-selection.ts";
+import { applicationModChoices, applyApplicationMods, type ApplicationModChoice } from "./mod-selection.ts";
+import { ModSelectionSet } from "../../content/mods/selection.ts";
+import { modSelectionKey, readModSelection } from "../../contracts/mods.ts";
+import type { ModMenuService } from "../../ui/mods/menu.ts";
 import { sourceProgramProduct } from "../../content/catalog/source-program.ts";
 import { liveQ2Protocol } from "./options.ts";
 import { readArenaSelection, type ArenaSelection } from "./base-arena-selection.ts";
@@ -22,7 +25,8 @@ import { parseQ1Entities, q1EntityValue } from "../../formats/q1-map/index.ts";
 import type { CampaignSelection, EnemySelection, EquipmentSelection, MonsterSelectionTarget, ExecutableRecipe, GameFamily, LaunchChoice, ProviderReference } from "../../contracts/content.ts";
 import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch } from "../../content/catalog/index.ts";
 import type { CatalogProduct, InstalledCatalog } from "../../content/catalog/index.ts";
-import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment } from "../../content/catalog/equipment.ts";
+import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment, grappleStyles, offhandGrenadeSource, type GrappleStyle } from "../../content/catalog/equipment.ts";
+import { applicationQvmGrappleSelection } from "./qvm-grapple-selection.ts";
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../content/catalog/monsters.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
@@ -33,7 +37,7 @@ import type { ApplicationOptions } from "./options.ts";
 import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
 import { defaultNetQuakeProfile } from "../../network/q1/profile.ts";
 
-export type StartupSelectionField = "doppler" | "environment" | "product" | "mapProduct" | "map" | "movement" | "character" | "model" | "weapons" | "weaponBehavior" | "enemies" | "grapple" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
+export type StartupSelectionField = "doppler" | "environment" | "product" | "mapProduct" | "map" | "movement" | "character" | "model" | "weapons" | "enemies" | "grapple" | "grappleStyle" | "grenades" | "mode" | "rules" | "skill" | "seats" | "renderer";
 export interface StartupSelectionChoice { readonly id: string; readonly label: string; readonly unavailable: string | null; }
 export interface StartupSelectionRow { readonly id: StartupSelectionField; readonly label: string; readonly value: string; readonly choices: readonly StartupSelectionChoice[]; }
 export interface MonsterRosterRow { readonly classname: string | null; readonly label: string; readonly value: string; readonly effectiveLabel: string; readonly choices: readonly StartupSelectionChoice[]; }
@@ -139,7 +143,55 @@ export class StartupSelectionModel {
     this.initial = { ...this.initial, q3Product: prepared.q3Product };
   }
   private readonly values: Record<StartupSelectionField, string>;
-  private behaviorChoices: readonly StartupSelectionChoice[] = [];
+  private modChoices: readonly ApplicationModChoice[] = [];
+  private qvmHookStyles: readonly GrappleStyle[] = [];
+  private hookStyles(): readonly GrappleStyle[] {
+    return [...grappleStyles(this.catalog, this.product("product")), ...this.qvmHookStyles];
+  }
+  private async prepareHookStyles(catalog = this.catalog): Promise<void> {
+    await using mounts = new MountPreparationScope();
+    const styles = new Map<string, GrappleStyle>();
+    for (const product of catalog.products) {
+      if (product.expectation.family !== "q3" || product.availability.kind !== "installed") continue;
+      const selection = await applicationQvmGrappleSelection(catalog, product.id, mounts.open);
+      if (selection === null || styles.has(selection.profile.id)) continue;
+      styles.set(selection.profile.id, { id: selection.profile.id, title: selection.profile.title, selection, unavailable: null });
+    }
+    this.qvmHookStyles = [...styles.values()];
+  }
+  private selectedMods: ModSelectionSet | null = null;
+  private modStatus = "";
+  private refreshingMods = false;
+  readonly mods: ModMenuService = {
+    rows: () => (this.selectedMods?.entries() ?? []).filter(entry => entry.purpose === "addition").map(entry => ({
+      id: modSelectionKey(entry.selection), title: entry.title, source: entry.sourceTitle,
+      enabled: this.selectedMods?.has(entry.selection) === true,
+      unavailable: entry.availability.kind === "available" ? null : entry.availability.reason,
+    })),
+    setEnabled: (id, enabled) => {
+      try {
+        if (this.selectedMods === null) throw new Error("Mod discovery has not finished");
+        this.selectedMods.setEnabled(readModSelection(id), enabled); this.modStatus = "";
+      } catch (error) { this.modStatus = error instanceof Error ? error.message : String(error); }
+    },
+    refresh: () => {
+      if (this.refreshingMods) return;
+      this.refreshingMods = true; this.modStatus = "Reading installed mods...";
+      discoverInstalledContent({ corpusRoot: this.catalog.corpusRoot, generation: this.catalog.generation + 1,
+        ...(this.catalog.userContentRoot === null ? {} : { userContentRoot: this.catalog.userContentRoot }), discoverMods: true })
+        .then(async catalog => { await this.prepareMods(catalog); await this.prepareHookStyles(catalog); this.currentCatalog = catalog; this.modStatus = ""; })
+        .catch((error: unknown) => { this.modStatus = error instanceof Error ? error.message : String(error); })
+        .finally(() => { this.refreshingMods = false; });
+    },
+    status: () => this.modStatus,
+  };
+  private async prepareMods(catalog = this.catalog): Promise<void> {
+    const choices = await applicationModChoices(catalog), descriptions = choices.map(choice => choice.description);
+    if (this.selectedMods === null) this.selectedMods = new ModSelectionSet(descriptions,
+      [...this.initial.mods ?? [], ...this.initial.weaponBehavior === undefined ? [] : [this.initial.weaponBehavior]]);
+    else this.selectedMods.refresh(descriptions);
+    this.modChoices = choices;
+  }
   private display: Pick<ApplicationOptions, "width" | "height" | "gamma">;
   private displayOverridesConsumed = false;
   private readonly playableMaps = new Map<string, readonly StartupSelectionChoice[]>();
@@ -159,7 +211,7 @@ export class StartupSelectionModel {
     const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
     this.values = { product: initial.product, mapProduct: initial.mapProduct ?? initial.product, map: initial.map,
       movement: initial.movementProduct === undefined ? baseProduct(initial.movement) : catalog.require(initial.movementProduct).expectation.id, character: baseProduct(initial.character), model: initial.characterModel,
-      doppler: "source", environment: "audio-content", weaponBehavior: initial.weaponBehavior === undefined ? "native" : `${initial.weaponBehavior.product}/${initial.weaponBehavior.id}`, weapons: "native", enemies: "native", grapple: "native", grenades: "native", mode: initial.mode, rules,
+      doppler: "source", environment: "audio-content", weapons: "native", enemies: "native", grapple: "native", grappleStyle: "native", grenades: "native", mode: initial.mode, rules,
       skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer };
     this.selectedModels.set(this.values.character, initial.characterModel);
   }
@@ -170,7 +222,9 @@ export class StartupSelectionModel {
     if (initialProduct === undefined) throw new Error("No installed game content remains");
     const candidate = new StartupSelectionModel(catalog, { ...this.initial, product: initialProduct.expectation.id });
     await candidate.prepareMaps();
-    this.currentCatalog = candidate.catalog; this.initial = candidate.initial; this.teamArenaCampaign = candidate.teamArenaCampaign; this.behaviorChoices = candidate.behaviorChoices;
+    this.currentCatalog = candidate.catalog; this.initial = candidate.initial; this.teamArenaCampaign = candidate.teamArenaCampaign; this.modChoices = candidate.modChoices;
+    this.qvmHookStyles = candidate.qvmHookStyles;
+    this.selectedMods?.refresh(this.modChoices.map(choice => choice.description));
     this.playableMaps.clear(); for (const [id, value] of candidate.playableMaps) this.playableMaps.set(id, value);
     this.authoredDefaultMaps.clear(); for (const [id, value] of candidate.authoredDefaultMaps) this.authoredDefaultMaps.set(id, value);
     this.looseModels.clear(); for (const [id, value] of candidate.looseModels) this.looseModels.set(id, value);
@@ -188,13 +242,8 @@ export class StartupSelectionModel {
     this.eligibleMaps.clear();
     await this.prepareQ3Catalog();
     await this.prepareTeamArena();
-    const behaviors: StartupSelectionChoice[] = [];
-    for (const product of this.catalog.products) {
-      if (unavailable(product) !== null) continue;
-      try { for (const entry of await applicationWeaponBehaviorChoices(this.catalog, product.expectation.id, mounts.open)) behaviors.push(choice(entry.id, entry.title, entry.unavailable)); }
-      catch (error) { behaviors.push(choice(`${product.expectation.id}/unavailable`, product.expectation.title, error instanceof Error ? error.message : String(error))); }
-    }
-    this.behaviorChoices = behaviors;
+    await this.prepareMods();
+    await this.prepareHookStyles();
     const archives = new Map<string, ArchiveHandle>(), files = new Map<string, FileSource>(), playable = new Map<string, boolean>();
     try {
       for (const product of this.catalog.products) {
@@ -311,7 +360,7 @@ export class StartupSelectionModel {
     const model = this.modelsFor(product).find(model => model.id === characterModel);
     if (model === undefined || model.unavailable !== null) throw new Error(`${selected.label}: native ${characterModel} model is unavailable`);
     const { teamArenaSkirmish: _teamArenaSkirmish, botSkill: _botSkill, serverProfile: _serverProfile, serverProfilePath: _serverProfilePath,
-      mapProduct: _mapProduct, quakeCProgram: _quakeCProgram, weaponBehavior: _weaponBehavior, remoteContent: _remoteContent, q1Protocol: _q1Protocol, q2Protocol: _q2Protocol, ...preferences } = this.initial;
+      mapProduct: _mapProduct, quakeCProgram: _quakeCProgram, weaponBehavior: _weaponBehavior, mods: _mods, remoteContent: _remoteContent, q1Protocol: _q1Protocol, q2Protocol: _q2Protocol, ...preferences } = this.initial;
     const skill = family === "q3" ? 1 : level;
     if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid campaign difficulty");
     const bot: Pick<ApplicationOptions, "botSkill"> = family === "q3" && (level === 1 || level === 2 || level === 3 || level === 4 || level === 5) ? { botSkill: level } : {};
@@ -521,7 +570,7 @@ export class StartupSelectionModel {
     const sourceLabel = monsterSource.choices.find(source => source.id === roster.source)?.label ?? "Authored campaign monsters";
     const customized = roster.default !== "native" || roster.byClassname.size > 0;
     const monsterValue = this.values.enemies === "custom" && roster.source !== "native" && !customized ? roster.source : this.values.enemies;
-    const row = (id: StartupSelectionField, label: string, choices: readonly StartupSelectionChoice[]): StartupSelectionRow => ({ id, label, value: id === "enemies" ? monsterValue : this.values[id], choices });
+    const row = (id: StartupSelectionField, label: string, choices: readonly StartupSelectionChoice[], value = id === "enemies" ? monsterValue : this.values[id]): StartupSelectionRow => ({ id, label, value, choices });
     const current = this.product("product"), currentLabel = productChoice(current).label;
     const provider: ProviderReference = { provider: `${current.expectation.family}:official`, content: current.id };
     const rules = this.values.rules === "ctf" || this.values.rules === "lmctf" ? this.catalog.product(`q2-classic-${this.values.rules}`) : current;
@@ -529,15 +578,13 @@ export class StartupSelectionModel {
       : nativeEquipment(this.catalog, provider, this.values.rules === "standard" ? provider : { provider: `${current.expectation.family}:${this.values.rules}`, content: rules.id });
     const nativeWeapons = choice("native", `${currentLabel} weapons`);
     const nativeMonsters = choice("native", `${currentLabel} authored monsters`);
-    const nativeGrapple = choice("native", defaults.grapple.kind === "disabled" ? "Off (campaign default)" : `${defaults.grapple.mechanic} (${defaults.grapple.binding})`);
-    const nativeGrenades = choice("native", defaults.handGrenades.kind === "disabled" ? "Off (campaign default)" : `Q2 ${defaults.handGrenades.edition} offhand grenades`);
-    const grapples: StartupSelectionChoice[] = [nativeGrapple, choice("disabled", "Disabled")];
-    for (const product of this.catalog.products) {
-      const { family, campaign, edition, id } = product.expectation;
-      if (family === "q1" && campaign === "ctf" && edition === "rerelease" || family === "q2" && (campaign === "ctf" || campaign === "lmctf" && edition === "classic")) {
-        for (const binding of ["slot", "offhand"]) grapples.push(choice(`${id}/${binding}`, `${product.expectation.title} — ${binding === "slot" ? "weapon slot" : "offhand"}`, unavailable(product)));
-      }
-    }
+    const styles = this.hookStyles();
+    const placement = this.values.grapple === "native" ? defaults.grapple.kind === "enabled" ? defaults.grapple.binding : "disabled" : this.values.grapple;
+    const defaultStyle = defaults.grapple.kind === "enabled" ? defaults.grapple.mechanic === "q3-qvm" ? defaults.grapple.profile.id : defaults.grapple.mechanic : styles.find(style => style.unavailable === null)?.id ?? styles[0]?.id ?? "";
+    const style = this.values.grappleStyle === "native" ? defaultStyle : this.values.grappleStyle;
+    const hookUnavailable = styles.some(style => style.unavailable === null) ? null : "Install a game or mod that provides a hook";
+    const grenadeSource = offhandGrenadeSource(this.catalog, current);
+    const grenades = this.values.grenades === "native" ? defaults.handGrenades.kind === "enabled" ? "enabled" : "disabled" : this.values.grenades;
     const environmentProduct = this.catalog.product("q2-rerelease-baseq2");
     return [row("environment", "Environment", [choice("disabled", "Off"), choice("audio-content", "Game default"),
       choice("q2-rerelease-baseq2", "Quake II environments", unavailable(environmentProduct) === null ? null : "Requires Quake II rerelease data")]), row("doppler", "Doppler", [choice("source", "Game default"), choice("disabled", "Off")]), row("product", "Game / mod", this.catalog.products.map(productChoice)),
@@ -550,9 +597,9 @@ export class StartupSelectionModel {
         return option.unavailable === null && product.expectation.family === current.expectation.family && product.id !== current.id && !baseArsenalPair(current, product)
           ? { ...option, unavailable: "Another edition or campaign within this weapon family is not implemented; use campaign defaults." } : option;
       })]), row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
-      row("weaponBehavior", "Projectile trajectory", [choice("native", "Selected weapon default"), ...this.behaviorChoices]),
-      row("grapple", "Grapple", grapples), row("grenades", "Offhand grenades", [nativeGrenades, choice("disabled", "Disabled"),
-        ...this.catalog.products.filter(product => product.expectation.family === "q2" && product.expectation.campaign === "baseq2").map(productChoice)]),
+      row("grapple", "Hook", [choice("disabled", "Off"), choice("slot", "Weapon slot", hookUnavailable), choice("offhand", "Offhand", hookUnavailable)], placement),
+      ...(placement === "disabled" ? [] : [row("grappleStyle", "Hook style", styles.map(style => choice(style.id, style.title, style.unavailable)), style)]),
+      row("grenades", "Offhand grenades", [choice("disabled", "Off"), choice("enabled", "On", grenadeSource === null ? "Requires Quake II grenade assets" : null)], grenades),
       row("mode", "Game mode", [choice("singleplayer", "Single player"), choice("coop", "Cooperative"), choice("deathmatch", "Deathmatch")]),
       row("rules", "Match rules", [choice("standard", "Standard"), ...(["tag", "deathball", "horde"] satisfies readonly MatchRules[]).map(rule => choice(rule, rule === "tag" ? "Tag" : rule === "deathball" ? "DeathBall" : "Horde", matchModeUnavailable({ ...sourceProgramProduct(this.catalog, this.product("product").id).expectation, mode: this.values.mode === "deathmatch" ? "deathmatch" : this.values.mode === "coop" ? "coop" : "singleplayer", rules: rule }))), ...["ctf", "lmctf"].map(rule => choice(rule, rule === "ctf" ? "Q2 Capture the Flag" : "Loki's Minions CTF",
         this.product("product").expectation.family !== "q2" || this.product("product").expectation.edition !== "classic" ? "Requires a classic Quake II campaign"
@@ -601,9 +648,10 @@ export class StartupSelectionModel {
     const mode = this.values.mode, renderer = this.values.renderer, rules = this.values.rules, skill = Number(this.values.skill);
     if (mode !== "singleplayer" && mode !== "coop" && mode !== "deathmatch" || renderer !== "gl" && renderer !== "cpu"
       || rules !== "standard" && rules !== "ctf" && rules !== "lmctf" && rules !== "tag" && rules !== "deathball" && rules !== "horde" || skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Invalid startup settings");
-    const { q1Protocol, weaponBehavior: _initialWeaponBehavior, ...initial } = this.initial;
+    const { q1Protocol, weaponBehavior: _initialWeaponBehavior, mods: _initialMods, ...initial } = this.initial;
     const protocol = initial.network.kind === "native-server" && this.hosting().q1Protocol !== null && q1Protocol !== undefined ? { q1Protocol } : {};
-    return this.applySelectedServerProfile({ ...initial, ...(this.values.weaponBehavior === "native" ? {} : { weaponBehavior: readWeaponBehaviorRequest(this.values.weaponBehavior) }), ...protocol, product: this.values.product, mapProduct: this.values.mapProduct, map: this.values.map, movement: this.product("movement").expectation.family, movementProduct: this.product("movement").expectation.id,
+    const mods = this.selectedMods?.enabled() ?? [...this.initial.mods ?? [], ...this.initial.weaponBehavior === undefined ? [] : [this.initial.weaponBehavior]];
+    return this.applySelectedServerProfile({ ...initial, mods, ...protocol, product: this.values.product, mapProduct: this.values.mapProduct, map: this.values.map, movement: this.product("movement").expectation.family, movementProduct: this.product("movement").expectation.id,
       character: this.product("character").expectation.family, characterModel: this.values.model, mode, rules, skill,
       seats: Number(this.values.seats), renderer, ...this.display, ...(this.displayOverridesConsumed ? { displayOverrides: {} } : {}) });
   }
@@ -625,21 +673,25 @@ export class StartupSelectionModel {
   private selectedEquipment(baseline: EquipmentSelection): EquipmentSelection {
     let equipment = baseline;
     if (this.values.grapple === "disabled") equipment = { ...equipment, grapple: disabledEquipment().grapple };
-    else if (this.values.grapple !== "native") {
-      const [id, binding] = this.values.grapple.split("/");
-      if (id === undefined || binding !== "slot" && binding !== "offhand") throw new Error("Invalid grapple selection");
-      const product = this.catalog.require(id), edition = product.expectation.edition;
-      if (product.expectation.family === "q1") equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.threewave, content: product.id }, mechanic: "q1-threewave", edition: "rerelease", binding } };
-      else if (product.expectation.campaign === "lmctf") equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.lmctf, content: product.id }, mechanic: "q2-lmctf", edition: "classic", binding } };
-      else {
-        if (edition !== "classic" && edition !== "rerelease") throw new Error("Unsupported grapple edition");
-        equipment = { ...equipment, grapple: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.ctf, content: product.id }, mechanic: "q2-ctf", edition, binding } };
+    else {
+      const binding = this.values.grapple === "native" ? baseline.grapple.kind === "enabled" ? baseline.grapple.binding : "disabled" : this.values.grapple;
+      if (binding !== "disabled") {
+        if (binding !== "slot" && binding !== "offhand") throw new Error("Invalid hook placement");
+        const styles = this.hookStyles();
+        const id = this.values.grappleStyle === "native" ? baseline.grapple.kind === "enabled"
+          ? baseline.grapple.mechanic === "q3-qvm" ? baseline.grapple.profile.id : baseline.grapple.mechanic
+          : styles.find(style => style.unavailable === null)?.id : this.values.grappleStyle;
+        const style = styles.find(style => style.id === id);
+        if (style === undefined || style.unavailable !== null) throw new Error(style?.unavailable ?? "Select an installed hook style");
+        equipment = { ...equipment, grapple: { ...style.selection, binding } };
       }
     }
     if (this.values.grenades === "disabled") equipment = { ...equipment, handGrenades: disabledEquipment().handGrenades };
-    else if (this.values.grenades !== "native") {
-      const product = this.catalog.require(this.values.grenades), edition = product.expectation.edition;
-      if (edition !== "classic" && edition !== "rerelease") throw new Error("Unsupported grenade edition");
+    else if (this.values.grenades === "enabled") {
+      const product = offhandGrenadeSource(this.catalog, this.product("product"));
+      if (product === null) throw new Error("Offhand grenades require Quake II grenade assets");
+      const edition = product.expectation.edition;
+      if (edition !== "classic" && edition !== "rerelease") throw new Error("Invalid grenade asset source");
       equipment = { ...equipment, handGrenades: { kind: "enabled", source: { provider: EQUIPMENT_PROVIDERS.handGrenades, content: product.id }, edition, binding: "offhand", initialAmmo: 5, capacity: 50 } };
     }
     return equipment;
@@ -682,12 +734,12 @@ export class StartupSelectionModel {
     }
     selections = { ...selections, equipment: { kind: "selected", value: this.selectedEquipment(base.equipment) } };
     let recipe = await resolveLaunch({ catalog: this.catalog, preset, choice: selections });
-    if (options.weaponBehavior !== undefined) recipe = await selectApplicationWeaponBehavior(this.catalog, recipe, options.weaponBehavior);
+    recipe = applyApplicationMods(recipe, this.modChoices, options.mods ?? []);
     return { options: { ...options, explicitRules: { skill: true, mode: true, capacity: true } }, recipe };
   }
 }
 export async function createStartupSelection(options: ApplicationOptions): Promise<StartupSelectionModel> {
-  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot() }), options);
+  const model = new StartupSelectionModel(await discoverInstalledContent({ corpusRoot: options.corpusRoot, userContentRoot: options.userContentRoot ?? defaultUserContentRoot(), discoverMods: true }), options);
   await model.prepareMaps();
   return model;
 }

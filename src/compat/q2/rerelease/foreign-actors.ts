@@ -4,7 +4,7 @@ import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { AttackProvenance, DamageOutcome, DamageRequest, Q2NativeCause } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
-import { canonicalCauseFromNative, nativeCauseFromCanonical } from "../../../content/q2/missionpacks/damage.ts";
+import { canonicalCauseFromNative } from "../../../content/q2/missionpacks/damage.ts";
 import { integer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import type { SourceDamageResult } from "../../../world/gameplay/authority.ts";
 import { RereleaseSourceEdict } from "./source-state.ts";
@@ -15,6 +15,7 @@ import { rereleaseDamageSignature, rereleaseFreeSignature, rereleaseModLayout, r
 import type { RereleaseNativeEntries } from "./native-entries.ts";
 import type { RereleaseQ2GuestHost } from "./host.ts";
 import { RereleaseDeferredDamage } from "./deferred-damage.ts";
+import { q2NativeDamageArguments } from "../native-damage.ts";
 
 export interface RereleaseForeignDamageServices {
   provenance(attacker: ActorId, inflictor: ActorId, target: ActorId): Omit<AttackProvenance, "attacker" | "inflictor" | "cause">;
@@ -27,35 +28,52 @@ export class RereleaseForeignActors {
   readonly #actors = new Map<ActorId, Projection>();
   readonly #slots = new Map<number, Projection>();
   readonly #removeEntry: () => void;
-  readonly #damageFrames: { readonly request: DamageRequest; entered: boolean }[] = [];
+  readonly #removeContinuation: () => void;
+  readonly #damageFrames: { readonly request: DamageRequest; entered: boolean; stack: bigint | null }[] = [];
   readonly deferred: RereleaseDeferredDamage;
-  #restoring: ReadonlyMap<number, SavedActorId> | null = null;
+  #restoring: { readonly actors: ReadonlyMap<number, SavedActorId>; readonly domain: "checkpoint" | "current" } | null = null;
   #closed = false;
   constructor(readonly host: RereleaseQ2GuestHost, readonly entries: RereleaseNativeEntries, readonly services: RereleaseForeignDamageServices) {
+    const { module } = host, { callbacks, cpu } = module.options.runner.options;
+    this.#removeContinuation = callbacks.observeEntry(entries.damage, () => {
+      const frame = this.#damageFrames.at(-1);
+      if (frame === undefined || frame.stack !== null) return;
+      frame.stack = cpu.state.registers.read("rsp", 64);
+    });
     this.deferred = new RereleaseDeferredDamage(host, services, actor => {
       const frame = this.#damageFrames.at(-1);
       if (frame === undefined || frame.entered || frame.request.target !== actor) return null;
       frame.entered = true; return frame.request;
-    });
-    const { module } = host, { callbacks, cpu } = module.options.runner.options;
+    }, () => this.#interceptNativeDamage());
     this.#removeEntry = callbacks.bindEntry(entries.damage, { id: `${module.memory.module.id}:foreign-damage`, signature: rereleaseDamageSignature,
       invoke: (_context, args) => { this.#incoming(args); return { kind: "void" }; } }, () => {
       const address = module.memory.pointer(cpu.state.registers.read("rcx", 64));
       if (address === null) return false;
       const entry = [...this.#slots.values()].find(candidate => candidate.view.address.byteOffset === address.byteOffset);
-      if (entry === undefined || this.lookup(entry.view) === undefined) return false;
+      if (entry === undefined || this.lookup(entry.view) === undefined) return this.#interceptNativeDamage();
       const source = new RereleaseSourceEdict(entry.view, module);
       return !entry.releasing && host.options.engine.actors.isLive(entry.actor.id)
         && module.memory.readUint8(source.at("shared.inuse")) !== 0;
     });
   }
+  #interceptNativeDamage(): boolean {
+    const { module } = this.host, { engine } = this.host.options;
+    if (!engine.combat.damageOperation.active) return false;
+    const cpu = module.options.runner.options.cpu;
+    if (this.#damageFrames.at(-1)?.stack === cpu.state.registers.read("rsp", 64)) return false;
+    const address = module.memory.pointer(cpu.state.registers.read("rcx", 64));
+    if (address === null) return false;
+    const view = module.entities().fromPointer(address);
+    if (this.#slots.has(view.slot)) return false;
+    return this.host.actor(view) !== null;
+  }
   released(actor: OwnedActor): void { this.deferred.release(actor); const entry = this.#actors.get(actor.id); if (entry !== undefined) this.#release(entry); }
   lookup(view: RawEntityView): OwnedActor | null | undefined {
     let entry = this.#slots.get(view.slot);
-    const saved = this.#restoring?.get(view.slot);
+    const saved = this.#restoring?.actors.get(view.slot);
     if (entry === undefined && saved !== undefined) {
       const actors = this.host.options.engine.actors;
-      const actor = actors.resolveOwned(actors.referenceSaved(saved, "current"));
+      const actor = actors.resolveOwned(actors.referenceSaved(saved, this.#restoring?.domain));
       if (actor === null) throw new Error("Saved foreign projection actor is no longer live");
       const source = new RereleaseSourceEdict(view, this.host.module);
       if (this.host.module.memory.readUint8(source.at("shared.inuse")) === 0) return null;
@@ -93,7 +111,7 @@ export class RereleaseForeignActors {
     if (entry.releasing || entry.syncing) return;
     const { engine } = this.host.options, { module } = this.host, memory = module.memory;
     const body = engine.bodies.read(entry.actor.id), combat = engine.combat.read(entry.actor.id);
-    if (body === null || combat === null) throw new Error("Foreign damage projection requires existing body and combat bindings");
+    if (body === null) throw new Error("Foreign native projection requires an existing body binding");
     const source = new RereleaseSourceEdict(entry.view, module);
     if (source.generation() !== entry.generation) {
       this.#actors.delete(entry.actor.id); this.#slots.delete(entry.view.slot); this.address(entry.actor.id); return;
@@ -101,8 +119,8 @@ export class RereleaseForeignActors {
     entry.syncing = true;
     try {
       source.body({ address: actor => this.host.addressForActor(actor), actor: address => this.#actor(address) }).write(body);
-      source.health = combat.health;
-      memory.writeInt32(source.at("mass"), combat.mass); memory.writeUint8(source.at("takedamage"), combat.canTakeDamage ? 1 : 0);
+      source.health = combat?.health ?? 0;
+      memory.writeInt32(source.at("mass"), combat?.mass ?? 0); memory.writeUint8(source.at("takedamage"), combat?.canTakeDamage === true ? 1 : 0);
       memory.writeInt32(source.at("movetype"), 0); // MOVETYPE_NONE: the shared owner alone advances the foreign body.
       memory.writeUint32(source.at("shared.svflags"), 1); // SVF_NOCLIENT: no duplicate native network presentation.
       memory.writePointer(source.at("shared.client"), null);
@@ -131,51 +149,53 @@ export class RereleaseForeignActors {
     const native: Q2NativeCause = { edition: "rerelease", id, friendlyFire: mod.bytes[1] !== 0, noPointLoss: mod.bytes[2] !== 0 };
     const canonical = canonicalCauseFromNative(native); if (canonical === null) throw new Error("Unclassified native damage cause");
     const damageFlags = Number(integer(args, 8));
-    this.host.options.engine.combat.apply({ target, amount: Number(integer(args, 6)), knockback: Number(integer(args, 7)),
+    const request: DamageRequest = { target, amount: Number(integer(args, 6)), knockback: Number(integer(args, 7)),
       direction: this.#vector(requiredPointer(args, 3)), point: this.#vector(requiredPointer(args, 4)), normal: this.#vector(requiredPointer(args, 5)),
       delivery: (damageFlags & 1) !== 0 ? "radius" : "direct", attack: { ...this.services.provenance(attacker, inflictor, target), attacker, inflictor,
-        cause: { kind: "q2", meansOfDeath: canonical, damageFlags, native } } });
+        cause: { kind: "q2", meansOfDeath: canonical, damageFlags, native } } };
+    if (this.#actors.has(target)) this.host.options.engine.combat.apply(request);
+    else this.damageNative(request);
     const entry = this.#actors.get(target); if (entry !== undefined && !entry.releasing) this.#sync(entry);
   }
-  damageNative(request: DamageRequest): DamageOutcome {
+  damageNative(input: DamageRequest): DamageOutcome {
     const { module } = this.host, { engine } = this.host.options, memory = module.memory;
-    const target = engine.actors.sourceOf(request.target);
-    if (target === null || target.provider !== memory.module.id) throw new Error("Native damage execution requires a native target");
-    if (request.attack.cause.kind !== "q2") throw new Error("Native damage requires a classified Q2 cause");
-    const cause = request.attack.cause, native = cause.native?.edition === "rerelease" ? cause.native : nativeCauseFromCanonical({ edition: "rerelease" }, cause.meansOfDeath);
-    if (native === null || native.edition !== "rerelease") throw new Error("Damage cause has no native representation");
-    const view = module.entities().atSlot(target.slot), source = new RereleaseSourceEdict(view, module);
-    const monster = (memory.readUint32(source.at("shared.svflags")) & 4) !== 0;
-    this.deferred.track(view);
-    const attacker = this.host.addressForActor(request.attack.attacker ?? engine.worldActor()), inflictor = this.host.addressForActor(request.attack.inflictor ?? engine.worldActor());
-    return engine.combat.runSourceDamage(request, observer => {
-      const frame = { request, entered: false };
+    return engine.combat.runSourceDamage(input, (observer, request) => {
+      const target = engine.actors.sourceOf(request.target);
+      if (target === null || target.provider !== memory.module.id) throw new Error("Native damage execution requires a native target");
+      const cause = q2NativeDamageArguments(request, { edition: "rerelease" }), native = cause.native;
+      if (native === null || native.edition !== "rerelease") throw new Error("Damage cause has no native representation");
+      const view = module.entities().atSlot(target.slot), source = new RereleaseSourceEdict(view, module);
+      const monster = (memory.readUint32(source.at("shared.svflags")) & 4) !== 0;
+      this.deferred.track(view);
+      const attacker = this.host.addressForActor(request.attack.attacker ?? engine.worldActor()), inflictor = this.host.addressForActor(request.attack.inflictor ?? engine.worldActor());
+      const frame: { readonly request: DamageRequest; entered: boolean; stack: bigint | null } = { request, entered: false, stack: null };
       const state: { result: SourceDamageResult | null } = { result: null };
-      let health = source.health, velocity = source.vector("velocity"), armor = engine.combat.read(request.target)?.armor;
+      let health = source.health, velocity = source.vector("velocity"), armor = engine.combat.read(request.target)?.armor, appliedDamage = 0;
       if (armor === undefined) throw new Error("Native target lacks a combat binding");
       this.#damageFrames.push(frame);
-      const initialHealth = health, removeWrites: (() => void)[] = [], removeEntries: (() => void)[] = [];
+      const removeWrites: (() => void)[] = [], removeEntries: (() => void)[] = [];
       let vectors: GuestAddress | null = null;
       const stopWrites = (): void => { for (const remove of removeWrites.splice(0)) remove(); };
       const current = (): boolean => this.#damageFrames.at(-1) === frame && state.result === null;
       try {
         removeWrites.push(memory.observeWrites(source.at("health"), 4, () => {
-          if (!current()) return;
-          const after = source.health;
-          if (after !== health) { const before = health; health = after; observer.stored({ kind: "health", before, after }); }
+          const after = source.health, before = health; health = after;
+          if (!current() || after === before) return;
+          appliedDamage += before - after;
+          observer.stored({ kind: "health", before, after });
         }));
         removeWrites.push(memory.observeWrites(source.at("velocity"), 12, () => {
-          if (!current()) return;
           const after = source.vector("velocity"), before = velocity; velocity = after;
+          if (!current()) return;
           observer.stored({ kind: "source-velocity", before, after, movementProvider: request.attack.movementProvider });
         }));
         if (source.client !== null) {
           const client = new RereleaseSourceClient(source.client, module, retailRereleaseClientProfile);
           removeWrites.push(memory.observeWrites(client.at("pers.inventory"), retailRereleaseClientProfile.inventoryCount * 4, () => {
-            if (!current()) return;
             const after = engine.combat.read(request.target)?.armor;
-            if (after === undefined || armor === undefined) throw new Error("Native armor binding disappeared during damage");
             const before = armor; armor = after;
+            if (!current()) return;
+            if (after === undefined || before === undefined) throw new Error("Native armor binding disappeared during damage");
             observer.stored({ kind: "armor", before, after });
           }));
         }
@@ -198,7 +218,7 @@ export class RereleaseForeignActors {
         module.invoke(this.entries.damage, rereleaseDamageSignature, [guestPointer(view.address), guestPointer(inflictor), guestPointer(attacker),
           guestPointer(vectors), guestPointer(memory.offset(vectors, 12n)), guestPointer(memory.offset(vectors, 24n)), guestInt(Math.trunc(request.amount)), guestInt(Math.trunc(request.knockback)), guestInt(cause.damageFlags),
           { kind: "aggregate", layout: rereleaseModLayout, bytes: new Uint8Array([native.id, native.friendlyFire ? 1 : 0, native.noPointLoss ? 1 : 0]) }], view);
-        return state.result ?? { reaction: "none", appliedDamage: initialHealth - source.health };
+        return state.result ?? { reaction: "none", appliedDamage };
       } finally {
         stopWrites(); for (const remove of removeEntries) remove();
         if (vectors !== null) memory.unmap(vectors, 36); this.#damageFrames.pop(); this.host.reconcile();
@@ -225,13 +245,13 @@ export class RereleaseForeignActors {
     return [...this.#actors.values()].filter(entry => this.lookup(entry.view) === entry.actor)
       .map(entry => ({ slot: entry.view.slot, actor: { slot: entry.actor.id.slot, generation: entry.actor.id.generation } }));
   }
-  beginRestore(saved: readonly RereleaseProjectionSave[]): void {
+  beginRestore(saved: readonly RereleaseProjectionSave[], domain: "checkpoint" | "current" = "current"): void {
     if (this.#restoring !== null) throw new Error("Native projection restore is already active");
-    this.#restoring = new Map(saved.map(entry => [entry.slot, entry.actor]));
+    this.#restoring = { actors: new Map(saved.map(entry => [entry.slot, entry.actor])), domain };
   }
   endRestore(): void { this.#restoring = null; }
   close(): void {
     if (this.#closed) return; this.#closed = true;
-    this.#removeEntry(); this.deferred.close(); this.clear();
+    this.#removeEntry(); this.#removeContinuation(); this.deferred.close(); this.clear();
   }
 }

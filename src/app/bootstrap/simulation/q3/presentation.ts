@@ -59,7 +59,7 @@ export function q3SourceModels(runtime: Q3SourceRuntime): readonly SimulationPre
         : entity.r.model.kind === "inline" ? ["*" + entity.r.model.index]
           : state.modelindex > 0 ? [runtime.host.configstrings.get(32 + state.modelindex)] : [];
     for (const path of paths) if (path !== null && path !== "") presentations.push({ actor: entity.actor.id,
-      content: runtime.options.recipe.map.entities.content, family: "q3", path, frame: state.frame, oldFrame: state.frame,
+      content: runtime.options.recipe.map.entities.content, family: "q3", renderOwner: "source-client", path, frame: state.frame, oldFrame: state.frame,
       skin: 0, effects: state.eFlags, renderFlags: 0, origin: evaluateTrajectory(state.pos, runtime.level.time),
       angles: evaluateTrajectory(state.apos, runtime.level.time), scale: 1, visible: true, viewWeapon: false });
   }

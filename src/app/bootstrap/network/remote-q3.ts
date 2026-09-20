@@ -161,7 +161,7 @@ export class Q3RemotePresentation implements Q3ApplicationClientHost, RemotePres
   playerUi(actor: ActorId): PlayerUi {
     const ps = this.requirePlayer(actor).playerState, source = this.world.content.recipe.weapons[0];
     if (source === undefined) throw new Error('Q3 remote has no native weapon provider');
-    return q3GuestPlayerUi(toQ3PlayerState(ps), source, this.current?.serverTime ?? ps.commandTime);
+    return q3GuestPlayerUi(toQ3PlayerState(ps), source, this.current?.serverTime ?? ps.commandTime, undefined, ps.product);
   }
   characterViews(): ReturnType<RemotePresentationAccess['characterViews']> { return []; }
   presentations(): readonly SimulationPresentation[] { return []; }

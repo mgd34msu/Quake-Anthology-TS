@@ -7,6 +7,58 @@ import { RereleaseSourceEdict } from "../../../../src/compat/q2/rerelease/source
 import { guestPointer, guestInt, resultPointer } from "../../../../src/compat/q2/rerelease/module.ts";
 import { rereleaseDamageSignature, rereleaseModLayout, rereleaseFreeSignature, rereleaseSpawnSignature } from "../../../../src/compat/q2/rerelease/native-entries.ts";
 
+test.skipIf(!available)("mod transforms intercept native damage entry and replacements skip mutation", async () => {
+  let nativeSequence = 0;
+  const { source, host, guest, world, memory } = await nativeFixture(undefined, true, () => [], {
+    provenance: () => ({ sequence: ++nativeSequence, time: { kind: "milliseconds", value: 10 }, weapon: null,
+      weaponProvider: "q2:guest", combatProvider: "test:q2-combat", inventoryProvider: "q2:guest", movementProvider: "q2:movement" }),
+  });
+  try {
+    host.preInit(); source.init();
+    host.spawnEntities("base1", `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${world.origin}" } { "classname" "monster_soldier" "origin" "0 0 512" }`);
+    const bridge = host.foreignActors; if (bridge === null) throw new Error("No native damage bridge");
+    const view = guest.entities().atSlot(18), edict = new RereleaseSourceEdict(view, guest), actor = host.actor(view);
+    if (actor === null) throw new Error("Missing native soldier");
+    const damage: DamageRequest = { target: actor.id, amount: 3, knockback: 0, direction: { x: 1, y: 0, z: 0 }, point: { x: 0, y: 0, z: 512 },
+      normal: { x: 0, y: 0, z: 1 }, delivery: "direct", attack: { sequence: 1, time: { kind: "milliseconds", value: 10 },
+        attacker: world.engine.worldActor(), inflictor: world.engine.worldActor(), weapon: null, weaponProvider: "q2:guest",
+        combatProvider: "test:q2-combat", inventoryProvider: "q2:guest", movementProvider: "q2:movement", cause: { kind: "q2", meansOfDeath: 1, damageFlags: 0 } } };
+    edict.health = 100;
+    const before = edict.health, observed: number[] = [];
+    const vectors = memory.allocate({ byteLength: 36, alignment: 4n, label: "native mod damage witness" });
+    const nativeDamage = (): void => {
+      guest.invoke(bridge.entries.damage, rereleaseDamageSignature, [guestPointer(view.address), guestPointer(guest.entities().atSlot(0).address), guestPointer(guest.entities().atSlot(0).address),
+        guestPointer(vectors), guestPointer(memory.offset(vectors, 12n)), guestPointer(memory.offset(vectors, 24n)), guestInt(3), guestInt(0), guestInt(0),
+        { kind: "aggregate", layout: rereleaseModLayout, bytes: new Uint8Array([1, 0, 0]) }], view);
+    };
+    world.engine.combat.damageOperation.register({ provider: "q1:mod", id: "offset:damage", order: 0, kind: "transform", transform: request => ({ ...request, amount: request.amount + 2 }) });
+    world.engine.combat.damageOperation.register({ provider: "q3:mod", id: "scale:damage", order: 1, kind: "transform", transform: request => ({ ...request, amount: request.amount * 2 }) });
+    world.engine.combat.damageOperation.register({ provider: "q2:mod", id: "observe:damage", order: 2, kind: "observe", observe: (request, outcome) => {
+      expect(request.amount).toBe(10); if (outcome.kind === "committed") observed.push(outcome.decision.appliedDamage); return undefined;
+    } });
+    let entries = 0;
+    const removeNested = guest.options.runner.options.callbacks.observeEntry(bridge.entries.damage, () => {
+      if (++entries === 2) nativeDamage();
+    });
+    nativeDamage(); removeNested();
+    expect(edict.health).toBe(before - 20); expect(observed).toEqual([10, 10]); expect(world.outcomes).toHaveLength(2);
+    expect(nativeSequence).toBe(2);
+    bridge.damageNative(damage);
+    expect(edict.health).toBe(before - 30); expect(observed).toEqual([10, 10, 10]); expect(world.outcomes).toHaveLength(3);
+    expect(nativeSequence).toBe(2);
+    world.engine.combat.damageOperation.register({ provider: "q1:other", id: "cancel:damage", order: 3, kind: "replace", replace: request => ({
+      kind: "committed", decision: { request, mutations: [], appliedDamage: 0, reaction: "none" }, survived: true,
+    }) });
+    nativeDamage();
+    expect(edict.health).toBe(before - 30); expect(observed).toEqual([10, 10, 10, 0]); expect(world.outcomes).toHaveLength(3);
+    expect(nativeSequence).toBe(3);
+    world.engine.combat.damageOperation.clear(); nativeDamage();
+    expect(edict.health).toBe(before - 33); expect(observed).toEqual([10, 10, 10, 0]);
+    expect(nativeSequence).toBe(4);
+    memory.unmap(vectors, 36);
+  } finally { source.close(); }
+}, 30000);
+
 test.skipIf(!available)("retail monster accumulation retains qualifying provenance through native callbacks and saves", async () => {
   let nativeSequence = 100;
   const { source, host, guest, world, memory } = await nativeFixture(undefined, true, () => [], {

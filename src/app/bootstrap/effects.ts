@@ -369,6 +369,11 @@ export class ApplicationEffects {
       return;
     }
     if (source.kind === "q3-source") {
+      if (source.event.kind === "sound") {
+        const sound = source.event;
+        this.sounds.push({ content: source.content, path: sound.path, origin: sound.origin, channel: sound.channel, volume: sound.volume, seconds: source.seconds,
+          playback: sound.loop ? { kind: "loop", actor: sound.actor, velocity: sound.velocity } : { kind: "actor", actor: sound.actor } });
+      }
       if (source.event.kind === "entity-event") this.reject(source, "Native Q3 entity event requires its per-seat cgame snapshot and weapon presentation context");
       return;
     }

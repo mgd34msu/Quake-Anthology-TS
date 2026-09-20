@@ -8,11 +8,12 @@ import type { QcWorldHost } from "./world-host.ts";
 type Projection = Pick<Q1PusherServices, "read" | "write" | "link" | "blocked">;
 
 /** Borrow the existing world's pusher services; own only raw QC projection and dispatch. */
-export function createQcPusherServices(world: QcWorldHost, vm: QcMachine, options: {
+export function createQcPusherServices(world: Pick<QcWorldHost, "options" | "reference" | "link">, vm: QcMachine, options: {
   readonly physical: (projection: Projection) => Omit<Q1PusherServices, "think">;
   readonly foreign: Pick<Q1PusherServices, "read" | "write">;
   readonly touchTriggers: (actor: OwnedActor) => undefined;
   readonly serverTime: () => number;
+  readonly invoke?: (actor: OwnedActor, callback: "think" | "blocked", other: ActorId | null) => undefined;
 }): Q1PusherServices {
   const { actors, bodies, entities, slots, program } = world.options;
   if (vm.program !== program || vm.entities !== entities) throw new QcProgramError("pusher belongs to another QC machine");
@@ -28,7 +29,7 @@ export function createQcPusherServices(world: QcWorldHost, vm: QcMachine, option
     const body = bodies.read(actor), owned = actors.resolveOwned(actor);
     if (body === null || owned === null) return null;
     const words = entities.at(slot), flags = Math.trunc(words.float(field("flags"))), ground = words.int(field("groundentity"));
-    const groundActor = ground === 0 ? null : slots.at(entities.slot(ground));
+    const groundActor = ground === 0 ? null : body.ground;
     const solid = words.float(field("solid"));
     return { actor: owned, bounds: body.bounds, absoluteBounds: { min: words.vector(field("absmin")), max: words.vector(field("absmax")) },
       solid: solid === 0 ? "not" : solid === 1 ? "trigger" : solid === 4 ? "bsp" : solid === 3 ? "slidebox" : "box",
@@ -38,7 +39,7 @@ export function createQcPusherServices(world: QcWorldHost, vm: QcMachine, option
         viewAngles: words.vector(field("v_angle")), punchAngles: program.api.kind === "q1-quakeworld" ? { x: 0, y: 0, z: 0 } : words.vector(field("punchangle")),
         moveType: words.float(field("movetype")), flags,
         ground: (flags & 512) === 0 ? { kind: "none" } : ground === 0 ? { kind: "world", model: 0 }
-          : groundActor === null ? { kind: "none" } : { kind: "actor", actor: groundActor.id },
+          : groundActor === null ? { kind: "none" } : { kind: "actor", actor: groundActor },
         waterLevel: words.float(field("waterlevel")), waterType: words.float(field("watertype")),
         teleportTimeSeconds: words.float(field("teleport_time")), waterJumpDirection: words.vector(field("movedir")),
         idealPitch: program.api.kind === "q1-quakeworld" ? 0 : words.float(field("idealpitch")), fixAngle: words.float(field("fixangle")) !== 0, health: words.float(field("health")) } };
@@ -58,6 +59,11 @@ export function createQcPusherServices(world: QcWorldHost, vm: QcMachine, option
     const slot = sourceSlot(actor); if (slot === null) throw new QcProgramError("pusher callback requires a live QC actor");
     const callback = entities.at(slot).int(field(name));
     if (callback === 0 && name === "blocked") return undefined;
+    if (options.invoke !== undefined) {
+      const owner = actors.resolveOwned(actor);
+      if (owner === null) throw new QcProgramError("pusher callback lost its source owner");
+      return options.invoke(owner, name, other);
+    }
     const self = vm.globalOffset("self"), otherOffset = vm.globalOffset("other");
     const savedSelf = vm.globals.int(self), savedOther = vm.globals.int(otherOffset);
     try {

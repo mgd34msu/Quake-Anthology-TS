@@ -280,8 +280,9 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
         } else vm.execute(program.functionNamed("door_blocked").index);
       };
       const foreignBinding = new Id1DamageBinding({ ...source, program: otherProgram }, authority, () => vm, () => { throw new Error("Foreign machine reached resolver"); });
+      const foreignExecution = () => { throw new Error("Foreign machine executed source damage"); };
       expect(() => foreignBinding.functionBoundary.run({ functionIndex: otherProgram.functionNamed("T_Damage").index, caller: 0, statement: -1 },
-        () => { throw new Error("Foreign machine executed source damage"); })).toThrow("binding belongs to another machine");
+        Object.assign(foreignExecution, { skip: foreignExecution }))).toThrow("binding belongs to another machine");
       if (variant === "failure") {
         expect(invoke).toThrow(); expect(outcomes).toHaveLength(0); expect(vm.depth).toBe(0); vm.snapshot();
         words.setInt(field("th_pain"), program.functionNamed("SUB_Null").index);

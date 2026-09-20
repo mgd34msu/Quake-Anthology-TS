@@ -57,6 +57,41 @@ async function candidate(prepared: PreparedClassicGuest, geometry: Q2WorldGeomet
   return { world, actors, physics, files, scene, cvars, portals };
 }
 const pak = "/home/buzzkill/Projects/qfiles/q2/baseq2/pak0.pak";
+test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") || !existsSync(pak))("classic external player velocity enters source Pmove and remains source owned", async () => {
+  const archive = await openArchive(pak);
+  const geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
+  const identity = createMountIdentity("mount:test:native-movement", "q2:classic:xatrix:installed", 1);
+  using mounts = await openMountPlan({ id: "mount-plan:test:native-movement", mounts: [{ kind: "loose", identity, rootPath: "/home/buzzkill/Projects/qfiles/q2/xatrix" }], defaultOrder: [identity.id], prefixOrders: [] });
+  const artifact = required(await mounts.open("gamex86.dll"));
+  const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:classic-native", content: identity.content }, role: "server-game", api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
+  const running = await candidate(prepared, geometry);
+  try {
+    const origin = required(parseEntities(geometry.entities).find(entity => entity.get("classname") === "info_player_start")).get("origin") ?? "0 0 128";
+    await running.world.initLoading(async () => { await Bun.sleep(0); });
+    await running.world.spawnLoading("base1", `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${origin}" }`, async () => { await Bun.sleep(0); }, "");
+    expect(running.world.connect(1, "\\name\\Hook test\\skin\\male/grunt\\ip\\127.0.0.1").allowed).toBe(true);
+    running.world.begin(1);
+    const actor = required(running.world.actor(1)), body = () => required(running.physics.bodies.read(actor));
+    const idle = { ...command, milliseconds: 25, forwardMove: 0 };
+    const before = body();
+    running.world.think(1, idle, { velocity: { x: 0, y: 0, z: 600 }, gravityScale: 1, predictionSuppressed: false });
+    expect(body().origin.z).toBeGreaterThan(before.origin.z);
+    expect(body().velocity.z).toBeGreaterThan(500);
+    const pulled = body();
+    running.world.think(1, idle);
+    expect(body().origin.z).toBeGreaterThan(pulled.origin.z);
+    expect(body().velocity.z).toBeLessThan(pulled.velocity.z);
+    expect(body().velocity.z).toBe(running.world.playerState(1).movement.velocityEighths[2] * 0.125);
+    running.world.think(1, idle, { velocity: { x: 0, y: 0, z: 0 }, gravityScale: 0, predictionSuppressed: true });
+    expect(body().velocity.z).toBe(0);
+    expect(running.world.playerState(1).movement.gravity).toBe(0);
+    expect(running.world.playerState(1).movement.flags & 64).toBe(64);
+    running.world.think(1, idle, { velocity: { x: 0, y: 0, z: 0 }, gravityScale: 1, predictionSuppressed: false });
+    expect(body().velocity.z).toBeLessThan(1);
+    running.world.think(1, idle);
+    expect(body().velocity.z).toBeLessThan(0);
+  } finally { running.world.close(); }
+});
 for (const fixture of [{ name: "ctf", deathmatch: true }, { name: "xatrix", deathmatch: false }]) {
 const dll = `/home/buzzkill/Projects/qfiles/q2/${fixture.name}/gamex86.dll`;
 test.skipIf(!existsSync(dll) || !existsSync(pak))(`actual native world restores ${fixture.name} original callback files into fresh source actors`, async () => {

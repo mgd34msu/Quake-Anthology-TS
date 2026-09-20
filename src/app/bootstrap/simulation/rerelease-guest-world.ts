@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../../contracts/execution.ts";
+import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Q2RereleaseEntityState, Q2RereleasePlayerState, Q2RereleaseUserCommand } from "../../../contracts/protocol.ts";
 import type { WindowsCapabilities } from "../../../guest/runtime/windows/index.ts";
 import type { RereleaseSourceSave } from "../../../compat/q2/rerelease/host.ts";
@@ -169,7 +170,7 @@ export class RereleaseGuestWorld {
       finally { this.commandContext.value = null; }
     });
   }
-  think(slot: number, command: Q2RereleaseUserCommand): void { this.operation(() => { this.requireRunning(); this.client(slot, "active"); this.source.host.clientThink(slot, command); }); }
+  think(slot: number, command: Q2RereleaseUserCommand, movement?: EquipmentMovement): void { this.operation(() => { this.requireRunning(); this.client(slot, "active"); this.source.host.clientThink(slot, command, movement); }); }
   frame(milliseconds: number): void { this.operation(() => { this.requireRunning(); if (milliseconds !== this.services.options.frameMilliseconds) throw new RangeError("API 2023 frame differs from its import-table cadence"); this.runFrame(true); }); }
   actor(slot: number): ActorId | null { this.requireRunning(); return this.services.entityInfo(slot).actor; }
   entityInfo(slot: number): ReturnType<RereleaseGuestServices["entityInfo"]> { this.requireRunning(); return this.services.entityInfo(slot); }
@@ -198,15 +199,15 @@ export class RereleaseGuestWorld {
   writeTravelLevel(): RereleaseSourceSave { return this.operation(() => { this.requireRunning(); return this.source.host.writeSave("level", true); }); }
   private restore(saved: RereleaseGuestSave, map: ClassicGuestMap, restoreServerState: () => void): void {
     if (this.#phase !== "initialized") throw new Error("Native import requires a fresh initialized candidate");
-    this.source.host.readSave("game", saved.game); this.spawnMap(map); this.#phase = "initialized"; this.services.drainMessages();
-    restoreServerState(); this.source.host.readSave("level", saved.level); this.services.completeSpawn(); this.#phase = "running";
+    this.source.host.readSave("game", saved.game, "checkpoint"); this.spawnMap(map); this.#phase = "initialized"; this.services.drainMessages();
+    restoreServerState(); this.source.host.readSave("level", saved.level, "checkpoint"); this.services.completeSpawn(); this.#phase = "running";
   }
   readSave(saved: RereleaseGuestSave, map: ClassicGuestMap, restoreServerState: () => void): void { this.operation(() => this.restore(saved, map, restoreServerState)); }
   readSaveLoading(saved: RereleaseGuestSave, map: ClassicGuestMap, restoreServerState: () => void, nextFrame: () => Promise<void>): Promise<void> { return this.loading(async () => {
       if (this.#phase !== "initialized") throw new Error("Native import requires a fresh initialized candidate");
-      await this.source.host.readSaveLoading("game", saved.game, nextFrame);
+      await this.source.host.readSaveLoading("game", saved.game, nextFrame, "checkpoint");
       await this.spawnMapLoading(map, nextFrame); this.#phase = "initialized"; this.services.drainMessages(); restoreServerState();
-      await this.source.host.readSaveLoading("level", saved.level, nextFrame); this.services.completeSpawn(); this.#phase = "running";
+      await this.source.host.readSaveLoading("level", saved.level, nextFrame, "checkpoint"); this.services.completeSpawn(); this.#phase = "running";
     }); }
   close(): void {
     if (this.isRetired) return;

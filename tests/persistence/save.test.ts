@@ -130,6 +130,18 @@ test("saved body attachments remap anchor generations and preserve their follow 
   expect(() => decodeSaveImage(oldSignature)).toThrow("signature/version");
 });
 
+test("saved gameplay selections cannot silently restart without their private checkpoint", () => {
+  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+    nextEventSequence: 0, clocks: [], random: [], actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
+  expect(decodeSaveImage(encodeSaveImage(image)).mods).toBeUndefined();
+  expect(decodeSaveImage(encodeSaveImage({ ...image, recipe: { ...image.recipe, mods: [] } })).mods).toBeUndefined();
+  const digest = createContentDigest("0".repeat(64));
+  const selected: SaveImage = { ...image, recipe: { ...image.recipe, mods: [{ selection: { product: "fixture", id: "health" },
+    source: { provider: "q1:official", content: "q1:classic:id1:fixture" }, title: "Health", sourceTitle: "Quake", requires: [], conflicts: [], declarationDigest: digest,
+    declaration: { version: 1, runtime: "quakec", program: { path: "progs.dat", digest }, actorFields: [], callbacks: [] } }] } };
+  expect(() => decodeSaveImage(encodeSaveImage(selected))).toThrow("selected gameplay mods require their saved checkpoint");
+});
+
 test("unified save reconstructs actors, bytes, source clocks and callback identities in a fresh Bun process", async () => {
   const actors = new SessionActorRegistry(createIdentityOwner("before-save"));
   const actor = actors.allocateAtSource("q1:game", 7, "q1:player");
@@ -140,7 +152,7 @@ test("unified save reconstructs actors, bytes, source clocks and callback identi
     combat: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: { health: 73, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, noKnockback: true, team: null } }],
     inventories: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: [{ item: "q1:ammo/nails", count: -3, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } }] }], configurations: [], thinks: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, callback: "q1:door-think", due: { kind: "seconds", value: 2.6 }, boundary: "after-physics", provider: "q1:game", sequence: 4 }],
     providers: [sourceActorsCheckpoint(actors.sourceCheckpoint()), { provider: "fixture:private", schema: "fixture:bytes", version: 7, bytes: new Uint8Array([0, 255, 17]) }],
-    guests: [{ kind: "qvm", module, api: { kind: "q3-qagame", version: 8 }, data: new Uint8Array([255, 0, 1, 128]), instructionIndex: 0, programStack: 4, operandStack: [], random: [], callbacks: [{ id: "q3:callback", reference: { kind: "native-guest", module, byteOffset: 0xffffffffffffffffn, abi: { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" } }, parameters: [], result: "void" }], hostState: { module, format: "fixture:host", bytes: new Uint8Array([9, 8, 7]) } }] };
+    guests: [{ kind: "qvm", module, abiProfile: "q3-modern", api: { kind: "q3-qagame", version: 8 }, data: new Uint8Array([255, 0, 1, 128]), instructionIndex: 0, programStack: 4, operandStack: [], random: [], callbacks: [{ id: "q3:callback", reference: { kind: "native-guest", module, byteOffset: 0xffffffffffffffffn, abi: { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" } }, parameters: [], result: "void" }], hostState: { module, format: "fixture:host", bytes: new Uint8Array([9, 8, 7]) } }] };
   // A structural SavedActorId must be encoded as fields, never as a live identity class.
   const body = image.bodies[0]; if (body === undefined) throw new Error("missing body");
   const saved: SaveImage = { ...image, bodies: [{ ...body, actor: { slot: actor.id.slot, generation: actor.id.generation }, linkCount: 7,

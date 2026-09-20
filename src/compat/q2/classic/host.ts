@@ -12,6 +12,7 @@ import { ClassicQ2Cvars } from "./cvars.ts";
 import { CLASSIC_Q2_ABI, CLASSIC_Q2_EXPORTS, CLASSIC_Q2_IMPORTS, CLASSIC_Q2_IMPORT_BYTES, CLASSIC_Q2_TRACE_LAYOUT, classicSignature, q2Pointer } from "./layout.ts";
 import { classicPrintf, classicPrintfLayouts } from "./printf.ts";
 import { ClassicQ2Edicts, allocateClassicString, classicStringAllocationBytes, readClassicString, readClassicVector, writeClassicString, writeClassicVector } from "./records.ts";
+import type { ClassicQ2ActorProjection } from "./records.ts";
 
 export interface ClassicQ2WorldLink {
   readonly clusters: readonly number[] | null;
@@ -19,6 +20,7 @@ export interface ClassicQ2WorldLink {
   readonly areas: readonly [number, number];
 }
 export interface ClassicQ2EngineServices {
+  readonly projection?: ClassicQ2ActorProjection;
   readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "combat" | "inventory" | "callbacks" | "trace" | "pointContents" | "inPvs" | "inPhs" | "setAreaPortal" | "setSolid" | "inlineModelBounds">;
   readonly cvars: CvarRegistry;
   readonly bindEntity: (record: RawEntityView, actor: OwnedActor) => undefined;
@@ -37,6 +39,7 @@ export interface ClassicQ2EngineServices {
   readonly pmove: (address: GuestAddress, host: ClassicQ2GuestHost) => undefined;
 }
 export interface ClassicQ2GuestHostOptions {
+  readonly importBoundary?: (name: string, arguments_: readonly GuestCallValue[], invoke: () => GuestCallResult) => GuestCallResult;
   readonly runner: GuestCallRunner;
   readonly provider: ProviderId;
   readonly services: ClassicQ2EngineServices;
@@ -85,7 +88,8 @@ export class ClassicQ2GuestHost {
       const id: CallbackId = `${options.provider}:api3.${entry.name}`;
       this.#callbackNames.set(id, entry.name);
       const address = options.runner.options.callbacks.bind({ id, signature: entry.signature,
-        invoke: (context, arguments_) => this.importCall(entry.name, context, arguments_) });
+        invoke: (context, arguments_) => options.importBoundary === undefined ? this.importCall(entry.name, context, arguments_)
+          : options.importBoundary(entry.name, arguments_, () => this.importCall(entry.name, context, arguments_)) });
       this.memory.writePointer(this.memory.offset(this.imports, BigInt(index * 4)), address);
     }
   }
@@ -109,7 +113,7 @@ export class ClassicQ2GuestHost {
     if (this.#exports !== null) throw new Error("GetGameAPI already bound");
     const result = this.invoke(target, classicSignature([q2Pointer], q2Pointer), [{ kind: "pointer", value: this.imports }]);
     if (result.kind !== "pointer" || result.value === null) throw new Error("GetGameAPI returned null or a non-pointer result");
-    const edicts = new ClassicQ2Edicts(this.memory, result.value, this.options.services.engine.actors, this.options.provider, this.options.services.bindEntity);
+    const edicts = new ClassicQ2Edicts(this.memory, result.value, this.options.services.engine.actors, this.options.provider, this.options.services.bindEntity, this.options.services.projection);
     for (const entry of Object.values(CLASSIC_Q2_EXPORTS)) {
       const address = this.memory.readPointer(this.memory.offset(result.value, BigInt(entry.offset)));
       if (address === null) throw new Error(`Null API 3 export at byte ${entry.offset}`);
@@ -186,7 +190,7 @@ export class ClassicQ2GuestHost {
   }
   rebindWorld(): void {
     if (!this.#initialized || this.#exports === null || this.options.runner.depth !== 0) throw new Error("API 3 world rebind requires an idle initialized module");
-    this.#edicts = new ClassicQ2Edicts(this.memory, this.#exports, this.options.services.engine.actors, this.options.provider, this.options.services.bindEntity);
+    this.#edicts = new ClassicQ2Edicts(this.memory, this.#exports, this.options.services.engine.actors, this.options.provider, this.options.services.bindEntity, this.options.services.projection);
     this.#models.clear();
   }
   writeTravelLevel(filename: string, maxClients: number): void {

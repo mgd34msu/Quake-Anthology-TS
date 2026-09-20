@@ -1,4 +1,5 @@
 import { readSavedNativeWeaponDeclaration } from "./native-weapon.ts";
+import { readGameplayMod } from "./mods.ts";
 import type { WeaponBehaviorCallback } from "../contracts/weapon-behavior.ts";
 import type { ArchiveMount, EnvironmentSelection, CampaignSelection, CharacterSelection, ContentId, ContentMount, EnemySelection, MonsterSelectionTarget, EquipmentSelection, ExecutableRecipe, GrappleSelection, HandGrenadeSelection, MountId, MountPlanId, PresentationSelection, ProviderReference, RecipeId, ResolvedExecutionModule, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../contracts/content.ts";
 import { createMountId, createMountPlanId, createRecipeId, createResourceId, isContentId } from "../contracts/content.ts";
@@ -138,14 +139,16 @@ function readExecution(reader: SaveReader): ResolvedExecutionModule {
     default: return reader.fail("native game module cannot use a QuakeC API");
   }
 }
+import { readQvmGrappleDefinition } from "./qvm-grapple.ts";
 function readGrapple(reader: SaveReader): GrappleSelection {
   const kind = reader.field("kind").choice("disabled", "enabled");
   if (kind === "disabled") return { kind };
   const source = readProvider(reader.field("source")), binding = reader.field("binding").choice("slot", "offhand");
-  switch (reader.field("mechanic").choice("q1-threewave", "q2-ctf", "q2-lmctf")) {
+  switch (reader.field("mechanic").choice("q1-threewave", "q2-ctf", "q2-lmctf", "q3-qvm")) {
     case "q1-threewave": return { kind, source, binding, mechanic: "q1-threewave", edition: reader.field("edition").literal("rerelease") };
     case "q2-ctf": return { kind, source, binding, mechanic: "q2-ctf", edition: reader.field("edition").choice("classic", "rerelease") };
     case "q2-lmctf": return { kind, source, binding, mechanic: "q2-lmctf", edition: reader.field("edition").literal("classic") };
+    case "q3-qvm": return { kind, source, binding, mechanic: "q3-qvm", edition: reader.field("edition").literal("classic"), profile: readQvmGrappleDefinition(reader.field("profile")) };
   }
 }
 function readHandGrenades(reader: SaveReader): HandGrenadeSelection {
@@ -212,7 +215,8 @@ function readWeaponBehavior(reader: SaveReader): NonNullable<ExecutableRecipe["w
   return { source, artifact, ...(component === undefined ? {} : { component }), definition };
 }
 export function readRecipe(reader: SaveReader): ExecutableRecipe {
-  return { ...(reader.field("weaponBehaviors").value === undefined ? {} : { weaponBehaviors: reader.field("weaponBehaviors").list(readWeaponBehavior) }), schemaVersion: reader.field("schemaVersion").literal(3), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
+  return { ...(reader.field("mods").value === undefined ? {} : { mods: reader.field("mods").list(readGameplayMod) }),
+    ...(reader.field("weaponBehaviors").value === undefined ? {} : { weaponBehaviors: reader.field("weaponBehaviors").list(readWeaponBehavior) }), schemaVersion: reader.field("schemaVersion").literal(3), id: readRecipeId(reader.field("id")), preset: readRecipeId(reader.field("preset")),
     map: { geometryContent: readContentId(reader.field("map").field("geometryContent")), geometry: readResource(reader.field("map").field("geometry")), entities: readProvider(reader.field("map").field("entities")) },
     campaign: readCampaign(reader.field("campaign")), movement: readProvider(reader.field("movement")), character: readCharacter(reader.field("character")),
     weapons: reader.field("weapons").list(readProvider), equipment: readEquipment(reader.field("equipment")), enemies: readEnemies(reader.field("enemies")), presentation: readPresentation(reader.field("presentation")),

@@ -11,10 +11,15 @@ import { QcProgramError } from "./program.ts";
 import { qcLinkBounds } from "./world-host.ts";
 import type { QcWorldHost } from "./world-host.ts";
 
-export function createQcMovementBindings(world: QcWorldHost, services: {
-  readonly scene: SceneQueries;
+type QcMovementWorld = Pick<QcWorldHost, "actor" | "reference" | "link"> & {
+  readonly options: Pick<QcWorldHost["options"], "actors" | "bodies" | "entities" | "slots" | "program" | "numeric">;
+};
+
+export function createQcMovementBindings(world: QcMovementWorld, services: {
+  readonly scene: Pick<SceneQueries, "trace" | "pointContents">;
   readonly random: Pick<RandomSource, "nextInteger">;
   readonly touchTriggers: (actor: OwnedActor) => undefined;
+  readonly actorReference?: (reference: number) => ActorId | null;
 }): ReadonlyMap<QcHostBuiltinName, QcBuiltin> {
   const { actors, bodies, entities, slots, program } = world.options;
   const numeric = createNumericOperations(world.options.numeric);
@@ -34,14 +39,16 @@ export function createQcMovementBindings(world: QcWorldHost, services: {
       if (slot === null || body === null) return null;
       const words = entities.at(slot), flags = Math.trunc(words.float(field("flags")));
       const groundReference = words.int(field("groundentity"));
-      const groundActor = groundReference === 0 ? null : slots.at(entities.slot(groundReference));
+      const referenced = (reference: number): ActorId | null => services.actorReference === undefined
+        ? slots.at(entities.slot(reference))?.id ?? null : services.actorReference(reference);
+      const groundActor = groundReference === 0 ? null : referenced(groundReference);
       const ground: TraceHit = (flags & 512) === 0 ? { kind: "none" }
         : groundReference === 0 ? { kind: "world", model: 0 }
-        : groundActor === null ? { kind: "none" } : { kind: "actor", actor: groundActor.id };
+        : groundActor === null ? { kind: "none" } : { kind: "actor", actor: groundActor };
       const enemyReference = words.int(field("enemy"));
       return { ...body, absoluteBounds: bodies.linked(actor)?.absoluteBounds ?? qcLinkBounds(body, flags, numeric), flags, ground,
         idealYaw: words.float(field("ideal_yaw")), yawSpeed: words.float(field("yaw_speed")),
-        enemy: enemyReference === 0 ? null : slots.at(entities.slot(enemyReference))?.id ?? null };
+        enemy: enemyReference === 0 ? null : referenced(enemyReference) };
     },
     readTarget: actor => {
       const body = bodies.read(actor), slot = sourceSlot(actor);
@@ -87,7 +94,15 @@ export function createQcMovementBindings(world: QcWorldHost, services: {
     if ((Math.trunc(words.float(field("flags"))) & (512 | 1 | 2)) === 0) { vm.returnFloat(0); return; }
     movement.moveToGoal(actor, goal.id, distance);
   };
-  return new Map<QcHostBuiltinName, QcBuiltin>([["walkmove", walkmove], ["movetogoal", movetogoal]]);
+  const changeyaw: QcBuiltin = vm => {
+    if (vm.program !== program || vm.entities !== entities) return vm.fail("movement builtin belongs to another QC machine");
+    movement.changeYaw(world.actor(entities.slot(vm.globals.int(vm.globalOffset("self")))));
+  };
+  const checkbottom: QcBuiltin = vm => {
+    if (vm.program !== program || vm.entities !== entities) return vm.fail("movement builtin belongs to another QC machine");
+    vm.returnFloat(Number(movement.checkBottom(world.actor(entities.slot(vm.argInt(0))).id)));
+  };
+  return new Map<QcHostBuiltinName, QcBuiltin>([["walkmove", walkmove], ["movetogoal", movetogoal], ["changeyaw", changeyaw], ["checkbottom", checkbottom]]);
 }
 
 /** Resolve mutable source touch words at dispatch, including newly spawned edicts. */

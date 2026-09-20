@@ -1,4 +1,5 @@
 import { startupSummaryLayout } from "./startup-summary.ts";
+import { registerModMenu } from "../../ui/mods/menu.ts";
 import { registerArenaSelectionMenu } from "./base-arena-select-menu.ts";
 import { registerLocalLobbyMenu } from "../../ui/settings/local-lobby.ts";
 import type { ApplicationLocalLobby, LocalLobbySelection } from "./local-lobby.ts";
@@ -83,7 +84,7 @@ const groups: readonly { readonly title: string; readonly fields: readonly Start
   { title: "World", fields: ["product", "mapProduct", "map"] },
   { title: "Player", fields: ["movement", "character", "model", "seats"] },
   { title: "Combat", fields: ["weapons", "enemies", "skill", "mode", "rules"] },
-  { title: "Equipment", fields: ["grapple", "grenades", "weaponBehavior"] },
+  { title: "Equipment", fields: ["grapple", "grappleStyle", "grenades"] },
 ];
 
 export class StartupMenu {
@@ -186,11 +187,13 @@ export class StartupMenu {
     this.register(browserDetailsMenu, () => this.browserDetailsControls());
     const lobby = options.lobby === undefined ? null : registerLocalLobbyMenu(this.controller, options.lobby.current, options.lobby.selection, options.lobby.seats);
     if (lobby !== null) { this.lobbyMenu = lobby.root; this.disposers.push(lobby.dispose); }
+    const mods = registerModMenu(this.controller, options.model.mods);
+    this.disposers.push(mods.dispose);
     this.register(session, () => [...(options.browser !== undefined ? [this.button("browse", "Find servers", 8, () => this.controller.openMenu(browserMenu))] : []), ...(lobby === null ? [] : [this.button("local-lobby", "Local lobby", 9, () => this.controller.openMenu(lobby.root))]), ...groups.map((group, index) => this.button(`group:${index}`, group.title, index, () => {
       this.group = group; this.controller.openMenu(categoryMenu);
     })), this.button("hosting", options.model.hosting().kind === "offline" ? "Network: local only" : "Network: hosting", 4, () => {
       this.hostDraft = options.model.hosting(); this.hostPort = String(this.hostDraft.port); this.status = ""; this.controller.openMenu(hostingMenu);
-    }), this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 6, options.play), this.button("back", "Back", 7, () => this.controller.closeMenu())]);
+    }), this.button("mods", "Mods", 5, () => this.controller.openMenu(mods.root)), this.button("play", options.model.hosting().kind === "offline" ? "Play" : "Start server", 6, options.play), this.button("back", "Back", 7, () => this.controller.closeMenu())]);
     this.register(hostingMenu, () => [
       { id: "ui:startup:host-kind", kind: "choice", label: "Connections", rect: menuRow(0), visible: true, enabled: !this.busy,
         selected: this.hostDraft.kind, choices: [{ id: "offline", label: "Local only" }, { id: "native-server", label: "Native game clients" }, { id: "unified-server", label: "This client: mixed games" }],
@@ -291,7 +294,11 @@ export class StartupMenu {
     return this.options.model.presets().filter(preset => preset.family === this.nativeFamily && preset.edition === this.nativeEdition);
   }
   private rows(fields: readonly StartupSelectionField[]): readonly StartupSelectionRow[] {
-    return this.options.model.rows().filter(row => fields.includes(row.id));
+    const rows = this.options.model.rows();
+    return fields.flatMap(field => {
+      const row = rows.find(row => row.id === field);
+      return row === undefined ? [] : [row];
+    });
   }
   resumeServerBrowser(): void { if (this.options.browser !== undefined) this.controller.openMenu(browserMenu); }
 
@@ -370,6 +377,17 @@ export class StartupMenu {
     }).catch((error: unknown) => this.setStatus(error instanceof Error ? error.message : String(error)));
   }
   private row(row: StartupSelectionRow, index: number): UiControl {
+    const rect = { x: 64, y: 118 + index * 34, width: 512, height: 30 };
+    if (row.id === "grapple") return {
+      id: "ui:startup:grapple", kind: "choice", label: row.label, rect, visible: true, enabled: !this.busy,
+      selected: row.value, choices: row.choices.filter(choice => choice.unavailable === null),
+      select: (_seat, value) => { this.options.model.select("grapple", value); return undefined; },
+    };
+    if (row.id === "grenades") return {
+      id: "ui:startup:grenades", kind: "toggle", label: row.label, rect, visible: true,
+      enabled: !this.busy && (row.value === "enabled" || row.choices.some(choice => choice.id === "enabled" && choice.unavailable === null)),
+      checked: row.value === "enabled", change: (_seat, enabled) => { this.options.model.select("grenades", enabled ? "enabled" : "disabled"); return undefined; },
+    };
     const selected = row.choices.find(choice => choice.id === row.value)?.label ?? row.value;
     return this.button(row.id, this.fit(`${row.label}: ${selected}`, 486, 2.6), index, () => { this.monsterField = { kind: "none" }; this.field = row.id; this.controller.openMenu(selectMenu); this.prepareChoicePage(0); }, true);
   }
@@ -453,7 +471,7 @@ export class StartupMenu {
       : active === nativeDifficultyMenu ? "Difficulty"
       : active === categoryMenu ? this.group?.title ?? "Session" : active === rosterMenu ? "Custom roster" : active === selectMenu ? this.selectionRow()?.label ?? "Choose"
       : active === this.gyroMenu ? "Gyro controls" : active === browserMenu ? "Find servers" : active === browserDetailsMenu ? "Server details" : active === browserOptionsMenu ? "Server filters" : active === optionsMenu ? "Options" : active === displayMenu ? "Display" : active === soundMenu ? "Sound" : active === controlsMenu ? "Controls" : "Load Game";
-    if (!active?.startsWith("menu:settings:") && !active?.startsWith("menu:library:") && !active?.startsWith("menu:bindings:") && !active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:") && !active?.startsWith("menu:settings:accessibility:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
+    if (!active?.startsWith("menu:settings:") && !active?.startsWith("menu:library:") && !active?.startsWith("menu:bindings:") && !active?.startsWith("menu:mods:") && !active?.startsWith("menu:settings:llm") && !active?.startsWith("menu:settings:display:") && !active?.startsWith("menu:settings:input:") && !active?.startsWith("menu:settings:accessibility:")) text(title, 64, 44, active === main ? 6 : 4, true, true);
     if (active === this.bindingMenu) text(this.fit(`Player 1 - ${this.options.model.catalog.product(this.options.model.options.product).expectation.title}`, 512, 1.4), 64, 458, 1.4);
 
     if (active === nativeDifficultyMenu && this.nativePreset !== null) text(this.fit(this.nativePreset.label, 512, 1.6), 64, 86, 1.6);
@@ -471,7 +489,7 @@ export class StartupMenu {
 
     if (active === session) {
       text("Your game", 316, 118, 2, true);
-      const fields: readonly StartupSelectionField[] = ["product", "mapProduct", "map", "movement", "character", "model", "weapons", "weaponBehavior", "enemies", "grapple", "grenades", "mode"];
+      const fields: readonly StartupSelectionField[] = ["product", "mapProduct", "map", "movement", "character", "model", "weapons", "enemies", "grapple", "grappleStyle", "grenades", "mode"];
       const rows = this.options.model.rows().filter(row => fields.includes(row.id));
       const layout = startupSummaryLayout(rows.length, { x: 316, y: 142, width: 260, height: 300 });
       for (const [index, row] of rows.entries()) {

@@ -12,6 +12,7 @@ import { RF_DEPTHHACK, RF_FIRST_PERSON, RF_MINLIGHT, RF_LIGHTING_ORIGIN, RF_THIR
 import { attachSceneEntity, modelAttachmentTag } from "../../render/scene/models/transform.ts";
 import type { ApplicationAssets, ModelAsset } from "./assets.ts";
 import type { SimulationPresentation } from "./simulation/types.ts";
+import { add3, scale3 } from "../../core/math.ts";
 
 const zero = { x: 0, y: 0, z: 0 };
 const unit = { x: 1, y: 1, z: 1 };
@@ -74,15 +75,17 @@ export class SelectedQ3WeaponPresenter {
     return passes;
   }
 
-  async frame(source: SimulationPresentation): Promise<SceneEntity> {
+  async frame(source: SimulationPresentation, fieldOfView = 90): Promise<SceneEntity> {
     const view = source.q3Weapon; if (view === undefined) throw new Error("Selected Q3 weapon presentation state is missing");
     const stem = source.path.replace(/\.[^.]+$/, "");
     const [gunAsset, ownHand, barrelAsset, flashAsset, animation] = await Promise.all([
-      this.assets.model(source.content, source.path), this.model(source.content, `${stem}_hand.md3`),
-      this.model(source.content, `${stem}_barrel.md3`), this.model(source.content, `${stem}_flash.md3`), this.animation(source.content),
+      this.assets.model(source.content, source.path), this.model(source.content, source.modelAnchor?.path ?? `${stem}_hand.md3`),
+      source.modelAnchor === undefined ? this.model(source.content, `${stem}_barrel.md3`) : null,
+      source.modelAnchor === undefined ? this.model(source.content, `${stem}_flash.md3`) : null,
+      source.modelAnchor === undefined ? this.animation(source.content) : null,
     ]);
     const handAsset = ownHand ?? await this.assets.model(source.content, "models/weapons2/shotgun/shotgun_hand.md3");
-    runLerpFrame(animation, this.torso, { timeMs: view.timeMilliseconds, newAnimation: view.torsoAnimation, speedScale: 1, noPlayerAnimations: false });
+    if (animation !== null) runLerpFrame(animation, this.torso, { timeMs: view.timeMilliseconds, newAnimation: view.torsoAnimation, speedScale: 1, noPlayerAnimations: false });
     const position = q3WeaponViewPose({ origin: source.origin, angles: source.angles, timeMilliseconds: view.timeMilliseconds,
       horizontalSpeed: view.horizontalSpeed, bobCycle: (view.bobCycle & 128) >> 7,
       bobFractionSine: Math.abs(Math.sin((view.bobCycle & 127) / 127 * Math.PI)), landTime: 0, landChange: 0 });
@@ -90,10 +93,15 @@ export class SelectedQ3WeaponPresenter {
       transform: { origin, axis: qvmAnglesToAxis(angles), scale: unit }, previousOrigin: origin,
       pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 }, skin: 0, color: { x: 1, y: 1, z: 1, w: 1 },
       shaderTime: { kind: "milliseconds", value: 0 }, flags: { kind: "q3", bits: RF_MINLIGHT | RF_FIRST_PERSON | RF_DEPTHHACK }, lightingOrigin: source.origin, shadowPlane: 0, attachments: [] });
-    const hand: SceneEntity = { ...part(handAsset, position.origin, position.angles), pose: { kind: "frame",
-      frame: q3TorsoWeaponFrame(animation, this.torso.frame), previousFrame: q3TorsoWeaponFrame(animation, this.torso.oldFrame), backLerp: this.torso.backLerp } };
-    const tag = modelAttachmentTag(hand, "tag_weapon"); if (tag === null) throw new Error("Selected Q3 hands model has no tag_weapon");
+    const axis = qvmAnglesToAxis(source.angles), offset = source.modelAnchor?.offset ?? zero;
+    const fov = source.modelAnchor?.fovOffset, fovOffset = fov === undefined ? 0 : Math.fround(Math.fround(fov.scale) * Math.fround(Math.max(0, fieldOfView - fov.above)));
+    const origin = add3(position.origin, add3(add3(scale3(axis[0], offset.x), scale3(axis[1], offset.y)), scale3(axis[2], Math.fround(offset.z + fovOffset))));
+    const hand: SceneEntity = { ...part(handAsset, origin, position.angles), pose: { kind: "frame",
+      frame: animation === null ? source.frame : q3TorsoWeaponFrame(animation, this.torso.frame),
+      previousFrame: animation === null ? source.oldFrame : q3TorsoWeaponFrame(animation, this.torso.oldFrame), backLerp: animation === null ? source.backLerp ?? 0 : this.torso.backLerp } };
+    const tagName = source.modelAnchor?.tag ?? "tag_weapon", tag = modelAttachmentTag(hand, tagName); if (tag === null) throw new Error(`Selected Q3 hands model has no ${tagName}`);
     const attachments: SceneEntity["attachments"][number][] = [];
+    for (const attachment of source.modelAttachments ?? []) attachments.push({ tag: attachment.tag, entity: part(await this.assets.model(source.content, attachment.path)) });
     const spin = this.barrel.step(view.timeMilliseconds, view.firing);
     if (barrelAsset !== null) attachments.push({ tag: "tag_barrel", entity: part(barrelAsset, zero, { x: 0, y: 0, z: spin.angle }) });
     const continuous = view.firing && (view.weapon === 1 || view.weapon === 6 || view.weapon === 10);

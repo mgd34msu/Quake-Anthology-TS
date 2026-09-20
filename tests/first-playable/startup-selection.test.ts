@@ -25,7 +25,7 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   const original = await model.resolve();
   expect(original.recipe.weapons).toEqual([{ provider: "q2:official", content: catalog.require("q2-classic-baseq2").id }]);
   model.select("weapons", "q3-baseq3"); model.select("movement", "q2-rerelease-baseq2");
-  model.select("grapple", "q2-classic-ctf/offhand"); model.select("grenades", "q2-classic-baseq2");
+  model.select("grapple", "offhand"); model.select("grappleStyle", "q2-ctf"); model.select("grenades", "enabled");
   model.select("product", "q1-rerelease-id1");
   expect(model.options.map).toBe("maps/start.bsp");
   expect(model.rows().find(row => row.id === "map")?.choices.some(map => map.id === "maps/b_bh10.bsp")).toBe(false);
@@ -41,7 +41,11 @@ test.skipIf(!existsSync(resolve(corpus, "q3a/baseq3/pak0.pk3")) || !existsSync(r
   expect(applicationOptionsForRecipe(selected.options, { catalog, recipe: selected.recipe })).toMatchObject({ movement: "q2", movementProduct: "q2-rerelease-baseq2" });
   expect(selected.recipe.campaign.kind).toBe("none");
   expect(selected.recipe.equipment.grapple).toMatchObject({ kind: "enabled", mechanic: "q2-ctf", binding: "offhand" });
-  expect(selected.recipe.equipment.handGrenades).toMatchObject({ kind: "enabled", edition: "classic", binding: "offhand" });
+  expect(selected.recipe.equipment.handGrenades).toMatchObject({ kind: "enabled", binding: "offhand" });
+  expect(model.rows().find(row => row.id === "grenades")?.choices.map(choice => choice.label)).toEqual(["Off", "On"]);
+  expect(model.rows().find(row => row.id === "grapple")?.choices.map(choice => choice.label)).toEqual(["Off", "Weapon slot", "Offhand"]);
+  expect(model.rows().find(row => row.id === "grappleStyle")?.choices.map(choice => choice.label)).toContain("Threewave CTF (Quake 2)");
+  expect(model.rows().find(row => row.id === "grappleStyle")?.choices.every(choice => !choice.label.includes("offhand") && !choice.label.includes("weapon slot"))).toBe(true);
   expect(model.bindingCapabilities()).toEqual({ chat: false, scoreCommand: null, offhandGrapple: true, offhandGrenades: true });
   expect(selected.options).toMatchObject({ width: 1280, height: 720, gamma: 1.3, mode: "deathmatch", movement: "q2", character: "q3", characterModel: "sarge" });
   expect(model.summary().some(line => line.includes("Independent pickup replacement is not implemented"))).toBe(true);
@@ -286,8 +290,8 @@ test.skipIf(!existsSync(resolve(corpus, "q2/baseq2/pak0.pak")))("native campaign
   const model = new StartupSelectionModel(catalog, { ...command.options, botSkill: 5, serverProfilePath: "/custom-match.json", quakeCProgram: "progs.dat" });
   await model.prepareMaps();
   model.select("weapons", "q3-baseq3");
-  model.select("grapple", "q2-classic-ctf/offhand");
-  model.select("grenades", "q2-classic-baseq2");
+  model.select("grapple", "offhand"); model.select("grappleStyle", "q2-ctf");
+  model.select("grenades", "enabled");
   model.select("mode", "deathmatch");
   model.select("enemies", "custom");
   model.select("environment", "disabled");
@@ -435,7 +439,7 @@ test("exact movement products resolve catalog family and edition independently o
 });
 
 
-test.skipIf(process.env["QTS_TEST_INSTALLED_WEAPON_BEHAVIORS"] !== "1" || !existsSync(corpus))("trajectory menu exposes installed declarations across provider families and retains selection", async () => {
+test.skipIf(process.env["QTS_TEST_INSTALLED_WEAPON_BEHAVIORS"] !== "1" || !existsSync(corpus))("Mods menu exposes installed components across provider families and retains independent selections", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, userContentRoot: defaultUserContentRoot(), discoverMods: true });
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2"]);
   if (command.kind !== "run") throw new Error("Expected launch options");
@@ -450,17 +454,17 @@ test.skipIf(process.env["QTS_TEST_INSTALLED_WEAPON_BEHAVIORS"] !== "1" || !exist
   const model = new StartupSelectionModel(catalog, command.options);
   await model.prepareMaps();
   for (const entry of declared) {
-    const choice = model.rows().find(row => row.id === "weaponBehavior")?.choices.find(choice => choice.id === entry.id);
+    for (const active of model.mods.rows().filter(row => row.enabled)) model.mods.setEnabled(active.id, false);
+    const choice = model.mods.rows().find(choice => choice.id === entry.id);
     expect(choice?.unavailable).toBeNull();
-    model.select("weaponBehavior", entry.id);
-    expect(model.rows().find(row => row.id === "weaponBehavior")?.value).toBe(entry.id);
-    expect(model.options.weaponBehavior?.product).toBe(entry.product);
+    model.mods.setEnabled(entry.id, true);
+    expect(model.mods.rows().find(row => row.id === entry.id)?.enabled).toBe(true);
+    expect(model.options.mods?.some(mod => mod.product === entry.product)).toBe(true);
   }
-  const unsupported = model.rows().find(row => row.id === "weaponBehavior")?.choices.find(choice => choice.unavailable !== null);
-  expect(unsupported).toBeDefined();
-  if (unsupported === undefined) throw new Error("Expected an explicit unavailable provider");
-  expect(() => model.select("weaponBehavior", unsupported.id)).toThrow();
-  const selected = model.options.weaponBehavior;
+  const selected = model.options.mods;
+  model.mods.setEnabled("missing/component", true);
+  expect(model.mods.status()).toContain("not installed");
+  expect(model.options.mods).toEqual(selected);
   await model.prepareMaps();
-  expect(model.options.weaponBehavior).toEqual(selected);
+  expect(model.options.mods).toEqual(selected);
 }, 60000);

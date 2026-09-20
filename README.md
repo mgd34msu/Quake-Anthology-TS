@@ -71,11 +71,11 @@ Writable content is separate by default:
   content/                        # downloads, add-ons, and per-product overrides
     q1/id1/maps/example.bsp
     q1/mymod/
-    q1/homefix/                    # progs.dat, companion assets, weapon-behaviors.json
+    q1/rerelease/mymod/           # source files, companion assets, optional component declarations
     q2/baseq2/
-    q2/rerelease/q2eaks/           # author's game_x64.dll and companion files
+    q2/rerelease/mymod/           # source module and companion files
     q3a/baseq3/
-    q3a/homing-source-built/      # authored Q3 homing component and exact QVM profile
+    q3a/mymod/                   # complete author package and any component declarations
   saves/                          # application-managed saved games
   settings/                       # application-managed settings
 ```
@@ -132,7 +132,11 @@ General mod interoperability remains unfinished. The required behavior includes:
 - Mods from Quake 1, Quake 2, Quake 3, their expansions, and their rereleases usable in any supported destination game or mixed-game configuration.
 - Shared support for authored mod behavior across weapons, monsters and AI, items, rules, events, and other game systems.
 
-The source game must not restrict a mod to that game's worlds or equipment. Homing rockets are one example for checking interoperability. Existing projectile adapters cover part of this work; they do not establish general mod compatibility or simultaneous mod composition. The dedicated mod menu and broader composition requirements are still pending.
+The source game must not restrict a mod to that game's worlds or equipment. Homing rockets are one example for checking interoperability. Existing projectile adapters cover part of this work; they do not establish general mod compatibility.
+
+In the current source, **Play a game → Custom game → Mods** opens a searchable list with each component's source and Enabled/Disabled state. Enable compatible components individually; conflicting selections report both names and retain the previous selection. The existing declared projectile components are connected to this menu. General gameplay adapters remain in progress, so the list does not yet expose arbitrary installed mod features. `--mod PRODUCT/COMPONENT_ID` can be repeated for compatible components. These menu changes are not yet in the installed executable.
+
+Native Q3 mod inventories can use the module's original item table for weapon names, selection numbers, and ammo. Threewave 1.7 has a verified built-in declaration; other static tables can provide `qvm-items.json`. See [mod compatibility](docs/mod-compatibility.md#quake-iii-mod-inventories) for the format and current limits. This source change is not yet in the installed executable.
 
 **Choosing a mod and map independently**
 
@@ -160,53 +164,17 @@ QuakeC mods retain their source damage calculations, inventory constants, inline
 
 Early Q3 server modules can use an explicit, artifact-pinned SDK profile. See [mod compatibility](docs/mod-compatibility.md) for the declaration format and supported boundaries. A profile must match the module's actual bytes; a mod's filename does not establish its ABI.
 
-**Mod projectile behaviors**
+**Independent mod components**
 
-A declared QuakeC or QVM trajectory, or a supported native trajectory, can run on a selected Q1, Q2, or Q3 projectile launcher. Choose the arsenal under **Custom game → Combat → Weapons**, then choose **Equipment → Projectile trajectory**. The picker scans installed QuakeC, QVM, and native rerelease providers through the same declaration checks; unsupported entries show their reason and cannot be selected. The command-line behavior selector is `--weapon-behavior PRODUCT/BEHAVIOR_ID`. The source module controls the matching projectile's trajectory and scheduled callbacks; the selected launcher retains its ammo, damage, impact, model, and sound. Saved games retain the module identity, private state, pending callbacks, and projectile attachments.
+Packages can declare independent gameplay components in `gameplay-mods.json`, with each component referring to its own callback declaration. QuakeC, QVM, and declared Q2 native adapters bind original compiled functions to shared damage, actor, and inventory operations. Every enabled component owns separate source state, registrations, and checkpoints. Artifact and declaration changes are checked when loading a save; a missing mod checkpoint is rejected. Native owned-actor scheduling and remaining host services are under development. See [component declarations and limits](docs/mod-compatibility.md#independent-components) for the supported scope.
 
-The supported Q2Eaks v0.21 native artifact offers **Faster rockets** through a built-in declaration using the same binder as external native declarations. Installing it under `q2/rerelease/q2eaks/` makes that behavior available unless an explicit `native-weapon-behaviors.json` replaces the built-in selection. Selection enables the author's `g_faster_rockets` setting inside the private component. For example, launch from the source checkout with Q3 weapons:
+Existing projectile components also appear in **Custom game → Mods**. Choose the launcher separately under **Combat → Weapons**. The component supplies the matching projectile's trajectory; the selected launcher retains ammo, damage, impact, model, and sound. Disable the component to restore the launcher's trajectory. See [QuakeC declarations](docs/mod-compatibility.md#quakec-projectile-components), [native declarations](docs/mod-compatibility.md#native-declarations), and [QVM declarations](docs/mod-compatibility.md#qvm-projectile-components) for the existing inspection and installation commands.
 
-```sh
-bun run start --content-root /path/to/qfiles --game q3-baseq3 --map q3dm1 \
-  --movement q3 --character q3 \
-  --weapon-behavior q2-rerelease-q2eaks/native:rocket-trajectory
-```
+**Hook and offhand grenade controls**
 
-The base game data and the mod must both be installed. See [native component requirements](docs/mod-compatibility.md#native-projectile-components) for the exact supported artifact. Choose **Selected weapon default** to keep the launcher's own trajectory.
+In **Custom game → Equipment**, **Hook** selects **Off**, **Weapon slot**, or **Offhand**. **Hook style** selects the source implementation separately. The picker lists hook providers rather than every installed mod and combines classic/rerelease asset choices within each source-game style. **Offhand grenades** is a single **Off/On** feature; the engine selects the installed grenade assets internally.
 
-Other API2023 Windows x64 native mods can supply a source-backed trajectory declaration. To install an author's profile mounted as `profiles/rocket.json` in an installed `q2/rerelease/mymod/` package, run from the source checkout:
-
-```sh
-bun run start weapon-behavior declare-native q2-rerelease-mymod \
-  --profile profiles/rocket.json --content /path/to/qfiles
-```
-
-The command validates the profile against its DLL and writes `native-weapon-behaviors.json` atomically into that mod's writable overlay. Use `--user-content` to change the tooling command's writable root. Authors can also ship the document with their package. An explicit document is authoritative; `{"version":1,"profiles":[]}` disables built-in choices for that mounted product. Native inspection reports image metadata, not inferred weapon callbacks or private layouts. See the [declaration workflow and limits](docs/mod-compatibility.md#native-declarations).
-
-For older packages without declarations, inspect the mounted program first:
-
-```sh
-./quake-typescript weapon-behavior inspect q1-classic-homefix --content /path/to/qfiles
-./quake-typescript weapon-behavior declare q1-classic-homefix --content /path/to/qfiles \
-  --id homefix:rocket --role rocket --fire CheckHomingRocket --activate ActivateHoming \
-  --title "Homefix homing rockets"
-```
-
-This example uses Homefix's actual callback names. Use the callbacks from the selected mod's source; inspection does not infer their purpose from their names. Declarations are written atomically to `weapon-behaviors.json` in the writable mod directory. They bind an exact module digest and do not modify installed packages. `--artifact` selects another mounted program path; `--user-content` changes the tooling command's writable content root. Run `weapon-behavior --help` for the complete syntax.
-
-Mod authors can ship `weapon-behaviors.json` beside their QuakeC package. A declaration identifies the actual compiled program and callbacks; it does not supply replacement trajectory code. Rebuilding the program changes its digest and requires a matching declaration.
-
-These component adapters support the built-in arsenals. They do not automatically extract arbitrary weapon, monster, or rule changes, and opaque primary game modules do not yet expose these projectile hooks. Whole-module execution and independent component composition have separate compatibility requirements.
-
-The installed `homing-source-built` package contains a QVM built from Anup Shinde's unchanged authored homing source, its original archive/README, and an exact executable profile. It can steer a selected Q2 rocket launcher, including saved-flight continuation:
-
-```sh
-bun run start --content-root /path/to/qfiles --game q2-classic-baseq2 --map base1 \
-  --movement q2 --character q2 \
-  --weapon-behavior q3-classic-homing-source-built/qvm:anup-homing-constant
-```
-
-The QVM profile binds its digest, executable callbacks and private entity/client layout. To install a verified profile supplied with another package, use `weapon-behavior declare-qvm PRODUCT --profile PATH --content /path/to/qfiles`; `PATH` is mounted relative to that product. Profiles describe the author's executable behavior; they are not inferred from a mod name. See [QVM component requirements](docs/mod-compatibility.md#qvm-projectile-components).
+The source picker contains Threewave for Q1, Q2 and Q3, LMCTF for Q2, and LRCTF for Q3. The Q3 adapters execute their original hook code, including pull behavior, models, sounds and saved continuation. Cross-runtime equipment integration is still being completed. These changes are not yet in the installed executable.
 
 **Original Quake saves**
 
@@ -230,7 +198,7 @@ Q2 classic and rerelease movement now apply ground friction on Q1 maps. The shar
 
 Q1 colored lightmap offsets now address complete RGB samples. This fixes striped lighting in the rerelease and other Q1 maps with colored lighting, for both GL and CPU rendering.
 
-The [shared functional task list](docs/functional-targets/status.md) records **21 of 23 targets accepted in source** under its earlier acceptance scope. That count does not establish completion of the general mod interoperability requirements above. T10 still needs the dedicated mod menu and simultaneous composition of mods across games and game systems. Its existing native weapon declarations and component save/load workflow cover a narrower part of that requirement.
+The [shared functional task list](docs/functional-targets/status.md) records **20 of 23 targets accepted in source** after reopening T10 for the general mod interoperability requirements above. T10 is the first unfinished target. The dedicated mod menu is connected to existing components; general source adapters and simultaneous composition across game systems remain unfinished. Its existing native weapon declarations and component save/load workflow cover a narrower part of that requirement.
 
 T12 is active again: supported expansion arsenals still need menu integration, and Team Arena weapon/supply mixing has unfinished backend paths. T19 progression and player services remains open because no compatible original GRank transport/provider is bundled. Shared lobby creation, readiness, launch, return, and next-match handling are implemented. Local progress and records, source arena progression, and provider-based ranking account/report handling are separate implemented features.
 

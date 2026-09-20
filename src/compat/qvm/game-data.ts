@@ -5,7 +5,7 @@ import type { QvmAbiProfile } from "../../contracts/execution.ts";
 import type { QvmSharedEntity } from "./shared-entity-record.ts";
 import type { Q3PlayerState } from "../../contracts/protocol.ts";
 import type { QvmMemory } from "./memory.ts";
-import { qvmPlayerStateBytes, readQvmPlayerState } from "./player-record.ts";
+import { qvmPlayerStateBytes, readQvmPlayerState, writeQvmPlayerState } from "./player-record.ts";
 import { qvmSharedEntityBytes, borrowQvmSharedEntity } from "./shared-entity-record.ts";
 
 function int32(value: number): void {
@@ -151,6 +151,10 @@ export class QvmGameData {
 
   copyPlayerState(number: number): Q3PlayerState {
     return readQvmPlayerState(this.view(this.clientOffset(number), qvmPlayerStateBytes(this.abiProfile)), this.abiProfile);
+  }
+
+  writePlayerState(number: number, state: Q3PlayerState): void {
+    writeQvmPlayerState(this.view(this.clientOffset(number), qvmPlayerStateBytes(this.abiProfile)), state, this.abiProfile);
   }
 
   playerPing(number: number): number {

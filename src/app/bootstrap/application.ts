@@ -131,6 +131,7 @@ import { CampaignCinematic, type ScreenCinematicRequest, type ScreenCinematicCap
 import { SeatMediaCaptions } from "../../text/media-captions.ts";
 import type { SystemCinematicHost } from "./q3-client/cinematics.ts";
 import { CampaignUnit } from "./campaign-unit.ts";
+import { q3GrappleProfile } from "../../content/q3/equipment/grapple-profiles.ts";
 import { authoredCampaignStart } from "./authored-start.ts";
 import { loadNativeUiArt } from "../../ui/common/index.ts";
 import type { NativeUiArt } from "../../ui/common/index.ts";
@@ -570,8 +571,9 @@ export class Application {
         return Math.trunc(now.getTime() / 1000);
       };
     const components = {
-      ...(content.preparedWeaponBehaviors.some(entry => entry.kind === "qvm") ? { weaponBehaviorRealTime: realTime } : {}),
-      ...(content.preparedWeaponBehaviors.some(entry => entry.kind === "rerelease-native") ? { weaponBehaviorClock: {
+      ...(content.preparedWeaponBehaviors.some(entry => entry.kind === "qvm") || content.preparedQvmGrapple !== null ? { weaponBehaviorRealTime: realTime } : {}),
+      ...(content.preparedQvmGrapple === null ? {} : { preparedQvmGrapple: content.preparedQvmGrapple }),
+      ...(content.preparedWeaponBehaviors.some(entry => entry.kind === "rerelease-native") || content.recipe.mods?.some(mod => mod.declaration.runtime === "native") === true ? { weaponBehaviorClock: {
         nowMilliseconds: () => Math.trunc(performance.now()), performanceCounter: () => BigInt(Math.trunc(performance.now() * 1000)), performanceFrequency: 1_000_000n } } : {}) };
 
     if (content.preparedQ2Game !== null) {
@@ -810,6 +812,7 @@ export class Application {
             || options.teamArenaSkirmish.cvars.every(setting => borrowedSource?.variableString(setting.name) === setting.value)
             ? {} : { q3Cvars: teamArenaSourceCvars(options.teamArenaSkirmish, borrowedSource?.snapshots() ?? sourceArchive) }),
           ...await Application.guestOptions(content, options, host, guestCommands, candidateGraph, nativeCommand), prepareRereleaseNavigation: simulation => createApplicationBotNavigation({ content, simulation }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, weaponBehaviors: content.preparedWeaponBehaviors, recipe: content.recipe, world: content.world, mounts: content.mounts,
+          preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [],
           skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
           ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
           maxClients,
@@ -2358,7 +2361,17 @@ export class Application {
       if (localGuest === null || seat === undefined || browser === null) throw new Error("Local guest client services are not prepared");
       const { state, cvars } = seat;
       const keys = await this.prepareKeys(assets.content, simulation);
+      const primaryArtifact = assets.content.preparedQ3Game?.artifact;
+      const equipmentProfile = primaryArtifact === undefined ? null : q3GrappleProfile(primaryArtifact);
       const client = await ApplicationQ3Client.create({ saveFontData: () => (input.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, kind: "qvm", keys, localServer: true, source: state.source, connection: state, cvars,
+        equipmentWeapon: () => {
+          const grapple = simulation.recipe.equipment.grapple;
+          if (equipmentProfile === null || grapple.kind !== "enabled" || grapple.binding !== "slot") return null;
+          const selected = simulation.weaponSlot(local.player.actor).active;
+          if (selected?.provider !== grapple.source.provider || selected.item !== "q3:weapon_grapplinghook") return null;
+          const player = guest.player(local.player.seat.client.id);
+          return player === null ? null : { primaryWeapon: guest.records.player(player.sourceEntity).weapon };
+        },
         systemCinematics: this.systemCinematics(simulation, assets.content, assets, audio, renderer, local.player.seat.id, input),
         assets, queries: simulation.scene, local, audio, renderer, browser: browser.view, commandBuffer: input.guestCommands, guestCvars: input.guestCvars(local.player.seat.id), guestInput: input.guestInput(local.player.seat.id),
         commandRegistration: input.clientCommandRegistration(local.player.seat.id),
@@ -2465,7 +2478,8 @@ export class Application {
       throw error;
     }
     this.timedAutosave.worldChanged();
-    published?.();
+    if (published !== undefined) published();
+    else this.campaignUnit.stage({ content: this.content.recipe.map.geometryContent, path: this.content.recipe.map.geometry.requestedPath }, nativeTravel?.newUnit ?? false, null).commit();
     if (save === undefined) await this.autosaveLevel();
   }
 
@@ -2593,6 +2607,7 @@ export class Application {
         return commands;
       };
       const monsterNavigation = await preloadApplicationMonsterNavigation(content);
+      const modTravel = save === undefined ? await previousSimulation.checkpointModsForTravel() : undefined;
       const continueQ3Clock = save === undefined && q3 !== null && content.recipe.map.entities.provider.startsWith("q3:")
         && !content.recipe.execution.some(module => module.kind === "qvm" && module.role === "server-game");
       const destinationSourceMilliseconds = continueQ3Clock && q3 !== null ? q3.host.now() : initialSourceMilliseconds;
@@ -2631,6 +2646,7 @@ export class Application {
       }
       const retainedNative = nativeTravel === undefined ? undefined : previousSimulation.captureNativeQ2Travel(nativeTravel.newUnit, nativeTravel.spawnPoint);
       simulation = await loadSimulation({ ...(retainedNative === undefined ? {} : { nativeQ2Travel: retainedNative }), dedicated: options.dedicated, ...await Application.guestOptions(content, options, this.host, guestCommands, candidateGraph, nativeCommand), prepareRereleaseNavigation: simulation => createApplicationBotNavigation({ content, simulation }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, weaponBehaviors: content.preparedWeaponBehaviors, recipe: content.recipe, world: content.world, mounts: content.mounts,
+        preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [], ...(modTravel === undefined ? {} : { modTravel }),
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? (q3Map?.maxClients === undefined ? undefined : previousSimulation.q3Guest() === null ? q3Map.maxClients : Math.max(q3Map.maxClients, ...clients.map(client => client.slot + 1))) ?? skirmish?.maxClients ?? nextRules?.maxClients ?? this.simulation.options.maxClients,
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => this.networkPlayerIdentities.get(client) ?? ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
@@ -3054,8 +3070,11 @@ export class Application {
 
   async changeLevel(map: string, spawnPoint = ""): Promise<void> {
     if (this.closed || this.stepping) throw new Error("World travel requires an idle open application");
-    if (this.simulation.q2Native() !== null) {
-      await this.replaceWorld(map, null, 0, undefined, undefined, undefined, { kind: "map", name: map, spawnPoint, newUnit: false, next: null });
+    const native = this.simulation.q2Native() !== null;
+    const campaign = this.simulation.q2Source() !== null && this.network === null && this.options.network.kind === "offline"
+      && (this.options.mode === "singleplayer" || this.options.mode === "coop");
+    if (native || campaign) {
+      await this.advanceQ2Travel({ kind: "map", name: map, spawnPoint, newUnit: false, next: null }, native ? null : this.simulation.captureTravel(spawnPoint));
       return;
     }
     await this.replaceWorld(map, this.simulation.q3Source() === null && this.simulation.q3Guest() === null ? this.simulation.captureTravel(spawnPoint) : null);
@@ -3858,7 +3877,15 @@ export class Application {
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
         if (sourceClient !== undefined && (command.name === "use" || command.name === "weapnext" || command.name === "weapprev")) {
           const actor = this.commandActor(command.seat);
-          if (this.simulation.movementPlayer(actor)?.arsenal.state.kind !== "q3") {
+          const player = this.simulation.movementPlayer(actor), grapple = this.simulation.recipe.equipment.grapple;
+          if (player?.arsenal.state.kind === "q3" && grapple.kind === "enabled" && grapple.binding === "slot") {
+            this.simulation.playerCommand(actor, command.name, command.arguments_);
+            const slot = this.simulation.weaponSlot(actor), selected = slot.pending ?? slot.active;
+            const weapon = selected?.provider === player.arsenal.provider ? Q3_WEAPON_ITEMS.find(weapon => weapon.item === selected.item) : undefined;
+            if (weapon !== undefined) await sourceClient.client.command(["weapon", String(weapon.weapon)]);
+            continue;
+          }
+          if (player?.arsenal.state.kind !== "q3") {
             this.simulation.playerCommand(actor, command.name, command.arguments_); continue;
           }
         }
@@ -4075,8 +4102,12 @@ export class Application {
         const selection = source.client.userCommandSelection;
         this.graphical?.input.setQ3CommandSelection(seat, selection);
         const player = this.simulation.movementPlayer(source.client.options.local.player.actor);
+        const explicitWeapon = source.client.consumeWeaponSelection();
+        const slot = player === null ? null : this.simulation.weaponSlot(player.actor.id);
+        const supplemental = slot !== null && [slot.active, slot.pending].some(weapon => weapon !== null && weapon.provider !== player?.arsenal.provider);
+        const weapon = supplemental ? explicitWeapon : selection.weapon;
         this.graphical?.input.setArsenalSelection(seat, player?.arsenal.state.kind === "q3"
-          ? { provider: player.arsenal.provider, weapon: q3WeaponItem(selection.weapon)?.item ?? null } : null);
+          ? { provider: player.arsenal.provider, weapon: weapon === null ? null : q3WeaponItem(weapon)?.item ?? null } : null);
       }
       if (paused && this.graphical !== null) for (const local of this.graphical.input.locals) local.input.sample(this.graphical.input.now(), elapsedMilliseconds);
       const localCommands = paused ? [] : this.graphical?.input.build(frameMilliseconds, this.elapsed, this.frames, elapsedMilliseconds) ?? [];
@@ -4129,7 +4160,8 @@ export class Application {
           source.prediction.captureSource(nativeQ3);
           source.client.receive(nativeQ3, this.sourceEvents.filter(event => event.recipient === undefined || event.recipient.equals(source.client.options.local.player.actor)), localCommands);
         }
-        const effectEvents = graphical.q3.size === 0 ? presentationEvents : presentationEvents.filter(event => event.kind !== "q3-source" && event.kind !== "q3-character");
+        const effectEvents = graphical.q3.size === 0 ? presentationEvents : presentationEvents.filter(event =>
+          event.kind === "q3-source" ? event.event.kind === "sound" : event.kind !== "q3-character");
         const commonEvents = effectEvents.filter(event => event.recipient === undefined);
         const eventsFor = (actor: ActorId, events: readonly SimulationPresentationEvent[]) => events.filter(event => event.recipient === undefined || event.recipient.equals(actor));
         const nativeEvents = new Map<SeatId, readonly SimulationPresentationEvent[]>();

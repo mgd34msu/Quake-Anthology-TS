@@ -1,4 +1,6 @@
 import { prepareNativeQ2Map } from "./simulation/native-q2-map.ts";
+import { prepareApplicationMods } from "./mod-selection.ts";
+import { prepareApplicationQvmGrapple, type PreparedQvmGrapple } from "./qvm-grapple-selection.ts";
 import { prepareApplicationWeaponBehavior, prepareConfiguredApplicationRecipe, type PreparedWeaponBehavior } from "./weapon-behavior-selection.ts";
 import { prepareRereleaseGuest, type PreparedRereleaseGuest } from "./simulation/rerelease-guest-source.ts";
 import { sourceProgramImplementation, sourceProgramProduct } from "../../content/catalog/source-program.ts";
@@ -140,7 +142,7 @@ export function applicationSourceSelection(catalog: InstalledCatalog, options: P
 
 export function applicationDiscoversMods(options: ApplicationOptions, recipe?: ExecutableRecipe): boolean {
   const product = expectedProducts.find(product => product.id === options.product);
-  return options.weaponBehavior !== undefined || options.dedicated || options.network.kind === "offline"
+  return options.weaponBehavior !== undefined || (options.mods?.length ?? 0) > 0 || options.dedicated || options.network.kind === "offline"
     && (recipe !== undefined || product === undefined || product.family === "q3");
 }
 
@@ -268,6 +270,17 @@ export async function openApplicationConfigurationContent(catalog: InstalledCata
 
 /** A map and every resolved reference retain their original archive identity. */
 export class LoadedApplicationContent {
+  private modOwners: readonly import("../../world/session/mods.ts").PreparedMod[] = [];
+  get preparedMods(): readonly import("../../world/session/mods.ts").PreparedMod[] { return this.modOwners; }
+  async prepareMods(): Promise<void> {
+    this.modOwners = await prepareApplicationMods(this.catalog, this.recipe, id => this.forContent(id));
+  }
+  private grappleOwner: PreparedQvmGrapple | null = null;
+  get preparedQvmGrapple(): PreparedQvmGrapple | null { return this.grappleOwner; }
+  async prepareQvmGrapple(): Promise<void> {
+    const selection = this.recipe.equipment.grapple;
+    if (selection.kind === "enabled" && selection.mechanic === "q3-qvm") this.grappleOwner = await prepareApplicationQvmGrapple(selection, id => this.forContent(id));
+  }
   private readonly weaponBehaviorOwners: PreparedWeaponBehavior[] = [];
   get preparedWeaponBehaviors(): readonly PreparedWeaponBehavior[] { return this.weaponBehaviorOwners; }
   async prepareWeaponBehaviors(): Promise<void> {
@@ -472,7 +485,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? q2Execution.api.kind === "q2-rerelease-game" ? await prepareRereleaseGuest(q2Execution, mounts) : await prepareClassicGuest(q2Execution, mounts) : null;
     if (q2Prepared !== null) prepareNativeQ2Map(world, q2Prepared.execution.api.kind === "q2-rerelease-game" ? "rerelease" : "classic", options.mode);
     const loaded = new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product, mapSidecars.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    try { if (presentationSource === undefined) await loaded.prepareWeaponBehaviors(); return loaded; }
+    try { if (presentationSource === undefined) { await loaded.prepareWeaponBehaviors(); await loaded.prepareMods(); await loaded.prepareQvmGrapple(); } return loaded; }
     catch (error) { await loaded.close(); throw error; }
   } catch (error) {
     mounts.close();

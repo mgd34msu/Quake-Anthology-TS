@@ -22,7 +22,7 @@ export interface Q1MonsterMoveState {
 }
 
 export interface Q1MonsterMoveServices {
-  readonly scene: SceneQueries;
+  readonly scene: Pick<SceneQueries, "trace" | "pointContents">;
   readonly numeric: NumericOperations;
   readonly random: Pick<RandomSource, "nextInteger">;
   read(actor: ActorId): Q1MonsterMoveState | null;

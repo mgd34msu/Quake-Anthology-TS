@@ -1,3 +1,4 @@
+import { QcActorState } from "../../../compat/qc/actor-state.ts";
 import { readQuakeCCompatibility } from "../../../compat/qc/compatibility.ts";
 import type { RereleaseMessages } from "../../../network/q1/profile.ts";
 import { QuakeCLocalMessages, presentQuakeCLocalMessage } from "./quakec-local-messages.ts";
@@ -93,10 +94,7 @@ export interface PreparedQuakeCSource {
 
 /** Decode the selected artifact and genuine assets before synchronous source precaching. */
 export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: MountedContent, entityText = "", resourceMounts: MountedContent = mounts): Promise<PreparedQuakeCSource> {
-  const artifact = await mounts.open(execution.artifact.requestedPath);
-  if (artifact === null || artifact.reference.digest !== execution.artifact.digest || artifact.reference.id !== execution.artifact.id)
-    throw new Error("Selected QuakeC artifact no longer matches its resolved identity");
-  const program = loadQcProgram(artifact.bytes);
+  const program = loadQcProgram(await mounts.read(execution.artifact));
   id1ProgramBinding(program);
   if (execution.api.kind !== program.api.kind || execution.api.programVersion !== program.api.programVersion || execution.api.systemCrc !== program.api.systemCrc)
     throw new Error("Shared QuakeC artifact API differs from the selected execution");
@@ -162,6 +160,7 @@ export interface QuakeCSourceOptions {
 /** One source state owner, borrowed by the session's existing actor traversal. */
 export class QuakeCSource {
   readonly machine: QcMachine;
+  private readonly actorState: QcActorState;
   readonly attacks: Id1SynchronousAttacks;
   readonly projectiles: Id1ProjectileAttacks;
   readonly environment: Id1Environment;
@@ -290,6 +289,9 @@ export class QuakeCSource {
       builtins: createQcBuiltins({ kind: binding.kind, random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
       functionBoundary: this.projectiles.compose(this.attacks.compose(damage.functionBoundary)), observeCall: call => damage.observeCall(call),
       observeEntityStore: store => { this.projectiles.observeStore(store); return damage.observeEntityStore(store); } });
+    this.actorState = new QcActorState({ machine: this.machine, rerelease: options.recipe.engineBehavior.content.startsWith("q1:rerelease:"),
+      sourceSlot: actor => this.sourceSlot(actor), reference: reference => this.slots.at(this.entities.slot(reference))?.id ?? null,
+      isClient: actor => this.isReservedClient(actor) });
     const pushers = createQcPusherServices(this.worldHost, this.machine, { physical: projection => options.physics.q1PusherServices(projection),
       foreign: { read: actor => options.physics.readQ1Pusher(actor), write: entity => options.physics.writeQ1Pusher(entity) },
       touchTriggers: actor => options.physics.touchTriggers(actor), serverTime: () => this.currentTime });
@@ -1151,52 +1153,11 @@ export class QuakeCSource {
     return this.invoke(words.int(this.field("think")), slot, 0, time.value);
   }
   readMoveType(actor: ActorId): number | null { const slot = this.sourceSlot(actor); return slot === null ? null : this.entities.at(slot).float(this.field("movetype")); }
-  collision(actor: OwnedActor): SharedSolid | null {
-    const slot = this.sourceSlot(actor.id); if (slot === null) return null;
-    const words = this.entities.at(slot), solid = words.float(this.field("solid")), flags = Math.trunc(words.float(this.field("flags")));
-    const name = this.machine.strings.get(words.int(this.field("model"))), model = name.startsWith("*") ? Number(name.slice(1)) : slot === 0 ? 0 : null;
-    const corpse = solid === 5 && this.options.recipe.engineBehavior.content.startsWith("q1:rerelease:");
-    return { family: "q1", ...(corpse ? { q1Corpse: true } : {}), solid: solid === 0 || solid === 5 && !corpse ? "none" : solid === 1 ? "trigger" : solid === 4 ? "brush" : "box", model,
-      owner: words.int(this.field("owner")) === 0 ? null : this.slots.at(this.entities.slot(words.int(this.field("owner"))))?.id ?? null,
-      monster: (flags & 32) !== 0, item: (flags & 256) !== 0 };
-  }
-  motion(actor: OwnedActor, body: BodyState): Q2Motion | null {
-    const slot = this.sourceSlot(actor.id); if (slot === null) return null;
-    const words = this.entities.at(slot), move = words.float(this.field("movetype"));
-    let kind: Q2Motion["kind"];
-    switch (move) {
-      case 0: case 8: kind = "stationary"; break;
-      case 3: case 4: kind = "step"; break;
-      case 5: kind = "fly"; break;
-      case 6: kind = "toss"; break;
-      case 7: kind = "push"; break;
-      case 9: kind = "fly-missile"; break;
-      case 10: kind = "bounce"; break;
-      case 11:
-        if (!this.options.recipe.engineBehavior.content.startsWith("q1:rerelease:")) throw new Error(`Unsupported id1 movetype ${move}`);
-        kind = "bounce"; break;
-      default: throw new Error(`Unsupported id1 movetype ${move}`);
-    }
-    return { actor, kind, velocity: body.velocity, angularVelocity: words.vector(this.field("avelocity")), gravity: this.prepared.program.fieldsByName.has("gravity") ? words.float(this.field("gravity")) || 1 : 1,
-      gravityVector: { x: 0, y: 0, z: -1 }, clipMask: 3, owner: this.collision(actor)?.owner ?? null };
-  }
-  flags(actor: OwnedActor): SharedPhysicsFlags {
-    const slot = this.sourceSlot(actor.id); if (slot === null) return {};
-    const words = this.entities.at(slot), flags = Math.trunc(words.float(this.field("flags")));
-    return { fly: (flags & 1) !== 0, swim: (flags & 2) !== 0, partialGround: (flags & 1024) !== 0, player: this.isReservedClient(actor.id),
-      waterLevel: words.float(this.field("waterlevel")), waterType: words.float(this.field("watertype")), dead: words.float(this.field("health")) <= 0 };
-  }
-  writeFlags(actor: OwnedActor, changes: SharedPhysicsFlags): undefined {
-    const slot = this.sourceSlot(actor.id); if (slot === null) return undefined;
-    const words = this.entities.at(slot); let flags = Math.trunc(words.float(this.field("flags")));
-    for (const [value, bit] of [[changes.fly, 1], [changes.swim, 2], [changes.partialGround, 1024]] satisfies readonly (readonly [boolean | undefined, number])[]) {
-      if (value !== undefined) flags = value ? flags | bit : flags & ~bit;
-    }
-    words.setFloat(this.field("flags"), flags);
-    if (changes.waterLevel !== undefined) words.setFloat(this.field("waterlevel"), changes.waterLevel);
-    if (changes.waterType !== undefined) words.setFloat(this.field("watertype"), changes.waterType);
-    return undefined;
-  }
+  notarget(actor: ActorId): boolean | null { const slot = this.sourceSlot(actor); return slot === null ? null : (Math.trunc(this.entities.at(slot).float(this.field("flags"))) & 128) !== 0; }
+  collision(actor: OwnedActor): SharedSolid | null { return this.actorState.collision(actor); }
+  motion(actor: OwnedActor, body: BodyState): Q2Motion | null { return this.actorState.motion(actor, body); }
+  flags(actor: OwnedActor): SharedPhysicsFlags { return this.actorState.flags(actor); }
+  writeFlags(actor: OwnedActor, changes: SharedPhysicsFlags): undefined { return this.actorState.writeFlags(actor, changes); }
   classname(actor: ActorId): string { const slot = this.sourceSlot(actor); return slot === null ? "" : this.machine.strings.get(this.entities.at(slot).int(this.field("classname"))); }
   checkWaterTransition(actor: OwnedActor): undefined {
     const slot = this.sourceSlot(actor.id); if (slot === null) return undefined;
@@ -1212,5 +1173,5 @@ export class QuakeCSource {
     words.setFloat(this.field("watertype"), decision.waterType); words.setFloat(this.field("waterlevel"), decision.waterLevel);
     return undefined;
   }
-  writeAngularVelocity(actor: OwnedActor, value: Vec3): undefined { const slot = this.sourceSlot(actor.id); if (slot !== null) this.entities.at(slot).setVector(this.field("avelocity"), value); return undefined; }
+  writeAngularVelocity(actor: OwnedActor, value: Vec3): undefined { return this.actorState.writeAngularVelocity(actor, value); }
 }

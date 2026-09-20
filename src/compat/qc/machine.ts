@@ -19,9 +19,13 @@ export interface QcEntityStoreObservation {
   readonly after: Uint8Array;
 }
 export interface QcCallSite { readonly functionIndex: number; readonly caller: number; readonly statement: number; }
+export interface QcFunctionExecution {
+  (prepare?: (machine: QcMachine) => undefined): undefined;
+  skip(returnWords: readonly [number, number, number]): undefined;
+}
 export interface QcFunctionBoundary {
   readonly functions: ReadonlySet<number>;
-  run(call: QcCallSite, execute: () => undefined): undefined;
+  run(call: QcCallSite, execute: QcFunctionExecution): undefined;
 }
 export interface QcMachineOptions {
   readonly program: QcProgram;
@@ -36,6 +40,7 @@ export interface QcMachineOptions {
   readonly observeCall?: (call: QcCallSite) => undefined;
   readonly functionBoundary?: QcFunctionBoundary;
   readonly observeEntityStore?: (store: QcEntityStoreObservation) => undefined;
+  readonly validateEntityAccess?: (reference: number, word: number, words: 1 | 3, kind: "read" | "write") => undefined;
 }
 export interface QcMachineSnapshot {
   readonly globals: Uint8Array;
@@ -108,6 +113,24 @@ export class QcMachine {
     const definition = this.program.fieldsByName.get(name);
     if (definition === undefined) return this.fail(`missing entity field ${name}`);
     return definition.offset;
+  }
+  entityFloat(reference: number, field: string): number { return this.entityFields(reference, field, 1).float(this.fieldOffset(field)); }
+  entityInt(reference: number, field: string): number { return this.entityFields(reference, field, 1).int(this.fieldOffset(field)); }
+  entityVector(reference: number, field: string): Vec3 { return this.entityFields(reference, field, 3).vector(this.fieldOffset(field)); }
+  setEntityFloat(reference: number, field: string, value: number): void { this.storeEntity(reference, field, 1, (fields, word) => fields.setFloat(word, value)); }
+  setEntityInt(reference: number, field: string, value: number): void { this.storeEntity(reference, field, 1, (fields, word) => fields.setInt(word, value)); }
+  setEntityVector(reference: number, field: string, value: Vec3): void { this.storeEntity(reference, field, 3, (fields, word) => fields.setVector(word, value)); }
+  private entityFields(reference: number, field: string, words: 1 | 3): QcWords {
+    this.options.validateEntityAccess?.(reference, this.fieldOffset(field), words, "read");
+    return this.entities.fromReference(reference);
+  }
+  private storeEntity(reference: number, field: string, words: 1 | 3, store: (fields: QcWords, word: number) => void): void {
+    const word = this.fieldOffset(field), fields = this.entities.fromReference(reference), observe = this.options.observeEntityStore;
+    this.options.validateEntityAccess?.(reference, word, words, "write");
+    const before = observe === undefined ? null : fields.bytes.slice(word * 4, (word + words) * 4);
+    store(fields, word);
+    if (observe !== undefined && before !== null) observe({ functionIndex: this.functionIndex, statement: this.statement,
+      reference, word, before, after: fields.bytes.slice(word * 4, (word + words) * 4) });
   }
   argFloat(index: number): number { return this.globals.float(this.parameterOffset(index)); }
   argInt(index: number): number { return this.globals.int(this.parameterOffset(index)); }
@@ -197,16 +220,28 @@ export class QcMachine {
     const completed: { value: CallStaging | null } = { value: null };
     this.boundaryDepth++;
     try {
-      boundary.run(call, () => {
+      const finish = (run: () => undefined): undefined => {
         try {
           if (!active || called) this.fail("function continuation must execute once inside its boundary");
           called = true;
           this.restoreCallStaging(staging);
-          this.runFunction(fn, budget);
+          run();
           completed.value = { words: this.globals.bytes.slice(4, 16), argumentCount: this.argumentCount };
           return undefined;
         } catch (error) { failure.value = { error }; throw error; }
-      });
+      };
+      const execute: QcFunctionExecution = Object.assign((prepare?: (machine: QcMachine) => undefined): undefined => finish(() => {
+        prepare?.(this);
+        this.runFunction(fn, budget);
+        return undefined;
+      }), { skip: (returnWords: readonly [number, number, number]): undefined => finish(() => {
+        for (const [index, word] of returnWords.entries()) {
+          if (!Number.isInteger(word) || word < -2147483648 || word > 4294967295) this.fail("replacement return is not a QC word");
+          this.globals.setInt(1 + index, word);
+        }
+        return undefined;
+      }) });
+      boundary.run(call, execute);
       if (failure.value !== null) throw failure.value.error;
       if (!called) this.fail("function boundary omitted source execution");
     } finally {
@@ -274,14 +309,18 @@ export class QcMachine {
             g.copyWords(g, a, b, 1); break;
           case QcOpcode.StoreV: g.copyWords(g, a, b, 3); break;
           case QcOpcode.LoadF: case QcOpcode.LoadS: case QcOpcode.LoadEnt: case QcOpcode.LoadFld: case QcOpcode.LoadFn:
+            this.options.validateEntityAccess?.(g.int(a), g.int(b), 1, "read");
             g.copyWords(this.entities.fromReference(g.int(a)), g.int(b), c, 1); break;
-          case QcOpcode.LoadV: g.copyWords(this.entities.fromReference(g.int(a)), g.int(b), c, 3); break;
+          case QcOpcode.LoadV:
+            this.options.validateEntityAccess?.(g.int(a), g.int(b), 3, "read");
+            g.copyWords(this.entities.fromReference(g.int(a)), g.int(b), c, 3); break;
           case QcOpcode.Address:
             if (this.entities.slot(g.int(a)) === 0 && this.options.serverActive()) this.fail("assignment to world entity");
             g.setInt(c, this.entities.pointer(g.int(a), g.int(b))); break;
           case QcOpcode.StorePF: case QcOpcode.StorePS: case QcOpcode.StorePEnt: case QcOpcode.StorePFld: case QcOpcode.StorePFn: case QcOpcode.StorePV: {
             const words = opcode === QcOpcode.StorePV ? 3 : 1;
             const destination = this.entities.resolvePointer(g.int(b), words);
+            this.options.validateEntityAccess?.(g.int(b) - this.entities.layout.variablesOffsetBytes - destination.word * 4, destination.word, words, "write");
             const observe = this.options.observeEntityStore;
             const before = observe === undefined ? null : destination.fields.bytes.slice(destination.word * 4, (destination.word + words) * 4);
             destination.fields.copyWords(g, a, destination.word, words);
@@ -310,6 +349,21 @@ export class QcMachine {
           }
           case QcOpcode.State: {
             const self = this.self();
+            if (this.options.validateEntityAccess !== undefined) {
+              const reference = g.int(this.globalOffset("self"));
+              const fields: readonly (readonly [string, number, "float" | "int"])[] = [
+                ["nextthink", n.add(g.float(this.globalOffset("time")), 0.1), "float"], ["frame", g.float(a), "float"], ["think", g.int(b), "int"],
+              ];
+              for (const [name, value, type] of fields) {
+                const word = this.fieldOffset(name), observe = this.options.observeEntityStore;
+                this.options.validateEntityAccess(reference, word, 1, "write");
+                const before = observe === undefined ? null : self.bytes.slice(word * 4, (word + 1) * 4);
+                if (type === "float") self.setFloat(word, value); else self.setInt(word, value);
+                if (observe !== undefined && before !== null) observe({ functionIndex: this.functionIndex, statement: this.statement, reference,
+                  word, before, after: self.bytes.slice(word * 4, (word + 1) * 4) });
+              }
+              break;
+            }
             self.setFloat(this.fieldOffset("nextthink"), n.add(g.float(this.globalOffset("time")), 0.1));
             self.setFloat(this.fieldOffset("frame"), g.float(a));
             self.setInt(this.fieldOffset("think"), g.int(b));

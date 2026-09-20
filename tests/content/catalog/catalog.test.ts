@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { ContentId, ExecutionSelection, ProviderReference } from "../../../src/contracts/content.ts";
@@ -8,6 +8,7 @@ import { applicationPreset, loadApplicationContent } from "../../../src/app/boot
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
 import { discoverInstalledContent, expectedProducts, presetChoice, resolveLaunch, selectLaunch } from "../../../src/content/catalog/index.ts";
 import type { LaunchPreset } from "../../../src/content/catalog/index.ts";
+import { openMountPlan } from "../../../src/content/mounts/index.ts";
 
 const corpusRoot = resolve(import.meta.dir, "../../../../qfiles");
 
@@ -24,6 +25,46 @@ function preset(content: ContentId): LaunchPreset {
 }
 
 describe("installed content catalog", () => {
+  test("independent modules retain different artifacts with the same mounted path", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "quake-mod-artifacts-"));
+    try {
+      const original = expectedProducts.find(product => product.id === "q1-classic-id1");
+      if (original === undefined) throw new Error("Missing Quake fixture expectation");
+      const base = { ...original, requiredContentArchives: [], requiredPrograms: [], mapWitness: null };
+      const products = [base, ...["first", "second"].map(name => ({ ...base,
+        id: `q1-classic-${name}`, title: name, campaign: name,
+        contentDirectory: `q1/${name}`, baseProduct: base.id,
+      }))];
+      await mkdir(resolve(root, "q1/id1/maps"), { recursive: true });
+      await writeFile(resolve(root, "q1/id1/maps/start.bsp"), "map");
+      for (const name of ["first", "second"]) {
+        await mkdir(resolve(root, `q1/${name}`), { recursive: true });
+        await writeFile(resolve(root, `q1/${name}/progs.dat`), `${name} authored program`);
+      }
+      const catalog = await discoverInstalledContent({ corpusRoot: root, products, discoverMods: false });
+      const native = { ...preset(catalog.require(base.id).id), weapons: [] };
+      const execution: ExecutionSelection[] = ["first", "second"].map(name => {
+        const content = catalog.require(`q1-classic-${name}`).id;
+        return { kind: "quakec", owner: { provider: `q1:${name}`, content }, role: "server-game",
+          artifact: { content, path: "progs.dat" }, api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } };
+      });
+      const choice = { ...presetChoice(native.id), execution: { kind: "selected", value: execution } } satisfies Parameters<typeof resolveLaunch>[0]["choice"];
+      const recipe = await resolveLaunch({ catalog, preset: native, choice });
+      using mounted = await openMountPlan(recipe.mounts);
+      expect(recipe.execution).toHaveLength(2);
+      const contents: string[] = [];
+      for (const module of recipe.execution) {
+        if (module.kind !== "quakec") throw new Error("Expected QuakeC fixture");
+        expect(module.artifact.provenance.mount.identity.content).toBe(module.owner.content);
+        contents.push(new TextDecoder().decode(await mounted.read(module.artifact)));
+      }
+      expect(contents).toEqual(["first authored program", "second authored program"]);
+      expect(new Set(recipe.resources.map(resource => resource.id)).size).toBe(3);
+      await unlink(resolve(root, "q1/first/progs.dat"));
+      await expect(resolveLaunch({ catalog, preset: native, choice })).rejects.toThrow("Required resource is missing");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   test("catalog read retains mounted content until asynchronous reads finish", async () => {
     const root = await mkdtemp(resolve(tmpdir(), "quake-catalog-read-"));
     try {

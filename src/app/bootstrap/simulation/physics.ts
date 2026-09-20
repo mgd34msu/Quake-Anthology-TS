@@ -48,6 +48,14 @@ export interface SharedPhysicsFlags {
   readonly deltaYaw?: number;
   readonly teamSlave?: boolean;
 }
+export interface SourceBodyPhysics {
+  collision(): SharedSolid | null;
+  motion(): Q2Motion | null;
+  flags(): SharedPhysicsFlags;
+  writeFlags(changes: SharedPhysicsFlags): undefined;
+  writeAngularVelocity(value: Vec3): undefined;
+  waterTransition(): undefined;
+}
 export interface SharedPhysicsOptions {
   readonly q1WaterTransition?: (actor: OwnedActor) => undefined;
   readonly actors: SessionActorRegistry;
@@ -84,6 +92,7 @@ export class SharedPhysics {
   private readonly motions = new Map<OwnedActor, Q2Motion>();
   private readonly flags = new Map<OwnedActor, SharedPhysicsFlags>();
   private readonly events: PhysicsEvent[] = [];
+  private readonly sources = new Map<OwnedActor, SourceBodyPhysics>();
   private pushTransaction: Pushed[] | null = null;
   private worldGravity: number;
   private readonly rereleaseFlyMove;
@@ -97,7 +106,7 @@ export class SharedPhysics {
       onUnlink: actor => { options.scene.unlink(actor); return undefined; },
     });
     options.scene.bindActorState(id => this.bodies.read(id));
-    options.actors.onRelease(actor => { this.solids.delete(actor); this.collisions.delete(actor); this.motions.delete(actor); this.flags.delete(actor); return undefined; });
+    options.actors.onRelease(actor => { this.sources.delete(actor); this.solids.delete(actor); this.collisions.delete(actor); this.motions.delete(actor); this.flags.delete(actor); return undefined; });
   }
   private vector(x: number, y: number, z: number): Vec3 { return { x: this.n.store(x), y: this.n.store(y), z: this.n.store(z) }; }
   private add(a: Vec3, b: Vec3): Vec3 { return this.vector(this.n.add(a.x, b.x), this.n.add(a.y, b.y), this.n.add(a.z, b.z)); }
@@ -106,8 +115,14 @@ export class SharedPhysics {
   private dot(a: Vec3, b: Vec3): number { return this.n.add(this.n.add(this.n.multiply(a.x, b.x), this.n.multiply(a.y, b.y)), this.n.multiply(a.z, b.z)); }
   private moving(v: Vec3): boolean { return v.x !== 0 || v.y !== 0 || v.z !== 0; }
   private live(actor: OwnedActor): boolean { return this.options.actors.isLive(actor.id); }
-  private solid(actor: OwnedActor): SharedSolid | null { return this.options.getCollision?.(actor) ?? this.solids.get(actor) ?? null; }
-  private motion(actor: OwnedActor): Q2Motion | null { return this.options.getMotion?.(actor) ?? this.motions.get(actor) ?? null; }
+  private solid(actor: OwnedActor): SharedSolid | null { return this.sources.get(actor)?.collision() ?? this.options.getCollision?.(actor) ?? this.solids.get(actor) ?? null; }
+  private motion(actor: OwnedActor): Q2Motion | null { return this.sources.get(actor)?.motion() ?? this.options.getMotion?.(actor) ?? this.motions.get(actor) ?? null; }
+  bindSource(actor: OwnedActor, source: SourceBodyPhysics): () => undefined {
+    this.options.actors.assertOwned(actor);
+    if (this.sources.has(actor)) throw new Error("Actor already has source physics");
+    this.sources.set(actor, source);
+    return () => { if (this.sources.get(actor) === source) this.sources.delete(actor); return undefined; };
+  }
   private family(actor: OwnedActor): PhysicsFamily { return this.solid(actor)?.family ?? "q2"; }
   get gravity(): number { return this.worldGravity; }
   setWorldGravity(value: number): undefined {
@@ -210,11 +225,16 @@ export class SharedPhysics {
   isBrush(actor: ActorId): boolean { const owned = this.options.actors.resolveOwned(actor); return owned !== null && this.solid(owned)?.solid === "brush"; }
   drainEvents(): readonly PhysicsEvent[] { return this.events.splice(0); }
   private emit(event: PhysicsEvent): undefined { if (this.options.event !== undefined) return this.options.event(event); this.events.push(event); return undefined; }
-  private actorFlags(actor: OwnedActor): SharedPhysicsFlags { return { ...this.flags.get(actor), ...this.options.getFlags?.(actor) }; }
+  private actorFlags(actor: OwnedActor): SharedPhysicsFlags { return { ...this.flags.get(actor), ...(this.sources.get(actor)?.flags() ?? this.options.getFlags?.(actor)) }; }
   setFlags(actor: OwnedActor, changes: SharedPhysicsFlags): undefined {
     if (!this.live(actor)) return undefined;
     this.flags.set(actor, { ...this.actorFlags(actor), ...changes });
-    return this.options.writeFlags?.(actor, changes);
+    const source = this.sources.get(actor);
+    return source === undefined ? this.options.writeFlags?.(actor, changes) : source.writeFlags(changes);
+  }
+  private writeAngularVelocity(actor: OwnedActor, value: Vec3): undefined {
+    const source = this.sources.get(actor);
+    return source === undefined ? this.options.writeAngularVelocity?.(actor, value) : source.writeAngularVelocity(value);
   }
   setSolid(actor: OwnedActor, solid: SharedSolid["solid"], model: number | null, family: PhysicsFamily, owner: ActorId | null = null): undefined {
     this.options.actors.assertOwned(actor);
@@ -614,7 +634,7 @@ export class SharedPhysics {
         trace: (start, end) => this.bodyTrace(actor, start, end, [], true),
         hitActor: trace => trace.hit.kind === "actor" ? trace.hit.actor : this.options.worldActor(),
         flyMove: frame => this.flyMove(actor, frame, true),
-        writeAngularVelocity: angularVelocity => { this.motions.set(actor, { ...motion, angularVelocity }); this.options.writeAngularVelocity?.(actor, angularVelocity); return undefined; },
+        writeAngularVelocity: angularVelocity => { this.motions.set(actor, { ...motion, angularVelocity }); this.writeAngularVelocity(actor, angularVelocity); return undefined; },
         touchTriggers: () => this.touchTriggers(actor), pointContents: point => {
           const contents = this.options.scene.pointContents({ point, target: { kind: "world" }, policy: this.policy("q2", -1), numeric: this.options.numeric, passActor: actor.id });
           if (contents.kind !== "q2") throw new Error("NewToss requires Q2 contents representation"); return contents.stored;
@@ -649,7 +669,7 @@ export class SharedPhysics {
         const adjustment = elapsed * 600;
         const friction = (value: number): number => value > 0 ? Math.max(0, value - adjustment) : Math.min(0, value + adjustment);
         const angular = this.vector(friction(motion.angularVelocity.x), friction(motion.angularVelocity.y), friction(motion.angularVelocity.z));
-        this.motions.set(actor, { ...motion, angularVelocity: angular }); this.options.writeAngularVelocity?.(actor, angular);
+        this.motions.set(actor, { ...motion, angularVelocity: angular }); this.writeAngularVelocity(actor, angular);
       }
       if (state.ground === null && !flags.fly && !(flags.swim && (flags.waterLevel ?? 0) > 2) && (flags.waterLevel ?? 0) === 0)
         velocity = this.add(velocity, this.scale(motion.gravityVector, motion.gravity * this.worldGravity * elapsed));
@@ -690,9 +710,9 @@ export class SharedPhysics {
     if (currentMotion.kind !== "wall-bounce" && this.dot(normal, currentMotion.gravityVector) < -0.7 && (this.dot(velocity, currentMotion.gravityVector) > -60 || currentMotion.kind !== "bounce")) {
       this.writeLive(actor, { velocity: zero, ground: this.hitActor(trace) });
       this.motions.set(actor, { ...currentMotion, velocity: zero, angularVelocity: zero });
-      this.options.writeAngularVelocity?.(actor, zero);
+      this.writeAngularVelocity(actor, zero);
     } else this.writeLive(actor, { velocity });
-    if (family === "q1" && this.live(actor)) this.options.q1WaterTransition?.(actor);
+    if (family === "q1" && this.live(actor)) { const source = this.sources.get(actor); if (source === undefined) this.options.q1WaterTransition?.(actor); else source.waterTransition(); }
     return undefined;
   }
 

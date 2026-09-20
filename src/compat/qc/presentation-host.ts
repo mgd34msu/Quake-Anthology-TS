@@ -18,6 +18,10 @@ import type { QcHostBuiltinName } from "./builtins.ts";
 import type { QcBuiltin } from "./machine.ts";
 import type { QcWorldHost } from "./world-host.ts";
 
+export type QcPresentationWorld = Pick<QcWorldHost, "host" | "actor"> & {
+  readonly options: Pick<QcWorldHost["options"], "program" | "entities">;
+};
+
 export type QcPresentationEvent = Extract<Q1Event, { readonly kind: "sound" | "ambient" | "particles" | "lightstyle" | "server-command" | "static-model" }>;
 export interface QcPrecachedResource {
   readonly index: number;
@@ -53,6 +57,8 @@ export interface QcPresentationServices {
   lookup(kind: "model" | "sound", name: string): QcPrecachedResource | null;
   loading(): boolean;
   print(text: string): undefined;
+  /** A shared console sink already delivers broadcast prints to its clients. */
+  readonly printBroadcastsToClients?: boolean;
   message?(event: NetworkEvent, actor: ActorId): undefined;
   /** Structurally accepted by the application's existing SimulationEvents instance. */
   readonly events: {
@@ -89,7 +95,7 @@ export class QcFinaleAcknowledgement {
 }
 
 /** Adds source events to the same sink as built-in gameplay, without another media registry. */
-export function createQcPresentationBindings(world: QcWorldHost, services: QcPresentationServices): ReadonlyMap<QcHostBuiltinName, QcBuiltin> {
+export function createQcPresentationBindings(world: QcPresentationWorld, services: QcPresentationServices): ReadonlyMap<QcHostBuiltinName, QcBuiltin> {
   const bindings = new Map<QcHostBuiltinName, QcBuiltin>();
   const register = (value: QcPrecachedResource): void => {
     services.events.registerResource(services.content, value.resource.requestedPath, value.resource);
@@ -106,10 +112,10 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
   const qw = world.options.program.api.kind === "q1-quakeworld" ? services.qw : undefined;
   if (world.options.program.api.kind === "q1-quakeworld" && qw === undefined) throw new Error("QuakeWorld presentation requires routed message services");
   install("bprint", vm => {
-    if (qw === undefined) { const text = vm.varString(0); services.print(text); services.nq?.route([{ kind: "print", text }], { kind: "broadcast", reliable: true }); }
+    if (qw === undefined) { const text = vm.varString(0); services.print(text); if (services.printBroadcastsToClients !== true) services.nq?.route([{ kind: "print", text }], { kind: "broadcast", reliable: true }); }
     else {
       const text = vm.varString(1); services.print(text);
-      qw.route([{ message: { kind: "print", level: Math.trunc(vm.argFloat(0)), text }, actor: null }], { kind: "broadcast", reliable: true });
+      if (services.printBroadcastsToClients !== true) qw.route([{ message: { kind: "print", level: Math.trunc(vm.argFloat(0)), text }, actor: null }], { kind: "broadcast", reliable: true });
     }
   });
   install("localcmd", vm => { emit({ kind: "server-command", text: vm.argString(0) }); });
@@ -214,6 +220,11 @@ export function createQcPresentationBindings(world: QcWorldHost, services: QcPre
 
 
 export type QcBroadcastEvent = Extract<Q1Event, { readonly kind: "effect" | "beam" | "colored-explosion" }>;
+export type QcMessageWorld = Pick<QcWorldHost, "actor"> & {
+  readonly options: Pick<QcWorldHost["options"], "program" | "entities"> & {
+    readonly slots: Pick<QcWorldHost["options"]["slots"], "at">;
+  };
+};
 
 /** QC writes retain their source codec and destination before joining shared presentation. */
 export class QcBroadcastMessages {
@@ -224,7 +235,7 @@ export class QcBroadcastMessages {
   private signonBuffers = 1;
   private readonly qwDecoder = new QuakeWorldDecoder();
   private readonly routedBuffers = new Map<string, { readonly buffer: SizeBuf; readonly owners: Map<number, ActorId | null>; readonly destination: QcMessageDestination | null }>();
-  constructor(world: QcWorldHost, private readonly emit: (effect: QcBroadcastEvent, recipient?: ActorId) => undefined, private readonly qw?: QcQuakeWorldMessageServices, private readonly nq?: QcNetQuakeMessageServices) {
+  constructor(world: QcMessageWorld, private readonly emit: (effect: QcBroadcastEvent, recipient?: ActorId) => undefined, private readonly qw?: QcQuakeWorldMessageServices, private readonly nq?: QcNetQuakeMessageServices) {
     this.decoder = new NetQuakeDecoder({ kind: "q1-netquake", version: 15 }, nq?.messageDialect ?? "known-retail");
     const isQw = world.options.program.api.kind === "q1-quakeworld";
     if (isQw && qw === undefined) throw new Error("QuakeWorld messages require routed message services");

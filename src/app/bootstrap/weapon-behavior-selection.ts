@@ -10,6 +10,7 @@ import { prepareRereleaseGuest, type PreparedRereleaseGuest } from "./simulation
 import { readWeaponBehaviorDocument } from "../../content/catalog/weapon-behavior-document.ts";
 import { type CvarRegistry } from "../../core/cvars/index.ts";
 import type { ApplicationOptions } from "./options.ts";
+import { applicationModChoices, applyApplicationMods } from "./mod-selection.ts";
 import type { ExecutableRecipe, ResolvedWeaponBehaviorSelection, ContentId } from "../../contracts/content.ts";
 import { createMountPlanId } from "../../contracts/content.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
@@ -52,7 +53,7 @@ export function readWeaponBehaviorRequest(value: string): WeaponBehaviorRequest 
   return { product: value.slice(0, slash), id: value.slice(slash + 1) };
 }
 export function configuredWeaponBehaviorOptions(options: ApplicationOptions, cvars: CvarRegistry): ApplicationOptions {
-  if (options.weaponBehavior !== undefined) return options;
+  if (options.weaponBehavior !== undefined || options.mods !== undefined) return options;
   const value = cvars.find("qts_weaponBehavior")?.value ?? "";
   return value === "" ? options : { ...options, weaponBehavior: readWeaponBehaviorRequest(value) };
 }
@@ -110,12 +111,12 @@ export async function selectApplicationWeaponBehavior(catalog: InstalledCatalog,
 }
 export async function prepareConfiguredApplicationRecipe(catalog: InstalledCatalog, options: ApplicationOptions,
   recipe: ExecutableRecipe): Promise<{ readonly catalog: InstalledCatalog; readonly recipe: ExecutableRecipe }> {
-  const request = options.weaponBehavior;
-  if (request === undefined) return { catalog, recipe };
-  if (!catalog.products.some(product => product.expectation.id === request.product || product.id === request.product))
+  const requests = [...options.mods ?? [], ...options.weaponBehavior === undefined ? [] : [options.weaponBehavior]];
+  if (requests.length === 0) return { catalog, recipe };
+  if (requests.some(request => !catalog.products.some(product => product.expectation.id === request.product || product.id === request.product)))
     catalog = await discoverInstalledContent({ corpusRoot: catalog.corpusRoot, generation: catalog.generation, discoverMods: true,
       ...(catalog.userContentRoot === null ? {} : { userContentRoot: catalog.userContentRoot }) });
-  return { catalog, recipe: await selectApplicationWeaponBehavior(catalog, recipe, request) };
+  return { catalog, recipe: applyApplicationMods(recipe, await applicationModChoices(catalog), requests) };
 }
 export async function prepareApplicationWeaponBehavior(catalog: InstalledCatalog, selection: ResolvedWeaponBehaviorSelection,
   forContent: (id: ContentId) => Promise<MountedContent>): Promise<PreparedWeaponBehavior> {
@@ -151,4 +152,3 @@ export async function prepareApplicationWeaponBehavior(catalog: InstalledCatalog
   const program = loadQcProgram(artifact.bytes);
   return { kind: "quakec", selection, program, resources: await prepareQuakeCResources(program, mounts), mounts };
 }
-

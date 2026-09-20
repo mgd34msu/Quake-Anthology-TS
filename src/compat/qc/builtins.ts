@@ -24,6 +24,7 @@ export interface QcBuiltinServices {
   /** A source RNG, owned and saved by the session. No process-global Math.random. */
   readonly random?: RandomSource;
   readonly isFreeEntity?: (slot: number) => boolean;
+  readonly prepareEntities?: () => void;
   /** Numbered and named host calls execute to completion before QC resumes. */
   readonly host?: ReadonlyMap<QcHostBuiltinName, QcBuiltin>;
   /** Advertise only behavior actually supplied by the chosen host. */
@@ -130,15 +131,20 @@ export function createQcBuiltins(services: QcBuiltinServices): QcBuiltinRegistry
   const isFree = services.isFreeEntity;
   if (isFree !== undefined) {
     numbered.set(18, machine => {
+      services.prepareEntities?.();
       const start = machine.entities.slot(machine.argInt(0)); const field = machine.argInt(1); const match = machine.argString(2);
+      const definition = machine.program.fields.find(definition => definition.offset === field && definition.type === "string");
+      if (definition === undefined) return machine.fail("find requires a source string field");
       for (let slot = start + 1; slot < machine.entities.count; slot++) {
         if (isFree(slot)) continue;
-        const text = machine.entities.at(slot).int(field);
+        const reference = machine.entities.reference(slot);
+        const text = machine.entityInt(reference, definition.name);
         if (text !== 0 && machine.strings.get(text) === match) { machine.returnInt(machine.entities.reference(slot)); return; }
       }
       machine.returnInt(0);
     });
     numbered.set(47, machine => {
+      services.prepareEntities?.();
       for (let slot = machine.entities.slot(machine.argInt(0)) + 1; slot < machine.entities.count; slot++) {
         if (!isFree(slot)) { machine.returnInt(machine.entities.reference(slot)); return; }
       }

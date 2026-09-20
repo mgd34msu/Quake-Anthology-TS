@@ -4,7 +4,7 @@ import type { QvmCheckpoint } from '../../../../contracts/execution.ts';
 import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from '../../../../persistence/value.ts';
 import { savedActorId, readSavedActor } from '../../../../persistence/save-image.ts';
 import type { QvmHostCheckpoint } from '../../../../compat/qvm/module.ts';
-import type { ClientId } from '../../../../contracts/identity.ts';
+import type { ActorId, ClientId } from '../../../../contracts/identity.ts';
 import type { MountedContent } from '../../../../content/mounts/index.ts';
 import type { UserFileStore } from '../../../../platform/files/writable.ts';
 import type { WireUserCommand } from '../../../../network/q3/message.ts';
@@ -51,6 +51,7 @@ export interface Q3GuestRuntimeOptions {
   readonly common: Pick<Extract<QvmCommonServices, { readonly role: 'qagame' }>, 'milliseconds' | 'realTime' | 'commands'>;
   now(): number;
   assertCurrent(): void;
+  beforeDisconnect?(actor: ActorId): void;
 }
 export type Q3SavedGuestClientId = Pick<ClientId, 'slot' | 'generation'>;
 export interface Q3GuestMapClient { readonly client: ClientId; readonly userinfo: string; readonly bot?: boolean; }
@@ -435,6 +436,7 @@ export class Q3QvmServerGame {
       const entry = this.clients.get(player.sourceEntity);
       if (entry === undefined || entry.player !== player) return;
       if (entry.phase.kind !== 'dropping') entry.phase = { kind: 'dropping', reason: 'Client disconnected.' };
+      this.options.beforeDisconnect?.(player.actor);
       this.clients.delete(player.sourceEntity);
       try {
         const call = this.currentCall;

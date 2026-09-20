@@ -15,11 +15,14 @@ import { Q2GrappleWeapon, createGrappleWeaponState } from "../../../content/q2/e
 import type { GrappleWeaponState, GrappleWeaponPresentation } from "../../../content/q2/equipment/grapple-weapon.ts";
 import type { EquipmentWeaponHandoff, WeaponReference } from "./weapon-slot.ts";
 import type { SourceRandom } from "./random.ts";
+import type { QvmGrappleSource, QvmGrappleSourceCheckpoint } from "./qvm-grapple-source.ts";
+import type { QvmGrappleProvider } from "../../../compat/qvm/grapple-provider.ts";
 
 export type GrappleSource =
   | { readonly kind: "q1-threewave"; readonly game: Q1EntityServices; readonly core: ThreewaveGrapple }
   | { readonly kind: "q2-ctf"; readonly game: Q2EntityServices; readonly core: Q2CtfGrappleEquipment }
-  | { readonly kind: "q2-lmctf"; readonly game: Q2EntityServices; readonly core: LmctfGrappleEquipment };
+  | { readonly kind: "q2-lmctf"; readonly game: Q2EntityServices; readonly core: LmctfGrappleEquipment }
+  | { readonly kind: "q3-qvm"; readonly game: QvmGrappleSource; readonly core: QvmGrappleProvider };
 interface GrappleControl {
   readonly teleportBit: number | null;
   readonly jump: boolean;
@@ -51,7 +54,8 @@ export interface GrappleRuntimeCheckpoint {
     | { readonly kind: "q2-ctf"; readonly entities: Q2FoundationCheckpoint;
         readonly states: readonly { readonly actor: SavedActorId; readonly state: ReturnType<typeof captureCtfGrapple> }[] }
     | { readonly kind: "q2-lmctf"; readonly entities: Q2FoundationCheckpoint;
-        readonly states: readonly { readonly actor: SavedActorId; readonly state: ReturnType<typeof captureLmctfGrapple> }[] };
+        readonly states: readonly { readonly actor: SavedActorId; readonly state: ReturnType<typeof captureLmctfGrapple> }[] }
+    | { readonly kind: "q3-qvm"; readonly component: QvmGrappleSourceCheckpoint; readonly holstered: readonly SavedActorId[] };
 }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function saved(actor: ActorId): SavedActorId { return { slot: actor.slot, generation: actor.generation }; }
@@ -62,29 +66,32 @@ export class GrappleRuntime {
   private readonly weaponAnimations = new Map<ActorId, GrappleWeaponAnimation>();
   private readonly q2Weapons = new Map<ActorId, Q2GrappleWeapon>();
   private readonly q1Weapon: ThreewaveWeapon | null;
+  private readonly q3Holstered = new Set<ActorId>();
   constructor(readonly selection: Extract<GrappleSelection, { readonly kind: "enabled" }>, readonly source: GrappleSource,
     readonly random: SourceRandom, private readonly slotHost: GrappleSlotHost | null = null) {
     if (selection.binding === "slot" && slotHost === null) throw new Error("Selected grapple slot needs its source weapon host");
     this.q1Weapon = source.kind === "q1-threewave" && selection.binding === "slot" && slotHost !== null
       ? new ThreewaveWeapon(source.core, { selected: actor => slotHost.selected(actor), available: actor => slotHost.available(actor), frame: (actor, frame) => slotHost.frame(actor, frame) }) : null;
-    source.game.host.actors.onRelease(actor => { this.controls.delete(actor.id); this.weaponAnimations.delete(actor.id); this.q2Weapons.delete(actor.id); return undefined; });
-    if (source.kind !== "q1-threewave") {
+    source.game.host.actors.onRelease(actor => { this.controls.delete(actor.id); this.weaponAnimations.delete(actor.id); this.q2Weapons.delete(actor.id); this.q3Holstered.delete(actor.id); return undefined; });
+    if (source.kind === "q2-ctf" || source.kind === "q2-lmctf") {
       source.game.sourceCallbacks.register(source.core.callbacks);
       source.core.bind(source.game);
     }
   }
   admit(actor: ActorId): undefined {
     if (!this.source.game.host.actors.isLive(actor) || this.source.game.host.bodies.read(actor) === null) throw new Error("Grapple needs an admitted actor and body");
+    if (this.source.kind === "q3-qvm") this.source.game.admit(actor);
     this.controls.set(actor, { teleportBit: null, jump: false, held: false, pressed: false, released: false, previousVelocity: zero, predictionSuppressed: false });
     if (this.selection.binding === "slot") {
       if (this.source.kind === "q1-threewave") this.source.core.state(actor);
+      else if (this.source.kind === "q3-qvm") this.q3Holstered.add(actor);
       else this.bindWeapon(actor, { state: createGrappleWeaponState(), nextFrameAt: 0, kickOrigin: zero, kickPitch: 0 });
     }
     return undefined;
   }
   private bindWeapon(actor: ActorId, animation: GrappleWeaponAnimation): undefined {
     const source = this.source, host = this.slotHost;
-    if (source.kind === "q1-threewave" || host === null) throw new Error("Q2 grapple animation requires its selected slot host");
+    if (source.kind === "q1-threewave" || source.kind === "q3-qvm" || host === null) throw new Error("Q2 grapple animation requires its selected slot host");
     this.weaponAnimations.set(actor, animation);
     const presentation = host.presentation(actor);
     this.q2Weapons.set(actor, new Q2GrappleWeapon(actor, source.game, source.kind === "q2-ctf" ? { kind: "ctf", core: source.core, edition: this.selection.edition } : { kind: "lmctf", core: source.core }, animation.state,
@@ -92,10 +99,11 @@ export class GrappleRuntime {
     return undefined;
   }
   weapon(): WeaponReference {
-    return { provider: this.selection.source.provider, item: this.selection.mechanic === "q1-threewave" ? "q1:ctf/weapon/grapple" : this.selection.mechanic === "q2-ctf" ? "q2:weapon_grapple" : "q2:weapon_hook" };
+    return { provider: this.selection.source.provider, item: this.selection.mechanic === "q1-threewave" ? "q1:ctf/weapon/grapple" : this.selection.mechanic === "q2-ctf" ? "q2:weapon_grapple" : this.selection.mechanic === "q3-qvm" ? "q3:weapon_grapplinghook" : "q2:weapon_hook" };
   }
   handoff(actor: ActorId): EquipmentWeaponHandoff {
     if (this.selection.binding !== "slot") throw new Error("Offhand grapple has no weapon slot");
+    if (this.source.kind === "q3-qvm") return { weapon: this.weapon(), holster: () => { this.q3Holstered.add(actor); this.release(actor); }, isHolstered: () => this.q3Holstered.has(actor), resume: () => { this.q3Holstered.delete(actor); } };
     const q1 = this.q1Weapon, q2 = this.q2Weapons.get(actor);
     if (q1 !== null) return { weapon: this.weapon(), holster: () => q1.holster(actor), isHolstered: () => q1.isHolstered(), resume: () => q1.resume(actor) };
     if (q2 === undefined) throw new Error("Missing grapple weapon animation owner");
@@ -104,6 +112,7 @@ export class GrappleRuntime {
   weaponView(actor: ActorId) {
     if (this.selection.binding !== "slot") return null;
     if (this.source.kind === "q1-threewave") return { path: "progs/v_star.mdl", frame: this.source.core.state(actor).weaponFrame, kickOrigin: zero, kickPitch: 0 };
+    if (this.source.kind === "q3-qvm") return this.source.game.weaponView(actor);
     const weapon = this.q2Weapons.get(actor), animation = this.weaponAnimations.get(actor);
     return weapon === undefined || animation === undefined ? null : { path: weapon.definition.viewModel, frame: animation.state.animation.frame, kickOrigin: animation.kickOrigin, kickPitch: animation.kickPitch };
   }
@@ -113,6 +122,11 @@ export class GrappleRuntime {
     if (host === null) throw new Error("Missing grapple slot host");
     const input = this.controls.get(actor);
     if (input !== undefined) this.controls.set(actor, { ...input, pressed: false, released: false });
+    if (source.kind === "q3-qvm") {
+      if (input?.released || !host.selected(actor)) source.game.release(actor);
+      else if (host.selected(actor) && host.available(actor) && input?.pressed && !this.q3Holstered.has(actor)) source.game.fire(actor);
+      return undefined;
+    }
     if (source.kind === "q1-threewave") {
       if (host.selected(actor) && this.held(actor)) this.q1Weapon?.attack(actor);
       this.q1Weapon?.animate(actor);
@@ -168,6 +182,7 @@ export class GrappleRuntime {
       case "q1-threewave": return source.core.hook(actor)?.actor.id ?? null;
       case "q2-ctf": return source.core.states.get(actor)?.grapple ?? null;
       case "q2-lmctf": return source.core.states.get(actor)?.hook ?? null;
+      case "q3-qvm": return source.game.hook(actor);
     }
   }
   pulling(actor: ActorId): boolean {
@@ -176,6 +191,7 @@ export class GrappleRuntime {
       case "q1-threewave": return source.core.pulling(actor);
       case "q2-ctf": { const state = source.core.states.get(actor); return state !== undefined && state.grappleState !== "fly"; }
       case "q2-lmctf": return source.core.states.get(actor)?.hookState === 2;
+      case "q3-qvm": return source.game.pulling(actor);
     }
   }
   gravityScale(actor: ActorId): 0 | 1 { return this.source.kind === "q2-lmctf" ? this.source.core.gravityScale(actor) : 1; }
@@ -187,6 +203,7 @@ export class GrappleRuntime {
       case "q1-threewave": return this.source.core.release(actor);
       case "q2-ctf": return this.source.core.reset(actor, this.source.game);
       case "q2-lmctf": return this.source.core.abort(actor, this.source.game);
+      case "q3-qvm": this.source.core.release(actor, true); return undefined;
     }
   }
   step(actor: ActorId, enabled: boolean): undefined {
@@ -194,6 +211,9 @@ export class GrappleRuntime {
     if (state === undefined) return undefined;
     if (!enabled) return this.release(actor);
     if (this.selection.binding === "slot") return this.stepSlot(actor);
+    if (state.released && this.source.kind === "q3-qvm") {
+      this.controls.set(actor, { ...state, pressed: false, released: false }); this.source.game.release(actor); return undefined;
+    }
     if (state.released) return this.release(actor);
     if (!state.held) return undefined;
     this.controls.set(actor, { ...state, pressed: false, released: false });
@@ -208,6 +228,7 @@ export class GrappleRuntime {
         return source.core.playerFrame(actor, source.game);
       case "q2-lmctf":
         return state.pressed || source.core.states.get(actor)?.hook != null ? source.core.fire(actor, source.game) : undefined;
+      case "q3-qvm": if (state.pressed) source.game.fire(actor); return undefined;
     }
   }
   capture(): GrappleRuntimeCheckpoint {
@@ -217,6 +238,7 @@ export class GrappleRuntime {
       case "q1-threewave": return { ...common, source: { kind: source.kind, entities: source.game.capture() } };
       case "q2-ctf": return { ...common, source: { kind: source.kind, entities: source.game.capture(), states: [...source.core.states].map(([actor, state]) => ({ actor: saved(actor), state: captureCtfGrapple(state) })) } };
       case "q2-lmctf": return { ...common, source: { kind: source.kind, entities: source.game.capture(), states: [...source.core.states].map(([actor, state]) => ({ actor: saved(actor), state: captureLmctfGrapple(state) })) } };
+      case "q3-qvm": return { ...common, source: { kind: source.kind, component: source.game.capture(), holstered: [...this.q3Holstered].map(saved) } };
     }
   }
   restore(checkpoint: GrappleRuntimeCheckpoint): undefined {
@@ -229,9 +251,15 @@ export class GrappleRuntime {
     } else if (source.kind === "q2-lmctf" && savedSource.kind === "q2-lmctf") {
       source.game.restore(savedSource.entities); source.core.states.clear();
       for (const entry of savedSource.states) source.core.states.set(source.game.host.actors.referenceSaved(entry.actor), restoreLmctfGrapple(entry.state, source.game));
+    } else if (source.kind === "q3-qvm" && savedSource.kind === "q3-qvm") {
+      source.game.restore(savedSource.component); this.q3Holstered.clear();
+      for (const actor of savedSource.holstered) this.q3Holstered.add(source.game.host.actors.referenceSaved(actor));
     } else throw new Error("Saved grapple source differs from selected equipment");
     this.weaponAnimations.clear(); this.q2Weapons.clear();
-    for (const entry of checkpoint.weaponAnimations) { const actor = source.game.host.actors.resolveSaved(entry.actor); if (actor === null) throw new Error("Missing grapple animation owner"); this.bindWeapon(actor.id, entry); }
+    for (const entry of checkpoint.weaponAnimations) {
+      const actor = source.game.host.actors.resolveSaved(entry.actor); if (actor === null) throw new Error("Missing grapple animation owner");
+      const { actor: _savedActor, ...animation } = entry; this.bindWeapon(actor.id, animation);
+    }
     this.controls.clear();
     for (const entry of checkpoint.controls) {
       const actor = source.game.host.actors.resolveSaved(entry.actor);

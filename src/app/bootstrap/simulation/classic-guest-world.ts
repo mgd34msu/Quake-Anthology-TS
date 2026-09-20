@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../../contracts/execution.ts";
+import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Q2EntityState, Q2PlayerState, Q2UserCommand } from "../../../contracts/protocol.ts";
 import type { WindowsCapabilities } from "../../../guest/runtime/windows/index.ts";
 import { ClassicGuestSource, type PreparedClassicGuest } from "./classic-guest-source.ts";
@@ -38,7 +39,7 @@ export class ClassicGuestWorld {
         adapter = new ClassicGuestServices(memory, { ...options.services, command: () => commandContext.value ?? options.services.command() });
         return adapter.services;
       } });
-    try { const services = getAdapter(); services.bindHost(source.host); return new ClassicGuestWorld(source, services, commandContext); }
+    try { const services = getAdapter(); services.bindHost(source.host, source.imageBase); return new ClassicGuestWorld(source, services, commandContext); }
     catch (error) { source.discard(); throw error; }
   }
   get module(): ModuleIdentity { return this.source.memory.module; }
@@ -189,8 +190,8 @@ export class ClassicGuestWorld {
       try { this.source.host.call("ServerCommand"); } finally { this.commandContext.value = null; }
     });
   }
-  think(slot: number, command: Q2UserCommand): void {
-    this.operation(() => { this.requireRunning(); this.requireClient(slot, "active"); this.source.host.clientThink(slot, classicGuestUserCommand(command)); });
+  think(slot: number, command: Q2UserCommand, movement?: EquipmentMovement): void {
+    this.operation(() => { this.requireRunning(); this.requireClient(slot, "active"); this.services.withPlayerMovement(movement, () => this.source.host.clientThink(slot, classicGuestUserCommand(command))); });
   }
   frame(milliseconds: number): void {
     this.operation(() => {

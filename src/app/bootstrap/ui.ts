@@ -107,7 +107,11 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   }
 
   async prepare(assets: ApplicationAssets): Promise<void> {
-    if (this.guestUi) return;
+    if (this.guestUi) {
+      this.weaponAssets ??= new ApplicationWeaponHudAssets(assets);
+      this.weaponIcons = await this.weaponAssets.prepare(this.simulation.playerUi(this.local.player.actor).weaponStatus);
+      return;
+    }
     if (this.takeRankingMenuRequest() && this.rankingMenu !== null) this.controller.openMenu(this.rankingMenu.root);
     this.teamArena?.update();
     this.baseArena?.update();
@@ -296,6 +300,19 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
     material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true, nativeStatus = false, showAggregateWarning = true, nativeCrosshair = nativeStatus): void {
     this.text.bind(this.art.skin.font, this.hudFont); this.menuText.bind(this.art.skin.font, this.menuFont);
+    if (this.guestUi && gameVisible && this.local.input.focus.kind === "game") {
+      const status = this.simulation.playerUi(this.local.player.actor).weaponStatus;
+      if (status !== null) {
+        const base = emptyHudData(this.local.player.seat.id);
+        const hud: CommonHudData = { ...base, visible: true, crosshair: { ...base.crosshair, visible: false },
+          weapon: { status, warning: "none", weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,
+            iconAspect: this.weaponAssets?.aspect(this.weaponIcons.weapon ?? this.weaponIcons.ammo) ?? 1,
+            measureText: this.measureHudText, nativeStatus: true } };
+        renderUiCommands(context, drawCommonHud(context, hud, { skin: hudSkinFont(this.art.skin, this.hudFont), measureText: this.measureHudText,
+          preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
+          { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
+      }
+    }
     if (!this.guestUi) {
       const player = this.simulation.playerUi(this.local.player.actor);
       this.messages.setSourcePoints(this.local.player.seat.id, this.sourceHud.points());

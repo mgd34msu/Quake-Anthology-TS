@@ -22,6 +22,13 @@ export function retailRereleaseEntries(module: Pick<RereleaseGuestModule, "memor
   return { spawn: entry(0x964b0n), free: entry(0x96600n), damage: entry(0x5cae0n), processPain: entry(0x76e20n) };
 }
 
+/** T_Damage compares client+0x1a10 and monster+0xb88 against this saved level.time global. */
+export function retailRereleaseTime(module: Pick<RereleaseGuestModule, "memory">, entries: RereleaseNativeEntries): bigint {
+  const authority = retailRereleaseClientProfile.authority;
+  if (authority.kind !== "artifact" || module.memory.module.digest !== authority.digest) throw new Error("Native clock profile requires the verified retail DLL");
+  return module.memory.readInt64(module.memory.offset(entries.damage, 0x241b28n - 0x5cae0n));
+}
+
 /** Retail monster accumulator offsets measured at both T_Damage store sites and M_ProcessPain reset. */
 export const rereleaseMonsterDamage = {
   attacker: 3120, inflictor: 3128, blood: 3136, knockback: 3140, point: 3144, mod: 3156,

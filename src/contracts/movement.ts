@@ -13,6 +13,13 @@ import type { TouchContact } from "./world.ts";
 
 /** These are source command shapes; the selected wire codec does not choose movement. */
 export type MovementCommand = UserCommand;
+
+/** Shared equipment contributes movement at the original player's Pmove boundary. */
+export interface EquipmentMovement {
+  readonly velocity?: Vec3;
+  readonly gravityScale: number;
+  readonly predictionSuppressed: boolean;
+}
 export type { Q2MovementState, Q2RereleaseMovementState } from "./protocol.ts";
 
 export interface Q1MovementState {

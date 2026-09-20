@@ -20,7 +20,7 @@ import type { Q3PresentationSession } from "../../content/q3/presentation/client
 import type { SnapshotSource } from "../../content/q3/presentation/snapshots.ts";
 import type { CommandSource } from "../../content/q3/presentation/prediction.ts";
 import type { Snapshot } from "../../network/q3/server-message.ts";
-import { MoveType, PersistentIndex, Team } from "../../content/q3/base/shared/definitions.ts";
+import { MoveType, PersistentIndex, Team, statSchema } from "../../content/q3/base/shared/definitions.ts";
 import { weaponViewCamera } from "./weapon-view.ts";
 import type { WeaponHudReader } from "../../content/q3/presentation/player-state.ts";
 import type { ActorCommand } from "../../contracts/session.ts";
@@ -70,8 +70,8 @@ import type { ApplicationQ3Services } from "./q3-client/services.ts";
 import { ApplicationQ3Cinematics, type SystemCinematicHost } from "./q3-client/cinematics.ts";
 import { frameTimeCvarNames, refreshFrameTimeCvars } from "./frame-time.ts";
 import { selectApplicationQ3Snapshot } from "./q3-client/visibility.ts";
-import { ApplicationQ3ForeignModels } from "./q3-client/foreign.ts";
 import { q3WeaponCamera } from "./q3-client/view.ts";
+import type { Q3EquipmentPresentation } from "./q3-client/equipment.ts";
 
 export interface ApplicationQ3ClientSource extends SnapshotSource {
   readonly sourceMode: 'live' | 'demo';
@@ -112,6 +112,7 @@ export type ApplicationQ3ClientOptions = ApplicationQ3ClientCommonOptions & (
     predictionCommand?(command: ActorCommand, sourceTimeMilliseconds: number): UserCommand; }
   | { readonly kind: "remote"; readonly movement: PresentationMovementHost; readonly source: ApplicationQ3ClientSource; readonly initialPlayer: Snapshot["playerState"] }
   | { readonly kind: "qvm"; readonly localServer?: boolean; readonly source: ApplicationQ3ClientSource; readonly connection: Q3ClientState;
+      readonly equipmentWeapon?: () => Q3EquipmentPresentation | null;
       readonly browser: Q3BrowserView;
       readonly keys: ApplicationKeyProfile;
       readonly guestCvars: QvmCvarServices;
@@ -144,6 +145,8 @@ export class ApplicationQ3Client {
   private round: ApplicationQ3LocalRound | null;
   private readonly localSource: ApplicationQ3Source | null;
   private readonly product: Q3SourcePresentationState["product"];
+  private supplementalViewWeapon = false;
+  private weaponSelection: number | null = null;
   private cvarOwner: CvarRegistry;
   get cvars(): CvarRegistry { return this.cvarOwner; }
   get timeCvars(): CvarRegistry | undefined { return this.options.timeCvars; }
@@ -171,7 +174,9 @@ export class ApplicationQ3Client {
   private eventCount = 0;
   private services: ApplicationQ3Services | null = null;
   private readonly sharedCvarNames: ReadonlySet<string>;
-  private readonly foreign: ApplicationQ3ForeignModels;
+  private readonly bodyPoses = new Map<ActorId, { readonly origin: Vec3; readonly angles: Vec3 }>();
+  private readonly poseActors = new Map<number, ActorId>();
+  private readonly hiddenBodies = new Map<number, ActorId>();
   private constructor(readonly options: ApplicationQ3ClientOptions, readonly media: ApplicationQ3Assets, private readonly artifacts?: QvmPresentationArtifacts) {
     this.round = options.kind === "remote" || options.kind === "qvm" ? null : { ...options, actor: options.local.player.actor };
     this.product = (options.kind === "remote" || options.kind === "qvm") ? "baseq3" : options.initial.product;
@@ -191,7 +196,6 @@ export class ApplicationQ3Client {
     const source = (options.kind === "remote" || options.kind === "qvm") ? options.source : this.localSource;
     if (source === null) throw new Error("Local Q3 client has no snapshot source");
     this.source = source;
-    this.foreign = new ApplicationQ3ForeignModels(options.assets, options.local.player.actor, number => this.source.actorAt(number));
     this.viewportValue = { ...options.viewport() };
     const player = options.kind === "qvm" ? null : options.kind === "remote" ? options.initialPlayer : options.initial.clients.find(client => client.actor.equals(options.local.player.actor))?.state;
     if (player === undefined) throw new Error("Q3 cgame seat lacks a source player");
@@ -237,7 +241,7 @@ export class ApplicationQ3Client {
     if (binding.movement.commandTiming !== this.round.movement.commandTiming) throw new Error("Q3 restart changed movement timing");
     this.round = binding;
     this.localSource.rebindRound(binding.actor, binding.initial);
-    this.foreign.rebindActor(binding.actor);
+    this.bodyPoses.clear(); this.poseActors.clear(); this.weaponSelection = null;
   }
   refreshSystemInfo(): void {
     if (this.closed) throw new Error("Q3 presentation is closed");
@@ -324,6 +328,8 @@ export class ApplicationQ3Client {
         keyCatcher: { get: () => this.keyCatcher, set: value => { this.keyCatcher = value; } }, clientState: o.clientState,
         lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
       const game = await ApplicationQvmClient.create({ ...(this.artifacts === undefined ? {} : { artifacts: this.artifacts }), seat, commandContext: this.commandContext(), services, media, session, connection: o.connection, queries: o.queries,
+        ...(o.equipmentWeapon === undefined ? {} : { equipmentWeapon: o.equipmentWeapon }),
+        bodyOverrides: { active: () => this.hiddenBodies.size !== 0, hidden: number => this.bodyHidden(number) },
         commands: o.commandBuffer, cvars: o.guestCvars, browser: o.browser, keys: o.keys, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
         removeCommand: name => { this.commandNames.delete(name); o.commandRegistration.remove(name); },
         scalar: (call, owner) => scalar.dispatch(call, () => owner.updateScreen(call)) });
@@ -348,14 +354,22 @@ export class ApplicationQ3Client {
         }, startBackground: path => sound.startBackgroundTrack(path ?? "", path ?? ""), stopBackground: () => { void sound.startBackgroundTrack("", ""); } } },
       memoryRemaining: () => Math.min(0x7fffffff, freemem()), updateLoadingScreen: paint => paint(),
       lightForPoint: point => this.light(point),
+      bodyHidden: number => this.bodyHidden(number),
+      weaponSelection: weapon => { this.weaponSelection = weapon; },
+      bodyPose: entity => {
+        if (this.poseActors.size === 0) return;
+        const actor = this.source.actorAt(entity.currentState.number);
+        if (this.poseActors.get(actor.slot)?.equals(actor)) this.bodyPoses.set(actor, { origin: entity.lerpOrigin, angles: entity.lerpAngles });
+      },
       character: (entity, render) => {
-        if (o.hooks !== undefined) o.hooks.character(entity, render);
+        if (this.bodyHidden(entity.currentState.number)) render();
+        else if (o.hooks !== undefined) o.hooks.character(entity, render);
         else if (o.assets.content.recipe.character.appearance.provider.startsWith("q3:")) render();
-        else this.foreign.character(entity);
       },
       event: async (entity, position, render) => { this.eventCount++; if (o.hooks === undefined) await render(); else await o.hooks.event(entity, position, render); },
       predictItem: (entity, predict) => o.hooks === undefined ? predict() : o.hooks.predictItem(entity, predict),
       viewWeapon: (state, render) => {
+        if (this.supplementalViewWeapon) return;
         if (o.hooks !== undefined) o.hooks.viewWeapon(state, render);
         else if (o.assets.content.recipe.weapons.some(weapon => weapon.provider.startsWith("q3:"))) render();
       },
@@ -368,10 +382,24 @@ export class ApplicationQ3Client {
     this.submissions.length = 0;
   }
   get cgame(): Q3ClientPresentation { return this.requireGame(); }
-  get userCommandSelection(): { readonly weapon: number; readonly sensitivity: number } { return this.selection; }
+  consumeWeaponSelection(): number | null {
+    const selected = this.weaponSelection; this.weaponSelection = null; return selected;
+  }
+  get userCommandSelection(): { readonly weapon: number; readonly sensitivity: number } {
+    const equipment = this.options.kind === "qvm" ? this.options.equipmentWeapon?.() ?? null : null;
+    return equipment === null ? this.selection : { ...this.selection, weapon: equipment.primaryWeapon };
+  }
   get presentedEvents(): number { return this.eventCount; }
   weaponHudView(): { readonly visible: boolean; readonly aggregateWarning: boolean } {
-    if (this.requireBackend().kind === "qvm") return { visible: false, aggregateWarning: false };
+    const backend = this.requireBackend();
+    if (backend.kind === "qvm") {
+      if (!backend.game.sharedEquipmentHud) return { visible: false, aggregateWarning: false };
+      const ps = this.source.read(this.source.current().number)?.playerState;
+      return { visible: ps !== undefined && ps.stats.get(statSchema(ps.product).health) > 0
+        && ps.pmType !== MoveType.PM_INTERMISSION && ps.persistant.get(PersistentIndex.PERS_TEAM) !== Team.TEAM_SPECTATOR
+        && (this.cvars.get("cg_draw2D")?.integerValue ?? 1) !== 0 && (this.cvars.get("cg_drawStatus")?.integerValue ?? 1) !== 0,
+        aggregateWarning: false };
+    }
     const state = this.requireGame().state, ps = state.snap?.playerState;
     return { visible: ps !== undefined && !state.levelShot && !state.showScores && ps.health > 0
       && ps.pmType !== MoveType.PM_INTERMISSION && ps.persistant.get(PersistentIndex.PERS_TEAM) !== Team.TEAM_SPECTATOR
@@ -379,6 +407,16 @@ export class ApplicationQ3Client {
       aggregateWarning: (this.cvars.get("cg_drawAmmoWarning")?.integerValue ?? 1) !== 0 };
   }
   camera(): SceneCamera { return this.latestCamera; }
+  bodyPose(actor: ActorId): { readonly origin: Vec3; readonly angles: Vec3 } | null { return this.bodyPoses.get(actor) ?? null; }
+  supplementalWeaponCamera(camera: SceneCamera): SceneCamera {
+    return this.requireBackend().kind === "qvm" ? camera : weaponViewCamera(q3WeaponCamera(camera, this.options.splitScreen === true),
+      this.submissions.flatMap(submission => submission.kind === "scene" && (submission.scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? [submission.scene.viewport] : []));
+  }
+  private bodyHidden(number: number): boolean {
+    if (this.hiddenBodies.size === 0) return false;
+    const actor = this.source.actorAt(number);
+    return this.hiddenBodies.get(actor.slot)?.equals(actor) ?? false;
+  }
   receiveEvents(events: readonly SimulationPresentationEvent[]): void {
     this.options.assertCurrent?.(); this.requireGame();
     if (this.localSource === null) throw new Error("Remote Q3 cgame receives events through its network connection");
@@ -386,13 +424,20 @@ export class ApplicationQ3Client {
   }
   receive(state: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void { this.requireGame(); if (this.localSource === null) throw new Error("Remote Q3 cgame receives snapshots through its network connection"); this.localSource.receive(state, events, commands); }
   async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = []): Promise<void> {
+    this.hiddenBodies.clear();
+    this.bodyPoses.clear();
+    this.poseActors.clear();
+    for (const model of presentations) {
+      if (model.replacesBody) this.hiddenBodies.set(model.actor.slot, model.actor);
+      if (model.renderOwner !== "source-client" && model.visible && !model.viewWeapon) this.poseActors.set(model.actor.slot, model.actor);
+    }
     this.refreshSystemInfo();
     const backend = this.requireBackend(); this.frameNumber = frameNumber; Object.assign(this.viewportValue, viewport); this.submissions.length = 0;
+    this.supplementalViewWeapon = presentations.some(source => source.renderOwner !== "source-client" && source.visible && source.viewWeapon && source.actor.equals(this.options.local.player.actor));
     for (const setting of this.serverSettings()) {
       if (this.sharedCvarNames.has(setting.name.toLowerCase())) this.cvars.set(setting.name, setting.value, true);
     }
     if (backend.kind === "typescript") {
-      await this.foreign.prepare(presentations);
       await backend.game.frames.drawActiveFrame({ serverTime: this.source.time, stereo: "center", demoPlayback: this.source.sourceMode === 'demo', engineFrameNumber: frameNumber });
     } else await backend.game.draw(this.source.time, this.source.sourceMode === 'demo');
     for (const submission of this.submissions) if (submission.kind === "scene") {
@@ -456,6 +501,7 @@ export class ApplicationQ3Client {
     const project = createViewProjector(input.camera), white = this.media.provider.textures.white.image;
     for (const [index, entity] of scene.admission.entities.entries()) {
       const entityOrder = { kind: "refentity", index: firstEntity + index } satisfies import("../../render/scene/submissions.ts").SourceEntityOrder;
+      if (this.supplementalViewWeapon && !noWorldModel && (entity.renderFlags & 4) !== 0) continue;
       if (input.camera.clip.kind === "portal" && (entity.renderFlags & 4) !== 0) continue;
       if (entity.kind === "poly") throw new CommonError("drop", "R_AddEntitySurfaces: Bad reType");
       if (entity.kind === "portal-surface") continue;
@@ -494,9 +540,6 @@ export class ApplicationQ3Client {
           { ...world.materialContext(input, undefined, fog?.volume ?? null), entityRGBA: entity.shaderRGBA, shaderTexCoord: entity.shaderTexCoord, timeOffset: entity.shaderTime })));
       }
     }
-    if (this.requireBackend().kind === "typescript" && !noWorldModel) operations.push(...this.foreign.draw(input, this.requireGame().state.renderingThirdPerson,
-      (this.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0, weaponViewCamera(weaponInput.camera,
-        this.submissions.flatMap(submission => submission.kind === "scene" && (submission.scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? [submission.scene.viewport] : []))));
     operations.push(...additions.filter(operation => !polygon(operation)));
     return operations;
   }
@@ -561,6 +604,6 @@ export class ApplicationQ3Client {
     this.timeMirror?.close(); this.timeMirror = null;
     this.backend?.game.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
-    this.closed = true; this.cinematics?.close(); this.media.close(); this.foreign.close(); this.renderers.clear(); this.submissions.length = 0;
+    this.closed = true; this.cinematics?.close(); this.media.close(); this.bodyPoses.clear(); this.poseActors.clear(); this.renderers.clear(); this.submissions.length = 0;
   }
 }

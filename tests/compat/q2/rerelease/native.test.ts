@@ -210,6 +210,37 @@ test.skipIf(!available)("rerelease message callbacks encode floats and preserve 
   expect(multicasts).toEqual([{ origin: { x: 1, y: 0, z: 0 }, destination: "pvs", reliable: true, bytes: new Uint8Array([255,254,255,120,86,52,18,0,0,192,63,0,0,128,63,0,0,0,0,0,0,0,0,52,111,107,0]) }]);
 });
 
+test.skipIf(!available)("retail external player velocity enters source Pmove and remains source owned", async () => {
+  const { source, guest, host, world } = await nativeFixture();
+  host.preInit(); source.init();
+  host.spawnEntities("base1", `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${world.origin}" }`, "");
+  host.runFrame(false);
+  expect(host.clientConnect(1, "\\name\\Hook test\\skin\\male/grunt\\ip\\127.0.0.1", "hook-test", false).accepted).toBe(true);
+  host.clientBegin(1);
+  const actor = host.actor(guest.entities().atSlot(1));
+  if (actor === null) throw new Error("Source player was not admitted");
+  const body = () => {
+    const value = world.engine.bodies.read(actor.id);
+    if (value === null) throw new Error("Source player has no body");
+    return value;
+  };
+  const command = { kind: "q2-rerelease", milliseconds: 25, buttons: 0, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, serverFrame: 123 } satisfies Parameters<typeof host.clientThink>[1];
+  const before = body();
+  host.clientThink(1, command, { velocity: { x: 0, y: 0, z: 600 }, gravityScale: 1, predictionSuppressed: false });
+  expect(body().origin.z).toBeGreaterThan(before.origin.z);
+  expect(body().velocity.z).toBeGreaterThan(500);
+  const pulled = body();
+  host.clientThink(1, command);
+  expect(body().origin.z).toBeGreaterThan(pulled.origin.z);
+  expect(body().velocity.z).toBeLessThan(pulled.velocity.z);
+  host.clientThink(1, command, { velocity: { x: 0, y: 0, z: 0 }, gravityScale: 0, predictionSuppressed: true });
+  expect(body().velocity.z).toBe(0);
+  host.clientThink(1, command, { velocity: { x: 0, y: 0, z: 0 }, gravityScale: 1, predictionSuppressed: false });
+  expect(body().velocity.z).toBeLessThan(1);
+  host.clientThink(1, command);
+  expect(body().velocity.z).toBeLessThan(0);
+});
+
 test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame use shared BSP, body and inventory authorities", async () => {
   const { source, guest, core, host, world, memory, cvars, prints, reached, unicasts, multicasts, releaseListeners } = await nativeFixture();
   host.preInit();

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress } from "../../../contracts/execution.ts";
 import type { Bounds } from "../../../contracts/math.ts";
+import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { NumericOperations } from "../../../contracts/numeric.ts";
 import type { BspPlane, TraceResult } from "../../../contracts/scene.ts";
 import { pmoveClassic, Q2_PLAYER_BOUNDS } from "../../../movement/q2/index.ts";
@@ -8,12 +9,20 @@ import type { ClassicPmove, MovementEntity, TraceT, Vec3 } from "../../../moveme
 import { CLASSIC_Q2_PMOVE_BYTES, classicSignature, q2Int, q2Pointer, q2Trace } from "./layout.ts";
 import type { ClassicQ2GuestHost } from "./host.ts";
 
-export interface ClassicGuestPmoveOptions { readonly numeric: NumericOperations; readonly characterBounds?: Bounds; readonly airAccelerate?: number }
+export interface ClassicGuestPmoveOptions { readonly numeric: NumericOperations; readonly characterBounds?: Bounds; readonly airAccelerate?: number; readonly equipment?: EquipmentMovement }
 /** Source Pmove calls source trace/contents callbacks synchronously on the same guest stack. */
 export function runClassicGuestPmove(address: GuestAddress, host: ClassicQ2GuestHost, options: ClassicGuestPmoveOptions): undefined {
   const memory = host.memory, view = memory.borrow(address, CLASSIC_Q2_PMOVE_BYTES);
   const traceTarget = memory.readPointer(memory.offset(address, 232n)), contentsTarget = memory.readPointer(memory.offset(address, 236n));
   if (traceTarget === null || contentsTarget === null) throw new Error("API 3 Pmove callback pointer is null");
+  if (options.equipment !== undefined) {
+    view.setInt16(18, options.numeric.toInt32(options.numeric.multiply(view.getInt16(18, true), options.equipment.gravityScale)), true);
+    view.setUint8(16, options.equipment.predictionSuppressed ? view.getUint8(16) | 64 : view.getUint8(16) & ~64);
+  }
+  if (options.equipment?.velocity !== undefined) {
+    for (const [index, value] of [options.equipment.velocity.x, options.equipment.velocity.y, options.equipment.velocity.z].entries())
+      view.setInt16(10 + index * 2, options.numeric.toInt32(options.numeric.multiply(value, 8)), true);
+  }
   const scratch = memory.allocate({ byteLength: 48, label: "API 3 nested Pmove vectors" });
   const canonical = new Map<bigint, MovementEntity>();
   function entity(pointer: GuestAddress | null): MovementEntity | null {

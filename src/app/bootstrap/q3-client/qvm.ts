@@ -36,6 +36,10 @@ import type { ApplicationQ3Assets } from './assets.ts';
 import type { ApplicationQ3Services } from './services.ts';
 import type { SharedSceneQueries } from '../../../world/collision/index.ts';
 import { UserFileStore } from '../../../platform/files/writable.ts';
+import { q3PresentationSnapshot, type Q3EquipmentPresentation } from './equipment.ts';
+import { q3EquipmentHudSelector } from '../../../content/q3/equipment/cgame-weapon-hud.ts';
+import { QvmBodySubmissions } from '../../../compat/qvm/cgame-body.ts';
+import { readCgameBodyProfile } from '../../../content/q3/presentation/cgame-body-profile.ts';
 
 export type QvmPresentationArtifacts = Readonly<Record<"ui" | "cgame", QvmModuleOptions["artifact"]>>;
 
@@ -55,6 +59,8 @@ export interface ApplicationQvmClientOptions {
   readonly map: string;
   readonly now: () => number;
   readonly keyCatcher: () => number;
+  readonly equipmentWeapon?: () => Q3EquipmentPresentation | null;
+  readonly bodyOverrides?: { active(): boolean; hidden(entity: number): boolean; };
   removeCommand(name: string): void;
   scalar(call: QvmHostCall, owner: ApplicationQvmClient): QvmHostResult | null;
 }
@@ -79,7 +85,13 @@ export class ApplicationQvmClient {
   private ready = false;
   private readonly artifacts = new Map<"ui" | "cgame", QvmModuleOptions["artifact"]>();
   private cgame: QvmCgame | null = null;
+  private bodySubmissions: QvmBodySubmissions | null = null;
   private ui: QvmUi | null = null;
+  private equipment: Q3EquipmentPresentation | null = null;
+  private equipmentSelectorIndex: number | null = null;
+  private equipmentSelector: (() => void) | null = null;
+  private equipmentHudRequested = false;
+  get sharedEquipmentHud(): boolean { return this.equipmentHudRequested; }
 
   private constructor(readonly options: ApplicationQvmClientOptions) {
     this.commandServices = { ui: qvmClientCommands(options.commands, options.commandContext, 'ui'),
@@ -101,6 +113,7 @@ export class ApplicationQvmClient {
   }
   private host(call: QvmHostCall): QvmHostResult {
     this.assertCurrent();
+    if (this.bodySubmissions?.suppress(call)) return 0;
     if (call.role !== 'cgame' && call.role !== 'ui') return rejectQvmSyscall(call);
     const o = this.options, session = o.session;
     const common = { cvars: o.cvars, print: session.print, milliseconds: o.now, arguments: () => this.arguments };
@@ -113,7 +126,9 @@ export class ApplicationQvmClient {
       ?? qvmClientScriptSyscall(call, this.scripts[call.role])
       ?? qvmClientRenderSyscall(call, o.services.resources, o.services.draw)
       ?? qvmClientAudioSyscall(call, { role: call.role, sound: o.services.sound, print: session.print })
-      ?? qvmClientStateSyscall(call, { connection: o.connection, snapshots: session.snapshots, snapshotPing: number => o.connection.snapshotPing(number),
+      ?? qvmClientStateSyscall(call, { connection: o.connection, snapshots: {
+        current: () => session.snapshots.current(), read: number => { const snapshot = session.snapshots.read(number); return snapshot === null ? null : q3PresentationSnapshot(snapshot, this.equipment); },
+      }, userCommand: number => { const command = o.connection.commands.read(number); return command === null || this.equipment === null ? command : { ...command, weapon: 0, buttons: command.buttons & ~1 }; }, snapshotPing: number => o.connection.snapshotPing(number),
         getServerCommand: async number => { const argv = await o.connection.getServerCommand(number); this.assertCurrent(); if (argv !== null) this.arguments = legacyClientCommand(argv, call.abiProfile ?? "q3-modern"); return argv; },
         setUserCommandValue: session.setUserCommandValue })
       ?? qvmClientCollisionSyscall(call, { models: () => this.collisionModels, loadMap: name => { if (name !== o.map) throw new Error(`Cgame requested a different collision map: ${name}`); this.assertCurrent(); } })
@@ -146,10 +161,15 @@ export class ApplicationQvmClient {
     try {
       owner.ui = await QvmUi.create(options.seat, await owner.module('ui'), () => owner.assertCurrent());
       await owner.ui.init(true);
-      owner.cgame = new QvmCgame(options.seat, await owner.module('cgame'), {
+      const cgameOptions = await owner.module('cgame');
+      owner.cgame = new QvmCgame(options.seat, cgameOptions, {
         assertCurrentOperation: () => owner.assertCurrent(), current: () => ({ generation: options.connection.generation, serverMessageNumber: options.connection.serverMessageSequence, dropped: null }),
         beginLoading: () => { owner.ready = false; return undefined; }, prime: () => { owner.ready = true; return undefined; },
       });
+      owner.equipmentSelectorIndex = q3EquipmentHudSelector(cgameOptions.artifact);
+      const bodies = await readCgameBodyProfile(cgameOptions.artifact, options.media.provider.mounts);
+      owner.assertCurrent();
+      if (bodies !== null) owner.bodySubmissions = new QvmBodySubmissions(owner.cgame.module, cgameOptions.artifact, bodies, entity => options.bodyOverrides?.hidden(entity) ?? false);
       await owner.cgame.init(options.session.serverMessageSequence, options.session.lastExecutedServerCommand, options.session.clientNumber);
       owner.assertCurrent(); return owner;
     } catch (error) {
@@ -170,6 +190,15 @@ export class ApplicationQvmClient {
   async draw(time: number, demoPlayback: boolean): Promise<void> {
     this.assertCurrent();
     if (!this.ready || this.cgame === null) throw new Error('QVM cgame has not initialized');
+    const hideBodies = this.options.bodyOverrides?.active() ?? false;
+    if (hideBodies && this.bodySubmissions === null) throw new Error('This cgame needs an artifact-matched cgame-presentation.json declaration for body replacements');
+    this.bodySubmissions?.enable(hideBodies);
+    this.equipment = this.equipmentSelectorIndex === null ? null : this.options.equipmentWeapon?.() ?? null;
+    if (this.equipment !== null && this.equipmentSelectorIndex !== null && this.equipmentSelector === null)
+      this.equipmentSelector = this.cgame.module.bindFunction({ kind: "qvm", module: this.cgame.module.profile.module, instructionIndex: this.equipmentSelectorIndex },
+        () => { this.equipmentHudRequested = true; return 0; });
+    else if (this.equipment === null) { this.equipmentSelector?.(); this.equipmentSelector = null; }
+    this.equipmentHudRequested = false;
     await this.cgame.drawActiveFrame(time, 'center', demoPlayback);
     if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.refresh(Math.trunc(this.options.now()));
   }
@@ -190,7 +219,7 @@ export class ApplicationQvmClient {
     if (this.retired) return;
     this.retired = true; this.ready = false;
     const failures: unknown[] = [];
-    for (const cleanup of [() => this.cgame?.retire(), () => this.ui?.retire(),
+    for (const cleanup of [() => { this.bodySubmissions?.close(); this.bodySubmissions = null; this.equipmentSelector?.(); this.equipmentSelector = null; this.equipment = null; }, () => this.cgame?.retire(), () => this.ui?.retire(),
       () => this.files.cgame.closeAll(), () => this.files.ui.closeAll(),
       () => this.scripts.cgame.closeAll(), () => this.scripts.ui.closeAll(), () => this.globals.clear()]) {
       try { cleanup(); } catch (error) { failures.push(error); }

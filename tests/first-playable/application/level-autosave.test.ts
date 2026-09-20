@@ -109,6 +109,9 @@ test("level autosave captures initial and next playable worlds and preserves sav
     expect(await Bun.file(path).bytes()).toEqual(nextBytes);
     expect(await Bun.file(manual).bytes()).toEqual(manualBytes);
     expect(await Bun.file(quick).bytes()).toEqual(quickBytes);
+    await app.changeLevel("base2");
+    expect((await readSaveImage(path)).recipe.map.geometry.requestedPath).toBe("maps/base2.bsp");
+    await app.saveGame(join(root, "saves", "after-restored-travel.sav"));
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 }, 60000);
 

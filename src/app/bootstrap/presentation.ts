@@ -268,13 +268,23 @@ export class WorldSeatPresentation implements SeatPresentation {
     this.nativeQ2Frame = this.nativeQ2?.frame() ?? null;
     if (this.nativeQ2Frame !== null) await this.ui.prepareNativeQ2Hud(this.nativeQ2Frame, this.assets.content.recipe.presentation.assets,
       this.assets, { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 });
-    if (this.q3Client !== null) {
+    const q3Client = this.q3Client;
+    if (q3Client !== null) {
       const size = this.viewSize();
       const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
-      await this.q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations); return;
+      await q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations);
+      const thirdPerson = (q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0;
+      const drawWeapon = (q3Client.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0;
+      const supplemental = visiblePresentations.filter(source => source.renderOwner !== "source-client" && (!source.viewWeapon || drawWeapon)).map(source => {
+        const pose = source.viewWeapon ? null : q3Client.bodyPose(source.actor);
+        return pose === null ? source : { ...source, origin: pose.origin, angles: pose.angles };
+      });
+      await this.scene.prepare(thirdPerson ? null : this.local.player.actor, snapshot, supplemental, [], q3Client.cvars.get("cg_fov")?.integerValue ?? 90);
+      return;
     }
     await this.finale.prepare();
-    await this.scene.prepare(this.chaseSettings === null ? this.local.player.actor : null, snapshot, visiblePresentations, characters);
+    await this.scene.prepare(this.chaseSettings === null ? this.local.player.actor : null, snapshot, visiblePresentations, characters,
+      Math.atan(1 / this.camera().projection[0]) * 360 / Math.PI);
   }
 
   frame(snapshot: WorldSnapshot): RenderFrame {
@@ -291,7 +301,13 @@ export class WorldSeatPresentation implements SeatPresentation {
       clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
       lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
       ...this.scene.styles() };
-    const nativeFrame = this.q3Client?.frame((camera, source) => this.effects.frame(camera, source, this.local.player.actor, fog), camera => {
+    const nativeFrame = this.q3Client?.frame((camera, source) => {
+      const effects = this.effects.frame(camera, source, this.local.player.actor, fog);
+      const input: WorldViewInput = { camera, time, target: { kind: "seat", seat: this.local.player.seat.id },
+        source: createWorldSurfaceAdmission(source), lights: effects.lights, q3Lights: effects.q3Lights,
+        ...(fog === undefined ? {} : { q1Fog: fog }) };
+      return { ...effects, operations: [...effects.operations, ...this.scene.supplemental(input, this.q3Client?.supplementalWeaponCamera(camera) ?? camera)] };
+    }, camera => {
       if (this.q3Client?.options.kind === "qvm") return this.cameraOverride(camera);
       const player = this.simulation.playerView(this.local.player.actor);
       return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));

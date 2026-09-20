@@ -2,6 +2,7 @@ import type { NativeAbi, Q2CgameApiIdentity, Q2GameApiIdentity, Q3ApiIdentity, Q
 import type { ProviderId } from "./identity.ts";
 import type { NumericProfile } from "./numeric.ts";
 import type { ClockProfile, FrameOrdering } from "./time.ts";
+import type { QvmGrappleDefinition } from "./qvm-grapple.ts";
 
 export type GameFamily = "q1" | "q2" | "q3";
 export type ContentId = `${GameFamily}:${string}:${string}:${string}`;
@@ -200,6 +201,7 @@ export type GrappleSelection =
     | { readonly mechanic: "q1-threewave"; readonly edition: "rerelease" }
     | { readonly mechanic: "q2-ctf"; readonly edition: "classic" | "rerelease" }
     | { readonly mechanic: "q2-lmctf"; readonly edition: "classic" }
+    | { readonly mechanic: "q3-qvm"; readonly edition: "classic"; readonly profile: QvmGrappleDefinition }
   ));
 
 export type HandGrenadeSelection =
@@ -297,6 +299,7 @@ export interface ResolvedWeaponBehaviorSelection {
 /** Resolved before session construction; renderer and window settings live elsewhere. */
 export interface ExecutableRecipe {
   readonly weaponBehaviors?: readonly ResolvedWeaponBehaviorSelection[];
+  readonly mods?: readonly import("./mods.ts").ResolvedGameplayMod[];
   readonly schemaVersion: 3;
   readonly id: RecipeId;
   readonly preset: RecipeId;

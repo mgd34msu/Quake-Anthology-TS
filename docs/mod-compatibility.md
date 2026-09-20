@@ -26,11 +26,94 @@ This profile supports the legacy server's public game services, callable bot ser
 
 Legacy client/UI syscall and record adapters are implemented from the retained SDK headers. An actual matching early client/UI package remains unwitnessed, and private configuration or powerup meanings still require an explicit declaration. Unsupported operations report an error, including deprecated model-load and test-print ordinals without a callable donor interface. The original InstaGib module also ran with the inherited modern client on Q2 geometry, including local firing and saved continuation. These results do not qualify every early mod.
 
+## Quake III mod inventories
+
+Native Q3 weapon selection preserves the module's weapon numbers. Modules with changed item tables can supply `qvm-items.json` beside their packages. Its `artifactDigest` must match the uncompressed qagame bytes, and its table layout describes the original initialized data. Names, weapon numbers, and ammo associations are then read from that table. The original cgame retains its own HUD and gameplay rules.
+
+Threewave 1.7's verified layout is built in. This equivalent declaration shows the format; its offsets apply only to these exact bytes:
+
+```json
+{
+  "version": 1,
+  "artifactDigest": "sha256:9751bad99a2d138f96a9b0436d2ea2d965b86214175dc33e4cea95e059419337",
+  "items": {
+    "address": 5356, "count": 49, "stride": 52,
+    "fields": { "className": 0, "pickupName": 28, "type": 36, "tag": 40 },
+    "weaponType": 1, "ammoType": 2
+  }
+}
+```
+
+The current interface covers a static QVM item table and the standard public weapon/ammo records. Mods that replace those records or generate their catalogs dynamically need an additional source interface. Q3 sound effects also follow the original client's WAV policy: cue/sampler loop metadata does not control Q3 channel playback.
+
 ## Independent components
 
-Whole-module execution runs the mod's rules together. Applying one mod feature to another game's weapon requires an executable component binding with clear ownership of source state, callbacks, and effects.
+**Custom game → Mods** lists installed independent components with individual enable/disable controls. Multiple components can be selected; their source game does not restrict the destination world. The list reports missing dependencies, declared conflicts, and unavailable components. From the command line, repeat `--mod PRODUCT/COMPONENT_ID` for each selection.
 
-The QuakeC projectile trajectory adapter executes declared source callbacks on built-in Q1, Q2, and Q3 projectile launchers; the [README](../README.md#mod-projectile-behaviors) describes selection and declaration commands. The declaration belongs with the mod's content and binds its compiled program digest, projectile role, fire callback, and optional activation callback. Inspection reports actual callbacks; the author or adapter developer must establish their meaning from the source.
+A package declares its independent components in `gameplay-mods.json` beside its game data:
+
+```text
+q1/rerelease/mymod/
+  progs.dat
+  gameplay-mods.json
+  profiles/
+    feature.json
+```
+
+The selection document has this shape:
+
+```json
+{
+  "version": 1,
+  "components": [
+    {
+      "id": "feature",
+      "title": "Authored feature name",
+      "purpose": "addition",
+      "callbacks": "profiles/feature.json",
+      "requires": [],
+      "conflicts": []
+    }
+  ]
+}
+```
+
+`requires` and `conflicts` contain complete `PRODUCT/COMPONENT_ID` selections. A `game-type` component stays out of this list. Callback declarations identify the exact compiled program digest, original functions, source fields, and shared operations they consume. Changing the program or declaration invalidates a saved component identity. Each selection owns separate guest state, registrations, and checkpoints, including two components that use the same program.
+
+The current QuakeC adapter executes declared original callbacks for damage, inventory changes, and actor think, touch, use, pain, and death. It connects source field access to canonical actors and reuses destination collision, spatial, and presentation services. See the [QuakeC callback contract](../src/contracts/mod-callbacks.ts). An actual Copper callback has passed the package selection, Q2 launch, two-component composition, and public save/load path. That establishes the declared callback behavior, not all of Copper's gameplay as independent components.
+
+The QVM adapter uses the same shared operations with explicit source record layouts, original instruction entries, and typed arguments. See the [QVM callback contract](../src/contracts/qvm-mod-callbacks.ts). Original QuakeC and QVM callbacks have run together through public Q2 launch, disk save/load, and map travel. QuakeC source helpers also use the source scheduler and shared physics; an original Copper bubble spawned, moved, rendered, and resumed after saving. Declared QVM allocation, linking, scheduled updates and removal retain their source-owned actors across full saves.
+
+Production QVM modules run in TypeScript with the compiled Quake III VM's call/return and bitwise-complement behavior. Return addresses remain separate from writable guest memory. This allows the original Threewave 1.7 module to initialize without a game-specific exception; its bounded client, hook and save/load workflow has passed. It does not establish full Threewave match compatibility.
+
+Full saves retain guest world state and its actor identities. Map travel retains the enabled selections and restarts world-scoped guests; it does not copy references to the previous map's actors. Only an adapter with explicitly independent session state may retain that state across maps.
+
+The native component adapter executes declared original API3/API2023 callbacks with private linked records and original module save routines. Original Xatrix and Q2Eaks health pickups have composed on a Q3 actor in a Q1 world and resumed after saving. Native callbacks can also emit authored sound and text or replace borrowed actors' model groups. QVM components can use destination inline brush geometry, link its collision and retain source mover state through saves. Native owned-actor scheduling, additional presentation fields, custom client effects and complete host-service coverage remain under development. A declaration describes an established source interface; it cannot infer a subsystem's behavior or make an unsupported engine service work. Whole-module execution and the narrower projectile adapters below remain separate compatibility paths.
+
+Shared equipment on a native primary game needs that module's original combat interface. Currently verified destinations are the admitted Xatrix API3 DLL, retail Q2 rerelease API2023 DLL, and LRCTF/Threewave QVMs. The shared attack enters the original damage routine, preserving source armor and reaction logic. Unknown private layouts remain unsupported; the public game ABI alone does not describe them.
+
+### Q3 body replacements
+
+Both Q3 presentation implementations share the supplemental model renderer. A body override replaces an actor's original body models while original sounds, lighting and nested effects continue. Original snapshots and collision remain unchanged. The last enabled component supplying an override owns that actor's model group; disabling it restores the preceding group.
+
+Compiled cgames need exact body-rendering declarations because the public `refEntity_t` has no actor identity. Verified Threewave and LRCTF declarations are built in. Other cgames can supply `cgame-presentation.json` with `version: 1`, `artifactPath`, `artifactDigest`, and a `bodySubmissions` array. Each entry declares a function instruction `entry`, its `actorArgument`, the actor's `entityNumberOffset`, and `reference: { "kind": "locals" }` or `{ "kind": "argument", "index": N }`. An optional `when: { "argument": N, "equals": V }` limits the declaration to a source call condition. Entries must match the actual module and cover its relevant body-rendering paths. See the [typed declaration](../src/compat/qvm/cgame-body.ts).
+
+The bridge executes each original function and suppresses only body references in its declared storage. It does not guess ownership from model filenames. Unknown cgames without a matching declaration reject body replacements explicitly. Current original-bytecode checks cover general entities, missiles and movers; replacement-player attachments and every custom effect path remain unqualified.
+
+### QuakeC projectile components
+
+Select a declared component under **Custom game → Mods**, or pass `--mod PRODUCT/ID`. The earlier `--weapon-behavior PRODUCT/ID` selector remains supported. The component changes trajectory on a matching projectile launcher; it does not replace the launcher itself.
+
+For a package without declarations, inspect the mounted program and bind callbacks established from its source:
+
+```sh
+./quake-typescript weapon-behavior inspect q1-classic-homefix --content /path/to/qfiles
+./quake-typescript weapon-behavior declare q1-classic-homefix --content /path/to/qfiles \
+  --id homefix:rocket --role rocket --fire CheckHomingRocket --activate ActivateHoming \
+  --title "Homefix homing rockets"
+```
+
+These are Homefix's actual callback names. Inspection does not infer a function's purpose from its name. The command writes `weapon-behaviors.json` atomically into the writable mod directory and leaves the executable unchanged. `--artifact` selects another mounted program; `--user-content` changes the tool's writable root. Authors can ship the declaration with their package. A rebuilt executable needs a declaration with its new digest.
 
 ### Native projectile components
 
@@ -59,7 +142,7 @@ bun run start weapon-behavior declare-native q2-rerelease-mymod \
   --profile profiles/rocket.json --content /path/to/qfiles
 ```
 
-`--profile` is relative to the product's mounted content, not the shell's working directory. `--user-content PATH` selects a different writable content root. The command reads one declaration, validates its artifact, and atomically writes the normalized profile into `native-weapon-behaviors.json` in the writable mod directory. It replaces the same behavior ID and preserves other valid entries. The output gives the exact `--weapon-behavior PRODUCT/ID` selector; the behavior also appears under **Custom game → Equipment → Projectile trajectory**.
+`--profile` is relative to the product's mounted content, not the shell's working directory. `--user-content PATH` selects a different writable content root. The command reads one declaration, validates its artifact, and atomically writes the normalized profile into `native-weapon-behaviors.json` in the writable mod directory. It replaces the same behavior ID and preserves other valid entries. The output gives the exact `--weapon-behavior PRODUCT/ID` selector; the behavior also appears under **Custom game → Mods** in the current source.
 
 Native `inspect` reports the artifact digest, ABI, PE entry-point RVA, section RVAs, sizes and permissions, and complete declared profiles. Image sections identify address ranges only. Inspection does not discover private weapon entrypoints, infer field layouts, or establish callback semantics. The author or adapter developer must establish those facts from the exact build's source and matching binary evidence.
 

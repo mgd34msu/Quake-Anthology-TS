@@ -20,14 +20,17 @@ for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attr
     slots.bindExisting(0, 'test:world'); const owner = slots.bindExisting(1, 'test:player'), missile = slots.bindExisting(2, 'test:missile'), target = slots.bindExisting(3, 'test:target');
     const host = new Map<QcHostBuiltinName, QcBuiltin>([['infokey', vm => { vm.returnInt(0); return undefined; }]]);
     const vm = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), builtins: createQcBuiltins({ kind: qw ? 'quakeworld' : 'netquake', host }), serverActive: () => true });
+    const functionExecution = (run: () => undefined) => Object.assign((prepare?: (machine: QcMachine) => undefined) => {
+      prepare?.(vm); return run();
+    }, { skip: () => { throw new Error('Projectile attribution must execute its source function'); } });
     const observer = new Id1ProjectileAttacks({ program, entities, actors, slots }, () => vm);
     const field = (name: string) => vm.fieldOffset(name);
     vm.globals.setInt(vm.globalOffset('self'), entities.reference(1)); vm.globals.setFloat(vm.globalOffset('time'), 2);
     const launch = program.functionNamed('W_FireRocket').index, ownerBytes = new Uint8Array(4); new DataView(ownerBytes.buffer).setInt32(0, entities.reference(1), true);
-    observer.compose({ functions: new Set<number>(), run: (_call, execute) => execute() }).run({ functionIndex: launch, caller: 0, statement: -1 }, () => {
+    observer.compose({ functions: new Set<number>(), run: (_call, execute) => execute() }).run({ functionIndex: launch, caller: 0, statement: -1 }, functionExecution(() => {
       entities.at(2).setInt(field('owner'), entities.reference(1));
       observer.observeStore({ functionIndex: launch, statement: 0, reference: entities.reference(2), word: field('owner'), before: new Uint8Array(4), after: ownerBytes }); return undefined;
-    });
+    }));
     slots.free(owner); const replacement = slots.bindExisting(1, 'test:new-player');
     expect(replacement.id.equals(owner.id)).toBe(false);
     vm.globals.setFloat(vm.globalOffset('time'), 10); vm.globals.setInt(vm.globalOffset('self'), entities.reference(2));
@@ -71,10 +74,10 @@ for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attr
     ];
     for (const [name, weapon, caller, statement] of projectiles) {
       const functionIndex = program.functionNamed(name).index;
-      observer.compose({ functions: new Set<number>(), run: (_call, execute) => execute() }).run({ functionIndex, caller: 0, statement: -1 }, () => {
+      observer.compose({ functions: new Set<number>(), run: (_call, execute) => execute() }).run({ functionIndex, caller: 0, statement: -1 }, functionExecution(() => {
         observer.observeStore({ functionIndex: name === 'W_FireGrenade' ? functionIndex : program.functionNamed('launch_spike').index,
           statement: 0, reference: entities.reference(2), word: field('owner'), before: new Uint8Array(4), after: ownerBytes }); return undefined;
-      });
+      }));
       const result = observer.resolve({ ...call, inflictor: reused.id, call: { ...call.call, caller, statement } });
       expect(result?.weapon).toBe(weapon); expect(result?.launch?.owner.equals(replacement.id)).toBe(true);
     }
@@ -87,18 +90,18 @@ for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attr
     ];
     for (const [name, weapon, caller, site] of cases) {
       vm.globals.setInt(7, entities.reference(1));
-      observer.compose({ functions: new Set<number>(), run: (_call, execute) => execute() }).run({ functionIndex: program.functionNamed(name).index, caller: 0, statement: -1 }, () => {
+      observer.compose({ functions: new Set<number>(), run: (_call, execute) => execute() }).run({ functionIndex: program.functionNamed(name).index, caller: 0, statement: -1 }, functionExecution(() => {
         const result = observer.resolve({ ...call, inflictor: replacement.id, call: { ...call.call, caller, statement: site } });
         expect(result?.weapon).toBe(weapon); expect(result?.launch).toBeNull(); return undefined;
-      });
+      }));
     }
     observer.compose({ functions: new Set<number>(), run: (_call, execute) => execute() }).run({
       functionIndex: program.functionNamed('W_FireLightning').index, caller: 0, statement: -1,
-    }, () => {
+    }, functionExecution(() => {
       vm.globals.setInt(7, entities.reference(3));
       expect(observer.resolve({ ...call, inflictor: target.id, call: { ...call.call,
         caller: program.functionNamed('T_RadiusDamage').index, statement: qw ? 580 : 1629 } })).toBeNull();
       return undefined;
-    });
+    }));
   } finally { archive.close(); }
 });

@@ -6,6 +6,7 @@ import type { SceneEntity, Q3MeshModel } from '../../../src/contracts/scene.ts';
 import type { UnifiedPredictionProjection } from '../../../src/app/bootstrap/network/unified-prediction.ts';
 import type { UnifiedPresentationFrame } from '../../../src/app/bootstrap/network/unified-types.ts';
 import { encodeUnifiedFrame, decodeUnifiedFrame, type UnifiedFrameDecoder } from '../../../src/app/bootstrap/network/unified-frame-codec.ts';
+import { encodeUnifiedPresentationEvents, decodeUnifiedPresentationEvents } from '../../../src/app/bootstrap/network/unified-event-codec.ts';
 import { decodeCheckpointValue, encodeCheckpointValue, SaveReader } from '../../../src/persistence/value.ts';
 
 const server=createIdentityOwner('server'),client=createIdentityOwner('client'),id=server.actor(4,2);
@@ -38,6 +39,26 @@ const frame:UnifiedPresentationFrame={epoch:3,acknowledgedInput:9,prediction,out
   worldText:[{content:'q1:registered:id1:1',text:'shared',origin,color:white,cellSize:8,orientation:{kind:'fixed',angles:origin},depthTest:true,font:'selected',distanceCullFactor:0.2}],
   player:{actor:id,view:{origin,angles:origin,viewHeight:22,blend:white,kickAngles:origin,fieldOfView:110,pitchDrift:{grounded:true,idealPitch:5,disabled:false}},ui:{health:85,armor:{kind:'q3',points:25,protection:0.66},activeWeapon:'q1:shotgun',ammo:{item:'q2:cells',count:17},inventory:[{item:'q2:cells',count:17,capacity:200}],powerups:[{item:'q3:quad',label:'Quad',remainingSeconds:10}],weaponStatus:{source:{provider:'q1:arsenal',content:'q1:registered:id1:1'},item:'q1:shotgun',label:'Shotgun',ammo:{kind:'finite',item:'q2:cells',count:17,hasAmmoToStart:true,low:false}},arsenalWarning:'none',items:[]}}};
 const context:UnifiedFrameDecoder={...client,resourceId:id=>id,world:null,resource:async()=>localResource,model:async()=>model};
+
+test('source grapple cable and looping sound retain client-owned actor identities',async()=>{
+  const result=await decodeUnifiedFrame(encodeUnifiedFrame({...frame,models:frame.models.map(model=>({...model,
+    replacesBody:true,renderOwner:'source-client',modelAnchor:{path:'models/weapons2/shotgun/shotgun_hand.md3',tag:'tag_weapon',offset:{x:5,y:0,z:-1},fovOffset:{above:90,scale:-0.2}},
+    q3GrappleCable:{owner:id,ownerOrigin:origin,ownerAngles:origin,viewHeight:26,offhand:true,attached:true,
+      flight:'models/grapple/flight.md3',pull:'models/grapple/pull.md3',hold:'models/grapple/hold.md3',segmentLength:14}}))}),context);
+  expect(result.models[0]?.q3GrappleCable?.owner.equals(client.actor(4,2))).toBe(true);
+  expect(result.models[0]?.replacesBody).toBe(true);
+  expect(result.models[0]?.renderOwner).toBe('source-client');
+  expect(result.models[0]?.q3GrappleCable?.owner.equals(id)).toBe(false);
+  expect(result.models[0]?.modelAnchor).toEqual({path:'models/weapons2/shotgun/shotgun_hand.md3',tag:'tag_weapon',offset:{x:5,y:0,z:-1},fovOffset:{above:90,scale:-0.2}});
+  const events=decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents([{kind:'q3-source',sequence:1,seconds:1,content:'q3:base:baseq3:1',
+    event:{kind:'sound',actor:id,origin,velocity:origin,path:'sound/grapple/pull.wav',channel:0,volume:1,loop:true}}]),context);
+  const event=events[0];
+  expect(event?.kind).toBe('q3-source');
+  if(event?.kind!=='q3-source'||event.event.kind!=='sound')throw new Error('Missing grapple sound');
+  expect(event.event.actor.equals(client.actor(4,2))).toBe(true);
+  expect(event.event.loop).toBe(true);
+  expect(event.event.path).toBe('sound/grapple/pull.wav');
+});
 
 test('unified frame reconstructs mixed presentation identities and local resources without server paths',async()=>{
   const bytes=encodeUnifiedFrame(frame),text=new TextDecoder().decode(inflateRawSync(bytes));

@@ -13,6 +13,7 @@ export interface QvmClientStateServices {
   /** Execute only on this trap, installing returned argv in the common command owner before resolving. */
   getServerCommand(number: number): Promise<readonly string[] | null>;
   setUserCommandValue(weapon: number, sensitivity: number): void;
+  userCommand?(number: number): ReturnType<Q3ClientState["commands"]["read"]>;
 }
 
 export function qvmClientStateSyscall(call: QvmHostCall, services: QvmClientStateServices): QvmHostResult | null {
@@ -44,7 +45,8 @@ export function qvmClientStateSyscall(call: QvmHostCall, services: QvmClientStat
       return services.getServerCommand(words.getInt32(4, true)).then(argv => Number(argv !== null));
     case QvmCgameImport.CG_GETCURRENTCMDNUMBER: return services.connection.commands.currentNumber;
     case QvmCgameImport.CG_GETUSERCMD: {
-      const number = words.getInt32(4, true), pointer = words.getInt32(8, true), command = services.connection.commands.read(number);
+      const number = words.getInt32(4, true), pointer = words.getInt32(8, true);
+      const command = services.userCommand === undefined ? services.connection.commands.read(number) : services.userCommand(number);
       if (command === null) return 0;
       writeQvmUserCommand(guest.view(pointer, QVM_USER_COMMAND_BYTES), command, profile); return 1;
     }

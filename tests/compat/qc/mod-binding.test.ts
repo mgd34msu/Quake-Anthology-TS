@@ -24,7 +24,7 @@ function changedProgram(program: QcProgram, statements: readonly QcStatement[]):
   return new QcProgram(program.source, program.api, statements, program.globals, program.fields, program.functions,
     program.strings, program.initialGlobals, program.entityFieldWords, program.checksum, createContentDigest("0".repeat(64)));
 }
-function run(program: QcProgram, observed: boolean, variant: "normal" | "death" | "empathy" | "wetsuit") {
+function run(program: QcProgram, observed: boolean, variant: "normal" | "death" | "empathy" | "wetsuit", mods?: (authority: GameplayAuthority) => void) {
   const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 3);
   const actors = new SessionActorRegistry(createIdentityOwner(`mod-${observed}-${variant}`));
   const slots = new SourceActorSlots(actors, { provider: "test:qc", capacity: 8, lifetime: quakeEdictLifetime(1),
@@ -37,6 +37,7 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
     impulse: () => { throw new Error("Replayed source impulse"); }, beforeReaction: () => undefined,
     confirmed: outcome => { outcomes.push(outcome); return undefined; },
   });
+  mods?.(authority);
   const binding = new Id1DamageBinding({ program, entities, actors, slots }, authority, () => vm, call => {
     const request: DamageRequest = { target: call.target, amount: call.amount, knockback: 0,
       direction: { x: 0, y: 0, z: 0 }, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, delivery: "direct",
@@ -74,6 +75,41 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
   vm.execute(program.functionNamed("T_Damage").index, program.functionNamed("T_Damage").parameterSizes.length);
   return { bytes: entities.bytes.slice(), outcomes, health: entities.at(2).float(field("health")), attackerHealth: entities.at(1).float(field("health")) };
 }
+test("registered transforms change actual QC damage arguments after saved call staging", async () => {
+  const program = await readProgram("id1/PAK0.PAK");
+  let observations = 0;
+  const changed = run(program, true, "normal", authority => {
+    authority.damageOperation.register({ provider: "q2:mod", id: "offset:damage", order: 0, kind: "transform", transform: request => ({ ...request, amount: request.amount + 4 }) });
+    authority.damageOperation.register({ provider: "q3:mod", id: "scale:damage", order: 1, kind: "transform", transform: request => ({ ...request, amount: request.amount / 2 }) });
+    authority.damageOperation.register({ provider: "q1:mod", id: "observe:damage", order: 2, kind: "observe", observe: (request, outcome) => {
+      observations++; expect(request.amount).toBe(22);
+      if (outcome.kind !== "committed") throw new Error("Expected native damage");
+      expect(outcome.decision.request.amount).toBe(22); return undefined;
+    } });
+  });
+  expect(changed.health).toBe(85); expect(observations).toBe(1); expect(changed.outcomes).toHaveLength(1);
+  expect(changed.outcomes[0]?.kind === "committed" ? changed.outcomes[0].decision.appliedDamage : -1).toBe(15);
+});
+
+test("a mod can replace QC damage without executing its original stores", async () => {
+  const program = await readProgram("id1/PAK0.PAK");
+  let observations = 0;
+  const changed = run(program, true, "normal", authority => {
+    authority.damageOperation.register({ provider: "q2:mod", id: "cancel:damage", order: 0, kind: "replace", replace: request => ({
+      kind: "committed", decision: { request, mutations: [], appliedDamage: 0, reaction: "none" }, survived: true,
+    }) });
+    authority.damageOperation.register({ provider: "q3:mod", id: "observe:damage", order: 1, kind: "observe", observe: () => { observations++; return undefined; } });
+  });
+  expect(changed.health).toBe(100); expect(changed.attackerHealth).toBe(100); expect(changed.outcomes).toEqual([]); expect(observations).toBe(1);
+});
+
+test("QC rejects transformations that its source call cannot execute", async () => {
+  const program = await readProgram("id1/PAK0.PAK");
+  expect(() => run(program, true, "normal", authority => {
+    authority.damageOperation.register({ provider: "q3:mod", id: "knockback:damage", order: 0, kind: "transform", transform: request => ({ ...request, knockback: 300 }) });
+  })).toThrow("independent damage metadata requires a replacement");
+});
+
 for (const path of ["id1/PAK0.PAK", "hipnotic/pak0.pak", "rerelease/dopa/pak0.pak", "rogue/pak0.pak"]) {
   test(`derived ${path} damage preserves the real VM stores and reactions`, async () => {
     const program = await readProgram(path), derived = deriveNativeProgramBinding(program);

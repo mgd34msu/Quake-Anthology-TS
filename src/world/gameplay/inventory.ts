@@ -1,6 +1,7 @@
 import type { InventoryEntry, InventoryTable, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { SessionActorRegistry } from "../actors/registry.ts";
+import { ModOperation } from "./mod-composition.ts";
 
 export interface InventoryStateBinding {
   read(): readonly InventoryEntry[];
@@ -45,6 +46,12 @@ export function inventoryGive(entry: InventoryEntry, count: number): InventoryGi
 
 /** Capacity and item selection belong to the chosen inventory provider. Counts have one write path. */
 export class SharedInventoryTable implements InventoryTable {
+  readonly operations = {
+    give: new ModOperation<Readonly<Parameters<InventoryTable["give"]>>, ReturnType<InventoryTable["give"]>>("inventory.give"),
+    consume: new ModOperation<Readonly<Parameters<InventoryTable["consume"]>>, ReturnType<InventoryTable["consume"]>>("inventory.consume"),
+    configure: new ModOperation<readonly [actor: OwnedActor, entry: InventoryEntry], undefined>("inventory.configure"),
+    adjustSourceCounter: new ModOperation<readonly [actor: OwnedActor, item: ItemId, delta: number], number>("inventory.adjust-source-counter"),
+  };
   private readonly stores = new Map<OwnedActor, InventoryStateBinding>();
 
   constructor(private readonly actors: SessionActorRegistry) {
@@ -90,6 +97,11 @@ export class SharedInventoryTable implements InventoryTable {
   }
 
   consume(actor: OwnedActor, item: ItemId, count: number): boolean {
+    if (this.operations.consume.active) this.actors.assertOwned(actor);
+    return this.operations.consume.active ? this.operations.consume.dispatch([actor, item, count], args => this.consumeCanonical(...args)) : this.consumeCanonical(actor, item, count);
+  }
+
+  private consumeCanonical(actor: OwnedActor, item: ItemId, count: number): boolean {
     this.actors.assertOwned(actor); quantity(count);
     const binding = this.stores.get(actor);
     const entry = binding?.read().find(candidate => candidate.item === item);
@@ -100,6 +112,11 @@ export class SharedInventoryTable implements InventoryTable {
   }
 
   give(actor: OwnedActor, item: ItemId, count: number): number {
+    if (this.operations.give.active) this.actors.assertOwned(actor);
+    return this.operations.give.active ? this.operations.give.dispatch([actor, item, count], args => this.giveCanonical(...args)) : this.giveCanonical(actor, item, count);
+  }
+
+  private giveCanonical(actor: OwnedActor, item: ItemId, count: number): number {
     this.actors.assertOwned(actor); quantity(count);
     const binding = this.stores.get(actor);
     const entry = binding?.read().find(candidate => candidate.item === item);
@@ -112,6 +129,11 @@ export class SharedInventoryTable implements InventoryTable {
 
   /** Source pickups can change capacity or retain an over-cap count without a forced generic clamp. */
   configure(actor: OwnedActor, entry: InventoryEntry): undefined {
+    if (this.operations.configure.active) this.actors.assertOwned(actor);
+    return this.operations.configure.active ? this.operations.configure.dispatch([actor, entry], args => this.configureCanonical(...args)) : this.configureCanonical(actor, entry);
+  }
+
+  private configureCanonical(actor: OwnedActor, entry: InventoryEntry): undefined {
     this.actors.assertOwned(actor);
     const binding = this.stores.get(actor);
     if (binding === undefined) throw new Error("Actor has no inventory binding");
@@ -121,6 +143,11 @@ export class SharedInventoryTable implements InventoryTable {
 
   /** Fixed source bursts may decrement past zero; ordinary stack consumption keeps its availability check. */
   adjustSourceCounter(actor: OwnedActor, item: ItemId, delta: number): number {
+    if (this.operations.adjustSourceCounter.active) this.actors.assertOwned(actor);
+    return this.operations.adjustSourceCounter.active ? this.operations.adjustSourceCounter.dispatch([actor, item, delta], args => this.adjustSourceCounterCanonical(...args)) : this.adjustSourceCounterCanonical(actor, item, delta);
+  }
+
+  private adjustSourceCounterCanonical(actor: OwnedActor, item: ItemId, delta: number): number {
     this.actors.assertOwned(actor);
     const binding = this.stores.get(actor), entry = binding?.read().find(candidate => candidate.item === item);
     if (binding === undefined || entry === undefined || entry.countPolicy?.kind !== "source-counter") throw new Error("Item is not a signed source counter");

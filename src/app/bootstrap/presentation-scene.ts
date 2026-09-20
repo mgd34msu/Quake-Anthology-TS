@@ -12,7 +12,8 @@ import type { SceneCamera } from "../../contracts/render.ts";
 import type { WorldSnapshot } from "../../contracts/session.ts";
 import type { Q3CharacterAssets, Q3CharacterView } from "../../content/q3/foundation/index.ts";
 import { Q3CharacterPresenter } from "../../content/q3/foundation/index.ts";
-import { anglesToAxis } from "../../core/math.ts";
+import { add3, sub3, scale3, length3, normalize3OrZero, vectorToAngles, anglesToAxis } from "../../core/math.ts";
+import { qvmAngleVectors } from "../../core/qvm-math.ts";
 import type { WorldScene, WorldViewInput } from "../../render/scene/world.ts";
 import type { ModelTransform } from "../../render/scene/view.ts";
 import { SceneModelRenderer } from "../../render/scene/models/index.ts";
@@ -22,6 +23,9 @@ import { prepareFlare } from "../../render/scene/flare.ts";
 import type { SceneFlare } from "../../contracts/flare.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { RendererImage } from "../../contracts/render.ts";
+import type { RegisteredSceneMaterial } from "../../render/scene/material-registrations.ts";
+import { railGeometry } from "../../render/scene/particles/primitives.ts";
+import { prepareMaterialBatches } from "../../materials/evaluate.ts";
 
 interface ModelPass {
   readonly entity: SceneEntity;
@@ -62,6 +66,7 @@ export class ApplicationWorldScene {
   private preparedTime = 0;
   private previousTime = 0;
   private flares: { readonly flare: SceneFlare; readonly origin: Vec3; readonly image: RendererImage; readonly imagePath: string }[] = [];
+  private shaderBeams: { readonly material: RegisteredSceneMaterial; readonly origin: Vec3; readonly end: Vec3; readonly width: number }[] = [];
 
   constructor(readonly assets: ApplicationAssets, private readonly characterAssets: Q3CharacterAssets | null, private readonly planarShadows: () => boolean = () => false) {
     this.foreignWeapons = new ForeignHeldWeapons(assets);
@@ -77,10 +82,11 @@ export class ApplicationWorldScene {
     return pattern === undefined || pattern.length === 0 ? absent : pattern.charCodeAt(Math.trunc(this.preparedTime * 10) % pattern.length) - 97;
   }
 
-  async prepare(viewer: ActorId | null, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
+  async prepare(viewer: ActorId | null, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[], fieldOfView = 90): Promise<void> {
     this.objects.clear();
     this.ordered.length = 0;
     this.flares = [];
+    this.shaderBeams = [];
     this.previousTime = this.preparedTime;
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     for (const group of this.groups.values()) group.passes.length = 0;
@@ -98,8 +104,14 @@ export class ApplicationWorldScene {
       const logical = object ?? { opacity: entity.opacity ?? 1, passes: [] };
       logical.passes.push({ group, pass }); this.objects.set(pass, logical);
     };
-    for (const source of presentations) {
+    for (const original of presentations) {
+      let source = original;
       if (!source.visible) continue;
+      if (source.shaderBeam !== undefined) {
+        const provider = await this.assets.provider(source.content), beam = source.shaderBeam;
+        this.shaderBeams.push({ material: await provider.shaders.register(beam.path), origin: source.origin, end: beam.end, width: beam.width });
+        continue;
+      }
       if (source.flare !== undefined) {
         const provider = await this.assets.provider(source.content), flare = source.flare;
         let imagePath = flare.image;
@@ -114,11 +126,20 @@ export class ApplicationWorldScene {
       if (source.path === "") continue;
       if (!seatModelVisible(viewer, source)) continue;
       if (!source.viewWeapon && characters.some(character => character.actor.equals(source.actor))) continue;
+      const cable = source.q3GrappleCable;
+      let cableStart: Vec3 | null = null;
+      if (cable !== undefined) {
+        const local = viewer?.equals(cable.owner) === true, aim = qvmAngleVectors(cable.ownerAngles);
+        cableStart = cable.offhand ? add3(add3(cable.ownerOrigin, { x: 0, y: 0, z: 26 }), scale3(aim.right, local ? -10 : -6))
+          : add3(cable.ownerOrigin, { x: 0, y: 0, z: local ? cable.viewHeight : 0 });
+        if (local && cable.offhand) cableStart = add3(cableStart, scale3(aim.forward, 3));
+        source = { ...source, path: !cable.attached ? cable.flight : length3(sub3(source.origin, cableStart)) > 64 ? cable.pull : cable.hold };
+      }
       if (source.q3Weapon !== undefined) {
         const key = `${source.content}/${source.actor.slot}/${source.actor.generation}`;
         let presenter = this.selectedWeapons.get(key);
         if (presenter === undefined) { presenter = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets?.animation ?? null); this.selectedWeapons.set(key, presenter); }
-        await append(source.content, await presenter.frame(source), () => ({ viewModel: true }));
+        await append(source.content, await presenter.frame(source, fieldOfView), () => ({ viewModel: true }));
         continue;
       }
       const asset = await this.assets.model(source.content, source.path);
@@ -144,7 +165,20 @@ export class ApplicationWorldScene {
         pose: { kind: "frame", frame: source.frame, previousFrame: source.oldFrame, backLerp: source.backLerp ?? 0 }, skin: source.skin,
         opacity: source.alpha ?? 1, color: { x: 1, y: 1, z: 1, w: 1 }, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: source.family, bits: source.renderFlags },
         lightingOrigin: source.origin, shadowPlane: 0, attachments: [] };
-      await append(source.content, entity, () => ({ viewModel: source.viewWeapon, ...(source.modelBeam === undefined ? {} : { modelBeam: source.modelBeam }),
+      const attachments: SceneEntity["attachments"][number][] = [];
+      for (const attachment of source.modelAttachments ?? []) {
+        const child = await this.assets.model(source.content, attachment.path);
+        attachments.push({ tag: attachment.tag, entity: { ...entity, resource: child.resource, model: child.model, transform: { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }), scale: { x: 1, y: 1, z: 1 } }, attachments: [] } });
+      }
+      if (cable !== undefined && cableStart !== null) {
+        const delta = sub3(cableStart, source.origin), distance = length3(delta), direction = normalize3OrZero(delta), axis = anglesToAxis(vectorToAngles(direction));
+        const count = Math.floor(distance / cable.segmentLength);
+        if (count > 65536) throw new Error("Source grapple cable exceeds the model segment limit");
+        for (let index = 0; index <= count; index++) await append(source.content, { ...entity,
+          transform: { ...entity.transform, origin: sub3(cableStart, scale3(direction, (index + 1) * cable.segmentLength)), axis } });
+        continue;
+      }
+      await append(source.content, { ...entity, attachments }, () => ({ viewModel: source.viewWeapon, ...(source.modelBeam === undefined ? {} : { modelBeam: source.modelBeam }),
         ...(source.indexedSkin === undefined ? {} : { indexedSkin: source.indexedSkin }),
         ...(source.playerColors === undefined ? {} : { playerColors: source.playerColors }),
         player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null }));
@@ -197,8 +231,22 @@ export class ApplicationWorldScene {
       input = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
     }
     this.assets.world.prepareWorldOperations(input);
+    const modelOperations = this.modelOperations(input, infrared, weaponCamera, skinningFrame);
+    const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
+    return this.assets.world.prepareView({ ...input, operations: [...operations.filter(polygon), ...modelOperations, ...operations.filter(operation => !polygon(operation))] });
+  }
+
+  supplemental(input: WorldViewInput, weaponCamera: SceneCamera = input.camera): readonly SceneOperation[] {
+    const inline = this.inlineModels.flatMap(model => this.assets.world.prepareModel(model.model, model.transform,
+      { ...input, ...(model.animationFrame === undefined ? {} : { animationFrame: model.animationFrame }),
+        ...(model.alternateAnimation === undefined ? {} : { alternateAnimation: model.alternateAnimation }) }));
+    return [...inline, ...this.modelOperations(input, false, weaponCamera)];
+  }
+
+  private modelOperations(input: WorldViewInput, infrared: boolean, weaponCamera: SceneCamera,
+    skinningFrame: ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() }): readonly SceneOperation[] {
     const modelOperations: SceneOperation[] = [], emitted = new Set<PresentationObject>();
-    const prepare = (group: ModelGroup, pass: ModelPass) => group.renderer.prepare([pass.entity],
+    const prepare = (group: ModelGroup, pass: ModelPass) => pass.options(pass.entity).viewModel === true && input.camera.clip.kind === "portal" ? [] : group.renderer.prepare([pass.entity],
       pass.options(pass.entity).viewModel === true ? { ...input, camera: weaponCamera } : input,
       current => ({ ...pass.options(current), infrared, planarShadow: this.planarShadows() }), skinningFrame);
     for (const { group, pass } of this.ordered) {
@@ -211,12 +259,16 @@ export class ApplicationWorldScene {
           batches: object.passes.flatMap(pass => sceneModelBatches(prepare(pass.group, pass.pass))) }] });
     }
     if (this.flares.length > 0) modelOperations.push(sequenceDrawGroup("translucent", this.flares.map(flare => prepareFlare(flare.flare, flare.origin, input.camera, flare.image, flare.imagePath))));
+    for (const beam of this.shaderBeams) {
+      const geometry = railGeometry({ kind: "rail-core", origin: beam.end, oldOrigin: beam.origin, shaderRGBA: { x: 255, y: 255, z: 255, w: 255 } }, input.camera.origin,
+        { coreWidth: beam.width, ringWidth: 16, segmentLength: 32 });
+      modelOperations.push(sequenceDrawGroup("translucent", prepareMaterialBatches(beam.material, geometry, this.assets.world.materialContext(input))));
+    }
     const brushes = this.brushModels.flatMap(brush => brush.scene.prepareModel(brush.model, brush.transform, { ...input, animationFrame: brush.frame,
       alternateAnimation: brush.scene.map.kind === "q1-bsp" && brush.frame !== 0,
       materialContext: { ...input.materialContext, entityRGBA: { x: 255, y: 255, z: 255, w: brush.alpha * 255 } } }));
-    const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
-    return this.assets.world.prepareView({ ...input, operations: [...operations.filter(polygon), ...brushes, ...modelOperations, ...operations.filter(operation => !polygon(operation))] });
+    return [...brushes, ...modelOperations];
   }
 
-  close(): undefined { this.ordered.length = 0; this.objects.clear(); this.groups.clear(); this.characters.clear(); this.selectedWeapons.clear(); return undefined; }
+  close(): undefined { this.ordered.length = 0; this.objects.clear(); this.groups.clear(); this.characters.clear(); this.selectedWeapons.clear(); this.shaderBeams = []; return undefined; }
 }

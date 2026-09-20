@@ -5,6 +5,7 @@ import type { ActorSlotCheckpoint, ProviderCheckpoint, SaveImage, SavedActorId, 
 import type { ActorId } from "../contracts/identity.ts";
 import type { SourceActorCheckpoint } from "../world/actors/registry.ts";
 import { readGuest } from "./execution.ts";
+import { readModSession } from "./mods.ts";
 import { readCharacter, readProvider, readRecipe } from "./recipe.ts";
 import { readBounds, readFrame, readRandom, readTime, readVector } from "./shared.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, namespaced, SaveFormatError, SaveReader } from "./value.ts";
@@ -46,7 +47,7 @@ export function readInventoryEntry(reader: SaveReader): InventoryEntry {
 
 export function parseSaveImage(value: unknown): SaveImage {
   const reader = new SaveReader(value);
-  return { schemaVersion: reader.field("schemaVersion").literal(2), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
+  const image: SaveImage = { schemaVersion: reader.field("schemaVersion").literal(2), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
     clocks: reader.field("clocks").list(entry => ({ provider: namespaced(entry.field("provider")), time: readTime(entry.field("time")) })),
     random: reader.field("random").list(entry => ({ provider: namespaced(entry.field("provider")), state: readRandom(entry.field("state")) })), actors: reader.field("actors").list(readActorSlot),
     bodies: reader.field("bodies").list(entry => ({ actor: readSavedActor(entry.field("actor")), body: readSavedBody(entry.field("body")), attachment: entry.field("attachment").nullable(readSavedBodyAttachment), linkCount: entry.field("linkCount").integer(0), linked: entry.field("linked").nullable(link => ({ state: readSavedBody(link.field("state")), absoluteBounds: readBounds(link.field("absoluteBounds")) })) })),
@@ -56,7 +57,11 @@ export function parseSaveImage(value: unknown): SaveImage {
     thinks: reader.field("thinks").list(entry => ({ actor: readSavedActor(entry.field("actor")), callback: namespaced(entry.field("callback")), due: readTime(entry.field("due")), boundary: entry.field("boundary").choice("before-physics", "during-physics", "after-physics"), provider: namespaced(entry.field("provider")), sequence: entry.field("sequence").integer(0),
       ...(entry.field("executionProvider").value === undefined ? {} : { executionProvider: namespaced(entry.field("executionProvider")) }) })),
     providers: reader.field("providers").list(entry => ({ provider: namespaced(entry.field("provider")), schema: namespaced(entry.field("schema")), version: entry.field("version").integer(0), bytes: entry.field("bytes").bytes() })),
-    guests: reader.field("guests").list(readGuest) };
+    guests: reader.field("guests").list(readGuest),
+    ...(reader.field("mods").value === undefined ? {} : { mods: readModSession(reader.field("mods")) }) };
+  if ((image.recipe.mods?.length ?? 0) !== 0 && image.mods === undefined)
+    return reader.field("mods").fail("selected gameplay mods require their saved checkpoint");
+  return image;
 }
 
 export function encodeSaveImage(image: SaveImage): Uint8Array {

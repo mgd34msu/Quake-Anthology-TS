@@ -39,10 +39,11 @@ export class RereleaseDeferredDamage {
   readonly #removeEntry: () => void;
   readonly #removePain: () => void;
   constructor(readonly host: RereleaseQ2GuestHost, readonly services: RereleaseForeignDamageServices,
-    readonly currentRequest: (actor: ActorId) => DamageRequest | null) {
+    readonly currentRequest: (actor: ActorId) => DamageRequest | null, readonly intercepted: () => boolean) {
     const { callbacks, cpu } = host.module.options.runner.options, adapter = new X86AbiAdapter(rereleaseAbi);
     const entries = host.options.nativeEntries; if (entries === undefined) throw new Error("Missing retail native entries");
     this.#removeEntry = callbacks.observeEntry(entries.damage, () => {
+      if (intercepted()) return;
       const args = adapter.arguments(cpu, rereleaseDamageSignature), stack = cpu.state.registers.read("rsp", 64);
       while (this.#calls.length > 0 && (this.#calls.at(-1)?.stack ?? 0n) <= stack) this.#calls.pop();
       const view = host.module.entities().fromPointer(requiredPointer(args, 0));
@@ -134,8 +135,8 @@ export class RereleaseDeferredDamage {
     }
     return { kind: "shared", actor: { slot: actor.slot, generation: actor.generation } };
   }
-  restoreActor(saved: RereleaseSavedActor): ActorId {
-    if (saved.kind === "shared") return this.host.options.engine.actors.referenceSaved(saved.actor, "current");
+  restoreActor(saved: RereleaseSavedActor, domain: "checkpoint" | "current" = "current"): ActorId {
+    if (saved.kind === "shared") return this.host.options.engine.actors.referenceSaved(saved.actor, domain);
     const view = this.host.module.entities().atSlot(saved.slot), source = new RereleaseSourceEdict(view, this.host.module);
     if (source.generation() !== saved.generation) throw new Error("Saved native damage actor generation changed");
     const actor = this.host.actor(view); if (actor === null) throw new Error("Saved native damage actor is not live");
@@ -156,10 +157,10 @@ export class RereleaseDeferredDamage {
     }
     return saved;
   }
-  restore(saved: readonly RereleaseDeferredDamageSave[]): void {
+  restore(saved: readonly RereleaseDeferredDamageSave[], domain: "checkpoint" | "current" = "current"): void {
     const memory = this.host.module.memory;
     for (const state of saved) {
-      const target = this.restoreActor(state.target), source = this.host.options.engine.actors.sourceOf(target);
+      const target = this.restoreActor(state.target, domain), source = this.host.options.engine.actors.sourceOf(target);
       if (source === null) throw new Error("Saved monster has no native source slot");
       const view = this.host.module.entities().atSlot(source.slot);
       memory.writePointer(this.#at(view, offsets.attacker), this.host.module.entities().atSlot(state.attackerSlot).address);
@@ -172,7 +173,7 @@ export class RereleaseDeferredDamage {
       const attack = restoreQ2Attack(state.attack, actor => {
         const reference = state.references.find(value => value.actor.slot === actor.slot && value.actor.generation === actor.generation);
         if (reference === undefined) throw new Error("Missing saved native damage reference");
-        return this.restoreActor(reference.reference);
+        return this.restoreActor(reference.reference, domain);
       });
       entry.pending = captureRequest({ ...state.request, target, attack });
     }

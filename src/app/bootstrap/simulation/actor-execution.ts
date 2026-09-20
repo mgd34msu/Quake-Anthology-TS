@@ -102,7 +102,7 @@ export function executeActor(entry: Exclude<ActorExecution, { readonly kind: "q3
   return entry.kind === "quakec" ? executeQuakeCActor(entry, context) : entry.kind === "q1" ? executeQ1Actor(entry, context) : executeQ2Actor(entry, context);
 }
 
-function moveQ1Noclip(actor: OwnedActor, angularVelocity: Vec3, context: ActorExecutionFrame): undefined {
+function moveQ1Noclip(actor: OwnedActor, angularVelocity: Vec3, context: Pick<ActorExecutionFrame, "bodies" | "elapsed">): undefined {
   const { bodies, elapsed } = context, body = bodies.read(actor.id);
   if (body === null) return undefined;
   bodies.write(actor, { ...body, origin: add(body.origin, { x: body.velocity.x * elapsed, y: body.velocity.y * elapsed, z: body.velocity.z * elapsed }),
@@ -115,6 +115,11 @@ function executeQuakeCActor(entry: Extract<ActorExecution, { readonly kind: "qua
   const { source, actor } = entry;
   if (source.isReservedClient(actor.id)) return undefined;
   if (!source.runActorOnce(actor.id, context.frame)) return undefined;
+  return executeQuakeCPhysics(source, actor, context);
+}
+
+export function executeQuakeCPhysics(source: Pick<QuakeCSource, "readMoveType" | "runThink" | "checkWaterTransition" | "motion" | "pusherServices">,
+  actor: OwnedActor, context: Pick<ActorExecutionFrame, "actors" | "bodies" | "frame" | "elapsed"> & { readonly physics: Pick<SharedPhysics, "step"> }): undefined {
   const move = source.readMoveType(actor.id);
   if (move === null) return undefined;
   if (move === 7) {

@@ -2,12 +2,15 @@
 import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestLayout, RawEntityTable, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
+import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Q2RereleaseUserCommand } from "../../../contracts/protocol.ts";
 import type { GuestCallRunner } from "../../../guest/abi/runner.ts";
+import { X86AbiAdapter } from "../../../guest/abi/adapter.ts";
+import { requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import type { GuestCallSignature } from "../../../guest/core/contracts.ts";
 import { cgameExports, cgameExportLayout, cgameImportLayout, cgameImports, gameExports, gameExportLayout, gameImportLayout, gameImports, getApiSignature, rereleaseAbi } from "./api.ts";
 import type { CgameExportName, CgameImportName, GameExportName, GameImportName } from "./api.ts";
-import { edictLayout, fieldOffset, rectangleLayout, usercmdLayout } from "./layouts.ts";
+import { edictLayout, fieldOffset, pmoveLayout, rectangleLayout, usercmdLayout } from "./layouts.ts";
 import { writeRereleaseUserCommand } from "./player-state.ts";
 
 export type RereleaseImportName = GameImportName | CgameImportName;
@@ -144,10 +147,32 @@ export class RereleaseGuestModule {
     } finally { this.memory.unmap(info, 2048); this.memory.unmap(social, nativeAllocationBytes(socialBytes.length + 1)); }
   }
   clientBegin(slot: number): void { const client = this.entities().atSlot(slot); this.callGame("ClientBegin", [guestPointer(client.address)], client); }
-  clientThink(slot: number, command: Q2RereleaseUserCommand): void {
+  clientThink(slot: number, command: Q2RereleaseUserCommand, equipment?: EquipmentMovement): void {
     const client = this.entities().atSlot(slot), address = this.memory.allocate({ byteLength: usercmdLayout.byteLength, alignment: 4n, label: "Q2 client command" });
-    try { writeRereleaseUserCommand(this.memory.borrow(address, usercmdLayout.byteLength), command); this.callGame("ClientThink", [guestPointer(client.address), guestPointer(address)], client); }
-    finally { this.memory.unmap(address, usercmdLayout.byteLength); }
+    let remove: (() => void) | undefined;
+    try {
+      if (equipment !== undefined) {
+        const entry = gameExports.find(value => value.name === "Pmove");
+        if (entry === undefined) throw new Error("API2023 has no Pmove signature");
+        const { cpu, callbacks } = this.options.runner.options, abi = new X86AbiAdapter(entry.signature.abi);
+        let applied = false;
+        remove = callbacks.observeEntry(this.#function(this.bindGame(), gameExportLayout, "Pmove"), () => {
+          if (applied) return;
+          const movement = requiredPointer(abi.arguments(cpu, entry.signature), 0);
+          const player = this.memory.readPointer(this.memory.offset(movement, BigInt(fieldOffset(pmoveLayout, "player"))));
+          if (player?.byteOffset !== client.address.byteOffset) return;
+          if (equipment.velocity !== undefined) {
+            const at = this.memory.offset(movement, BigInt(fieldOffset(pmoveLayout, "s.velocity"))), velocity = equipment.velocity;
+            this.memory.writeFloat32(at, velocity.x); this.memory.writeFloat32(this.memory.offset(at, 4n), velocity.y); this.memory.writeFloat32(this.memory.offset(at, 8n), velocity.z);
+          }
+          const state = this.memory.borrow(movement, pmoveLayout.byteLength), gravity = fieldOffset(pmoveLayout, "s.gravity"), flags = fieldOffset(pmoveLayout, "s.pm_flags");
+          state.setInt16(gravity, Math.trunc(state.getInt16(gravity, true) * equipment.gravityScale), true);
+          state.setUint16(flags, equipment.predictionSuppressed ? state.getUint16(flags, true) | 64 : state.getUint16(flags, true) & ~64, true);
+          applied = true;
+        });
+      }
+      writeRereleaseUserCommand(this.memory.borrow(address, usercmdLayout.byteLength), command); this.callGame("ClientThink", [guestPointer(client.address), guestPointer(address)], client);
+    } finally { remove?.(); this.memory.unmap(address, usercmdLayout.byteLength); }
   }
   clientDisconnect(slot: number): void { const client = this.entities().atSlot(slot); this.callGame("ClientDisconnect", [guestPointer(client.address)], client); }
   spawnEntities(map: string, entities: string, spawnpoint: string): void {

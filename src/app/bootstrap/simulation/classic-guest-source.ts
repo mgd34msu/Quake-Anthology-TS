@@ -2,6 +2,7 @@ import type { ResolvedExecutionModule } from '../../../contracts/content.ts';
 import type { GuestCallContext, ModuleIdentity } from '../../../contracts/execution.ts';
 import type { MountedContent } from '../../../content/mounts/index.ts';
 import { ClassicQ2GuestHost, CLASSIC_Q2_ABI } from '../../../compat/q2/classic/index.ts';
+import type { ClassicQ2GuestHostOptions } from '../../../compat/q2/classic/host.ts';
 import type { ClassicQ2EngineServices } from '../../../compat/q2/classic/index.ts';
 import { GuestCallRunner } from '../../../guest/abi/index.ts';
 import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from '../../../guest/core/index.ts';
@@ -17,13 +18,12 @@ export interface PreparedClassicGuest { readonly edition: "classic"; readonly ex
 export async function prepareClassicGuest(execution: NativeExecution, mounts: MountedContent): Promise<PreparedClassicGuest> {
   if (execution.role !== 'server-game' || execution.api.kind !== 'q2-classic-game' || execution.api.version !== 3
     || execution.profile.kind !== 'windows-i386') throw new Error('Classic Q2 guest requires Windows i386 game API 3');
-  const artifact = await mounts.open(execution.artifact.requestedPath);
-  if (artifact === null || artifact.reference.id !== execution.artifact.id || artifact.reference.digest !== execution.artifact.digest)
-    throw new Error('Selected classic native artifact no longer matches its resolved identity');
-  if (parsePe(artifact.bytes).abi.kind !== execution.profile.kind) throw new Error('Classic native artifact ABI differs from the selected profile');
-  return { edition: "classic", execution, bytes: artifact.bytes };
+  const bytes = await mounts.read(execution.artifact);
+  if (parsePe(bytes).abi.kind !== execution.profile.kind) throw new Error('Classic native artifact ABI differs from the selected profile');
+  return { edition: "classic", execution, bytes };
 }
 export interface ClassicGuestSourceOptions {
+  readonly importBoundary?: ClassicQ2GuestHostOptions['importBoundary'];
   services(memory: MappedGuestMemory): ClassicQ2EngineServices;
   readonly capabilities: WindowsCapabilities;
   readonly instructionBudget?: number;
@@ -31,6 +31,8 @@ export interface ClassicGuestSourceOptions {
 
 /** The selected DLL owns game bytes; all world and presentation services are supplied by the session. */
 export class ClassicGuestSource {
+  get imageBase() { return this.image.base; }
+  entry(name: string) { return resolvePeExport(this.image, { kind: 'name', name, version: null }, () => null).address; }
   private phase: 'created' | 'initializing' | 'running' | 'closed' = 'created';
   private constructor(readonly host: ClassicQ2GuestHost, readonly runtime: WindowsGuestRuntime,
     readonly memory: SparseGuestMemory, private readonly image: PeImage, private readonly context: GuestCallContext,
@@ -68,7 +70,8 @@ export class ClassicGuestSource {
       const game = resolvePeExport(image, { kind: 'name', name: 'GetGameAPI', version: null }, () => null).address;
       const context: GuestCallContext = { module, callback: { kind: 'native-guest', module, address: game, abi: CLASSIC_Q2_ABI }, parent: null, self: null, other: null };
       const budget = options.instructionBudget ?? 5_000_000;
-      host = new ClassicQ2GuestHost({ runner, provider: prepared.execution.owner.provider, services: options.services(memory), instructionBudget: budget });
+      host = new ClassicQ2GuestHost({ runner, provider: prepared.execution.owner.provider, services: options.services(memory), instructionBudget: budget,
+        ...(options.importBoundary === undefined ? {} : { importBoundary: options.importBoundary }) });
       source = new ClassicGuestSource(host, runtime, memory, image, context, budget, files);
       runtime.initialize(image, { context, instructionBudget: budget });
       host.getGameApi(game);

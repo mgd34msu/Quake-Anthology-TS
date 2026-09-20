@@ -679,8 +679,13 @@ test("dedicated actual id1 QuakeC application traverses authored pushers and liv
     expect(source.options.random).toBe(simulation.random);
     expect(source.options.physics).toBe(simulation.physics);
     expect(source.options.actors).toBe(simulation.actors);
-    expect(() => simulation.checkpoint()).toThrow("complete saved-game checkpoint");
-    expect(() => simulation.admitPlayer(simulation.options.identity.client(0, 0))).toThrow("QuakeC");
+    const savedSource = simulation.checkpoint().guests.find(guest => guest.kind === "quakec");
+    if (savedSource?.kind !== "quakec") throw new Error("Missing complete source checkpoint");
+    expect(savedSource.module.digest).toBe(source.prepared.execution.artifact.digest);
+    expect(savedSource.module.id).toBe(source.prepared.execution.owner.provider);
+    expect(savedSource.globals).toEqual(source.machine.globals.bytes);
+    expect(savedSource.entityCount).toBe(source.entities.count);
+    expect(() => simulation.admitPlayer(simulation.options.identity.client(0, 0))).toThrow("QC clients require matching source travel");
     const visits: number[] = [], beforeActor = source.beforeActor.bind(source);
     source.beforeActor = actor => {
       const slot = source.sourceSlot(actor.id);
@@ -808,7 +813,12 @@ test("dedicated actual id1 QC client reuses its raw actor, retains movement and 
             throw new Error('Missing raw bounds fields');
         expect(source.entities.at(slot).vector(absmin.offset)).toEqual(linked.absoluteBounds.min);
         expect(source.entities.at(slot).vector(absmax.offset)).toEqual(linked.absoluteBounds.max);
-        expect(() => simulation.checkpoint()).toThrow('complete saved-game checkpoint');
+        const savedSource = simulation.checkpoint().guests.find(guest => guest.kind === "quakec");
+        if (savedSource?.kind !== "quakec") throw new Error("Missing complete source checkpoint");
+        expect(savedSource.module.digest).toBe(source.prepared.execution.artifact.digest);
+        expect(savedSource.module.id).toBe(source.prepared.execution.owner.provider);
+        expect(savedSource.globals).toEqual(source.machine.globals.bytes);
+        expect(savedSource.entities).toEqual(source.entities.bytes);
         const door = simulation.actors.observations().find(actor => source.classname(actor.id) === "door");
         const crusher = door === undefined ? null : simulation.actors.resolveOwned(door.id);
         const healthBeforeCrush = simulation.combat.read(admitted.actor)?.health;

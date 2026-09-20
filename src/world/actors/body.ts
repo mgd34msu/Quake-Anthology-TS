@@ -67,6 +67,13 @@ export class SharedBodyTable implements BodyTable {
     this.records.set(actor.id.slot, { actor, storage: { kind: "external", binding }, linked: null, linkCount: 0 });
     return undefined;
   }
+  rebind(actor: OwnedActor, binding: BodyStateBinding): undefined {
+    this.actors.assertOwned(actor);
+    const previous = this.record(actor.id);
+    if (previous === null) return this.bind(actor, binding);
+    this.records.set(actor.id.slot, { ...previous, storage: { kind: "external", binding } });
+    return undefined;
+  }
 
   create(actor: OwnedActor, initial: BodyState): undefined {
     const state = copyBody(initial);

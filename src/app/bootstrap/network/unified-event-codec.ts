@@ -802,12 +802,14 @@ type EventSimulationPresentationEventQ3Source = Extract<EventSimulationPresentat
 type EventQ3SourceEvent = EventSimulationPresentationEventQ3Source["event"];
 
 function readEventQ3SourceEvent(reader: SaveReader, identity: UnifiedIdentityDecoder): EventQ3SourceEvent { void identity; switch (reader.field('kind').string()) { case "print": case "log": return ({ "kind": reader.field("kind").choice<"print" | "log">("print", "log"), "text": reader.field("text").string() });
+case "sound": return { kind: "sound", actor: readActorId(reader.field("actor"), identity), origin: readEventVec3(reader.field("origin"), identity), velocity: readEventVec3(reader.field("velocity"), identity), path: reader.field("path").string(), channel: reader.field("channel").integer(0), volume: reader.field("volume").finite(), loop: reader.field("loop").boolean() };
 case "server-command": return ({ "kind": reader.field("kind").literal("server-command"), "client": reader.field("client").finite(), "text": reader.field("text").string() });
 case "console-command": return ({ "kind": reader.field("kind").literal("console-command"), "execution": reader.field("execution").choice<"append" | "now">("append", "now"), "text": reader.field("text").string() });
 case "drop-client": return ({ "kind": reader.field("kind").literal("drop-client"), "client": reader.field("client").finite(), "reason": reader.field("reason").string() });
 case "configstring": return ({ "kind": reader.field("kind").literal("configstring"), "index": reader.field("index").finite(), "value": reader.field("value").string() });
 case "entity-event": return ({ "kind": reader.field("kind").literal("entity-event"), "actor": readActorId(reader.field("actor"), identity), "state": readEntityState(reader.field("state"), identity), "origin": readEventVec3(reader.field("origin"), identity), "time": reader.field("time").finite() }); default: return reader.fail('unknown event variant'); } }
 function writeEventQ3SourceEvent(value: EventQ3SourceEvent): unknown { switch (value.kind) { case "print": case "log": return ({ "kind": value["kind"], "text": value["text"] });
+case "sound": return { ...value, actor: writeActorId(value.actor), origin: writeEventVec3(value.origin), velocity: writeEventVec3(value.velocity) };
 case "server-command": return ({ "kind": value["kind"], "client": value["client"], "text": value["text"] });
 case "console-command": return ({ "kind": value["kind"], "execution": value["execution"], "text": value["text"] });
 case "drop-client": return ({ "kind": value["kind"], "client": value["client"], "reason": value["reason"] });

@@ -59,6 +59,10 @@ export type NativeQ2GuestOptions = NativeQ2GuestCallbacks & (
 );
 
 export interface SimulationOptions {
+  readonly preparedQvmGrapple?: import("../qvm-grapple-selection.ts").PreparedQvmGrapple;
+  readonly preparedMods?: readonly import("../../../world/session/mods.ts").PreparedMod[];
+  readonly enabledMods?: readonly import("../../../contracts/mods.ts").ModSelection[];
+  readonly modTravel?: import("../../../contracts/mods.ts").ModTravelCheckpoint;
   readonly prepareRereleaseNavigation?: (simulation: SharedSimulation) => Promise<ApplicationBotNavigation>;
   readonly weaponBehaviorRealTime?: Q3GuestRuntimeOptions["common"]["realTime"];
   readonly weaponBehaviorClock?: Required<Pick<WindowsCapabilities, "nowMilliseconds" | "performanceCounter" | "performanceFrequency">>;
@@ -143,6 +147,8 @@ export interface PlayerUi {
 }
 
 export interface SimulationPresentation {
+  readonly replacesBody?: true;
+  readonly renderOwner?: "source-client";
   readonly flare?: SceneFlare;
   readonly actor: ActorId;
   readonly content: ContentId;
@@ -160,6 +166,11 @@ export interface SimulationPresentation {
   readonly origin: Vec3;
   readonly previousOrigin?: Vec3;
   readonly modelBeam?: { readonly segmentLength: number };
+  readonly shaderBeam?: { readonly path: string; readonly end: Vec3; readonly width: number };
+  readonly modelAttachments?: readonly { readonly path: string; readonly tag: string }[];
+  readonly modelAnchor?: import("../../../contracts/qvm-grapple.ts").QvmGrappleDefinition["presentation"]["viewAnchor"];
+  readonly q3GrappleCable?: { readonly owner: ActorId; readonly ownerOrigin: Vec3; readonly ownerAngles: Vec3; readonly viewHeight: number;
+    readonly offhand: boolean; readonly attached: boolean; readonly flight: string; readonly pull: string; readonly hold: string; readonly segmentLength: number };
   readonly angles: Vec3;
   readonly scale: number;
   readonly alpha?: number;

@@ -1,0 +1,71 @@
+import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
+import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue } from "../../contracts/qvm-mod-callbacks.ts";
+import { readDigest, readVector } from "../../persistence/shared.ts";
+import { namespaced, SaveReader } from "../../persistence/value.ts";
+import { normalizeResourcePath } from "../mounts/paths.ts";
+
+function value(reader: SaveReader): ModCallbackValue {
+  switch (reader.field("kind").choice("input", "float", "vector", "string")) {
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result") };
+    case "float": return { kind: "float", value: reader.field("value").number() };
+    case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
+    case "string": return { kind: "string", value: reader.field("value").string() };
+  }
+}
+function argument(reader: SaveReader): QvmModValue {
+  const kind = reader.field("kind").choice("int32", "float32", "vector", "string", "actor", "time", "address");
+  switch (kind) {
+    case "actor": return { kind, record: reader.field("record").string(), input: reader.field("input").choice("self", "other", "activator", "attacker", "inflictor") };
+    case "time": return { kind, input: reader.field("input").choice("time", "elapsed"), units: reader.field("units").choice("seconds", "milliseconds"), encoding: reader.field("encoding").choice("int32", "float32") };
+    case "address": return { kind, value: reader.field("value").integer(0) };
+    default: return { kind, value: value(reader.field("value")) };
+  }
+}
+function sourceCall(reader: SaveReader): QvmModSourceCall {
+  return { entry: reader.field("entry").integer(0), arguments: reader.field("arguments").list(argument),
+    globals: reader.field("globals").list(global => ({ address: global.field("address").integer(0), value: argument(global.field("value")) })),
+    returns: reader.field("returns").choice("int32", "float32", "void") };
+}
+function binding(reader: SaveReader): ModCallbackBinding {
+  const id = namespaced(reader.field("id")), operation = reader.field("operation").choice("damage", "inventory.give", "inventory.consume", "actor.think", "actor.touch", "actor.use", "actor.pain", "actor.die");
+  switch (reader.field("stage").choice("observe", "transform", "replace")) {
+    case "observe": return { id, operation, stage: "observe" };
+    case "transform":
+      if (operation === "damage") return { id, operation, stage: "transform", result: reader.field("result").choice("amount", "knockback") };
+      if (operation === "inventory.give" || operation === "inventory.consume") return { id, operation, stage: "transform", result: reader.field("result").literal("amount") };
+      return reader.fail("actor callbacks support observation or replacement");
+    case "replace":
+      if (operation === "damage" || operation === "inventory.give" || operation === "inventory.consume") return reader.fail("only actor callbacks support replacement");
+      return { id, operation, stage: "replace", result: reader.field("result").literal("boolean") };
+  }
+}
+function field(reader: SaveReader): QvmModActorField {
+  const offset = reader.field("offset").integer(0), binding = reader.field("binding").choice("health", "inventory", "origin", "velocity", "angles", "bounds-min", "bounds-max", "record", "constant", "constant-vector", "private");
+  switch (binding) {
+    case "health": return { offset, binding, encoding: reader.field("encoding").choice("int32", "float32") };
+    case "inventory": return { offset, binding, encoding: reader.field("encoding").choice("int32", "float32"), item: namespaced(reader.field("item")) };
+    case "record": return { offset, binding, record: reader.field("record").string() };
+    case "constant": return { offset, binding, encoding: reader.field("encoding").choice("int32", "float32"), value: reader.field("value").number() };
+    case "constant-vector": return { offset, binding, value: readVector(reader.field("value")) };
+    case "private": return { offset, binding, byteLength: reader.field("byteLength").integer(1) };
+    default: return { offset, binding };
+  }
+}
+export function readQvmModCallbacks(bytes: Uint8Array): QvmModCallbackDeclaration {
+  const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  return readQvmModDeclaration(new SaveReader(value));
+}
+
+export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclaration {
+  const program = reader.field("program"), actors = reader.field("sourceActors");
+  return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("qvm"),
+    program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
+    abiProfile: reader.field("abiProfile").choice("q3-modern", "q3-1.16n-base"),
+    entityRecord: reader.field("entityRecord").nullable(value => value.string()),
+    ...(actors.value === undefined ? {} : { sourceActors: { allocate: actors.field("allocate").integer(0),
+      release: { entry: actors.field("release").field("entry").integer(0), argument: actors.field("release").field("argument").integer(0) },
+      inuse: actors.field("inuse").integer(0), eventEntityType: actors.field("eventEntityType").integer(0), update: actors.field("update").nullable(sourceCall) } }),
+    actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(), address: record.field("address").integer(1),
+      stride: record.field("stride").integer(4), capacity: record.field("capacity").integer(1), fields: record.field("fields").list(field) })),
+    initialize: reader.field("initialize").list(sourceCall), callbacks: reader.field("callbacks").list(reader => ({ ...binding(reader), ...sourceCall(reader) })) };
+}

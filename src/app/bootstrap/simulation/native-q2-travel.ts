@@ -1,10 +1,12 @@
+import type { HandGrenadeTravel } from "./equipment-runtime.ts";
+import type { WeaponReference } from "./weapon-slot.ts";
 import type { ClientId } from "../../../contracts/identity.ts";
 import type { ClassicOriginalSaveFiles, Q2ClassicVisitedLevel } from "../../../persistence/q2-classic-guest.ts";
 import type { ClassicGuestWorld } from "./classic-guest-world.ts";
 
 /** Transferred only after the application commits to retiring the current source world. */
 interface NativeQ2TravelClients {
-  readonly clients: readonly { readonly client: ClientId; readonly phase: "connected" | "active" }[];
+  readonly clients: readonly { readonly client: ClientId; readonly phase: "connected" | "active"; readonly handGrenades?: HandGrenadeTravel; readonly weaponSlot?: WeaponReference }[];
   readonly spawnPoint: string;
 }
 

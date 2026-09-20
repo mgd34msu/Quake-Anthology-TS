@@ -20,11 +20,9 @@ export interface PreparedRereleaseGuest { readonly edition: "rerelease"; readonl
 export async function prepareRereleaseGuest(execution: NativeExecution, mounts: MountedContent): Promise<PreparedRereleaseGuest> {
     if (execution.role !== 'server-game' || execution.api.kind !== 'q2-rerelease-game' || execution.profile.kind !== 'windows-x86-64')
         throw new Error('Rerelease guest requires the native Windows x64 game API 2023');
-    const artifact = await mounts.open(execution.artifact.requestedPath);
-    if (artifact === null || artifact.reference.id !== execution.artifact.id || artifact.reference.digest !== execution.artifact.digest)
-        throw new Error('Selected native artifact no longer matches its resolved identity');
-    if (parsePe(artifact.bytes).abi.kind !== execution.profile.kind) throw new Error('Native artifact ABI differs from the selected profile');
-    return { edition: "rerelease", execution, bytes: artifact.bytes };
+    const bytes = await mounts.read(execution.artifact);
+    if (parsePe(bytes).abi.kind !== execution.profile.kind) throw new Error('Native artifact ABI differs from the selected profile');
+    return { edition: "rerelease", execution, bytes };
 }
 export interface RereleaseGuestSourceOptions extends Omit<RereleaseQ2HostOptions, 'runner' | 'getGameApi' | 'getCgameApi' | 'services'> {
     services(memory: MappedGuestMemory): RereleaseCoreServices;
@@ -33,6 +31,7 @@ export interface RereleaseGuestSourceOptions extends Omit<RereleaseQ2HostOptions
 /** Owns only the guest address space and ABI lifetime; supplied engine authorities own the world. */
 export class RereleaseGuestSource {
     get imageBase(): GuestAddress { return this.image.base; }
+    entry(name: string): GuestAddress { return resolvePeExport(this.image, { kind: 'name', name, version: null }, () => null).address; }
     private closed = false;
     private constructor(readonly host: RereleaseQ2GuestHost, readonly runtime: WindowsGuestRuntime,
         readonly memory: SparseGuestMemory, private readonly image: PeImage, private readonly context: GuestCallContext, private readonly budget: number) {}

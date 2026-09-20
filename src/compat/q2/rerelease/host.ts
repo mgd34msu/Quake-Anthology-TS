@@ -62,6 +62,7 @@ export interface RereleaseSpatialServices {
   linkMetadata(actor: OwnedActor, view: RawEntityView): { readonly area: number; readonly area2: number; readonly networkSolid: number };
 }
 export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "invokeImport" | "actorAtSlot"> {
+  readonly importBoundary?: (name: string, arguments_: readonly GuestCallValue[], invoke: () => GuestCallResult) => GuestCallResult;
   readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "callbacks" | "combat" | "inventory" | "trace" | "pointContents" | "setAreaPortal" | "setSolid" | "inlineModelBounds" | "worldActor">;
   readonly services: RereleaseCoreServices;
   readonly spatial: RereleaseSpatialServices;
@@ -212,16 +213,16 @@ export class RereleaseQ2GuestHost {
     await this.callLoading("PrepFrame", [], nextFrame);
     this.foreignActors?.synchronize(); await this.callLoading("RunFrame", [guestBool(mainLoop)], nextFrame);
   }
-  async readSaveLoading(kind: "game" | "level", saved: RereleaseSourceSave, nextFrame: () => Promise<void>): Promise<void> {
+  async readSaveLoading(kind: "game" | "level", saved: RereleaseSourceSave, nextFrame: () => Promise<void>, domain: "checkpoint" | "current" = "current"): Promise<void> {
     const bytes = saved.native;
     if (bytes.includes(0)) throw new Error("Q2 JSON save contains an embedded terminator");
     if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0)) throw new Error("Native save requires its foreign actor binding");
     const memory = this.module.memory, address = allocateNativeMemory(memory, bytes.length + 1, "Q2 source save input");
     let restoring = false;
     try {
-      memory.write(address, bytes); this.foreignActors?.beginRestore(saved.projections); restoring = true;
+      memory.write(address, bytes); this.foreignActors?.beginRestore(saved.projections, domain); restoring = true;
       await this.callLoading(kind === "game" ? "ReadGameJson" : "ReadLevelJson", [guestPointer(address)], nextFrame);
-      this.foreignActors?.deferred.restore(saved.deferredDamage);
+      this.foreignActors?.deferred.restore(saved.deferredDamage, domain);
     } finally { if (restoring) this.foreignActors?.endRestore(); memory.unmap(address, nativeAllocationBytes(bytes.length + 1)); }
   }
   shutdown(): void {
@@ -275,18 +276,22 @@ export class RereleaseQ2GuestHost {
         projections: kind === "level" ? this.foreignActors?.saveProjections() ?? [] : [] };
     } finally { if (output !== null) this.core.free(output); memory.unmap(size, 8); }
   }
-  readSave(kind: "game" | "level", saved: RereleaseSourceSave): void {
+  readSave(kind: "game" | "level", saved: RereleaseSourceSave, domain: "checkpoint" | "current" = "current"): void {
     const bytes = saved.native;
     if (bytes.includes(0)) throw new Error("Q2 JSON save contains an embedded terminator");
     if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0)) throw new Error("Native save requires its foreign actor binding");
     const memory = this.module.memory, address = allocateNativeMemory(memory, bytes.length + 1, "Q2 source save input");
     let restoring = false;
     try {
-      memory.write(address, bytes); this.foreignActors?.beginRestore(saved.projections); restoring = true;
-      this.core.refreshCvars(); this.module.callGame(kind === "game" ? "ReadGameJson" : "ReadLevelJson", [guestPointer(address)]); this.reconcile(); this.foreignActors?.deferred.restore(saved.deferredDamage);
+      memory.write(address, bytes); this.foreignActors?.beginRestore(saved.projections, domain); restoring = true;
+      this.core.refreshCvars(); this.module.callGame(kind === "game" ? "ReadGameJson" : "ReadLevelJson", [guestPointer(address)]); this.reconcile(); this.foreignActors?.deferred.restore(saved.deferredDamage, domain);
     } finally { if (restoring) this.foreignActors?.endRestore(); memory.unmap(address, nativeAllocationBytes(bytes.length + 1)); }
   }
   #import(call: RereleaseImportCall): GuestCallResult {
+    return this.options.importBoundary === undefined ? this.#dispatchImport(call)
+      : this.options.importBoundary(call.name, call.arguments, () => this.#dispatchImport(call));
+  }
+  #dispatchImport(call: RereleaseImportCall): GuestCallResult {
     const intercepted = this.options.interceptImport?.(call, this);
     if (intercepted !== undefined) return intercepted;
     if (this.options.debugDrawing === "headless" && call.api === "game") {

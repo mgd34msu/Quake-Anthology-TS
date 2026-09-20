@@ -1,7 +1,8 @@
 import { id1ProgramBinding, type Id1ProgramBinding } from "./id1-program.ts";
+import { isDeepStrictEqual } from "node:util";
 import type { ActorId } from "../../../contracts/identity.ts";
-import type { ArmorState, DamageRequest } from "../../../contracts/gameplay.ts";
-import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcMachine } from "../../../compat/qc/machine.ts";
+import type { ArmorState, DamageOutcome, DamageRequest } from "../../../contracts/gameplay.ts";
+import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcFunctionExecution, QcMachine } from "../../../compat/qc/machine.ts";
 import { QcWords } from "../../../compat/qc/memory.ts";
 import { QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
@@ -15,10 +16,17 @@ export interface Id1DamageCall {
   readonly amount: number;
 }
 
+export interface Id1DamageProjection {
+  actor(reference: number): ActorId;
+  reference(actor: ActorId | null): number;
+  reaction?(request: DamageRequest, result: SourceDamageResult, execute: QcFunctionExecution): undefined;
+  completed?(request: DamageRequest, outcome: DamageOutcome): undefined;
+}
+
 /** Observes validated source damage operations inside the shared authority. */
 export class Id1DamageBinding {
   readonly functionBoundary: QcFunctionBoundary;
-  private readonly active: { readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; result: SourceDamageResult; reactionDepth: number; healthWritten: boolean }[] = [];
+  private readonly active: { readonly request: DamageRequest; readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; result: SourceDamageResult; reactionDepth: number; healthWritten: boolean }[] = [];
   private readonly binding: Id1ProgramBinding;
   private readonly health: number;
   private readonly velocity: number;
@@ -29,7 +37,7 @@ export class Id1DamageBinding {
   private readonly die: number;
   constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,
     authority: GameplayAuthority, private readonly machine: () => QcMachine,
-    resolveRequest: (call: Id1DamageCall) => DamageRequest) {
+    resolveRequest: (call: Id1DamageCall) => DamageRequest, private readonly projection?: Id1DamageProjection) {
     const { program } = source;
     this.binding = id1ProgramBinding(program);
     const layout = this.binding.damage, damage = program.functionNamed("T_Damage");
@@ -45,26 +53,49 @@ export class Id1DamageBinding {
       return value.offset;
     };
     this.health = field("health"); this.velocity = field("velocity"); this.armorValue = field("armorvalue"); this.armorType = field("armortype"); this.items = field(this.binding.armorField); this.pain = field("th_pain"); this.die = field("th_die");
-    this.functionBoundary = { functions: new Set(layout.kind === "sites" ? [layout.index]
+    this.functionBoundary = { functions: new Set(layout.kind === "sites" && projection?.reaction === undefined ? [layout.index]
       : program.functions.filter(fn => fn.index > 0 && fn.firstStatement > 0 && !fn.namedBuiltin).map(fn => fn.index)), run: (call, execute) => {
       if (call.functionIndex !== layout.index) return this.observeNativeFunction(call, execute);
       const vm = this.vm(), reference = vm.argInt(0);
       const actor = (reference: number): ActorId => {
+        if (projection !== undefined) return projection.actor(reference);
         const value = source.slots.at(source.entities.slot(reference));
         if (value === null || !source.actors.isLive(value.id)) throw new QcProgramError("id1 damage references a free source actor");
         return value.id;
       };
       const captured = { call, target: actor(reference), inflictor: actor(vm.argInt(1)), attacker: actor(vm.argInt(2)), amount: vm.argFloat(3) };
       const request = resolveRequest(captured);
-      if (!request.target.equals(captured.target) || request.amount !== captured.amount || request.attack.attacker?.equals(captured.attacker) !== true
-        || request.attack.inflictor?.equals(captured.inflictor) !== true) throw new QcProgramError("id1 damage provenance changed source arguments");
-      authority.runSourceDamage(request, observer => {
-        const frame: (typeof this.active)[number] = { targetReference: reference, observer, movementProvider: request.attack.movementProvider, result: { appliedDamage: 0, reaction: "none" }, reactionDepth: 0, healthWritten: false };
+      const sameReference = (actor: ActorId | null, captured: ActorId, reference: number): boolean => actor === null ? reference === 0 : actor.equals(captured);
+      if (!request.target.equals(captured.target) || request.amount !== captured.amount || !sameReference(request.attack.attacker, captured.attacker, vm.argInt(2))
+        || !sameReference(request.attack.inflictor, captured.inflictor, vm.argInt(1))) throw new QcProgramError("id1 damage provenance changed source arguments");
+      let executed = false;
+      const outcome = authority.runSourceDamage(request, (observer, effective) => {
+        if (authority.damageOperation.active && (!isDeepStrictEqual(
+          { knockback: request.knockback, direction: request.direction, point: request.point, normal: request.normal, delivery: request.delivery,
+            attack: { ...request.attack, attacker: null, inflictor: null } },
+          { knockback: effective.knockback, direction: effective.direction, point: effective.point, normal: effective.normal, delivery: effective.delivery,
+            attack: { ...effective.attack, attacker: null, inflictor: null } })))
+          throw new QcProgramError("QuakeC T_Damage accepts actor and amount changes; independent damage metadata requires a replacement");
+        if (!Number.isFinite(Math.fround(effective.amount))) throw new QcProgramError("QuakeC damage amount exceeds binary32 range");
+        const referenceFor = (actor: ActorId | null): number => {
+          if (projection !== undefined) return projection.reference(actor);
+          if (actor === null) return source.entities.reference(0);
+          const slot = source.actors.sourceOf(actor);
+          if (slot === null || slot.provider !== source.slots.options.provider) throw new QcProgramError("QuakeC damage actor has no source projection");
+          return source.entities.reference(slot.slot);
+        };
+        const targetReference = referenceFor(effective.target), inflictorReference = referenceFor(effective.attack.inflictor), attackerReference = referenceFor(effective.attack.attacker);
+        const frame: (typeof this.active)[number] = { request: effective, targetReference, observer, movementProvider: effective.attack.movementProvider, result: { appliedDamage: 0, reaction: "none" }, reactionDepth: 0, healthWritten: false };
         this.active.push(frame);
         try {
-          execute();
+          executed = true;
+          execute(machine => {
+            machine.globals.setInt(4, targetReference); machine.globals.setInt(7, inflictorReference); machine.globals.setInt(10, attackerReference);
+            machine.globals.setFloat(13, effective.amount);
+            return undefined;
+          });
           if (layout.kind === "calls" && frame.healthWritten && frame.result.reaction === "none"
-            && source.actors.isLive(captured.target) && source.entities.fromReference(reference).float(this.health) <= 0) {
+            && source.actors.isLive(effective.target) && source.entities.fromReference(targetReference).float(this.health) <= 0) {
             frame.result = { ...frame.result, reaction: "death" };
             observer.beforeReaction(frame.result);
           }
@@ -72,12 +103,20 @@ export class Id1DamageBinding {
         }
         finally { this.active.pop(); }
       });
+      projection?.completed?.(request, outcome);
+      if (!executed) execute.skip([0, 0, 0]);
       return undefined;
     } };
   }
-  private observeNativeFunction(call: QcCallSite, execute: () => undefined): undefined {
+  private observeNativeFunction(call: QcCallSite, execute: QcFunctionExecution): undefined {
     const frame = this.active.at(-1), layout = this.binding.damage;
-    if (layout.kind !== "calls" || frame === undefined || frame.reactionDepth > 0 || frame.result.reaction !== "none") return execute();
+    if (frame === undefined || frame.reactionDepth > 0) return execute();
+    if (layout.kind === "sites") {
+      if (frame.result.reaction === "none" || call.caller !== layout.index || call.statement !== (frame.result.reaction === "death" ? layout.death[0] : layout.pain[0])) return execute();
+      frame.reactionDepth++;
+      try { return this.projection?.reaction === undefined ? execute() : this.projection.reaction(frame.request, frame.result, execute); } finally { frame.reactionDepth--; }
+    }
+    if (frame.result.reaction !== "none") return execute();
     const vm = this.vm(), target = this.source.entities.fromReference(frame.targetReference);
     const reaction = layout.reactions.get(call.statement);
     if (reaction === undefined) return execute();
@@ -88,7 +127,7 @@ export class Id1DamageBinding {
     frame.result = { ...frame.result, reaction };
     frame.observer.beforeReaction(frame.result);
     frame.reactionDepth++;
-    try { return execute(); } finally { frame.reactionDepth--; }
+    try { return this.projection?.reaction === undefined ? execute() : this.projection.reaction(frame.request, frame.result, execute); } finally { frame.reactionDepth--; }
   }
   private vm(): QcMachine {
     const vm = this.machine();

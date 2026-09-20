@@ -59,9 +59,15 @@ function mountPath(mount: ContentMount): string { return mount.kind === "archive
 
 export async function resolveLaunchResource(catalog: InstalledCatalog, mounted: MountedContent,
   request: ResourceRequest, kind: "map" | "artifact"): Promise<ResolvedResourceReference> {
-  const resolved = await mounted.resolve(request.path);
-  if (resolved === null) throw new Error(`Required resource is missing: ${request.content}/${request.path}`);
   const allowed = await catalog.mountsFor(request.content);
+  const reader = kind === "artifact" ? mounted.borrowOrderedReader({
+    id: createMountPlanId("artifact", Buffer.from(request.content).toString("hex")),
+    defaultOrder: await orderForContent(catalog, mounted.plan, request.content), prefixOrders: [],
+  }) : mounted;
+  const opened = await reader.open(request.path, mount => kind === "map"
+    || allowed.some(candidate => mountPath(candidate) === mountPath(mount)));
+  const resolved = opened?.reference;
+  if (resolved === undefined) throw new Error(`Required resource is missing: ${request.content}/${request.path}`);
   if (!allowed.some(mount => mountPath(mount) === mountPath(resolved.provenance.mount))) {
     throw new Error(`Required ${kind} is absent from its selected content and base: ${request.content}/${request.path}`);
   }
@@ -96,16 +102,19 @@ export async function prepareLaunchMountPlan(options: ResolveLaunchOptions): Pro
   const basePlan = await options.catalog.createMountPlan({ id: createMountPlanId("launch", Buffer.from(selected.id).toString("hex")),
     assets: selected.presentation.assets, geometry: selected.map.geometry.content, rules: selected.combat.content,
     explicitPresentation: options.choice.presentation.kind === "selected", additional: required });
-  const artifacts = new Map<string, ContentId>();
+  const artifacts = new Map<string, Set<ContentId>>();
   for (const module of selected.execution) {
     if (module.kind === "typescript") continue;
     const path = normalizeResourcePath(module.artifact.path);
-    const previous = artifacts.get(path);
-    if (previous !== undefined && previous !== module.artifact.content) throw new Error(`Conflicting artifact sources for ${path}: ${previous} and ${module.artifact.content}`);
-    artifacts.set(path, module.artifact.content);
+    const sources = artifacts.get(path) ?? new Set<ContentId>();
+    sources.add(module.artifact.content);
+    artifacts.set(path, sources);
   }
   const artifactOrders: ResolvedMountPlan["prefixOrders"][number][] = [];
-  for (const [prefix, content] of artifacts) artifactOrders.push({ prefix, mounts: await orderForContent(options.catalog, basePlan, content) });
+  for (const [prefix, sources] of artifacts) {
+    if (sources.size !== 1) continue;
+    for (const content of sources) artifactOrders.push({ prefix, mounts: await orderForContent(options.catalog, basePlan, content) });
+  }
   const plan: ResolvedMountPlan = { ...basePlan, prefixOrders: [...artifactOrders, ...basePlan.prefixOrders] };
   return { selected, plan };
 }
@@ -160,7 +169,7 @@ export async function resolveLaunch(options: ResolveLaunchOptions): Promise<Exec
       case "native": execution.push({ ...module, artifact: await resolveResource(module.artifact, "artifact") }); break;
     }
   }
-  const selectedSourceIds = new Set<string>([...Object.values(EQUIPMENT_PROVIDERS), ...Object.values(Q1_WEAPON_PROVIDERS), ...Object.values(Q1_HIPNOTIC_WEAPON_PROVIDERS), ...Object.values(Q2_WEAPON_PROVIDERS), ...monsterSources.map(source => source.provider)]);
+  const selectedSourceIds = new Set<string>([...Object.values(EQUIPMENT_PROVIDERS), ...equipmentProviders(selected.equipment).map(source => source.provider), ...Object.values(Q1_WEAPON_PROVIDERS), ...Object.values(Q1_HIPNOTIC_WEAPON_PROVIDERS), ...Object.values(Q2_WEAPON_PROVIDERS), ...monsterSources.map(source => source.provider)]);
   const monsterProfiles = selectedMonsterTiming(selected.enemies);
   const weaponProfiles = selectedWeaponTiming(selected.map.entities, selected.weapons, options.catalog);
   const timing = [...selected.timing.filter(entry => !selectedSourceIds.has(entry.provider)), ...equipmentTiming(selected.equipment), ...monsterProfiles];

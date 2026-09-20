@@ -117,6 +117,7 @@ export interface ProviderCheckpoint {
 }
 
 export interface SaveImage {
+  readonly mods?: import("./mods.ts").ModSessionCheckpoint;
   readonly schemaVersion: 2;
   readonly recipe: ExecutableRecipe;
   readonly frame: FrameContext;

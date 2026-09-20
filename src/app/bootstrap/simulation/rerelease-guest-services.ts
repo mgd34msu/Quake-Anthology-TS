@@ -17,6 +17,11 @@ import { SizeBuf, SZ_Init, SZ_Clear, MSG_WriteByte, MSG_WriteShort, MSG_WriteFlo
 import { traceActorBody } from "../../../world/collision/body.ts";
 import type { ClassicGuestAudience } from "./classic-guest-services.ts";
 import type { RereleaseGuestMapServices, RereleaseGuestMessage, RereleaseGuestServicesOptions, RereleaseGuestServicesPort } from "./rerelease-guest-services-contract.ts";
+import { RereleaseCombatBindings } from "../../../compat/q2/rerelease/combat-binding.ts";
+import { retailRereleaseClientProfile } from "../../../compat/q2/rerelease/client-profile.ts";
+import { RereleaseSourceClient } from "../../../compat/q2/rerelease/source-state.ts";
+import { rereleaseInventoryItems } from "../../../compat/q2/rerelease/semantics.ts";
+import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 const resourceRanges = { model: { base: 62, count: 8192 }, sound: { base: 8254, count: 2048 }, image: { base: 10302, count: 512 } };
@@ -25,6 +30,11 @@ function messageBuffer(): SizeBuf { const buffer = new SizeBuf(); SZ_Init(buffer
 
 /** Public API2023 imports borrow the shared engine while source RunFrame owns gameplay. */
 export class RereleaseGuestServices implements RereleaseGuestServicesPort {
+  #writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
+  #readPlayerVelocity: ((actor: ActorId) => Vec3 | undefined) | null = null;
+  setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined, read: (actor: ActorId) => Vec3 | undefined): void {
+    this.#writePlayerVelocity = write; this.#readPlayerVelocity = read;
+  }
   readonly hostOptions: RereleaseGuestServicesPort["hostOptions"];
   readonly #strings = new Map<number, string>();
   readonly #messages: RereleaseGuestMessage[] = [];
@@ -33,6 +43,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   #options: RereleaseGuestServicesOptions;
   #memory: MappedGuestMemory | null = null;
   #host: RereleaseQ2GuestHost | null = null;
+  #combat: RereleaseCombatBindings | null = null;
   #loading = true;
   #frame = 0;
   get options(): RereleaseGuestServicesOptions { return this.#options; }
@@ -55,6 +66,10 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     };
     const semantics: RereleaseSemanticBindings = options.semanticBindings ?? { bind: (record: RawEntityView, actor: OwnedActor) => this.bindEntity(record, actor), foreignAddress: (actor: ActorId): GuestAddress => { throw new Error(`API2023 module requires a semantic projection extension for foreign actor ${actor.slot}`); } };
     this.hostOptions = { engine, frameMilliseconds: options.frameMilliseconds,
+      ...(options.foreignDamage === undefined ? {} : { foreignDamage: { provenance: (attacker, inflictor, target) => {
+        const binding = this.options.foreignDamage; if (binding === undefined) throw new Error("Native damage provenance is unavailable");
+        return binding.provenance(attacker, inflictor, target);
+      } } }),
       semantics: { ...semantics, bound: (record, actor) => { semantics.bound?.(record, actor); this.options.admit(record, actor); } },
       spatial: {
         areasConnected: (first, second) => this.options.scene.areasConnected(first, second),
@@ -79,7 +94,20 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
       addCommand: text => this.options.addCommand(text), extension: () => null, invoke: call => this.invoke(call),
     };
   }
-  bindHost(host: RereleaseQ2GuestHost): void { if (this.#host !== null || host.module.memory !== this.memory) throw new Error("API2023 host/memory binding mismatch"); this.#host = host; }
+  bindHost(host: RereleaseQ2GuestHost): void { if (this.#host !== null || host.module.memory !== this.memory) throw new Error("API2023 host/memory binding mismatch"); this.#host = host; this.#combat = new RereleaseCombatBindings(host); }
+  notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.module.entities().atSlot(slot)) ?? null; }
+  equipmentInventory(slot: number): InventoryStateBinding | null {
+    const profile = retailRereleaseClientProfile, host = this.host;
+    if (profile.authority.kind !== "artifact" || host.module.memory.module.digest !== profile.authority.digest) return null;
+    const items = rereleaseInventoryItems(host.module, text => host.core.string(text)).filter(item => item.item === "q2:ammo_grenades");
+    if (items.length !== 1) throw new Error("Native grenade inventory item is missing");
+    const current = () => {
+      const address = this.view(slot).pointer("client");
+      if (address === null) throw new Error("Native grenade inventory requires a source client");
+      return new RereleaseSourceClient(address, host.module, profile).inventory(items);
+    };
+    return { read: () => current().read(), write: entry => current().write(entry) };
+  }
   validateMap(binding: RereleaseGuestMapServices): void { if (binding.scene.geometry.models.length >= 8191) throw new RangeError("API2023 map exceeds model capacity"); }
   private seedMap(): void { this.#strings.set(63, this.options.mapPath); for (let i = 1; i < this.options.scene.geometry.models.length; i++) this.#strings.set(63 + i + (i >= 254 ? 1 : 0), `*${i}`); }
   rebindWorld(binding: RereleaseGuestMapServices): void { this.validateMap(binding); this.#options = { ...this.#options, ...binding }; this.#loading = true; this.#frame = 0; this.#strings.clear(); this.#messages.length = 0; this.#links.clear(); SZ_Clear(this.#buffer); this.seedMap(); }
@@ -99,11 +127,22 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   resourceIndex(kind: "model" | "sound" | "image", name: string): number { if (name === "") return 0; const range = resourceRanges[kind]; for (let index = 1; index < range.count; index++) { if (kind === "model" && index === 255) continue; const current = this.resource(kind, index); if (current === name) return index; if (current === "") { this.setConfigstring(range.base + index, name); return index; } } throw new RangeError(`API2023 ${kind} index overflow`); }
   private inlineModel(index: number): number { const path = this.resource("model", index); if (index === 1 && path === this.options.mapPath) return 0; const model = Number(path.slice(1)); if (!path.startsWith("*") || !Number.isInteger(model) || model < 0 || model >= this.options.scene.geometry.models.length) throw new Error(`Invalid API2023 inline model ${path}`); return model; }
   private view(slot: number): RereleasePublicEdict { return new RereleasePublicEdict(this.memory, this.host.module.entities().atSlot(slot)); }
-  private body(view: RereleasePublicEdict): BodyState { return { origin: view.vector("s.origin"), angles: view.vector("s.angles"), velocity: view.vector("sv.velocity"), bounds: { min: view.vector("mins"), max: view.vector("maxs") }, ground: null }; }
+  private body(view: RereleasePublicEdict): BodyState {
+    const actor = view.record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
+    const velocity = pending ?? (view.record.slot > 0 && view.record.slot <= this.options.maxClients && view.pointer("client") !== null ? view.playerState().movement.velocity : view.vector("sv.velocity"));
+    return { origin: view.vector("s.origin"), angles: view.vector("s.angles"), velocity, bounds: { min: view.vector("mins"), max: view.vector("maxs") }, ground: null };
+  }
   private bindEntity(record: RawEntityView, actor: OwnedActor): RereleaseActorBindings {
     const view = new RereleasePublicEdict(this.memory, record); this.#links.delete(actor.id);
-    return { body: { read: () => this.body(view), write: state => { const velocity = view.vector("sv.velocity"); if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) throw new Error("API2023 velocity writes require a source semantic binding"); view.setVector("s.origin", state.origin); view.setVector("s.angles", state.angles); view.setVector("mins", state.bounds.min); view.setVector("maxs", state.bounds.max); return undefined; } },
-      combat: null, powerArmorCells: null, inventory: null, callbacks: { think: null, touch: null, use: null, pain: null, die: null } };
+    return { body: { read: () => this.body(view), write: state => {
+      const velocity = this.body(view).velocity;
+      if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
+        if (record.slot < 1 || record.slot > this.options.maxClients || view.pointer("client") === null || this.#writePlayerVelocity === null)
+          throw new Error("API2023 velocity writes require a source semantic binding");
+        this.#writePlayerVelocity(actor, state.velocity);
+      }
+      view.setVector("s.origin", state.origin); view.setVector("s.angles", state.angles); view.setVector("mins", state.bounds.min); view.setVector("maxs", state.bounds.max); return undefined; } },
+      combat: this.#combat?.bind(record) ?? null, powerArmorCells: null, inventory: null, callbacks: { think: null, touch: null, use: null, pain: null, die: null } };
   }
   private worldLink(bounds: Bounds): LinkMetadata {
     const scene = this.options.scene, query = scene.boxLeaves(bounds, 128), clusters: number[] = []; let first = 0, second = 0;
@@ -129,7 +168,9 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     return { actor: actor?.id ?? null, active: view.byte("inuse") !== 0, serverFlags: view.uint("svflags"), areas: [view.int("areanum"), view.int("areanum2")], clusters: link === undefined ? [] : link.clusters, firstCluster: link?.firstCluster ?? 0, headnode: link?.headnode ?? 0, ownerSlot: owner === null ? null : this.host.module.entities().fromPointer(owner).slot };
   }
   modelAppearance(slot: number): ReturnType<RereleaseGuestServicesPort["modelAppearance"]> {
-    const state = this.entityState(slot), value = this.#strings.get(11582 + (state.skin & 255)) ?? "player\\male/grunt", appearance = value.slice(value.indexOf("\\") + 1), slash = appearance.indexOf("/");
+    const state = this.entityState(slot);
+    if (state.modelIndexes.every(index => index !== 255)) return { path: this.resource("model", state.modelIndexes[0]), skin: state.skin, skinPath: null, attachedModels: state.modelIndexes.slice(1).map(index => this.resource("model", index)) };
+    const value = this.#strings.get(11582 + (state.skin & 255)) ?? "player\\male/grunt", appearance = value.slice(value.indexOf("\\") + 1), slash = appearance.indexOf("/");
     const model = slash < 0 ? "male" : appearance.slice(0, slash), skin = slash < 0 ? "grunt" : appearance.slice(slash + 1), weapons = ["weapon.md2"];
     for (let index = 1; index < 8192; index++) { const name = this.resource("model", index); if (name.startsWith("#")) weapons.push(name.slice(1)); }
     const weapon = weapons[(state.skin >>> 8) & 255] ?? "weapon.md2";
@@ -145,7 +186,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
       if (state.event !== 0) this.options.engine.emit({ kind: "entity-event", actor: actor.id, event: state.event });
     }
   }
-  private acceptsClient(slot: number): boolean { return slot >= 1 && slot <= this.options.maxClients && slot < this.host.module.entities().count && this.host.isClientReserved(slot); }
+  private acceptsClient(slot: number): boolean { if (this.options.acceptsClient !== undefined) return this.options.acceptsClient(slot); return slot >= 1 && slot <= this.options.maxClients && slot < this.host.module.entities().count && this.host.isClientReserved(slot); }
   private enqueue(audience: ClassicGuestAudience, reliable: boolean, bytes: Uint8Array, dupeKey = 0): void { this.#messages.push({ sourceDialect: "q2-multicast-float", audience, reliable, bytes, dupeKey }); }
   drainMessages(): readonly RereleaseGuestMessage[] { return this.#messages.splice(0); }
   private print(slot: number | null, level: number, text: string, broadcast: boolean, center = false): void {

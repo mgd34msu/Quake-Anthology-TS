@@ -19,15 +19,16 @@ export interface RereleaseGuestServicesOptions extends ClassicGuestServicesOptio
   readonly worldText: (event: RereleaseWorldTextEvent) => void;
   readonly navigation: RereleaseNavigationServices;
   readonly semanticBindings?: RereleaseSemanticBindings;
+  readonly foreignDamage?: RereleaseQ2HostOptions["foreignDamage"];
 }
-export type RereleaseGuestMapServices = Omit<ClassicGuestMapServices, "engine"> & Pick<RereleaseGuestServicesOptions, "engine" | "localize" | "debugShapes" | "worldText" | "navigation">;
+export type RereleaseGuestMapServices = Omit<ClassicGuestMapServices, "engine"> & Pick<RereleaseGuestServicesOptions, "engine" | "localize" | "debugShapes" | "worldText" | "navigation" | "foreignDamage">;
 export interface RereleaseGuestMessage extends ClassicGuestMessage {
   readonly sourceDialect: "q2-multicast-float";
   readonly dupeKey: number;
 }
 export interface RereleaseGuestServicesPort {
   readonly options: RereleaseGuestServicesOptions;
-  readonly hostOptions: Pick<RereleaseQ2HostOptions, "engine" | "spatial" | "semantics" | "messages" | "debugDrawing" | "debugShapes" | "worldText" | "sound" | "frameMilliseconds">;
+  readonly hostOptions: Pick<RereleaseQ2HostOptions, "engine" | "spatial" | "semantics" | "messages" | "debugDrawing" | "debugShapes" | "worldText" | "sound" | "frameMilliseconds" | "foreignDamage">;
   bindMemory(memory: MappedGuestMemory): RereleaseCoreServices;
   bindHost(host: RereleaseQ2GuestHost): void;
   completeSpawn(): void;
