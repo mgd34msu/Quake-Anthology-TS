@@ -2,7 +2,7 @@
 import type { GuestAddress, ModuleIdentity } from "../../contracts/execution.ts";
 import type {
   GuestAccess, GuestAllocationOptions, GuestMapOptions, GuestMapping, GuestMemorySnapshot,
-  GuestPermissions, GuestPointerBytes, MappedGuestMemory,
+  GuestPermissions, GuestPointerBytes, GuestWrittenRange, MappedGuestMemory,
 } from "./contracts.ts";
 
 export type GuestMemoryFaultReason = "foreign-address-space" | "address-overflow" | "null-address"
@@ -58,7 +58,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #mappingGeneration = 0;
   readonly #allocationHints = new Map<bigint, { readonly base: bigint; readonly byteLength: number }>();
   readonly #recentMappings = new Map<GuestAccess | null, { readonly mapping: Mapping; readonly end: bigint }>();
-  readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: () => void }>();
+  readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: (ranges: readonly GuestWrittenRange[]) => void }>();
 
   constructor(options: SparseGuestMemoryOptions) {
     this.module = options.module;
@@ -221,20 +221,24 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const errors: unknown[] = [];
     for (const observer of [...this.#writeObservers]) {
       if (!this.#writeObservers.has(observer)) continue;
-      const overlaps = observer.chunks.some(watched => chunks.some(written => {
-        const a = watched.mapping.bytes, b = written.mapping.bytes;
-        const start = a.byteOffset + watched.offset, end = start + watched.byteLength;
-        const other = b.byteOffset + written.offset;
-        return a.buffer === b.buffer && start < other + written.byteLength && other < end;
-      }));
-      if (overlaps) { try { observer.notify(); } catch (error) { errors.push(error); } }
+      const ranges: GuestWrittenRange[] = []; let displacement = 0;
+      for (const watched of observer.chunks) {
+        for (const written of chunks) {
+          const a = watched.mapping.bytes, b = written.mapping.bytes;
+          const start = a.byteOffset + watched.offset, other = b.byteOffset + written.offset;
+          const first = Math.max(start, other), last = Math.min(start + watched.byteLength, other + written.byteLength);
+          if (a.buffer === b.buffer && first < last) ranges.push({ byteOffset: displacement + first - start, byteLength: last - first });
+        }
+        displacement += watched.byteLength;
+      }
+      if (ranges.length > 0) { try { observer.notify(ranges); } catch (error) { errors.push(error); } }
     }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, "Guest write observers failed");
     return undefined;
   }
 
-  observeWrites(address: GuestAddress, byteLength: number, afterWrite: () => void): () => void {
+  observeWrites(address: GuestAddress, byteLength: number, afterWrite: (ranges: readonly GuestWrittenRange[]) => void): () => void {
     const observer = { chunks: this.#chunks(address, byteLength, "read"), notify: afterWrite };
     this.#writeObservers.add(observer);
     return () => { this.#writeObservers.delete(observer); };

@@ -5,6 +5,8 @@ import type {
 } from "../../contracts/execution.ts";
 import type { CallbackId } from "../../contracts/identity.ts";
 
+/** Committed bytes relative to the observer's requested start, including alias writes. */
+export interface GuestWrittenRange { readonly byteOffset: number; readonly byteLength: number; }
 export type GuestPointerBytes = 4 | 8;
 export type GuestAccess = "read" | "write" | "execute";
 export type GuestPermissions = "none" | "read" | "read-write" | "read-execute" | "read-write-execute" | "execute";
@@ -65,7 +67,7 @@ export interface MappedGuestMemory extends GuestMemory {
   protect(address: GuestAddress, byteLength: number, permissions: GuestPermissions): undefined;
   mappings(): readonly GuestMapping[];
   /** Observe committed stores to this backing range, including writes through aliases. */
-  observeWrites(address: GuestAddress, byteLength: number, afterWrite: () => void): () => void;
+  observeWrites(address: GuestAddress, byteLength: number, afterWrite: (ranges: readonly GuestWrittenRange[]) => void): () => void;
   check(address: GuestAddress, byteLength: number, access: GuestAccess): undefined;
   fetch(address: GuestAddress, byteLength: number): Uint8Array;
   /** Execute one live byte at this memory owner's processor instruction pointer. */

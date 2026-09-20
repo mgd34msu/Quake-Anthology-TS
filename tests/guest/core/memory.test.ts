@@ -8,7 +8,7 @@ import {
 } from "../../../src/guest/core/index.ts";
 import type { GuestHostCallback } from "../../../src/guest/core/index.ts";
 import { ProcessorFlags } from "../../../src/guest/core/registers.ts";
-import type { GuestFlag } from "../../../src/guest/core/contracts.ts";
+import type { GuestFlag, GuestWrittenRange } from "../../../src/guest/core/contracts.ts";
 
 test("processor flag masks preserve unrelated and reserved bits", () => {
   const positions: readonly (readonly [GuestFlag, number])[] = [["carry", 0], ["parity", 2], ["auxiliary-carry", 4],
@@ -175,6 +175,22 @@ test("register checkpoint scratch is caller-owned and ordinary snapshots stay in
     expect(() => registers.checkpoint(new Uint8Array(1))).toThrow("architecture or length");
     expect(registers.read("rax", 32)).toBe(7n);
   }
+});
+
+test("write ranges retain watched offsets across aliases and mapping boundaries", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const first = memory.map({ base: 0x10000n, byteLength: 8, permissions: "read-write" });
+  const second = memory.map({ base: 0x10008n, byteLength: 8, permissions: "read-write" });
+  const alias = memory.mapAlias({ base: 0x20000n, source: second, byteLength: 8, permissions: "read-write" });
+  const seen: (readonly GuestWrittenRange[])[] = [];
+  const remove = memory.observeWrites(memory.offset(first, 4n), 8, ranges => {
+    seen.push(ranges); expect(memory.readUint8(memory.offset(first, 8n))).toBe(9);
+  });
+  memory.writeUint8(alias, 9);
+  expect(seen).toEqual([[{ byteOffset: 4, byteLength: 1 }]]);
+  memory.write(memory.offset(first, 6n), new Uint8Array([2, 3, 9, 4]));
+  expect(seen[1]).toEqual([{ byteOffset: 2, byteLength: 2 }, { byteOffset: 4, byteLength: 2 }]);
+  remove(); memory.writeUint8(alias, 8); expect(seen).toHaveLength(2);
 });
 
 test("range write observers follow aliases and stop after removal or backing replacement", () => {

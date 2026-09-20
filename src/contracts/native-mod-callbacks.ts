@@ -50,6 +50,35 @@ export interface NativeModSourceActors {
     readonly think: number;
     readonly nextthink: { readonly offset: number; readonly encoding: NativeModScalar; readonly units: "seconds" | "milliseconds" };
   };
+  readonly callbacks?: {
+    readonly abi: "q2-classic" | "q2-rerelease";
+    readonly touch: number | null;
+    readonly pain: number | null;
+    readonly die: number | null;
+  };
+  readonly combat?: NativeModCombat;
+}
+export interface NativeModScalarField { readonly offset: number; readonly encoding: NativeModScalar; }
+export interface NativeModDeferredDamage {
+  readonly process: NativeModEntry;
+  readonly attacker: number;
+  readonly inflictor: number;
+  readonly blood: NativeModScalarField;
+  readonly knockback: NativeModScalarField;
+  readonly point: number;
+  readonly mod: number;
+  readonly receipt: number;
+}
+/** A pinned source declares its internal ABI and field meanings, independently of the engine API. */
+export interface NativeModCombat {
+  readonly damage: { readonly entry: NativeModEntry; readonly abi: "q2-classic" | "q2-rerelease" };
+  readonly causes: { readonly edition: "classic"; readonly game: "base" | "xatrix" | "rogue" | "ctf" } | { readonly edition: "rerelease" };
+  readonly health: NativeModScalarField;
+  readonly mass: NativeModScalarField;
+  readonly takedamage: NativeModScalarField;
+  readonly flags: NativeModScalarField & { readonly invulnerable: number; readonly noKnockback: number };
+  readonly armor: { readonly kind: "none" };
+  readonly deferred?: NativeModDeferredDamage;
 }
 export interface NativeModDeclaration {
   readonly version: 1;

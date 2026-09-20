@@ -1,4 +1,5 @@
 import { NativeModActors, type SavedNativeActors } from "./native-mod-actors.ts";
+import { readNativeDeferredDamage } from "./native-mod-deferred.ts";
 import { asciiFold, type CommandInvocation } from "../../core/commands/index.ts";
 import type { FrameContext } from "../../contracts/time.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -52,6 +53,11 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
   const records = new Map<string, NativeModActorRecord>(), authority = new Set<string>();
   const owned = declaration.sourceActors;
   if (owned !== undefined && (!Number.isFinite(owned.frameSeconds) || owned.frameSeconds <= 0 || owned.clock.length === 0)) throw new Error("Native owned actors require a positive source frame period and clock");
+  const expectedAbi = declaration.target.api.kind === "q2-classic-game" ? "q2-classic" : "q2-rerelease";
+  if (owned?.callbacks !== undefined && owned.callbacks.abi !== expectedAbi) throw new Error("Native callback ABI differs from the selected module target");
+  if (owned?.combat !== undefined && (owned.callbacks === undefined || owned.combat.damage.abi !== expectedAbi
+    || (owned.combat.causes.edition === "classic") !== (expectedAbi === "q2-classic"))) throw new Error("Native combat requires its matching source callback and damage ABIs");
+  if (owned?.combat?.deferred !== undefined && expectedAbi !== "q2-rerelease") throw new Error("Native deferred damage requires its declared rerelease mod_t ABI");
   for (const record of declaration.actorRecords) {
     if (!record.id || records.has(record.id) || !Number.isSafeInteger(record.stride) || record.stride < 4
       || !Number.isSafeInteger(record.capacity) || record.capacity < 1 || record.capacity > 65536 || !Number.isSafeInteger(record.firstSlot) || record.firstSlot < 0) throw new Error("Invalid native mod actor record");
@@ -117,8 +123,11 @@ function readCheckpoint(record: ProviderCheckpoint, module: ModuleIdentity, decl
   const ownedReader = reader.field("owned");
   const owned = ownedReader.value === undefined || ownedReader.value === null ? null : {
     nextFrame: ownedReader.field("nextFrame").finite(), frame: ownedReader.field("frame").integer(0),
+    deferred: ownedReader.field("deferred").value === undefined ? [] : ownedReader.field("deferred").list(readNativeDeferredDamage),
     actors: ownedReader.field("actors").list(entry => ({ actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) }, slot: entry.field("slot").integer(1), linked: entry.field("linked").boolean() })) };
   if ((owned !== null) !== (declaration.sourceActors !== undefined) || owned !== null && (new Set(owned.actors.map(entry => entry.slot)).size !== owned.actors.length || new Set(owned.actors.map(entry => `${entry.actor.slot}:${entry.actor.generation}`)).size !== owned.actors.length)) throw new Error("Invalid native owned actor checkpoint");
+  if (owned !== null && (owned.deferred.length > 0 && declaration.sourceActors?.combat?.deferred === undefined || new Set(owned.deferred.map(entry => `${entry.target.slot}:${entry.target.generation}`)).size !== owned.deferred.length
+    || owned.deferred.some(entry => !owned.actors.some(actor => actor.actor.slot === entry.target.slot && actor.actor.generation === entry.target.generation)))) throw new Error("Invalid native deferred attack checkpoint");
   return { map, source, actors, owned, presentation: readNativeModPresentation(reader.field("presentation")) };
 }
 export function validateNativeModCheckpoint(record: ProviderCheckpoint, module: ModuleIdentity, declaration: NativeModDeclaration): void { readCheckpoint(record, module, declaration); }
@@ -147,6 +156,8 @@ export class NativeModProvider implements NativeModProjection {
   attach(host: NativeModHost): void { if (this.host_ !== null) throw new Error("Native mod already attached"); this.host_ = host;
     if (this.declaration.sourceActors !== undefined) this.owned = new NativeModActors(this.declaration.sourceActors, this.declaration, host, this.services, this.instance, {
       resolve: address => this.resolve(address), scalar: (address, value, encoding) => this.scalarWrite(address, value, encoding),
+      combat: { transfer: invoke => this.transfer(invoke), scalar: (base, field, value) => { const address = host.memory.offset(base, BigInt(field.offset)); if (value !== undefined) this.scalarWrite(address, value, field.encoding); return this.scalarRead(address, field.encoding); },
+        synchronize: () => { this.flush(); this.refresh(); const frame = this.frames.at(-1); if (frame !== undefined) frame.observations = this.observe(); } },
       invoke: (entry, values, returns) => this.executeEntry(entry, values, returns), address: actor => this.address(actor), actorAt: slot => this.actorAt(slot),
       beginFrame: () => { for (const entry of this.entries()) this.host.clearEntityEvent(entry.slot); this.host.presentation.beginFrame(); }, endFrame: () => this.publish() });
   }

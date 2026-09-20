@@ -7,10 +7,14 @@ import type { ModHostServices } from "../../world/session/mods.ts";
 import type { NativeModHost } from "../../app/bootstrap/simulation/native-mod-host.ts";
 import { readClassicVector, writeClassicVector } from "./classic/records.ts";
 import { RereleasePublicEdict } from "./rerelease/public-state.ts";
+import { bindNativeModEntry } from "./native-mod-entries.ts";
+import { NativeModCombat, type NativeModCombatCalls } from "./native-mod-combat.ts";
+import type { SavedNativeDeferredDamage } from "./native-mod-deferred.ts";
 
 export interface SavedNativeActors {
   readonly nextFrame: number;
   readonly frame: number;
+  readonly deferred: readonly SavedNativeDeferredDamage[];
   readonly actors: readonly { readonly actor: SavedActorId; readonly slot: number; readonly linked: boolean }[];
 }
 interface SourceCalls {
@@ -21,6 +25,7 @@ interface SourceCalls {
   actorAt(slot: number): ActorId | null;
   beginFrame(): void;
   endFrame(): void;
+  readonly combat: Pick<NativeModCombatCalls, "transfer" | "scalar" | "synchronize">;
 }
 
 /** Source edicts retain their private words, function pointers, allocator and update loop. */
@@ -35,6 +40,7 @@ export class NativeModActors {
   private frame = 0;
   private nextFrame: number;
   private tickTime: number | null = null;
+  private readonly behavior: NativeModCombat;
   constructor(readonly definition: NativeModSourceActors, readonly declaration: NativeModDeclaration, readonly host: NativeModHost,
     readonly services: ModHostServices, readonly instance: ProviderId, readonly calls: SourceCalls) {
     this.nextFrame = this.now() + definition.frameSeconds;
@@ -42,34 +48,35 @@ export class NativeModActors {
       const slot = this.actorSlots.get(actor.id); if (slot !== undefined) { this.pending.add(slot); host.presentation.release(actor.id); }
       return undefined;
     });
+    let behavior: NativeModCombat | null = null;
     try {
       this.intercept(definition.allocate, "allocate", [], "pointer", (args, proceed) => {
-        if (!this.suspended) for (const slot of [...this.slots.keys()]) if (!host.active(slot)) this.retire(slot);
         const result = proceed(args);
-        if (!this.suspended && result.kind === "pointer" && result.value !== null) this.adopt(this.slot(result.value));
+        if (!this.suspended && result.kind === "pointer" && result.value !== null) { const slot = this.slot(result.value); this.retire(slot); this.adopt(slot); }
         return result;
       });
+      this.behavior = behavior = new NativeModCombat(definition, declaration, host, services, instance, { ...calls.combat,
+        address: actor => calls.address(actor), owner: slot => this.actorAt(slot), actor: address => {
+          const actor = calls.actorAt(this.slot(address)); if (actor === null) throw new Error("Native callback references an unowned source actor"); return actor;
+        } });
       this.intercept(definition.release, "release", ["pointer"], "void", (args, proceed) => {
         const value = args[0], slot = value?.kind === "pointer" && value.value !== null ? this.slot(value.value) : null;
         const result = proceed(args);
         if (!this.suspended && slot !== null && !host.active(slot)) this.retire(slot);
         return result;
       });
-    } catch (error) { this.unsubscribe(); for (const remove of this.removals.reverse()) remove(); throw error; }
+    } catch (error) { behavior?.close(); this.unsubscribe(); for (const remove of this.removals.reverse()) remove(); throw error; }
   }
   get advancing(): boolean { return this.tickTime !== null; }
   private now(): number { const time = this.services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; }
   private entry(entry: NativeModEntry): GuestAddress { return entry.kind === "export" ? this.host.entry(entry.name) : this.host.memory.offset(this.host.imageBase, BigInt(entry.rva)); }
   private intercept(entry: NativeModEntry, name: "allocate" | "release", parameters: readonly "pointer"[], returns: "pointer" | "void",
     execute: (args: readonly GuestCallValue[], proceed: (args: readonly GuestCallValue[]) => GuestCallResult) => GuestCallResult): void {
-    const address = this.entry(entry), { callbacks, cpu } = this.host.entries, frames: { stack: bigint | null }[] = [];
-    const stack = () => cpu.state.registers.read("rsp", this.host.memory.pointerBytes === 4 ? 32 : 64);
+    const address = this.entry(entry);
     const signature = { abi: this.declaration.target.abi, parameters: parameters.map(storage => ({ kind: "scalar", storage } satisfies import("../../contracts/execution.ts").GuestValueLayout)),
       result: returns === "void" ? "void" : { kind: "scalar", storage: returns }, variadic: false } satisfies import("../../guest/core/contracts.ts").GuestCallSignature;
-    this.removals.push(callbacks.observeEntry(address, () => { const frame = frames.at(-1); if (frame !== undefined && frame.stack === null) frame.stack = stack(); }));
-    this.removals.push(callbacks.bindEntry(address, { id: `${this.instance}:source-${name}`, signature,
-      invoke: (_context, args) => execute(args, values => { const frame = { stack: null }; frames.push(frame);
-        try { return this.host.invoke(address, signature, values); } finally { frames.pop(); } }) }, () => frames.at(-1)?.stack !== stack()));
+    const binding = bindNativeModEntry(this.host, address, `${this.instance}:source-${name}`, signature, execute);
+    this.removals.push(() => binding.close());
   }
   private reserved(slot: number): boolean {
     const record = this.declaration.actorRecords.find(record => record.id === this.declaration.entityRecord);
@@ -106,12 +113,7 @@ export class NativeModActors {
       write("s.origin", 4, state.origin); write("s.angles", 16, state.angles); write("mins", 188, state.bounds.min); write("maxs", 200, state.bounds.max);
       writeClassicVector(memory, this.at(slot, fields.velocity), state.velocity); memory.writePointer(this.at(slot, fields.ground), state.ground === null ? null : this.calls.address(state.ground)); return undefined;
     } });
-    this.services.callbacks?.bind(actor, { think: null, touch: null, pain: null, die: null,
-      use: fields.use === null ? null : (_self, other, activator) => {
-        if (fields.use === null) return undefined;
-        const target = memory.readPointer(this.at(slot, fields.use)); if (target === null) return undefined;
-        this.calls.invoke(target, [actor.id, other, activator].map(value => ({ kind: "pointer", value: value === null ? null : this.calls.address(value) })), "void"); return undefined;
-      } });
+    this.services.callbacks?.bind(actor, this.behavior.bind(slot, actor));
   }
   synchronizeClock(): void {
     if (this.suspended) return;
@@ -127,6 +129,7 @@ export class NativeModActors {
       if (offset === undefined || size === undefined || !Number.isSafeInteger(offset) || offset < 0 || offset + size > stride) throw new Error("Native owned-actor field exceeds the source stride");
     }
     this.host.memory.check(this.entry(this.definition.update.entry), 1, "execute");
+    this.behavior.validate();
     this.synchronizeClock();
   }
   drainReleases(): void {
@@ -140,6 +143,7 @@ export class NativeModActors {
   private retire(slot: number): void {
     const actor = this.slots.get(slot); this.slots.delete(slot); this.pending.delete(slot);
     if (actor === undefined) return;
+    this.behavior.release(actor.id);
     this.actorSlots.delete(actor.id);
     this.host.presentation.release(actor.id); if (this.services.actors.isLive(actor.id)) this.services.actors.release(actor);
   }
@@ -161,9 +165,10 @@ export class NativeModActors {
       } finally { this.tickTime = null; }
     }
   }
-  suspend(value: boolean): void { this.suspended = value; }
-  checkpoint(): SavedNativeActors { return { frame: this.frame, nextFrame: this.nextFrame, actors: this.entries().map(({ actor, slot }) => ({ actor: { slot: actor.slot, generation: actor.generation }, slot, linked: this.services.bodies.linked(actor) !== null })) }; }
+  suspend(value: boolean): void { this.suspended = value; this.behavior.suspend(value); }
+  checkpoint(): SavedNativeActors { return { frame: this.frame, nextFrame: this.nextFrame, deferred: this.behavior.checkpoint(), actors: this.entries().map(({ actor, slot }) => ({ actor: { slot: actor.slot, generation: actor.generation }, slot, linked: this.services.bodies.linked(actor) !== null })) }; }
   validateSaved(saved: SavedNativeActors): readonly { readonly actor: OwnedActor; readonly slot: number; readonly linked: boolean }[] {
+    this.behavior.validateSaved(saved.deferred);
     return saved.actors.map(entry => {
       const id = this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current"), actor = this.services.actors.resolveOwned(id);
       if (actor === null || actor.owner !== this.instance || this.reserved(entry.slot) || this.services.actors.sourceOf(id)?.slot !== entry.slot) throw new Error(`Saved native owned actor ${entry.actor.slot}/${entry.actor.generation} does not belong to ${this.instance}/${entry.slot}: ${actor?.owner ?? "expired"}/${this.services.actors.sourceOf(id)?.slot ?? "unbound"}`);
@@ -175,10 +180,11 @@ export class NativeModActors {
     this.slots.clear(); this.actorSlots.clear(); this.pending.clear(); this.frame = saved.frame; this.nextFrame = saved.nextFrame;
     for (const entry of actors) { this.slots.set(entry.slot, entry.actor); this.actorSlots.set(entry.actor.id, entry.slot); }
     for (const entry of actors) { this.bind(entry.slot, entry.actor); if (entry.linked) this.services.bodies.link(entry.actor); }
+    this.behavior.restore(saved.deferred);
   }
   close(): void {
     if (this.closing) return; this.closing = true;
     try { for (const slot of this.slots.keys()) this.pending.add(slot); this.drainReleases(); }
-    finally { this.unsubscribe(); for (const slot of [...this.slots.keys()]) this.retire(slot); for (const remove of this.removals.reverse()) remove(); }
+    finally { this.unsubscribe(); for (const slot of [...this.slots.keys()]) this.retire(slot); this.behavior.close(); for (const remove of this.removals.reverse()) remove(); }
   }
 }

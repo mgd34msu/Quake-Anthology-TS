@@ -3,6 +3,7 @@ import type { GuestAddress, GuestCallResult, GuestCallValue, RawEntityView } fro
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { NativeModDeclaration } from "../../../contracts/native-mod-callbacks.ts";
 import type { ProviderCheckpoint } from "../../../contracts/session.ts";
+import type { TraceResult } from "../../../contracts/scene.ts";
 import type { Q2FoundationHost } from "../../../content/q2/foundation/host.ts";
 import { nativeProviderTiming } from "../../../content/catalog/timing.ts";
 import { asciiFold, type CommandInvocation } from "../../../core/commands/index.ts";
@@ -60,6 +61,7 @@ export interface NativeModHost {
   entity(slot: number): RawEntityView;
   active(slot: number): boolean;
   clearEntityEvent(slot: number): void;
+  encodeTrace(trace: TraceResult): Uint8Array;
   invokeCommand(command: CommandInvocation): boolean;
   entry(name: string): GuestAddress;
   entities(): { readonly base: GuestAddress; readonly stride: number; readonly count: number; readonly capacity: number };
@@ -126,6 +128,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
           scale: 1, alpha: (state.renderEffects & 32) !== 0 ? 0.3 : 1, visible: record.bytes.getInt32(88, true) !== 0 && (record.bytes.getInt32(184, true) & 1) === 0,
           origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
     return { memory: source.memory, imageBase: source.imageBase, cvars, presentation, entry: name => source.entry(name),
+      encodeTrace: trace => source.host.traceBytes(trace),
       invokeCommand: command => invokeCommand(command, () => { source.host.call("ServerCommand"); }),
       clearEntityEvent: slot => { source.host.edicts.at(slot).bytes.setInt32(80, 0, true); },
       entries: source.host.options.runner.options, entity: slot => source.host.edicts.at(slot), active: slot => source.host.edicts.at(slot).bytes.getInt32(88, true) !== 0,
@@ -160,6 +163,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
         scale: state.scale === 0 ? 1 : state.scale, alpha: state.alpha === 0 ? (state.renderEffects & 32) !== 0 ? 0.3 : 1 : state.alpha,
         visible: info.active && (info.serverFlags & 1) === 0, origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
   return { memory: source.memory, imageBase: source.imageBase, cvars, presentation, entry: name => source.entry(name),
+    encodeTrace: trace => { const result = source.host.encodeTrace(trace); if (result.kind !== "aggregate") throw new Error("Native trace must be an aggregate"); return result.bytes; },
     invokeCommand: command => invokeCommand(command, () => { source.host.module.callGame("ServerCommand"); }),
     clearEntityEvent: slot => { const record = new RereleasePublicEdict(source.memory, source.host.module.entities().atSlot(slot)); source.memory.writeUint8(record.address("s.event"), 0); },
     entries: source.host.module.options.runner.options, entity: slot => source.host.module.entities().atSlot(slot), active: slot => adapter.entityInfo(slot).active,

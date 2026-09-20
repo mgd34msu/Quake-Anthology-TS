@@ -62,6 +62,18 @@ function sourceActors(reader: SaveReader): NativeModSourceActors {
     update: { entry: entry(update.field("entry")), returns: update.field("returns").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "void") },
     frameSeconds: reader.field("frameSeconds").number(),
     clock: reader.field("clock").list(value => ({ address: address(value.field("address")), input: value.field("input").choice("time", "frame"), encoding: encoding(value.field("encoding")), units: value.field("units").choice("seconds", "milliseconds") })),
+    ...(reader.field("callbacks").value === undefined ? {} : { callbacks: { abi: reader.field("callbacks").field("abi").choice("q2-classic", "q2-rerelease"),
+      touch: reader.field("callbacks").field("touch").nullable(value => value.integer(0)), pain: reader.field("callbacks").field("pain").nullable(value => value.integer(0)), die: reader.field("callbacks").field("die").nullable(value => value.integer(0)) } }),
+    ...(reader.field("combat").value === undefined ? {} : { combat: (() => {
+      const combat = reader.field("combat"), causes = combat.field("causes"), damage = combat.field("damage"), flags = combat.field("flags"), deferred = combat.field("deferred");
+      const scalar = (value: SaveReader) => ({ offset: value.field("offset").integer(0), encoding: encoding(value.field("encoding")) });
+      return { damage: { entry: entry(damage.field("entry")), abi: damage.field("abi").choice("q2-classic", "q2-rerelease") },
+        causes: causes.field("edition").choice("classic", "rerelease") === "classic" ? { edition: "classic", game: causes.field("game").choice("base", "xatrix", "rogue", "ctf") } satisfies NonNullable<NativeModSourceActors["combat"]>["causes"] : { edition: "rerelease" } satisfies NonNullable<NativeModSourceActors["combat"]>["causes"],
+        health: scalar(combat.field("health")), mass: scalar(combat.field("mass")), takedamage: scalar(combat.field("takedamage")),
+        flags: { ...scalar(flags), invulnerable: flags.field("invulnerable").integer(0), noKnockback: flags.field("noKnockback").integer(0) }, armor: { kind: combat.field("armor").field("kind").literal("none") },
+        ...(deferred.value === undefined ? {} : { deferred: { process: entry(deferred.field("process")), attacker: deferred.field("attacker").integer(0), inflictor: deferred.field("inflictor").integer(0),
+          blood: scalar(deferred.field("blood")), knockback: scalar(deferred.field("knockback")), point: deferred.field("point").integer(0), mod: deferred.field("mod").integer(0), receipt: deferred.field("receipt").integer(0) } }) };
+    })() }),
     fields: { velocity: fields.field("velocity").integer(0), ground: fields.field("ground").integer(0), use: fields.field("use").nullable(value => value.integer(0)),
       think: fields.field("think").integer(0), nextthink: { offset: nextthink.field("offset").integer(0), encoding: encoding(nextthink.field("encoding")), units: nextthink.field("units").choice("seconds", "milliseconds") } } };
 }
