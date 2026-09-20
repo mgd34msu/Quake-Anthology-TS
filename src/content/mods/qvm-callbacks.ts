@@ -61,6 +61,7 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("qvm"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
     abiProfile: reader.field("abiProfile").choice("q3-modern", "q3-1.16n-base"),
+    spawnEntities: reader.field("spawnEntities").value === undefined ? null : reader.field("spawnEntities").nullable(value => value.string()),
     entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     ...(actors.value === undefined ? {} : { sourceActors: { allocate: actors.field("allocate").integer(0),
       release: { entry: actors.field("release").field("entry").integer(0), argument: actors.field("release").field("argument").integer(0) },

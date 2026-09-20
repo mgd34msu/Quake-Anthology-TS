@@ -8,6 +8,7 @@ import { QVM_USER_COMMAND_BYTES, writeQvmUserCommand } from "./client-state-reco
 import type { QvmGameData } from "./game-data.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 import { qvmServerInformationSyscall } from "./server-info-syscalls.ts";
+import { qvmEntityTokenSyscall } from "./entity-tokens.ts";
 import { QVM_TRACE_BYTES, writeQvmTrace } from "./trace-record.ts";
 import type { QvmTraceRecord } from "./trace-record.ts";
 
@@ -118,10 +119,7 @@ export function qvmServerGameSyscall(call: QvmHostCall, services: QvmServerGameS
     case QvmGameImport.G_GET_USERCMD:
       client(word(1), services, "SV_GetUsercmd");
       writeQvmUserCommand(guest.view(word(2), QVM_USER_COMMAND_BYTES), services.getUserCommand(word(1)), services.data.abiProfile); return 0;
-    case QvmGameImport.G_GET_ENTITY_TOKEN: {
-      const result = services.entityToken();
-      guest.writeString(word(1), result.token, word(2)); return Number(!result.ended || result.token.length !== 0);
-    }
+    case QvmGameImport.G_GET_ENTITY_TOKEN: return qvmEntityTokenSyscall(call, services);
     default: return null;
   }
 }

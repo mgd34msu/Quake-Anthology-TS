@@ -62,6 +62,8 @@ export interface QvmModCallbackDeclaration {
   readonly runtime: "qvm";
   readonly program: { readonly path: string; readonly digest: ContentDigest };
   readonly abiProfile: QvmAbiProfile;
+  /** Explicit component additions, consumed only by declared source calls; absent/null is an empty stream. */
+  readonly spawnEntities?: string | null;
   readonly actorRecords: readonly QvmModActorRecord[];
   readonly entityRecord: string | null;
   readonly sourceActors?: QvmModSourceActors;

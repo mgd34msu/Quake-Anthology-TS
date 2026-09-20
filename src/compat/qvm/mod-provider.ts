@@ -26,6 +26,7 @@ import type { QvmModuleOptions } from "./module.ts";
 import { QvmGameExport, QvmGameImport } from "./abi.ts";
 import { qvmCommonSyscall } from "./common-syscalls.ts";
 import { qvmServerInformationSyscall, type QvmServerInformationServices } from "./server-info-syscalls.ts";
+import { QvmEntityTokens, qvmEntityTokenSyscall } from "./entity-tokens.ts";
 import { QvmFiles, qvmFileSyscall } from "./file-syscalls.ts";
 import { rejectQvmSyscall } from "./syscalls.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
@@ -56,6 +57,7 @@ function seconds(services: ModHostServices): number { const time = services.time
 export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDeclaration): void {
   if (artifact.module.digest !== declaration.program.digest || artifact.module.artifactPath !== declaration.program.path
     || artifact.role !== "qagame" || (artifact.abiProfile ?? "q3-modern") !== declaration.abiProfile) throw new Error("Gameplay mod differs from its declared QVM artifact or ABI");
+  new QvmEntityTokens(declaration.spawnEntities ?? "");
   const sourceEnd = artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength;
   const range = (address: number, size: number): void => {
     if (!Number.isSafeInteger(address) || address < 0 || !Number.isSafeInteger(size) || size < 1 || address + size > sourceEnd)
@@ -138,6 +140,8 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
 function hostImage(checkpoint: QvmCheckpoint, declaration: QvmModCallbackDeclaration) {
   if (checkpoint.hostState.format !== "qvm:mod-host-v1" || checkpoint.random.length !== 0 || checkpoint.callbacks.length !== 0) throw new Error("Invalid QVM mod host checkpoint");
   const reader = new SaveReader(decodeCheckpointValue(checkpoint.hostState.bytes)); reader.field("version").literal(1);
+  const entityTokens = new QvmEntityTokens(declaration.spawnEntities ?? "");
+  entityTokens.restoreSaveState(reader.field("entityTokens").value);
   const slots = new Set<number>(), actors = new Set<string>(), capacity = declaration.actorRecords.length === 0 ? 0 : Math.min(...declaration.actorRecords.map(record => record.capacity));
   const nextSlot = reader.field("nextSlot").integer(0);
   if (nextSlot > capacity) throw new Error("Invalid QVM projection allocation cursor");
@@ -186,6 +190,7 @@ export class QvmModProvider {
   private readonly frames: Frame[] = [];
   readonly cvars: CvarRegistry;
   private readonly information: QvmServerInformationServices;
+  private readonly entityTokens: QvmEntityTokens;
   private commands: ModCommandPort | null = null;
   private files: QvmFiles | null;
   private readonly unsubscribe: () => undefined;
@@ -202,6 +207,7 @@ export class QvmModProvider {
     this.scratchStart = Math.ceil((artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength) / 16) * 16;
     this.scratch = this.scratchStart;
     this.cvars = this.newCvars();
+    this.entityTokens = new QvmEntityTokens(declaration.spawnEntities ?? "");
     this.information = { abiProfile: declaration.abiProfile, cvars: this.cvars, configstrings: {
       get: index => this.configstrings.get(index) ?? "",
       set: (index, value) => {
@@ -221,9 +227,11 @@ export class QvmModProvider {
         projections: [...this.projections].map(([actor, slot]) => ({ actor: savedActorId(actor), slot, owned: this.owned.has(actor), event: this.eventKeys.get(actor) ?? null })), nextSlot: this.nextSlot,
         defaults: [...this.defaults].map(([id, bytes]) => ({ id, bytes })),
         configstrings: [...this.configstrings].map(([index, value]) => ({ index, value })),
-        cvars: this.cvars.captureSaveState(), files: this.files?.captureCheckpoint() ?? null, portals: this.portals?.capturePortalCheckpoint() ?? null }) }, random: [], callbacks: [] }),
+        cvars: this.cvars.captureSaveState(), files: this.files?.captureCheckpoint() ?? null, portals: this.portals?.capturePortalCheckpoint() ?? null,
+        entityTokens: this.entityTokens.captureSaveState() }) }, random: [], callbacks: [] }),
       restore: state => {
         const decoded = new SaveReader(decodeCheckpointValue(state.state.bytes));
+        this.entityTokens.restoreSaveState(decoded.field("entityTokens").value);
         if (decoded.field("portals").value !== undefined && decoded.field("portals").value !== null) {
           if (this.portals === null) throw new Error("Saved QVM mod portals require destination topology");
           this.portals.restorePortalCheckpoint(decoded.field("portals").value);
@@ -680,6 +688,7 @@ export class QvmModProvider {
       print: text => { if (this.services.engine === undefined) throw new Error("QVM print requires destination engine services"); this.services.engine.print(text); },
       commands: { executeNow: text => { this.commandPort().executeNow(text); }, append: text => this.commandPort().append(text), insert: text => this.commandPort().insert(text) }, realTime: () => { throw new Error("QVM real-time service is not bound"); } })
       ?? qvmServerInformationSyscall(call, this.information)
+      ?? qvmEntityTokenSyscall(call, this.entityTokens)
       ?? (this.files === null ? null : qvmFileSyscall(call, this.files)) ?? this.engine(call) ?? this.spatial(call);
     if (result === null) return rejectQvmSyscall(call);
     const refresh = (): void => { this.current(); this.refresh(); const frame = this.frames.at(-1); if (frame !== undefined) frame.observations = this.observe(); };
