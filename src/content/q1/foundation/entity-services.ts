@@ -392,17 +392,22 @@ export class Q1EntityServices {
     return this.host.powerupExpires?.(actor, powerup) ?? this.player(actor)?.powerups.get(powerup) ?? 0;
   }
   combatContext(request: DamageRequest): Q1CombatContext {
-    const inflictor = request.attack.inflictor === null ? null : this.host.bodies.linked(request.attack.inflictor);
+    const projectile = request.attack.originatingProjectile === undefined ? null : this.host.bodies.read(request.attack.originatingProjectile);
+    const inflictor = request.attack.inflictor === null || this.world?.actor.id.equals(request.attack.inflictor) === true
+      ? null : this.host.bodies.linked(request.attack.inflictor);
+    // A source may report world as the damage inflictor while retaining the actual projectile.
+    const origin = projectile !== null ? vadd(projectile.origin, vscale(vadd(projectile.bounds.min, projectile.bounds.max), 0.5))
+      : inflictor === null ? null : vscale(vadd(inflictor.absoluteBounds.min, inflictor.absoluteBounds.max), 0.5);
     const target = this.host.bodies.read(request.target);
     return { arithmetic: "binary32", quad: request.attack.attacker !== null && this.powerupExpires(request.attack.attacker, "quad") > this.time,
-      teamplay: this.options.teamplay ?? 0, baseTeamHealth: this.baseTeamHealth, walk: this.isPlayer(request.target), momentumDirection: target === null || inflictor === null ? null :
-        normalize(vsub(target.origin, vscale(vadd(inflictor.absoluteBounds.min, inflictor.absoluteBounds.max), 0.5))) };
+      teamplay: this.options.teamplay ?? 0, baseTeamHealth: this.baseTeamHealth, walk: this.isPlayer(request.target), momentumDirection: target === null || origin === null ? null :
+        normalize(vsub(target.origin, origin)) };
   }
   sourceTarget(actor: ActorId) {
     const observed = this.host.sourceTarget?.(actor);
     if (observed !== undefined) return observed;
     const entity = this.entity(actor);
-    return { aimedDamage: entity?.aimedDamage ?? false, push: entity?.movement === "push", player: this.isPlayer(actor) };
+    return { aimedDamage: entity?.aimedDamage ?? false, push: entity?.movement === "push", player: this.isPlayer(actor), slidebox: entity?.solid === "slidebox" };
   }
   monsterTarget(actor: ActorId) {
     if (this.host.monsterTarget !== undefined) return this.host.monsterTarget(actor);

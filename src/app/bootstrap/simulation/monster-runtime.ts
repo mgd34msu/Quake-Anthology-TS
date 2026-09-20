@@ -2,6 +2,7 @@ import type { Q1AddonContext } from "../../../content/q1/addons/context.ts";
 import type { SelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import type { EnemySelection, MonsterDefinitionReference, ProviderReference } from "../../../contracts/content.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
+import type { Vec3 } from "../../../contracts/math.ts";
 import type { Q1Entity } from "../../../formats/q1-map/index.ts";
 import type { AuthoredMonster, MonsterMission } from "../../../content/monsters/authored.ts";
 import type { Q1Foundation } from "../../../content/q1/foundation/runtime.ts";
@@ -24,7 +25,7 @@ export type SelectedMonsterSource = {
 
 export interface SelectedMonsterBehavior {
   attach(actor: OwnedActor, definition: MonsterDefinitionReference, mission: MonsterMission): undefined;
-  validatePlacement(entry: AuthoredMonster, definition: MonsterDefinitionReference): boolean;
+  validatePlacement(entry: AuthoredMonster, definition: MonsterDefinitionReference, relocated?: Vec3): boolean;
   placementReady(entry: AuthoredMonster): boolean;
   enemy(actor: ActorId): ActorId | null;
   oldEnemy(actor: ActorId): ActorId | null;
@@ -66,7 +67,7 @@ export class SelectedMonsters {
     return this.admit(actor, source.values, source.ordinal, definition);
   }
 
-  active(actor: ActorId): boolean { const entry = this.authored.get(actor); return entry === undefined || entry.activation.kind === "active" && entry.placement.kind === "ready"; }
+  active(actor: ActorId): boolean { const entry = this.authored.get(actor); return entry === undefined || entry.activation.kind === "active" && entry.placement.kind !== "waiting"; }
 
   capture(): readonly SavedAuthoredMonster[] {
     const save = (actor: ActorId) => ({ slot: actor.slot, generation: actor.generation });
@@ -74,7 +75,7 @@ export class SelectedMonsters {
       const definition = this.definitions.get(entry.actor.id);
       if (definition === undefined) throw new Error("Authored monster has no selected definition");
       return { ...entry, definition, actor: save(entry.actor.id), routeGoal: entry.routeGoal === null ? null : save(entry.routeGoal), combatGoal: entry.combatGoal === null ? null : save(entry.combatGoal),
-        placement: entry.placement.kind === "ready" ? entry.placement : { ...entry.placement, barriers: entry.placement.barriers.map(barrier => ({ ...barrier, actor: save(barrier.actor) })), activator: entry.placement.activator === null ? null : save(entry.placement.activator) },
+        placement: entry.placement.kind !== "waiting" ? entry.placement : { ...entry.placement, barriers: entry.placement.barriers.map(barrier => ({ ...barrier, actor: save(barrier.actor) })), activator: entry.placement.activator === null ? null : save(entry.placement.activator) },
         activation: entry.activation.kind === "scheduled" ? { ...entry.activation, activator: entry.activation.activator === null ? null : save(entry.activation.activator) } : entry.activation };
     });
   }
@@ -90,7 +91,7 @@ export class SelectedMonsters {
         || actors.observe(actor.id)?.definition !== `${expected.source.provider}/${expected.classname}`) throw new Error("Saved monster definition differs from selected actor");
       const { definition, ...fields } = saved;
       const entry: AuthoredMonster = { ...fields, actor, routeGoal: saved.routeGoal === null ? null : actors.referenceSaved(saved.routeGoal), combatGoal: saved.combatGoal === null ? null : actors.referenceSaved(saved.combatGoal),
-        placement: saved.placement.kind === "ready" ? saved.placement : { ...saved.placement, barriers: saved.placement.barriers.map(barrier => ({ ...barrier, actor: actors.referenceSaved(barrier.actor) })), activator: saved.placement.activator === null ? null : actors.referenceSaved(saved.placement.activator) },
+        placement: saved.placement.kind !== "waiting" ? saved.placement : { ...saved.placement, barriers: saved.placement.barriers.map(barrier => ({ ...barrier, actor: actors.referenceSaved(barrier.actor) })), activator: saved.placement.activator === null ? null : actors.referenceSaved(saved.placement.activator) },
         activation: saved.activation.kind === "scheduled" ? { ...saved.activation, activator: saved.activation.activator === null ? null : actors.referenceSaved(saved.activation.activator) } : saved.activation };
       if (entry.placement.kind === "waiting") {
         if (this.map.kind !== "q2" || entry.targetname === "" || entry.placement.barriers.length === 0) throw new Error("Saved waiting monster has no authored door encounter");
@@ -107,6 +108,18 @@ export class SelectedMonsters {
   beforeTurn(actor: ActorId): boolean {
     const entry = this.authored.get(actor);
     if (entry === undefined) return true;
+    if (entry.placement.kind === "teleport") {
+      const origin = this.map.game.host.bodies.read(actor)?.origin;
+      if (origin !== undefined && (origin.x !== entry.placement.origin.x || origin.y !== entry.placement.origin.y || origin.z !== entry.placement.origin.z)) {
+        if (!this.behavior.placementReady(entry)) entry.placement = { kind: "teleport", origin };
+        else {
+          const definition = this.definitions.get(actor);
+          if (definition === undefined) throw new Error("Teleported monster has no selected definition");
+          entry.placement = { kind: "ready" };
+          if (!this.behavior.validatePlacement(entry, definition, origin)) return false;
+        }
+      }
+    }
     if (entry.placement.kind === "waiting") {
       if (!this.behavior.placementReady(entry)) return false;
       const definition = this.definitions.get(actor);

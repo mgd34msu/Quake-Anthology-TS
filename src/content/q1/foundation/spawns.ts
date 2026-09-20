@@ -146,7 +146,7 @@ function counterUse(game: Q1EntityServices, entity: Q1Actor, _other: ActorId | n
 function teleportTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
     if (entity.targetname !== "" && entity.nextThink < game.time) return undefined;
     const player = game.isPlayer(other); if ((entity.spawnflags & 1) !== 0 && !player) return undefined;
-    if (game.health(other) <= 0 || !player && game.entity(other)?.solid !== "slidebox") return undefined;
+    if (game.health(other) <= 0 || !player && !game.sourceTarget(other).slidebox) return undefined;
     const target = game.find(entity.target)[0]; if (target === undefined) throw new Error("could not find teleport target");
     const owner = game.host.actors.resolveOwned(other), body = game.host.bodies.read(other); if (owner === null || body === null) return undefined;
     game.useTargets(entity, other); spawnTeleportFog(game, body.origin);

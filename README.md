@@ -200,7 +200,7 @@ Generated menu artwork is present in the source. The complete menu asset pack ma
 
 Q2 classic and rerelease movement now apply ground friction on Q1 maps. The shared collision adapter supplies ordinary surface metadata, so releasing movement keys stops the player in both Q1 editions.
 
-Newer source fixes choppy aiming with Q2 characters in mixed worlds: the camera uses live movement angles every frame while retaining source kick, death and intermission behavior. Classic Q2 weapon recoil also expires correctly in mixed worlds, including the BFG's timed kick. These corrections are not yet in the installed executable.
+Newer source fixes choppy aiming with Q2 characters in mixed worlds: the camera uses live movement angles every frame while retaining source kick, death and intermission behavior. Classic Q2 weapon recoil also expires correctly in mixed worlds, including the BFG's timed kick. Quake 1 monster teleports now admit selected foreign monsters and preserve encounters staged inside teleport holding areas across level travel and saves. Rocket-jump knockback uses the causal projectile position instead of the world bounds when a weapon reports the world as its inflictor. These corrections are not yet in the installed executable.
 
 Q1 colored lightmap offsets now address complete RGB samples. This fixes striped lighting in the rerelease and other Q1 maps with colored lighting, for both GL and CPU rendering.
 

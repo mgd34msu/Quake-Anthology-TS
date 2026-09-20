@@ -115,7 +115,7 @@ export interface Q1FoundationHost {
   checkClient(observer: OwnedActor): ActorId | null;
   /** The selected actor provider exposes its actual gameplay class for source exceptions. */
   classname(actor: ActorId): string;
-  sourceTarget?(actor: ActorId): { readonly aimedDamage: boolean; readonly push: boolean; readonly player: boolean };
+  sourceTarget?(actor: ActorId): { readonly aimedDamage: boolean; readonly push: boolean; readonly player: boolean; readonly slidebox: boolean };
   /** Apply a timed effect to the shared player state, including combat invulnerability. */
   powerup(actor: OwnedActor, powerup: Q1Powerup, expiresSeconds: number): undefined;
   powerupExpires?(actor: ActorId, powerup: Q1Powerup): number;

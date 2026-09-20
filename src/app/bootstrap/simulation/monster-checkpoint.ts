@@ -25,7 +25,8 @@ export type SavedAuthoredMonster = Omit<AuthoredMonster, "actor" | "routeGoal" |
   readonly definition: MonsterDefinitionReference;
   readonly routeGoal: SavedActorId | null;
   readonly combatGoal: SavedActorId | null;
-  readonly placement: { readonly kind: "ready" } | { readonly kind: "waiting"; readonly barriers: readonly { readonly actor: SavedActorId; readonly origin: Vec3 }[]; readonly activator: SavedActorId | null };
+  readonly placement: { readonly kind: "ready" } | { readonly kind: "teleport"; readonly origin: Vec3 }
+    | { readonly kind: "waiting"; readonly barriers: readonly { readonly actor: SavedActorId; readonly origin: Vec3 }[]; readonly activator: SavedActorId | null };
   readonly activation: { readonly kind: "active" } | { readonly kind: "dormant" } | { readonly kind: "scheduled"; readonly at: number; readonly activator: SavedActorId | null };
 };
 export type MonsterSourceCheckpoint = {
@@ -43,13 +44,15 @@ export interface SelectedMonstersCheckpoint {
 export function readSelectedMonstersCheckpoint(reader: SaveReader): SelectedMonstersCheckpoint {
   return { version: reader.field("version").literal(2), authored: reader.field("authored").list(value => {
     const activation = value.field("activation"), kind = activation.field("kind").choice("active", "dormant", "scheduled");
+    const placement = value.field("placement"), placementKind = placement.value === undefined ? "ready" : placement.field("kind").choice("ready", "waiting", "teleport");
     return { actor: readSavedActor(value.field("actor")), definition: { source: readProvider(value.field("definition").field("source")), classname: value.field("definition").field("classname").string() },
       classname: value.field("classname").string(), sourceOrdinal: value.field("sourceOrdinal").integer(0), spawnflags: value.field("spawnflags").integer(),
       targetname: value.field("targetname").string(), target: value.field("target").string(), killtarget: value.field("killtarget").string(), message: value.field("message").string(), delay: value.field("delay").finite(),
       deathTarget: value.field("deathTarget").string(), dropItem: value.field("dropItem").string(), route: value.field("route").string(), routeGoal: value.field("routeGoal").nullable(readSavedActor), routeResolved: value.field("routeResolved").boolean(),
       countedDeath: value.field("countedDeath").boolean(), combatTarget: value.field("combatTarget").string(), combatGoal: value.field("combatGoal").nullable(readSavedActor), standGround: value.field("standGround").boolean(),
-      placement: value.field("placement").value !== undefined && value.field("placement").field("kind").choice("ready", "waiting") === "waiting"
-        ? { kind: "waiting", barriers: value.field("placement").field("barriers").list(barrier => ({ actor: readSavedActor(barrier.field("actor")), origin: readVector(barrier.field("origin")) })), activator: value.field("placement").field("activator").nullable(readSavedActor) } : { kind: "ready" },
+      placement: placementKind === "waiting"
+        ? { kind: "waiting", barriers: placement.field("barriers").list(barrier => ({ actor: readSavedActor(barrier.field("actor")), origin: readVector(barrier.field("origin")) })), activator: placement.field("activator").nullable(readSavedActor) }
+        : placementKind === "teleport" ? { kind: "teleport", origin: readVector(placement.field("origin")) } : { kind: "ready" },
       activation: kind === "scheduled" ? { kind, at: activation.field("at").finite(), activator: activation.field("activator").nullable(readSavedActor) } : { kind } };
   }), sources: reader.field("sources").list(value => {
     const reference = readProvider(value.field("reference")), frame = readFrame(value.field("frame")), random = readRandom(value.field("random"));

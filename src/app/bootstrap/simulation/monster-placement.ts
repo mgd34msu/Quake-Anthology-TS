@@ -14,6 +14,20 @@ import type { Q1EntityServices } from "../../../content/q1/foundation/entity-ser
 import type { Q1Actor } from "../../../content/q1/foundation/entity.ts";
 import { baseSpecies } from "../../../content/q1/base/species.ts";
 
+/** Q1 maps may store live monsters in solid space inside a target-activated teleport. */
+export function isQ1TeleportStaging(game: Q1EntityServices, body: BodyState): boolean {
+  for (const trigger of game.entities.values()) {
+    if (trigger.classname !== "trigger_teleport" || trigger.targetname === "" || trigger.solid !== "trigger"
+      || trigger.touch === null || (trigger.spawnflags & 1) !== 0) continue;
+    const bounds = game.host.bodies.linked(trigger.actor.id)?.absoluteBounds;
+    if (bounds !== undefined && body.origin.x + body.bounds.max.x >= bounds.min.x && body.origin.x + body.bounds.min.x <= bounds.max.x
+      && body.origin.y + body.bounds.max.y >= bounds.min.y && body.origin.y + body.bounds.min.y <= bounds.max.y
+      && body.origin.z + body.bounds.max.z >= bounds.min.z && body.origin.z + body.bounds.min.z <= bounds.max.z
+      && game.find(trigger.target).length !== 0) return true;
+  }
+  return false;
+}
+
 function sameVector(left: Vec3, right: Vec3): boolean {
   return left.x === right.x && left.y === right.y && left.z === right.z;
 }

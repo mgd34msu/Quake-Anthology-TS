@@ -73,7 +73,7 @@ import { q3NativeCombatProfile } from "../../../content/q3/equipment/combat-prof
 import { retailRereleaseClientProfile } from "../../../compat/q2/rerelease/client-profile.ts";
 import { q3GrappleProfile } from "../../../content/q3/equipment/grapple-profiles.ts";
 import { SelectedMonsters } from "./monster-runtime.ts";
-import { nearbyMonsterPlacement, preservesAuthoredQ1Placement, preservesAuthoredQ2Placement } from "./monster-placement.ts";
+import { isQ1TeleportStaging, nearbyMonsterPlacement, preservesAuthoredQ1Placement, preservesAuthoredQ2Placement } from "./monster-placement.ts";
 import { parseVector } from "../../../content/q1/foundation/entity.ts";
 import { numberField, parseQ2Entities } from "../../../content/q2/foundation/fields.ts";
 import type { SelectedMonsterSource } from "./monster-runtime.ts";
@@ -837,7 +837,7 @@ export class SharedSimulation implements Simulation {
     const map = this.source;
     if (map.kind !== "q1" && map.kind !== "q2") throw new Error("Selected monster map admission currently requires a Q1 or Q2 authored map");
     const selected = new SelectedMonsters(selection, map, { attach: (actor, definition, mission) => this.attachMonster(actor, definition, mission),
-      validatePlacement: (entry, definition) => {
+      validatePlacement: (entry, definition, relocated) => {
         const body = this.bodies.read(entry.actor.id);
         if (body === null) throw new Error("Started selected monster has no shared body");
         const source = this.monsterSourceFor(definition);
@@ -845,6 +845,10 @@ export class SharedSimulation implements Simulation {
           target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
           policy: source.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } });
         if (trace.startSolid || trace.allSolid) {
+          if (map.kind === "q1" && isQ1TeleportStaging(map.game, body)) {
+            entry.placement = { kind: "teleport", origin: body.origin };
+            return true;
+          }
           const entity = source.kind === "q1" ? source.game.entity(entry.actor.id) : null;
           const q2Entity = source.kind === "q2" ? source.game.entity(entry.actor.id) : null;
           const preservedQ2 = source.kind === "q2" && map.kind === "q2" && this.options.world.kind === "q2-bsp" && q2Entity !== null
@@ -871,7 +875,7 @@ export class SharedSimulation implements Simulation {
             const blockers: ActorId[] = [];
             const search = (excluded: readonly ActorId[]) => nativeBounds === undefined || position === undefined ? null : nearbyMonsterPlacement({ body, locomotion, worldActor: this.worldActor(),
               sameMedium: origin => medium(origin) === originalMedium,
-              authored: { origin: parseVector(position), bounds: nativeBounds, locomotion: nativeMovement === "fly" || nativeMovement === "swim" ? nativeMovement : "walk" },
+              authored: { origin: relocated ?? parseVector(position), bounds: nativeBounds, locomotion: nativeMovement === "fly" || nativeMovement === "swim" ? nativeMovement : "walk" },
               query: { target: { kind: "world" }, passActor: entry.actor.id, numeric: providerTiming(this.recipe, definition.source.provider).numeric,
                 policy: source.kind === "q1" ? { kind: "q1", move: "normal", hull: null } : { kind: "q2", contentsMask: 1, leafContents: "merged" } },
               blockedBy: actor => { if (!blockers.some(value => value.equals(actor))) blockers.push(actor); return undefined; },
@@ -907,6 +911,10 @@ export class SharedSimulation implements Simulation {
         return true;
       },
       placementReady: entry => {
+        if (entry.placement.kind === "teleport") {
+          const body = this.bodies.read(entry.actor.id);
+          return map.kind === "q1" && body !== null && !isQ1TeleportStaging(map.game, body);
+        }
         if (entry.placement.kind !== "waiting" || map.kind !== "q2") return false;
         return entry.placement.barriers.every(barrier => {
           const door = map.game.entity(barrier.actor);
@@ -1269,7 +1277,9 @@ export class SharedSimulation implements Simulation {
         monsterTarget: actor => this.monsterTarget(actor),
         registerEntity: (entity, services) => this.registerActorExecution({ kind: "q1", entity, services, content }),
         sourceTarget: actor => { const entry = this.actorExecutions.get(actor), player = this.playerClient(actor) !== null;
+          const collision = this.scene.spatial.get(actor)?.collision;
           return { player, aimedDamage: player || (entry?.kind === "q1" ? entry.entity.aimedDamage : entry?.kind === "q2" && (entry.entity.serverFlags & 4) !== 0),
+            slidebox: entry?.kind === "q1" ? entry.entity.solid === "slidebox" : collision?.role === "solid" && collision.monster && collision.shape.kind !== "model",
             push: entry?.kind === "q1" ? entry.entity.movement === "push" : entry?.kind === "q2" ? entry.entity.motion === "push" || entry.entity.motion === "stop" : this.grappleAnchor(actor) === "brush" }; },
         random: () => runtime.random.nextUnit(),
         walkMove: (actor, yaw, distance) => movement.walkMove(actor, yaw, distance),

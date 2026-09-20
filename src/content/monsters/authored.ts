@@ -24,7 +24,8 @@ export interface AuthoredMonster extends AuthoredTarget {
   combatTarget: string;
   combatGoal: ActorId | null;
   standGround: boolean;
-  placement: { readonly kind: "ready" } | { readonly kind: "waiting"; readonly barriers: readonly { readonly actor: ActorId; readonly origin: Vec3 }[]; activator: ActorId | null };
+  placement: { readonly kind: "ready" } | { readonly kind: "teleport"; readonly origin: Vec3 }
+    | { readonly kind: "waiting"; readonly barriers: readonly { readonly actor: ActorId; readonly origin: Vec3 }[]; activator: ActorId | null };
   activation: { readonly kind: "active" } | { readonly kind: "dormant" } | { readonly kind: "scheduled"; readonly at: number; readonly activator: ActorId | null };
 }
 
