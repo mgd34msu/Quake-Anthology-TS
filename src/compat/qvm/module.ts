@@ -1,4 +1,4 @@
-import type { ExecutionProfile, GuestCallContext, GuestCallResult, GuestCallValue, GuestCheckpoint, GuestExecutor, GuestPrivateState, ModuleIdentity, Q3ApiIdentity, QvmCheckpoint, SavedGuestCallbackBinding, QvmAbiProfile } from "../../contracts/execution.ts";
+import type { ExecutionProfile, GuestCallbackReference, GuestCallContext, GuestCallResult, GuestCallValue, GuestCheckpoint, GuestExecutor, GuestPrivateState, ModuleIdentity, Q3ApiIdentity, QvmCheckpoint, SavedGuestCallbackBinding, QvmAbiProfile } from "../../contracts/execution.ts";
 import type { NumericProfile, RandomState } from "../../contracts/numeric.ts";
 import { float32ToBits } from "../../core/numeric.ts";
 import { CommonError } from "../../core/common-error.ts";
@@ -7,7 +7,7 @@ import type { ResolvedQvmArtifact } from "./artifacts.ts";
 import type { QvmAllocationProfile } from "./allocation.ts";
 import { QvmGuestMemory } from "./guest-memory.ts";
 import { QvmInterpreter } from "./interpreter.ts";
-import type { QvmArguments, QvmSyscall } from "./interpreter.ts";
+import type { QvmArguments, QvmFunctionHook, QvmFunctionObserver, QvmSyscall } from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
 import { QvmMemory } from "./memory.ts";
 import type { VmRegistration } from "./registry.ts";
@@ -60,7 +60,7 @@ export class QvmModule implements GuestExecutor {
   readonly interpreter: QvmInterpreter;
   readonly memory: QvmMemory;
   readonly guestMemory: QvmGuestMemory;
-  private currentSyscall: QvmSyscall | null = null;
+  private currentEntry: Pick<QvmSyscall, "invoke" | "invokeAsync"> | null = null;
   private currentCommandArguments: readonly string[] | null = null;
   private retired = false;
 
@@ -69,11 +69,11 @@ export class QvmModule implements GuestExecutor {
     this.executionProfile = { kind: "qvm", module: artifact.module, api: qvmApi(artifact.role, this.abiProfile), magic: 0x12721444, numeric: qvmNumericProfile };
     const systemCall = createQvmSystemCall(artifact.role, options.host, () => this.currentCommandArguments, this.abiProfile);
     this.interpreter = new QvmInterpreter(artifact.image, call => {
-      const previous = this.currentSyscall;
-      this.currentSyscall = call;
+      const previous = this.currentEntry;
+      this.currentEntry = call;
       try { return systemCall(call); }
-      finally { this.currentSyscall = previous; }
-    }, options.allocation, options.registration);
+      finally { this.currentEntry = previous; }
+    }, options.allocation, options.registration, "compiled");
     this.memory = new QvmMemory(this.interpreter.memory);
     this.guestMemory = new QvmGuestMemory(artifact.module, this.memory);
     if (artifact.role === "ui" && initialization !== deferredUiInitialization) {
@@ -101,11 +101,34 @@ export class QvmModule implements GuestExecutor {
     if (this.retired) throw new Error(`${this.options.artifact.role} QVM module has been retired`);
   }
 
+  bindFunction(reference: Extract<GuestCallbackReference, { readonly kind: "qvm" }>, hook: QvmFunctionHook): () => void {
+    this.live();
+    if (!sameModule(reference.module, this.profile.module)) throw new Error("QVM function hook belongs to a different module artifact");
+    return this.interpreter.bindFunction(reference.instructionIndex, call => {
+      this.live();
+      const previous = this.currentEntry;
+      this.currentEntry = call;
+      try { return hook(call); }
+      finally { this.currentEntry = previous; }
+    });
+  }
+
+  observeFunction(reference: Extract<GuestCallbackReference, { readonly kind: "qvm" }>, observe: QvmFunctionObserver): () => void {
+    this.live();
+    if (!sameModule(reference.module, this.profile.module)) throw new Error("QVM function observer belongs to a different module artifact");
+    return this.interpreter.observeFunction(reference.instructionIndex, call => {
+      this.live();
+      const previous = this.currentEntry; this.currentEntry = call;
+      try { return observe(call); }
+      finally { this.currentEntry = previous; }
+    });
+  }
+
   call(words: readonly number[], instructionIndex = 0): number {
     this.live();
     this.options.registration?.called();
     const arguments_ = qvmArguments(words);
-    return this.currentSyscall === null ? this.interpreter.invoke(arguments_, instructionIndex) : this.currentSyscall.invoke(arguments_, instructionIndex);
+    return this.currentEntry === null ? this.interpreter.invoke(arguments_, instructionIndex) : this.currentEntry.invoke(arguments_, instructionIndex);
   }
 
   async callAsync(words: readonly number[], instructionIndex = 0, validate: () => void = () => {}): Promise<number> {
@@ -114,15 +137,15 @@ export class QvmModule implements GuestExecutor {
     const arguments_ = qvmArguments(words);
     const current = (): void => { this.live(); validate(); };
     current();
-    const result = this.currentSyscall === null
+    const result = this.currentEntry === null
       ? await this.interpreter.invokeAsync(arguments_, instructionIndex, current)
-      : await this.currentSyscall.invokeAsync(arguments_, instructionIndex, current);
+      : await this.currentEntry.invokeAsync(arguments_, instructionIndex, current);
     current();
     return result;
   }
 
   async commandAsync(words: readonly number[], arguments_: readonly string[], validate: () => void = () => {}): Promise<number> {
-    if (this.interpreter.isActive && this.currentSyscall === null) throw new Error("QVM is already active; command arguments belong to the current invocation");
+    if (this.interpreter.isActive && this.currentEntry === null) throw new Error("QVM is already active; command arguments belong to the current invocation");
     const previous = this.currentCommandArguments;
     this.currentCommandArguments = arguments_;
     try { return await this.callAsync(words, 0, validate); }

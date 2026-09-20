@@ -38,6 +38,30 @@ const recursiveProgram: readonly Operation[] = [
 ];
 
 describe("QVM execution", () => {
+  test("interpreted block copies retain source alignment checks", () => {
+    const source = bytes([[QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 101],
+      [QvmOpcode.OP_BLOCK_COPY, 4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 0]]);
+    const vm = new QvmInterpreter(parseQvm(source), () => { throw new Error("Unexpected syscall"); });
+    expect(() => vm.invoke(qvmArguments([]))).toThrow("OP_BLOCK_COPY not dword aligned");
+  });
+
+  test("production modules retain compiled return control when guest buffers overwrite frame padding", () => {
+    const source = bytes([
+      [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 6], [QvmOpcode.OP_CALL],
+      [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
+      [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_LOCAL, 16], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_STORE4],
+      [QvmOpcode.OP_CONST, 240], [QvmOpcode.OP_BCOM], [QvmOpcode.OP_LEAVE, 16],
+    ]);
+    const artifact = resolveQvmArtifact({ module: identity(source, "qagame"), role: "qagame", bytes: source });
+    if (artifact.kind !== "bytecode") throw new Error("Expected original bytecode");
+    const module = new QvmModule({ artifact, host: rejectQvmSyscall });
+    try {
+      expect(module.call([])).toBe(-240);
+      expect(module.interpreter.stackPointer).toBe(module.interpreter.memory.length);
+      expect(module.call([])).toBe(-240);
+    } finally { module.retire(); }
+  });
+
   test("nested host entry finishes synchronously and expired syscall scopes reject", () => {
     const order: string[] = [];
     let escaped: QvmSyscall | null = null;

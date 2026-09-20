@@ -29,6 +29,24 @@ export interface QvmSyscall {
 export type QvmSystemCallResult = number | Promise<number>;
 export type QvmSystemCall = (call: QvmSyscall) => QvmSystemCallResult;
 
+export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsync"> {
+  readonly instructionIndex: number;
+  /** Live source argument words, starting at the caller's first OP_ARG slot. */
+  readonly words: DataView;
+  readonly memory: Uint8Array;
+  /** Runs the original body once with its actual caller stack and argument addresses. */
+  proceed(): number;
+  proceedAsync(): Promise<number>;
+}
+export type QvmFunctionHook = (call: QvmFunctionCall) => QvmSystemCallResult;
+export interface QvmFunctionObservation extends Pick<QvmSyscall, "invoke" | "invokeAsync"> {
+  readonly instructionIndex: number;
+  argument(index: number): number;
+}
+export type QvmFunctionObserver = (call: QvmFunctionObservation) => undefined;
+interface FunctionObserver { readonly observe: QvmFunctionObserver; active: boolean; }
+export type QvmSemantics = "interpreted" | "compiled";
+
 class Operands {
   private readonly cells: (number | undefined)[] = new Array<number | undefined>(256);
   private depth = 0;
@@ -95,6 +113,16 @@ interface SyscallScope {
   pending: Promise<void> | null;
   failure: { readonly error: unknown } | null;
 }
+interface HostCallScope extends Pick<QvmSyscall, "invoke" | "invokeAsync"> {
+  run(operation: () => number): number;
+  runAsync(operation: () => Promise<number>): Promise<number>;
+}
+interface SourceFunctionCall {
+  readonly stack: number;
+  readonly returnPC: number;
+  readonly operands: Operands;
+  readonly operandDepth: number;
+}
 
 function signedWord(value: number): number {
   if (!Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff) {
@@ -120,10 +148,13 @@ export class QvmInterpreter {
   private rootActive = false;
   private breaks = 0;
   private debug = false;
+  private functionHooks: Map<number, { readonly hook: QvmFunctionHook }> | null = null;
+  private functionObservers: Map<number, readonly FunctionObserver[]> | null = null;
 
   constructor(image: QvmImage, private readonly systemCall: QvmSystemCall,
     profile: QvmAllocationProfile = { kind: "unaccounted" },
     private readonly registration: VmRegistration | null = null,
+    private readonly semantics: QvmSemantics = "interpreted",
   ) {
     this.source = image.source;
     const allocations: QvmAllocation[] = [];
@@ -165,6 +196,40 @@ export class QvmInterpreter {
 
   get isActive(): boolean { return this.rootActive; }
   get stackPointer(): number { return this.programStack; }
+
+  /** Bind a source OP_CALL target in this interpreter's immutable instruction table. */
+  bindFunction(instructionIndex: number, hook: QvmFunctionHook): () => void {
+    this.live();
+    if (!Number.isSafeInteger(instructionIndex) || instructionIndex < 0
+      || this.codeWord(this.targetPC(instructionIndex)) !== QvmOpcode.OP_ENTER) throw new Error("QVM hook requires a function entry instruction");
+    if (this.functionHooks?.has(instructionIndex)) throw new Error("QVM function already has a hook");
+    const entry = { hook };
+    const hooks = this.functionHooks ?? new Map<number, { readonly hook: QvmFunctionHook }>();
+    this.functionHooks = hooks;
+    hooks.set(instructionIndex, entry);
+    return () => {
+      if (hooks.get(instructionIndex) !== entry) return;
+      hooks.delete(instructionIndex);
+      if (hooks.size === 0 && this.functionHooks === hooks) this.functionHooks = null;
+    };
+  }
+
+  /** Observers share an entry with each other and with its optional replacement hook. */
+  observeFunction(instructionIndex: number, observe: QvmFunctionObserver): () => void {
+    this.live();
+    if (!Number.isSafeInteger(instructionIndex) || instructionIndex < 0
+      || this.codeWord(this.targetPC(instructionIndex)) !== QvmOpcode.OP_ENTER) throw new Error("QVM observer requires a function entry instruction");
+    const observers = this.functionObservers ?? new Map<number, readonly FunctionObserver[]>(), entry = { observe, active: true };
+    this.functionObservers = observers;
+    observers.set(instructionIndex, [...observers.get(instructionIndex) ?? [], entry]);
+    return () => {
+      if (!entry.active) return;
+      entry.active = false;
+      const retained = observers.get(instructionIndex)?.filter(value => value.active) ?? [];
+      if (retained.length === 0) observers.delete(instructionIndex); else observers.set(instructionIndex, retained);
+      if (observers.size === 0 && this.functionObservers === observers) this.functionObservers = null;
+    };
+  }
 
   restoreData(data: Uint8Array): void {
     if (this.rootActive) throw new Error("Cannot restore an active QVM");
@@ -231,8 +296,8 @@ export class QvmInterpreter {
     finally { this.rootActive = false; }
   }
 
-  private executeSync(args: QvmArguments, instructionIndex: number): number {
-    const execution = this.execute(args, instructionIndex, false, () => {});
+  private executeSync(args: QvmArguments, instructionIndex: number, sourceCall?: SourceFunctionCall): number {
+    const execution = this.execute(args, instructionIndex, false, () => {}, sourceCall);
     const result = execution.next();
     if (result.done) return result.value;
     // The trap boundary rejects promises before a synchronous invocation can yield.
@@ -240,9 +305,9 @@ export class QvmInterpreter {
     throw new Error("Synchronous QVM call cannot suspend");
   }
 
-  private async executeAsync(args: QvmArguments, instructionIndex: number, validate: () => void): Promise<number> {
+  private async executeAsync(args: QvmArguments, instructionIndex: number, validate: () => void, sourceCall?: SourceFunctionCall): Promise<number> {
     validate();
-    const execution = this.execute(args, instructionIndex, true, validate);
+    const execution = this.execute(args, instructionIndex, true, validate, sourceCall);
     let next = execution.next();
     while (!next.done) {
       try {
@@ -292,7 +357,7 @@ export class QvmInterpreter {
     return word;
   }
 
-  private trap(frame: Invocation, sp: number): QvmSystemCallResult {
+  private hostCall(frame: Invocation, perform: (scope: HostCallScope) => QvmSystemCallResult): QvmSystemCallResult {
     const scope: SyscallScope = { open: true, pending: null, failure: null };
     const complete = (value: number): QvmSystemCallResult => {
       scope.open = false;
@@ -310,19 +375,19 @@ export class QvmInterpreter {
       throw error;
     };
     const available = (): void => {
-      if (!scope.open || scope.pending !== null || this.active !== frame) throw new Error("QVM recursive call requires the active syscall with no pending child");
+      if (!scope.open || scope.pending !== null || this.active !== frame) throw new Error("QVM recursive call requires the active syscall or function hook with no pending child");
       this.live();
       frame.validate();
     };
-    const invoke = (args: QvmArguments, instructionIndex = 0): number => {
+    const run = (operation: () => number): number => {
       available();
-      return this.executeSync(args, instructionIndex);
+      return operation();
     };
-    const invokeAsync = (args: QvmArguments, instructionIndex = 0, validate: () => void = () => {}): Promise<number> => {
+    const runAsync = (operation: () => Promise<number>): Promise<number> => {
       try {
         available();
         if (!frame.asynchronous) throw new Error("Synchronous QVM syscall cannot start an asynchronous child");
-        const child = this.executeAsync(args, instructionIndex, () => { frame.validate(); validate(); });
+        const child = operation();
         scope.pending = child.then(
           () => { scope.pending = null; },
           (error: unknown) => { scope.pending = null; scope.failure = { error }; },
@@ -331,10 +396,9 @@ export class QvmInterpreter {
       } catch (error) { return Promise.reject(error); }
     };
     try {
-      this.range(sp + 4, 4);
-      const result = this.systemCall({
-        words: new DataView(this.memory.buffer, this.memory.byteOffset + sp + 4, this.memory.byteLength - sp - 4),
-        memory: this.memory, invoke, invokeAsync,
+      const result = perform({ run, runAsync,
+        invoke: (args, instructionIndex = 0) => run(() => this.executeSync(args, instructionIndex)),
+        invokeAsync: (args, instructionIndex = 0, validate = () => {}) => runAsync(() => this.executeAsync(args, instructionIndex, () => { frame.validate(); validate(); })),
       });
       if (typeof result === "number") return complete(result);
       if (!frame.asynchronous) {
@@ -346,10 +410,66 @@ export class QvmInterpreter {
     } catch (error) { return failed(error); }
   }
 
+  private trap(frame: Invocation, sp: number): QvmSystemCallResult {
+    this.range(sp + 4, 4);
+    return this.hostCall(frame, scope => this.systemCall({
+      words: new DataView(this.memory.buffer, this.memory.byteOffset + sp + 4, this.memory.byteLength - sp - 4),
+      memory: this.memory, invoke: scope.invoke, invokeAsync: scope.invokeAsync,
+    }));
+  }
+
+  private intercept(frame: Invocation, sp: number, returnPC: number, instructionIndex: number, hook: QvmFunctionHook | undefined,
+    observers: readonly FunctionObserver[] | undefined): QvmSystemCallResult {
+    const sourceCall: SourceFunctionCall = { stack: sp, returnPC, operands: frame.operands, operandDepth: frame.operands.count };
+    const unusedArguments: QvmArguments = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let proceeded = false;
+    const failure: { value: { readonly error: unknown } | null } = { value: null };
+    const begin = (): void => {
+      if (proceeded) throw new Error("QVM function continuation can only run once");
+      proceeded = true;
+    };
+    this.range(sp + 8, 0);
+    const words = new DataView(this.memory.buffer, this.memory.byteOffset + sp + 8, this.memory.byteLength - sp - 8);
+    const proceed = (): QvmSystemCallResult => this.hostCall(frame, scope => {
+      const call: QvmFunctionCall = { instructionIndex, memory: this.memory,
+        words,
+        invoke: scope.invoke, invokeAsync: scope.invokeAsync,
+        proceed: () => scope.run(() => {
+          try { begin(); return this.executeSync(unusedArguments, instructionIndex, sourceCall); }
+          catch (error) { failure.value = { error }; throw error; }
+        }),
+        proceedAsync: () => scope.runAsync(() => { begin(); return this.executeAsync(unusedArguments, instructionIndex, frame.validate, sourceCall); }),
+      };
+      const result = hook !== undefined ? hook(call) : frame.asynchronous ? call.proceedAsync() : call.proceed();
+      const checked = (value: number): number => { if (failure.value !== null) throw failure.value.error; return value; };
+      return typeof result === "number" ? checked(result) : result.then(checked);
+    });
+    const observeNext = (start: number): QvmSystemCallResult => {
+      for (let index = start; observers !== undefined && index < observers.length; index++) {
+        const observer = observers[index];
+        if (observer === undefined || !observer.active) continue;
+        const result = this.hostCall(frame, scope => {
+          let open = true;
+          const observation: QvmFunctionObservation = { instructionIndex, invoke: scope.invoke, invokeAsync: scope.invokeAsync,
+            argument: argumentIndex => {
+              if (!open) throw new Error("QVM function observation has ended");
+              if (!Number.isSafeInteger(argumentIndex) || argumentIndex < 0 || argumentIndex >= 10) throw new RangeError("QVM argument index outside source call");
+              return words.getInt32(argumentIndex * 4, true);
+            } };
+          try { observer.observe(observation); return 0; }
+          finally { open = false; }
+        });
+        if (typeof result !== "number") return result.then(() => observeNext(index + 1));
+      }
+      return proceed();
+    };
+    return observeNext(0);
+  }
+
   private *execute(args: QvmArguments, instructionIndex: number, asynchronous: boolean,
-    validate: () => void): Generator<Promise<number>, number, number> {
+    validate: () => void, sourceCall?: SourceFunctionCall): Generator<Promise<number>, number, number> {
     for (const word of args) signedWord(word);
-    this.registration?.printCall(args[0]);
+    if (sourceCall === undefined) this.registration?.printCall(args[0]);
     const profile = this.registration?.executionProfile() ?? { kind: "release" };
     const debug = profile.kind === "debug";
     const previousDebug = this.debug;
@@ -357,17 +477,22 @@ export class QvmInterpreter {
     const trace = profile.kind === "debug" ? profile.trace : 0;
     const print = (text: string): void => { this.registration?.print(text); };
     const entryStack = this.programStack;
-    let sp = this.stack(entryStack - 48);
+    const previousCallLevel = this.callLevel;
+    let sp = sourceCall === undefined ? this.stack(entryStack - 48) : sourceCall.stack;
     const previous = this.active;
-    const frame: Invocation = { operands: new Operands(debug), asynchronous, validate };
+    const frame: Invocation = { operands: sourceCall?.operands ?? new Operands(debug), asynchronous, validate };
     const operands = frame.operands;
+    // vm_x86.c retains CALL/RET control on the host stack, outside writable guest locals.
+    const returns = this.semantics === "compiled" ? [sp, sourceCall?.returnPC ?? -1] : null;
     this.active = frame;
     try {
-      this.writeWord(sp, -1);
-      this.writeWord(sp + 4, 0);
-      args.forEach((word, index) => this.writeWord(sp + 8 + index * 4, word));
-      this.callLevel = 0;
-      this.registration?.debug(0);
+      if (sourceCall === undefined) {
+        this.writeWord(sp, -1);
+        this.writeWord(sp + 4, 0);
+        args.forEach((word, index) => this.writeWord(sp + 8 + index * 4, word));
+        this.callLevel = 0;
+        this.registration?.debug(0);
+      }
       let pc = this.targetPC(instructionIndex);
       let profileSymbol = debug ? this.symbols.valueToFunctionSymbol(0) : null;
       const debugString = (): string => `${this.indent()}${operands.count}`;
@@ -415,7 +540,8 @@ export class QvmInterpreter {
           }
           case QvmOpcode.OP_LEAVE: {
             sp = this.stack(sp + this.codeWord(pc));
-            const target = this.readWord(sp);
+            const target = returns === null ? this.readWord(sp) : returns.pop();
+            if (target === undefined || returns !== null && returns.pop() !== sp) throw new Error("QVM function returned with an invalid program stack");
             if (debug) {
               profileSymbol = this.symbols.valueToFunctionSymbol(target);
               if (trace !== 0) {
@@ -423,14 +549,31 @@ export class QvmInterpreter {
                 print(`${debugString()}<--- ${this.symbols.valueToSymbol(target)}\n`);
               }
             }
+            if (sourceCall !== undefined && sp === sourceCall.stack && (returns === null || returns.length === 0)) {
+              if (target !== sourceCall.returnPC || operands.count !== sourceCall.operandDepth + 1) throw new Error("QVM function returned with an invalid caller stack");
+              return operands.pop();
+            }
             if (target === -1) return operands.result();
             pc = target;
             break;
           }
           case QvmOpcode.OP_CALL: {
+            const returnPC = pc;
             this.writeWord(sp, pc);
             const target = operands.pop();
-            if (target >= 0) pc = this.targetPC(target);
+            if (target >= 0) {
+              const binding = this.functionHooks?.get(target), observers = this.functionObservers?.get(target);
+              if (binding === undefined && observers === undefined) { returns?.push(sp, returnPC); pc = this.targetPC(target); }
+              else {
+                const savedCallLevel = this.callLevel, savedStack = this.programStack;
+                this.programStack = sp - 4;
+                try {
+                  const result = this.intercept(frame, sp, returnPC, target, binding?.hook, observers);
+                  operands.push(typeof result === "number" ? result : yield result);
+                  pc = returns === null ? this.readWord(sp) : returnPC;
+                } finally { this.callLevel = savedCallLevel; this.programStack = savedStack; }
+              }
+            }
             else {
               if (trace !== 0) print(`${debugString()}---> systemcall(${-1 - target})\n`);
               const savedCallLevel = this.callLevel;
@@ -441,7 +584,7 @@ export class QvmInterpreter {
               const value = typeof result === "number" ? result : yield result;
               if (savedFrame !== null) this.writeWord(sp + 4, savedFrame);
               operands.push(value);
-              pc = this.readWord(sp);
+              pc = returns === null ? this.readWord(sp) : returnPC;
               this.callLevel = savedCallLevel;
               if (trace !== 0) print(`${debugString()}<--- ${this.symbols.valueToSymbol(pc)}\n`);
             }
@@ -482,18 +625,29 @@ export class QvmInterpreter {
           }
           case QvmOpcode.OP_ARG: this.writeWord(sp + this.codeWord(pc++), operands.pop()); break;
           case QvmOpcode.OP_BLOCK_COPY: {
-            const source = operands.pop() & this.dataMask;
-            const destination = operands.pop() & this.dataMask;
-            let count = ((source + this.codeWord(pc)) & this.dataMask) - source;
+            const source = operands.pop();
+            const destination = operands.pop();
+            const count = this.codeWord(pc);
             pc += 4;
-            count = ((destination + count) & this.dataMask) - destination;
-            if ((source | destination | count) & 3) throw new CommonError("drop", "OP_BLOCK_COPY not dword aligned");
-            for (let word = (count >> 2) - 1; word >= 0; word--) {
-              this.writeWord(destination + word * 4, this.readWord(source + word * 4));
+            if (this.semantics === "interpreted") {
+              const from = source & this.dataMask, to = destination & this.dataMask;
+              const sourceCount = ((from + count) & this.dataMask) - from;
+              const copied = ((to + sourceCount) & this.dataMask) - to;
+              if ((from | to | copied) & 3) throw new CommonError("drop", "OP_BLOCK_COPY not dword aligned");
+              for (let word = (copied >> 2) - 1; word >= 0; word--) this.writeWord(to + word * 4, this.readWord(from + word * 4));
+              break;
             }
+            if (count < 0 || source < 0 || destination < 0 || source + count > this.dataMask || destination + count > this.dataMask) {
+              throw new CommonError("drop", "OP_BLOCK_COPY out of range");
+            }
+            // Q3's compiled VM accepts unaligned literals; ioquake's VM_BlockCopy checks bounds and copies bytes.
+            this.memory.copyWithin(destination, source, source + count);
             break;
           }
-          case QvmOpcode.OP_BCOM: operands.complementPrevious(); break;
+          case QvmOpcode.OP_BCOM:
+            if (this.semantics === "compiled") operands.set(~operands.peek());
+            else operands.complementPrevious();
+            break;
           case QvmOpcode.OP_SEX8: case QvmOpcode.OP_SEX16: case QvmOpcode.OP_NEGI:
           case QvmOpcode.OP_NEGF: case QvmOpcode.OP_CVIF: case QvmOpcode.OP_CVFI:
             operands.set(evaluateQvmUnary(opcode, operands.peek()));
@@ -528,7 +682,7 @@ export class QvmInterpreter {
     } finally {
       this.programStack = entryStack;
       this.active = previous;
-      if (previous !== null) this.debug = previousDebug;
+      if (previous !== null) { this.debug = previousDebug; this.callLevel = previousCallLevel; }
     }
   }
 }
