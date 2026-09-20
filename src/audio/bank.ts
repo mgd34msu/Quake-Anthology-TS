@@ -3,7 +3,7 @@ import type { MountedContent } from "../content/mounts/index.ts";
 import type { SoundAsset, SoundFamily } from "./types.ts";
 import { decodeSoundBytes, openPcmBytes } from "./streams.ts";
 import type { PcmStream } from "./streams.ts";
-import { decodeQuakeWav } from "./wav.ts";
+import { decodeQ3Wav, decodeQuakeWav } from "./wav.ts";
 /** Registrations retain both the selected resource and its source decode policy. */
 export class SoundBank {
     private readonly assets = new Map<string, SoundAsset>();
@@ -20,7 +20,7 @@ export class SoundBank {
         const prior = this.assets.get(key);
         if (prior !== undefined)
             return prior;
-        const pcm = family !== "q3" && opened.bytes[0] === 82 ? decodeQuakeWav(opened.bytes, path) : decodeSoundBytes(opened.bytes, path);
+        const pcm = opened.bytes[0] === 82 ? (family === "q3" ? decodeQ3Wav : decodeQuakeWav)(opened.bytes, path) : decodeSoundBytes(opened.bytes, path);
         const asset = { resource: opened.reference.id, reference: opened.reference, name: path, pcm };
         this.assets.set(key, asset);
         return asset;

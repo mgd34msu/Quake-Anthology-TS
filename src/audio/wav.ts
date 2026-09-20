@@ -192,7 +192,11 @@ function parseSamplerLoop(reader: BinaryReader, source: string, chunkOffset: num
 export function decodeWav(bytes: Uint8Array, source = "<buffer>"): DecodedWav {
     return decodePcm(bytes, source, false);
 }
-function decodePcm(bytes: Uint8Array, source: string, sourceSignedChunks: boolean): DecodedWav {
+/** Q3 GetWavinfo reads fmt/data only; loop control belongs to its sound channel. */
+export function decodeQ3Wav(bytes: Uint8Array, source = "<buffer>"): DecodedWav {
+    return decodePcm(bytes, source, true, false);
+}
+function decodePcm(bytes: Uint8Array, source: string, sourceSignedChunks: boolean, readLoops = true): DecodedWav {
     const reader = new BinaryReader(bytes, source);
     if (reader.length < 12)
         reject(source, 0, "truncated RIFF/WAVE header");
@@ -235,10 +239,10 @@ function decodePcm(bytes: Uint8Array, source: string, sourceSignedChunks: boolea
         else if (chunkId === "data" && data === null) {
             data = { offset: chunkOffset, length: chunkLength };
         }
-        else if (chunkId === "cue " && cueLoopStart === null) {
+        else if (readLoops && chunkId === "cue " && cueLoopStart === null) {
             cueLoopStart = parseCueLoop(reader.section(chunkOffset, chunkLength), source, chunkOffset);
         }
-        else if (chunkId === "smpl" && samplerLoopStart === null) {
+        else if (readLoops && chunkId === "smpl" && samplerLoopStart === null) {
             samplerLoopStart = parseSamplerLoop(reader.section(chunkOffset, chunkLength), source, chunkOffset, sourceSignedChunks);
         }
         reader.seek(nextChunkOffset);
