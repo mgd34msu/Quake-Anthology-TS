@@ -1,4 +1,5 @@
 import type { WireSelection } from "../../network/common/session.ts";
+import { ModCommands, readModCommand } from "../../world/session/mod-commands.ts";
 import { ApplicationQ3Rankings } from "./q3-rankings.ts";
 import type { RankingServiceProvider, RankingPlayerState } from "../../network/services/rankings.ts";
 import type { RankingAccountActions } from "../../ui/settings/rankings.ts";
@@ -113,7 +114,7 @@ import { openApplicationTransport } from "./network/transport.ts";
 import type { ApplicationNetworkAddress } from "./network/transport.ts";
 import { addressKey } from "../../network/common/endpoint.ts";
 import { Q2_DATAGRAM_LIMITS, Q3_DATAGRAM_LIMITS, UNIFIED_DATAGRAM_LIMITS } from "../../network/common/transport.ts";
-import { CommandBuffer, tokenizeCommand, type CommandBufferOptions, type CommandHandler } from "../../core/commands/index.ts";
+import { CommandBuffer, tokenizeCommand, type CommandBufferOptions, type CommandHandler, type CommandInvocation } from "../../core/commands/index.ts";
 import { nativeAtoi } from "../../core/numeric.ts";
 import { CvarRegistry, CvarFlag } from "../../core/cvars/index.ts";
 import type { CvarSnapshot } from "../../core/cvars/index.ts";
@@ -423,6 +424,8 @@ export class Application {
   private operatorSend: ((to: NetworkAddress, bytes: Uint8Array) => boolean) | null = null;
   private sourceCommandBinding: Pick<PreparedSourceCommands, "options"> | null = null;
   private releaseSourceCommands: () => void = () => {};
+  private releaseModInputCommands: () => void = () => {};
+  private modInputCommands: CommandBuffer | null = null;
   private q2Console: ApplicationQ2Console | null = null;
   private pendingRestart: number | null = null;
   private lastRestartFrame = -1;
@@ -674,6 +677,7 @@ export class Application {
       const networkPlayerIdentities = new Map<ClientId, { readonly seat: number; readonly socialId: string }>();
       let application: Application | null = null;
       let guestConsole: CommandBuffer | null = null;
+      const modCommands = new ModCommands({ context: { session: session.session, origin: { kind: "server-console" } }, commands: () => guestConsole });
       let startup: Awaited<ReturnType<typeof prepareInitialConfiguration>> | null = null;
       let loadedContent: LoadedApplicationContent | null = null;
       let profileConfiguration: PreparedProfileConfiguration | null = null;
@@ -707,8 +711,6 @@ export class Application {
         }
         const sourceArchive = initialSave !== undefined || options.dedicated ? [] : preparation.kind !== "restored" ? await loadCvarArchive(configurationStore(options, preparation.content, preparation.content.selection.source.content),
             ["source", preparation.content.selection.source.content, preparation.content.selection.source.provider], configurationDialect(preparation.content)) : [];
-        const nativeCommands: string[] = [];
-
         const guestCommands = () => {
           const commands = guestConsole;
           if (commands === null) throw new Error("Q3 guest console is unavailable");
@@ -784,7 +786,7 @@ export class Application {
         const content = preparation.kind === "restored" ? preparation.content : await loadApplicationContent(options, recipe, undefined, catalog);
         const nativeContext = Application.nativeCommandContext.bind(null, content, session.session);
         const nativeCommand = (text: string): undefined => {
-          if (guestConsole === null) nativeCommands.push(text); else guestConsole.append(text, nativeContext());
+          modCommands.append(text, nativeContext(), Application.contentDialect(content));
           return undefined;
         };
         if (preparation.kind === "borrowed" && profileConfiguration === null) await preparation.content.close();
@@ -812,7 +814,7 @@ export class Application {
             || options.teamArenaSkirmish.cvars.every(setting => borrowedSource?.variableString(setting.name) === setting.value)
             ? {} : { q3Cvars: teamArenaSourceCvars(options.teamArenaSkirmish, borrowedSource?.snapshots() ?? sourceArchive) }),
           ...await Application.guestOptions(content, options, host, guestCommands, candidateGraph, nativeCommand), prepareRereleaseNavigation: simulation => createApplicationBotNavigation({ content, simulation }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, weaponBehaviors: content.preparedWeaponBehaviors, recipe: content.recipe, world: content.world, mounts: content.mounts,
-          preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [],
+          preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [], modCommands,
           skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
           ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
           maxClients,
@@ -858,7 +860,7 @@ export class Application {
         if (initialSave !== undefined && simulation.q3Source() !== null && savedBots === null) throw new Error("Q3 application restoration requires saved bot service state");
         await application.bindSourceCommands(initialSave !== undefined);
         guestConsole = application.sourceCommands;
-        for (const text of nativeCommands.splice(0)) guestCommands().append(text, nativeContext());
+        modCommands.flush();
         await application.prepareGuestBots(content, simulation);
         if (!options.dedicated && simulation.q3Guest() !== null) {
           const authority = createQ3ApplicationServerHost({ session, simulation, content, print: text => host.print(text), ...(initialSave === undefined ? {} : { mode: "restore" }) });
@@ -1141,6 +1143,13 @@ export class Application {
   private refreshApplicationTools(): void {
     const commands = this.sourceCommands;
     if (commands === null) return;
+    const inputCommands = this.graphical?.input.commands ?? null;
+    if (inputCommands !== this.modInputCommands) {
+      this.releaseModInputCommands(); this.modInputCommands = inputCommands;
+      const handler: CommandHandler = command => { this.modCommand(command, this.simulation); return undefined; };
+      const installed = inputCommands?.register("modcmd", handler, { summary: "Run a command for one enabled component.", usage: "modcmd PRODUCT/COMPONENT_ID <command>", examples: ["modcmd addon/component echo ready"] }) ?? false;
+      this.releaseModInputCommands = () => { if (installed) inputCommands?.unregister("modcmd", handler); };
+    }
     if (this.tools === null) this.tools = new ApplicationTools(commands, {
       mounts: () => this.content.mounts, outputRoot: () => applicationCaptureRoot(this.options.userContentRoot),
       milliseconds: () => this.elapsed, cvars: () => this.sourceCvars(),
@@ -1166,6 +1175,13 @@ export class Application {
     this.publishSourceCommands(prepared);
   }
 
+  private modCommand(command: CommandInvocation, simulation: SharedSimulation): void {
+    const { selection, text } = readModCommand(command.raw);
+    const mods = simulation.options.modCommands;
+    if (mods === undefined) throw new Error("This world has no component command services");
+    mods.execute(selection, text, command.source);
+  }
+
   private publishSourceCommands(prepared: PreparedSourceCommands): void {
     const options = prepared.options;
     if (options === null) throw new Error("Published world requires source command bindings");
@@ -1174,14 +1190,17 @@ export class Application {
     if (this.sourceCommands === null) {
       this.sourceCommands = new CommandBuffer({ dialect: options.dialect, context: options.context,
         cvarRouting: {
-          owner: () => {
-            const cvars = this.sourceCommandBinding?.options?.cvars;
+          owner: (name, source) => {
+            const current = this.sourceCommandBinding?.options;
+            const cvars = current?.cvarRouting?.owner(name, source) ?? current?.cvars;
             if (cvars === undefined) throw new Error("Published authority requires a source registry");
             return cvars;
           },
-          visible: () => { const cvars = this.sourceCommandBinding?.options?.cvars; return cvars === undefined ? [] : [cvars]; },
+          visible: source => { const current = this.sourceCommandBinding?.options;
+            return current?.cvarRouting?.visible(source) ?? (current?.cvars === undefined ? [] : [current.cvars]); },
         }, print: text => this.host.print(text),
         readScript: (name, source) => this.sourceCommandBinding?.options?.readScript?.(name, source),
+        sourceCommand: (command, registered) => this.sourceCommandBinding?.options?.sourceCommand?.(command, registered) ?? false,
         clientGame: command => this.sourceCommandBinding?.options?.clientGame?.(command) ?? false,
         serverGame: command => this.sourceCommandBinding?.options?.serverGame?.(command) ?? false,
         forwardToServer: command => this.sourceCommandBinding?.options?.forwardToServer?.(command) });
@@ -1192,8 +1211,14 @@ export class Application {
   }
 
   private async prepareSourceCommands(simulation: SharedSimulation, content: LoadedApplicationContent, restoring: boolean, action: (request: ApplicationCommandRequest) => undefined): Promise<PreparedSourceCommands> {
-    const queue = (name: string, args: readonly string[], seat: SeatId | null, source?: CommandContext): undefined =>
-      action({ target: "application", name, arguments_: [...args], seat, ...(source === undefined ? {} : { source }) });
+    const mods = simulation.options.modCommands;
+    const engineCommands = new Set([...sourceAdministrationCommandNames(Application.contentDialect(content)).filter(name => name !== "sv"), ...applicationAudioCommands,
+      ...q3ProductMapCommands(content.q3Product?.policy ?? { kind: "retail" }), "quit", "map", "gamemap", "changelevel", "map_restart", "save", "load", "exec", "cinematic"].map(name => name.toLowerCase()));
+    const queue = (name: string, args: readonly string[], seat: SeatId | null, source?: CommandContext): undefined => {
+      if (source?.producer?.instance !== undefined && !engineCommands.has(name.toLowerCase()))
+        throw new Error(`Command ${name} belongs to the primary world; component ${source.producer.module.id} has no declared command with that name`);
+      return action({ target: "application", name, arguments_: [...args], seat, ...(source === undefined ? {} : { source }) });
+    };
     const sourceAction = (name: string, args: readonly string[], source: CommandContext): undefined =>
       action({ target: "source", name, arguments_: [...args], seat: null, source });
     let program: ReturnType<CommandBuffer["prepareProgram"]> | null = null;
@@ -1201,10 +1226,39 @@ export class Application {
     const bindings: ((commands: CommandBuffer) => () => void)[] = [];
     const readSourceScript = sourceScriptReader(content.catalog, content.mounts, content.recipe.engineBehavior.content);
     const create = (selected: CommandBufferOptions): CommandBuffer => {
-      options = { ...selected, readScript: selected.readScript ?? (async name => {
-        const bytes = await readSourceScript(name); return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
-      }) };
       let commands: CommandBuffer;
+      options = { ...selected,
+        cvarRouting: {
+          owner: (name, source) => {
+            const registry = mods?.cvars(source) ?? selected.cvarRouting?.owner(name, source) ?? selected.cvars;
+            if (registry === undefined) throw new Error("Source command has no cvar registry"); return registry;
+          },
+          visible: source => { const registry = mods?.cvars(source);
+            return registry === undefined || registry === null ? selected.cvarRouting?.visible(source) ?? (selected.cvars === undefined ? [] : [selected.cvars]) : [registry]; },
+        },
+        readScript: (name, source) => {
+          if (source.producer?.instance !== undefined) return mods?.readScript(name, source);
+          return selected.readScript?.(name, source) ?? readSourceScript(name).then(bytes => bytes === undefined ? undefined : new TextDecoder().decode(bytes));
+        },
+        sourceCommand: (command, registered) => {
+          const name = (command.argv[0] ?? "").toLowerCase();
+          if (command.source.producer?.instance === undefined || engineCommands.has(name)) return false;
+          if (mods?.handles(name, command.source)
+            || name === "sv" && mods?.cvars(command.source)?.dialect.startsWith("q2")) {
+            if (mods?.invoke(command) !== true) throw new Error(`Component command was not handled: ${command.raw}`);
+            return true;
+          }
+          if (registered) throw new Error(`Command ${name} belongs to the primary world; component ${command.source.producer.module.id} has no declared command with that name`);
+          return false;
+        },
+        clientGame: command => command.source.producer?.instance === undefined ? selected.clientGame?.(command) : false,
+        serverGame: command => command.source.producer?.instance === undefined ? selected.serverGame?.(command) : mods?.invoke(command) ?? false,
+        forwardToServer: command => {
+          if (command.source.producer?.instance === undefined) return selected.forwardToServer?.(command);
+          if (command.dialect === "q3" || mods?.invoke(command) !== true) this.host.print(`Unknown component command: ${command.raw}\n`);
+          return undefined;
+        },
+      };
       if (this.sourceCommands === null) commands = new CommandBuffer(options);
       else { program = this.sourceCommands.prepareProgram(options); commands = program.commands; }
       const operatorNames = sourceAdministrationCommandNames(selected.dialect).filter(name =>
@@ -1222,6 +1276,8 @@ export class Application {
         let origin = invocation.source.origin; while (origin.kind === "script") origin = origin.caller;
         return queue(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
       });
+      register(commands, "modcmd", command => { this.modCommand(command, simulation); return undefined; });
+      for (const name of ["changelevel", "gamemap"]) register(commands, name, command => queue(name, command.args, null, command.source));
       return commands;
     };
     const register = (commands: CommandBuffer, name: string, handler: CommandHandler): void => {
@@ -1312,6 +1368,7 @@ export class Application {
       commands.unregister("exec");
       bindings.push(owner => { owner.unregister("exec"); return () => {}; });
       register(commands, "exec", invocation => {
+        if (invocation.source.producer?.instance !== undefined) { invocation.executeScript(); return undefined; }
         if (guest.game.module.interpreter.isActive) throw new Error("Q3 guest immediate exec is unsupported; append the script command");
         queue("exec", invocation.args, null, { session: invocation.source.session, origin: invocation.source.origin });
         return undefined;
@@ -2589,16 +2646,16 @@ export class Application {
       const clients = savedClients?.clients ?? this.simulation.clientIdentities().filter(client => preserveBots || !previousBotClients.some(bot => bot.client.id.equals(client)));
       let candidatePublished = false;
       let candidateCommands: CommandBuffer | null = null;
+      const modCommands = new ModCommands({ context: { session: this.session.session, origin: { kind: "server-console" } },
+        commands: () => candidatePublished ? this.sourceCommands : candidateCommands });
       const candidateActions: ApplicationCommandRequest[] = [];
       const candidateAction = (request: ApplicationCommandRequest): undefined => {
         if (candidatePublished) this.requestedCommands.push(request); else candidateActions.push(request);
         return undefined;
       };
-      const nativeCommands: string[] = [];
       const nativeContext = Application.nativeCommandContext.bind(null, content, this.session.session);
       const nativeCommand = (text: string): undefined => {
-        const commands = candidatePublished ? this.sourceCommands : candidateCommands;
-        if (commands === null) nativeCommands.push(text); else commands.append(text, nativeContext());
+        modCommands.append(text, nativeContext(), Application.contentDialect(content));
         return undefined;
       };
       const guestCommands = (): CommandBuffer => {
@@ -2646,7 +2703,7 @@ export class Application {
       }
       const retainedNative = nativeTravel === undefined ? undefined : previousSimulation.captureNativeQ2Travel(nativeTravel.newUnit, nativeTravel.spawnPoint);
       simulation = await loadSimulation({ ...(retainedNative === undefined ? {} : { nativeQ2Travel: retainedNative }), dedicated: options.dedicated, ...await Application.guestOptions(content, options, this.host, guestCommands, candidateGraph, nativeCommand), prepareRereleaseNavigation: simulation => createApplicationBotNavigation({ content, simulation }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, weaponBehaviors: content.preparedWeaponBehaviors, recipe: content.recipe, world: content.world, mounts: content.mounts,
-        preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [], ...(modTravel === undefined ? {} : { modTravel }),
+        preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [], modCommands, ...(modTravel === undefined ? {} : { modTravel }),
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? (q3Map?.maxClients === undefined ? undefined : previousSimulation.q3Guest() === null ? q3Map.maxClients : Math.max(q3Map.maxClients, ...clients.map(client => client.slot + 1))) ?? skirmish?.maxClients ?? nextRules?.maxClients ?? this.simulation.options.maxClients,
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => this.networkPlayerIdentities.get(client) ?? ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
@@ -2722,7 +2779,7 @@ export class Application {
       }
       const preparedCommands = await this.prepareSourceCommands(nextSimulation, content, save !== undefined, candidateAction);
       candidateCommands = preparedCommands.commands;
-      for (const text of nativeCommands.splice(0)) guestCommands().append(text, nativeContext());
+      modCommands.flush();
       await this.prepareGuestBots(content, nextSimulation);
       const restoredGuest = nextSimulation.q3Guest();
       if (guestTransition !== null && restoredGuest !== null) {
@@ -3624,7 +3681,7 @@ export class Application {
   private async nativeMatchTransition(request: ApplicationCommandRequest): Promise<boolean> {
     const producer = request.source?.producer;
     if ((request.name !== "map" && request.name !== "gamemap") || request.target !== "application"
-      || request.arguments_.length !== 1 || producer?.kind !== "game-module"
+      || request.arguments_.length !== 1 || producer?.kind !== "game-module" || producer.instance !== undefined
       || request.source?.session !== this.session.session || this.simulation.q2Native() === null) return false;
     return this.finishQ2Match({ kind: "game-module-map-transition", module: producer.module });
   }
@@ -3650,6 +3707,7 @@ export class Application {
     const pending = direct ?? this.requestedCommands;
     if (direct === undefined) this.requestedCommands = [];
     for (const [index, request] of pending.entries()) {
+      if (request.source?.producer?.instance !== undefined && this.simulation.options.modCommands?.active(request.source) !== true) continue;
       if (this.stepping && (this.pendingShellPublication || this.videoRestart?.pending)) { this.requestedCommands.unshift(...pending.slice(index)); return; }
       if (request.source?.producer?.kind === "game-module" && (request.name === "map" || request.name === "gamemap")) {
         if (this.captureBlocksTransition()) { this.requestedCommands.unshift(...pending.slice(index)); return; }
@@ -3936,16 +3994,16 @@ export class Application {
           if (!this.isTeamArenaSkirmish() || this.simulation.q3Source()?.level.intermissionTime === 0) throw new Error("Team Arena match has not finished");
           this.pendingTeamArena = command.name === "teamarena-next" ? "next" : "retry";
         }
-        else if (command.name === "gamemap" && this.simulation.q2Native() !== null) {
+        else if ((command.name === "gamemap" || command.name === "changelevel") && this.simulation.q2Native() !== null) {
           const map = command.arguments_[0];
-          if (map === undefined || command.arguments_.length !== 1) throw new Error("Usage: gamemap <map>");
+          if (map === undefined || command.arguments_.length !== 1) throw new Error(`Usage: ${command.name} <map>`);
           this.pendingNativeTravel = parseQ2Travel(map); this.pendingMap = null; this.pendingQ3Map = undefined; this.pendingRestart = null; this.pendingTransition = null;
         }
-        else if (command.name === "map" || this.simulation.q3Source() !== null && ["devmap", "spmap", "spdevmap"].includes(command.name)) {
+        else if (["map", "gamemap", "changelevel"].includes(command.name) || this.simulation.q3Source() !== null && ["devmap", "spmap", "spdevmap"].includes(command.name)) {
           const map = command.arguments_[0];
           if (map === undefined) throw new Error("Usage: map <name>");
           const source = this.simulation.q3Source();
-          this.pendingQ3Map = source === null ? undefined : q3MapLaunch(this.content.q3Product?.policy ?? { kind: "retail" }, command.name, Number(source.host.cvars.find("g_gametype")?.latchedValue ?? source.host.cvars.variableString("g_gametype")));
+          this.pendingQ3Map = source === null ? undefined : q3MapLaunch(this.content.q3Product?.policy ?? { kind: "retail" }, command.name === "gamemap" || command.name === "changelevel" ? "map" : command.name, Number(source.host.cvars.find("g_gametype")?.latchedValue ?? source.host.cvars.variableString("g_gametype")));
           this.pendingMap = mapResourcePath(map); this.pendingNativeTravel = null;
         }
         else if ((command.name === "pause" || command.name === "status" || command.name === "ping")
@@ -4373,6 +4431,7 @@ export class Application {
       try { close(); } catch (error) { errors.push(error); }
     }
     try { this.releaseSourceCommands(); } catch (error) { errors.push(error); }
+    try { this.releaseModInputCommands(); } catch (error) { errors.push(error); }
     try { this.profileConfiguration?.routing.close(); } catch (error) { errors.push(error); }
     this.profileConfiguration = null;
     try { await this.configurationScripts?.close(); } catch (error) { errors.push(error); }

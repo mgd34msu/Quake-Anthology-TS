@@ -18,6 +18,9 @@ import { QcModCombat, validateQcModCombat } from "./mod-combat.ts";
 import { QcModMessages } from "./mod-messages.ts";
 import { createQcMovementBindings } from "./movement-host.ts";
 import { QcModEnvironment } from "./mod-environment.ts";
+import { qcConsoleCall } from "./mod-commands.ts";
+import { asciiFold, tokenizeCommand, type CommandInvocation } from "../../core/commands/index.ts";
+import type { ModCommandPort } from "../../world/session/mod-commands.ts";
 import type { FrameContext } from "../../contracts/time.ts";
 import { createQcBodyBinding, QcActorState } from "./actor-state.ts";
 import { createQcPusherServices } from "./pusher-host.ts";
@@ -82,6 +85,13 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
     }
   }
   const callbacks = new Set<string>();
+  const commands = new Set<string>();
+  for (const command of declaration.commands ?? []) {
+    const name = asciiFold(command.name), tokens = tokenizeCommand(command.name, program.api.kind).argv;
+    if (tokens.length !== 1 || tokens[0] !== command.name || command.name.includes(";") || commands.has(name)) throw new Error(`Invalid or duplicate mod command ${command.name}`);
+    commands.add(name);
+    validateCall(program, qcConsoleCall(command, [], ""), new Set<ModCallbackInput>(), `console command ${command.name}`);
+  }
   for (const call of declaration.initialize ?? []) validateCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "initialization");
   if (declaration.frame !== undefined) validateCall(program, declaration.frame, new Set<ModCallbackInput>(["self", "time", "elapsed"]), "source frame");
   const cvars = new Set<string>();
@@ -129,6 +139,7 @@ export class QcModProvider {
   private loading = false;
   private initialized = false;
   private closed = false;
+  private commands: ModCommandPort | null = null;
   constructor(readonly program: QcProgram, readonly module: ModuleIdentity, readonly declaration: ModCallbackDeclaration,
     readonly services: ModHostServices, readonly random: QcModRandom, readonly media?: QcModMedia) {
     validateQcMod(program, declaration);
@@ -186,6 +197,10 @@ export class QcModProvider {
         } })) host.set(name, builtin);
     }
     for (const [name, builtin] of this.environment.host) host.set(name, builtin);
+    host.set("localcmd", vm => {
+      if (this.commands === null) return vm.fail("Mod localcmd requires the destination command service");
+      this.commands.append(vm.argString(0));
+    });
     this.machine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), serverActive: () => !this.loading,
       builtins: createQcBuiltins({ kind: program.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake", random, host,
         prepareEntities: () => this.prepareEntities(),
@@ -434,6 +449,18 @@ export class QcModProvider {
       case "string": words.setInt(offset, this.machine.strings.setEngine(`mod-value:${value.value}`, value.value, Math.max(128, value.value.length + 1))); break;
       case "actor": words.setInt(offset, this.reference(value.value)); break;
     }
+  }
+  get cvars() { return this.environment.cvars; }
+  bindCommands(commands: ModCommandPort): void {
+    if (this.commands !== null) throw new Error("Mod commands are already bound");
+    this.commands = commands;
+  }
+  consoleCommand(invocation: CommandInvocation): boolean {
+    invocation.assertActive();
+    const name = asciiFold(invocation.argv[0] ?? ""), command = this.declaration.commands?.find(command => asciiFold(command.name) === name);
+    if (command === undefined) return false;
+    this.invoke(qcConsoleCall(command, invocation.argv, invocation.argsText), new Map<ModCallbackInput, QcModValue>());
+    return true;
   }
   invoke(call: ModSourceCall, inputs: QcModInputs): number {
     if (this.closed) throw new Error("Gameplay mod is closed");

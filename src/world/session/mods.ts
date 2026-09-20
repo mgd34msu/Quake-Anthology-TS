@@ -27,6 +27,7 @@ import type { NativeModHostContext } from "../../app/bootstrap/simulation/native
 import type { QuakeCLocalMessageHost } from "../../app/bootstrap/simulation/quakec-local-messages.ts";
 import type { NetworkEvent } from "../../contracts/protocol.ts";
 import type { Q1ClientVisibilityScene, Q1VisibilityClient } from "../gameplay/q1-client-visibility.ts";
+import type { ModCommands } from "./mod-commands.ts";
 
 export interface ModOperations {
   readonly actors: ActorCallbackTable["operations"];
@@ -59,6 +60,7 @@ export interface ModInitialization {
   assertCurrent(): void;
 }
 export interface ModHostServices {
+  readonly commands?: Pick<ModCommands, "bind">;
   readonly native?: NativeModHostContext;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;

@@ -36,6 +36,8 @@ export function prepareQvmMod(options: PrepareQvmModOptions): PreparedMod {
       if (context.services === null) throw new Error("QVM gameplay mods require destination world services");
       const services = context.services, source = new QvmModProvider(artifact, declaration, services, context.assertCurrent, description.source.content, options.mounts);
       context.resources.own(source);
+      if (services.commands !== undefined) source.bindCommands(services.commands.bind({ selection: description.selection, module, cvars: source.cvars,
+        invoke: command => source.consoleCommand(command), readScript: name => source.readScript(name) }, context.resources));
       if (context.restoring !== true) await source.initialize();
       context.assertCurrent();
       return {

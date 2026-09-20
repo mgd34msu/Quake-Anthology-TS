@@ -699,7 +699,7 @@ export class SharedSimulation implements Simulation {
       if (options.preparedMods !== undefined || enabled.length !== 0 || modState !== undefined || options.modTravel !== undefined) {
         const native = simulation.nativeModContext();
         simulation.modOwner = await SessionMods.open({ prepared: options.preparedMods ?? [], enabled,
-          services: { ...(native === undefined ? {} : { native }), actors: simulation.actors, bodies: simulation.bodies, combat: simulation.combat, inventory: simulation.inventory, seed: options.seed, time: () => simulation.sourceFrame.time,
+          services: { ...(native === undefined ? {} : { native }), ...(options.modCommands === undefined ? {} : { commands: options.modCommands }), actors: simulation.actors, bodies: simulation.bodies, combat: simulation.combat, inventory: simulation.inventory, seed: options.seed, time: () => simulation.sourceFrame.time,
             damageContext: source => ({ sequence: simulation.attackSequence++, weaponProvider: source, combatProvider: simulation.recipe.combat.provider,
               inventoryProvider: simulation.recipe.inventory.provider, movementProvider: simulation.recipe.movement.provider }),
             callbacks: simulation.callbacks, referenceSaved: actor => {

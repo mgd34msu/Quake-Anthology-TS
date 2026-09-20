@@ -1,4 +1,5 @@
 import { NativeModActors, type SavedNativeActors } from "./native-mod-actors.ts";
+import { asciiFold, type CommandInvocation } from "../../core/commands/index.ts";
 import type { FrameContext } from "../../contracts/time.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { GuestAddress, GuestCallResult, GuestCallValue, GuestValueLayout, ModuleIdentity, RawEntityView } from "../../contracts/execution.ts";
@@ -308,15 +309,29 @@ export class NativeModProvider implements NativeModProjection {
       if (transfer && this.frames.length === 0) this.releasePending();
     }
   }
-  private executeEntry(entry: GuestAddress, values: readonly Extract<GuestCallValue, { readonly kind: "pointer" }>[], returns: NativeModScalar | "void"): GuestCallResult {
+  private transfer<Result>(invoke: () => Result): Result {
     this.current(); this.owned?.synchronizeClock(); this.flush(); this.refresh();
     const frame: Invocation = { observations: this.observe() }; this.frames.push(frame);
     try {
-      const result = this.host.invoke(entry, { abi: this.declaration.target.abi,
-        parameters: values.map(() => ({ kind: "scalar", storage: "pointer" })),
-        result: returns === "void" ? "void" : { kind: "scalar", storage: returns }, variadic: false }, values);
-      this.flush(); if (this.owned?.advancing !== true) this.publish(); return result;
+      const result = invoke(); this.flush();
+      if (this.owned?.advancing !== true) this.publish(); return result;
     } finally { this.frames.pop(); }
+  }
+  private executeEntry(entry: GuestAddress, values: readonly Extract<GuestCallValue, { readonly kind: "pointer" }>[], returns: NativeModScalar | "void"): GuestCallResult {
+    return this.transfer(() => this.host.invoke(entry, { abi: this.declaration.target.abi,
+      parameters: values.map(() => ({ kind: "scalar", storage: "pointer" })),
+      result: returns === "void" ? "void" : { kind: "scalar", storage: returns }, variadic: false }, values));
+  }
+  invokeCommand(command: CommandInvocation): boolean {
+    if (asciiFold(command.argv[0] ?? "") !== "sv") return false;
+    command.assertActive(); this.releasePending();
+    return this.transfer(() => {
+      const appearances = new Map<ActorId, string>();
+      for (const actor of this.projections.keys()) { const slot = this.slotOf(actor); if (slot !== null) appearances.set(actor, this.host.presentation.signature(slot)); }
+      const result = this.host.invokeCommand(command);
+      for (const [actor, before] of appearances) { const slot = this.slotOf(actor); if (slot !== null && before !== this.host.presentation.signature(slot)) this.appearanceActors.add(actor); }
+      return result;
+    });
   }
   private entries(): readonly { readonly actor: ActorId; readonly slot: number }[] {
     const result = [...(this.owned?.entries() ?? [])];

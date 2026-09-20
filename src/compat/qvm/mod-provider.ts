@@ -12,6 +12,8 @@ import type { ModCallbackInput, ModRuntimeValue } from "../../contracts/mod-call
 import type { QvmModActorField, QvmModActorRecord, QvmModCallbackDeclaration, QvmModScalar, QvmModSourceCall, QvmModValue } from "../../contracts/qvm-mod-callbacks.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
+import type { ModCommandPort } from "../../world/session/mod-commands.ts";
+import type { CommandInvocation } from "../../core/commands/index.ts";
 import { CvarRegistry } from "../../core/cvars/index.ts";
 import { float32ToBits, nativeAtoi, Q3_BINARY32_PROFILE } from "../../core/numeric.ts";
 import { createBoxModel, createCapsuleModel } from "../../world/collision/q3/model.ts";
@@ -20,7 +22,7 @@ import { readSavedActor, savedActorId } from "../../persistence/save-image.ts";
 import { QvmOpcode } from "./image.ts";
 import { QvmModule, qvmApi } from "./module.ts";
 import type { QvmModuleOptions } from "./module.ts";
-import { QvmGameImport } from "./abi.ts";
+import { QvmGameExport, QvmGameImport } from "./abi.ts";
 import { qvmCommonSyscall } from "./common-syscalls.ts";
 import { QvmFiles, qvmFileSyscall } from "./file-syscalls.ts";
 import { rejectQvmSyscall } from "./syscalls.ts";
@@ -180,7 +182,8 @@ export class QvmModProvider {
   private readonly eventKeys = new Map<ActorId, string>();
   private readonly defaults = new Map<string, Uint8Array>();
   private readonly frames: Frame[] = [];
-  private readonly cvars: CvarRegistry;
+  readonly cvars: CvarRegistry;
+  private commands: ModCommandPort | null = null;
   private files: QvmFiles | null;
   private readonly unsubscribe: () => undefined;
   private readonly scratchStart: number;
@@ -378,9 +381,29 @@ export class QvmModProvider {
       if (!Number.isFinite(value)) throw new Error("QVM mod returned a nonfinite scalar"); return value;
     } finally { execution.finish(); if (!this.closed && this.frames.length === 0) this.publish(); }
   }
+  bindCommands(commands: ModCommandPort): void {
+    this.current();
+    if (this.commands !== null) throw new Error("QVM mod commands are already bound");
+    this.commands = commands;
+  }
+  consoleCommand(command: CommandInvocation): boolean {
+    this.current(); command.assertActive();
+    const execution = this.begin({ entry: 0, arguments: [{ kind: "int32", value: { kind: "float", value: QvmGameExport.GAME_CONSOLE_COMMAND } }], globals: [], returns: "int32" }, new Map<ModCallbackInput, ModRuntimeValue>());
+    try { return this.module.command(execution.words, command.argv) !== 0; }
+    finally { execution.finish(); if (!this.closed && this.frames.length === 0) this.publish(); }
+  }
+  async readScript(name: string): Promise<string | undefined> {
+    this.current();
+    const resource = await this.mounts?.open(name);
+    this.current(); return resource == null ? undefined : new TextDecoder().decode(resource.bytes);
+  }
+  private commandPort(): ModCommandPort {
+    if (this.commands === null) throw new Error("QVM mod console execution requires its component command service");
+    return this.commands;
+  }
   async initialize(): Promise<void> {
     for (const call of this.declaration.initialize) {
-      const execution = this.begin(call, new Map([["time", { kind: "float", value: seconds(this.services) }]]));
+      const execution = this.begin(call, new Map<ModCallbackInput, ModRuntimeValue>([["time", { kind: "float", value: seconds(this.services) }]]));
       try { const result = await this.module.callAsync(execution.words, call.entry, () => this.current()); this.completeDirectLifecycle(call, execution.words, result); } finally { execution.finish(); }
     }
     this.rememberDefaults(); this.publish();
@@ -648,10 +671,9 @@ export class QvmModProvider {
   }
   private syscall(call: QvmHostCall): QvmHostResult {
     this.current(); this.flush();
-    const unavailable = (): never => { throw new Error("QVM mod console execution requires a declared command service"); };
     const result = qvmCommonSyscall(call, { role: "qagame", cvars: this.cvars, milliseconds: () => Math.trunc(seconds(this.services) * 1000), arguments: () => [],
       print: text => { if (this.services.engine === undefined) throw new Error("QVM print requires destination engine services"); this.services.engine.print(text); },
-      commands: { executeNow: unavailable, append: unavailable, insert: unavailable }, realTime: () => { throw new Error("QVM real-time service is not bound"); } })
+      commands: { executeNow: text => { this.commandPort().executeNow(text); }, append: text => this.commandPort().append(text), insert: text => this.commandPort().insert(text) }, realTime: () => { throw new Error("QVM real-time service is not bound"); } })
       ?? (this.files === null ? null : qvmFileSyscall(call, this.files)) ?? this.engine(call) ?? this.spatial(call);
     if (result === null) return rejectQvmSyscall(call);
     const refresh = (): void => { this.current(); this.refresh(); const frame = this.frames.at(-1); if (frame !== undefined) frame.observations = this.observe(); };
@@ -683,6 +705,7 @@ export class QvmModProvider {
       try { this.services.actors.release(actor); } catch (error) { errors.push(error); }
     }
     this.unsubscribe();
+    try { this.commands?.close(); } catch (error) { errors.push(error); }
     try { this.portals?.close(); } catch (error) { errors.push(error); }
     try { this.actorSemantics?.close(); } catch (error) { errors.push(error); }
     for (const remove of this.hooks) try { remove(); } catch (error) { errors.push(error); }

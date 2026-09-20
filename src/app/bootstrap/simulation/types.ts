@@ -61,6 +61,7 @@ export type NativeQ2GuestOptions = NativeQ2GuestCallbacks & (
 export interface SimulationOptions {
   readonly preparedQvmGrapple?: import("../qvm-grapple-selection.ts").PreparedQvmGrapple;
   readonly preparedMods?: readonly import("../../../world/session/mods.ts").PreparedMod[];
+  readonly modCommands?: import("../../../world/session/mod-commands.ts").ModCommands;
   readonly enabledMods?: readonly import("../../../contracts/mods.ts").ModSelection[];
   readonly modTravel?: import("../../../contracts/mods.ts").ModTravelCheckpoint;
   readonly prepareRereleaseNavigation?: (simulation: SharedSimulation) => Promise<ApplicationBotNavigation>;

@@ -19,13 +19,16 @@ export interface PrepareQuakeCModOptions {
   readonly declarationDigest: ContentDigest;
   readonly program: Uint8Array;
   readonly resources?: QcModMedia["resources"];
+  readScript?(name: string): Promise<string | undefined>;
 }
 
 export async function prepareMountedQuakeCMod(options: Omit<PrepareQuakeCModOptions, "program" | "resources"> & { readonly mounts: MountedContent }): Promise<PreparedMod> {
   const artifact = await options.mounts.open(options.declaration.program.path);
   if (artifact === null || artifact.reference.digest !== options.declaration.program.digest) throw new Error("Selected mod program differs from its resolved artifact");
   const resources = await prepareQuakeCResources(loadQcProgram(artifact.bytes), options.mounts);
-  return prepareQuakeCMod({ ...options, program: artifact.bytes, resources });
+  return prepareQuakeCMod({ ...options, program: artifact.bytes, resources, readScript: async name => {
+    const script = await options.mounts.open(name); return script === null ? undefined : new TextDecoder().decode(script.bytes);
+  } });
 }
 
 export function prepareQuakeCMod(options: PrepareQuakeCModOptions): PreparedMod {
@@ -49,6 +52,9 @@ export function prepareQuakeCMod(options: PrepareQuakeCModOptions): PreparedMod 
         restore: state => { if (state.kind !== "glibc-random") throw new Error("Invalid QuakeC mod random state"); return random.restore(state); },
       }, { content: description.source.content, resources: options.resources ?? new Map<string, { readonly resource: ResolvedResourceReference; readonly modelBounds: Bounds | null }>() });
       context.resources.own(source);
+      if (services.commands !== undefined) source.bindCommands(services.commands.bind({ selection: description.selection, module, cvars: source.cvars,
+        names: declaration.commands?.map(command => command.name) ?? [], invoke: command => source.consoleCommand(command),
+        ...(options.readScript === undefined ? {} : { readScript: options.readScript }) }, context.resources));
       if (context.restoring !== true) source.initialize();
       return {
         register(registrations) {

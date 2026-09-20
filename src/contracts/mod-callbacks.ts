@@ -27,6 +27,16 @@ export type ModCallbackBinding = { readonly id: `${string}:${string}` } & (
 export type ModCallback = ModSourceCall & ModCallbackBinding;
 export type ModRuntimeValue = Exclude<ModCallbackValue, { readonly kind: "input" }> | { readonly kind: "actor"; readonly value: ActorId | null };
 
+export type ModConsoleValue = Exclude<ModCallbackValue, { readonly kind: "input" }>
+  | { readonly kind: "argument"; readonly index: number; readonly type: "string" | "float" }
+  | { readonly kind: "arguments-text" | "argument-count" };
+export interface ModConsoleCommand {
+  readonly name: string;
+  readonly function: string;
+  readonly arguments: readonly ModConsoleValue[];
+  readonly globals: readonly { readonly name: string; readonly value: ModConsoleValue }[];
+}
+
 export interface ModCallbackDeclaration {
   readonly version: 1;
   readonly runtime: "quakec";
@@ -36,6 +46,8 @@ export interface ModCallbackDeclaration {
   readonly cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly initialize?: readonly ModSourceCall[];
   readonly frame?: ModSourceCall;
+  /** Explicit console names and argument lowering into original compiled functions. */
+  readonly commands?: readonly ModConsoleCommand[];
   /** Declared lowering of canonical damage into the artifact's verified T_Damage ABI. */
   readonly combat?: { readonly damage: ModSourceCall };
 }

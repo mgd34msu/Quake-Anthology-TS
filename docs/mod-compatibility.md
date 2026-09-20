@@ -94,6 +94,25 @@ The native component adapter executes declared original API3/API2023 callbacks w
 
 Shared equipment on a native primary game needs that module's original combat interface. Currently verified destinations are the admitted Xatrix API3 DLL, retail Q2 rerelease API2023 DLL, and LRCTF/Threewave QVMs. The shared attack enters the original damage routine, preserving source armor and reaction logic. Unknown private layouts remain unsupported; the public game ABI alone does not describe them.
 
+### Component console commands
+
+`modcmd PRODUCT/COMPONENT_ID <command>` selects one enabled component explicitly. Component-generated commands enter the same Application command program with their source dialect and instance identity. Cvars and script files resolve within that component; aliases and deferred commands retain the same owner. Disabling an instance cancels its pending commands, waits and script reads while preserving the other components and the primary world. Prepared worlds stage engine actions until publication.
+
+QVM components use their original `GAME_CONSOLE_COMMAND` entry and command imports. Native API3/API2023 components use the public `ServerCommand` entry through `sv`, with source argv restored after nested calls. QuakeC `localcmd` retains component ownership instead of becoming unowned presentation text. Classic QuakeC has no general console export, so its declaration can supply named original functions:
+
+```json
+"commands": [{
+  "name": "source_skill",
+  "function": "skill_set",
+  "arguments": [{ "kind": "argument", "index": 1, "type": "string" }],
+  "globals": []
+}]
+```
+
+This example binds Copper's original function. Argument index zero is the command name; missing arguments yield an empty string or zero. Argument types are `string` or `float`. `arguments-text` passes the source argument text and `argument-count` passes the number of tokens, including the command name. Constants use the existing `float`, `string` and `vector` values. The same values can populate declared source globals, which are restored after the call. Names and source signatures are validated against the exact program.
+
+Ordinary user input continues to address the primary world. An explicit component command must not silently fall through to another game's private command handler when names collide. Engine operations such as map changes remain shared Application operations. A declaration does not add engine imports or custom console ABIs that the adapter does not support.
+
 ### Q3 body replacements
 
 Both Q3 presentation implementations share the supplemental model renderer. A body override replaces an actor's original body models while original sounds, lighting and nested effects continue. Original snapshots and collision remain unchanged. The last enabled component supplying an override owns that actor's model group; disabling it restores the preceding group.

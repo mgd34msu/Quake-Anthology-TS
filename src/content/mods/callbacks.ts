@@ -1,4 +1,4 @@
-import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
+import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -47,14 +47,27 @@ function sourceCall(reader: SaveReader): ModSourceCall {
     globals: reader.field("globals").list(entry => ({ name: entry.field("name").string(), value: value(entry.field("value")) })) };
 }
 
+function consoleValue(reader: SaveReader): ModConsoleValue {
+  switch (reader.field("kind").choice("float", "string", "vector", "argument", "arguments-text", "argument-count")) {
+    case "float": return { kind: "float", value: reader.field("value").number() };
+    case "string": return { kind: "string", value: reader.field("value").string() };
+    case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
+    case "argument": return { kind: "argument", index: reader.field("index").integer(0), type: reader.field("type").choice("string", "float") };
+    case "arguments-text": return { kind: "arguments-text" };
+    case "argument-count": return { kind: "argument-count" };
+  }
+}
+
 export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclaration {
   const program = reader.field("program");
-  const combat = reader.field("combat"), initialize = reader.field("initialize"), frame = reader.field("frame"), cvars = reader.field("cvars");
+  const combat = reader.field("combat"), initialize = reader.field("initialize"), frame = reader.field("frame"), cvars = reader.field("cvars"), commands = reader.field("commands");
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("quakec"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
     actorFields: reader.field("actorFields").list(field), callbacks: reader.field("callbacks").list(callback),
     ...(initialize.value === undefined ? {} : { initialize: initialize.list(sourceCall) }),
     ...(frame.value === undefined ? {} : { frame: sourceCall(frame) }),
     ...(cvars.value === undefined ? {} : { cvars: cvars.list(entry => ({ name: entry.field("name").string(), value: entry.field("value").string() })) }),
+    ...(commands.value === undefined ? {} : { commands: commands.list(entry => ({ name: entry.field("name").string(), function: entry.field("function").string(),
+      arguments: entry.field("arguments").list(consoleValue), globals: entry.field("globals").list(global => ({ name: global.field("name").string(), value: consoleValue(global.field("value")) })) })) }),
     ...(combat.value === undefined ? {} : { combat: { damage: sourceCall(combat.field("damage")) } }) };
 }

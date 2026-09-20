@@ -24,6 +24,7 @@ export interface CommandInvocation {
   append(text: string): void;
   insert(text: string): void;
   executeNow(text: string): number;
+  executeScript(): void;
   assertActive(): void;
 }
 export type CommandHandler = (command: CommandInvocation) => undefined;
@@ -52,6 +53,7 @@ export interface CommandBufferOptions {
   readonly commandLine?: readonly string[];
   readonly startupCommandText?: string;
   readonly allowCommand?: (command: CommandInvocation) => boolean;
+  readonly sourceCommand?: (command: CommandInvocation, registered: boolean) => boolean | undefined;
   readonly clientGame?: CommandFallback;
   readonly serverGame?: CommandFallback;
   readonly ui?: CommandFallback;
@@ -62,13 +64,13 @@ export interface CommandBufferOptions {
 }
 
 interface RegisteredEntry { readonly name: string; readonly handler: CommandHandler | null; readonly documentation: CommandDocumentation | undefined; next: RegisteredEntry | undefined; }
-interface AliasEntry { readonly name: string; value: string; textMode: CommandTextMode; dialect: CommandDialect; }
+interface AliasEntry { readonly name: string; readonly instance: symbol | undefined; value: string; textMode: CommandTextMode; dialect: CommandDialect; }
 interface TextChunk { readonly dialect: CommandDialect; readonly kind: "text"; readonly text: string; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; }
 type CommandChunk = TextChunk | { readonly kind: "completion"; readonly event: ScriptCompletion; readonly dialect: CommandDialect; readonly textMode: CommandTextMode };
 interface ExecutionFrame { readonly dialect: CommandDialect; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; readonly parent: ExecutionFrame | undefined; active: boolean; }
 interface ProgramTail {
   readonly chunks: CommandChunk[]; readonly deferred: CommandChunk[];
-  readonly waitFrames: number; readonly waitDialect: CommandDialect | undefined;
+  readonly waitFrames: number; readonly waitDialect: CommandDialect | undefined; readonly waitSource: CommandContext | undefined;
   readonly scriptRead: ScriptRead | undefined; readonly tokens: readonly string[];
   readonly aliasCount: number; readonly startupCommandText: string | undefined;
   readonly preparationTail: ProgramTail | undefined;
@@ -80,6 +82,7 @@ interface ScriptRead {
   readonly dialect: CommandDialect;
   readonly textMode: CommandTextMode;
   readonly settled: Promise<void>;
+  cancel(): void;
   readonly name: string;
   readonly source: CommandContext;
   result: { readonly kind: "pending" } | { readonly kind: "ready"; readonly text: string | undefined } | { readonly kind: "failed"; readonly error: unknown };
@@ -115,7 +118,14 @@ function positiveInteger(value: number, label: string): number {
 function copyContext(context: CommandContext, origin = context.origin): CommandContext {
   return Object.freeze({ session: context.session, origin: copyOrigin(origin, context),
     ...(context.producer === undefined ? {} : { producer: Object.freeze({ kind: context.producer.kind,
-      module: Object.freeze({ ...context.producer.module }) }) }) });
+      module: Object.freeze({ ...context.producer.module }), ...(context.producer.instance === undefined ? {} : { instance: context.producer.instance }) }) }) });
+}
+
+function sameProducer(left: CommandContext, right: CommandContext): boolean {
+  const first = left.producer, second = right.producer;
+  if (first === undefined || second === undefined) return first === second;
+  return first.instance === second.instance && first.module.id === second.module.id && first.module.digest === second.module.digest
+    && first.module.artifactPath === second.module.artifactPath && first.module.revision === second.module.revision;
 }
 
 export class CommandBuffer {
@@ -127,6 +137,8 @@ export class CommandBuffer {
   private programRevision = 0;
   private inheritedAsyncDrain = false;
   private waitDialect: CommandDialect | undefined;
+  private waitSource: CommandContext | undefined;
+  private retiredProducers = new Set<symbol>();
   private fallbackCvars: CvarRegistry | undefined;
   private readonly builtinHandlers = new Map<string, CommandHandler>();
   private readonly outputBindings = new Set<{ readonly print: (text: string, source?: CommandContext) => void }>();
@@ -223,12 +235,12 @@ export class CommandBuffer {
       validatePublication();
       const inheritedAsyncDrain = commands.inheritedAsyncDrain;
       const pending: ProgramTail = { chunks: commands.chunks, deferred: commands.deferred, waitFrames: commands.waitFrames,
-        waitDialect: commands.waitDialect, scriptRead: commands.scriptRead, tokens: commands.tokens,
+        waitDialect: commands.waitDialect, waitSource: commands.waitSource, scriptRead: commands.scriptRead, tokens: commands.tokens,
         aliasCount: commands.aliasCount, startupCommandText: commands.startupCommandText, preparationTail: commands.preparationTail };
       phase = "preparing";
       commands.preparationTail = pending;
       commands.chunks = []; commands.deferred = []; commands.waitFrames = 0;
-      commands.waitDialect = undefined; commands.scriptRead = undefined; commands.tokens = [];
+      commands.waitDialect = undefined; commands.waitSource = undefined; commands.scriptRead = undefined; commands.tokens = [];
       commands.aliasCount = 0; commands.startupCommandText = options.startupCommandText; commands.inheritedAsyncDrain = false;
       try {
         const complete = await run();
@@ -244,8 +256,9 @@ export class CommandBuffer {
 
   private restoreTail(tail: ProgramTail): void {
     this.chunks = tail.chunks; this.deferred = tail.deferred; this.waitFrames = tail.waitFrames;
-    this.waitDialect = tail.waitDialect; this.scriptRead = tail.scriptRead; this.tokens = tail.tokens;
+    this.waitDialect = tail.waitDialect; this.waitSource = tail.waitSource; this.scriptRead = tail.scriptRead; this.tokens = tail.tokens;
     this.aliasCount = tail.aliasCount; this.startupCommandText = tail.startupCommandText; this.preparationTail = tail.preparationTail;
+    this.discardRetiredWork();
   }
   finishPreparation(): void {
     const tail = this.preparationTail;
@@ -258,9 +271,12 @@ export class CommandBuffer {
     this.chunks = [...previous.chunks]; this.deferred = [...previous.deferred];
     this.preparationTail = cloneProgramTail(previous.preparationTail);
     this.waitFrames = previous.waitFrames; this.waitDialect = previous.waitDialect;
+    this.waitSource = previous.waitSource;
+    this.retiredProducers = previous.retiredProducers;
     this.aliasCount = previous.aliasCount; this.tokens = previous.tokens;
     this.startupCommandText = previous.startupCommandText; this.scriptRead = previous.scriptRead;
     this.aliases.splice(0, this.aliases.length, ...previous.aliases.map(alias => ({ ...alias })));
+    this.discardRetiredWork();
   }
 
   copyPendingFrom(previous: CommandBuffer): void {
@@ -270,6 +286,40 @@ export class CommandBuffer {
     if (previous.pendingText.length + previous.deferredText.length >= this.maximumBuffer)
       throw new Error("Replacement command buffer cannot hold pending commands");
     this.copyProgramState(previous); this.programRevision++;
+  }
+
+  /** Release only this component instance, including suspended preparation and script work. */
+  discardProducer(instance: symbol): void {
+    this.retiredProducers.add(instance);
+    const retained = (chunk: CommandChunk): boolean => (chunk.kind === "text" ? chunk.source : chunk.event.source).producer?.instance !== instance;
+    const discardRead = (read: ScriptRead | undefined): ScriptRead | undefined => {
+      if (read?.source.producer?.instance !== instance) return read;
+      read.cancel(); return undefined;
+    };
+    const discardTail = (tail: ProgramTail | undefined): ProgramTail | undefined => tail === undefined ? undefined : {
+      ...tail, chunks: tail.chunks.filter(retained), deferred: tail.deferred.filter(retained), scriptRead: discardRead(tail.scriptRead),
+      ...(tail.waitSource?.producer?.instance === instance ? { waitFrames: 0, waitDialect: undefined, waitSource: undefined } : {}),
+      preparationTail: discardTail(tail.preparationTail),
+    };
+    this.chunks = this.chunks.filter(retained); this.deferred = this.deferred.filter(retained);
+    this.scriptRead = discardRead(this.scriptRead); this.preparationTail = discardTail(this.preparationTail);
+    if (this.waitSource?.producer?.instance === instance) { this.waitFrames = 0; this.waitDialect = undefined; this.waitSource = undefined; }
+    for (let index = this.aliases.length - 1; index >= 0; index--) if (this.aliases[index]?.instance === instance) this.aliases.splice(index, 1);
+    this.programRevision++;
+  }
+  private discardRetiredWork(): void {
+    const retired = new Set<symbol>();
+    const remember = (source: CommandContext | undefined): void => {
+      const instance = source?.producer?.instance;
+      if (instance !== undefined && this.retiredProducers.has(instance)) retired.add(instance);
+    };
+    const scan = (chunks: readonly CommandChunk[]): void => { for (const chunk of chunks) remember(chunk.kind === "text" ? chunk.source : chunk.event.source); };
+    scan(this.chunks); scan(this.deferred); remember(this.waitSource); remember(this.scriptRead?.source);
+    for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail) {
+      scan(tail.chunks); scan(tail.deferred); remember(tail.waitSource); remember(tail.scriptRead?.source);
+    }
+    for (const alias of this.aliases) if (alias.instance !== undefined && this.retiredProducers.has(alias.instance)) retired.add(alias.instance);
+    for (const instance of retired) this.discardProducer(instance);
   }
 
   get hasPendingCommands(): boolean { return this.preparationTail !== undefined || this.chunks.length > 0 || this.scriptRead !== undefined; }
@@ -373,14 +423,15 @@ export class CommandBuffer {
   cvarDocumentation(name: string, source?: CommandContext): CommandDocumentation | undefined {
     return this.cvarOwner(name, this.inputContext(source))?.documentation(name);
   }
-  aliasValue(name: string): string | undefined { return this.aliases.find(alias => asciiFold(alias.name) === asciiFold(name))?.value; }
+  private visibleAliases(): readonly AliasEntry[] { return this.aliases.filter(alias => alias.instance === this.frame?.source.producer?.instance); }
+  aliasValue(name: string): string | undefined { return this.visibleAliases().find(alias => asciiFold(alias.name) === asciiFold(name))?.value; }
   completeNames(visitor: (name: string) => undefined): void {
     for (let entry = this.handlers; entry !== undefined; entry = entry.next) visitor(entry.name);
   }
   complete(partialInput: string): string | undefined {
     const partial = sourceCommandText(partialInput);
     if (partial.length === 0) return undefined;
-    const names = [...this.registeredNames(), ...(isQ2(this.executionDialect) || this.executionDialect === "q1-quakeworld" ? this.aliases.map(alias => alias.name) : [])];
+    const names = [...this.registeredNames(), ...(isQ2(this.executionDialect) || this.executionDialect === "q1-quakeworld" ? this.visibleAliases().map(alias => alias.name) : [])];
     if (this.executionDialect !== "q1-netquake") {
       const exact = names.find(name => name === partial);
       if (exact !== undefined) return exact;
@@ -393,12 +444,12 @@ export class CommandBuffer {
     const name = sourceCommandText(nameInput), text = sourceCommandText(textInput);
     if (name.length >= 32) { this.print("Alias name is too long\n"); return false; }
     this.programRevision++;
-    const existing = this.aliases.find(alias => alias.name === name);
+    const instance = this.frame?.source.producer?.instance, existing = this.aliases.find(alias => alias.name === name && alias.instance === instance);
     const textMode = this.frame?.textMode ?? "source";
-    if (existing === undefined) this.aliases.unshift({ name, value: text, textMode, dialect: this.executionDialect }); else { existing.value = text; existing.textMode = textMode; existing.dialect = this.executionDialect; }
+    if (existing === undefined) this.aliases.unshift({ name, instance, value: text, textMode, dialect: this.executionDialect }); else { existing.value = text; existing.textMode = textMode; existing.dialect = this.executionDialect; }
     return true;
   }
-  aliasNames(): readonly string[] { return Object.freeze(this.executionDialect === "q3" ? [] : this.aliases.map(alias => alias.name)); }
+  aliasNames(): readonly string[] { return Object.freeze(this.executionDialect === "q3" ? [] : this.visibleAliases().map(alias => alias.name)); }
 
   append(text: string, source?: CommandContext, dialect?: CommandDialect): void {
     this.appendFor(text, this.inputContext(source), undefined, undefined, dialect);
@@ -407,11 +458,13 @@ export class CommandBuffer {
     if (this.preparationTail === undefined) throw new Error("Command program has no preparation prefix");
     this.appendFor(text, this.inputContext(source), undefined, undefined, dialect, true);
   }
-  insert(text: string, source?: CommandContext): void { this.insertFor(text, this.inputContext(source)); }
+  insert(text: string, source?: CommandContext, dialect?: CommandDialect): void { this.insertFor(text, this.inputContext(source), undefined, undefined, undefined, dialect); }
   private inputContext(source: CommandContext | undefined): CommandContext {
-    if (source === undefined) return this.frame?.source ?? this.context;
-    if (source.session !== this.context.session) throw new RangeError("Command input belongs to another session");
-    return copyContext(source);
+    const context = source ?? this.frame?.source ?? this.context;
+    if (context.session !== this.context.session) throw new RangeError("Command input belongs to another session");
+    const instance = context.producer?.instance;
+    if (instance !== undefined && this.retiredProducers.has(instance)) throw new Error("Command producer is closed");
+    return source === undefined ? context : copyContext(context);
   }
   private inputTextMode(source: CommandContext, direct: boolean): CommandTextMode {
     if (source.origin.kind !== "local-seat" && source.origin.kind !== "local-console") return "source";
@@ -533,9 +586,9 @@ export class CommandBuffer {
     }
   }
 
-  executeNow(text: string | null, source?: CommandContext): number {
+  executeNow(text: string | null, source?: CommandContext, dialect?: CommandDialect): number {
     const value = text === null ? "" : sourceCommandText(text);
-    return value.length === 0 ? this.execute() : this.dispatch(value, this.inputContext(source), this.frame === undefined);
+    return value.length === 0 ? this.execute() : this.dispatch(value, this.inputContext(source), this.frame === undefined, undefined, dialect);
   }
   /** Execute a bounded batch without draining another seat's pending input. */
   executeBatch(text: string, source: CommandContext, signal?: AbortSignal): number {
@@ -572,15 +625,17 @@ export class CommandBuffer {
       else if (++length >= this.maximumCommand) throw new RangeError("Command batch line exceeds the engine line limit.");
     }
     if (this.batchBudget !== undefined) throw new Error("Nested command batches are not supported.");
-    const saved = { chunks: this.chunks, deferred: this.deferred, waitFrames: this.waitFrames, waitDialect: this.waitDialect, aliasCount: this.aliasCount, tokens: this.tokens, scriptRead: this.scriptRead };
+    const saved = { chunks: this.chunks, deferred: this.deferred, waitFrames: this.waitFrames, waitDialect: this.waitDialect, waitSource: this.waitSource, aliasCount: this.aliasCount, tokens: this.tokens, scriptRead: this.scriptRead };
     this.scriptRead = undefined;
-    this.chunks = []; this.deferred = []; this.waitFrames = 0; this.aliasCount = 0;
+    this.chunks = []; this.deferred = []; this.waitFrames = 0; this.waitSource = undefined; this.aliasCount = 0;
     this.batchBudget = { remaining: 128, signal };
     if (append) this.appendFor(value, context, false, undefined, undefined, true);
     return () => {
       this.chunks = saved.chunks; this.deferred = saved.deferred; this.waitFrames = saved.waitFrames; this.waitDialect = saved.waitDialect;
+      this.waitSource = saved.waitSource;
       this.aliasCount = saved.aliasCount; this.tokens = saved.tokens; this.batchBudget = undefined;
       this.scriptRead = saved.scriptRead;
+      this.discardRetiredWork();
     };
   }
 
@@ -590,6 +645,7 @@ export class CommandBuffer {
     let resumedCaller = false;
     for (const chunk of this.chunks) {
       if (chunk.dialect !== first.dialect || chunk.textMode !== first.textMode) break;
+      if (!sameProducer(first.source, chunk.kind === "text" ? chunk.source : chunk.event.source)) break;
       if (chunk.kind === "completion") {
         if (!isQ2(first.dialect) || origin.kind !== "script" || chunk.event.result.kind !== "completed"
           || !sameOrigin(chunk.event.source.origin, origin)) break;
@@ -639,9 +695,14 @@ export class CommandBuffer {
       args: Object.freeze(tokens.argv.slice(1)), argsText: tokens.argsText, raw,
       append: (text: string): void => { requireActive(); this.appendFor(text, source); },
       insert: (text: string): void => { requireActive(); this.insertFor(text, source); },
-      executeNow: (text: string): number => { requireActive(); return this.executeNow(text); }, assertActive: requireActive });
+      executeNow: (text: string): number => { requireActive(); return this.executeNow(text); },
+      executeScript: (): void => { requireActive(); this.executeScript(command); }, assertActive: requireActive });
     try {
       if (this.options.allowCommand?.(command) === false) return 1;
+      const builtin = this.builtinHandlers.get(asciiFold(name));
+      let selected = this.handlers;
+      while (selected !== undefined && asciiFold(selected.name) !== asciiFold(name)) selected = selected.next;
+      if ((builtin === undefined || selected?.handler !== builtin) && this.options.sourceCommand?.(command, selected !== undefined) === true) return 1;
       for (let entry = this.handlers; entry !== undefined; entry = entry.next) {
         if (asciiFold(entry.name) !== asciiFold(name)) continue;
         if (this.executionDialect === "q3") this.touch(entry);
@@ -652,7 +713,7 @@ export class CommandBuffer {
         return 1;
       }
       if (this.executionDialect !== "q3") {
-        const alias = this.aliases.find(value => asciiFold(value.name) === asciiFold(name));
+        const alias = this.visibleAliases().find(value => asciiFold(value.name) === asciiFold(name));
         if (alias !== undefined) {
           if (isQ2(this.executionDialect) && ++this.aliasCount === 16) { this.print("ALIAS_LOOP_COUNT\n"); return 1; }
           this.insertFor(alias.value, source, false, undefined, alias.textMode, alias.dialect);
@@ -712,6 +773,21 @@ export class CommandBuffer {
     this.insertFor(text, completion.source, false, completion, textMode, dialect);
   }
 
+  private executeScript(command: CommandInvocation): void {
+    if (command.argv.length !== 2) { this.print("exec <filename> : execute a script file\n"); return; }
+    if (this.scriptRead !== undefined) { this.insertFor(`${command.raw}\n`, command.source); return; }
+    const requested = command.argv[1] ?? "";
+    const filename = this.executionDialect === "q3" && !requested.slice(requested.lastIndexOf("/") + 1).includes(".") ? `${requested}.cfg` : requested;
+    const file = this.options.readScript?.(filename, command.source);
+    if (file instanceof Promise) {
+      let cancel = (): void => {};
+      const settled = new Promise<void>(resolve => { cancel = resolve; });
+      const read: ScriptRead = { name: filename, source: command.source, dialect: command.dialect, textMode: this.frame?.textMode ?? "source", result: { kind: "pending" }, settled, cancel };
+      void file.then(text => { read.result = { kind: "ready", text }; cancel(); }, (error: unknown) => { read.result = { kind: "failed", error }; cancel(); });
+      this.programRevision++; this.scriptRead = read;
+    } else this.insertScript(filename, file, command.source);
+  }
+
   private registerBuiltins(dialect = this.executionDialect): void {
     this.builtinDialect = dialect;
     const handlers = new Map<string, CommandHandler>();
@@ -727,24 +803,13 @@ export class CommandBuffer {
         if (handler !== undefined && !this.exists(name) && this.register(name, handler, documents.get(name))) this.builtinHandlers.set(name, handler);
       }
     };
-    register("wait", command => { this.programRevision++; this.waitDialect = command.dialect; this.waitFrames = this.executionDialect === "q3" && command.argv.length === 2 ? nativeAtoi(command.argv[1] ?? "") : 1; });
+    register("wait", command => { this.programRevision++; this.waitDialect = command.dialect; this.waitSource = command.source; this.waitFrames = this.executionDialect === "q3" && command.argv.length === 2 ? nativeAtoi(command.argv[1] ?? "") : 1; });
     register("echo", command => { this.print(`${command.args.join(" ")}${command.args.length > 0 ? " " : ""}\n`); }, { summary: "Print text to the console.", usage: "echo <text>", examples: ["echo hello"] });
     register("cmd", command => { this.forwardToServer(command); });
-    register("exec", command => {
-      if (command.argv.length !== 2) { this.print("exec <filename> : execute a script file\n"); return; }
-      if (this.scriptRead !== undefined) { this.insertFor(`${command.raw}\n`, command.source); return; }
-      const requested = command.argv[1] ?? "";
-      const filename = this.executionDialect === "q3" && !requested.slice(requested.lastIndexOf("/") + 1).includes(".") ? `${requested}.cfg` : requested;
-      const file = this.options.readScript?.(filename, command.source);
-      if (file instanceof Promise) {
-        const read: ScriptRead = { name: filename, source: command.source, dialect: command.dialect, textMode: this.frame?.textMode ?? "source", result: { kind: "pending" },
-          settled: file.then(text => { read.result = { kind: "ready", text }; }, (error: unknown) => { read.result = { kind: "failed", error }; }) };
-        this.programRevision++; this.scriptRead = read;
-      } else this.insertScript(filename, file, command.source);
-    });
+    register("exec", command => { command.executeScript(); });
     if (dialect !== "q3") register("alias", command => {
       const name = command.argv[1];
-      if (name === undefined) { this.print("Current alias commands:\n"); for (const alias of this.aliases) this.print(`${alias.name} : ${alias.value}\n`); return; }
+      if (name === undefined) { this.print("Current alias commands:\n"); for (const alias of this.visibleAliases()) this.print(`${alias.name} : ${alias.value}\n`); return; }
       const args = command.argv.slice(2), text = `${args.join(" ")}${isQ1(this.executionDialect) && args.length > 0 ? " " : ""}\n`;
       if (text.length >= 1024) throw new RangeError("Alias body overflows source cmd[1024]");
       this.defineAlias(name, text);

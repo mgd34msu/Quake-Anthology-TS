@@ -112,6 +112,21 @@ export interface CommandTokens {
   readonly argsText: string;
 }
 
+/** Retain quotes and punctuation when a dispatcher removes its own leading tokens. */
+export function commandTextTail(input: string, dialect: CommandDialect, count: number): string {
+  const text = sourceCommandText(input);
+  if (!Number.isInteger(count) || count < 0) throw new RangeError("Command prefix length must be a nonnegative integer");
+  let offset = 0;
+  for (let index = 0; index < count; index++) {
+    while (offset < text.length && whitespace(text, offset, "source")) offset++;
+    const token = parseToken(text, offset, dialect, "source");
+    if (token === undefined) return "";
+    offset = token.end;
+  }
+  while (offset < text.length && whitespace(text, offset, "source")) offset++;
+  return text.slice(offset);
+}
+
 export function tokenizeCommand(input: string, dialect: CommandDialect, mode: CommandTextMode = "source"): CommandTokens {
   const text = sourceCommandText(input), argv: string[] = [];
   const maximumTokens = dialect === "q3" ? 1024 : 80;

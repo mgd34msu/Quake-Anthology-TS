@@ -5,6 +5,8 @@ import type { NativeModDeclaration } from "../../../contracts/native-mod-callbac
 import type { ProviderCheckpoint } from "../../../contracts/session.ts";
 import type { Q2FoundationHost } from "../../../content/q2/foundation/host.ts";
 import { nativeProviderTiming } from "../../../content/catalog/timing.ts";
+import { asciiFold, type CommandInvocation } from "../../../core/commands/index.ts";
+import type { ModCommandPort } from "../../../world/session/mod-commands.ts";
 import { CvarRegistry } from "../../../core/cvars/index.ts";
 import { createNumericOperations } from "../../../core/numeric.ts";
 import type { GuestCallSignature, MappedGuestMemory } from "../../../guest/core/contracts.ts";
@@ -58,6 +60,7 @@ export interface NativeModHost {
   entity(slot: number): RawEntityView;
   active(slot: number): boolean;
   clearEntityEvent(slot: number): void;
+  invokeCommand(command: CommandInvocation): boolean;
   entry(name: string): GuestAddress;
   entities(): { readonly base: GuestAddress; readonly stride: number; readonly count: number; readonly capacity: number };
   invoke(entry: GuestAddress, signature: GuestCallSignature, values: readonly GuestCallValue[]): GuestCallResult;
@@ -73,6 +76,7 @@ export interface NativeModHostOptions {
   readonly context: NativeModHostContext;
   readonly services: ModHostServices;
   readonly projection: NativeModProjection;
+  bindCommands?(cvars: CvarRegistry): ModCommandPort;
   localize(key: string, arguments_: readonly string[]): string;
   nextFrame(): Promise<void>;
 }
@@ -86,6 +90,13 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
   for (const [name, value] of Object.entries({ maxclients: String(context.maxClients), skill: String(context.skill),
     deathmatch: context.mode === "deathmatch" ? "1" : "0", coop: context.mode === "coop" ? "1" : "0", sv_gravity: String(context.gravity) })) cvars.register(name, value);
   for (const cvar of declaration.cvars) { if (cvars.find(cvar.name) === undefined) cvars.register(cvar.name, cvar.value); else cvars.set(cvar.name, cvar.value, true); }
+  const commands = options.bindCommands?.(cvars) ?? null;
+  let currentCommand: CommandInvocation | null = null;
+  const invokeCommand = (command: CommandInvocation, run: () => void): boolean => {
+    if (asciiFold(command.argv[0] ?? "") !== "sv") return false;
+    command.assertActive(); const parent = currentCommand; currentCommand = command;
+    try { run(); return true; } finally { currentCommand = parent; }
+  };
   const runtime: ActorHostRuntime = { numeric: timing.numeric, random: new SourceRandom(services.seed, rerelease ? "q2-rerelease" : "classic"),
     now: () => { const time = services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; },
     frameSeconds: () => rerelease ? context.frameMilliseconds / 1000 : 0.1,
@@ -94,8 +105,10 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
   const shared: ClassicGuestServicesOptions = { engine: context.engine(options.source, runtime), scene: context.scene, cvars,
     numeric: createNumericOperations(timing.numeric), mapPath: context.mapPath, maxClients: context.maxClients,
     admit: () => unavailable("owned actor"), collision: context.collision, acceptsClient: slot => options.projection.acceptsClient(slot),
-    print: text => services.engine?.print(text), command: () => ({ arguments: [], args: "" }),
-    addCommand: () => unavailable("command buffer"), debugGraph: () => unavailable("debug graph") };
+    print: text => services.engine?.print(text), command: () => {
+      currentCommand?.assertActive(); return { arguments: currentCommand?.argv ?? [], args: currentCommand?.argsText ?? "" };
+    },
+    addCommand: text => { if (commands === null) return unavailable("command buffer"); commands.append(text, currentCommand?.source); return undefined; }, debugGraph: () => unavailable("debug graph") };
   const map = context.mapPath.replace(/^maps\//, "").replace(/\.bsp$/, "");
   if (prepared.edition === "classic") {
     const files = new ClassicOriginalSaveFiles(); let adapter: ClassicGuestServices | null = null;
@@ -113,6 +126,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
           scale: 1, alpha: (state.renderEffects & 32) !== 0 ? 0.3 : 1, visible: record.bytes.getInt32(88, true) !== 0 && (record.bytes.getInt32(184, true) & 1) === 0,
           origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
     return { memory: source.memory, imageBase: source.imageBase, cvars, presentation, entry: name => source.entry(name),
+      invokeCommand: command => invokeCommand(command, () => { source.host.call("ServerCommand"); }),
       clearEntityEvent: slot => { source.host.edicts.at(slot).bytes.setInt32(80, 0, true); },
       entries: source.host.options.runner.options, entity: slot => source.host.edicts.at(slot), active: slot => source.host.edicts.at(slot).bytes.getInt32(88, true) !== 0,
       entities: () => source.host.edicts.descriptor(), invoke: (entry, signature, values) => source.host.invoke(entry, signature, values),
@@ -146,6 +160,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
         scale: state.scale === 0 ? 1 : state.scale, alpha: state.alpha === 0 ? (state.renderEffects & 32) !== 0 ? 0.3 : 1 : state.alpha,
         visible: info.active && (info.serverFlags & 1) === 0, origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
   return { memory: source.memory, imageBase: source.imageBase, cvars, presentation, entry: name => source.entry(name),
+    invokeCommand: command => invokeCommand(command, () => { source.host.module.callGame("ServerCommand"); }),
     clearEntityEvent: slot => { const record = new RereleasePublicEdict(source.memory, source.host.module.entities().atSlot(slot)); source.memory.writeUint8(record.address("s.event"), 0); },
     entries: source.host.module.options.runner.options, entity: slot => source.host.module.entities().atSlot(slot), active: slot => adapter.entityInfo(slot).active,
     entities() { const table = source.host.module.entities(); return { base: table.base, stride: table.strideBytes, count: table.count, capacity: table.capacity }; },
