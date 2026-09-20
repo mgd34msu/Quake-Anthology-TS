@@ -30,22 +30,34 @@ export async function applicationModChoices(catalog: InstalledCatalog): Promise<
       const contentMounts = await catalog.mountsFor(product.id);
       using opened = await mounts.open({ id: createMountPlanId("gameplay-mods", Buffer.from(product.id).toString("hex")),
         mounts: contentMounts, defaultOrder: contentMounts.map(mount => mount.identity.id), prefixOrders: [] });
-      for (const selection of await discoverGameplayMods(product, opened)) choices.push({
-        description: { ...selection, purpose: "addition", availability: { kind: "available" } },
-        implementation: { kind: "gameplay", selection },
-      });
-      for (const entry of await applicationWeaponBehaviorChoices(catalog, product.expectation.id, mounts.open)) {
-      if (entry.selection === null) continue;
-      choices.push({ description: {
-        selection: readModSelection(entry.id), source: entry.selection.source,
-        title: entry.title, sourceTitle, purpose: "addition", requires: [], conflicts: [],
-        availability: entry.unavailable === null ? { kind: "available" } : { kind: "unavailable", reason: entry.unavailable },
-      }, implementation: { kind: "weapon-behavior", selection: entry.selection } });
-    } } catch (error) {
+      for (const entry of await discoverGameplayMods(product, opened)) choices.push(entry.kind === "available" ? {
+        description: { ...entry.mod, purpose: "addition", availability: { kind: "available" } },
+        implementation: { kind: "gameplay", selection: entry.mod },
+      } : { description: entry.description, implementation: { kind: "unavailable" } });
+    } catch (error) {
       choices.push({ description: {
         selection: { product: product.expectation.id, id: "unavailable" },
         source: { provider: `${product.expectation.family}:official`, content: product.id },
         title: product.expectation.title, sourceTitle, purpose: "addition", requires: [], conflicts: [],
+        availability: { kind: "unavailable", reason: error instanceof Error ? error.message : String(error) },
+      }, implementation: { kind: "unavailable" } });
+    }
+    try {
+      for (const entry of await applicationWeaponBehaviorChoices(catalog, product.expectation.id, mounts.open)) {
+        if (entry.selection === null) continue;
+        choices.push({ description: {
+          selection: readModSelection(entry.id), source: entry.selection.source,
+          title: entry.title, sourceTitle, purpose: "addition", requires: [], conflicts: [],
+          availability: entry.unavailable === null ? { kind: "available" } : { kind: "unavailable", reason: entry.unavailable },
+        }, implementation: { kind: "weapon-behavior", selection: entry.selection } });
+      }
+    } catch (error) {
+      let id = "unavailable-weapon-behaviors";
+      while (choices.some(choice => choice.description.selection.product === product.expectation.id && choice.description.selection.id === id)) id += "+";
+      choices.push({ description: {
+        selection: { product: product.expectation.id, id },
+        source: { provider: `${product.expectation.family}:official`, content: product.id },
+        title: `${product.expectation.title} weapon behaviors`, sourceTitle, purpose: "addition", requires: [], conflicts: [],
         availability: { kind: "unavailable", reason: error instanceof Error ? error.message : String(error) },
       }, implementation: { kind: "unavailable" } });
     }
@@ -86,7 +98,11 @@ export async function prepareApplicationMods(catalog: InstalledCatalog, recipe: 
   for (const selection of selections) {
     const product = catalog.require(selection.selection.product), mounted = await forContent(product.id);
     const declarations = await discoverGameplayMods(product, mounted);
-    const current = declarations.find(entry => modSelectionKey(entry.selection) === modSelectionKey(selection.selection));
+    const entry = declarations.find(entry => modSelectionKey(entry.kind === "available" ? entry.mod.selection : entry.description.selection) === modSelectionKey(selection.selection));
+    if (entry?.kind === "unavailable") {
+      throw new Error(`${entry.description.title}: ${entry.description.availability.reason}`);
+    }
+    const current = entry?.mod;
     if (current === undefined || current.source.content !== selection.source.content || current.source.provider !== selection.source.provider
       || current.declarationDigest !== selection.declarationDigest || JSON.stringify(current.declaration) !== JSON.stringify(selection.declaration))
       throw new Error(`Selected mod differs from its installed declaration: ${modSelectionKey(selection.selection)}`);
