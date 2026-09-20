@@ -28,6 +28,7 @@ import type { QuakeCLocalMessageHost } from "../../app/bootstrap/simulation/quak
 import type { NetworkEvent } from "../../contracts/protocol.ts";
 import type { Q1ClientVisibilityScene, Q1VisibilityClient } from "../gameplay/q1-client-visibility.ts";
 import type { ModCommands } from "./mod-commands.ts";
+import type { ModUserFiles } from "./mod-files.ts";
 
 export interface ModOperations {
   readonly actors: ActorCallbackTable["operations"];
@@ -61,6 +62,7 @@ export interface ModInitialization {
 }
 export interface ModHostServices {
   readonly commands?: Pick<ModCommands, "bind">;
+  readonly files?: Pick<ModUserFiles, "for">;
   readonly native?: NativeModHostContext;
   readonly actors: SessionActorRegistry;
   readonly bodies: SharedBodyTable;

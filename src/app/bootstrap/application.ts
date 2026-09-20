@@ -1,5 +1,6 @@
 import type { WireSelection } from "../../network/common/session.ts";
 import { ModCommands, readModCommand } from "../../world/session/mod-commands.ts";
+import { ModUserFiles } from "../../world/session/mod-files.ts";
 import { ApplicationQ3Rankings } from "./q3-rankings.ts";
 import type { RankingServiceProvider, RankingPlayerState } from "../../network/services/rankings.ts";
 import type { RankingAccountActions } from "../../ui/settings/rankings.ts";
@@ -32,6 +33,7 @@ import { readStartupCommand } from "./startup-commands.ts";
 import { teamArenaDemo, type TeamArenaDemo } from "./team-arena-demo.ts";
 import { DemoLibrary } from "./demo-library.ts";
 import { ClientDemoRecording } from "./demo-recording-commands.ts";
+import { localWorldDemoCommands, type ClientDemoCommands } from "./demo-commands.ts";
 import { LocalDemoRecording, type LocalRecordingSource } from "./demo-local-recording.ts";
 import type { ClientRecordingFeed } from "./client-bootstrap.ts";
 import { ApplicationKeys, type ApplicationKeyProfile } from "./keys.ts";
@@ -390,6 +392,7 @@ export class Application {
   private stepCompletion: Promise<void> | null = null;
   private closing: Promise<void> | null = null;
   private ownedRecording: ClientDemoRecording | null = null;
+  private ownedDemos: { readonly service: ClientDemoCommands; readonly release: () => void } | null = null;
   private elapsed = 0;
   private frames = 0;
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
@@ -679,6 +682,7 @@ export class Application {
       let guestConsole: CommandBuffer | null = null;
       const modCommands = new ModCommands({ context: { session: session.session, origin: { kind: "server-console" } }, commands: () => guestConsole });
       let startup: Awaited<ReturnType<typeof prepareInitialConfiguration>> | null = null;
+      let startupDemos: Application["ownedDemos"] = null;
       let loadedContent: LoadedApplicationContent | null = null;
       let profileConfiguration: PreparedProfileConfiguration | null = null;
       const borrowedImages = ownership.kind === "borrowed" ? ownership.client.imageSettings.prepareClientSettings() : null;
@@ -770,7 +774,20 @@ export class Application {
         }
         if (preparation.kind === "configuration") {
           const configuration = preparation.content;
-          const prepare = (nextFrame: () => Promise<void>) => prepareInitialConfiguration(options, configuration, session, identity, localSeats, inputConfig, host, sourceArchive, defaultCapacity, nextFrame);
+          const prepare = (nextFrame: () => Promise<void>) => prepareInitialConfiguration(options, configuration, session, identity, localSeats, inputConfig, host, sourceArchive, defaultCapacity, nextFrame, prepared => {
+            const service = localWorldDemoCommands({ dedicated: options.dedicated, commands: prepared.commands,
+              source: () => {
+                if (application === null) return prepared.source;
+                const current = application.sourceCvars();
+                if (current === null) throw new Error("Local demo commands require the active world's source cvars");
+                return current;
+              },
+              print: text => {
+                if (application === null || application.graphical === null) host.print(text);
+                else application.graphical.input.print(text, prepared.commands.executionContext);
+              } });
+            startupDemos = { service, release: service.attach(prepared.commands) };
+          });
           startup = host.loading?.nextFrame === undefined ? await serviceLoading(prepare, () => {}) : await prepare(host.loading.nextFrame);
         }
         if (startup !== null) options = startup.options;
@@ -815,6 +832,7 @@ export class Application {
             ? {} : { q3Cvars: teamArenaSourceCvars(options.teamArenaSkirmish, borrowedSource?.snapshots() ?? sourceArchive) }),
           ...await Application.guestOptions(content, options, host, guestCommands, candidateGraph, nativeCommand), prepareRereleaseNavigation: simulation => createApplicationBotNavigation({ content, simulation }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity, weaponBehaviors: content.preparedWeaponBehaviors, recipe: content.recipe, world: content.world, mounts: content.mounts,
           preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [], modCommands,
+          modFiles: new ModUserFiles(options.userContentRoot ?? defaultUserContentRoot()),
           skill: options.skill, mode: options.mode, seed: options.seed, ...(options.serverProfile === undefined ? {} : { serverProfile: options.serverProfile }),
           ...(initialSave === undefined ? {} : { restore: initialSave, restoredClients: [...restoredClients.values()].map(client => client.id) }),
           maxClients,
@@ -829,6 +847,7 @@ export class Application {
         }
         const { authoredCampaignStart: consumedCampaignStart, q3MapLaunch: consumedMapLaunch, ...retainedOptions } = options;
         application = new Application(retainedOptions, content, session, simulation, host, identity, localSeats, networkPlayerIdentities, inputConfig, ownership);
+        application.ownedDemos = startupDemos;
         application.operatorOutput = operatorOutput;
         application.operatorState = await ServerOperatorState.open(Application.sourceConfig(options, content), "settings/server-operator.json");
         application.debugGraph = candidateGraph;
@@ -919,7 +938,7 @@ export class Application {
           try { if (initialSave !== undefined) application.simulation.q3Guest()?.discard(); await application.close(); }
           catch (cleanup) { errors.push(cleanup); }
         } else {
-          for (const close of [() => ownership.kind === "owned" ? session.close() : undefined,
+          for (const close of [() => startupDemos?.release(), () => ownership.kind === "owned" ? session.close() : undefined,
             ...stagedSeats.added.map(seat => () => seat.close()), ...stagedClients.added.map(client => () => client.close()),
             () => profileConfiguration?.routing.close(), () => profileConfiguration?.scripts.close(),
             () => startup?.image?.close(), () => startup?.scripts.close(), () => loadedContent?.close()]) {
@@ -1205,7 +1224,9 @@ export class Application {
         serverGame: command => this.sourceCommandBinding?.options?.serverGame?.(command) ?? false,
         forwardToServer: command => this.sourceCommandBinding?.options?.forwardToServer?.(command) });
     } else this.sourceCommands.setProfile(options.dialect, undefined);
-    this.releaseSourceCommands = prepared.activate(this.sourceCommands);
+    const releaseSource = prepared.activate(this.sourceCommands);
+    const releaseDemos = this.ownedDemos?.service.attach(this.sourceCommands);
+    this.releaseSourceCommands = () => { releaseDemos?.(); releaseSource(); };
     this.q2Console = prepared.q2Console;
     this.refreshApplicationTools();
   }
@@ -2704,6 +2725,7 @@ export class Application {
       const retainedNative = nativeTravel === undefined ? undefined : previousSimulation.captureNativeQ2Travel(nativeTravel.newUnit, nativeTravel.spawnPoint);
       simulation = await loadSimulation({ ...(retainedNative === undefined ? {} : { nativeQ2Travel: retainedNative }), dedicated: options.dedicated, ...await Application.guestOptions(content, options, this.host, guestCommands, candidateGraph, nativeCommand), prepareRereleaseNavigation: simulation => createApplicationBotNavigation({ content, simulation }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, weaponBehaviors: content.preparedWeaponBehaviors, recipe: content.recipe, world: content.world, mounts: content.mounts,
         preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [], modCommands, ...(modTravel === undefined ? {} : { modTravel }),
+        modFiles: new ModUserFiles(options.userContentRoot ?? defaultUserContentRoot()),
         skill: options.skill, mode: options.mode, seed: options.seed, maxClients: settings?.maxClients ?? (q3Map?.maxClients === undefined ? undefined : previousSimulation.q3Guest() === null ? q3Map.maxClients : Math.max(q3Map.maxClients, ...clients.map(client => client.slot + 1))) ?? skirmish?.maxClients ?? nextRules?.maxClients ?? this.simulation.options.maxClients,
         promptSupported: client => !options.dedicated && this.localSeats.has(client),
         playerIdentity: client => this.networkPlayerIdentities.get(client) ?? ({ seat: this.localSeats.get(client)?.id.index ?? 0, socialId: "" }),
@@ -3057,6 +3079,7 @@ export class Application {
           this.ownership.client.sourceProfile.current = content.recipe.map.entities;
         }
         adoptHeadless();
+        this.ownedDemos?.service.refresh();
         this.enableStartupPersistence();
         if (nextLocalGuest !== null) this.requestedCommands.push(...nextLocalGuest.pendingCommands.splice(0));
         if (options.dedicated) this.dedicatedCommands = this.sourceCommands;
@@ -3740,6 +3763,7 @@ export class Application {
         }
       };
       try {
+        if (command.target === "application" && this.ownedDemos?.service.handle(command.name, command.arguments_, source ?? { session: this.session.session, origin: { kind: "local-console" } })) continue;
         if (command.target === "application" && command.name === "clientLevelShot") {
           const local = this.graphical?.input.locals.find(local => command.seat !== null && local.player.seat.id.equals(command.seat));
           if (local !== undefined && this.simulation.q3Guest() !== null) {
@@ -4374,6 +4398,8 @@ export class Application {
     const errors: unknown[] = [];
     if (this.ownership.kind === "borrowed") { try { await this.ownership.client.stopRecording(this); } catch (error) { errors.push(error); } }
     try { await this.ownedRecording?.stopAll(); } catch (error) { errors.push(error); }
+    try { this.ownedDemos?.release(); } catch (error) { errors.push(error); }
+    this.ownedDemos = null;
     try { await this.tools?.close(); } catch (error) { errors.push(error); }
     this.tools = null;
     try { this.ownedVideoRestart?.close(); } catch (error) { errors.push(error); }

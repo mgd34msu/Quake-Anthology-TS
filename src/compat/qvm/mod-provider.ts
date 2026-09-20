@@ -11,6 +11,7 @@ import type { ActorCollision } from "../../world/collision/index.ts";
 import type { ModCallbackInput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
 import type { QvmModActorField, QvmModActorRecord, QvmModCallbackDeclaration, QvmModScalar, QvmModSourceCall, QvmModValue } from "../../contracts/qvm-mod-callbacks.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
+import type { UserFileStore } from "../../platform/files/writable.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
 import type { ModCommandPort } from "../../world/session/mod-commands.ts";
 import type { CommandInvocation } from "../../core/commands/index.ts";
@@ -191,7 +192,8 @@ export class QvmModProvider {
   private nextSlot = 0;
   private closed = false;
   constructor(readonly artifact: Artifact, readonly declaration: QvmModCallbackDeclaration, readonly services: ModHostServices,
-    private readonly assertCurrent: () => void, private readonly content: ContentId, private readonly mounts?: MountedContent) {
+    private readonly assertCurrent: () => void, private readonly content: ContentId, private readonly mounts?: MountedContent,
+    private readonly writable: UserFileStore | null = null) {
     validateQvmMod(artifact, declaration);
     if (declaration.sourceActors !== undefined && services.engine?.physics === undefined) throw new Error("QVM source actors require destination collision services");
     this.records = new Map(declaration.actorRecords.map(record => [record.id, record]));
@@ -204,7 +206,7 @@ export class QvmModProvider {
       geometry: topology, adjustAreaPortalState: (first, second, open) => adjust.call(scene, first, second, open),
       adjustAreaPortalContribution: (portal, delta) => contribution.call(scene, portal, delta), nativeQ3ClipModels: () => native.call(scene),
     });
-    this.files = mounts === undefined ? null : new QvmFiles({ mounts, writable: null, print: text => services.engine?.print(text), assertCurrent: () => this.current() });
+    this.files = mounts === undefined ? null : new QvmFiles({ mounts, writable, print: text => services.engine?.print(text), assertCurrent: () => this.current() });
     this.module = new QvmModule({ artifact, host: call => this.syscall(call), hostState: {
       checkpoint: () => ({ state: { module: artifact.module, format: "qvm:mod-host-v1", bytes: encodeCheckpointValue({ version: 1,
         projections: [...this.projections].map(([actor, slot]) => ({ actor: savedActorId(actor), slot, owned: this.owned.has(actor), event: this.eventKeys.get(actor) ?? null })), nextSlot: this.nextSlot,
@@ -217,7 +219,7 @@ export class QvmModProvider {
           if (this.portals === null) throw new Error("Saved QVM mod portals require destination topology");
           this.portals.restorePortalCheckpoint(decoded.field("portals").value);
         }
-        const files = mounts === undefined ? null : new QvmFiles({ mounts, writable: null, assertCurrent: () => this.current() });
+        const files = mounts === undefined ? null : new QvmFiles({ mounts, writable, print: text => services.engine?.print(text), assertCurrent: () => this.current() });
         try { files?.restoreCheckpoint(decoded.field("files").value); this.cvars.restoreSaveState(decoded.field("cvars").value); }
         catch (error) { files?.closeAll(); throw error; }
         this.files?.closeAll(); this.files = files; this.nextSlot = decoded.field("nextSlot").integer(0);
@@ -692,7 +694,7 @@ export class QvmModProvider {
     }
     if (saved.projections.filter(entry => entry.owned).length !== this.services.actors.ownedBy(this.artifact.module.id).length) throw new Error("QVM mod source ownership differs from the saved world");
     this.newCvars().restoreSaveState(saved.cvars);
-    if (this.mounts !== undefined) { const files = new QvmFiles({ mounts: this.mounts, writable: null, assertCurrent: () => this.current() });
+    if (this.mounts !== undefined) { const files = new QvmFiles({ mounts: this.mounts, writable: this.writable, assertCurrent: () => this.current() });
       try { files.restoreCheckpoint(saved.files); } finally { files.closeAll(); } }
     else if (saved.files !== null) throw new Error("Saved QVM mod filesystem is unavailable");
     this.module.restore(checkpoint); return undefined;

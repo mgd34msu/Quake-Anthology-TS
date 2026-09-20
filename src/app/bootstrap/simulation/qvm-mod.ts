@@ -4,6 +4,7 @@ import { modInstanceProvider } from "../../../contracts/mods.ts";
 import type { QvmModCallbackDeclaration } from "../../../contracts/qvm-mod-callbacks.ts";
 import type { MountedContent } from "../../../content/mounts/index.ts";
 import type { PreparedMod } from "../../../world/session/mods.ts";
+import { borrowModFileMounts } from "../../../world/session/mod-files.ts";
 import { resolveQvmArtifact } from "../../../compat/qvm/artifacts.ts";
 import { QvmModProvider, validateQvmMod, validateQvmModCheckpoint } from "../../../compat/qvm/mod-provider.ts";
 import { registerModCallbacks } from "./mod-callbacks.ts";
@@ -34,7 +35,10 @@ export function prepareQvmMod(options: PrepareQvmModOptions): PreparedMod {
     },
     async initialize(context) {
       if (context.services === null) throw new Error("QVM gameplay mods require destination world services");
-      const services = context.services, source = new QvmModProvider(artifact, declaration, services, context.assertCurrent, description.source.content, options.mounts);
+      const services = context.services, writable = services.files?.for(description.selection) ?? null;
+      const mounts = writable === null ? options.mounts : borrowModFileMounts(description.selection, description.source.content, options.mounts, writable);
+      if (mounts !== undefined && mounts !== options.mounts) context.resources.defer(() => { mounts.close(); return undefined; });
+      const source = new QvmModProvider(artifact, declaration, services, context.assertCurrent, description.source.content, mounts, writable);
       context.resources.own(source);
       if (services.commands !== undefined) source.bindCommands(services.commands.bind({ selection: description.selection, module, cvars: source.cvars,
         invoke: command => source.consoleCommand(command), readScript: name => source.readScript(name) }, context.resources));

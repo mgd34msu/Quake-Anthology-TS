@@ -18,12 +18,42 @@ import { resolveStartupRules } from "../../src/app/bootstrap/startup-source.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { Q3ServerState, registerQ3ServerCvars } from "../../src/app/bootstrap/simulation/q3/server-state.ts";
 import { archivedBindings, defaultBindings } from "../../src/input/bindings.ts";
+import { localWorldDemoCommands } from "../../src/app/bootstrap/demo-commands.ts";
 
 function options(args: readonly string[] = []) {
   const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", ...args]);
   if (command.kind !== "run") throw new Error("Expected launch");
   return command.options;
 }
+
+test("direct local-world startup owns quake.rc demos without replacing its selected map", async () => {
+  for (const dedicated of [false, true]) {
+    const identity = createIdentityOwner(`direct-demos-${dedicated}`), printed: string[] = [], forwarded: string[] = [];
+    const context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };
+    const source = new CvarRegistry({ dialect: "q1-netquake", context });
+    const prepared = new PreparedStartup(source, source,
+      new ConsoleScriptFiles({ consoleRoot: "/unused", settings: new ConfigStore("/unused"), mounted: undefined }), {
+        dialect: "q1-netquake", movementDialect: "q1-netquake", seats: [], shared: null, sharedNames: [],
+        print: text => { printed.push(text); }, forward: name => { forwarded.push(name); return undefined; },
+      });
+    const demos = localWorldDemoCommands({ dedicated, commands: prepared.commands, source: () => prepared.source, print: text => { printed.push(text); } });
+    const release = demos.attach(prepared.commands);
+    try {
+      await prepared.execute({ nextFrame: async () => {}, hasMod: false, sourceArchive: [], movementArchive: [], fallbackArchive: [], sharedArchive: [],
+        read: async name => name === "quake.rc" ? "exec default.cfg\nexec config.cfg\nstartdemos demo1 demo2 demo3\n" : "", applyLaunchOptions: () => {} });
+      expect(printed.join("")).not.toContain("Unknown command"); expect(forwarded).toEqual([]);
+      if (dedicated) {
+        prepared.commands.executeNow("demos\nplaydemo demo1\nstopdemo\n"); expect(forwarded).toEqual([]);
+      } else {
+        expect(printed.join("")).toContain("3 demo(s) in loop");
+        expect(() => prepared.commands.executeNow("demos")).toThrow("Demo playback (demo2) requires the graphical launcher");
+        demos.manualGame();
+        expect(() => prepared.commands.executeNow("demos")).toThrow("Demo playback (demo2) requires the graphical launcher");
+      }
+    } finally { release(); }
+    expect(prepared.commands.exists("startdemos")).toBe(false);
+  }
+});
 
 test("startup run setting belongs to the seat before scripts and reaches its later movement builder", async () => {
   const dialects: readonly CommandDialect[] = ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"];

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { open, readdir, stat } from "node:fs/promises";
 import { relative } from "node:path";
 import { createContentDigest, createResourceId } from "../../contracts/content.ts";
-import type { ArchiveMount, ContentDigest, ContentMount, LooseMount, MountId, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../../contracts/content.ts";
+import type { ArchiveMount, ContentDigest, ContentMount, LooseMount, MountId, MountPlanId, ResolvedMountPlan, ResolvedResourceReference, ResourceProvenance, ResourceResolution } from "../../contracts/content.ts";
 import { FileSource } from "../archive/source.ts";
 import { openArchiveSource, openArchive, readLooseEntry } from "../archive/index.ts";
 import type { ArchiveHandle } from "../archive/index.ts";
@@ -127,6 +127,7 @@ function sameMount(left: ContentMount, right: ContentMount): boolean {
 /** A selected plan owns its open archives; no process-global search path is mutated. */
 export class MountedContent {
   readonly #sources = new Map<MountId, MountedSource>();
+  readonly #userMounts = new Set<MountId>();
   readonly #referenced = new Map<MountId, ArchiveMount>();
   readonly #openedResources = new Map<string, ResolvedResourceReference>();
   #closed = false;
@@ -171,6 +172,20 @@ export class MountedContent {
       || pure.some((digest, index) => digest !== expectedPure[index])) return null;
     const borrowed = new MountedContent(resolved, sources, options);
     borrowed.#ownership = { kind: "borrowed", parent: this };
+    for (const id of this.#userMounts) if (borrowed.#sources.has(id)) borrowed.#userMounts.add(id);
+    return borrowed;
+  }
+
+  /** A scoped user overlay borrows installed archives without taking ownership of them. */
+  borrowWithLooseMount(mount: LooseMount, id: MountPlanId): MountedContent {
+    this.assertOpen();
+    if (this.#sources.has(mount.identity.id)) throw new Error(`Duplicate user mount: ${mount.identity.id}`);
+    const plan: ResolvedMountPlan = { id, mounts: [mount, ...this.plan.mounts],
+      defaultOrder: [mount.identity.id, ...this.plan.defaultOrder],
+      prefixOrders: this.plan.prefixOrders.map(order => ({ ...order, mounts: [mount.identity.id, ...order.mounts] })) };
+    const borrowed = new MountedContent(plan, [{ kind: "loose", mount }, ...this.#sources.values()], this.options, this);
+    for (const user of this.#userMounts) borrowed.#userMounts.add(user);
+    borrowed.#userMounts.add(mount.identity.id);
     return borrowed;
   }
 
@@ -191,6 +206,7 @@ export class MountedContent {
   }
 
   #allowed(source: MountedSource, path: string): boolean {
+    if (source.kind === "loose" && this.#userMounts.has(source.mount.identity.id)) return true;
     if (source.kind === "loose" && this.options.q3Restriction === "demo" && !pureLoosePath(path)) return false;
     const pure = this.options.pure;
     if (pure === undefined || pure.archives.length === 0) return true;
@@ -229,6 +245,14 @@ export class MountedContent {
     openedResources: Map<string, ResolvedResourceReference>): Promise<OpenedResource | null> {
     this.assertOpen();
     const requestedPath = normalizeResourcePath(path);
+    if (this.#userMounts.size !== 0) for (const [rank, id] of plan.defaultOrder.entries()) {
+      if (!this.#userMounts.has(id)) continue;
+      const source = this.#sources.get(id);
+      if (source === undefined || !acceptMount(source.mount)) continue;
+      const read = await this.#readSource(source, requestedPath);
+      this.assertOpen();
+      if (read !== null) return this.#opened(requestedPath, read, { kind: "default-order", plan: plan.id, rank }, openedResources);
+    }
     for (const link of this.options.links ?? []) {
       if (!requestedPath.startsWith(link.sourcePrefix)) continue;
       const source = this.#sources.get(link.mount);
@@ -244,6 +268,7 @@ export class MountedContent {
     for (const [rank, id] of order.entries()) {
       const source = this.#sources.get(id);
       if (source === undefined) throw new Error(`Unknown mounted source: ${id}`);
+      if (this.#userMounts.has(id)) continue;
       if (!acceptMount(source.mount)) continue;
       const read = await this.#readSource(source, requestedPath);
       this.assertOpen();
@@ -285,7 +310,8 @@ export class MountedContent {
           add(name.slice(directory.length === 0 ? 0 : directory.length + 1));
         }
       } else {
-        if (this.options.q3Restriction === "demo" || (this.options.pure?.archives.length ?? 0) !== 0) continue;
+        if (!this.#userMounts.has(source.mount.identity.id)
+          && (this.options.q3Restriction === "demo" || (this.options.pure?.archives.length ?? 0) !== 0)) continue;
         const location = directory === "" ? source.mount.rootPath
           : await findContentPath(source.mount.rootPath, directory, this.options.looseComparison);
         if (location === null) continue;

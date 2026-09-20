@@ -1,6 +1,7 @@
 import { asciiFold } from "../../core/commands/index.ts";
 import type { CommandContext } from "../../contracts/common.ts";
 import type { CommandBuffer, CommandHandler, CommandInvocation } from "../../core/commands/index.ts";
+import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { demoFamily, type DemoFamily, type DemoRequest } from "./demo-playback.ts";
 
 export type DemoClientState =
@@ -22,6 +23,31 @@ export interface ClientDemoCommandHost {
 }
 
 type DemoCommand = Pick<CommandInvocation, "args" | "source"> & { readonly name: string };
+
+/** Direct Application owners retain a local server; the frontend owns recording playback. */
+export function localWorldDemoCommands(host: {
+  readonly dedicated: boolean;
+  readonly commands: CommandBuffer;
+  source(): Pick<CvarRegistry, "dialect" | "variableString" | "set">;
+  print(text: string): void;
+}): ClientDemoCommands {
+  return new ClientDemoCommands({ dedicated: host.dedicated,
+    current: () => {
+      const dialect = host.source().dialect;
+      return { kind: "local", family: dialect === "q1-netquake" ? "q1" : dialect === "q1-quakeworld" ? "qw" : dialect === "q3" ? "q3" : "q2" };
+    },
+    stage: intent => {
+      throw new Error(intent.kind === "start"
+        ? `Demo playback (${intent.request.name}) requires the graphical launcher; this application owns a local game.`
+        : "Stopping demo playback requires its retained client owner.");
+    },
+    print: host.print, append: (text, source) => host.commands.append(text, source),
+    takeCompletionCommand: family => {
+      const source = host.source(), name = family === "q2" ? "nextserver" : "nextdemo", text = source.variableString(name);
+      source.set(name, "", true); return text;
+    },
+  });
+}
 
 function local(source: CommandContext): boolean {
   let origin = source.origin;
