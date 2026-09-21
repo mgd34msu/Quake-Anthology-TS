@@ -38,6 +38,8 @@ T23 real existing-account evidence covers public `llm_ask` and `llm_exec`, each 
 
 The historical 477-row source ledger is unchanged. This update neither re-audits that inventory nor converts reviewed rows into completed functional targets.
 
+Latest installed T10 checkpoint: `ce3c9ba` keeps regular armor and powered protection independent and connects authored view-roll cleanup. The same executable includes original native/QVM applied-input observation, shared Q1 punch and declared native capacities. Old version-2 saves load; new saves use version 3. Authored component input callbacks and borrowed original armor-stage operations remain active work. Target totals are unchanged. See [delivery and evidence](../execution-status.md).
+
 ## T01 session and resource lifetime
 
 Completed source behavior:
