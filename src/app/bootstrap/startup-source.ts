@@ -25,7 +25,7 @@ export function createStartupSource(options: ApplicationOptions, selection: Pick
     cvars.register("fs_restrict", "0", CvarFlag.Init);
     for (const definition of q3GameCvarDefinitions(selection.source.content.includes("missionpack") ? "missionpack" : "baseq3"))
       cvars.register(definition.name, definition.value, definition.flags);
-  } else for (const [name, value] of Object.entries({ skill: "1", deathmatch: "0", coop: "0", teamplay: "0", sv_cheats: "0", sv_aim: "0.93",
+  } else for (const [name, value] of Object.entries({ skill: "1", deathmatch: "0", coop: "0", teamplay: "0", sv_cheats: "0", sv_aim: dialect === "q1-quakeworld" ? "2" : "0.93",
     developer: "0", pausable: "1", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1", footsteps: "1" })) cvars.register(name, value);
   for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0",
     coop: options.mode === "coop" ? "1" : "0", g_gametype: options.mode === "singleplayer" ? "2" : "0",

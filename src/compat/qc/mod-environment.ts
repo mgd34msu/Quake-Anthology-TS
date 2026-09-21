@@ -19,7 +19,7 @@ export class QcModEnvironment {
     this.cvars = new CvarRegistry({ dialect: program.api.kind, context: { session: services.actors.session, origin: { kind: "server-console" } }, print: text => services.engine?.print(text) });
     const defaults = { skill: String(environment?.skill ?? 1), maxclients: String(declaration.clients?.maximum ?? environment?.maxClients ?? 1),
       coop: environment?.mode === "coop" ? "1" : "0", deathmatch: environment?.mode === "deathmatch" ? "1" : "0", teamplay: "0",
-      sv_gravity: String(environment?.gravity ?? 800), sv_aim: "0.93", sv_maxspeed: "320", registered: "1", developer: "0", sv_cheats: "0",
+      sv_gravity: String(environment?.gravity ?? 800), sv_aim: program.api.kind === "q1-quakeworld" ? "2" : "0.93", sv_maxspeed: "320", registered: "1", developer: "0", sv_cheats: "0",
       samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0" };
     for (const [name, value] of Object.entries(defaults)) this.cvars.register(name, value);
     if (program.api.kind === "q1-quakeworld") this.cvars.register("sv_phs", "1");

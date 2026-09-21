@@ -5,7 +5,8 @@ import type { ActorId } from "../../contracts/identity.ts";
 import type { ModActorField, ModCallbackDeclaration, ModCallbackInput, ModCallbackValue, ModRuntimeValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
 import type { RandomSource, RandomState } from "../../contracts/numeric.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
-import { createNumericOperations, Q1_DONOR_PROFILE } from "../../core/numeric.ts";
+import { createNumericOperations, nativeAtoi, Q1_DONOR_PROFILE } from "../../core/numeric.ts";
+import { quakeWorldInfo } from "../../network/q1/handshake.ts";
 import { savedActorId, readSavedActor } from "../../persistence/save-image.ts";
 import { encodeCheckpointValue, decodeCheckpointValue, SaveReader } from "../../persistence/value.ts";
 import { createQcBuiltins } from "./builtins.ts";
@@ -14,6 +15,7 @@ import { createQcPresentationBindings } from "./presentation-host.ts";
 import type { QcPrecachedResource } from "./presentation-host.ts";
 import { createQcSpatialBindings } from "./spatial-host.ts";
 import { QcModClientBindings } from "./mod-clients.ts";
+import { createQcAimBinding } from "./client-host.ts";
 import { QcModActors } from "./mod-actors.ts";
 import { QcModCombat, validateQcModCombat } from "./mod-combat.ts";
 import { QcModMessages } from "./mod-messages.ts";
@@ -185,6 +187,26 @@ export class QcModProvider {
         services.bodies.link(actor);
       },
     })) host.set(name, builtin);
+    if (services.engine !== undefined) host.set("aim", createQcAimBinding({
+      options: { program, entities, bodies: services.bodies, scene: services.engine.scene, numeric: Q1_DONOR_PROFILE },
+      actor: slot => {
+        const actor = services.actors.resolveOwned(this.actor(entities.reference(slot)));
+        if (actor === null) throw new Error("Aim references a released component actor"); return actor;
+      },
+    }, { aimThreshold: () => this.cvars.variableValue("sv_aim"), teamplay: () => this.cvars.variableValue("teamplay"),
+      noAim: actor => {
+        const client = services.clients?.forActor(actor);
+        return program.api.kind === "q1-quakeworld" && client != null && services.clients !== undefined
+          && nativeAtoi(quakeWorldInfo(services.clients.userinfo(client)).get("noaim") ?? "0") > 0;
+      }, targets: () => {
+        this.prepareEntities();
+        const targets: { actor: ActorId; reference: number }[] = [];
+        for (let slot = 1; slot < entities.count; slot++) {
+          const actor = this.actorsBySlot.get(slot);
+          if (actor !== undefined && services.actors.isLive(actor)) targets.push({ actor, reference: entities.reference(slot) });
+        }
+        return targets;
+      } }));
     this.messages = null;
     if (services.engine !== undefined && media !== undefined) {
       const lookup = (kind: "model" | "sound", name: string) => this.lookup(kind, name);
@@ -407,13 +429,14 @@ export class QcModProvider {
     if (actor === null) return 0;
     const world = this.services.engine?.world();
     if (world != null && actor.equals(world)) return 0;
-    if (!this.services.actors.isLive(actor)) throw new Error("Gameplay mod cannot project a stale actor");
-    const existing = this.projections.get(actor);
+    const current = this.services.actors.resolveOwned(actor)?.id;
+    if (current === undefined) throw new Error("Gameplay mod cannot project a stale actor");
+    const existing = this.projections.get(current);
     if (existing !== undefined) return this.machine.entities.reference(existing);
-    const clientSlot = this.clients?.slot(actor) ?? null, slot = clientSlot ?? this.machine.entities.count;
+    const clientSlot = this.clients?.slot(current) ?? null, slot = clientSlot ?? this.machine.entities.count;
     if (clientSlot === null) this.machine.entities.setCount(slot + 1);
     else this.machine.entities.at(slot).bytes.fill(0);
-    this.projections.set(actor, slot); this.actorsBySlot.set(slot, actor);
+    this.projections.set(current, slot); this.actorsBySlot.set(slot, current);
     for (const field of this.fields) if (field.declaration.binding === "constant") this.write(this.machine.entities.at(slot), field.offset, field.declaration.value);
     return this.machine.entities.reference(slot);
   }

@@ -71,6 +71,17 @@ export interface NativeModSourceActors {
   readonly combat?: NativeModCombat;
 }
 export interface NativeModScalarField { readonly offset: number; readonly encoding: NativeModScalar; }
+export interface NativeModArmorField extends NativeModScalarField { readonly record: string; }
+export type NativeModArmorSelection =
+  | { readonly kind: "positive"; readonly field: NativeModArmorField }
+  | { readonly kind: "enum"; readonly field: NativeModArmorField; readonly value: number; readonly none: number };
+export type NativeModArmor = { readonly kind: "none" } | {
+  readonly kind: "q2";
+  readonly regular: readonly { readonly item: ItemId; readonly selection: NativeModArmorSelection; readonly points: NativeModArmorField;
+    readonly normalProtection: number; readonly energyProtection: number }[];
+  readonly power: readonly { readonly item: ItemId; readonly kind: "screen" | "shield"; readonly selection: NativeModArmorSelection;
+    readonly cells: NativeModArmorField; readonly enabled: { readonly field: NativeModArmorField; readonly mask: number } | null }[];
+};
 export interface NativeModDeferredDamage {
   readonly process: NativeModEntry;
   readonly attacker: number;
@@ -89,7 +100,7 @@ export interface NativeModCombat {
   readonly mass: NativeModScalarField;
   readonly takedamage: NativeModScalarField;
   readonly flags: NativeModScalarField & { readonly invulnerable: number; readonly noKnockback: number };
-  readonly armor: { readonly kind: "none" };
+  readonly armor: NativeModArmor;
   readonly deferred?: NativeModDeferredDamage;
 }
 export interface NativeModDeclaration {

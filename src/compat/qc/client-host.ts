@@ -6,6 +6,7 @@ import type { QcHostBuiltinName } from "./builtins.ts";
 import type { QcBuiltin } from "./machine.ts";
 import { QcProgramError } from "./program.ts";
 import type { QcWorldHost } from "./world-host.ts";
+import type { QcWorldHostOptions } from "./world-host.ts";
 
 /** QC owns the fields and lifetimes; the shared policy owns client rotation and PVS caching. */
 export class QcClientHost {
@@ -41,28 +42,29 @@ export class QcClientHost {
 }
 
 /** PF_aim reads speed but never uses it; all collision and selection uses the shared Q1 policy. */
-export function createQcAimBinding(world: QcWorldHost, services: {
+export function createQcAimBinding(world: Pick<QcWorldHost, "actor"> & {
+  readonly options: Pick<QcWorldHostOptions, "program" | "entities" | "bodies" | "scene" | "numeric">;
+}, services: {
   readonly aimThreshold: () => number;
   readonly teamplay: () => number;
+  /** Projected references are in native source-slot order, independent of their owning game. */
+  readonly targets: () => readonly { readonly actor: ActorId; readonly reference: number }[];
+  readonly noAim?: (actor: ActorId) => boolean;
 }): QcBuiltin {
-  const { program, entities, actors, slots, bodies, scene, numeric } = world.options;
-  const field = (name: string): number => {
-    const value = program.fieldsByName.get(name); if (value === undefined) throw new Error(`Missing QC aim field ${name}`); return value.offset;
-  };
-  const team = field("team"), damage = field("takedamage");
+  const { program, entities, bodies, scene, numeric } = world.options;
   return vm => {
     if (vm.program !== program || vm.entities !== entities) return vm.fail("aim builtin belongs to another QC machine");
-    const actor = world.actor(entities.slot(vm.argInt(0))), body = bodies.read(actor.id);
+    const reference = vm.argInt(0), actor = world.actor(entities.slot(reference)), forward = vm.globals.vector(vm.globalOffset("v_forward"));
+    if (services.noAim?.(actor.id) === true) { vm.returnVector(forward); return; }
+    for (const field of ["team", "takedamage"]) if (program.fieldsByName.get(field)?.type !== "float") return vm.fail(`Missing QC aim float field ${field}`);
+    const body = bodies.read(actor.id);
     if (body === null) return vm.fail("QC aim actor has no body");
-    const shooter = entities.fromReference(vm.argInt(0)), targets: ActorId[] = [];
-    for (let slot = 1; slot < entities.count; slot++) {
-      const target = slots.at(slot); if (target !== null && actors.isLive(target.id)) targets.push(target.id);
-    }
-    vm.returnVector(aimQ1(body.origin, vm.globals.vector(vm.globalOffset("v_forward")), services.aimThreshold(), {
-      targets, body: target => bodies.read(target), eligible: target => {
-        const source = actors.sourceOf(target); if (source?.provider !== slots.options.provider || target.equals(actor.id)) return false;
-        const words = entities.at(source.slot);
-        return words.float(damage) === 2 && !(services.teamplay() !== 0 && shooter.float(team) > 0 && shooter.float(team) === words.float(team));
+    const targets = services.targets(), references = new Map(targets.map(target => [target.actor.slot, target]));
+    vm.returnVector(aimQ1(body.origin, forward, services.aimThreshold(), {
+      targets: targets.map(target => target.actor), body: target => bodies.read(target), eligible: target => {
+        const projected = references.get(target.slot);
+        if (projected === undefined || !projected.actor.equals(target) || target.equals(actor.id) || vm.entityFloat(projected.reference, "takedamage") !== 2) return false;
+        return services.teamplay() === 0 || vm.entityFloat(reference, "team") <= 0 || vm.entityFloat(reference, "team") !== vm.entityFloat(projected.reference, "team");
       }, trace: (start, end) => {
         const trace = scene.trace({ start, end, shape: { kind: "point" }, target: { kind: "world" },
           policy: { kind: "q1", move: "normal", hull: null }, numeric, passActor: actor.id });

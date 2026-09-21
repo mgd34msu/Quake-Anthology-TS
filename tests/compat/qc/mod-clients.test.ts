@@ -17,6 +17,7 @@ import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
 import { loadQcProgram } from "../../../src/compat/qc/program.ts";
 import { QcModClientBindings } from "../../../src/compat/qc/mod-clients.ts";
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
+import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 
 const copper = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
 const selfGlobal = [{ name: "self", value: { kind: "input", name: "self" } }] satisfies ModSourceCall["globals"];
@@ -122,7 +123,7 @@ test("QC userinfo field writes preserve other keys and do not recursively publis
 });
 
 const quakeworld = "/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat";
-test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, sounds and blood use component media and destination identities", async () => {
+test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, media and shotgun aim use destination identities and collision", async () => {
   const program = loadQcProgram(await Bun.file(quakeworld).bytes()); expect(program.api.kind).toBe("q1-quakeworld");
   const occupied = new Set<number>(), actorFields: ModActorField[] = [];
   for (const field of program.fields) {
@@ -137,8 +138,15 @@ test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, 
   if (options.kind !== "run") throw new Error("Missing destination");
   const content = await loadApplicationContent(options.options), resources = await prepareQuakeCResources(program, await content.forContent("q1:classic:id1:installed")), ids = createIdentityOwner("qc-qw-clients"), actors = new SessionActorRegistry(ids), callbacks = new ActorCallbackTable(actors);
   const world = actors.allocate("q2:map", "q2:world"), first = actors.allocate("q2:game", "q2:player"), second = actors.allocate("q2:game", "q2:player");
-  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined }), port = clients();
-  const scene = createSceneQueries(content.world), points = scene.geometry.leaves.map(leaf => ({
+  const scene = createSceneQueries(content.world), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds,
+    onLink: body => {
+      // A decoded destination reference has value identity without sharing the QC projection's object.
+      scene.link({ ...body, actor: ids.actor(body.actor.slot, body.actor.generation) }, { family: "q2", shape: { kind: "box" }, contents: 0x02000000, owner: null, role: "solid", monster: true, deadMonster: false });
+      return undefined;
+    },
+    onUnlink: actor => { scene.unlink(actor); return undefined; } }), port = clients();
+  scene.bindActorState(actor => bodies.read(actor));
+  const points = scene.geometry.leaves.map(leaf => ({
     x: (leaf.bounds.min.x + leaf.bounds.max.x) / 2, y: (leaf.bounds.min.y + leaf.bounds.max.y) / 2, z: (leaf.bounds.min.z + leaf.bounds.max.z) / 2
   })).filter(point => scene.leafCluster(scene.pointLeaf(point)) >= 0);
   const origin = points[0]; if (origin === undefined) throw new Error("Missing visible map leaf");
@@ -196,5 +204,53 @@ test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, 
     const saved = source.checkpoint(); source.restore(saved); effects.length = 0;
     source.invoke({ function: "SpawnBlood", arguments: [{ kind: "vector", value: origin }, { kind: "float", value: 20 }], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>());
     expect(effects.map(effect => effect.recipient)).toEqual([first.id]);
+
+    // Find a real clear volume in the destination BSP, without assuming its spawn or room coordinates.
+    const bounds = { min: { x: -16, y: -16, z: -16 }, max: { x: 16, y: 16, z: 32 } };
+    bodies.unlink(first); bodies.unlink(second);
+    const lane = points.flatMap(start => [0, 90, 180, 270].map(yaw => {
+      const radians = yaw * Math.PI / 180, forward = { x: Math.round(Math.cos(radians)), y: Math.round(Math.sin(radians)), z: 0 };
+      return { start, yaw, forward, end: { x: start.x + forward.x * 128, y: start.y + forward.y * 128, z: start.z + 48 } };
+    })).find(candidate => {
+      const trace = scene.trace({ start: candidate.start, end: candidate.end, shape: { kind: "box", bounds }, target: { kind: "world" },
+        policy: { kind: "q1", move: "normal", hull: null }, numeric: Q1_DONOR_PROFILE, passActor: null });
+      return !trace.startSolid && trace.fraction === 1;
+    });
+    if (lane === undefined) throw new Error("Missing destination shotgun test volume");
+    for (const { actor, position, words } of [{ actor: first, position: lane.start, words: target }, { actor: second, position: lane.end, words: attacker }]) {
+      bodies.write(actor, { origin: position, angles: zero, velocity: zero, bounds, ground: null }); bodies.link(actor);
+      words.setVector(field("origin"), position); words.setVector(field("mins"), bounds.min); words.setVector(field("maxs"), bounds.max);
+      words.setVector(field("absmin"), { x: position.x - 16, y: position.y - 16, z: position.z - 16 });
+      words.setVector(field("size"), { x: 32, y: 32, z: 48 }); words.setFloat(field("health"), 100);
+      words.setFloat(field("takedamage"), 2); words.setFloat(field("team"), 0);
+      words.setInt(field("th_pain"), program.functionNamed("SUB_Null").index);
+    }
+    target.setVector(field("v_angle"), { x: 0, y: lane.yaw, z: 0 });
+    target.setFloat(field("ammo_shells"), 8); target.setFloat(field("currentammo"), 8);
+    vm.globals.setFloat(vm.globalOffset("teamplay"), 0); vm.globals.setVector(vm.globalOffset("v_forward"), lane.forward);
+    const aim = () => {
+      vm.globals.setInt(4, vm.entities.reference(1)); vm.globals.setFloat(7, 100000);
+      vm.execute(program.functionNamed("aim").index, 2);
+      return vm.globals.vector(1);
+    };
+    expect(source.cvars.variableValue("sv_aim")).toBe(2); expect(aim()).toEqual(lane.forward);
+    source.cvars.set("sv_aim", "0.93"); expect(aim().z).toBeGreaterThan(0.3);
+    attacker.setFloat(field("takedamage"), 1); expect(aim()).toEqual(lane.forward); attacker.setFloat(field("takedamage"), 2);
+    source.cvars.set("teamplay", "1"); target.setFloat(field("team"), 1); attacker.setFloat(field("team"), 1);
+    expect(aim()).toEqual(lane.forward); source.cvars.set("teamplay", "0");
+    port.services.setUserinfo(a, "\\name\\Alice\\noaim\\1"); expect(aim()).toEqual(lane.forward);
+    port.services.setUserinfo(a, "\\name\\Alice\\noaim\\0"); expect(aim().z).toBeGreaterThan(0.3);
+    const blocker = actors.allocate("q2:game", "q2:blocker");
+    bodies.create(blocker, { origin: { x: lane.start.x + lane.forward.x * 64, y: lane.start.y + lane.forward.y * 64, z: lane.start.z + 32 },
+      angles: zero, velocity: zero, bounds: { min: { x: -24, y: -24, z: -32 }, max: { x: 24, y: 24, z: 32 } }, ground: null }); bodies.link(blocker);
+    expect(aim()).toEqual(lane.forward);
+    const fire: ModSourceCall = { function: "W_FireShotgun", arguments: [], globals: selfGlobal };
+    source.invoke(fire, inputs(first.id)); expect(attacker.float(field("health"))).toBe(100); expect(target.float(field("ammo_shells"))).toBe(7);
+    bodies.unlink(blocker); actors.release(blocker);
+    source.invoke(fire, inputs(first.id)); expect(attacker.float(field("health"))).toBeLessThan(100); expect(target.float(field("ammo_shells"))).toBe(6);
+    const armed = source.checkpoint(); source.invoke(fire, inputs(first.id));
+    const nextHealth = attacker.float(field("health")), nextAmmo = target.float(field("ammo_shells"));
+    source.restore(armed); expect(source.cvars.variableValue("sv_aim")).toBe(Math.fround(0.93));
+    source.invoke(fire, inputs(first.id)); expect(attacker.float(field("health"))).toBe(nextHealth); expect(target.float(field("ammo_shells"))).toBe(nextAmmo);
   } finally { source.close(); actors.close(); await content.close(); }
 });

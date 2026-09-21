@@ -11,6 +11,19 @@ import { createStartupSource, resolveStartupRules } from "../../src/app/bootstra
 
 function selection(source: ProviderReference): Parameters<typeof createStartupSource>[1] { return { source, match: source }; }
 
+test("source aim defaults follow the Quake ABI and retain configured overrides", () => {
+  const command = parseApplicationCommand(["--game", "q1-quakeworld"]);
+  if (command.kind !== "run") throw new Error("Expected ordinary launch");
+  const context = { session: createIdentityOwner("startup-qc-aim").session, origin: { kind: "server-console" } } satisfies Parameters<typeof createStartupSource>[3];
+  const dialects: readonly Parameters<typeof createStartupSource>[2][] = ["q1-netquake", "q1-quakeworld"];
+  for (const dialect of dialects) {
+    const cvars = createStartupSource(command.options, selection({ provider: "q1:official", content: "q1:classic:id1:installed" }), dialect, context, 1, () => {});
+    expect(cvars.variableString("sv_aim")).toBe(dialect === "q1-quakeworld" ? "2" : "0.93");
+    cvars.set("sv_aim", "0.97"); resolveStartupRules(command.options, cvars, 1, []);
+    expect(cvars.variableString("sv_aim")).toBe("0.97");
+  }
+});
+
 test("ordinary Q3 startup selects game cvars from map source content rather than provider spelling", () => {
   const command = parseApplicationCommand(["--game", "q3-missionpack", "--map", "mpq3ctf4"]);
   if (command.kind !== "run") throw new Error("Expected ordinary launch");

@@ -15,6 +15,7 @@ import { readClassicString, readClassicVector, writeClassicVector } from "./clas
 import { bindNativeModEntry, type NativeModEntryBinding } from "./native-mod-entries.ts";
 import { integer, requiredPointer } from "../../guest/runtime/common/memory.ts";
 import { NativeModDeferredDamageState, type SavedNativeDeferredDamage } from "./native-mod-deferred.ts";
+import { NativeModArmorState } from "./native-mod-armor.ts";
 
 const P: GuestValueLayout = { kind: "scalar", storage: "pointer" }, I: GuestValueLayout = { kind: "scalar", storage: "int32" }, F: GuestValueLayout = { kind: "scalar", storage: "float32" }, B: GuestValueLayout = { kind: "scalar", storage: "uint8" };
 const pointer = (value: GuestAddress | null): GuestCallValue => ({ kind: "pointer", value });
@@ -37,12 +38,14 @@ export class NativeModCombat {
   private readonly damage: NativeModEntryBinding | null;
   private readonly deferred: NativeModDeferredDamageState | null;
   private readonly process: NativeModEntryBinding | null;
+  private readonly armor: NativeModArmorState;
   private readonly frames: DamageFrame[] = [];
   private watched: { readonly base: GuestAddress; readonly bytes: number; readonly close: () => void } | null = null;
   private suspended = false;
   constructor(readonly definition: NativeModSourceActors, readonly declaration: NativeModDeclaration, readonly host: NativeModHost,
     readonly services: ModHostServices, readonly instance: ProviderId, readonly calls: NativeModCombatCalls) {
     const combat = definition.combat;
+    this.armor = new NativeModArmorState(combat?.armor ?? { kind: "none" }, declaration, host, calls.scalar);
     if (combat === undefined) this.damage = null;
     else {
       const entry = combat.damage.entry, address = entry.kind === "export" ? host.entry(entry.name) : host.memory.offset(host.imageBase, BigInt(entry.rva));
@@ -131,10 +134,10 @@ export class NativeModCombat {
       const scalar = (field: NativeModScalarField, value?: number) => this.calls.scalar(this.host.entity(slot).address, field, value);
       const flags = () => BigInt(scalar(combat.flags));
       this.services.combat.rebind(actor, { sourceDamage: request => this.apply(request), read: () => ({ health: scalar(combat.health), mass: scalar(combat.mass),
-        armor: { kind: "none" }, canTakeDamage: scalar(combat.takedamage) !== 0, invulnerable: (flags() & BigInt(combat.flags.invulnerable)) !== 0n,
+        armor: this.armor.read(slot), canTakeDamage: scalar(combat.takedamage) !== 0, invulnerable: (flags() & BigInt(combat.flags.invulnerable)) !== 0n,
         noKnockback: (flags() & BigInt(combat.flags.noKnockback)) !== 0n, team: null }),
         writeHealth: value => { scalar(combat.health, value); return undefined; },
-        writeArmor: armor => { if (armor.kind !== "none") throw new Error("Native owned actor declares no shared armor fields"); return undefined; } });
+        writeArmor: armor => this.armor.write(slot, armor) });
     }
     return { think: null, use: (_self, other, activator) => this.eligible(actor.id, other, activator) ? this.call("use", slot, [this.pointer(actor.id), this.pointer(other), this.pointer(activator)]) : undefined,
       touch: contact => this.withTouch(contact, args => this.call("touch", slot, args)), pain: reaction => this.withPain(reaction, args => this.call("pain", slot, args)),
@@ -225,6 +228,7 @@ export class NativeModCombat {
         const current = () => this.frames.at(-1) === frame && frame.result === null && this.host.active(slot) && this.services.actors.isLive(request.target);
         const vectors = memory.allocate({ byteLength: 36, alignment: 4n, label: "Native mod damage vectors" }); this.frames.push(frame);
         try {
+          removals.push(this.armor.observe(slot, (before, after) => { if (current()) observer.stored({ kind: "armor", before, after }); }));
           removals.push(memory.observeWrites(this.at(slot, definition.health.offset), this.scalarBytes(definition.health), () => {
             const before = health, after = this.calls.scalar(target, definition.health); health = after;
             if (current() && before !== after) { frame.applied += before - after; observer.stored({ kind: "health", before, after }); }

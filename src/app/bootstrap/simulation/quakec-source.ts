@@ -224,7 +224,7 @@ export class QuakeCSource {
       foreignReference: () => { throw new Error("Dedicated id1 QC does not admit foreign source actors"); }, admit: (actor, slot) => this.admit(actor, slot) });
     this.cvars = options.sourceRegistry ?? new CvarRegistry({ dialect: prepared.program.api.kind, context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
     if (options.sourceRegistry === undefined) for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",
-      teamplay: "0", sv_cheats: "0", sv_aim: "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1" })) this.cvars.register(name, value);
+      teamplay: "0", sv_cheats: "0", sv_aim: binding.kind === "quakeworld" ? "2" : "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1" })) this.cvars.register(name, value);
     this.clients = new QcClientHost(this.worldHost, { scene: options.scene, maxClients: this.reservedClientSlots, serverTime: () => this.currentTime });
     const qw: QcQuakeWorldMessageServices | undefined = binding.kind === "quakeworld" ? {
       loading: () => this.spawning, client: actor => this.isReservedClient(actor), phs: () => this.cvars.variableValue("sv_phs") !== 0,
@@ -262,7 +262,15 @@ export class QuakeCSource {
       return options.changeLevel(vm.argString(0));
     });
     host.set("cvar_set", vm => { const name = vm.argString(0); this.cvars.set(name, vm.argString(1)); if (name === "sv_gravity") options.physics.setWorldGravity(this.cvars.variableValue(name)); });
-    const aim = createQcAimBinding(this.worldHost, { aimThreshold: () => this.cvars.variableValue("sv_aim"), teamplay: () => this.cvars.variableValue("teamplay") });
+    const aim = createQcAimBinding(this.worldHost, { aimThreshold: () => this.cvars.variableValue("sv_aim"), teamplay: () => this.cvars.variableValue("teamplay"),
+      targets: () => {
+        const targets: { actor: ActorId; reference: number }[] = [];
+        for (let slot = 1; slot < this.entities.count; slot++) {
+          const actor = this.slots.at(slot);
+          if (actor !== null && options.actors.isLive(actor.id)) targets.push({ actor: actor.id, reference: this.entities.reference(slot) });
+        }
+        return targets;
+      } });
     host.set("aim", vm => {
       if (binding.kind === "quakeworld" && nativeAtoi(this.userInfo.get(this.entities.slot(vm.argInt(0)))?.get("noaim") ?? "0") > 0) {
         vm.returnVector(vm.globals.vector(vm.globalOffset("v_forward"))); return undefined;

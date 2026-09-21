@@ -1,5 +1,5 @@
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
-import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors } from "../../contracts/native-mod-callbacks.ts";
+import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors, NativeModArmor, NativeModArmorField, NativeModArmorSelection } from "../../contracts/native-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -56,6 +56,20 @@ function field(reader: SaveReader): NativeModActorField {
     default: return { offset, binding };
   }
 }
+function armorField(reader: SaveReader): NativeModArmorField { return { record: reader.field("record").string(), offset: reader.field("offset").integer(0),
+  encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") }; }
+function armorSelection(reader: SaveReader): NativeModArmorSelection {
+  const field = armorField(reader.field("field"));
+  return reader.field("kind").choice("positive", "enum") === "positive" ? { kind: "positive", field }
+    : { kind: "enum", field, value: reader.field("value").number(), none: reader.field("none").number() };
+}
+function armor(reader: SaveReader): NativeModArmor {
+  if (reader.field("kind").choice("none", "q2") === "none") return { kind: "none" };
+  return { kind: "q2", regular: reader.field("regular").list(value => ({ item: namespaced(value.field("item")), selection: armorSelection(value.field("selection")),
+    points: armorField(value.field("points")), normalProtection: value.field("normalProtection").number(), energyProtection: value.field("energyProtection").number() })),
+    power: reader.field("power").list(value => ({ item: namespaced(value.field("item")), kind: value.field("kind").choice("screen", "shield"),
+      selection: armorSelection(value.field("selection")), cells: armorField(value.field("cells")), enabled: value.field("enabled").nullable(value => ({ field: armorField(value.field("field")), mask: value.field("mask").integer(1) })) })) };
+}
 function sourceActors(reader: SaveReader): NativeModSourceActors {
   const fields = reader.field("fields"), nextthink = fields.field("nextthink"), update = reader.field("update");
   const encoding = (reader: SaveReader) => reader.choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64");
@@ -71,7 +85,7 @@ function sourceActors(reader: SaveReader): NativeModSourceActors {
       return { damage: { entry: entry(damage.field("entry")), abi: damage.field("abi").choice("q2-classic", "q2-rerelease") },
         causes: causes.field("edition").choice("classic", "rerelease") === "classic" ? { edition: "classic", game: causes.field("game").choice("base", "xatrix", "rogue", "ctf") } satisfies NonNullable<NativeModSourceActors["combat"]>["causes"] : { edition: "rerelease" } satisfies NonNullable<NativeModSourceActors["combat"]>["causes"],
         health: scalar(combat.field("health")), mass: scalar(combat.field("mass")), takedamage: scalar(combat.field("takedamage")),
-        flags: { ...scalar(flags), invulnerable: flags.field("invulnerable").integer(0), noKnockback: flags.field("noKnockback").integer(0) }, armor: { kind: combat.field("armor").field("kind").literal("none") },
+        flags: { ...scalar(flags), invulnerable: flags.field("invulnerable").integer(0), noKnockback: flags.field("noKnockback").integer(0) }, armor: armor(combat.field("armor")),
         ...(deferred.value === undefined ? {} : { deferred: { process: entry(deferred.field("process")), attacker: deferred.field("attacker").integer(0), inflictor: deferred.field("inflictor").integer(0),
           blood: scalar(deferred.field("blood")), knockback: scalar(deferred.field("knockback")), point: deferred.field("point").integer(0), mod: deferred.field("mod").integer(0), receipt: deferred.field("receipt").integer(0) } }) };
     })() }),

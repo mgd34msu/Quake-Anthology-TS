@@ -964,7 +964,8 @@ test.skipIf(!haveCorpus)("verified id1 attacks and environmental callbacks prese
             weaponProvider: "test:qc", combatProvider: "test:qc", inventoryProvider: "test:qc", movementProvider: "test:qc", cause: { kind: "q1", deathType: "" } } };
       });
       const host = new Map([...world.host, ...presentation]);
-      host.set("aim", createQcAimBinding(world, { aimThreshold: () => 0.93, teamplay: () => 0 }));
+      host.set("aim", createQcAimBinding(world, { aimThreshold: () => 0.93, teamplay: () => 0,
+        targets: () => [shooter, target].map(actor => ({ actor: actor.id, reference: world.reference(actor.id) })) }));
       const vm: QcMachine = new QcMachine({ program, entities, numeric, builtins: createQcBuiltins({ kind: "netquake", host, random: new SourceRandom(1) }),
         serverActive: () => true, ...(observed ? { functionBoundary: attacks.compose(damage.functionBoundary),
           observeCall: call => damage.observeCall(call), observeEntityStore: store => damage.observeEntityStore(store) } : {}) });
