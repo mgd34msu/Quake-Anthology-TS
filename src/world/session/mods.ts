@@ -92,6 +92,8 @@ export interface ModHostServices {
 }
 
 export interface ModRuntime extends SessionResource {
+  /** Attach prepared actor bindings after original source state has initialized or restored. */
+  activate?(): undefined;
   register(registrations: ModRegistrations): undefined;
   advance?(frame: FrameContext): undefined;
   presentations?(): readonly SimulationPresentation[];
@@ -223,10 +225,11 @@ export class SessionMods implements SessionResource {
 
   async checkpointForTravel(): Promise<ModTravelCheckpoint> {
     return await this.exclusive(async () => {
+      this.options.services?.combat.assertIdle();
       const mods: ModTravelCheckpoint["mods"][number][] = [];
       for (const entry of this.active) {
         const state = entry.prepared.travel === "retain" ? await entry.runtime.checkpoint() : null;
-        this.assertOpen();
+        this.assertOpen(); this.options.services?.combat.assertIdle();
         if (state !== null) this.validateState(entry, state);
         mods.push({ identity: entry.identity, state });
       }
@@ -243,7 +246,7 @@ export class SessionMods implements SessionResource {
           const checkpoint = saved.mods[index];
           if (checkpoint === undefined) throw new Error("Validated mod checkpoint disappeared");
           changed.push(index);
-          await entry.runtime.restore(checkpoint.state); this.assertOpen();
+          await entry.runtime.restore(checkpoint.state); this.assertOpen(); entry.runtime.activate?.(); this.assertOpen();
         }
       } catch (error) {
         if (this.closed) throw error;
@@ -251,7 +254,7 @@ export class SessionMods implements SessionResource {
         for (const index of changed.reverse()) {
           const entry = this.active[index], checkpoint = previous.mods[index];
           if (entry === undefined || checkpoint === undefined) throw new Error("Mod restore lost its rollback state");
-          try { await entry.runtime.restore(checkpoint.state); } catch (rollback) { errors.push(rollback); }
+          try { await entry.runtime.restore(checkpoint.state); entry.runtime.activate?.(); } catch (rollback) { errors.push(rollback); }
         }
         if (errors.length > 1) {
           try { this.close(); } catch (cleanup) { errors.push(cleanup); }
@@ -317,9 +320,10 @@ export class SessionMods implements SessionResource {
     }
   }
   private async capture(): Promise<ModSessionCheckpoint> {
+    this.options.services?.combat.assertIdle();
     const mods: ModCheckpoint[] = [];
     for (const entry of this.active) {
-      const state = await entry.runtime.checkpoint(); this.assertOpen();
+      const state = await entry.runtime.checkpoint(); this.assertOpen(); this.options.services?.combat.assertIdle();
       this.validateState(entry, state); mods.push({ identity: entry.identity, state });
     }
     return { version: 1, mods };
@@ -345,6 +349,7 @@ export class SessionMods implements SessionResource {
         resources.own(runtime); assertCurrent();
         const active = { ...entry, resources, runtime }; opened.push(active); next.push(active);
         if (state !== undefined && state !== null) { await runtime.restore(state); assertCurrent(); }
+        runtime.activate?.(); assertCurrent();
       }
       for (const entry of opened) {
         entry.runtime.register(new ModRegistrations(modInstanceProvider(entry.identity.selection), this.options.operations, this.nextOrder++, entry.resources));

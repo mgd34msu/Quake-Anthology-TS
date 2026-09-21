@@ -1,4 +1,4 @@
-import type { ArmorState, RegularArmorState, PoweredProtectionState, CombatPolicy, CombatState, DamageAuthority, DamageDecision, DamageMutation, DamageOutcome, DamageRequest, ItemId } from "../../contracts/gameplay.ts";
+import type { ArmorStageInput, ArmorStageObserver, ArmorStageResult, ArmorState, RegularArmorState, PoweredProtectionState, CombatPolicy, CombatProgress, CombatState, DamageAuthority, DamageDecision, DamageMutation, DamageOutcome, DamageRequest, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorCallbackTable } from "../actors/callbacks.ts";
@@ -13,10 +13,40 @@ export interface SourceDamageObserver {
   stored(write: Exclude<DamageMutation, { readonly kind: "impulse" }>): undefined;
   beforeReaction(result: SourceDamageResult): undefined;
 }
-interface SourceDamageCursor { health: number; armor: ArmorState; velocity: Vec3 | null; }
+interface SourceDamageCursor {
+  readonly request: DamageRequest;
+  readonly mutations: DamageMutation[];
+  health: number; armor: ArmorState; velocity: Vec3 | null;
+  active: boolean;
+  reaction: SourceDamageResult | null;
+}
+
+export type PoweredProtectionAdmission = { readonly kind: "claim" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
+export interface PoweredProtectionClaim {
+  readonly owner: ProviderId;
+  readonly rule: string;
+  readonly admission: PoweredProtectionAdmission;
+}
+export interface PoweredProtectionBinding extends PoweredProtectionClaim {
+  readonly fuelItems: readonly ItemId[];
+  read(): PoweredProtectionState;
+  validateWrite(next: PoweredProtectionState): undefined;
+  write(next: PoweredProtectionState): undefined;
+  absorb(input: ArmorStageInput, observer: ArmorStageObserver): ArmorStageResult;
+}
+export interface SourcePoweredArmorStage {
+  bind(intercept: (input: ArmorStageInput, original: () => number) => number): () => undefined;
+}
+export interface PoweredProtectionReservation {
+  bind(binding: PoweredProtectionBinding): () => undefined;
+  close(): undefined;
+}
+interface PowerSlot { readonly claim: PoweredProtectionClaim; binding: PoweredProtectionBinding | null; removeSource: (() => undefined) | null; }
 
 export interface CombatStateBinding {
   sourceDamage?(request: DamageRequest): DamageOutcome;
+  readonly poweredProtectionOwner?: ProviderId;
+  readonly poweredArmorStage?: SourcePoweredArmorStage;
   admitDamage?(request: DamageRequest): "continue" | "handled";
   adjustDamage?(request: DamageRequest): Pick<DamageRequest, "amount" | "knockback"> | null;
   read(): CombatState;
@@ -85,7 +115,7 @@ function captureDecision(proposed: DamageDecision, request: DamageRequest): Dama
       case "impulse": return Object.freeze({ ...mutation, impulse: copyVector(mutation.impulse) });
     }
   });
-  return Object.freeze({ ...proposed, request, mutations: Object.freeze(mutations), ...(proposed.continuation === undefined ? {} : { continuation: Object.freeze({ ...proposed.continuation }) }) });
+  return Object.freeze({ ...proposed, request, mutations: Object.freeze(mutations) });
 }
 
 /** Combat decisions are pure. Their stores commit synchronously before source callbacks may reenter. */
@@ -95,10 +125,16 @@ export class GameplayAuthority implements DamageAuthority {
   private readonly sourceCursors = new Map<OwnedActor, Set<SourceDamageCursor>>();
   private readonly bindings = new Map<OwnedActor, CombatStateBinding>();
   private readonly powerArmorCells = new Map<OwnedActor, PowerArmorCellBinding>();
+  private readonly poweredProtection = new Map<OwnedActor, PowerSlot>();
   private readonly policies = new Map<ProviderId, CombatPolicy>();
+  private activeHits = 0;
 
   constructor(private readonly actors: SessionActorRegistry, private readonly callbacks: ActorCallbackTable, private readonly hooks: GameplayHooks) {
-    actors.onRelease(actor => { this.bindings.delete(actor); this.powerArmorCells.delete(actor); return undefined; });
+    actors.onRelease(actor => {
+      const power = this.poweredProtection.get(actor);
+      this.poweredProtection.delete(actor); power?.removeSource?.();
+      this.bindings.delete(actor); this.powerArmorCells.delete(actor); return undefined;
+    });
   }
 
   register(policy: CombatPolicy): () => undefined {
@@ -116,6 +152,7 @@ export class GameplayAuthority implements DamageAuthority {
 
   rebind(actor: OwnedActor, binding: CombatStateBinding): undefined {
     this.actors.assertOwned(actor);
+    if (this.poweredProtection.has(actor)) throw new Error("Cannot replace a combat binding with a reserved powered owner");
     this.bindings.set(actor, binding);
     return undefined;
   }
@@ -138,7 +175,64 @@ export class GameplayAuthority implements DamageAuthority {
   bindPowerArmorCells(actor: OwnedActor, cells: PowerArmorCellBinding): undefined {
     this.actors.assertOwned(actor);
     if (this.powerArmorCells.has(actor)) throw new Error("Power armor cells already have an inventory binding");
+    if (this.poweredProtection.has(actor)) throw new Error("Cannot replace primary power ownership after a component reserved it");
     this.powerArmorCells.set(actor, cells);
+    return undefined;
+  }
+
+  /** A reservation performs no source reads or initialization. */
+  reservePoweredProtection(actor: OwnedActor, claim: PoweredProtectionClaim): PoweredProtectionReservation {
+    const primary = this.binding(actor);
+    if (this.poweredProtection.has(actor)) throw new Error("Powered protection already has a component owner");
+    const owner = primary.poweredProtectionOwner ?? (this.powerArmorCells.has(actor) ? actor.owner : null);
+    if (claim.admission.kind === "claim" ? owner !== null : owner !== claim.admission.owner)
+      throw new Error("Powered protection admission does not match primary ownership");
+    if (primary.sourceDamage !== undefined && primary.poweredArmorStage === undefined)
+      throw new Error("Original source combat has no declared powered armor stage");
+    const slot: PowerSlot = { claim: Object.freeze({ ...claim, admission: Object.freeze({ ...claim.admission }) }), binding: null, removeSource: null };
+    this.poweredProtection.set(actor, slot);
+    const close = (): undefined => {
+      if (this.poweredProtection.get(actor) !== slot) return undefined;
+      this.poweredProtection.delete(actor); slot.removeSource?.(); slot.removeSource = null; slot.binding = null;
+      return undefined;
+    };
+    return { close, bind: binding => {
+      this.actors.assertOwned(actor);
+      if (this.poweredProtection.get(actor) !== slot || slot.binding !== null) throw new Error("Powered protection reservation is closed or bound");
+      if (binding.owner !== claim.owner || binding.rule !== claim.rule || binding.admission.kind !== claim.admission.kind
+        || binding.admission.kind === "replace-primary" && (claim.admission.kind !== "replace-primary" || binding.admission.owner !== claim.admission.owner))
+        throw new Error("Powered protection binding differs from its reservation");
+      slot.binding = binding;
+      try {
+        slot.removeSource = primary.poweredArmorStage?.bind((input, original) => {
+          if (this.poweredProtection.get(actor) !== slot || slot.binding === null) return original();
+          const cursor = this.cursorFor(actor, input.request);
+          return this.absorbPowered(actor, primary, cursor, input, binding).saved;
+        }) ?? null;
+      } catch (error) { close(); throw error; }
+      return close;
+    } };
+  }
+
+  bindPoweredProtection(actor: OwnedActor, binding: PoweredProtectionBinding): () => undefined {
+    return this.reservePoweredProtection(actor, binding).bind(binding);
+  }
+
+  poweredProtectionOwner(actor: OwnedActor): ProviderId | null {
+    this.actors.assertOwned(actor);
+    return this.poweredProtection.get(actor)?.claim.owner ?? null;
+  }
+
+  poweredProtectionFuelItems(actor: OwnedActor): readonly ItemId[] {
+    this.actors.assertOwned(actor);
+    const slot = this.poweredProtection.get(actor);
+    if (slot === undefined) return [];
+    if (slot.binding === null) throw new Error("Powered protection reservation has not been bound");
+    return Object.freeze([...slot.binding.fuelItems]);
+  }
+
+  assertIdle(): undefined {
+    if (this.activeHits !== 0) throw new Error("Cannot checkpoint during combat execution");
     return undefined;
   }
 
@@ -195,66 +289,48 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   runSourceDamage(input: DamageRequest, execute: (observer: SourceDamageObserver, request: DamageRequest) => SourceDamageResult): DamageOutcome {
-    return this.damageOperation.active && !this.dispatchedDamage.has(input)
-      ? this.composeDamage(input, request => this.runSourceDamageCanonical(request, execute)) : this.runSourceDamageCanonical(input, execute);
+    this.activeHits++;
+    try {
+      return this.damageOperation.active && !this.dispatchedDamage.has(input)
+        ? this.composeDamage(input, request => this.runSourceDamageCanonical(request, execute)) : this.runSourceDamageCanonical(input, execute);
+    } finally { this.activeHits--; }
   }
 
   private runSourceDamageCanonical(input: DamageRequest, execute: (observer: SourceDamageObserver, request: DamageRequest) => SourceDamageResult): DamageOutcome {
     const request = this.dispatchedDamage.has(input) ? input : captureRequest(input), target = this.actors.resolveOwned(request.target);
     if (target === null) return { kind: "stale-target", request };
     const binding = this.binding(target), initial = this.readState(target, binding);
-    const mutations: DamageMutation[] = [];
-    const cursor: SourceDamageCursor = { health: initial.health, armor: initial.armor, velocity: null };
-    let cursors = this.sourceCursors.get(target);
-    if (cursors === undefined) { cursors = new Set(); this.sourceCursors.set(target, cursors); }
-    cursors.add(cursor);
-    let active = true;
-    const observed: { reaction: SourceDamageResult | null } = { reaction: null };
-    const assertActive = (): void => { if (!active) throw new Error("Source damage observer is closed"); };
+    const cursor = this.openCursor(target, request, initial);
     const decision = (result: SourceDamageResult): DamageDecision => {
       if (!Number.isFinite(result.appliedDamage)) throw new Error("Source applied damage must be finite");
-      return captureDecision({ request, mutations, appliedDamage: result.appliedDamage, reaction: result.reaction }, request);
+      return captureDecision({ request, mutations: cursor.mutations, appliedDamage: result.appliedDamage, reaction: result.reaction }, request);
     };
     let result: SourceDamageResult;
     try {
       result = execute({
         stored: write => {
-          assertActive(); this.actors.assertOwned(target);
-          if (observed.reaction !== null) throw new Error("Source damage store follows its reaction boundary");
-          switch (write.kind) {
-            case "health":
-              if (write.before !== cursor.health || !Number.isFinite(write.after) || binding.read().health !== write.after) throw new Error("Invalid observed source health store");
-              break;
-            case "armor":
-              if (!armorEqual(write.before, cursor.armor) || !armorEqual(this.readState(target, binding).armor, write.after)) throw new Error("Invalid observed source armor store");
-              break;
-            case "source-velocity":
-              if (![write.before.x, write.before.y, write.before.z, write.after.x, write.after.y, write.after.z].every(Number.isFinite)
-                || cursor.velocity !== null && (cursor.velocity.x !== write.before.x || cursor.velocity.y !== write.before.y || cursor.velocity.z !== write.before.z)) throw new Error("Invalid observed source velocity store");
-              break;
+          // A primary source observes its regular storage; the independent power owner
+          // reports its own stores through the same hit cursor.
+          if (write.kind === "armor" && this.poweredProtection.get(target)?.binding != null) {
+            const powered = cursor.armor.powered;
+            return this.observeStore(target, binding, cursor, { kind: "armor",
+              before: { regular: write.before.regular, powered }, after: { regular: write.after.regular, powered } });
           }
-          this.advanceSourceCursors(target, write);
-          const captured = captureDecision({ request, mutations: [write], appliedDamage: 0, reaction: "none" }, request).mutations[0];
-          if (captured === undefined) throw new Error("Missing source damage store");
-          mutations.push(captured);
-          return undefined;
+          return this.observeStore(target, binding, cursor, write);
         },
         beforeReaction: value => {
-          assertActive(); this.actors.assertOwned(target);
-          if (observed.reaction !== null) throw new Error("Source damage reaction was already observed");
+          this.assertCursor(target, cursor);
+          if (cursor.reaction !== null) throw new Error("Source damage reaction was already observed");
           const captured = decision(value);
-          observed.reaction = { appliedDamage: captured.appliedDamage, reaction: captured.reaction };
+          cursor.reaction = { appliedDamage: captured.appliedDamage, reaction: captured.reaction };
           this.hooks.beforeReaction(target, captured);
           return undefined;
         },
       }, request);
-    } finally {
-      active = false; cursors.delete(cursor);
-      if (cursors.size === 0) this.sourceCursors.delete(target);
-    }
+    } finally { this.closeCursor(target, cursor); }
     const completed = decision(result);
-    if (observed.reaction !== null && (observed.reaction.appliedDamage !== completed.appliedDamage || observed.reaction.reaction !== completed.reaction)) throw new Error("Source damage result disagrees with its reaction boundary");
-    if (observed.reaction === null) {
+    if (cursor.reaction !== null && (cursor.reaction.appliedDamage !== completed.appliedDamage || cursor.reaction.reaction !== completed.reaction)) throw new Error("Source damage result disagrees with its reaction boundary");
+    if (cursor.reaction === null) {
       if (completed.reaction !== "none") throw new Error("Source damage omitted its reaction boundary");
       if (this.actors.isLive(target.id)) this.hooks.beforeReaction(target, completed);
     }
@@ -274,7 +350,9 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   apply(input: DamageRequest): DamageOutcome {
-    return this.damageOperation.active ? this.composeDamage(input, request => this.applyCanonical(request)) : this.applyCanonical(input);
+    this.activeHits++;
+    try { return this.damageOperation.active ? this.composeDamage(input, request => this.applyCanonical(request)) : this.applyCanonical(input); }
+    finally { this.activeHits--; }
   }
 
   private composeDamage(input: DamageRequest, canonical: (request: DamageRequest) => DamageOutcome): DamageOutcome {
@@ -309,31 +387,67 @@ export class GameplayAuthority implements DamageAuthority {
     if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
     if (prepared?.kind === "continue" && !Number.isFinite(prepared.amount)) throw new RangeError("Prepared source damage must be finite");
     const initial = this.readState(target, binding);
-    const proposed: DamageDecision = prepared?.kind === "cancel" ? { request, mutations: [], appliedDamage: 0, reaction: "none" }
-      : policy.decide(request, initial, request.attack.attacker === null ? null : this.read(request.attack.attacker), prepared);
-    let decision = captureDecision(proposed, request);
-    this.commitMutations(target, binding, initial, decision.mutations);
-    if (decision.continuation !== undefined) {
-      if (policy.resume === undefined) throw new Error("Combat policy has no source continuation implementation");
-      const resumed = captureDecision(policy.resume(decision, { target: () => this.read(target.id), attacker: () => request.attack.attacker === null ? null : this.read(request.attack.attacker) }), request);
-      if (resumed.continuation !== undefined) throw new Error("Combat source health continuation did not complete");
-      const latest = this.read(target.id);
-      if (latest === null) {
-        if (resumed.mutations.length !== 0) throw new Error("Combat continuation mutated a removed actor");
-      } else this.commitMutations(target, binding, latest, resumed.mutations);
-      decision = captureDecision({ ...resumed, mutations: [...decision.mutations, ...resumed.mutations] }, request);
-    }
-    if (policy.afterHealth !== undefined && decision.mutations.some(mutation => mutation.kind === "health")) {
-      const reaction = policy.afterHealth(decision, { target: () => this.read(target.id), attacker: () => request.attack.attacker === null ? null : this.read(request.attack.attacker) });
-      decision = captureDecision({ ...decision, reaction }, request);
-    }
-    if (this.actors.isLive(target.id)) this.hooks.beforeReaction(target, decision);
-    if (this.actors.isLive(target.id)) {
-      const kick = decision.feedback?.kind === "q2" ? decision.feedback.knockback : request.knockback;
-      const reaction = { attack: request.attack, self: target, attacker: request.attack.attacker, kick, damage: decision.appliedDamage };
-      if (decision.reaction === "death") this.callbacks.die({ ...reaction, inflictor: request.attack.inflictor, point: request.point });
-      else if (decision.reaction === "pain") this.callbacks.pain(reaction);
-    }
+    const cursor = this.openCursor(target, request, initial);
+    const currentState = { target: () => this.read(target.id), attacker: () => request.attack.attacker === null ? null : this.read(request.attack.attacker) };
+    let decision: DamageDecision;
+    try {
+      let progress: CombatProgress = prepared?.kind === "cancel"
+        ? { kind: "complete", request, mutations: [], result: { appliedDamage: 0, reaction: "none" } }
+        : policy.decide(request, initial, currentState.attacker(), prepared);
+      for (;;) {
+        if (progress.request !== request) throw new Error("Combat policy replaced attack provenance");
+        const pending = captureDecision({ request, mutations: progress.mutations, appliedDamage: 0, reaction: "none" }, request).mutations;
+        const latest = this.read(target.id);
+        if (latest === null) {
+          if (pending.length !== 0) throw new Error("Combat continuation mutated a removed actor");
+          decision = captureDecision({ request, mutations: cursor.mutations, appliedDamage: 0, reaction: "none" }, request);
+          break;
+        }
+        this.commitMutations(target, binding, latest, pending);
+        cursor.mutations.push(...pending);
+        if (progress.kind === "complete") {
+          if (!Number.isFinite(progress.result.appliedDamage)) throw new Error("Combat applied damage must be finite");
+          decision = captureDecision({ request, mutations: cursor.mutations, ...progress.result }, request);
+          break;
+        }
+        if (!this.actors.isLive(target.id)) {
+          decision = captureDecision({ request, mutations: cursor.mutations, appliedDamage: 0, reaction: "none" }, request);
+          break;
+        }
+        if (progress.kind === "source-continuation") { progress = progress.resume(currentState); continue; }
+        if (progress.input.request !== request || !Number.isFinite(progress.input.amount)) throw new Error("Invalid powered armor stage input");
+        const power = this.poweredProtection.get(target)?.binding;
+        let result: ArmorStageResult;
+        if (power != null) result = this.absorbPowered(target, binding, cursor, progress.input, power);
+        else {
+          const state = this.readState(target, binding), absorbed = progress.fallback(state.armor);
+          if (absorbed.regularSaved !== 0 || !regularArmorEqual(absorbed.armor.regular, state.armor.regular) || !Number.isFinite(absorbed.powerSaved))
+            throw new Error("Powered armor fallback changed regular armor or returned invalid savings");
+          if (!armorEqual(absorbed.armor, state.armor)) {
+            const write: DamageMutation = { kind: "armor", before: state.armor, after: absorbed.armor };
+            this.commitMutations(target, binding, state, [write]);
+            cursor.mutations.push(captureDecision({ request, mutations: [write], appliedDamage: 0, reaction: "none" }, request).mutations[0] ?? write);
+          }
+          result = { saved: absorbed.powerSaved };
+        }
+        if (!this.actors.isLive(target.id)) {
+          decision = captureDecision({ request, mutations: cursor.mutations, appliedDamage: 0, reaction: "none" }, request);
+          break;
+        }
+        progress = progress.resume(result, currentState);
+      }
+      if (policy.afterHealth !== undefined && decision.mutations.some(mutation => mutation.kind === "health") && this.actors.isLive(target.id)) {
+        const reaction = policy.afterHealth(decision, currentState);
+        decision = captureDecision({ ...decision, reaction }, request);
+      }
+      if (this.actors.isLive(target.id)) this.hooks.beforeReaction(target, decision);
+      if (this.actors.isLive(target.id)) {
+        const kick = decision.feedback?.kind === "q2" ? decision.feedback.knockback : request.knockback;
+        const reaction = { attack: request.attack, self: target, attacker: request.attack.attacker, kick, damage: decision.appliedDamage };
+        if (decision.reaction === "death") this.callbacks.die({ ...reaction, inflictor: request.attack.inflictor, point: request.point });
+        else if (decision.reaction === "pain") this.callbacks.pain(reaction);
+      }
+    } finally { this.closeCursor(target, cursor); }
     const current = this.read(target.id);
     const outcome: DamageOutcome = Object.freeze({ kind: "committed", decision, survived: current !== null && current.health > 0 });
     this.hooks.confirmed(outcome);
@@ -348,17 +462,108 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   private readState(actor: OwnedActor, binding: CombatStateBinding): CombatState {
-    const state = binding.read();
+    const state = binding.read(), power = this.poweredProtection.get(actor)?.binding;
+    if (power != null) return copyCombat({ ...state, armor: { ...state.armor, powered: power.read() } });
     const cells = this.powerArmorCells.get(actor);
     if (cells === undefined || state.armor.powered.kind === "none") return copyCombat(state);
     return copyCombat({ ...state, armor: { ...state.armor, powered: { ...state.armor.powered, cells: cells.read() } } });
   }
 
   private writeArmor(actor: OwnedActor, binding: CombatStateBinding, armor: ArmorState): undefined {
-    binding.validateArmor?.(armor);
-    const cells = this.powerArmorCells.get(actor);
-    if (cells !== undefined && armor.powered.kind !== "none" && cells.read() !== armor.powered.cells) cells.write(armor.powered.cells);
-    return binding.writeArmor(copyArmor(armor));
+    const power = this.poweredProtection.get(actor)?.binding;
+    const primary = copyArmor(binding.read().armor);
+    const writesRegular = !regularArmorEqual(primary.regular, armor.regular);
+    const original = power == null ? armor : { regular: armor.regular, powered: primary.powered };
+    binding.validateArmor?.(original);
+    power?.validateWrite(armor.powered);
+    if (power != null) {
+      if (!armorEqual({ regular: armor.regular, powered: power.read() }, armor)) power.write(armor.powered);
+    } else {
+      const cells = this.powerArmorCells.get(actor);
+      if (cells !== undefined && armor.powered.kind !== "none" && cells.read() !== armor.powered.cells) cells.write(armor.powered.cells);
+    }
+    this.actors.assertOwned(actor);
+    if (this.bindings.get(actor) !== binding || this.poweredProtection.get(actor)?.binding !== power)
+      throw new Error("Armor ownership changed during a powered write");
+    const latest = binding.read().armor;
+    if (writesRegular && !regularArmorEqual(primary.regular, latest.regular)) throw new Error("Primary regular armor changed during a powered write");
+    const updated = { regular: writesRegular ? armor.regular : latest.regular, powered: power == null ? armor.powered : latest.powered };
+    binding.validateArmor?.(updated);
+    if (!armorEqual(latest, updated)) binding.writeArmor(copyArmor(updated));
+    return undefined;
+  }
+
+  private openCursor(target: OwnedActor, request: DamageRequest, initial: CombatState): SourceDamageCursor {
+    const cursor: SourceDamageCursor = { request, mutations: [], health: initial.health, armor: initial.armor, velocity: null, active: true, reaction: null };
+    let cursors = this.sourceCursors.get(target);
+    if (cursors === undefined) { cursors = new Set(); this.sourceCursors.set(target, cursors); }
+    cursors.add(cursor);
+    return cursor;
+  }
+
+  private closeCursor(target: OwnedActor, cursor: SourceDamageCursor): void {
+    cursor.active = false;
+    const cursors = this.sourceCursors.get(target);
+    cursors?.delete(cursor);
+    if (cursors?.size === 0) this.sourceCursors.delete(target);
+  }
+
+  private assertCursor(target: OwnedActor, cursor: SourceDamageCursor): void {
+    if (!cursor.active) throw new Error("Source damage observer is closed");
+    this.actors.assertOwned(target);
+  }
+
+  private cursorFor(target: OwnedActor, request: DamageRequest): SourceDamageCursor {
+    let found: SourceDamageCursor | null = null;
+    for (const cursor of this.sourceCursors.get(target) ?? []) if (cursor.request === request && cursor.active) found = cursor;
+    if (found === null) throw new Error("Original powered armor stage has no active damage observation");
+    return found;
+  }
+
+  private observeStore(target: OwnedActor, binding: CombatStateBinding, cursor: SourceDamageCursor, write: Exclude<DamageMutation, { readonly kind: "impulse" }>): undefined {
+    this.assertCursor(target, cursor);
+    if (cursor.reaction !== null) throw new Error("Source damage store follows its reaction boundary");
+    switch (write.kind) {
+      case "health":
+        if (write.before !== cursor.health || !Number.isFinite(write.after) || binding.read().health !== write.after) throw new Error("Invalid observed source health store");
+        break;
+      case "armor":
+        if (!armorEqual(write.before, cursor.armor) || !armorEqual(this.readState(target, binding).armor, write.after)) throw new Error("Invalid observed source armor store");
+        if (armorEqual(write.before, write.after)) return undefined;
+        break;
+      case "source-velocity":
+        if (![write.before.x, write.before.y, write.before.z, write.after.x, write.after.y, write.after.z].every(Number.isFinite)
+          || cursor.velocity !== null && (cursor.velocity.x !== write.before.x || cursor.velocity.y !== write.before.y || cursor.velocity.z !== write.before.z)) throw new Error("Invalid observed source velocity store");
+        break;
+    }
+    this.advanceSourceCursors(target, write);
+    const captured = captureDecision({ request: cursor.request, mutations: [write], appliedDamage: 0, reaction: "none" }, cursor.request).mutations[0];
+    if (captured === undefined) throw new Error("Missing source damage store");
+    cursor.mutations.push(captured);
+    return undefined;
+  }
+
+  private absorbPowered(target: OwnedActor, binding: CombatStateBinding, cursor: SourceDamageCursor, input: ArmorStageInput, power: PoweredProtectionBinding): ArmorStageResult {
+    this.assertCursor(target, cursor);
+    if (input.request !== cursor.request || !Number.isFinite(input.amount)) throw new Error("Invalid powered armor stage input");
+    if (input.amount === 0 || input.flags.noArmor || input.flags.noPowerArmor || power.read().kind === "none") return { saved: 0 };
+    let open = true;
+    try {
+      const result = power.absorb(Object.freeze({ ...input, flags: Object.freeze({ ...input.flags }) }), {
+        stored: change => {
+          if (!open) throw new Error("Powered armor observer is closed");
+          return this.observeStore(target, binding, cursor, { kind: "armor", before: { regular: cursor.armor.regular, powered: change.before },
+            after: { regular: cursor.armor.regular, powered: change.after } });
+        },
+      });
+      if (!Number.isFinite(result.saved)) throw new Error("Powered armor savings must be finite");
+      if (this.actors.isLive(target.id)) {
+        const current = this.readState(target, binding);
+        if (!armorEqual(current.armor, cursor.armor)) throw new Error("Powered armor stage omitted a committed armor observation");
+        if (current.health !== cursor.health) throw new Error("Powered armor stage changed health without damage observation");
+      }
+      return { saved: result.saved };
+    } finally { open = false; }
   }
 
   private advanceSourceCursors(target: OwnedActor, mutation: DamageMutation): void {

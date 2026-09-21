@@ -22,6 +22,7 @@ import type { ActorCollision, SharedSceneQueries } from "../../../world/collisio
 export type ClassicGuestAudience = { readonly kind: "unicast"; readonly slot: number } | { readonly kind: "multicast"; readonly origin: Vec3; readonly scope: "all" | "phs" | "pvs" };
 export interface ClassicGuestMessage { readonly audience: ClassicGuestAudience; readonly reliable: boolean; readonly bytes: Uint8Array }
 export interface ClassicGuestServicesOptions {
+  readonly damageProvenance?: ClassicQ2EngineServices["damageProvenance"];
   readonly engine: ClassicQ2EngineServices["engine"] & Pick<Q2FoundationHost, "emit">;
   readonly scene: SharedSceneQueries;
   readonly cvars: CvarRegistry;
@@ -36,7 +37,7 @@ export interface ClassicGuestServicesOptions {
   readonly addCommand: ClassicQ2EngineServices["addCommand"];
   readonly debugGraph: ClassicQ2EngineServices["debugGraph"];
 }
-export type ClassicGuestMapServices = Pick<ClassicGuestServicesOptions, "engine" | "scene" | "mapPath" | "admit" | "collision" | "print" | "command" | "addCommand" | "debugGraph">;
+export type ClassicGuestMapServices = Pick<ClassicGuestServicesOptions, "engine" | "scene" | "mapPath" | "admit" | "collision" | "print" | "command" | "addCommand" | "debugGraph" | "damageProvenance">;
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function vector(view: DataView, offset: number): Vec3 { return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) }; }
 function storeVector(view: DataView, offset: number, value: Vec3): void { view.setFloat32(offset, value.x, true); view.setFloat32(offset + 4, value.y, true); view.setFloat32(offset + 8, value.z, true); }
@@ -72,6 +73,11 @@ export class ClassicGuestServices {
     for (let model = 1; model < options.scene.geometry.models.length; model++) this.#configstrings.set(33 + model, `*${model}`);
     const owner = this;
     this.services = {
+      ...(options.damageProvenance === undefined ? {} : { damageProvenance: (attacker, inflictor, target) => {
+        const provenance = this.options.damageProvenance;
+        if (provenance === undefined) throw new Error("Native damage provenance disappeared during travel");
+        return provenance(attacker, inflictor, target);
+      } }),
       get engine() { return owner.options.engine; }, cvars: options.cvars,
       bindEntity: (record, actor) => this.bindEntity(record, actor),
       linkBody: (record, actor) => this.linkBody(record, actor),
@@ -95,8 +101,8 @@ export class ClassicGuestServices {
   }
   rebindWorld(binding: ClassicGuestMapServices): void {
     this.validateMap(binding);
-    const { engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph } = binding;
-    this.#options = { ...this.#options, engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph };
+    const { engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance } = binding;
+    this.#options = { ...this.#options, engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance };
     this.#loading = true; this.#configstrings.clear(); this.#messages.length = 0; SZ_Clear(this.#buffer);
     this.#configstrings.set(33, binding.mapPath);
     for (let model = 1; model < binding.scene.geometry.models.length; model++) this.#configstrings.set(33 + model, `*${model}`);

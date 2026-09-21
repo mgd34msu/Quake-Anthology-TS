@@ -39,7 +39,7 @@ function world() {
   let uses = 0;
   callbacks.bind(player, { think: null, touch: null, pain: null, die: null, use: () => { uses++; return undefined; } });
   const operations: ModOperations = { actors: callbacks.operations, damage: combat.damageOperation, inventory: inventory.operations };
-  return { actors, callbacks, inventory, player, operations, uses: () => uses };
+  return { actors, callbacks, combat, inventory, player, operations, uses: () => uses };
 }
 type TestWorld = ReturnType<typeof world>;
 interface Controls { failInitialize?: boolean; failRegister?: boolean; failRestore?: boolean; invalidState?: boolean; appearances?: readonly SimulationPresentation[]; }
@@ -96,9 +96,48 @@ function prepared(world: TestWorld, selection: ModSelection, events: string[], v
 }
 const first: ModSelection = { product: "q3-one", id: "amount" }, second: ModSelection = { product: "q3-two", id: "amount" };
 
+test("powered component reservations precede source initialization and activate after restore", async () => {
+  const w = world(), events: string[] = [];
+  const regular = { kind: "q1", points: 50, absorption: 0.6, item: "q1:armor/yellow" } satisfies import("../../../src/contracts/gameplay.ts").RegularArmorState;
+  w.combat.create(w.player, { health: 73, armor: { regular, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  w.inventory.give(w.player, "q2:cells", 20);
+  const withPower = (selection: ModSelection): PreparedMod => {
+    const source = prepared(w, selection, events, 0), key = modSelectionKey(selection);
+    return { ...source, async initialize(context) {
+      const claim = { owner: context.instance, rule: "source:power", admission: { kind: "claim" } } satisfies import("../../../src/world/gameplay/authority.ts").PoweredProtectionClaim;
+      const reservation = w.combat.reservePoweredProtection(w.player, claim); context.resources.defer(() => reservation.close());
+      const runtime = await source.initialize(context); let active = false;
+      return { ...runtime, activate() {
+        events.push(`activate:${key}`);
+        if (!active) {
+          reservation.bind({ ...claim, fuelItems: ["q2:cells"], read: () => ({ kind: "shield", cells: w.inventory.count(w.player.id, "q2:cells") }),
+            validateWrite: () => undefined, write: () => undefined, absorb: () => ({ saved: 0 }) }); active = true;
+        }
+        return undefined;
+      } };
+    } };
+  };
+  const options = { prepared: [withPower(first), withPower(second)], enabled: [first], operations: w.operations, nextFrame: async () => {} };
+  const original = await SessionMods.open(options), saved = await original.checkpoint(); original.close(); events.length = 0;
+  const owner = await SessionMods.open(options, saved);
+  try {
+    expect(events).toEqual(["open:q3-one/amount", "restore:q3-one/amount", "activate:q3-one/amount"]);
+    expect(w.combat.read(w.player.id)?.armor).toEqual({ regular, powered: { kind: "shield", cells: 20 } });
+    events.length = 0;
+    await expect(owner.setEnabled(second, true)).rejects.toThrow("component owner");
+    expect(events).toEqual([]);
+    expect(owner.enabled()).toEqual([first]);
+    await owner.restore(saved);
+    expect(events).toEqual(["restore:q3-one/amount", "activate:q3-one/amount"]);
+    await owner.setEnabled(first, false);
+    expect(w.combat.read(w.player.id)?.armor).toEqual({ regular, powered: { kind: "none" } });
+    expect(w.inventory.count(w.player.id, "q2:cells")).toBe(20);
+  } finally { owner.close(); w.actors.close(); }
+});
+
 test("mod appearance groups preserve attachments and restore the preceding enabled source", async () => {
   const w = world(), events: string[] = [], origin = { x: 0, y: 0, z: 0 };
-  const model = (path: string): SimulationPresentation => ({ actor: w.player.id, content: "q2:mod", family: "q2", path,
+  const model = (path: string): SimulationPresentation => ({ actor: w.player.id, content: "q2:classic:mod:fixture", family: "q2", path,
     frame: 0, oldFrame: 0, skin: 0, effects: 0, renderFlags: 0, origin, angles: origin, scale: 1, visible: true, viewWeapon: false });
   const original = [model("body.md2"), model("weapon.md2")], replacement = [model("other.md2")];
   const owner = await SessionMods.open({ prepared: [prepared(w, first, events, 1, false, { appearances: original }),

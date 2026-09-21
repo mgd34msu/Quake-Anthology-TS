@@ -3,6 +3,7 @@ import type { NativeAbi, Q2GameApiIdentity } from "./execution.ts";
 import type { ModCallbackBinding, ModCallbackValue, ModClientInputBinding } from "./mod-callbacks.ts";
 import type { QvmModActorField } from "./qvm-mod-callbacks.ts";
 import type { ItemId } from "./gameplay.ts";
+import type { ProviderId } from "./identity.ts";
 
 export type NativeModScalar = "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "int64" | "uint64" | "float32" | "float64";
 /** Image-relative addresses are rebound after each original source save restoration. */
@@ -85,13 +86,25 @@ export interface NativeModArmorField extends NativeModScalarField { readonly rec
 export type NativeModArmorSelection =
   | { readonly kind: "positive"; readonly field: NativeModArmorField }
   | { readonly kind: "enum"; readonly field: NativeModArmorField; readonly value: number; readonly none: number };
+export interface NativeModPowerArmorItem {
+  readonly item: ItemId;
+  readonly kind: "screen" | "shield";
+  readonly selection: NativeModArmorSelection;
+  readonly cells: NativeModArmorField;
+  readonly enabled: { readonly field: NativeModArmorField; readonly mask: number } | null;
+}
 export type NativeModArmor = { readonly kind: "none" } | {
   readonly kind: "q2";
   readonly regular: readonly { readonly item: ItemId; readonly selection: NativeModArmorSelection; readonly points: NativeModArmorField;
     readonly normalProtection: number; readonly energyProtection: number }[];
-  readonly power: readonly { readonly item: ItemId; readonly kind: "screen" | "shield"; readonly selection: NativeModArmorSelection;
-    readonly cells: NativeModArmorField; readonly enabled: { readonly field: NativeModArmorField; readonly mask: number } | null }[];
+  readonly power: readonly NativeModPowerArmorItem[];
 };
+export interface NativeModPoweredProtection {
+  readonly id: string;
+  readonly admission?: { readonly kind: "claim" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
+  readonly storage: readonly NativeModPowerArmorItem[];
+  readonly absorb: { readonly entry: NativeModEntry; readonly abi: "q2-check-power-armor"; readonly flags: "q2-classic" | "q2-rerelease"; readonly globals?: NativeModSourceCall["globals"] };
+}
 export interface NativeModDeferredDamage {
   readonly process: NativeModEntry;
   readonly attacker: number;
@@ -121,6 +134,7 @@ export interface NativeModDeclaration {
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-classic-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-i386" }> }
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-rerelease-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-x86-64" }> };
   readonly sourceActors?: NativeModSourceActors;
+  readonly poweredProtection?: NativeModPoweredProtection;
   readonly clients?: NativeModClients;
   readonly cvars: readonly { readonly name: string; readonly value: string }[];
   readonly spawnEntities: string | null;

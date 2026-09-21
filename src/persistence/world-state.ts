@@ -46,8 +46,19 @@ export interface SharedWorldRestoreHost {
   storage(actor: OwnedActor): "copied" | "prebound" | "source-reconstructed";
 }
 
+export interface SharedWorldRestoreCompletion {
+  /** Finish after component source state and its combat layers have been attached. */
+  finish(): undefined;
+  assertComplete(): undefined;
+}
+
 /** Run before source-provider restore binds named callbacks; link bodies after source collision metadata exists. */
-export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost): undefined {
+export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost): undefined;
+export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost,
+  options: { readonly deferPoweredProtection: true }): SharedWorldRestoreCompletion;
+export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost,
+  options?: { readonly deferPoweredProtection: true }): undefined | SharedWorldRestoreCompletion {
+  host.combat.assertIdle();
   const actor = (saved: SavedActorId): OwnedActor => {
     const restored = host.actors.resolveSaved(saved);
     if (restored === null) throw new SaveFormatError("world", `missing saved actor ${saved.slot}/${saved.generation}`);
@@ -55,13 +66,13 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   };
   const bodyActors = new Set(save.bodies.map(entry => actor(entry.actor)));
   const combatActors = new Set(save.combat.map(entry => actor(entry.actor)));
-  const inventoryActors = new Set(save.inventories.map(entry => actor(entry.actor)));
+  const inventories = new Map(save.inventories.map(entry => [actor(entry.actor), entry.entries]));
   for (const entry of save.actors) if (entry.lifetime.kind === "active") {
     const restored = actor(entry);
     if (host.storage(restored) === "copied") continue;
     if ((host.bodies.read(restored.id) !== null) !== bodyActors.has(restored)
       || (host.combat.read(restored.id) !== null) !== combatActors.has(restored)
-      || host.inventory.has(restored.id) !== inventoryActors.has(restored))
+      || host.inventory.has(restored.id) !== inventories.has(restored))
       throw new SaveFormatError("world", "source bindings disagree with saved shared state coverage");
   }
   for (const entry of save.bodies) {
@@ -83,12 +94,13 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   for (const entry of save.combat) {
     const restored = actor(entry.actor);
     const storage = host.storage(restored);
-    const saved = save.legacyArmorLayout === true && storage !== "copied" ? { ...entry.state, armor: host.combat.normalizeLegacyArmor(restored, entry.state.armor) } : entry.state;
+    const saved = options === undefined && save.legacyArmorLayout === true && storage !== "copied"
+      ? { ...entry.state, armor: host.combat.normalizeLegacyArmor(restored, entry.state.armor) } : entry.state;
     if (storage !== "copied") {
       const state = host.combat.read(restored.id);
       if (state === null) throw new SaveFormatError("world.combat", "source combat view has not been bound");
-      if (storage === "prebound" && !isDeepStrictEqual(state, saved)) throw new SaveFormatError("world.combat", "source combat disagrees with saved shared state");
-    } else host.combat.create(restored, saved);
+      if (options === undefined && storage === "prebound" && !isDeepStrictEqual(state, saved)) throw new SaveFormatError("world.combat", "source combat disagrees with saved shared state");
+    } else host.combat.create(restored, options === undefined ? saved : { ...saved, armor: { regular: saved.armor.regular, powered: { kind: "none" } } });
   }
   for (const entry of save.inventories) {
     const restored = actor(entry.actor);
@@ -99,5 +111,54 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
         throw new SaveFormatError("world.inventories", "source inventory disagrees with saved shared state");
     } else host.inventory.create(restored, entry.entries);
   }
-  return undefined;
+  if (options === undefined) return undefined;
+  let state: "pending" | "complete" | "failed" = "pending";
+  return {
+    finish() {
+      if (state !== "pending") throw new SaveFormatError("world.combat", `shared restoration is ${state}`);
+      try {
+        host.combat.assertIdle();
+        const copied: { readonly actor: OwnedActor; readonly state: SaveImage["combat"][number]["state"] }[] = [];
+        for (const entry of save.combat) {
+          const restored = actor(entry.actor), storage = host.storage(restored);
+          const saved = save.legacyArmorLayout === true && storage !== "copied"
+            ? { ...entry.state, armor: host.combat.normalizeLegacyArmor(restored, entry.state.armor) } : entry.state;
+          const current = host.combat.read(restored.id), external = host.combat.poweredProtectionOwner(restored) !== null;
+          const fuels = host.combat.poweredProtectionFuelItems(restored);
+          if (current === null) throw new SaveFormatError("world.combat", "restored combat view has not been bound");
+          if (storage === "source-reconstructed") {
+            if (external && !isDeepStrictEqual(current.armor.powered, saved.armor.powered))
+              throw new SaveFormatError("world.combat", "component powered protection disagrees with saved shared state");
+            for (const item of fuels) {
+              const savedFuel = inventories.get(restored)?.find(entry => entry.item === item);
+              const currentFuel = host.inventory.entries(restored.id).find(entry => entry.item === item);
+              if (savedFuel === undefined || currentFuel === undefined || !Object.is(savedFuel.count, currentFuel.count))
+                throw new SaveFormatError("world.inventories", "component powered fuel disagrees with saved shared state");
+            }
+          } else if (storage === "copied" && !external) {
+            if (!isDeepStrictEqual({ ...current, armor: { ...current.armor, powered: saved.armor.powered } }, saved))
+              throw new SaveFormatError("world.combat", "copied combat disagrees with saved shared state");
+            copied.push({ actor: restored, state: saved });
+          } else if (!isDeepStrictEqual(current, saved)) throw new SaveFormatError("world.combat", "source combat disagrees with saved shared state");
+        }
+        for (const entry of save.inventories) {
+          const restored = actor(entry.actor);
+          if (host.storage(restored) !== "source-reconstructed" && (!host.inventory.has(restored.id)
+            || !isDeepStrictEqual(host.inventory.entries(restored.id), entry.entries)))
+            throw new SaveFormatError("world.inventories", "restored inventory disagrees with saved shared state");
+        }
+        for (const entry of copied) {
+          host.combat.setPoweredProtection(entry.actor, entry.state.armor.powered);
+          if (!isDeepStrictEqual(host.combat.read(entry.actor.id), entry.state))
+            throw new SaveFormatError("world.combat", "copied powered protection disagrees with saved shared state");
+        }
+        state = "complete";
+      } catch (error) { state = "failed"; throw error; }
+      return undefined;
+    },
+    assertComplete() {
+      if (state !== "complete") throw new SaveFormatError("world.combat", `shared restoration is ${state}`);
+      return undefined;
+    },
+  };
 }

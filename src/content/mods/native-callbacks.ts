@@ -1,5 +1,5 @@
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
-import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors, NativeModArmor, NativeModArmorField, NativeModArmorSelection } from "../../contracts/native-mod-callbacks.ts";
+import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors, NativeModArmor, NativeModArmorField, NativeModArmorSelection, NativeModPowerArmorItem } from "../../contracts/native-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -68,8 +68,11 @@ function armor(reader: SaveReader): NativeModArmor {
   if (reader.field("kind").choice("none", "q2") === "none") return { kind: "none" };
   return { kind: "q2", regular: reader.field("regular").list(value => ({ item: namespaced(value.field("item")), selection: armorSelection(value.field("selection")),
     points: armorField(value.field("points")), normalProtection: value.field("normalProtection").number(), energyProtection: value.field("energyProtection").number() })),
-    power: reader.field("power").list(value => ({ item: namespaced(value.field("item")), kind: value.field("kind").choice("screen", "shield"),
-      selection: armorSelection(value.field("selection")), cells: armorField(value.field("cells")), enabled: value.field("enabled").nullable(value => ({ field: armorField(value.field("field")), mask: value.field("mask").integer(1) })) })) };
+    power: reader.field("power").list(powerArmorItem) };
+}
+function powerArmorItem(reader: SaveReader): NativeModPowerArmorItem {
+  return { item: namespaced(reader.field("item")), kind: reader.field("kind").choice("screen", "shield"), selection: armorSelection(reader.field("selection")),
+    cells: armorField(reader.field("cells")), enabled: reader.field("enabled").nullable(value => ({ field: armorField(value.field("field")), mask: value.field("mask").integer(1) })) };
 }
 function sourceActors(reader: SaveReader): NativeModSourceActors {
   const fields = reader.field("fields"), nextthink = fields.field("nextthink"), update = reader.field("update");
@@ -106,6 +109,15 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("native"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) }, target: parsedTarget,
     ...(reader.field("sourceActors").value === undefined ? {} : { sourceActors: sourceActors(reader.field("sourceActors")) }),
+    ...(reader.field("poweredProtection").value === undefined ? {} : { poweredProtection: (() => {
+      const value = reader.field("poweredProtection"), absorb = value.field("absorb");
+      return { id: value.field("id").string(), storage: value.field("storage").list(powerArmorItem),
+        ...(value.field("admission").value === undefined ? {} : { admission: value.field("admission").field("kind").choice("claim", "replace-primary") === "claim"
+          ? { kind: "claim" } satisfies NonNullable<NativeModDeclaration["poweredProtection"]>["admission"]
+          : { kind: "replace-primary", owner: namespaced(value.field("admission").field("owner")) } satisfies NonNullable<NativeModDeclaration["poweredProtection"]>["admission"] }),
+        absorb: { entry: entry(absorb.field("entry")), abi: absorb.field("abi").literal("q2-check-power-armor"), flags: absorb.field("flags").choice("q2-classic", "q2-rerelease"),
+          ...(absorb.field("globals").value === undefined ? {} : { globals: absorb.field("globals").list(global => ({ address: address(global.field("address")), value: argument(global.field("value")) })) }) } };
+    })() }),
     ...(reader.field("clients").value === undefined ? {} : { clients: {
       maximum: reader.field("clients").field("maximum").integer(1), records: reader.field("clients").field("records").list(value => value.string()),
       admit: reader.field("clients").field("admit").list(reader => ({ ...sourceCall(reader), accepts: reader.field("accepts").choice("always", "nonzero") })), userinfo: reader.field("clients").field("userinfo").list(sourceCall),

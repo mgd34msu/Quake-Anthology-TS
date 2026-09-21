@@ -19,6 +19,8 @@ import { decodeQ2ClassicLevel, encodeQ2ClassicLevel, restoreQ2ClassicRecord } fr
 import type { Q2ClassicSaveLayout } from "../../src/persistence/q2-classic.ts";
 import { decodeQ3ClientSession, encodeQ3ClientSession } from "../../src/persistence/q3.ts";
 import { validateSimulationSave } from "../../src/app/bootstrap/simulation/save.ts";
+import type { PoweredProtectionState } from "../../src/contracts/gameplay.ts";
+import type { SharedWorldRestoreHost } from "../../src/persistence/world-state.ts";
 
 function recipe(): ExecutableRecipe {
   const content = "q1:classic:id1:fixture";
@@ -33,6 +35,89 @@ function recipe(): ExecutableRecipe {
     mounts: { id: "mount-plan:fixture:1", mounts: [raw.provenance.mount], defaultOrder: [raw.provenance.mount.identity.id], prefixOrders: [] }, resources: [geometry], timing: [],
     ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
 }
+
+function poweredRestore(storage: ReturnType<SharedWorldRestoreHost["storage"]>, powered: PoweredProtectionState) {
+  const identity = createIdentityOwner("powered-save"), original = new SessionActorRegistry(identity);
+  const player = original.allocate("q1:game", "q1:player"), savedActor = { slot: player.id.slot, generation: player.id.generation };
+  const state = { health: 73, armor: { regular: { kind: "q1", points: 50, absorption: 0.6, item: "q1:armor/yellow" }, powered },
+    mass: 200, canTakeDamage: true, invulnerable: false, team: null } satisfies SaveImage["combat"][number]["state"];
+  const entries = [{ item: "q2:cells", count: 20, capacity: 200 }] satisfies SaveImage["inventories"][number]["entries"];
+  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+    nextEventSequence: 0, clocks: [], random: [], actors: original.checkpoint(), bodies: [], combat: [{ actor: savedActor, state }],
+    inventories: [{ actor: savedActor, entries }], configurations: [], thinks: [], providers: [], guests: [] };
+  const actors = SessionActorRegistry.restore(identity, image.actors, original.sourceCheckpoint()); original.close();
+  const restored = actors.resolveSaved(savedActor); if (restored === null) throw new Error("Missing restored player");
+  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+  const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  const inventory = new SharedInventoryTable(actors);
+  if (storage !== "copied") {
+    combat.create(restored, { ...state, armor: { regular: state.armor.regular, powered: { kind: "none" } } });
+    inventory.create(restored, entries);
+  }
+  const completion = restoreSharedWorldState(decodeSaveImage(encodeSaveImage(image)), { actors, bodies, combat, inventory, storage: () => storage }, { deferPoweredProtection: true });
+  return { actors, restored, combat, inventory, completion, state };
+}
+
+test("component restore attaches original powered state before equality and disable preserves regular armor and fuel", () => {
+  for (const storage of ["copied", "prebound"] satisfies readonly ReturnType<SharedWorldRestoreHost["storage"]>[]) {
+    const w = poweredRestore(storage, { kind: "shield", cells: 20 });
+    try {
+      expect(w.combat.read(w.restored.id)?.armor).toEqual({ regular: w.state.armor.regular, powered: { kind: "none" } });
+      expect(() => w.completion.assertComplete()).toThrow("pending");
+      const release = w.combat.bindPoweredProtection(w.restored, { owner: "mod:power", rule: "source:power", admission: { kind: "claim" }, fuelItems: ["q2:cells"],
+        read: () => ({ kind: "shield", cells: w.inventory.count(w.restored.id, "q2:cells") }), validateWrite: () => undefined,
+        write: () => { throw new Error("Restore must not overwrite component source state"); }, absorb: () => ({ saved: 0 }) });
+      w.completion.finish(); w.completion.assertComplete();
+      expect(w.combat.read(w.restored.id)).toEqual(w.state);
+      release();
+      expect(w.combat.read(w.restored.id)?.armor).toEqual({ regular: w.state.armor.regular, powered: { kind: "none" } });
+      expect(w.inventory.count(w.restored.id, "q2:cells")).toBe(20);
+    } finally { w.actors.close(); }
+  }
+});
+
+test("deferred restore retains primary power and catches inactive component fuel changes", () => {
+  const primary = poweredRestore("copied", { kind: "shield", cells: 20 });
+  try {
+    primary.completion.finish(); primary.completion.assertComplete();
+    expect(primary.combat.read(primary.restored.id)).toEqual(primary.state);
+  } finally { primary.actors.close(); }
+  const component = poweredRestore("copied", { kind: "none" });
+  try {
+    component.combat.bindPoweredProtection(component.restored, { owner: "mod:power", rule: "source:power", admission: { kind: "claim" }, fuelItems: ["q2:cells"],
+      read: () => ({ kind: "none" }), validateWrite: () => undefined, write: () => undefined, absorb: () => ({ saved: 0 }) });
+    component.inventory.give(component.restored, "q2:cells", 1);
+    expect(() => component.completion.finish()).toThrow("restored inventory disagrees");
+    expect(() => component.completion.assertComplete()).toThrow("failed");
+  } finally { component.actors.close(); }
+});
+
+test("source reconstruction validates declared component fuel without imposing unrelated inventory or health", () => {
+  for (const changedFuel of [false, true]) {
+    const w = poweredRestore("source-reconstructed", { kind: "none" });
+    try {
+      w.combat.setHealth(w.restored, 100);
+      w.inventory.configure(w.restored, { item: "q1:ammo/shells", count: 10, capacity: 100 });
+      w.combat.bindPoweredProtection(w.restored, { owner: "mod:power", rule: "source:power", admission: { kind: "claim" }, fuelItems: ["q2:cells"],
+        read: () => ({ kind: "none" }), validateWrite: () => undefined, write: () => undefined, absorb: () => ({ saved: 0 }) });
+      if (changedFuel) {
+        w.inventory.give(w.restored, "q2:cells", 1);
+        expect(() => w.completion.finish()).toThrow("component powered fuel disagrees");
+        expect(() => w.completion.assertComplete()).toThrow("failed");
+      } else {
+        w.completion.finish(); w.completion.assertComplete();
+        expect(w.combat.read(w.restored.id)?.health).toBe(100);
+        expect(w.inventory.count(w.restored.id, "q1:ammo/shells")).toBe(10);
+      }
+    } finally { w.actors.close(); }
+  }
+  const pending = poweredRestore("copied", { kind: "none" });
+  try {
+    pending.combat.reservePoweredProtection(pending.restored, { owner: "mod:power", rule: "source:power", admission: { kind: "claim" } });
+    expect(() => pending.completion.finish()).toThrow("has not been bound");
+    expect(() => pending.completion.assertComplete()).toThrow("failed");
+  } finally { pending.actors.close(); }
+});
 
 test("save version 3 preserves independent armor and reads version 2 without losing depleted equipment", () => {
   const armor = { regular: { kind: "q1", points: 0, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "shield", cells: 77 } } satisfies SaveImage["combat"][number]["state"]["armor"];

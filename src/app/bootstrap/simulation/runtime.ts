@@ -207,6 +207,7 @@ import { captureSharedBodies, restoreSharedBodyLinks, restoreSharedWorldState, s
   savedActorId, readSavedActor, encodeCheckpointValue, decodeCheckpointValue, SaveReader, encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint,
   readQ2CharacterCheckpoint } from "../../../persistence/index.ts";
 import { readContentId } from "../../../persistence/recipe.ts";
+import type { SharedWorldRestoreCompletion } from "../../../persistence/world-state.ts";
 import { readRandom, readVector } from "../../../persistence/shared.ts";
 import { captureMovementPlayer, readMovementPlayer, readQ1Travel, readQ2View, readQ3Character } from "./player-checkpoint.ts";
 import { simulationProviderCheckpoint, simulationSaveReader, savedSimulationSettings, simulationQuakeCCheckpoint, simulationQvmCheckpoint, validateSimulationSave, nativeQ3RuntimeReader, savedSourceCvars, nativeQ2RereleaseSave, nativeQ2OriginalSave, nativeQ2SavedClients } from "./save.ts";
@@ -264,6 +265,7 @@ export class SharedSimulation implements Simulation {
   private readonly startItems: string;
   private readonly initialSpawnPoint: string;
   private readonly pendingStartItems = new Set<ActorId>();
+  private pendingSharedRestore: SharedWorldRestoreCompletion | null = null;
   private readonly detachedModels = new Map<OwnedActor, { readonly content: ContentId; readonly path: string }>();
   private readonly q1Characters = new Map<OwnedActor, Q1CharacterActor>();
   private q1CharacterFoundation: Q1EntityServices | null = null;
@@ -714,7 +716,12 @@ export class SharedSimulation implements Simulation {
       this.source.product.afterSpawn();
       if (report.unsupported.length !== 0) throw new Error(`Unimplemented authored Q2 spawns: ${[...new Set(report.unsupported.map(entity => entity.classname))].join(", ")}`);
     }
-    if (loading !== nativeLoading) this.bindNativeInput();
+    if (loading !== nativeLoading) {
+      this.pendingSharedRestore?.finish();
+      this.pendingSharedRestore?.assertComplete();
+      this.pendingSharedRestore = null;
+      this.bindNativeInput();
+    }
     } catch (error) {
       if (this.source.kind === "q3-qvm") {
         const errors: unknown[] = [error];
@@ -782,6 +789,9 @@ export class SharedSimulation implements Simulation {
                 camera: actor => { const view = simulation.playerView(actor); return { origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles }; } } } },
           operations: { damage: simulation.combat.damageOperation, actors: simulation.callbacks.operations, inventory: simulation.inventory.operations }, nextFrame }, modState, options.modTravel);
       }
+      simulation.pendingSharedRestore?.finish();
+      simulation.pendingSharedRestore?.assertComplete();
+      simulation.pendingSharedRestore = null;
       return simulation;
     } catch (error) {
       const errors: unknown[] = [error];
@@ -1907,6 +1917,9 @@ export class SharedSimulation implements Simulation {
       const runtime: ActorHostRuntime = { numeric: timing.numeric, random: this.random, now: () => this.timeSeconds, frameSeconds: () => native.edition === "classic" ? 0.1 : 0.025,
         schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) };
       const services: ClassicGuestServicesOptions = {
+        damageProvenance: () => ({ sequence: this.attackSequence++, time: { kind: "seconds", value: this.timeSeconds }, weapon: null,
+          weaponProvider: recipe.map.entities.provider, combatProvider: recipe.combat.provider,
+          inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider }),
         engine: this.q2ActorHost(recipe.map.entities, runtime, () => undefined, "primary-world"), scene: this.scene, cvars, numeric: createNumericOperations(timing.numeric),
         mapPath: recipe.map.geometry.requestedPath, maxClients: this.options.maxClients,
         admit: (record, actor) => { this.actors.assertOwned(actor); if (record.currentActor()?.equals(actor.id) !== true) throw new Error("Native actor projection lost shared identity"); return undefined; },
@@ -3384,6 +3397,7 @@ export class SharedSimulation implements Simulation {
   }
 
   async stepAsync(input: InputBatch): Promise<SimulationOutput> {
+    this.pendingSharedRestore?.assertComplete();
     if (this.source.kind !== "q3-qvm") return this.step(input);
     this.assertOpen();
     if (this.stepping || this.checkpointInProgress) throw new Error("Simulation step is already running or a checkpoint is active");
@@ -3441,6 +3455,7 @@ export class SharedSimulation implements Simulation {
   }
 
   step(input: InputBatch): SimulationOutput {
+    this.pendingSharedRestore?.assertComplete();
     this.assertOpen();
     this.assertBotRestoreReady();
     if (this.stepping || this.checkpointInProgress) throw new Error("Simulation step is already running or a checkpoint is active");
@@ -4859,6 +4874,8 @@ export class SharedSimulation implements Simulation {
       throw new Error("Saved bot services must be restored before simulation advances or saves");
   }
   private assertCheckpointReady(): void {
+    this.pendingSharedRestore?.assertComplete();
+    this.combat.assertIdle();
     this.assertOpen();
     this.assertBotRestoreReady();
     if (this.sourceRoundSettlement.kind === "active" || this.sourceRoundSettlement.kind === "failed") throw new Error("Save requires completed source round settlement");
@@ -5081,8 +5098,8 @@ export class SharedSimulation implements Simulation {
         if (actor !== null && this.playerClient(actor.id) !== null && !this.inventory.has(actor.id)) this.bindEquipmentInventory(actor, entry.entries);
       }
     }
-    restoreSharedWorldState(save, { actors: this.actors, bodies: this.bodies, combat: this.combat, inventory: this.inventory,
-      storage: actor => reconstructed(actor.id) ? "source-reconstructed" : (source.kind === "quakec" || source.kind === "q3-qvm") && this.actors.sourceOf(actor.id)?.provider === this.recipe.map.entities.provider ? "prebound" : "copied" });
+    this.pendingSharedRestore = restoreSharedWorldState(save, { actors: this.actors, bodies: this.bodies, combat: this.combat, inventory: this.inventory,
+      storage: actor => reconstructed(actor.id) ? "source-reconstructed" : (source.kind === "quakec" || source.kind === "q3-qvm") && this.actors.sourceOf(actor.id)?.provider === this.recipe.map.entities.provider ? "prebound" : "copied" }, { deferPoweredProtection: true });
     reader.field("players").list(value => {
       const saved = readMovementPlayer(value, actor => this.actors.referenceSaved(actor)), actor = owner(value.field("actor"));
       const client = this.options.restoredClients?.find(client => client.slot === saved.clientSlot);

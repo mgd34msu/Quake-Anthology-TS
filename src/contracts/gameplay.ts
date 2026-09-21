@@ -69,6 +69,22 @@ export interface ArmorState {
   readonly powered: PoweredProtectionState;
 }
 
+export interface ArmorDamageFlags {
+  readonly stage?: "power" | "regular";
+  readonly noArmor: boolean;
+  readonly noPowerArmor: boolean;
+  readonly noRegularArmor: boolean;
+  readonly energy: boolean;
+  readonly regularProtectionScale?: number;
+}
+export interface ArmorResult { readonly armor: ArmorState; readonly powerSaved: number; readonly regularSaved: number; }
+export interface ArmorStageInput { readonly request: DamageRequest; readonly amount: number; readonly flags: ArmorDamageFlags; }
+export interface ArmorStageResult { readonly saved: number; }
+/** Reports an already committed store; the observer never repeats the write. */
+export interface ArmorStageObserver {
+  stored(change: { readonly before: PoweredProtectionState; readonly after: PoweredProtectionState }): undefined;
+}
+
 export interface CombatState {
   readonly health: number;
   readonly armor: ArmorState;
@@ -96,19 +112,25 @@ export interface DamageDecision {
   readonly feedback?:
     | { readonly kind: "q2"; readonly powerArmor: number; readonly armor: number; readonly blood: number; readonly knockback: number }
     | { readonly kind: "q3"; readonly knockback: number; readonly battlesuit: boolean };
-  /** Source TeamHealthDam runs after armor/momentum commit and before health is read again. */
-  readonly continuation?: { readonly kind: "q1-health"; readonly damage: number; readonly take: number };
 }
 
 export interface CurrentCombatState { target(): CombatState | null; attacker(): CombatState | null; }
+
+export type CombatResult = Pick<DamageDecision, "appliedDamage" | "reaction" | "feedback">;
+/** Synchronous execution only. Completed decisions contain no continuations. */
+export type CombatProgress = { readonly request: DamageRequest; readonly mutations: readonly DamageMutation[] } & (
+  | { readonly kind: "complete"; readonly result: CombatResult }
+  | { readonly kind: "powered-armor"; readonly input: ArmorStageInput;
+      readonly fallback: (current: ArmorState) => ArmorResult;
+      readonly resume: (result: ArmorStageResult, current: CurrentCombatState) => CombatProgress }
+  | { readonly kind: "source-continuation"; readonly resume: (current: CurrentCombatState) => CombatProgress }
+);
 
 export interface CombatPolicy {
   readonly id: ProviderId;
   /** Source stages such as empathy may synchronously reenter combat before armor is read. */
   prepare?(request: DamageRequest, target: CombatState, attacker: CombatState | null): DamagePreparation;
-  decide(request: DamageRequest, target: CombatState, attacker: CombatState | null, prepared?: { readonly amount: number }): DamageDecision;
-  /** May synchronously reenter. Returned mutations use freshly read state after that call returns. */
-  resume?(decision: DamageDecision, current: CurrentCombatState): DamageDecision;
+  decide(request: DamageRequest, target: CombatState, attacker: CombatState | null, prepared?: { readonly amount: number }): CombatProgress;
   /** Runs after committed health and before pain/death; reentrant effects read current actors. */
   afterHealth?(decision: DamageDecision, current: CurrentCombatState): DamageDecision["reaction"];
 }

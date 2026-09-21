@@ -9,6 +9,11 @@ export interface InventoryStateBinding {
   /** Explicit owner support, including its source consumers and saved continuation. */
   mutableCapacity?(item: ItemId): boolean;
 }
+export interface InventoryCommittedChange {
+  readonly actor: OwnedActor;
+  readonly before: InventoryEntry | null;
+  readonly after: InventoryEntry;
+}
 
 function quantity(value: number): number {
   if (!Number.isFinite(value) || value < 0) throw new RangeError("Inventory quantity must be finite and nonnegative");
@@ -135,17 +140,32 @@ export class SharedInventoryTable implements InventoryTable {
   }
 
   /** Source pickups can change capacity or retain an over-cap count without a forced generic clamp. */
-  configure(actor: OwnedActor, entry: InventoryEntry): undefined {
+  configure(actor: OwnedActor, entry: InventoryEntry, committed?: (change: InventoryCommittedChange) => undefined): undefined {
     if (this.operations.configure.active) this.actors.assertOwned(actor);
-    return this.operations.configure.active ? this.operations.configure.dispatch([actor, entry], args => this.configureCanonical(...args)) : this.configureCanonical(actor, entry);
+    if (committed === undefined) return this.operations.configure.active
+      ? this.operations.configure.dispatch([actor, entry], args => this.configureCanonical(...args)) : this.configureCanonical(actor, entry);
+    let stored = false;
+    return this.operations.configure.dispatch([actor, entry], ([owner, value]) => {
+      if (owner !== actor || value.item !== entry.item) throw new Error("Observed inventory store changed actor or item");
+      return this.configureCanonical(owner, value, change => { committed(change); stored = true; return undefined; });
+    }, () => { if (!stored) throw new Error("Observed source inventory requires its canonical store before observers"); });
   }
 
-  private configureCanonical(actor: OwnedActor, entry: InventoryEntry): undefined {
+  private configureCanonical(actor: OwnedActor, entry: InventoryEntry, committed?: (change: InventoryCommittedChange) => undefined): undefined {
     this.actors.assertOwned(actor);
     const binding = this.stores.get(actor);
     if (binding === undefined) throw new Error("Actor has no inventory binding");
-    const policy = entry.countPolicy ?? binding.read().find(candidate => candidate.item === entry.item)?.countPolicy;
-    return binding.write(copyEntry(policy === undefined ? entry : { ...entry, countPolicy: policy }));
+    const previous = binding.read().find(candidate => candidate.item === entry.item);
+    const before = committed === undefined || previous === undefined ? null : copyEntry(previous), policy = entry.countPolicy ?? previous?.countPolicy;
+    binding.write(copyEntry(policy === undefined ? entry : { ...entry, countPolicy: policy }));
+    if (committed !== undefined) {
+      this.actors.assertOwned(actor);
+      if (this.stores.get(actor) !== binding) throw new Error("Inventory owner changed during observed store");
+      const after = binding.read().find(candidate => candidate.item === entry.item);
+      if (after === undefined) throw new Error("Observed inventory entry disappeared during its store");
+      committed({ actor, before, after: copyEntry(after) });
+    }
+    return undefined;
   }
 
   /** Fixed source bursts may decrement past zero; ordinary stack consumption keeps its availability check. */

@@ -1,18 +1,6 @@
 // Armor formulas from Quake combat.qc, Quake II g_combat.c and Quake III g_combat.c.
-import type { ArmorState, DamageRequest } from "../../contracts/gameplay.ts";
-
-export interface ArmorDamageFlags {
-  /** Split source armor sites without changing the native damage flags or cell cost. */
-  readonly stage?: "power" | "regular";
-  readonly noArmor: boolean;
-  readonly noPowerArmor: boolean;
-  readonly noRegularArmor: boolean;
-  readonly energy: boolean;
-  /** A source attack scales regular protection; each victim retains its own armor formula. */
-  readonly regularProtectionScale?: number;
-}
-
-export interface ArmorResult { readonly armor: ArmorState; readonly powerSaved: number; readonly regularSaved: number; }
+import type { ArmorDamageFlags, ArmorResult, ArmorState, DamageRequest } from "../../contracts/gameplay.ts";
+export type { ArmorDamageFlags, ArmorResult } from "../../contracts/gameplay.ts";
 export interface VictimArmorContext {
   /** The Q2 caller computes normalize(point - origin) dot AngleVectors(angles).forward. */
   readonly screenFacingDot: number;
@@ -24,7 +12,7 @@ export interface VictimArmorContext {
 export type VictimArmorPolicy = (request: DamageRequest, armor: ArmorState, damage: number, flags: ArmorDamageFlags) => ArmorResult;
 
 export function absorbNativeArmor(armor: ArmorState, damage: number, flags: ArmorDamageFlags, context: VictimArmorContext): ArmorResult {
-  if ((armor.regular.kind === "q2" || armor.powered.kind !== "none") && context.q2 === undefined)
+  if ((flags.stage !== "power" && armor.regular.kind === "q2" || flags.stage !== "regular" && armor.powered.kind !== "none") && context.q2 === undefined)
     throw new Error("Q2 victim armor requires an explicit classic or rerelease source profile");
   if (damage === 0 || flags.noArmor || armor.regular.kind === "none" && armor.powered.kind === "none") return { armor, powerSaved: 0, regularSaved: 0 };
   const multiply = (left: number, right: number): number => context.arithmetic === "binary32" ? Math.fround(Math.fround(left) * Math.fround(right)) : left * right;

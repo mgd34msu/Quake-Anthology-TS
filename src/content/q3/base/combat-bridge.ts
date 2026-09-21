@@ -1,6 +1,6 @@
 import { SaveReader } from "../../../persistence/value.ts";
 import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
-import type { AttackProvenance, CombatPolicy, CombatState, DamageDecision, DamageOutcome, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
+import type { AttackProvenance, CombatPolicy, CombatProgress, CurrentCombatState, CombatState, DamageDecision, DamageOutcome, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId, ProviderId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
@@ -146,8 +146,19 @@ export class Q3CombatBridge {
       return { ...state, invulnerable: state.invulnerable || entity !== null && (entity.flags & GameFlags.GODMODE) !== 0,
         team: entity?.client !== null && entity?.client !== undefined && host.gameType() >= GameType.GT_TEAM ? `q3-team:${entity.client.sess.sessionTeam}` : state.team };
     };
-    return { id: policy.id, decide: (request, target, attacker) => policy.decide(request, sourceState(request, target, false),
-      attacker === null ? null : sourceState(request, attacker, true)) };
+    const project = (request: DamageRequest, current: CurrentCombatState): CurrentCombatState => ({
+      target: () => { const value = current.target(); return value === null ? null : sourceState(request, value, false); },
+      attacker: () => { const value = current.attacker(); return value === null ? null : sourceState(request, value, true); },
+    });
+    const progress = (value: CombatProgress): CombatProgress => {
+      switch (value.kind) {
+        case "complete": return value;
+        case "source-continuation": return { ...value, resume: (current: CurrentCombatState) => progress(value.resume(project(value.request, current))) };
+        case "powered-armor": return { ...value, resume: (result, current) => progress(value.resume(result, project(value.request, current))) };
+      }
+    };
+    return { id: policy.id, decide: (request, target, attacker) => progress(policy.decide(request, sourceState(request, target, false),
+      attacker === null ? null : sourceState(request, attacker, true))) };
   }
 
   private sameTeam(first: GameEntity | null, second: GameEntity | null): boolean {

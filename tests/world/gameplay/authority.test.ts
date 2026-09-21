@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../src/contracts/identity.ts";
-import type { ArmorState, CombatState, DamageRequest } from "../../../src/contracts/gameplay.ts";
+import type { ArmorState, CombatPolicy, CombatState, DamageDecision, DamageRequest } from "../../../src/contracts/gameplay.ts";
 import type { BodyState } from "../../../src/contracts/world.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { SparseGuestMemory } from "../../../src/guest/core/memory.ts";
@@ -27,6 +27,18 @@ function attack(target: ActorId, attacker: ActorId, sequence = 1, amount = 40): 
   return { attack: { sequence, time: { kind: "milliseconds", value: 100 }, attacker, inflictor: attacker, weapon: "q1:rocket",
     weaponProvider: "q1:weapons", combatProvider: "q3:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement", cause: { kind: "q1", deathType: "rocket" } },
     target, amount, knockback: amount, direction: { x: 1, y: 0, z: 0 }, point: origin, normal: origin, delivery: "direct" };
+}
+
+function evaluate(actors: SessionActorRegistry, policy: CombatPolicy, request: DamageRequest, target: CombatState, attacker: CombatState): DamageDecision {
+  const victim = actors.resolveOwned(request.target), source = request.attack.attacker === null ? null : actors.resolveOwned(request.attack.attacker);
+  if (victim === null) throw new Error("Missing policy test actor");
+  const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  authority.create(victim, target);
+  if (source !== null && source !== victim) authority.create(source, attacker);
+  authority.register(policy);
+  const outcome = authority.apply({ ...request, attack: { ...request.attack, combatProvider: policy.id } });
+  if (outcome.kind !== "committed") throw new Error("Policy test actor was removed");
+  return outcome.decision;
 }
 
 describe("shared actor and gameplay authority", () => {
@@ -254,13 +266,13 @@ describe("shared actor and gameplay authority", () => {
     const q1 = createQ1CombatPolicy({ id: "q1:combat", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 0, walk: true, momentumDirection: { x: 1, y: 0, z: 0 } }), armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary32" })) });
     const victim = state(100, { regular: { kind: "q1", points: 50, absorption: 0.6, item: "q1:armor" }, powered: { kind: "none" } });
     const request = attack(target.id, attacker.id);
-    const native = q1.decide(request, victim, state());
-    const disabled = q1.decide(request, { ...victim, noKnockback: true }, state());
+    const native = evaluate(actors, q1, request, victim, state());
+    const disabled = evaluate(actors, q1, request, { ...victim, noKnockback: true }, state());
     expect(native.mutations.filter(mutation => mutation.kind === "impulse")).toEqual([{ kind: "impulse", impulse: { x: 320, y: 0, z: 0 }, movementProvider: "q1:movement" }]);
     expect(disabled.mutations).toEqual(native.mutations.filter(mutation => mutation.kind !== "impulse"));
     expect(disabled.appliedDamage).toBe(native.appliedDamage);
     expect(disabled.reaction).toBe(native.reaction);
-    expect(q1.decide(request, { ...victim, noKnockback: false }, state())).toEqual(native);
+    expect(evaluate(actors, q1, request, { ...victim, noKnockback: false }, state())).toEqual(native);
   });
 
   test("source protection orders and Q2 power armor stay distinct", () => {
@@ -269,20 +281,20 @@ describe("shared actor and gameplay authority", () => {
     const attacker = actors.allocate("q1:game", "q1:player");
     const q1 = createQ1CombatPolicy({ id: "q1:combat", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 0, walk: true, momentumDirection: { x: 1, y: 0, z: 0 } }), armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary32" })) });
     const protectedState: CombatState = { ...state(100, { regular: { kind: "q1", points: 10, absorption: 0.8, item: "q1:red-armor" }, powered: { kind: "none" } }), invulnerable: true };
-    const result = q1.decide(attack(target.id, attacker.id), protectedState, state());
+    const result = evaluate(actors, q1, attack(target.id, attacker.id), protectedState, state());
     expect(result.mutations.map(mutation => mutation.kind)).toEqual(["armor", "impulse"]);
     expect(result.appliedDamage).toBe(0);
     const rogue = createQ1CombatPolicy({ id: "q1:rogue-combat", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 1, baseTeamHealth: false, walk: false, momentumDirection: null }), armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary32" })) });
-    expect(rogue.decide(attack(target.id, attacker.id), { ...state(), team: "1" }, { ...state(), team: "1" }).appliedDamage).toBe(40);
+    expect(evaluate(actors, rogue, attack(target.id, attacker.id), { ...state(), team: "1" }, { ...state(), team: "1" }).appliedDamage).toBe(40);
     const q2 = createQ2CombatPolicy({ id: "q2:combat", context: () => q2Context, armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } })) });
-    expect(q2.decide(attack(target.id, attacker.id), protectedState, state()).mutations.map(mutation => mutation.kind)).toEqual(["impulse"]);
+    expect(evaluate(actors, q2, attack(target.id, attacker.id), protectedState, state()).mutations.map(mutation => mutation.kind)).toEqual(["impulse"]);
     const shield: ArmorState = { regular: { kind: "q2", points: 100, normalProtection: 0.6, energyProtection: 0.3, item: "q2:armor" }, powered: { kind: "shield", cells: 10 } };
     const absorption = absorbNativeArmor(shield, 30, { noArmor: false, noPowerArmor: false, noRegularArmor: false, energy: false }, { screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } });
     expect([absorption.powerSaved, absorption.regularSaved]).toEqual([20, 6]);
     const rerelease = absorbNativeArmor(shield, 1, { noArmor: false, noPowerArmor: false, noRegularArmor: false, energy: false }, { screenFacingDot: 1, arithmetic: "binary32", q2: { product: "rerelease", ctf: false, alive: true } });
     expect([rerelease.powerSaved, rerelease.regularSaved, rerelease.armor.regular.kind === "q2" && rerelease.armor.powered.kind !== "none" ? rerelease.armor.powered.cells : null]).toEqual([1, 0, 8]);
-    expect(q2.decide(attack(target.id, attacker.id), protectedState, state()).feedback).toEqual({ kind: "q2", powerArmor: 0, armor: 40, blood: 0, knockback: 40 });
-    expect(q2.decide(attack(target.id, attacker.id, 2, 5), state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 3, armor: 2, blood: 0, knockback: 5 });
+    expect(evaluate(actors, q2, attack(target.id, attacker.id), protectedState, state()).feedback).toEqual({ kind: "q2", powerArmor: 0, armor: 40, blood: 0, knockback: 40 });
+    expect(evaluate(actors, q2, attack(target.id, attacker.id, 2, 5), state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 3, armor: 2, blood: 0, knockback: 5 });
     const inventory = new SharedInventoryTable(actors);
     inventory.create(target, [{ item: "q2:cells", count: 10, capacity: 200 }]);
     const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
@@ -295,7 +307,7 @@ describe("shared actor and gameplay authority", () => {
     expect(inventory.count(target.id, "q2:cells")).toBe(0);
     expect(authority.read(target.id)?.health).toBe(92);
     authority.setTraits(target, { noKnockback: true });
-    const fixed = q2.decide(request, authority.read(target.id) ?? state(), state());
+    const fixed = evaluate(actors, q2, request, authority.read(target.id) ?? state(), state());
     expect(fixed.mutations.some(mutation => mutation.kind === "impulse")).toBe(false);
     expect(fixed.feedback?.knockback).toBe(0);
   });
@@ -310,7 +322,7 @@ describe("shared actor and gameplay authority", () => {
       beforeMomentum: (_request, damage) => Math.trunc(Math.fround(damage * 1.75)),
       afterPowerArmor: (_request, take) => Math.trunc(Math.fround(take / 1.75)),
     } });
-    const lm = lmctf.decide(request, state(100, shield), state());
+    const lm = evaluate(actors, lmctf, request, state(100, shield), state());
     // 41 * 1.75 -> 71; shield saves 20; resistance 51 / 1.75 -> 29; armor saves 18.
     expect(lm.feedback).toEqual({ kind: "q2", powerArmor: 20, armor: 18, blood: 11, knockback: 41 });
     const changed = lm.mutations.find(mutation => mutation.kind === "armor");
@@ -319,18 +331,18 @@ describe("shared actor and gameplay authority", () => {
       beforeMomentum: (_request, damage) => { expect(damage).toBe(82); return Math.trunc(Math.fround(damage * 1.75)); },
       afterPowerArmor: (_request, take) => Math.trunc(Math.fround(take / 1.75)),
     } });
-    expect(surprised.decide(request, state(100, shield), state()).appliedDamage).toBe(28);
+    expect(evaluate(actors, surprised, request, state(100, shield), state()).appliedDamage).toBe(28);
     const ctf = createQ2CombatPolicy({ id: "ctf:combat", context: () => q2Context, armor, sourceEffects: {
       beforeMomentum: (_request, damage) => damage * 2,
       afterArmor: (_request, take) => Math.trunc(take / 2),
     } });
-    expect(ctf.decide(request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 20, armor: 38, blood: 12, knockback: 41 });
+    expect(evaluate(actors, ctf, request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 20, armor: 38, blood: 12, knockback: 41 });
     const regularProtected = createQ2CombatPolicy({ id: "lmctf:combat", context: () => q2Context, armor, sourceEffects: { armorAllowed: () => false } });
-    expect(regularProtected.decide(request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 20, armor: 0, blood: 21, knockback: 41 });
+    expect(evaluate(actors, regularProtected, request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 20, armor: 0, blood: 21, knockback: 41 });
     const bothProtected = createQ2CombatPolicy({ id: "ctf:combat", context: () => q2Context, armor, sourceEffects: { powerArmorAllowed: () => false, armorAllowed: () => false } });
-    expect(bothProtected.decide(request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 0, armor: 0, blood: 41, knockback: 41 });
+    expect(evaluate(actors, bothProtected, request, state(100, shield), state()).feedback).toEqual({ kind: "q2", powerArmor: 0, armor: 0, blood: 41, knockback: 41 });
     const q1Armor: ArmorState = { regular: { kind: "q1", points: 100, absorption: 0.5, item: "q1:armor" }, powered: { kind: "none" } };
-    expect(lmctf.decide(request, state(100, q1Armor), state()).appliedDamage).toBe(20);
+    expect(evaluate(actors, lmctf, request, state(100, q1Armor), state()).appliedDamage).toBe(20);
   });
 
   test("Q2 after-health effects observe committed health and reenter before fresh death selection", () => {
@@ -388,13 +400,13 @@ describe("shared actor and gameplay authority", () => {
     expect([authority.read(attacker.id)?.health, authority.read(target.id)?.health]).toEqual([80, 73]);
     const armor = { regular: { kind: "q1", points: 10, absorption: 0.8, item: "q1:armor" }, powered: { kind: "none" } } satisfies ArmorState;
     const lava = attack(target.id, attacker.id, 3, 18);
-    const half = policy.decide({ ...lava, attack: { ...lava.attack, cause: { kind: "q1", deathType: "rogue:super-lava", armorEffect: "half-effectiveness" } } }, state(100, armor), state());
+    const half = evaluate(actors, policy, { ...lava, attack: { ...lava.attack, cause: { kind: "q1", deathType: "rogue:super-lava", armorEffect: "half-effectiveness" } } }, state(100, armor), state());
     expect(half.appliedDamage).toBe(10);
     expect(half.mutations.find(mutation => mutation.kind === "armor")?.after).toEqual({ ...armor, regular: { ...armor.regular, points: 2 } });
-    const bypass = policy.decide({ ...lava, attack: { ...lava.attack, cause: { kind: "q1", deathType: "rogue:lava", armorEffect: "bypass" } } }, state(100, armor), state());
+    const bypass = evaluate(actors, policy, { ...lava, attack: { ...lava.attack, cause: { kind: "q1", deathType: "rogue:lava", armorEffect: "bypass" } } }, state(100, armor), state());
     expect(bypass.appliedDamage).toBe(18); expect(bypass.mutations.some(mutation => mutation.kind === "armor")).toBe(false);
     const earth = createQ1CombatPolicy({ id: "q1:earth", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 0, walk: false, momentumDirection: null }), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 1 })), sourceEffects: { afterArmor: (_request, take) => take * 0.5 } });
-    const earthResult = earth.decide({ ...lava, amount: 10 }, state(100, { regular: { kind: "q1", points: 30, absorption: 0.5, item: "q1:armor" }, powered: { kind: "none" } }), state());
+    const earthResult = evaluate(actors, earth, { ...lava, amount: 10 }, state(100, { regular: { kind: "q1", points: 30, absorption: 0.5, item: "q1:armor" }, powered: { kind: "none" } }), state());
     expect(earthResult.appliedDamage).toBe(2.5);
     expect(earthResult.mutations).toEqual([{ kind: "armor", before: { regular: { kind: "q1", points: 30, absorption: 0.5, item: "q1:armor" }, powered: { kind: "none" } }, after: { regular: { kind: "q1", points: 25, absorption: 0.5, item: "q1:armor" }, powered: { kind: "none" } } }, { kind: "health", before: 100, after: 97.5 }]);
   });
@@ -468,7 +480,7 @@ test("target damage admission handles source use before policy and preserves ree
     confirmed: () => { calls.push("confirmed"); return undefined; },
   });
   authority.register({ id: "q3:combat", prepare: () => { calls.push("prepare"); return { kind: "cancel" }; },
-    decide: request => { calls.push("decide"); return { request, mutations: [], appliedDamage: 0, reaction: "none" }; } });
+    decide: request => { calls.push("decide"); return { kind: "complete", request, mutations: [], result: { appliedDamage: 0, reaction: "none" } }; } });
   let removeOnUse = false;
   authority.bind(target, { read: () => state(), writeHealth: () => { calls.push("health"); return undefined; },
     writeArmor: () => { calls.push("armor"); return undefined; },

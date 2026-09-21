@@ -49,11 +49,13 @@ export function prepareNativeMod(options: PrepareNativeModOptions): PreparedMod 
       if (services === null || services.native === undefined) throw new Error("Native gameplay mods require the destination's native engine context");
       const native = services.native, commands = services.commands;
       const provider = new NativeModProvider(declaration, services, instance, native.mapPath, context.assertCurrent); context.resources.own(provider);
+      provider.reservePoweredProtection();
       const host = createNativeModHost({ prepared, declaration, source, services, context: native, projection: provider, localize: options.localize, nextFrame: context.nextFrame,
         ...(commands === undefined ? {} : { bindCommands: cvars => commands.bind({ selection: description.selection, module, cvars,
           invoke: command => provider.invokeCommand(command), ...(options.readScript === undefined ? {} : { readScript: options.readScript }) }, context.resources) }) });
       provider.attach(host); await provider.initialize(context.restoring); context.assertCurrent();
-      return { register: registrations => registerModCallbacks(declaration.callbacks, registrations, () => services.time(), (callback, inputs) => provider.invoke(callback, inputs)),
+      return { activate: () => { provider.activatePoweredProtection(); return undefined; },
+        register: registrations => registerModCallbacks(declaration.callbacks, registrations, () => services.time(), (callback, inputs) => provider.invoke(callback, inputs)),
         async checkpoint() { return { guests: [], providers: [await provider.checkpoint()] }; },
         async restore(state) { const record = state.providers[0]; if (record === undefined) throw new Error("Missing native gameplay mod checkpoint"); await provider.restore(record); },
         advance: frame => provider.advance(frame), presentations: () => provider.presentations(),

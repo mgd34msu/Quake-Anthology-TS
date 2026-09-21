@@ -14,6 +14,7 @@ interface Operations {
   readonly declaration: NativeModClients;
   readonly content: ContentId;
   project(actor: ActorId): void;
+  admitted?(actor: ActorId): void;
   release(actor: ActorId): void;
   invoke(call: NativeModSourceCall, actor: ActorId): number;
   invokeInput(call: NativeModSourceCall, application: ModClientApplication): void;
@@ -47,6 +48,7 @@ export class NativeModClientsBinding {
     return slot;
   }
   has(actor: ActorId): boolean { return this.entries.has(actor); }
+  admitted(actor: ActorId): boolean { return this.entries.has(actor) && this.require(actor).admitted && !this.denied.has(actor); }
   rejects(actor: ActorId): boolean { return this.denied.has(actor); }
   private calls(calls: readonly NativeModSourceCall[], actor: ActorId): void {
     for (const call of calls) { this.require(actor); this.operations.invoke(call, actor); }
@@ -68,6 +70,7 @@ export class NativeModClientsBinding {
         }
       }
       this.entries.set(actor, { ...this.require(actor), admitted: true });
+      this.operations.admitted?.(actor);
       return true;
     } catch (error) {
       this.operations.release(actor); this.entries.delete(actor); throw error;

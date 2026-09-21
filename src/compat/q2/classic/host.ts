@@ -2,6 +2,7 @@
 import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestValueLayout, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, CallbackId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
+import type { AttackProvenance } from "../../../contracts/gameplay.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { TraceResult } from "../../../contracts/scene.ts";
 import type { Q2FoundationHost } from "../../../content/q2/foundation/host.ts";
@@ -20,6 +21,7 @@ export interface ClassicQ2WorldLink {
   readonly areas: readonly [number, number];
 }
 export interface ClassicQ2EngineServices {
+  readonly damageProvenance?: (attacker: ActorId, inflictor: ActorId, target: ActorId) => Omit<AttackProvenance, "attacker" | "inflictor" | "cause">;
   readonly projection?: ClassicQ2ActorProjection;
   readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "combat" | "inventory" | "callbacks" | "trace" | "pointContents" | "inPvs" | "inPhs" | "setAreaPortal" | "setSolid" | "inlineModelBounds">;
   readonly cvars: CvarRegistry;

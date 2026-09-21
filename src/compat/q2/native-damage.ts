@@ -1,7 +1,18 @@
 import type { DamageRequest } from "../../contracts/gameplay.ts";
+import type { ArmorDamageFlags } from "../../contracts/gameplay.ts";
 import { attackDamageFlags } from "../../world/gameplay/armor.ts";
 import { nativeCauseFromCanonical } from "../../content/q2/missionpacks/damage.ts";
 import type { Q2NativeCauseProfile } from "../../content/q2/missionpacks/damage.ts";
+
+export class RemovedNativeDamage extends Error {
+  constructor(readonly request: DamageRequest) { super("Native damage target was removed during powered protection"); }
+}
+
+/** Flags at the original armor callsite, after the source has applied its damage gates. */
+export function q2NativeArmorFlags(flags: number): ArmorDamageFlags {
+  return { noArmor: (flags & 2) !== 0, noPowerArmor: (flags & 0x100) !== 0,
+    noRegularArmor: (flags & 0x80) !== 0, energy: (flags & 4) !== 0 };
+}
 
 /** Foreign attacks keep their provenance; only the arguments entering Q2 are lowered. */
 export function q2NativeDamageArguments(request: DamageRequest, profile: Q2NativeCauseProfile) {

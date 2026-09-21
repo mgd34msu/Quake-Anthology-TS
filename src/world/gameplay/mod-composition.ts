@@ -46,9 +46,9 @@ export class ModOperation<Request, Result> {
     };
   }
 
-  dispatch(input: Request, canonical: (request: Request) => Result): Result {
+  dispatch(input: Request, canonical: (request: Request) => Result, beforeObservers?: () => void): Result {
     const entries = this.entries;
-    if (entries.length === 0) return canonical(input);
+    if (entries.length === 0) { const result = canonical(input); beforeObservers?.(); return result; }
     let request = input;
     for (const entry of entries) if (entry.active && entry.contribution.kind === "transform") request = entry.contribution.transform(request);
     const replacement = entries.find(entry => entry.active && entry.contribution.kind === "replace")?.contribution;
@@ -69,6 +69,7 @@ export class ModOperation<Request, Result> {
         if (failure.value !== null) throw failure.value.error;
       } finally { open = false; }
     } else result = canonical(request);
+    beforeObservers?.();
     for (const entry of entries) if (entry.active && entry.contribution.kind === "observe") entry.contribution.observe(request, result);
     return result;
   }

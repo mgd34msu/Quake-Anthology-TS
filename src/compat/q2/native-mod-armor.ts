@@ -60,6 +60,18 @@ export class NativeModArmorState {
     const value = this.value(slot, field); if (value === null) throw new Error("Selected native armor has no source storage"); return value;
   }
   read(slot: number): ArmorState { return this.capture(field => this.value(slot, field)); }
+  readPowerCells(slot: number, kind: "screen" | "shield"): number {
+    const item = this.definition.kind === "none" ? undefined : this.definition.power.find(item => item.kind === kind);
+    if (item === undefined) throw new Error("Native power storage is not declared");
+    return this.required(slot, item.cells);
+  }
+  writePowerCells(slot: number, kind: "screen" | "shield", value: number): void {
+    const item = this.definition.kind === "none" ? undefined : this.definition.power.find(item => item.kind === kind);
+    if (item === undefined) throw new Error("Native power storage is not declared");
+    validateValue(item.cells, value);
+    const location = this.location(slot, item.cells); if (location === null) throw new Error("Native power fuel has no source storage");
+    this.scalar(location.base, item.cells, value);
+  }
   private capture(read: (field: NativeModArmorField) => number | null): ArmorState {
     const definition = this.definition; if (definition.kind === "none") return { regular: { kind: "none" }, powered: { kind: "none" } };
     const required = (field: NativeModArmorField): number => { const value = read(field); if (value === null) throw new Error("Selected native armor has no source storage"); return value; };
@@ -76,9 +88,14 @@ export class NativeModArmorState {
     const item = definition.kind === "none" ? undefined : definition.power.find(item => item.kind === armor.powered.kind);
     return item === undefined ? armor : normalizeLegacyPowerOnlyArmor(armor, this.read(slot), item.item);
   }
+  validateWrite(slot: number, armor: ArmorState): undefined { this.stores(slot, armor); return undefined; }
   write(slot: number, armor: ArmorState): undefined {
+    for (const { base, field, value } of this.stores(slot, armor)) this.scalar(base, field, value);
+    return undefined;
+  }
+  private stores(slot: number, armor: ArmorState): readonly Store[] {
     const definition = this.definition, requested = armor.regular;
-    if (definition.kind === "none") { if (requested.kind !== "none" || armor.powered.kind !== "none") throw new Error("Native owned actor declares no armor storage"); return undefined; }
+    if (definition.kind === "none") { if (requested.kind !== "none" || armor.powered.kind !== "none") throw new Error("Native owned actor declares no armor storage"); return []; }
     if (requested.kind !== "none" && requested.kind !== "q2") throw new Error("Native armor declaration cannot represent another armor family");
     const regular = requested.kind === "none" ? undefined : definition.regular.find(item => item.item === requested.item);
     const power = armor.powered.kind === "none" ? undefined : definition.power.find(item => item.kind === armor.powered.kind);
@@ -127,8 +144,7 @@ export class NativeModArmorState {
       || requestedCells !== (result.powered.kind === "none" ? 0 : result.powered.cells)
       || !emptyRegular && requested.kind === "q2" && (result.regular.kind !== "q2" || result.regular.item !== requested.item))
       throw new Error("Native source selection cannot represent this armor without changing other ownership");
-    for (const { base, field, value } of stores.values()) this.scalar(base, field, value);
-    return undefined;
+    return [...stores.values()];
   }
   observe(slot: number, changed: (before: ArmorState, after: ArmorState) => void): () => void {
     const groups = new Map<bigint, { readonly base: GuestAddress; readonly fields: NativeModArmorField[] }>();

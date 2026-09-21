@@ -65,7 +65,8 @@ export class RereleaseCombatBindings {
       if (state.powered.kind !== "none") memory.writeInt32(itemAddress(value, "q2:ammo_cells"), state.powered.cells);
       return undefined;
     };
-    return { validateArmor, normalizeLegacyArmor: legacy => normalizeLegacyPowerOnlyArmor(legacy, armor(), "q2:none"), ...source.combat({ armor, writeArmor, traits: () => {
+    return { validateArmor, poweredProtectionOwner: memory.module.id, poweredArmorStage: damage.poweredArmorStage(view, armor),
+      normalizeLegacyArmor: legacy => normalizeLegacyPowerOnlyArmor(legacy, armor(), "q2:none"), ...source.combat({ armor, writeArmor, traits: () => {
       const value = client(), flags = memory.readUint64(source.at("flags"));
       const team = value === null ? 0 : publicState.playerState().teamId;
       const invincibleUntil = value !== null ? value.invincibleUntilMilliseconds()

@@ -1,22 +1,32 @@
 import { normalizeLegacyPowerOnlyArmor } from "../../../world/gameplay/authority.ts";
-import type { GuestAddress, RawEntityView } from "../../../contracts/execution.ts";
+import type { GuestAddress, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ArmorState, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
-import type { CombatStateBinding, SourceDamageResult } from "../../../world/gameplay/authority.ts";
+import type { CombatStateBinding, SourceDamageResult, SourcePoweredArmorStage } from "../../../world/gameplay/authority.ts";
 import { infoValueForKey } from "../../../core/info-string.ts";
 import { classicSignature, q2Int, q2Pointer } from "./layout.ts";
 import { readClassicString, readClassicVector, writeClassicVector } from "./records.ts";
 import type { ClassicQ2GuestHost } from "./host.ts";
 import { classicCombatProfile, type ClassicCombatProfile } from "./combat-profile.ts";
-import { q2NativeDamageArguments } from "../native-damage.ts";
+import { RemovedNativeDamage, q2NativeArmorFlags, q2NativeDamageArguments } from "../native-damage.ts";
+import { captureAbiProcessorState, restoreAbiProcessorState } from "../../../guest/abi/runner.ts";
+import { classicNumber, classicRequiredPointer } from "./host.ts";
+import { canonicalCauseFromNative } from "../../../content/q2/missionpacks/damage.ts";
+import { isDeepStrictEqual } from "node:util";
 
 const pointer = (value: GuestAddress | null) => ({ kind: "pointer", value } satisfies import("../../../contracts/execution.ts").GuestCallValue);
 const integer = (value: number) => ({ kind: "int32", value: Math.trunc(value) } satisfies import("../../../contracts/execution.ts").GuestCallValue);
 const damageSignature = classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Pointer, q2Pointer, q2Pointer, q2Int, q2Int, q2Int, q2Int]);
+const powerSignature = classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Int, q2Int], q2Int);
+type PowerIntercept = Parameters<SourcePoweredArmorStage["bind"]>[0];
+interface DamageFrame { readonly request: DamageRequest; readonly view: RawEntityView; stack: bigint | null; }
 
 /** Source ABI declarations allow shared damage without replacing the DLL's combat rules. */
 export class ClassicCombatBindings {
-  private readonly frames: object[] = [];
+  private readonly frames: DamageFrame[] = [];
+  private readonly powerBindings = new Map<OwnedActor, PowerIntercept>();
+  private readonly powerHooks: (() => void)[] = [];
+  private powerBypass: bigint | "pending" | null = null;
   private constructor(private readonly host: ClassicQ2GuestHost, private readonly image: GuestAddress, private readonly profile: ClassicCombatProfile) {}
   static create(host: ClassicQ2GuestHost, image: GuestAddress): ClassicCombatBindings | null {
     const profile = classicCombatProfile(host.memory.module.digest);
@@ -51,7 +61,9 @@ export class ClassicCombatBindings {
       if (armor.powered.kind !== this.armor(view).powered.kind) throw new Error("Native power activation requires its original source equipment operation");
       return undefined;
     };
-    const binding: CombatStateBinding = { validateArmor, normalizeLegacyArmor: armor => normalizeLegacyPowerOnlyArmor(armor, this.armor(view), "q2:none"), sourceDamage: request => this.damage(request, view), read: () => {
+    const binding: CombatStateBinding = { validateArmor, poweredProtectionOwner: memory.module.id,
+      ...(host.options.services.damageProvenance === undefined ? {} : { poweredArmorStage: this.powerStage(actor) }),
+      normalizeLegacyArmor: armor => normalizeLegacyPowerOnlyArmor(armor, this.armor(view), "q2:none"), sourceDamage: request => this.damage(request, view), read: () => {
       const client = this.client(view), flags = memory.readInt32(this.at(view, profile.fields.flags)), cvars = host.options.services.cvars;
       const skin = client === null ? "" : infoValueForKey(readClassicString(memory, memory.offset(client, BigInt(profile.client.userinfo)), 512), "skin"), rules = cvars.variableValue("dmflags") | 0;
       const team = client === null ? null : cvars.variableValue("coop") !== 0 ? "q2:coop" : (rules & 64) !== 0 ? `q2:model:${skin.split("/")[0] ?? ""}` : (rules & 128) !== 0 ? `q2:skin:${skin.split("/")[1] ?? ""}` : null;
@@ -73,10 +85,83 @@ export class ClassicCombatBindings {
     } };
     engine.combat.bind(actor, binding); return undefined;
   }
+  private powerStage(actor: OwnedActor): SourcePoweredArmorStage {
+    return { bind: intercept => {
+      if (this.powerBindings.has(actor)) throw new Error("Classic source power stage already has an owner");
+      this.powerBindings.set(actor, intercept);
+      try { if (this.powerHooks.length === 0) this.installPowerHooks(); }
+      catch (error) { this.powerBindings.delete(actor); for (const remove of this.powerHooks.splice(0)) remove(); throw error; }
+      return () => {
+        if (this.powerBindings.get(actor) === intercept) this.powerBindings.delete(actor);
+        if (this.powerBindings.size === 0) for (const remove of this.powerHooks.splice(0)) remove();
+        return undefined;
+      };
+    } };
+  }
+  private installPowerHooks(): void {
+    const { host, profile } = this, { callbacks, cpu } = host.options.runner.options, memory = host.memory;
+    const stack = () => cpu.state.registers.read("rsp", 32);
+    const targetAtEntry = (): OwnedActor | null => {
+      const frame = memory.pointer(stack()); if (frame === null) throw new Error("Classic power entry has no source stack");
+      const address = memory.pointer(BigInt(memory.readUint32(memory.offset(frame, 4n))));
+      return address === null ? null : host.edicts.observe(address);
+    };
+    this.powerHooks.push(callbacks.observeEntry(this.entry(profile.entries.damage), () => {
+      const frame = this.frames.at(-1); if (frame !== undefined && frame.stack === null) frame.stack = stack();
+    }));
+    this.powerHooks.push(callbacks.bindEntry(this.entry(profile.entries.damage), {
+      id: `${memory.module.id}:powered-damage`, signature: damageSignature,
+      invoke: (_context, args) => { this.incomingDamage(args); return { kind: "void" }; },
+    }, () => {
+      if (this.frames.at(-1)?.stack === stack()) return false;
+      const actor = targetAtEntry(); return actor !== null && this.powerBindings.has(actor);
+    }));
+    this.powerHooks.push(callbacks.observeEntry(this.entry(profile.entries.powerArmor), () => {
+      if (this.powerBypass === "pending") this.powerBypass = stack();
+    }));
+    this.powerHooks.push(callbacks.bindEntry(this.entry(profile.entries.powerArmor), {
+      id: `${memory.module.id}:powered-armor`, signature: powerSignature,
+      invoke: (_context, args) => {
+        const frame = this.frames.at(-1), actor = host.edicts.observe(classicRequiredPointer(args, 0));
+        const intercept = actor === null ? undefined : this.powerBindings.get(actor);
+        if (frame === undefined || actor === null || intercept === undefined || !frame.request.target.equals(actor.id))
+          throw new Error("Classic power stage has no active source damage request");
+        const original = (): number => {
+          const previous = this.powerBypass; this.powerBypass = "pending";
+          try {
+            const result = host.invoke(this.entry(profile.entries.powerArmor), powerSignature, args, frame.view);
+            if (result.kind !== "int32") throw new Error("Classic power stage returned a non-integer result");
+            return result.value;
+          } finally { this.powerBypass = previous; }
+        };
+        const saved = intercept({ request: frame.request, amount: classicNumber(args, 3), flags: q2NativeArmorFlags(classicNumber(args, 4)) }, original);
+        if (!host.options.services.engine.actors.isLive(actor.id)) throw new RemovedNativeDamage(frame.request);
+        return integer(saved);
+      },
+    }, () => {
+      if (this.powerBypass === stack()) return false;
+      const actor = targetAtEntry(); return actor !== null && this.powerBindings.has(actor);
+    }));
+  }
+  private incomingDamage(args: readonly GuestCallValue[]): void {
+    const { host } = this, provenance = host.options.services.damageProvenance;
+    if (provenance === undefined) throw new Error("Classic source damage requires captured provenance");
+    const actor = (index: number): ActorId => {
+      const owned = host.edicts.observe(classicRequiredPointer(args, index));
+      if (owned === null) throw new Error("Classic damage references a retired source actor"); return owned.id;
+    };
+    const target = actor(0), inflictor = actor(1), attacker = actor(2), flags = classicNumber(args, 8);
+    const native = { edition: "classic", game: this.profile.game, value: classicNumber(args, 9) } satisfies import("../../../contracts/gameplay.ts").Q2NativeCause;
+    const meansOfDeath = canonicalCauseFromNative(native); if (meansOfDeath === null) throw new Error("Unclassified classic damage cause");
+    host.options.services.engine.combat.apply({ target, amount: classicNumber(args, 6), knockback: classicNumber(args, 7),
+      direction: readClassicVector(host.memory, classicRequiredPointer(args, 3)), point: readClassicVector(host.memory, classicRequiredPointer(args, 4)),
+      normal: readClassicVector(host.memory, classicRequiredPointer(args, 5)), delivery: (flags & 1) !== 0 ? "radius" : "direct",
+      attack: { ...provenance(attacker, inflictor, target), attacker, inflictor, cause: { kind: "q2", meansOfDeath, damageFlags: flags, native } } });
+  }
   private damage(input: DamageRequest, view: RawEntityView) {
     const { host, profile } = this, { memory } = host, engine = host.options.services.engine;
     return engine.combat.runSourceDamage(input, (observer, request) => {
-      const frame = {}; this.frames.push(frame);
+      const frame: DamageFrame = { request, view, stack: null }; this.frames.push(frame);
       let health = memory.readInt32(this.at(view, profile.fields.health)), armor = this.armor(view), velocity = readClassicVector(memory, this.at(view, profile.fields.velocity));
       let result: SourceDamageResult = { appliedDamage: 0, reaction: "none" }, reacting = false;
       const writes: (() => void)[] = [], reactions: (() => void)[] = [], temporary: GuestAddress[] = [];
@@ -100,7 +185,12 @@ export class ClassicCombatBindings {
         writes.push(memory.observeWrites(this.at(view, profile.fields.health), 4, () => { const before = health; health = memory.readInt32(this.at(view, profile.fields.health)); if (current() && before !== health) { observer.stored({ kind: "health", before, after: health }); result = { ...result, appliedDamage: result.appliedDamage + before - health }; } }));
         writes.push(memory.observeWrites(this.at(view, profile.fields.velocity), 12, () => { const before = velocity; velocity = readClassicVector(memory, this.at(view, profile.fields.velocity)); if (current()) observer.stored({ kind: "source-velocity", before, after: velocity, movementProvider: request.attack.movementProvider }); }));
         const client = this.client(view);
-        if (client !== null) writes.push(memory.observeWrites(memory.offset(client, BigInt(profile.client.inventory)), profile.client.inventoryCount * 4, () => { const before = armor; armor = this.armor(view); if (current()) observer.stored({ kind: "armor", before, after: armor }); }));
+        if (client !== null) writes.push(memory.observeWrites(memory.offset(client, BigInt(profile.client.inventory)), profile.client.inventoryCount * 4, () => {
+          const before = armor; armor = this.armor(view);
+          const target = engine.actors.resolveOwned(request.target);
+          if (!current() || target === null || this.powerBindings.has(target) && isDeepStrictEqual(before.regular, armor.regular)) return;
+          observer.stored({ kind: "armor", before, after: armor });
+        }));
         const { callbacks, cpu } = host.options.runner.options;
         for (const reaction of ["pain", "death"] satisfies readonly ("pain" | "death")[]) {
           const callback = memory.readPointer(this.at(view, reaction === "pain" ? profile.fields.pain : profile.fields.die)); if (callback === null) continue;
@@ -114,8 +204,13 @@ export class ClassicCombatBindings {
         const lowered = q2NativeDamageArguments(request, { edition: "classic", game: profile.game });
         if (lowered.native?.edition !== "classic") throw new Error("Missing declared classic damage cause");
         const attacker = address(request.attack.attacker), inflictor = request.attack.inflictor !== null && request.attack.attacker !== null && request.attack.inflictor.equals(request.attack.attacker) ? attacker : address(request.attack.inflictor);
-        host.invoke(this.entry(profile.entries.damage), damageSignature, [pointer(view.address), pointer(inflictor), pointer(attacker), pointer(vectors), pointer(memory.offset(vectors, 12n)), pointer(memory.offset(vectors, 24n)),
-          integer(request.amount), integer(request.knockback), integer(lowered.damageFlags), integer(lowered.native.value)], view);
+        const savedProcessor = captureAbiProcessorState(cpu.state);
+        try { host.invoke(this.entry(profile.entries.damage), damageSignature, [pointer(view.address), pointer(inflictor), pointer(attacker), pointer(vectors), pointer(memory.offset(vectors, 12n)), pointer(memory.offset(vectors, 24n)),
+          integer(request.amount), integer(request.knockback), integer(lowered.damageFlags), integer(lowered.native.value)], view); }
+        catch (error) {
+          if (!(error instanceof RemovedNativeDamage) || error.request !== request) throw error;
+          restoreAbiProcessorState(cpu.state, savedProcessor);
+        }
         return result;
       } finally {
         stopWrites(); for (const remove of reactions) remove();

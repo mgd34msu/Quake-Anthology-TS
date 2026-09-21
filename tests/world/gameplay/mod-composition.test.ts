@@ -8,6 +8,35 @@ import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 import { ModOperation } from "../../../src/world/gameplay/mod-composition.ts";
 import { createQ1CombatPolicy, nativeVictimArmor } from "../../../src/world/gameplay/policies.ts";
 
+test("source inventory stores publish normalized values before reentrant observers", () => {
+  const { actors, target } = world(), inventory = new SharedInventoryTable(actors), seen: string[] = [];
+  const item = { item: "q2:cells", count: 40, capacity: 50 } satisfies import("../../../src/contracts/gameplay.ts").InventoryEntry;
+  inventory.create(target, [item]);
+  const stopTransform = inventory.operations.configure.register({ provider: "q1:mod", id: "fuel:transform", order: 0, kind: "transform",
+    transform: ([actor, entry]) => [actor, { ...entry, count: entry.count - 1 }] });
+  let nested = false;
+  const stopObserve = inventory.operations.configure.register({ provider: "q3:mod", id: "fuel:observe", order: 0, kind: "observe", observe: () => {
+    seen.push(`observe:${inventory.count(target.id, item.item)}`);
+    if (!nested) { nested = true; inventory.configure(target, { ...item, count: 20 }, change => {
+      seen.push(`inner:${change.before?.count}:${change.after.count}`); return undefined;
+    }); }
+    return undefined;
+  } });
+  inventory.configure(target, { ...item, count: 30 }, change => {
+    expect(inventory.count(target.id, item.item)).toBe(change.after.count);
+    seen.push(`outer:${change.before?.count}:${change.after.count}`); return undefined;
+  });
+  expect(seen).toEqual(["outer:40:29", "observe:29", "inner:29:19", "observe:19"]);
+  expect(inventory.count(target.id, item.item)).toBe(19);
+  stopTransform(); stopObserve();
+  let observed = false;
+  inventory.operations.configure.register({ provider: "q1:mod", id: "fuel:cancel", order: 0, kind: "replace", replace: () => undefined });
+  inventory.operations.configure.register({ provider: "q3:mod", id: "fuel:after", order: 0, kind: "observe", observe: () => { observed = true; return undefined; } });
+  expect(() => inventory.configure(target, item, () => undefined)).toThrow("requires its canonical store");
+  expect(observed).toBe(false); expect(inventory.count(target.id, item.item)).toBe(19);
+  inventory.configure(target, item); expect(observed).toBe(true);
+});
+
 test("mod operations order transforms and observers around one replaceable canonical call", () => {
   const operation = new ModOperation<number, number>("test.amount"), calls: string[] = [];
   operation.register({ provider: "q1:mod", id: "scale:amount", order: 2, kind: "transform", transform: amount => { calls.push("scale"); return amount * 2; } });
