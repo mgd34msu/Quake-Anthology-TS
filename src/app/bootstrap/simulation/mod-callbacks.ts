@@ -10,8 +10,8 @@ const seconds = (time: SourceTime): number => time.kind === "seconds" ? time.val
 type Input = readonly [ModCallbackInput, ModRuntimeValue];
 
 export function registerModCallbacks<Callback extends ModCallbackBinding>(callbacks: readonly Callback[], registrations: ModRegistrations,
-  time: () => SourceTime, execute: (callback: Callback, inputs: ReadonlyMap<ModCallbackInput, ModRuntimeValue>) => number): undefined {
-  const invoke = (callback: Callback, values: readonly Input[], result?: number): number => {
+  time: () => SourceTime, execute: (callback: Callback, inputs: ReadonlyMap<ModCallbackInput, ModRuntimeValue>) => number | null): undefined {
+  const invoke = (callback: Callback, values: readonly Input[], result?: number): number | null => {
     const inputs = new Map<ModCallbackInput, ModRuntimeValue>([["time", scalar(seconds(time()))], ...values]);
     if (result !== undefined) inputs.set("result", scalar(result));
     return execute(callback, inputs);
@@ -19,7 +19,9 @@ export function registerModCallbacks<Callback extends ModCallbackBinding>(callba
   const actors = <Request>(callback: Callback,
     operation: ModOperation<Request, boolean>, inputs: (request: Request) => readonly Input[]): void => {
     if (callback.stage === "observe") registrations.register(operation, { id: callback.id, kind: "observe", observe: (request, result) => { invoke(callback, inputs(request), result ? 1 : 0); return undefined; } });
-    else if (callback.stage === "replace") registrations.register(operation, { id: callback.id, kind: "replace", replace: request => invoke(callback, inputs(request)) !== 0 });
+    else if (callback.stage === "replace") registrations.register(operation, { id: callback.id, kind: "replace", replace: (request, next) => {
+      const result = invoke(callback, inputs(request)); return result === null ? next(request) : result !== 0;
+    } });
   };
   for (const callback of callbacks) {
     switch (callback.operation) {
@@ -29,7 +31,7 @@ export function registerModCallbacks<Callback extends ModCallbackBinding>(callba
           ["amount", scalar(request.amount)], ["knockback", scalar(request.knockback)], ["direction", { kind: "vector", value: request.direction }],
           ["point", { kind: "vector", value: request.point }], ["normal", { kind: "vector", value: request.normal }],
         ];
-        if (callback.stage === "transform") registrations.register(registrations.operations.damage, { id: callback.id, kind: "transform", transform: request => ({ ...request, [callback.result]: invoke(callback, inputs(request)) }) });
+        if (callback.stage === "transform") registrations.register(registrations.operations.damage, { id: callback.id, kind: "transform", transform: request => ({ ...request, [callback.result]: invoke(callback, inputs(request)) ?? request[callback.result] }) });
         else registrations.register(registrations.operations.damage, { id: callback.id, kind: "observe", observe: (request, result) => {
           invoke(callback, inputs(request), result.kind === "committed" ? result.decision.appliedDamage : 0); return undefined;
         } });
@@ -38,7 +40,7 @@ export function registerModCallbacks<Callback extends ModCallbackBinding>(callba
       case "inventory.give": {
         const operation = registrations.operations.inventory.give;
         if (callback.stage === "transform") registrations.register(operation, { id: callback.id, kind: "transform", transform: ([owner, item, amount]) =>
-          [owner, item, invoke(callback, [["self", actor(owner.id)], ["item", { kind: "string", value: item }], ["amount", scalar(amount)]])] });
+          [owner, item, invoke(callback, [["self", actor(owner.id)], ["item", { kind: "string", value: item }], ["amount", scalar(amount)]]) ?? amount] });
         else registrations.register(operation, { id: callback.id, kind: "observe", observe: ([owner, item, amount], result) => {
           invoke(callback, [["self", actor(owner.id)], ["item", { kind: "string", value: item }], ["amount", scalar(amount)]], result); return undefined;
         } });
@@ -47,7 +49,7 @@ export function registerModCallbacks<Callback extends ModCallbackBinding>(callba
       case "inventory.consume": {
         const operation = registrations.operations.inventory.consume;
         if (callback.stage === "transform") registrations.register(operation, { id: callback.id, kind: "transform", transform: ([owner, item, amount]) =>
-          [owner, item, invoke(callback, [["self", actor(owner.id)], ["item", { kind: "string", value: item }], ["amount", scalar(amount)]])] });
+          [owner, item, invoke(callback, [["self", actor(owner.id)], ["item", { kind: "string", value: item }], ["amount", scalar(amount)]]) ?? amount] });
         else registrations.register(operation, { id: callback.id, kind: "observe", observe: ([owner, item, amount], result) => {
           invoke(callback, [["self", actor(owner.id)], ["item", { kind: "string", value: item }], ["amount", scalar(amount)]], result ? 1 : 0); return undefined;
         } });

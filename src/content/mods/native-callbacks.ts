@@ -16,8 +16,9 @@ function address(reader: SaveReader): NativeModAddress { return { rva: reader.fi
 function entry(reader: SaveReader): NativeModEntry { return reader.field("kind").choice("export", "rva") === "export"
   ? { kind: "export", name: reader.field("name").string() } : { kind: "rva", rva: reader.field("rva").integer(0) }; }
 function argument(reader: SaveReader): NativeModValue {
-  const kind = reader.field("kind").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "vector", "string", "actor", "time", "address");
+  const kind = reader.field("kind").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "vector", "string", "actor", "client", "userinfo", "time", "address");
   switch (kind) {
+    case "client": case "userinfo": return { kind, input: reader.field("input").choice("self", "other", "activator", "attacker", "inflictor") };
     case "actor": return { kind, record: reader.field("record").string(), input: reader.field("input").choice("self", "other", "activator", "attacker", "inflictor") };
     case "time": return { kind, input: reader.field("input").choice("time", "elapsed"), units: reader.field("units").choice("seconds", "milliseconds"), encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") };
     case "address": return { kind, value: reader.field("value").nullable(address) };
@@ -25,7 +26,7 @@ function argument(reader: SaveReader): NativeModValue {
   }
 }
 function sourceCall(reader: SaveReader): NativeModSourceCall {
-  return { entry: entry(reader.field("entry")), arguments: reader.field("arguments").list(argument),
+  return { entry: reader.field("entry").field("kind").string() === "game-export" ? { kind: "game-export", name: reader.field("entry").field("name").string() } : entry(reader.field("entry")), arguments: reader.field("arguments").list(argument),
     globals: reader.field("globals").list(global => ({ address: address(global.field("address")), value: argument(global.field("value")) })),
     returns: reader.field("returns").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "void") };
 }
@@ -90,10 +91,15 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("native"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) }, target: parsedTarget,
     ...(reader.field("sourceActors").value === undefined ? {} : { sourceActors: sourceActors(reader.field("sourceActors")) }),
+    ...(reader.field("clients").value === undefined ? {} : { clients: {
+      maximum: reader.field("clients").field("maximum").integer(1), records: reader.field("clients").field("records").list(value => value.string()),
+      admit: reader.field("clients").field("admit").list(reader => ({ ...sourceCall(reader), accepts: reader.field("accepts").choice("always", "nonzero") })), userinfo: reader.field("clients").field("userinfo").list(sourceCall),
+      disconnect: reader.field("clients").field("disconnect").list(sourceCall), command: reader.field("clients").field("command").list(sourceCall),
+    } }),
     cvars: reader.field("cvars").list(value => ({ name: value.field("name").string(), value: value.field("value").string() })),
     spawnEntities: reader.field("spawnEntities").nullable(value => value.string()), entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(),
-      base: record.field("base").field("kind").choice("entities", "address") === "entities" ? { kind: "entities" } : { kind: "address", ...address(record.field("base")) },
+      base: (() => { const kind = record.field("base").field("kind").choice("entities", "clients", "address"); return kind === "address" ? { kind, ...address(record.field("base")) } : { kind }; })(),
       stride: record.field("stride").integer(4), firstSlot: record.field("firstSlot").integer(0), capacity: record.field("capacity").integer(1), fields: record.field("fields").list(field) })),
     initialize: reader.field("initialize").list(sourceCall), project: reader.field("project").list(sourceCall), release: reader.field("release").list(sourceCall),
     callbacks: reader.field("callbacks").list(reader => ({ ...binding(reader), ...sourceCall(reader) })) };

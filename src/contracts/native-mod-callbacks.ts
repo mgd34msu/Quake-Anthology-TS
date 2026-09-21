@@ -14,15 +14,27 @@ export type NativeModEntry = { readonly kind: "export"; readonly name: string } 
 export type NativeModValue =
   | { readonly kind: NativeModScalar | "vector" | "string"; readonly value: ModCallbackValue }
   | { readonly kind: "actor"; readonly record: string; readonly input: "self" | "other" | "activator" | "attacker" | "inflictor" }
+  | { readonly kind: "client"; readonly input: "self" | "other" | "activator" | "attacker" | "inflictor" }
+  | { readonly kind: "userinfo"; readonly input: "self" | "other" | "activator" | "attacker" | "inflictor" }
   | { readonly kind: "time"; readonly input: "time" | "elapsed"; readonly units: "seconds" | "milliseconds"; readonly encoding: NativeModScalar }
   | { readonly kind: "address"; readonly value: NativeModAddress | null };
 export interface NativeModSourceCall {
-  readonly entry: NativeModEntry;
+  readonly entry: NativeModEntry | { readonly kind: "game-export"; readonly name: string };
   readonly arguments: readonly NativeModValue[];
   readonly globals: readonly { readonly address: NativeModAddress; readonly value: NativeModValue }[];
   readonly returns: NativeModScalar | "void";
 }
 export type NativeModCallback = ModCallbackBinding & NativeModSourceCall;
+export interface NativeModAdmissionCall extends NativeModSourceCall { readonly accepts: "always" | "nonzero"; }
+/** Private client arrays belong to the pinned module, separately from canonical client identities. */
+export interface NativeModClients {
+  readonly maximum: number;
+  readonly records: readonly string[];
+  readonly admit: readonly NativeModAdmissionCall[];
+  readonly userinfo: readonly NativeModSourceCall[];
+  readonly disconnect: readonly NativeModSourceCall[];
+  readonly command: readonly NativeModSourceCall[];
+}
 export type NativeModActorField = Exclude<QvmModActorField, { readonly binding: "health" | "inventory" | "constant" }>
   | { readonly offset: number; readonly binding: "address"; readonly value: NativeModAddress | null }
   | { readonly offset: number; readonly binding: "health"; readonly encoding: NativeModScalar }
@@ -30,7 +42,7 @@ export type NativeModActorField = Exclude<QvmModActorField, { readonly binding: 
   | { readonly offset: number; readonly binding: "constant"; readonly encoding: NativeModScalar; readonly value: number };
 export interface NativeModActorRecord {
   readonly id: string;
-  readonly base: { readonly kind: "entities" } | ({ readonly kind: "address" } & NativeModAddress);
+  readonly base: { readonly kind: "entities" | "clients" } | ({ readonly kind: "address" } & NativeModAddress);
   readonly stride: number;
   readonly firstSlot: number;
   readonly capacity: number;
@@ -88,6 +100,7 @@ export interface NativeModDeclaration {
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-classic-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-i386" }> }
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-rerelease-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-x86-64" }> };
   readonly sourceActors?: NativeModSourceActors;
+  readonly clients?: NativeModClients;
   readonly cvars: readonly { readonly name: string; readonly value: string }[];
   readonly spawnEntities: string | null;
   readonly actorRecords: readonly NativeModActorRecord[];

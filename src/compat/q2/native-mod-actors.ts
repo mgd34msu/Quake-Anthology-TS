@@ -25,7 +25,7 @@ interface SourceCalls {
   actorAt(slot: number): ActorId | null;
   beginFrame(): void;
   endFrame(): void;
-  readonly combat: Pick<NativeModCombatCalls, "transfer" | "scalar" | "synchronize">;
+  readonly combat: Pick<NativeModCombatCalls, "eligible" | "transfer" | "scalar" | "synchronize">;
 }
 
 /** Source edicts retain their private words, function pointers, allocator and update loop. */

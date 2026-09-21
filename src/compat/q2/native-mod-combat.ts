@@ -22,6 +22,7 @@ const int = (value: number): GuestCallValue => ({ kind: "int32", value: Math.tru
 type Kind = "use" | "touch" | "pain" | "die";
 interface DamageFrame { readonly request: DamageRequest; readonly observer: SourceDamageObserver; result: SourceDamageResult | null; applied: number; }
 export interface NativeModCombatCalls {
+  eligible(actor: ActorId): boolean;
   actor(address: GuestAddress): ActorId;
   address(actor: ActorId): GuestAddress;
   owner(slot: number): OwnedActor | null;
@@ -48,7 +49,7 @@ export class NativeModCombat {
       const signature = this.signature([P, P, P, P, P, P, I, I, I, combat.damage.abi === "q2-classic" ? I : { kind: "aggregate", layout: rereleaseModLayout }]);
       this.damage = bindNativeModEntry(host, address, `${instance}:damage`, signature, values => {
         const request = this.request(values), target = services.actors.resolveOwned(request.target);
-        if (target === null) return { kind: "void" };
+        if (target === null || !this.eligible(request.target, request.attack.attacker, request.attack.inflictor)) return { kind: "void" };
         if (target.owner === instance) this.apply(request); else { calls.transfer(() => services.combat.apply(request)); calls.synchronize(); }
         return { kind: "void" };
       }, () => !this.suspended);
@@ -79,6 +80,13 @@ export class NativeModCombat {
     return value.value === null ? null : this.calls.actor(value.value);
   }
   private pointer(actor: ActorId | null): GuestCallValue { return pointer(actor === null ? null : this.calls.address(actor)); }
+  private eligible(...actors: readonly (ActorId | null | undefined)[]): boolean { return actors.every(actor => actor === null || actor === undefined || this.calls.eligible(actor)); }
+  private allowsPain(reaction: PainReaction): boolean { return this.eligible(reaction.self.id, reaction.attacker, reaction.attack?.attacker, reaction.attack?.inflictor); }
+  private allowsDie(reaction: DeathReaction): boolean { return this.allowsPain(reaction) && this.eligible(reaction.inflictor); }
+  private allowsTouch(contact: TouchContact): boolean {
+    const hit = contact.sourceTrace?.trace.hit;
+    return this.eligible(contact.self.id, contact.other, contact.sourceTrace?.ent, hit?.kind === "actor" ? hit.actor : null);
+  }
   private parameters(kind: Kind): readonly GuestValueLayout[] {
     const rr = this.definition.callbacks?.abi === "q2-rerelease";
     switch (kind) { case "use": return [P,P,P]; case "touch": return rr ? [P,P,P,B] : [P,P,P,P]; case "pain": return rr ? [P,P,F,I,P] : [P,P,F,I]; case "die": return rr ? [P,P,P,I,P,P] : [P,P,P,I,P]; }
@@ -128,7 +136,7 @@ export class NativeModCombat {
         writeHealth: value => { scalar(combat.health, value); return undefined; },
         writeArmor: armor => { if (armor.kind !== "none") throw new Error("Native owned actor declares no shared armor fields"); return undefined; } });
     }
-    return { think: null, use: (_self, other, activator) => this.call("use", slot, [this.pointer(actor.id), this.pointer(other), this.pointer(activator)]),
+    return { think: null, use: (_self, other, activator) => this.eligible(actor.id, other, activator) ? this.call("use", slot, [this.pointer(actor.id), this.pointer(other), this.pointer(activator)]) : undefined,
       touch: contact => this.withTouch(contact, args => this.call("touch", slot, args)), pain: reaction => this.withPain(reaction, args => this.call("pain", slot, args)),
       die: reaction => this.withDie(reaction, args => this.call("die", slot, args)) };
   }
@@ -142,12 +150,14 @@ export class NativeModCombat {
       const other = this.nullable(args[1]), activator = this.nullable(args[2]);
       callbacks.sourceUse(self, other, activator, (actor, nextOther, nextActivator) => {
         if (actor.id !== self.id) throw new Error("Native source callback target changes require replacement");
+        if (!this.eligible(actor.id, nextOther, nextActivator)) return undefined;
         return proceed(nextOther === other && nextActivator === activator ? args : [this.pointer(actor.id), this.pointer(nextOther), this.pointer(nextActivator)]);
       });
     } else if (kind === "touch") {
       const contact = this.touch(self, args);
       callbacks.sourceTouch(contact, effective => {
         if (effective.self.id !== self.id) throw new Error("Native source callback target changes require replacement");
+        if (!this.allowsTouch(effective)) return undefined;
         return effective === contact ? proceed(args) : this.withTouch(effective, proceed);
       });
     }
@@ -161,12 +171,14 @@ export class NativeModCombat {
       const reaction: PainReaction = { self, attack, attacker, kick, damage: amount };
       if (kind === "pain") callbacks.sourcePain(reaction, effective => {
         if (effective.self.id !== self.id) throw new Error("Native source callback target changes require replacement");
+        if (!this.allowsPain(effective)) return undefined;
         return effective === reaction ? proceed(args) : this.withPain(effective, proceed);
       });
       else {
         const death = { ...reaction, inflictor: this.nullable(args[1]), point: readClassicVector(this.host.memory, requiredPointer(args, 4)) };
         callbacks.sourceDie(death, effective => {
           if (effective.self.id !== self.id) throw new Error("Native source callback target changes require replacement");
+          if (!this.allowsDie(effective)) return undefined;
           return effective === death ? proceed(args) : this.withDie(effective, proceed);
         });
       }
@@ -203,6 +215,7 @@ export class NativeModCombat {
     const definition = this.definition.combat, damage = this.damage;
     if (definition === undefined || damage === null) throw new Error("Native damage body has not been declared");
     return this.services.combat.runSourceDamage(input, (observer, request) => {
+      if (!this.eligible(request.target, request.attack.attacker, request.attack.inflictor)) return { reaction: "none", appliedDamage: 0 };
       const world = this.services.engine?.world(); if (world === undefined) throw new Error("Native damage requires its destination world actor");
       const target = this.calls.address(request.target), inflictor = this.pointer(request.attack.inflictor ?? world), attacker = this.pointer(request.attack.attacker ?? world);
       return this.calls.transfer(() => {
@@ -261,9 +274,11 @@ export class NativeModCombat {
     return this.withBytes(new Uint8Array([native.id, Number(native.friendlyFire), Number(native.noPointLoss)]), address => run([pointer(address)]));
   }
   private withPain(reaction: PainReaction, run: (values: readonly GuestCallValue[]) => undefined): undefined {
+    if (!this.allowsPain(reaction)) return undefined;
     return this.withMod(reaction.attack, mod => run([this.pointer(reaction.self.id), this.pointer(reaction.attacker), { kind: "float32", value: reaction.kick }, int(reaction.damage), ...mod]));
   }
   private withDie(reaction: DeathReaction, run: (values: readonly GuestCallValue[]) => undefined): undefined {
+    if (!this.allowsDie(reaction)) return undefined;
     const bytes = new Uint8Array(12), view = new DataView(bytes.buffer); [reaction.point.x,reaction.point.y,reaction.point.z].forEach((value,index) => view.setFloat32(index * 4, value, true));
     return this.withBytes(bytes, point => this.withMod(reaction.attack, mod => run([this.pointer(reaction.self.id), this.pointer(reaction.inflictor), this.pointer(reaction.attacker), int(reaction.damage), pointer(point), ...mod])));
   }
@@ -289,6 +304,7 @@ export class NativeModCombat {
     return {self,other,plane:plane.value===null?null:this.plane(plane.value),surface:value===null?null:{name:value.name,nativeFlags:value.flags,nativeValue:value.value}};
   }
   private withTouch(contact: TouchContact, run: (values: readonly GuestCallValue[]) => undefined): undefined {
+    if (!this.allowsTouch(contact)) return undefined;
     if(this.definition.callbacks?.abi==="q2-rerelease") {
       if(contact.sourceTrace===undefined)throw new Error("Native rerelease touch requires the shared source trace");
       return this.withBytes(this.host.encodeTrace(contact.sourceTrace.trace),trace=>run([this.pointer(contact.self.id),this.pointer(contact.other),pointer(trace),{kind:"uint32",value:Number(contact.sourceTrace?.inverted ?? false)}]));
