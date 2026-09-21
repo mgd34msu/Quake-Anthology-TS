@@ -3,10 +3,11 @@ import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, Qvm
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
+import { readModClientInput } from "./client-input.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
     case "string": return { kind: "string", value: reader.field("value").string() };
@@ -65,7 +66,8 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
     spawnEntities: reader.field("spawnEntities").value === undefined ? null : reader.field("spawnEntities").nullable(value => value.string()),
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1),
       records: clients.field("records").list(value => value.string()), playerStateRecord: clients.field("playerStateRecord").string(), admit: clients.field("admit").list(sourceCall),
-      userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall) } }),
+      userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
+      ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall) }) } }),
     entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     ...(actors.value === undefined ? {} : { sourceActors: { allocate: actors.field("allocate").integer(0),
       release: { entry: actors.field("release").field("entry").integer(0), argument: actors.field("release").field("argument").integer(0) },

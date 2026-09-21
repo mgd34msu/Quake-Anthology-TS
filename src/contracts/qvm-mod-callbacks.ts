@@ -2,7 +2,7 @@ import type { ContentDigest } from "./content.ts";
 import type { QvmAbiProfile } from "./execution.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { Vec3 } from "./math.ts";
-import type { ModCallbackBinding, ModCallbackValue } from "./mod-callbacks.ts";
+import type { ModCallbackBinding, ModCallbackValue, ModClientInputBinding } from "./mod-callbacks.ts";
 
 export type QvmModScalar = "int32" | "float32";
 export type QvmModValue =
@@ -82,4 +82,5 @@ export interface QvmModClients {
   readonly admit: readonly QvmModSourceCall[];
   readonly userinfo: readonly QvmModSourceCall[];
   readonly disconnect: readonly QvmModSourceCall[];
+  readonly input?: readonly ModClientInputBinding<QvmModSourceCall>[];
 }

@@ -108,6 +108,16 @@ export class ClassicGuestServices {
   }
   get host(): ClassicQ2GuestHost { if (this.#host === null) throw new Error("API 3 services have no guest host"); return this.#host; }
   notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.edicts.at(slot)) ?? null; }
+  playerGrounded(slot: number, actor: ActorId): boolean {
+    const record = this.host.edicts.at(slot);
+    if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
+      throw new Error("API3 movement state requires the current client actor");
+    const motion = this.inputMotion.get(actor);
+    if (motion !== undefined) return motion.grounded();
+    const client = this.host.edicts.clientPrefix(slot);
+    if (client === null) throw new Error("API3 movement state has no client");
+    return (client.getUint8(16) & 4) !== 0;
+  }
   setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
     const profile = classicCombatProfile(this.memory.module.digest), record = this.host.edicts.at(slot);
     if (profile === null) throw new Error("API3 source view writes require a declared private client layout");

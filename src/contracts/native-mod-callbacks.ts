@@ -1,6 +1,6 @@
 import type { ContentDigest } from "./content.ts";
 import type { NativeAbi, Q2GameApiIdentity } from "./execution.ts";
-import type { ModCallbackBinding, ModCallbackValue } from "./mod-callbacks.ts";
+import type { ModCallbackBinding, ModCallbackValue, ModClientInputBinding } from "./mod-callbacks.ts";
 import type { QvmModActorField } from "./qvm-mod-callbacks.ts";
 import type { ItemId } from "./gameplay.ts";
 
@@ -26,6 +26,12 @@ export interface NativeModSourceCall {
 }
 export type NativeModCallback = ModCallbackBinding & NativeModSourceCall;
 export interface NativeModAdmissionCall extends NativeModSourceCall { readonly accepts: "always" | "nonzero"; }
+export interface NativeModClientInputField {
+  readonly record: string;
+  readonly offset: number;
+  readonly value: { readonly kind: NativeModScalar | "vector"; readonly value: ModCallbackValue }
+    | Extract<NativeModValue, { readonly kind: "time" }>;
+}
 /** Private client arrays belong to the pinned module, separately from canonical client identities. */
 export interface NativeModClients {
   readonly maximum: number;
@@ -34,6 +40,9 @@ export interface NativeModClients {
   readonly userinfo: readonly NativeModSourceCall[];
   readonly disconnect: readonly NativeModSourceCall[];
   readonly command: readonly NativeModSourceCall[];
+  readonly input?: readonly ModClientInputBinding<NativeModSourceCall>[];
+  /** Transient input words within declared private storage; the original module owns saved state. */
+  readonly inputFields?: readonly NativeModClientInputField[];
 }
 export type NativeModActorField = Exclude<QvmModActorField, { readonly binding: "health" | "inventory" | "constant" }>
   | { readonly offset: number; readonly binding: "address"; readonly value: NativeModAddress | null }

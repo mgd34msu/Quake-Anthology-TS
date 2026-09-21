@@ -1,6 +1,7 @@
 import type { ActorId, ClientId } from "../../contracts/identity.ts";
 import type { NativeModClients, NativeModSourceCall } from "../../contracts/native-mod-callbacks.ts";
-import type { ModClientServices } from "../../world/session/mod-clients.ts";
+import type { ModClientApplication, ModClientServices } from "../../world/session/mod-clients.ts";
+import { subscribeModClientInput } from "../../world/session/mod-client-input.ts";
 import type { CommandOrigin } from "../../contracts/common.ts";
 import type { CommandInvocation } from "../../core/commands/index.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -15,6 +16,8 @@ interface Operations {
   project(actor: ActorId): void;
   release(actor: ActorId): void;
   invoke(call: NativeModSourceCall, actor: ActorId): number;
+  invokeInput(call: NativeModSourceCall, application: ModClientApplication): void;
+  openInput(application: ModClientApplication): () => void;
   withCommand(command: CommandInvocation, invoke: () => void): void;
 }
 
@@ -23,6 +26,7 @@ export class NativeModClientsBinding {
   private readonly entries = new Map<ActorId, Entry>();
   private readonly denied = new Set<ActorId>();
   private unsubscribe: (() => undefined) | null = null;
+  private unsubscribeInput: (() => undefined) | null = null;
   constructor(private readonly operations: Operations) {}
   private require(actor: ActorId): Entry {
     const entry = this.entries.get(actor), client = this.operations.services.forActor(actor);
@@ -79,6 +83,14 @@ export class NativeModClientsBinding {
       return undefined;
     });
     for (const identity of this.operations.services.clients()) this.admit(identity.actor);
+    this.unsubscribeInput = subscribeModClientInput(this.operations.services, this.operations.declaration.input ?? [], {
+      open: application => this.require(application.identity.actor).admitted && !this.denied.has(application.identity.actor)
+        ? this.operations.openInput(application) : () => undefined,
+      invoke: (call, application) => {
+        const actor = application.identity.actor;
+        if (this.require(actor).admitted && !this.denied.has(actor)) this.operations.invokeInput(call, application);
+      },
+    });
   }
   private disconnect(actor: ActorId): void {
     try { if (this.require(actor).admitted) this.calls(this.operations.declaration.disconnect, actor); }
@@ -120,6 +132,7 @@ export class NativeModClientsBinding {
   close(): void {
     this.unsubscribe?.(); this.unsubscribe = null;
     const errors: unknown[] = [];
+    try { this.unsubscribeInput?.(); } catch (error) { errors.push(error); } this.unsubscribeInput = null;
     for (const actor of [...this.entries.keys()]) {
       try { this.operations.release(actor); }
       catch (error) { errors.push(error); }

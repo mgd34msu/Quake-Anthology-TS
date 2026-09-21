@@ -4,6 +4,7 @@ import { readQvmPlayerState } from "../../../src/compat/qvm/player-record.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
 import type { ModClientCommand, ModClientEvent, ModClientServices } from "../../../src/world/session/mod-clients.ts";
+import { ModClientApplications } from "../../../src/world/session/mod-client-applications.ts";
 
 test("component clients route targeted effects and accepted commands through live identities", () => {
   const ids = createIdentityOwner("component-clients"), first = ids.actor(40, 1), second = ids.actor(7, 3);
@@ -49,4 +50,49 @@ test("component clients route targeted effects and accepted commands through liv
   expect(binding.slot(replacement)).toBe(0); expect(binding.getUserinfo(1)).toBe("new second");
   binding.sendServerCommand(0, "print replacement"); expect(messages.at(-1)).toEqual({ text: "print replacement", recipient: replacement });
   binding.close(); expect(listeners.size).toBe(0); expect(identities.size).toBe(2);
+});
+
+test("QVM input callbacks read nested applied commands and retire every scoped override", () => {
+  const ids = createIdentityOwner("component-applied-input"), actor = ids.actor(2, 1), client = ids.client(1, 1);
+  const applications = new ModClientApplications(identity => identity.actor.equals(actor) && identity.client.equals(client));
+  const observed: number[] = [];
+  const services: ModClientServices = { maximum: 2, clients: () => [{ actor, client }],
+    forActor: value => value.equals(actor) ? client : null, actor: value => value.equals(client) ? actor : null,
+    userinfo: () => "", setUserinfo: () => {}, command: () => null, drop: () => {},
+    subscribe: () => () => undefined, subscribeApplication: listener => applications.subscribe(listener) };
+  const state = new DataView(new ArrayBuffer(468)); state.setInt32(56, 1024, true); state.setInt32(144, 11, true);
+  const call = { entry: 1, arguments: [], globals: [], returns: "void" } satisfies import("../../../src/contracts/qvm-mod-callbacks.ts").QvmModSourceCall;
+  const binding = new QvmModClientBindings({ services, content: "q3:classic:component:test",
+    declaration: { maximum: 2, records: ["client"], playerStateRecord: "client", admit: [], userinfo: [], disconnect: [],
+      input: [{ scope: "client-command", phase: "after", calls: [call] }, { scope: "movement-slice", phase: "after", calls: [call] }] },
+    project: () => {}, release: () => {}, invoke: () => { observed.push(binding.getUserCommand(0).serverTime); },
+    playerState: () => readQvmPlayerState(state), send: () => {} });
+  binding.start();
+  const received: ModClientCommand = { time: { kind: "seconds", value: 5 }, input: { actor, source: { kind: "remote-client", client }, sequence: 10,
+    arsenal: { provider: "q3:weapons", weapon: null, useHoldable: true }, command: { kind: "q3", serverTimeMilliseconds: 5000,
+      angleWords: [0, 0, 0], buttons: 4, weapon: 5, forwardMove: 0, rightMove: 0, upMove: 0 } } };
+  const begin = (serverTime: number, aim: number, scope: "client-command" | "movement-slice", parentInvocation?: number) => applications.begin({
+    identity: { actor, client }, scope, ...(parentInvocation === undefined ? {} : { parentInvocation }),
+    command: { kind: "q3", serverTimeMilliseconds: serverTime, angleWords: [3, 4, 5], buttons: 1,
+      forwardMove: 40, rightMove: -20, upMove: 0, weapon: 2 }, angleSpace: "source-relative",
+    absoluteAim: { x: aim, y: 0, z: 0 }, accepted: scope === "client-command" ? received : null,
+    frame: { frame: 1, time: { kind: "milliseconds", value: 999 }, elapsed: { kind: "milliseconds", value: 50 }, phase: "client-command" },
+  });
+  const outer = begin(100, 45, "client-command");
+  expect(binding.getUserCommand(0)).toEqual({ serverTime: 100, angles: [7168, 0, 0], buttons: 1,
+    weapon: 11, forwardmove: 40, rightmove: -20, upmove: 0 });
+  expect(observed).toEqual([]);
+  expect(() => binding.checkpoint()).toThrow("input application");
+  const inner = begin(150, 90, "movement-slice", outer?.invocation);
+  expect(binding.getUserCommand(0).angles[0]).toBe(15360);
+  applications.finish(inner);
+  expect(observed).toEqual([150]); expect(binding.getUserCommand(0).serverTime).toBe(100);
+  applications.finish(outer);
+  expect(observed).toEqual([150, 100]);
+  expect(() => binding.getUserCommand(0)).toThrow("accepted");
+  expect(binding.checkpoint()).toHaveLength(1);
+  applications.finish(begin(200, 0, "client-command"), true);
+  expect(observed).toEqual([150, 100]); expect(() => binding.getUserCommand(0)).toThrow("accepted");
+  const pending = begin(250, 0, "client-command"); binding.close(); applications.finish(pending);
+  expect(observed).toEqual([150, 100]); expect(applications.active).toBe(false);
 });

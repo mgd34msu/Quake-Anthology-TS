@@ -116,7 +116,7 @@ test.skipIf(!await Bun.file(copper).exists())("original Copper client callbacks 
 test("QC userinfo field writes preserve other keys and do not recursively publish lifecycle callbacks", () => {
   const ids = createIdentityOwner("qc-userinfo"), actor = ids.actor(42, 4), client = ids.client(7, 9), port = clients();
   port.entries.set(client, { actor, info: "\\name\\Alice\\rate\\25000" }); let calls = 0;
-  const binding = new QcModClientBindings({ services: port.services, declaration: { maximum: 1, admit: [{ function: "Original", arguments: [], globals: [] }], userinfo: [], disconnect: [] }, project: () => {}, release: () => {}, invoke: () => { calls++; } });
+  const binding = new QcModClientBindings({ services: port.services, declaration: { maximum: 1, admit: [{ function: "Original", arguments: [], globals: [] }], userinfo: [], disconnect: [] }, project: () => {}, release: () => "released", invoke: () => { calls++; } });
   binding.start(); binding.setUserinfo(actor, "name", "Carol");
   expect(port.services.userinfo(client)).toBe("\\rate\\25000\\name\\Carol"); expect(calls).toBe(1); expect(binding.userinfo(actor, "name")).toBe("Carol");
   binding.close();

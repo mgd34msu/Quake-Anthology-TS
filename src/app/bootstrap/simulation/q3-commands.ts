@@ -22,7 +22,7 @@ export function q3SourceCommand(input: ActorCommand, player: MovementPlayer, mil
   return q3CommandForControls(input, milliseconds, controls);
 }
 
-export function q3CommandForControls(input: ActorCommand, milliseconds: number, controls: { readonly requestedWeapon: number; readonly useHoldable: boolean }): UserCommand {
+export function q3CommandForControls(input: Pick<ActorCommand, "command">, milliseconds: number, controls: { readonly requestedWeapon: number; readonly useHoldable: boolean }): UserCommand {
   const command = input.command;
   const buttons = (command.kind === "q3" ? command.buttons & ~4 : command.buttons & 1) | (controls.useHoldable ? 4 : 0);
   if (command.kind === "q3") return { serverTime: command.serverTimeMilliseconds,

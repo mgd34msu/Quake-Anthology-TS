@@ -2,7 +2,8 @@ import type { ActorId, ClientId } from "../../contracts/identity.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { Q3PlayerState } from "../../contracts/protocol.ts";
 import type { QvmModClients, QvmModSourceCall } from "../../contracts/qvm-mod-callbacks.ts";
-import type { ModClientServices } from "../../world/session/mod-clients.ts";
+import type { ModClientApplication, ModClientServices } from "../../world/session/mod-clients.ts";
+import { subscribeModClientInput } from "../../world/session/mod-client-input.ts";
 import { q3CommandForControls, relativeQ3SourceCommand } from "../../app/bootstrap/simulation/q3-commands.ts";
 import type { QvmClientGameServices } from "./client-game-syscalls.ts";
 
@@ -14,7 +15,8 @@ interface Operations {
   readonly declaration: QvmModClients;
   project(actor: ActorId): void;
   release(actor: ActorId): void;
-  invoke(call: QvmModSourceCall, actor: ActorId): void;
+  invoke(call: QvmModSourceCall, actor: ActorId, application?: ModClientApplication): void;
+  reservedSlots?(): Iterable<number, undefined, unknown>;
   playerState(actor: ActorId): Q3PlayerState;
   send(text: string, recipient: ActorId | null): void;
 }
@@ -23,6 +25,8 @@ interface Operations {
 export class QvmModClientBindings {
   private readonly entries = new Map<ActorId, ClientSlot>();
   private unsubscribe: (() => undefined) | null = null;
+  private unsubscribeInput: (() => undefined) | null = null;
+  private readonly applications: ModClientApplication[] = [];
   constructor(private readonly operations: Operations) {}
 
   has(actor: ActorId): boolean { return this.entries.has(actor); }
@@ -32,6 +36,7 @@ export class QvmModClientBindings {
     const previous = this.entries.get(actor);
     if (previous !== undefined) { this.require(actor); return previous.slot; }
     const used = new Set([...this.entries.values()].map(entry => entry.slot));
+    for (const slot of this.operations.reservedSlots?.() ?? []) used.add(slot);
     let slot = 0; while (used.has(slot)) slot++;
     if (slot >= this.operations.declaration.maximum) throw new Error("QVM component source client capacity exceeded");
     this.entries.set(actor, { actor, client, slot, admitted: false });
@@ -74,14 +79,32 @@ export class QvmModClientBindings {
       return undefined;
     });
     for (const identity of this.operations.services.clients()) this.admit(identity.actor);
+    this.unsubscribeInput = subscribeModClientInput(this.operations.services, this.operations.declaration.input ?? [], {
+      open: application => {
+        const entry = this.require(application.identity.actor);
+        if (!entry.admitted) throw new Error("QVM input callback requires admitted source client state");
+        this.applications.push(application);
+        return () => { const index = this.applications.indexOf(application); if (index !== -1) this.applications.splice(index, 1); };
+      },
+      invoke: (call, application) => {
+        this.require(application.identity.actor);
+        this.operations.invoke(call, application.identity.actor, application);
+      },
+    });
   }
   restore(entries: readonly QvmModClientSlot[]): void {
     this.entries.clear();
     for (const entry of entries) this.entries.set(entry.actor, { ...entry, client: this.operations.services.forActor(entry.actor) });
   }
-  checkpoint(): readonly QvmModClientSlot[] { return [...this.entries.values()].map(({ actor, slot, admitted }) => ({ actor, slot, admitted })); }
+  checkpoint(): readonly QvmModClientSlot[] {
+    if (this.applications.length !== 0) throw new Error("Cannot save during QVM component input application");
+    return [...this.entries.values()].map(({ actor, slot, admitted }) => ({ actor, slot, admitted }));
+  }
   forget(actor: ActorId): void { this.entries.delete(actor); }
-  close(): void { this.unsubscribe?.(); this.unsubscribe = null; this.entries.clear(); }
+  close(): void {
+    try { this.unsubscribeInput?.(); }
+    finally { this.unsubscribeInput = null; this.unsubscribe?.(); this.unsubscribe = null; this.applications.length = 0; this.entries.clear(); }
+  }
 
   getUserinfo(slot: number): string {
     const entry = this.at(slot);
@@ -99,8 +122,25 @@ export class QvmModClientBindings {
     if (slot === -1) { this.operations.send(text, null); return; }
     const entry = this.at(slot); if (entry !== null) this.operations.send(text, entry.actor);
   }
+  private applied(actor: ActorId): ModClientApplication | undefined {
+    for (let index = this.applications.length - 1; index >= 0; index--) {
+      const application = this.applications[index];
+      if (application?.identity.actor.equals(actor)) return application;
+    }
+    return undefined;
+  }
   getUserCommand(slot: number): ReturnType<QvmClientGameServices["getUserCommand"]> {
-    const entry = this.at(slot), accepted = entry?.client == null ? null : this.operations.services.command(entry.client);
+    const entry = this.at(slot);
+    const application = entry === null ? undefined : this.applied(entry.actor);
+    if (application !== undefined && entry !== null) {
+      const ps = this.operations.playerState(entry.actor), time = application.frame.time;
+      const command = q3CommandForControls({ command: application.command }, time.kind === "seconds" ? time.value * 1000 : time.value,
+        { requestedWeapon: ps.weapon, useHoldable: application.command.kind === "q3" && (application.command.buttons & 4) !== 0 });
+      const words = (angle: number): number => Math.trunc(angle * 65536 / 360) & 65535;
+      return { ...command, angles: [words(application.absoluteAim.x) - ps.deltaAngleWords[0],
+        words(application.absoluteAim.y) - ps.deltaAngleWords[1], words(application.absoluteAim.z) - ps.deltaAngleWords[2]] };
+    }
+    const accepted = entry?.client == null ? null : this.operations.services.command(entry.client);
     if (entry === null || accepted === null) throw new Error("QVM component usercmd requires an accepted destination client command");
     const input = accepted.input, milliseconds = accepted.time.kind === "seconds" ? accepted.time.value * 1000 : accepted.time.value;
     const ps = this.operations.playerState(entry.actor);

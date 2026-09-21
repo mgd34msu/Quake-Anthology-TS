@@ -3,10 +3,11 @@ import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDe
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
+import { readModClientInput } from "./client-input.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
     case "string": return { kind: "string", value: reader.field("value").string() };
@@ -109,6 +110,12 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
       maximum: reader.field("clients").field("maximum").integer(1), records: reader.field("clients").field("records").list(value => value.string()),
       admit: reader.field("clients").field("admit").list(reader => ({ ...sourceCall(reader), accepts: reader.field("accepts").choice("always", "nonzero") })), userinfo: reader.field("clients").field("userinfo").list(sourceCall),
       disconnect: reader.field("clients").field("disconnect").list(sourceCall), command: reader.field("clients").field("command").list(sourceCall),
+      ...(reader.field("clients").field("input").value === undefined ? {} : { input: readModClientInput(reader.field("clients").field("input"), sourceCall) }),
+      ...(reader.field("clients").field("inputFields").value === undefined ? {} : { inputFields: reader.field("clients").field("inputFields").list(field => {
+        const value = argument(field.field("value"));
+        if (value.kind === "actor" || value.kind === "client" || value.kind === "userinfo" || value.kind === "address" || value.kind === "string") return field.fail("Native input fields require scalar, vector or time values");
+        return { record: field.field("record").string(), offset: field.field("offset").integer(0), value: value.kind === "time" ? value : { kind: value.kind, value: value.value } };
+      }) }),
     } }),
     cvars: reader.field("cvars").list(value => ({ name: value.field("name").string(), value: value.field("value").string() })),
     spawnEntities: reader.field("spawnEntities").nullable(value => value.string()), entityRecord: reader.field("entityRecord").nullable(value => value.string()),

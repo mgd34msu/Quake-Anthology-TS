@@ -103,6 +103,13 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   }
   bindHost(host: RereleaseQ2GuestHost): void { if (this.#host !== null || host.module.memory !== this.memory) throw new Error("API2023 host/memory binding mismatch"); this.#host = host; this.#combat = new RereleaseCombatBindings(host); }
   notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.module.entities().atSlot(slot)) ?? null; }
+  playerGrounded(slot: number, actor: ActorId): boolean {
+    const record = this.host.module.entities().atSlot(slot);
+    if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
+      throw new Error("API2023 movement state requires the current client actor");
+    const motion = this.inputMotion.get(actor);
+    return motion === undefined ? (this.view(slot).playerState().movement.flags & 4) !== 0 : motion.grounded();
+  }
   setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
     const profile = retailRereleaseClientProfile, host = this.host, record = host.module.entities().atSlot(slot);
     if (profile.authority.kind !== "artifact" || this.memory.module.digest !== profile.authority.digest)

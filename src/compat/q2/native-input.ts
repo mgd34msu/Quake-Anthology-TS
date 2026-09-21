@@ -20,6 +20,7 @@ import { bindNativeModEntry, type NativeModEntryBinding } from "./native-mod-ent
 type NativeCommand = Q2UserCommand | Q2RereleaseUserCommand;
 export interface NativeInputMotion {
   read(): { readonly origin: Vec3; readonly velocity: Vec3 };
+  grounded(): boolean;
   write(value: { readonly origin: Vec3; readonly velocity: Vec3 }): undefined;
 }
 export interface NativeInputServices {
@@ -171,6 +172,7 @@ export class NativeInputBinding {
       }
     };
     const projection: NativeInputMotion = { read: () => ({ origin: vector(4), velocity: vector(classic ? 10 : 16) }),
+      grounded: () => ((classic ? view.getUint8(16) : view.getUint16(fieldOffset(pmoveStateLayout, "pm_flags"), true)) & 4) !== 0,
       write: value => { store(4, value.origin); store(classic ? 10 : 16, value.velocity); return undefined; } };
     return this.services.movement(scope.identity, projection, () => this.apply(scope, "movement-slice", command, view, run));
   }

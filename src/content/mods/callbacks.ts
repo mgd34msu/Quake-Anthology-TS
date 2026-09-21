@@ -2,17 +2,22 @@ import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackVal
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
+import { readModClientInput } from "./client-input.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "string", "vector")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "string": return { kind: "string", value: reader.field("value").string() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
   }
 }
 function field(reader: SaveReader): ModActorField {
-  const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset", "userinfo");
+  const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset", "userinfo", "client-input");
+  if (binding === "client-input") return { field: name, binding, input: reader.field("input").choice("view-angles", "attack", "jump", "impulse"), update: reader.field("update").choice("always", "nonzero") };
+  if (binding === "client-flags") return { field: name, binding,
+    ...(reader.field("grounded").value === undefined ? {} : { grounded: reader.field("grounded").literal(true) }),
+    ...(reader.field("privateMask").value === undefined ? {} : { privateMask: reader.field("privateMask").integer(0) }) };
   if (binding === "userinfo") return { field: name, binding, key: reader.field("key").string() };
   if (binding === "inventory") return { field: name, binding, item: namespaced(reader.field("item")) };
   if (binding === "constant") {
@@ -66,7 +71,8 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
     actorFields: reader.field("actorFields").list(field), callbacks: reader.field("callbacks").list(callback),
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1), admit: clients.field("admit").list(sourceCall),
-      userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall) } }),
+      userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
+      ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall) }) } }),
     ...(initialize.value === undefined ? {} : { initialize: initialize.list(sourceCall) }),
     ...(frame.value === undefined ? {} : { frame: sourceCall(frame) }),
     ...(cvars.value === undefined ? {} : { cvars: cvars.list(entry => ({ name: entry.field("name").string(), value: entry.field("value").string() })) }),

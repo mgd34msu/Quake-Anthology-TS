@@ -335,6 +335,18 @@ export class SharedSimulation implements Simulation {
     userinfo: client => this.sourcePlayerUserinfo(this.requireModClient(client)) ?? "",
     setUserinfo: (client, value) => this.storePlayerUserinfo(this.requireModClient(client), value),
     command: client => this.modClientCommands.get(this.requireModClient(client)) ?? null,
+    grounded: client => {
+      const actor = this.requireModClient(client), source = this.source;
+      if (source.kind === "q2-native") return source.game.services.playerGrounded(this.nativeQ2Client(actor).slot + 1, actor);
+      if (source.kind === "q3-qvm") {
+        const slot = source.game.records.slot(actor);
+        if (slot === null) throw new Error("QVM movement state requires a source client");
+        return source.game.records.player(slot).groundEntityNumber !== 1023;
+      }
+      const state = this.requirePlayer(actor).readState();
+      if (state.kind === "q2-classic" || state.kind === "q2-rerelease") return (state.flags & 4) !== 0;
+      return state.kind === "q1-netquake" ? (state.flags & 512) !== 0 : state.ground.kind !== "none";
+    },
     drop: (client, reason, content) => { const actor = this.requireModClient(client); this.modClientDrops.push({ client, actor, reason, content }); },
     subscribe: listener => { this.modClientListeners.add(listener); return () => { this.modClientListeners.delete(listener); return undefined; }; },
     subscribeApplication: listener => this.modClientApplications.subscribe(listener),

@@ -15,6 +15,7 @@ import { createQcPresentationBindings } from "./presentation-host.ts";
 import type { QcPrecachedResource } from "./presentation-host.ts";
 import { createQcSpatialBindings } from "./spatial-host.ts";
 import { QcModClientBindings } from "./mod-clients.ts";
+import { QcModInput } from "./mod-input.ts";
 import { createQcAimBinding } from "./client-host.ts";
 import { QcModActors } from "./mod-actors.ts";
 import { QcModCombat, validateQcModCombat } from "./mod-combat.ts";
@@ -51,7 +52,7 @@ function inputType(value: ModCallbackValue): QcValueType {
   if (value.kind !== "input") return value.kind;
   switch (value.name) {
     case "self": case "other": case "activator": case "attacker": case "inflictor": return "entity";
-    case "point": case "direction": case "normal": return "vector";
+    case "point": case "direction": case "normal": case "view-angles": return "vector";
     case "item": return "string";
     default: return "float";
   }
@@ -76,10 +77,16 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
   const think = declaration.actorFields.filter(field => field.binding === "think"), nextthink = declaration.actorFields.filter(field => field.binding === "nextthink");
   if (think.length !== nextthink.length || think.length > 1) throw new Error("Mod source scheduling requires one think and one nextthink binding together");
   for (const entry of declaration.actorFields) {
+    if (entry.binding === "client-input" && (declaration.clients?.input === undefined || declaration.clients.input.length === 0
+      || entry.update === "nonzero" && entry.input === "view-angles")) throw new Error("Mod client input fields require declared applications and scalar nonzero updates");
+    if (entry.binding === "client-flags" && entry.privateMask !== undefined
+      && (!Number.isInteger(entry.privateMask) || entry.privateMask < 0 || entry.privateMask > 0x7fffff || (entry.privateMask & (8 | 128 | (entry.grounded ? 512 : 0))) !== 0))
+      throw new Error("Mod private client flags overlap canonical flags or exceed the source flag word");
     if (entry.binding === "userinfo" && (declaration.clients === undefined || entry.key.length === 0 || /[\\\x00]/u.test(entry.key))) throw new Error("Mod userinfo field requires a declared client and valid info key");
     const field = program.fieldsByName.get(entry.field);
     if (field === undefined) throw new Error(`Missing mod actor field ${entry.field}`);
     const type = entry.binding === "private" ? field.type : entry.binding === "constant" ? entry.value.kind
+      : entry.binding === "client-input" ? entry.input === "view-angles" ? "vector" : "float"
       : entry.binding === "classname" || entry.binding === "userinfo" ? "string" : entry.binding === "think" ? "function"
       : entry.binding === "health" || entry.binding === "inventory" || entry.binding === "nextthink" || entry.binding === "client-flags" ? "float" : "vector";
     if (field.type !== type) throw new Error(`Mod actor field ${entry.field} requires ${type}, found ${field.type}`);
@@ -93,6 +100,8 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
       throw new Error("Mod client capacity must fit reserved QuakeC edicts");
     for (const call of [...declaration.clients.admit, ...declaration.clients.userinfo, ...declaration.clients.disconnect])
       validateCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "client lifecycle");
+    for (const binding of declaration.clients.input ?? []) for (const call of binding.calls)
+      validateCall(program, call, new Set<ModCallbackInput>(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse"]), "client input");
   }
   const callbacks = new Set<string>();
   const commands = new Set<string>();
@@ -137,6 +146,8 @@ export class QcModProvider {
   private readonly hostState: QcExecutorHost;
   private readonly ownedActors: QcModActors;
   private readonly clients: QcModClientBindings | null;
+  private readonly input: QcModInput;
+  private readonly retiredProjections = new Set<ActorId>();
   private readonly combat: QcModCombat | null;
   private readonly messages: QcModMessages | null;
   private readonly environment: QcModEnvironment;
@@ -270,10 +281,14 @@ export class QcModProvider {
       } }), observeCall: call => this.combat?.damage.observeCall(call), observeEntityStore: store => {
         this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
       } });
+    this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor));
     this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
       project: actor => { this.reference(actor); }, release: actor => this.releaseClientProjection(actor), invoke: (call, actor) => {
         const now = services.time(); this.invoke(call, new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }],
           ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]));
+      }, input: {
+        open: application => { const close = this.input.open(application); return () => { try { close(); } finally { this.drainRetiredProjections(); } }; },
+        invoke: (call, application) => { this.invoke(call, this.input.values(application)); },
       } });
     this.environment.initializeGlobals(this.machine);
     this.actorState = new QcActorState({ machine: this.machine, rerelease: media?.content.includes(":rerelease:") === true,
@@ -400,10 +415,7 @@ export class QcModProvider {
       },
     };
     this.releaseProjection = services.actors.onRelease(actor => {
-      this.clients?.forget(actor.id);
-      const slot = this.projections.get(actor.id);
-      if (slot !== undefined) this.actorsBySlot.delete(slot);
-      this.projections.delete(actor.id);
+      this.retiredProjections.add(actor.id); this.drainRetiredProjections();
       return undefined;
     });
   }
@@ -440,10 +452,17 @@ export class QcModProvider {
     for (const field of this.fields) if (field.declaration.binding === "constant") this.write(this.machine.entities.at(slot), field.offset, field.declaration.value);
     return this.machine.entities.reference(slot);
   }
-  private releaseClientProjection(actor: ActorId): void {
+  private releaseClientProjection(actor: ActorId): "released" | "deferred" {
+    if (this.depth !== 0 || this.input.active) { this.retiredProjections.add(actor); return "deferred"; }
     const slot = this.projections.get(actor);
-    if (slot === undefined) return;
-    this.projections.delete(actor); this.actorsBySlot.delete(slot); this.machine.entities.at(slot).bytes.fill(0);
+    if (slot !== undefined) { this.projections.delete(actor); this.actorsBySlot.delete(slot); this.machine.entities.at(slot).bytes.fill(0); }
+    return "released";
+  }
+  private drainRetiredProjections(): void {
+    if (this.depth !== 0 || this.input.active) return;
+    for (const actor of this.retiredProjections) {
+      this.clients?.forget(actor); this.releaseClientProjection(actor); this.retiredProjections.delete(actor);
+    }
   }
   private prepareEntities(): void { for (const actor of this.services.actors.observations()) this.reference(actor.id); }
   private refresh(actor: ActorId, slot: number, word: number, count: number): void {
@@ -452,7 +471,7 @@ export class QcModProvider {
       if (word + count <= field.offset || word >= field.offset + field.words) continue;
       const declared = field.declaration;
       switch (declared.binding) {
-        case "constant": case "private": case "think": case "nextthink": break;
+        case "constant": case "private": case "client-input": case "think": case "nextthink": break;
         case "userinfo": {
           if (this.clients === null) throw new Error("Mod userinfo field requires client services");
           if (this.clients.slot(actor) === null) break;
@@ -464,7 +483,16 @@ export class QcModProvider {
           if (name === undefined) throw new Error("Mod classname field requires canonical actor metadata");
           words.setInt(field.offset, this.machine.strings.setEngine(`mod-classname:${name}`, name, Math.max(128, name.length + 1))); break;
         }
-        case "client-flags": { const client = this.environment.client(actor); words.setFloat(field.offset, client === null ? 0 : 8 | (client.notarget ? 128 : 0)); break; }
+        case "client-flags": {
+          const client = this.environment.client(actor);
+          let canonical = client === null ? 0 : 8 | (client.notarget ? 128 : 0);
+          if (client !== null && declared.grounded) {
+            const identity = this.services.clients?.forActor(actor), grounded = this.services.clients?.grounded;
+            if (identity == null || grounded === undefined) throw new Error("Mod grounded flags require canonical client movement state");
+            if (grounded(identity)) canonical |= 512;
+          }
+          words.setFloat(field.offset, canonical | (Math.trunc(words.float(field.offset)) & (declared.privateMask ?? 0))); break;
+        }
         case "view-offset": { words.setVector(field.offset, this.environment.client(actor)?.viewOffset ?? { x: 0, y: 0, z: 0 }); break; }
         case "health": {
           words.setFloat(field.offset, this.services.combat.read(actor)?.health ?? 0); break;
@@ -496,13 +524,19 @@ export class QcModProvider {
       if (store.word + store.after.length / 4 <= field.offset || store.word >= field.offset + field.words) continue;
       const declared = field.declaration;
       switch (declared.binding) {
-        case "constant": case "private": break;
+        case "constant": case "private": case "client-input": break;
         case "userinfo": {
           if (this.clients === null) throw new Error("Mod userinfo field requires client services");
           if (this.clients.slot(actor.id) !== null) this.clients.setUserinfo(actor.id, declared.key, this.machine.strings.get(words.int(field.offset)));
           break;
         }
-        case "classname": case "client-flags": case "view-offset": throw new Error(`Mod ${declared.binding} store requires its canonical owner`);
+        case "client-flags": {
+          const before = new DataView(store.before.buffer, store.before.byteOffset, store.before.byteLength).getFloat32((field.offset - store.word) * 4, true);
+          if (declared.privateMask === undefined || ((Math.trunc(before) ^ Math.trunc(words.float(field.offset))) & ~declared.privateMask) !== 0)
+            throw new Error("Mod client-flags store requires its canonical owner");
+          break;
+        }
+        case "classname": case "view-offset": throw new Error(`Mod ${declared.binding} store requires its canonical owner`);
         case "think": case "nextthink": this.ownedActors.schedule(actor); break;
         case "health":
           if (this.services.combat.read(actor.id) === null) throw new Error("Mod health store requires a combat actor");
@@ -571,6 +605,7 @@ export class QcModProvider {
       this.machine.globals.bytes.set(staging, 4);
       for (const global of savedGlobals) this.machine.globals.bytes.set(global.bytes, global.offset);
       this.depth--;
+      this.drainRetiredProjections();
     }
   }
   private invokeOwned(index: number, actor: ActorId, other: ActorId | null, time: FrameContext["time"]): void {
@@ -630,7 +665,7 @@ export class QcModProvider {
     }
     return result;
   }
-  checkpoint(): QuakeCCheckpoint { if (this.depth !== 0) throw new Error("Mod checkpoint requires an idle callback boundary"); return captureQcCheckpoint(this.machine, this.module, this.hostState); }
+  checkpoint(): QuakeCCheckpoint { if (this.depth !== 0 || this.input.active) throw new Error("Mod checkpoint requires an idle callback boundary"); return captureQcCheckpoint(this.machine, this.module, this.hostState); }
   initialize(): undefined {
     if (this.initialized || this.depth !== 0) throw new Error("Mod source initialization must run once at an idle boundary");
     this.loading = true;
@@ -654,7 +689,7 @@ export class QcModProvider {
     ]));
     return this.ownedActors.advance(frame);
   }
-  restore(saved: QuakeCCheckpoint): undefined { if (this.depth !== 0) throw new Error("Mod restore requires an idle callback boundary"); return restoreQcCheckpoint(this.machine, this.module, this.hostState, saved); }
+  restore(saved: QuakeCCheckpoint): undefined { if (this.depth !== 0 || this.input.active) throw new Error("Mod restore requires an idle callback boundary"); return restoreQcCheckpoint(this.machine, this.module, this.hostState, saved); }
   close(): undefined {
     if (this.closed) return undefined;
     this.closed = true; this.clients?.close();

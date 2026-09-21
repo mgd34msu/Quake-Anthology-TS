@@ -1,6 +1,7 @@
 import type { ActorId, ClientId } from "../../contracts/identity.ts";
 import type { ModCallbackDeclaration, ModSourceCall } from "../../contracts/mod-callbacks.ts";
-import type { ModClientServices } from "../../world/session/mod-clients.ts";
+import type { ModClientApplication, ModClientServices } from "../../world/session/mod-clients.ts";
+import { subscribeModClientInput } from "../../world/session/mod-client-input.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
 
 export interface QcModClientSlot { readonly actor: ActorId; readonly slot: number; readonly admitted: boolean; }
@@ -9,14 +10,19 @@ interface Operations {
   readonly services: ModClientServices;
   readonly declaration: NonNullable<ModCallbackDeclaration["clients"]>;
   project(actor: ActorId): void;
-  release(actor: ActorId): void;
+  release(actor: ActorId): "released" | "deferred";
   invoke(call: ModSourceCall, actor: ActorId): void;
+  readonly input?: {
+    open(application: ModClientApplication): () => void;
+    invoke(call: ModSourceCall, application: ModClientApplication): void;
+  };
 }
 
 /** QuakeC reserves edicts after world; canonical clients retain their independent identities. */
 export class QcModClientBindings {
   private readonly entries = new Map<ActorId, Entry>();
   private unsubscribe: (() => undefined) | null = null;
+  private unsubscribeInput: (() => undefined) | null = null;
   constructor(private readonly operations: Operations) {}
   slot(actor: ActorId): number | null {
     const client = this.operations.services.forActor(actor);
@@ -34,7 +40,7 @@ export class QcModClientBindings {
     if (entry.client !== null) return entry;
     const current = { ...entry, client }; this.entries.set(actor, current); return current;
   }
-  private invoke(calls: readonly ModSourceCall[], actor: ActorId): void { for (const call of calls) this.operations.invoke(call, actor); }
+  private invoke(calls: readonly ModSourceCall[], actor: ActorId): void { for (const call of calls) { this.require(actor); this.operations.invoke(call, actor); } }
   private admit(actor: ActorId): void {
     if (this.slot(actor) === null) throw new Error("QuakeC component admission requires a live client");
     const entry = this.require(actor); this.operations.project(actor);
@@ -48,11 +54,22 @@ export class QcModClientBindings {
       else if (event.kind === "userinfo") { this.admit(actor); this.invoke(this.operations.declaration.userinfo, actor); }
       else if (this.entries.has(actor)) {
         this.require(actor); this.invoke(this.operations.declaration.disconnect, actor);
-        this.entries.delete(actor); this.operations.release(actor);
+        if (this.operations.release(actor) === "released") this.entries.delete(actor);
       }
       return undefined;
     });
     for (const client of this.operations.services.clients()) this.admit(client.actor);
+    const bindings = this.operations.declaration.input ?? [], input = this.operations.input;
+    if (bindings.length !== 0) {
+      if (input === undefined) throw new Error("QuakeC client input requires a source application owner");
+      this.unsubscribeInput = subscribeModClientInput(this.operations.services, bindings, {
+        open: application => {
+          if (!this.require(application.identity.actor).admitted) throw new Error("QuakeC client input requires source admission");
+          return input.open(application);
+        },
+        invoke: (call, application) => { this.require(application.identity.actor); input.invoke(call, application); },
+      });
+    }
   }
   userinfo(actor: ActorId, key: string): string {
     const client = this.require(actor).client;
@@ -81,5 +98,8 @@ export class QcModClientBindings {
     }
   }
   forget(actor: ActorId): void { this.entries.delete(actor); }
-  close(): void { this.unsubscribe?.(); this.unsubscribe = null; this.entries.clear(); }
+  close(): void {
+    this.unsubscribe?.(); this.unsubscribe = null;
+    try { this.unsubscribeInput?.(); } finally { this.unsubscribeInput = null; this.entries.clear(); }
+  }
 }

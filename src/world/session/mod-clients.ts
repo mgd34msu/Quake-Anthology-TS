@@ -49,6 +49,8 @@ export interface ModClientServices {
   /** Updates the authoritative store without invoking gameplay callbacks or publishing another userinfo event. */
   setUserinfo(client: ClientId, value: string): void;
   command(client: ClientId): ModClientCommand | null;
+  /** Current source movement state, including an input operation's working state. */
+  grounded?(client: ClientId): boolean;
   /** Queues the owning host's disconnect after the current source callback completes. */
   drop(client: ClientId, reason: string, content: ContentId): void;
   /** Disconnect notifications run while both handles still resolve; admission follows actor creation. */
