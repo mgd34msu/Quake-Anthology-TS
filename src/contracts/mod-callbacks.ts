@@ -8,6 +8,7 @@ export type ModCallbackValue = { readonly kind: "input"; readonly name: ModCallb
   | { readonly kind: "float"; readonly value: number } | { readonly kind: "string"; readonly value: string } | { readonly kind: "vector"; readonly value: Vec3 };
 export type ModActorField = { readonly field: string } & (
   | { readonly binding: "health" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" | "think" | "nextthink" | "private" | "classname" | "client-flags" | "view-offset" }
+  | { readonly binding: "userinfo"; readonly key: string }
   | { readonly binding: "inventory"; readonly item: ItemId }
   | { readonly binding: "constant"; readonly value: Exclude<ModCallbackValue, { readonly kind: "input" }> }
 );
@@ -43,6 +44,8 @@ export interface ModCallbackDeclaration {
   readonly program: { readonly path: string; readonly digest: ContentDigest };
   readonly actorFields: readonly ModActorField[];
   readonly callbacks: readonly ModCallback[];
+  readonly clients?: { readonly maximum: number; readonly admit: readonly ModSourceCall[];
+    readonly userinfo: readonly ModSourceCall[]; readonly disconnect: readonly ModSourceCall[] };
   readonly cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly initialize?: readonly ModSourceCall[];
   readonly frame?: ModSourceCall;

@@ -12,7 +12,8 @@ function value(reader: SaveReader): ModCallbackValue {
   }
 }
 function field(reader: SaveReader): ModActorField {
-  const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset");
+  const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset", "userinfo");
+  if (binding === "userinfo") return { field: name, binding, key: reader.field("key").string() };
   if (binding === "inventory") return { field: name, binding, item: namespaced(reader.field("item")) };
   if (binding === "constant") {
     const constant = value(reader.field("value"));
@@ -59,11 +60,13 @@ function consoleValue(reader: SaveReader): ModConsoleValue {
 }
 
 export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclaration {
-  const program = reader.field("program");
+  const program = reader.field("program"), clients = reader.field("clients");
   const combat = reader.field("combat"), initialize = reader.field("initialize"), frame = reader.field("frame"), cvars = reader.field("cvars"), commands = reader.field("commands");
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("quakec"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
     actorFields: reader.field("actorFields").list(field), callbacks: reader.field("callbacks").list(callback),
+    ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1), admit: clients.field("admit").list(sourceCall),
+      userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall) } }),
     ...(initialize.value === undefined ? {} : { initialize: initialize.list(sourceCall) }),
     ...(frame.value === undefined ? {} : { frame: sourceCall(frame) }),
     ...(cvars.value === undefined ? {} : { cvars: cvars.list(entry => ({ name: entry.field("name").string(), value: entry.field("value").string() })) }),

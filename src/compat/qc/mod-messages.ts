@@ -19,7 +19,7 @@ export class QcModMessages {
     const engine = services.engine;
     if (engine === undefined) throw new Error("Source mod messages require destination engine services");
     this.route = { native: () => false, loading: () => false,
-      client: actor => engine.presentation?.players().some(client => client.equals(actor)) === true,
+      client: actor => services.clients === undefined ? engine.presentation?.players().some(client => client.equals(actor)) === true : services.clients.forActor(actor) !== null,
       route: (messages, destination) => {
         if (destination.kind === "multicast") throw new Error("NetQuake cannot route a multicast message");
         const presentation = engine.presentation;

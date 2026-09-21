@@ -15,6 +15,7 @@ export interface QcModActorOptions {
   readonly services: ModHostServices;
   readonly think: number | null;
   readonly nextthink: number | null;
+  readonly firstDynamicSlot?: number;
   body(slot: number): BodyStateBinding;
   admitted(actor: OwnedActor, slot: number): void;
   retired(actor: OwnedActor): void;
@@ -49,7 +50,7 @@ export class QcModActors {
         services.callbacks.think(actor, frame); return undefined;
       } : null });
     const storage = createQcSourceSlotStorage(machine, { freeOffsetBytes: 0, freeTimeOffsetBytes: machine.program.api.kind === "q1-quakeworld" ? 100 : 92 });
-    this.slots = new SourceActorSlots(services.actors, { provider, capacity: machine.entities.capacity, lifetime: quakeEdictLifetime(1),
+    this.slots = new SourceActorSlots(services.actors, { provider, capacity: machine.entities.capacity, lifetime: quakeEdictLifetime(options.firstDynamicSlot ?? 1),
       storage: { ...storage, initialize: (slot, actor) => {
         storage.initialize(slot, actor); options.remember(actor.id, slot);
         services.bodies.bind(actor, options.body(slot));

@@ -13,6 +13,7 @@ import type { QcHostBuiltinName } from "./builtins.ts";
 import { createQcPresentationBindings } from "./presentation-host.ts";
 import type { QcPrecachedResource } from "./presentation-host.ts";
 import { createQcSpatialBindings } from "./spatial-host.ts";
+import { QcModClientBindings } from "./mod-clients.ts";
 import { QcModActors } from "./mod-actors.ts";
 import { QcModCombat, validateQcModCombat } from "./mod-combat.ts";
 import { QcModMessages } from "./mod-messages.ts";
@@ -73,16 +74,23 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
   const think = declaration.actorFields.filter(field => field.binding === "think"), nextthink = declaration.actorFields.filter(field => field.binding === "nextthink");
   if (think.length !== nextthink.length || think.length > 1) throw new Error("Mod source scheduling requires one think and one nextthink binding together");
   for (const entry of declaration.actorFields) {
+    if (entry.binding === "userinfo" && (declaration.clients === undefined || entry.key.length === 0 || /[\\\x00]/u.test(entry.key))) throw new Error("Mod userinfo field requires a declared client and valid info key");
     const field = program.fieldsByName.get(entry.field);
     if (field === undefined) throw new Error(`Missing mod actor field ${entry.field}`);
     const type = entry.binding === "private" ? field.type : entry.binding === "constant" ? entry.value.kind
-      : entry.binding === "classname" ? "string" : entry.binding === "think" ? "function"
+      : entry.binding === "classname" || entry.binding === "userinfo" ? "string" : entry.binding === "think" ? "function"
       : entry.binding === "health" || entry.binding === "inventory" || entry.binding === "nextthink" || entry.binding === "client-flags" ? "float" : "vector";
     if (field.type !== type) throw new Error(`Mod actor field ${entry.field} requires ${type}, found ${field.type}`);
     for (let word = field.offset; word < field.offset + (type === "vector" ? 3 : 1); word++) {
       if (fields.has(word)) throw new Error(`Overlapping mod actor field ${entry.field}`);
       fields.add(word);
     }
+  }
+  if (declaration.clients !== undefined) {
+    if (!Number.isInteger(declaration.clients.maximum) || declaration.clients.maximum < 1 || declaration.clients.maximum >= 8191)
+      throw new Error("Mod client capacity must fit reserved QuakeC edicts");
+    for (const call of [...declaration.clients.admit, ...declaration.clients.userinfo, ...declaration.clients.disconnect])
+      validateCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "client lifecycle");
   }
   const callbacks = new Set<string>();
   const commands = new Set<string>();
@@ -126,6 +134,7 @@ export class QcModProvider {
   private readonly actorsBySlot = new Map<number, ActorId>();
   private readonly hostState: QcExecutorHost;
   private readonly ownedActors: QcModActors;
+  private readonly clients: QcModClientBindings | null;
   private readonly combat: QcModCombat | null;
   private readonly messages: QcModMessages | null;
   private readonly environment: QcModEnvironment;
@@ -148,7 +157,8 @@ export class QcModProvider {
       if (field === undefined) throw new Error(`Missing validated actor field ${entry.field}`);
       return { declaration: entry, offset: field.offset, words: field.type === "vector" ? 3 : 1 };
     });
-    const entities = new QcEntityMemory(classicQcEntityLayout(program), 8192);
+    if (declaration.clients !== undefined && services.clients === undefined) throw new Error("QuakeC component clients require destination client services");
+    const entities = new QcEntityMemory(classicQcEntityLayout(program), 8192, (declaration.clients?.maximum ?? 0) + 1);
     this.environment = new QcModEnvironment(services, program, declaration, actor => this.reference(actor));
     const host = new Map<QcHostBuiltinName, QcBuiltin>();
     const movement = new Map<QcHostBuiltinName, QcBuiltin>();
@@ -197,6 +207,23 @@ export class QcModProvider {
         } })) host.set(name, builtin);
     }
     for (const [name, builtin] of this.environment.host) host.set(name, builtin);
+    if (declaration.clients !== undefined && program.api.kind === "q1-quakeworld") {
+      host.set("infokey", vm => {
+        const reference = vm.argInt(0), key = vm.argString(1);
+        const actor = reference === 0 ? null : this.actorsBySlot.get(vm.entities.slot(reference));
+        const value = reference === 0 ? this.cvars.variableString(key)
+          : actor === undefined || actor === null || this.clients?.slot(actor) == null ? "" : this.clients.userinfo(actor, key);
+        vm.returnInt(vm.strings.setEngine(`mod-infokey:${reference}:${key}`, value, Math.max(1024, value.length + 1)));
+      });
+      for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[]) host.set(name, vm => {
+        const actor = this.actor(vm.argInt(0));
+        if (this.clients?.slot(actor) == null) { services.engine?.print(`tried to ${name} to a non-client\n`); return; }
+        const message = services.engine?.message; if (message === undefined) return vm.fail("Mod client message requires a destination message sink");
+        const text = vm.varString(name === "sprint" ? 2 : 1);
+        return message(name === "sprint" ? { kind: "print", level: Math.trunc(vm.argFloat(1)), text }
+          : name === "centerprint" ? { kind: "center-print", text } : { kind: "command-text", text }, actor);
+      });
+    }
     host.set("localcmd", vm => {
       if (this.commands === null) return vm.fail("Mod localcmd requires the destination command service");
       this.commands.append(vm.argString(0));
@@ -218,11 +245,16 @@ export class QcModProvider {
       } }), observeCall: call => this.combat?.damage.observeCall(call), observeEntityStore: store => {
         this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
       } });
+    this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
+      project: actor => { this.reference(actor); }, release: actor => this.releaseClientProjection(actor), invoke: (call, actor) => {
+        const now = services.time(); this.invoke(call, new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }],
+          ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]));
+      } });
     this.environment.initializeGlobals(this.machine);
     this.actorState = new QcActorState({ machine: this.machine, rerelease: media?.content.includes(":rerelease:") === true,
       sourceSlot: actor => { const source = services.actors.sourceOf(actor); return source?.provider === module.id ? source.slot : null; },
       reference: reference => this.actor(reference), isClient: () => false });
-    this.ownedActors = new QcModActors({ machine: this.machine, services, provider: module.id,
+    this.ownedActors = new QcModActors({ machine: this.machine, services, provider: module.id, firstDynamicSlot: (declaration.clients?.maximum ?? 0) + 1,
       think: program.fieldsByName.get("think")?.offset ?? null,
       nextthink: program.fieldsByName.get("nextthink")?.offset ?? null,
       body: slot => createQcBodyBinding(program, entities, slot, { reference: actor => this.reference(actor), actor: reference => {
@@ -304,7 +336,7 @@ export class QcModProvider {
       checkpoint: () => ({ state: { module, format: "quakec:mod-host-v3", bytes: encodeCheckpointValue({
         projections: [...this.projections].map(([actor, slot]) => ({ actor: savedActorId(actor), slot })), precached: [...this.precached.keys()],
         messages: this.messages?.capture() ?? null, cvars: this.environment.cvars.captureQuakeCState(), visibility: this.environment.visibility?.capture() ?? null,
-        initialized: this.initialized }) }, random: [random.checkpoint()], callbacks: [] }),
+        initialized: this.initialized, clients: this.clients?.checkpoint().map(entry => ({ ...entry, actor: savedActorId(entry.actor) })) ?? null }) }, random: [random.checkpoint()], callbacks: [] }),
       restore: state => {
         if (state.state.format !== "quakec:mod-host-v3" || state.random.length !== 1) throw new Error("Invalid gameplay mod host state");
         const savedRandom = state.random[0]; if (savedRandom === undefined) throw new Error("Missing gameplay mod random state");
@@ -330,11 +362,20 @@ export class QcModProvider {
         if (this.environment.visibility === null ? visibility.value !== null : visibility.value === null) throw new Error("Saved mod client visibility differs");
         this.environment.visibility?.restore(visibility.value);
         this.initialized = savedHost.field("initialized").boolean();
-        this.ownedActors.restored();
+        const clients = savedHost.field("clients");
+        if (this.clients !== null) {
+          this.clients.restore(clients.list(entry => ({ actor: resolve(readSavedActor(entry.field("actor"))), slot: entry.field("slot").integer(1), admitted: entry.field("admitted").boolean() })));
+          const projected = this.clients.checkpoint();
+          if (entities.count <= (declaration.clients?.maximum ?? 0) || projected.some(entry => this.projections.get(entry.actor) !== entry.slot)
+            || [...this.actorsBySlot].some(([slot, actor]) => slot <= (declaration.clients?.maximum ?? 0) && !projected.some(entry => entry.slot === slot && entry.actor.equals(actor))))
+            throw new Error("Saved QuakeC client projection differs from its reserved slot");
+        } else if (clients.value !== undefined && clients.value !== null) throw new Error("Saved QuakeC clients require the declared lifecycle service");
+        this.ownedActors.restored(); this.clients?.start();
         return undefined;
       },
     };
     this.releaseProjection = services.actors.onRelease(actor => {
+      this.clients?.forget(actor.id);
       const slot = this.projections.get(actor.id);
       if (slot !== undefined) this.actorsBySlot.delete(slot);
       this.projections.delete(actor.id);
@@ -366,11 +407,17 @@ export class QcModProvider {
     if (!this.services.actors.isLive(actor)) throw new Error("Gameplay mod cannot project a stale actor");
     const existing = this.projections.get(actor);
     if (existing !== undefined) return this.machine.entities.reference(existing);
-    const slot = this.machine.entities.count;
-    this.machine.entities.setCount(slot + 1);
+    const clientSlot = this.clients?.slot(actor) ?? null, slot = clientSlot ?? this.machine.entities.count;
+    if (clientSlot === null) this.machine.entities.setCount(slot + 1);
+    else this.machine.entities.at(slot).bytes.fill(0);
     this.projections.set(actor, slot); this.actorsBySlot.set(slot, actor);
     for (const field of this.fields) if (field.declaration.binding === "constant") this.write(this.machine.entities.at(slot), field.offset, field.declaration.value);
     return this.machine.entities.reference(slot);
+  }
+  private releaseClientProjection(actor: ActorId): void {
+    const slot = this.projections.get(actor);
+    if (slot === undefined) return;
+    this.projections.delete(actor); this.actorsBySlot.delete(slot); this.machine.entities.at(slot).bytes.fill(0);
   }
   private prepareEntities(): void { for (const actor of this.services.actors.observations()) this.reference(actor.id); }
   private refresh(actor: ActorId, slot: number, word: number, count: number): void {
@@ -380,6 +427,12 @@ export class QcModProvider {
       const declared = field.declaration;
       switch (declared.binding) {
         case "constant": case "private": case "think": case "nextthink": break;
+        case "userinfo": {
+          if (this.clients === null) throw new Error("Mod userinfo field requires client services");
+          if (this.clients.slot(actor) === null) break;
+          const value = this.clients.userinfo(actor, declared.key);
+          words.setInt(field.offset, this.machine.strings.setEngine(`mod-userinfo:${slot}:${declared.key}`, value, Math.max(128, value.length + 1))); break;
+        }
         case "classname": {
           const name = this.services.engine?.classname?.(actor);
           if (name === undefined) throw new Error("Mod classname field requires canonical actor metadata");
@@ -418,6 +471,11 @@ export class QcModProvider {
       const declared = field.declaration;
       switch (declared.binding) {
         case "constant": case "private": break;
+        case "userinfo": {
+          if (this.clients === null) throw new Error("Mod userinfo field requires client services");
+          if (this.clients.slot(actor.id) !== null) this.clients.setUserinfo(actor.id, declared.key, this.machine.strings.get(words.int(field.offset)));
+          break;
+        }
         case "classname": case "client-flags": case "view-offset": throw new Error(`Mod ${declared.binding} store requires its canonical owner`);
         case "think": case "nextthink": this.ownedActors.schedule(actor); break;
         case "health":
@@ -556,6 +614,7 @@ export class QcModProvider {
       for (const call of this.declaration.initialize ?? []) this.invoke(call, inputs);
       this.initialized = true;
     } finally { this.loading = false; }
+    this.clients?.start();
     return undefined;
   }
   advance(frame: FrameContext): undefined {
@@ -571,7 +630,7 @@ export class QcModProvider {
   restore(saved: QuakeCCheckpoint): undefined { if (this.depth !== 0) throw new Error("Mod restore requires an idle callback boundary"); return restoreQcCheckpoint(this.machine, this.module, this.hostState, saved); }
   close(): undefined {
     if (this.closed) return undefined;
-    this.closed = true;
+    this.closed = true; this.clients?.close();
     try { this.ownedActors.close(); } finally {
       this.releaseProjection();
       this.messages?.close();
