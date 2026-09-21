@@ -5,9 +5,10 @@ import type { QvmGame } from "./game.ts";
 import type { SharedBodyTable } from "../../world/actors/body.ts";
 import type { GameplayAuthority } from "../../world/gameplay/authority.ts";
 import { attackDamageFlags } from "../../world/gameplay/armor.ts";
-import { QvmGameCombat, type QvmGameCombatDefinition } from "./game-combat.ts";
+import { QvmGameCombat, type QvmGameArmorDefinition, type QvmGameCombatDefinition } from "./game-combat.ts";
 
 interface NativeCombatDefinition extends QvmGameCombatDefinition {
+  readonly armor: QvmGameArmorDefinition;
   readonly reactions: { readonly flags: number; readonly pain: number; readonly die: number };
   readonly grappleDamageMethod: number;
 }
@@ -27,13 +28,72 @@ export class QvmCombatBindings {
     this.source = new QvmGameCombat(options.game, options.artifact, options.definition);
     for (const field of Object.values(options.definition.reactions)) if (!Number.isInteger(field) || field < 0 || field % 4 !== 0 || field + 4 > options.definition.entityStride)
       throw new Error("Source combat reaction field is outside its entity record");
+    const { armor } = options.definition, image = options.artifact.image;
+    const stat = (index: number): void => {
+      if (!Number.isInteger(index) || index < 0 || index >= 16) throw new Error("Source armor stat is outside the public player record");
+    };
+    const protection = (value: number): void => {
+      if (!Number.isFinite(value) || value < 0 || value > 1 || Math.fround(value) !== value) throw new Error("Source armor protection must be a binary32 fraction");
+    };
+    stat(armor.pointsStat); protection(armor.protection);
+    const tiers = armor.tiers;
+    if (tiers !== null) {
+      stat(tiers.stat); protection(tiers.fallback);
+      if (tiers.stat === armor.pointsStat || tiers.whenAny.length === 0 || tiers.values.length === 0) throw new Error("Source armor tier declaration is incomplete or aliases its points");
+      const values = new Set<number>();
+      for (const entry of tiers.values) {
+        if (!Number.isInteger(entry.tier) || entry.tier < -0x80000000 || entry.tier > 0x7fffffff || values.has(entry.tier)) throw new Error("Source armor tiers require unique signed integer values");
+        values.add(entry.tier); protection(entry.protection);
+      }
+      for (const condition of tiers.whenAny) {
+        if (!Number.isInteger(condition.offset) || condition.offset < 0 || condition.offset % 4 !== 0
+          || condition.offset + 4 > image.dataLength + image.literalLength + image.bssLength) throw new Error("Source armor mode word is outside source data");
+        if (!Number.isInteger(condition.value) || condition.value < -0x80000000 || condition.value > 0x7fffffff) throw new Error("Source armor mode comparison requires a signed integer");
+      }
+    }
   }
   notarget(actor: ActorId): boolean | null {
     const slot = this.options.slot(actor);
     return slot === null ? null : (this.options.game.data.entityBytes(slot).getInt32(this.options.definition.reactions.flags, true) & 32) !== 0;
   }
+  normalizeLegacyArmor(actor: ActorId, saved: ArmorState): ArmorState {
+    const slot = this.options.slot(actor);
+    if (slot === null || slot >= 1022) throw new Error("Legacy QVM armor has no source actor");
+    const matches = slot < this.options.game.data.numClients
+      ? saved.regular.kind === "q3" && saved.regular.points === (this.options.game.data.copyPlayerState(slot).stats[3] ?? 0) && saved.regular.protection === 0.66
+      : saved.regular.kind === "none";
+    if (!matches || saved.powered.kind !== "none") throw new Error("Legacy QVM armor disagrees with the original source projection");
+    return this.armor(slot);
+  }
+  private activeTiers(): QvmGameArmorDefinition["tiers"] {
+    const tiers = this.options.definition.armor.tiers;
+    return tiers !== null && tiers.whenAny.some(condition => {
+      const value = this.options.game.module.memory.view(condition.offset, 4).getInt32(0, true);
+      return condition.comparison === "equal" ? value === condition.value : value !== condition.value;
+    }) ? tiers : null;
+  }
+  private protection(stats: readonly number[], tiers: QvmGameArmorDefinition["tiers"]): number {
+    return tiers === null ? this.options.definition.armor.protection : tiers.values.find(entry => entry.tier === stats[tiers.stat])?.protection ?? tiers.fallback;
+  }
   private armor(slot: number): ArmorState {
-    return { regular: slot < this.options.game.data.numClients ? { kind: "q3", points: this.options.game.data.copyPlayerState(slot).stats[3] ?? 0, protection: 0.66 } : { kind: "none" }, powered: { kind: "none" } };
+    if (slot >= this.options.game.data.numClients) return { regular: { kind: "none" }, powered: { kind: "none" } };
+    const stats = this.options.game.data.copyPlayerState(slot).stats;
+    return { regular: { kind: "q3", points: stats[this.options.definition.armor.pointsStat] ?? 0, protection: this.protection(stats, this.activeTiers()) }, powered: { kind: "none" } };
+  }
+  private armorWrite(slot: number, armor: ArmorState): { readonly points: number; readonly tier: { readonly stat: number; readonly value: number } | null } | null {
+    if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q3") throw new Error("Native Q3 armor requires Q3 armor values");
+    if (slot >= this.options.game.data.numClients) {
+      if (armor.regular.kind !== "none") throw new Error("Source non-client has no player armor");
+      return null;
+    }
+    const points = armor.regular.kind === "none" ? 0 : armor.regular.points;
+    if (!Number.isInteger(points) || points < 0 || points > 0x7fffffff) throw new Error("Source armor points require a nonnegative signed integer");
+    if (armor.regular.kind === "none") return { points, tier: null };
+    const stats = this.options.game.data.copyPlayerState(slot).stats, tiers = this.activeTiers(), requested = Math.fround(armor.regular.protection);
+    if (requested === this.protection(stats, tiers)) return { points, tier: null };
+    const selected = tiers?.values.find(entry => entry.protection === requested);
+    if (tiers === null || selected === undefined) throw new Error("Requested protection is not representable by the source armor mode");
+    return { points, tier: { stat: tiers.stat, value: selected.tier } };
   }
   admit(actor: OwnedActor): undefined {
     const { game, definition, combat } = this.options, slot = this.options.slot(actor.id);
@@ -47,7 +107,7 @@ export class QvmCombatBindings {
     };
     const binding = { read, sourceDamage: (request: DamageRequest) => this.damage(request, slot),
       validateArmor: (armor: ArmorState): undefined => {
-        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q3") throw new Error("Native Q3 armor requires Q3 armor values");
+        this.armorWrite(slot, armor);
         return undefined;
       },
       writeHealth: (health: number): undefined => {
@@ -55,9 +115,10 @@ export class QvmCombatBindings {
         if (slot < game.data.numClients) { const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[0] = health; game.data.writePlayerState(slot, { ...state, stats }); }
         return undefined;
       }, writeArmor: (armor: ArmorState): undefined => {
-        if (slot >= game.data.numClients) { if (armor.regular.kind !== "none" || armor.powered.kind !== "none") throw new Error("Source non-client has no player armor"); return undefined; }
-        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q3") throw new Error("Native Q3 armor requires Q3 armor values");
-        const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[3] = armor.regular.kind === "none" ? 0 : armor.regular.points; game.data.writePlayerState(slot, { ...state, stats }); return undefined;
+        const write = this.armorWrite(slot, armor); if (write === null) return undefined;
+        const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[definition.armor.pointsStat] = write.points;
+        if (write.tier !== null) stats[write.tier.stat] = write.tier.value;
+        game.data.writePlayerState(slot, { ...state, stats }); return undefined;
       } };
     if (combat.read(actor.id) === null) combat.bind(actor, binding); else combat.rebind(actor, binding);
     return undefined;

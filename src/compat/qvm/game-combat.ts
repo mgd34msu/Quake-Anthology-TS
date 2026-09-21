@@ -6,6 +6,17 @@ import type { QvmModuleOptions } from "./module.ts";
 import { QvmOpcode } from "./image.ts";
 import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
 
+export interface QvmGameArmorDefinition {
+  readonly pointsStat: number;
+  readonly protection: number;
+  readonly tiers: {
+    readonly stat: number;
+    readonly whenAny: readonly { readonly offset: number; readonly comparison: "equal" | "not-equal"; readonly value: number }[];
+    readonly values: readonly { readonly tier: number; readonly protection: number }[];
+    readonly fallback: number;
+  } | null;
+}
+
 export interface QvmGameCombatDefinition {
   readonly module: ModuleIdentity;
   readonly abiProfile: QvmAbiProfile;

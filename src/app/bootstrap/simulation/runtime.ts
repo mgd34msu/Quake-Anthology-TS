@@ -3869,8 +3869,12 @@ export class SharedSimulation implements Simulation {
     if (this.source.kind === "q3-qvm") {
       const player = this.source.game.players().find(player => player.actor.equals(actor));
       if (player === undefined) throw new Error("Actor has no Q3 guest client UI");
-      return q3GuestPlayerUi(this.source.game.records.player(player.sourceEntity), this.weaponProvider, this.timeSeconds * 1000,
+      const ui = q3GuestPlayerUi(this.source.game.records.player(player.sourceEntity), this.weaponProvider, this.timeSeconds * 1000,
         this.options.q3Guest?.prepared.weapons, this.options.q3Guest?.prepared.artifact.known?.product);
+      if (this.source.combat === null) return ui;
+      const combat = this.combat.read(actor);
+      if (combat === null) throw new Error("Qualified Q3 guest client has no combat binding");
+      return { ...ui, armor: combat.armor };
     }
     if (this.source.kind === "q2-native") return this.source.edition === "classic"
       ? classicGuestPlayerUi(this.source.game.playerState(this.nativeQ2Client(actor).slot + 1), this.source.game.configstrings(), this.weaponProvider)
@@ -4955,6 +4959,7 @@ export class SharedSimulation implements Simulation {
 
     add("world:simulation", encodeCheckpointValue({ settings: { skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients, seed: this.options.seed, startItems: this.startItems, initialSpawnPoint: this.initialSpawnPoint },
       modClientApplicationOrdinal: this.modClientApplications.checkpoint(), q1Punch: this.q1Punch.capture(),
+      ...(source.kind === "q3-qvm" && source.combat !== null ? { qvmArmorProjection: 1 } : {}),
       players: [...this.playerStates.values()].map(captureMovementPlayer), hostMilliseconds: this.hostMilliseconds, q1Paused: this.q1PauseState,
       modClientCommands: [...this.modClientCommands.values()].map(value => {
         const client = this.playerClient(value.input.actor); if (client === null) throw new Error("Accepted command lost its live client");
@@ -5098,7 +5103,15 @@ export class SharedSimulation implements Simulation {
         if (actor !== null && this.playerClient(actor.id) !== null && !this.inventory.has(actor.id)) this.bindEquipmentInventory(actor, entry.entries);
       }
     }
-    this.pendingSharedRestore = restoreSharedWorldState(save, { actors: this.actors, bodies: this.bodies, combat: this.combat, inventory: this.inventory,
+    const qvmArmorProjection = reader.field("qvmArmorProjection");
+    if (qvmArmorProjection.value !== undefined) qvmArmorProjection.literal(1);
+    const legacyQvmCombat = qvmArmorProjection.value === undefined && source.kind === "q3-qvm" ? source.combat : null;
+    const sharedSave = legacyQvmCombat === null ? save : { ...save, combat: save.combat.map(entry => {
+      const actor = this.actors.resolveSaved(entry.actor);
+      if (actor === null || this.actors.sourceOf(actor.id)?.provider !== this.recipe.map.entities.provider) return entry;
+      return { ...entry, state: { ...entry.state, armor: legacyQvmCombat.normalizeLegacyArmor(actor.id, entry.state.armor) } };
+    }) };
+    this.pendingSharedRestore = restoreSharedWorldState(sharedSave, { actors: this.actors, bodies: this.bodies, combat: this.combat, inventory: this.inventory,
       storage: actor => reconstructed(actor.id) ? "source-reconstructed" : (source.kind === "quakec" || source.kind === "q3-qvm") && this.actors.sourceOf(actor.id)?.provider === this.recipe.map.entities.provider ? "prebound" : "copied" }, { deferPoweredProtection: true });
     reader.field("players").list(value => {
       const saved = readMovementPlayer(value, actor => this.actors.referenceSaved(actor)), actor = owner(value.field("actor"));
