@@ -366,6 +366,7 @@ export class Application {
   private frontendBaseline: FrontendPreferenceValues | null = null;
   private bots: ApplicationBotService | null = null;
   private clientCvars = new Map<SeatId, CvarRegistry>();
+  private readonly publishedUserinfo = new WeakMap<CvarRegistry, string>();
   private teamArenaOverrides: TeamArenaOverrides | null = null;
 
   private overrideSeats(clients: ReadonlyMap<SeatId, CvarRegistry> = this.clientCvars): readonly OverrideRegistry[] {
@@ -1509,6 +1510,28 @@ export class Application {
       if (!this.requestedCommands.some(command => command.name === "local_drop" && command.seat?.equals(seat)))
         this.queueCommand("local_drop", [], seat);
     }
+    const droppingSimulation = this.simulation;
+    for (const request of droppingSimulation.takeModClientDrops()) {
+      const { actor, client, reason } = request;
+      if (this.simulation !== droppingSimulation || !droppingSimulation.playerClient(actor)?.equals(client)) continue;
+      const localSeat = [...this.localSeats].find(([id]) => id.equals(client))?.[1];
+      if (localSeat !== undefined && this.localSeats.size > 1) {
+        await this.changeLocalPlayers("drop", [], localSeat.id);
+        this.host.print(`${request.content}: client ${client.slot}: ${reason}\n`);
+        continue;
+      }
+      await this.disconnectRankings(droppingSimulation, client);
+      if (this.simulation !== droppingSimulation || !droppingSimulation.playerClient(actor)?.equals(client)) continue;
+      if (this.bots?.disconnect(client.slot)) continue;
+      if (await this.network?.server.disconnectClient(client, reason)) continue;
+      const local = [...this.localSeats.keys()].some(id => id.equals(client));
+      const guest = this.simulation.q3Guest(), player = guest?.player(client);
+      if (guest !== null && player !== undefined && player !== null) await guest.disconnect(player);
+      else this.simulation.disconnectPlayer(actor);
+      this.session.closeClient(client); this.localSeats.delete(client);
+      this.host.print(`${request.content}: client ${client.slot}: ${reason}\n`);
+      if (local) this.requestQuit();
+    }
     for (const source of events) {
       await this.recordPlayerProgress(source);
       if (source.kind === "q1-composition") {
@@ -2195,6 +2218,7 @@ export class Application {
       for (const name of ["headmodel", "team_headmodel"]) cvars.set(name, setup.playerHeadModel, true);
       for (const setting of teamArenaClientCvars(setup, cvars.snapshots())) cvars.set(setting.name, setting.value, true);
     }
+    this.publishedUserinfo.set(cvars, playerUserinfo(cvars));
     return cvars;
   }
 
@@ -4172,12 +4196,20 @@ export class Application {
         this.operatorState.refreshQ3Masters(serverCvars, text => this.host.print(text));
       for (const local of this.graphical?.input.locals ?? []) {
         const cvars = this.clientCvars.get(local.player.seat.id);
-        if (cvars !== undefined) this.simulation.updatePlayerUserinfo(local.player.actor, playerUserinfo(cvars));
+        if (cvars !== undefined) {
+          const userinfo = playerUserinfo(cvars);
+          if (this.publishedUserinfo.get(cvars) !== userinfo) {
+            await this.simulation.updatePlayerUserinfo(local.player.actor, userinfo);
+            this.publishedUserinfo.set(cvars, userinfo);
+          }
+        }
       }
       for (const native of this.graphical?.nativeQ2.values() ?? []) {
         const userinfo = native.cvars.infoString(CvarFlag.UserInfo);
         if (userinfo === native.userinfo) continue;
         q2GameCallback(() => native.client.world.userinfo(native.client.sourceSlot, `${userinfo}\\ip\\localhost`));
+        const actor = native.client.world.actor(native.client.sourceSlot);
+        if (actor !== null) this.simulation.notifyClientEvent("userinfo", actor);
         native.userinfo = userinfo;
       }
       for (const [seat, source] of this.graphical?.q3 ?? []) {

@@ -280,10 +280,11 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         } else if (name === 'name') {
             const values = new Map(source.composition.clients.require(player.actor).userinfo);
             values.set('name', (args[0] ?? 'unconnected').slice(0, 15));
-            source.composition.userinfo(player.actor, values);
+            source.composition.userinfo(player.actor, values); simulation.notifyClientEvent("userinfo", player.actor);
         }
-        else if (name === 'color')
-            source.composition.clients.colors(player.actor, Number(args[0] ?? 0), Number(args[1] ?? args[0] ?? 0));
+        else if (name === 'color') {
+            source.composition.clients.colors(player.actor, Number(args[0] ?? 0), Number(args[1] ?? args[0] ?? 0)); simulation.notifyClientEvent("userinfo", player.actor);
+        }
         else if (name === 'use' || name === 'weapnext' || name === 'weapprev' || name === 'give' || name === 'god'
             || name === 'notarget' || name === 'noclip' || name === 'fly' || name === 'kill')
             simulation.playerCommand(player.actor, name, args);

@@ -29,6 +29,7 @@ import type { NetworkEvent } from "../../contracts/protocol.ts";
 import type { Q1ClientVisibilityScene, Q1VisibilityClient } from "../gameplay/q1-client-visibility.ts";
 import type { ModCommands } from "./mod-commands.ts";
 import type { ModUserFiles } from "./mod-files.ts";
+import type { ModClientServices } from "./mod-clients.ts";
 
 export interface ModOperations {
   readonly actors: ActorCallbackTable["operations"];
@@ -61,6 +62,7 @@ export interface ModInitialization {
   assertCurrent(): void;
 }
 export interface ModHostServices {
+  readonly clients?: ModClientServices;
   readonly commands?: Pick<ModCommands, "bind">;
   readonly files?: Pick<ModUserFiles, "for">;
   readonly native?: NativeModHostContext;

@@ -192,6 +192,7 @@ export class Q3ServerNetwork implements ApplicationNetwork {
       for (const peer of [...this.peers.values()]) {
         if (this.ended) return;
         if (this.peers.get(peer.slot) !== peer) continue;
+        if (item.recipient !== undefined && !item.recipient.equals(peer.player.actor)) continue;
         if (event.kind === 'drop-client' && event.client === peer.player.sourceEntity) await this.disconnectClient(peer.player.client, event.reason);
         else if (event.kind === 'server-command' && (event.client === -1 || event.client === peer.player.sourceEntity)) await this.queue(peer, event.text);
         else if (event.kind === 'configstring' && peer.connection.phase !== 'connected') {

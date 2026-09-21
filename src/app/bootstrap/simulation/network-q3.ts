@@ -186,11 +186,12 @@ export function createQ3ApplicationServerHost(options: Q3ApplicationServerBindin
     },
     ...(guest ? { begin: (player: Q3ApplicationPlayer, command: import('../../../network/q3/message.ts').WireUserCommand) => source.begin(player, command) } : {}),
     input: async (player, command, sequence) => {
-      if (guest) { await source.think(player, command); return null; }
+      if (guest) { simulation.observeClientCommand({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command: toQ3UserCommand(command) });
+        await source.think(player, command); return null; }
       return { actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command: toQ3UserCommand(command) };
     },
     command: (player, name, args) => guest ? source.command(player, [name, ...args]) : nativeSource().playerCommand(player.actor, name, args),
-    userinfo: (player, value) => { if (guest) return source.userinfo(player, value); state.setUserinfo(player.sourceEntity, value); nativeSource().admission.userinfoChanged(player.sourceEntity); return undefined; },
+    userinfo: (player, value) => { if (guest) return source.userinfo(player, value); state.setUserinfo(player.sourceEntity, value); nativeSource().admission.userinfoChanged(player.sourceEntity); simulation.notifyClientEvent("userinfo", player.actor); return undefined; },
     status: (challenge, detailed) => {
       if (cvars.variableValue('g_gametype') === 2 || !detailed && cvars.variableValue('ui_singlePlayerActive') !== 0) return null;
       const put = (info: string, key: string, value: string): string => setInfoValue(info, key, value,

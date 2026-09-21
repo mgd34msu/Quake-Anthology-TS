@@ -157,6 +157,11 @@ export class RereleaseGuestWorld {
       } finally { module.memory.unmap(info, 2048); }
     });
   }
+  setUserinfoStorage(slot: number, value: string): void {
+    this.requireRunning(); const client = this.client(slot);
+    if (new TextEncoder().encode(value).length >= 2048 || value.includes("\0")) throw new RangeError("Rerelease userinfo exceeds its source string limits");
+    this.#clients.set(slot, { ...client, userinfo: value });
+  }
   command(slot: number, arguments_: readonly string[], args: string): void {
     this.operation(() => { this.requireRunning(); this.client(slot, "active"); const module = this.source.host.module, entity = module.entities().atSlot(slot);
       this.commandContext.value = { arguments: [...arguments_], args };

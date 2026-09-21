@@ -91,7 +91,7 @@ export async function createClassicQ2ApplicationServerHost(options: Q2Applicatio
             if (actor === undefined) throw new Error('Q2 guest carried client is not owned by this world');
             const player = { client, actor, sourceEntity: client.slot + 1 }; players.set(client.slot, player); return player;
         },
-        begin: player => q2GameCallback(() => { requirePlayer(player); world.begin(player.sourceEntity); }),
+        begin: player => q2GameCallback(() => { requirePlayer(player); world.begin(player.sourceEntity); simulation.notifyClientEvent("admitted", player.actor); }),
         disconnect: player => q2GameCallback(() => {
             requirePlayer(player);
             const failures: unknown[] = [];
@@ -138,9 +138,11 @@ export async function createClassicQ2ApplicationServerHost(options: Q2Applicatio
             });
         },
         events: () => [],
-        input: (player, wire) => q2GameCallback(() => { requirePlayer(player); world.think(player.sourceEntity, toQ2Command(wire)); return null; }),
+        input: (player, wire, sequence) => q2GameCallback(() => { requirePlayer(player); const command = toQ2Command(wire);
+            simulation.observeClientCommand({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command });
+            world.think(player.sourceEntity, command); return null; }),
         expandClientCommand: text => expandCommandMacros(text, name => cvars.variableString(name), options.print),
         command: (player, name, args) => command(player, [name, ...args].join(' ')), commandText: command,
-        userinfo: (player, value) => q2GameCallback(() => { requirePlayer(player); world.userinfo(player.sourceEntity, value); }), print: options.print,
+        userinfo: (player, value) => q2GameCallback(() => { requirePlayer(player); world.userinfo(player.sourceEntity, value); simulation.notifyClientEvent("userinfo", player.actor); }), print: options.print,
     };
 }

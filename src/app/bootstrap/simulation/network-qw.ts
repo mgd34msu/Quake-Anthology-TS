@@ -229,7 +229,7 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
             } else if (name === 'setinfo' && args.length === 2) {
                 const key = args[0], value = args[1]; if (key === undefined || value === undefined || key.startsWith('*') || /[\\"\n\r]/.test(key + value)) return;
                 const client = requireClient(player); if (value === '') client.info.delete(key); else client.info.set(key, value);
-                game.setClientInfo(player.client, client.info);
+                game.setClientInfo(player.client, client.info); simulation.notifyClientEvent("userinfo", player.actor);
                 queued.push({ message: { kind: 'set-info', slot: player.slot, key, value }, destination: { kind: 'broadcast', reliable: true } });
             } else options.print(`Unhandled QW client command: ${name}`);
         },

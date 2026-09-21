@@ -4,7 +4,8 @@ import type { TraceQuery } from "../../contracts/scene.ts";
 import { CommonError } from "../../core/common-error.ts";
 import type { CvarRegistry } from "../../core/cvars/index.ts";
 import { QvmGameImport } from "./abi.ts";
-import { QVM_USER_COMMAND_BYTES, writeQvmUserCommand } from "./client-state-record.ts";
+import type { writeQvmUserCommand } from "./client-state-record.ts";
+import { qvmClientGameSyscall } from "./client-game-syscalls.ts";
 import type { QvmGameData } from "./game-data.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 import { qvmServerInformationSyscall } from "./server-info-syscalls.ts";
@@ -41,14 +42,6 @@ export interface QvmServerGameServices {
   sendServerCommand(slot: number, text: string): void | Promise<void>;
   entityToken(): { readonly token: string; readonly ended: boolean };
 }
-function complete(result: void | Promise<void>): QvmHostResult { return result === undefined ? 0 : result.then(() => 0); }
-function capacity(size: number, operation: string): void {
-  if (size < 1) throw new CommonError("drop", `${operation}: bufferSize == ${size}`);
-}
-function client(slot: number, services: QvmServerGameServices, operation: string): void {
-  if (slot < 0 || slot >= services.maxClients) throw new CommonError("drop", operation === "SV_GetUsercmd"
-    ? `${operation}: bad clientNum:${slot}` : `${operation}: bad index ${slot}\n`);
-}
 
 /** Null delegates to another trap owner; zero means the requested operation completed. */
 export function qvmServerGameSyscall(call: QvmHostCall, services: QvmServerGameServices): QvmHostResult | null {
@@ -62,24 +55,19 @@ export function qvmServerGameSyscall(call: QvmHostCall, services: QvmServerGameS
   const bounds = (): Bounds => ({ min: vector(word(1)), max: vector(word(2)) });
   const slot = (index: number): number => services.data.numberFromPointer(word(index));
   switch (call.code) {
-    case QvmGameImport.G_DROP_CLIENT: {
-      const number = word(1);
-      return number < 0 || number >= services.maxClients ? 0 : complete(services.dropClient(number, guest.readString(word(2))));
-    }
-    case QvmGameImport.G_SEND_SERVER_COMMAND: {
-      const number = word(1);
-      return number !== -1 && (number < 0 || number >= services.maxClients) ? 0 : complete(services.sendServerCommand(number, guest.readString(word(2))));
-    }
+    case QvmGameImport.G_DROP_CLIENT:
+    case QvmGameImport.G_SEND_SERVER_COMMAND:
+    case QvmGameImport.G_GET_USERINFO:
+    case QvmGameImport.G_SET_USERINFO:
+    case QvmGameImport.G_GET_USERCMD:
+      return qvmClientGameSyscall(call, { abiProfile: services.data.abiProfile, maxClients: services.maxClients,
+        getUserinfo: slot => services.getUserinfo(slot), setUserinfo: (slot, value) => services.setUserinfo(slot, value),
+        getUserCommand: slot => services.getUserCommand(slot), dropClient: (slot, reason) => services.dropClient(slot, reason),
+        sendServerCommand: (slot, text) => services.sendServerCommand(slot, text) });
     case QvmGameImport.G_SET_CONFIGSTRING:
     case QvmGameImport.G_GET_CONFIGSTRING:
     case QvmGameImport.G_GET_SERVERINFO:
       return qvmServerInformationSyscall(call, { abiProfile: services.data.abiProfile, cvars: services.cvars, configstrings: services.configstrings });
-    case QvmGameImport.G_GET_USERINFO:
-      capacity(word(3), "SV_GetUserinfo"); client(word(1), services, "SV_GetUserinfo");
-      guest.writeString(word(2), services.getUserinfo(word(1)), word(3)); return 0;
-    case QvmGameImport.G_SET_USERINFO:
-      client(word(1), services, "SV_SetUserinfo");
-      services.setUserinfo(word(1), word(2) === 0 ? "" : guest.readString(word(2))); return 0;
     case QvmGameImport.G_SET_BRUSH_MODEL: {
       if (word(2) === 0) throw new CommonError("drop", "SV_SetBrushModel: NULL");
       const name = guest.readString(word(2));
@@ -116,9 +104,6 @@ export function qvmServerGameSyscall(call: QvmHostCall, services: QvmServerGameS
     case QvmGameImport.G_ENTITY_CONTACT:
     case QvmGameImport.G_ENTITY_CONTACTCAPSULE:
       return Number(services.spatial.entityContact(bounds(), slot(3), call.code === QvmGameImport.G_ENTITY_CONTACTCAPSULE));
-    case QvmGameImport.G_GET_USERCMD:
-      client(word(1), services, "SV_GetUsercmd");
-      writeQvmUserCommand(guest.view(word(2), QVM_USER_COMMAND_BYTES), services.getUserCommand(word(1)), services.data.abiProfile); return 0;
     case QvmGameImport.G_GET_ENTITY_TOKEN: return qvmEntityTokenSyscall(call, services);
     default: return null;
   }

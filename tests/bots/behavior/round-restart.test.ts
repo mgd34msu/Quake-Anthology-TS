@@ -35,6 +35,11 @@ test("six Team Arena slots retain bot resources and reconnect once after round s
       state.lastGoalDecisionmaker = 23; state.lastGoalTeammate = 4;
       client.reliable.add("print retained-round-ring");
     }
+    const target = clients[0], recipient = target === undefined ? null : bots.actor(target.client.id);
+    if (target === undefined || recipient === null) throw new Error("Missing actual bot recipient");
+    bots.receive([{ kind: "q3-source", content: "q3:classic:component:test", sequence: 0, seconds: simulation.timeSeconds,
+      recipient, event: { kind: "server-command", client: -1, text: "print private-component-message" } }]);
+    expect(clients.map(client => client.reliable.pending().some(command => command.text === "print private-component-message"))).toEqual([true, false, false, false, false]);
     const rings = clients.map(client => client.reliable.pending());
     let eventSequence = 0;
     const receive = (client: number, text: string): void => bots.receive([{ kind: "q3-source",

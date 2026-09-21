@@ -13,9 +13,10 @@ function value(reader: SaveReader): ModCallbackValue {
   }
 }
 function argument(reader: SaveReader): QvmModValue {
-  const kind = reader.field("kind").choice("int32", "float32", "vector", "string", "actor", "time", "address");
+  const kind = reader.field("kind").choice("int32", "float32", "vector", "string", "actor", "client", "time", "address");
   switch (kind) {
     case "actor": return { kind, record: reader.field("record").string(), input: reader.field("input").choice("self", "other", "activator", "attacker", "inflictor") };
+    case "client": return { kind, input: reader.field("input").choice("self", "other", "activator", "attacker", "inflictor") };
     case "time": return { kind, input: reader.field("input").choice("time", "elapsed"), units: reader.field("units").choice("seconds", "milliseconds"), encoding: reader.field("encoding").choice("int32", "float32") };
     case "address": return { kind, value: reader.field("value").integer(0) };
     default: return { kind, value: value(reader.field("value")) };
@@ -57,11 +58,14 @@ export function readQvmModCallbacks(bytes: Uint8Array): QvmModCallbackDeclaratio
 }
 
 export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclaration {
-  const program = reader.field("program"), actors = reader.field("sourceActors"), combat = reader.field("combat");
+  const program = reader.field("program"), actors = reader.field("sourceActors"), combat = reader.field("combat"), clients = reader.field("clients");
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("qvm"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
     abiProfile: reader.field("abiProfile").choice("q3-modern", "q3-1.16n-base"),
     spawnEntities: reader.field("spawnEntities").value === undefined ? null : reader.field("spawnEntities").nullable(value => value.string()),
+    ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1),
+      records: clients.field("records").list(value => value.string()), playerStateRecord: clients.field("playerStateRecord").string(), admit: clients.field("admit").list(sourceCall),
+      userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall) } }),
     entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     ...(actors.value === undefined ? {} : { sourceActors: { allocate: actors.field("allocate").integer(0),
       release: { entry: actors.field("release").field("entry").integer(0), argument: actors.field("release").field("argument").integer(0) },

@@ -19,6 +19,11 @@ export function q3SourceCommand(input: ActorCommand, player: MovementPlayer, mil
   const controls = player.arsenal.state.kind === "q3"
     ? resolveQ3ArsenalControls(player.arsenal, input.arsenal, command, player.recipe.map.entities.content.includes("missionpack") ? "missionpack" : "baseq3")
     : { requestedWeapon: nativeWeapon, useHoldable: input.arsenal?.useHoldable ?? (command.kind === "q3" && (command.buttons & 4) !== 0) };
+  return q3CommandForControls(input, milliseconds, controls);
+}
+
+export function q3CommandForControls(input: ActorCommand, milliseconds: number, controls: { readonly requestedWeapon: number; readonly useHoldable: boolean }): UserCommand {
+  const command = input.command;
   const buttons = (command.kind === "q3" ? command.buttons & ~4 : command.buttons & 1) | (controls.useHoldable ? 4 : 0);
   if (command.kind === "q3") return { serverTime: command.serverTimeMilliseconds,
     angles: { x: command.angleWords[0], y: command.angleWords[1], z: command.angleWords[2] }, buttons,
@@ -30,7 +35,8 @@ export function q3SourceCommand(input: ActorCommand, player: MovementPlayer, mil
   return { serverTime: Math.trunc(milliseconds), angles, buttons,
     weapon: controls.requestedWeapon,
     forwardmove: axis(command.forwardMove), rightmove: axis(command.sideMove),
-    upmove: command.kind === "q2-rerelease" ? (command.buttons & 8) !== 0 ? 127 : (command.buttons & 16) !== 0 ? -127 : 0 : axis(command.upMove) };
+    upmove: command.kind === "q2-rerelease" ? (command.buttons & 8) !== 0 ? 127 : (command.buttons & 16) !== 0 ? -127 : 0
+      : (command.kind === "q1-netquake" || command.kind === "q1-quakeworld") && (command.buttons & 2) !== 0 ? 127 : axis(command.upMove) };
 }
 
 /** Source spawn/inactivity frames can supply commands without a new transport packet. */

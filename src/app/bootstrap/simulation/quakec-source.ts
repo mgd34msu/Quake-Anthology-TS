@@ -470,11 +470,14 @@ export class QuakeCSource {
     return field === undefined ? "" : this.machine.strings.get(this.entities.fromReference(this.reference(actor)).int(field.offset));
   }
   setClientInfo(client: ClientId, values: ReadonlyMap<string, string>): void {
-    if (client.slot < 0 || client.slot >= this.options.maxClients) throw new Error("QC userinfo slot is unavailable");
-    this.userInfo.set(client.slot + 1, new Map(values));
+    this.setClientInfoStorage(client, values);
     const actor = this.slots.at(client.slot + 1);
     if (actor !== null && (this.activeClients.has(actor.id) || this.preparedClients.has(client.slot + 1))) this.entities.at(client.slot + 1).setInt(this.field("netname"),
       this.kind === "quakeworld" ? this.machine.strings.setEngine(`qw-name:${client.slot + 1}`, values.get("name") ?? "unnamed", 32) : this.machine.strings.allocate(values.get("name") ?? "unnamed"));
+  }
+  setClientInfoStorage(client: ClientId, values: ReadonlyMap<string, string>): void {
+    if (client.slot < 0 || client.slot >= this.options.maxClients) throw new Error("QC userinfo slot is unavailable");
+    this.userInfo.set(client.slot + 1, new Map(values));
   }
   setClientRole(client: ClientId, role: "player" | "spectator"): void {
     if (role === "spectator" && this.kind !== "quakeworld") throw new Error("Spectator clients require the QuakeWorld host ABI");

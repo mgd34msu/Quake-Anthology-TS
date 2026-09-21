@@ -113,6 +113,7 @@ export function createUnifiedApplicationServerHost(options: { readonly session: 
     else if (q2 !== null) { const entity = q2.game.entity(player.actor); if (entity === null) throw new Error('Unified Q2 player lost its source entity'); q2.players.userinfoChanged(entity, q2.game, text(values)); }
     else if (q3 !== null) { q3.host.serverState.setUserinfo(player.client.slot, text(values)); q3.admission.userinfoChanged(player.client.slot); }
     userinfos.set(player.client.slot, values);
+    simulation.notifyClientEvent("userinfo", player.actor);
   };
   const permitted = (player: UnifiedApplicationPlayer, event: SimulationEvent): boolean => {
     if (event.audience.kind === 'seat' || event.audience.kind === 'client' && !event.audience.client.equals(player.client)) return false;

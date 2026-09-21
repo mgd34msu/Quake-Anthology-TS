@@ -102,7 +102,9 @@ Server-info and configstring imports share the primary QVM implementation, inclu
 
 A QVM component can declare `spawnEntities` as source entity text, like a native component. Missing or null text supplies an empty stream. Only the component's declared original calls consume it; enabling the component does not pass the destination BSP entity lump or start another game world. The token import uses the primary engine parser and buffer rules. Saves retain the exact stream and parser position. An original LR parser/spawn witness creates one declared button in a Q1 world, saves, then resumes at a second declared button without recreating the first. Full match initialization remains separate.
 
-Client-specific services still need shared client identity and userinfo storage interfaces. Component source slots must not be treated as primary client numbers, including when routing targeted server commands.
+QVM client callbacks can opt into a `clients` declaration with reserved source rows, client-only `records`, a public `playerStateRecord`, and explicit `admit`, `userinfo`, and `disconnect` calls. A `{"kind":"client","input":"self"}` argument supplies the component's source client number. Ordinary actors use separate rows. Each row resolves a live destination client identity; restoring saved rows does not replay admission callbacks or reuse a disconnected client's identity. This does not invoke a second game's client-connect, client-begin, or whole-game frame.
+
+Client imports read the destination's userinfo and accepted input. Source userinfo writes update storage without recursively invoking gameplay callbacks. Usercmd conversion retains the accepted input time and uses the component's own weapon and angle state; it requires real input. Targeted commands and deferred disconnects retain the actual recipient. Component configstrings remain private, including source player rows; they feed component asset lookup and saves, and do not overwrite the primary game's wire tables. Independent component cgame transport is not provided.
 
 ### Component console commands
 

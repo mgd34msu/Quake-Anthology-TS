@@ -176,6 +176,11 @@ export class ClassicGuestWorld {
   userinfo(slot: number, value: string): void {
     this.operation(() => { this.requireRunning(); const client = this.requireClient(slot); const userinfo = this.source.host.clientUserinfoChanged(slot, value); this.#clients.set(slot, { ...client, userinfo }); });
   }
+  setUserinfoStorage(slot: number, value: string): void {
+    this.requireRunning(); const client = this.requireClient(slot);
+    if (new TextEncoder().encode(value).length >= 512 || value.includes("\0")) throw new RangeError("Classic userinfo exceeds its source string limits");
+    this.#clients.set(slot, { ...client, userinfo: value });
+  }
   command(slot: number, arguments_: readonly string[], args: string): void {
     this.operation(() => {
       this.requireRunning(); this.requireClient(slot, "active");

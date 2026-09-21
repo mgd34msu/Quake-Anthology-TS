@@ -116,7 +116,7 @@ export async function createRereleaseNativeQ2ApplicationServerHost(options: Q2Ap
             if (actor === undefined) throw new Error('Q2 guest carried client is not owned by this world');
             const player = { client, actor, sourceEntity: client.slot + 1 }; players.set(client.slot, player); return player;
         },
-        begin: player => q2GameCallback(() => { requirePlayer(player); world.begin(player.sourceEntity); }),
+        begin: player => q2GameCallback(() => { requirePlayer(player); world.begin(player.sourceEntity); simulation.notifyClientEvent("admitted", player.actor); }),
         disconnect: player => q2GameCallback(() => {
             requirePlayer(player);
             const failures: unknown[] = [];
@@ -166,10 +166,12 @@ export async function createRereleaseNativeQ2ApplicationServerHost(options: Q2Ap
         rawMessages: player => playerMessages(player).map(message => message.wire),
         sourceMessages: player => playerMessages(player).map(message => message.source),
         events: () => [],
-        input: (player, wire, sequence) => q2GameCallback(() => { requirePlayer(player); world.think(player.sourceEntity, toQ2RereleaseCommand(wire, protocol.kind === 'q2-kex' ? wire.serverFrame : sequence)); return null; }),
+        input: (player, wire, sequence) => q2GameCallback(() => { requirePlayer(player); const command = toQ2RereleaseCommand(wire, protocol.kind === 'q2-kex' ? wire.serverFrame : sequence);
+            simulation.observeClientCommand({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command });
+            world.think(player.sourceEntity, command); return null; }),
         expandClientCommand: text => expandCommandMacros(text, name => cvars.variableString(name), options.print),
         command: (player, name, args) => command(player, [name, ...args].join(' ')), commandText: command,
-        userinfo: (player, value) => q2GameCallback(() => { requirePlayer(player); world.userinfo(player.sourceEntity, value); }), print: options.print,
+        userinfo: (player, value) => q2GameCallback(() => { requirePlayer(player); world.userinfo(player.sourceEntity, value); simulation.notifyClientEvent("userinfo", player.actor); }), print: options.print,
     };
 }
 

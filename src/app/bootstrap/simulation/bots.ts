@@ -470,6 +470,7 @@ export class ApplicationBots {
       if (event.kind === "view-reset" && this.shared !== null) { this.resetView(event.actor, event.angles); if (event.reason === "spawn") this.resetWeapon(event.actor); continue; }
       if (event.kind !== "q3-source" || event.event.kind !== "server-command") continue;
       for (const client of this.clients()) {
+        if (event.recipient !== undefined && this.actor(client.client.id)?.equals(event.recipient) !== true) continue;
         if (event.event.client !== -1 && event.event.client !== client.client.id.slot) continue;
         this.appendReliable(client, event.event.text);
       }

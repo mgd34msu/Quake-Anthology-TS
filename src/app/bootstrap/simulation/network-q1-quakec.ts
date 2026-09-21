@@ -180,7 +180,7 @@ export async function createQuakeCNetQuakeHost(options: Q1ApplicationServerBindi
                 if (name === "name") info.set("name", (args[0] ?? "unconnected").slice(0, 15));
                 else { const top = Math.min(13, Math.trunc(Number(args[0] ?? 0)) & 15), bottom = Math.min(13, Math.trunc(Number(args[1] ?? args[0] ?? 0)) & 15);
                     info.set("topcolor", String(top)); info.set("bottomcolor", String(bottom)); game.entities.at(player.sourceEntity).setFloat(field("team"), bottom + 1); }
-                game.setClientInfo(player.client, info);
+                game.setClientInfo(player.client, info); simulation.notifyClientEvent("userinfo", player.actor);
             } else if (name === "say" || name === "say_team") {
                 const text = `\x01${string(player.sourceEntity, "netname")}: ${args.join(" ").slice(0, 126)}\n`;
                 for (const recipient of clients.values()) if (name !== "say_team" || game.cvars.variableValue("teamplay") === 0 || scalar(recipient.sourceEntity, "team") === scalar(player.sourceEntity, "team"))

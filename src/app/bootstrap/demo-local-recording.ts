@@ -135,6 +135,7 @@ export class LocalDemoRecording {
     } else if (source.kind === 'q3' && prepared?.kind === 'q3') {
       const operations: ServerOperation[] = [];
       for (const item of events) if (item.kind === 'q3-source') {
+        if (item.recipient !== undefined && !item.recipient.equals(source.player.actor)) continue;
         const event = item.event;
         const commands = event.kind === 'server-command' && (event.client === -1 || event.client === source.player.sourceEntity) ? [event.text]
           : event.kind === 'configstring' ? q3ConfigstringCommands(event.index, event.value) : [];

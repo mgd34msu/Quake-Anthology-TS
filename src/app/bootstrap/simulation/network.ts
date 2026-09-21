@@ -439,6 +439,6 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         command: (player, name, args) => { const entity = source.game.entity(player.actor); if (entity === null)
             throw new Error('Q2 command has no source player'); source.players.clientCommand(entity, source.game, name, args); },
         userinfo: (player, value) => { const entity = source.game.entity(player.actor); if (entity === null)
-            throw new Error('Q2 userinfo has no source entity'); source.players.userinfoChanged(entity, source.game, value); }, print: options.print,
+            throw new Error('Q2 userinfo has no source entity'); source.players.userinfoChanged(entity, source.game, value); simulation.notifyClientEvent("userinfo", player.actor); }, print: options.print,
     };
 }

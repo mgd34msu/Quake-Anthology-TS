@@ -8,6 +8,7 @@ export type QvmModScalar = "int32" | "float32";
 export type QvmModValue =
   | { readonly kind: QvmModScalar | "vector" | "string"; readonly value: ModCallbackValue }
   | { readonly kind: "actor"; readonly record: string; readonly input: "self" | "other" | "activator" | "attacker" | "inflictor" }
+  | { readonly kind: "client"; readonly input: "self" | "other" | "activator" | "attacker" | "inflictor" }
   | { readonly kind: "time"; readonly input: "time" | "elapsed"; readonly units: "seconds" | "milliseconds"; readonly encoding: QvmModScalar }
   | { readonly kind: "address"; readonly value: number };
 
@@ -64,10 +65,21 @@ export interface QvmModCallbackDeclaration {
   readonly abiProfile: QvmAbiProfile;
   /** Explicit component additions, consumed only by declared source calls; absent/null is an empty stream. */
   readonly spawnEntities?: string | null;
+  readonly clients?: QvmModClients;
   readonly actorRecords: readonly QvmModActorRecord[];
   readonly entityRecord: string | null;
   readonly sourceActors?: QvmModSourceActors;
   readonly combat?: QvmModCombat;
   readonly initialize: readonly QvmModSourceCall[];
   readonly callbacks: readonly QvmModCallback[];
+}
+
+/** Source client rows are reserved separately from ordinary actor projections. */
+export interface QvmModClients {
+  readonly maximum: number;
+  readonly records: readonly string[];
+  readonly playerStateRecord: string;
+  readonly admit: readonly QvmModSourceCall[];
+  readonly userinfo: readonly QvmModSourceCall[];
+  readonly disconnect: readonly QvmModSourceCall[];
 }
