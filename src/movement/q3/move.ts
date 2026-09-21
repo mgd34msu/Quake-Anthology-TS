@@ -8,6 +8,7 @@ import type { TraceResult } from "../../contracts/scene.ts";
 import { sameActor } from "../../contracts/identity.ts";
 import { EntityEvent, MoveType, CommandButtons as B, MoveFlags as F, PlayerAnimation as A } from "./constants.ts";
 import { clipVelocity, slideMove, stepSlideMove } from "./slide-move.ts";
+import { q3ViewAngles } from "./view.ts";
 import type { SlideMoveContext } from "./slide-move.ts";
 import type { Q3Motion, Q3Command, Q3MotionOptions, Q3MotionResult, Q3MovementTraceFunction } from "./types.ts";
 const ALL_TIMES = F.TIME_WATERJUMP | F.TIME_LAND | F.TIME_KNOCKBACK;
@@ -26,19 +27,9 @@ function snap(value: number): number {
 }
 
 export function updateViewAngles(ps: Q3Motion, cmd: Q3Command): void {
-  if (ps.pmType === MoveType.PM_INTERMISSION || ps.pmType === MoveType.PM_SPINTERMISSION ||
-    (ps.pmType !== MoveType.PM_SPECTATOR && ps.health <= 0)) return;
-  let pitch = ((cmd.angles.x + ps.deltaAngles.x) << 16) >> 16;
-  if (pitch > 16000) {
-    ps.deltaAngles = { ...ps.deltaAngles, x: (16000 - cmd.angles.x) | 0 };
-    pitch = 16000;
-  } else if (pitch < -16000) {
-    ps.deltaAngles = { ...ps.deltaAngles, x: (-16000 - cmd.angles.x) | 0 };
-    pitch = -16000;
-  }
-  const yaw = ((cmd.angles.y + ps.deltaAngles.y) << 16) >> 16;
-  const roll = ((cmd.angles.z + ps.deltaAngles.z) << 16) >> 16;
-  ps.viewangles = vec3(pitch * (360 / 65536), yaw * (360 / 65536), roll * (360 / 65536));
+  const value = q3ViewAngles(cmd.angles, ps.deltaAngles, ps.viewangles, ps.health, ps.pmType,
+    [MoveType.PM_INTERMISSION, MoveType.PM_SPINTERMISSION]);
+  ps.viewangles = value.angles; ps.deltaAngles = value.delta;
 }
 
 class MoveStep implements SlideMoveContext {

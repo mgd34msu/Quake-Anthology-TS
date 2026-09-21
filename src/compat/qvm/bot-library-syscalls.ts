@@ -6,7 +6,7 @@ import type { BotLibrary } from '../../bots/behavior/q3/library.ts';
 import { readQvmBotGoal, writeQvmBotGoal, QVM_BOT_GOAL_BYTES } from './bot-navigation-records.ts';
 import { touchingGoal } from '../../bots/behavior/library/goals.ts';
 import { QVM_SCRIPT_TOKEN_BYTES, writeQvmScriptToken } from './script-record.ts';
-import { QVM_USER_COMMAND_BYTES } from './client-state-record.ts';
+import { QVM_USER_COMMAND_BYTES, readQvmUserCommand } from './client-state-record.ts';
 import { stringContains, unifyWhiteSpacesInPlace, type ChatVariableSources, type ChatMatchBuffer, type ChatMatchVariable } from '../../bots/behavior/library/chat.ts';
 import type { WireUserCommand } from '../../network/q3/message.ts';
 export interface QvmBotLibraryServices {
@@ -188,8 +188,4 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         }
         default: return null;
     }
-}
-
-function readQvmUserCommand(view: DataView): WireUserCommand {
-    return { serverTime: view.getInt32(0, true), angles: [view.getInt32(4, true), view.getInt32(8, true), view.getInt32(12, true)], buttons: view.getInt32(16, true), weapon: view.getUint8(20), forwardmove: view.getInt8(21), rightmove: view.getInt8(22), upmove: view.getInt8(23) };
 }

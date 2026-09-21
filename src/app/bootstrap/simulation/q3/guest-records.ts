@@ -7,6 +7,7 @@ import type { BodyState } from '../../../../contracts/world.ts';
 import type { Vec3 } from '../../../../contracts/math.ts';
 import type { Q3PlayerState } from '../../../../contracts/protocol.ts';
 import type { QvmGameData } from '../../../../compat/qvm/game-data.ts';
+import type { QvmSystemCallResult } from '../../../../compat/qvm/interpreter.ts';
 import type { QvmSharedEntity } from '../../../../compat/qvm/shared-entity-record.ts';
 import type { SessionActorRegistry } from '../../../../world/actors/registry.ts';
 import type { SharedBodyTable } from '../../../../world/actors/body.ts';
@@ -29,6 +30,8 @@ export class Q3GuestRecords {
   setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined): void { this.writePlayerVelocity = write; }
   private readonly actors = new Map<number, OwnedActor>();
   private readonly links = new Map<number, ReturnType<Q3VisibilityBindings['link']>>();
+  private readonly retiredInputs = new Set<number>();
+  private readonly inputMotion = new Set<number>();
   private closed = false;
   private readonly unobserve: () => undefined;
 
@@ -56,6 +59,7 @@ export class Q3GuestRecords {
 
   actor(slot: number): OwnedActor {
     this.entity(slot);
+    if (this.retiredInputs.has(slot)) throw new Error('Q3 input client is retiring');
     if (slot >= 1022) throw new RangeError('Q3 world and none slots cannot own shared actors');
     const current = this.actors.get(slot);
     if (current !== undefined) { this.host.actors.assertOwned(current); return current; }
@@ -70,11 +74,12 @@ export class Q3GuestRecords {
       read: () => this.body(slot),
       write: body => {
         const entity = this.entity(slot);
-        if (slot < this.data.numClients) this.writePlayerVelocity?.(actor, body.velocity);
+        if (this.inputMotion.has(slot)) this.data.writePlayerState(slot, { ...this.player(slot), origin: body.origin, velocity: body.velocity });
+        else if (slot < this.data.numClients) this.writePlayerVelocity?.(actor, body.velocity);
         entity.r.currentOrigin = body.origin; entity.r.currentAngles = body.angles;
         entity.r.mins = body.bounds.min; entity.r.maxs = body.bounds.max;
         entity.s.pos = { ...entity.s.pos, delta: body.velocity };
-        entity.s.groundEntityNum = body.ground === null ? 1023 : this.requireSlot(body.ground);
+        if (!this.inputMotion.has(slot)) entity.s.groundEntityNum = body.ground === null ? 1023 : this.requireSlot(body.ground);
         return undefined;
       },
     });
@@ -94,12 +99,12 @@ export class Q3GuestRecords {
   }
 
   reference(slot: number): ActorId | null {
-    return slot < 0 || slot >= 1022 ? null : this.actor(slot).id;
+    return slot < 0 || slot >= 1022 || this.retiredInputs.has(slot) ? null : this.actor(slot).id;
   }
 
   body(slot: number): BodyState {
     const entity = this.entity(slot), shared = entity.r;
-    return { origin: shared.currentOrigin, angles: shared.currentAngles, velocity: slot < this.data.numClients ? this.player(slot).velocity : entity.s.pos.delta,
+    return { origin: this.inputMotion.has(slot) ? this.player(slot).origin : shared.currentOrigin, angles: shared.currentAngles, velocity: slot < this.data.numClients ? this.player(slot).velocity : entity.s.pos.delta,
       bounds: { min: shared.mins, max: shared.maxs }, ground: this.actors.get(entity.s.groundEntityNum)?.id ?? null };
   }
 
@@ -111,6 +116,7 @@ export class Q3GuestRecords {
   }
 
   link(slot: number): void {
+    if (this.retiredInputs.has(slot)) { this.entity(slot).r.linked = false; return; }
     const entity = this.entity(slot), shared = entity.r, actor = this.actor(slot), scene = this.host.scene;
     this.host.bodies.unlink(actor); shared.linked = false;
     const model = shared.model;
@@ -161,6 +167,7 @@ export class Q3GuestRecords {
 
   captureCheckpoint() {
     if (this.closed) throw new Error('Q3 guest records are retired');
+    if (this.retiredInputs.size !== 0 || this.inputMotion.size !== 0) throw new Error('Q3 input must finish before checkpoint');
     return [...this.actors].map(([slot, actor]) => {
       this.host.actors.assertOwned(actor);
       const link = this.links.get(slot);
@@ -198,6 +205,16 @@ export class Q3GuestRecords {
     if (slot < this.data.numEntities) this.unlink(slot);
     const actor = this.actors.get(slot);
     if (actor !== undefined) this.host.actors.release(actor);
+  }
+
+  retireInputClient(slot: number): void { this.retiredInputs.add(slot); this.unlink(slot); }
+  finishInputRetirement(slot: number): void { this.retiredInputs.delete(slot); }
+  isInputRetired(slot: number): boolean { return this.retiredInputs.has(slot); }
+  withInputMotion(slot: number, run: () => QvmSystemCallResult): QvmSystemCallResult {
+    const previous = this.inputMotion.has(slot); this.inputMotion.add(slot);
+    const finish = (): void => { if (!previous) this.inputMotion.delete(slot); };
+    try { const result = run(); if (typeof result !== 'number') return result.finally(finish); finish(); return result; }
+    catch (error) { finish(); throw error; }
   }
 
   close(): void {

@@ -39,6 +39,7 @@ import type { DebugLine } from "../../../debug/shapes.ts";
 import { fromQ3UserCommand } from "../../../network/q3/adapters.ts";
 import { assertQ3GuestRecipe } from "./q3/guest-artifact.ts";
 import { Q3QvmServerGame } from "./q3/guest-runtime.ts";
+import { q3InputProfile } from "../../../content/q3/input-profile.ts";
 import { Q3ServerState } from "./q3/server-state.ts";
 import { createSelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import { WorldTextStore } from "../../../text/world.ts";
@@ -579,6 +580,19 @@ export class SharedSimulation implements Simulation {
       game.records.setPlayerVelocityWriter((actor, velocity) => {
         const slot = game.records.requireSlot(actor.id), state = game.records.player(slot);
         game.game.data.writePlayerState(slot, { ...state, velocity, groundEntityNumber: 1023 }); return undefined;
+      });
+      const artifact = this.options.q3Guest?.prepared.artifact;
+      const definition = artifact === undefined ? null : q3InputProfile(artifact);
+      if (definition !== null) game.bindInput(definition, {
+        applications: this.modClientApplications,
+        identity: slot => {
+          const player = game.players().find(player => player.sourceEntity === slot);
+          return player === undefined ? null : { client: player.client, actor: player.actor };
+        },
+        live: identity => this.actors.isLive(identity.actor) && this.playerClient(identity.actor)?.equals(identity.client) === true,
+        accepted: actor => this.modClientCommands.get(actor) ?? null,
+        frame: () => this.sourceFrame,
+        onRelease: listener => this.actors.onRelease(actor => listener(actor.id)),
       });
     }
     if (this.source.kind === "q3-qvm" && (this.recipe.equipment.grapple.kind === "enabled" && this.recipe.equipment.grapple.mechanic !== "q3-qvm" || this.recipe.equipment.handGrenades.kind === "enabled")) {
@@ -1932,7 +1946,10 @@ export class SharedSimulation implements Simulation {
         botCommand: (actor, command) => this.observeClientCommand({ actor, source: { kind: "bot", provider: guest.prepared.artifact.module.id },
           sequence: (this.modClientCommands.get(actor)?.input.sequence ?? 0) + 1, command: { kind: "q3", serverTimeMilliseconds: command.serverTime,
             angleWords: command.angles, buttons: command.buttons, weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove } }),
-        beforeDisconnect: actor => { this.notifyClientEvent("disconnecting", actor); this.grapple?.release(actor); this.stepHandGrenade(actor, "removing"); } });
+        beforeDisconnect: actor => {
+          this.notifyClientEvent("disconnecting", actor);
+          if (this.actors.isLive(actor)) { this.grapple?.release(actor); this.stepHandGrenade(actor, "removing"); }
+        } });
       const nativeCombat = q3NativeCombatProfile(guest.prepared.artifact);
       if (nativeCombat !== null) combatBindings = new QvmCombatBindings({ game: game.game, artifact: guest.prepared.artifact, definition: nativeCombat,
         bodies: this.bodies, combat: this.combat, slot: actor => game.records.slot(actor) });
@@ -3367,13 +3384,13 @@ export class SharedSimulation implements Simulation {
         const scale = this.grapple?.gravityScale(entry.player.actor) ?? 1;
         const artifact = this.options.q3Guest?.prepared.artifact, definition = artifact === undefined ? null : q3GrappleProfile(artifact);
         if (scale !== 1 && definition === null) throw new Error("Native Q3 equipment gravity requires a declared source Pmove entry");
-        const remove = scale === 1 || definition === null ? null : guest.game.module.bindFunction({ kind: "qvm", module: definition.module, instructionIndex: definition.callbacks.playerMove }, call => {
-          const movement = call.words.getInt32(0, true), pointer = guest.game.module.memory.view(movement, 4).getInt32(0, true);
+        const remove = scale === 1 || definition === null ? null : guest.game.module.observeFunction({ kind: "qvm", module: definition.module, instructionIndex: definition.callbacks.playerMove }, call => {
+          const movement = call.argument(0), pointer = guest.game.module.memory.view(movement, 4).getInt32(0, true);
           const expected = guest.game.data.checkpoint().clientsWord + entry.player.sourceEntity * definition.clientStride;
           if (pointer !== expected) throw new Error("Source Pmove does not target the admitted equipment player");
           const state = guest.records.player(entry.player.sourceEntity);
           guest.game.data.writePlayerState(entry.player.sourceEntity, { ...state, gravity: Math.trunc(state.gravity * scale) });
-          return call.proceed();
+          return undefined;
         });
         try { await guest.think(entry.player, entry.command); } finally { remove?.(); }
         if (guest.records.player(entry.player.sourceEntity).weapon === this.nativeWeaponRequests.get(entry.player.actor)) this.nativeWeaponRequests.delete(entry.player.actor);

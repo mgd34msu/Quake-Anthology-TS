@@ -70,3 +70,15 @@ export function writeQvmUserCommand(view: DataView, command: WireUserCommand, pr
   view.setInt32(16, command.buttons, true); view.setUint8(20, command.weapon);
   view.setInt8(21, command.forwardmove); view.setInt8(22, command.rightmove); view.setInt8(23, command.upmove);
 }
+
+export function readQvmUserCommand(view: DataView, profile: QvmAbiProfile = "q3-modern"): WireUserCommand {
+  requireBytes(view, QVM_USER_COMMAND_BYTES);
+  if (profile !== "q3-modern") {
+    const buttons = view.getUint8(4);
+    return { serverTime: view.getInt32(0, true), angles: [view.getInt32(8, true), view.getInt32(12, true), view.getInt32(16, true)],
+      buttons: (buttons & 31) | ((buttons & 128) === 0 ? 0 : 2048), weapon: view.getUint8(5),
+      forwardmove: view.getInt8(20), rightmove: view.getInt8(21), upmove: view.getInt8(22) };
+  }
+  return { serverTime: view.getInt32(0, true), angles: [view.getInt32(4, true), view.getInt32(8, true), view.getInt32(12, true)],
+    buttons: view.getInt32(16, true), weapon: view.getUint8(20), forwardmove: view.getInt8(21), rightmove: view.getInt8(22), upmove: view.getInt8(23) };
+}

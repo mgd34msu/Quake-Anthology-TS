@@ -36,6 +36,7 @@ export type QvmSystemCall = (call: QvmSyscall) => QvmSystemCallResult;
 
 export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> {
   readonly instructionIndex: number;
+  readonly execution: "synchronous" | "asynchronous";
   /** Live source argument words, starting at the caller's first OP_ARG slot. */
   readonly words: DataView;
   readonly memory: Uint8Array;
@@ -500,7 +501,7 @@ export class QvmInterpreter {
     this.range(sp + 8, 0);
     const words = new DataView(this.memory.buffer, this.memory.byteOffset + sp + 8, this.memory.byteLength - sp - 8);
     const proceed = (): QvmSystemCallResult => this.hostCall(frame, scope => {
-      const call: QvmFunctionCall = { instructionIndex, memory: this.memory,
+      const call: QvmFunctionCall = { instructionIndex, execution: frame.asynchronous ? "asynchronous" : "synchronous", memory: this.memory,
         words,
         invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
         cancellationScope: () => scope.control(() => {
