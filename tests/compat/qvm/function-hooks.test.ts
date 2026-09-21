@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { QvmInterpreter, QvmModule, QvmOpcode, parseQvm, parseQvmRestart, qvmArguments, rejectQvmSyscall, resolveQvmArtifact } from "../../../src/compat/qvm/index.ts";
-import type { QvmFunctionCall, QvmFunctionHook } from "../../../src/compat/qvm/index.ts";
+import type { QvmCancellationScope, QvmFunctionCall, QvmFunctionHook } from "../../../src/compat/qvm/index.ts";
 
 type Operation = readonly [QvmOpcode, number?];
 function bytecode(operations: readonly Operation[]): Uint8Array {
@@ -67,6 +67,158 @@ const trappingSource = bytecode([
   [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, -1], [QvmOpcode.OP_CALL],
   [QvmOpcode.OP_CONST, 2], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
 ]);
+const cancellableSource = bytecode([
+  [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 5], [QvmOpcode.OP_CONST, 9], [QvmOpcode.OP_CALL], [QvmOpcode.OP_ADD],
+  [QvmOpcode.OP_CONST, 21], [QvmOpcode.OP_CALL], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
+  [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 100], [QvmOpcode.OP_CONST, 15], [QvmOpcode.OP_CALL], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
+  [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 200], [QvmOpcode.OP_CONST, -1], [QvmOpcode.OP_CALL], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
+  [QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, 7], [QvmOpcode.OP_LEAVE, 0],
+]);
+
+for (const semantics of ["interpreted", "compiled"] satisfies readonly import("../../../src/compat/qvm/interpreter.ts").QvmSemantics[]) {
+  test(`${semantics} cancellation unwinds only its exact nested source call`, async () => {
+    for (const asynchronous of [false, true]) for (const target of [9, 15]) for (const reentry of [false, true]) {
+      const order: string[] = [];
+      let capability: QvmCancellationScope | null = null;
+      const required = (): QvmCancellationScope => { if (capability === null) throw new Error("Missing cancellation scope"); return capability; };
+      const vm = new QvmInterpreter(parseQvm(cancellableSource), call => {
+        if (asynchronous) return Promise.resolve().then(() => call.cancelFunction(required()));
+        return call.cancelFunction(required());
+      }, undefined, null, semantics);
+      for (const entry of [9, 15]) vm.bindFunction(entry, call => {
+        if (entry === target) capability = call.cancellationScope();
+        order.push(`enter:${entry}`);
+        if (asynchronous) return (reentry && entry === 15 ? call.invokeAsync(qvmArguments([]), entry) : call.proceedAsync())
+          .catch(() => 999).finally(() => { order.push(`leave:${entry}`); });
+        try { return reentry && entry === 15 ? call.invoke(qvmArguments([]), entry) : call.proceed(); }
+        catch { return 999; } finally { order.push(`leave:${entry}`); }
+      });
+      vm.observeFunction(21, () => { order.push("sibling"); return undefined; });
+      expect(asynchronous ? await vm.invokeAsync(qvmArguments([])) : vm.invoke(qvmArguments([]))).toBe(target === 9 ? 12 : 112);
+      expect(order).toEqual(["enter:9", "enter:15", "leave:15", "leave:9", "sibling"]);
+      expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
+    }
+  });
+}
+
+test("cancellation drains an unawaited asynchronous body before sibling continuation", async () => {
+  const gate = Promise.withResolvers<void>(), order: string[] = [];
+  let capability: QvmCancellationScope | null = null;
+  const vm = new QvmInterpreter(parseQvm(cancellableSource), async call => {
+    await gate.promise;
+    if (capability === null) throw new Error("Missing cancellation scope");
+    return call.cancelFunction(capability);
+  }, undefined, null, "compiled");
+  vm.bindFunction(9, call => {
+    capability = call.cancellationScope();
+    void call.proceedAsync().catch(() => { order.push("body drained"); });
+    return 999;
+  });
+  vm.observeFunction(21, () => { order.push("sibling"); return undefined; });
+  const result = vm.invokeAsync(qvmArguments([]));
+  expect(vm.isActive).toBe(true); expect(order).toEqual([]);
+  gate.resolve();
+  expect(await result).toBe(12); expect(order).toEqual(["body drained", "sibling"]);
+  expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
+});
+
+test("nested cleanup cannot redirect an already requested outer cancellation", async () => {
+  let outer: QvmCancellationScope | null = null, completed = false;
+  const vm = new QvmInterpreter(parseQvm(cancellableSource), call => {
+    if (outer === null) throw new Error("Missing outer cancellation scope");
+    return call.cancelFunction(outer);
+  }, undefined, null, "compiled");
+  vm.bindFunction(9, call => {
+    outer = call.cancellationScope();
+    return call.proceedAsync().then(value => { completed = true; return value; });
+  });
+  vm.bindFunction(15, call => {
+    const inner = call.cancellationScope();
+    return call.proceedAsync().finally(() => call.cancelFunction(inner));
+  });
+  expect(await vm.invokeAsync(qvmArguments([]))).toBe(12);
+  expect(completed).toBe(false); expect(vm.isActive).toBe(false);
+  expect(vm.stackPointer).toBe(vm.memory.length);
+});
+
+test("cancellation cannot hide source faults or cleanup failures", async () => {
+  for (const asynchronous of [false, true]) for (const cleanup of [false, true]) {
+    const fault = new Error(cleanup ? "cleanup failed" : "source failed");
+    let capability: QvmCancellationScope | null = null;
+    const vm = new QvmInterpreter(parseQvm(cancellableSource), call => {
+      if (!cleanup) throw fault;
+      if (capability === null) throw new Error("Missing cancellation scope");
+      return call.cancelFunction(capability);
+    }, undefined, null, "compiled");
+    vm.bindFunction(9, call => {
+      capability = call.cancellationScope();
+      if (asynchronous) return call.proceedAsync().catch(() => 999);
+      try { return call.proceed(); } catch { return 999; }
+    });
+    vm.bindFunction(15, call => {
+      if (asynchronous) return call.proceedAsync().finally(() => { if (cleanup) throw fault; });
+      try { return call.proceed(); } finally { if (cleanup) throw fault; }
+    });
+    if (asynchronous) await expect(vm.invokeAsync(qvmArguments([]))).rejects.toBe(fault);
+    else expect(() => vm.invoke(qvmArguments([]))).toThrow(fault);
+    expect(vm.isActive).toBe(false); expect(vm.stackPointer).toBe(vm.memory.length);
+  }
+});
+
+test("a cancellation capability opens before proceeding and expires with its exact call", () => {
+  let saved: QvmCancellationScope | null = null;
+  const vm = new QvmInterpreter(parseQvm(cancellableSource), () => 0, undefined, null, "compiled");
+  const remove = vm.bindFunction(9, call => {
+    saved = call.cancellationScope();
+    try { return call.cancelFunction(saved); } catch { return 999; }
+  });
+  expect(vm.invoke(qvmArguments([]))).toBe(12);
+  const expired = saved;
+  if (expired === null) throw new Error("Missing expired scope");
+  remove();
+  const stale = vm.bindFunction(9, call => { try { return call.cancelFunction(expired); } catch { return 999; } });
+  expect(() => vm.invoke(qvmArguments([]))).toThrow("has expired"); stale();
+  const late = vm.bindFunction(9, call => {
+    const result = call.proceed();
+    try { call.cancellationScope(); } catch { return result; }
+    return result;
+  });
+  expect(() => vm.invoke(qvmArguments([]))).toThrow("before proceeding"); late();
+  vm.bindFunction(9, call => {
+    const scope = call.cancellationScope();
+    try { call.cancelFunction(scope); } catch { /* A caught request cannot be reused. */ }
+    try { return call.cancelFunction(scope); } catch { return 999; }
+  });
+  expect(() => vm.invoke(qvmArguments([]))).toThrow("already been used");
+  expect(vm.isActive).toBe(false); expect(vm.stackPointer).toBe(vm.memory.length);
+});
+
+test("foreign and copied capabilities fail ordinarily even when their hook catches", () => {
+  const first = new QvmInterpreter(parseQvm(cancellableSource), () => 0, undefined, null, "compiled");
+  const second = new QvmInterpreter(parseQvm(cancellableSource), () => 0, undefined, null, "compiled");
+  first.bindFunction(9, call => {
+    const scope = call.cancellationScope();
+    const foreign = second.bindFunction(9, other => { try { return other.cancelFunction(scope); } catch { return 999; } });
+    expect(() => second.invoke(qvmArguments([]))).toThrow("another interpreter"); foreign();
+    expect(second.isActive).toBe(false); expect(second.stackPointer).toBe(second.memory.length);
+    try { return call.cancelFunction({ ...scope }); } catch { return 999; }
+  });
+  expect(() => first.invoke(qvmArguments([]))).toThrow("another interpreter");
+  expect(first.isActive).toBe(false); expect(first.stackPointer).toBe(first.memory.length);
+});
+
+test("an ancestor callback cannot cancel its descendant through an inactive call object", () => {
+  const vm = new QvmInterpreter(parseQvm(cancellableSource), () => 0, undefined, null, "compiled");
+  let ancestor: QvmFunctionCall | null = null;
+  vm.bindFunction(9, call => { ancestor = call; call.cancellationScope(); try { return call.proceed(); } catch { return 999; } });
+  vm.bindFunction(15, call => {
+    const scope = call.cancellationScope();
+    if (ancestor === null) throw new Error("Missing ancestor call");
+    try { return ancestor.cancelFunction(scope); } catch { return 999; }
+  });
+  expect(() => vm.invoke(qvmArguments([]))).toThrow("active syscall or function hook");
+  expect(vm.isActive).toBe(false); expect(vm.stackPointer).toBe(vm.memory.length);
+});
 
 test("compiled return control survives suspended hook continuations and nested source frames", async () => {
   const gate = Promise.withResolvers<number>();

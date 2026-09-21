@@ -7,6 +7,8 @@ import type { WindowsCapabilities } from "../../../guest/runtime/windows/index.t
 import type { RereleaseSourceSave } from "../../../compat/q2/rerelease/host.ts";
 import { guestPointer } from "../../../compat/q2/rerelease/module.ts";
 import { RereleaseGuestSource, type PreparedRereleaseGuest } from "./rerelease-guest-source.ts";
+import { NativeInputBinding, type NativeInputServices } from "../../../compat/q2/native-input.ts";
+import { RereleasePublicEdict } from "../../../compat/q2/rerelease/public-state.ts";
 import { RereleaseGuestServices } from "./rerelease-guest-services.ts";
 import type { RereleaseGuestServicesOptions, RereleaseGuestMapServices } from "./rerelease-guest-services-contract.ts";
 import type { ClassicGuestMap, ClassicGuestClient } from "./classic-guest-world.ts";
@@ -25,6 +27,28 @@ export class RereleaseGuestWorld {
   readonly edition = "rerelease";
   #phase: "created" | "initialized" | "running" | "transferred" | "closed" = "created";
   #busy = false;
+  private inputBinding: NativeInputBinding | null = null;
+  private readonly inputRetirements = new Map<number, () => void>();
+  bindInput(services: NativeInputServices): void {
+    this.inputBinding?.close();
+    this.inputBinding = new NativeInputBinding({ edition: "rerelease", host: this.source.host.module, retire: (slot, identity) => {
+      this.source.host.retireInputClient(slot);
+      this.inputRetirements.set(slot, () => services.retired(identity));
+    } }, services);
+  }
+  private finishInputRetirements(): void {
+    for (const [slot, complete] of this.inputRetirements) {
+      const host = this.source.host, record = new RereleasePublicEdict(host.module.memory, host.module.entities().atSlot(slot));
+      if (record.byte("inuse") !== 0) host.clientDisconnect(slot);
+      host.releaseClientReservation(slot); host.finishInputRetirement(slot);
+      this.#clients.delete(slot); this.inputRetirements.delete(slot); complete();
+    }
+  }
+  private discardInputRetirements(): void {
+    for (const [slot, complete] of this.inputRetirements) {
+      this.#clients.delete(slot); this.inputRetirements.delete(slot); complete();
+    }
+  }
   #frame = 0;
   readonly #clients = new Map<number, ClassicGuestClient>();
   private constructor(private readonly retainedSource: RereleaseGuestSource, private readonly retainedServices: RereleaseGuestServices,
@@ -50,12 +74,12 @@ export class RereleaseGuestWorld {
   get clients(): readonly ClassicGuestClient[] { this.requireOwnership(); return [...this.#clients.values()]; }
   private operation<T>(run: () => T): T {
     this.requireOwnership(); if (this.#busy) throw new Error("External native world operation is already active");
-    this.#busy = true; try { return run(); } finally { this.#busy = false; }
+    this.#busy = true; try { const result = run(); this.finishInputRetirements(); return result; } finally { this.#busy = false; }
   }
   private async loading<T>(run: () => Promise<T>): Promise<T> {
     this.requireOwnership(); if (this.#busy) throw new Error("External native world operation is already active");
     this.#busy = true;
-    try { return await run(); } finally { this.#busy = false; }
+    try { const result = await run(); this.finishInputRetirements(); return result; } finally { this.#busy = false; }
   }
   private requireRunning(): void { this.requireOwnership(); if (this.#phase !== "running") throw new Error("Native world has not spawned"); }
   private client(slot: number, phase?: ClassicGuestClient["phase"]): ClassicGuestClient {
@@ -97,8 +121,10 @@ export class RereleaseGuestWorld {
   private transfer(map: ClassicGuestMap, binding: RereleaseGuestMapServices, revisit?: RereleaseGuestRevisit): RereleaseGuestWorld {
     this.requireRunning(); this.services.validateMap(binding);
     if (revisit !== undefined && this.services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Native deathmatch does not restore hub levels");
+    this.finishInputRetirements();
     const source = this.source, services = this.services, clients = this.clients;
     const next = new RereleaseGuestWorld(source, services, this.commandContext);
+    this.inputBinding?.close(); this.inputBinding = null;
     next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
     try {
       source.host.rebindWorld(() => services.rebindWorld({ ...binding, command: () => this.commandContext.value ?? binding.command() }));
@@ -113,8 +139,10 @@ export class RereleaseGuestWorld {
     return this.loading(async () => {
       this.requireRunning(); this.services.validateMap(binding);
       if (revisit !== undefined && this.services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Native deathmatch does not restore hub levels");
+      this.finishInputRetirements();
       const source = this.source, services = this.services, clients = this.clients;
       const next = new RereleaseGuestWorld(source, services, this.commandContext);
+      this.inputBinding?.close(); this.inputBinding = null;
       next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
       try {
         source.host.rebindWorld(() => services.rebindWorld({ ...binding, command: () => this.commandContext.value ?? binding.command() }));
@@ -216,7 +244,11 @@ export class RereleaseGuestWorld {
     }); }
   close(): void {
     if (this.isRetired) return;
-    this.operation(() => { try { this.retainedSource.close(); } finally { this.#phase = "closed"; this.#clients.clear(); } });
+    this.inputBinding?.close(); this.inputBinding = null;
+    this.operation(() => {
+      this.discardInputRetirements();
+      try { this.retainedSource.close(); } finally { this.#phase = "closed"; this.#clients.clear(); }
+    });
   }
   discard(): void { this.close(); }
 }

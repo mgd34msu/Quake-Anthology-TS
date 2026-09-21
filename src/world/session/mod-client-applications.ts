@@ -19,8 +19,18 @@ export class ModClientApplications {
   begin(input: ApplicationInput): ModClientApplication | null {
     if (!this.active || !this.live(input.identity)) return null;
     if (this.ordinal === Number.MAX_SAFE_INTEGER) throw new RangeError("Client application ordinal exhausted");
+    let parent = this.current;
+    if (input.parentInvocation !== undefined && input.parentInvocation !== null) {
+      let found = this.current?.invocation === input.parentInvocation;
+      for (const pending of this.pending.keys()) if (pending.invocation === input.parentInvocation) {
+        found = true;
+        if (parent === null || pending.invocation > parent.invocation) parent = pending;
+        break;
+      }
+      if (!found) throw new Error("Input application parent is no longer active");
+    }
     const application: ModClientApplication = { ...input, invocation: ++this.ordinal,
-      parentInvocation: this.current?.invocation ?? input.parentInvocation ?? null };
+      parentInvocation: parent?.invocation ?? null };
     this.pending.set(application, []);
     try { this.publish({ phase: "before", application }, [...this.listeners]); }
     catch (error) {

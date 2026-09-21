@@ -5,6 +5,7 @@ import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Q2EntityState, Q2PlayerState, Q2UserCommand } from "../../../contracts/protocol.ts";
 import type { WindowsCapabilities } from "../../../guest/runtime/windows/index.ts";
 import { ClassicGuestSource, type PreparedClassicGuest } from "./classic-guest-source.ts";
+import { NativeInputBinding, type NativeInputServices } from "../../../compat/q2/native-input.ts";
 import { ClassicGuestServices, type ClassicGuestMessage, type ClassicGuestServicesOptions, type ClassicGuestMapServices } from "./classic-guest-services.ts";
 
 export interface ClassicGuestMap { readonly map: string; readonly entities: string; readonly spawnPoint: string }
@@ -23,6 +24,28 @@ export class ClassicGuestWorld {
   readonly edition = "classic";
   #phase: "created" | "initialized" | "running" | "transferred" | "closed" = "created";
   #busy = false;
+  private inputBinding: NativeInputBinding | null = null;
+  private readonly inputRetirements = new Map<number, () => void>();
+  bindInput(services: NativeInputServices): void {
+    this.inputBinding?.close();
+    this.inputBinding = new NativeInputBinding({ edition: "classic", host: this.source.host, retire: (slot, identity) => {
+      this.source.host.edicts.retireInputClient(slot);
+      this.inputRetirements.set(slot, () => services.retired(identity));
+    } }, services);
+  }
+  private finishInputRetirements(): void {
+    for (const [slot, complete] of this.inputRetirements) {
+      const host = this.source.host;
+      if (host.edicts.at(slot).bytes.getInt32(88, true) !== 0) host.clientEvent("ClientDisconnect", slot);
+      host.edicts.releaseClient(slot); host.edicts.finishInputRetirement(slot);
+      this.#clients.delete(slot); this.inputRetirements.delete(slot); complete();
+    }
+  }
+  private discardInputRetirements(): void {
+    for (const [slot, complete] of this.inputRetirements) {
+      this.#clients.delete(slot); this.inputRetirements.delete(slot); complete();
+    }
+  }
   readonly #clients = new Map<number, ClassicGuestClient>();
   private constructor(private readonly retainedSource: ClassicGuestSource, private readonly retainedServices: ClassicGuestServices, private readonly commandContext: CommandContext) {}
   private requireOwnership(): void { if (this.#phase === "transferred") throw new Error("Native world ownership was transferred"); }
@@ -49,7 +72,7 @@ export class ClassicGuestWorld {
     if (this.#phase === "closed") throw new Error("Native world is closed");
     if (this.#busy) throw new Error("External native world operation is already active");
     this.#busy = true;
-    try { return run(); } finally { this.#busy = false; }
+    try { const result = run(); this.finishInputRetirements(); return result; } finally { this.#busy = false; }
   }
   private requireRunning(): void { if (this.#phase !== "running") throw new Error("Native world has not spawned"); }
   private requireClient(slot: number, phase?: ClassicGuestClient["phase"]): ClassicGuestClient {
@@ -79,7 +102,7 @@ export class ClassicGuestWorld {
     if (this.#phase === "closed") throw new Error("Native world is closed");
     if (this.#busy) throw new Error("External native world operation is already active");
     this.#busy = true;
-    try { return await run(); } finally { this.#busy = false; }
+    try { const result = await run(); this.finishInputRetirements(); return result; } finally { this.#busy = false; }
   }
   async spawnLoading(map: string, entities: string, nextFrame: () => Promise<void>, spawnPoint = ""): Promise<void> {
     this.requireOwnership();
@@ -101,8 +124,10 @@ export class ClassicGuestWorld {
       const source = this.source, services = this.services;
       services.validateMap(binding);
       if (revisit !== undefined && services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Original API 3 deathmatch does not restore hub levels");
+      this.finishInputRetirements();
       const clients = this.clients;
       const next = new ClassicGuestWorld(source, services, this.commandContext);
+      this.inputBinding?.close(); this.inputBinding = null;
       next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
       try {
         for (const actor of services.options.engine.actors.ownedBy(source.host.options.provider)) services.options.engine.actors.release(actor);
@@ -131,8 +156,10 @@ export class ClassicGuestWorld {
       const source = this.source, services = this.services;
       services.validateMap(binding);
       if (revisit !== undefined && services.options.cvars.variableValue("deathmatch") !== 0) throw new Error("Original API 3 deathmatch does not restore hub levels");
+      this.finishInputRetirements();
       const clients = this.clients;
       const next = new ClassicGuestWorld(source, services, this.commandContext);
+      this.inputBinding?.close(); this.inputBinding = null;
       next.#phase = "initialized"; this.#phase = "transferred"; this.#clients.clear();
       try {
         for (const actor of services.options.engine.actors.ownedBy(source.host.options.provider)) services.options.engine.actors.release(actor);
@@ -268,8 +295,22 @@ export class ClassicGuestWorld {
       this.services.completeSpawn(); this.#phase = "running";
     });
   }
-  close(): void { if (this.#phase === "closed" || this.#phase === "transferred") return; this.operation(() => this.source.close()); this.#phase = "closed"; this.#clients.clear(); }
-  discard(): void { if (this.#phase === "closed" || this.#phase === "transferred") return; this.operation(() => this.source.discard()); this.#phase = "closed"; this.#clients.clear(); }
+  close(): void {
+    if (this.isRetired) return;
+    this.inputBinding?.close(); this.inputBinding = null;
+    this.operation(() => {
+      this.discardInputRetirements();
+      try { this.retainedSource.close(); } finally { this.#phase = "closed"; this.#clients.clear(); }
+    });
+  }
+  discard(): void {
+    if (this.isRetired) return;
+    this.inputBinding?.close(); this.inputBinding = null;
+    this.operation(() => {
+      this.discardInputRetirements();
+      try { this.retainedSource.discard(); } finally { this.#phase = "closed"; this.#clients.clear(); }
+    });
+  }
 }
 
 export function classicGuestUserCommand(command: Q2UserCommand): Uint8Array {

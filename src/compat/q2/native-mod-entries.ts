@@ -9,7 +9,7 @@ export interface NativeModEntryBinding {
 }
 
 /** Bypass only the exact original entry frame; recursive source calls still compose. */
-export function bindNativeModEntry(host: NativeModHost, address: GuestAddress, id: CallbackId, signature: GuestCallSignature,
+export function bindNativeModEntry(host: Pick<NativeModHost, "memory" | "entries" | "invoke">, address: GuestAddress, id: CallbackId, signature: GuestCallSignature,
   execute: (values: readonly GuestCallValue[], original: NativeModEntryBinding["original"]) => GuestCallResult,
   accepts: () => boolean = () => true): NativeModEntryBinding {
   const { callbacks, cpu } = host.entries, frames: { stack: bigint | null }[] = [];

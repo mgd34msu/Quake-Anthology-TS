@@ -79,6 +79,15 @@ export class ClassicQ2GuestHost {
   #exports: GuestAddress | null = null;
   #initialized = false;
   #suppressReconcile = false;
+  private inputMovement: ((address: GuestAddress, run: () => undefined) => undefined) | null = null;
+  bindInputMovement(boundary: (address: GuestAddress, run: () => undefined) => undefined): () => undefined {
+    if (this.inputMovement !== null) throw new Error("API3 movement already has an input owner");
+    this.inputMovement = boundary;
+    return () => { if (this.inputMovement === boundary) this.inputMovement = null; return undefined; };
+  }
+  applyInputMovement(address: GuestAddress, run: () => undefined): undefined {
+    return this.inputMovement === null ? run() : this.inputMovement(address, run);
+  }
   constructor(readonly options: ClassicQ2GuestHostOptions) {
     this.memory = options.runner.options.cpu.memory;
     if (this.memory.pointerBytes !== 4) throw new TypeError("Classic Q2 API 3 requires a 32-bit guest");

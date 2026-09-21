@@ -684,6 +684,7 @@ export class SharedSimulation implements Simulation {
       this.source.product.afterSpawn();
       if (report.unsupported.length !== 0) throw new Error(`Unimplemented authored Q2 spawns: ${[...new Set(report.unsupported.map(entity => entity.classname))].join(", ")}`);
     }
+    if (loading !== nativeLoading) this.bindNativeInput();
     } catch (error) {
       if (this.source.kind === "q3-qvm") {
         const errors: unknown[] = [error];
@@ -717,6 +718,7 @@ export class SharedSimulation implements Simulation {
           await simulation.source.game.spawnLoading(options.recipe.map.geometry.requestedPath.replace(/^maps\//, "").replace(/\.bsp$/, ""), options.world.entities, nextFrame);
         }
       }
+      simulation.bindNativeInput();
       await simulation.initializeQvmGrapple();
       await simulation.weaponBehavior.initializeLoading(nextFrame);
       const modState = options.restore?.mods;
@@ -4202,6 +4204,24 @@ export class SharedSimulation implements Simulation {
     for (const [client, owner] of this.source.clients) if (owner.id.equals(actor)) return client;
     throw new Error("Actor has no native Quake II client");
   }
+  private bindNativeInput(): void {
+    const source = this.source;
+    if (source.kind !== "q2-native") return;
+    source.game.bindInput({ applications: this.modClientApplications, numeric: source.game.services.options.numeric,
+      identity: slot => {
+        const actor = source.game.actor(slot), client = actor === null ? null : this.playerClient(actor);
+        return actor === null || client === null ? null : { client, actor };
+      },
+      live: identity => this.actors.isLive(identity.actor) && this.playerClient(identity.actor)?.equals(identity.client) === true,
+      onRelease: listener => this.actors.onRelease(actor => listener(actor.id)),
+      retired: identity => { if (source.clients.get(identity.client)?.id.equals(identity.actor) === true) source.clients.delete(identity.client); },
+      accepted: actor => this.modClientCommands.get(actor) ?? null, frame: () => this.sourceFrame,
+      movement: (identity, projection, run) => {
+        const velocity = this.nativeEquipmentVelocity.get(identity.actor);
+        if (velocity !== undefined) { projection.write({ ...projection.read(), velocity }); this.nativeEquipmentVelocity.delete(identity.actor); }
+        return source.game.services.withInputMovement(identity.actor, projection, run);
+      } });
+  }
   private stepNativeQ2(input: InputBatch): SimulationOutput {
     if (this.source.kind !== "q2-native" || this.stepping) throw new Error("Native Quake II frame is unavailable");
     if (!Number.isFinite(input.elapsedMilliseconds) || input.elapsedMilliseconds < 0) throw new RangeError("Invalid host frame interval");
@@ -4219,9 +4239,11 @@ export class SharedSimulation implements Simulation {
         const gated = equipment?.primarySelected() === false ? { ...command, command: { ...command.command, buttons: command.command.buttons & ~1 } } : command;
         const velocity = this.nativeEquipmentVelocity.get(command.actor), movement = this.grapple === null && velocity === undefined ? undefined
           : { ...(velocity === undefined ? {} : { velocity }), gravityScale: this.grapple?.gravityScale(command.actor) ?? 1, predictionSuppressed: this.grapple?.prediction(command.actor) ?? false };
+        const observingInput = this.modClientApplications.active;
+        if (observingInput) this.nativeEquipmentVelocity.delete(command.actor);
         if (source.edition === "classic") source.game.think(slot, classicGuestLocalCommand(gated, source.game.playerState(slot)), movement);
         else source.game.think(slot, rereleaseGuestLocalCommand(gated, source.game.playerState(slot)), movement);
-        this.nativeEquipmentVelocity.delete(command.actor);
+        if (!observingInput) this.nativeEquipmentVelocity.delete(command.actor);
       }
       this.hostMilliseconds += input.elapsedMilliseconds; this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
       const frameMilliseconds = source.edition === "classic" ? 100 : source.game.services.options.frameMilliseconds;

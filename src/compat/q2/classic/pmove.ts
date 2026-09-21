@@ -23,6 +23,11 @@ export function runClassicGuestPmove(address: GuestAddress, host: ClassicQ2Guest
     for (const [index, value] of [options.equipment.velocity.x, options.equipment.velocity.y, options.equipment.velocity.z].entries())
       view.setInt16(10 + index * 2, options.numeric.toInt32(options.numeric.multiply(value, 8)), true);
   }
+  return host.applyInputMovement(address, () => runMovement(address, host, options));
+}
+
+function runMovement(address: GuestAddress, host: ClassicQ2GuestHost, options: ClassicGuestPmoveOptions): undefined {
+  const memory = host.memory, view = memory.borrow(address, CLASSIC_Q2_PMOVE_BYTES);
   const scratch = memory.allocate({ byteLength: 48, label: "API 3 nested Pmove vectors" });
   const canonical = new Map<bigint, MovementEntity>();
   function entity(pointer: GuestAddress | null): MovementEntity | null {

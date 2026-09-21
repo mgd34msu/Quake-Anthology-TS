@@ -37,3 +37,7 @@ export function writeRereleaseUserCommand(view: DataView, value: Q2RereleaseUser
   view.setUint8(0, value.milliseconds); view.setUint8(1, value.buttons); writeVector(view, 4, value.angles);
   view.setFloat32(16, value.forwardMove, true); view.setFloat32(20, value.sideMove, true); view.setUint32(24, value.serverFrame, true);
 }
+export function readRereleaseUserCommand(view: DataView): Q2RereleaseUserCommand {
+  return { kind: "q2-rerelease", milliseconds: view.getUint8(0), buttons: view.getUint8(1), angles: readVector(view, 4),
+    forwardMove: view.getFloat32(16, true), sideMove: view.getFloat32(20, true), serverFrame: view.getUint32(24, true) };
+}

@@ -17,6 +17,10 @@ export type QvmArguments = readonly [
   number, number, number, number, number, number, number, number, number, number,
 ];
 
+const cancellationScope = Symbol("QVM cancellation scope");
+/** A capability for one live intercepted call, issued and checked by its interpreter. */
+export interface QvmCancellationScope { readonly [cancellationScope]: true; }
+
 export interface QvmSyscall {
   /** Live little-endian words: syscall number, followed by its arguments. */
   readonly words: DataView;
@@ -24,23 +28,26 @@ export interface QvmSyscall {
   /** Recursive entry is valid only while this callback owns the suspended frame. */
   invoke(args: QvmArguments, instructionIndex?: number): number;
   invokeAsync(args: QvmArguments, instructionIndex?: number, validate?: () => void): Promise<number>;
+  cancelFunction(scope: QvmCancellationScope): never;
 }
 
 export type QvmSystemCallResult = number | Promise<number>;
 export type QvmSystemCall = (call: QvmSyscall) => QvmSystemCallResult;
 
-export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsync"> {
+export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> {
   readonly instructionIndex: number;
   /** Live source argument words, starting at the caller's first OP_ARG slot. */
   readonly words: DataView;
   readonly memory: Uint8Array;
+  /** Open before proceeding; cancellation returns zero from this exact source call. */
+  cancellationScope(): QvmCancellationScope;
   /** Runs the original body once with its actual caller stack and argument addresses. */
   proceed(): number;
   proceedAsync(): Promise<number>;
 }
 export type QvmFunctionHook = (call: QvmFunctionCall) => QvmSystemCallResult;
 export type QvmFunctionResolver = (instructionIndex: number, firstArgument: number) => QvmFunctionHook | undefined;
-export interface QvmFunctionObservation extends Pick<QvmSyscall, "invoke" | "invokeAsync"> {
+export interface QvmFunctionObservation extends Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> {
   readonly instructionIndex: number;
   argument(index: number): number;
 }
@@ -102,27 +109,37 @@ class Operands {
     if (this.depth !== 1) throw new CommonError("drop", `Interpreter error: opStack = ${this.depth}`);
     return this.peek();
   }
+
+  truncate(depth: number): void {
+    if (!Number.isSafeInteger(depth) || depth < 0 || depth > this.depth) throw new Error("QVM cancellation lost its caller operands");
+    while (this.depth > depth) { this.cells[this.depth] = undefined; this.depth--; }
+  }
 }
 
 interface Invocation {
   readonly operands: Operands;
   readonly asynchronous: boolean;
   readonly validate: () => void;
+  readonly functionScope: SourceFunctionCall | null;
 }
 interface SyscallScope {
   open: boolean;
   pending: Promise<void> | null;
   failure: { readonly error: unknown } | null;
 }
-interface HostCallScope extends Pick<QvmSyscall, "invoke" | "invokeAsync"> {
+interface HostCallScope extends Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> {
   run(operation: () => number): number;
   runAsync(operation: () => Promise<number>): Promise<number>;
+  control<Result>(operation: () => Result): Result;
 }
 interface SourceFunctionCall {
   readonly stack: number;
   readonly returnPC: number;
   readonly operands: Operands;
   readonly operandDepth: number;
+  readonly parent: SourceFunctionCall | null;
+  active: boolean;
+  cancellation: { readonly signal: Error; requested: boolean; failure: { readonly error: unknown } | null } | null;
 }
 
 function signedWord(value: number): number {
@@ -152,6 +169,7 @@ export class QvmInterpreter {
   private functionHooks: Map<number, { readonly hook: QvmFunctionHook }> | null = null;
   private functionObservers: Map<number, readonly FunctionObserver[]> | null = null;
   private functionResolver: { readonly resolve: QvmFunctionResolver } | undefined;
+  private readonly cancellationScopes = new WeakMap<QvmCancellationScope, SourceFunctionCall>();
 
   constructor(image: QvmImage, private readonly systemCall: QvmSystemCall,
     profile: QvmAllocationProfile = { kind: "unaccounted" },
@@ -306,8 +324,8 @@ export class QvmInterpreter {
     finally { this.rootActive = false; }
   }
 
-  private executeSync(args: QvmArguments, instructionIndex: number, sourceCall?: SourceFunctionCall): number {
-    const execution = this.execute(args, instructionIndex, false, () => {}, sourceCall);
+  private executeSync(args: QvmArguments, instructionIndex: number, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null): number {
+    const execution = this.execute(args, instructionIndex, false, () => {}, sourceCall, functionScope);
     const result = execution.next();
     if (result.done) return result.value;
     // The trap boundary rejects promises before a synchronous invocation can yield.
@@ -315,9 +333,9 @@ export class QvmInterpreter {
     throw new Error("Synchronous QVM call cannot suspend");
   }
 
-  private async executeAsync(args: QvmArguments, instructionIndex: number, validate: () => void, sourceCall?: SourceFunctionCall): Promise<number> {
+  private async executeAsync(args: QvmArguments, instructionIndex: number, validate: () => void, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null): Promise<number> {
     validate();
-    const execution = this.execute(args, instructionIndex, true, validate, sourceCall);
+    const execution = this.execute(args, instructionIndex, true, validate, sourceCall, functionScope);
     let next = execution.next();
     while (!next.done) {
       try {
@@ -367,12 +385,44 @@ export class QvmInterpreter {
     return word;
   }
 
-  private hostCall(frame: Invocation, perform: (scope: HostCallScope) => QvmSystemCallResult): QvmSystemCallResult {
+  private cancellationFailure(functionScope: SourceFunctionCall | null, error: unknown): void {
+    for (let call = functionScope; call !== null; call = call.parent)
+      if (call.active && call.cancellation?.requested && call.cancellation.signal === error) return;
+    for (let call = functionScope; call !== null; call = call.parent)
+      if (call.active && call.cancellation !== null && call.cancellation.failure === null) call.cancellation.failure = { error };
+  }
+
+  private checkCancellation(functionScope: SourceFunctionCall | null): void {
+    let cancelled: Error | null = null;
+    for (let call = functionScope; call !== null; call = call.parent) {
+      if (!call.active || call.cancellation === null) continue;
+      if (call.cancellation.failure !== null) throw call.cancellation.failure.error;
+      if (call.cancellation.requested) cancelled = call.cancellation.signal;
+    }
+    if (cancelled !== null) throw cancelled;
+  }
+
+  private cancelFunction(capability: QvmCancellationScope, functionScope: SourceFunctionCall | null): never {
+    const target = this.cancellationScopes.get(capability);
+    if (target === undefined) throw new Error("QVM cancellation scope belongs to another interpreter");
+    if (!target.active) throw new Error("QVM cancellation scope has expired");
+    if (target.cancellation === null || target.cancellation.requested) throw new Error("QVM cancellation scope has already been used");
+    let current = functionScope;
+    while (current !== null && current !== target) current = current.parent;
+    if (current === null) throw new Error("QVM cancellation scope is not an ancestor of this call");
+    this.checkCancellation(functionScope);
+    target.cancellation.requested = true;
+    throw target.cancellation.signal;
+  }
+
+  private hostCall(frame: Invocation, perform: (scope: HostCallScope) => QvmSystemCallResult,
+    functionScope: SourceFunctionCall | null = frame.functionScope): QvmSystemCallResult {
     const scope: SyscallScope = { open: true, pending: null, failure: null };
     const complete = (value: number): QvmSystemCallResult => {
       scope.open = false;
       const checked = (): number => {
         if (scope.failure !== null) throw scope.failure.error;
+        this.checkCancellation(functionScope);
         this.live();
         frame.validate();
         return signedWord(value);
@@ -381,6 +431,7 @@ export class QvmInterpreter {
     };
     const failed = (error: unknown): never | Promise<number> => {
       scope.open = false;
+      this.cancellationFailure(functionScope, error);
       if (scope.pending !== null) return scope.pending.then(() => { throw error; });
       throw error;
     };
@@ -389,13 +440,19 @@ export class QvmInterpreter {
       this.live();
       frame.validate();
     };
+    const control = <Result>(operation: () => Result): Result => {
+      try { available(); return operation(); }
+      catch (error) { scope.failure ??= { error }; this.cancellationFailure(functionScope, error); throw error; }
+    };
     const run = (operation: () => number): number => {
       available();
+      this.checkCancellation(functionScope);
       return operation();
     };
     const runAsync = (operation: () => Promise<number>): Promise<number> => {
       try {
         available();
+        this.checkCancellation(functionScope);
         if (!frame.asynchronous) throw new Error("Synchronous QVM syscall cannot start an asynchronous child");
         const child = operation();
         scope.pending = child.then(
@@ -406,9 +463,10 @@ export class QvmInterpreter {
       } catch (error) { return Promise.reject(error); }
     };
     try {
-      const result = perform({ run, runAsync,
-        invoke: (args, instructionIndex = 0) => run(() => this.executeSync(args, instructionIndex)),
-        invokeAsync: (args, instructionIndex = 0, validate = () => {}) => runAsync(() => this.executeAsync(args, instructionIndex, () => { frame.validate(); validate(); })),
+      const result = perform({ run, runAsync, control,
+        cancelFunction: capability => control(() => this.cancelFunction(capability, functionScope)),
+        invoke: (args, instructionIndex = 0) => run(() => this.executeSync(args, instructionIndex, undefined, functionScope)),
+        invokeAsync: (args, instructionIndex = 0, validate = () => {}) => runAsync(() => this.executeAsync(args, instructionIndex, () => { frame.validate(); validate(); }, undefined, functionScope)),
       });
       if (typeof result === "number") return complete(result);
       if (!frame.asynchronous) {
@@ -424,13 +482,14 @@ export class QvmInterpreter {
     this.range(sp + 4, 4);
     return this.hostCall(frame, scope => this.systemCall({
       words: new DataView(this.memory.buffer, this.memory.byteOffset + sp + 4, this.memory.byteLength - sp - 4),
-      memory: this.memory, invoke: scope.invoke, invokeAsync: scope.invokeAsync,
+      memory: this.memory, invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
     }));
   }
 
   private intercept(frame: Invocation, sp: number, returnPC: number, instructionIndex: number, hook: QvmFunctionHook | undefined,
     observers: readonly FunctionObserver[] | undefined): QvmSystemCallResult {
-    const sourceCall: SourceFunctionCall = { stack: sp, returnPC, operands: frame.operands, operandDepth: frame.operands.count };
+    const sourceCall: SourceFunctionCall = { stack: sp, returnPC, operands: frame.operands, operandDepth: frame.operands.count,
+      parent: frame.functionScope, active: true, cancellation: null };
     const unusedArguments: QvmArguments = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     let proceeded = false;
     const failure: { value: { readonly error: unknown } | null } = { value: null };
@@ -443,7 +502,14 @@ export class QvmInterpreter {
     const proceed = (): QvmSystemCallResult => this.hostCall(frame, scope => {
       const call: QvmFunctionCall = { instructionIndex, memory: this.memory,
         words,
-        invoke: scope.invoke, invokeAsync: scope.invokeAsync,
+        invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
+        cancellationScope: () => scope.control(() => {
+          if (proceeded || sourceCall.cancellation !== null) throw new Error("QVM cancellation scope must open once before proceeding");
+          const capability = Object.freeze<QvmCancellationScope>({ [cancellationScope]: true });
+          sourceCall.cancellation = { signal: new Error("QVM function scope cancelled"), requested: false, failure: null };
+          this.cancellationScopes.set(capability, sourceCall);
+          return capability;
+        }),
         proceed: () => scope.run(() => {
           try { begin(); return this.executeSync(unusedArguments, instructionIndex, sourceCall); }
           catch (error) { failure.value = { error }; throw error; }
@@ -453,14 +519,14 @@ export class QvmInterpreter {
       const result = hook !== undefined ? hook(call) : frame.asynchronous ? call.proceedAsync() : call.proceed();
       const checked = (value: number): number => { if (failure.value !== null) throw failure.value.error; return value; };
       return typeof result === "number" ? checked(result) : result.then(checked);
-    });
+    }, sourceCall);
     const observeNext = (start: number): QvmSystemCallResult => {
       for (let index = start; observers !== undefined && index < observers.length; index++) {
         const observer = observers[index];
         if (observer === undefined || !observer.active) continue;
         const result = this.hostCall(frame, scope => {
           let open = true;
-          const observation: QvmFunctionObservation = { instructionIndex, invoke: scope.invoke, invokeAsync: scope.invokeAsync,
+          const observation: QvmFunctionObservation = { instructionIndex, invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
             argument: argumentIndex => {
               if (!open) throw new Error("QVM function observation has ended");
               if (!Number.isSafeInteger(argumentIndex) || argumentIndex < 0 || argumentIndex >= 10) throw new RangeError("QVM argument index outside source call");
@@ -468,16 +534,34 @@ export class QvmInterpreter {
             } };
           try { observer.observe(observation); return 0; }
           finally { open = false; }
-        });
+        }, sourceCall);
         if (typeof result !== "number") return result.then(() => observeNext(index + 1));
       }
       return proceed();
     };
-    return observeNext(0);
+    const complete = (value: number): number => {
+      try { this.checkCancellation(sourceCall); return value; }
+      finally { sourceCall.active = false; }
+    };
+    const failed = (error: unknown): number => {
+      try {
+        const cancellation = sourceCall.cancellation;
+        if (cancellation !== null && cancellation.failure !== null) throw cancellation.failure.error;
+        if (cancellation?.requested && error === cancellation.signal) {
+          sourceCall.operands.truncate(sourceCall.operandDepth);
+          this.writeWord(sourceCall.stack, sourceCall.returnPC);
+          return 0;
+        }
+        throw error;
+      } finally { sourceCall.active = false; }
+    };
+    let result: QvmSystemCallResult;
+    try { result = observeNext(0); } catch (error) { return failed(error); }
+    return typeof result === "number" ? complete(result) : result.then(complete, failed);
   }
 
   private *execute(args: QvmArguments, instructionIndex: number, asynchronous: boolean,
-    validate: () => void, sourceCall?: SourceFunctionCall): Generator<Promise<number>, number, number> {
+    validate: () => void, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null): Generator<Promise<number>, number, number> {
     for (const word of args) signedWord(word);
     if (sourceCall === undefined) this.registration?.printCall(args[0]);
     const profile = this.registration?.executionProfile() ?? { kind: "release" };
@@ -490,7 +574,8 @@ export class QvmInterpreter {
     const previousCallLevel = this.callLevel;
     let sp = sourceCall === undefined ? this.stack(entryStack - 48) : sourceCall.stack;
     const previous = this.active;
-    const frame: Invocation = { operands: sourceCall?.operands ?? new Operands(debug), asynchronous, validate };
+    const frame: Invocation = { operands: sourceCall?.operands ?? new Operands(debug), asynchronous, validate,
+      functionScope: sourceCall ?? functionScope ?? previous?.functionScope ?? null };
     const operands = frame.operands;
     // vm_x86.c retains CALL/RET control on the host stack, outside writable guest locals.
     const returns = this.semantics === "compiled" ? [sp, sourceCall?.returnPC ?? -1] : null;
@@ -692,6 +777,9 @@ export class QvmInterpreter {
             break;
         }
       }
+    } catch (error) {
+      this.cancellationFailure(frame.functionScope, error);
+      throw error;
     } finally {
       this.programStack = entryStack;
       this.active = previous;

@@ -89,6 +89,9 @@ export class RereleaseQ2GuestHost {
   readonly #worldText: RereleaseWorldTextImports | null;
   readonly #sounds: RereleaseSoundImports | null;
   readonly #lifetimes = new Map<number, { readonly actor: OwnedActor; readonly generation: number | null; readonly address: bigint }>();
+  readonly #retiredInputClients = new Set<number>();
+  retireInputClient(slot: number): void { this.#retiredInputClients.add(slot); }
+  finishInputRetirement(slot: number): void { this.#retiredInputClients.delete(slot); this.#lifetimes.delete(slot); }
   readonly #surfaces = new Map<Q2SurfaceInfo, GuestAddress>();
   readonly #botEntities = new Map<ActorId, RawEntityView>();
   #filterDepth = 0;
@@ -123,6 +126,7 @@ export class RereleaseQ2GuestHost {
     memory.writeFloat32(address, vector.x); memory.writeFloat32(memory.offset(address, 4n), vector.y); memory.writeFloat32(memory.offset(address, 8n), vector.z);
   }
   actor(view: RawEntityView): OwnedActor | null {
+    if (this.#retiredInputClients.has(view.slot)) return null;
     if (this.options.semantics.project !== undefined) return this.options.semantics.project(view, this.module);
     const projected = this.foreignActors?.lookup(view);
     if (projected !== undefined) return projected;

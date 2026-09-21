@@ -52,6 +52,9 @@ export interface ClassicQ2ActorProjection {
 /** Reads the DLL's current export descriptor and borrows complete source-owned edicts. */
 export class ClassicQ2Edicts {
   readonly #retainedClients = new Set<number>();
+  readonly #retiredInputClients = new Set<number>();
+  retireInputClient(slot: number): void { this.#retiredInputClients.add(slot); }
+  finishInputRetirement(slot: number): void { this.#retiredInputClients.delete(slot); }
   constructor(readonly memory: MappedGuestMemory, readonly exports: GuestAddress, readonly actors: SessionActorRegistry,
     readonly provider: ProviderId, readonly bind: (record: RawEntityView, actor: OwnedActor) => undefined,
     readonly projection?: ClassicQ2ActorProjection) {
@@ -90,6 +93,7 @@ export class ClassicQ2Edicts {
     return this.at(source.slot).address;
   }
   observe(address: GuestAddress): OwnedActor | null {
+    if (this.#retiredInputClients.size !== 0 && this.#retiredInputClients.has(this.fromPointer(address).slot)) return null;
     if (this.projection !== undefined) return this.projection.project(this.fromPointer(address));
     const record = this.fromPointer(address), existing = this.actors.atSource(this.provider, record.slot);
     if (record.bytes.getInt32(88, true) === 0 && !this.#retainedClients.has(record.slot)) {

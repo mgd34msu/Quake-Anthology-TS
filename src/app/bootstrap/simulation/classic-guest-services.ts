@@ -1,4 +1,5 @@
 import type { EquipmentMovement } from "../../../contracts/movement.ts";
+import type { NativeInputMotion } from "../../../compat/q2/native-input.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -50,6 +51,12 @@ export class ClassicGuestServices {
   #combat: ClassicCombatBindings | null = null;
   #playerMovement: EquipmentMovement | undefined;
   #writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
+  private readonly inputMotion = new Map<ActorId, NativeInputMotion>();
+  withInputMovement<T>(actor: ActorId, projection: NativeInputMotion, run: () => T): T {
+    const previous = this.inputMotion.get(actor); this.inputMotion.set(actor, projection);
+    try { return run(); }
+    finally { if (previous === undefined) this.inputMotion.delete(actor); else this.inputMotion.set(actor, previous); }
+  }
   #readPlayerVelocity: ((actor: ActorId) => Vec3 | undefined) | null = null;
   #loading = true;
   #options: ClassicGuestServicesOptions;
@@ -135,18 +142,21 @@ export class ClassicGuestServices {
     const view = record.bytes;
     const client = record.slot > 0 && record.slot <= this.options.maxClients ? this.host.edicts.clientPrefix(record.slot) : null;
     const actor = record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
-    const velocity = pending ?? (client === null ? zero : { x: client.getInt16(10, true) * 0.125, y: client.getInt16(12, true) * 0.125, z: client.getInt16(14, true) * 0.125 });
-    return { origin: vector(view, 4), angles: vector(view, 16), velocity, bounds: { min: vector(view, 188), max: vector(view, 200) }, ground: null };
+    const motion = actor === null ? undefined : this.inputMotion.get(actor)?.read();
+    const velocity = motion?.velocity ?? pending ?? (client === null ? zero : { x: client.getInt16(10, true) * 0.125, y: client.getInt16(12, true) * 0.125, z: client.getInt16(14, true) * 0.125 });
+    return { origin: motion?.origin ?? vector(view, 4), angles: vector(view, 16), velocity, bounds: { min: vector(view, 188), max: vector(view, 200) }, ground: null };
   }
   private bindEntity(record: RawEntityView, actor: OwnedActor): undefined {
     this.options.engine.bodies.bind(actor, { read: () => this.body(record), write: state => {
-      const velocity = this.body(record).velocity;
-      if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
+      const velocity = this.body(record).velocity, motion = this.inputMotion.get(actor.id);
+      if (motion !== undefined) motion.write(state);
+      else if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
         if (record.slot < 1 || record.slot > this.options.maxClients || this.#writePlayerVelocity === null)
           throw new Error("API3 velocity writes require a source semantic binding");
         this.#writePlayerVelocity(actor, state.velocity);
       }
-      storeVector(record.bytes, 4, state.origin); storeVector(record.bytes, 16, state.angles);
+      if (motion === undefined) storeVector(record.bytes, 4, state.origin);
+      storeVector(record.bytes, 16, state.angles);
       storeVector(record.bytes, 188, state.bounds.min); storeVector(record.bytes, 200, state.bounds.max); return undefined;
     } });
     this.#combat?.bind(record, actor);

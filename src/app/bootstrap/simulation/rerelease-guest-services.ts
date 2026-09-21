@@ -1,4 +1,5 @@
 import { RereleaseNavigationImports } from "../../../compat/q2/rerelease/navigation.ts";
+import type { NativeInputMotion } from "../../../compat/q2/native-input.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallResult, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -31,6 +32,12 @@ function messageBuffer(): SizeBuf { const buffer = new SizeBuf(); SZ_Init(buffer
 /** Public API2023 imports borrow the shared engine while source RunFrame owns gameplay. */
 export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   #writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
+  private readonly inputMotion = new Map<ActorId, NativeInputMotion>();
+  withInputMovement<T>(actor: ActorId, projection: NativeInputMotion, run: () => T): T {
+    const previous = this.inputMotion.get(actor); this.inputMotion.set(actor, projection);
+    try { return run(); }
+    finally { if (previous === undefined) this.inputMotion.delete(actor); else this.inputMotion.set(actor, previous); }
+  }
   #readPlayerVelocity: ((actor: ActorId) => Vec3 | undefined) | null = null;
   setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined, read: (actor: ActorId) => Vec3 | undefined): void {
     this.#writePlayerVelocity = write; this.#readPlayerVelocity = read;
@@ -129,19 +136,22 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   private view(slot: number): RereleasePublicEdict { return new RereleasePublicEdict(this.memory, this.host.module.entities().atSlot(slot)); }
   private body(view: RereleasePublicEdict): BodyState {
     const actor = view.record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
-    const velocity = pending ?? (view.record.slot > 0 && view.record.slot <= this.options.maxClients && view.pointer("client") !== null ? view.playerState().movement.velocity : view.vector("sv.velocity"));
-    return { origin: view.vector("s.origin"), angles: view.vector("s.angles"), velocity, bounds: { min: view.vector("mins"), max: view.vector("maxs") }, ground: null };
+    const motion = actor === null ? undefined : this.inputMotion.get(actor)?.read();
+    const velocity = motion?.velocity ?? pending ?? (view.record.slot > 0 && view.record.slot <= this.options.maxClients && view.pointer("client") !== null ? view.playerState().movement.velocity : view.vector("sv.velocity"));
+    return { origin: motion?.origin ?? view.vector("s.origin"), angles: view.vector("s.angles"), velocity, bounds: { min: view.vector("mins"), max: view.vector("maxs") }, ground: null };
   }
   private bindEntity(record: RawEntityView, actor: OwnedActor): RereleaseActorBindings {
     const view = new RereleasePublicEdict(this.memory, record); this.#links.delete(actor.id);
     return { body: { read: () => this.body(view), write: state => {
-      const velocity = this.body(view).velocity;
-      if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
+      const velocity = this.body(view).velocity, motion = this.inputMotion.get(actor.id);
+      if (motion !== undefined) motion.write(state);
+      else if (state.velocity.x !== velocity.x || state.velocity.y !== velocity.y || state.velocity.z !== velocity.z) {
         if (record.slot < 1 || record.slot > this.options.maxClients || view.pointer("client") === null || this.#writePlayerVelocity === null)
           throw new Error("API2023 velocity writes require a source semantic binding");
         this.#writePlayerVelocity(actor, state.velocity);
       }
-      view.setVector("s.origin", state.origin); view.setVector("s.angles", state.angles); view.setVector("mins", state.bounds.min); view.setVector("maxs", state.bounds.max); return undefined; } },
+      if (motion === undefined) view.setVector("s.origin", state.origin);
+      view.setVector("s.angles", state.angles); view.setVector("mins", state.bounds.min); view.setVector("maxs", state.bounds.max); return undefined; } },
       combat: this.#combat?.bind(record) ?? null, powerArmorCells: null, inventory: null, callbacks: { think: null, touch: null, use: null, pain: null, die: null } };
   }
   private worldLink(bounds: Bounds): LinkMetadata {
