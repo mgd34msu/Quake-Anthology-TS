@@ -106,6 +106,10 @@ QVM client callbacks can opt into a `clients` declaration with reserved source r
 
 Client imports read the destination's userinfo and accepted input. Source userinfo writes update storage without recursively invoking gameplay callbacks. Usercmd conversion retains the accepted input time and uses the component's own weapon and angle state; it requires real input. Targeted commands and deferred disconnects retain the actual recipient. Component configstrings remain private, including source player rows; they feed component asset lookup and saves, and do not overwrite the primary game's wire tables. Independent component cgame transport is not provided.
 
+QuakeC components can declare `clients: { maximum, admit, userinfo, disconnect }`, using named original calls with `self` and `time` inputs. Source edicts 1 through `maximum` are reserved independently of destination client IDs; ordinary actors begin after them. A string field such as `netname` can declare `binding: "userinfo", key: "name"`. Client reads and writes use that raw userinfo key while other actors retain private source fields. Saves retain admitted state and private memory without replaying admission; disconnect and slot reuse retire the old mapping.
+
+The decoded program ABI selects NetQuake or QuakeWorld client builtin semantics. QuakeWorld `infokey` reads the mapped client and `sprint` keeps its level argument. Original Copper and QuakeWorld callbacks have exercised these paths against Q2 geometry. QuakeWorld component multicast and complete source input callbacks remain under development.
+
 ### Component console commands
 
 `modcmd PRODUCT/COMPONENT_ID <command>` selects one enabled component explicitly. Component-generated commands enter the same Application command program with their source dialect and instance identity. Cvars and script files resolve within that component; aliases and deferred commands retain the same owner. Disabling an instance cancels its pending commands, waits and script reads while preserving the other components and the primary world. Prepared worlds stage engine actions until publication.
