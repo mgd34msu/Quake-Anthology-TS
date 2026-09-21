@@ -57,8 +57,14 @@ export interface ChatConfiguration {
 
 export interface ChatMatchVariable { offset: number; length: number }
 export type ChatMatchVariables = [ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable, ChatMatchVariable];
+export interface ChatBufferWrites {
+  view(bytes: Uint8Array): DataView;
+  copy(destination: Uint8Array, source: Uint8Array): void;
+  clear(destination: Uint8Array, start: number): void;
+}
 export interface ChatMatchBuffer {
   readonly string: Uint8Array | null;
+  readonly writes?: ChatBufferWrites;
   type: number;
   subtype: number;
   readonly variables: ChatMatchVariables;
@@ -269,9 +275,15 @@ function chatCString(bytes: Uint8Array | null): string {
   if (end < 0) throw new RangeError("bot chat string has no terminator before allocation end");
   return byteText(bytes.subarray(0, end));
 }
-function copyChatText(bytes: Uint8Array | null, offset: number, text: string, count: number): void {
+function copyChatText(bytes: Uint8Array | null, offset: number, text: string, count: number, writes?: ChatBufferWrites): void {
   const destination = chatSpan(bytes, offset, count);
   const copied = Math.min(text.length, count);
+  if (writes !== undefined) {
+    const view = writes.view(destination);
+    for (let index = 0; index < copied; index++) view.setUint8(index, text.charCodeAt(index));
+    writes.clear(destination, copied);
+    return;
+  }
   for (let index = 0; index < copied; index++) destination[index] = text.charCodeAt(index);
   destination.fill(0, copied);
 }
@@ -334,17 +346,23 @@ export function unifyWhiteSpaces(input: string): string {
 }
 
 /** Runs the original byte moves against the caller's live string allocation. */
-export function unifyWhiteSpacesInPlace(bytes: Uint8Array | null): void {
+export function unifyWhiteSpacesInPlace(bytes: Uint8Array | null, writes?: ChatBufferWrites): void {
   function at(index: number): number { return chatByte(bytes, index); }
   let pointer = 0, old = 0;
   while (at(pointer) !== 0) {
     while (at(pointer) !== 0 && whiteSpace(at(pointer))) pointer++;
     if (pointer > old) {
-      if (old > 0 && at(pointer) !== 0) chatSpan(bytes, old++, 1)[0] = 32;
+      if (old > 0 && at(pointer) !== 0) {
+        const destination = chatSpan(bytes, old++, 1);
+        if (writes === undefined) destination[0] = 32;
+        else writes.view(destination).setUint8(0, 32);
+      }
       if (pointer > old) {
         let end = pointer;
         while (at(end) !== 0) end++;
-        chatSpan(bytes, old, end + 1 - pointer).set(chatSpan(bytes, pointer, end + 1 - pointer));
+        const destination = chatSpan(bytes, old, end + 1 - pointer), source = chatSpan(bytes, pointer, end + 1 - pointer);
+        if (writes === undefined) destination.set(source);
+        else writes.copy(destination, source);
       }
     }
     while (at(pointer) !== 0 && !whiteSpace(at(pointer))) pointer++;
@@ -971,9 +989,13 @@ export class BotChatLibrary {
     return { text: chatCString(buffer.string), type: buffer.type, subtype: buffer.subtype, variables: publicCaptures(buffer.variables) };
   }
   findMatchInto(input: ChatTextSource, context: number, buffer: ChatMatchBuffer): boolean {
-    copyChatText(buffer.string, 0, boundedChatText(input, CHAT_MESSAGE_SIZE), CHAT_MESSAGE_SIZE);
+    copyChatText(buffer.string, 0, boundedChatText(input, CHAT_MESSAGE_SIZE), CHAT_MESSAGE_SIZE, buffer.writes);
     let length = chatCString(buffer.string).length;
-    while (length > 0 && chatByte(buffer.string, length - 1) === 10) chatSpan(buffer.string, --length, 1)[0] = 0;
+    while (length > 0 && chatByte(buffer.string, length - 1) === 10) {
+      const destination = chatSpan(buffer.string, --length, 1);
+      if (buffer.writes === undefined) destination[0] = 0;
+      else buffer.writes.view(destination).setUint8(0, 0);
+    }
     const match: RawMatch = { get text(): string { return chatCString(buffer.string); }, variables: buffer.variables };
     for (let template = this.matches; template !== null; template = template.next) {
       if ((template.context & context) === 0) continue;
@@ -1016,13 +1038,13 @@ export class BotChatLibrary {
     }
     return text;
   }
-  replaceSynonymsInPlace(input: () => Uint8Array | null, context: number): void {
+  replaceSynonymsInPlace(input: () => Uint8Array | null, context: number, writes?: ChatBufferWrites): void {
     for (const group of this.synonyms) if ((group.context & context) !== 0) {
       for (const entry of group.entries.slice(1)) {
         const bytes = input();
         replaceWords(chatCString(bytes), entry.text, group.entries[0].text, (offset, tail, replacement) => {
-          copyChatText(bytes, offset + replacement.length, tail, tail.length + 1);
-          copyChatText(bytes, offset, replacement, replacement.length);
+          copyChatText(bytes, offset + replacement.length, tail, tail.length + 1, writes);
+          copyChatText(bytes, offset, replacement, replacement.length, writes);
         });
       }
     }

@@ -100,16 +100,6 @@ export function readQvmBotGoal(view: DataView): BotGoal {
   };
 }
 
-/** BotPushGoal/GetTopGoal/GetSecondGoal use memcpy, including noncanonical float words. */
-export function copyQvmBotGoal(view: DataView, source: Uint8Array): void {
-  requireGoalRecord(view, QVM_BOT_GOAL_BYTES);
-  if (source.byteLength < QVM_BOT_GOAL_BYTES) {
-    throw new BinaryError("QVM bot_goal_t", 0,
-      `record requires ${QVM_BOT_GOAL_BYTES} bytes, received ${source.byteLength}`);
-  }
-  new Uint8Array(view.buffer, view.byteOffset, QVM_BOT_GOAL_BYTES).set(source.subarray(0, QVM_BOT_GOAL_BYTES));
-}
-
 /** Queries write only their source fields; the remaining bytes are never read. */
 export function writeQvmBotGoal(
   view: DataView, goal: BotGoal, fields: "full" | "level-item" | "location" = "full",
@@ -130,15 +120,16 @@ export const QVM_BOT_INIT_MOVE_BYTES = 68;
 export const QVM_BOT_MOVE_RESULT_BYTES = 52;
 
 type Pointer = () => Uint8Array | null;
+type FieldView = (bytes: Uint8Array, offset: number) => DataView;
 
-function field(pointer: Pointer, offset: number): DataView {
+function field(pointer: Pointer, offset: number, view?: FieldView): DataView {
   const bytes = pointer();
   if (bytes === null) throw new RangeError("QVM bot movement requires a nonnull pointer");
   if (offset + 4 > bytes.byteLength) {
     throw new BinaryError("QVM bot movement record", offset,
       `field exceeds ${bytes.byteLength}-byte allocation`);
   }
-  return new DataView(bytes.buffer, bytes.byteOffset + offset, 4);
+  return view === undefined ? new DataView(bytes.buffer, bytes.byteOffset + offset, 4) : view(bytes, offset);
 }
 
 function movementVector(pointer: Pointer, offset: number): Vec3 {
@@ -149,10 +140,10 @@ function movementVector(pointer: Pointer, offset: number): Vec3 {
   };
 }
 
-function writeVector(pointer: Pointer, offset: number, value: Vec3): void {
-  field(pointer, offset).setFloat32(0, value.x, true);
-  field(pointer, offset + 4).setFloat32(0, value.y, true);
-  field(pointer, offset + 8).setFloat32(0, value.z, true);
+function writeVector(pointer: Pointer, offset: number, value: Vec3, view: FieldView): void {
+  field(pointer, offset, view).setFloat32(0, value.x, true);
+  field(pointer, offset + 4, view).setFloat32(0, value.y, true);
+  field(pointer, offset + 8, view).setFloat32(0, value.z, true);
 }
 
 /** Field reads follow the owning BotInitMoveState handle check and copy order. */
@@ -171,36 +162,36 @@ export function qvmBotInitMoveReference(pointer: Pointer): BotInitMove {
 }
 
 /** The source clears six words before checking the handle, leaving the tail live. */
-export function qvmBotMoveResultReference(pointer: Pointer): BotMoveResult {
+export function qvmBotMoveResultReference(pointer: Pointer, view: FieldView): BotMoveResult {
   return {
     get failure(): boolean { return field(pointer, 0).getInt32(0, true) !== 0; },
-    set failure(value: boolean) { field(pointer, 0).setInt32(0, Number(value), true); },
+    set failure(value: boolean) { field(pointer, 0, view).setInt32(0, Number(value), true); },
     get type(): number { return field(pointer, 4).getInt32(0, true); },
-    set type(value: number) { field(pointer, 4).setInt32(0, value, true); },
+    set type(value: number) { field(pointer, 4, view).setInt32(0, value, true); },
     get blocked(): boolean { return field(pointer, 8).getInt32(0, true) !== 0; },
-    set blocked(value: boolean) { field(pointer, 8).setInt32(0, Number(value), true); },
+    set blocked(value: boolean) { field(pointer, 8, view).setInt32(0, Number(value), true); },
     get blockEntity(): number { return field(pointer, 12).getInt32(0, true); },
-    set blockEntity(value: number) { field(pointer, 12).setInt32(0, value, true); },
+    set blockEntity(value: number) { field(pointer, 12, view).setInt32(0, value, true); },
     get travelType(): number { return field(pointer, 16).getInt32(0, true); },
-    set travelType(value: number) { field(pointer, 16).setInt32(0, value, true); },
+    set travelType(value: number) { field(pointer, 16, view).setInt32(0, value, true); },
     get flags(): number { return field(pointer, 20).getInt32(0, true); },
-    set flags(value: number) { field(pointer, 20).setInt32(0, value, true); },
+    set flags(value: number) { field(pointer, 20, view).setInt32(0, value, true); },
     get weapon(): number { return field(pointer, 24).getInt32(0, true); },
-    set weapon(value: number) { field(pointer, 24).setInt32(0, value, true); },
+    set weapon(value: number) { field(pointer, 24, view).setInt32(0, value, true); },
     get moveDirection(): Vec3 { return movementVector(pointer, 28); },
-    set moveDirection(value: Vec3) { writeVector(pointer, 28, value); },
+    set moveDirection(value: Vec3) { writeVector(pointer, 28, value, view); },
     get idealViewAngles(): Vec3 { return movementVector(pointer, 40); },
-    set idealViewAngles(value: Vec3) { writeVector(pointer, 40, value); },
+    set idealViewAngles(value: Vec3) { writeVector(pointer, 40, value, view); },
   };
 }
 
 export function qvmBotMovementVector(pointer: Pointer): Vec3 { return movementVector(pointer, 0); }
 
 /** Target writes are visible immediately, including a route query returning false. */
-export function qvmBotMovementTarget(pointer: Pointer): MovementTarget {
+export function qvmBotMovementTarget(pointer: Pointer, view: FieldView): MovementTarget {
   return {
     get value(): Vec3 { return movementVector(pointer, 0); },
-    set value(value: Vec3) { writeVector(pointer, 0, value); },
+    set value(value: Vec3) { writeVector(pointer, 0, value, view); },
   };
 }
 

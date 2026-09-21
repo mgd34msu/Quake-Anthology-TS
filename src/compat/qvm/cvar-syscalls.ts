@@ -16,9 +16,8 @@ function update(pointer: number, memory: QvmMemory, cvars: QvmCvarServices): voi
   if (source === undefined || source.modificationCount === record.getInt32(4, true)) return;
   record.setInt32(4, source.modificationCount, true);
   if (source.value.length > 255) throw new RangeError("Cvar_Update: value exceeds MAX_CVAR_VALUE_STRING");
-  const text = new Uint8Array(record.buffer, record.byteOffset + 16, 256);
-  text.fill(0);
-  for (let index = 0; index < source.value.length; index++) text[index] = source.value.charCodeAt(index);
+  memory.fillBytes(record.byteOffset - memory.bytes.byteOffset + 16, 256, 0);
+  for (let index = 0; index < source.value.length; index++) record.setUint8(16 + index, source.value.charCodeAt(index));
   record.setFloat32(8, source.numericValue, true);
   record.setInt32(12, source.integerValue, true);
 }

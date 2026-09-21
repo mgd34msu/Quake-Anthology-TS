@@ -60,10 +60,13 @@ export class Q3CdKeyState {
     if (destination.length < 33) throw new RangeError('CD key authorization requires 33 bytes');
     destination.set(this.bytes.subarray(0, 32)); destination[32] = 0;
   }
-  readUi(uniqueKeyResult: number, gameDirectory: string, destination: Uint8Array): void {
+  readUi(uniqueKeyResult: number, gameDirectory: string, destination: Uint8Array,
+    writes?: { copy(bytes: Uint8Array): void; setByte(offset: number, value: number): void }): void {
     if (destination.length < 17) throw new RangeError('CD key UI destination requires 17 bytes');
     const offset = uniqueKeyResult === 1 && sourceCommandText(gameDirectory).length !== 0 ? 16 : 0;
-    destination.set(this.bytes.subarray(offset, offset + 16)); destination[16] = 0;
+    const source = this.bytes.subarray(offset, offset + 16);
+    if (writes === undefined) { destination.set(source); destination[16] = 0; }
+    else { writes.copy(source); writes.setByte(16, 0); }
   }
   writeUi(uniqueKeyResult: number, gameDirectory: string, source: Uint8Array): void {
     if (source.length < 16) throw new RangeError('CD key UI source requires 16 bytes');

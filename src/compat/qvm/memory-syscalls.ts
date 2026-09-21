@@ -26,14 +26,15 @@ export function qvmMemorySyscall(_role: "game" | "cgame" | "ui", words: DataView
   const sourceWord = words.getInt32(8, true);
   const count = words.getInt32(12, true);
   const destination = memory.span(destinationWord, count);
+  const offset = destination.byteOffset - memory.bytes.byteOffset;
   if (trap === 100) {
-    destination.fill(sourceWord & 255);
+    memory.fillBytes(offset, count, sourceWord & 255);
     return 0;
   }
   if (trap === 101) {
     const source = memory.span(sourceWord, count);
     rejectOverlap(destination, source);
-    destination.set(source);
+    memory.writeBytes(offset, source);
     return 0;
   }
   const source = memory.pointer(sourceWord);
@@ -42,7 +43,7 @@ export function qvmMemorySyscall(_role: "game" | "cgame" | "ui", words: DataView
   const copiedLength = terminator < 0 ? count : terminator;
   const consumed = memory.span(sourceWord, terminator < 0 ? count : terminator + 1);
   rejectOverlap(destination, consumed);
-  destination.set(source.subarray(0, copiedLength));
-  destination.fill(0, copiedLength);
+  memory.writeBytes(offset, source.subarray(0, copiedLength));
+  memory.fillBytes(offset + copiedLength, count - copiedLength, 0);
   return destinationWord;
 }

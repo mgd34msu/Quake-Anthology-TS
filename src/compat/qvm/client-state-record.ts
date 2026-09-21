@@ -6,6 +6,7 @@ import type { Snapshot } from "../../network/q3/server-message.ts";
 import { qvmConfigstring } from "./legacy-presentation.ts";
 import { writeQvmEntityState } from "./entity-record.ts";
 import { writeQvmPlayerState } from "./player-record.ts";
+import type { QvmMemory } from "./memory.ts";
 
 export const QVM_GAME_STATE_BYTES = 20100;
 export const QVM_SNAPSHOT_BYTES = 53772;
@@ -16,25 +17,26 @@ function requireBytes(view: DataView, size: number): void {
   if (view.byteLength < size) throw new RangeError(`QVM client record requires ${size} bytes`);
 }
 
-export function writeQvmGameState(view: DataView, state: SourceGameStateRecord, profile: QvmAbiProfile = "q3-modern"): void {
+export function writeQvmGameState(memory: QvmMemory, view: DataView, state: SourceGameStateRecord, profile: QvmAbiProfile = "q3-modern"): void {
   requireBytes(view, QVM_GAME_STATE_BYTES);
   if (state.stringOffsets.length !== 1024 || state.stringData.length !== 16000) throw new RangeError("Invalid source gameState_t extent");
   for (let index = 0; index < 1024; index++) {
     const source = profile !== "q3-modern" && index >= 16 && index <= 26 ? -1 : qvmConfigstring(index, profile);
     view.setInt32(index * 4, source < 0 ? 0 : state.stringOffsets[source] ?? 0, true);
   }
-  new Uint8Array(view.buffer, view.byteOffset + 4096, 16000).set(state.stringData);
+  memory.writeBytes(view.byteOffset - memory.bytes.byteOffset + 4096, state.stringData);
   view.setInt32(20096, state.dataCount, true);
 }
 
-export function writeQvmSnapshot(view: DataView, snapshot: Snapshot, ping: number, profile: QvmAbiProfile = "q3-modern"): void {
+export function writeQvmSnapshot(memory: QvmMemory, view: DataView, snapshot: Snapshot, ping: number, profile: QvmAbiProfile = "q3-modern"): void {
   requireBytes(view, qvmSnapshotBytes(profile));
   const psBytes = profile === "q3-modern" ? 468 : 444, entityBytes = profile === "q3-modern" ? 208 : 204;
   if (snapshot.areaMask.length !== 32 || snapshot.entities.length > 256) throw new RangeError("Invalid source snapshot_t extent");
   const ps = snapshot.playerState;
+  const offset = view.byteOffset - memory.bytes.byteOffset;
   view.setInt32(0, snapshot.flags, true); view.setInt32(4, ping, true); view.setInt32(8, snapshot.serverTime, true);
-  new Uint8Array(view.buffer, view.byteOffset + 12, 32).set(snapshot.areaMask);
-  writeQvmPlayerState(new DataView(view.buffer, view.byteOffset + 44, psBytes), {
+  memory.writeBytes(offset + 12, snapshot.areaMask);
+  writeQvmPlayerState(memory.dataView(offset + 44, psBytes), {
     commandTimeMilliseconds: ps.commandTime, movementType: ps.pmType, bobCycle: ps.bobCycle,
     movementFlags: ps.pmFlags, movementTimeMilliseconds: ps.pmTime, origin: ps.origin, velocity: ps.velocity,
     weaponTimeMilliseconds: ps.weaponTime, gravity: ps.gravity, speed: ps.speed,
@@ -52,7 +54,7 @@ export function writeQvmSnapshot(view: DataView, snapshot: Snapshot, ping: numbe
     movementFrameCount: ps.pmoveFramecount, jumpPadFrame: ps.jumppadFrame, entityEventSequence: ps.entityEventSequence,
   }, profile);
   view.setInt32(44 + psBytes, snapshot.entities.length, true);
-  snapshot.entities.forEach((entity, index) => writeQvmEntityState(new DataView(view.buffer, view.byteOffset + 48 + psBytes + index * entityBytes, entityBytes), entity, profile));
+  snapshot.entities.forEach((entity, index) => writeQvmEntityState(memory.dataView(offset + 48 + psBytes + index * entityBytes, entityBytes), entity, profile));
   // CL_GetSnapshot leaves numServerCommands and unused entity slots untouched.
   view.setInt32(qvmSnapshotBytes(profile) - 4, snapshot.serverCommandNumber, true);
 }

@@ -121,7 +121,7 @@ export class QvmGameData {
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes.byteLength - size) {
       throw new RangeError("Game-data record exceeds the interpreter allocation");
     }
-    return new DataView(bytes.buffer, bytes.byteOffset + offset, size);
+    return this.memory.dataView(offset, size);
   }
 
   private entityAt(offset: number): QvmSharedEntity {

@@ -68,7 +68,7 @@ test("QVM failed restore releases staged descriptors and never creates or change
     expect(readdirSync(f.root)).toEqual(["existing"]);
     expect(files.captureCheckpoint().handles).toEqual([]);
     expect(() => files.restoreCheckpoint({ handles: [valid, valid] })).toThrow("duplicate");
-    expect(() => files.restoreCheckpoint({ handles: [{ ...valid, file: { ...valid.file, path: "../escape" } }] })).toThrow("contained");
+    expect(() => files.restoreCheckpoint({ handles: [{ ...valid, file: { ...valid.file, path: "../escape" } }] })).toThrow("stay inside its storage directory");
     expect(() => files.restoreCheckpoint({ handles: [{ ...valid, file: { ...valid.file, position: -1 } }] })).toThrow();
     files.restoreCheckpoint({ handles: [valid] });
     files.write(1, bytes("x")); expect(readFileSync(join(f.root, "existing")).length).toBe(100);

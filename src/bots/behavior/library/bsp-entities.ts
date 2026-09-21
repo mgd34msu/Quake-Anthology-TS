@@ -193,10 +193,12 @@ export class AasBspEntities {
     return next < 1 || next >= this.entityCount ? 0 : next;
   }
 
-  value(entity: number, key: AasBspKey, output: Uint8Array, size = output.length): boolean {
+  value(entity: number, key: AasBspKey, output: Uint8Array, size = output.length,
+    writes?: { readonly view: DataView; clear(length: number): void }): boolean {
     int32(entity);
     if (output.length === 0) throw new RangeError("AAS_ValueForBSPEpairKey requires its first output byte");
-    output[0] = 0;
+    if (writes === undefined) output[0] = 0;
+    else writes.view.setUint8(0, 0);
     if (entity <= 0 || entity >= this.entityCount) {
       this.print(1, "bsp entity out of range\n");
       return false;
@@ -213,9 +215,13 @@ export class AasBspEntities {
       if (!Number.isInteger(size) || size < 1 || size > output.length) {
         throw new RangeError("AAS_ValueForBSPEpairKey matched output exceeds its allocation or has an invalid size");
       }
-      output.fill(0, 0, size);
+      if (writes === undefined) output.fill(0, 0, size);
+      else writes.clear(size);
       const value = this.readString(this.allocation(valuePointer));
-      for (let index = 0; index < Math.min(value.length, size - 1); index++) output[index] = value.charCodeAt(index);
+      for (let index = 0; index < Math.min(value.length, size - 1); index++) {
+        if (writes === undefined) output[index] = value.charCodeAt(index);
+        else writes.view.setUint8(index, value.charCodeAt(index));
+      }
       return true;
     }
     return false;

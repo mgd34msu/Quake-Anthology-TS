@@ -7,8 +7,16 @@ import { readQvmBotGoal, writeQvmBotGoal, QVM_BOT_GOAL_BYTES } from './bot-navig
 import { touchingGoal } from '../../bots/behavior/library/goals.ts';
 import { QVM_SCRIPT_TOKEN_BYTES, writeQvmScriptToken } from './script-record.ts';
 import { QVM_USER_COMMAND_BYTES, readQvmUserCommand } from './client-state-record.ts';
-import { stringContains, unifyWhiteSpacesInPlace, type ChatVariableSources, type ChatMatchBuffer, type ChatMatchVariable } from '../../bots/behavior/library/chat.ts';
+import { stringContains, unifyWhiteSpacesInPlace, type ChatVariableSources, type ChatMatchBuffer, type ChatMatchVariable, type ChatBufferWrites } from '../../bots/behavior/library/chat.ts';
 import type { WireUserCommand } from '../../network/q3/message.ts';
+import type { QvmMemory } from './memory.ts';
+function chatWrites(guest: QvmMemory): ChatBufferWrites {
+    return {
+        view: bytes => guest.dataView(bytes.byteOffset - guest.bytes.byteOffset, bytes.length),
+        copy: (destination, source) => guest.writeBytes(destination.byteOffset - guest.bytes.byteOffset, source),
+        clear: (destination, start) => guest.fillBytes(destination.byteOffset - guest.bytes.byteOffset + start, destination.length - start, 0),
+    };
+}
 export interface QvmBotLibraryServices {
     readonly library: BotLibrary;
     setup(): number | Promise<number>;
@@ -75,7 +83,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_EA_MOVE: library.actions.move(int(1), vector(2), float(3)); return 0;
         case QvmGameImport.BOTLIB_EA_VIEW: library.actions.view(int(1), vector(2)); return 0;
         case QvmGameImport.BOTLIB_EA_END_REGULAR: library.actions.endRegular(int(1), float(2)); return 0;
-        case QvmGameImport.BOTLIB_EA_GET_INPUT: guest.span(int(3), 40).set(library.actions.getInputBytes(int(1), float(2))); return 0;
+        case QvmGameImport.BOTLIB_EA_GET_INPUT: guest.writeBytes(guest.span(int(3), 40).byteOffset - guest.bytes.byteOffset, library.actions.getInputBytes(int(1), float(2))); return 0;
         case QvmGameImport.BOTLIB_EA_RESET_INPUT: library.actions.resetInput(int(1)); return 0;
         case QvmGameImport.BOTLIB_AI_LOAD_CHARACTER: return library.characters.load(text(1), float(2));
         case QvmGameImport.BOTLIB_AI_FREE_CHARACTER: library.characters.free(int(1)); return 0;
@@ -101,8 +109,8 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_AI_ENTER_CHAT: library.chat.enterChat(int(1), int(2), int(3)); return 0;
         case QvmGameImport.BOTLIB_AI_GET_CHAT_MESSAGE: library.chat.writeChatMessage(int(1), message => guest.writeString(int(2), message, int(3))); return 0;
         case QvmGameImport.BOTLIB_AI_STRING_CONTAINS: return stringContains(nullableText(1), nullableText(2), int(3) !== 0);
-        case QvmGameImport.BOTLIB_AI_UNIFY_WHITE_SPACES: unifyWhiteSpacesInPlace(guest.pointer(int(1))); return 0;
-        case QvmGameImport.BOTLIB_AI_REPLACE_SYNONYMS: library.chat.replaceSynonymsInPlace(() => guest.pointer(int(1)), int(2)); return 0;
+        case QvmGameImport.BOTLIB_AI_UNIFY_WHITE_SPACES: unifyWhiteSpacesInPlace(guest.pointer(int(1)), chatWrites(guest)); return 0;
+        case QvmGameImport.BOTLIB_AI_REPLACE_SYNONYMS: library.chat.replaceSynonymsInPlace(() => guest.pointer(int(1)), int(2), chatWrites(guest)); return 0;
         case QvmGameImport.BOTLIB_AI_LOAD_CHAT_FILE: return library.chat.loadChatFile(int(1), text(2), text(3)) ? 0 : 8;
         case QvmGameImport.BOTLIB_AI_SET_CHAT_GENDER: library.chat.setGender(int(1), int(2)); return 0;
         case QvmGameImport.BOTLIB_AI_SET_CHAT_NAME: library.chat.setName(int(1), text(2), int(3)); return 0;
@@ -116,7 +124,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_AI_GET_TOP_GOAL:
         case QvmGameImport.BOTLIB_AI_GET_SECOND_GOAL: {
             const result = call.code === QvmGameImport.BOTLIB_AI_GET_TOP_GOAL ? library.goals.getTopGoalBytes(int(1)) : library.goals.getSecondGoalBytes(int(1));
-            if (result === null) return 0; guest.span(int(2), QVM_BOT_GOAL_BYTES).set(result); return 1;
+            if (result === null) return 0; guest.writeBytes(guest.span(int(2), QVM_BOT_GOAL_BYTES).byteOffset - guest.bytes.byteOffset, result); return 1;
         }
         case QvmGameImport.BOTLIB_AI_GOAL_NAME: guest.writeString(int(2), library.goals.goalName(int(1)), int(3)); return 0;
         case QvmGameImport.BOTLIB_AI_AVOID_GOAL_TIME: return float32ToBits(library.goals.avoidGoalTime(int(1), int(2)));
@@ -136,7 +144,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_AI_LOAD_WEAPON_WEIGHTS: return library.weapons.loadWeights(int(1), () => text(2));
         case QvmGameImport.BOTLIB_AI_CHOOSE_BEST_FIGHT_WEAPON: return library.weapons.chooseBestFightWeapon(int(1), inventory(2));
         case QvmGameImport.BOTLIB_AI_GET_WEAPON_INFO: {
-            const bytes = library.weapons.weaponInfoBytes(int(1), int(2)); if (bytes !== undefined) guest.span(int(3), bytes.length).set(bytes); return 0;
+            const bytes = library.weapons.weaponInfoBytes(int(1), int(2)); if (bytes !== undefined) guest.writeBytes(guest.span(int(3), bytes.length).byteOffset - guest.bytes.byteOffset, bytes); return 0;
         }
         case QvmGameImport.BOTLIB_AI_GET_LEVEL_ITEM_GOAL:
         case QvmGameImport.BOTLIB_AI_GET_MAP_LOCATION_GOAL: {
@@ -165,7 +173,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
                 get offset() { return view.getInt8(264 + index * 8); }, set offset(value) { view.setInt8(264 + index * 8, value); },
                 get length() { return view.getInt32(268 + index * 8, true); }, set length(value) { view.setInt32(268 + index * 8, value, true); },
             });
-            const buffer: ChatMatchBuffer = { string: guest.span(int(2), 256),
+            const buffer: ChatMatchBuffer = { string: guest.span(int(2), 256), writes: chatWrites(guest),
                 get type() { return view.getInt32(256, true); }, set type(value) { view.setInt32(256, value, true); },
                 get subtype() { return view.getInt32(260, true); }, set subtype(value) { view.setInt32(260, value, true); },
                 variables: [variable(0), variable(1), variable(2), variable(3), variable(4), variable(5), variable(6), variable(7)] };
@@ -174,7 +182,7 @@ export function qvmBotLibrarySyscall(call: QvmHostCall, services: QvmBotLibraryS
         case QvmGameImport.BOTLIB_AI_MATCH_VARIABLE: {
             const view = guest.view(int(1), 328);
             library.chat.writeMatchVariable(index => ({ offset: view.getInt8(264 + index * 8), length: view.getInt32(268 + index * 8, true) }), int(2), int(4),
-                (offset, capacity) => guest.writeString(int(3), guest.readString(int(1) + offset), capacity), () => { guest.span(int(3), 1)[0] = 0; }); return 0;
+                (offset, capacity) => guest.writeString(int(3), guest.readString(int(1) + offset), capacity), () => { guest.view(int(3), 1).setUint8(0, 0); }); return 0;
         }
         case QvmGameImport.BOTLIB_PC_LOAD_SOURCE: return library.sources.loadSourceHandle(text(1));
         case QvmGameImport.BOTLIB_PC_FREE_SOURCE: return Number(library.sources.freeSourceHandle(int(1)));

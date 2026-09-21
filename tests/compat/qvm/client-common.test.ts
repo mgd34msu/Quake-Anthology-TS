@@ -28,7 +28,7 @@ function fixture() {
     const words = new DataView(new ArrayBuffer(4 * (args.length + 1)));
     words.setInt32(0, identity.code, true); args.forEach((word, index) => words.setInt32((index + 1) * 4, word, true));
     const entry = { words, memory: guest.bytes, invoke: (): never => { throw new Error("Unexpected reentry"); },
-      invokeAsync: async (): Promise<number> => { throw new Error("Unexpected async reentry"); } };
+      invokeAsync: async (): Promise<number> => { throw new Error("Unexpected async reentry"); }, cancelFunction: (): never => { throw new Error("Unexpected source cancellation"); } };
     return { ...entry, ...identity, kind: "engine", guest, commandArguments };
   };
   return { guest, cvars, commands, cgame, ui, call, printed, reliable };

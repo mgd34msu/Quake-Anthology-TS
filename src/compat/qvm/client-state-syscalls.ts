@@ -29,7 +29,7 @@ export function qvmClientStateSyscall(call: QvmHostCall, services: QvmClientStat
   if (call.role !== "cgame") return null;
   switch (call.code) {
     case QvmCgameImport.CG_GETGAMESTATE:
-      writeQvmGameState(guest.view(words.getInt32(4, true), QVM_GAME_STATE_BYTES), services.connection.gameState.copySourceRecord(), profile); return 0;
+      writeQvmGameState(guest, guest.view(words.getInt32(4, true), QVM_GAME_STATE_BYTES), services.connection.gameState.copySourceRecord(), profile); return 0;
     case QvmCgameImport.CG_GETCURRENTSNAPSHOTNUMBER: {
       const number = guest.view(words.getInt32(4, true), 4), time = guest.view(words.getInt32(8, true), 4);
       const current = services.snapshots.current(); number.setInt32(0, current.number, true); time.setInt32(0, current.serverTime, true); return 0;
@@ -39,7 +39,7 @@ export function qvmClientStateSyscall(call: QvmHostCall, services: QvmClientStat
       if (snapshot === null) return 0;
       const ping = services.snapshotPing(number);
       if (ping === null) throw new Error("Retained snapshot has no source ping");
-      writeQvmSnapshot(guest.view(pointer, qvmSnapshotBytes(profile)), snapshot, ping, profile); return 1;
+      writeQvmSnapshot(guest, guest.view(pointer, qvmSnapshotBytes(profile)), snapshot, ping, profile); return 1;
     }
     case QvmCgameImport.CG_GETSERVERCOMMAND:
       return services.getServerCommand(words.getInt32(4, true)).then(argv => Number(argv !== null));

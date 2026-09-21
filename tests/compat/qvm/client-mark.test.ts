@@ -24,7 +24,7 @@ function fixture() {
   [QvmCgameImport.CG_CM_MARKFRAGMENTS, 4, 64, 128, 128, 256, 32, 1800].forEach((word, index) => words.setInt32(index * 4, word, true));
   points.forEach((point, index) => writeVector(memory.view(64, 48), index * 12, point)); writeVector(memory.view(128, 12), 0, projection);
   const call: QvmHostCall = { kind: "engine", role: "cgame", code: QvmCgameImport.CG_CM_MARKFRAGMENTS, words, memory: memory.bytes, guest: memory,
-    commandArguments: null, invoke: () => { throw new Error("Unexpected reentry"); }, invokeAsync: async () => { throw new Error("Unexpected reentry"); } };
+    commandArguments: null, cancelFunction: () => { throw new Error("Unexpected source cancellation"); }, invoke: () => { throw new Error("Unexpected reentry"); }, invokeAsync: async () => { throw new Error("Unexpected reentry"); } };
   return { memory, words, call };
 }
 
@@ -49,7 +49,13 @@ test("mark trap only touches reached outputs and masks bases once", () => {
   f.words.setInt32(20, 0, true); f.words.setInt32(28, 0, true);
   expect(qvmClientMarkSyscall(f.call, projector(0x20))).toBe(0);
   f.words.setInt32(28, 1800, true);
+  const stores: number[] = [];
+  const close = f.memory.observeWrites([{ byteOffset: 1800, byteLength: 8 }], event => {
+    for (const range of event.ranges) stores.push(range.byteOffset);
+  });
   expect(() => qvmClientMarkSyscall(f.call, projector())).toThrow("output points requires a nonnull pointer");
+  expect(stores).toEqual([1800, 1804]);
+  close();
   expect(f.memory.view(1800, 8).getInt32(4, true)).toBeGreaterThan(0);
   f.words.setInt32(20, 2040, true);
   expect(() => qvmClientMarkSyscall(f.call, projector())).toThrow("output points exceeds allocation");

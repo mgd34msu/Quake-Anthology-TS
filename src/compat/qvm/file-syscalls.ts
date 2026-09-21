@@ -154,7 +154,7 @@ export class QvmFiles {
     if (handle === undefined) throw new CommonError("drop", "FS_FileForHandle: NULL");
     return handle;
   }
-  read(slot: number, destination: Uint8Array): void {
+  read(slot: number, destination: { readonly length: number; set(bytes: Uint8Array): void }): void {
     this.assertCurrent();
     if (slot === 0) return;
     const handle = this.handle(slot);
@@ -243,7 +243,9 @@ export function qvmFileSyscall(call: QvmHostCall, files: QvmFiles): QvmHostResul
     if (slot === 0) return 0;
     const buffer = pointer === 0 && length === 0 ? new Uint8Array(0) : guest.span(pointer, length);
     if (trap === open + 2) files.write(slot, buffer);
-    else files.read(slot, buffer);
+    else files.read(slot, { length: buffer.length, set: bytes => {
+      if (bytes.length !== 0) guest.writeBytes(buffer.byteOffset - guest.bytes.byteOffset, bytes);
+    } });
     return 0;
   }
   if (trap === open + 3) { files.close(words.getInt32(4, true)); return 0; }
@@ -254,13 +256,13 @@ export function qvmFileSyscall(call: QvmHostCall, files: QvmFiles): QvmHostResul
   guest.span(pointer, length);
   return files.list(path, extension).then(names => {
     files.assertCurrent();
-    const destination = guest.span(pointer, length);
-    destination[0] = 0;
+    const destination = guest.view(pointer, length);
+    destination.setUint8(0, 0);
     let offset = 0, count = 0;
     for (const name of names) {
-      if (offset + name.length + 2 >= destination.length) break;
-      for (let index = 0; index < name.length; index++) destination[offset++] = name.charCodeAt(index);
-      destination[offset++] = 0;
+      if (offset + name.length + 2 >= destination.byteLength) break;
+      for (let index = 0; index < name.length; index++) destination.setUint8(offset++, name.charCodeAt(index));
+      destination.setUint8(offset++, 0);
       count++;
     }
     return count;

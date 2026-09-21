@@ -3,7 +3,7 @@ import type { QvmAbiProfile } from "../../contracts/execution.ts";
 import { decodeQvmGameImport, decodeQvmCgameImport, decodeQvmUiImport } from "./abi.ts";
 import type { QvmGameImport, QvmCgameImport, QvmUiImport } from "./abi.ts";
 import type { QvmSyscall, QvmSystemCall, QvmSystemCallResult } from "./interpreter.ts";
-import { QvmMemory } from "./memory.ts";
+import type { QvmMemory } from "./memory.ts";
 import { qvmMathSyscall } from "./math-syscalls.ts";
 import { qvmMemorySyscall } from "./memory-syscalls.ts";
 import { qvmVectorSyscall } from "./vector-syscalls.ts";
@@ -57,7 +57,6 @@ export function createQvmSystemCall(role: QvmRole, host: QvmHost = rejectQvmSysc
   commandArguments: () => readonly string[] | null = () => null,
   abiProfile: QvmAbiProfile = "q3-modern",
 ): QvmSystemCall {
-  let current: QvmMemory | null = null;
   return call => {
     if (abiProfile !== "q3-modern") {
       const trap = call.words.getInt32(0, true);
@@ -67,7 +66,8 @@ export function createQvmSystemCall(role: QvmRole, host: QvmHost = rejectQvmSysc
       if (!supported)
         throw new Error(`Legacy QVM ABI service ${role}/${trap} is not implemented`);
     }
-    if (current === null || current.bytes !== call.memory) current = new QvmMemory(call.memory);
+    const current = call.guest;
+    if (current.bytes !== call.memory) throw new Error("QVM syscall memory belongs to another allocation");
     const sourceRole = role === "qagame" ? "game" : role;
     const intrinsic = qvmMemorySyscall(sourceRole, call.words, current)
       ?? qvmMathSyscall(abiProfile !== "q3-modern" && role === "ui" ? "game" : sourceRole, call.words)

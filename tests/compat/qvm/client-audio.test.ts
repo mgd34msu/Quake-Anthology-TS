@@ -51,8 +51,8 @@ test('cgame and UI sound traps use shared bank handles, mixer and music through 
     const call = (role: 'cgame' | 'ui', code: number, args: readonly number[] = []) => {
       const words = new DataView(new ArrayBuffer(4 * (args.length + 1)));
       words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
-      return syscalls[role]({ words, memory: guest.bytes, invoke: (): never => { throw new Error('Unexpected guest reentry'); },
-        invokeAsync: async (): Promise<number> => { throw new Error('Unexpected guest reentry'); } });
+      return syscalls[role]({ words, guest, memory: guest.bytes, invoke: (): never => { throw new Error('Unexpected guest reentry'); },
+        invokeAsync: async (): Promise<number> => { throw new Error('Unexpected guest reentry'); }, cancelFunction: (): never => { throw new Error('Unexpected source cancellation'); } });
     };
     guest.writeString(256, path, 64);
     const pendingHandle = call('cgame', QvmCgameImport.CG_S_REGISTERSOUND, [256, 1]);

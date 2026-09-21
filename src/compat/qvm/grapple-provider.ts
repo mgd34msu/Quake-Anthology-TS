@@ -136,29 +136,31 @@ export class QvmGrappleProvider {
     const projection = this.projection(actor);
     if (projection === null || !projection.pulling) return null;
     const globals = this.profile.globals, memory = this.game.module.memory, scratch = this.bridge.scratch.word;
-    const movement = this.word(globals.movement), savedForward = memory.span(globals.forward, 12).slice(), groundPlane = this.word(globals.groundPlane);
-    const savedScratch = memory.span(scratch, this.profile.movement.byteLength).slice(), player = this.owner(actor);
+    const movement = this.word(globals.movement), forwardBytes = memory.span(globals.forward, 12), savedForward = forwardBytes.slice(), groundPlane = this.word(globals.groundPlane);
+    const scratchBytes = memory.span(scratch, this.profile.movement.byteLength), savedScratch = scratchBytes.slice(), player = this.owner(actor);
+    const forwardOffset = forwardBytes.byteOffset - memory.bytes.byteOffset, scratchOffset = scratchBytes.byteOffset - memory.bytes.byteOffset;
     try {
-      memory.span(scratch, this.profile.movement.byteLength).fill(0);
+      memory.fillBytes(scratchOffset, scratchBytes.length, 0);
       for (const word of this.profile.movement.words) this.write(scratch + word.offset, word.value);
       this.write(scratch, player.client); this.write(globals.movement, scratch); this.writeVector(globals.forward, forward);
       this.game.module.call([], this.profile.callbacks.pull);
       this.publish(actor);
       return this.vector(player.client + 32);
     } finally {
-      this.write(globals.movement, movement); memory.span(globals.forward, 12).set(savedForward); this.write(globals.groundPlane, groundPlane);
-      memory.span(scratch, savedScratch.length).set(savedScratch);
+      this.write(globals.movement, movement); memory.writeBytes(forwardOffset, savedForward); this.write(globals.groundPlane, groundPlane);
+      memory.writeBytes(scratchOffset, savedScratch);
     }
   }
   moverMoved(actor: ActorId, translation: Vec3): void {
     if (this.profile.callbacks.moveMoverHooks === null) return;
     const mover = this.bridge.entity(actor);
     if (mover === null) throw new Error("Grapple mover has no source entity");
-    const scratch = this.bridge.scratch.word, saved = this.game.module.memory.span(scratch, 12).slice();
+    const memory = this.game.module.memory, scratch = this.bridge.scratch.word, bytes = memory.span(scratch, 12), saved = bytes.slice();
+    const offset = bytes.byteOffset - memory.bytes.byteOffset;
     try {
       this.writeVector(scratch, translation); this.game.module.call([mover, scratch], this.profile.callbacks.moveMoverHooks);
       for (const owner of this.owners) this.publish(owner);
-    } finally { this.game.module.memory.span(scratch, 12).set(saved); }
+    } finally { memory.writeBytes(offset, saved); }
   }
   /** Called before the shared actor and its mirrored source record are released or teleported. */
   actorReleased(actor: ActorId): void {

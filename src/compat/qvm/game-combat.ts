@@ -88,7 +88,7 @@ export class QvmGameCombat {
       this.game.module.call([this.pointer(hit.target), inflictor, attacker, this.scratch, this.scratch + 12, hit.amount, hit.flags, hit.method], this.definition.callbacks.damage);
     } finally {
       try { if (temporary !== null) this.game.module.call([temporary], this.definition.callbacks.free); }
-      finally { memory.bytes.set(saved, this.scratch); }
+      finally { memory.writeBytes(this.scratch, saved); }
     }
   }
 }

@@ -9,7 +9,7 @@ import { QvmGuestMemory } from "./guest-memory.ts";
 import { QvmInterpreter } from "./interpreter.ts";
 import type { QvmArguments, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall } from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
-import { QvmMemory } from "./memory.ts";
+import type { QvmMemory } from "./memory.ts";
 import type { VmRegistration } from "./registry.ts";
 import { createQvmSystemCall } from "./syscalls.ts";
 import type { QvmHost, QvmRole } from "./syscalls.ts";
@@ -74,7 +74,7 @@ export class QvmModule implements GuestExecutor {
       try { return systemCall(call); }
       finally { this.currentEntry = previous; }
     }, options.allocation, options.registration, "compiled");
-    this.memory = new QvmMemory(this.interpreter.memory);
+    this.memory = this.interpreter.addressSpace;
     this.guestMemory = new QvmGuestMemory(artifact.module, this.memory);
     if (artifact.role === "ui" && initialization !== deferredUiInitialization) {
       try { this.validateUiVersion(this.call([QvmUiExport.UI_GETAPIVERSION])); }
@@ -98,6 +98,7 @@ export class QvmModule implements GuestExecutor {
   }
 
   private live(): void {
+    this.memory.assertLive();
     if (this.retired) throw new Error(`${this.options.artifact.role} QVM module has been retired`);
   }
 
@@ -239,5 +240,5 @@ export class QvmModule implements GuestExecutor {
     state.restore({ state: checkpoint.hostState, random: checkpoint.random, callbacks: checkpoint.callbacks });
   }
 
-  retire(): void { this.retired = true; this.options.registration?.free(); }
+  retire(): void { this.memory.close(); this.retired = true; this.options.registration?.free(); }
 }

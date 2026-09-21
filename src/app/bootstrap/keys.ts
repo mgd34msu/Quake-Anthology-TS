@@ -11,7 +11,7 @@ import type { ApplicationOptions } from "./options.ts";
 export class ApplicationKeyProfile {
   constructor(public cvars: CvarRegistry, readonly gameDirectory: string, readonly demoRestricted: boolean,
     private readonly state: Q3CdKeyState, private readonly base: ConfigStore, private readonly mod: ConfigStore | null) {}
-  readUi(unique: number, directory: string, destination: Uint8Array): void { this.state.readUi(unique, directory, destination); }
+  readUi(...args: Parameters<Q3CdKeyState["readUi"]>): void { this.state.readUi(...args); }
   async writeUi(unique: number, directory: string, source: Uint8Array): Promise<void> {
     this.state.writeUi(unique, directory, source);
     const useMod = unique === 1 && directory.length !== 0;

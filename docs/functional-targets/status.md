@@ -1,5 +1,7 @@
 # Functional target status
 
+T10 progress: QVM committed-write tracking is implemented across the interpreter and migrated host services. Original QVM damage-stage integration and borrowed powered armor remain unfinished. This completes a prerequisite within T10; the target count and installed executable are unchanged.
+
 **20/23 functional targets complete under the recorded acceptance scope. T10 and T12 are reopened; T19 remains externally blocked.** T10 is the first unfinished target and the current priority. Its dedicated enable/disable menu is connected in source. General source adapters and simultaneous composition across game systems remain unfinished. Multiple mods from Quake 1, Quake 2, Quake 3, expansions, and rereleases must run together across any supported game or mixed configuration. Composition must cover authored gameplay systems, including weapons, actors and AI, items, rules, and events. Full campaigns, native peers, physical devices, and whole-game performance retain the explicit limits below.
 
 The current executable also includes normalized movement selection, exact-envelope collision reuse, and the public projectile picker for declared QuakeC, QVM, and native rerelease providers. Build/source guards and `--help` passed. See [execution status](../execution-status.md#installed-executable-and-recent-fixes) for the exact delivery identity, source qualifications, and separate earlier compiled gameplay evidence.

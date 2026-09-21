@@ -28,6 +28,7 @@ function fixture() {
     const words = new DataView(new ArrayBuffer(4 + args.length * 4)); words.setInt32(0, code, true);
     args.forEach((word, index) => words.setInt32(4 + index * 4, word, true));
     return { kind: "engine", role: "cgame", code, words, guest, memory: guest.bytes, commandArguments: null,
+      cancelFunction: (): never => { throw new Error("Unexpected source cancellation"); },
       invoke: (): never => { throw new Error("Unexpected reentry"); }, invokeAsync: async (): Promise<number> => { throw new Error("Unexpected reentry"); } };
   };
   return { connection, guest, services, call, selection };
@@ -65,7 +66,15 @@ test("QVM snapshot uses retained parse entities, preserves untouched ABI slots, 
   expect(f.guest.view(60000, 8).getInt32(0, true)).toBe(1); expect(f.guest.view(60000, 8).getInt32(4, true)).toBe(200);
   f.connection.parseEntities.at(0).modelindex = 19;
   f.guest.span(8, 53772).fill(0x5a);
+  const stores: { offset: number; length: number }[] = [];
+  const close = f.guest.observeWrites([
+    { byteOffset: 20, byteLength: 32 }, { byteOffset: 52, byteLength: 4 }, { byteOffset: 684, byteLength: 4 },
+  ], event => {
+    for (const range of event.ranges) stores.push({ offset: range.byteOffset, length: range.after.length });
+  });
   expect(qvmClientStateSyscall(f.call(QvmCgameImport.CG_GETSNAPSHOT, [1, 8]), f.services)).toBe(1);
+  expect(stores).toEqual([{ offset: 20, length: 32 }, { offset: 52, length: 4 }, { offset: 684, length: 4 }]);
+  close();
   const view = f.guest.view(8, 53772);
   expect(view.getInt32(4, true)).toBe(37); expect(view.getInt32(44 + 452, true)).toBe(99);
   expect(view.getInt32(44 + 464, true)).toBe(123); expect(view.getInt32(44 + 436, true)).toBe(75);

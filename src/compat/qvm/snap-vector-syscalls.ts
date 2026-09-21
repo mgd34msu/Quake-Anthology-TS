@@ -29,7 +29,7 @@ export function qvmSnapVectorSyscall(
   if (words.getInt32(0, true) !== (role === "game" ? 42 : 71)) return null;
   const pointer = memory.pointer(words.getInt32(4, true));
   if (pointer === null) throw new RangeError("QVM SnapVector requires a nonnull pointer");
-  const vector = new DataView(pointer.buffer, pointer.byteOffset, pointer.byteLength);
+  const vector = memory.dataView(pointer.byteOffset - memory.bytes.byteOffset, pointer.byteLength);
   // Mask only the base; publish each component before reaching the next read.
   for (let offset = 0; offset < 12; offset += 4) {
     vector.setFloat32(offset, snapComponent(vector.getFloat32(offset, true)), true);

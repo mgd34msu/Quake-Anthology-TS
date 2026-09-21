@@ -25,7 +25,7 @@ test('legacy bot wrappers preserve action ordinals, bits, source chat ownership 
   const call = (code: number, ...args: readonly number[]) => {
     const words = new DataView(new ArrayBuffer(64)); words.setInt32(0, code, true);
     args.forEach((value, index) => words.setInt32(4 + index * 4, value, true));
-    return syscall({ words, memory: guest.bytes, invoke: unavailable, invokeAsync: unavailable });
+    return syscall({ words, guest, memory: guest.bytes, invoke: unavailable, invokeAsync: unavailable, cancelFunction: unavailable });
   };
   try {
     library.actions.setup(4);
@@ -34,6 +34,13 @@ test('legacy bot wrappers preserve action ordinals, bits, source chat ownership 
     call(412, 2); call(413, 2); call(415, 2); call(409, 2); call(406, 2);
     call(425, 2, 0, 256);
     expect(guest.view(256, 40).getInt32(32, true)).toBe(4 | 8 | 16 | 1024 | 2048);
+    library.actions.jump(1);
+    const overlapping = guest.view(256, 64);
+    [425, 1, 0, 256].forEach((word, index) => overlapping.setInt32(index * 4, word, true));
+    expect(syscall({ words: overlapping, guest, memory: guest.bytes,
+      invoke: unavailable, invokeAsync: unavailable, cancelFunction: unavailable })).toBe(0);
+    expect(overlapping.getInt32(12, true)).toBe(0);
+    expect(overlapping.getInt32(32, true)).toBe(8);
     expect(decodeLegacyQvmGameImport(408)).toBe(QvmGameImport.BOTLIB_EA_SELECT_WEAPON);
     expect(decodeLegacyQvmGameImport(300)).toBeNull();
     expect(() => call(300)).toThrow('Legacy QVM ABI service');

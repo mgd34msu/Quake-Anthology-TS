@@ -18,7 +18,14 @@ export function qvmUiKeySyscall(call: QvmHostCall, services: QvmUiKeyServices): 
       const pointer = call.words.getInt32(4, true), read = call.code === QvmUiImport.UI_GET_CDKEY;
       return call.invokeAsync([QvmUiExport.UI_HASUNIQUECDKEY, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, () => services.assertCurrent()).then(async unique => {
         services.assertCurrent();
-        if (read) services.keys.readUi(unique, services.gameDirectory(), call.guest.span(pointer, 17));
+        if (read) {
+          const directory = services.gameDirectory(), destination = call.guest.span(pointer, 17);
+          const offset = destination.byteOffset - call.guest.bytes.byteOffset;
+          services.keys.readUi(unique, directory, destination, {
+            copy: bytes => call.guest.writeBytes(offset, bytes),
+            setByte: (index, value) => call.guest.dataView(offset + index, 1).setUint8(0, value),
+          });
+        }
         else await services.keys.writeUi(unique, services.gameDirectory(), call.guest.span(pointer, 16));
         services.assertCurrent();
         return 0;

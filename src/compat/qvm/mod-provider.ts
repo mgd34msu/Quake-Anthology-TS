@@ -335,7 +335,7 @@ export class QvmModProvider {
   private newCvars(): CvarRegistry { return new CvarRegistry({ dialect: "q3", context: { session: this.services.actors.session, origin: { kind: "server-console" } }, print: text => this.services.engine?.print(text) }); }
   private rememberDefaults(): void { for (const record of this.records.values()) this.defaults.set(record.id, this.module.memory.bytes.slice(record.address, record.address + record.stride * record.capacity)); }
   private current(): void { this.assertCurrent(); if (this.closed) throw new Error("QVM gameplay mod is closed"); }
-  private view(address: number, size: number): DataView { return new DataView(this.module.memory.bytes.buffer, this.module.memory.bytes.byteOffset + address, size); }
+  private view(address: number, size: number): DataView { return this.module.memory.dataView(address, size); }
   private vector(address: number): Vec3 { const view = this.view(address, 12); return { x: view.getFloat32(0, true), y: view.getFloat32(4, true), z: view.getFloat32(8, true) }; }
   private writeVector(address: number, value: Vec3): void { const view = this.view(address, 12); [value.x, value.y, value.z].forEach((value, index) => view.setInt32(index * 4, scalar(value, "float32"), true)); }
   private pointer(actor: ActorId | null, recordId: string): number {
@@ -354,7 +354,7 @@ export class QvmModProvider {
       for (const record of this.actorRecords(actor)) {
         const address = record.address + slot * record.stride;
         const defaults = this.defaults.get(record.id); if (defaults === undefined) throw new Error("Missing source actor defaults");
-        this.module.memory.bytes.set(defaults.subarray(slot * record.stride, (slot + 1) * record.stride), address);
+        this.module.memory.writeBytes(address, defaults.subarray(slot * record.stride, (slot + 1) * record.stride));
         for (const field of record.fields) {
           if (field.binding === "constant") this.view(address + field.offset, 4).setInt32(0, scalar(field.value, field.encoding), true);
           else if (field.binding === "constant-vector") this.writeVector(address + field.offset, field.value);
@@ -378,7 +378,7 @@ export class QvmModProvider {
     if (this.frames.length !== 0) { this.retiredProjections.add(actor); return; }
     for (const record of this.records.values()) if (slot < record.capacity) {
       const defaults = this.defaults.get(record.id); if (defaults === undefined) throw new Error("Missing QVM source client defaults");
-      this.module.memory.bytes.set(defaults.subarray(slot * record.stride, (slot + 1) * record.stride), record.address + slot * record.stride);
+      this.module.memory.writeBytes(record.address + slot * record.stride, defaults.subarray(slot * record.stride, (slot + 1) * record.stride));
     }
     this.projections.delete(actor); this.eventKeys.delete(actor);
   }
@@ -462,7 +462,7 @@ export class QvmModProvider {
     try {
       const words = call.arguments.map(value => this.lower(value, inputs));
       for (const global of call.globals) { const word = this.lower(global.value, inputs);
-        if (global.value.kind === "vector") this.module.memory.bytes.copyWithin(global.address, word, word + 12);
+        if (global.value.kind === "vector") this.module.memory.copyBytes(global.address, word, 12);
         else this.view(global.address, 4).setInt32(0, word, true); }
       const source = this.declaration.sourceActors;
       if (source !== undefined && call.entry === source.release.entry) {
@@ -472,8 +472,8 @@ export class QvmModProvider {
         if (actor !== null) this.actorSemantics?.beforeRelease(actor);
       }
       this.refresh(); const frame: Frame = { observations: this.observe() }; this.frames.push(frame);
-      return { words, finish: () => { try { if (!this.closed) { this.current(); this.flush(); } } finally { this.frames.pop(); for (const global of globals) this.module.memory.bytes.set(global.bytes, global.address); this.scratch = scratch; } } };
-    } catch (error) { for (const global of globals) this.module.memory.bytes.set(global.bytes, global.address); this.scratch = scratch; throw error; }
+      return { words, finish: () => { try { if (!this.closed) { this.current(); this.flush(); } } finally { this.frames.pop(); try { if (!this.closed) for (const global of globals) this.module.memory.writeBytes(global.address, global.bytes); } finally { this.scratch = scratch; } } } };
+    } catch (error) { try { if (!this.closed) for (const global of globals) this.module.memory.writeBytes(global.address, global.bytes); } finally { this.scratch = scratch; } throw error; }
   }
   invoke(call: QvmModSourceCall, inputs: Inputs): number {
     const execution = this.begin(call, inputs);

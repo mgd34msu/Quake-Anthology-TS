@@ -7,12 +7,13 @@ import type { Vec3 } from "../../contracts/math.ts";
 import type { BspMarkProjector } from "../../content/q3/presentation/mark-projector.ts";
 import type { QvmHostCall } from "./syscalls.ts";
 import { QvmCgameImport } from "./abi.ts";
+import type { QvmMemory } from "./memory.ts";
 
-function span(bytes: Uint8Array | null, offset: number, length: number, name: string): DataView {
+function span(memory: QvmMemory, bytes: Uint8Array | null, offset: number, length: number, name: string): DataView {
   if (bytes === null) throw new RangeError(`QVM mark ${name} requires a nonnull pointer`);
   if (!Number.isSafeInteger(offset) || offset < 0 || offset + length > bytes.byteLength)
     throw new RangeError(`QVM mark ${name} exceeds allocation`);
-  return new DataView(bytes.buffer, bytes.byteOffset + offset, length);
+  return memory.dataView(bytes.byteOffset - memory.bytes.byteOffset + offset, length);
 }
 
 function vector(view: DataView): Vec3 {
@@ -33,14 +34,14 @@ export function qvmClientMarkSyscall(
   const points = memory.pointer(pointsWord), fragments = memory.pointer(fragmentsWord);
   return projector.markFragmentsRecord({
     pointCount, maxPoints, maxFragments,
-    readProjection: () => vector(span(projection, 0, 12, "projection")),
-    readPoint: index => vector(span(input, index * 12, 12, "input points")),
+    readProjection: () => vector(span(memory, projection, 0, 12, "projection")),
+    readPoint: index => vector(span(memory, input, index * 12, 12, "input points")),
     writeFragment(index, fragment) {
-      span(fragments, index * 8, 4, "fragments").setInt32(0, fragment.firstPoint, true);
-      span(fragments, index * 8 + 4, 4, "fragments").setInt32(0, fragment.pointCount, true);
+      span(memory, fragments, index * 8, 4, "fragments").setInt32(0, fragment.firstPoint, true);
+      span(memory, fragments, index * 8 + 4, 4, "fragments").setInt32(0, fragment.pointCount, true);
     },
     writePoints(firstPoint, values) {
-      const output = span(points, firstPoint * 12, values.length * 12, "output points");
+      const output = span(memory, points, firstPoint * 12, values.length * 12, "output points");
       for (const [index, point] of values.entries()) {
         output.setFloat32(index * 12, point.x, true);
         output.setFloat32(index * 12 + 4, point.y, true);

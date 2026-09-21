@@ -74,7 +74,8 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
   const float = (index: number): number => words.getFloat32(index * 4, true);
   const point = (index: number): Vec3 => qvmBotMovementVector(() => memory.pointer(integer(index)));
   const goal = (index: number) => readQvmBotGoalReference(() => memory.pointer(integer(index)));
-  const target = (index: number) => qvmBotMovementTarget(() => memory.pointer(integer(index)));
+  const fieldView = (bytes: Uint8Array, offset: number) => memory.dataView(bytes.byteOffset - memory.bytes.byteOffset + offset, 4);
+  const target = (index: number) => qvmBotMovementTarget(() => memory.pointer(integer(index)), fieldView);
   const nodeId = (area: number): number => services.navigation.host.runtime.graph.asset?.kind === "aas" ? area : area - 1;
   const key = (index: number) => (candidate: string): boolean => {
     const bytes = memory.pointer(integer(index));
@@ -114,7 +115,7 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
     }
     case 303: {
       const info = services.entityInfo(integer(1));
-      if (info === null) memory.span(integer(2), 140).fill(0);
+      if (info === null) memory.fillBytes(memory.span(integer(2), 140).byteOffset - memory.bytes.byteOffset, 140, 0);
       else writeQvmAasEntityInfo(memory.view(integer(2), 140), info);
       return 0;
     }
@@ -141,7 +142,10 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
     case 311: {
       const output = memory.pointer(integer(3));
       if (output === null) throw new RangeError("QVM BSP epair output is null");
-      return Number(services.bspEntities.value(integer(1), key(2), output, integer(4)));
+      const offset = output.byteOffset - memory.bytes.byteOffset;
+      return Number(services.bspEntities.value(integer(1), key(2), output, integer(4), {
+        view: memory.dataView(offset, output.length), clear: length => memory.fillBytes(offset, length, 0),
+      }));
     }
     case 312: {
       const out = memory.view(integer(3), 12); vector(out, 0, { x: 0, y: 0, z: 0 });
@@ -173,7 +177,7 @@ export function qvmBotNavigationSyscall(call: QvmHostCall, services: QvmBotNavig
     }
     case 548: states.reset(integer(1)); return 0;
     case 549: {
-      const result = qvmBotMoveResultReference(() => memory.pointer(integer(1)));
+      const result = qvmBotMoveResultReference(() => memory.pointer(integer(1)), fieldView);
       result.failure = false; result.type = 0; result.blocked = false; result.blockEntity = 0; result.travelType = 0; result.flags = 0;
       if (integer(3) === 0) result.failure = true;
       else services.navigation.moveToGoal(result, integer(2), goal(3), integer(4));

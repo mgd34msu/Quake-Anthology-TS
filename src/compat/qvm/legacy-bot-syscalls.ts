@@ -38,8 +38,9 @@ export function qvmLegacyBotLibrarySyscall(call: QvmHostCall, services: QvmBotLi
       library.chat.enterChat(integer(1), integer(2), integer(3) === 1 ? 1 : 0, integer(2)); return 0;
     case QvmGameImport.BOTLIB_EA_GET_INPUT: {
       const bytes = library.actions.getInputBytes(integer(1), call.words.getFloat32(8, true));
-      const target = call.guest.span(integer(3), 40); target.set(bytes);
-      const view = new DataView(target.buffer, target.byteOffset, target.byteLength);
+      const target = call.guest.span(integer(3), 40);
+      call.guest.writeBytes(target.byteOffset - call.guest.bytes.byteOffset, bytes);
+      const view = call.guest.dataView(target.byteOffset - call.guest.bytes.byteOffset, target.byteLength);
       view.setInt32(32, legacyBotActionFlags(view.getInt32(32, true)), true); return 0;
     }
     case QvmGameImport.BOTLIB_USER_COMMAND: {

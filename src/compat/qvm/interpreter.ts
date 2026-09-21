@@ -25,6 +25,7 @@ export interface QvmSyscall {
   /** Live little-endian words: syscall number, followed by its arguments. */
   readonly words: DataView;
   readonly memory: Uint8Array;
+  readonly guest: QvmMemory;
   /** Recursive entry is valid only while this callback owns the suspended frame. */
   invoke(args: QvmArguments, instructionIndex?: number): number;
   invokeAsync(args: QvmArguments, instructionIndex?: number, validate?: () => void): Promise<number>;
@@ -40,6 +41,7 @@ export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsyn
   /** Live source argument words, starting at the caller's first OP_ARG slot. */
   readonly words: DataView;
   readonly memory: Uint8Array;
+  readonly guest: QvmMemory;
   /** Open before proceeding; cancellation returns zero from this exact source call. */
   cancellationScope(): QvmCancellationScope;
   /** Runs the original body once with its actual caller stack and argument addresses. */
@@ -155,8 +157,9 @@ export class QvmInterpreter {
   readonly memory: Uint8Array;
   readonly symbols: QvmSymbols;
   callLevel = 0;
-  private readonly addressSpace: QvmMemory;
+  readonly addressSpace: QvmMemory;
   private readonly data: DataView;
+  private readonly observedData: DataView;
   private readonly code: Int32Array;
   private readonly instructionPointers: Int32Array;
   private readonly allocations: readonly QvmAllocation[];
@@ -190,6 +193,7 @@ export class QvmInterpreter {
     this.addressSpace = new QvmMemory(this.memory);
     this.memory.set(image.initializedData);
     this.data = new DataView(this.memory.buffer, this.memory.byteOffset, this.memory.byteLength);
+    this.observedData = this.addressSpace.dataView(0, this.memory.byteLength);
     this.dataMask = image.dataMask;
     this.programStack = this.memory.length;
     // Source preparation expands each code byte to an int slot. Operand tails
@@ -264,6 +268,7 @@ export class QvmInterpreter {
     if (this.rootActive) throw new Error("Cannot restore an active QVM");
     this.live();
     if (data.length !== this.memory.length) throw new Error("QVM checkpoint allocation mismatch");
+    this.addressSpace.clearWriteObservers();
     this.memory.set(data);
   }
 
@@ -292,6 +297,7 @@ export class QvmInterpreter {
   loadSymbols(options: QvmSymbolLoadOptions): void { this.symbols.load(options); }
 
   private live(): void {
+    this.addressSpace.assertLive();
     if (this.registration?.binding.kind === "freed") throw new Error("QVM registration has been freed");
     for (const allocation of this.allocations) void allocation.bytes;
   }
@@ -305,6 +311,7 @@ export class QvmInterpreter {
     if (this.rootActive) throw new Error("Cannot restart an active QVM");
     this.live();
     if (image.allocatedDataLength > this.memory.length) throw new Error("QVM restart would exceed its original allocation");
+    this.addressSpace.clearWriteObservers();
     this.memory.fill(0, 0, image.allocatedDataLength);
     this.memory.set(image.initializedData);
   }
@@ -371,7 +378,7 @@ export class QvmInterpreter {
 
   private writeWord(address: number, word: number): void {
     this.range(address, 4);
-    this.data.setInt32(address, word, true);
+    (this.addressSpace.observesWrites ? this.observedData : this.data).setInt32(address, word, true);
   }
 
   private targetPC(index: number): number {
@@ -482,8 +489,8 @@ export class QvmInterpreter {
   private trap(frame: Invocation, sp: number): QvmSystemCallResult {
     this.range(sp + 4, 4);
     return this.hostCall(frame, scope => this.systemCall({
-      words: new DataView(this.memory.buffer, this.memory.byteOffset + sp + 4, this.memory.byteLength - sp - 4),
-      memory: this.memory, invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
+      words: this.addressSpace.dataView(sp + 4, this.memory.byteLength - sp - 4),
+      memory: this.memory, guest: this.addressSpace, invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
     }));
   }
 
@@ -499,9 +506,9 @@ export class QvmInterpreter {
       proceeded = true;
     };
     this.range(sp + 8, 0);
-    const words = new DataView(this.memory.buffer, this.memory.byteOffset + sp + 8, this.memory.byteLength - sp - 8);
+    const words = this.addressSpace.dataView(sp + 8, this.memory.byteLength - sp - 8);
     const proceed = (): QvmSystemCallResult => this.hostCall(frame, scope => {
-      const call: QvmFunctionCall = { instructionIndex, execution: frame.asynchronous ? "asynchronous" : "synchronous", memory: this.memory,
+      const call: QvmFunctionCall = { instructionIndex, execution: frame.asynchronous ? "asynchronous" : "synchronous", memory: this.memory, guest: this.addressSpace,
         words,
         invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
         cancellationScope: () => scope.control(() => {
@@ -707,14 +714,14 @@ export class QvmInterpreter {
             break;
           case QvmOpcode.OP_STORE1: {
             const value = operands.pop();
-            this.data.setUint8(operands.pop() & this.dataMask, value);
+            (this.addressSpace.observesWrites ? this.observedData : this.data).setUint8(operands.pop() & this.dataMask, value);
             break;
           }
           case QvmOpcode.OP_STORE2: {
             const value = operands.pop();
             const address = operands.pop() & (this.dataMask & ~1);
             this.range(address, 2);
-            this.data.setUint16(address, value, true);
+            (this.addressSpace.observesWrites ? this.observedData : this.data).setUint16(address, value, true);
             break;
           }
           case QvmOpcode.OP_STORE4: {
@@ -740,7 +747,7 @@ export class QvmInterpreter {
               throw new CommonError("drop", "OP_BLOCK_COPY out of range");
             }
             // Q3's compiled VM accepts unaligned literals; ioquake's VM_BlockCopy checks bounds and copies bytes.
-            this.memory.copyWithin(destination, source, source + count);
+            this.addressSpace.copyBytes(destination, source, count);
             break;
           }
           case QvmOpcode.OP_BCOM:

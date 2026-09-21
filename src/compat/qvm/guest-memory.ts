@@ -32,8 +32,7 @@ export class QvmGuestMemory implements GuestMemory {
   }
 
   borrow(address: GuestAddress, byteLength: number): DataView {
-    const start = this.checked(address, byteLength), bytes = this.memory.bytes;
-    return new DataView(bytes.buffer, bytes.byteOffset + start, byteLength);
+    return this.memory.dataView(this.checked(address, byteLength), byteLength);
   }
 
   copy(address: GuestAddress, byteLength: number): Uint8Array {
@@ -42,6 +41,6 @@ export class QvmGuestMemory implements GuestMemory {
   }
 
   write(address: GuestAddress, bytes: Uint8Array): undefined {
-    this.memory.bytes.set(bytes, this.checked(address, bytes.length));
+    this.memory.writeBytes(this.checked(address, bytes.length), bytes);
   }
 }

@@ -18,8 +18,8 @@ function gameCalls(guest: QvmMemory, files: QvmFiles) {
   return (code: QvmGameImport, args: readonly number[] = []) => {
     const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
     words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32(4 + index * 4, value, true));
-    return system({ words, memory: guest.bytes, invoke: () => { throw new Error("Unexpected VM reentry"); },
-      invokeAsync: async () => { throw new Error("Unexpected async VM reentry"); } });
+    return system({ words, guest, memory: guest.bytes, invoke: () => { throw new Error("Unexpected VM reentry"); },
+      invokeAsync: async () => { throw new Error("Unexpected async VM reentry"); }, cancelFunction: (): never => { throw new Error("Unexpected source cancellation"); } });
   };
 }
 
@@ -72,7 +72,7 @@ async function fixture() {
     const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
     words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32(4 + index * 4, value, true));
     return { kind: "engine", role: "ui", code, words, guest, memory: guest.bytes, commandArguments: null,
-      invoke: () => { throw new Error("Unexpected VM reentry"); }, invokeAsync: async () => { throw new Error("Unexpected async VM reentry"); } };
+      invoke: () => { throw new Error("Unexpected VM reentry"); }, invokeAsync: async () => { throw new Error("Unexpected async VM reentry"); }, cancelFunction: (): never => { throw new Error("Unexpected source cancellation"); } };
   };
   const close = async (): Promise<void> => { files.closeAll(); mounts.close(); pure.close(); await rm(root, { recursive: true, force: true }); };
   return { root, mount, mounts, pure, guest, files, call, close };
@@ -185,7 +185,7 @@ test("guest write, append and append-sync use scoped descriptors and mounted rea
     expect(open(1)).toBe(0);
     const truncated = f.guest.view(256, 4).getInt32(0, true); files.close(truncated);
     expect((await mounted.open("profiles/test.cfg"))?.bytes.length).toBe(0);
-    expect(() => files.openWrite("../escape", "write", () => {})).toThrow("contained relative path");
+    expect(() => files.openWrite("../escape", "write", () => {})).toThrow("relative and stay inside its storage directory");
     await symlink(f.root, join(userRoot, "outside"));
     expect(() => files.openWrite("outside/retail-overwrite", "write", () => {})).toThrow();
     expect(open(3)).toBe(0);
