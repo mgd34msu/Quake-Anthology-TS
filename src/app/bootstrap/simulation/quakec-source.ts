@@ -899,6 +899,17 @@ export class QuakeCSource {
       moveType: scalar("movetype"), flags: Math.trunc(scalar("flags")), waterLevel: scalar("waterlevel"), waterType: scalar("watertype"),
       teleportTimeSeconds: scalar("teleport_time"), waterJumpDirection: vector("movedir"), idealPitch: scalar("idealpitch"), fixAngle: scalar("fixangle") !== 0, health: scalar("health") };
   }
+  clientPunchAngles(actor: ActorId): Vec3 {
+    if (this.kind !== "netquake") throw new Error("QuakeWorld does not own a NetQuake punch vector");
+    return this.entities.fromReference(this.reference(actor)).vector(this.field("punchangle"));
+  }
+  clientPunchAdvances(actor: ActorId): boolean {
+    return this.entities.fromReference(this.reference(actor)).float(this.field("movetype")) !== 0;
+  }
+  setClientPunchAngles(actor: ActorId, angles: Vec3): void {
+    if (this.kind !== "netquake") throw new Error("QuakeWorld does not own a NetQuake punch vector");
+    this.entities.fromReference(this.reference(actor)).setVector(this.field("punchangle"), angles);
+  }
   writeClientState(actor: ActorId, state: Q1MovementState): undefined {
     const slot = this.sourceSlot(actor); if (slot === null) throw new Error("QC player has no source slot");
     const words = this.entities.at(slot);

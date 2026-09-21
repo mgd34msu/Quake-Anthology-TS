@@ -31,6 +31,13 @@ import { registerMonsterCallbacks } from "./monsters.ts";
 import { registerWeaponCallbacks } from "./weapons.ts";
 import type { AuthoredTarget, MonsterMission } from "../../monsters/authored.ts";
 
+/** WinQuake SV_ClientThink / DropPunchAngle, using the source's binary32 operations. */
+export function dropQ1Punch(angles: Vec3, elapsed: number, numeric: NumericOperations): Vec3 {
+  const math = createMutableVectorMath(numeric, "preserve"), direction = { ...angles };
+  const magnitude = math.VectorNormalize(direction), remaining = Math.max(0, numeric.subtract(magnitude, numeric.multiply(10, elapsed)));
+  const punch = { ...ZERO }; math.VectorScale(direction, remaining, punch); return punch;
+}
+
 /** Q1 source entity continuations use the session's authoritative bodies, combat and scheduling. */
 export class Q1EntityServices {
   readonly named = new Q1CallbackRegistry(this);
@@ -511,14 +518,17 @@ export class Q1EntityServices {
     return undefined;
   }
   weaponPunch(player: Q1PlayerState, pitch: number): undefined {
-    if (pitch !== 0) player.punchAngles = { ...player.punchAngles, x: pitch };
+    if (pitch !== 0) {
+      if (this.host.punchAngles === undefined) player.punchAngles = { ...player.punchAngles, x: pitch };
+      else this.host.punchAngles.write(player.actor.id, { ...this.host.punchAngles.read(player.actor.id), x: pitch });
+    }
     return undefined;
   }
   advancePunch(actor: ActorId, elapsed: number, numeric: NumericOperations): Vec3 | null {
     const player = this.player(actor); if (player === null) return null;
-    const math = createMutableVectorMath(numeric, "preserve"), direction = { ...player.punchAngles };
-    const magnitude = math.VectorNormalize(direction), remaining = Math.max(0, numeric.subtract(magnitude, numeric.multiply(10, elapsed)));
-    const punch = { ...ZERO }; math.VectorScale(direction, remaining, punch); player.punchAngles = punch; return punch;
+    const punch = dropQ1Punch(this.host.punchAngles?.read(actor) ?? player.punchAngles, elapsed, numeric);
+    if (this.host.punchAngles === undefined) player.punchAngles = punch; else this.host.punchAngles.write(actor, punch);
+    return punch;
   }
   weaponFrame(actor: OwnedActor, seconds: number): undefined {
     this.time = seconds; const player = this.players.get(actor);

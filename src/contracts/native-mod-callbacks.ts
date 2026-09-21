@@ -39,6 +39,7 @@ export type NativeModActorField = Exclude<QvmModActorField, { readonly binding: 
   | { readonly offset: number; readonly binding: "address"; readonly value: NativeModAddress | null }
   | { readonly offset: number; readonly binding: "health"; readonly encoding: NativeModScalar }
   | { readonly offset: number; readonly binding: "inventory"; readonly encoding: NativeModScalar; readonly item: ItemId }
+  | { readonly offset: number; readonly binding: "inventory-capacity"; readonly encoding: NativeModScalar; readonly item: ItemId }
   | { readonly offset: number; readonly binding: "constant"; readonly encoding: NativeModScalar; readonly value: number };
 export interface NativeModActorRecord {
   readonly id: string;

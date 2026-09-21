@@ -149,7 +149,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   private sourceCamera(): SceneCamera {
-    if (this.q3Client?.options.kind === "qvm") return this.q3Client.camera();
+    if (this.q3Client?.options.kind === "qvm") return cameraWithKick(this.q3Client.camera(), this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 });
     const player = this.simulation.playerView(this.local.player.actor), size = this.viewSize();
     const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
     if (this.q3Client !== null) return this.applyViewSize(cameraWithKick((this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? this.q3Client.camera()
@@ -308,7 +308,7 @@ export class WorldSeatPresentation implements SeatPresentation {
         ...(fog === undefined ? {} : { q1Fog: fog }) };
       return { ...effects, operations: [...effects.operations, ...this.scene.supplemental(input, this.q3Client?.supplementalWeaponCamera(camera) ?? camera)] };
     }, camera => {
-      if (this.q3Client?.options.kind === "qvm") return this.cameraOverride(camera);
+      if (this.q3Client?.options.kind === "qvm") return this.cameraOverride(cameraWithKick(camera, this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 }));
       const player = this.simulation.playerView(this.local.player.actor);
       return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));
     }, { ...this.q1Services.view(this.local.player.actor), ...(fog === undefined ? {} : { q1Fog: fog }) });

@@ -6,6 +6,8 @@ import { ModOperation } from "./mod-composition.ts";
 export interface InventoryStateBinding {
   read(): readonly InventoryEntry[];
   write(entry: InventoryEntry): undefined;
+  /** Explicit owner support, including its source consumers and saved continuation. */
+  mutableCapacity?(item: ItemId): boolean;
 }
 
 function quantity(value: number): number {
@@ -71,7 +73,7 @@ export class SharedInventoryTable implements InventoryTable {
       if (items.has(entry.item)) throw new RangeError(`Duplicate inventory item ${entry.item}`);
       items.set(entry.item, copyEntry(entry));
     }
-    return this.bind(actor, { read: () => [...items.values()], write: entry => { items.set(entry.item, copyEntry(entry)); return undefined; } });
+    return this.bind(actor, { read: () => [...items.values()], write: entry => { items.set(entry.item, copyEntry(entry)); return undefined; }, mutableCapacity: () => true });
   }
 
   entries(actor: ActorId): readonly InventoryEntry[] {
@@ -82,6 +84,11 @@ export class SharedInventoryTable implements InventoryTable {
   has(actor: ActorId): boolean {
     const owner = this.actors.resolveOwned(actor);
     return owner !== null && this.stores.has(owner);
+  }
+
+  mutableCapacity(actor: ActorId, item: ItemId): boolean {
+    const owner = this.actors.resolveOwned(actor), binding = owner === null ? undefined : this.stores.get(owner);
+    return binding?.read().some(entry => entry.item === item) === true && binding.mutableCapacity?.(item) === true;
   }
 
   count(actor: ActorId, item: ItemId): number {

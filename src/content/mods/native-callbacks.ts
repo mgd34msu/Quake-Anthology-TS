@@ -44,11 +44,11 @@ function binding(reader: SaveReader): ModCallbackBinding {
   }
 }
 function field(reader: SaveReader): NativeModActorField {
-  const offset = reader.field("offset").integer(0), binding = reader.field("binding").choice("health", "inventory", "origin", "velocity", "angles", "bounds-min", "bounds-max", "record", "constant", "constant-vector", "private", "address");
+  const offset = reader.field("offset").integer(0), binding = reader.field("binding").choice("health", "inventory", "inventory-capacity", "origin", "velocity", "angles", "bounds-min", "bounds-max", "record", "constant", "constant-vector", "private", "address");
   switch (binding) {
     case "address": return { offset, binding, value: reader.field("value").nullable(address) };
     case "health": return { offset, binding, encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") };
-    case "inventory": return { offset, binding, encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64"), item: namespaced(reader.field("item")) };
+    case "inventory": case "inventory-capacity": return { offset, binding, encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64"), item: namespaced(reader.field("item")) };
     case "record": return { offset, binding, record: reader.field("record").string() };
     case "constant": return { offset, binding, encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64"), value: reader.field("value").number() };
     case "constant-vector": return { offset, binding, value: readVector(reader.field("value")) };

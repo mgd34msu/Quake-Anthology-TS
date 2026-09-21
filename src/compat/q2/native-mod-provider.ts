@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { GuestAddress, GuestCallResult, GuestCallValue, GuestValueLayout, ModuleIdentity, RawEntityView } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
+import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ModCallbackInput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
 import type { NativeModActorField, NativeModActorRecord, NativeModAddress, NativeModDeclaration, NativeModScalar, NativeModSourceCall, NativeModValue } from "../../contracts/native-mod-callbacks.ts";
 import type { ProviderCheckpoint, SavedActorId } from "../../contracts/session.ts";
@@ -21,11 +22,12 @@ import { decodeValue, encodeValue, storageBytes } from "../../guest/abi/values.t
 import { allocateClassicString, classicStringAllocationBytes, readClassicString, writeClassicString, readClassicVector, writeClassicVector } from "./classic/records.ts";
 
 type Inputs = ReadonlyMap<ModCallbackInput, ModRuntimeValue>;
-type SharedField = Extract<NativeModActorField, { readonly binding: "health" | "inventory" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }>;
+type SharedField = Extract<NativeModActorField, { readonly binding: "health" | "inventory" | "inventory-capacity" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }>;
 interface Observation { readonly actor: ActorId; readonly address: GuestAddress; readonly field: SharedField; readonly bytes: Uint8Array; }
-interface Invocation { observations: readonly Observation[]; }
+interface Invocation { observations: readonly Observation[]; readonly pending: (() => void)[]; cursor: number; }
+interface InventoryChanges { count?: number; capacity?: number; }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
-function shared(field: NativeModActorField): field is SharedField { return field.binding === "health" || field.binding === "inventory" || field.binding === "origin" || field.binding === "velocity" || field.binding === "angles" || field.binding === "bounds-min" || field.binding === "bounds-max"; }
+function shared(field: NativeModActorField): field is SharedField { return field.binding === "health" || field.binding === "inventory" || field.binding === "inventory-capacity" || field.binding === "origin" || field.binding === "velocity" || field.binding === "angles" || field.binding === "bounds-min" || field.binding === "bounds-max"; }
 function scalarSize(kind: NativeModScalar): number { return storageBytes(kind, 4); }
 function size(field: NativeModActorField, pointerBytes: number): number { return field.binding === "private" ? field.byteLength : field.binding === "record" || field.binding === "address" ? pointerBytes : "encoding" in field ? scalarSize(field.encoding) : 12; }
 function scalar(value: number, kind: NativeModScalar): GuestCallValue {
@@ -67,7 +69,7 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
       const length = size(field, declaration.target.abi.pointerBytes);
       if (!Number.isSafeInteger(field.offset) || field.offset < 0 || !Number.isSafeInteger(length) || length < 1 || field.offset + length > record.stride) throw new Error("Native mod field exceeds its source record");
       for (let byte = field.offset; byte < field.offset + length; byte++) { if (occupied.has(byte)) throw new Error("Overlapping native mod fields"); occupied.add(byte); }
-      if (shared(field)) { const key = field.binding === "inventory" ? `inventory:${field.item}` : field.binding;
+      if (shared(field)) { const key = field.binding === "inventory" || field.binding === "inventory-capacity" ? `${field.binding}:${field.item}` : field.binding;
         if (authority.has(key)) throw new Error(`Multiple native stores for ${key}`); authority.add(key); }
       if (field.binding === "constant") scalar(field.value, field.encoding);
       if (field.binding === "constant-vector") for (const value of [field.value.x, field.value.y, field.value.z]) scalar(value, "float32");
@@ -244,6 +246,7 @@ export class NativeModProvider implements NativeModProjection {
     let slot = this.projections.get(actor);
     if (slot === undefined) {
       if (!this.services.actors.isLive(actor)) throw new Error("Native mod cannot borrow an expired actor");
+      this.validateInventoryCapacity(actor);
       this.releasePending(); const occupied = new Set(this.projections.values()); let next = clientSlot ?? this.declaration.clients?.maximum ?? 0;
       if (clientSlot === null) while (occupied.has(next)) next++;
       else if (occupied.has(next)) throw new Error("Native source client row is already projected");
@@ -302,14 +305,26 @@ export class NativeModProvider implements NativeModProjection {
     if (this.declaration.entityRecord === null) throw new Error("Native mod requires a declared engine actor projection");
     const value = this.pointer(actor, this.declaration.entityRecord); if (value === null) throw new Error("Native actor projection returned null"); return value;
   }
+  private validateInventoryCapacity(actor: ActorId, client = this.clients?.has(actor) === true): void {
+    for (const record of client ? this.declaration.actorRecords : this.nonclientRecords) for (const field of record.fields) if (field.binding === "inventory-capacity"
+      && !this.services.inventory.mutableCapacity(actor, field.item)) throw new Error(`Native mod requires mutable inventory capacity for ${field.item}`);
+  }
   private refresh(): void {
     const memory = this.host.memory;
-    for (const [actor, slot] of this.projections) for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field)) {
-      const address = memory.offset(this.recordAddress(record, slot), BigInt(field.offset));
-      if (field.binding === "health") this.scalarWrite(address, this.services.combat.read(actor)?.health ?? 0, field.encoding);
-      else if (field.binding === "inventory") this.scalarWrite(address, this.services.inventory.entries(actor).find(entry => entry.item === field.item)?.count ?? 0, field.encoding);
-      else { const state = this.services.bodies.read(actor); writeClassicVector(memory, address, state === null ? zero : field.binding === "bounds-min" ? state.bounds.min : field.binding === "bounds-max" ? state.bounds.max : state[field.binding]); }
+    for (const [actor, slot] of this.projections) {
+      this.validateInventoryCapacity(actor);
+      const inventory = this.services.inventory.entries(actor);
+      for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field)) {
+        const address = memory.offset(this.recordAddress(record, slot), BigInt(field.offset));
+        if (field.binding === "health") this.scalarWrite(address, this.services.combat.read(actor)?.health ?? 0, field.encoding);
+        else if (field.binding === "inventory" || field.binding === "inventory-capacity") {
+          const entry = inventory.find(entry => entry.item === field.item);
+          this.scalarWrite(address, entry === undefined ? 0 : field.binding === "inventory" ? entry.count : entry.capacity, field.encoding);
+        }
+        else { const state = this.services.bodies.read(actor); writeClassicVector(memory, address, state === null ? zero : field.binding === "bounds-min" ? state.bounds.min : field.binding === "bounds-max" ? state.bounds.max : state[field.binding]); }
+      }
     }
+    if (this.frames.length !== 0) { const observations = this.observe(); for (const frame of this.frames) frame.observations = observations; }
   }
   private observe(): readonly Observation[] {
     const values: Observation[] = [], memory = this.host.memory;
@@ -322,15 +337,40 @@ export class NativeModProvider implements NativeModProjection {
     const frame = this.frames.at(-1); if (frame === undefined) return;
     const memory = this.host.memory, changed = frame.observations.filter(entry => !isDeepStrictEqual(entry.bytes, memory.copy(entry.address, entry.bytes.length)));
     frame.observations = this.observe();
-    for (const { actor, address, field } of changed) {
-      if (this.clients?.rejects(actor)) continue;
-      const owner = this.services.actors.resolveOwned(actor); if (owner === null) throw new Error("Native mod wrote an expired actor");
-      if (field.binding === "health") this.services.combat.setHealth(owner, this.scalarRead(address, field.encoding));
-      else if (field.binding === "inventory") { const entry = this.services.inventory.entries(actor).find(entry => entry.item === field.item); if (entry === undefined) throw new Error("Native mod wrote an undeclared destination item"); this.services.inventory.configure(owner, { ...entry, count: this.scalarRead(address, field.encoding) }); }
-      else { const body = this.services.bodies.read(actor); if (body === null) throw new Error("Native mod wrote an actor without a body");
-        const value = readClassicVector(memory, address); for (const component of [value.x, value.y, value.z]) scalar(component, "float32");
-        const next = field.binding === "bounds-min" ? { ...body, bounds: { ...body.bounds, min: value } } : field.binding === "bounds-max" ? { ...body, bounds: { ...body.bounds, max: value } } : { ...body, [field.binding]: value }; this.services.bodies.write(owner, next); }
+    if (changed.length === 0 && frame.cursor === frame.pending.length) return;
+    const inventoryChanges = new Map<ActorId, Map<ItemId, InventoryChanges>>();
+    for (const { actor, address, field } of changed) if (field.binding === "inventory" || field.binding === "inventory-capacity") {
+      let items = inventoryChanges.get(actor); if (items === undefined) { items = new Map<ItemId, InventoryChanges>(); inventoryChanges.set(actor, items); }
+      let entry = items.get(field.item); if (entry === undefined) { entry = {}; items.set(field.item, entry); }
+      if (field.binding === "inventory") entry.count = this.scalarRead(address, field.encoding); else entry.capacity = this.scalarRead(address, field.encoding);
     }
+    const committedInventory = new Set<InventoryChanges>();
+    const queue = (actor: ActorId, commit: (owner: OwnedActor) => void): void => { frame.pending.push(() => {
+      if (this.clients?.rejects(actor)) return;
+      const owner = this.services.actors.resolveOwned(actor); if (owner === null) throw new Error("Native mod wrote an expired actor");
+      commit(owner);
+    }); };
+    for (const { actor, address, field } of changed) {
+      if (field.binding === "health") { const value = this.scalarRead(address, field.encoding); queue(actor, owner => { this.services.combat.setHealth(owner, value); }); }
+      else if (field.binding === "inventory" || field.binding === "inventory-capacity") {
+        const changes = inventoryChanges.get(actor)?.get(field.item); if (changes === undefined) throw new Error("Native inventory changes lost their source observation");
+        if (committedInventory.has(changes)) continue;
+        committedInventory.add(changes); queue(actor, owner => {
+          const entry = this.services.inventory.entries(actor).find(entry => entry.item === field.item); if (entry === undefined) throw new Error("Native mod wrote an undeclared destination item");
+          if (changes.capacity !== undefined && !this.services.inventory.mutableCapacity(actor, field.item)) throw new Error(`Native mod requires mutable inventory capacity for ${field.item}`);
+          this.services.inventory.configure(owner, { ...entry, ...changes });
+        });
+      }
+      else {
+        const value = readClassicVector(memory, address); for (const component of [value.x, value.y, value.z]) scalar(component, "float32");
+        queue(actor, owner => {
+          const body = this.services.bodies.read(actor); if (body === null) throw new Error("Native mod wrote an actor without a body");
+          const next = field.binding === "bounds-min" ? { ...body, bounds: { ...body.bounds, min: value } } : field.binding === "bounds-max" ? { ...body, bounds: { ...body.bounds, max: value } } : { ...body, [field.binding]: value }; this.services.bodies.write(owner, next);
+        });
+      }
+    }
+    while (frame.cursor < frame.pending.length) { const commit = frame.pending[frame.cursor++]; if (commit === undefined) throw new Error("Native source commit disappeared"); commit(); }
+    frame.pending.length = 0; frame.cursor = 0;
   }
   private lower(value: NativeModValue, inputs: Inputs, allocations: { readonly address: GuestAddress; readonly bytes: number }[], corrections: (() => void)[]): GuestCallValue {
     if (value.kind === "address") return { kind: "pointer", value: value.value === null ? null : this.resolve(value.value) };
@@ -387,7 +427,7 @@ export class NativeModProvider implements NativeModProjection {
       }
       const appearances = new Map<ActorId, string>();
       if (transfer) for (const actor of this.projections.keys()) { const slot = this.slotOf(actor); if (slot !== null) appearances.set(actor, this.host.presentation.signature(slot)); }
-      if (transfer) { this.refresh(); frame = { observations: this.observe() }; this.frames.push(frame); }
+      if (transfer) { this.refresh(); frame = { observations: this.observe(), pending: [], cursor: 0 }; this.frames.push(frame); }
       const target = call.entry.kind === "game-export" ? this.gameEntry(call) : call.entry.kind === "export" ? this.host.entry(call.entry.name) : this.host.memory.offset(this.host.imageBase, BigInt(call.entry.rva));
       this.host.memory.check(target, 1, "execute");
       const result = this.host.invoke(target, { abi: this.declaration.target.abi, parameters: call.arguments.map(layout), result: call.returns === "void" ? "void" : { kind: "scalar", storage: call.returns }, variadic: false }, arguments_);
@@ -407,7 +447,7 @@ export class NativeModProvider implements NativeModProjection {
   }
   private transfer<Result>(invoke: () => Result): Result {
     this.current(); this.owned?.synchronizeClock(); this.flush(); this.refresh();
-    const frame: Invocation = { observations: this.observe() }; this.frames.push(frame);
+    const frame: Invocation = { observations: this.observe(), pending: [], cursor: 0 }; this.frames.push(frame);
     try {
       const result = invoke(); this.flush();
       if (this.owned?.advancing !== true) this.publish(); return result;
@@ -509,6 +549,8 @@ export class NativeModProvider implements NativeModProjection {
     for (const entry of actors) if (!this.services.actors.isLive(entry.actor)) throw new Error("Saved native projection actor is unavailable");
     const clients = saved.clients.map(entry => ({ ...entry, actor: this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current") }));
     this.clients?.validateRestore(clients);
+    const clientActors = new Set(clients.map(entry => entry.actor));
+    for (const entry of actors) this.validateInventoryCapacity(entry.actor, clientActors.has(entry.actor));
     for (const entry of saved.presentation.fog) { const actor = this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current"); if (!this.services.actors.isLive(actor)) throw new Error("Saved native presentation player is unavailable"); }
     const ownedActors = saved.owned === null ? [] : this.owned?.validateSaved(saved.owned) ?? [];
     this.lifecycle = true; this.restoring = true; this.restoreLinks.clear(); this.owned?.suspend(true);

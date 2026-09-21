@@ -88,6 +88,8 @@ import { Q1EntityServices } from "../../../content/q1/foundation/entity-services
 import { Q1Creatures, q1Creatures } from "../../../content/q1/base/creatures.ts";
 import { baseSpecies } from "../../../content/q1/base/species.ts";
 import { registerSelectedQ1Expansion } from "./monster-sources.ts";
+import { Q1PlayerPunch, type Q1PunchOwner } from "./q1-punch.ts";
+import type { Q1AddonEvent } from "../../../content/q1/addons/context.ts";
 import { q1AmmoPickupSelection, q1WeaponPickupSelection } from "../../../content/q1/foundation/pickups.ts";
 import { threewaveCharacterPose } from "../../../content/q1/equipment/threewave-weapon.ts";
 import { ThreewaveGrapple } from "../../../content/q1/equipment/threewave-grapple.ts";
@@ -156,7 +158,7 @@ import { createQ1SourceComposition } from "../../../content/composition/q1/index
 import { sourceQ2MatchSelection } from "../../../content/composition/q2/match-selection.ts";
 import { adaptForeignQ3Objectives } from "../../../content/q3/team-arena/foreign-objectives.ts";
 import type { Q1SourceComposition, Q1CompositionServices } from "../../../content/composition/q1/index.ts";
-import { createNumericOperations } from "../../../core/numeric.ts";
+import { createNumericOperations, Q1_DONOR_PROFILE } from "../../../core/numeric.ts";
 import { SessionActorRegistry, ActorCallbackTable } from "../../../world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable, createQ1CombatPolicy, createQ2CombatPolicy, nativeVictimArmor } from "../../../world/gameplay/index.ts";
 import { SharedSceneQueries } from "../../../world/collision/index.ts";
@@ -254,6 +256,7 @@ export class SharedSimulation implements Simulation {
   readonly events: SimulationEvents;
   private readonly actorExecutions = new Map<ActorId, ActorExecution>();
   private readonly playerStates = new Map<OwnedActor, MovementPlayer>();
+  private readonly q1Punch: Q1PlayerPunch;
   private readonly q2Characters = new Map<OwnedActor, Q2CharacterActor>();
   private readonly characterTicks = new Map<OwnedActor, number>();
   private readonly entryCarry = new Map<OwnedActor, Q1TravelState>();
@@ -436,6 +439,7 @@ export class SharedSimulation implements Simulation {
     this.random = new SourceRandom(options.seed, timing.clock.kind === "q2-rerelease" ? "q2-rerelease" : "classic");
     this.actors = saved === undefined ? new SessionActorRegistry(options.identity)
       : SessionActorRegistry.restore(options.identity, saved.actors, readSourceActorsCheckpoint(simulationProviderCheckpoint(saved, "world:source-slots")));
+    this.q1Punch = new Q1PlayerPunch(this.actors, actor => this.q1PunchOwner(actor));
     this.callbacks = new ActorCallbackTable(this.actors);
     this.scene = new SharedSceneQueries(options.world);
     this.physics = new SharedPhysics({ actors: this.actors, callbacks: this.callbacks, scene: this.scene, numeric: timing.numeric,
@@ -764,6 +768,29 @@ export class SharedSimulation implements Simulation {
 
   get bodies() { return this.physics.bodies; }
   get timeSeconds(): number { return seconds(this.sourceFrame.time); }
+  private q1PunchOwner(actor: ActorId): Q1PunchOwner | null {
+    const source = this.source;
+    if (source.kind === "quakec" && source.game.kind === "netquake") return {
+      read: () => source.game.clientPunchAngles(actor), write: angles => source.game.setClientPunchAngles(actor, angles) };
+    const player = (source.kind === "q1" ? source.game.player(actor) : null) ?? this.q1WeaponSource()?.game.player(actor);
+    return player == null ? null : { read: () => player.punchAngles, write: angles => { player.punchAngles = angles; } };
+  }
+  private emitQ1Addon(content: ContentId, event: Q1AddonEvent, time: SourceTime): undefined {
+    if (event.kind === "punch-angle") this.q1Punch.write(event.player, event.angles);
+    return this.events.emit(content, { kind: "q1-composition", event: { kind: "addon", event } }, time);
+  }
+  private advanceQ1Punch(): void {
+    const numeric = createNumericOperations(Q1_DONOR_PROFILE);
+    for (const actor of this.players()) {
+      const owned = this.actors.resolveOwned(actor), player = owned === null ? undefined : this.playerStates.get(owned);
+      if (player?.cutscene != null || player?.intermission === true || player?.state.kind === "q1-netquake" && player.state.moveType === 0) continue;
+      // Native NetQuake ClientThink owns DropPunchAngle and writes its result to QC memory.
+      if (this.source.kind === "quakec" && this.source.game.kind === "netquake"
+        && (player?.state.kind === "q1-netquake" || !this.source.game.clientPunchAdvances(actor))) continue;
+      const punchAngles = this.q1Punch.advance(actor, seconds(this.sourceFrame.elapsed), numeric);
+      if (player?.state.kind === "q1-netquake") player.state = { ...player.state, punchAngles };
+    }
+  }
   private get q1PhysicsEdition(): "classic" | "rerelease" { return this.recipe.engineBehavior.content.startsWith("q1:rerelease:") ? "rerelease" : "classic"; }
 
   private monsterSourceFor(definition: MonsterDefinitionReference): SelectedMonsterSource {
@@ -785,7 +812,7 @@ export class SharedSimulation implements Simulation {
       const game = new Q1EntityServices(this.q1ActorHost(reference, runtime), { ...common, physicsEdition: this.q1PhysicsEdition, deathmatch: 0, coop: this.options.mode === "coop", gravity: this.physics.gravity, precacheProgram: "id1" });
       if (registered.program === "mg3" && this.options.restore === undefined) game.world = game.create("worldspawn");
       const addon = registered.program === "id1" ? null : registerSelectedQ1Expansion(game, registered.program, {
-        emit: event => this.events.emit(reference.content, { kind: "q1-composition", event: { kind: "addon", event } }, clock.frame.time),
+        emit: event => this.emitQ1Addon(reference.content, event, clock.frame.time),
         isMonster: actor => {
           const execution = this.actorExecutions.get(actor);
           return execution?.kind === "q1" ? (execution.entity.movementFlags & 32) !== 0
@@ -1258,7 +1285,7 @@ export class SharedSimulation implements Simulation {
       combatProvider: this.recipe.combat.provider, movementProvider: this.recipe.movement.provider, inventoryProvider: this.recipe.inventory.provider, gravity: this.physics.gravity });
     if (product === "mg3" && this.options.restore === undefined) game.world = game.create("worldspawn");
     const missionWeapons = registerSelectedQ1MissionWeapons(game, product, {
-      emit: event => this.events.emit(this.weaponProvider.content, { kind: "q1-composition", event: { kind: "addon", event } }, this.selectedQ1Frame().time),
+      emit: event => this.emitQ1Addon(this.weaponProvider.content, event, this.selectedQ1Frame().time),
       isMonster: actor => { const execution = this.actorExecutions.get(actor); return execution?.kind === "q1" ? (execution.entity.movementFlags & 32) !== 0 : execution?.kind === "q2" && (execution.entity.serverFlags & 4) !== 0; },
       cvar: name => this.source.kind === "q1" ? this.source.cvars.variableValue(name) : this.source.kind === "q3" ? this.source.game.host.cvars.variableValue(name) : this.q2ServerRegistry?.variableValue(name) ?? 0,
       setCvar: (name, value) => { const registry = this.source.kind === "q1" ? this.source.cvars : this.source.kind === "q3" ? this.source.game.host.cvars : this.q2ServerRegistry;
@@ -1300,7 +1327,7 @@ export class SharedSimulation implements Simulation {
     const content = source.content;
     const movement = source.provider === this.recipe.map.entities.provider ? this.q1Movement : this.createMonsterMovement(runtime.numeric, runtime.random);
     const visibilityNumeric = createNumericOperations(runtime.numeric);
-    return createQ1ActorHost({ weaponBehavior: this.weaponBehavior, actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+    return createQ1ActorHost({ punchAngles: this.q1Punch, weaponBehavior: this.weaponBehavior, actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
         monsterTarget: actor => this.monsterTarget(actor),
         registerEntity: (entity, services) => this.registerActorExecution({ kind: "q1", entity, services, content }),
         sourceTarget: actor => { const entry = this.actorExecutions.get(actor), player = this.playerClient(actor) !== null;
@@ -2055,7 +2082,9 @@ export class SharedSimulation implements Simulation {
       }
       const services: Q1CompositionServices = { sharedGrapple: this.sharedGrapple(),
         cvar: name => cvars.variableValue(name), setCvar: (name, value) => { cvars.set(name, value, true); if (name === "sv_gravity") this.setWorldGravity(cvars.variableValue(name)); if (name === "skill") { const skill = cvars.variableValue(name); if (skill !== 0 && skill !== 1 && skill !== 2 && skill !== 3) throw new Error("Q1 skill must be 0..3"); this.q1Campaign.skill = skill; } return undefined; },
-        emit: event => { if (event.kind === "level-presentation") return this.events.emit(content, { kind: "q1-level", event: event.event }); return this.events.emit(content, { kind: "q1-composition", event }); },
+        emit: event => { if (event.kind === "level-presentation") return this.events.emit(content, { kind: "q1-level", event: event.event });
+          if (event.kind === "addon") return this.emitQ1Addon(content, event.event, this.sourceFrame.time);
+          return this.events.emit(content, { kind: "q1-composition", event }); },
         selectedPlayer: actor => { const player = this.requirePlayer(actor), lifecycle = this.q1Characters.get(player.actor)?.lifecycle, life = lifecycle?.life;
           return { deadFlag: life === "dying" ? 1 : life === "dead" ? 2 : life === "respawnable" ? 3 : (this.combat.read(actor)?.health ?? 0) > 0 ? 0 : 2,
             isBot: this.botServices.isBot(actor), viewAngles: player.viewAngles, viewOffset: lifecycle?.viewOffset ?? this.q2Views.get(actor)?.offset ?? { x: 0, y: 0, z: player.viewHeight }, frame: player.animation.state.kind === "q1" || player.animation.state.kind === "q2" ? player.animation.state.frame : 0,
@@ -2487,7 +2516,7 @@ export class SharedSimulation implements Simulation {
       q2MovementConfig: () => this.q2MovementConfig(),
       gibbed: () => this.q2Characters.get(actor)?.state.gibbed ?? (this.source.kind === "q2" && this.source.players.states.get(actor.id)?.gibbed === true),
       weaponStep: input => this.weaponStep(input), animationStep: input => this.animationStep(input), touch: (contact, state) => this.touch(contact, state),
-      sourcePunch: actor => this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? null,
+      sourcePunch: actor => this.source.kind === "quakec" && this.source.game.kind === "netquake" ? null : this.q1Punch.read(actor),
       worldActor: () => this.worldActor(), touchTriggers: owned => this.source.kind === "q3"
         || this.source.kind === "quakec" && this.source.game.kind === "quakeworld" && this.source.game.isSpectatorClient(owned.id)
         ? undefined : this.physics.touchTriggers(owned), isBrush: id => this.physics.isBrush(id), jump: (owned, action) => this.jump(owned, action),
@@ -3352,7 +3381,7 @@ export class SharedSimulation implements Simulation {
       this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
       while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + profile.serverFrameMilliseconds) {
         this.sourceFrame = this.clock.advance({ kind: "milliseconds", value: profile.serverFrameMilliseconds });
-        this.beginNativeEquipmentFrame();
+        this.advanceQ1Punch(); this.beginNativeEquipmentFrame();
         await this.source.game.runFrame(Math.trunc(this.timeSeconds * 1000));
         this.assertOpen();
         this.sourceFrame = this.clock.enter("frame-exit");
@@ -3452,12 +3481,7 @@ export class SharedSimulation implements Simulation {
           if (this.selectedWeaponSource?.kind === "q1") this.selectedWeaponSource.missionWeapons.frame(seconds(frame.elapsed));
           this.selectedArsenal.frame(seconds(frame.time));
         }
-        const q1Weapons = this.q1WeaponSource();
-        if (!paused && q1Weapons !== null) for (const player of this.playerStates.values()) {
-          if (player.cutscene !== null || player.intermission || player.state.kind === "q1-netquake" && player.state.moveType === 0) continue;
-          const punchAngles = q1Weapons.game.advancePunch(player.actor.id, seconds(this.selectedQ1Frame().elapsed), createNumericOperations(providerTiming(this.recipe, this.weaponProvider.provider).numeric));
-          if (punchAngles !== null && player.state.kind === "q1-netquake") player.state = { ...player.state, punchAngles };
-        }
+        if (!paused) this.advanceQ1Punch();
         if (this.handGrenades !== null) this.equipmentFrame = providerFrame(this.sourceFrame, profile, providerTiming(this.recipe, this.handGrenades.selection.source.provider).clock);
         if (this.grapple !== null) {
           this.grappleFrame = providerFrame(this.sourceFrame, profile, providerTiming(this.recipe, this.grapple.selection.source.provider).clock);
@@ -3551,8 +3575,7 @@ export class SharedSimulation implements Simulation {
           if (this.source.kind === "q2" && moved.kind === "q2-rerelease" && moved.status === "active") this.source.product.movementImpact(player.actor.id, moved.impactDelta, (moved.state.flags & 128) !== 0);
           } finally { player.gravityMultiplier = gravityMultiplier; }
         }
-        const sourcePunch = this.q1WeaponSource()?.game.player(player.actor.id)?.punchAngles;
-        if (sourcePunch !== undefined && player.state.kind === "q1-netquake") player.state = { ...player.state, punchAngles: sourcePunch };
+        if (player.state.kind === "q1-netquake") player.state = { ...player.state, punchAngles: this.q1Punch.read(player.actor.id) };
         if (!paused && this.selectedArsenal !== null && (player.profile.kind === "q2-classic" || player.profile.kind === "q2-rerelease") && this.actors.isLive(player.actor.id)) {
           const combat = this.combat.read(player.actor.id);
           if (combat === null) throw new Error("Selected arsenal owner has no combat state");
@@ -3588,8 +3611,7 @@ export class SharedSimulation implements Simulation {
               clientPlayer.gravityMultiplier *= this.grapple?.gravityScale(actor.id) ?? 1;
               try { clientPlayer.physicsNetQuake({ ...this.sourceFrame, phase: "entity-physics" }); }
               finally { clientPlayer.gravityMultiplier = gravityMultiplier; }
-              const punch = this.q1WeaponSource()?.game.player(actor.id)?.punchAngles;
-              if (punch !== undefined && clientPlayer.state.kind === "q1-netquake") clientPlayer.state = { ...clientPlayer.state, punchAngles: punch };
+              if (clientPlayer.state.kind === "q1-netquake") clientPlayer.state = { ...clientPlayer.state, punchAngles: this.q1Punch.read(actor.id) };
               this.syncQuakeCClientView(clientPlayer);
             } else clientPlayer.finishNetQuakeInput();
             if (boundary.q2) this.frameSelectedQ2Weapon(actor);
@@ -4038,6 +4060,10 @@ export class SharedSimulation implements Simulation {
     if (this.sourcePlayerUserinfo(actor) !== previousUserinfo) this.notifyClientEvent("userinfo", actor);
   }
   playerView(actor: ActorId): PlayerView {
+    const view = this.sourcePlayerView(actor);
+    return { ...view, kickAngles: add(view.kickAngles ?? zero, this.q1Punch.read(actor)) };
+  }
+  private sourcePlayerView(actor: ActorId): PlayerView {
     if (this.source.kind === "q2-native") return this.source.edition === "classic"
       ? classicGuestPlayerView(this.source.game.playerState(this.nativeQ2Client(actor).slot + 1))
       : rereleaseGuestPlayerView(this.source.game.playerState(this.nativeQ2Client(actor).slot + 1));
@@ -4076,11 +4102,10 @@ export class SharedSimulation implements Simulation {
         return { ...view, viewHeight: -16, angles: { x: -15, y: yaw, z: 40 }, fieldOfView: source?.fov ?? 90 };
       }
     }
-    const punch = this.q1WeaponSource()?.game.player(actor)?.punchAngles ?? zero;
     // Classic viewoffset includes eye height; rerelease sends it separately in pmove.viewheight.
-    return player.character !== "q2" || source === undefined ? { ...view, kickAngles: punch, ...(source === undefined ? {} : { fieldOfView: source.fov }) }
+    return player.character !== "q2" || source === undefined ? { ...view, ...(source === undefined ? {} : { fieldOfView: source.fov }) }
       : { origin: add(view.origin, { x: source.offset.x, y: source.offset.y, z: 0 }),
-        angles: add(!player.intermission && (this.combat.read(actor)?.health ?? 0) > 0 ? view.angles : source.angles, source.kickAngles), kickAngles: punch,
+        angles: add(!player.intermission && (this.combat.read(actor)?.health ?? 0) > 0 ? view.angles : source.angles, source.kickAngles),
         ...(this.source.kind === "q3" && this.q2Characters.get(player.actor)?.state.dead === true && !player.intermission ? { foreignCharacterDeath: true } : {}),
         fieldOfView: source.fov, viewHeight: source.offset.z + (this.source.kind === "q2" && this.source.product.rerelease !== null && !player.intermission ? view.viewHeight : 0) };
   }
@@ -4249,7 +4274,7 @@ export class SharedSimulation implements Simulation {
       const frameMilliseconds = source.edition === "classic" ? 100 : source.game.services.options.frameMilliseconds;
       while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + frameMilliseconds) {
         this.sourceFrame = this.clock.advance(source.edition === "classic" ? { kind: "seconds", value: frameMilliseconds / 1000 } : { kind: "milliseconds", value: frameMilliseconds });
-        this.beginNativeEquipmentFrame(); source.game.frame(frameMilliseconds); this.sourceFrame = this.clock.enter("frame-exit");
+        this.advanceQ1Punch(); this.beginNativeEquipmentFrame(); source.game.frame(frameMilliseconds); this.sourceFrame = this.clock.enter("frame-exit");
         this.modOwner?.advance(this.sourceFrame);
       }
       return { snapshot: this.snapshot(), events: this.events.take() };
@@ -4863,7 +4888,7 @@ export class SharedSimulation implements Simulation {
     const guests: SaveImage["guests"] = source.kind === "quakec" || source.kind === "q3-qvm" ? [source.game.checkpoint()] : [];
 
     add("world:simulation", encodeCheckpointValue({ settings: { skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients, seed: this.options.seed, startItems: this.startItems, initialSpawnPoint: this.initialSpawnPoint },
-      modClientApplicationOrdinal: this.modClientApplications.checkpoint(),
+      modClientApplicationOrdinal: this.modClientApplications.checkpoint(), q1Punch: this.q1Punch.capture(),
       players: [...this.playerStates.values()].map(captureMovementPlayer), hostMilliseconds: this.hostMilliseconds, q1Paused: this.q1PauseState,
       modClientCommands: [...this.modClientCommands.values()].map(value => {
         const client = this.playerClient(value.input.actor); if (client === null) throw new Error("Accepted command lost its live client");
@@ -5178,6 +5203,13 @@ export class SharedSimulation implements Simulation {
       this.scheduler.schedule(actor, think.callback, { due: think.due, boundary: think.boundary,
         ...(think.executionProvider === undefined ? {} : { executionProvider: think.executionProvider }),
         order: { actor: actor.id, provider: think.provider, sequence: think.sequence } });
+    }
+    this.q1Punch.restore(reader.field("q1Punch"));
+    if (reader.field("q1Punch").value === undefined && this.selectedArsenal?.family === "q1" && this.selectedWeaponSource?.kind === "q1") {
+      for (const actor of this.players()) {
+        const previous = this.selectedWeaponSource.game.player(actor);
+        if (previous !== null) this.q1Punch.write(actor, previous.punchAngles);
+      }
     }
     this.weaponBehavior.restore(reader.field("weaponBehaviors"));
     this.modClientApplications.restore(reader.field("modClientApplicationOrdinal").value === undefined ? 0 : reader.field("modClientApplicationOrdinal").integer(0));
