@@ -63,7 +63,8 @@ export interface Q3MotionOptions {
   readonly traceMask: number;
   readonly fixedMsec: number | null;
   readonly noFootsteps: boolean;
-  beginStep(state: Q3Motion, command: Q3Command, msec: number, substep: number): void;
+  beginStep(state: Q3Motion, command: Q3Command, msec: number, substep: number): void | boolean;
+  endStep?(state: Q3Motion): void | boolean;
   event(event: number): void;
   animation(request: Q3AnimationRequest): void;
   weapon(): void;

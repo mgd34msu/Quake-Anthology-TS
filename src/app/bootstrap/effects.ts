@@ -469,7 +469,9 @@ export class ApplicationEffects {
         case "lava-splash": case "teleport": particles.q1Splash(event.origin, seconds, event.effect === "lava-splash"); break;
         case "muzzleflash": {
           const pose = event.actor === null ? undefined : this.pose(event.actor), direction = pose === undefined ? zero : anglesToAxis(pose.angles)[0];
-          this.light(add3(add3(event.origin, { x: 0, y: 0, z: 16 }), scale3(direction, 18)), seconds, 200 + (this.random.nextInteger() & 31), 0.1, white, 0, 32, event.actor); break;
+          const origin = event.muzzle === undefined ? add3(add3(event.origin, { x: 0, y: 0, z: 16 }), scale3(direction, 18))
+            : add3(event.muzzle.origin, scale3(anglesToAxis(event.muzzle.angles)[0], 18));
+          this.light(origin, seconds, 200 + (this.random.nextInteger() & 31), 0.1, white, 0, 32, event.actor); break;
         }
       }
       return;

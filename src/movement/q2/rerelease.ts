@@ -6,7 +6,8 @@ import type { NumericOperations } from "../../contracts/numeric.ts";
 import type { Vec3 as SceneVector } from "../../contracts/math.ts";
 import { characterHeight } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";
-import { type Vec3, type KexPmoveT, type KexTraceT, type KexTouchListT, type KexCsurfaceT, ContentsT, MASK_SOLID, MASK_DEADSOLID, MASK_PLAYERSOLID, MASK_WATER, MASK_CURRENT, SurfflagsT, WaterLevelT, KexPmTypeT, PmflagsT, ButtonT, RefdefFlagsT, MAXTOUCH, STEPSIZE, StuckResultT, PM_CONFIG_DEFAULT, type PmConfigT, type PmTraceFn, type StuckObjectTraceFn, PITCH, YAW, ROLL, axes, element } from "./types.ts";
+import { rereleaseViewAngles } from "./view.ts";
+import { type Vec3, type KexPmoveT, type KexTraceT, type KexTouchListT, type KexCsurfaceT, ContentsT, MASK_SOLID, MASK_DEADSOLID, MASK_PLAYERSOLID, MASK_WATER, MASK_CURRENT, SurfflagsT, WaterLevelT, KexPmTypeT, PmflagsT, ButtonT, RefdefFlagsT, MAXTOUCH, STEPSIZE, StuckResultT, PM_CONFIG_DEFAULT, type PmConfigT, type PmTraceFn, type StuckObjectTraceFn, PITCH, axes, element } from "./types.ts";
 /** The game DLL shares pml between all Pmove and SV_FlyMove calls. Prediction
  * owns a separate context. Pmove resets it; server duplicate-plane recovery does not. */
 export class Q2RereleaseMovementContext {
@@ -837,20 +838,7 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
             }
         }
         function PM_ClampAngles(): void {
-            if (pm.s.pm_flags & PmflagsT.PMF_TIME_TELEPORT) {
-                pm.viewangles[YAW] = numericOps.store(numericOps.add(element(pm.cmd.angles, YAW), element(pm.s.delta_angles, YAW)));
-                pm.viewangles[PITCH] = numericOps.store(0);
-                pm.viewangles[ROLL] = numericOps.store(0);
-            }
-            else {
-                pm.viewangles[0] = numericOps.store(numericOps.add(element(pm.cmd.angles, 0), element(pm.s.delta_angles, 0)));
-                pm.viewangles[1] = numericOps.store(numericOps.add(element(pm.cmd.angles, 1), element(pm.s.delta_angles, 1)));
-                pm.viewangles[2] = numericOps.store(numericOps.add(element(pm.cmd.angles, 2), element(pm.s.delta_angles, 2)));
-                if (element(pm.viewangles, PITCH) > 89 && element(pm.viewangles, PITCH) < 180)
-                    pm.viewangles[PITCH] = numericOps.store(89);
-                else if (element(pm.viewangles, PITCH) < 271 && element(pm.viewangles, PITCH) >= 180)
-                    pm.viewangles[PITCH] = numericOps.store(271);
-            }
+            rereleaseViewAngles(pm.viewangles, pm.cmd.angles, pm.s.delta_angles, pm.s.pm_flags, numericOps);
             AngleVectors(pm.viewangles, pml.forward, pml.right, pml.up);
         }
         function PM_ScreenEffects(): void {

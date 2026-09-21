@@ -22,6 +22,7 @@ export class QcModEnvironment {
       sv_gravity: String(environment?.gravity ?? 800), sv_aim: "0.93", sv_maxspeed: "320", registered: "1", developer: "0", sv_cheats: "0",
       samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0" };
     for (const [name, value] of Object.entries(defaults)) this.cvars.register(name, value);
+    if (program.api.kind === "q1-quakeworld") this.cvars.register("sv_phs", "1");
     for (const variable of declaration.cvars ?? []) {
       if (this.cvars.find(variable.name) === undefined) this.cvars.register(variable.name, variable.value);
       else this.cvars.set(variable.name, variable.value, true);

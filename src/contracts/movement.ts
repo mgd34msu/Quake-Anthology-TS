@@ -246,11 +246,16 @@ export interface AnimationStepInput {
 export interface AnimationStepResult { readonly animation: ActorAnimationState; readonly effects: readonly MovementEffect[]; }
 export type MovementContinuation = { readonly kind: "continue"; readonly state: MovementState }
   | { readonly kind: "actor-removed" };
+export interface MovementInputApplication {
+  begin(command: UserCommand, frame: FrameContext, state: MovementState): MovementContinuation;
+  end(state: MovementState, failed?: boolean): MovementContinuation;
+}
 export type MovementTouchContact = Omit<TouchContact, "other" | "sourceTrace"> & {
   readonly other: Exclude<TraceHit, { readonly kind: "none" }>;
   readonly sourceTrace?: Omit<NonNullable<TouchContact["sourceTrace"]>, "ent">;
 };
 export interface MovementServices {
+  readonly inputApplication?: MovementInputApplication | undefined;
   readonly scene: SceneQueries;
   readonly numeric: NumericOperations;
   /** Nested source touches finish here; the returned state includes teleports and velocity changes. */

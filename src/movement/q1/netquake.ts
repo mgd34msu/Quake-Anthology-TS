@@ -325,6 +325,21 @@ class NetQuakeMove {
     return this.state;
   }
   physics(): Q1MovementResult {
+    const application = this.input.execution === "authoritative" ? this.context.services.inputApplication : undefined;
+    if (application === undefined) return this.physicsStep();
+    let result: Q1MovementResult;
+    try {
+      const before = application.begin(this.input.command, this.input.frame, this.state);
+      if (before.kind === "actor-removed") this.context.removed = true; else this.setState(before.state);
+      result = this.physicsStep();
+    } catch (error) { application.end(this.state, true); throw error; }
+    const after = application.end(this.state);
+    if (after.kind === "actor-removed" || result.status === "actor-removed") return { kind: "q1-netquake", status: "actor-removed",
+      actor: this.input.actor.id, commandSequence: this.input.commandSequence, effects: this.context.effects };
+    this.setState(after.state);
+    return { ...result, state: this.state };
+  }
+  private physicsStep(): Q1MovementResult {
     const c = this.context, s = this.state;
     this.setState(c.lifecycle(s, "beforePhysics"));
     if (!c.removed) this.playerActions();

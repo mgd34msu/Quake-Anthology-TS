@@ -1,3 +1,4 @@
+import { quakeTemporaryEvent } from "./message-effects.ts";
 import type { RereleaseMessages } from "../../network/q1/profile.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
@@ -57,6 +58,7 @@ export interface QcPresentationServices {
   lookup(kind: "model" | "sound", name: string): QcPrecachedResource | null;
   loading(): boolean;
   print(text: string): undefined;
+  broadcastPrint?(text: string, level: number): undefined;
   /** A shared console sink already delivers broadcast prints to its clients. */
   readonly printBroadcastsToClients?: boolean;
   message?(event: NetworkEvent, actor: ActorId): undefined;
@@ -112,6 +114,7 @@ export function createQcPresentationBindings(world: QcPresentationWorld, service
   const qw = world.options.program.api.kind === "q1-quakeworld" ? services.qw : undefined;
   if (world.options.program.api.kind === "q1-quakeworld" && qw === undefined) throw new Error("QuakeWorld presentation requires routed message services");
   install("bprint", vm => {
+    if (services.broadcastPrint !== undefined) return services.broadcastPrint(vm.varString(qw === undefined ? 0 : 1), qw === undefined ? 2 : Math.trunc(vm.argFloat(0)));
     if (qw === undefined) { const text = vm.varString(0); services.print(text); if (services.printBroadcastsToClients !== true) services.nq?.route([{ kind: "print", text }], { kind: "broadcast", reliable: true }); }
     else {
       const text = vm.varString(1); services.print(text);
@@ -219,7 +222,7 @@ export function createQcPresentationBindings(world: QcPresentationWorld, service
 }
 
 
-export type QcBroadcastEvent = Extract<Q1Event, { readonly kind: "effect" | "beam" | "colored-explosion" }>;
+export type QcBroadcastEvent = Extract<Q1Event, { readonly kind: "effect" | "beam" | "colored-explosion" | "particles" }>;
 export type QcMessageWorld = Pick<QcWorldHost, "actor"> & {
   readonly options: Pick<QcWorldHost["options"], "program" | "entities"> & {
     readonly slots: Pick<QcWorldHost["options"]["slots"], "at">;
@@ -410,29 +413,7 @@ export class QcBroadcastMessages {
         if (routed) return null;
         throw new Error(`Unsupported QC broadcast message ${message.kind}`);
       }
-      const effect = message.effect;
-      if (effect.kind === "explosion-colors") return { kind: "colored-explosion", origin: effect.origin, colorStart: effect.colorStart, colorLength: effect.colorLength };
-      if (effect.kind === "beam") {
-        const actor = owners.get(offset + 2);
-        if (actor === undefined || actor === null) throw new Error(`QC beam entity ${effect.entity} had no owned actor when written`);
-        const style = effect.type === 5 ? "lightning1" : effect.type === 6 ? "lightning2" : effect.type === 9 ? "lightning3" : effect.type === 13 ? "grapple" : null;
-        if (style === null) throw new Error(`Unsupported QC beam ${effect.type}`);
-        return { kind: "beam", style, actor, start: effect.start, end: effect.end };
-      }
-      let name: Extract<Q1Event, { readonly kind: "effect" }>["effect"];
-      switch (effect.type) {
-        case 0: name = "spike"; break;
-        case 1: name = "superspike"; break;
-        case 2: name = "gunshot"; break;
-        case 3: name = "explosion"; break;
-        case 4: name = "tar-explosion"; break;
-        case 7: name = "wizard-spike"; break;
-        case 8: name = "knight-spike"; break;
-        case 10: name = "lava-splash"; break;
-        case 11: name = "teleport"; break;
-        default: throw new Error(`Unsupported QC point effect ${effect.type}`);
-      }
-      return { kind: "effect", effect: name, actor: null, origin: effect.origin, amount: effect.count };
+      return quakeTemporaryEvent(message.effect, owners.get(offset + 2) ?? null, false);
     });
     for (const effect of effects) if (effect !== null) this.emit(effect, recipient);
   }

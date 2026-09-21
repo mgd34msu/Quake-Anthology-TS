@@ -98,6 +98,22 @@ function touchContacts<T extends Q2MovementState | Q2RereleaseMovementState>(inp
 }
 
 export function moveQ2Classic(input: Q2MovementInput, services: MovementServices): Q2MovementResult {
+  const application = input.execution === "authoritative" ? services.inputApplication : undefined;
+  if (application === undefined) return moveQ2ClassicPhysics(input, services);
+  let result: Q2MovementResult;
+  try {
+    const before = application.begin(input.command, { ...input.frame, elapsed: { kind: "milliseconds", value: input.command.milliseconds } }, input.state);
+    if (before.kind === "actor-removed") result = { kind: "q2-classic", status: "actor-removed", actor: input.actor.id, commandSequence: input.commandSequence, effects: [] };
+    else if (before.state.kind === "q2-classic") result = moveQ2ClassicPhysics({ ...input, state: before.state }, services);
+    else throw new Error("Input callback changed Quake II movement family");
+  } catch (error) { application.end(input.state, true); throw error; }
+  const after = application.end(result.status === "active" ? result.state : input.state);
+  if (after.kind === "actor-removed" || result.status === "actor-removed") return { kind: "q2-classic", status: "actor-removed", actor: input.actor.id, commandSequence: input.commandSequence, effects: result.effects };
+  if (after.state.kind !== "q2-classic") throw new Error("Input callback changed Quake II movement family");
+  return { ...result, state: after.state };
+}
+
+function moveQ2ClassicPhysics(input: Q2MovementInput, services: MovementServices): Q2MovementResult {
   commandDuration(input.command.milliseconds);
   const { vec3 } = createMovementMath(services.numeric);
   const scene = traceAdapter(input, services);
@@ -124,6 +140,22 @@ export function moveQ2Classic(input: Q2MovementInput, services: MovementServices
 }
 
 export function moveQ2Rerelease(input: Q2RereleaseMovementInput, services: MovementServices, context: Q2RereleaseMovementContext): Q2RereleaseMovementResult {
+  const application = input.execution === "authoritative" ? services.inputApplication : undefined;
+  if (application === undefined) return moveQ2RereleasePhysics(input, services, context);
+  let result: Q2RereleaseMovementResult;
+  try {
+    const before = application.begin(input.command, { ...input.frame, elapsed: { kind: "milliseconds", value: input.command.milliseconds } }, input.state);
+    if (before.kind === "actor-removed") result = { kind: "q2-rerelease", status: "actor-removed", actor: input.actor.id, commandSequence: input.commandSequence, effects: [] };
+    else if (before.state.kind === "q2-rerelease") result = moveQ2RereleasePhysics({ ...input, state: before.state }, services, context);
+    else throw new Error("Input callback changed Quake II movement family");
+  } catch (error) { application.end(input.state, true); throw error; }
+  const after = application.end(result.status === "active" ? result.state : input.state);
+  if (after.kind === "actor-removed" || result.status === "actor-removed") return { kind: "q2-rerelease", status: "actor-removed", actor: input.actor.id, commandSequence: input.commandSequence, effects: result.effects };
+  if (after.state.kind !== "q2-rerelease") throw new Error("Input callback changed Quake II movement family");
+  return { ...result, state: after.state };
+}
+
+function moveQ2RereleasePhysics(input: Q2RereleaseMovementInput, services: MovementServices, context: Q2RereleaseMovementContext): Q2RereleaseMovementResult {
   commandDuration(input.command.milliseconds);
   const { vec3 } = createMovementMath(services.numeric);
   const scene = traceAdapter(input, services);

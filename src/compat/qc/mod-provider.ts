@@ -186,7 +186,7 @@ export class QcModProvider {
       },
     })) host.set(name, builtin);
     this.messages = null;
-    if (services.engine !== undefined && media !== undefined && program.api.kind !== "q1-quakeworld") {
+    if (services.engine !== undefined && media !== undefined) {
       const lookup = (kind: "model" | "sound", name: string) => this.lookup(kind, name);
       const world = { options: { program, entities, slots: { at: (slot: number) => {
         const reference = slot === 0 ? services.engine?.world() : this.actorsBySlot.get(slot);
@@ -199,9 +199,12 @@ export class QcModProvider {
       this.messages = new QcModMessages(world, services, media.content, (kind, index) => {
         for (const [name, resource] of this.precached) if (name.startsWith(`${kind}:`) && resource.index === index) return name.slice(kind.length + 1);
         throw new Error(`Unknown mod ${kind} index ${index}`);
-      });
+      }, { loading: () => this.loading, phs: () => this.cvars.variableValue("sv_phs") !== 0 });
+      const qw = this.messages.routes.qw;
       for (const [name, builtin] of this.messages.messages.host) host.set(name, builtin);
-      for (const [name, builtin] of createQcPresentationBindings(world, { ...services.engine, nq: this.messages.route, content: media.content, printBroadcastsToClients: true,
+      for (const [name, builtin] of createQcPresentationBindings(world, { ...services.engine, ...this.messages.routes, content: media.content, printBroadcastsToClients: true,
+        ...(qw === undefined ? {} : { broadcastPrint: (text: string, level: number) =>
+          qw.route([{ message: { kind: "print", text, level }, actor: null }], { kind: "broadcast", reliable: true }) }),
         loading: () => this.loading, lookup, precache: (kind, name) => {
           const resource = lookup(kind, name); if (resource === null) throw new Error(`Mod resource was not prepared: ${kind}/${name}`); return resource;
         } })) host.set(name, builtin);
@@ -215,7 +218,7 @@ export class QcModProvider {
           : actor === undefined || actor === null || this.clients?.slot(actor) == null ? "" : this.clients.userinfo(actor, key);
         vm.returnInt(vm.strings.setEngine(`mod-infokey:${reference}:${key}`, value, Math.max(1024, value.length + 1)));
       });
-      for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[]) host.set(name, vm => {
+      if (this.messages === null) for (const name of ["sprint", "centerprint", "stuffcmd"] satisfies readonly QcHostBuiltinName[]) host.set(name, vm => {
         const actor = this.actor(vm.argInt(0));
         if (this.clients?.slot(actor) == null) { services.engine?.print(`tried to ${name} to a non-client\n`); return; }
         const message = services.engine?.message; if (message === undefined) return vm.fail("Mod client message requires a destination message sink");
@@ -615,6 +618,7 @@ export class QcModProvider {
       this.initialized = true;
     } finally { this.loading = false; }
     this.clients?.start();
+    this.messages?.start();
     return undefined;
   }
   advance(frame: FrameContext): undefined {

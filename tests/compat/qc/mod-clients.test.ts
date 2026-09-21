@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
 import type { ModActorField, ModCallbackDeclaration, ModCallbackInput, ModRuntimeValue, ModSourceCall } from "../../../src/contracts/mod-callbacks.ts";
 import type { ModClientEvent, ModClientServices } from "../../../src/world/session/mod-clients.ts";
+import type { SourcePresentationEvent, SimulationPresentationEvent } from "../../../src/app/bootstrap/simulation/types.ts";
 import type { NetworkEvent } from "../../../src/contracts/protocol.ts";
+import { encodeUnifiedPresentationEvents, decodeUnifiedPresentationEvents } from "../../../src/app/bootstrap/network/unified-event-codec.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
 import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
@@ -25,6 +27,7 @@ function clients() {
   const services: ModClientServices = { maximum: 8, clients: () => [...entries].map(([client, value]) => ({ client, actor: value.actor })),
     forActor: actor => [...entries].find(([, entry]) => entry.actor.equals(actor))?.[0] ?? null, actor: client => entries.get(client)?.actor ?? null,
     userinfo: client => require(client).info, setUserinfo: (client, info) => { require(client).info = info; }, command: () => null,
+    subscribeApplication: () => () => undefined,
     drop: () => { throw new Error("No source drop expected"); }, subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); return undefined; }; } };
   return { services, entries, listeners, notify: (kind: ModClientEvent["kind"], client: ClientId) => {
     for (const listener of listeners) listener({ kind, identity: { client, actor: require(client).actor } });
@@ -119,7 +122,7 @@ test("QC userinfo field writes preserve other keys and do not recursively publis
 });
 
 const quakeworld = "/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat";
-test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld infokey and sprint use reserved component client identity and QW argument ABI", async () => {
+test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld clients, sounds and blood use component media and destination identities", async () => {
   const program = loadQcProgram(await Bun.file(quakeworld).bytes()); expect(program.api.kind).toBe("q1-quakeworld");
   const occupied = new Set<number>(), actorFields: ModActorField[] = [];
   for (const field of program.fields) {
@@ -132,17 +135,32 @@ test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld infokey a
     clients: { maximum: 2, admit: [], userinfo: [], disconnect: [] } };
   const options = parseApplicationCommand(["--content-root", "/home/buzzkill/Projects/qfiles", "--game", "q2-classic-baseq2", "--map", "base1"]);
   if (options.kind !== "run") throw new Error("Missing destination");
-  const content = await loadApplicationContent(options.options), ids = createIdentityOwner("qc-qw-clients"), actors = new SessionActorRegistry(ids), callbacks = new ActorCallbackTable(actors);
+  const content = await loadApplicationContent(options.options), resources = await prepareQuakeCResources(program, await content.forContent("q1:classic:id1:installed")), ids = createIdentityOwner("qc-qw-clients"), actors = new SessionActorRegistry(ids), callbacks = new ActorCallbackTable(actors);
   const world = actors.allocate("q2:map", "q2:world"), first = actors.allocate("q2:game", "q2:player"), second = actors.allocate("q2:game", "q2:player");
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined }), port = clients();
+  const scene = createSceneQueries(content.world), points = scene.geometry.leaves.map(leaf => ({
+    x: (leaf.bounds.min.x + leaf.bounds.max.x) / 2, y: (leaf.bounds.min.y + leaf.bounds.max.y) / 2, z: (leaf.bounds.min.z + leaf.bounds.max.z) / 2
+  })).filter(point => scene.leafCluster(scene.pointLeaf(point)) >= 0);
+  const origin = points[0]; if (origin === undefined) throw new Error("Missing visible map leaf");
+  const distant = points.find(point => !scene.clusterVisible(scene.leafCluster(scene.pointLeaf(origin)), scene.leafCluster(scene.pointLeaf(point)), "pvs"));
+  if (distant === undefined) throw new Error("Missing separated map visibility clusters");
+  const zero = { x: 0, y: 0, z: 0 };
+  for (const { actor, position } of [{ actor: first, position: origin }, { actor: second, position: distant }])
+    bodies.create(actor, { origin: position, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
+  const effects: { readonly recipient: ActorId | undefined; readonly source: SourcePresentationEvent }[] = [];
   const a = ids.client(7, 2), b = ids.client(3, 4), messages: { actor: ActorId | null; event: NetworkEvent }[] = [], rng = new SourceRandom(17);
   port.entries.set(a, { actor: first.id, info: "\\name\\Alice\\team\\red" }); port.entries.set(b, { actor: second.id, info: "\\name\\Bob\\team\\red" });
   const source = new QcModProvider(program, { id: "mod:qw-clients", artifactPath: "qwprogs.dat", digest: program.digest, revision: "original-qw-client-witness" }, declaration,
     { actors, callbacks, bodies, clients: port.services, combat: new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined }),
       inventory: new SharedInventoryTable(actors), seed: 17, time: () => ({ kind: "seconds", value: 3 }),
-      engine: { scene: createSceneQueries(content.world), world: () => world.id, print: () => undefined, events: { emit: () => undefined, registerResource: () => undefined },
+      engine: { scene, world: () => world.id, print: () => undefined,
+        clients: { maximum: 8, visibility: scene, at: () => { throw new Error("No checkclient in this witness"); } },
+        presentation: { map: "maps/base1.bsp", players: () => [...port.entries.values()].map(value => value.actor), camera: actor => {
+          const body = bodies.read(actor); if (body === null) throw new Error("Missing camera body"); return body;
+        } },
+        events: { emit: (_content, source, _time, recipient) => { effects.push({ source, recipient }); return undefined; }, registerResource: () => undefined },
         message: (event, actor) => { messages.push({ event, actor }); return undefined; } } },
-    { nextInteger: () => rng.nextInteger(), nextUnit: () => rng.nextUnit(), checkpoint: () => rng.checkpoint(), restore: state => { if (state.kind !== "glibc-random") throw new Error("Wrong RNG"); return rng.restore(state); } });
+    { nextInteger: () => rng.nextInteger(), nextUnit: () => rng.nextUnit(), checkpoint: () => rng.checkpoint(), restore: state => { if (state.kind !== "glibc-random") throw new Error("Wrong RNG"); return rng.restore(state); } }, { content: "q1:classic:id1:installed", resources });
   try {
     source.initialize(); const vm = source.machine, target = vm.entities.at(1), attacker = vm.entities.at(2), field = (name: string) => vm.fieldOffset(name);
     vm.globals.setFloat(vm.globalOffset("teamplay"), 1);
@@ -158,5 +176,25 @@ test.skipIf(!await Bun.file(quakeworld).exists())("original QuakeWorld infokey a
     source.invoke({ function: "W_ChangeWeapon", arguments: [], globals: selfGlobal }, inputs(first.id));
     expect(messages).toEqual([{ actor: first.id, event: { kind: "print", level: 2, text: "no weapon.\n" } }]);
     expect(target.float(field("impulse"))).toBe(0);
+    source.invoke({ function: "bprint", arguments: [{ kind: "float", value: 3 }, { kind: "string", value: "chat level\n" }], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>());
+    expect(messages.at(-1)).toEqual({ actor: null, event: { kind: "print", level: 3, text: "chat level\n" } });
+    source.invoke({ function: "SpawnBlood", arguments: [{ kind: "vector", value: origin }, { kind: "float", value: 20 }], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>());
+    expect(effects).toEqual([{ recipient: first.id, source: { kind: "q1", event: { kind: "particles", color: 73, count: 20, direction: zero, origin } } }]);
+    effects.length = 0;
+    target.setInt(field("noise1"), vm.strings.allocate("ambience/water1.wav"));
+    source.invoke({ function: "door_hit_bottom", arguments: [], globals: selfGlobal }, inputs(first.id));
+    expect(effects.map(effect => effect.recipient)).toEqual([first.id, second.id]);
+    expect(effects.every(effect => effect.source.kind === "q1" && effect.source.event.kind === "sound")).toBe(true);
+    effects.length = 0; target.setVector(field("origin"), origin);
+    source.invoke({ function: "player_shot1", arguments: [], globals: selfGlobal }, inputs(first.id));
+    expect(effects).toEqual([{ recipient: first.id, source: { kind: "q1", event: { kind: "effect", effect: "muzzleflash", actor: first.id,
+      origin, amount: 1, muzzle: { origin, angles: zero } } } }]);
+    const flashes: SimulationPresentationEvent[] = effects.map((effect, sequence) => ({ ...effect.source, ...(effect.recipient === undefined ? {} : { recipient: effect.recipient }),
+      sequence, content: "q1:classic:id1:installed", seconds: 3, sourceEntity: 1 }));
+    expect(decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents(flashes), { session: actors.session, actor: (slot, generation) => ids.actor(slot, generation),
+      client: (slot, generation) => ids.client(slot, generation), seat: index => ids.seat(index), resourceId: id => id })).toEqual(flashes);
+    const saved = source.checkpoint(); source.restore(saved); effects.length = 0;
+    source.invoke({ function: "SpawnBlood", arguments: [{ kind: "vector", value: origin }, { kind: "float", value: 20 }], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>());
+    expect(effects.map(effect => effect.recipient)).toEqual([first.id]);
   } finally { source.close(); actors.close(); await content.close(); }
 });

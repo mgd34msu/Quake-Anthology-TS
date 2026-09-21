@@ -16,6 +16,7 @@ test("component clients route targeted effects and accepted commands through liv
     forActor: actor => [...identities].find(([, value]) => value.equals(actor))?.[0] ?? null, actor: client => identities.get(client) ?? null,
     userinfo: client => info.get(client) ?? "", setUserinfo: (client, value) => { info.set(client, value); }, command: () => accepted,
     drop: (client, reason, content) => { drops.push({ client, reason, content }); },
+    subscribeApplication: () => () => undefined,
     subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); return undefined; }; } };
   const state = new DataView(new ArrayBuffer(468));
   state.setInt32(56, 1024, true); state.setInt32(60, 2048, true); state.setInt32(144, 11, true);

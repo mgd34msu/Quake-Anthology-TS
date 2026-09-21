@@ -4,9 +4,10 @@ import { sweepQ2Body } from "./swept.ts";
 import type { NumericOperations } from "../../contracts/numeric.ts";
 import { characterHeight } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";
-import { type Vec3, type TraceT, type CsurfaceT, type CplaneT, type ClassicPmove, plane, PmTypeT, PMF_DUCKED, PMF_JUMP_HELD, PMF_ON_GROUND, PMF_TIME_WATERJUMP, PMF_TIME_LAND, PMF_TIME_TELEPORT, MAXTOUCH, PITCH, YAW, ROLL, CONTENTS_SOLID, CONTENTS_WATER, CONTENTS_SLIME, CONTENTS_LADDER, MASK_WATER, MASK_CURRENT, CONTENTS_CURRENT_0, CONTENTS_CURRENT_90, CONTENTS_CURRENT_180, CONTENTS_CURRENT_270, CONTENTS_CURRENT_UP, CONTENTS_CURRENT_DOWN, SURF_SLICK, axes, element } from "./types.ts";
+import { classicViewAngles } from "./view.ts";
+import { type Vec3, type TraceT, type CsurfaceT, type CplaneT, type ClassicPmove, plane, PmTypeT, PMF_DUCKED, PMF_JUMP_HELD, PMF_ON_GROUND, PMF_TIME_WATERJUMP, PMF_TIME_LAND, PMF_TIME_TELEPORT, MAXTOUCH, PITCH, CONTENTS_SOLID, CONTENTS_WATER, CONTENTS_SLIME, CONTENTS_LADDER, MASK_WATER, MASK_CURRENT, CONTENTS_CURRENT_0, CONTENTS_CURRENT_90, CONTENTS_CURRENT_180, CONTENTS_CURRENT_270, CONTENTS_CURRENT_UP, CONTENTS_CURRENT_DOWN, SURF_SLICK, axes, element } from "./types.ts";
 export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, airAccelerate = 0, strafejumpHack = false, flight = false): void {
-    const { vec3, DotProduct, VectorCopy, VectorClear, VectorMA, VectorScale, VectorNormalize, VectorLength, AngleVectors, SHORT2ANGLE } = createMovementMath(numericOps);
+    const { vec3, DotProduct, VectorCopy, VectorClear, VectorMA, VectorScale, VectorNormalize, VectorLength, AngleVectors } = createMovementMath(numericOps);
     const STEPSIZE = 18;
     class PmlT {
         origin: Vec3 = vec3();
@@ -560,21 +561,7 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
         }
     }
     function PM_ClampAngles(): void {
-        if (pm.s.pm_flags & PMF_TIME_TELEPORT) {
-            pm.viewangles[YAW] = numericOps.store(SHORT2ANGLE(numericOps.add(element(pm.cmd.angles, YAW), element(pm.s.delta_angles, YAW))));
-            pm.viewangles[PITCH] = numericOps.store(0);
-            pm.viewangles[ROLL] = numericOps.store(0);
-        }
-        else {
-            for (const i of axes) {
-                const temp = toShort(numericOps.add(element(pm.cmd.angles, i), element(pm.s.delta_angles, i)));
-                pm.viewangles[i] = numericOps.store(SHORT2ANGLE(temp));
-            }
-            if (element(pm.viewangles, PITCH) > 89 && element(pm.viewangles, PITCH) < 180)
-                pm.viewangles[PITCH] = numericOps.store(89);
-            else if (element(pm.viewangles, PITCH) < 271 && element(pm.viewangles, PITCH) >= 180)
-                pm.viewangles[PITCH] = numericOps.store(271);
-        }
+        classicViewAngles(pm.viewangles, pm.cmd.angles, pm.s.delta_angles, pm.s.pm_flags, numericOps);
         AngleVectors(pm.viewangles, pml.forward, pml.right, pml.up);
     }
     function run(): void {

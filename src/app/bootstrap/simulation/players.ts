@@ -21,6 +21,10 @@ import type { SessionActorRegistry, SharedBodyTable } from "../../../world/actor
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import type { PlayerView } from "./types.ts";
 import type { ClientMovementOptions } from "./q3/types.ts";
+import type { ModClientApplication, ModClientCommand } from "../../../world/session/mod-clients.ts";
+import type { ModClientApplications } from "../../../world/session/mod-client-applications.ts";
+import type { MovementInputApplication } from "../../../contracts/movement.ts";
+import { movementApplicationAim, movementApplicationFrame } from "./player-input-application.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 
@@ -34,6 +38,8 @@ export interface NetQuakeClientBinding {
 }
 
 export interface PlayerMovementHost {
+  readonly inputApplications?: ModClientApplications;
+  acceptedInput?(): ModClientCommand | null;
   readonly sourceClient?: {
     projectState(state: MovementState): MovementState;
     beforeMovement(command: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand): QuakeCClientMovement;
@@ -142,6 +148,36 @@ export class MovementPlayer {
   arsenalIntent: ArsenalIntent | undefined;
   sourceMovement: ClientMovementOptions | null = null;
   sourceEnvironment: MovementInput["environment"] | null = null;
+  private applicationParent: ModClientApplication | null = null;
+  private netQuakeApplication: ModClientApplication | null = null;
+  private readonly sliceApplications: (ModClientApplication | null)[] = [];
+  private readonly appliedMovement: MovementInputApplication = {
+    begin: (command, frame, state) => {
+      const index = this.sliceApplications.length; this.sliceApplications.push(null);
+      const committed = this.commit(state, false, false);
+      if (committed.kind === "actor-removed") return committed;
+      const application = this.beginInputApplication("movement-slice", command, frame, state);
+      this.sliceApplications[index] = application;
+      return this.applicationContinuation();
+    },
+    end: (state, failed = false) => {
+      if (this.host.actors.isLive(this.actor.id) && !failed) this.commit(state, false, false);
+      this.host.inputApplications?.finish(this.sliceApplications.pop() ?? null, failed);
+      return this.applicationContinuation();
+    },
+  };
+
+  private applicationContinuation(): MovementContinuation {
+    return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
+  }
+  private beginInputApplication(scope: ModClientApplication["scope"], command: MovementInput["command"], frame: FrameContext, state: MovementState): ModClientApplication | null {
+    const owner = this.host.inputApplications;
+    if (owner === undefined || !owner.active) return null;
+    return owner.begin({ identity: { actor: this.actor.id, client: this.client }, scope, command,
+      angleSpace: command.kind === "q1-netquake" || command.kind === "q1-quakeworld" ? "absolute" : "source-relative",
+      absoluteAim: movementApplicationAim(command, state, this.host.combat.read(this.actor.id)?.health ?? 0, this.services.numeric), frame, accepted: this.host.acceptedInput?.() ?? null,
+      ...(this.applicationParent === null ? {} : { parentInvocation: this.applicationParent.invocation }) });
+  }
 
   setFlight(enabled: boolean): boolean {
     this.flight = enabled && (this.host.combat.read(this.actor.id)?.health ?? 0) > 0;
@@ -171,7 +207,9 @@ export class MovementPlayer {
       state: this.character === "q1" ? { kind: "q1", frame: 12, nextFrameSeconds: 0 }
         : this.character === "q2" ? { kind: "q2", frame: 0, endFrame: 39, priority: 0, duck: false, run: false }
         : { kind: "q3", legs: 22, torso: 11, legsTimerMilliseconds: 0, torsoTimerMilliseconds: 0 } };
+    const owner = this;
     this.services = { scene: host.scene, numeric: createNumericOperations(this.profile.numeric),
+      get inputApplication() { return host.inputApplications?.active === true ? owner.appliedMovement : undefined; },
       touch: host.touch, weaponStep: host.weaponStep, animationStep: host.animationStep };
     switch (this.profile.kind) {
       case "q1-netquake": this.state = { kind: "q1-netquake", origin, velocity: zero, angles,
@@ -301,22 +339,81 @@ export class MovementPlayer {
   }
   prepareNetQuake(frame: FrameContext): undefined {
     const input = this.netQuakeInput(frame);
-    this.host.netQuake?.input(input.command);
-    const prepared = prepareNetQuake({ ...input, state: this.readStateQ1() }, this.services, this.netQuakeOptions());
-    this.commit(prepared, false, false);
+    this.netQuakeApplication = this.beginInputApplication("client-command", input.command, frame, input.state);
+    this.applicationParent = this.netQuakeApplication;
+    if (!this.host.actors.isLive(this.actor.id)) { this.host.inputApplications?.finish(this.netQuakeApplication); this.netQuakeApplication = null; this.applicationParent = null; return undefined; }
+    try {
+      this.host.netQuake?.input(input.command);
+      const prepared = prepareNetQuake({ ...input, state: this.readStateQ1() }, this.services, this.netQuakeOptions());
+      this.commit(prepared, false, false);
+    } catch (error) { this.host.inputApplications?.finish(this.netQuakeApplication, true); this.netQuakeApplication = null; this.applicationParent = null; throw error; }
     return undefined;
   }
   private readStateQ1(): Q1MovementState {
     const state = this.readState(); if (state.kind !== "q1-netquake") throw new Error("NetQuake source changed movement family"); return state;
   }
+  finishNetQuakeInput(failed = false): void {
+    try { this.host.inputApplications?.finish(this.netQuakeApplication, failed); }
+    finally { this.netQuakeApplication = null; this.applicationParent = null; }
+  }
   physicsNetQuake(frame: FrameContext): Q1MovementResult {
-    const result = physicsNetQuake(this.netQuakeInput(frame), this.services, this.netQuakeOptions());
-    if (result.status === "active" && this.host.actors.isLive(this.actor.id)) { this.accept(result); this.commit(result.state, false, false); }
-    if (this.netQuakeCommand !== null) this.netQuakeCommand = { ...this.netQuakeCommand, impulse: 0 };
-    return result;
+    const observed = this.netQuakeApplication !== null;
+    let result: Q1MovementResult;
+    try {
+      result = physicsNetQuake(this.netQuakeInput(frame), this.services, this.netQuakeOptions());
+      if (result.status === "active" && this.host.actors.isLive(this.actor.id)) { this.accept(result); this.commit(result.state, false, false); }
+      if (this.netQuakeCommand !== null) this.netQuakeCommand = { ...this.netQuakeCommand, impulse: 0 };
+    } catch (error) { this.finishNetQuakeInput(true); throw error; }
+    this.finishNetQuakeInput();
+    if (!observed) return result;
+    if (!this.host.actors.isLive(this.actor.id)) return { kind: "q1-netquake", status: "actor-removed", actor: this.actor.id, commandSequence: result.commandSequence, effects: result.effects };
+    return result.status === "active" ? { ...result, state: this.readStateQ1() } : result;
   }
 
   move(input: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand): MovementResult {
+    if (this.host.inputApplications?.active !== true) return this.moveCommand(input, frame, sourceCommand);
+    const result = this.withInputCommand<MovementResult>(input.command, frame, () => this.moveCommand(input, frame, sourceCommand),
+      () => ({ kind: this.profile.kind, status: "actor-removed", actor: this.actor.id, commandSequence: input.sequence, effects: [] }));
+    return this.refreshInputResult(result);
+  }
+
+  private refreshInputResult(result: MovementResult): MovementResult {
+    if (result.status === "actor-removed") return result;
+    const state = this.readState(), body = this.host.bodies.read(this.actor.id);
+    if (body === null) throw new Error("Input application lost its live body");
+    this.state = state; this.bounds = body.bounds;
+    const current = { bounds: this.bounds, viewAngles: this.viewAngles, viewHeight: this.viewHeight,
+      ground: this.ground, waterLevel: this.waterLevel, waterType: this.waterType, arsenal: this.arsenal, animation: this.animation };
+    switch (state.kind) {
+      case "q1-netquake": if (result.kind === state.kind) return { ...result, ...current, state }; break;
+      case "q1-quakeworld": if (result.kind === state.kind) return { ...result, ...current, state }; break;
+      case "q2-classic": if (result.kind === state.kind) return { ...result, ...current, state }; break;
+      case "q2-rerelease": if (result.kind === state.kind) return { ...result, ...current, state }; break;
+      case "q3": if (result.kind === state.kind) return { ...result, ...current, state }; break;
+    }
+    return this.wrongFamily();
+  }
+
+  /** A source command may apply several selected-movement slices before its outer operation ends. */
+  withInputCommand<Result>(command: MovementInput["command"], frame: FrameContext, operation: () => Result, removed: () => Result): Result {
+    const owner = this.host.inputApplications;
+    if (owner?.active !== true) return operation();
+    const previous = this.applicationParent, state = this.readState();
+    const application = this.beginInputApplication("client-command", command,
+      movementApplicationFrame(command, state, this.predictionProfile, frame), state);
+    this.applicationParent = application;
+    try {
+      if (!this.host.actors.isLive(this.actor.id)) { owner.finish(application); return removed(); }
+      let result: Result;
+      try { result = operation(); } catch (error) { owner.finish(application, true); throw error; }
+      owner.finish(application);
+      if (!this.host.actors.isLive(this.actor.id)) return removed();
+      this.state = this.readState();
+      return result;
+    } finally { this.applicationParent = previous; }
+  }
+
+  moveCommand(input: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand): MovementResult {
     this.acceptArsenalIntent(input.arsenal);
     const sourceMovement = this.host.sourceClient?.beforeMovement(input, frame, sourceCommand);
     if (sourceMovement !== undefined) input = { ...input, command: sourceMovement.command };

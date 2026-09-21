@@ -240,6 +240,16 @@ class QuakeWorldMove {
       : prior.kind === "actor" && hit.kind === "actor" ? sameActor(prior.actor, hit.actor) : false);
   }
   private step(command: QwUserCommand): void {
+    const application = this.input.execution === "authoritative" ? this.context.services.inputApplication : undefined;
+    if (application === undefined) { this.stepPhysics(command); return; }
+    try {
+      const before = application.begin(command, { ...this.input.frame, elapsed: { kind: "milliseconds", value: command.milliseconds } }, this.state);
+      if (before.kind === "actor-removed") this.context.removed = true; else { this.setState(before.state); this.stepPhysics(command); }
+    } catch (error) { application.end(this.state, true); throw error; }
+    const after = application.end(this.state);
+    if (after.kind === "actor-removed") this.context.removed = true; else this.setState(after.state);
+  }
+  private stepPhysics(command: QwUserCommand): void {
     const c = this.context;
     this.command = command;
     this.frameSeconds = c.math.n.multiply(command.milliseconds, 0.001);

@@ -482,11 +482,12 @@ export function movePlayer(state: Q3Motion, command: Q3Command, options: Q3Motio
   let substep = 0;
   while (state.commandTime !== finalTime) {
     cmd.serverTime = state.commandTime + Math.min(finalTime - state.commandTime, fixed);
+    if (options.beginStep(state, cmd, Math.max(1, Math.min(200, cmd.serverTime - state.commandTime)), substep++) === false) break;
     const step = new MoveStep(state, cmd, options);
-    options.beginStep(state, cmd, step.msec, substep++);
     step.run();
     result = { contacts: step.contacts, bounds: step.bounds,
       waterlevel: step.waterlevel, watertype: step.watertype, xyspeed: step.xyspeed };
+    if (options.endStep?.(state) === false) break;
     if (state.pmFlags & F.JUMP_HELD) cmd.upmove = 20;
   }
   return result;

@@ -4,6 +4,7 @@ import type { Vec3 } from '../../../contracts/math.ts';
 import type { QwUserCommand, QwPlayerState } from '../../../contracts/protocol.ts';
 import type { QuakeWorldEntity } from '../../../network/q1/quakeworld.ts';
 import type { QcMessageDestination } from '../../../compat/qc/presentation-host.ts';
+import { receivesQuakeWorldMessage } from '../../../compat/qc/message-routing.ts';
 import type { EngineSession } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { SharedSimulation } from './runtime.ts';
@@ -91,15 +92,8 @@ export async function createQwApplicationServerHost(options: QwApplicationServer
         const to = simulation.scene.boxLeaves(linked.absoluteBounds, 16);
         return from.leaves.some(first => to.leaves.some(second => simulation.scene.clusterVisible(simulation.scene.leafCluster(first), simulation.scene.leafCluster(second), 'pvs')));
     };
-    const receives = (player: QwApplicationPlayer, destination: QcMessageDestination): boolean => {
-        if (destination.kind === 'client') return player.actor.equals(destination.actor);
-        if (destination.kind === 'signon') return false;
-        if (destination.kind === 'broadcast' || destination.visibility === 'all') return true;
-        const point = vector(player.actor, 'origin'), delta = { x: point.x - destination.origin.x, y: point.y - destination.origin.y, z: point.z - destination.origin.z };
-        if (destination.visibility === 'phs' && delta.x * delta.x + delta.y * delta.y + delta.z * delta.z <= 1024 * 1024) return true;
-        return simulation.scene.clusterVisible(simulation.scene.leafCluster(simulation.scene.pointLeaf(destination.origin)),
-            simulation.scene.leafCluster(simulation.scene.pointLeaf(point)), destination.visibility);
-    };
+    const receives = (player: QwApplicationPlayer, destination: QcMessageDestination): boolean =>
+        receivesQuakeWorldMessage(player.actor, destination, () => vector(player.actor, 'origin'), () => simulation.scene);
     const playerState = (client: ClientState, owner: QwApplicationPlayer): QwPlayerState => {
         const actor = client.player.actor, entity = state(actor), velocity = vector(actor, 'velocity');
         let flags = PF_MSEC | PF_COMMAND;

@@ -1,7 +1,7 @@
 import type { ProviderId } from "../../contracts/identity.ts";
 import type { Bounds } from "../../contracts/math.ts";
 import type { MovementEffect, MovementProvider, OrderedMovementEffect, Q3MovementInput,
-  Q3MovementResult, MovementServices } from "../../contracts/movement.ts";
+  Q3MovementResult, Q3MovementState, MovementServices, MovementState } from "../../contracts/movement.ts";
 import type { FrameContext } from "../../contracts/time.ts";
 import type { TracePolicy, TraceShape } from "../../contracts/scene.ts";
 import { vec3 } from "../../core/math.ts";
@@ -53,6 +53,29 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
   let frame: FrameContext = input.frame;
   let substep = 0;
   const effects: OrderedMovementEffect[] = [];
+  const application = input.execution === "authoritative" ? services.inputApplication : undefined;
+  let applicationOpen = false, removed = false;
+  let sourceState = source;
+  const movementState = (): Q3MovementState => ({ ...sourceState,
+    commandTimeMilliseconds: motion.commandTime, movementType: motion.pmType,
+    bobCycle: motion.bobCycle, movementFlags: motion.pmFlags, movementTimeMilliseconds: motion.pmTime,
+    origin: motion.origin, velocity: motion.velocity,
+    deltaAngleWords: [motion.deltaAngles.x, motion.deltaAngles.y, motion.deltaAngles.z],
+    ground: motion.ground, movementDirection: motion.movementDir, flags: motion.eFlags,
+    viewAngles: motion.viewangles, viewHeight: motion.viewheight, movementFrame: motion.pmoveFramecount,
+    predictableEventSequence: motion.eventSequence });
+  const resume = (state: MovementState): void => {
+    if (state.kind !== "q3") throw new Error("Input callback changed Quake III movement family");
+    sourceState = state;
+    motion.commandTime = state.commandTimeMilliseconds; motion.pmType = state.movementType;
+    motion.bobCycle = state.bobCycle; motion.pmFlags = state.movementFlags; motion.pmTime = state.movementTimeMilliseconds;
+    motion.origin = state.origin; motion.velocity = state.velocity; motion.ground = state.ground;
+    motion.deltaAngles = { x: state.deltaAngleWords[0], y: state.deltaAngleWords[1], z: state.deltaAngleWords[2] };
+    motion.movementDir = state.movementDirection; motion.eFlags = state.flags;
+    motion.viewangles = state.viewAngles; motion.viewheight = state.viewHeight; motion.pmoveFramecount = state.movementFrame;
+    motion.eventSequence = state.predictableEventSequence; motion.grapplePoint = state.grapplePoint;
+    motion.gravity = Math.trunc(state.gravity * input.environment.gravityMultiplier); motion.speed = state.speed;
+  };
   const context = (): Q3HookContext => ({ input, motion, command, frame, arsenal, animation, services });
   const append = (effect: MovementEffect): void => {
     let ordered = effect;
@@ -62,7 +85,8 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
     }
     effects.push({ substep, sequence: effects.length, time: frame.time, effect: ordered });
   };
-  const result = movePlayer(motion, command, {
+  let result: ReturnType<typeof movePlayer>;
+  try { result = movePlayer(motion, command, {
     trace(start, end, bounds, passActor, mask) {
       return services.scene.trace({ start, end, shape: shape(bounds), passActor, target: { kind: "world" },
         numeric: input.profile.numeric, policy: policy(mask) });
@@ -80,7 +104,22 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
       command = activeCommand; substep = index;
       frame = { ...input.frame, time: { kind: "milliseconds", value: command.serverTime },
         elapsed: { kind: "milliseconds", value: msec } };
+      if (application !== undefined) {
+        applicationOpen = true;
+        const before = application.begin({ ...input.command, serverTimeMilliseconds: command.serverTime,
+          angleWords: [command.angles.x, command.angles.y, command.angles.z], buttons: command.buttons,
+          weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove }, frame, movementState());
+        if (before.kind === "actor-removed") { removed = true; return false; }
+        resume(before.state);
+      }
+      return true;
     },
+    ...(application === undefined ? {} : { endStep() {
+      applicationOpen = false;
+      const after = application.end(movementState());
+      if (after.kind === "actor-removed") { removed = true; return false; }
+      resume(after.state); return true;
+    } }),
     event(event) { append({ kind: "event", value: { provider: options.id, sequence: motion.eventSequence, event, parameter: 0 } }); },
     animation(request) {
       const update = options.hooks.animation(request, context());
@@ -101,15 +140,11 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
     contact(trace) {
       if (trace.hit.kind !== "none") append({ kind: "touch", target: trace.hit, substep });
     },
-  });
+  }); } catch (error) { if (applicationOpen) application?.end(movementState(), true); throw error; }
+  if (applicationOpen) application?.end(movementState());
+  if (removed) return { kind: "q3", status: "actor-removed", actor: input.actor.id, commandSequence: input.commandSequence, effects };
   return { kind: "q3", status: "active", actor: input.actor.id, commandSequence: input.commandSequence,
-    state: { ...source, commandTimeMilliseconds: motion.commandTime, movementType: motion.pmType,
-      bobCycle: motion.bobCycle, movementFlags: motion.pmFlags, movementTimeMilliseconds: motion.pmTime,
-      origin: motion.origin, velocity: motion.velocity,
-      deltaAngleWords: [motion.deltaAngles.x, motion.deltaAngles.y, motion.deltaAngles.z],
-      ground: motion.ground, movementDirection: motion.movementDir, flags: motion.eFlags,
-      viewAngles: motion.viewangles, viewHeight: motion.viewheight, movementFrame: motion.pmoveFramecount,
-      predictableEventSequence: motion.eventSequence },
+    state: movementState(),
     bounds: result.bounds, viewAngles: motion.viewangles, viewHeight: motion.viewheight, ground: motion.ground,
     waterLevel: result.waterlevel, waterType: result.watertype, horizontalSpeed: result.xyspeed,
     contacts: result.contacts.map(trace => ({ target: trace.hit, trace, substep })), effects, arsenal, animation };
