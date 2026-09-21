@@ -38,7 +38,7 @@ T23 real existing-account evidence covers public `llm_ask` and `llm_exec`, each 
 
 The historical 477-row source ledger is unchanged. This update neither re-audits that inventory nor converts reviewed rows into completed functional targets.
 
-Latest installed T10 checkpoint: `ce3c9ba` keeps regular armor and powered protection independent and connects authored view-roll cleanup. The same executable includes original native/QVM applied-input observation, shared Q1 punch and declared native capacities. Old version-2 saves load; new saves use version 3. Source checkpoint `23b3a90` adds declared component input callbacks across QuakeC, QVM and both native interfaces; it awaits executable delivery. Complete source movement/weapon loops and borrowed original armor-stage operations remain active work. Target totals are unchanged. See [delivery and evidence](../execution-status.md).
+Latest installed T10 checkpoint: `10f9150` composes declared original native powered protection with independent regular armor, preserving source activation, fuel and save policy. It includes `23b3a90` component callbacks on applied input, prior source input observation, view-roll cleanup and Q1 punch. Old version-2 saves load; new saves use version 3. Original QC/QVM power stages, borrowed regular armor, complete source movement/weapon loops and remaining host services are still active work. The next source correction is Threewave's distinct armor points/tier metadata. Target totals remain 20/23. See [delivery and evidence](../execution-status.md).
 
 ## T01 session and resource lifetime
 
