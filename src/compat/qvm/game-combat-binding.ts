@@ -33,7 +33,7 @@ export class QvmCombatBindings {
     return slot === null ? null : (this.options.game.data.entityBytes(slot).getInt32(this.options.definition.reactions.flags, true) & 32) !== 0;
   }
   private armor(slot: number): ArmorState {
-    return slot < this.options.game.data.numClients ? { kind: "q3", points: this.options.game.data.copyPlayerState(slot).stats[3] ?? 0, protection: 0.66 } : { kind: "none" };
+    return { regular: slot < this.options.game.data.numClients ? { kind: "q3", points: this.options.game.data.copyPlayerState(slot).stats[3] ?? 0, protection: 0.66 } : { kind: "none" }, powered: { kind: "none" } };
   }
   admit(actor: OwnedActor): undefined {
     const { game, definition, combat } = this.options, slot = this.options.slot(actor.id);
@@ -46,14 +46,18 @@ export class QvmCombatBindings {
         team: team === 1 || team === 2 ? `q3:${team}` : null, invulnerable: (flags & 16) !== 0, noKnockback: (flags & 2048) !== 0 };
     };
     const binding = { read, sourceDamage: (request: DamageRequest) => this.damage(request, slot),
+      validateArmor: (armor: ArmorState): undefined => {
+        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q3") throw new Error("Native Q3 armor requires Q3 armor values");
+        return undefined;
+      },
       writeHealth: (health: number): undefined => {
         view().setInt32(definition.fields.health, health, true);
         if (slot < game.data.numClients) { const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[0] = health; game.data.writePlayerState(slot, { ...state, stats }); }
         return undefined;
       }, writeArmor: (armor: ArmorState): undefined => {
-        if (slot >= game.data.numClients) { if (armor.kind !== "none") throw new Error("Source non-client has no player armor"); return undefined; }
-        if (armor.kind !== "none" && armor.kind !== "q3") throw new Error("Native Q3 armor requires Q3 armor values");
-        const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[3] = armor.kind === "none" ? 0 : armor.points; game.data.writePlayerState(slot, { ...state, stats }); return undefined;
+        if (slot >= game.data.numClients) { if (armor.regular.kind !== "none" || armor.powered.kind !== "none") throw new Error("Source non-client has no player armor"); return undefined; }
+        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q3") throw new Error("Native Q3 armor requires Q3 armor values");
+        const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[3] = armor.regular.kind === "none" ? 0 : armor.regular.points; game.data.writePlayerState(slot, { ...state, stats }); return undefined;
       } };
     if (combat.read(actor.id) === null) combat.bind(actor, binding); else combat.rebind(actor, binding);
     return undefined;
@@ -66,7 +70,7 @@ export class QvmCombatBindings {
       const flush = (): void => {
         if (flushed) return; flushed = true;
         const after = this.source.state(slot), currentArmor = this.armor(slot), currentBody = bodies.read(request.target);
-        if (armor.kind === "q3" && currentArmor.kind === "q3" && armor.points !== currentArmor.points) observer.stored({ kind: "armor", before: armor, after: currentArmor });
+        if (armor.regular.kind === "q3" && currentArmor.regular.kind === "q3" && armor.regular.points !== currentArmor.regular.points) observer.stored({ kind: "armor", before: armor, after: currentArmor });
         if (before !== null && after !== null && before.health !== after.health) { observer.stored({ kind: "health", before: before.health, after: after.health }); result.appliedDamage = before.health - after.health; }
         if (body !== null && currentBody !== null && (body.velocity.x !== currentBody.velocity.x || body.velocity.y !== currentBody.velocity.y || body.velocity.z !== currentBody.velocity.z))
           observer.stored({ kind: "source-velocity", before: body.velocity, after: currentBody.velocity, movementProvider: request.attack.movementProvider });

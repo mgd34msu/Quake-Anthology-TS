@@ -67,7 +67,7 @@ async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "
   function player(slot: number) {
     const owner = actors.allocateAtSource("q3:character", slot, "q3:sarge");
     bodies.create(owner, { origin: vadd(origin, { x: 64 * (slot - 1), y: 0, z: 0 }), angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(owner, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
+    combat.create(owner, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
     const state = game.attachPlayer(owner); players.push(owner.id); return state;
   }
   return { game, arsenal, actors, callbacks, combat, bodies, inventory, events, pending, gravity, player: player(1), target: player(2) };
@@ -135,14 +135,14 @@ test.skipIf(!existsSync(archivePath))("Rogue powered ammunition, lava armor and 
   expect(game.selectWeapon(player.actor, "rogue:lava-supernailgun")).toBe(true); expect(game.attack(player.actor, ZERO, 1)).toBe(true);
   expect(inventory.count(player.actor.id, "rogue:ammo/lava-nails")).toBe(1); expect(game.attack(player.actor, ZERO, 1.21)).toBe(true);
   expect(inventory.count(player.actor.id, "rogue:ammo/lava-nails")).toBe(0);
-  combat.setArmor(target.actor, { kind: "q1", points: 100, absorption: 0.8, item: "q1:armor/red" });
+  combat.setArmor(target.actor, { regular: { kind: "q1", points: 100, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "none" } });
   const lava = launchRogueLavaSpike(game, player.actor.id, game.host.bodies.read(target.actor.id)?.origin ?? ZERO, { x: 1, y: 0, z: 0 });
   callbacks.touch({ self: lava.actor, other: target.actor.id, plane: null, surface: null });
-  expect(combat.read(target.actor.id)?.health).toBe(91); expect(combat.read(target.actor.id)?.armor).toEqual({ kind: "q1", points: 100, absorption: 0.8, item: "q1:armor/red" });
+  expect(combat.read(target.actor.id)?.health).toBe(91); expect(combat.read(target.actor.id)?.armor).toEqual({ regular: { kind: "q1", points: 100, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "none" } });
   game.givePowerup(target, "rogue:shield");
   const superLava = launchRogueLavaSpike(game, player.actor.id, game.host.bodies.read(target.actor.id)?.origin ?? ZERO, { x: 1, y: 0, z: 0 }, true);
   callbacks.touch({ self: superLava.actor, other: target.actor.id, plane: null, surface: null });
-  expect(combat.read(target.actor.id)?.health).toBe(84); expect(combat.read(target.actor.id)?.armor).toEqual({ kind: "q1", points: 94, absorption: 0.8, item: "q1:armor/red" });
+  expect(combat.read(target.actor.id)?.health).toBe(84); expect(combat.read(target.actor.id)?.armor).toEqual({ regular: { kind: "q1", points: 94, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "none" } });
   inventory.give(player.actor, weaponItem("rogue:multi-grenade"), 1); inventory.give(player.actor, "rogue:ammo/multi-rockets", 1); game.selectWeapon(player.actor, "rogue:multi-grenade"); game.attack(player.actor, ZERO, 2);
   const grenade = [...game.entities.values()].find(entity => entity.classname === "MultiGrenade"); if (grenade === undefined) throw new Error("Missing source multi-grenade");
   callbacks.think(grenade.actor, { frame: 30, time: { kind: "seconds", value: 3 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" });
@@ -176,7 +176,7 @@ test.skipIf(!existsSync(archivePath))("Mission pack travel preserves edition res
   const { game, inventory, actors, player, combat } = await session("rogue", "rerelease", 1, 4);
   admitMissionPackTravel(game, player.actor, newMissionPackTravel(game, "rogue"), "rogue");
   expect(inventory.count(player.actor.id, weaponItem("rogue:grapple"))).toBe(1);
-  expect(combat.read(player.actor.id)?.armor).toEqual({ kind: "q1", points: 50, absorption: 0.3, item: "q1:armor/green" }); actors.close();
+  expect(combat.read(player.actor.id)?.armor).toEqual({ regular: { kind: "q1", points: 50, absorption: 0.3, item: "q1:armor/green" }, powered: { kind: "none" } }); actors.close();
 });
 
 test.skipIf(!existsSync(archivePath))("Rogue backpacks carry powered ammunition and grant the original base weapon", async () => {

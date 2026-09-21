@@ -51,7 +51,7 @@ async function session(pack: Q1MissionPack, name: string, edition: "classic" | "
   function player(slot: number) {
     const owner = actors.allocateAtSource("q3:character", slot, "q3:sarge");
     bodies.create(owner, { origin: vadd(origin, { x: 64 * (slot - 1), y: 0, z: 0 }), angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(owner, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
+    combat.create(owner, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
     const state = game.attachPlayer(owner); players.push(owner.id); return state;
   }
   return { game, arsenal, monsters, actors, callbacks, combat, bodies, inventory, events, pending, gravity, random: (value: number) => { randomValue = value; }, player: player(1), target: player(2) };

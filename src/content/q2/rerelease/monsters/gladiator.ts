@@ -67,7 +67,7 @@ export function createRereleaseGladiatorDefinitions(weapons: Q2MissionPackMonste
       if (!game.host.inventory.has(entity.actor.id)) game.host.inventory.create(entity.actor, []);
       const cells = numberField(entity.spawn, "power_armor_power", 250), type = numberField(entity.spawn, "power_armor_type", 2);
       game.host.inventory.configure(entity.actor, { item: "q2:monster-power", count: cells, capacity: Math.max(250, cells) }); bindArmor(context);
-      game.host.combat.setArmor(entity.actor, { kind: "q2", points: 0, normalProtection: 0, energyProtection: 0, item: "q2:monster-power", powerArmor: type === 0 ? { kind: "none" } : { kind: type === 1 ? "screen" : "shield", cells } });
+      game.host.combat.setPoweredProtection(entity.actor, type === 0 ? { kind: "none" } : { kind: type === 1 ? "screen" : "shield", cells });
       return game.host.emit({ kind: "sound", actor: entity.actor.id, origin: game.body(entity).origin, path: "weapons/phaloop.wav", channel: 1, volume: 1, attenuation: 1, reliable: false, loop: "start" });
     }, restore: bindArmor,
   }];

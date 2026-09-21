@@ -168,7 +168,7 @@ export class Q2RereleasePlayers extends Q2Players {
       for (const entry of game.host.inventory.entries(entity.actor.id)) game.host.inventory.configure(entity.actor, { ...entry, count: 0 });
       if (state.useQ2Inventory) this.items.configurePlayer(entity.actor, game, true);
       else for (const entry of state.spawnInventory) game.host.inventory.configure(entity.actor, entry);
-      game.host.combat.setHealth(entity.actor, 100); game.host.combat.setArmor(entity.actor, { kind: "none" });
+      game.host.combat.setHealth(entity.actor, 100); game.host.combat.setArmor(entity.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
       entity.maxHealth = 100; entity.flags &= ~(16 | 32 | 4096 | 0x400000 | 0x40000000); entity.powerCubes = 0;
       state.god = false; state.notarget = false; state.selectedItem = state.useQ2Inventory ? "q2:weapon_blaster" : null;
       game.host.combat.setTraits(entity.actor, { invulnerable: false });
@@ -307,7 +307,7 @@ export class Q2RereleasePlayers extends Q2Players {
       for (const [actor, state] of this.states) {
         const entity = game.entity(actor); if (entity === null) continue;
         for (const entry of game.host.inventory.entries(actor)) game.host.inventory.configure(entity.actor, { ...entry, count: 0 });
-        game.host.combat.setHealth(entity.actor, 0); game.host.combat.setArmor(entity.actor, { kind: "none" });
+        game.host.combat.setHealth(entity.actor, 0); game.host.combat.setArmor(entity.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
         this.items.clearPowerups(actor); this.rereleaseHooks.clearExpansionPowerups?.(actor);
         entity.flags &= ~(16 | 32 | 4096 | 0x400000 | 0x40000000); entity.powerCubes = 0;
         state.god = false; state.notarget = false; state.coopRespawn = null; state.selectedItem = null;

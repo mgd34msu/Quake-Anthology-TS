@@ -269,7 +269,7 @@ function bossEnd(context: Q1AddonContext): undefined {
   for (const actor of game.host.players()) {
     const player = game.player(actor); if (player === null) continue;
     for (const entry of game.host.inventory.entries(actor)) if (entry.item === "q1:ammo/shells" || entry.item === "q1:ammo/nails" || entry.item === "q1:ammo/cells" || entry.item === "q1:ammo/rockets") game.host.inventory.configure(player.actor, { ...entry, count: entry.item === "q1:ammo/shells" ? 25 : 0 });
-    game.host.combat.setArmor(player.actor, { kind: "none" }); player.weapon = "shotgun";
+    game.host.combat.setArmor(player.actor, { regular: { kind: "none" }, powered: { kind: "none" } }); player.weapon = "shotgun";
   }
   const flags = base.campaign.readFlags(); let map = "start";
   if ((flags & BLOODY_NIGHTMARE_ACTIVE) !== 0) {

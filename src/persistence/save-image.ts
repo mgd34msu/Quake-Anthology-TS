@@ -1,6 +1,6 @@
 import { rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { ArmorState, CombatState, InventoryEntry } from "../contracts/gameplay.ts";
+import type { ArmorState, RegularArmorState, PoweredProtectionState, CombatState, InventoryEntry } from "../contracts/gameplay.ts";
 import type { ActorSlotCheckpoint, ProviderCheckpoint, SaveImage, SavedActorId, SavedBodyAttachment, SavedBodyState } from "../contracts/session.ts";
 import type { ActorId } from "../contracts/identity.ts";
 import type { SourceActorCheckpoint } from "../world/actors/registry.ts";
@@ -10,7 +10,8 @@ import { readCharacter, readProvider, readRecipe } from "./recipe.ts";
 import { readBounds, readFrame, readRandom, readTime, readVector } from "./shared.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, namespaced, SaveFormatError, SaveReader } from "./value.ts";
 
-const MAGIC = new TextEncoder().encode("QTSAVE2\n");
+const MAGIC = new TextEncoder().encode("QTSAVE3\n");
+const LEGACY_MAGIC = new TextEncoder().encode("QTSAVE2\n");
 export function savedActorId(actor: ActorId): SavedActorId { return { slot: actor.slot, generation: actor.generation }; }
 export function readSavedActor(reader: SaveReader): SavedActorId { return { slot: reader.field("slot").integer(0), generation: reader.field("generation").integer(0) }; }
 export function readSavedBody(reader: SaveReader): SavedBodyState {
@@ -26,18 +27,22 @@ function readActorSlot(reader: SaveReader): ActorSlotCheckpoint {
   return { ...actor, lifetime: lifetime.field("kind").choice("active", "free") === "free" ? { kind: "free", freedAt: lifetime.field("freedAt").nullable(readTime) }
     : { kind: "active", owner: namespaced(lifetime.field("owner")), definition: namespaced(lifetime.field("definition")) } };
 }
-export function readArmor(reader: SaveReader): ArmorState {
+function readRegularArmor(reader: SaveReader): RegularArmorState {
   switch (reader.field("kind").choice("none", "q1", "q2", "q3")) {
     case "none": return { kind: "none" };
     case "q1": return { kind: "q1", points: reader.field("points").number(), absorption: reader.field("absorption").number(), item: namespaced(reader.field("item")) };
     case "q3": return { kind: "q3", points: reader.field("points").number(), protection: reader.field("protection").number() };
-    case "q2": {
-      const power = reader.field("powerArmor");
-      const kind = power.field("kind").choice("none", "screen", "shield");
-      return { kind: "q2", points: reader.field("points").number(), normalProtection: reader.field("normalProtection").number(), energyProtection: reader.field("energyProtection").number(), item: namespaced(reader.field("item")),
-        powerArmor: kind === "none" ? { kind } : { kind, cells: power.field("cells").number() } };
-    }
+    case "q2": return { kind: "q2", points: reader.field("points").number(), normalProtection: reader.field("normalProtection").number(), energyProtection: reader.field("energyProtection").number(), item: namespaced(reader.field("item")) };
   }
+}
+function readPoweredProtection(reader: SaveReader): PoweredProtectionState {
+  const kind = reader.field("kind").choice("none", "screen", "shield");
+  return kind === "none" ? { kind } : { kind, cells: reader.field("cells").number() };
+}
+export function readArmor(reader: SaveReader): ArmorState {
+  if (reader.field("regular").value !== undefined) return { regular: readRegularArmor(reader.field("regular")), powered: readPoweredProtection(reader.field("powered")) };
+  const regular = readRegularArmor(reader);
+  return { regular, powered: regular.kind === "q2" ? readPoweredProtection(reader.field("powerArmor")) : { kind: "none" } };
 }
 function readCombat(reader: SaveReader): CombatState { return { health: reader.field("health").number(), armor: readArmor(reader.field("armor")), mass: reader.field("mass").number(), canTakeDamage: reader.field("canTakeDamage").boolean(), invulnerable: reader.field("invulnerable").boolean(), team: reader.field("team").nullable(value => value.string()), ...(reader.field("noKnockback").value === undefined ? {} : { noKnockback: reader.field("noKnockback").boolean() }) }; }
 export function readInventoryEntry(reader: SaveReader): InventoryEntry {
@@ -47,7 +52,10 @@ export function readInventoryEntry(reader: SaveReader): InventoryEntry {
 
 export function parseSaveImage(value: unknown): SaveImage {
   const reader = new SaveReader(value);
-  const image: SaveImage = { schemaVersion: reader.field("schemaVersion").literal(2), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
+  const version = reader.field("schemaVersion").choice(2, 3);
+  const legacyArmor = reader.field("legacyArmorLayout");
+  if (legacyArmor.value !== undefined) legacyArmor.literal(true);
+  const image: SaveImage = { schemaVersion: 3, ...(version === 2 || legacyArmor.value === true ? { legacyArmorLayout: true } : {}), recipe: readRecipe(reader.field("recipe")), frame: readFrame(reader.field("frame")), nextEventSequence: reader.field("nextEventSequence").integer(0),
     clocks: reader.field("clocks").list(entry => ({ provider: namespaced(entry.field("provider")), time: readTime(entry.field("time")) })),
     random: reader.field("random").list(entry => ({ provider: namespaced(entry.field("provider")), state: readRandom(entry.field("state")) })), actors: reader.field("actors").list(readActorSlot),
     bodies: reader.field("bodies").list(entry => ({ actor: readSavedActor(entry.field("actor")), body: readSavedBody(entry.field("body")), attachment: entry.field("attachment").nullable(readSavedBodyAttachment), linkCount: entry.field("linkCount").integer(0), linked: entry.field("linked").nullable(link => ({ state: readSavedBody(link.field("state")), absoluteBounds: readBounds(link.field("absoluteBounds")) })) })),
@@ -71,8 +79,11 @@ export function encodeSaveImage(image: SaveImage): Uint8Array {
   return output;
 }
 export function decodeSaveImage(bytes: Uint8Array): SaveImage {
-  if (!MAGIC.every((value, index) => bytes[index] === value)) throw new SaveFormatError("save", "unsupported unified save signature/version");
-  return parseSaveImage(decodeCheckpointValue(bytes.subarray(MAGIC.length)));
+  const version = MAGIC.every((value, index) => bytes[index] === value) ? 3 : LEGACY_MAGIC.every((value, index) => bytes[index] === value) ? 2 : null;
+  if (version === null) throw new SaveFormatError("save", "unsupported unified save signature/version");
+  const value = decodeCheckpointValue(bytes.subarray(MAGIC.length));
+  new SaveReader(value).field("schemaVersion").literal(version);
+  return parseSaveImage(value);
 }
 export async function readSaveImage(path: string): Promise<SaveImage> { return decodeSaveImage(new Uint8Array(await Bun.file(path).arrayBuffer())); }
 /** Rename commits the completed sibling file; failed writes leave the previous save intact. */

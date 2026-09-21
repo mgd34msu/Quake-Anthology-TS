@@ -20,6 +20,8 @@ export const sourceRereleaseClientProfile: RereleaseClientProfile = {
  * capacities at3024 to p_client.cpp InitClientPersistant's distinct source values.
  * Native give/use Invulnerability writes int64 milliseconds at6672 (RVA66f52):
  * zero to30000 to60000; g_items.cpp Use_Invulnerability extends the deadline.
+ * ClientThink RVAde04b copies pm.viewangles to v_angle0x1998, independently of
+ * public ps.viewangles0x34; source weapons and server projection read this field.
  */
 export const retailRereleaseClientProfile: RereleaseClientProfile = {
   authority: { kind: "artifact", digest: "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd" },
@@ -31,6 +33,7 @@ export const retailRereleaseClientProfile: RereleaseClientProfile = {
     { name: "pers.max_ammo", byteOffset: 3024, storage: "int16", count: 12 },
     { name: "pers.weapon", byteOffset: 3048, storage: "pointer", count: 1 },
     { name: "newweapon", byteOffset: 6296, storage: "pointer", count: 1 },
+    { name: "v_angle", byteOffset: 6552, storage: "float32", count: 3 },
     { name: "invincible_time", byteOffset: 6672, storage: "int64", count: 1 },
     { name: "no_weapon_chains", byteOffset: 7016, storage: "uint8", count: 1 },
   ] },

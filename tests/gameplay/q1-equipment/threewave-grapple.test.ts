@@ -74,7 +74,7 @@ function equipment(map: Q1Map, saved?: Saved, edition: "classic" | "rerelease" =
   const sharedActor = (slot: number, origin = ZERO, damageable = false) => {
     const actor = actors.allocateAtSource("q3:character", slot, "q3:sarge");
     bodies.create(actor, { origin, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: damageable, invulnerable: false, team: null }); return actor;
+    combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: damageable, invulnerable: false, team: null }); return actor;
   };
   const advance = (time: number) => {
     for (;;) {

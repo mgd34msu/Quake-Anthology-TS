@@ -55,7 +55,7 @@ function fixture(saved: SavedFixture | null = null) {
     for (let slot = 0; slot < 3; slot++) {
       const actor = actors.allocate("q3:character", "q3:sarge"), state = new Q2PlayerState(slot, 0); state.name = ["red", "redmate", "blue"][slot] ?? "player"; state.skin = "male/grunt"; state.userinfo = `\\name\\${state.name}\\skin\\male/grunt`; state.connected = true;
       common.set(actor.id, state); bodies.create(actor, { origin: { x: slot * 512, y: 0, z: 64 }, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null });
-      combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(actor, []);
+      combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(actor, []);
     }
   }
   const world = actors.ownedBy("q2:game").find(actor => actors.sourceOf(actor.id)?.slot === 0); if (world === undefined) throw new Error("Missing fixture world");
@@ -101,7 +101,7 @@ test("grapple retains a zero-health brush and releases a damageable dead anchor"
   if (core === null) throw new Error("Missing native CTF grapple");
   const brush = scene.game.create("test_brush_anchor");
   scene.game.solid(brush, "brush");
-  scene.combat.create(brush.actor, { health: 0, armor: { kind: "none" }, mass: 100,
+  scene.combat.create(brush.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100,
     canTakeDamage: false, invulnerable: false, team: null });
   expect(core.fireGrapple(owner.actor.id, scene.game, zero, { x: 1, y: 0, z: 0 })).toBe(true);
   const hook = scene.game.entity(core.state(owner.actor.id).grapple);

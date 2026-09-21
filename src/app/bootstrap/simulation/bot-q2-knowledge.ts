@@ -85,7 +85,7 @@ export function createQ2BotKnowledge(options: { readonly simulation: Pick<Shared
       if (actor === null) actorsForHandle.delete(state.ws); else actorsForHandle.set(state.ws, actor);
       for (let index = 0; index < 200; index++) state.inventory[index] = 0;
       state.inventory[BotInventory.HEALTH] = combat?.health ?? 0;
-      state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.kind === "none" ? 0 : combat.armor.points;
+      state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.regular.kind === "none" ? 0 : combat.armor.regular.points;
       for (const entry of entries.values()) {
         state.inventory[entry.info.weaponInventoryIndex] = actor === null ? 0 : Number(inventory.count(actor, entry.definition.item) > 0);
         state.inventory[entry.info.ammoInventoryIndex] = actor === null || entry.definition.ammo === null ? 0 : inventory.count(actor, entry.definition.ammo);

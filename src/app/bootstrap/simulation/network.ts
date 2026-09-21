@@ -221,7 +221,7 @@ export async function createQ2ApplicationServerHost(options: Q2ApplicationServer
         state.stats[0] = image('i_health');
         state.stats[1] = view?.health ?? ui.health;
         state.stats[3] = view?.ammo ?? ui.ammo?.count ?? 0;
-        state.stats[5] = view?.armor ?? (ui.armor.kind === 'none' ? 0 : ui.armor.points);
+        state.stats[5] = view?.armor ?? (ui.armor.regular.kind === 'none' ? 0 : ui.armor.regular.points);
         state.stats[9] = view?.timer?.seconds ?? 0;
         state.stats[13] = view?.layouts ?? 0;
         state.stats[14] = view?.score ?? 0;

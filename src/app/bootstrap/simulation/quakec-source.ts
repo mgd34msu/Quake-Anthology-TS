@@ -903,6 +903,11 @@ export class QuakeCSource {
     if (this.kind !== "netquake") throw new Error("QuakeWorld does not own a NetQuake punch vector");
     return this.entities.fromReference(this.reference(actor)).vector(this.field("punchangle"));
   }
+  setClientViewRoll(actor: ActorId, roll: number): void {
+    if (!this.activeClients.has(actor)) throw new Error("QC source view requires an admitted client");
+    const words = this.entities.fromReference(this.reference(actor)), field = this.field("v_angle");
+    words.setVector(field, { ...words.vector(field), z: roll });
+  }
   clientPunchAdvances(actor: ActorId): boolean {
     return this.entities.fromReference(this.reference(actor)).float(this.field("movetype")) !== 0;
   }
@@ -1069,7 +1074,7 @@ export class QuakeCSource {
   private armor(slot: number): ArmorState {
     const words = this.entities.at(slot), items = Math.trunc(words.float(this.field("items")));
     const item = (items & 32768) !== 0 ? "q1:item_armorInv" : (items & 16384) !== 0 ? "q1:item_armor2" : (items & 8192) !== 0 ? "q1:item_armor1" : null;
-    return item === null ? { kind: "none" } : { kind: "q1", item, points: words.float(this.field("armorvalue")), absorption: words.float(this.field("armortype")) };
+    return { regular: item === null ? { kind: "none" } : { kind: "q1", item, points: words.float(this.field("armorvalue")), absorption: words.float(this.field("armortype")) }, powered: { kind: "none" } };
   }
   private admit(actor: OwnedActor, slot: number): undefined {
     const words = this.entities.at(slot);
@@ -1078,11 +1083,15 @@ export class QuakeCSource {
       read: () => ({ health: words.float(this.field("health")), armor: this.armor(slot), mass: 200,
         canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) >= this.currentTime, team: null }),
       writeHealth: health => { words.setFloat(this.field("health"), health); return undefined; },
+      validateArmor: armor => {
+        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q1") throw new Error("Cannot store foreign armor in native id1 fields");
+        return undefined;
+      },
       writeArmor: armor => {
-        if (armor.kind !== "none" && armor.kind !== "q1") throw new Error("Cannot store foreign armor in native id1 fields");
-        words.setFloat(this.field("armorvalue"), armor.kind === "none" ? 0 : armor.points);
-        words.setFloat(this.field("armortype"), armor.kind === "none" ? 0 : armor.absorption);
-        const bit = armor.kind === "none" ? 0 : armor.item === "q1:item_armorInv" ? 32768 : armor.item === "q1:item_armor2" ? 16384 : 8192;
+        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q1") throw new Error("Cannot store foreign armor in native id1 fields");
+        words.setFloat(this.field("armorvalue"), armor.regular.kind === "none" ? 0 : armor.regular.points);
+        words.setFloat(this.field("armortype"), armor.regular.kind === "none" ? 0 : armor.regular.absorption);
+        const bit = armor.regular.kind === "none" ? 0 : armor.regular.item === "q1:item_armorInv" ? 32768 : armor.regular.item === "q1:item_armor2" ? 16384 : 8192;
         words.setFloat(this.field("items"), (Math.trunc(words.float(this.field("items"))) & ~57344) | bit); return undefined;
       },
     });

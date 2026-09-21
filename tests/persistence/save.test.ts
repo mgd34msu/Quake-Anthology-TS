@@ -34,15 +34,35 @@ function recipe(): ExecutableRecipe {
     ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
 }
 
+test("save version 3 preserves independent armor and reads version 2 without losing depleted equipment", () => {
+  const armor = { regular: { kind: "q1", points: 0, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "shield", cells: 77 } } satisfies SaveImage["combat"][number]["state"]["armor"];
+  const state = { health: 73, armor, mass: 200, canTakeDamage: true, invulnerable: false, team: null };
+  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+    nextEventSequence: 0, clocks: [], random: [], actors: [], bodies: [], combat: [{ actor: { slot: 0, generation: 0 }, state }],
+    inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
+  expect(decodeSaveImage(encodeSaveImage(image)).combat[0]?.state.armor).toEqual(armor);
+  const legacyArmor = { kind: "q2", points: 0, normalProtection: 0.8, energyProtection: 0.6, item: "q2:armor/body", powerArmor: { kind: "shield", cells: 77 } };
+  const legacy = { ...image, schemaVersion: 2, combat: [{ actor: { slot: 0, generation: 0 }, state: { ...state, armor: legacyArmor } }] };
+  const header = new TextEncoder().encode("QTSAVE2\n"), payload = encodeCheckpointValue(legacy), bytes = new Uint8Array(header.length + payload.length);
+  bytes.set(header); bytes.set(payload, header.length);
+  const decoded = decodeSaveImage(bytes);
+  expect(decoded.schemaVersion).toBe(3);
+  expect(decoded.legacyArmorLayout).toBe(true);
+  expect(decoded.combat[0]?.state.armor).toEqual({ regular: { kind: "q2", points: 0, normalProtection: 0.8, energyProtection: 0.6, item: "q2:armor/body" }, powered: { kind: "shield", cells: 77 } });
+  expect(decodeSaveImage(encodeSaveImage(decoded))).toEqual(decoded);
+  bytes[6] = 51;
+  expect(() => decodeSaveImage(bytes)).toThrow("schemaVersion");
+});
+
 test("prebound restore verifies exact source values and retains writable authority", () => {
   const identity = createIdentityOwner("prebound-save"), original = new SessionActorRegistry(identity);
   const actor = original.allocateAtSource("q1:game", 1, "q1:player"), ground = original.allocateAtSource("q1:game", 0, "q1:world");
   const savedActor = { slot: actor.id.slot, generation: actor.id.generation }, savedGround = { slot: ground.id.slot, generation: ground.id.generation };
   const zero = { x: 0, y: 0, z: 0 };
   const body = { origin: { ...zero, x: -0 }, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: savedGround };
-  const state = { health: 73, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null } satisfies SaveImage["combat"][number]["state"];
+  const state = { health: 73, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null } satisfies SaveImage["combat"][number]["state"];
   const entry = { item: "q1:ammo/nails", count: -3, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } } satisfies SaveImage["inventories"][number]["entries"][number];
-  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 0, clocks: [], random: [], actors: original.checkpoint(),
     bodies: [{ actor: savedActor, body, attachment: null, linked: null, linkCount: 0 }], combat: [{ actor: savedActor, state }],
     inventories: [{ actor: savedActor, entries: [entry] }], configurations: [], thinks: [], providers: [], guests: [] };
@@ -79,7 +99,7 @@ test("prebound restore verifies exact source values and retains writable authori
 
 test("simulation restore rejects missing, duplicate and foreign source records before construction", () => {
   const frame = { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" } satisfies SaveImage["frame"];
-  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame, nextEventSequence: 0,
+  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame, nextEventSequence: 0,
     clocks: [{ provider: "q1:game", time: frame.time }], random: [{ provider: "q1:game", state: { kind: "msvcrt-rand", seed: 1, draws: 0 } }],
     actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], guests: [],
     providers: [sourceActorsCheckpoint([]), { provider: "q1:game", schema: "world:simulation", version: 11, bytes: encodeCheckpointValue({}) },
@@ -111,7 +131,7 @@ test("saved body attachments remap anchor generations and preserve their follow 
   bodies.create(anchor, state); bodies.create(child, { ...state, origin: { x: 8, y: 0, z: 0 } });
   bodies.attach(child, { anchor: anchor.id, follow: { kind: "translation", offset: { x: 8, y: 0, z: 0 } } });
   bodies.link(anchor); bodies.link(child);
-  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 0, clocks: [], random: [], actors: actors.checkpoint(), bodies: captureSharedBodies(actors, bodies), combat: [], inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
   const saved = decodeSaveImage(encodeSaveImage(image));
   actors.close();
@@ -131,7 +151,7 @@ test("saved body attachments remap anchor generations and preserve their follow 
 });
 
 test("saved gameplay selections cannot silently restart without their private checkpoint", () => {
-  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 1, time: { kind: "seconds", value: 0.1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 0, clocks: [], random: [], actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], providers: [], guests: [] };
   expect(decodeSaveImage(encodeSaveImage(image)).mods).toBeUndefined();
   expect(decodeSaveImage(encodeSaveImage({ ...image, recipe: { ...image.recipe, mods: [] } })).mods).toBeUndefined();
@@ -146,10 +166,10 @@ test("unified save reconstructs actors, bytes, source clocks and callback identi
   const actors = new SessionActorRegistry(createIdentityOwner("before-save"));
   const actor = actors.allocateAtSource("q1:game", 7, "q1:player");
   const module = { id: "q3:fixture", artifactPath: "vm/qagame.qvm", digest: createContentDigest("1".repeat(64)), revision: "1" } satisfies Q2ClassicSaveLayout["module"];
-  const image: SaveImage = { schemaVersion: 2, recipe: recipe(), frame: { frame: 3, time: { kind: "seconds", value: 2.5 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, nextEventSequence: 19,
+  const image: SaveImage = { schemaVersion: 3, recipe: recipe(), frame: { frame: 3, time: { kind: "seconds", value: 2.5 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" }, nextEventSequence: 19,
     clocks: [{ provider: "q1:game", time: { kind: "seconds", value: 2.5 } }], random: [{ provider: "q1:game", state: { kind: "msvcrt-rand", seed: 1234, draws: 17 } }], actors: actors.checkpoint(),
     bodies: [{ actor: actor.id, attachment: null, linkCount: 0, linked: null, body: { origin: { x: 12, y: 20, z: -0 }, angles: { x: 0, y: 45, z: 0 }, velocity: { x: 10, y: 0, z: 0 }, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null } }],
-    combat: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: { health: 73, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, noKnockback: true, team: null } }],
+    combat: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, state: { health: 73, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, noKnockback: true, team: null } }],
     inventories: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, entries: [{ item: "q1:ammo/nails", count: -3, capacity: 200, countPolicy: { kind: "source-counter", arithmetic: "binary32" } }] }], configurations: [], thinks: [{ actor: { slot: actor.id.slot, generation: actor.id.generation }, callback: "q1:door-think", due: { kind: "seconds", value: 2.6 }, boundary: "after-physics", provider: "q1:game", sequence: 4 }],
     providers: [sourceActorsCheckpoint(actors.sourceCheckpoint()), { provider: "fixture:private", schema: "fixture:bytes", version: 7, bytes: new Uint8Array([0, 255, 17]) }],
     guests: [{ kind: "qvm", module, abiProfile: "q3-modern", api: { kind: "q3-qagame", version: 8 }, data: new Uint8Array([255, 0, 1, 128]), instructionIndex: 0, programStack: 4, operandStack: [], random: [], callbacks: [{ id: "q3:callback", reference: { kind: "native-guest", module, byteOffset: 0xffffffffffffffffn, abi: { kind: "linux-x86-64", image: "elf64", pointerBytes: 8, call: "system-v-x86-64" } }, parameters: [], result: "void" }], hostState: { module, format: "fixture:host", bytes: new Uint8Array([9, 8, 7]) } }] };

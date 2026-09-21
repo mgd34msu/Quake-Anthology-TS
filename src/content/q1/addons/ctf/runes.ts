@@ -40,9 +40,9 @@ export function regenerate(state: CtfState, actor: ActorId): undefined {
   if (rune !== "regeneration" || state.number(actor, "regenTime") >= game.time || game.health(actor) <= 0) return undefined;
   let delay = 0;
   if (game.health(actor) < 150) { game.host.combat.setHealth(state.owner(actor), Math.min(150, game.health(actor) + 5)); delay += 0.5; }
-  const armor = game.host.combat.read(actor)?.armor;
+  const armor = game.host.combat.read(actor)?.armor.regular;
   if (armor !== undefined && armor.kind !== "none" && armor.points < 150 && (armor.kind !== "q1" || armor.absorption > 0)) {
-    game.host.combat.setArmor(state.owner(actor), { ...armor, points: Math.min(150, armor.points + 5) }); delay += 0.5;
+    game.host.combat.setRegularPoints(state.owner(actor), Math.min(150, armor.points + 5)); delay += 0.5;
   }
   state.set(actor, "regenTime", game.time + delay);
   if (delay > 0 && state.number(actor, "regenSound") < game.time) { state.set(actor, "regenSound", game.time + 1); game.sound(state.owner(actor), "rune/rune4.wav", "body"); }

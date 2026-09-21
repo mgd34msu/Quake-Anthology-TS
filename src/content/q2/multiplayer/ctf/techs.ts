@@ -128,8 +128,8 @@ export class Q2CtfTechs {
     if (current === null || state.regenTime >= now) return undefined;
     state.regenTime = now; let noise = false;
     if (current.health < 150) { game.host.combat.setHealth(entity.actor, Math.min(150, current.health + 5)); state.regenTime += 0.5; noise = true; }
-    const armor = current.armor;
-    if (armor.kind !== "none" && armor.points > 0 && armor.points < 150) { game.host.combat.setArmor(entity.actor, { ...armor, points: Math.min(150, armor.points + 5) }); state.regenTime += 0.5; noise = true; }
+    const armor = current.armor.regular;
+    if (armor.kind !== "none" && armor.points > 0 && armor.points < 150) { game.host.combat.setRegularPoints(entity.actor, Math.min(150, armor.points + 5)); state.regenTime += 0.5; noise = true; }
     if (noise && state.techSoundTime < now) { state.techSoundTime = now + 1; this.sound(entity, game, "tech4"); }
     return undefined;
   }

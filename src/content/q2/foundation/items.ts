@@ -1,7 +1,7 @@
 import { previewPickupGrants } from "../../../world/gameplay/pickups.ts";
 /* Pickup and inventory behaviors adapted from Quake II game/g_items.c and p_weapon.c. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
-import type { ArmorState, InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
+import type { RegularArmorState, InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
 import type { PickupAdmission, PickupAmmoGrant, PickupSupplyObservation, PickupSupplyOffer, PickupSupplyPreview } from "../../../contracts/pickups.ts";
 import { add, movedir, scale, zero } from "./fields.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think } from "./host.ts";
@@ -614,9 +614,9 @@ export class Q2ItemModule implements Q2SpawnModule {
         break;
       }
       case "armor": case "shard": {
-        const next = pickupQ2Armor(item, current.armor);
+        const next = pickupQ2Armor(item, current.armor.regular);
         if (next === null) return false;
-        game.host.combat.setArmor(player, next); break;
+        game.host.combat.setRegularArmor(player, next); break;
       }
       case "maximum-health": {
         const increase = item.fill && game.options.mode === "deathmatch" ? 0 : item.increase;
@@ -664,14 +664,10 @@ export class Q2ItemModule implements Q2SpawnModule {
     if (item.kind === "custom") return item.use?.(player, game) ?? false;
     if (item.kind === "power-armor") {
       const armor = game.host.combat.read(player.id)?.armor;
-      const active = armor?.kind === "q2" && armor.powerArmor.kind !== "none";
+      const active = armor !== undefined && armor.powered.kind !== "none";
       if (!active && game.host.inventory.count(player.id, "q2:ammo_cells") === 0) return false;
       const kind = active ? "none" : item.armor;
-      const powerArmor = kind === "none" ? { kind: "none" } satisfies Extract<ArmorState, { kind: "q2" }>["powerArmor"]
-        : { kind, cells: game.host.inventory.count(player.id, "q2:ammo_cells") };
-      game.host.combat.setArmor(player, armor?.kind === "q2" ? { ...armor, powerArmor } : {
-        kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0.3, energyProtection: 0, powerArmor,
-      });
+      game.host.combat.setPoweredProtection(player, kind === "none" ? { kind } : { kind, cells: game.host.inventory.count(player.id, "q2:ammo_cells") });
       this.hooks.powerArmor(player.id, active ? "none" : item.armor);
       return true;
     }
@@ -715,15 +711,14 @@ export class Q2ItemModule implements Q2SpawnModule {
   };
 }
 
-function pickupQ2Armor(item: Extract<Item, { readonly kind: "armor" | "shard" }>, old: ArmorState): ArmorState | null {
-  const powerArmor = old.kind === "q2" ? old.powerArmor : { kind: "none" } satisfies Extract<ArmorState, { kind: "q2" }>["powerArmor"];
+function pickupQ2Armor(item: Extract<Item, { readonly kind: "armor" | "shard" }>, old: RegularArmorState): RegularArmorState | null {
   if (item.kind === "shard") {
     if (old.kind === "q2" && old.points > 0) return { ...old, points: old.points + 2 };
-    return { kind: "q2", item: "q2:item_armor_jacket", points: 2, normalProtection: 0.3, energyProtection: 0, powerArmor };
+    return { kind: "q2", item: "q2:item_armor_jacket", points: 2, normalProtection: 0.3, energyProtection: 0 };
   }
-  if (old.kind !== "q2" || old.points === 0) return { kind: "q2", item: id(item), points: item.points, normalProtection: item.normal, energyProtection: item.energy, powerArmor };
+  if (old.kind !== "q2" || old.points === 0) return { kind: "q2", item: id(item), points: item.points, normalProtection: item.normal, energyProtection: item.energy };
   if (item.normal > old.normalProtection) {
-    return { kind: "q2", item: id(item), points: Math.min(item.maximum, item.points + Math.trunc(old.points * old.normalProtection / item.normal)), normalProtection: item.normal, energyProtection: item.energy, powerArmor };
+    return { kind: "q2", item: id(item), points: Math.min(item.maximum, item.points + Math.trunc(old.points * old.normalProtection / item.normal)), normalProtection: item.normal, energyProtection: item.energy };
   }
   const maximum = old.item === "q2:item_armor_jacket" ? 50 : old.item === "q2:item_armor_combat" ? 100 : 200;
   const points = Math.min(maximum, old.points + Math.trunc(item.points * item.normal / old.normalProtection));

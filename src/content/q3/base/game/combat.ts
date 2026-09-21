@@ -195,7 +195,7 @@ function q3CommittedDamageFeedback(context: CombatContext, target: GameEntity, n
   if (decision.appliedDamage === 0 && decision.mutations.every(mutation => mutation.kind !== "armor")) return;
   let armor = 0;
   for (const mutation of decision.mutations) {
-    if (mutation.kind === "armor" && mutation.before.kind !== "none" && mutation.after.kind !== "none") armor += mutation.before.points - mutation.after.points;
+    if (mutation.kind === "armor" && mutation.before.regular.kind !== "none" && mutation.after.regular.kind !== "none") armor += mutation.before.regular.points - mutation.after.regular.points;
   }
   if (client !== null) context.entities.rankings.damage(target.slot, nativeOwner?.slot ?? ENTITYNUM_WORLD,
     decision.appliedDamage + armor, context.product === "missionpack" && methodOfDeath >= 23 ? (methodOfDeath === 28 ? 23 : 0) : methodOfDeath,

@@ -113,8 +113,8 @@ export class QvmModActors {
   }
   private armor(pointer: number): ArmorState {
     const client = this.client(pointer), definition = this.options.declaration.combat?.client;
-    return client === null || definition === undefined || definition === null ? { kind: "none" }
-      : { kind: "q3", points: this.word(client + definition.armor), protection: definition.protection };
+    return { regular: client === null || definition === undefined || definition === null ? { kind: "none" }
+      : { kind: "q3", points: this.word(client + definition.armor), protection: definition.protection }, powered: { kind: "none" } };
   }
   private read(actor: ActorId): CombatState {
     const definition = this.options.declaration.combat; if (definition === undefined) throw new Error("Missing QVM combat declaration");
@@ -129,15 +129,19 @@ export class QvmModActors {
     const pointer = this.options.pointer(actor.id); this.pointers.set(pointer, actor); this.actorPointers.set(actor.id, pointer);
     if (definition !== undefined) services.combat.rebind(actor, {
       read: () => this.read(actor.id), sourceDamage: request => this.damage(request, effective => this.invokeDamage(effective)),
+      validateArmor: (armor: ArmorState): undefined => {
+        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q3") throw new Error("Native Q3 armor requires Q3 armor values");
+        return undefined;
+      },
       writeHealth: health => {
         const pointer = this.options.pointer(actor.id); this.store(pointer + definition.health, health);
         const client = this.client(pointer); if (client !== null && definition.client !== null) this.store(client + definition.client.health, health);
         return undefined;
       }, writeArmor: armor => {
         const client = this.client(this.options.pointer(actor.id));
-        if (client === null || definition.client === null) { if (armor.kind !== "none") throw new Error("QVM actor has no declared armor store"); return undefined; }
-        if (armor.kind !== "none" && armor.kind !== "q3") throw new Error("QVM source armor requires Q3 armor values");
-        this.store(client + definition.client.armor, armor.kind === "none" ? 0 : armor.points); return undefined;
+        if (client === null || definition.client === null) { if (armor.regular.kind !== "none" || armor.powered.kind !== "none") throw new Error("QVM actor has no declared armor store"); return undefined; }
+        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q3") throw new Error("QVM source armor requires Q3 armor values");
+        this.store(client + definition.client.armor, armor.regular.kind === "none" ? 0 : armor.regular.points); return undefined;
       },
     });
     services.callbacks?.bind(actor, {
@@ -235,7 +239,7 @@ export class QvmModActors {
     if (frame.finished) return;
     const before = frame.before, velocity = frame.velocity, after = this.read(frame.request.target), currentVelocity = this.options.services.bodies.read(frame.request.target)?.velocity ?? null;
     for (const active of this.damageFrames) if (active.request.target === frame.request.target) { active.before = after; active.velocity = currentVelocity; }
-    if (before.armor.kind === "q3" && after.armor.kind === "q3" && before.armor.points !== after.armor.points)
+    if (before.armor.regular.kind === "q3" && after.armor.regular.kind === "q3" && before.armor.regular.points !== after.armor.regular.points)
       frame.observer.stored({ kind: "armor", before: before.armor, after: after.armor });
     if (before.health !== after.health) frame.observer.stored({ kind: "health", before: before.health, after: after.health });
     if (velocity !== null && currentVelocity !== null && (velocity.x !== currentVelocity.x || velocity.y !== currentVelocity.y || velocity.z !== currentVelocity.z))

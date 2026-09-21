@@ -112,7 +112,7 @@ export function createProboscis(monsters: Q2Monsters) {
     const tip = game.create("parasite_proboscis"), segment = game.create("parasite_proboscis_segment");
     tip.model = "models/monsters/parasite/tip/tris.md2"; tip.owner = entity.actor.id; entity.proboscus = tip.actor.id;
     tip.clipMask = 3 | 0x2000000 | 0x40000000; tip.speed = 1250; tip.projectile = true; tip.die = die; tip.touch = touch;
-    tip.flags |= 8; game.host.combat.create(tip.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+    tip.flags |= 8; game.host.combat.create(tip.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
     game.move(tip, { origin: from, angles: vectorAngles(direction), velocity: scale(direction, tip.speed) });
     game.motion(tip, "fly-missile"); game.solid(tip, "box"); game.schedule(tip, game.host.frameSeconds(), think);
     segment.model = "models/monsters/parasite/segment/tris.md2"; segment.renderFlags = 128; segment.postthink = draw;

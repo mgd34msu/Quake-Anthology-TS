@@ -69,7 +69,7 @@ export class Q2RogueEntities implements Q2SpawnModule {
     if (target === undefined || entity.target === "") return undefined;
     target.serverFlags |= 4;
     if (game.host.combat.read(target.actor.id) === null)
-      game.host.combat.create(target.actor, { health: 300, mass: 0, armor: { kind: "none" }, canTakeDamage: false, invulnerable: false, team: null });
+      game.host.combat.create(target.actor, { health: 300, mass: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: false, invulnerable: false, team: null });
     else game.host.combat.setHealth(target.actor, 300);
     for (const monster of game.targets(entity.target)) {
       if (monster === entity) game.host.diagnostic("WARNING: entity used itself.");

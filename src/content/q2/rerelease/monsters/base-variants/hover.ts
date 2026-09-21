@@ -49,7 +49,7 @@ export function createRereleaseHoverDefinition(monsters: Q2Monsters): Q2MonsterD
     die(context) {
       const { entity, game, state } = context;
       entity.effects = 0;
-      game.host.combat.setArmor(entity.actor, { kind: "q2", points: 0, normalProtection: 0, energyProtection: 0, item: "q2:monster-power", powerArmor: { kind: "none" } });
+      game.host.combat.setPoweredProtection(entity.actor, { kind: "none" });
       if (checkGib(context)) return gib(context);
       if (state.dead) return undefined;
       game.sound(entity, game.host.random() < 0.5 ? "hover/hovdeth1.wav" : "hover/hovdeth2.wav", 2);

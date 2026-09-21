@@ -14,7 +14,7 @@ export function newQ1CtfTravel(state: CtfState): Q1TravelState {
     entry.item === "q1:ammo/shells" ? { ...entry, count: lobby ? 0 : 40 } : entry);
   inventory.push({ item: "q1:ctf/weapon/grapple", count: state.nativeGrappleEnabled && !lobby && (state.teamplay & CTF_FLAGS.disableGrapple) === 0 ? 1 : 0, capacity: 1 });
   return { health: 100, maxHealth: 100, inventory, weapon: lobby ? "axe" : "shotgun", extensions: [],
-    armor: lobby ? { kind: "none" } : { kind: "q1", points: 50, absorption: 0.3, item: "q1:item_armor1" } };
+    armor: { ...base.armor, regular: lobby ? { kind: "none" } : { kind: "q1", points: 50, absorption: 0.3, item: "q1:item_armor1" } } };
 }
 
 /** SetChangeParms resets equipment even for living players; parm10/14/15 still travel. */

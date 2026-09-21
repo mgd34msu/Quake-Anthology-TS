@@ -147,7 +147,7 @@ export function createSharedBotWorld(options: Options) {
         ps.viewheight = movement.viewHeight; ps.groundEntityNum = body.ground === null ? 1023 : entityId(body.ground);
         ps.pmType = common.spectator ? MoveType.PM_SPECTATOR : (combat?.health ?? 0) <= 0 ? MoveType.PM_DEAD : MoveType.PM_NORMAL;
         ps.weapon = knowledge.sourceWeapon(number); ps.weaponState = knowledge.sourceWeaponState(number);
-        ps.stats.set(schema.health, combat?.health ?? 0); ps.stats.set(schema.armor, combat === null || combat.armor.kind === "none" ? 0 : combat.armor.points); ps.stats.set(schema.maxHealth, entity?.maxHealth ?? 100);
+        ps.stats.set(schema.health, combat?.health ?? 0); ps.stats.set(schema.armor, combat === null || combat.armor.regular.kind === "none" ? 0 : combat.armor.regular.points); ps.stats.set(schema.maxHealth, entity?.maxHealth ?? 100);
         ps.persistant.set(0, common.score); ps.persistant.set(3, common.spectator ? 3 : 0);
         player = { state: ps, connected: options.actor(number) === null || begun.has(number), team: common.spectator ? 3 : 0, name: common.name, lastHurtClient: 0, lastHurtMod: 0 };
         state.eType = EntityType.ET_PLAYER; state.weapon = ps.weapon; Object.assign(state.pos.base, body.origin); Object.assign(state.apos.base, movement.viewAngles);

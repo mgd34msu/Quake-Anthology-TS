@@ -227,7 +227,7 @@ export class Q2BaseScenery {
       case "monster_commander_body": {
         entity.renderFlags |= 64; entity.flags |= 16;
         model(entity, game, "models/monsters/commandr/tris.md2", { min: { x: -32, y: -32, z: 0 }, max: { x: 32, y: 32, z: 48 } }, "box");
-        game.host.combat.create(entity.actor, { health: 0, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: true, team: null });
+        game.host.combat.create(entity.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: true, team: null });
 
         entity.use = this.commanderUse;
         game.schedule(entity, 5 * game.host.frameSeconds(), this.commanderRelease);
@@ -243,7 +243,7 @@ export class Q2BaseScenery {
         entity.model = `models/objects/gibs/${entity.classname === "misc_gib_arm" ? "arm" : "leg"}/tris.md2`;
         entity.effects |= 2; entity.serverFlags |= 4;
         entity.angularVelocity = { x: game.host.random() * 200, y: game.host.random() * 200, z: game.host.random() * 200 };
-        game.host.combat.create(entity.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+        game.host.combat.create(entity.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
         entity.die = this.removeDie;
         game.motion(entity, "toss"); game.solid(entity, "none"); game.show(entity);
         game.schedule(entity, 30, this.removeThink); return true;

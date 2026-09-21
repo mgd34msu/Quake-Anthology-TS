@@ -128,7 +128,7 @@ export class Q3EntityRecords {
     const actor = this.host.actors.allocateAtSource(this.provider, slot, slot < MAX_CLIENTS ? "q3:player" : "q3:entity");
     record.actor = actor;
     this.host.bodies.create(actor, ZERO_BODY);
-    this.host.combat.create(actor, { health: 0, armor: { kind: "q3", points: 0, protection: Math.fround(0.66) },
+    this.host.combat.create(actor, { health: 0, armor: { regular: { kind: "q3", points: 0, protection: Math.fround(0.66) }, powered: { kind: "none" } },
       mass: 200, canTakeDamage: false, invulnerable: false, team: null }, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
     this.host.inventory.create(actor, []);
     this.bindCallbacks(record);
@@ -234,7 +234,7 @@ export class Q3EntityRecords {
       stats: {
         read: index => {
           if (index === schema.health) return this.record(slot).entity.health;
-          if (index === schema.armor) { const current = this.record(slot).actor; const armor = current === null ? null : this.host.combat.read(current.id)?.armor;
+          if (index === schema.armor) { const current = this.record(slot).actor; const armor = current === null ? null : this.host.combat.read(current.id)?.armor.regular;
             return armor === null || armor === undefined || armor.kind === "none" ? 0 : armor.points; }
           if (index === schema.weapons) { const current = this.record(slot).actor; if (current === null) return 0;
             return Q3_WEAPON_ITEMS.reduce((bits, weapon) => bits | (this.host.inventory.count(current.id, weapon.item) > 0 ? 1 << weapon.weapon : 0), 0); }
@@ -242,9 +242,9 @@ export class Q3EntityRecords {
         },
         write: (index, value) => {
           if (index === schema.health) { this.host.combat.setHealth(actor(), value); return; }
-          if (index === schema.armor) { const armor = this.host.combat.read(actor().id)?.armor;
-            if (armor === undefined || armor.kind === "none") this.host.combat.setArmor(actor(), { kind: "q3", points: value, protection: Math.fround(0.66) });
-            else this.host.combat.setArmor(actor(), { ...armor, points: value }); return; }
+          if (index === schema.armor) { const armor = this.host.combat.read(actor().id)?.armor.regular;
+            if (armor === undefined || armor.kind === "none") this.host.combat.setRegularArmor(actor(), { kind: "q3", points: value, protection: Math.fround(0.66) });
+            else this.host.combat.setRegularPoints(actor(), value); return; }
           if (index === schema.weapons) { for (const weapon of Q3_WEAPON_ITEMS) configure(weapon.item, value & (1 << weapon.weapon) ? 1 : 0, 1); return; }
           if (!Number.isInteger(index) || index < 0 || index >= 16) throw new RangeError(`Q3 stat ${index} outside 0..15`);
           sourceStats[index] = value;

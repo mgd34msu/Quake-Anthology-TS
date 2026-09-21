@@ -65,7 +65,7 @@ export class Q2MissionPackDoppleganger {
     base.teamMaster = owner.actor.id; base.renderFlags = 0x8000; base.damageableTarget = true; base.pain = this.pain; base.die = this.die;
     game.move(base, { origin: start, angles: { ...angles, x: 0 }, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } } });
     game.motion(base, "toss"); game.solid(base, "box");
-    game.host.combat.create(base.actor, { health: 30, mass: 0, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, team: null });
+    game.host.combat.create(base.actor, { health: 30, mass: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: true, invulnerable: false, team: null });
     game.schedule(base, 30, this.timeout);
     const body = game.create("doppleganger_body");
     body.model = owner.model; body.model2 = owner.model2; body.model3 = owner.model3; body.model4 = owner.model4; body.frame = owner.frame; body.oldFrame = owner.oldFrame;

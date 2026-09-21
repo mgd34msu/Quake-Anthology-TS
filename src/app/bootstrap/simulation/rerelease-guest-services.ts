@@ -103,6 +103,17 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   }
   bindHost(host: RereleaseQ2GuestHost): void { if (this.#host !== null || host.module.memory !== this.memory) throw new Error("API2023 host/memory binding mismatch"); this.#host = host; this.#combat = new RereleaseCombatBindings(host); }
   notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.module.entities().atSlot(slot)) ?? null; }
+  setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
+    const profile = retailRereleaseClientProfile, host = this.host, record = host.module.entities().atSlot(slot);
+    if (profile.authority.kind !== "artifact" || this.memory.module.digest !== profile.authority.digest)
+      throw new Error("API2023 source view writes require a declared private client layout");
+    if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
+      throw new Error("API2023 source view requires the current client actor");
+    const client = this.view(slot).pointer("client");
+    if (client === null) throw new Error("API2023 source view has no client");
+    const field = new RereleaseSourceClient(client, host.module, profile).at("v_angle");
+    this.memory.writeFloat32(this.memory.offset(field, 8n), roll);
+  }
   equipmentInventory(slot: number): InventoryStateBinding | null {
     const profile = retailRereleaseClientProfile, host = this.host;
     if (profile.authority.kind !== "artifact" || host.module.memory.module.digest !== profile.authority.digest) return null;

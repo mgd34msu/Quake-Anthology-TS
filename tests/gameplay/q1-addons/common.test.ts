@@ -59,7 +59,7 @@ function world(program: "mg1" | "mg3", withHorde = false, walkable = false) {
     respawnTeammate: () => undefined, addScore: () => undefined, restartSession: () => undefined }) : null;
   const player = actors.allocateAtSource("q3:character", 1, "q3:sarge");
   bodies.create(player, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-  combat.create(player, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(player, []); players.push(player.id); game.attachPlayer(player);
+  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(player, []); players.push(player.id); game.attachPlayer(player);
   const spawn = (classname: string, fields: Readonly<Record<string, string>> = {}) => {
     const source: Q1Entity = { properties: [{ key: "classname", value: classname }, ...Object.entries(fields).map(([key, value]) => ({ key, value }))] };
     const entity = game.create(classname, source); game.spawnEntity(entity); return entity;

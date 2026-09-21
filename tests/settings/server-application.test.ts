@@ -32,7 +32,7 @@ test("CLI profile controls real Q2 item spawn, shared damage, limits and next-ma
     application.simulation.playerCommand(firstId, "team", ["red"]); application.simulation.playerCommand(secondId, "team", ["red"]);
     const first = source.game.entity(firstId), second = source.game.entity(secondId);
     if (first === null || second === null) throw new Error("Missing source players");
-    source.game.host.combat.setHealth(second.actor, 100); source.game.host.combat.setArmor(second.actor, { kind: "none" });
+    source.game.host.combat.setHealth(second.actor, 100); source.game.host.combat.setArmor(second.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
     const zero = { x: 0, y: 0, z: 0 };
     source.game.damage(secondId, first, firstId, 10, 0, zero, zero, zero, 1, 0);
     expect(source.game.host.combat.read(secondId)?.health).toBe(100);

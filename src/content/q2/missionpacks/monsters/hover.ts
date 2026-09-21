@@ -36,7 +36,7 @@ export function createRogueHoverDefinitions(weapons: Q2MissionPackMonsterWeapons
       return context.setMove(first ? reaction.damage <= 25 ? "hover_move_pain3" : "hover_move_pain1" : "hover_move_pain2");
     },
     die(context, reaction) {
-      context.entity.effects = 0; context.game.host.combat.setArmor(context.entity.actor, { kind: "none" });
+      context.entity.effects = 0; context.game.host.combat.setArmor(context.entity.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
       if (standardGib(context, reaction, 2, 2, "models/objects/gibs/sm_meat/tris.md2") || context.state.dead) return undefined;
       return beginDeath(context, reaction, path(context, context.game.host.random() < 0.5 ? "deth1" : "deth2"), "hover_move_death1");
     },

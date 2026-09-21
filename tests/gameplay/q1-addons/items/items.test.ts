@@ -57,7 +57,7 @@ function session(saved?: Saved, options: { readonly skill?: 0 | 1 | 2 | 3; reado
   if (saved === undefined) {
     actor = actors.allocateAtSource("q3:character", 1, "q3:sarge");
     bodies.create(actor, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); game.attachPlayer(actor);
+    combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); game.attachPlayer(actor);
   } else {
     const player = actors.atSource("q3:character", 1); if (player === null) throw new Error("Missing restored player"); actor = player;
     const owner = (id: BodyCheckpoint["actor"]): OwnedActor => { const value = actors.resolveSaved(id); if (value === null) throw new Error("Missing saved actor"); return value; };
@@ -231,14 +231,14 @@ test("MG3 Bloody Nightmare travel preserves hammer, Bloody SSG and armor with so
   try {
     source.touch(source.spawn("weapon_mjolnir")); source.touch(source.spawn("weapon_laser_gun"));
     source.context.setPlayerNumber(source.player.actor.id, "parm15", 3);
-    source.combat.setArmor(source.player.actor, { kind: "q1", points: 150, absorption: 0.8, item: "q1:armor/red" });
+    source.combat.setArmor(source.player.actor, { regular: { kind: "q1", points: 150, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "none" } });
     source.base.campaign.writeFlags(BLOODY_NIGHTMARE_ACTIVE); next.base.campaign.writeFlags(source.base.campaign.readFlags());
     const carry = captureQ1AddonTravel(source.context, source.player.actor); expect(carry.weapon).toBe("mg3:laser");
     admitQ1AddonTravel(next.context, next.player.actor, carry);
     expect(next.player.weapon).toBe("shotgun"); expect(next.game.weaponModel(next.player.weapon, next.player)).toBe("progs/v_bloodshot.mdl");
     expect(next.inventory.entries(next.player.actor.id).filter(entry => entry.item.startsWith("q1:weapon/") && entry.count !== 0).map(entry => entry.item).sort())
       .toEqual(["q1:weapon/axe", "q1:weapon/mg3:mjolnir", "q1:weapon/shotgun", "q1:weapon/supershotgun"]);
-    expect(next.combat.read(next.player.actor.id)?.armor).toEqual({ kind: "q1", points: 150, absorption: 0.8, item: "q1:armor/red" });
+    expect(next.combat.read(next.player.actor.id)?.armor).toEqual({ regular: { kind: "q1", points: 150, absorption: 0.8, item: "q1:armor/red" }, powered: { kind: "none" } });
   } finally { source.actors.close(); next.actors.close(); }
 });
 

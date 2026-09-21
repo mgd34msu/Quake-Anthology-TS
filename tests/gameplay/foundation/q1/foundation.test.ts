@@ -130,7 +130,7 @@ function gameFor(map: Q1Map, saved?: SavedTestWorld, edition: "classic" | "rerel
     player = actors.allocateAtSource(Q1_PROVIDER, 1, "q2:male-character");
     const start = [...runtime.entities.values()].find(entity => entity.classname === "info_player_start"); if (start === undefined) throw new Error("Missing start");
     bodies.create(player, { origin: runtime.body(start).origin, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(player, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
+    combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
     inventory.create(player, []); runtime.attachPlayer(player);
   } else {
     const restored = actors.atSource(Q1_PROVIDER, 1); if (restored === null) throw new Error("Missing saved player"); player = restored;
@@ -256,7 +256,7 @@ test.skipIf(!existsSync(path))("Q2 character receives Q1 arsenal, armor and sing
   for (const item of [gun, armor, quad]) callbacks.touch({ self: item.actor, other: player.id, plane: null, surface: null });
   expect(inventory.count(player.id, weaponItem("nailgun"))).toBe(1);
   expect(inventory.count(player.id, "q1:ammo/nails")).toBe(30);
-  expect(combat.read(player.id)?.armor).toEqual({ kind: "q1", points: 150, absorption: 0.6, item: "q1:item_armor2" });
+  expect(combat.read(player.id)?.armor).toEqual({ regular: { kind: "q1", points: 150, absorption: 0.6, item: "q1:item_armor2" }, powered: { kind: "none" } });
   const victim = runtime.create("damage_receiver"); victim.damageable = true; combat.setHealth(victim.actor, 100);
   runtime.damage(victim.actor.id, player.id, player.id, 9, "nailgun");
   expect(runtime.health(victim.actor.id)).toBe(64);
@@ -324,7 +324,7 @@ test.skipIf(!existsSync(path))("Q1 services attach existing foreign owners and r
   const owners = [actors.allocateAtSource("q2:base", 900, "q2:authored-monster"), actors.allocate("q2:base", "q2:dynamic-monster")];
   for (const owner of owners) {
     bodies.create(owner, { origin: { x: 11, y: 22, z: 33 }, angles: ZERO, velocity: { x: 1, y: 2, z: 3 }, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(owner, { health: 37, armor: { kind: "none" }, mass: 275, canTakeDamage: true, invulnerable: false, team: null });
+    combat.create(owner, { health: 37, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 275, canTakeDamage: true, invulnerable: false, team: null });
     const body = bodies.read(owner.id), state = combat.read(owner.id), binding = actors.sourceOf(owner.id), count = actors.observations().length;
     const entity = runtime.attachExisting(owner, "DelayedUse");
     expect(entity.actor).toBe(owner);

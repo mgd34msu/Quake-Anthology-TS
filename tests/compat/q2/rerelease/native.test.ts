@@ -99,7 +99,7 @@ export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent)
     if (client !== null && inventoryItems === null) inventoryItems = rereleaseInventoryItems(module, value => owner().core.string(value));
     const classname = module.memory.readPointer(edict.at("classname"));
     const barrel = foreignDamage !== undefined && classname !== null && ["misc_explobox", "monster_soldier"].includes(readGuestString(module.memory, classname));
-    return { ...base, combat: !barrel ? base.combat : edict.combat({ armor: () => ({ kind: "none" }), writeArmor: () => { throw new Error("Native barrel has no armor"); }, traits: () => ({ invulnerable: false, team: null, noKnockback: false }) }),
+    return { ...base, combat: !barrel ? base.combat : edict.combat({ armor: () => ({ regular: { kind: "none" }, powered: { kind: "none" } }), writeArmor: () => { throw new Error("Native barrel has no armor"); }, traits: () => ({ invulnerable: false, team: null, noKnockback: false }) }),
       inventory: client === null || inventoryItems === null ? null : client.inventory(inventoryItems),
       callbacks: edict.callbacks({ address: id => owner().addressForActor(id), actor: address => owner().actor(module.entities().fromPointer(address))?.id ?? null }, trace => owner().encodeTrace(trace)) };
   } };
@@ -521,7 +521,7 @@ test.skipIf(!available)("retail projectile and native damage share foreign actor
   const origin = { x: playerBody.origin.x + Math.cos(yaw * Math.PI / 180) * 128, y: playerBody.origin.y + Math.sin(yaw * Math.PI / 180) * 128, z: playerBody.origin.z };
   world.engine.bodies.create(victim, { origin, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, bounds: { min: { x: -20, y: -20, z: -24 }, max: { x: 20, y: 20, z: 40 } }, ground: null });
   world.engine.bodies.link(victim);
-  world.engine.combat.create(victim, { health: 20, mass: 200, armor: { kind: "q3", points: 20, protection: 0.66 }, canTakeDamage: true, invulnerable: false, team: null });
+  world.engine.combat.create(victim, { health: 20, mass: 200, armor: { regular: { kind: "q3", points: 20, protection: 0.66 }, powered: { kind: "none" } }, canTakeDamage: true, invulnerable: false, team: null });
   world.engine.inventory.create(victim, [{ item: "q3:ammo_cells", count: 12, capacity: 200 }]);
   const reactions: AttackProvenance[] = [], drops: OwnedActor[] = [];
   const barrelView = guest.entities().atSlot(18), barrel = host.actor(barrelView);
@@ -558,8 +558,8 @@ test.skipIf(!available)("retail projectile and native damage share foreign actor
   if (victimState === null) throw new Error("Foreign combat state was removed");
   expect(victimState.health).toBeLessThan(20);
   const armor = victimState.armor;
-  if (armor?.kind !== "q3") throw new Error("Foreign armor was replaced");
-  expect(armor.points).toBeLessThan(20);
+  if (armor?.regular.kind !== "q3") throw new Error("Foreign armor was replaced");
+  expect(armor.regular.points).toBeLessThan(20);
   expect(world.engine.inventory.count(victim.id, "q3:ammo_cells")).toBe(12);
   expect(new RereleaseSourceEdict(projectedView, guest).health).toBe(victimState.health);
   const outcome = counter.outcome;
@@ -582,7 +582,7 @@ test.skipIf(!available)("retail projectile and native damage share foreign actor
   const survivor = world.engine.actors.allocate("q3:foreign", "q3:survivor");
   const body = world.engine.bodies.read(victim.id); if (body === null) throw new Error("Foreign body disappeared");
   world.engine.bodies.create(survivor, body);
-  world.engine.combat.create(survivor, { health: 100, mass: 200, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, team: null });
+  world.engine.combat.create(survivor, { health: 100, mass: 200, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: true, invulnerable: false, team: null });
   bridge.address(survivor.id);
   world.engine.actors.release(victim);
   expect(host.actor(projectedView)).toBeNull();
@@ -603,7 +603,7 @@ test.skipIf(!available)("retail reused native slot stops foreign damage intercep
   const actor = world.engine.actors.allocate("q3:foreign", "review:reused-slot");
   world.engine.bodies.create(actor, { origin: { x: 0, y: 0, z: 512 }, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
     bounds: { min: { x: -16, y: -16, z: -16 }, max: { x: 16, y: 16, z: 16 } }, ground: null });
-  world.engine.combat.create(actor, { health: 100, mass: 200, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, team: null });
+  world.engine.combat.create(actor, { health: 100, mass: 200, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: true, invulnerable: false, team: null });
   const address = bridge.address(actor.id), view = guest.entities().fromPointer(address);
   const generation = new RereleaseSourceEdict(view, guest).generation();
   const { cpu, callbacks } = guest.options.runner.options;

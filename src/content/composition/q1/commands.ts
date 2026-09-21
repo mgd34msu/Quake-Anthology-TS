@@ -45,7 +45,7 @@ export function baseQ1Impulse(source: Q1SourceComposition, player: Q1PlayerState
     }
     setCount(game, player, "q1:key/silver", 1, 1); setCount(game, player, "q1:key/gold", 1, 1);
     if (selection.program === "ctf") setCount(game, player, "q1:ctf/weapon/grapple", 1, 1);
-    if (game.options.edition === "rerelease" && (selection.program === "id1" || selection.program === "ctf")) game.host.combat.setArmor(player.actor, { kind: "q1", points: 200, absorption: 0.8, item: "q1:item_armorInv" });
+    if (game.options.edition === "rerelease" && (selection.program === "id1" || selection.program === "ctf")) game.host.combat.setRegularArmor(player.actor, { kind: "q1", points: 200, absorption: 0.8, item: "q1:item_armorInv" });
     if (!foreignArsenal) services.selectWeapon(player.actor.id, game.weaponItem("rocketlauncher"));
     return true;
   }

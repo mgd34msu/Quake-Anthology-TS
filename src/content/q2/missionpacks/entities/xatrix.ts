@@ -103,12 +103,12 @@ export class Q2XatrixEntities implements Q2SpawnModule {
         entity.model = "models/objects/light/tris.md2"; entity.speed ||= 32; entity.maxHealth = health; entity.frame = 0;
         entity.use = this.lightUse; entity.die = this.lightKilled;
         entity.effects = (entity.spawnflags & 1) !== 0 ? entity.effects & ~0x800000 : entity.effects | 0x800000;
-        game.host.combat.create(entity.actor, { health, mass: 0, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, team: null });
+        game.host.combat.create(entity.actor, { health, mass: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: true, invulnerable: false, team: null });
         game.solid(entity, "box"); game.motion(entity, "stop"); game.show(entity); break;
       }
       case "func_object_repair":
         entity.classname = "object_repair"; entity.delay ||= 1;
-        game.host.combat.create(entity.actor, { health: 100, mass: 0, armor: { kind: "none" }, canTakeDamage: false, invulnerable: false, team: null });
+        game.host.combat.create(entity.actor, { health: 100, mass: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: false, invulnerable: false, team: null });
         game.move(entity, { bounds: { min: { x: -8, y: -8, z: 8 }, max: { x: 8, y: 8, z: 8 } } });
         game.solid(entity, "box"); game.motion(entity, "stationary"); game.schedule(entity, 1, this.repairSparks); break;
       case "misc_viper_missile":

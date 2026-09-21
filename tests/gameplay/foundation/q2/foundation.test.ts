@@ -89,7 +89,7 @@ function targetGame(selected: Q2GameOptions = options) {
   const game = new Q2Foundation(host, selected, [createQ2TargetModule(), items, movers]);
   const player = actors.allocateAtSource(options.provider, 1, "q3:character"); players.push(player.id);
   bodies.create(player, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-  combat.create(player, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   inventory.create(player, []); game.attachPlayer(player); items.configurePlayer(player, game, true);
   return { game, host, player, items, movers, events, advance(seconds: number) {
     const elapsed = seconds - now;
@@ -167,7 +167,7 @@ describe("Q2 permanent gameplay foundation", () => {
     for (let i = 0; i < 2; i++) {
       const victim = host.actors.allocate("q1:monsters/classic/id1", "q1:monster_army"); victims.push(victim);
       host.bodies.create(victim, body);
-      host.combat.create(victim, { health: 10, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
+      host.combat.create(victim, { health: 10, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
       host.callbacks.bind(victim, { think: null, touch: null, use: null, pain: null, die: () => host.actors.release(victim) });
       expect(game.entity(victim.id)).toBeNull();
     }
@@ -283,9 +283,9 @@ describe("Q2 permanent gameplay foundation", () => {
         expect(host.inventory.count(player.id, "q3:ammo/lightning")).toBe(50);
         expect(host.inventory.count(player.id, "q3:ammo/bfg")).toBe(50);
         if (mode !== "deathmatch") expect(items.use(player, "q2:item_power_shield", game)).toBe(true);
-        expect(host.combat.read(player.id)?.armor).toMatchObject({ powerArmor: { kind: "shield", cells: 50 } });
+        expect(host.combat.read(player.id)?.armor).toMatchObject({ powered: { kind: "shield", cells: 50 } });
         host.inventory.consume(player, "q2:ammo_cells", 10);
-        expect(host.combat.read(player.id)?.armor).toMatchObject({ powerArmor: { kind: "shield", cells: 40 } });
+        expect(host.combat.read(player.id)?.armor).toMatchObject({ powered: { kind: "shield", cells: 40 } });
         expect(host.inventory.count(player.id, "q3:ammo/plasmagun")).toBe(50);
       }
       const native = targetGame(options);
@@ -443,12 +443,12 @@ describe("Q2 permanent gameplay foundation", () => {
     const report = game.load('{ "classname" "item_armor_jacket" }\n{ "classname" "item_armor_combat" }\n{ "classname" "item_power_shield" }');
     for (const entity of report.spawned) items.touch(entity, game, player.id);
     const armor = host.combat.read(player.id)?.armor;
-    expect(armor?.kind).toBe("q2"); if (armor?.kind !== "q2") throw new Error("Missing Q2 armor");
-    expect(armor.points).toBe(62);
+    expect(armor?.regular.kind).toBe("q2"); if (armor?.regular.kind !== "q2") throw new Error("Missing Q2 armor");
+    expect(armor.regular.points).toBe(62);
     host.inventory.give(player, "q2:ammo_cells", 40);
     expect(items.use(player, "q2:item_power_shield", game)).toBe(true);
     host.inventory.consume(player, "q2:ammo_cells", 10);
-    expect(host.combat.read(player.id)?.armor).toMatchObject({ powerArmor: { kind: "shield", cells: 30 } });
+    expect(host.combat.read(player.id)?.armor).toMatchObject({ powered: { kind: "shield", cells: 30 } });
     const inflictor = game.create("test_blaster");
     game.damage(player.id, inflictor, null, 30, 0, zero, zero, zero, 1);
     expect(host.inventory.count(player.id, "q2:ammo_cells")).toBe(20);
@@ -462,7 +462,7 @@ describe("Q2 permanent gameplay foundation", () => {
     if (first === undefined || second === undefined || gate === undefined || pack === undefined) throw new Error("Missing key fixture actors");
     const other = host.actors.allocateAtSource(options.provider, 2, "q1:character");
     host.bodies.create(other, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
-    host.combat.create(other, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+    host.combat.create(other, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
     host.inventory.create(other, []); const otherEntity = game.attachPlayer(other);
     // The host's player query includes foreign character owners in the shared client slots.
     const players = [player.id, other.id]; host.players = () => players; host.isPlayer = actor => players.includes(actor);

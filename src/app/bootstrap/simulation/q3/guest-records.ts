@@ -57,6 +57,13 @@ export class Q3GuestRecords {
     return this.data.copyPlayerState(slot);
   }
 
+  setPlayerViewRoll(actor: ActorId, roll: number): void {
+    const slot = this.slot(actor);
+    if (slot === null || slot >= this.data.numClients || this.retiredInputs.has(slot)) throw new Error('Q3 source view requires the current client actor');
+    const state = this.player(slot);
+    this.data.writePlayerState(slot, { ...state, viewAngles: { ...state.viewAngles, z: Math.fround(roll) } });
+  }
+
   actor(slot: number): OwnedActor {
     this.entity(slot);
     if (this.retiredInputs.has(slot)) throw new Error('Q3 input client is retiring');

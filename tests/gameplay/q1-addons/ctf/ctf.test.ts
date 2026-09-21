@@ -63,7 +63,7 @@ function world(map: Q1Map, coop = false) {
   const admit = (team: CtfTeam) => {
     const actor = actors.allocateAtSource("q3:character", players.length + 1, "q3:sarge");
     bodies.create(actor, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team });
+    combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team });
     inventory.create(actor, []); players.push(actor.id); game.attachPlayer(actor); ctf.spawnPlayer(actor.id, true); setTeam(ctf, actor.id, team);
     const spot = ctf.selectSpawn(actor.id); if (spot !== null) ctf.writeBody(actor.id, { origin: game.body(spot).origin }); return actor;
   };
@@ -105,10 +105,10 @@ test("foreign character captures, returns dropped flags and pulls an actual grap
 
 test("team armor and health gates reflect through the source damage commit boundary", async () => {
   const state = world(await map("ctf1")), attacker = state.admit("red"), target = state.admit("red"); state.advance(10); state.cvars.set("teamplay", 7);
-  state.combat.setArmor(attacker, { kind: "none" });
-  state.combat.setArmor(target, { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" });
+  state.combat.setArmor(attacker, { regular: { kind: "none" }, powered: { kind: "none" } });
+  state.combat.setArmor(target, { regular: { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } });
   state.game.damage(target.id, attacker.id, attacker.id, 20, "shotgun");
-  expect(state.game.health(target.id)).toBe(100); expect(state.combat.read(target.id)?.armor).toEqual({ kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" }); expect(state.game.health(attacker.id)).toBe(80);
+  expect(state.game.health(target.id)).toBe(100); expect(state.combat.read(target.id)?.armor).toEqual({ regular: { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } }); expect(state.game.health(attacker.id)).toBe(80);
   state.cvars.set("teamplay", 4); state.game.damage(target.id, attacker.id, attacker.id, 20, "shotgun");
   expect(state.game.health(target.id)).toBe(86); expect(state.game.health(attacker.id)).toBe(60);
   state.actors.close();
@@ -116,7 +116,7 @@ test("team armor and health gates reflect through the source damage commit bound
 
 test("CTF source arsenal applies haste launch speed and delayed grapple frames", async () => {
   const state = world(await map("ctf1")), actor = state.admit("red"); state.advance(10);
-  expect(state.inventory.count(actor.id, "q1:ammo/shells")).toBe(40); expect(state.combat.read(actor.id)?.armor).toEqual({ kind: "q1", points: 50, absorption: 0.3, item: "q1:item_armor1" });
+  expect(state.inventory.count(actor.id, "q1:ammo/shells")).toBe(40); expect(state.combat.read(actor.id)?.armor).toEqual({ regular: { kind: "q1", points: 50, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } });
   state.ctf.grant(actor.id, "q1:ctf/rune/haste", 1); expect(state.game.attack(actor, ZERO, 10)).toBe(true);
   expect(state.game.player(actor.id)?.attackFinished).toBeCloseTo(10.3, 5);
   state.ctf.grant(actor.id, "q1:weapon/nailgun", 1); state.ctf.grant(actor.id, "q1:ammo/nails", 10, 200); state.game.selectWeapon(actor, "nailgun");

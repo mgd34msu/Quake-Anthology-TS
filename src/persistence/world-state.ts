@@ -83,11 +83,12 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   for (const entry of save.combat) {
     const restored = actor(entry.actor);
     const storage = host.storage(restored);
+    const saved = save.legacyArmorLayout === true && storage !== "copied" ? { ...entry.state, armor: host.combat.normalizeLegacyArmor(restored, entry.state.armor) } : entry.state;
     if (storage !== "copied") {
       const state = host.combat.read(restored.id);
       if (state === null) throw new SaveFormatError("world.combat", "source combat view has not been bound");
-      if (storage === "prebound" && !isDeepStrictEqual(state, entry.state)) throw new SaveFormatError("world.combat", "source combat disagrees with saved shared state");
-    } else host.combat.create(restored, entry.state);
+      if (storage === "prebound" && !isDeepStrictEqual(state, saved)) throw new SaveFormatError("world.combat", "source combat disagrees with saved shared state");
+    } else host.combat.create(restored, saved);
   }
   for (const entry of save.inventories) {
     const restored = actor(entry.actor);

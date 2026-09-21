@@ -791,7 +791,27 @@ export class SharedSimulation implements Simulation {
   }
   private emitQ1Addon(content: ContentId, event: Q1AddonEvent, time: SourceTime): undefined {
     if (event.kind === "punch-angle") this.q1Punch.write(event.player, event.angles);
+    else if (event.kind === "view-roll") this.setSourceViewRoll(event.player, event.roll);
     return this.events.emit(content, { kind: "q1-composition", event: { kind: "addon", event } }, time);
+  }
+  private setSourceViewRoll(actor: ActorId, roll: number): void {
+    if (!Number.isFinite(roll)) throw new RangeError("Source view roll must be finite");
+    const source = this.source;
+    if (this.playerClient(actor) === null) throw new Error("Source view requires a live client");
+    if (source.kind === "quakec") { source.game.setClientViewRoll(actor, roll); return; }
+    if (source.kind === "q2-native") { source.game.services.setPlayerViewRoll(this.nativeQ2Client(actor).slot + 1, actor, roll); return; }
+    if (source.kind === "q3-qvm") { source.game.records.setPlayerViewRoll(actor, roll); return; }
+    const movement = this.requirePlayer(actor);
+    if (source.kind === "q1") {
+      const player = source.game.player(actor);
+      if (player === null) throw new Error("Q1 source view has no player state");
+      player.viewAngles = { ...player.viewAngles, z: Math.fround(roll) };
+    } else if (source.kind === "q3") {
+      const state = source.game.records.byActor(actor)?.client?.ps;
+      if (state === undefined) throw new Error("Q3 source view has no player state");
+      state.viewangles = { ...state.viewangles, z: Math.fround(roll) };
+    }
+    movement.setSourceViewRoll(roll);
   }
   private advanceQ1Punch(): void {
     const numeric = createNumericOperations(Q1_DONOR_PROFILE);
@@ -2801,7 +2821,7 @@ export class SharedSimulation implements Simulation {
       character.spawn({ body, combat: q3InitialCombat("100", null), inventory: [] });
       player.animation = character.animation;
     } else {
-      this.combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+      this.combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
       this.inventory.create(actor, []);
     }
     if (source.kind === "q1") { source.game.attachPlayer(actor); source.composition.attach(actor, { slot: client.slot, userinfo: userinfo === undefined ? new Map([["name", `Player ${client.slot + 1}`], ["topcolor", "0"], ["bottomcolor", "0"]]) : q2Userinfo(userinfo) }); }
@@ -4949,7 +4969,7 @@ export class SharedSimulation implements Simulation {
       q2Views: [...this.q2Views].map(([actor, view]) => ({ actor: savedActorId(actor), view })),
       levelChange: null }));
     const actors = this.actors.observations();
-    return { schemaVersion: 2, recipe: this.recipe, frame: this.sourceFrame, nextEventSequence: this.events.nextSequence, ...(mods === undefined ? {} : { mods }),
+    return { schemaVersion: 3, recipe: this.recipe, frame: this.sourceFrame, nextEventSequence: this.events.nextSequence, ...(mods === undefined ? {} : { mods }),
       clocks: [{ provider, time: this.sourceFrame.time }], random: [{ provider, state: this.random.checkpoint() }], actors: this.actors.checkpoint(),
       bodies: captureSharedBodies(this.actors, this.bodies),
       combat: actors.flatMap(actor => { const state = this.combat.read(actor.id); return state === null ? [] : [{ actor: savedActorId(actor.id), state }]; }),

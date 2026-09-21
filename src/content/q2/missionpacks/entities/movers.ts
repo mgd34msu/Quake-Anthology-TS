@@ -166,7 +166,7 @@ export class Q2RogueMovers implements Q2SpawnModule {
     entity.touch = this.secretTouch; entity.blocked = this.secretBlocked; entity.use = this.secretUse;
     if (entity.targetname === "" || (entity.spawnflags & 16) !== 0) {
       entity.maxHealth = 1; entity.die = this.secretDie;
-      game.host.combat.create(entity.actor, { health: 1, mass: 0, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, team: null });
+      game.host.combat.create(entity.actor, { health: 1, mass: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: true, invulnerable: false, team: null });
     }
     return game.show(entity);
   }

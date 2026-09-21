@@ -210,7 +210,7 @@ export class Q2BaseMoverEntities {
     entity.damage ||= 2; entity.wait ||= 5; entity.speed = 50; entity.accel = 50; entity.decel = 50;
     const shootable = entity.targetname === "" || (entity.spawnflags & 1) !== 0;
     if (shootable || entity.maxHealth !== 0) game.host.combat.create(entity.actor, { health: shootable ? 0 : entity.maxHealth,
-      armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+      armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
     this.secrets.set(entity, { first, second, home, shootable, blockedTime: 0, messageTime: 0 });
     entity.use = this.secretUse;
     if (shootable || entity.maxHealth !== 0) entity.die = this.secretDie;

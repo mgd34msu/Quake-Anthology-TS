@@ -160,7 +160,7 @@ export class Q2DeathBall implements Q2SpawnModule {
     if (entity.classname === "dm_dball_ball") {
       this.ball = entity.actor.id; entity.model = "models/objects/dball/tris.md2"; entity.maxHealth = 50000; entity.clipMask = monsterSolidMask(game);
       entity.pain = this.pain; entity.die = this.die; entity.touch = this.ballTouch;
-      game.host.combat.create(entity.actor, { health: 50000, mass: 50, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, team: null });
+      game.host.combat.create(entity.actor, { health: 50000, mass: 50, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: true, invulnerable: false, team: null });
       game.move(entity, { bounds: { min: { x: -32, y: -32, z: -32 }, max: { x: 32, y: 32, z: 32 } } });
       game.solid(entity, "box"); game.motion(entity, "new-toss"); game.show(entity);
     } else if (entity.classname === "dm_dball_goal" || entity.classname === "dm_dball_speed_change") {

@@ -46,7 +46,7 @@ function fixture(edition: Q2Edition, frameSeconds = 0.1) {
   const inventory = new SharedInventoryTable(actors);
   const player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(player, { origin: zero, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null });
-  combat.create(player, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   const monsters = new Set<ActorId>();
   const tracing = { trace: clearTrace };
   const host: Q2FoundationHost = {
@@ -71,7 +71,7 @@ function fixture(edition: Q2Edition, frameSeconds = 0.1) {
     target(x: number) {
       const target = game.create("monster_soldier");
       game.move(target, { origin: { x, y: 0, z: 0 }, bounds: { min: zero, max: zero } });
-      combat.create(target.actor, { health: 500, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+      combat.create(target.actor, { health: 500, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
       monsters.add(target.actor.id);
       return target;
     },

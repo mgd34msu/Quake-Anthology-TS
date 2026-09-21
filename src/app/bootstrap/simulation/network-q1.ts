@@ -86,12 +86,12 @@ export async function createQ1ApplicationServerHost(options: Q1ApplicationServer
         const weaponBits = [4096, 1, 2, 4, 8, 16, 32, 64];
         WEAPONS.forEach((weapon, ordinal) => { if (simulation.inventory.count(player.actor, game.weaponItem(weapon)) > 0)
             items |= weaponBits[ordinal] ?? 0; });
-        if (ui.armor.kind !== 'none')
-            items |= ui.armor.kind === 'q1' && ui.armor.absorption >= 0.8 ? 32768 : ui.armor.kind === 'q1' && ui.armor.absorption >= 0.6 ? 16384 : 8192;
+        if (ui.armor.regular.kind !== 'none')
+            items |= ui.armor.regular.kind === 'q1' && ui.armor.regular.absorption >= 0.8 ? 32768 : ui.armor.regular.kind === 'q1' && ui.armor.regular.absorption >= 0.6 ? 16384 : 8192;
         for (const [powerup, expires] of native.powerups)
             if (expires > game.time)
                 items |= powerup === 'quad' ? 4194304 : powerup === 'invulnerability' ? 1048576 : powerup === 'invisibility' ? 524288 : powerup === 'suit' ? 2097152 : 0;
-        return { kind: 'client-data', weaponAlpha: wide ? ENTALPHA_ENCODE(native.alpha) : 0, data: { viewHeight: movement.viewHeight, idealPitch: state.idealPitch, punchAngles: state.punchAngles, velocity: state.velocity, items, onGround: (state.flags & 512) !== 0, inWater: state.waterLevel >= 2, weaponFrame: native.weaponFrame, armor: ui.armor.kind === 'none' ? 0 : ui.armor.points, weaponModel: index(game.weaponModel(native.weapon, native), models), health: ui.health, ammo: ui.ammo?.count ?? 0, shells: simulation.inventory.count(player.actor, 'q1:ammo/shells'), nails: simulation.inventory.count(player.actor, 'q1:ammo/nails'), rockets: simulation.inventory.count(player.actor, 'q1:ammo/rockets'), cells: simulation.inventory.count(player.actor, 'q1:ammo/cells'), activeWeapon: weaponBits[WEAPONS.findIndex(weapon => weapon === native.weapon)] ?? 0 } };
+        return { kind: 'client-data', weaponAlpha: wide ? ENTALPHA_ENCODE(native.alpha) : 0, data: { viewHeight: movement.viewHeight, idealPitch: state.idealPitch, punchAngles: state.punchAngles, velocity: state.velocity, items, onGround: (state.flags & 512) !== 0, inWater: state.waterLevel >= 2, weaponFrame: native.weaponFrame, armor: ui.armor.regular.kind === 'none' ? 0 : ui.armor.regular.points, weaponModel: index(game.weaponModel(native.weapon, native), models), health: ui.health, ammo: ui.ammo?.count ?? 0, shells: simulation.inventory.count(player.actor, 'q1:ammo/shells'), nails: simulation.inventory.count(player.actor, 'q1:ammo/nails'), rockets: simulation.inventory.count(player.actor, 'q1:ammo/rockets'), cells: simulation.inventory.count(player.actor, 'q1:ammo/cells'), activeWeapon: weaponBits[WEAPONS.findIndex(weapon => weapon === native.weapon)] ?? 0 } };
     };
     interface Routed {
         readonly recipient: ActorId | null;

@@ -73,7 +73,7 @@ function world() {
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: () => ({ arithmetic: "binary32", quad: false, teamplay: 0, walk: false, momentumDirection: null }),
     armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary32", q2: { product: "classic", ctf: false, alive: true } })) }));
   const target = actors.allocate("q2:game", "q2:monster");
-  combat.create(target, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(target, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   return { actors, callbacks, combat, target, outcomes };
 }
 

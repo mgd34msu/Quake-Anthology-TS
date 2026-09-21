@@ -53,7 +53,7 @@ async function session(pack: Q1MissionPack, edition: "classic" | "rerelease" = "
   function player(slot: number) {
     const owner = actors.allocateAtSource("q3:character", slot, "q3:sarge");
     bodies.create(owner, { origin: vadd(origin, { x: 64 * (slot - 1), y: 0, z: 0 }), angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(owner, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
+    combat.create(owner, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
     const state = game.attachPlayer(owner); players.push(owner.id); return state;
   }
   function think(entity: import("../../../../src/content/q1/foundation/entity.ts").Q1Actor, time = entity.nextThink) { pending.delete(entity.actor); callbacks.think(entity.actor, { frame: Math.floor(time * 10), time: { kind: "seconds", value: time }, elapsed: { kind: "seconds", value: 0.1 }, phase: "entity-think" }); }

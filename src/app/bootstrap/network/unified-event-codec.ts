@@ -927,22 +927,29 @@ type EventDamageMutationArmor = Extract<EventDamageMutation, { readonly kind: "a
 
 type EventArmorState = EventDamageMutationArmor["before"];
 
-type EventArmorStateQ2 = Extract<EventArmorState, { readonly kind: "q2" }>;
-type EventArmorStateQ2PowerArmor = EventArmorStateQ2["powerArmor"];
+type EventRegularArmorState = EventArmorState["regular"];
+type EventPoweredProtectionState = EventArmorState["powered"];
 
-function readEventArmorStateQ2PowerArmor(reader: SaveReader, identity: UnifiedIdentityDecoder): EventArmorStateQ2PowerArmor { void identity; switch (reader.field('kind').string()) { case "none": return readEventQ3RailTrailImpactNone(reader, identity);
+function readEventPoweredProtectionState(reader: SaveReader, identity: UnifiedIdentityDecoder): EventPoweredProtectionState { void identity; switch (reader.field('kind').string()) { case "none": return readEventQ3RailTrailImpactNone(reader, identity);
 case "screen": case "shield": return ({ "kind": reader.field("kind").choice<"screen" | "shield">("screen", "shield"), "cells": reader.field("cells").finite() }); default: return reader.fail('unknown event variant'); } }
-function writeEventArmorStateQ2PowerArmor(value: EventArmorStateQ2PowerArmor): unknown { switch (value.kind) { case "none": return writeEventQ3RailTrailImpactNone(value);
+function writeEventPoweredProtectionState(value: EventPoweredProtectionState): unknown { switch (value.kind) { case "none": return writeEventQ3RailTrailImpactNone(value);
 case "screen": case "shield": return ({ "kind": value["kind"], "cells": value["cells"] }); } }
 
-function readEventArmorState(reader: SaveReader, identity: UnifiedIdentityDecoder): EventArmorState { void identity; switch (reader.field('kind').string()) { case "none": return readEventQ3RailTrailImpactNone(reader, identity);
+function readEventRegularArmorState(reader: SaveReader, identity: UnifiedIdentityDecoder): EventRegularArmorState { void identity; switch (reader.field('kind').string()) { case "none": return readEventQ3RailTrailImpactNone(reader, identity);
 case "q1": return ({ "kind": reader.field("kind").literal("q1"), "points": reader.field("points").finite(), "absorption": reader.field("absorption").finite(), "item": readItemId(reader.field("item"), identity) });
-case "q2": return ({ "kind": reader.field("kind").literal("q2"), "points": reader.field("points").finite(), "normalProtection": reader.field("normalProtection").finite(), "energyProtection": reader.field("energyProtection").finite(), "item": readItemId(reader.field("item"), identity), "powerArmor": readEventArmorStateQ2PowerArmor(reader.field("powerArmor"), identity) });
+case "q2": return ({ "kind": reader.field("kind").literal("q2"), "points": reader.field("points").finite(), "normalProtection": reader.field("normalProtection").finite(), "energyProtection": reader.field("energyProtection").finite(), "item": readItemId(reader.field("item"), identity) });
 case "q3": return ({ "kind": reader.field("kind").literal("q3"), "points": reader.field("points").finite(), "protection": reader.field("protection").finite() }); default: return reader.fail('unknown event variant'); } }
-function writeEventArmorState(value: EventArmorState): unknown { switch (value.kind) { case "none": return writeEventQ3RailTrailImpactNone(value);
+function writeEventRegularArmorState(value: EventRegularArmorState): unknown { switch (value.kind) { case "none": return writeEventQ3RailTrailImpactNone(value);
 case "q1": return ({ "kind": value["kind"], "points": value["points"], "absorption": value["absorption"], "item": writeItemId(value["item"]) });
-case "q2": return ({ "kind": value["kind"], "points": value["points"], "normalProtection": value["normalProtection"], "energyProtection": value["energyProtection"], "item": writeItemId(value["item"]), "powerArmor": writeEventArmorStateQ2PowerArmor(value["powerArmor"]) });
+case "q2": return ({ "kind": value["kind"], "points": value["points"], "normalProtection": value["normalProtection"], "energyProtection": value["energyProtection"], "item": writeItemId(value["item"]) });
 case "q3": return ({ "kind": value["kind"], "points": value["points"], "protection": value["protection"] }); } }
+
+function readEventArmorState(reader: SaveReader, identity: UnifiedIdentityDecoder): EventArmorState {
+  return { regular: readEventRegularArmorState(reader.field("regular"), identity), powered: readEventPoweredProtectionState(reader.field("powered"), identity) };
+}
+function writeEventArmorState(value: EventArmorState): unknown {
+  return { regular: writeEventRegularArmorState(value.regular), powered: writeEventPoweredProtectionState(value.powered) };
+}
 
 function readEventDamageMutation(reader: SaveReader, identity: UnifiedIdentityDecoder): EventDamageMutation { void identity; switch (reader.field('kind').string()) { case "health": return ({ "kind": reader.field("kind").literal("health"), "before": reader.field("before").finite(), "after": reader.field("after").finite() });
 case "armor": return ({ "kind": reader.field("kind").literal("armor"), "before": readEventArmorState(reader.field("before"), identity), "after": readEventArmorState(reader.field("after"), identity) });

@@ -101,7 +101,7 @@ function fixture(saved?: SavedEntities) {
     player() {
       const actor = actors.allocate("q3:character", "q3:sarge");
       bodies.create(actor, { origin: zero, angles: zero, velocity: zero, ground: null, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } } });
-      combat.create(actor, { health: 1000, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null }); players.push(actor.id); return actor;
+      combat.create(actor, { health: 1000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null }); players.push(actor.id); return actor;
     },
     advance(seconds: number) {
       const elapsed = seconds - now;
@@ -166,7 +166,7 @@ describe("Q2 base entity source behaviors", () => {
     if (bolt === undefined) throw new Error("Target did not fire a blaster projectile");
     expect(bolt.effects).toBe(8);
     const victim = scene.game.create("victim");
-    scene.host.combat.create(victim.actor, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
+    scene.host.combat.create(victim.actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null });
     scene.host.callbacks.touch({ self: bolt.actor, other: victim.actor.id, plane: null, surface: null });
     expect(scene.host.combat.read(victim.actor.id)?.health).toBe(85);
     const outcome = scene.outcomes.at(-1);

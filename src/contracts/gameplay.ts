@@ -55,11 +55,19 @@ export interface DamageRequest {
   readonly delivery: "direct" | "radius";
 }
 
-export type ArmorState =
+export type RegularArmorState =
   | { readonly kind: "none" }
   | { readonly kind: "q1"; readonly points: number; readonly absorption: number; readonly item: ItemId }
-  | { readonly kind: "q2"; readonly points: number; readonly normalProtection: number; readonly energyProtection: number; readonly item: ItemId; readonly powerArmor: { readonly kind: "none" } | { readonly kind: "screen" | "shield"; readonly cells: number } }
+  | { readonly kind: "q2"; readonly points: number; readonly normalProtection: number; readonly energyProtection: number; readonly item: ItemId }
   | { readonly kind: "q3"; readonly points: number; readonly protection: number };
+
+/** Effective protection; held equipment and inactive fuel remain in their inventory/source owner. */
+export type PoweredProtectionState = { readonly kind: "none" } | { readonly kind: "screen" | "shield"; readonly cells: number };
+
+export interface ArmorState {
+  readonly regular: RegularArmorState;
+  readonly powered: PoweredProtectionState;
+}
 
 export interface CombatState {
   readonly health: number;

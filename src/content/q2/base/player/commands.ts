@@ -291,8 +291,7 @@ function give(context: Q2PlayerContext, args: readonly string[]): undefined {
     if (!all) return undefined;
   }
   if (all || requested === "armor") {
-    const old = game.host.combat.read(entity.actor.id)?.armor;
-    game.host.combat.setArmor(entity.actor, { kind: "q2", item: "q2:item_armor_body", points: 200, normalProtection: 0.8, energyProtection: 0.6, powerArmor: old?.kind === "q2" ? old.powerArmor : { kind: "none" } });
+    game.host.combat.setRegularArmor(entity.actor, { kind: "q2", item: "q2:item_armor_body", points: 200, normalProtection: 0.8, energyProtection: 0.6 });
     if (!all) return undefined;
   }
   if (all || !rerelease && requested === "power shield") {
@@ -333,7 +332,7 @@ function checkPowerArmorAfterGive(context: Q2PlayerContext): void {
   for (let index = 1; index < fields.length; index += 2) if (fields[index] === "autoshield") automatic = Number.parseInt(fields[index + 1] ?? "0", 10) || 0;
   const cells = game.host.inventory.count(entity.actor.id, "q2:ammo_cells");
   const enough = cells !== 0 && (automatic < 0 || (entity.flags & 0x40000000) !== 0 && cells > automatic);
-  const armor = game.host.combat.read(entity.actor.id)?.armor, active = armor?.kind === "q2" && armor.powerArmor.kind !== "none";
+  const armor = game.host.combat.read(entity.actor.id)?.armor, active = armor !== undefined && armor.powered.kind !== "none";
   const shield = game.host.inventory.count(entity.actor.id, "q2:item_power_shield") !== 0 ? "q2:item_power_shield" : "q2:item_power_screen";
   if (active && !enough || !active && automatic !== -1 && enough) items.use(entity.actor, shield, game);
 }

@@ -191,7 +191,7 @@ export function createRereleaseMedicDefinitions(monsters: Q2Monsters, weapons: Q
       const baseHealth = previous?.state.baseHealth ?? maxHealth, healthScaling = previous?.state.healthScaling ?? 1;
       const revived = monsters.respawn(target, game);
       if (initialPowerArmorType === "none") {
-        game.host.combat.setArmor(target.actor, { kind: "none" });
+        game.host.combat.setArmor(target.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
         if (game.host.inventory.has(target.actor.id)) game.host.inventory.configure(target.actor, { item: "q2:monster-power", count: maxPowerArmorPower, capacity: maxPowerArmorPower });
       } else monsterPowerArmor(revived, initialPowerArmorType, maxPowerArmorPower);
       revived.state.initialPowerArmorType = initialPowerArmorType; revived.state.maxPowerArmorPower = maxPowerArmorPower;

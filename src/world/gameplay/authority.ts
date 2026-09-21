@@ -1,4 +1,4 @@
-import type { ArmorState, CombatPolicy, CombatState, DamageAuthority, DamageDecision, DamageMutation, DamageOutcome, DamageRequest } from "../../contracts/gameplay.ts";
+import type { ArmorState, RegularArmorState, PoweredProtectionState, CombatPolicy, CombatState, DamageAuthority, DamageDecision, DamageMutation, DamageOutcome, DamageRequest, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorCallbackTable } from "../actors/callbacks.ts";
@@ -22,6 +22,9 @@ export interface CombatStateBinding {
   read(): CombatState;
   writeHealth(health: number): undefined;
   writeArmor(armor: ArmorState): undefined;
+  /** Reject unsupported source representations before a bound fuel reservoir is changed. */
+  validateArmor?(armor: ArmorState): undefined;
+  normalizeLegacyArmor?(armor: ArmorState): ArmorState;
   /** Present when the source provider exposes mutable traits through this semantic binding. */
   writeTraits?(traits: CombatTraits): undefined;
 }
@@ -36,7 +39,7 @@ export interface GameplayHooks {
 }
 
 export function copyArmor(armor: ArmorState): ArmorState {
-  return armor.kind === "q2" ? Object.freeze({ ...armor, powerArmor: Object.freeze({ ...armor.powerArmor }) }) : Object.freeze({ ...armor });
+  return Object.freeze({ regular: Object.freeze({ ...armor.regular }), powered: Object.freeze({ ...armor.powered }) });
 }
 
 export function copyCombat(state: CombatState): CombatState { return Object.freeze({ ...state, armor: copyArmor(state.armor) }); }
@@ -49,14 +52,27 @@ export function captureRequest(request: DamageRequest): DamageRequest {
     direction: copyVector(request.direction), point: copyVector(request.point), normal: copyVector(request.normal) });
 }
 
-function armorEqual(left: ArmorState, right: ArmorState): boolean {
+function regularArmorEqual(left: RegularArmorState, right: RegularArmorState): boolean {
   switch (left.kind) {
     case "none": return right.kind === "none";
     case "q1": return right.kind === "q1" && left.points === right.points && left.absorption === right.absorption && left.item === right.item;
-    case "q2": return right.kind === "q2" && left.points === right.points && left.normalProtection === right.normalProtection && left.energyProtection === right.energyProtection && left.item === right.item &&
-      left.powerArmor.kind === right.powerArmor.kind && (left.powerArmor.kind === "none" || (right.powerArmor.kind !== "none" && left.powerArmor.cells === right.powerArmor.cells));
+    case "q2": return right.kind === "q2" && left.points === right.points && left.normalProtection === right.normalProtection && left.energyProtection === right.energyProtection && left.item === right.item;
     case "q3": return right.kind === "q3" && left.points === right.points && left.protection === right.protection;
   }
+}
+
+function armorEqual(left: ArmorState, right: ArmorState): boolean {
+  return regularArmorEqual(left.regular, right.regular) && left.powered.kind === right.powered.kind
+    && (left.powered.kind === "none" || right.powered.kind !== "none" && left.powered.cells === right.powered.cells);
+}
+
+/** Old power-only views fabricated regular armor using this exact source-owned item. */
+export function normalizeLegacyPowerOnlyArmor(legacy: ArmorState, current: ArmorState, placeholder: ItemId): ArmorState {
+  const regular = legacy.regular;
+  return current.regular.kind === "none" && regular.kind === "q2" && regular.item === placeholder
+    && regular.points === 0 && regular.normalProtection === 0 && regular.energyProtection === 0
+    && legacy.powered.kind === current.powered.kind && legacy.powered.kind !== "none" && current.powered.kind !== "none"
+    && legacy.powered.cells === current.powered.cells ? { ...legacy, regular: { kind: "none" } } : legacy;
 }
 
 function captureDecision(proposed: DamageDecision, request: DamageRequest): DamageDecision {
@@ -146,6 +162,28 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   setArmor(actor: OwnedActor, armor: ArmorState): undefined { return this.writeArmor(actor, this.binding(actor), armor); }
+
+  normalizeLegacyArmor(actor: OwnedActor, armor: ArmorState): ArmorState {
+    return this.binding(actor).normalizeLegacyArmor?.(armor) ?? armor;
+  }
+
+  setRegularPoints(actor: OwnedActor, points: number): undefined {
+    if (!Number.isFinite(points)) throw new RangeError("Armor points must be finite");
+    const binding = this.binding(actor), armor = this.readState(actor, binding).armor;
+    if (armor.regular.kind === "none") throw new Error("Armor points require an explicit regular armor selection");
+    return this.writeArmor(actor, binding, { ...armor, regular: { ...armor.regular, points } });
+  }
+
+  setRegularArmor(actor: OwnedActor, regular: RegularArmorState): undefined {
+    const binding = this.binding(actor);
+    return this.writeArmor(actor, binding, { ...this.readState(actor, binding).armor, regular });
+  }
+
+  setPoweredProtection(actor: OwnedActor, powered: PoweredProtectionState): undefined {
+    const binding = this.binding(actor);
+    return this.writeArmor(actor, binding, { ...this.readState(actor, binding).armor, powered });
+  }
+
 
   setTraits(actor: OwnedActor, changes: Partial<CombatTraits>): undefined {
     const binding = this.binding(actor);
@@ -312,13 +350,14 @@ export class GameplayAuthority implements DamageAuthority {
   private readState(actor: OwnedActor, binding: CombatStateBinding): CombatState {
     const state = binding.read();
     const cells = this.powerArmorCells.get(actor);
-    if (cells === undefined || state.armor.kind !== "q2" || state.armor.powerArmor.kind === "none") return copyCombat(state);
-    return copyCombat({ ...state, armor: { ...state.armor, powerArmor: { ...state.armor.powerArmor, cells: cells.read() } } });
+    if (cells === undefined || state.armor.powered.kind === "none") return copyCombat(state);
+    return copyCombat({ ...state, armor: { ...state.armor, powered: { ...state.armor.powered, cells: cells.read() } } });
   }
 
   private writeArmor(actor: OwnedActor, binding: CombatStateBinding, armor: ArmorState): undefined {
+    binding.validateArmor?.(armor);
     const cells = this.powerArmorCells.get(actor);
-    if (cells !== undefined && armor.kind === "q2" && armor.powerArmor.kind !== "none") cells.write(armor.powerArmor.cells);
+    if (cells !== undefined && armor.powered.kind !== "none" && cells.read() !== armor.powered.cells) cells.write(armor.powered.cells);
     return binding.writeArmor(copyArmor(armor));
   }
 

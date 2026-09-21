@@ -82,7 +82,7 @@ export function throwGib(self: Q2Entity, game: Q2GameServices, model: string, da
     : { x: game.host.random() * 600, y: game.host.random() * 600, z: game.host.random() * 600 };
   const angles = rerelease ? { x: game.host.random() * 359, y: game.host.random() * 359, z: game.host.random() * 359 } : game.body(gib).angles;
   game.move(gib, { origin, velocity: clipped, angles, bounds: { min: zero, max: zero }, ground: null }, false);
-  if (game.host.combat.read(gib.actor.id) === null) game.host.combat.create(gib.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+  if (game.host.combat.read(gib.actor.id) === null) game.host.combat.create(gib.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
   else game.host.combat.setTraits(gib.actor, { canTakeDamage: true });
   gib.die = gibDie;
   gib.pain = null;

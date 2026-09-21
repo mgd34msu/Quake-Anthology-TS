@@ -138,7 +138,7 @@ export class Id1DamageBinding {
     const items = Math.trunc(words.float(this.items));
     const [green, yellow, red] = this.binding.armorMasks;
     const item = (items & red) !== 0 ? "q1:item_armorInv" : (items & yellow) !== 0 ? "q1:item_armor2" : (items & green) !== 0 ? "q1:item_armor1" : null;
-    return item === null ? { kind: "none" } : { kind: "q1", points: words.float(this.armorValue), absorption: words.float(this.armorType), item };
+    return { regular: item === null ? { kind: "none" } : { kind: "q1", points: words.float(this.armorValue), absorption: words.float(this.armorType), item }, powered: { kind: "none" } };
   }
   observeCall(call: QcCallSite): undefined {
     const frame = this.active.at(-1);

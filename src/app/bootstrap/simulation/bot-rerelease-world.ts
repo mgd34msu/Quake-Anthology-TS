@@ -58,7 +58,7 @@ export function createRereleaseBotWorld(options: RereleaseWorldOptions, actor: A
       }
       return { id: options.identify(actor), origin: body.origin, velocity: body.velocity, viewAngles: movement.viewAngles,
         eye: { ...body.origin, z: body.origin.z + movement.viewHeight }, health: ui.health,
-        armor: ui.armor.kind === "none" ? 0 : ui.armor.points, items, ammo, currentWeapon,
+        armor: ui.armor.regular.kind === "none" ? 0 : ui.armor.regular.points, items, ammo, currentWeapon,
         onGround: body.ground !== null, onLift: groundClass === "func_plat" || groundClass === "func_plat2" || groundClass === "func_train",
         waterLevel: movement.waterLevel, team: objectives.team(actor), dead: ui.health <= 0,
         hasProtection: simulation.combat.read(actor)?.invulnerable ?? false, carryingObjective: objectives.carrying(actor) };

@@ -28,7 +28,7 @@ export function giveQ1(source: Q1SourceComposition, actor: ActorId, args: readon
   }
   if (all || input === "armor" || input === "a") {
     const points = amount ?? (input === "a" ? 0 : 200);
-    game.host.combat.setArmor(player.actor, points <= 0 ? { kind: "none" } : { kind: "q1", points,
+    game.host.combat.setRegularArmor(player.actor, points <= 0 ? { kind: "none" } : { kind: "q1", points,
       absorption: points > 150 ? 0.8 : points > 100 ? 0.6 : 0.3,
       item: points > 150 ? "q1:item_armorInv" : points > 100 ? "q1:item_armor2" : "q1:item_armor1" });
     if (!all) return undefined;

@@ -19,7 +19,7 @@ function bindPowerArmor(context: MonsterContext): undefined {
 function screen(context: MonsterContext, active: boolean): undefined {
   const { entity, game } = context;
   const cells = game.host.inventory.count(entity.actor.id, "q2:monster-power");
-  return game.host.combat.setArmor(entity.actor, { kind: "q2", points: 0, normalProtection: 0, energyProtection: 0, item: "q2:monster-power-screen", powerArmor: active ? { kind: "screen", cells } : { kind: "none" } });
+  return game.host.combat.setPoweredProtection(entity.actor, active ? { kind: "screen", cells } : { kind: "none" });
 }
 const stand = move("brain_move_stand");
 function run(context: MonsterContext): undefined { screen(context, true); return context.setMove(context.state.standGround ? "brain_move_stand" : "brain_move_run"); }

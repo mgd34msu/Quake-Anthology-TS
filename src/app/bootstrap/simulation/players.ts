@@ -225,6 +225,14 @@ export class MovementPlayer {
     }
   }
 
+  setSourceViewRoll(roll: number): void {
+    this.host.actors.assertOwned(this.actor);
+    this.viewAngles = { ...this.viewAngles, z: Math.fround(roll) };
+    const state = this.state;
+    if (state.kind === "q1-netquake" || state.kind === "q3") this.state = { ...state, viewAngles: { ...state.viewAngles, z: this.viewAngles.z } };
+    else if (state.kind === "q1-quakeworld") this.state = { ...state, angles: { ...state.angles, z: this.viewAngles.z } };
+  }
+
   view(): PlayerView {
     const body = this.host.bodies.read(this.actor.id);
     if (body === null) throw new Error("Player no longer has a body");

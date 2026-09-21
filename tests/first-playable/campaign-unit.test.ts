@@ -23,7 +23,7 @@ function recipe(): ExecutableRecipe {
 }
 function image(map: string, state: string): SaveImage {
   const source = recipe(), geometry = { ...source.map.geometry, requestedPath: `maps/${map}.bsp` };
-  return { schemaVersion: 2, recipe: { ...source, map: { ...source.map, geometry } }, frame: { frame: 1, time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
+  return { schemaVersion: 3, recipe: { ...source, map: { ...source.map, geometry } }, frame: { frame: 1, time: { kind: "seconds", value: 1 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" },
     nextEventSequence: 1, clocks: [], random: [], actors: [], bodies: [], combat: [], inventories: [], configurations: [], thinks: [], guests: [],
     providers: [{ provider: "q1:game", schema: "q1:world", version: 1, bytes: encodeCheckpointValue({ state }) }] };
 }

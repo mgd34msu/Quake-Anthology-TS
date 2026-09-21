@@ -118,7 +118,9 @@ export interface ProviderCheckpoint {
 
 export interface SaveImage {
   readonly mods?: import("./mods.ts").ModSessionCheckpoint;
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
+  /** Version 2 armor placeholders still need source-owner normalization during restore. */
+  readonly legacyArmorLayout?: true;
   readonly recipe: ExecutableRecipe;
   readonly frame: FrameContext;
   readonly nextEventSequence: number;

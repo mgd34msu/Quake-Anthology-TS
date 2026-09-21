@@ -238,7 +238,7 @@ export class Q1EntityServices {
     const owner = this.host.actors.allocateAtSource(this.provider, slot, `q1:${classname}`);
     const entity = new Q1Actor(owner, classname, sourceOrdinal, this.host.combat, source);
     this.host.bodies.create(owner, { origin: source === undefined ? ZERO : entity.vector("origin"), angles: source === undefined ? ZERO : sourceAngles(source), velocity: ZERO, bounds: POINT, ground: null });
-    this.host.combat.create(owner, { health: entity.maxHealth, armor: { kind: "none" }, mass: 100, canTakeDamage: false, invulnerable: false, team: null });
+    this.host.combat.create(owner, { health: entity.maxHealth, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: false, invulnerable: false, team: null });
     return this.admitEntity(entity);
   }
   /** Attaches source continuation to existing shared state without running a spawn function. */

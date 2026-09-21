@@ -15,7 +15,7 @@ import { brainFrame, brainMoves } from "../tables/brain.ts";
 
 function screen(context: MonsterContext, active: boolean): undefined {
   const { entity, game } = context, cells = game.host.inventory.count(entity.actor.id, "q2:monster-power");
-  return game.host.combat.setArmor(entity.actor, { kind: "q2", points: 0, normalProtection: 0, energyProtection: 0, item: "q2:monster-power", powerArmor: active ? { kind: "screen", cells } : { kind: "none" } });
+  return game.host.combat.setPoweredProtection(entity.actor, active ? { kind: "screen", cells } : { kind: "none" });
 }
 function run(context: MonsterContext): undefined { screen(context, true); return context.setMove(context.state.standGround ? "brain_move_stand" : "brain_move_run"); }
 function tongueAllowed(start: Vec3, end: Vec3): boolean {

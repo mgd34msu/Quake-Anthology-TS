@@ -20,7 +20,7 @@ function character() {
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: (_actor, decision) => {
     decisions.push(decision); return undefined;
   }, confirmed: outcome => { if (outcome.kind === "committed") controller.recordDamage(outcome.decision); return undefined; } });
-  combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   combat.register(createQ2CombatPolicy({ id: "q2:combat", armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } })),
     context: () => ({ arithmetic: "binary64", player: true, monster: false, attackerPlayer: false, hasEnemy: false, easySkill: false,
       deathmatch: false, defenderSphere: false, teamDamageEnabled: false, friendlyFire: false, nuke: false, noKnockback: true,
@@ -62,11 +62,11 @@ test("Q2 character preserves foreign shared actor/body/inventory and uses source
 
 test("Q2 character feeds exact shield savings and sends one death to the selected campaign", () => {
   const game = character();
-  game.combat.setArmor(game.actor, { kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0.3, energyProtection: 0, powerArmor: { kind: "shield", cells: 10 } });
+  game.combat.setArmor(game.actor, { regular: { kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0.3, energyProtection: 0 }, powered: { kind: "shield", cells: 10 } });
   game.host.environmentDamage(game.actor, 5, 1, 0);
   expect(game.controller.state.damagePowerArmor).toBe(3);
   expect(game.controller.state.damageBlood).toBe(2);
-  game.combat.setArmor(game.actor, { kind: "none" });
+  game.combat.setArmor(game.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
   game.host.environmentDamage(game.actor, 110, 1, 0);
   expect(game.controller.state.dead).toBe(true);
   expect(game.deaths()).toBe(1);
@@ -205,7 +205,7 @@ test("Q2 rerelease give all upgrades ammo, grants eight keys, excludes protected
   expect(shared.inventory.count(entity.actor.id, "q2:ammo_cells")).toBe(300);
   expect(shared.inventory.count(entity.actor.id, "q2:key_power_cube")).toBe(8); expect(entity.powerCubes).toBe(255);
   expect(shared.inventory.count(entity.actor.id, "q2:item_power_shield")).toBe(1);
-  expect(shared.combat.read(entity.actor.id)?.armor).toMatchObject({ kind: "q2", points: 200 });
+    expect(shared.combat.read(entity.actor.id)?.armor).toMatchObject({ regular: { kind: "q2", points: 200 } });
   for (const id of ["q2:item_flag_team1", "q2:item_tech1", "q2:dm_tag_token", "q2:item_compass"] satisfies readonly ItemId[]) expect(shared.inventory.count(entity.actor.id, id)).toBe(0);
   give("item_compass"); expect(shared.inventory.count(entity.actor.id, "q2:item_compass")).toBe(1);
   give("Tag Token"); expect(events.at(-1)).toMatchObject({ kind: "print", text: "Item is not giveable.\n" });

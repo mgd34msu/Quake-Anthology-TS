@@ -22,7 +22,7 @@ function packInventory(game: Q1EntityServices, pack: Q1MissionPack): readonly In
 export function newMissionPackTravel(game: Q1EntityServices, pack: Q1MissionPack): Q1TravelState {
   const base = newQ1Travel(game.options), inventory = [...base.inventory, ...packInventory(game, pack)];
   return pack === "rogue" && game.options.deathmatch !== 0 && (game.options.teamplay ?? 0) >= 4 ?
-    { ...base, inventory, armor: { kind: "q1", points: 50, absorption: 0.3, item: "q1:armor/green" } } : { ...base, inventory };
+    { ...base, inventory, armor: { ...base.armor, regular: { kind: "q1", points: 50, absorption: 0.3, item: "q1:armor/green" } } } : { ...base, inventory };
 }
 export function captureMissionPackTravel(game: Q1EntityServices, actor: OwnedActor, pack: Q1MissionPack): Q1TravelState {
   if (game.health(actor.id) <= 0 || game.options.edition === "rerelease" && game.options.deathmatch !== 0 || pack === "rogue" && (game.options.teamplay ?? 0) >= 4) return newMissionPackTravel(game, pack);

@@ -51,7 +51,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
   const inventory = new SharedInventoryTable(actors);
   const player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(player, { origin: zero, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null });
-  combat.create(player, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   const ammo: readonly InventoryEntry[] = ["shells", "bullets", "grenades", "rockets", "cells", "slugs"].map(kind => ({ item: `q2:ammo_${kind}`, count: 200, capacity: 200 }));
   inventory.create(player, [...ammo, ...Q2_BASE_WEAPONS.filter(weapon => weapon.name !== "grenades").map(weapon => ({ item: weapon.item, count: 1, capacity: 1 }))]);
   const monsters = new Set<ActorId>();
@@ -83,7 +83,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
     target(x: number) {
       const target = game.create("monster_soldier");
       game.move(target, { origin: { x, y: 0, z: 0 }, bounds: { min: zero, max: zero } });
-      combat.create(target.actor, { health: 500, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+      combat.create(target.actor, { health: 500, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
       monsters.add(target.actor.id);
       return target;
     },
@@ -446,7 +446,7 @@ test("Q2 weapon ownership fires and restores without a source player entity", ()
   const body = scene.bodies.read(scene.player.id);
   if (body === null) throw new Error("Missing shared body");
   scene.bodies.create(actor, { ...body, origin: { x: 128, y: 0, z: 0 } });
-  scene.combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  scene.combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   scene.inventory.create(actor, scene.inventory.entries(scene.player.id));
   const owner = { actor, viewHeight: 22 }, weapons = new Q2Weapons(scene.weapons.hooks);
   const state = weapons.bind(owner, scene.game, new Q2WeaponState("blaster"));

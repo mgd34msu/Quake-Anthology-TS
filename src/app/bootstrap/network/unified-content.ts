@@ -89,14 +89,14 @@ export function createUnifiedComposition(recipe: ExecutableRecipe, sidecars: rea
     if (sidecarKeys.has(key)) throw new Error('Repeated unified map sidecar');
     sidecarKeys.add(key);
   }
-  const composition = { schemaVersion: 1, recipe: normalized, snapshotSchema: 'qts:snapshot-v1', actorConfigurations: [], sidecars: checked } satisfies UnifiedCompositionIdentity['composition'];
+  const composition = { schemaVersion: 1, recipe: normalized, snapshotSchema: 'qts:snapshot-v2', actorConfigurations: [], sidecars: checked } satisfies UnifiedCompositionIdentity['composition'];
   const identity = compositionIdentity(composition);
   return { ...identity, composition: { ...identity.composition, sidecars: checked } };
 }
 
 export function readUnifiedComposition(value: unknown): UnifiedCompositionIdentity {
   const reader = new SaveReader(value, 'unified.composition'), composition = reader.field('composition');
-  composition.field('schemaVersion').literal(1); composition.field('snapshotSchema').literal('qts:snapshot-v1');
+  composition.field('schemaVersion').literal(1); composition.field('snapshotSchema').literal('qts:snapshot-v2');
   if (composition.field('actorConfigurations').list(entry => entry.value).length !== 0) return composition.fail('actor configurations are negotiated by frame');
   const recipe = readRecipe(composition.field('recipe')), sidecars = readSidecars(composition.field('sidecars')), identity = createUnifiedComposition(recipe, sidecars);
   const parsed = compositionIdentity({ ...identity.composition, recipe });

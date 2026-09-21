@@ -1,3 +1,4 @@
+import { normalizeLegacyPowerOnlyArmor } from "../../../world/gameplay/authority.ts";
 import type { GuestAddress, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ArmorState, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
@@ -30,22 +31,27 @@ export class ClassicCombatBindings {
   private count(client: GuestAddress, index: number): number { return this.host.memory.readInt32(this.host.memory.offset(client, BigInt(this.profile.client.inventory + index * 4))); }
   private armor(view: RawEntityView): ArmorState {
     const { memory } = this.host, client = this.client(view), { items, globals } = this.profile;
-    if (client === null) return { kind: "none" };
+    if (client === null) return { regular: { kind: "none" }, powered: { kind: "none" } };
     const index = [items.jacket, items.combat, items.body].find(index => this.count(client, index) > 0);
     const powered = (memory.readInt32(this.at(view, this.profile.fields.flags)) & 4096) !== 0;
     const power = !powered ? null : this.count(client, items.shield) > 0 ? "shield" : this.count(client, items.screen) > 0 ? "screen" : null;
-    if (index === undefined && power === null) return { kind: "none" };
+    if (index === undefined && power === null) return { regular: { kind: "none" }, powered: { kind: "none" } };
     const item = index === undefined ? null : this.entry(globals.itemList + index * globals.itemBytes);
     const classname = item === null ? "none" : readClassicString(memory, memory.readPointer(item));
     const info = item === null ? null : memory.readPointer(memory.offset(item, 64n));
-    return { kind: "q2", item: `q2:${classname}`, points: index === undefined ? 0 : this.count(client, index),
-      normalProtection: info === null ? 0 : memory.readFloat32(memory.offset(info, 8n)), energyProtection: info === null ? 0 : memory.readFloat32(memory.offset(info, 12n)),
-      powerArmor: power === null ? { kind: "none" } : { kind: power, cells: this.count(client, items.cells) } };
+    return { regular: index === undefined ? { kind: "none" } : { kind: "q2", item: `q2:${classname}`, points: this.count(client, index),
+      normalProtection: info === null ? 0 : memory.readFloat32(memory.offset(info, 8n)), energyProtection: info === null ? 0 : memory.readFloat32(memory.offset(info, 12n)) },
+      powered: power === null ? { kind: "none" } : { kind: power, cells: this.count(client, items.cells) } };
   }
   bind(view: RawEntityView, actor: OwnedActor): undefined {
     const { host, profile } = this, { memory } = host, engine = host.options.services.engine;
     if (view.strideBytes !== profile.entityBytes) throw new Error("Native combat declaration differs from the source edict stride");
-    const binding: CombatStateBinding = { sourceDamage: request => this.damage(request, view), read: () => {
+    const validateArmor = (armor: ArmorState): undefined => {
+      if (armor.regular.kind !== "none" && armor.regular.kind !== "q2") throw new Error("Source armor requires Q2 armor values");
+      if (armor.powered.kind !== this.armor(view).powered.kind) throw new Error("Native power activation requires its original source equipment operation");
+      return undefined;
+    };
+    const binding: CombatStateBinding = { validateArmor, normalizeLegacyArmor: armor => normalizeLegacyPowerOnlyArmor(armor, this.armor(view), "q2:none"), sourceDamage: request => this.damage(request, view), read: () => {
       const client = this.client(view), flags = memory.readInt32(this.at(view, profile.fields.flags)), cvars = host.options.services.cvars;
       const skin = client === null ? "" : infoValueForKey(readClassicString(memory, memory.offset(client, BigInt(profile.client.userinfo)), 512), "skin"), rules = cvars.variableValue("dmflags") | 0;
       const team = client === null ? null : cvars.variableValue("coop") !== 0 ? "q2:coop" : (rules & 64) !== 0 ? `q2:model:${skin.split("/")[0] ?? ""}` : (rules & 128) !== 0 ? `q2:skin:${skin.split("/")[1] ?? ""}` : null;
@@ -53,11 +59,16 @@ export class ClassicCombatBindings {
         mass: memory.readInt32(this.at(view, profile.fields.mass)), armor: this.armor(view), team, noKnockback: (flags & 2048) !== 0,
         invulnerable: (flags & 16) !== 0 || client !== null && memory.readFloat32(memory.offset(client, BigInt(profile.client.invincibleFrame))) > memory.readInt32(this.entry(profile.globals.levelFrame)) };
     }, writeHealth: health => memory.writeInt32(this.at(view, profile.fields.health), health), writeArmor: armor => {
-      const client = this.client(view); if (client === null) { if (armor.kind !== "none") throw new Error("Source non-client has no inventory armor"); return undefined; }
-      if (armor.kind !== "none" && armor.kind !== "q2") throw new Error("Source armor requires Q2 armor values");
-      for (const [name, index] of [["q2:item_armor_jacket", profile.items.jacket], ["q2:item_armor_combat", profile.items.combat], ["q2:item_armor_body", profile.items.body]] satisfies readonly (readonly [ItemId, number])[])
-        memory.writeInt32(memory.offset(client, BigInt(profile.client.inventory + index * 4)), armor.kind === "q2" && armor.item === name ? armor.points : 0);
-      if (armor.kind === "q2" && armor.powerArmor.kind !== "none") memory.writeInt32(memory.offset(client, BigInt(profile.client.inventory + profile.items.cells * 4)), armor.powerArmor.cells);
+      validateArmor(armor);
+      const client = this.client(view); if (client === null) { if (armor.regular.kind !== "none" || armor.powered.kind !== "none") throw new Error("Source non-client has no inventory armor"); return undefined; }
+      if (armor.regular.kind !== "none" && armor.regular.kind !== "q2") throw new Error("Source armor requires Q2 armor values");
+      const current = this.armor(view).regular;
+      for (const [name, index] of [["q2:item_armor_jacket", profile.items.jacket], ["q2:item_armor_combat", profile.items.combat], ["q2:item_armor_body", profile.items.body]] satisfies readonly (readonly [ItemId, number])[]) {
+        if (armor.regular.kind === "q2" && current.kind === "q2" && armor.regular.item === current.item && name !== current.item) continue;
+        const address = memory.offset(client, BigInt(profile.client.inventory + index * 4)), count = armor.regular.kind === "q2" && armor.regular.item === name ? armor.regular.points : 0;
+        if (memory.readInt32(address) !== count) memory.writeInt32(address, count);
+      }
+      if (armor.powered.kind !== "none") memory.writeInt32(memory.offset(client, BigInt(profile.client.inventory + profile.items.cells * 4)), armor.powered.cells);
       return undefined;
     } };
     engine.combat.bind(actor, binding); return undefined;

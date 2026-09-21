@@ -18,7 +18,7 @@ export function newQ1Travel(options: Pick<Q1FoundationOptions, "edition" | "skil
   const inventory: InventoryEntry[] = WEAPONS.map(weapon => ({ item: weaponItem(weapon), count: weapon === "axe" || weapon === "shotgun" ? 1 : 0, capacity: 1 }));
   inventory.push({ item: "q1:ammo/shells", count: 25, capacity: 100 }, { item: "q1:ammo/nails", count: 0, capacity: 200 }, { item: "q1:ammo/rockets", count: 0, capacity: 100 }, { item: "q1:ammo/cells", count: 0, capacity: 100 }, { item: "q1:key/silver", count: 0, capacity: 1 }, { item: "q1:key/gold", count: 0, capacity: 1 });
   const health = options.edition === "rerelease" && options.skill === 3 && options.deathmatch === 0 ? 50 : 100;
-  return { health, maxHealth: health, armor: { kind: "none" }, inventory, weapon: "shotgun", extensions: [] };
+  return { health, maxHealth: health, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, inventory, weapon: "shotgun", extensions: [] };
 }
 /** Captures source travel policy without changing the departing actor. */
 export function captureQ1Travel(game: Q1EntityServices, actor: OwnedActor, weapon: Q1Weapon = game.player(actor.id)?.weapon ?? "shotgun", maxHealth = game.player(actor.id)?.maxHealth ?? 100, policy: { readonly resetInDeathmatch?: boolean } = {}): Q1TravelState {

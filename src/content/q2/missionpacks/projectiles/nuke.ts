@@ -85,7 +85,7 @@ export class Q2MissionPackNuke extends Q2MissionPackMines {
     game.move(bomb, { angles: zero, bounds: { min: { x: -8, y: -8, z: 0 }, max: { x: 8, y: 8, z: 16 } } }, false);
     bomb.damage = 400 * multiplier; bomb.damageRadius = multiplier === 1 ? 512 : 512 + 128 * multiplier;
     bomb.wait = game.host.now() + 10; bomb.die = this.nukeDie; bomb.touch = this.nukeBounce;
-    game.host.combat.create(bomb.actor, { health: 10000, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+    game.host.combat.create(bomb.actor, { health: 10000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
     game.schedule(bomb, game.host.frameSeconds(), this.nukeThink); publishProjectile(bomb, game, "", { weapon: "q2:ammo_nuke", role: "grenade" }); return bomb;
   }
 }

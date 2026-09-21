@@ -66,7 +66,7 @@ for (const edition of ["classic", "rerelease"] satisfies readonly ("classic" | "
       player.commit({ ...shooterState, origin, oldOrigin: origin, angles: { x: 0, y: yaw, z: 0 }, viewAngles: { x: 0, y: yaw, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, ground: { kind: "none" }, flags: shooterState.flags & ~512 }, true, false);
       const targetOrigin = { x: origin.x + Math.cos(yaw * Math.PI / 180) * distance, y: origin.y + Math.sin(yaw * Math.PI / 180) * distance, z: origin.z };
       victim.commit({ ...targetState, origin: targetOrigin, oldOrigin: targetOrigin, velocity: { x: 0, y: 0, z: 0 }, ground: { kind: "none" }, flags: targetState.flags & ~512 }, true, false);
-      simulation.combat.setHealth(victim.actor, 1000); simulation.combat.setArmor(victim.actor, { kind: "none" });
+      simulation.combat.setHealth(victim.actor, 1000); simulation.combat.setArmor(victim.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
     };
     for (const weapon of weapons) {
       for (let i = 0; i < 12 && game.time < native.attackFinished; i++) step();

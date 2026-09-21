@@ -45,7 +45,7 @@ function acidGib(context: MonsterContext, part: string, damage: number, head = f
   const velocity = add(body.velocity, scale(impulse, head ? 0.5 : 3));
   gib.angularVelocity = head ? { ...gib.angularVelocity, y: crandom() * 600 } : { x: random() * 600, y: random() * 600, z: random() * 600 };
   game.move(gib, { origin, velocity: { x: Math.max(-300, Math.min(300, velocity.x)), y: Math.max(-300, Math.min(300, velocity.y)), z: Math.max(200, Math.min(500, velocity.z)) }, bounds: { min: zero, max: zero } }, false);
-  if (game.host.combat.read(gib.actor.id) === null) game.host.combat.create(gib.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+  if (game.host.combat.read(gib.actor.id) === null) game.host.combat.create(gib.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
   else game.host.combat.setTraits(gib.actor, { canTakeDamage: true });
   gib.die = gibDie; game.motion(gib, "toss"); game.solid(gib, "box"); game.schedule(gib, 10 + random() * 10, freeQ2Entity); game.show(gib);
   return undefined;

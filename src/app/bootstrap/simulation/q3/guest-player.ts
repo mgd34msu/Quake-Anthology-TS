@@ -19,7 +19,7 @@ export function q3GuestPlayerUi(state: Q3PlayerState, source: ProviderReference,
   if (state.weapon !== 0 && !definitions.some(definition => definition.weapon === state.weapon))
     throw new Error(`Q3 guest weapon ${state.weapon} is missing from its item catalog; this mod needs a qvm-items.json declaration`);
   const armor = state.stats[stats.armor] ?? 0;
-  return { powerups: q3PublicPowerupTimers(powerup => state.powerups[powerup] ?? 0, nowMilliseconds), health: state.stats[stats.health] ?? 0, armor: armor === 0 ? { kind: "none" } : { kind: "q3", points: armor, protection: Math.fround(0.66) },
+  return { powerups: q3PublicPowerupTimers(powerup => state.powerups[powerup] ?? 0, nowMilliseconds), health: state.stats[stats.health] ?? 0, armor: { powered: { kind: "none" }, regular: armor === 0 ? { kind: "none" } : { kind: "q3", points: armor, protection: Math.fround(0.66) } },
     activeWeapon: weapon?.item ?? null, ammo: weapon === undefined || weapon.ammo === null ? null : { item: weapon.ammo, count: state.ammo[weapon.weapon] ?? 0 },
     inventory: definitions.flatMap(value => [{ item: value.item, count: count(value.item), capacity: 1 }, ...(value.ammo === null ? [] : [{ item: value.ammo, count: count(value.ammo), capacity: 200 }])]),
     weaponStatus: weapon === undefined ? null : { source, item: weapon.item, label: weapon.label,

@@ -72,7 +72,7 @@ async function session(pack: "hipnotic" | "rogue", edition: "classic" | "rerelea
   if (saved === undefined) {
     for (const source of map.entityList) { const classname = q1EntityValue(source, "classname") ?? ""; if (classname === "worldspawn" || classname.startsWith("monster_") || classname === "dragon_corner" || classname === "path_corner") initial.game.spawnEntity(initial.game.create(classname, source)); }
     player = actors.allocateAtSource("q3:character", 1, "q3:sarge"); bodies.create(player, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(player, { health: 1000, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); initial.game.attachPlayer(player);
+    combat.create(player, { health: 1000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); initial.game.attachPlayer(player);
   } else {
     const actor = actors.atSource("q3:character", 1); if (actor === null) throw new Error("Missing saved foreign player"); player = actor;
     const owner = (id: BodyCheckpoint["actor"]): OwnedActor => { const actor = actors.resolveSaved(id); if (actor === null) throw new Error("Missing saved actor"); return actor; };

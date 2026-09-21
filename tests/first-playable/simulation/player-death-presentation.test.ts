@@ -64,7 +64,7 @@ for (const movement of ["q1", "q2", "q3"]) for (const character of ["q1", "q2", 
       for (let frame = 0; frame < 5; frame++) simulation.step({ elapsedMilliseconds: 100, commands: [] });
       const source = simulation.q2Source(), player = simulation.movementPlayer(actor), body = simulation.bodies.read(actor);
       if (source === null || player === null || body === null) throw new Error("Missing source player");
-      simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { kind: "none" });
+      simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
       const alive = simulation.playerView(actor);
       expect(alive.angles.z).not.toBe(character === "q1" ? 80 : 40);
       source.game.damage(actor, actor, actor, 100 - health, 0, { x: 0, y: 0, z: 0 }, body.origin, { x: 0, y: 0, z: 0 }, 0);
@@ -121,7 +121,7 @@ for (const [game, map] of [["q1-classic-id1", "e1m1"], ["q3-baseq3", "q3dm1"]]) 
     try {
       const client = identity.client(0, 0), actor = simulation.admitPlayer(client).actor, player = simulation.movementPlayer(actor);
       if (player === null) throw new Error("Missing player");
-      simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { kind: "none" }); simulation.combat.setTraits(player.actor, { invulnerable: false });
+      simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { regular: { kind: "none" }, powered: { kind: "none" } }); simulation.combat.setTraits(player.actor, { invulnerable: false });
       const origin = simulation.playerView(actor).origin;
       simulation.combat.apply({ target: actor, amount: 117, knockback: 0, direction: { x: 0, y: 0, z: 0 }, point: origin, normal: { x: 0, y: 0, z: 0 }, delivery: "direct",
         attack: { sequence: 0, time: { kind: "seconds", value: simulation.timeSeconds }, attacker: null, inflictor: null, weapon: null,
@@ -156,7 +156,7 @@ for (const character of ["q1", "q2", "q3"]) test(`Q2 coop ${character} character
   try {
     const client = identity.client(0, 0), actor = simulation.admitPlayer(client).actor, player = simulation.movementPlayer(actor), source = simulation.q2Source();
     if (player === null || source === null) throw new Error("Missing player");
-    simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { kind: "none" });
+    simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
     source.game.damage(actor, actor, actor, 117, 0, { x: 0, y: 0, z: 0 }, simulation.playerView(actor).origin, { x: 0, y: 0, z: 0 }, 0);
     expect(simulation.playerUi(actor).health).toBe(-17);
     for (let frame = 0; frame < 25; frame++) simulation.step({ elapsedMilliseconds: 100, commands: [{ actor, source: { kind: "remote-client", client }, sequence: frame,
@@ -214,7 +214,7 @@ test("Q2 source respawn resets Q3 movement pitch-clamp delta with its absolute v
     step(30000, 12345, false);
     const clamped = player.readState(); if (clamped.kind !== "q3") throw new Error("Missing selected Q3 state");
     expect(clamped.deltaAngleWords[0]).not.toBe(0);
-    simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { kind: "none" });
+    simulation.combat.setHealth(player.actor, 100); simulation.combat.setArmor(player.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
     source.game.damage(actor, actor, actor, 117, 0, { x: 0, y: 0, z: 0 }, simulation.playerView(actor).origin, { x: 0, y: 0, z: 0 }, 0);
     expect(simulation.playerUi(actor).health).toBeLessThan(0);
     for (let frame = 0; frame < 30 && simulation.playerUi(actor).health <= 0; frame++) step(30000, 12345, frame >= 22);

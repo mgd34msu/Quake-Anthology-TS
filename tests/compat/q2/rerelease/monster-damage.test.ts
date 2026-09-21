@@ -74,7 +74,7 @@ test.skipIf(!available)("retail monster accumulation retains qualifying provenan
   const foreign = world.engine.actors.allocate("q3:foreign", "q3:monster-attacker");
   world.engine.bodies.create(foreign, { origin: { x: 100, y: 0, z: 512 }, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 },
     bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null });
-  world.engine.combat.create(foreign, { health: 100, mass: 200, canTakeDamage: true, invulnerable: false, armor: { kind: "none" }, team: null });
+  world.engine.combat.create(foreign, { health: 100, mass: 200, canTakeDamage: true, invulnerable: false, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, team: null });
   const request = (target: ActorId, sequence: number, amount: number): DamageRequest => ({ target, amount, knockback: 0, direction: { x: 1, y: 0, z: 0 },
     point: { x: 1, y: 2, z: 3 }, normal: { x: 0, y: 0, z: 1 }, delivery: "direct",
     attack: { sequence, time: { kind: "milliseconds", value: sequence }, attacker: foreign.id, inflictor: foreign.id, weapon: "q2:weapon_blaster",

@@ -181,12 +181,12 @@ test("CTF strength and resistance execute at native shared armor stages", () => 
   active.players.clientCommand(active.second, active.game, "team", ["blue"]);
   active.inventory.configure(active.first.actor, { item: "q2:item_tech2", count: 1, capacity: 1 });
   active.inventory.configure(active.second.actor, { item: "q2:item_tech1", count: 1, capacity: 1 });
-  active.combat.setArmor(active.second.actor, { kind: "q2", points: 200, normalProtection: 0.8, energyProtection: 0.6, item: "q2:item_armor_body", powerArmor: { kind: "none" } });
+  active.combat.setArmor(active.second.actor, { regular: { kind: "q2", points: 200, normalProtection: 0.8, energyProtection: 0.6, item: "q2:item_armor_body" }, powered: { kind: "none" } });
   const zero = { x: 0, y: 0, z: 0 };
   active.game.damage(active.second.actor.id, active.first, active.first.actor.id, 100, 0, zero, zero, zero, 1, 0);
   expect(active.combat.read(active.second.actor.id)?.health).toBe(80);
   const armor = active.combat.read(active.second.actor.id)?.armor;
-  expect(armor?.kind === "q2" ? armor.points : null).toBe(40);
+  expect(armor?.regular.kind === "q2" ? armor.regular.points : null).toBe(40);
 });
 
 test("LMCTF runes execute between shared armor stages and heal vampire on committed damage", () => {
@@ -196,16 +196,16 @@ test("LMCTF runes execute between shared armor stages and heal vampire on commit
   const resist = active.game.spawn({ classname: "resist_rune", ordinal: 101, values: new Map<string, string>() });
   expect(mode.runes.pickup(damage, active.game, active.first.actor.id)).toBe(true);
   expect(mode.runes.pickup(resist, active.game, active.second.actor.id)).toBe(true);
-  active.combat.setArmor(active.second.actor, { kind: "q2", points: 200, normalProtection: 0.8, energyProtection: 0.6, item: "q2:item_armor_body", powerArmor: { kind: "none" } });
+  active.combat.setArmor(active.second.actor, { regular: { kind: "q2", points: 200, normalProtection: 0.8, energyProtection: 0.6, item: "q2:item_armor_body" }, powered: { kind: "none" } });
   const zero = { x: 0, y: 0, z: 0 };
   active.game.damage(active.second.actor.id, active.first, active.first.actor.id, 100, 0, zero, zero, zero, 1, 0);
   expect(active.combat.read(active.second.actor.id)?.health).toBe(80);
   const armor = active.combat.read(active.second.actor.id)?.armor;
-  expect(armor?.kind === "q2" ? armor.points : null).toBe(120);
+  expect(armor?.regular.kind === "q2" ? armor.regular.points : null).toBe(120);
   mode.runes.drop(active.first.actor.id, active.game); mode.runes.drop(active.second.actor.id, active.game);
   const vampire = active.game.spawn({ classname: "vampire_rune", ordinal: 102, values: new Map<string, string>() });
   expect(mode.runes.pickup(vampire, active.game, active.first.actor.id)).toBe(true);
-  active.combat.setHealth(active.first.actor, 200); active.combat.setArmor(active.second.actor, { kind: "none" });
+  active.combat.setHealth(active.first.actor, 200); active.combat.setArmor(active.second.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
   active.game.damage(active.second.actor.id, active.first, active.first.actor.id, 40, 0, zero, zero, zero, 1, 0);
   expect(active.combat.read(active.second.actor.id)?.health).toBe(40);
   expect(active.combat.read(active.first.actor.id)?.health).toBe(220);

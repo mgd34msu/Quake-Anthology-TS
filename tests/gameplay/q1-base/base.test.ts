@@ -83,7 +83,7 @@ function createGame(map: Q1Map, saved?: SavedBaseWorld, deathmatch = 0, nativePr
   if (saved === undefined) {
     report = game.spawnMap(map); player = actors.allocateAtSource("q3:character", 1, "q3:sarge"); const spawn = [...game.entities.values()].find(entity => entity.classname === "info_player_start");
     bodies.create(player, { origin: spawn === undefined ? ZERO : game.body(spawn).origin, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null });
-    combat.create(player, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(player, []); game.attachPlayer(player);
+    combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(player, []); game.attachPlayer(player);
   } else {
     const restored = actors.atSource("q3:character", 1); if (restored === null) throw new Error("Missing saved foreign character"); player = restored;
     const owner = (id: import("../../../src/contracts/session.ts").SavedActorId): OwnedActor => { const actor = actors.resolveSaved(id); if (actor === null) throw new Error("Missing saved actor"); return actor; };

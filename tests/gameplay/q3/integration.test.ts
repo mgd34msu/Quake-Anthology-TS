@@ -109,7 +109,7 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
   const actor = actors.allocateAtSource("q3:character", 0, "q3:selected-player"), zero = { x: 0, y: 0, z: 0 };
   const selectedBounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
   physics.bodies.create(actor, { origin: zero, angles: zero, velocity: zero, bounds: selectedBounds, ground: null });
-  combat.create(actor, { health: 87, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(actor, { health: 87, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   inventory.create(actor, [{ item: "q2:weapon/blaster", count: 1, capacity: 1 }]);
   let deaths = 0;
   callbacks.bind(actor, { think: null, touch: null, use: null, pain: () => undefined, die: () => { deaths++; return undefined; } });

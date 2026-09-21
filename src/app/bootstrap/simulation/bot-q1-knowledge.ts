@@ -62,7 +62,7 @@ export function createQ1BotKnowledge(options: {
       for (let index = 0; index < 200; index++) state.inventory[index] = 0;
       const combat = actor === null ? null : options.simulation.combat.read(actor);
       state.inventory[BotInventory.HEALTH] = combat?.health ?? 0;
-      state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.kind === "none" ? 0 : combat.armor.points;
+      state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.regular.kind === "none" ? 0 : combat.armor.regular.points;
       state.inventory[BotInventory.QUAD] = Number(actor !== null && game.powerupExpires(actor, "quad") > game.time);
       for (const entry of entries.values()) {
         state.inventory[64 + entry.slot] = actor === null ? 0 : Number(usable(actor, entry));

@@ -44,7 +44,7 @@ describe("Q2 reusable entity services", () => {
     const services = new Q2EntityServices(host, options, [module]);
     const actor = host.actors.allocateAtSource("q1:map", 17, "q1:authored");
     host.bodies.create(actor, { origin: { x: 7, y: 8, z: 9 }, angles: zero, velocity: { x: 3, y: 0, z: 0 }, bounds: { min: zero, max: { x: 2, y: 3, z: 4 } }, ground: null });
-    host.combat.create(actor, { health: 73, armor: { kind: "none" }, mass: 90, canTakeDamage: true, invulnerable: false, team: null });
+    host.combat.create(actor, { health: 73, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 90, canTakeDamage: true, invulnerable: false, team: null });
     const body = host.bodies.read(actor.id), combat = host.combat.read(actor.id), source = host.actors.sourceOf(actor.id);
     const fields = { classname: "target_secret", ordinal: -1, values: new Map([["health", "900"], ["origin", "100 200 300"], ["delay", "0.4"]]) };
     const entity = services.attach(actor, fields);

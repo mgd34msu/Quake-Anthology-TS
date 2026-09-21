@@ -11,7 +11,7 @@ export function throwQ2Debris(self: Q2Entity, game: Q2GameServices, model: strin
   const randomVelocity = { x: 100 * (game.host.random() * 2 - 1), y: 100 * (game.host.random() * 2 - 1), z: 100 + 100 * (game.host.random() * 2 - 1) };
   game.move(chunk, { origin, velocity: add(game.body(self).velocity, scale(randomVelocity, speed)) }, false);
   chunk.angularVelocity = { x: game.host.random() * 600, y: game.host.random() * 600, z: game.host.random() * 600 };
-  game.host.combat.create(chunk.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+  game.host.combat.create(chunk.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
   chunk.die = freeQ2Entity;
   game.motion(chunk, "bounce"); game.solid(chunk, "none"); game.show(chunk);
   game.schedule(chunk, 5 + game.host.random() * 5, freeQ2Entity);
@@ -66,7 +66,7 @@ function explosive(entity: Q2Entity, game: Q2GameServices): undefined {
   } else if (entity.targetname !== "") entity.use = func_explosive_use;
   if ((entity.spawnflags & 1) !== 0 || entity.targetname === "") {
     entity.maxHealth ||= 100;
-    game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { kind: "none" }, mass: numberField(entity.spawn, "mass") || 75, canTakeDamage: true, invulnerable: false, team: null });
+    game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: numberField(entity.spawn, "mass") || 75, canTakeDamage: true, invulnerable: false, team: null });
     entity.die = func_explosive_die;
   }
   game.solid(entity, entity.visible ? "brush" : "none"); game.show(entity);
@@ -77,7 +77,7 @@ function barrel(entity: Q2Entity, game: Q2GameServices): undefined {
   if (game.options.mode === "deathmatch") return game.remove(entity);
   entity.model = "models/objects/barrels/tris.md2"; entity.maxHealth ||= 10; entity.damage ||= 150;
   const mass = numberField(entity.spawn, "mass") || 400;
-  game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { kind: "none" }, mass, canTakeDamage: true, invulnerable: false, team: null });
+  game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass, canTakeDamage: true, invulnerable: false, team: null });
   game.move(entity, { bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 40 } } }, false);
   game.solid(entity, "box"); game.motion(entity, "step"); game.show(entity);
   
@@ -110,7 +110,7 @@ export function createQ2SceneryModule(): Q2SpawnModule {
         entity.model = "models/deadbods/dude/tris.md2";
         entity.frame = (entity.spawnflags & 2) !== 0 ? 1 : (entity.spawnflags & 4) !== 0 ? 2 : (entity.spawnflags & 8) !== 0 ? 3 : (entity.spawnflags & 16) !== 0 ? 4 : (entity.spawnflags & 32) !== 0 ? 5 : 0;
         entity.serverFlags |= 12;
-        game.host.combat.create(entity.actor, { health: integerField(entity.spawn, "health"), armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+        game.host.combat.create(entity.actor, { health: integerField(entity.spawn, "health"), armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
         game.move(entity, { bounds: { min: { x: -16, y: -16, z: 0 }, max: { x: 16, y: 16, z: 16 } } }, false);
         entity.die = misc_deadsoldier_die;
         game.solid(entity, "box"); game.show(entity); return true;
@@ -118,7 +118,7 @@ export function createQ2SceneryModule(): Q2SpawnModule {
       case "misc_gib_head": {
         entity.model = "models/objects/gibs/head/tris.md2"; entity.effects |= 2; entity.serverFlags |= 4;
         entity.angularVelocity = { x: game.host.random() * 200, y: game.host.random() * 200, z: game.host.random() * 200 };
-        game.host.combat.create(entity.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+        game.host.combat.create(entity.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
         entity.die = freeQ2Entity;
         game.motion(entity, "toss"); game.solid(entity, "none"); game.show(entity);
         game.schedule(entity, 30, freeQ2Entity); return true;

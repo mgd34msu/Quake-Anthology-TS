@@ -34,7 +34,7 @@ export class Q2Foundation extends Q2EntityServices {
       const definition = replacements.get(field.ordinal);
       if (definition != null && this.monsterAdmission !== null) {
         const actor = this.allocateActor(field, `${definition.source.provider}/${definition.classname}`);
-        this.host.combat.create(actor, { health: 0, armor: { kind: "none" }, mass: 100, canTakeDamage: false, invulnerable: false, team: null });
+        this.host.combat.create(actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: false, invulnerable: false, team: null });
         this.monsterAdmission.spawn(actor, field, definition); replaced.push(actor); continue;
       }
       const entity = this.spawn(field);

@@ -78,11 +78,11 @@ export function registerMg3Pickups(context: Q1AddonContext): undefined {
   });
   game.named.register(MG3_ITEM_PREFIX + "shard_touch", { touch: (_game, entity, other) => {
     const player = game.player(other); if (player === null || game.health(other) <= 0) return undefined;
-    const armor = game.host.combat.read(other)?.armor;
-    if (armor?.kind === "q1" && armor.absorption < 0.3) game.host.combat.setArmor(player.actor, { ...armor, absorption: 0.3 });
+    const armor = game.host.combat.read(other)?.armor.regular;
+    if (armor?.kind === "q1" && armor.absorption < 0.3) game.host.combat.setRegularArmor(player.actor, { ...armor, absorption: 0.3 });
     const points = armor === undefined || armor.kind === "none" ? 0 : armor.points;
     if (points >= 200) return undefined;
-    game.host.combat.setArmor(player.actor, { kind: "q1", points: Math.min(200, points + 5), absorption: armor?.kind === "q1" ? Math.max(0.3, armor.absorption) : 0.3,
+    game.host.combat.setRegularArmor(player.actor, { kind: "q1", points: Math.min(200, points + 5), absorption: armor?.kind === "q1" ? Math.max(0.3, armor.absorption) : 0.3,
       item: armor?.kind === "q1" ? armor.item : "q1:item_armor1" });
     return finishMg3Pickup(context, entity, other, "$mg3_qc_armor_shard_touch", "items/armor1.wav");
   } });

@@ -137,7 +137,7 @@ export class NativeModCombat {
         armor: this.armor.read(slot), canTakeDamage: scalar(combat.takedamage) !== 0, invulnerable: (flags() & BigInt(combat.flags.invulnerable)) !== 0n,
         noKnockback: (flags() & BigInt(combat.flags.noKnockback)) !== 0n, team: null }),
         writeHealth: value => { scalar(combat.health, value); return undefined; },
-        writeArmor: armor => this.armor.write(slot, armor) });
+        normalizeLegacyArmor: armor => this.armor.normalizeLegacyArmor(slot, armor), writeArmor: armor => this.armor.write(slot, armor) });
     }
     return { think: null, use: (_self, other, activator) => this.eligible(actor.id, other, activator) ? this.call("use", slot, [this.pointer(actor.id), this.pointer(other), this.pointer(activator)]) : undefined,
       touch: contact => this.withTouch(contact, args => this.call("touch", slot, args)), pain: reaction => this.withPain(reaction, args => this.call("pain", slot, args)),

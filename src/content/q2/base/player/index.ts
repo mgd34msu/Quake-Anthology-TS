@@ -150,7 +150,7 @@ export class Q2Players implements Q2SpawnModule {
     const release = game.host.actors.onRelease(actor => { if (actor.id === entity.actor.id) { this.states.delete(actor.id); this.playerEntities.delete(actor.id); release(); } return undefined; });
     this.userinfoChanged(entity, game, admission.userinfo);
     if (!game.host.inventory.has(entity.actor.id)) game.host.inventory.create(entity.actor, []);
-    if (game.host.combat.read(entity.actor.id) === null) game.host.combat.create(entity.actor, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+    if (game.host.combat.read(entity.actor.id) === null) game.host.combat.create(entity.actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
     if (admission.initializeInventory) this.items.configurePlayer(entity.actor, game, true);
     if (state.useQ2Weapons && !this.weapons.states.has(entity.actor.id)) this.weapons.bind(entity, game);
     entity.pain = this.playerPain;
@@ -235,7 +235,7 @@ export class Q2Players implements Q2SpawnModule {
       else if (game.options.mode === "deathmatch" || (game.host.combat.read(entity.actor.id)?.health ?? 0) <= 0) {
         this.setInventory(entity, game, state.useQ2Inventory ? [] : state.spawnInventory);
         if (state.useQ2Inventory) this.items.configurePlayer(entity.actor, game, true);
-        game.host.combat.setHealth(entity.actor, 100); game.host.combat.setArmor(entity.actor, { kind: "none" }); entity.maxHealth = 100;
+        game.host.combat.setHealth(entity.actor, 100); game.host.combat.setArmor(entity.actor, { regular: { kind: "none" }, powered: { kind: "none" } }); entity.maxHealth = 100;
         state.selectedItem = "q2:weapon_blaster";
         if (state.useQ2Inventory) this.hooks.persistentInventoryInitialized?.(entity, game);
       }
@@ -286,7 +286,7 @@ export class Q2Players implements Q2SpawnModule {
     corpse.serverFlags = entity.serverFlags; corpse.clipMask = entity.clipMask; corpse.owner = entity.owner; corpse.visible = entity.visible;
     game.move(corpse, game.body(entity), false);
     // Original CopyToBodyQue leaves the reserved edict's health value in place.
-    if (game.host.combat.read(corpse.actor.id) === null) game.host.combat.create(corpse.actor, { health: 0, armor: { kind: "none" }, canTakeDamage: true, invulnerable: false, mass: 0, team: null });
+    if (game.host.combat.read(corpse.actor.id) === null) game.host.combat.create(corpse.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, canTakeDamage: true, invulnerable: false, mass: 0, team: null });
     else game.host.combat.setTraits(corpse.actor, { canTakeDamage: true, invulnerable: false });
     corpse.die = this.bodyDie;
     game.solid(corpse, entity.solid); game.motion(corpse, entity.motion); game.show(corpse);
@@ -392,7 +392,7 @@ export class Q2Players implements Q2SpawnModule {
   private clearPowerups(entity: Q2Entity, game: Q2GameServices): undefined {
     this.items.clearPowerups(entity.actor.id); entity.flags &= ~4096;
     const armor = game.host.combat.read(entity.actor.id)?.armor;
-    if (armor?.kind === "q2") game.host.combat.setArmor(entity.actor, { ...armor, powerArmor: { kind: "none" } });
+    if (armor !== undefined && armor.powered.kind !== "none") game.host.combat.setPoweredProtection(entity.actor, { kind: "none" });
     return game.host.combat.setTraits(entity.actor, { invulnerable: this.states.get(entity.actor.id)?.god ?? false });
   }
 

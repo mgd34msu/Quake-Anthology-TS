@@ -154,7 +154,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     const angles = vectorAngles(normal); entity.angularVelocity = zero;
     game.move(entity, { velocity: zero, angles: { ...angles, x: angles.x + 90 } });
     entity.die = this.proxDie; entity.teamChain = field.actor.id; entity.touch = null;
-    game.host.combat.create(entity.actor, { health: 20, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+    game.host.combat.create(entity.actor, { health: 20, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
     if (game.options.edition === "rerelease") entity.projectile = false;
     game.motion(entity, motion); return game.schedule(entity, game.options.edition === "rerelease" ? 0 : 0.05, this.proxOpen);
   };
@@ -264,7 +264,7 @@ export class Q2MissionPackMines extends Q2MissionPackBolts {
     mine.damage = 3 * multiplier; mine.clipMask |= 24; mine.flags |= 0x2000; mine.touch = this.teslaLava; mine.die = this.teslaDie;
     if (game.options.edition === "rerelease") { mine.classname = "tesla_mine"; mine.clipMask &= ~0x4000000; mine.flags = (mine.flags | 0x20000) + 2 ** 32; }
     game.move(mine, { angles: zero, bounds: { min: { x: -12, y: -12, z: 0 }, max: { x: 12, y: 12, z: 20 } } }, false);
-    game.host.combat.create(mine.actor, { health: game.options.mode === "deathmatch" ? 20 : game.options.edition === "rerelease" ? 50 : 30, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+    game.host.combat.create(mine.actor, { health: game.options.mode === "deathmatch" ? 20 : game.options.edition === "rerelease" ? 50 : 30, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
     mine.wait = game.host.now() + 30; game.schedule(mine, 3, this.teslaOpen); publishProjectile(mine, game, "", { weapon: "q2:ammo_tesla", role: "grenade" }); return mine;
   }
 }

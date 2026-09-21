@@ -28,7 +28,7 @@ function fixture(edition: Q2Edition = "classic", map: Q2DecodedMap | null = null
   const bounds = { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } };
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
   bodies.create(player, { origin: { x: 800, y: 0, z: 24 }, angles: zero, velocity: zero, bounds, ground: world.id });
-  combat.create(player, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   const queries = map === null ? null : createSceneQueries(map);
   let now = 0, hideEnemy = false;
   const scheduled = new Map<OwnedActor, number>(), diagnostics: string[] = [];

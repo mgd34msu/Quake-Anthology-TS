@@ -48,7 +48,7 @@ export class Q1Foundation extends Q1EntityServices {
         const slot = ordinal === 0 ? 0 : ordinal + (this.options.maxClients ?? 0);
         const actor = this.host.actors.allocateAtSource(this.provider, slot, `${definition.source.provider}/${definition.classname}`);
         this.host.bodies.create(actor, { origin: parseVector(q1EntityValue(source, "origin") ?? ""), angles: sourceAngles(source), velocity: ZERO, bounds: POINT, ground: null });
-        this.host.combat.create(actor, { health: 0, armor: { kind: "none" }, mass: 100, canTakeDamage: false, invulnerable: false, team: null });
+        this.host.combat.create(actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: false, invulnerable: false, team: null });
         this.monsterAdmission.spawn(actor, source, ordinal, definition);
         continue;
       }

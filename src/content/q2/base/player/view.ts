@@ -103,7 +103,7 @@ export function q2BuildView(context: Q2CharacterContext, flashes: number, interm
   blend = addQ2Blend(blend, { x: 0.85, y: 0.7, z: 0.3 }, state.bonusAlpha);
   state.damageAlpha = Math.max(0, state.damageAlpha - 0.06); state.bonusAlpha = Math.max(0, state.bonusAlpha - 0.1);
   const combat = game.host.combat.read(entity.actor.id), armor = combat?.armor;
-  const armorPoints = armor === undefined || armor.kind === "none" ? 0 : armor.points;
+  const armorPoints = armor === undefined || armor.regular.kind === "none" ? 0 : armor.regular.points;
   const activeWeapon = weapon?.q2Name;
   const ammo = activeWeapon === undefined || activeWeapon === null ? null : weapon?.ammo ?? null;
   const timer = powers.quadUntil > now ? { item: "q2:item_quad", seconds: Math.trunc(powers.quadUntil - now) }
@@ -112,7 +112,7 @@ export function q2BuildView(context: Q2CharacterContext, flashes: number, interm
         : powers.breatherUntil > now ? { item: "q2:item_breather", seconds: Math.trunc(powers.breatherUntil - now) } : null;
   return { angles, offset: intermission ? zero : offset, kickAngles: intermission ? zero : kicks, gunAngles, gunOffset,
     blend: intermission ? { x: 0, y: 0, z: 0, w: 0 } : blend, fov: intermission ? 90 : state.fov, underwater: !intermission && (contents & 56) !== 0,
-    flashes, health, armor: armor?.kind === "q2" && armor.powerArmor.kind !== "none" && (armorPoints === 0 || (Math.round(now * 10) & 8) !== 0) ? armor.powerArmor.cells : armorPoints,
+    flashes, health, armor: armor !== undefined && armor.powered.kind !== "none" && (armorPoints === 0 || (Math.round(now * 10) & 8) !== 0) ? armor.powered.cells : armorPoints,
     ammo: ammo === null ? 0 : game.host.inventory.count(entity.actor.id, ammo), score: state.score, selectedItem: state.selectedItem,
     timer: timer === null ? null : { item: timer.item === "q2:item_quad" ? "q2:item_quad" : timer.item === "q2:item_invulnerability" ? "q2:item_invulnerability" : timer.item === "q2:item_enviro" ? "q2:item_enviro" : "q2:item_breather", seconds: timer.seconds },
     spectator: state.spectator, layouts: (state.showScores || state.showHelp || health <= 0 || intermission ? 1 : 0) | (state.showInventory && health > 0 ? 2 : 0) };
@@ -147,9 +147,9 @@ export function q2ClientEffects(context: Q2CharacterContext): undefined {
   entity.effects = 0; entity.renderFlags = game.options.edition === "rerelease" ? 32768 : 0;
   const flashing = (until: number): boolean => until > now && (until - now > 3 || (Math.round((until - now) * 10) & 4) !== 0);
   if ((combat?.health ?? 0) > 0) {
-    if (state.powerArmorTime > now && combat?.armor.kind === "q2") {
-      if (combat.armor.powerArmor.kind === "screen") entity.effects |= 0x200;
-      else if (combat.armor.powerArmor.kind === "shield") { entity.effects |= 0x100; entity.renderFlags |= 0x800; }
+    if (state.powerArmorTime > now && combat !== null && combat.armor.powered.kind !== "none") {
+      if (combat.armor.powered.kind === "screen") entity.effects |= 0x200;
+      else if (combat.armor.powered.kind === "shield") { entity.effects |= 0x100; entity.renderFlags |= 0x800; }
     }
     if (flashing(powers.quadUntil)) entity.effects |= 0x8000;
     if (flashing(powers.invulnerabilityUntil)) entity.effects |= 0x10000;

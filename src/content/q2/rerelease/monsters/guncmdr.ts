@@ -74,7 +74,7 @@ export function createGunCommanderDefinition(weapons: Q2MissionPackMonsterWeapon
       if (!game.host.inventory.has(entity.actor.id)) game.host.inventory.create(entity.actor, []);
       const cells = numberField(entity.spawn, "power_armor_power", 200), type = numberField(entity.spawn, "power_armor_type", 2);
       game.host.inventory.configure(entity.actor, { item: "q2:monster-power", count: cells, capacity: Math.max(200, cells) }); bindArmor(context);
-      return game.host.combat.setArmor(entity.actor, { kind: "q2", points: 0, normalProtection: 0, energyProtection: 0, item: "q2:monster-power", powerArmor: type === 0 ? { kind: "none" } : { kind: type === 1 ? "screen" : "shield", cells } });
+      return game.host.combat.setPoweredProtection(entity.actor, type === 0 ? { kind: "none" } : { kind: type === 1 ? "screen" : "shield", cells });
     },
     restore: bindArmor,
     duck(context) {

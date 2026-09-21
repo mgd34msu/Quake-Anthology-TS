@@ -70,10 +70,12 @@ export class Q2CtfPresentation {
     if (!this.context.hooks.chatAllowed(entity.actor.id, game)) return undefined;
     const state = ctfPlayer(this.context, entity.actor.id), combat = game.host.combat.read(entity.actor.id), health = combat?.health ?? 0;
     const armor = (): string => {
-      const value = combat?.armor; if (value === undefined || value.kind === "none") return "no armor";
-      if (value.kind !== "q2") return `${value.points} armor`;
-      const cells = game.host.inventory.count(entity.actor.id, "q2:ammo_cells"), power = value.powerArmor.kind !== "none" && cells > 0 ? `Power ${value.powerArmor.kind === "screen" ? "Screen" : "Shield"} with ${cells} cells` : "";
-      const conventional = value.points > 0 ? `${value.points} units of ${this.context.hooks.items.lookup(value.item)?.name ?? "armor"}` : ""; return [power, conventional].filter(Boolean).join(" and ") || "no armor";
+      const value = combat?.armor; if (value === undefined) return "no armor";
+      const cells = game.host.inventory.count(entity.actor.id, "q2:ammo_cells"), power = value.powered.kind !== "none" && cells > 0 ? `Power ${value.powered.kind === "screen" ? "Screen" : "Shield"} with ${cells} cells` : "";
+      const regular = value.regular;
+      const conventional = regular.kind === "none" || regular.points <= 0 ? "" : regular.kind === "q2"
+        ? `${regular.points} units of ${this.context.hooks.items.lookup(regular.item)?.name ?? "armor"}` : `${regular.points} armor`;
+      return [power, conventional].filter(Boolean).join(" and ") || "no armor";
     };
     const sight = (): string => { const names = game.host.players().filter(actor => actor !== entity.actor.id).flatMap(actor => { const target = game.entity(actor); return target !== null && ctfCanSee(target, entity, game) ? [ctfName(this.context, actor)] : []; }); return names.length < 2 ? names[0] ?? "no one" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`; };
     if (words.startsWith('"')) words = words.slice(1, words.endsWith('"') ? -1 : undefined);

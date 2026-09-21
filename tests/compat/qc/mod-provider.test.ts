@@ -15,7 +15,7 @@ test.skipIf(!await Bun.file(path).exists())("original Copper healing executes th
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors), bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const target = actors.allocate("q2:game", "q2:monster_soldier");
-  combat.create(target, { health: 20, mass: 200, canTakeDamage: true, invulnerable: false, armor: { kind: "none" }, team: null });
+  combat.create(target, { health: 20, mass: 200, canTakeDamage: true, invulnerable: false, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, team: null });
   let uses = 0;
   callbacks.bind(target, { think: null, touch: null, pain: null, die: null, use: () => { uses++; return undefined; } });
   const declaration = (amount: number): ModCallbackDeclaration => ({ version: 1, runtime: "quakec", program: { path: "progs.dat", digest },

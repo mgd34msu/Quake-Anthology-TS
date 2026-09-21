@@ -14,6 +14,7 @@ import { classicNumber, classicPointer, classicRequiredPointer, type ClassicQ2En
 import { readClassicString, readClassicVector } from "../../../compat/q2/classic/records.ts";
 import { runClassicGuestPmove } from "../../../compat/q2/classic/pmove.ts";
 import { ClassicCombatBindings } from "../../../compat/q2/classic/combat-binding.ts";
+import { classicCombatProfile } from "../../../compat/q2/classic/combat-profile.ts";
 import { classicGrenadeInventory } from "../../../compat/q2/classic/grenade-inventory.ts";
 import { SizeBuf, SZ_Init, SZ_Clear, MSG_WriteChar, MSG_WriteByte, MSG_WriteShort, MSG_WriteLong, MSG_WriteFloat, MSG_WriteString, MSG_WritePos, MSG_WriteDir, MSG_WriteAngle } from "../../../network/q2/message.ts";
 import type { ActorCollision, SharedSceneQueries } from "../../../world/collision/index.ts";
@@ -107,6 +108,15 @@ export class ClassicGuestServices {
   }
   get host(): ClassicQ2GuestHost { if (this.#host === null) throw new Error("API 3 services have no guest host"); return this.#host; }
   notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.edicts.at(slot)) ?? null; }
+  setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
+    const profile = classicCombatProfile(this.memory.module.digest), record = this.host.edicts.at(slot);
+    if (profile === null) throw new Error("API3 source view writes require a declared private client layout");
+    if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
+      throw new Error("API3 source view requires the current client actor");
+    const client = this.memory.readPointer(this.memory.offset(record.address, 84n));
+    if (client === null) throw new Error("API3 source view has no client");
+    this.memory.writeFloat32(this.memory.offset(client, BigInt(profile.client.viewAngles + 8)), roll);
+  }
   equipmentInventory(slot: number) { return classicGrenadeInventory(this.host, this.host.edicts.at(slot)); }
   completeSpawn(): void { this.#loading = false; }
   setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined, read: (actor: ActorId) => Vec3 | undefined): void {

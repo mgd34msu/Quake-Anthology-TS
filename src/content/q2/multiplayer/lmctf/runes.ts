@@ -130,11 +130,11 @@ export class LmctfRunes {
     if (frame < state.regenFrame + heartRate) return undefined;
     state.regenFrame = frame; let sound = false;
     if (combat.health < entity.maxHealth + 25) { game.host.combat.setHealth(entity.actor, Math.min(entity.maxHealth + 25, Math.trunc(combat.health + Math.fround(heartRate / 3)))); sound = true; }
-    const armor = combat.armor;
+    const armor = combat.armor.regular;
     if (armor.kind === "none" || armor.points === 0) {
-      game.host.combat.setArmor(entity.actor, { kind: "q2", points: Math.trunc(heartRate / 4), normalProtection: 0.3, energyProtection: 0,
-        item: "q2:item_armor_jacket", powerArmor: armor.kind === "q2" ? armor.powerArmor : { kind: "none" } }); sound = true;
-    } else if (armor.points < 200) { game.host.combat.setArmor(entity.actor, { ...armor, points: Math.min(200, Math.trunc(armor.points + Math.fround(heartRate / 3))) }); sound = true; }
+      game.host.combat.setRegularArmor(entity.actor, { kind: "q2", points: Math.trunc(heartRate / 4), normalProtection: 0.3, energyProtection: 0,
+        item: "q2:item_armor_jacket" }); sound = true;
+    } else if (armor.points < 200) { game.host.combat.setRegularPoints(entity.actor, Math.min(200, Math.trunc(armor.points + Math.fround(heartRate / 3)))); sound = true; }
     return sound ? game.sound(entity, "ctf/regen.wav", 3) : undefined;
   }
   weaponFrame(entity: Pick<Q2Entity, "actor">, game: Q2GameServices, firing: boolean, repeat: () => undefined): undefined {

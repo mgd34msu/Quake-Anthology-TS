@@ -43,7 +43,7 @@ export function widowGib(self: Q2Entity, game: Q2GameServices, model: string, da
     gib.touch = organic ? game.sourceCallbacks.touch.resolve("gib_touch") : null;
   }
   game.move(gib, { origin: point, velocity, bounds }, false);
-  game.host.combat.create(gib.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+  game.host.combat.create(gib.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
   game.solid(gib, sized ? "box" : "none"); game.motion(gib, organic ? "toss" : "bounce"); game.schedule(gib, lifetime, free); game.link(gib); game.show(gib);
   return gib;
 }

@@ -110,7 +110,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
           gib.model = entity.style === 1 ? "models/objects/gekkgib/torso/tris.md2" : (game.host.combat.read(entity.actor.id)?.mass ?? 0) > 200 ? "models/objects/gibs/chest/tris.md2" : "models/objects/gibs/sm_meat/tris.md2";
           gib.effects = (entity.style === 1 ? 26 : 1) | 2; gib.serverFlags |= 4;
           game.move(gib, { origin: { ...point, z: body.origin.z + entity.wait }, angles: body.angles, bounds: { min: zero, max: zero } });
-          game.host.combat.create(gib.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+          game.host.combat.create(gib.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
           game.solid(gib, "none"); game.motion(gib, "toss"); game.show(gib); game.schedule(gib, 0.1, freeProjectile);
         }
         if (entity.wait < 19) entity.frame++;
@@ -174,7 +174,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
       trap.clipMask = 0x42004003;
       if (game.host.isPlayer(self.actor.id) && this.hooks.base.inputs.get(self.actor.id)?.playersCollide === false) trap.clipMask &= ~0x40000000;
       trap.timestamp = game.host.now() + 30; trap.sound = "weapons/traploop.wav";
-      game.host.combat.create(trap.actor, { health: 20, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+      game.host.combat.create(trap.actor, { health: 20, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
       game.move(trap, { angles: zero, velocity: add(body.velocity, scale(axes.up, baseUp * (gravity / 800 - 1))), bounds: { min: { x: -4, y: -4, z: 0 }, max: { x: 4, y: 4, z: 8 } } }, false);
       game.schedule(trap, 1, this.trapRerelease); publishProjectile(trap, game, trap.sound, { weapon: "q2:ammo_trap", role: "grenade" }); return trap;
     }
@@ -182,7 +182,7 @@ export class Q2MissionPackProjectiles extends Q2MissionPackNuke {
     trap.teamMaster = null; trap.damage = damage; trap.damageRadius = radius; trap.spawnflags = held ? 3 : 1;
     trap.angularVelocity = { x: 0, y: 300, z: 0 }; trap.timestamp = game.host.now() + 30;
     game.move(trap, { angles: zero, bounds: { min: { x: -4, y: -4, z: 0 }, max: { x: 4, y: 4, z: 8 } } }, false);
-    game.host.combat.create(trap.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: false, invulnerable: false, team: null });
+    game.host.combat.create(trap.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: false, invulnerable: false, team: null });
     if (timer <= 0) {
       this.hooks.base.playerNoise(self, game, start, "impact");
       game.radiusDamage(trap, trap.owner, trap.damage, null, radius, held ? 24 : 16, 0, "q2:ammo_trap");

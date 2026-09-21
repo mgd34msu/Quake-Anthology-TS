@@ -81,7 +81,7 @@ function sourceWorld(map: Q1Map, program: Q1SourceProgram, saved?: Saved) {
   }
   function admit(name: string, color: number, autoSwitch?: string) {
     const slot = players.length, actor = actors.allocateAtSource("q1:official", slot + 1, "q3:sarge");
-    bodies.create(actor, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null }); combat.create(actor, { health: 100, armor: { kind: "none" }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(actor, []); players.push(actor.id);
+    bodies.create(actor, { origin: ZERO, angles: ZERO, velocity: ZERO, bounds: PLAYER_BOUNDS, ground: null }); combat.create(actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 100, canTakeDamage: true, invulnerable: false, team: null }); inventory.create(actor, []); players.push(actor.id);
     source.attach(actor, { slot, userinfo: new Map([["name", name], ["topcolor", String(color)], ["bottomcolor", String(color)], ...(autoSwitch === undefined ? [] : [["qts_weapon_autoswitch", autoSwitch] satisfies [string, string]])]) }); game.attachPlayer(actor); source.admitTravel(actor, source.newTravel()); source.spawned(actor.id, true);
     const point = source.selectSpawn(actor.id); if (point !== null) { const body = bodies.read(actor.id); if (body !== null) bodies.write(actor, { ...body, origin: game.body(point).origin }); } return actor;
   }
@@ -167,23 +167,23 @@ test("official campaign selection joins base, mission packs and rerelease addons
       world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 0 }); expect(world.source.clients.require(actor.id).impulse).toBe(1);
       world.game.time = 1; expect(world.source.impulse(actor.id)).toBe(true); expect(player.weapon).toBe("axe");
       world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: 9 }); expect(world.source.impulse(actor.id)).toBe(true);
-      expect(world.inventory.count(actor.id, "q1:ammo/cells")).toBe(200); expect(world.combat.read(actor.id)?.armor.kind).toBe("q1"); expect(player.weapon).toBe("rocketlauncher");
+      expect(world.inventory.count(actor.id, "q1:ammo/cells")).toBe(200); expect(world.combat.read(actor.id)?.armor.regular.kind).toBe("q1"); expect(player.weapon).toBe("rocketlauncher");
     }
     if (program === "mg3") {
       const addon = world.source.addon, player = world.game.player(actor.id); if (addon === null || player === null) throw new Error("Missing MG3 source state");
       const impulse = (value: number) => { world.source.input(actor.id, { attack: false, jump: false, use: false, impulse: value }); expect(world.source.impulse(actor.id)).toBe(true); };
       impulse(111); expect(addon.playerNumber(actor.id, "parm10")).toBe(1); expect(player.maxHealth).toBe(60);
       impulse(100); expect(player.maxHealth).toBe(100); expect(addon.playerNumber(actor.id, "parm10")).toBe(1);
-      impulse(99); expect(world.inventory.count(actor.id, "q1:key/silver")).toBe(0); expect(world.inventory.count(actor.id, "q1:weapon/mg3:laser")).toBe(1); expect(world.combat.read(actor.id)?.armor.kind).toBe("none");
+      impulse(99); expect(world.inventory.count(actor.id, "q1:key/silver")).toBe(0); expect(world.inventory.count(actor.id, "q1:weapon/mg3:laser")).toBe(1); expect(world.combat.read(actor.id)?.armor.regular.kind).toBe("none");
       impulse(118); impulse(1); expect(player.weapon).toBe("mg3:mjolnir"); impulse(12); expect(player.weapon).toBe("mg3:laser");
       impulse(227); expect(addon.playerNumber(actor.id, "parm15")).toBe(1); impulse(122); expect(addon.playerNumber(actor.id, "infiniteammo")).toBe(1);
       impulse(2); expect(world.game.weaponInput(actor, true, ZERO, 0, 0)).toBe(true); expect(world.inventory.count(actor.id, "q1:ammo/shells")).toBe(100);
       world.game.time = 2; impulse(4); expect(world.game.weaponInput(actor, true, ZERO, 2, 0)).toBe(true); expect(world.inventory.count(actor.id, "q1:ammo/nails")).toBe(200);
-      world.game.time = 3; impulse(121); world.combat.setArmor(actor, { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" });
+      world.game.time = 3; impulse(121); world.combat.setArmor(actor, { regular: { kind: "q1", points: 100, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } });
       let reactions = 0;
       world.callbacks.bind(actor, { think: null, touch: null, use: null, pain: () => { reactions++; return undefined; }, die: () => { reactions++; return undefined; } });
       world.game.damage(actor.id, actor.id, actor.id, 200, "rocketlauncher"); expect(world.game.health(actor.id)).toBe(1); expect(reactions).toBe(0);
-      expect(world.combat.read(actor.id)?.armor).toEqual({ kind: "q1", points: 39, absorption: 0.3, item: "q1:item_armor1" }); expect(world.source.clients.require(actor.id).deathRecorded).toBe(false);
+      expect(world.combat.read(actor.id)?.armor).toEqual({ regular: { kind: "q1", points: 39, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } }); expect(world.source.clients.require(actor.id).deathRecorded).toBe(false);
       const checkpoint = world.capture(), restored = sourceWorld(level, program, checkpoint);
       expect(restored.game.capture()).toEqual(decodeQ1FoundationCheckpoint(checkpoint.source)); restored.actors.close();
     }

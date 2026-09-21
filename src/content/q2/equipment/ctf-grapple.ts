@@ -151,7 +151,7 @@ export class Q2CtfGrappleEquipment {
     hook.clipMask = q2ActorShotMask(game, this.settings(owner, game).playersCollide);
     if (game.options.edition === "rerelease") {
       hook.flags |= 0x800 | 0x100000; hook.die = this.sourceDie;
-      game.host.combat.create(hook.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null, noKnockback: true });
+      game.host.combat.create(hook.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null, noKnockback: true });
     }
     hook.projectile = true; hook.effects = effects; hook.model = "models/weapons/grapple/hook/tris.md2"; hook.owner = owner; hook.touch = this.sourceTouch; hook.damage = damage;
     game.move(hook, { origin: start, angles: vectorAngles(normalized), velocity: scale(normalized, speed), bounds: { min: zero, max: zero } }, false);

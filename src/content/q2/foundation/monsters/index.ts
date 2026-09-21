@@ -426,10 +426,10 @@ export class Q2Monsters implements Q2SpawnModule {
     game.move(entity, { bounds: { min: scale(definition.bounds.min, entity.scale), max: scale(definition.bounds.max, entity.scale) } }, false);
     state.normalHeight = game.body(entity).bounds.max.z;
     if (game.options.edition === "rerelease" && entity.viewHeight === 0) entity.viewHeight = Math.trunc(state.normalHeight - 8);
-    if (game.host.combat.read(entity.actor.id) === null) game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { kind: "none" }, mass: definition.mass * entity.scale, canTakeDamage: true, invulnerable: false, team: null });
+    if (game.host.combat.read(entity.actor.id) === null) game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: definition.mass * entity.scale, canTakeDamage: true, invulnerable: false, team: null });
     else {
       game.host.combat.setHealth(entity.actor, entity.maxHealth);
-      game.host.combat.setArmor(entity.actor, { kind: "none" });
+      game.host.combat.setArmor(entity.actor, { regular: { kind: "none" }, powered: { kind: "none" } });
       game.host.combat.setTraits(entity.actor, { mass: definition.mass * entity.scale, canTakeDamage: true, invulnerable: false });
     }
     entity.pain = this.sourcePain; entity.die = this.sourceDie; entity.use = this.sourceUse;
@@ -437,9 +437,9 @@ export class Q2Monsters implements Q2SpawnModule {
     if (!game.host.actors.isLive(entity.actor.id)) return true;
     const initialCombat = game.host.combat.read(entity.actor.id);
     if (initialCombat === null) throw new Error(`Missing initialized Q2 monster combat state ${entity.classname}`);
-    if (initialCombat.armor.kind === "q2" && initialCombat.armor.powerArmor.kind !== "none") {
-      state.initialPowerArmorType = initialCombat.armor.powerArmor.kind;
-      state.maxPowerArmorPower = initialCombat.armor.powerArmor.cells;
+    if (initialCombat.armor.powered.kind !== "none") {
+      state.initialPowerArmorType = initialCombat.armor.powered.kind;
+      state.maxPowerArmorPower = initialCombat.armor.powered.cells;
     } else {
       state.maxPowerArmorPower = game.host.inventory.count(entity.actor.id, "q2:monster-power");
     }

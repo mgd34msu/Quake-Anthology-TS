@@ -35,7 +35,7 @@ export function createQ3BotKnowledge(options: {
       for (let index = 0; index < 200; index++) state.inventory[index] = 0;
       const combat = actor === null ? null : options.simulation.combat.read(actor);
       state.inventory[BotInventory.HEALTH] = combat?.health ?? 0;
-      state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.kind === "none" ? 0 : combat.armor.points;
+      state.inventory[BotInventory.ARMOR] = combat === null || combat.armor.regular.kind === "none" ? 0 : combat.armor.regular.points;
       updateQ3BotWeaponInventory(state, weapon => {
         const entry = q3WeaponItem(weapon);
         return actor !== null && entry !== null && inventory.count(actor, entry.item) > 0;

@@ -233,7 +233,7 @@ describe("mission-pack source weapons", () => {
     let score = 0;
     const tag = new Q2Tag({ items, addScore: (_actor, amount) => { score += amount; return undefined; }, farthestSpawn: () => null, selectSpawn: () => ({ origin: zero, angles: zero }) });
     const token = scene.game.create("dm_tag_token"); tag.spawn(token, scene.game); items.touch(token, scene.game, scene.self.actor.id);
-    expect(tag.ownerActor()).toBe(scene.self.actor.id); expect(scene.combat.read(scene.self.actor.id)?.armor.kind).toBe("q2");
+    expect(tag.ownerActor()).toBe(scene.self.actor.id); expect(scene.combat.read(scene.self.actor.id)?.armor.regular.kind).toBe("q2");
     const victim = scene.target(100);
     for (let count = 0; count < 5; count++) tag.score(scene.self, victim, scene.game, 1, 2);
     expect(score).toBe(15); expect(items.playerPowerups(scene.player.id).quadUntil).toBe(30);
@@ -331,7 +331,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
   const inventory = new SharedInventoryTable(actors);
   const player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(player, { origin: zero, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: null });
-  combat.create(player, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   const ammo: readonly InventoryEntry[] = ["shells", "bullets", "grenades", "rockets", "cells", "slugs"].map(kind => ({ item: `q2:ammo_${kind}`, count: 200, capacity: 200 }));
   inventory.create(player, [...ammo, ...Q2_BASE_WEAPONS.filter(weapon => weapon.name !== "grenades").map(weapon => ({ item: weapon.item, count: 1, capacity: 1 }))]);
   const monsters = new Set<ActorId>(), foreignPlayers = new Set<ActorId>();
@@ -365,7 +365,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
     target(x: number) {
       const target = game.create("monster_soldier");
       game.move(target, { origin: { x, y: 0, z: 0 }, bounds: { min: zero, max: zero } });
-      combat.create(target.actor, { health: 500, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+      combat.create(target.actor, { health: 500, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
       monsters.add(target.actor.id);
       return target;
     },

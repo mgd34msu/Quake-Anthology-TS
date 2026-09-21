@@ -289,10 +289,10 @@ for (const edition of armorEditions) test(`Q3 application bridge resolves ${edit
     if (source === null) throw new Error("Missing selected Q2 source");
     expect(source.game.options.edition).toBe(edition);
     const victim = source.game.create("armor_probe");
-    simulation.combat.create(victim.actor, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+    simulation.combat.create(victim.actor, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
     for (const family of ["q1", "q3"]) for (const front of [true, false]) for (const amount of [1, 9]) {
       simulation.combat.setHealth(victim.actor, 100);
-      simulation.combat.setArmor(victim.actor, { kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0, energyProtection: 0, powerArmor: { kind: "screen", cells: 100 } });
+      simulation.combat.setArmor(victim.actor, { regular: { kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0, energyProtection: 0 }, powered: { kind: "screen", cells: 100 } });
       const outcome = simulation.combat.apply({ target: victim.actor.id, amount, knockback: 0, delivery: "direct",
         direction: { x: front ? -1 : 1, y: 0, z: 0 }, point: { x: family === "q1" ? 0 : front ? 16 : -16, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 },
         attack: { sequence: 1, time: { kind: "milliseconds", value: 0 }, attacker: player, inflictor: player, weapon: null,
@@ -301,7 +301,7 @@ for (const edition of armorEditions) test(`Q3 application bridge resolves ${edit
       expect(outcome.kind).toBe("committed");
       const saved = front ? edition === "rerelease" ? Math.max(1, Math.trunc(amount / 3)) : Math.trunc(amount / 3) : 0;
       expect(simulation.combat.read(victim.actor.id)?.health).toBe(100 - amount + saved);
-      expect(simulation.combat.read(victim.actor.id)?.armor).toEqual({ kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0, energyProtection: 0, powerArmor: { kind: "screen", cells: 100 - saved } });
+      expect(simulation.combat.read(victim.actor.id)?.armor).toEqual({ regular: { kind: "q2", item: "q2:item_armor_jacket", points: 0, normalProtection: 0, energyProtection: 0 }, powered: { kind: "screen", cells: 100 - saved } });
     }
   } finally { simulation.close(); await content.close(); }
 }, 30000);

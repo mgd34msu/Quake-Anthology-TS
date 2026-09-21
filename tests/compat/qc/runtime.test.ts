@@ -65,7 +65,7 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
       bodies.bind(target, { read: () => ({ origin: words.vector(field("origin")), angles: words.vector(field("angles")), velocity: words.vector(field("velocity")),
         bounds: { min: words.vector(field("mins")), max: words.vector(field("maxs")) }, ground: null }),
         write: value => { words.setVector(field("origin"), value.origin); words.setVector(field("velocity"), value.velocity); return undefined; } });
-      const armor = (): ArmorState => ({ kind: "q1", points: words.float(field("armorvalue")), absorption: words.float(field("armortype")), item: "q1:armor" });
+      const armor = (): ArmorState => ({ regular: { kind: "q1", points: words.float(field("armorvalue")), absorption: words.float(field("armortype")), item: "q1:armor" }, powered: { kind: "none" } });
       const order: string[] = [], outcomes: DamageOutcome[] = [];
       let onBeforeReaction: (() => undefined) | null = null;
       const authority = new GameplayAuthority(actors, callbacks, {
@@ -98,8 +98,9 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
           if (store.word === field("health")) observer.stored({ kind: "health", before: before.getFloat32(0, true), after: after.getFloat32(0, true) });
           if (store.word === field("armorvalue") || store.word === field("armortype")) {
             const current = armor();
-            if (current.kind !== "q1") throw new Error("Expected QC armor");
-            observer.stored({ kind: "armor", before: store.word === field("armorvalue") ? { ...current, points: before.getFloat32(0, true) } : { ...current, absorption: before.getFloat32(0, true) }, after: current });
+            if (current.regular.kind !== "q1") throw new Error("Expected QC armor");
+            observer.stored({ kind: "armor", before: store.word === field("armorvalue") ? { ...current, regular: { ...current.regular, points: before.getFloat32(0, true) } }
+              : { ...current, regular: { ...current.regular, absorption: before.getFloat32(0, true) } }, after: current });
           }
           if (store.word === field("velocity")) {
             const previous = { x: before.getFloat32(0, true), y: before.getFloat32(4, true), z: before.getFloat32(8, true) };
@@ -207,7 +208,7 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
         expect(damageOutcome.decision.mutations.some(value => value.kind === "health")).toBe(false);
       } else {
         expect(damageOutcome.decision.mutations.filter(value => value.kind === "armor")).toHaveLength(2);
-        expect(checked.armor).toEqual({ kind: "q1", points: 0, absorption: 0, item: "q1:armor" });
+        expect(checked.armor).toEqual({ regular: { kind: "q1", points: 0, absorption: 0, item: "q1:armor" }, powered: { kind: "none" } });
         expect(damageOutcome.decision.appliedDamage).toBe(35);
       }
     }
@@ -300,7 +301,7 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
       expect(outcome.decision.request.attack.cause).toEqual({ kind: "q1", deathType: "squish" });
       if (variant === "normal") { expect(observed.health).toBe(72); expect(outcome.decision.appliedDamage).toBe(28); }
       if (variant === "invulnerable") { expect(observed.health).toBe(100); expect(outcome.decision.appliedDamage).toBe(0); }
-      if (variant === "exhausted") { expect(observed.armor).toEqual({ kind: "none" }); expect(outcome.decision.mutations.filter(value => value.kind === "armor")).toHaveLength(3); }
+      if (variant === "exhausted") { expect(observed.armor).toEqual({ regular: { kind: "none" }, powered: { kind: "none" } }); expect(outcome.decision.mutations.filter(value => value.kind === "armor")).toHaveLength(3); }
       if (variant === "nested") {
         expect(observed.painArguments).toEqual([{ attacker: observed.doorReference, damage: 28, argc: 2 }]);
         expect(observed.outcomes.map(value => value.kind === "committed" ? value.decision.request.attack.sequence : -1)).toEqual([1, 0]); expect(outcome.survived).toBe(false); }

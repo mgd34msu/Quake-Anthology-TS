@@ -27,8 +27,8 @@ export function classicGuestPlayerUi(state: Q2PlayerState, configstrings: Readon
   const armor = readElement(state.stats, 5), ammo = readElement(state.stats, 3);
   return {
     powerups: [], health: readElement(state.stats, 1),
-    armor: armor === 0 ? { kind: "none" } : { kind: "q2", points: armor, normalProtection: 0, energyProtection: 0,
-      item: "q2:remote-armor", powerArmor: { kind: "none" } },
+    armor: { powered: { kind: "none" }, regular: armor === 0 ? { kind: "none" } : { kind: "q2", points: armor, normalProtection: 0, energyProtection: 0,
+      item: "q2:remote-armor" } },
     weaponStatus: q2WeaponStatus(weapon, () => ammo, source), arsenalWarning: "none",
     activeWeapon: weapon?.item ?? null,
     ammo: weapon === null || weapon.ammo === null ? null : { item: weapon.ammo, count: ammo },

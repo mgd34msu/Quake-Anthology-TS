@@ -45,9 +45,9 @@ export function registerHordeLoot(horde: Q1Horde): undefined {
     const actor = game.host.actors.resolveOwned(other); if (actor === null) return undefined;
     const absorption = entity.classname === "item_armor1" ? 0.3 : entity.classname === "item_armor2" ? 0.6 : 0.8;
     const points = entity.classname === "item_armor1" ? 100 : entity.classname === "item_armor2" ? 150 : 200;
-    const armor = game.host.combat.read(other)?.armor, protection = armor === undefined || armor.kind === "none" ? 0 : armor.points * (armor.kind === "q1" ? armor.absorption : armor.kind === "q2" ? armor.normalProtection : armor.protection);
+    const armor = game.host.combat.read(other)?.armor.regular, protection = armor === undefined || armor.kind === "none" ? 0 : armor.points * (armor.kind === "q1" ? armor.absorption : armor.kind === "q2" ? armor.normalProtection : armor.protection);
     if (protection >= absorption * points) return undefined;
-    game.host.combat.setArmor(actor, { kind: "q1", points, absorption, item: `q1:${entity.classname}` });
+    game.host.combat.setRegularArmor(actor, { kind: "q1", points, absorption, item: `q1:${entity.classname}` });
     game.message(other, "$qc_item_armor", false); taken(entity, other, "items/armor1.wav");
     const owner = game.entity(entity.owner); if (owner !== null) owner.wait = 0; return game.remove(entity);
   } });

@@ -317,10 +317,10 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       const player = this.simulation.playerUi(this.local.player.actor);
       this.messages.setSourcePoints(this.local.player.seat.id, this.sourceHud.points());
       const sourceHud = this.sourceHud.presentation(context.timeMilliseconds);
-      const armor = player.armor.kind === "none" ? 0 : player.armor.points;
+      const armor = player.armor.regular.kind === "none" ? 0 : player.armor.regular.points;
       const base = emptyHudData(this.local.player.seat.id);
       const hud: CommonHudData = { ...base, ...sourceHud, captions: this.soundCaptions.active({ subtitles: true, soundCaptions: this.preferences.values.captions, speakers: true }), powerups: player.powerups, prompts: [...this.match.prompts, ...sourceHud.prompts,
-        ...(player.armor.kind === "q2" && player.armor.powerArmor.kind !== "none" ? [{ action: `Power ${player.armor.powerArmor.kind} ${player.armor.powerArmor.cells}`, binding: "", icon: null }] : [])], ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
+        ...(player.armor.powered.kind !== "none" ? [{ action: `Power ${player.armor.powered.kind} ${player.armor.powered.cells}`, binding: "", icon: null }] : [])], ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
         crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeCrosshair },
         ...(player.weaponStatus === null ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
           weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,

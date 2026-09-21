@@ -1,3 +1,4 @@
+import { normalizeLegacyPowerOnlyArmor } from "../../../world/gameplay/authority.ts";
 import type { ArmorState, ItemId } from "../../../contracts/gameplay.ts";
 import type { RawEntityView } from "../../../contracts/execution.ts";
 import type { CombatStateBinding } from "../../../world/gameplay/authority.ts";
@@ -35,25 +36,36 @@ export class RereleaseCombatBindings {
       { item: "q2:item_armor_body", normal: 0.8, energy: 0.6 },
     ];
     const armor = (): ArmorState => {
-      const value = client(); if (value === null) return { kind: "none" };
+      const value = client(); if (value === null) return { regular: { kind: "none" }, powered: { kind: "none" } };
       const regular = armorItems.find(item => count(value, item.item) > 0);
       const powered = (memory.readUint64(source.at("flags")) & 4096n) !== 0n;
       const power = !powered ? null : count(value, "q2:item_power_shield") > 0 ? "shield" : count(value, "q2:item_power_screen") > 0 ? "screen" : null;
-      if (regular === undefined && power === null) return { kind: "none" };
-      return { kind: "q2", points: regular === undefined ? 0 : count(value, regular.item), item: regular?.item ?? "q2:none",
-        normalProtection: regular?.normal ?? 0, energyProtection: regular?.energy ?? 0,
-        powerArmor: power === null ? { kind: "none" } : { kind: power, cells: count(value, "q2:ammo_cells") } };
+      if (regular === undefined && power === null) return { regular: { kind: "none" }, powered: { kind: "none" } };
+      return { regular: regular === undefined ? { kind: "none" } : { kind: "q2", points: count(value, regular.item), item: regular.item,
+        normalProtection: regular.normal, energyProtection: regular.energy },
+        powered: power === null ? { kind: "none" } : { kind: power, cells: count(value, "q2:ammo_cells") } };
     };
-    const writeArmor = (state: ArmorState): undefined => {
-      const value = client();
-      if (value === null) { if (state.kind !== "none") throw new Error("Native non-client armor requires its own source declaration"); return undefined; }
-      if (state.kind !== "none" && state.kind !== "q2") throw new Error("Native Q2 armor cannot store another game's armor record");
-      if (state.kind === "q2" && state.points !== 0 && !armorItems.some(item => item.item === state.item)) throw new Error("Unknown native armor item");
-      for (const item of armorItems) memory.writeInt32(itemAddress(value, item.item), state.kind === "q2" && state.item === item.item ? state.points : 0);
-      if (state.kind === "q2" && state.powerArmor.kind !== "none") memory.writeInt32(itemAddress(value, "q2:ammo_cells"), state.powerArmor.cells);
+    const validateArmor = (state: ArmorState): undefined => {
+      if (state.regular.kind !== "none" && state.regular.kind !== "q2") throw new Error("Native Q2 armor cannot store another game's armor record");
+      if (state.powered.kind !== armor().powered.kind) throw new Error("Native power activation requires its original source equipment operation");
       return undefined;
     };
-    return { ...source.combat({ armor, writeArmor, traits: () => {
+    const writeArmor = (state: ArmorState): undefined => {
+      validateArmor(state);
+      const value = client(), regular = state.regular;
+      if (value === null) { if (regular.kind !== "none" || state.powered.kind !== "none") throw new Error("Native non-client armor requires its own source declaration"); return undefined; }
+      if (regular.kind !== "none" && regular.kind !== "q2") throw new Error("Native Q2 armor cannot store another game's armor record");
+      if (regular.kind === "q2" && regular.points !== 0 && !armorItems.some(item => item.item === regular.item)) throw new Error("Unknown native armor item");
+      const current = armor().regular;
+      for (const item of armorItems) {
+        if (regular.kind === "q2" && current.kind === "q2" && regular.item === current.item && item.item !== current.item) continue;
+        const address = itemAddress(value, item.item), points = regular.kind === "q2" && regular.item === item.item ? regular.points : 0;
+        if (memory.readInt32(address) !== points) memory.writeInt32(address, points);
+      }
+      if (state.powered.kind !== "none") memory.writeInt32(itemAddress(value, "q2:ammo_cells"), state.powered.cells);
+      return undefined;
+    };
+    return { validateArmor, normalizeLegacyArmor: legacy => normalizeLegacyPowerOnlyArmor(legacy, armor(), "q2:none"), ...source.combat({ armor, writeArmor, traits: () => {
       const value = client(), flags = memory.readUint64(source.at("flags"));
       const team = value === null ? 0 : publicState.playerState().teamId;
       const invincibleUntil = value !== null ? value.invincibleUntilMilliseconds()

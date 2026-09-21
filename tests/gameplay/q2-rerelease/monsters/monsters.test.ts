@@ -40,7 +40,7 @@ function fixture(isN64 = false, gravity = 800) {
   const world = actors.allocateAtSource("q2:game", 0, "q2:worldspawn"), player = actors.allocate("q3:character", "q3:sarge");
   bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
   bodies.create(player, { origin: { x: 500, y: 0, z: 24 }, angles: zero, velocity: zero, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } }, ground: world.id });
-  combat.create(player, { health: 1000, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(player, { health: 1000, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   let now = 0, rayActor: ActorId = player.id;
   const random: number[] = [], diagnostics: string[] = [], rereleaseRandom = new Q2RereleaseRandom(1);
   const plane = { normal: { x: 0, y: 0, z: 1 }, distance: 0, type: 2, signbits: 0 };
@@ -389,7 +389,7 @@ test("Rerelease medic revives the same actor and preserves health and commander 
     expect(revived?.state.baseHealth).toBe(370); expect(revived?.state.healthScaling).toBe(2);
     expect(scene.inventory.count(actor, "q2:monster-power")).toBe(480);
     const armor = scene.combat.read(actor)?.armor;
-    expect(armor?.kind === "q2" ? armor.powerArmor : null).toEqual({ kind: "shield", cells: 480 });
+    expect(armor?.regular.kind === "q2" ? armor.powered : null).toEqual({ kind: "shield", cells: 480 });
     expect(revived?.entity.enemy).toBe(scene.player.id);
     expect(scene.source.get(patient.entity).healer).toBeNull();
     expect(medic.entity.enemy).toBe(scene.player.id);

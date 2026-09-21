@@ -381,7 +381,7 @@ export class Q2Ballistics {
     piece.model = "models/objects/debris2/tris.md2";
     game.move(piece, { origin: body.origin, velocity: add(body.velocity, scale({ x: 100 * random(), y: 100 * random(), z: 100 + 100 * random() }, 2)) }, false);
     piece.angularVelocity = { x: game.host.random() * 600, y: game.host.random() * 600, z: game.host.random() * 600 };
-    game.host.combat.create(piece.actor, { health: 0, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+    game.host.combat.create(piece.actor, { health: 0, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
     piece.die = free;
     game.motion(piece, "bounce"); game.solid(piece, "none"); game.show(piece);
     return game.schedule(piece, 5 + game.host.random() * 5, free);

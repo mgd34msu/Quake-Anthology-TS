@@ -280,7 +280,7 @@ export class Q2MoverModule implements Q2SpawnModule {
     else if (!water) { if ((entity.spawnflags & 16) !== 0) entity.effects |= 0x1000; if (!angular && (entity.spawnflags & 64) !== 0) entity.effects |= 0x2000; }
     entity.use = this.doorUse;
     if (entity.maxHealth > 0 && !water) {
-      game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { kind: "none" }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
+      game.host.combat.create(entity.actor, { health: entity.maxHealth, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 0, canTakeDamage: true, invulnerable: false, team: null });
       entity.die = this.doorKilled;
     } else if (button && entity.targetname === "") {
       entity.touch = this.buttonTouch;

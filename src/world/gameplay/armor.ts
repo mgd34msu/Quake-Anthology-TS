@@ -24,43 +24,45 @@ export interface VictimArmorContext {
 export type VictimArmorPolicy = (request: DamageRequest, armor: ArmorState, damage: number, flags: ArmorDamageFlags) => ArmorResult;
 
 export function absorbNativeArmor(armor: ArmorState, damage: number, flags: ArmorDamageFlags, context: VictimArmorContext): ArmorResult {
-  if (armor.kind === "q2" && context.q2 === undefined) throw new Error("Q2 victim armor requires an explicit classic or rerelease source profile");
-  if (damage === 0 || flags.noArmor || armor.kind === "none") return { armor, powerSaved: 0, regularSaved: 0 };
+  if ((armor.regular.kind === "q2" || armor.powered.kind !== "none") && context.q2 === undefined)
+    throw new Error("Q2 victim armor requires an explicit classic or rerelease source profile");
+  if (damage === 0 || flags.noArmor || armor.regular.kind === "none" && armor.powered.kind === "none") return { armor, powerSaved: 0, regularSaved: 0 };
   const multiply = (left: number, right: number): number => context.arithmetic === "binary32" ? Math.fround(Math.fround(left) * Math.fround(right)) : left * right;
   const protectionScale = flags.regularProtectionScale ?? 1;
-  switch (armor.kind) {
-    case "q1": {
-      if (flags.noRegularArmor || flags.stage === "power") return { armor, powerSaved: 0, regularSaved: 0 };
-      const regularSaved = Math.min(armor.points, Math.ceil(multiply(multiply(armor.absorption, protectionScale), damage)));
-      return { armor: { ...armor, points: armor.points - regularSaved, absorption: regularSaved >= armor.points ? 0 : armor.absorption }, powerSaved: 0, regularSaved };
-    }
-    case "q2": {
-      let powerSaved = 0;
-      let powerArmor = armor.powerArmor;
-      const rerelease = context.q2?.product === "rerelease";
-      const facingLimit = rerelease ? Math.fround(0.3) : 0.3;
-      if (flags.stage !== "regular" && !flags.noPowerArmor && (!rerelease || context.q2?.alive === true) && powerArmor.kind !== "none" && powerArmor.cells > 0 && (powerArmor.kind !== "screen" || context.screenFacingDot > facingLimit)) {
-        const damagePerCell = powerArmor.kind === "screen" || context.q2?.ctf === true ? 1 : 2;
-        const dividedDamage = Math.trunc(powerArmor.kind === "screen" ? damage / 3 : (2 * damage) / 3);
-        const protectedDamage = rerelease ? Math.max(1, dividedDamage) : dividedDamage;
-        const doubledCost = rerelease ? flags.energy : flags.noRegularArmor;
-        const baseAvailable = powerArmor.cells * damagePerCell;
-        const dividedAvailable = doubledCost ? Math.trunc(baseAvailable / 2) : baseAvailable;
-        const available = rerelease ? Math.max(1, dividedAvailable) : dividedAvailable;
-        powerSaved = Math.min(available, protectedDamage);
-        const used = Math.trunc(powerSaved / damagePerCell) * (doubledCost ? 2 : 1);
-        powerArmor = { ...powerArmor, cells: rerelease ? Math.max(0, powerArmor.cells - Math.max(damagePerCell, used)) : powerArmor.cells - used };
-      }
-      const protection = flags.energy ? armor.energyProtection : armor.normalProtection;
-      const regularSaved = flags.noRegularArmor || flags.stage === "power" ? 0 : Math.min(armor.points, Math.ceil(multiply(multiply(protection, protectionScale), damage - powerSaved)));
-      return { armor: { ...armor, points: armor.points - regularSaved, powerArmor }, powerSaved, regularSaved };
-    }
-    case "q3": {
-      if (flags.noRegularArmor || flags.stage === "power") return { armor, powerSaved: 0, regularSaved: 0 };
-      const regularSaved = Math.min(armor.points, Math.ceil(Math.fround(Math.fround(damage) * Math.fround(Math.fround(armor.protection) * Math.fround(protectionScale)))));
-      return { armor: { ...armor, points: armor.points - regularSaved }, powerSaved: 0, regularSaved };
-    }
+  let powerSaved = 0, powered = armor.powered;
+  const rerelease = context.q2?.product === "rerelease";
+  const facingLimit = rerelease ? Math.fround(0.3) : 0.3;
+  if (flags.stage !== "regular" && !flags.noPowerArmor && (!rerelease || context.q2?.alive === true) && powered.kind !== "none" && powered.cells > 0 && (powered.kind !== "screen" || context.screenFacingDot > facingLimit)) {
+    const damagePerCell = powered.kind === "screen" || context.q2?.ctf === true ? 1 : 2;
+    const dividedDamage = Math.trunc(powered.kind === "screen" ? damage / 3 : (2 * damage) / 3);
+    const protectedDamage = rerelease ? Math.max(1, dividedDamage) : dividedDamage;
+    const doubledCost = rerelease ? flags.energy : flags.noRegularArmor;
+    const baseAvailable = powered.cells * damagePerCell;
+    const dividedAvailable = doubledCost ? Math.trunc(baseAvailable / 2) : baseAvailable;
+    const available = rerelease ? Math.max(1, dividedAvailable) : dividedAvailable;
+    powerSaved = Math.min(available, protectedDamage);
+    const used = Math.trunc(powerSaved / damagePerCell) * (doubledCost ? 2 : 1);
+    powered = { ...powered, cells: rerelease ? Math.max(0, powered.cells - Math.max(damagePerCell, used)) : powered.cells - used };
   }
+  let regular = armor.regular, regularSaved = 0;
+  if (!flags.noRegularArmor && flags.stage !== "power") switch (regular.kind) {
+    case "none": break;
+    case "q1":
+      regularSaved = Math.min(regular.points, Math.ceil(multiply(multiply(regular.absorption, protectionScale), damage - powerSaved)));
+      regular = { ...regular, points: regular.points - regularSaved, absorption: regularSaved >= regular.points ? 0 : regular.absorption };
+      break;
+    case "q2": {
+      const protection = flags.energy ? regular.energyProtection : regular.normalProtection;
+      regularSaved = Math.min(regular.points, Math.ceil(multiply(multiply(protection, protectionScale), damage - powerSaved)));
+      regular = { ...regular, points: regular.points - regularSaved };
+      break;
+    }
+    case "q3":
+      regularSaved = Math.min(regular.points, Math.ceil(Math.fround(Math.fround(damage - powerSaved) * Math.fround(Math.fround(regular.protection) * Math.fround(protectionScale)))));
+      regular = { ...regular, points: regular.points - regularSaved };
+      break;
+  }
+  return { armor: regular === armor.regular && powered === armor.powered ? armor : { regular, powered }, powerSaved, regularSaved };
 }
 
 /** Native flags are decoded according to their origin, never reinterpreted as another game's bit positions. */

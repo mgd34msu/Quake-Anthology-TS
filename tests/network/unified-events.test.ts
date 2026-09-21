@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test';
 import { createIdentityOwner } from '../../src/contracts/identity.ts';
 import { createContentId } from '../../src/contracts/content.ts';
 import type { SimulationPresentationEvent } from '../../src/app/bootstrap/simulation/types.ts';
+import type { ArmorState } from '../../src/contracts/gameplay.ts';
+import type { SimulationEvent } from '../../src/contracts/session.ts';
 import type { UnifiedIdentityDecoder } from '../../src/app/bootstrap/network/unified-types.ts';
 import { unifiedPresentationFor } from '../../src/app/bootstrap/simulation/network-unified.ts';
 import { EntityState } from '../../src/network/q3/state/entity.ts';
@@ -47,6 +49,20 @@ test('unified event boundary preserves source payloads and rebuilds only local p
     payload: { kind: 'sound', resource: `resource:unified:${'a'.repeat(64)}`, actor, origin: state.origin, channel: 1, volume: 0.7, attenuation: 1 } }), identity);
   expect(sound.audience.kind === 'client' && client.owns(sound.audience.client)).toBe(true);
   expect(sound.payload.kind === 'sound' && sound.payload.resource).toBe('resource:local-sound');
+  const before: ArmorState = { regular: { kind: 'q1', points: 75, absorption: 0.6, item: 'q1:armor/yellow' }, powered: { kind: 'screen', cells: 20 } };
+  const after: ArmorState = { regular: { ...before.regular }, powered: { kind: 'screen', cells: 15 } };
+  const damage: SimulationEvent = { sequence: 4, time: { kind: 'seconds', value: 2 }, audience: { kind: 'world' }, payload: { kind: 'damage', outcome: {
+    kind: 'committed', survived: true, decision: { reaction: 'none', appliedDamage: 0, mutations: [{ kind: 'armor', before, after }], request: {
+      target: actor, amount: 5, knockback: 0, direction: state.origin, point: state.origin, normal: state.origin, delivery: 'direct', attack: {
+        sequence: 1, time: { kind: 'seconds', value: 2 }, attacker: actor, inflictor: actor, weapon: 'q3:machinegun', weaponProvider: 'q3:weapons',
+        combatProvider: 'q1:combat', inventoryProvider: 'q2:inventory', movementProvider: 'q1:movement', cause: { kind: 'q3', meansOfDeath: 3, damageFlags: 0 },
+      },
+    } },
+  } } };
+  const decodedDamage = readUnifiedSimulationEvent(writeUnifiedSimulationEvent(damage), identity);
+  if (decodedDamage.payload.kind !== 'damage' || decodedDamage.payload.outcome.kind !== 'committed') throw new Error('Lost damage event');
+  expect(decodedDamage.payload.outcome.decision.mutations).toEqual([{ kind: 'armor', before, after }]);
+  expect(decodedDamage.payload.outcome.decision.request.target).toBe(local);
   expect(() => decodeUnifiedPresentationEvents(new TextEncoder().encode('[{"kind":"unknown"}]'), identity)).toThrow();
   expect(() => readUnifiedSimulationEvent({ sequence: 1, time: { kind: 'seconds', value: 0 }, audience: { kind: 'world' }, payload: { kind: 'sound', resource: 'resource:/private/server/pak0' } }, identity)).toThrow();
 });

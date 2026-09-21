@@ -36,7 +36,7 @@ test.skipIf(!await Bun.file(path).exists())("original Copper monster spawns, acq
   physics.bodies.create(player, { origin: playerOrigin, angles: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, ground: world.id, bounds: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } } });
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => { throw new Error("Source velocity must not be replayed"); },
     beforeReaction: () => undefined, confirmed: outcome => { outcomes.push(outcome); return undefined; } });
-  combat.create(player, { health: 100, armor: { kind: "none" }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
+  combat.create(player, { health: 100, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null });
   const occupied = new Set<number>(), actorFields: ModActorField[] = [];
   for (const field of program.fields) {
     const width = field.type === "vector" ? 3 : 1;

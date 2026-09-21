@@ -25,7 +25,7 @@ export function spawnArsenal(state: CtfState, actor: ActorId): undefined {
   state.grant(actor, "q1:ammo/shells", state.startMap ? 0 : 40, 100);
   state.grant(actor, "q1:ammo/nails", 0, 200); state.grant(actor, "q1:ammo/rockets", 0, 100); state.grant(actor, "q1:ammo/cells", 0, 100);
   state.grant(actor, "q1:ctf/weapon/grapple", state.nativeGrappleEnabled && !state.startMap && !(state.teamplay & CTF_FLAGS.disableGrapple) ? 1 : 0);
-  game.host.combat.setArmor(player.actor, state.startMap ? { kind: "none" } : { kind: "q1", points: 50, absorption: 0.3, item: "q1:item_armor1" });
+  game.host.combat.setArmor(player.actor, { regular: state.startMap ? { kind: "none" } : { kind: "q1", points: 50, absorption: 0.3, item: "q1:item_armor1" }, powered: { kind: "none" } });
   game.selectWeapon(player.actor, state.startMap ? "axe" : "shotgun"); return undefined;
 }
 

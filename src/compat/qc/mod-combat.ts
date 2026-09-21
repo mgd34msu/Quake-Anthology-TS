@@ -57,17 +57,21 @@ export class QcModCombat {
     if (slot?.provider !== slots.options.provider) throw new Error("QC combat admission requires its own source actor");
     const words = machine.entities.at(slot.slot), binding = id1ProgramBinding(this.options.program);
     const writeArmor = (armor: ArmorState): undefined => {
-      if (armor.kind !== "none" && armor.kind !== "q1") throw new Error("Cannot store foreign armor in source QC fields");
+      if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q1") throw new Error("Cannot store foreign armor in source QC fields");
       const [green, yellow, red] = binding.armorMasks, mask = green | yellow | red;
-      const bit = armor.kind === "none" ? 0 : armor.item === "q1:item_armorInv" ? red : armor.item === "q1:item_armor2" ? yellow : green;
-      words.setFloat(this.field("armorvalue"), armor.kind === "none" ? 0 : armor.points);
-      words.setFloat(this.field("armortype"), armor.kind === "none" ? 0 : armor.absorption);
+      const bit = armor.regular.kind === "none" ? 0 : armor.regular.item === "q1:item_armorInv" ? red : armor.regular.item === "q1:item_armor2" ? yellow : green;
+      words.setFloat(this.field("armorvalue"), armor.regular.kind === "none" ? 0 : armor.regular.points);
+      words.setFloat(this.field("armortype"), armor.regular.kind === "none" ? 0 : armor.regular.absorption);
       words.setFloat(this.field(binding.armorField), (Math.trunc(words.float(this.field(binding.armorField))) & ~mask) | bit);
       return undefined;
     };
     const state = { sourceDamage: (request: DamageRequest) => this.apply(request),
       read: () => ({ health: words.float(this.field("health")), armor: this.damage.readArmor(words), mass: 200,
         canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) > this.seconds(), team: null }),
+      validateArmor: (armor: ArmorState): undefined => {
+        if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q1") throw new Error("Cannot store foreign armor in source QC fields");
+        return undefined;
+      },
       writeHealth: (health: number): undefined => { words.setFloat(this.field("health"), health); return undefined; }, writeArmor };
     // A full save admitted copied canonical state before restoring this guest's exact words.
     if (services.combat.read(actor.id) === null) services.combat.bind(actor, state); else services.combat.rebind(actor, state);

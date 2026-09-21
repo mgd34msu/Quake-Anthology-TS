@@ -93,7 +93,7 @@ export function q3MaximumHealth(handicap: string): number {
 }
 
 export function q3InitialCombat(handicap: string, team: string | null): CombatState {
-  return { health: (q3MaximumHealth(handicap) + 25) | 0, armor: { kind: "q3", points: 0, protection: Math.fround(0.66) },
+  return { health: (q3MaximumHealth(handicap) + 25) | 0, armor: { regular: { kind: "q3", points: 0, protection: Math.fround(0.66) }, powered: { kind: "none" } },
     mass: 200, canTakeDamage: true, invulnerable: false, team };
 }
 
