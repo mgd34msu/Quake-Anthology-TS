@@ -34,6 +34,9 @@ export function grappleStyles(catalog: InstalledCatalog, preferred: CatalogProdu
   for (const product of sources) {
     const selection = grappleForProduct(product);
     if (selection === null) continue;
+    // The curated Threewave style uses its original Morning Star. Rerelease
+    // packages retain their different model when selected by a native game or save.
+    if (selection.mechanic === "q1-threewave" && selection.edition !== "classic") continue;
     const id = selection.mechanic;
     if (styles.has(id)) continue;
     const title = id === "q1-threewave" ? "Threewave CTF (Quake 1)" : id === "q2-ctf" ? "Threewave CTF (Quake 2)" : "LMCTF (Quake 2)";
@@ -44,7 +47,7 @@ export function grappleStyles(catalog: InstalledCatalog, preferred: CatalogProdu
 
 function grappleForProduct(product: CatalogProduct): GrappleStyle["selection"] | null {
   const { family, campaign, edition } = product.expectation;
-  if (family === "q1" && campaign === "ctf" && edition === "rerelease")
+  if (family === "q1" && campaign === "ctf" && (edition === "classic" || edition === "rerelease"))
     return { kind: "enabled", mechanic: "q1-threewave", edition, binding: "slot", source: { provider: EQUIPMENT_PROVIDERS.threewave, content: product.id } };
   if (family === "q2" && campaign === "ctf" && (edition === "classic" || edition === "rerelease"))
     return { kind: "enabled", mechanic: "q2-ctf", edition, binding: "slot", source: { provider: EQUIPMENT_PROVIDERS.ctf, content: product.id } };
@@ -127,6 +130,9 @@ export function equipmentResources(equipment: EquipmentSelection): readonly Reso
     switch (grapple.mechanic) {
       case "q1-threewave":
         add(grapple.source, ["progs/star.mdl", "sound/weapons/chain1.wav", "sound/blob/land1.wav", "sound/player/axhit2.wav"]);
+        add(grapple.source, grapple.edition === "classic"
+          ? ["progs/bit.mdl", "sound/weapons/chain2.wav", "sound/weapons/chain3.wav", "sound/weapons/bounce2.wav"]
+          : ["progs/beam.mdl"]);
         if (grapple.binding === "slot") add(grapple.source, ["progs/v_star.mdl"]);
         break;
       case "q2-ctf":

@@ -28,6 +28,7 @@ qfiles/
     id1/                          # classic Quake: pak0.pak, pak1.pak
     hipnotic/                     # classic Scourge of Armagon
     rogue/                        # classic Dissolution of Eternity
+    ctf/                          # original Threewave CTF, including the Morning Star
     qw/                           # QuakeWorld content, including qwprogs.dat
     mymod/                        # a classic Q1 mod, kept in its own directory
     rerelease/
@@ -208,7 +209,7 @@ The installed executable includes these recent fixes:
 - Stock Q3 hooks attach, pull, save and release in mixed worlds. Cable rendering still needs correction.
 - Long collision traces avoid reconstructing geometry beyond an earlier wall, removing the reproduced multi-second end-map stalls without reducing collision detail.
 
-The Q1 Threewave menu choice still resolves to the rerelease grappling-gun model. Original Morning Star package selection is being corrected.
+Newer source selects the original Morning Star for Threewave CTF (Quake 1), independently of the destination world. Install the original Threewave server and client packages in `q1/ctf`. Threewave 4.0 uses the 3.01 client `pak0.pak`, the 4.0 client `pak1.pak`, and the 4.0 server programs. Saved rerelease selections retain their original package. The selected Q3 cable now anchors to the current character's eye height. These two visual corrections are not yet in the installed executable.
 
 Q1 colored lightmap offsets now address complete RGB samples. This fixes striped lighting in the rerelease and other Q1 maps with colored lighting, for both GL and CPU rendering.
 

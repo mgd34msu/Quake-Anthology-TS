@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
 import type { ContentId, EquipmentSelection, GrappleSelection, ProviderReference } from "../../../src/contracts/content.ts";
 import { discoverInstalledContent, disabledEquipment, EQUIPMENT_PROVIDERS, nativeEquipment, presetChoice, resolveLaunch, selectLaunch } from "../../../src/content/catalog/index.ts";
+import { grappleStyles } from "../../../src/content/catalog/equipment.ts";
 import type { InstalledCatalog, LaunchPreset } from "../../../src/content/catalog/index.ts";
 import { readEquipment } from "../../../src/persistence/recipe.ts";
 import { SaveReader } from "../../../src/persistence/value.ts";
 import { openMountPlan } from "../../../src/content/mounts/index.ts";
 import { applicationPreset, loadApplicationContent } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
+import { parseMdl } from "../../../src/formats/q12-model/mdl.ts";
 
 const installed = discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
 function preset(catalog: InstalledCatalog, product: string, map: string): LaunchPreset {
@@ -20,6 +22,32 @@ function preset(catalog: InstalledCatalog, product: string, map: string): Launch
     ordering: { kind: "mixed", providers: [provider.provider], entityOrder: "source-slot-order", ties: "provider-entity-invocation" } };
 }
 function source(provider: ProviderReference["provider"], content: ContentId): ProviderReference { return { provider, content }; }
+
+test("curated Q1 Threewave selects the original Morning Star in every world and saves retain the selected edition", async () => {
+  const catalog = await installed, classic = catalog.require("q1-classic-ctf");
+  const styles = ["q1-classic-id1", "q1-rerelease-id1", "q2-classic-baseq2", "q2-rerelease-baseq2", "q3-baseq3"].map(product =>
+    grappleStyles(catalog, catalog.require(product)).filter(style => style.id === "q1-threewave"));
+  for (const choices of styles) {
+    expect(choices).toHaveLength(1);
+    expect(choices[0]?.selection).toMatchObject({ mechanic: "q1-threewave", edition: "classic", source: { content: classic.id } });
+  }
+  const selection = styles[0]?.[0]?.selection;
+  if (selection === undefined) throw new Error("Missing Threewave style");
+  const native = preset(catalog, "q1-rerelease-id1", "maps/start.bsp");
+  const equipment: EquipmentSelection = { grapple: selection, handGrenades: { kind: "disabled" } };
+  const recipe = await resolveLaunch({ catalog, preset: native, choice: { ...presetChoice(native.id), equipment: { kind: "selected", value: equipment } } });
+  expect(readEquipment(new SaveReader(recipe.equipment, "equipment"))).toEqual(equipment);
+  const view = recipe.resources.find(resource => resource.requestedPath === "progs/v_star.mdl");
+  if (view === undefined) throw new Error("Missing selected view model");
+  expect(view.provenance.mount.identity.content).toBe(classic.id);
+  using mounts = await openMountPlan(recipe.mounts);
+  expect(parseMdl(await mounts.read(view)).frames.map(frame => frame.kind === "single" ? frame.frame.name : "group"))
+    .toEqual(["v_star1", "v_star2", "v_star3", "v_star4", "v_star5", "v_star6"]);
+  const rerelease = source("q1:official", catalog.require("q1-rerelease-ctf").id);
+  const saved = nativeEquipment(catalog, rerelease, rerelease);
+  expect(readEquipment(new SaveReader(saved, "equipment"))).toEqual(saved);
+  expect(saved.grapple).toMatchObject({ edition: "rerelease", source: { content: rerelease.content } });
+}, 60000);
 
 test("classic Q1 map sidecars cannot resolve from selected Threewave rerelease equipment", async () => {
   const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--mode", "deathmatch"]);

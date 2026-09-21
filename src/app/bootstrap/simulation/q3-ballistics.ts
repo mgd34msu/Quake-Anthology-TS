@@ -309,7 +309,7 @@ export class Q3SharedBallistics {
     if (owner === null || body === null) return;
     if (projectile.phase.kind === "attached") this.event({ kind: "projectile", trajectory: { ...projectile.trajectory }, actor: projectile.actor.id, weapon: 10,
       origin: body.origin, end: body.origin, normal: zero, target: null, surfaceFlags: 0 });
-    const pose = this.host.pose(owner), cable = q3GrappleCable(pose.origin, qvmAngleVectors(pose.angles).up, body.origin);
+    const pose = this.host.pose(owner), cable = q3GrappleCable(pose.origin, qvmAngleVectors(pose.angles).up, body.origin, pose.viewheight);
     this.event({ kind: "trail", actor: projectile.actor.id, weapon: 10, origin: cable?.start ?? body.origin, end: cable?.end ?? body.origin,
       normal: zero, target: projectile.owner, surfaceFlags: 0 });
   }

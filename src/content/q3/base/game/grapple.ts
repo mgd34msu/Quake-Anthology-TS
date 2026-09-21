@@ -17,7 +17,7 @@ export function q3GrappleTarget(origin: Vec3, bounds: Bounds): Vec3 {
   return add3(origin, scale3(add3(bounds.min, bounds.max), 0.5));
 }
 
-export function q3GrappleCable(origin: Vec3, up: Vec3, point: Vec3): { readonly start: Vec3; readonly end: Vec3 } | null {
-  const start = add3(add3(origin, vec3(0, 0, 26)), scale3(up, -6));
+export function q3GrappleCable(origin: Vec3, up: Vec3, point: Vec3, viewHeight = 26): { readonly start: Vec3; readonly end: Vec3 } | null {
+  const start = add3(add3(origin, vec3(0, 0, viewHeight)), scale3(up, -6));
   return length3(sub3(start, point)) < 64 ? null : { start, end: point };
 }

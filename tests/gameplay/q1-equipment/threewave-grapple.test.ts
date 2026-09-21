@@ -32,7 +32,7 @@ async function geometry(): Promise<Q1Map> {
     return readQ1Bsp(await archive.readEntry(entry), { source: "maps/e1m1.bsp" });
   } finally { archive.close(); }
 }
-function equipment(map: Q1Map, saved?: Saved) {
+function equipment(map: Q1Map, saved?: Saved, edition: "classic" | "rerelease" = "rerelease") {
   const identities = createIdentityOwner("threewave-equipment");
   const actors = saved === undefined ? new SessionActorRegistry(identities) : SessionActorRegistry.restore(identities, saved.slots, saved.sources);
   const callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(map);
@@ -54,7 +54,7 @@ function equipment(map: Q1Map, saved?: Saved) {
     scheduleThink: (actor, time) => { pending.set(actor, time); return undefined; }, cancelThink: actor => { pending.delete(actor); return undefined; },
     emit: event => { events.push(event); return undefined; }, transition: () => undefined, players: () => [], checkClient: () => null, classname: () => "", powerup: () => undefined,
   };
-  const game = new Q1EntityServices(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop: false, gravity: 800, maxClients: 4,
+  const game = new Q1EntityServices(host, { edition, skill: 1, deathmatch: 0, coop: false, gravity: 800, maxClients: 4,
     campaign: "q1:id1", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q3:movement" });
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
   let input: ThreewaveGrappleInput = { held: true, release: false, jump: false, viewAngles: ZERO, teleportUntil: 0 };
@@ -93,6 +93,32 @@ function equipment(map: Q1Map, saved?: Saved) {
 function hookFor(state: ReturnType<typeof equipment>, owner: ActorId) {
   const hook = state.grapple.hook(owner); if (hook === null) throw new Error("Missing equipment hook"); return hook;
 }
+
+test("classic Threewave saves its three authored chain links and releases every source continuation", async () => {
+  const map = await geometry(), state = equipment(map, undefined, "classic"), owner = state.sharedActor(1);
+  expect(state.grapple.fire(owner.id)).toBe(true);
+  const hook = hookFor(state, owner.id), links = [...state.game.entities.values()].filter(entity => entity.classname === "ctf_hook_link");
+  expect(links).toHaveLength(3);
+  expect(links.map(link => link.number("weapon"))).toEqual([0.75, 0.5, 0.25]);
+  expect(links.map(link => state.game.body(link).angles)).toEqual([{ x: 93, y: 123, z: 153 }, { x: 62, y: 82, z: 102 }, { x: 31, y: 41, z: 51 }]);
+  for (const link of links) {
+    expect(link.model).toBe("progs/bit.mdl"); expect(link.movement).toBe("noclip");
+    expect(link.angularVelocity).toEqual({ x: 310, y: 410, z: 510 });
+  }
+  state.game.setOrigin(hook, { x: 300, y: 0, z: 16 }); state.input({ jump: true }); state.advance(0.11);
+  expect(links.map(link => state.game.body(link).origin)).toEqual([{ x: 87, y: 0, z: 4 }, { x: 158, y: 0, z: 8 }, { x: 229, y: 0, z: 12 }]);
+  state.grapple.trail(owner.id); expect(state.events.some(event => event.kind === "beam")).toBe(false);
+  const saved = state.capture(), restored = equipment(map, saved, "classic");
+  const restoredOwner = restored.actors.resolveSaved({ slot: owner.id.slot, generation: owner.id.generation });
+  if (restoredOwner === null) throw new Error("Missing restored owner");
+  restored.input({ jump: true }); state.advance(0.21); restored.advance(0.21);
+  expect(restored.game.capture()).toEqual(state.game.capture());
+  restored.grapple.release(restoredOwner.id);
+  expect([...restored.game.entities.values()].filter(entity => entity.classname === "ctf_hook_link")).toHaveLength(0);
+  expect(restored.pending.size).toBe(0);
+  expect(restored.events.some(event => event.kind === "sound" && event.path === "weapons/bounce2.wav")).toBe(true);
+  state.actors.close(); restored.actors.close();
+});
 
 test("offhand Threewave fire, moving anchor, pull and release require only the foreign owner's shared body and combat", async () => {
   const state = equipment(await geometry()), owner = state.sharedActor(1), anchor = state.sharedActor(2, { x: 300, y: 0, z: 16 });

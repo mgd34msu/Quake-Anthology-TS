@@ -198,7 +198,7 @@ export type EnemySelection =
 export type GrappleSelection =
   | { readonly kind: "disabled" }
   | ({ readonly kind: "enabled"; readonly source: ProviderReference; readonly binding: "slot" | "offhand" } & (
-    | { readonly mechanic: "q1-threewave"; readonly edition: "rerelease" }
+    | { readonly mechanic: "q1-threewave"; readonly edition: "classic" | "rerelease" }
     | { readonly mechanic: "q2-ctf"; readonly edition: "classic" | "rerelease" }
     | { readonly mechanic: "q2-lmctf"; readonly edition: "classic" }
     | { readonly mechanic: "q3-qvm"; readonly edition: "classic"; readonly profile: QvmGrappleDefinition }

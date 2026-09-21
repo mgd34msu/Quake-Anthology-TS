@@ -37,6 +37,7 @@ export class ThreewaveGrapple {
   constructor(readonly game: Q1EntityServices, readonly host: ThreewaveGrappleHost) {
     game.named.register("ctf:hook_touch", { touch: (_game, hook, actor, _normal, surface) => this.touch(hook, actor, surface) });
     game.named.register("ctf:hook_pull", { action: (_game, hook) => this.pull(hook) });
+    game.named.register("ctf:hook_link", { action: (_game, link) => this.positionLink(link) });
     game.named.register("ctf:hook_flying", { action: (_game, hook) => {
       const owner = hook.owner;
       if (owner === null || !game.host.actors.isLive(owner) || game.time >= hook.number("ctf.fired") + 5) return this.vanish(hook);
@@ -82,6 +83,7 @@ export class ThreewaveGrapple {
     if (state !== undefined) { state.animation = null; state.pulling = false; }
     if (animation !== null) this.game.remove(animation);
     const hook = this.hook(actor); if (hook === null) return undefined;
+    if (this.game.options.edition === "classic" && this.game.host.actors.isLive(actor)) this.game.sound(this.owner(actor), "weapons/bounce2.wav", "weapon");
     this.game.host.bodies.detach(hook.actor);
     for (const link of this.game.entities.values()) if (link.classname === "ctf_hook_link" && link.owner !== null && sameActor(link.owner, hook.actor.id)) this.game.remove(link);
     return this.game.remove(hook);
@@ -116,8 +118,14 @@ export class ThreewaveGrapple {
     const relative = vsub(game.body(hook).origin, vadd(body.origin, vadd(vscale(basis.up, input.jump ? 0 : 16), vscale(basis.forward, 16))));
     const distance = length(relative), velocity = vscale(normalize(relative), distance <= 100 ? distance * 10 : 1000);
     const traveled = length(vsub(body.origin, hook.vector("ctf.lastOrigin")));
-    if (traveled > 10 && hook.number("style") === 3) hook.fields.set("style", "2");
-    if (traveled < 10 && hook.number("style") === 2) hook.fields.set("style", "3");
+    if (traveled > 10 && hook.number("style") === 3) {
+      if (game.options.edition === "classic") game.sound(this.owner(owner), "weapons/chain2.wav", "weapon");
+      hook.fields.set("style", "2");
+    }
+    if (traveled < 10 && hook.number("style") === 2) {
+      if (game.options.edition === "classic") game.sound(this.owner(owner), "weapons/chain3.wav", "weapon");
+      hook.fields.set("style", "3");
+    }
     const actor = this.owner(owner); game.host.bodies.write(actor, { ...body, velocity }); game.host.bodies.link(actor);
     hook.fields.set("ctf.lastOrigin", `${Math.fround(body.origin.x)} ${Math.fround(body.origin.y)} ${Math.fround(body.origin.z)}`); game.link(hook);
     return game.schedule(hook, 0.1, game.named.action(hook, "ctf:hook_pull"));
@@ -141,6 +149,7 @@ export class ThreewaveGrapple {
     else game.setBody(hook, { velocity: body.velocity });
     game.host.bodies.attach(hook.actor, { anchor: other, follow: target.centered ? { kind: "center" }
       : { kind: "translation", offset: vsub(game.body(hook).origin, body.origin) } });
+    if (game.options.edition === "classic") game.sound(this.owner(owner), "weapons/chain2.wav", "weapon");
     hook.references.set("ctf.enemy", other); hook.fields.set("style", "2");
     hook.touch = null; game.link(hook); return game.schedule(hook, 0.1, game.named.action(hook, "ctf:hook_pull"));
   }
@@ -155,9 +164,31 @@ export class ThreewaveGrapple {
     const yaw = Math.atan2(direction.y, direction.x) * 180 / Math.PI, pitch = Math.atan2(direction.z, Math.hypot(direction.x, direction.y)) * 180 / Math.PI;
     game.setBody(hook, { origin: vadd(body.origin, vadd(vscale(forward, 16), { x: 0, y: 0, z: 16 })), bounds: POINT,
       velocity: vscale(direction, 800), angles: { x: pitch, y: yaw < 0 ? yaw + 360 : yaw, z: 0 } }); game.link(hook);
-    game.sound(owner, "weapons/chain1.wav", "weapon"); game.schedule(hook, 0.1, game.named.action(hook, "ctf:hook_flying")); return true;
+    game.sound(owner, "weapons/chain1.wav", "weapon"); game.schedule(hook, 0.1, game.named.action(hook, "ctf:hook_flying"));
+    if (game.options.edition === "classic") {
+      for (let number = 3; number > 0; number--) {
+        const link = game.create("ctf_hook_link");
+        link.owner = hook.actor.id; link.movement = "noclip"; link.solid = "none"; link.model = "progs/bit.mdl";
+        link.references.set("ctf.tail", actor); link.fields.set("weapon", String(number / 4));
+        link.angularVelocity = { x: 310, y: 410, z: 510 };
+        game.setBody(link, { bounds: POINT, angles: { x: 31 * number, y: 41 * number, z: 51 * number } });
+        this.positionLink(link);
+      }
+    }
+    return true;
+  }
+  /** Original Threewave 4.00 MakeChain/LinkPos; each link owns its source think. */
+  private positionLink(link: Q1Actor): undefined {
+    const game = this.game, head = game.entity(link.owner), tail = link.references.get("ctf.tail");
+    if (head === null || tail == null || !game.host.actors.isLive(tail)) return game.remove(link);
+    const body = this.body(tail), basis = vectors(body.angles);
+    const end = vadd(body.origin, vadd(vscale(basis.up, this.host.input(tail).jump ? 0 : 16), vscale(basis.forward, 16)));
+    const origin = game.body(head).origin;
+    game.setOrigin(link, vadd(origin, vscale(vsub(end, origin), link.number("weapon"))));
+    return game.schedule(link, 0.1, game.named.action(link, "ctf:hook_link"));
   }
   trail(actor: ActorId): undefined {
+    if (this.game.options.edition === "classic") return undefined;
     const hook = this.hook(actor); if (hook === null) return undefined;
     const body = this.game.body(hook), offset = vscale(vectors(body.angles).forward, -7);
     return this.game.host.emit({ kind: "beam", style: "grapple", actor: hook.actor.id, start: vadd(body.origin, { ...offset, z: -offset.z }), end: vadd(this.body(actor).origin, { x: 0, y: 0, z: 16 }) });

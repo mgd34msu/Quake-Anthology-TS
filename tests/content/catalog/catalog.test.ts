@@ -17,7 +17,7 @@ function preset(content: ContentId): LaunchPreset {
   const clock: LaunchPreset["ordering"] = { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } };
   return { id: "recipe:campaign:1", map: { geometry: { content, path: "maps/start.bsp" }, entities: provider("entities") },
     campaign: { kind: "campaign", mission: provider("mission"), gamecode: provider("gamecode") }, movement: provider("movement"),
-    character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [provider("weapons")], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
+    character: { definition: provider("character"), appearance: provider("appearance") }, weapons: [{ provider: "q1:official", content }], equipment: { grapple: { kind: "disabled" }, handGrenades: { kind: "disabled" } }, enemies: { kind: "map-defined" },
     presentation: { doppler: { kind: "source" }, environment: { kind: "audio-content" }, assets: content, hud: provider("hud"), effects: provider("effects"), audio: provider("audio") }, engineBehavior: provider("rerelease"),
     combat: provider("combat"), inventory: provider("inventory"), match: provider("match"), transition: provider("transition"),
     execution: [{ kind: "quakec", owner: provider("gamecode"), role: "server-game", artifact: { content, path: "progs.dat" }, api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }],
@@ -81,7 +81,7 @@ describe("installed content catalog", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  test.skipIf(!existsSync(corpusRoot))("application rejects resolved guest artifacts instead of substituting TypeScript execution", async () => {
+  test.skipIf(!existsSync(corpusRoot))("application prepares resolved guest artifacts without substituting TypeScript execution", async () => {
     const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
     const cases: readonly { readonly game: string; readonly map: string; readonly module: (owner: ProviderReference) => ExecutionSelection }[] = [
       { game: "q1-classic-id1", map: "start", module: owner => ({ kind: "quakec", owner, role: "server-game", artifact: { content: owner.content, path: "progs.dat" }, api: { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 } }) },
@@ -89,7 +89,9 @@ describe("installed content catalog", () => {
       { game: "q3-baseq3", map: "q3dm1", module: owner => ({ kind: "qvm", owner, role: "server-game", artifact: { content: owner.content, path: "vm/qagame.qvm" }, api: { kind: "q3-qagame", version: 8 } }) },
     ];
     for (const entry of cases) {
-      const command = parseApplicationCommand(["--content-root", corpusRoot, "--game", entry.game, "--map", entry.map]);
+      const family = catalog.require(entry.game).expectation.family;
+      const command = parseApplicationCommand(["--content-root", corpusRoot, "--game", entry.game, "--map", entry.map,
+        "--movement", family, "--character", family, "--mode", family === "q3" ? "deathmatch" : "singleplayer"]);
       if (command.kind !== "run") throw new Error("Expected application launch");
       const native = applicationPreset(catalog, command.options);
       const module = entry.module(native.map.entities);
@@ -98,7 +100,12 @@ describe("installed content catalog", () => {
       if (resolved === undefined || resolved.kind === "typescript") throw new Error("Expected resolved guest artifact");
       expect(resolved.artifact.byteLength).toBeGreaterThan(0);
       expect(resolved.artifact.provenance.mount.identity.content).toBe(native.map.entities.content);
-      await expect(loadApplicationContent(command.options, recipe)).rejects.toThrow(`Application cannot execute ${resolved.kind} server-game module ${resolved.owner.provider} (${resolved.artifact.requestedPath})`);
+      const selected = await loadApplicationContent(command.options, recipe);
+      try {
+        expect(selected.recipe.execution).toEqual(recipe.execution);
+        expect(resolved.kind === "quakec" ? selected.preparedQuakeC
+          : resolved.kind === "native" ? selected.preparedQ2Game : selected.preparedQ3Game).not.toBeNull();
+      } finally { await selected.close(); }
       const supported = await loadApplicationContent(command.options);
       try { expect(supported.recipe.execution.every(value => value.kind === "typescript")).toBe(true); }
       finally { await supported.close(); }
@@ -109,9 +116,9 @@ describe("installed content catalog", () => {
     const root = await mkdtemp(resolve(tmpdir(), "quake-catalog-"));
     try {
       const catalog = await discoverInstalledContent({ corpusRoot: root });
-      expect(expectedProducts).toHaveLength(26);
-      expect(catalog.products).toHaveLength(26);
-      expect(catalog.products.filter(product => product.availability.kind === "missing")).toHaveLength(26);
+      expect(expectedProducts).toHaveLength(27);
+      expect(catalog.products).toHaveLength(27);
+      expect(catalog.products.filter(product => product.availability.kind === "missing")).toHaveLength(27);
       expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("missing");
       expect(catalog.product("q1-rerelease-quake64").expectation).toMatchObject({ contentDirectory: "q1/rerelease/q64", mapWitness: "maps/start.bsp", baseProduct: "q1-rerelease-id1" });
       expect(catalog.product("q3-demota").expectation.baseProduct).toBeNull();
@@ -166,10 +173,10 @@ describe("installed content catalog", () => {
     expect(resolved.presentation).toEqual(native.presentation);
   });
 
-  test.skipIf(!existsSync(corpusRoot))("discovers the supplied 24 products and reads campaign progs under selected classic behavior", async () => {
+  test.skipIf(!existsSync(corpusRoot))("discovers the supplied 25 products and reads campaign progs under selected classic behavior", async () => {
     const catalog = await discoverInstalledContent({ corpusRoot, discoverMods: false });
-    expect(catalog.products).toHaveLength(26);
-    expect(catalog.products.filter(product => product.availability.kind === "installed")).toHaveLength(24);
+    expect(catalog.products).toHaveLength(27);
+    expect(catalog.products.filter(product => product.availability.kind === "installed")).toHaveLength(25);
     expect(catalog.product("q1-rerelease-quake64").availability.kind).toBe("missing");
     expect(catalog.mapsFor("q1-quakeworld").some(map => map.path === "maps/start.bsp")).toBe(true);
     const native = preset(catalog.product("q1-rerelease-mg1").id);

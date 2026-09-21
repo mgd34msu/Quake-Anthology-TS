@@ -145,7 +145,7 @@ function readGrapple(reader: SaveReader): GrappleSelection {
   if (kind === "disabled") return { kind };
   const source = readProvider(reader.field("source")), binding = reader.field("binding").choice("slot", "offhand");
   switch (reader.field("mechanic").choice("q1-threewave", "q2-ctf", "q2-lmctf", "q3-qvm")) {
-    case "q1-threewave": return { kind, source, binding, mechanic: "q1-threewave", edition: reader.field("edition").literal("rerelease") };
+    case "q1-threewave": return { kind, source, binding, mechanic: "q1-threewave", edition: reader.field("edition").choice("classic", "rerelease") };
     case "q2-ctf": return { kind, source, binding, mechanic: "q2-ctf", edition: reader.field("edition").choice("classic", "rerelease") };
     case "q2-lmctf": return { kind, source, binding, mechanic: "q2-lmctf", edition: reader.field("edition").literal("classic") };
     case "q3-qvm": return { kind, source, binding, mechanic: "q3-qvm", edition: reader.field("edition").literal("classic"), profile: readQvmGrappleDefinition(reader.field("profile")) };
