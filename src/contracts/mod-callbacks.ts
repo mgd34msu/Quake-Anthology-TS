@@ -46,6 +46,19 @@ export interface ModConsoleCommand {
   readonly globals: readonly { readonly name: string; readonly value: ModConsoleValue }[];
 }
 
+export interface ModQcArmorStage {
+  readonly function: string;
+  readonly entry: number;
+  readonly exit: number;
+  readonly target: number;
+  readonly damage: number;
+  readonly saved: number;
+  readonly flags: { readonly kind: "none" } | { readonly kind: "bits"; readonly word: number;
+    readonly noArmor: number; readonly noPowerArmor: number; readonly noRegularArmor: number; readonly energy: number };
+  /** Exact source instructions, including the join, qualified by the declaring artifact. */
+  readonly statements: readonly { readonly opcode: number; readonly a: number; readonly b: number; readonly c: number }[];
+}
+
 export interface ModCallbackDeclaration {
   readonly version: 1;
   readonly runtime: "quakec";
@@ -61,5 +74,5 @@ export interface ModCallbackDeclaration {
   /** Explicit console names and argument lowering into original compiled functions. */
   readonly commands?: readonly ModConsoleCommand[];
   /** Declared lowering of canonical damage into the artifact's verified T_Damage ABI. */
-  readonly combat?: { readonly damage: ModSourceCall };
+  readonly combat?: { readonly damage: ModSourceCall; readonly armorStage?: ModQcArmorStage };
 }

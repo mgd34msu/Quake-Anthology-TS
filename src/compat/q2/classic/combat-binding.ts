@@ -134,7 +134,10 @@ export class ClassicCombatBindings {
             return result.value;
           } finally { this.powerBypass = previous; }
         };
-        const saved = intercept({ request: frame.request, amount: classicNumber(args, 3), flags: q2NativeArmorFlags(classicNumber(args, 4)) }, original);
+        const saved = intercept({ request: frame.request, amount: classicNumber(args, 3),
+          geometry: { direction: frame.request.direction, point: readClassicVector(memory, classicRequiredPointer(args, 1)),
+            normal: readClassicVector(memory, classicRequiredPointer(args, 2)) },
+          flags: q2NativeArmorFlags(classicNumber(args, 4)) }, original);
         if (!host.options.services.engine.actors.isLive(actor.id)) throw new RemovedNativeDamage(frame.request);
         return integer(saved);
       },

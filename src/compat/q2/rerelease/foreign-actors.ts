@@ -105,6 +105,7 @@ export class RereleaseForeignActors {
           } finally { this.#powerBypass = previous; }
         };
         const saved = binding.intercept({ request: frame.request, amount: Number(integer(args, 3)),
+          geometry: { direction: frame.request.direction, point: this.#vector(requiredPointer(args, 1)), normal: this.#vector(requiredPointer(args, 2)) },
           flags: q2NativeArmorFlags(Number(integer(args, 4))) }, original);
         if (!this.host.options.engine.actors.isLive(actor.id)) throw new RemovedNativeDamage(frame.request);
         return guestInt(saved);

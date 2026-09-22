@@ -75,6 +75,48 @@ const cancellableSource = bytecode([
   [QvmOpcode.OP_ENTER, 0], [QvmOpcode.OP_CONST, 7], [QvmOpcode.OP_LEAVE, 0],
 ]);
 
+test("invocation bindings intercept direct module entry and source calls exactly once", () => {
+  const moduleIdentity = { id: "q3:invocation-test", artifactPath: "vm/qagame.qvm", revision: "test",
+    digest: createContentDigest(new Bun.CryptoHasher("sha256").update(source).digest("hex")) } satisfies import("../../../src/contracts/execution.ts").ModuleIdentity;
+  const artifact = resolveQvmArtifact({ module: moduleIdentity, role: "qagame", bytes: source });
+  if (artifact.kind !== "bytecode") throw new Error("Expected bytecode artifact");
+  const module = new QvmModule({ artifact, host: rejectQvmSyscall });
+  const reference = { kind: "qvm", module: moduleIdentity, instructionIndex: 16 } satisfies import("../../../src/contracts/execution.ts").GuestCallbackReference;
+  let entered = 0;
+  const remove = module.bindInvocation(reference, call => { entered++; return call.proceed() + 1; });
+  expect(() => module.bindFunction(reference, call => call.proceed())).toThrow("already has a hook");
+  expect(module.call([])).toBe(32);
+  module.memory.view(64, 4).setInt32(0, 7, true);
+  expect(module.call([64, 9], 16)).toBe(20);
+  expect(entered).toBe(2);
+  remove(); remove();
+  expect(module.call([64, 9], 16)).toBe(19);
+  expect(entered).toBe(2);
+  module.retire();
+});
+
+for (const semantics of ["interpreted", "compiled"] satisfies readonly import("../../../src/compat/qvm/interpreter.ts").QvmSemantics[]) {
+  test(`${semantics} direct invocation cancellation preserves caller and sibling execution`, async () => {
+    for (const asynchronous of [false, true]) for (const direct of [false, true]) {
+      let capability: QvmCancellationScope | null = null, entered = 0;
+      const vm = new QvmInterpreter(parseQvm(cancellableSource), call => {
+        if (capability === null) throw new Error("Missing invocation cancellation scope");
+        return call.cancelFunction(capability);
+      }, undefined, null, semantics);
+      vm.bindInvocation(9, call => {
+        entered++; capability = call.cancellationScope();
+        return asynchronous ? call.proceedAsync() : call.proceed();
+      });
+      const entry = direct ? 9 : 0;
+      expect(asynchronous ? await vm.invokeAsync(qvmArguments([]), entry) : vm.invoke(qvmArguments([]), entry)).toBe(direct ? 0 : 12);
+      expect(entered).toBe(1);
+      expect(vm.invoke(qvmArguments([]), 21)).toBe(7);
+      expect(vm.stackPointer).toBe(vm.memory.length);
+      expect(vm.isActive).toBe(false);
+    }
+  });
+}
+
 for (const semantics of ["interpreted", "compiled"] satisfies readonly import("../../../src/compat/qvm/interpreter.ts").QvmSemantics[]) {
   test(`${semantics} cancellation unwinds only its exact nested source call`, async () => {
     for (const asynchronous of [false, true]) for (const target of [9, 15]) for (const reentry of [false, true]) {

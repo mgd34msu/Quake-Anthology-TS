@@ -15,13 +15,14 @@ export class QvmMemoryWrites {
   constructor(private readonly bytes: Uint8Array) {}
   get intercepts(): boolean { return this.watches.length !== 0 || this.publishing || this.closed; }
   assertNotPublishing(): void { if (this.publishing) throw new Error("QVM store publication permits bookkeeping only"); }
-  assertWritable(): void { this.assertNotPublishing(); if (this.closed) throw new Error("QVM memory has been retired"); }
+  assertLive(): void { if (this.closed) throw new Error("QVM memory has been retired"); }
+  assertWritable(): void { this.assertNotPublishing(); this.assertLive(); }
   range(offset: number, length: number): void {
     if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset > this.bytes.length - length)
       throw new RangeError("QVM raw memory range exceeds allocation");
   }
   observe(ranges: readonly QvmWriteRange[], publish: Watch["publish"]): () => undefined {
-    if (this.closed) throw new Error("QVM memory has been retired");
+    this.assertLive();
     const sorted = ranges.map(range => { this.range(range.byteOffset, range.byteLength); return { ...range }; }).filter(range => range.byteLength !== 0).sort((a, b) => a.byteOffset - b.byteOffset);
     const merged: QvmWriteRange[] = [];
     for (const range of sorted) {

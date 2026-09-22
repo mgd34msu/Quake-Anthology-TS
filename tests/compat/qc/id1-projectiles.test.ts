@@ -22,7 +22,7 @@ for (const qw of [false, true]) test(`pinned ${qw ? 'QW' : 'NQ'} projectile attr
     const vm = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), builtins: createQcBuiltins({ kind: qw ? 'quakeworld' : 'netquake', host }), serverActive: () => true });
     const functionExecution = (run: () => undefined) => Object.assign((prepare?: (machine: QcMachine) => undefined) => {
       prepare?.(vm); return run();
-    }, { skip: () => { throw new Error('Projectile attribution must execute its source function'); } });
+    }, { skip: () => { throw new Error('Projectile attribution must execute its source function'); }, cancel: (): never => { throw new Error('Unexpected projectile cancellation'); } });
     const observer = new Id1ProjectileAttacks({ program, entities, actors, slots }, () => vm);
     const field = (name: string) => vm.fieldOffset(name);
     vm.globals.setInt(vm.globalOffset('self'), entities.reference(1)); vm.globals.setFloat(vm.globalOffset('time'), 2);

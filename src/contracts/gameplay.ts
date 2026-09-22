@@ -78,7 +78,12 @@ export interface ArmorDamageFlags {
   readonly regularProtectionScale?: number;
 }
 export interface ArmorResult { readonly armor: ArmorState; readonly powerSaved: number; readonly regularSaved: number; }
-export interface ArmorStageInput { readonly request: DamageRequest; readonly amount: number; readonly flags: ArmorDamageFlags; }
+export interface ArmorStageInput {
+  readonly request: DamageRequest;
+  readonly geometry: Pick<DamageRequest, "direction" | "point" | "normal">;
+  readonly amount: number;
+  readonly flags: ArmorDamageFlags;
+}
 export interface ArmorStageResult { readonly saved: number; }
 /** Reports an already committed store; the observer never repeats the write. */
 export interface ArmorStageObserver {

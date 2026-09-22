@@ -33,7 +33,7 @@ export class QvmMemory {
   }
   observeWrites(ranges: readonly QvmWriteRange[], publish: (event: QvmCommittedWrite) => undefined): () => undefined { return this.writes.observe(ranges, publish); }
   get observesWrites(): boolean { return this.writes.intercepts; }
-  assertLive(): void { this.writes.assertWritable(); }
+  assertLive(): void { this.writes.assertLive(); }
   assertNotPublishing(): void { this.writes.assertNotPublishing(); }
   clearWriteObservers(): void { this.writes.clear(); }
   close(): void { this.writes.close(); }

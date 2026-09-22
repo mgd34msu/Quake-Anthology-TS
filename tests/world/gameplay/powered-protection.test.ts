@@ -94,6 +94,27 @@ test("nested powered damage advances outer cursors without copying nested stores
   world.actors.close();
 });
 
+test("disabling power during absorption exposes primary armor and invalidates the removed observer", () => {
+  for (const policy of policies) {
+    const world = fixture(policy);
+    const remove = world.authority.bindPoweredProtection(world.target, world.power((_input, observer) => {
+      const before = world.fuel.state;
+      world.fuel.state = { kind: "shield", cells: 10 };
+      observer.stored({ before, after: world.fuel.state });
+      remove();
+      expect(() => observer.stored({ before: world.fuel.state, after: world.fuel.state })).toThrow("owner was removed");
+      return { saved: 6 };
+    }));
+    const result = world.authority.apply(world.request());
+    if (result.kind !== "committed") throw new Error("Target disappeared");
+    expect(world.authority.read(world.target.id)?.health).toBe(88);
+    expect(world.authority.read(world.target.id)?.armor).toEqual({ regular: { ...regular, points: 88 }, powered: { kind: "none" } });
+    expect(result.decision.mutations.filter(value => value.kind === "armor")).toHaveLength(3);
+    expect(world.outcomes).toHaveLength(1);
+    world.actors.close();
+  }
+});
+
 test("power reservations reject ownership and unsupported primary stages before reading a component", () => {
   const policy = policies[0]; if (policy === undefined) throw new Error("Missing Q1 policy");
   const world = fixture(policy);
@@ -156,7 +177,7 @@ test("original source power interception shares one hit and composes only primar
   world.authority.rebind(world.target, { ...world.binding, poweredProtectionOwner: "q1:primary", poweredArmorStage: {
     bind: callback => { entry.call = callback; return () => { entry.call = null; return undefined; }; },
   }, sourceDamage: input => world.authority.runSourceDamage(input, (observer, request) => {
-    const stage: ArmorStageInput = { request, amount: request.amount, flags: attackDamageFlags(request) };
+    const stage: ArmorStageInput = { request, geometry: request, amount: request.amount, flags: attackDamageFlags(request) };
     const original = (): number => { originalCalls++; return 0; };
     const saved = entry.call === null ? original() : entry.call(stage, original);
     const before = world.primary().armor;

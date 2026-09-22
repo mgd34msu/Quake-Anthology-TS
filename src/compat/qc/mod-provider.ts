@@ -19,6 +19,7 @@ import { QcModInput } from "./mod-input.ts";
 import { createQcAimBinding } from "./client-host.ts";
 import { QcModActors } from "./mod-actors.ts";
 import { QcModCombat, validateQcModCombat } from "./mod-combat.ts";
+import { qcArmorStage } from "../../content/q1/quakec/armor-stage.ts";
 import { QcModMessages } from "./mod-messages.ts";
 import { createQcMovementBindings } from "./movement-host.ts";
 import { QcModEnvironment } from "./mod-environment.ts";
@@ -278,6 +279,9 @@ export class QcModProvider {
       }, ...(declaration.combat === undefined ? {} : { functionBoundary: {
         functions: new Set(program.functions.filter(fn => fn.index > 0 && fn.firstStatement > 0 && !fn.namedBuiltin).map(fn => fn.index)),
         run: (call, execute) => this.combat === null ? execute() : this.combat.damage.functionBoundary.run(call, execute),
+      }, inlineBoundary: {
+        regions: (() => { const stage = qcArmorStage(program, declaration.combat.armorStage); return stage === null ? [] : [stage.region]; })(),
+        run: (region, execute) => this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute),
       } }), observeCall: call => this.combat?.damage.observeCall(call), observeEntityStore: store => {
         this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
       } });

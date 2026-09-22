@@ -37,7 +37,7 @@ function continuation(request: DamageRequest, mutations: readonly DamageMutation
 
 function powerStage(request: DamageRequest, amount: number, flags: ArmorDamageFlags, armor: VictimArmorPolicy,
   resume: (saved: number, current: CurrentCombatState) => CombatProgress): CombatProgress {
-  return { kind: "powered-armor", request, mutations: [], input: { request, amount, flags: { ...flags, stage: "power" } },
+  return { kind: "powered-armor", request, mutations: [], input: { request, geometry: request, amount, flags: { ...flags, stage: "power" } },
     fallback: current => armor(request, current, amount, { ...flags, stage: "power" }), resume: (result, current) => resume(result.saved, current) };
 }
 

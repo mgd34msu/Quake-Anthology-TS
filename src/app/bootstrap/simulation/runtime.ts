@@ -1988,6 +1988,7 @@ export class SharedSimulation implements Simulation {
         mounts: this.options.mounts, writable: guest.writable, common: guest.common,
         maxClients: this.options.maxClients, seed: this.options.seed, dedicated: this.options.dedicated === true, entityText: this.options.world.entities,
         now, assertCurrent: () => { this.assertOpen(); }, clientChanged: (kind, actor) => this.notifyClientEvent(kind, actor),
+        beforeRetire: () => { combatBindings?.close(); },
         botCommand: (actor, command) => this.observeClientCommand({ actor, source: { kind: "bot", provider: guest.prepared.artifact.module.id },
           sequence: (this.modClientCommands.get(actor)?.input.sequence ?? 0) + 1, command: { kind: "q3", serverTimeMilliseconds: command.serverTime,
             angleWords: command.angles, buttons: command.buttons, weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove } }),
@@ -1997,7 +1998,13 @@ export class SharedSimulation implements Simulation {
         } });
       const nativeCombat = q3NativeCombatProfile(guest.prepared.artifact);
       if (nativeCombat !== null) combatBindings = new QvmCombatBindings({ game: game.game, artifact: guest.prepared.artifact, definition: nativeCombat,
-        bodies: this.bodies, combat: this.combat, slot: actor => game.records.slot(actor) });
+        bodies: this.bodies, combat: this.combat, slot: actor => game.records.slot(actor), source: {
+          actors: this.actors,
+          actor: slot => { const reference = game.records.reference(slot); return reference === null ? null : this.actors.resolveOwned(reference); },
+          provenance: () => ({ sequence: this.attackSequence++, time: { kind: "milliseconds", value: now() }, weapon: null,
+            weaponProvider: recipe.map.entities.provider, combatProvider: recipe.combat.provider,
+            inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider }),
+        } });
       if (this.options.restore !== undefined) {
         const checkpoint = simulationQvmCheckpoint(this.options.restore);
         if (checkpoint === null) throw new Error("Saved Q3 guest memory is missing");

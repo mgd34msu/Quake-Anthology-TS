@@ -128,7 +128,7 @@ for (const path of ["id1/PAK0.PAK", "hipnotic/pak0.pak", "rerelease/dopa/pak0.pa
       expect(outcome.decision.request.attack.weapon).toBeNull();
       const armorWrites = outcome.decision.mutations.filter(mutation => mutation.kind === "armor");
       expect(armorWrites.length).toBeGreaterThan(0);
-      expect(armorWrites.at(-1)?.after).toEqual(variant === "death" ? { kind: "none" }
+      expect(armorWrites.at(-1)?.after.regular).toEqual(variant === "death" ? { kind: "none" }
         : { kind: "q1", points: 28, absorption: Math.fround(0.3), item: "q1:item_armor1" });
     }
   });

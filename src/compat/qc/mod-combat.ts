@@ -9,6 +9,7 @@ import type { SourceDamageResult } from "../../world/gameplay/authority.ts";
 import { Id1DamageBinding } from "../../content/q1/quakec/id1-damage.ts";
 import type { Id1DamageCall } from "../../content/q1/quakec/id1-damage.ts";
 import { id1ProgramBinding } from "../../content/q1/quakec/id1-program.ts";
+import { qcArmorStage } from "../../content/q1/quakec/armor-stage.ts";
 import type { QcFunctionExecution, QcMachine } from "./machine.ts";
 import type { QcProgram } from "./program.ts";
 
@@ -21,6 +22,7 @@ export function validateQcModCombat(program: QcProgram, declaration: Declaration
     if (value?.kind !== "input" || value.name !== name) throw new Error(`QC damage argument ${index} must lower ${name}`);
   }
   id1ProgramBinding(program);
+  qcArmorStage(program, declaration.armorStage);
   for (const name of ["health", "takedamage", "flags", "invincible_finished", "armorvalue", "armortype"])
     if (program.fieldsByName.get(name)?.type !== "float") throw new Error(`QC combat requires float field ${name}`);
 }
@@ -48,7 +50,7 @@ export class QcModCombat {
       call => this.request(call), { actor: reference => options.actor(reference), reference: actor => options.reference(actor),
         reaction: (request, result, execute) => this.reaction(request, result, execute), completed: (request, outcome) => {
           const incoming = this.incoming.at(-1); if (incoming?.request === request) incoming.outcome = outcome; return undefined;
-        } });
+        } }, options.declaration.armorStage);
   }
   private seconds(): number { const time = this.options.services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; }
   private field(name: string): number { return this.options.machine.fieldOffset(name); }
@@ -65,7 +67,8 @@ export class QcModCombat {
       words.setFloat(this.field(binding.armorField), (Math.trunc(words.float(this.field(binding.armorField))) & ~mask) | bit);
       return undefined;
     };
-    const state = { sourceDamage: (request: DamageRequest) => this.apply(request),
+    const stage = this.damage.poweredArmorStage(actor);
+    const state = { sourceDamage: (request: DamageRequest) => this.apply(request), ...(stage === null ? {} : { poweredArmorStage: stage }),
       read: () => ({ health: words.float(this.field("health")), armor: this.damage.readArmor(words), mass: 200,
         canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) > this.seconds(), team: null }),
       validateArmor: (armor: ArmorState): undefined => {

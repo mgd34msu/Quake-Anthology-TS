@@ -156,7 +156,7 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
         expect(() => failedObserver.beforeReaction(none)).toThrow("closed");
         expect(vm.depth).toBe(0);
         vm.snapshot();
-        authority.register({ id: "test:qc", decide: incoming => ({ request: incoming, appliedDamage: 1, reaction: "none", mutations: [
+        authority.register({ id: "test:qc", decide: incoming => ({ request: incoming, kind: "complete", result: { appliedDamage: 1, reaction: "none" }, mutations: [
           { kind: "health", before: words.float(field("health")), after: 1 },
           { kind: "source-velocity", before: words.vector(field("velocity")), after: { x: 0, y: 0, z: 0 }, movementProvider: "q1:movement" },
         ] }) });
@@ -283,7 +283,7 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
       const foreignBinding = new Id1DamageBinding({ ...source, program: otherProgram }, authority, () => vm, () => { throw new Error("Foreign machine reached resolver"); });
       const foreignExecution = () => { throw new Error("Foreign machine executed source damage"); };
       expect(() => foreignBinding.functionBoundary.run({ functionIndex: otherProgram.functionNamed("T_Damage").index, caller: 0, statement: -1 },
-        Object.assign(foreignExecution, { skip: foreignExecution }))).toThrow("binding belongs to another machine");
+        Object.assign(foreignExecution, { skip: foreignExecution, cancel: (): never => { throw new Error("unexpected cancellation"); } }))).toThrow("binding belongs to another machine");
       if (variant === "failure") {
         expect(invoke).toThrow(); expect(outcomes).toHaveLength(0); expect(vm.depth).toBe(0); vm.snapshot();
         words.setInt(field("th_pain"), program.functionNamed("SUB_Null").index);
@@ -301,7 +301,7 @@ describe.skipIf(!haveCorpus)("real QuakeC programs", () => {
       expect(outcome.decision.request.attack.cause).toEqual({ kind: "q1", deathType: "squish" });
       if (variant === "normal") { expect(observed.health).toBe(72); expect(outcome.decision.appliedDamage).toBe(28); }
       if (variant === "invulnerable") { expect(observed.health).toBe(100); expect(outcome.decision.appliedDamage).toBe(0); }
-      if (variant === "exhausted") { expect(observed.armor).toEqual({ regular: { kind: "none" }, powered: { kind: "none" } }); expect(outcome.decision.mutations.filter(value => value.kind === "armor")).toHaveLength(3); }
+      if (variant === "exhausted") { expect(observed.armor).toEqual({ regular: { kind: "none" }, powered: { kind: "none" } }); expect(outcome.decision.mutations.filter(value => value.kind === "armor")).toHaveLength(2); }
       if (variant === "nested") {
         expect(observed.painArguments).toEqual([{ attacker: observed.doorReference, damage: 28, argc: 2 }]);
         expect(observed.outcomes.map(value => value.kind === "committed" ? value.decision.request.attack.sequence : -1)).toEqual([1, 0]); expect(outcome.survived).toBe(false); }

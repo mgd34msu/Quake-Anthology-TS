@@ -4,8 +4,8 @@ import { q3GrappleProfile } from "./grapple-profiles.ts";
 import { LRCTF_GRAPPLE_DIGEST } from "./lrctf-grapple-profile.ts";
 import { THREEWAVE_GRAPPLE_DIGEST } from "./threewave-grapple-profile.ts";
 
-const lrctfArmor: QvmGameArmorDefinition = { pointsStat: 3, protection: Math.fround(0.66), tiers: null };
-const threewaveArmor: QvmGameArmorDefinition = { pointsStat: 6, protection: Math.fround(0.66), tiers: {
+const lrctfArmor: QvmGameArmorDefinition = { checkArmor: 139839, pointsStat: 3, protection: Math.fround(0.66), tiers: null };
+const threewaveArmor: QvmGameArmorDefinition = { checkArmor: 161690, pointsStat: 6, protection: Math.fround(0.66), tiers: {
   stat: 3, whenAny: [{ offset: 107944, comparison: "equal", value: 10 }, { offset: 1089728, comparison: "not-equal", value: 0 }],
   values: [{ tier: 0, protection: Math.fround(0.3) }, { tier: 1, protection: Math.fround(0.6) }, { tier: 2, protection: Math.fround(0.8) }],
   fallback: Math.fround(0.3),

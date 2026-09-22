@@ -98,20 +98,34 @@ export class QvmModule implements GuestExecutor {
   }
 
   private live(): void {
+    this.memory.assertNotPublishing();
+    this.assertOwner();
+  }
+
+  private assertOwner(): void {
     this.memory.assertLive();
     if (this.retired) throw new Error(`${this.options.artifact.role} QVM module has been retired`);
   }
 
   bindFunction(reference: Extract<GuestCallbackReference, { readonly kind: "qvm" }>, hook: QvmFunctionHook): () => void {
+    return this.bindEntry(reference, hook, "calls");
+  }
+
+  bindInvocation(reference: Extract<GuestCallbackReference, { readonly kind: "qvm" }>, hook: QvmFunctionHook): () => void {
+    return this.bindEntry(reference, hook, "invocations");
+  }
+
+  private bindEntry(reference: Extract<GuestCallbackReference, { readonly kind: "qvm" }>, hook: QvmFunctionHook, scope: "calls" | "invocations"): () => void {
     this.live();
     if (!sameModule(reference.module, this.profile.module)) throw new Error("QVM function hook belongs to a different module artifact");
-    return this.interpreter.bindFunction(reference.instructionIndex, call => {
+    const wrapped: QvmFunctionHook = call => {
       this.live();
       const previous = this.currentEntry;
       this.currentEntry = call;
       try { return hook(call); }
       finally { this.currentEntry = previous; }
-    });
+    };
+    return scope === "calls" ? this.interpreter.bindFunction(reference.instructionIndex, wrapped) : this.interpreter.bindInvocation(reference.instructionIndex, wrapped);
   }
 
   bindFunctionResolver(resolve: QvmFunctionResolver): () => void {
@@ -133,7 +147,7 @@ export class QvmModule implements GuestExecutor {
   }
 
   observeFunction(reference: Extract<GuestCallbackReference, { readonly kind: "qvm" }>, observe: QvmFunctionObserver): () => void {
-    this.live();
+    this.assertOwner();
     if (!sameModule(reference.module, this.profile.module)) throw new Error("QVM function observer belongs to a different module artifact");
     return this.interpreter.observeFunction(reference.instructionIndex, call => {
       this.live();

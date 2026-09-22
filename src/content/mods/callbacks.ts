@@ -1,4 +1,4 @@
-import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
+import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage } from "../../contracts/mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -78,5 +78,17 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     ...(cvars.value === undefined ? {} : { cvars: cvars.list(entry => ({ name: entry.field("name").string(), value: entry.field("value").string() })) }),
     ...(commands.value === undefined ? {} : { commands: commands.list(entry => ({ name: entry.field("name").string(), function: entry.field("function").string(),
       arguments: entry.field("arguments").list(consoleValue), globals: entry.field("globals").list(global => ({ name: global.field("name").string(), value: consoleValue(global.field("value")) })) })) }),
-    ...(combat.value === undefined ? {} : { combat: { damage: sourceCall(combat.field("damage")) } }) };
+    ...(combat.value === undefined ? {} : { combat: { damage: sourceCall(combat.field("damage")),
+      ...(combat.field("armorStage").value === undefined ? {} : { armorStage: armorStage(combat.field("armorStage")) }) } }) };
+}
+
+function armorStage(reader: SaveReader): ModQcArmorStage {
+  const flags = reader.field("flags");
+  return { function: reader.field("function").string(), entry: reader.field("entry").integer(0), exit: reader.field("exit").integer(0),
+    target: reader.field("target").integer(0), damage: reader.field("damage").integer(0), saved: reader.field("saved").integer(0),
+    flags: flags.field("kind").choice("none", "bits") === "none" ? { kind: "none" } : { kind: "bits", word: flags.field("word").integer(0),
+      noArmor: flags.field("noArmor").integer(0), noPowerArmor: flags.field("noPowerArmor").integer(0),
+      noRegularArmor: flags.field("noRegularArmor").integer(0), energy: flags.field("energy").integer(0) },
+    statements: reader.field("statements").list(statement => ({ opcode: statement.field("opcode").integer(0), a: statement.field("a").integer(0),
+      b: statement.field("b").integer(0), c: statement.field("c").integer(0) })) };
 }

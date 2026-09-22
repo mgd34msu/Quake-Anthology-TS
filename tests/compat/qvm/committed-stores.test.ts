@@ -97,10 +97,20 @@ test("module, syscall and guest bridge share one observer owner and publication 
   if (artifact.kind !== "bytecode") throw new Error("Expected bytecode");
   const events: QvmCommittedWrite[] = [];
   const module = new QvmModule({ artifact, host: call => { expect(call.guest).toBe(module.memory); call.guest.view(64, 4).setInt32(0, 12, true); return 0; } });
-  module.memory.observeWrites([{ byteOffset: 64, byteLength: 4 }], event => { events.push(event); expect(() => module.call([])).toThrow("bookkeeping"); return undefined; });
+  const reference = { kind: "qvm", module: artifact.module, instructionIndex: 0 } satisfies import("../../../src/contracts/execution.ts").GuestCallbackReference;
+  module.memory.observeWrites([{ byteOffset: 64, byteLength: 4 }], event => {
+    events.push(event);
+    module.observeFunction(reference, () => undefined)();
+    expect(() => module.call([])).toThrow("bookkeeping");
+    expect(() => module.interpreter.invoke(qvmArguments([]))).toThrow();
+    expect(() => module.memory.view(64, 4).setInt32(0, 99, true)).toThrow("bookkeeping");
+    return undefined;
+  });
   module.call([]); const address = module.guestMemory.pointer(64n); if (address === null) throw new Error("Missing address");
   module.guestMemory.write(address, Uint8Array.of(14, 0, 0, 0)); expect(events).toHaveLength(2); expect(events[1]?.ranges[0]?.before).toEqual([12, 0, 0, 0]);
   const retained = module.guestMemory.borrow(address, 4); module.retire(); expect(() => retained.setInt32(0, 0, true)).toThrow("retired");
+  expect(() => module.observeFunction(reference, () => undefined)).toThrow("retired");
+  expect(() => module.interpreter.observeFunction(0, () => undefined)).toThrow("retired");
 });
 
 test("retired allocations reject raw interpreter restore and restart before changing bytes", () => {

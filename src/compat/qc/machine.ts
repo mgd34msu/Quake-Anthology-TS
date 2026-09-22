@@ -22,6 +22,12 @@ export interface QcCallSite { readonly functionIndex: number; readonly caller: n
 export interface QcFunctionExecution {
   (prepare?: (machine: QcMachine) => undefined): undefined;
   skip(returnWords: readonly [number, number, number]): undefined;
+  cancel(returnWords: readonly [number, number, number]): never;
+}
+export interface QcInlineRegion { readonly functionIndex: number; readonly entry: number; readonly exit: number; }
+export interface QcInlineBoundary {
+  readonly regions: readonly QcInlineRegion[];
+  run(region: QcInlineRegion, execute: () => undefined): undefined;
 }
 export interface QcFunctionBoundary {
   readonly functions: ReadonlySet<number>;
@@ -39,6 +45,7 @@ export interface QcMachineOptions {
   readonly trace?: (machine: QcMachine) => undefined;
   readonly observeCall?: (call: QcCallSite) => undefined;
   readonly functionBoundary?: QcFunctionBoundary;
+  readonly inlineBoundary?: QcInlineBoundary;
   readonly observeEntityStore?: (store: QcEntityStoreObservation) => undefined;
   readonly validateEntityAccess?: (reference: number, word: number, words: 1 | 3, kind: "read" | "write") => undefined;
 }
@@ -55,6 +62,9 @@ export interface QcMachineSnapshot {
 }
 interface CallStaging { readonly words: Uint8Array; readonly argumentCount: number; }
 interface Frame { readonly statement: number; readonly functionIndex: number; readonly locals: Uint8Array; }
+class QcFunctionCancellation {
+  constructor(readonly owner: object, readonly words: readonly [number, number, number]) {}
+}
 export class QcRuntimeError extends Error {
   constructor(message: string, readonly statement: number, readonly functionIndex: number, readonly callStack: readonly { readonly functionIndex: number; readonly statement: number }[]) {
     super(`QuakeC ${functionIndex}:${statement}: ${message}`);
@@ -80,6 +90,7 @@ export class QcMachine {
   private builtinDepth = 0;
   private boundaryDepth = 0;
   private readonly boundaryFunctions: ReadonlySet<number>;
+  private readonly inlineRegions = new Map<number, QcInlineRegion>();
   traceEnabled = false;
   constructor(private readonly options: QcMachineOptions) {
     this.program = options.program; this.entities = options.entities; this.numeric = options.numeric;
@@ -91,6 +102,14 @@ export class QcMachine {
     for (const index of this.boundaryFunctions) {
       const fn = this.program.functionAt(index);
       if (fn.namedBuiltin || fn.firstStatement < 0) throw new QcProgramError("function boundary requires an interpreted function");
+    }
+    for (const region of options.inlineBoundary?.regions ?? []) {
+      const fn = this.program.functionAt(region.functionIndex);
+      const end = this.program.functions.reduce((limit, other) => other.firstStatement > fn.firstStatement ? Math.min(limit, other.firstStatement) : limit, this.program.statements.length);
+      if (fn.namedBuiltin || fn.firstStatement <= 0 || !Number.isInteger(region.entry) || !Number.isInteger(region.exit)
+        || region.entry < fn.firstStatement || region.exit <= region.entry || region.exit >= end || this.inlineRegions.has(region.entry))
+        throw new QcProgramError("invalid inline source region");
+      this.inlineRegions.set(region.entry, Object.freeze({ ...region }));
     }
     this.statementLimit = options.statementLimit ?? 100000;
     this.stackLimit = options.stackLimit ?? 32;
@@ -215,7 +234,14 @@ export class QcMachine {
   private invokeFunction(fn: QcFunction, call: QcCallSite, budget: { remaining: number }, staging: CallStaging | null): void {
     const boundary = this.options.functionBoundary;
     if (boundary === undefined || !this.boundaryFunctions.has(fn.index)) { this.runFunction(fn, budget); return; }
-    let active = true, called = false;
+    let active = true, called = false, executing = false;
+    const owner = {};
+    const returnWords = (words: readonly [number, number, number]): void => {
+      for (const [index, word] of words.entries()) {
+        if (!Number.isInteger(word) || word < -2147483648 || word > 4294967295) this.fail("replacement return is not a QC word");
+        this.globals.setInt(1 + index, word);
+      }
+    };
     const failure: { value: { error: unknown } | null } = { value: null };
     const completed: { value: CallStaging | null } = { value: null };
     this.boundaryDepth++;
@@ -232,7 +258,12 @@ export class QcMachine {
       };
       const execute: QcFunctionExecution = Object.assign((prepare?: (machine: QcMachine) => undefined): undefined => finish(() => {
         prepare?.(this);
-        this.runFunction(fn, budget);
+        executing = true;
+        try { this.runFunction(fn, budget); }
+        catch (error) {
+          if (!(error instanceof QcFunctionCancellation) || error.owner !== owner) throw error;
+          returnWords(error.words);
+        } finally { executing = false; }
         return undefined;
       }), { skip: (returnWords: readonly [number, number, number]): undefined => finish(() => {
         for (const [index, word] of returnWords.entries()) {
@@ -240,7 +271,10 @@ export class QcMachine {
           this.globals.setInt(1 + index, word);
         }
         return undefined;
-      }) });
+      }), cancel: (words: readonly [number, number, number]): never => {
+        if (!active || !executing) this.fail("function cancellation requires its live source execution");
+        throw new QcFunctionCancellation(owner, words);
+      } });
       boundary.run(call, execute);
       if (failure.value !== null) throw failure.value.error;
       if (!called) this.fail("function boundary omitted source execution");
@@ -256,10 +290,45 @@ export class QcMachine {
     if (builtin !== null) { this.callBuiltin(builtin); return; }
     this.enter(fn);
     try {
+      this.runStatements(exitDepth, budget);
+    } catch (error) {
+      while (this.frames.length > exitDepth) this.leave();
+      throw error;
+    }
+  }
+  private runStatements(exitDepth: number, budget: { remaining: number }, stop?: { readonly region: QcInlineRegion; readonly frame: Frame }): void {
+      const boundary = this.inlineRegions.size === 0 ? undefined : this.options.inlineBoundary;
       while (this.frames.length > exitDepth) {
+        if (stop !== undefined && this.frames.at(-1) === stop.frame) {
+          if (this.statement + 1 === stop.region.exit) return;
+          if (this.statement + 1 < stop.region.entry || this.statement + 1 > stop.region.exit) this.fail("inline source region escaped its continuation");
+        }
         this.statement++;
         const statement = this.program.statements[this.statement];
         if (statement === undefined) this.fail("statement outside program");
+        const region = boundary === undefined ? undefined : this.inlineRegions.get(this.statement);
+        if (boundary !== undefined && region !== undefined && region.functionIndex === this.functionIndex
+          && !(stop !== undefined && stop.frame === this.frames.at(-1) && stop.region.entry === this.statement)) {
+          const frame = this.frames.at(-1);
+          if (frame === undefined) this.fail("inline source region has no frame");
+          let active = true, called = false;
+          const failure: { value: { error: unknown } | null } = { value: null };
+          this.statement--;
+          try {
+            boundary.run(region, () => {
+              try {
+                if (!active || called) this.fail("inline continuation must execute once inside its boundary");
+                called = true;
+                this.runStatements(exitDepth, budget, { region, frame });
+              }
+              catch (error) { failure.value = { error }; throw error; }
+              return undefined;
+            });
+            if (failure.value !== null) throw failure.value.error;
+            if (!called) this.fail("inline boundary omitted source execution");
+          } finally { active = false; }
+          continue;
+        }
         if (--budget.remaining === 0) this.fail("runaway loop error");
         this.profiling[this.functionIndex] = (this.profiling[this.functionIndex] ?? 0) + 1;
         if (this.traceEnabled) this.options.trace?.(this);
@@ -369,14 +438,12 @@ export class QcMachine {
             self.setInt(this.fieldOffset("think"), g.int(b));
             break;
           }
-          case QcOpcode.Done: case QcOpcode.Return: g.copyWords(g, a, 1, 3); this.leave(); break;
+          case QcOpcode.Done: case QcOpcode.Return:
+            if (stop?.frame === this.frames.at(-1)) this.fail("inline source region returned before its continuation");
+            g.copyWords(g, a, 1, 3); this.leave(); break;
           default: { const unreachable: never = opcode; this.fail(`unsupported opcode ${unreachable}`); }
         }
       }
-    } catch (error) {
-      while (this.frames.length > exitDepth) this.leave();
-      throw error;
-    }
   }
   snapshot(): QcMachineSnapshot {
     if (this.depth !== 0 || this.builtinDepth !== 0 || this.boundaryDepth !== 0) return this.fail("save requires an idle callback boundary");

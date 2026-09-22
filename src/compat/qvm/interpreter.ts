@@ -56,6 +56,7 @@ export interface QvmFunctionObservation extends Pick<QvmSyscall, "invoke" | "inv
 }
 export type QvmFunctionObserver = (call: QvmFunctionObservation) => undefined;
 interface FunctionObserver { readonly observe: QvmFunctionObserver; active: boolean; }
+interface FunctionBinding { readonly hook: QvmFunctionHook; readonly scope: "calls" | "invocations"; }
 export type QvmSemantics = "interpreted" | "compiled";
 
 class Operands {
@@ -170,7 +171,7 @@ export class QvmInterpreter {
   private rootActive = false;
   private breaks = 0;
   private debug = false;
-  private functionHooks: Map<number, { readonly hook: QvmFunctionHook }> | null = null;
+  private functionHooks: Map<number, FunctionBinding> | null = null;
   private functionObservers: Map<number, readonly FunctionObserver[]> | null = null;
   private functionResolver: { readonly resolve: QvmFunctionResolver } | undefined;
   private readonly cancellationScopes = new WeakMap<QvmCancellationScope, SourceFunctionCall>();
@@ -224,12 +225,21 @@ export class QvmInterpreter {
 
   /** Bind a source OP_CALL target in this interpreter's immutable instruction table. */
   bindFunction(instructionIndex: number, hook: QvmFunctionHook): () => void {
+    return this.bindEntry(instructionIndex, hook, "calls");
+  }
+
+  /** Include direct host entry, retaining the same original-body and cancellation scope. */
+  bindInvocation(instructionIndex: number, hook: QvmFunctionHook): () => void {
+    return this.bindEntry(instructionIndex, hook, "invocations");
+  }
+
+  private bindEntry(instructionIndex: number, hook: QvmFunctionHook, scope: FunctionBinding["scope"]): () => void {
     this.live();
     if (!Number.isSafeInteger(instructionIndex) || instructionIndex < 0
       || this.codeWord(this.targetPC(instructionIndex)) !== QvmOpcode.OP_ENTER) throw new Error("QVM hook requires a function entry instruction");
     if (this.functionHooks?.has(instructionIndex)) throw new Error("QVM function already has a hook");
-    const entry = { hook };
-    const hooks = this.functionHooks ?? new Map<number, { readonly hook: QvmFunctionHook }>();
+    const entry = { hook, scope };
+    const hooks = this.functionHooks ?? new Map<number, FunctionBinding>();
     this.functionHooks = hooks;
     hooks.set(instructionIndex, entry);
     return () => {
@@ -249,7 +259,7 @@ export class QvmInterpreter {
 
   /** Observers share an entry with each other and with its optional replacement hook. */
   observeFunction(instructionIndex: number, observe: QvmFunctionObserver): () => void {
-    this.live();
+    this.assertAllocation();
     if (!Number.isSafeInteger(instructionIndex) || instructionIndex < 0
       || this.codeWord(this.targetPC(instructionIndex)) !== QvmOpcode.OP_ENTER) throw new Error("QVM observer requires a function entry instruction");
     const observers = this.functionObservers ?? new Map<number, readonly FunctionObserver[]>(), entry = { observe, active: true };
@@ -297,6 +307,11 @@ export class QvmInterpreter {
   loadSymbols(options: QvmSymbolLoadOptions): void { this.symbols.load(options); }
 
   private live(): void {
+    this.addressSpace.assertNotPublishing();
+    this.assertAllocation();
+  }
+
+  private assertAllocation(): void {
     this.addressSpace.assertLive();
     if (this.registration?.binding.kind === "freed") throw new Error("QVM registration has been freed");
     for (const allocation of this.allocations) void allocation.bytes;
@@ -595,6 +610,12 @@ export class QvmInterpreter {
         args.forEach((word, index) => this.writeWord(sp + 8 + index * 4, word));
         this.callLevel = 0;
         this.registration?.debug(0);
+        const binding = this.functionHooks?.get(instructionIndex);
+        if (binding?.scope === "invocations") {
+          this.programStack = sp - 4;
+          const result = this.intercept(frame, sp, -1, instructionIndex, binding.hook, undefined);
+          return typeof result === "number" ? result : yield result;
+        }
       }
       let pc = this.targetPC(instructionIndex);
       let profileSymbol = debug ? this.symbols.valueToFunctionSymbol(0) : null;

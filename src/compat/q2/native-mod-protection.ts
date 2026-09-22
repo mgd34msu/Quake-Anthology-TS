@@ -132,7 +132,7 @@ export class NativeModProtection {
       const time = this.services.time();
       const inputs = new Map<ModCallbackInput, ModRuntimeValue>([
         ["self", { kind: "actor", value: actor }], ["amount", { kind: "float", value: input.amount }],
-        ["point", { kind: "vector", value: input.request.point }], ["normal", { kind: "vector", value: input.request.normal }],
+        ["point", { kind: "vector", value: input.geometry.point }], ["normal", { kind: "vector", value: input.geometry.normal }],
         ["time", { kind: "float", value: time.kind === "seconds" ? time.value : time.value / 1000 }],
       ]);
       const record = this.declaration.entityRecord; if (record === null) throw new Error("Native power requires a declared source entity");

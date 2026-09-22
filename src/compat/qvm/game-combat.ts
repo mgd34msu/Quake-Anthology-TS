@@ -7,6 +7,7 @@ import { QvmOpcode } from "./image.ts";
 import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
 
 export interface QvmGameArmorDefinition {
+  readonly checkArmor: number;
   readonly pointsStat: number;
   readonly protection: number;
   readonly tiers: {
@@ -66,7 +67,11 @@ export class QvmGameCombat {
     const view = this.entity(slot), fields = this.definition.fields;
     return view.getInt32(fields.inuse, true) === 0 ? null : { health: view.getInt32(fields.health, true), damageable: view.getInt32(fields.takedamage, true) !== 0 };
   }
-  damage(hit: QvmGameDamage): void {
+  damage(hit: QvmGameDamage, invoke: (words: readonly number[]) => void = words => {
+    this.game.module.call(words, this.definition.callbacks.damage);
+  }): void {
+    for (const word of [hit.amount, hit.flags, hit.method]) if (!Number.isInteger(word) || word < -0x80000000 || word > 0x7fffffff)
+      throw new RangeError("Source damage arguments require signed integer words");
     const state = this.state(hit.target);
     if (state === null || !state.damageable) return;
     const memory = this.game.module.memory, saved = memory.bytes.slice(this.scratch, this.scratch + 24), scratch = memory.view(this.scratch, 24);
@@ -85,7 +90,7 @@ export class QvmGameCombat {
         entity.s.pos = { ...entity.s.pos, base: body.origin, delta: body.velocity };
         inflictor = temporary;
       }
-      this.game.module.call([this.pointer(hit.target), inflictor, attacker, this.scratch, this.scratch + 12, hit.amount, hit.flags, hit.method], this.definition.callbacks.damage);
+      invoke([this.pointer(hit.target), inflictor, attacker, this.scratch, this.scratch + 12, hit.amount, hit.flags, hit.method]);
     } finally {
       try { if (temporary !== null) this.game.module.call([temporary], this.definition.callbacks.free); }
       finally { memory.writeBytes(this.scratch, saved); }

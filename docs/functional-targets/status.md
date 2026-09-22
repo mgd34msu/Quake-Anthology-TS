@@ -1,6 +1,6 @@
 # Functional target status
 
-T10 progress: QVM committed-write tracking is implemented across the interpreter and migrated host services. Original QVM damage-stage integration and borrowed powered armor remain unfinished. This completes a prerequisite within T10; the target count and installed executable are unchanged.
+T10 progress: qualified original QuakeC and QVM damage stages now compose borrowed powered armor before original regular absorption. Source stores, nested hits, public health/armor changes, component removal and original entity reuse retain their owning damage call. Borrowed regular armor, complete source player/weapon loops and remaining host services are next. This source change awaits executable delivery; installed `ffd745e` already contains QVM committed-write tracking and the armor/HUD/save correction.
 
 **20/23 functional targets complete under the recorded acceptance scope. T10 and T12 are reopened; T19 remains externally blocked.** T10 is the first unfinished target and the current priority. Its dedicated enable/disable menu is connected in source. General source adapters and simultaneous composition across game systems remain unfinished. Multiple mods from Quake 1, Quake 2, Quake 3, expansions, and rereleases must run together across any supported game or mixed configuration. Composition must cover authored gameplay systems, including weapons, actors and AI, items, rules, and events. Full campaigns, native peers, physical devices, and whole-game performance retain the explicit limits below.
 
@@ -40,7 +40,7 @@ T23 real existing-account evidence covers public `llm_ask` and `llm_exec`, each 
 
 The historical 477-row source ledger is unchanged. This update neither re-audits that inventory nor converts reviewed rows into completed functional targets.
 
-Latest installed T10 checkpoint: `10f9150` composes declared original native powered protection with independent regular armor, preserving source activation, fuel and save policy. It includes `23b3a90` component callbacks on applied input, prior source input observation, view-roll cleanup and Q1 punch. Old version-2 saves load; new saves use version 3. Original QC/QVM power stages, borrowed regular armor, complete source movement/weapon loops and remaining host services are still active work. Source checkpoint `c8d45da` corrects Threewave's distinct armor points/tier metadata and preserves qualified old saves; it awaits executable delivery. The next work is precise QVM source writes and original powered-stage integration. Target totals remain 20/23. See [delivery and evidence](../execution-status.md).
+Latest installed T10 checkpoint: `ffd745e` contains QVM committed-write tracking and original armor/HUD/save corrections, alongside earlier native powered protection and component input callbacks. Its compiled original Threewave GL check covers movement, firing, armor and save/load. Original QC/QVM powered-stage integration is now in source and awaits the next executable. General mod composition remains unfinished; target totals remain 20/23. See [delivery and evidence](../execution-status.md).
 
 ## T01 session and resource lifetime
 

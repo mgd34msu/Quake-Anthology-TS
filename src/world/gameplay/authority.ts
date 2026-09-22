@@ -193,7 +193,15 @@ export class GameplayAuthority implements DamageAuthority {
     this.poweredProtection.set(actor, slot);
     const close = (): undefined => {
       if (this.poweredProtection.get(actor) !== slot) return undefined;
+      const cursor = this.currentCursor(actor);
+      if (cursor !== undefined && cursor.reaction === null && !armorEqual(this.readState(actor, primary).armor, cursor.armor))
+        throw new Error("Powered protection closed with an unobserved armor store");
       this.poweredProtection.delete(actor); slot.removeSource?.(); slot.removeSource = null; slot.binding = null;
+      if (cursor !== undefined && this.actors.isLive(actor.id)) {
+        const write = { kind: "armor", before: cursor.armor, after: this.readState(actor, primary).armor } satisfies DamageMutation;
+        if (cursor.reaction === null) this.observeStore(actor, primary, cursor, write);
+        else this.advanceSourceCursors(actor, write);
+      }
       return undefined;
     };
     return { close, bind: binding => {
@@ -252,10 +260,16 @@ export class GameplayAuthority implements DamageAuthority {
 
   setHealth(actor: OwnedActor, health: number): undefined {
     if (!Number.isFinite(health)) throw new RangeError("Health must be finite");
-    return this.binding(actor).writeHealth(health);
+    const binding = this.binding(actor);
+    binding.writeHealth(health);
+    return this.observePublicWrite(actor, binding, "health");
   }
 
-  setArmor(actor: OwnedActor, armor: ArmorState): undefined { return this.writeArmor(actor, this.binding(actor), armor); }
+  setArmor(actor: OwnedActor, armor: ArmorState): undefined {
+    const binding = this.binding(actor);
+    this.writeArmor(actor, binding, armor);
+    return this.observePublicWrite(actor, binding, "armor");
+  }
 
   normalizeLegacyArmor(actor: OwnedActor, armor: ArmorState): ArmorState {
     return this.binding(actor).normalizeLegacyArmor?.(armor) ?? armor;
@@ -265,17 +279,17 @@ export class GameplayAuthority implements DamageAuthority {
     if (!Number.isFinite(points)) throw new RangeError("Armor points must be finite");
     const binding = this.binding(actor), armor = this.readState(actor, binding).armor;
     if (armor.regular.kind === "none") throw new Error("Armor points require an explicit regular armor selection");
-    return this.writeArmor(actor, binding, { ...armor, regular: { ...armor.regular, points } });
+    return this.setArmor(actor, { ...armor, regular: { ...armor.regular, points } });
   }
 
   setRegularArmor(actor: OwnedActor, regular: RegularArmorState): undefined {
     const binding = this.binding(actor);
-    return this.writeArmor(actor, binding, { ...this.readState(actor, binding).armor, regular });
+    return this.setArmor(actor, { ...this.readState(actor, binding).armor, regular });
   }
 
   setPoweredProtection(actor: OwnedActor, powered: PoweredProtectionState): undefined {
     const binding = this.binding(actor);
-    return this.writeArmor(actor, binding, { ...this.readState(actor, binding).armor, powered });
+    return this.setArmor(actor, { ...this.readState(actor, binding).armor, powered });
   }
 
 
@@ -493,6 +507,25 @@ export class GameplayAuthority implements DamageAuthority {
     return undefined;
   }
 
+  private currentCursor(target: OwnedActor): SourceDamageCursor | undefined {
+    const cursors = this.sourceCursors.get(target);
+    if (cursors === undefined) return undefined;
+    let current: SourceDamageCursor | undefined;
+    for (const cursor of cursors) current = cursor;
+    return current;
+  }
+
+  private observePublicWrite(target: OwnedActor, binding: CombatStateBinding, kind: "health" | "armor"): undefined {
+    const cursor = this.currentCursor(target);
+    if (cursor === undefined || !this.actors.isLive(target.id)) return undefined;
+    const write = kind === "health" ? { kind, before: cursor.health, after: binding.read().health }
+      : { kind, before: cursor.armor, after: this.readState(target, binding).armor };
+    if (write.kind === "health" ? write.before === write.after : armorEqual(write.before, write.after)) return undefined;
+    if (cursor.reaction === null) return this.observeStore(target, binding, cursor, write);
+    this.advanceSourceCursors(target, write);
+    return undefined;
+  }
+
   private openCursor(target: OwnedActor, request: DamageRequest, initial: CombatState): SourceDamageCursor {
     const cursor: SourceDamageCursor = { request, mutations: [], health: initial.health, armor: initial.armor, velocity: null, active: true, reaction: null };
     let cursors = this.sourceCursors.get(target);
@@ -546,17 +579,22 @@ export class GameplayAuthority implements DamageAuthority {
   private absorbPowered(target: OwnedActor, binding: CombatStateBinding, cursor: SourceDamageCursor, input: ArmorStageInput, power: PoweredProtectionBinding): ArmorStageResult {
     this.assertCursor(target, cursor);
     if (input.request !== cursor.request || !Number.isFinite(input.amount)) throw new Error("Invalid powered armor stage input");
-    if (input.amount === 0 || input.flags.noArmor || input.flags.noPowerArmor || power.read().kind === "none") return { saved: 0 };
+    const { direction, point, normal } = input.geometry;
+    if (![direction.x, direction.y, direction.z, point.x, point.y, point.z, normal.x, normal.y, normal.z].every(Number.isFinite))
+      throw new Error("Powered armor stage geometry must be finite");
+    if (input.amount <= 0 || input.flags.noArmor || input.flags.noPowerArmor || power.read().kind === "none") return { saved: 0 };
     let open = true;
     try {
-      const result = power.absorb(Object.freeze({ ...input, flags: Object.freeze({ ...input.flags }) }), {
+      const result = power.absorb(Object.freeze({ ...input, flags: Object.freeze({ ...input.flags }),
+        geometry: Object.freeze({ direction: copyVector(direction), point: copyVector(point), normal: copyVector(normal) }) }), {
         stored: change => {
           if (!open) throw new Error("Powered armor observer is closed");
+          if (this.poweredProtection.get(target)?.binding !== power) throw new Error("Powered armor owner was removed");
           return this.observeStore(target, binding, cursor, { kind: "armor", before: { regular: cursor.armor.regular, powered: change.before },
             after: { regular: cursor.armor.regular, powered: change.after } });
         },
       });
-      if (!Number.isFinite(result.saved)) throw new Error("Powered armor savings must be finite");
+      if (!Number.isFinite(result.saved) || result.saved < 0 || result.saved > input.amount) throw new Error("Powered armor savings must be within the current damage amount");
       if (this.actors.isLive(target.id)) {
         const current = this.readState(target, binding);
         if (!armorEqual(current.armor, cursor.armor)) throw new Error("Powered armor stage omitted a committed armor observation");

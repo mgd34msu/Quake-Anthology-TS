@@ -1,12 +1,14 @@
 import { id1ProgramBinding, type Id1ProgramBinding } from "./id1-program.ts";
 import { isDeepStrictEqual } from "node:util";
-import type { ActorId } from "../../../contracts/identity.ts";
+import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
+import type { ModQcArmorStage } from "../../../contracts/mod-callbacks.ts";
 import type { ArmorState, DamageOutcome, DamageRequest } from "../../../contracts/gameplay.ts";
-import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcFunctionExecution, QcMachine } from "../../../compat/qc/machine.ts";
+import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcFunctionExecution, QcInlineBoundary, QcMachine } from "../../../compat/qc/machine.ts";
 import { QcWords } from "../../../compat/qc/memory.ts";
 import { QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
-import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult } from "../../../world/gameplay/authority.ts";
+import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourcePoweredArmorStage } from "../../../world/gameplay/authority.ts";
+import { qcArmorStage, type QcArmorStage } from "./armor-stage.ts";
 
 export interface Id1DamageCall {
   readonly call: QcCallSite;
@@ -26,7 +28,10 @@ export interface Id1DamageProjection {
 /** Observes validated source damage operations inside the shared authority. */
 export class Id1DamageBinding {
   readonly functionBoundary: QcFunctionBoundary;
-  private readonly active: { readonly request: DamageRequest; readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; result: SourceDamageResult; reactionDepth: number; healthWritten: boolean }[] = [];
+  readonly inlineBoundary: QcInlineBoundary;
+  private readonly armorStage: QcArmorStage | null;
+  private readonly powered = new Map<OwnedActor, Parameters<SourcePoweredArmorStage["bind"]>[0]>();
+  private readonly active: { readonly request: DamageRequest; readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; readonly cancel: QcFunctionExecution["cancel"]; result: SourceDamageResult; reactionDepth: number; healthWritten: boolean }[] = [];
   private readonly binding: Id1ProgramBinding;
   private readonly health: number;
   private readonly velocity: number;
@@ -37,9 +42,11 @@ export class Id1DamageBinding {
   private readonly die: number;
   constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,
     authority: GameplayAuthority, private readonly machine: () => QcMachine,
-    resolveRequest: (call: Id1DamageCall) => DamageRequest, private readonly projection?: Id1DamageProjection) {
+    resolveRequest: (call: Id1DamageCall) => DamageRequest, private readonly projection?: Id1DamageProjection, declaredArmor?: ModQcArmorStage) {
     const { program } = source;
     this.binding = id1ProgramBinding(program);
+    this.armorStage = qcArmorStage(program, declaredArmor);
+    this.inlineBoundary = { regions: this.armorStage === null ? [] : [this.armorStage.region], run: (_region, execute) => this.runArmor(execute) };
     const layout = this.binding.damage, damage = program.functionNamed("T_Damage");
     if (damage.index !== layout.index || damage.firstStatement !== layout.firstStatement || damage.parameterStart !== layout.parameterStart || damage.localWords !== layout.localWords
       || layout.kind === "sites" && (damage.parameterSizes.length !== 4 || damage.parameterSizes.some(size => size !== 1))) throw new QcProgramError("id1 damage function layout mismatch");
@@ -85,7 +92,8 @@ export class Id1DamageBinding {
           return source.entities.reference(slot.slot);
         };
         const targetReference = referenceFor(effective.target), inflictorReference = referenceFor(effective.attack.inflictor), attackerReference = referenceFor(effective.attack.attacker);
-        const frame: (typeof this.active)[number] = { request: effective, targetReference, observer, movementProvider: effective.attack.movementProvider, result: { appliedDamage: 0, reaction: "none" }, reactionDepth: 0, healthWritten: false };
+        const frame: (typeof this.active)[number] = { request: effective, targetReference, observer, movementProvider: effective.attack.movementProvider, cancel: execute.cancel,
+          result: { appliedDamage: 0, reaction: "none" }, reactionDepth: 0, healthWritten: false };
         this.active.push(frame);
         try {
           executed = true;
@@ -107,6 +115,39 @@ export class Id1DamageBinding {
       if (!executed) execute.skip([0, 0, 0]);
       return undefined;
     } };
+  }
+  poweredArmorStage(actor: OwnedActor): SourcePoweredArmorStage | null {
+    if (this.armorStage === null) return null;
+    return { bind: intercept => {
+      this.source.actors.assertOwned(actor);
+      if (this.powered.has(actor)) throw new QcProgramError("QC powered armor stage already has an owner");
+      this.powered.set(actor, intercept);
+      return () => { if (this.powered.get(actor) === intercept) this.powered.delete(actor); return undefined; };
+    } };
+  }
+  private runArmor(execute: () => undefined): undefined {
+    const frame = this.active.at(-1), plan = this.armorStage;
+    if (frame === undefined || plan === null || frame.reactionDepth > 0) return execute();
+    const vm = this.vm(), actor = this.source.actors.resolveOwned(frame.request.target);
+    if (actor === null) return frame.cancel([0, 0, 0]);
+    if (vm.globals.int(plan.target) !== frame.targetReference) throw new QcProgramError("QC armor stage changed its damage target");
+    const intercept = this.powered.get(actor);
+    if (intercept === undefined) return execute();
+    const word = plan.flags.kind === "bits" ? Math.trunc(vm.globals.float(plan.flags.word)) : 0;
+    const flags = plan.flags.kind === "none" ? { noArmor: false, noPowerArmor: false, noRegularArmor: false, energy: false }
+      : { noArmor: (word & plan.flags.noArmor) !== 0, noPowerArmor: (word & plan.flags.noPowerArmor) !== 0,
+        noRegularArmor: (word & plan.flags.noRegularArmor) !== 0, energy: (word & plan.flags.energy) !== 0 };
+    const saved = intercept({ request: frame.request, amount: vm.globals.float(plan.damage), flags,
+      geometry: { direction: { ...frame.request.direction }, point: { ...frame.request.point }, normal: { ...frame.request.normal } } }, () => 0);
+    if (!this.source.actors.isLive(actor.id)) return frame.cancel([0, 0, 0]);
+    if (!Number.isFinite(Math.fround(saved))) throw new QcProgramError("Powered armor savings exceed QC binary32 range");
+    const original = vm.globals.int(plan.damage);
+    try {
+      vm.globals.setFloat(plan.damage, vm.numeric.subtract(vm.globals.float(plan.damage), saved));
+      execute();
+    } finally { vm.globals.setInt(plan.damage, original); }
+    vm.globals.setFloat(plan.saved, vm.numeric.add(vm.globals.float(plan.saved), saved));
+    return undefined;
   }
   private observeNativeFunction(call: QcCallSite, execute: QcFunctionExecution): undefined {
     const frame = this.active.at(-1), layout = this.binding.damage;

@@ -55,6 +55,7 @@ export interface Q3GuestRuntimeOptions {
   now(): number;
   assertCurrent(): void;
   beforeDisconnect?(actor: ActorId): void;
+  beforeRetire?(): void;
   clientChanged?(kind: 'admitted' | 'userinfo', actor: ActorId): void;
   botCommand?(actor: ActorId, command: WireUserCommand): void;
 }
@@ -323,6 +324,7 @@ export class Q3QvmServerGame {
     const errors: unknown[] = [];
     try { this.bots?.close(); } catch (error) { errors.push(error); }
     try { this.files.closeAll(); } catch (error) { errors.push(error); }
+    try { this.options.beforeRetire?.(); } catch (error) { errors.push(error); }
     try { this.records.close(); } catch (error) { errors.push(error); }
     this.game.retire(); this.clients.clear(); this.reconnecting.clear(); this.lifecycle = { kind: 'retired' };
     if (errors.length !== 0) throw new AggregateError(errors, 'Q3 guest discard failed');
@@ -582,6 +584,7 @@ export class Q3QvmServerGame {
   private releaseSource(errors: unknown[], transferClients = false): void {
     try { this.bots?.close(); } catch (error) { errors.push(error); }
     try { this.files.closeAll(); } catch (error) { errors.push(error); }
+    try { this.options.beforeRetire?.(); } catch (error) { errors.push(error); }
     try { this.records.close(); } catch (error) { errors.push(error); }
     if (!transferClients) for (const slot of this.botClients) { const entry = this.clients.get(slot); if (entry !== undefined) this.botPreparation?.freeClient(entry.player.client); }
     this.botClients.clear(); this.botMessages.clear();
