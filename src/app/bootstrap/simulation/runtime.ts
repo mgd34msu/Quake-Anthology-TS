@@ -203,6 +203,7 @@ import type { SharedSolid } from "./physics.ts";
 import { MovementPlayer, movementOrigin, providerFamily, providerTiming } from "./players.ts";
 import { SimulationEvents } from "./events.ts";
 import { SourceRandom } from "./random.ts";
+import { capturePrimaryProtection } from "../../../persistence/protection.ts";
 import { captureSharedBodies, restoreSharedBodyLinks, restoreSharedWorldState, sourceActorsCheckpoint, readSourceActorsCheckpoint,
   savedActorId, readSavedActor, encodeCheckpointValue, decodeCheckpointValue, SaveReader, encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint,
   readQ2CharacterCheckpoint } from "../../../persistence/index.ts";
@@ -4943,7 +4944,7 @@ export class SharedSimulation implements Simulation {
     })();
     const provider = this.recipe.map.entities.provider;
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
-    const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint()), ...(nativeOriginal === null ? [] : [nativeOriginal])];
+    const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint()), capturePrimaryProtection(this.actors, this.combat), ...(nativeOriginal === null ? [] : [nativeOriginal])];
     const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 11 : 1, bytes });
     const bots = this.botServices.checkpoint();
     if (bots !== null) {
@@ -5119,7 +5120,7 @@ export class SharedSimulation implements Simulation {
       return { ...entry, state: { ...entry.state, armor: legacyQvmCombat.normalizeLegacyArmor(actor.id, entry.state.armor) } };
     }) };
     this.pendingSharedRestore = restoreSharedWorldState(sharedSave, { actors: this.actors, bodies: this.bodies, combat: this.combat, inventory: this.inventory,
-      storage: actor => reconstructed(actor.id) ? "source-reconstructed" : (source.kind === "quakec" || source.kind === "q3-qvm") && this.actors.sourceOf(actor.id)?.provider === this.recipe.map.entities.provider ? "prebound" : "copied" }, { deferPoweredProtection: true });
+      storage: actor => reconstructed(actor.id) ? "source-reconstructed" : (source.kind === "quakec" || source.kind === "q3-qvm") && this.actors.sourceOf(actor.id)?.provider === this.recipe.map.entities.provider ? "prebound" : "copied" }, { deferProtection: true });
     reader.field("players").list(value => {
       const saved = readMovementPlayer(value, actor => this.actors.referenceSaved(actor)), actor = owner(value.field("actor"));
       const client = this.options.restoredClients?.find(client => client.slot === saved.clientSlot);

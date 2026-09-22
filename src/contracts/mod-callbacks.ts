@@ -1,10 +1,10 @@
 import type { ContentDigest } from "./content.ts";
-import type { ActorId } from "./identity.ts";
+import type { ActorId, ProviderId } from "./identity.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { Vec3 } from "./math.ts";
 
 export type ModClientInput = "view-angles" | "attack" | "jump" | "impulse";
-export type ModCallbackInput = ModClientInput | "self" | "other" | "activator" | "attacker" | "inflictor" | "amount" | "knockback" | "point" | "direction" | "normal" | "item" | "time" | "elapsed" | "result";
+export type ModCallbackInput = ModClientInput | "self" | "other" | "activator" | "attacker" | "inflictor" | "amount" | "damage-flags" | "regular-protection-scale" | "knockback" | "point" | "direction" | "normal" | "item" | "time" | "elapsed" | "result";
 export type ModCallbackValue = { readonly kind: "input"; readonly name: ModCallbackInput }
   | { readonly kind: "float"; readonly value: number } | { readonly kind: "string"; readonly value: string } | { readonly kind: "vector"; readonly value: Vec3 };
 export type ModActorField = { readonly field: string } & (
@@ -53,11 +53,26 @@ export interface ModQcArmorStage {
   readonly target: number;
   readonly damage: number;
   readonly saved: number;
+  /** Original callers may temporarily scale their own armor before entering damage. */
+  readonly regularScale?: readonly { readonly caller: string; readonly statement: number; readonly scale: number }[];
   readonly flags: { readonly kind: "none" } | { readonly kind: "bits"; readonly word: number;
     readonly noArmor: number; readonly noPowerArmor: number; readonly noRegularArmor: number; readonly energy: number };
   /** Exact source instructions, including the join, qualified by the declaring artifact. */
   readonly statements: readonly { readonly opcode: number; readonly a: number; readonly b: number; readonly c: number }[];
 }
+
+export type ModQcProtection = {
+  readonly id: string;
+  readonly admission?: { readonly kind: "claim" | "replace-current-primary" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
+  readonly absorb: { readonly kind: "function"; readonly call: ModSourceCall }
+    | { readonly kind: "region"; readonly call: ModSourceCall; readonly stage: ModQcArmorStage };
+  readonly flags: { readonly noArmor: number; readonly noPowerArmor: number; readonly noRegularArmor: number; readonly energy: number; readonly radius: number };
+} & (
+  | { readonly channel: "regular"; readonly storage: { readonly points: string; readonly item: ItemId | null;
+      readonly selection?: { readonly field: string; readonly mask?: number; readonly values: readonly { readonly value: number; readonly item: ItemId | null }[] } } }
+  | { readonly channel: "powered"; readonly storage: { readonly cells: string; readonly kind: "screen" | "shield";
+      readonly selection?: { readonly field: string; readonly mask?: number; readonly values: readonly { readonly value: number; readonly kind: "none" | "screen" | "shield" }[] } } }
+);
 
 export interface ModCallbackDeclaration {
   readonly version: 1;
@@ -75,4 +90,6 @@ export interface ModCallbackDeclaration {
   readonly commands?: readonly ModConsoleCommand[];
   /** Declared lowering of canonical damage into the artifact's verified T_Damage ABI. */
   readonly combat?: { readonly damage: ModSourceCall; readonly armorStage?: ModQcArmorStage };
+  /** Independent protection executes original source armor over its private client storage. */
+  readonly protection?: readonly ModQcProtection[];
 }

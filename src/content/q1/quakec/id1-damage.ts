@@ -2,13 +2,14 @@ import { id1ProgramBinding, type Id1ProgramBinding } from "./id1-program.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { ModQcArmorStage } from "../../../contracts/mod-callbacks.ts";
-import type { ArmorState, DamageOutcome, DamageRequest } from "../../../contracts/gameplay.ts";
-import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcFunctionExecution, QcInlineBoundary, QcMachine } from "../../../compat/qc/machine.ts";
+import type { ArmorState, DamageOutcome, DamageRequest, ProtectionChannel } from "../../../contracts/gameplay.ts";
+import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcFunctionExecution, QcInlineBoundary, QcInlineContinuation, QcMachine } from "../../../compat/qc/machine.ts";
 import { QcWords } from "../../../compat/qc/memory.ts";
 import { QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
-import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourcePoweredArmorStage } from "../../../world/gameplay/authority.ts";
+import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../../world/gameplay/authority.ts";
 import { qcArmorStage, type QcArmorStage } from "./armor-stage.ts";
+import { attackDamageFlags } from "../../../world/gameplay/armor.ts";
 
 export interface Id1DamageCall {
   readonly call: QcCallSite;
@@ -30,8 +31,8 @@ export class Id1DamageBinding {
   readonly functionBoundary: QcFunctionBoundary;
   readonly inlineBoundary: QcInlineBoundary;
   private readonly armorStage: QcArmorStage | null;
-  private readonly powered = new Map<OwnedActor, Parameters<SourcePoweredArmorStage["bind"]>[0]>();
-  private readonly active: { readonly request: DamageRequest; readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; readonly cancel: QcFunctionExecution["cancel"]; result: SourceDamageResult; reactionDepth: number; healthWritten: boolean }[] = [];
+  private readonly protection = { regular: new Map<OwnedActor, Parameters<SourceArmorStage["bind"]>[0]>(), powered: new Map<OwnedActor, Parameters<SourceArmorStage["bind"]>[0]>() };
+  private readonly active: { readonly request: DamageRequest; readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; readonly cancel: QcFunctionExecution["cancel"]; readonly regularScale: number; result: SourceDamageResult; reactionDepth: number; healthWritten: boolean }[] = [];
   private readonly binding: Id1ProgramBinding;
   private readonly health: number;
   private readonly velocity: number;
@@ -93,6 +94,7 @@ export class Id1DamageBinding {
         };
         const targetReference = referenceFor(effective.target), inflictorReference = referenceFor(effective.attack.inflictor), attackerReference = referenceFor(effective.attack.attacker);
         const frame: (typeof this.active)[number] = { request: effective, targetReference, observer, movementProvider: effective.attack.movementProvider, cancel: execute.cancel,
+          regularScale: this.armorStage?.regularScale?.find(site => site.statement === call.statement && program.functionNamed(site.caller).index === call.caller)?.scale ?? 1,
           result: { appliedDamage: 0, reaction: "none" }, reactionDepth: 0, healthWritten: false };
         this.active.push(frame);
         try {
@@ -116,37 +118,52 @@ export class Id1DamageBinding {
       return undefined;
     } };
   }
-  poweredArmorStage(actor: OwnedActor): SourcePoweredArmorStage | null {
-    if (this.armorStage === null) return null;
+  protectionStage(actor: OwnedActor, channel: ProtectionChannel): SourceArmorStage | null {
+    if (this.armorStage === null || channel === "regular" && this.armorStage.region.replaceable !== true) return null;
+    const owners = this.protection[channel];
     return { bind: intercept => {
       this.source.actors.assertOwned(actor);
-      if (this.powered.has(actor)) throw new QcProgramError("QC powered armor stage already has an owner");
-      this.powered.set(actor, intercept);
-      return () => { if (this.powered.get(actor) === intercept) this.powered.delete(actor); return undefined; };
+      if (owners.has(actor)) throw new QcProgramError(`QC ${channel} armor stage already has an owner`);
+      owners.set(actor, intercept);
+      return () => { if (owners.get(actor) === intercept) owners.delete(actor); return undefined; };
     } };
   }
-  private runArmor(execute: () => undefined): undefined {
+  private runArmor(execute: QcInlineContinuation): undefined {
     const frame = this.active.at(-1), plan = this.armorStage;
     if (frame === undefined || plan === null || frame.reactionDepth > 0) return execute();
     const vm = this.vm(), actor = this.source.actors.resolveOwned(frame.request.target);
     if (actor === null) return frame.cancel([0, 0, 0]);
     if (vm.globals.int(plan.target) !== frame.targetReference) throw new QcProgramError("QC armor stage changed its damage target");
-    const intercept = this.powered.get(actor);
-    if (intercept === undefined) return execute();
+    const power = this.protection.powered.get(actor), regular = this.protection.regular.get(actor);
+    if (power === undefined && regular === undefined) return execute();
+    const live = (): void => { if (this.source.actors.resolveOwned(actor.id) !== actor) frame.cancel([0, 0, 0]); };
     const word = plan.flags.kind === "bits" ? Math.trunc(vm.globals.float(plan.flags.word)) : 0;
-    const flags = plan.flags.kind === "none" ? { noArmor: false, noPowerArmor: false, noRegularArmor: false, energy: false }
-      : { noArmor: (word & plan.flags.noArmor) !== 0, noPowerArmor: (word & plan.flags.noPowerArmor) !== 0,
-        noRegularArmor: (word & plan.flags.noRegularArmor) !== 0, energy: (word & plan.flags.energy) !== 0 };
-    const saved = intercept({ request: frame.request, amount: vm.globals.float(plan.damage), flags,
-      geometry: { direction: { ...frame.request.direction }, point: { ...frame.request.point }, normal: { ...frame.request.normal } } }, () => 0);
-    if (!this.source.actors.isLive(actor.id)) return frame.cancel([0, 0, 0]);
-    if (!Number.isFinite(Math.fround(saved))) throw new QcProgramError("Powered armor savings exceed QC binary32 range");
+    const capturedFlags = attackDamageFlags(frame.request);
+    const originating = { ...capturedFlags, regularProtectionScale: vm.numeric.multiply(capturedFlags.regularProtectionScale ?? 1, frame.regularScale) };
+    const flags = plan.flags.kind === "none" ? originating
+      : { ...originating, noArmor: plan.flags.noArmor === 0 ? originating.noArmor : (word & plan.flags.noArmor) !== 0,
+        noPowerArmor: plan.flags.noPowerArmor === 0 ? originating.noPowerArmor : (word & plan.flags.noPowerArmor) !== 0,
+        noRegularArmor: plan.flags.noRegularArmor === 0 ? originating.noRegularArmor : (word & plan.flags.noRegularArmor) !== 0,
+        energy: plan.flags.energy === 0 ? originating.energy : (word & plan.flags.energy) !== 0 };
+    const input = { request: frame.request, amount: vm.globals.float(plan.damage), flags,
+      geometry: { direction: { ...frame.request.direction }, point: { ...frame.request.point }, normal: { ...frame.request.normal } } };
+    const powerSaved = power?.(input, () => 0) ?? 0;
+    live();
+    if (!Number.isFinite(Math.fround(powerSaved))) throw new QcProgramError("Armor savings exceed QC binary32 range");
     const original = vm.globals.int(plan.damage);
     try {
-      vm.globals.setFloat(plan.damage, vm.numeric.subtract(vm.globals.float(plan.damage), saved));
-      execute();
+      const amount = vm.numeric.subtract(input.amount, powerSaved);
+      vm.globals.setFloat(plan.damage, amount);
+      let executed = false;
+      const originalRegular = (): number => { execute(); executed = true; return vm.globals.float(plan.saved); };
+      // Power may remove the regular owner while this frame is suspended.
+      const current = this.protection.regular.get(actor);
+      const regularSaved = current === undefined ? originalRegular() : current({ ...input, amount }, originalRegular);
+      live();
+      if (!Number.isFinite(Math.fround(regularSaved))) throw new QcProgramError("Armor savings exceed QC binary32 range");
+      if (!executed) execute.skipToJoin();
+      vm.globals.setFloat(plan.saved, vm.numeric.add(regularSaved, powerSaved));
     } finally { vm.globals.setInt(plan.damage, original); }
-    vm.globals.setFloat(plan.saved, vm.numeric.add(vm.globals.float(plan.saved), saved));
     return undefined;
   }
   private observeNativeFunction(call: QcCallSite, execute: QcFunctionExecution): undefined {

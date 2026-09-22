@@ -24,10 +24,14 @@ export interface QcFunctionExecution {
   skip(returnWords: readonly [number, number, number]): undefined;
   cancel(returnWords: readonly [number, number, number]): never;
 }
-export interface QcInlineRegion { readonly functionIndex: number; readonly entry: number; readonly exit: number; }
+export interface QcInlineRegion { readonly functionIndex: number; readonly entry: number; readonly exit: number; readonly replaceable?: true; readonly standalone?: { readonly saved: number }; }
+export interface QcInlineContinuation {
+  (): undefined;
+  skipToJoin(): undefined;
+}
 export interface QcInlineBoundary {
   readonly regions: readonly QcInlineRegion[];
-  run(region: QcInlineRegion, execute: () => undefined): undefined;
+  run(region: QcInlineRegion, execute: QcInlineContinuation): undefined;
 }
 export interface QcFunctionBoundary {
   readonly functions: ReadonlySet<number>;
@@ -224,6 +228,27 @@ export class QcMachine {
     this.invokeFunction(fn, call, budget, staging);
     return undefined;
   }
+  executeRegion(region: QcInlineRegion, argumentCount: number): number {
+    const admitted = this.inlineRegions.get(region.entry), fn = this.program.functionAt(region.functionIndex);
+    if (admitted?.functionIndex !== region.functionIndex || admitted.exit !== region.exit || admitted.standalone === undefined)
+      this.fail("standalone inline execution requires an admitted source region");
+    const savedWord = admitted.standalone.saved;
+    if (argumentCount !== fn.parameterSizes.length || !Number.isInteger(savedWord)
+      || savedWord < fn.parameterStart || savedWord >= fn.parameterStart + fn.localWords) this.fail("invalid standalone inline frame");
+    const depth = this.frames.length, previousArguments = this.argumentCount;
+    this.argumentCount = argumentCount;
+    this.enter(fn);
+    const frame = this.frames.at(-1);
+    if (frame === undefined) this.fail("standalone inline execution has no frame");
+    this.statement = region.entry - 1;
+    try {
+      this.runStatements(depth, { remaining: this.statementLimit }, { region: admitted, frame });
+      return this.globals.float(savedWord);
+    } finally {
+      while (this.frames.length > depth) this.leave();
+      this.argumentCount = previousArguments;
+    }
+  }
   private captureCallStaging(): CallStaging | null {
     return this.options.observeCall === undefined && this.boundaryFunctions.size === 0 ? null
       : { words: this.globals.bytes.slice(4, 112), argumentCount: this.argumentCount };
@@ -315,15 +340,19 @@ export class QcMachine {
           const failure: { value: { error: unknown } | null } = { value: null };
           this.statement--;
           try {
-            boundary.run(region, () => {
+            const decide = (skip: boolean): undefined => {
               try {
                 if (!active || called) this.fail("inline continuation must execute once inside its boundary");
+                if (this.frames.at(-1) !== frame || this.functionIndex !== region.functionIndex) this.fail("inline continuation belongs to another source frame");
+                if (skip && region.replaceable !== true) this.fail("inline source region is not admitted for replacement");
                 called = true;
-                this.runStatements(exitDepth, budget, { region, frame });
+                if (skip) this.statement = region.exit - 1;
+                else this.runStatements(exitDepth, budget, { region, frame });
               }
               catch (error) { failure.value = { error }; throw error; }
               return undefined;
-            });
+            };
+            boundary.run(region, Object.assign(() => decide(false), { skipToJoin: () => decide(true) }));
             if (failure.value !== null) throw failure.value.error;
             if (!called) this.fail("inline boundary omitted source execution");
           } finally { active = false; }

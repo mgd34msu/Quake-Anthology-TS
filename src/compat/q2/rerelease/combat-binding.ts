@@ -30,19 +30,22 @@ export class RereleaseCombatBindings {
       return memory.offset(value.at("pers.inventory"), BigInt(entry.sourceIndex * 4));
     };
     const count = (value: RereleaseSourceClient, item: ItemId): number => memory.readInt32(itemAddress(value, item));
-    const armorItems: readonly { readonly item: ItemId; readonly normal: number; readonly energy: number }[] = [
-      { item: "q2:item_armor_jacket", normal: 0.3, energy: 0 },
-      { item: "q2:item_armor_combat", normal: 0.6, energy: 0.3 },
-      { item: "q2:item_armor_body", normal: 0.8, energy: 0.6 },
-    ];
+    const armorItems: readonly ItemId[] = ["q2:item_armor_jacket", "q2:item_armor_combat", "q2:item_armor_body"];
+    const protection = (item: ItemId, offset: bigint): number => {
+      this.items ??= rereleaseInventoryItems(module, text => host.core.string(text));
+      const index = this.items.find(entry => entry.item === item)?.sourceIndex;
+      if (index === undefined) throw new Error("Native armor item is absent");
+      const info = memory.readPointer(memory.offset(damage.entries.armorInfoTable, BigInt(index * 192)));
+      return info === null ? 0 : memory.readFloat32(memory.offset(info, offset));
+    };
     const armor = (): ArmorState => {
       const value = client(); if (value === null) return { regular: { kind: "none" }, powered: { kind: "none" } };
-      const regular = armorItems.find(item => count(value, item.item) > 0);
+      const regular = armorItems.find(item => count(value, item) > 0);
       const powered = (memory.readUint64(source.at("flags")) & 4096n) !== 0n;
       const power = !powered ? null : count(value, "q2:item_power_shield") > 0 ? "shield" : count(value, "q2:item_power_screen") > 0 ? "screen" : null;
       if (regular === undefined && power === null) return { regular: { kind: "none" }, powered: { kind: "none" } };
-      return { regular: regular === undefined ? { kind: "none" } : { kind: "q2", points: count(value, regular.item), item: regular.item,
-        normalProtection: regular.normal, energyProtection: regular.energy },
+      return { regular: regular === undefined ? { kind: "none" } : { kind: "q2", points: count(value, regular), item: regular,
+        normalProtection: protection(regular, 8n), energyProtection: protection(regular, 12n) },
         powered: power === null ? { kind: "none" } : { kind: power, cells: count(value, "q2:ammo_cells") } };
     };
     const validateArmor = (state: ArmorState): undefined => {
@@ -55,17 +58,20 @@ export class RereleaseCombatBindings {
       const value = client(), regular = state.regular;
       if (value === null) { if (regular.kind !== "none" || state.powered.kind !== "none") throw new Error("Native non-client armor requires its own source declaration"); return undefined; }
       if (regular.kind !== "none" && regular.kind !== "q2") throw new Error("Native Q2 armor cannot store another game's armor record");
-      if (regular.kind === "q2" && regular.points !== 0 && !armorItems.some(item => item.item === regular.item)) throw new Error("Unknown native armor item");
+      if (regular.kind === "q2" && regular.points !== 0 && !armorItems.includes(regular.item)) throw new Error("Unknown native armor item");
       const current = armor().regular;
       for (const item of armorItems) {
-        if (regular.kind === "q2" && current.kind === "q2" && regular.item === current.item && item.item !== current.item) continue;
-        const address = itemAddress(value, item.item), points = regular.kind === "q2" && regular.item === item.item ? regular.points : 0;
+        if (regular.kind === "q2" && current.kind === "q2" && regular.item === current.item && item !== current.item) continue;
+        const address = itemAddress(value, item), points = regular.kind === "q2" && regular.item === item ? regular.points : 0;
         if (memory.readInt32(address) !== points) memory.writeInt32(address, points);
       }
       if (state.powered.kind !== "none") memory.writeInt32(itemAddress(value, "q2:ammo_cells"), state.powered.cells);
       return undefined;
     };
-    return { validateArmor, poweredProtectionOwner: memory.module.id, poweredArmorStage: damage.poweredArmorStage(view, armor),
+    return { validateArmor, protection: {
+      regular: { owner: memory.module.id, stage: damage.armorStage(view, armor, "regular") },
+      powered: { owner: memory.module.id, stage: damage.armorStage(view, armor, "powered") },
+    },
       normalizeLegacyArmor: legacy => normalizeLegacyPowerOnlyArmor(legacy, armor(), "q2:none"), ...source.combat({ armor, writeArmor, traits: () => {
       const value = client(), flags = memory.readUint64(source.at("flags"));
       const team = value === null ? 0 : publicState.playerState().teamId;

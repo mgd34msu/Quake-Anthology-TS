@@ -56,10 +56,18 @@ export interface GuestCallRunnerOptions {
   readonly variadicLayouts?: (callback: GuestHostCallback, fixedArguments: readonly GuestCallValue[], context: GuestCallContext) => readonly GuestValueLayout[];
 }
 interface ActiveCall { readonly context: GuestCallContext; remaining: number; }
+export interface GuestInlineContinuation { execute(): undefined; skip(): undefined; }
+interface InlineRegion {
+  readonly entry: GuestAddress;
+  readonly join: GuestAddress;
+  readonly intercept: (continuation: GuestInlineContinuation) => undefined;
+  readonly executing: { readonly call: ActiveCall; readonly stack: bigint }[];
+}
 
 /** Synchronous nested entries preserve processor context and retain guest memory mutations. */
 export class GuestCallRunner {
   readonly #active: ActiveCall[] = [];
+  readonly #regions = new Map<bigint, InlineRegion>();
   #callbackContext: GuestCallContext | null = null;
   #instructionsExecuted = 0n;
   #loadingSuspended = false;
@@ -96,7 +104,7 @@ export class GuestCallRunner {
   }
   private *invokeSteps(request: GuestCallRequest, slice = Number.MAX_SAFE_INTEGER): Generator<undefined, GuestCallResult, void> {
     if (!Number.isSafeInteger(request.instructionBudget) || request.instructionBudget <= 0) throw new RangeError("Guest instruction budget must be positive");
-    const { cpu, callbacks, returnAddress } = this.options;
+    const { cpu, returnAddress } = this.options;
     if (request.context.module.id !== cpu.memory.module.id || request.context.module.digest !== cpu.memory.module.digest) throw new TypeError("Call context belongs to a different guest module");
     const enclosing = this.#active.at(-1);
     const context = enclosing === undefined ? request.context : { ...request.context, parent: this.currentContext };
@@ -108,52 +116,104 @@ export class GuestCallRunner {
     const entryStack = cpu.state.registers.read("rsp", width);
     const plan = planGuestCall(request.signature, request.arguments.map((value, index) => request.signature.parameters[index] ?? inferredLayout(value, request.signature.variadic)));
     this.#active.push(active);
-    let sliceRemaining = slice;
     try {
-      for (;;) {
-        if (sliceRemaining <= 0 && active.remaining > 0) { yield undefined; sliceRemaining = slice; }
-        const rawStop = cpu.run({ instructionBudget: Math.min(active.remaining, sliceRemaining), returnAddress });
-        const stop: GuestExecutionStop = rawStop.kind === "budget" && cpu.state.instructionPointer === returnAddress.byteOffset
-          ? { kind: "return", instructions: rawStop.instructions, address: returnAddress } : rawStop;
-        if (!Number.isSafeInteger(stop.instructions) || stop.instructions < 0 || stop.instructions > active.remaining) throw new Error("CPU returned an invalid instruction count");
-        this.#instructionsExecuted += BigInt(stop.instructions);
-        sliceRemaining -= stop.instructions;
-        for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - stop.instructions);
-        if (stop.kind === "return") {
-          if (cpu.state.registers.read("rsp", width) !== entryStack + BigInt(cpu.memory.pointerBytes + plan.calleePopBytes)) throw new Error("Guest returned with incorrect ABI stack cleanup");
-          const result = adapter.returnValue(cpu, request.signature);
-          if (enclosing !== undefined) restoreAbiProcessorState(cpu.state, saved);
-          else {
-            // The host caller reclaims its stack; guest register and floating state remain authoritative.
-            cpu.state.registers.write("rsp", width, callerStack);
-            cpu.state.instructionPointer = saved.instructionPointer;
-          }
-          return result;
-        }
-        if (stop.kind === "budget" && active.remaining > 0 && sliceRemaining <= 0) continue;
-        if (stop.kind !== "host-call") throw new GuestCallStopped(stop, context);
-        const callback = callbacks.resolve(stop.address);
-        if (callback === null) throw new Error(`Unknown guest callback at 0x${stop.address.byteOffset.toString(16)}`);
-        const callbackAdapter = new X86AbiAdapter(callback.signature.abi);
-        const callbackContext: GuestCallContext = { ...context, parent: context,
-          callback: { kind: "native-guest", module: cpu.memory.module, address: stop.address, abi: callback.signature.abi } };
-        const fixed = callbackAdapter.arguments(cpu, callback.signature);
-        if (callback.signature.variadic && this.options.variadicLayouts === undefined) throw new TypeError("Variadic host callback requires a layout resolver");
-        const extra = callback.signature.variadic ? this.options.variadicLayouts?.(callback, fixed, callbackContext) ?? [] : [];
-        const arguments_ = extra.length === 0 ? fixed : callbackAdapter.arguments(cpu, callback.signature, extra);
-        sliceRemaining--;
-        // Count dispatch as one step so a zero-instruction trap loop remains bounded.
-        for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - 1);
-        const previousContext = this.#callbackContext;
-        this.#callbackContext = callbackContext;
-        let result: GuestCallResult;
-        try { result = callbacks.invoke(stop.address, callbackContext, arguments_); }
-        finally { this.#callbackContext = previousContext; }
-        callbackAdapter.leave(cpu, callback.signature, result);
+      yield* this.runSteps(active, returnAddress, slice);
+      if (cpu.state.registers.read("rsp", width) !== entryStack + BigInt(cpu.memory.pointerBytes + plan.calleePopBytes)) throw new Error("Guest returned with incorrect ABI stack cleanup");
+      const result = adapter.returnValue(cpu, request.signature);
+      if (enclosing !== undefined) restoreAbiProcessorState(cpu.state, saved);
+      else {
+        cpu.state.registers.write("rsp", width, callerStack);
+        cpu.state.instructionPointer = saved.instructionPointer;
       }
+      return result;
     } finally {
       // Stops retain the actual faulting processor and memory for the runtime's exception policy.
       this.#active.pop();
     }
+  }
+  private *runSteps(active: ActiveCall, returnAddress: GuestAddress, slice = Number.MAX_SAFE_INTEGER): Generator<undefined, undefined, void> {
+    const { cpu, callbacks } = this.options, context = active.context;
+    let sliceRemaining = slice;
+    for (;;) {
+      if (sliceRemaining <= 0 && active.remaining > 0) { yield undefined; sliceRemaining = slice; }
+      const rawStop = cpu.run({ instructionBudget: Math.min(active.remaining, sliceRemaining), returnAddress });
+      const stop: GuestExecutionStop = rawStop.kind === "budget" && cpu.state.instructionPointer === returnAddress.byteOffset
+        ? { kind: "return", instructions: rawStop.instructions, address: returnAddress } : rawStop;
+      if (!Number.isSafeInteger(stop.instructions) || stop.instructions < 0 || stop.instructions > active.remaining) throw new Error("CPU returned an invalid instruction count");
+      this.#instructionsExecuted += BigInt(stop.instructions);
+      sliceRemaining -= stop.instructions;
+      for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - stop.instructions);
+      if (stop.kind === "return") return undefined;
+      if (stop.kind === "budget" && active.remaining > 0 && sliceRemaining <= 0) continue;
+      if (stop.kind !== "host-call") throw new GuestCallStopped(stop, context);
+      const region = this.#regions.get(stop.address.byteOffset);
+      if (region !== undefined) {
+        if (active.remaining === 0) throw new GuestCallStopped({ kind: "budget", instructions: 0 }, context);
+        for (const frame of this.#active) frame.remaining--;
+        sliceRemaining--;
+        this.interceptRegion(region, active);
+        continue;
+      }
+      const callback = callbacks.resolve(stop.address);
+      if (callback === null) throw new Error(`Unknown guest callback at 0x${stop.address.byteOffset.toString(16)}`);
+      const callbackAdapter = new X86AbiAdapter(callback.signature.abi);
+      const callbackContext: GuestCallContext = { ...context, parent: context,
+        callback: { kind: "native-guest", module: cpu.memory.module, address: stop.address, abi: callback.signature.abi } };
+      const fixed = callbackAdapter.arguments(cpu, callback.signature);
+      if (callback.signature.variadic && this.options.variadicLayouts === undefined) throw new TypeError("Variadic host callback requires a layout resolver");
+      const extra = callback.signature.variadic ? this.options.variadicLayouts?.(callback, fixed, callbackContext) ?? [] : [];
+      const arguments_ = extra.length === 0 ? fixed : callbackAdapter.arguments(cpu, callback.signature, extra);
+      sliceRemaining--;
+      // Count dispatch as one step so a zero-instruction trap loop remains bounded.
+      for (const frame of this.#active) frame.remaining = Math.max(0, frame.remaining - 1);
+      const previousContext = this.#callbackContext;
+      this.#callbackContext = callbackContext;
+      let result: GuestCallResult;
+      try { result = callbacks.invoke(stop.address, callbackContext, arguments_); }
+      finally { this.#callbackContext = previousContext; }
+      callbackAdapter.leave(cpu, callback.signature, result);
+    }
+  }
+  /** The source adapter qualifies a fixed entry and join against its original artifact. */
+  bindInlineRegion(entry: GuestAddress, join: GuestAddress, abi: GuestCallSignature["abi"], intercept: (continuation: GuestInlineContinuation) => undefined): () => void {
+    const { cpu, callbacks } = this.options;
+    cpu.memory.check(entry, 1, "execute"); cpu.memory.check(join, 1, "execute");
+    if (entry.byteOffset === join.byteOffset || this.#regions.has(entry.byteOffset)) throw new Error("Invalid or occupied inline region");
+    const region: InlineRegion = { entry, join, intercept, executing: [] };
+    const remove = callbacks.bindEntry(entry, { id: `inline:${entry.byteOffset}`, signature: { abi, parameters: [], result: "void", variadic: false },
+      invoke: () => { throw new Error("Inline region cannot be invoked as an ABI callback"); } }, () => {
+      const current = this.#active.at(-1), stack = cpu.state.registers.read("rsp", cpu.memory.pointerBytes === 4 ? 32 : 64);
+      return !region.executing.some(frame => frame.call === current && frame.stack === stack);
+    });
+    this.#regions.set(entry.byteOffset, region);
+    return () => { if (this.#regions.get(entry.byteOffset) === region) { this.#regions.delete(entry.byteOffset); remove(); } };
+  }
+  private interceptRegion(region: InlineRegion, active: ActiveCall): void {
+    const { cpu } = this.options, width = cpu.memory.pointerBytes === 4 ? 32 : 64;
+    const stack = cpu.state.registers.read("rsp", width);
+    let open = true, consumed = false, failed = false;
+    let failure: unknown;
+    const use = (execute: boolean): undefined => {
+      try {
+        if (!open || consumed || this.#active.at(-1) !== active || cpu.state.registers.read("rsp", width) !== stack
+          || cpu.state.instructionPointer !== region.entry.byteOffset) throw new Error("Inline continuation is not at its active source frame");
+        consumed = true;
+        if (execute) {
+          const frame = { call: active, stack }; region.executing.push(frame);
+          try {
+            const steps = this.runSteps(active, region.join), result = steps.next();
+            if (!result.done) throw new Error("Synchronous inline region yielded");
+          } finally { region.executing.pop(); }
+          if (this.#active.at(-1) !== active || cpu.state.registers.read("rsp", width) !== stack) throw new Error("Inline region changed its source stack");
+        } else cpu.state.instructionPointer = region.join.byteOffset;
+        return undefined;
+      } catch (error) { failed = true; failure = error; throw error; }
+    };
+    try {
+      const returned = region.intercept({ execute: () => use(true), skip: () => use(false) });
+      if (failed) throw failure;
+      if (returned !== undefined || !consumed || this.#active.at(-1) !== active || cpu.state.registers.read("rsp", width) !== stack
+        || cpu.state.instructionPointer !== region.join.byteOffset) throw new Error("Inline interceptor did not join its source frame");
+    } finally { open = false; }
   }
 }

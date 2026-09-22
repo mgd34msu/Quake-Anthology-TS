@@ -14,6 +14,8 @@ import type { QcHostBuiltinName } from "./builtins.ts";
 import { createQcPresentationBindings } from "./presentation-host.ts";
 import type { QcPrecachedResource } from "./presentation-host.ts";
 import { createQcSpatialBindings } from "./spatial-host.ts";
+import { QcModProtection, qcProtectionRegions } from "./mod-protection.ts";
+import type { QcArmorStage } from "../../content/q1/quakec/armor-stage.ts";
 import { QcModClientBindings } from "./mod-clients.ts";
 import { QcModInput } from "./mod-input.ts";
 import { createQcAimBinding } from "./client-host.ts";
@@ -74,6 +76,8 @@ function validateCall(program: QcProgram, call: ModSourceCall, available: Readon
 }
 export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclaration): void {
   if (program.digest !== declaration.program.digest) throw new Error("Gameplay mod program differs from its declared artifact digest");
+  qcProtectionRegions(program, declaration);
+  for (const protection of declaration.protection ?? []) validateCall(program, protection.absorb.call, new Set<ModCallbackInput>(["self", "attacker", "inflictor", "amount", "knockback", "damage-flags", "regular-protection-scale", "direction", "point", "normal", "time"]), "protection");
   const fields = new Set<number>();
   const think = declaration.actorFields.filter(field => field.binding === "think"), nextthink = declaration.actorFields.filter(field => field.binding === "nextthink");
   if (think.length !== nextthink.length || think.length > 1) throw new Error("Mod source scheduling requires one think and one nextthink binding together");
@@ -150,6 +154,7 @@ export class QcModProvider {
   private readonly input: QcModInput;
   private readonly retiredProjections = new Set<ActorId>();
   private readonly combat: QcModCombat | null;
+  private readonly protection: QcModProtection | null;
   private readonly messages: QcModMessages | null;
   private readonly environment: QcModEnvironment;
   private readonly precached = new Map<string, QcPrecachedResource>();
@@ -279,15 +284,20 @@ export class QcModProvider {
       }, ...(declaration.combat === undefined ? {} : { functionBoundary: {
         functions: new Set(program.functions.filter(fn => fn.index > 0 && fn.firstStatement > 0 && !fn.namedBuiltin).map(fn => fn.index)),
         run: (call, execute) => this.combat === null ? execute() : this.combat.damage.functionBoundary.run(call, execute),
-      }, inlineBoundary: {
-        regions: (() => { const stage = qcArmorStage(program, declaration.combat.armorStage); return stage === null ? [] : [stage.region]; })(),
+      } }), inlineBoundary: {
+        regions: (() => {
+          const primary = declaration.combat === undefined ? null : qcArmorStage(program, declaration.combat.armorStage);
+          return [...new Map([...(primary === null ? [] : [primary]), ...qcProtectionRegions(program, declaration)].map(stage => [stage.entry, stage.region])).values()];
+        })(),
         run: (region, execute) => this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute),
-      } }), observeCall: call => this.combat?.damage.observeCall(call), observeEntityStore: store => {
-        this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
+      }, observeCall: call => this.combat?.damage.observeCall(call), observeEntityStore: store => {
+        this.protection?.observe(store); this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
       } });
+    this.protection = declaration.protection === undefined ? null : new QcModProtection(declaration, module.id, services, { machine: this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference), invoke: (call, inputs, region) => this.invoke(call, inputs, region) });
     this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor));
     this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
-      project: actor => { this.reference(actor); }, release: actor => this.releaseClientProjection(actor), invoke: (call, actor) => {
+      reserve: actor => this.protection?.reserve(actor), admitted: actor => this.protection?.activate(actor),
+      project: actor => { this.reference(actor); }, release: actor => { this.protection?.release(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor) => {
         const now = services.time(); this.invoke(call, new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }],
           ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]));
       }, input: {
@@ -414,12 +424,14 @@ export class QcModProvider {
             || [...this.actorsBySlot].some(([slot, actor]) => slot <= (declaration.clients?.maximum ?? 0) && !projected.some(entry => entry.slot === slot && entry.actor.equals(actor))))
             throw new Error("Saved QuakeC client projection differs from its reserved slot");
         } else if (clients.value !== undefined && clients.value !== null) throw new Error("Saved QuakeC clients require the declared lifecycle service");
-        this.ownedActors.restored(); this.clients?.start();
+        this.ownedActors.restored();
+        for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) this.protection?.activate(client.actor); }
+        this.clients?.start();
         return undefined;
       },
     };
     this.releaseProjection = services.actors.onRelease(actor => {
-      this.retiredProjections.add(actor.id); this.drainRetiredProjections();
+      this.protection?.release(actor.id); this.retiredProjections.add(actor.id); this.drainRetiredProjections();
       return undefined;
     });
   }
@@ -584,7 +596,7 @@ export class QcModProvider {
     this.invoke(qcConsoleCall(command, invocation.argv, invocation.argsText), new Map<ModCallbackInput, QcModValue>());
     return true;
   }
-  invoke(call: ModSourceCall, inputs: QcModInputs): number {
+  invoke(call: ModSourceCall, inputs: QcModInputs, region?: QcArmorStage): number {
     if (this.closed) throw new Error("Gameplay mod is closed");
     if (this.depth >= 64) throw new Error("Gameplay mod callback recursion exceeded 64 calls");
     const resolve = (value: ModCallbackValue): QcModValue => {
@@ -602,9 +614,11 @@ export class QcModProvider {
     try {
       for (const [index, value] of args.entries()) this.write(this.machine.globals, 4 + index * 3, value);
       for (const { definition, value } of globals) if (definition !== undefined) this.write(this.machine.globals, definition.offset, value);
-      this.machine.execute(this.program.functionNamed(call.function).index, args.length);
+      let result: number;
+      if (region === undefined) { this.machine.execute(this.program.functionNamed(call.function).index, args.length); result = this.machine.globals.float(1); }
+      else result = this.machine.executeRegion(region.region, args.length);
       if (this.depth === 1) this.messages?.messages.flush();
-      return this.machine.globals.float(1);
+      return result;
     } finally {
       this.machine.globals.bytes.set(staging, 4);
       for (const global of savedGlobals) this.machine.globals.bytes.set(global.bytes, global.offset);
@@ -669,11 +683,12 @@ export class QcModProvider {
     }
     return result;
   }
-  checkpoint(): QuakeCCheckpoint { if (this.depth !== 0 || this.input.active) throw new Error("Mod checkpoint requires an idle callback boundary"); return captureQcCheckpoint(this.machine, this.module, this.hostState); }
+  checkpoint(): QuakeCCheckpoint { this.protection?.assertIdle(); if (this.depth !== 0 || this.input.active) throw new Error("Mod checkpoint requires an idle callback boundary"); return captureQcCheckpoint(this.machine, this.module, this.hostState); }
   initialize(): undefined {
     if (this.initialized || this.depth !== 0) throw new Error("Mod source initialization must run once at an idle boundary");
     this.loading = true;
     try {
+      for (const client of this.services.clients?.clients() ?? []) this.protection?.reserve(client.actor);
       const now = this.services.time();
       const inputs = new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: null }], ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]);
       for (const call of this.declaration.initialize ?? []) this.invoke(call, inputs);
@@ -693,10 +708,15 @@ export class QcModProvider {
     ]));
     return this.ownedActors.advance(frame);
   }
-  restore(saved: QuakeCCheckpoint): undefined { if (this.depth !== 0 || this.input.active) throw new Error("Mod restore requires an idle callback boundary"); return restoreQcCheckpoint(this.machine, this.module, this.hostState, saved); }
+  restore(saved: QuakeCCheckpoint): undefined {
+    this.protection?.assertIdle();
+    if (this.depth !== 0 || this.input.active) throw new Error("Mod restore requires an idle callback boundary");
+    this.protection?.close();
+    return restoreQcCheckpoint(this.machine, this.module, this.hostState, saved);
+  }
   close(): undefined {
     if (this.closed) return undefined;
-    this.closed = true; this.clients?.close();
+    this.protection?.close(); this.closed = true; this.clients?.close();
     try { this.ownedActors.close(); } finally {
       this.releaseProjection();
       this.messages?.close();

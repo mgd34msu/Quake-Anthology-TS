@@ -67,8 +67,8 @@ export class QcModCombat {
       words.setFloat(this.field(binding.armorField), (Math.trunc(words.float(this.field(binding.armorField))) & ~mask) | bit);
       return undefined;
     };
-    const stage = this.damage.poweredArmorStage(actor);
-    const state = { sourceDamage: (request: DamageRequest) => this.apply(request), ...(stage === null ? {} : { poweredArmorStage: stage }),
+    const poweredStage = this.damage.protectionStage(actor, "powered"), regularStage = this.damage.protectionStage(actor, "regular");
+    const state = { sourceDamage: (request: DamageRequest) => this.apply(request), protection: { regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) }, powered: { owner: null, ...(poweredStage === null ? {} : { stage: poweredStage }) } },
       read: () => ({ health: words.float(this.field("health")), armor: this.damage.readArmor(words), mass: 200,
         canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) > this.seconds(), team: null }),
       validateArmor: (armor: ArmorState): undefined => {

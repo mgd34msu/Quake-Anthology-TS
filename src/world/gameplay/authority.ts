@@ -1,4 +1,4 @@
-import type { ArmorStageInput, ArmorStageObserver, ArmorStageResult, ArmorState, RegularArmorState, PoweredProtectionState, CombatPolicy, CombatProgress, CombatState, DamageAuthority, DamageDecision, DamageMutation, DamageOutcome, DamageRequest, ItemId } from "../../contracts/gameplay.ts";
+import type { ArmorStageInput, ProtectionObserver, ProtectionChannel, ArmorStageResult, ArmorState, RegularArmorState, PoweredProtectionState, CombatPolicy, CombatProgress, CombatState, DamageAuthority, DamageDecision, DamageMutation, DamageOutcome, DamageRequest, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorCallbackTable } from "../actors/callbacks.ts";
@@ -21,32 +21,34 @@ interface SourceDamageCursor {
   reaction: SourceDamageResult | null;
 }
 
-export type PoweredProtectionAdmission = { readonly kind: "claim" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
-export interface PoweredProtectionClaim {
+export type ProtectionAdmission = { readonly kind: "claim" } | { readonly kind: "replace-primary"; readonly owner: ProviderId } | { readonly kind: "replace-current-primary" };
+export interface ProtectionClaim {
   readonly owner: ProviderId;
   readonly rule: string;
-  readonly admission: PoweredProtectionAdmission;
+  readonly admission: ProtectionAdmission;
 }
-export interface PoweredProtectionBinding extends PoweredProtectionClaim {
-  readonly fuelItems: readonly ItemId[];
-  read(): PoweredProtectionState;
-  validateWrite(next: PoweredProtectionState): undefined;
-  write(next: PoweredProtectionState): undefined;
-  absorb(input: ArmorStageInput, observer: ArmorStageObserver): ArmorStageResult;
-}
-export interface SourcePoweredArmorStage {
+export type ProtectionBinding<K extends ProtectionChannel = ProtectionChannel> = {
+  [P in K]: ProtectionClaim & {
+    readonly channel: P;
+    readonly inventoryItems: readonly ItemId[];
+    readonly read: () => ArmorState[P];
+    readonly validateWrite: (next: ArmorState[P]) => undefined;
+    readonly write: (next: ArmorState[P]) => undefined;
+    readonly absorb: (input: ArmorStageInput, observer: ProtectionObserver) => ArmorStageResult;
+  };
+}[K];
+export interface SourceArmorStage {
   bind(intercept: (input: ArmorStageInput, original: () => number) => number): () => undefined;
 }
-export interface PoweredProtectionReservation {
-  bind(binding: PoweredProtectionBinding): () => undefined;
-  close(): undefined;
-}
-interface PowerSlot { readonly claim: PoweredProtectionClaim; binding: PoweredProtectionBinding | null; removeSource: (() => undefined) | null; }
+export type ProtectionReservation<K extends ProtectionChannel = ProtectionChannel> = {
+  [P in K]: { readonly channel: P; readonly bind: (binding: ProtectionBinding<P>) => () => undefined; readonly close: () => undefined };
+}[K];
+interface ProtectionSlot { readonly claim: ProtectionClaim; binding: ProtectionBinding | null; removeSource: (() => undefined) | null; }
+interface ProtectionSlots { regular: ProtectionSlot | null; powered: ProtectionSlot | null; }
 
 export interface CombatStateBinding {
   sourceDamage?(request: DamageRequest): DamageOutcome;
-  readonly poweredProtectionOwner?: ProviderId;
-  readonly poweredArmorStage?: SourcePoweredArmorStage;
+  readonly protection?: { readonly [K in ProtectionChannel]?: { readonly owner: ProviderId | null; readonly stage?: SourceArmorStage } };
   admitDamage?(request: DamageRequest): "continue" | "handled";
   adjustDamage?(request: DamageRequest): Pick<DamageRequest, "amount" | "knockback"> | null;
   read(): CombatState;
@@ -88,12 +90,16 @@ function regularArmorEqual(left: RegularArmorState, right: RegularArmorState): b
     case "q1": return right.kind === "q1" && left.points === right.points && left.absorption === right.absorption && left.item === right.item;
     case "q2": return right.kind === "q2" && left.points === right.points && left.normalProtection === right.normalProtection && left.energyProtection === right.energyProtection && left.item === right.item;
     case "q3": return right.kind === "q3" && left.points === right.points && left.protection === right.protection;
+    case "source": return right.kind === "source" && left.points === right.points && left.item === right.item;
   }
 }
 
+function poweredArmorEqual(left: PoweredProtectionState, right: PoweredProtectionState): boolean {
+  return left.kind === right.kind && (left.kind === "none" || right.kind !== "none" && left.cells === right.cells);
+}
+
 function armorEqual(left: ArmorState, right: ArmorState): boolean {
-  return regularArmorEqual(left.regular, right.regular) && left.powered.kind === right.powered.kind
-    && (left.powered.kind === "none" || right.powered.kind !== "none" && left.powered.cells === right.powered.cells);
+  return regularArmorEqual(left.regular, right.regular) && poweredArmorEqual(left.powered, right.powered);
 }
 
 /** Old power-only views fabricated regular armor using this exact source-owned item. */
@@ -125,15 +131,20 @@ export class GameplayAuthority implements DamageAuthority {
   private readonly sourceCursors = new Map<OwnedActor, Set<SourceDamageCursor>>();
   private readonly bindings = new Map<OwnedActor, CombatStateBinding>();
   private readonly powerArmorCells = new Map<OwnedActor, PowerArmorCellBinding>();
-  private readonly poweredProtection = new Map<OwnedActor, PowerSlot>();
+  private readonly protection = new Map<OwnedActor, ProtectionSlots>();
+  private readonly copiedBindings = new WeakSet<CombatStateBinding>();
   private readonly policies = new Map<ProviderId, CombatPolicy>();
   private activeHits = 0;
 
   constructor(private readonly actors: SessionActorRegistry, private readonly callbacks: ActorCallbackTable, private readonly hooks: GameplayHooks) {
     actors.onRelease(actor => {
-      const power = this.poweredProtection.get(actor);
-      this.poweredProtection.delete(actor); power?.removeSource?.();
-      this.bindings.delete(actor); this.powerArmorCells.delete(actor); return undefined;
+      const slots = this.protection.get(actor);
+      this.protection.delete(actor);
+      const errors: unknown[] = [];
+      for (const slot of [slots?.regular, slots?.powered]) try { slot?.removeSource?.(); } catch (error) { errors.push(error); }
+      this.bindings.delete(actor); this.powerArmorCells.delete(actor);
+      if (errors.length !== 0) throw new AggregateError(errors, "Failed to detach actor protection");
+      return undefined;
     });
   }
 
@@ -152,7 +163,7 @@ export class GameplayAuthority implements DamageAuthority {
 
   rebind(actor: OwnedActor, binding: CombatStateBinding): undefined {
     this.actors.assertOwned(actor);
-    if (this.poweredProtection.has(actor)) throw new Error("Cannot replace a combat binding with a reserved powered owner");
+    if (this.protection.has(actor)) throw new Error("Cannot replace a combat binding with a reserved protection owner");
     this.bindings.set(actor, binding);
     return undefined;
   }
@@ -160,14 +171,18 @@ export class GameplayAuthority implements DamageAuthority {
   bindDamageAdjustment(actor: OwnedActor, adjustDamage: NonNullable<CombatStateBinding["adjustDamage"]>): undefined {
     const binding = this.binding(actor);
     if (binding.adjustDamage !== undefined) throw new Error("Actor already has source damage adjustment");
-    this.bindings.set(actor, { ...binding, adjustDamage });
+    const adjusted = { ...binding, adjustDamage };
+    if (this.copiedBindings.has(binding)) this.copiedBindings.add(adjusted);
+    this.bindings.set(actor, adjusted);
     return undefined;
   }
 
   bindDamageAdmission(actor: OwnedActor, admitDamage: NonNullable<CombatStateBinding["admitDamage"]>): undefined {
     const binding = this.binding(actor);
     if (binding.admitDamage !== undefined) throw new Error("Actor already has source damage admission");
-    this.bindings.set(actor, { ...binding, admitDamage });
+    const admitted = { ...binding, admitDamage };
+    if (this.copiedBindings.has(binding)) this.copiedBindings.add(admitted);
+    this.bindings.set(actor, admitted);
     return undefined;
   }
 
@@ -175,68 +190,94 @@ export class GameplayAuthority implements DamageAuthority {
   bindPowerArmorCells(actor: OwnedActor, cells: PowerArmorCellBinding): undefined {
     this.actors.assertOwned(actor);
     if (this.powerArmorCells.has(actor)) throw new Error("Power armor cells already have an inventory binding");
-    if (this.poweredProtection.has(actor)) throw new Error("Cannot replace primary power ownership after a component reserved it");
+    if (this.protection.get(actor)?.powered != null) throw new Error("Cannot replace primary power ownership after a component reserved it");
     this.powerArmorCells.set(actor, cells);
     return undefined;
   }
 
   /** A reservation performs no source reads or initialization. */
-  reservePoweredProtection(actor: OwnedActor, claim: PoweredProtectionClaim): PoweredProtectionReservation {
+  reserveProtection(actor: OwnedActor, channel: "regular", claim: ProtectionClaim): ProtectionReservation<"regular">;
+  reserveProtection(actor: OwnedActor, channel: "powered", claim: ProtectionClaim): ProtectionReservation<"powered">;
+  reserveProtection(actor: OwnedActor, channel: ProtectionChannel, claim: ProtectionClaim): ProtectionReservation;
+  reserveProtection(actor: OwnedActor, channel: ProtectionChannel, claim: ProtectionClaim): ProtectionReservation {
+    if (this.activeHits !== 0) throw new Error("Cannot reserve protection during combat execution");
     const primary = this.binding(actor);
-    if (this.poweredProtection.has(actor)) throw new Error("Powered protection already has a component owner");
-    const owner = primary.poweredProtectionOwner ?? (this.powerArmorCells.has(actor) ? actor.owner : null);
-    if (claim.admission.kind === "claim" ? owner !== null : owner !== claim.admission.owner)
-      throw new Error("Powered protection admission does not match primary ownership");
-    if (primary.sourceDamage !== undefined && primary.poweredArmorStage === undefined)
-      throw new Error("Original source combat has no declared powered armor stage");
-    const slot: PowerSlot = { claim: Object.freeze({ ...claim, admission: Object.freeze({ ...claim.admission }) }), binding: null, removeSource: null };
-    this.poweredProtection.set(actor, slot);
+    let slots = this.protection.get(actor);
+    if (slots?.[channel] != null) throw new Error("Protection channel already has a component owner");
+    const declared = primary.protection?.[channel];
+    const owner = declared === undefined ? channel === "regular" || this.powerArmorCells.has(actor) ? actor.owner : null : declared.owner;
+    if (claim.admission.kind === "claim" ? owner !== null : claim.admission.kind === "replace-primary" && owner !== claim.admission.owner)
+      throw new Error("Protection admission does not match primary ownership");
+    if (primary.sourceDamage !== undefined && declared?.stage === undefined)
+      throw new Error(`Original source combat has no declared ${channel} armor stage`);
+    const slot: ProtectionSlot = { claim: Object.freeze({ ...claim, admission: Object.freeze({ ...claim.admission }) }), binding: null, removeSource: null };
+    if (slots === undefined) { slots = { regular: null, powered: null }; this.protection.set(actor, slots); }
+    slots[channel] = slot;
     const close = (): undefined => {
-      if (this.poweredProtection.get(actor) !== slot) return undefined;
+      const current = this.protection.get(actor);
+      if (current?.[channel] !== slot) return undefined;
       const cursor = this.currentCursor(actor);
       if (cursor !== undefined && cursor.reaction === null && !armorEqual(this.readState(actor, primary).armor, cursor.armor))
-        throw new Error("Powered protection closed with an unobserved armor store");
-      this.poweredProtection.delete(actor); slot.removeSource?.(); slot.removeSource = null; slot.binding = null;
-      if (cursor !== undefined && this.actors.isLive(actor.id)) {
-        const write = { kind: "armor", before: cursor.armor, after: this.readState(actor, primary).armor } satisfies DamageMutation;
-        if (cursor.reaction === null) this.observeStore(actor, primary, cursor, write);
-        else this.advanceSourceCursors(actor, write);
+        throw new Error("Protection closed with an unobserved armor store");
+      current[channel] = null;
+      if (current.regular === null && current.powered === null) this.protection.delete(actor);
+      const remove = slot.removeSource;
+      slot.removeSource = null; slot.binding = null;
+      try { remove?.(); }
+      finally {
+        if (cursor !== undefined && this.actors.isLive(actor.id)) {
+          const write = { kind: "armor", before: cursor.armor, after: this.readState(actor, primary).armor } satisfies DamageMutation;
+          if (cursor.reaction === null) this.observeStore(actor, primary, cursor, write);
+          else this.advanceSourceCursors(actor, write);
+        }
       }
       return undefined;
     };
-    return { close, bind: binding => {
+    const bind = (binding: ProtectionBinding): (() => undefined) => {
+      if (this.activeHits !== 0) throw new Error("Cannot attach protection during combat execution");
       this.actors.assertOwned(actor);
-      if (this.poweredProtection.get(actor) !== slot || slot.binding !== null) throw new Error("Powered protection reservation is closed or bound");
-      if (binding.owner !== claim.owner || binding.rule !== claim.rule || binding.admission.kind !== claim.admission.kind
+      if (this.protection.get(actor)?.[channel] !== slot || slot.binding !== null) throw new Error("Protection reservation is closed or bound");
+      if (binding.channel !== channel || binding.owner !== claim.owner || binding.rule !== claim.rule || binding.admission.kind !== claim.admission.kind
         || binding.admission.kind === "replace-primary" && (claim.admission.kind !== "replace-primary" || binding.admission.owner !== claim.admission.owner))
-        throw new Error("Powered protection binding differs from its reservation");
+        throw new Error("Protection binding differs from its reservation");
       slot.binding = binding;
       try {
-        slot.removeSource = primary.poweredArmorStage?.bind((input, original) => {
-          if (this.poweredProtection.get(actor) !== slot || slot.binding === null) return original();
-          const cursor = this.cursorFor(actor, input.request);
-          return this.absorbPowered(actor, primary, cursor, input, binding).saved;
+        const remove = declared?.stage?.bind((input, original) => {
+          if (this.protection.get(actor)?.[channel] !== slot || slot.binding === null) return original();
+          return this.absorbProtection(actor, primary, this.cursorFor(actor, input.request), input, binding).saved;
         }) ?? null;
+        if (this.protection.get(actor)?.[channel] !== slot) { remove?.(); throw new Error("Protection reservation closed during attachment"); }
+        slot.removeSource = remove;
       } catch (error) { close(); throw error; }
       return close;
-    } };
+    };
+    return channel === "regular" ? { channel, close, bind } : { channel, close, bind };
   }
 
-  bindPoweredProtection(actor: OwnedActor, binding: PoweredProtectionBinding): () => undefined {
-    return this.reservePoweredProtection(actor, binding).bind(binding);
+  bindProtection(actor: OwnedActor, binding: ProtectionBinding): () => undefined {
+    return binding.channel === "regular" ? this.reserveProtection(actor, "regular", binding).bind(binding)
+      : this.reserveProtection(actor, "powered", binding).bind(binding);
   }
 
-  poweredProtectionOwner(actor: OwnedActor): ProviderId | null {
+  protectionOwner(actor: OwnedActor, channel: ProtectionChannel): ProviderId | null {
     this.actors.assertOwned(actor);
-    return this.poweredProtection.get(actor)?.claim.owner ?? null;
+    return this.protection.get(actor)?.[channel]?.claim.owner ?? null;
   }
 
-  poweredProtectionFuelItems(actor: OwnedActor): readonly ItemId[] {
+  protectionInventoryItems(actor: OwnedActor, channel: ProtectionChannel): readonly ItemId[] {
     this.actors.assertOwned(actor);
-    const slot = this.poweredProtection.get(actor);
-    if (slot === undefined) return [];
-    if (slot.binding === null) throw new Error("Powered protection reservation has not been bound");
-    return Object.freeze([...slot.binding.fuelItems]);
+    const slot = this.protection.get(actor)?.[channel];
+    if (slot == null) return [];
+    if (slot.binding === null) throw new Error("Protection reservation has not been bound");
+    return Object.freeze([...slot.binding.inventoryItems]);
+  }
+
+  copiedPrimaryArmor(actor: OwnedActor): ArmorState | null {
+    this.actors.assertOwned(actor);
+    const binding = this.bindings.get(actor);
+    if (binding === undefined || !this.copiedBindings.has(binding)) return null;
+    const armor = binding.read().armor, cells = this.powerArmorCells.get(actor);
+    return copyArmor(cells === undefined || armor.powered.kind === "none" ? armor : { ...armor, powered: { ...armor.powered, cells: cells.read() } });
   }
 
   assertIdle(): undefined {
@@ -245,11 +286,14 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   create(actor: OwnedActor, initial: CombatState, admitDamage?: CombatStateBinding["admitDamage"]): undefined {
+    if (initial.armor.regular.kind === "source") throw new Error("Copied primary armor cannot own a source formula");
     let state = copyCombat(initial);
-    return this.bind(actor, { ...(admitDamage === undefined ? {} : { admitDamage }), read: () => state,
+    const binding: CombatStateBinding = { ...(admitDamage === undefined ? {} : { admitDamage }), read: () => state,
       writeHealth: health => { state = copyCombat({ ...state, health }); return undefined; },
       writeArmor: armor => { state = copyCombat({ ...state, armor }); return undefined; },
-      writeTraits: traits => { state = copyCombat({ ...state, ...traits }); return undefined; } });
+      writeTraits: traits => { state = copyCombat({ ...state, ...traits }); return undefined; } };
+    this.copiedBindings.add(binding);
+    return this.bind(actor, binding);
   }
 
   read(actor: ActorId): CombatState | null {
@@ -323,12 +367,11 @@ export class GameplayAuthority implements DamageAuthority {
     try {
       result = execute({
         stored: write => {
-          // A primary source observes its regular storage; the independent power owner
-          // reports its own stores through the same hit cursor.
-          if (write.kind === "armor" && this.poweredProtection.get(target)?.binding != null) {
-            const powered = cursor.armor.powered;
+          if (write.kind === "armor") {
+            const regular = this.protectionBinding(target, "regular"), powered = this.protectionBinding(target, "powered");
             return this.observeStore(target, binding, cursor, { kind: "armor",
-              before: { regular: write.before.regular, powered }, after: { regular: write.after.regular, powered } });
+              before: { regular: regular === null ? write.before.regular : cursor.armor.regular, powered: powered === null ? write.before.powered : cursor.armor.powered },
+              after: { regular: regular === null ? write.after.regular : cursor.armor.regular, powered: powered === null ? write.after.powered : cursor.armor.powered } });
           }
           return this.observeStore(target, binding, cursor, write);
         },
@@ -418,7 +461,6 @@ export class GameplayAuthority implements DamageAuthority {
           break;
         }
         this.commitMutations(target, binding, latest, pending);
-        cursor.mutations.push(...pending);
         if (progress.kind === "complete") {
           if (!Number.isFinite(progress.result.appliedDamage)) throw new Error("Combat applied damage must be finite");
           decision = captureDecision({ request, mutations: cursor.mutations, ...progress.result }, request);
@@ -429,20 +471,22 @@ export class GameplayAuthority implements DamageAuthority {
           break;
         }
         if (progress.kind === "source-continuation") { progress = progress.resume(currentState); continue; }
-        if (progress.input.request !== request || !Number.isFinite(progress.input.amount)) throw new Error("Invalid powered armor stage input");
-        const power = this.poweredProtection.get(target)?.binding;
+        if (progress.input.request !== request || !Number.isFinite(progress.input.amount)) throw new Error("Invalid armor stage input");
+        const component = this.protectionBinding(target, progress.channel);
         let result: ArmorStageResult;
-        if (power != null) result = this.absorbPowered(target, binding, cursor, progress.input, power);
+        if (component !== null) result = this.absorbProtection(target, binding, cursor, progress.input, component);
         else {
           const state = this.readState(target, binding), absorbed = progress.fallback(state.armor);
-          if (absorbed.regularSaved !== 0 || !regularArmorEqual(absorbed.armor.regular, state.armor.regular) || !Number.isFinite(absorbed.powerSaved))
-            throw new Error("Powered armor fallback changed regular armor or returned invalid savings");
+          const saved = progress.channel === "regular" ? absorbed.regularSaved : absorbed.powerSaved;
+          const otherUnchanged = progress.channel === "regular"
+            ? absorbed.powerSaved === 0 && armorEqual({ ...absorbed.armor, regular: state.armor.regular }, state.armor)
+            : absorbed.regularSaved === 0 && regularArmorEqual(absorbed.armor.regular, state.armor.regular);
+          if (!otherUnchanged || !Number.isFinite(saved)) throw new Error("Armor fallback changed another channel or returned invalid savings");
           if (!armorEqual(absorbed.armor, state.armor)) {
             const write: DamageMutation = { kind: "armor", before: state.armor, after: absorbed.armor };
             this.commitMutations(target, binding, state, [write]);
-            cursor.mutations.push(captureDecision({ request, mutations: [write], appliedDamage: 0, reaction: "none" }, request).mutations[0] ?? write);
           }
-          result = { saved: absorbed.powerSaved };
+          result = { saved };
         }
         if (!this.actors.isLive(target.id)) {
           decision = captureDecision({ request, mutations: cursor.mutations, appliedDamage: 0, reaction: "none" }, request);
@@ -475,33 +519,49 @@ export class GameplayAuthority implements DamageAuthority {
     return binding;
   }
 
+  private protectionBinding(actor: OwnedActor, channel: "regular"): ProtectionBinding<"regular"> | null;
+  private protectionBinding(actor: OwnedActor, channel: "powered"): ProtectionBinding<"powered"> | null;
+  private protectionBinding(actor: OwnedActor, channel: ProtectionChannel): ProtectionBinding | null;
+  private protectionBinding(actor: OwnedActor, channel: ProtectionChannel): ProtectionBinding | null {
+    return this.protection.get(actor)?.[channel]?.binding ?? null;
+  }
+
   private readState(actor: OwnedActor, binding: CombatStateBinding): CombatState {
-    const state = binding.read(), power = this.poweredProtection.get(actor)?.binding;
-    if (power != null) return copyCombat({ ...state, armor: { ...state.armor, powered: power.read() } });
+    const state = binding.read(), regular = this.protectionBinding(actor, "regular"), power = this.protectionBinding(actor, "powered");
     const cells = this.powerArmorCells.get(actor);
-    if (cells === undefined || state.armor.powered.kind === "none") return copyCombat(state);
-    return copyCombat({ ...state, armor: { ...state.armor, powered: { ...state.armor.powered, cells: cells.read() } } });
+    const powered = power !== null ? power.read() : cells === undefined || state.armor.powered.kind === "none"
+      ? state.armor.powered : { ...state.armor.powered, cells: cells.read() };
+    return copyCombat({ ...state, armor: { regular: regular?.read() ?? state.armor.regular, powered } });
   }
 
   private writeArmor(actor: OwnedActor, binding: CombatStateBinding, armor: ArmorState): undefined {
-    const power = this.poweredProtection.get(actor)?.binding;
-    const primary = copyArmor(binding.read().armor);
-    const writesRegular = !regularArmorEqual(primary.regular, armor.regular);
-    const original = power == null ? armor : { regular: armor.regular, powered: primary.powered };
+    const regular = this.protectionBinding(actor, "regular"), power = this.protectionBinding(actor, "powered");
+    const primary = copyArmor(binding.read().armor), effective = this.readState(actor, binding).armor;
+    const writesRegular = !regularArmorEqual(effective.regular, armor.regular);
+    const writesPower = !poweredArmorEqual(effective.powered, armor.powered);
+    const original = { regular: regular === null ? armor.regular : primary.regular, powered: power === null ? armor.powered : primary.powered };
+    if (this.copiedBindings.has(binding) && original.regular.kind === "source") throw new Error("Copied primary armor cannot own a source formula");
     binding.validateArmor?.(original);
-    power?.validateWrite(armor.powered);
-    if (power != null) {
-      if (!armorEqual({ regular: armor.regular, powered: power.read() }, armor)) power.write(armor.powered);
-    } else {
+    regular?.validateWrite(armor.regular); power?.validateWrite(armor.powered);
+    const ownership = (): void => {
+      this.actors.assertOwned(actor);
+      if (this.bindings.get(actor) !== binding || this.protectionBinding(actor, "regular") !== regular || this.protectionBinding(actor, "powered") !== power)
+        throw new Error("Armor ownership changed during a protection write");
+    };
+    if (regular !== null && writesRegular) { regular.write(armor.regular); ownership(); }
+    if (writesPower && !poweredArmorEqual(this.readState(actor, binding).armor.powered, effective.powered))
+      throw new Error("Powered armor changed during a regular write");
+    if (power !== null && writesPower) { power.write(armor.powered); ownership(); }
+    if (power === null && writesPower) {
       const cells = this.powerArmorCells.get(actor);
-      if (cells !== undefined && armor.powered.kind !== "none" && cells.read() !== armor.powered.cells) cells.write(armor.powered.cells);
+      if (cells !== undefined && armor.powered.kind !== "none" && cells.read() !== armor.powered.cells) { cells.write(armor.powered.cells); ownership(); }
     }
-    this.actors.assertOwned(actor);
-    if (this.bindings.get(actor) !== binding || this.poweredProtection.get(actor)?.binding !== power)
-      throw new Error("Armor ownership changed during a powered write");
+    ownership();
     const latest = binding.read().armor;
-    if (writesRegular && !regularArmorEqual(primary.regular, latest.regular)) throw new Error("Primary regular armor changed during a powered write");
-    const updated = { regular: writesRegular ? armor.regular : latest.regular, powered: power == null ? armor.powered : latest.powered };
+    if (regular === null && writesRegular && !regularArmorEqual(primary.regular, latest.regular))
+      throw new Error("Primary regular armor changed during a protection write");
+    const updated = { regular: regular === null && writesRegular ? armor.regular : latest.regular,
+      powered: power === null && writesPower ? armor.powered : latest.powered };
     binding.validateArmor?.(updated);
     if (!armorEqual(latest, updated)) binding.writeArmor(copyArmor(updated));
     return undefined;
@@ -527,6 +587,11 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   private openCursor(target: OwnedActor, request: DamageRequest, initial: CombatState): SourceDamageCursor {
+    if (this.currentCursor(target) !== undefined) {
+      const binding = this.binding(target);
+      this.observePublicWrite(target, binding, "health");
+      this.observePublicWrite(target, binding, "armor");
+    }
     const cursor: SourceDamageCursor = { request, mutations: [], health: initial.health, armor: initial.armor, velocity: null, active: true, reaction: null };
     let cursors = this.sourceCursors.get(target);
     if (cursors === undefined) { cursors = new Set(); this.sourceCursors.set(target, cursors); }
@@ -549,7 +614,7 @@ export class GameplayAuthority implements DamageAuthority {
   private cursorFor(target: OwnedActor, request: DamageRequest): SourceDamageCursor {
     let found: SourceDamageCursor | null = null;
     for (const cursor of this.sourceCursors.get(target) ?? []) if (cursor.request === request && cursor.active) found = cursor;
-    if (found === null) throw new Error("Original powered armor stage has no active damage observation");
+    if (found === null) throw new Error("Original armor stage has no active damage observation");
     return found;
   }
 
@@ -576,29 +641,33 @@ export class GameplayAuthority implements DamageAuthority {
     return undefined;
   }
 
-  private absorbPowered(target: OwnedActor, binding: CombatStateBinding, cursor: SourceDamageCursor, input: ArmorStageInput, power: PoweredProtectionBinding): ArmorStageResult {
+  private absorbProtection(target: OwnedActor, binding: CombatStateBinding, cursor: SourceDamageCursor, input: ArmorStageInput, protection: ProtectionBinding): ArmorStageResult {
     this.assertCursor(target, cursor);
-    if (input.request !== cursor.request || !Number.isFinite(input.amount)) throw new Error("Invalid powered armor stage input");
+    if (input.request !== cursor.request || !Number.isFinite(input.amount)) throw new Error("Invalid armor stage input");
     const { direction, point, normal } = input.geometry;
     if (![direction.x, direction.y, direction.z, point.x, point.y, point.z, normal.x, normal.y, normal.z].every(Number.isFinite))
-      throw new Error("Powered armor stage geometry must be finite");
-    if (input.amount <= 0 || input.flags.noArmor || input.flags.noPowerArmor || power.read().kind === "none") return { saved: 0 };
+      throw new Error("Armor stage geometry must be finite");
+    if (input.amount <= 0 || input.flags.noArmor || (protection.channel === "powered" ? input.flags.noPowerArmor : input.flags.noRegularArmor)) return { saved: 0 };
     let open = true;
+    const observer: ProtectionObserver = { stored: change => {
+      if (!open) throw new Error("Armor observer is closed");
+      if (this.protectionBinding(target, protection.channel) !== protection) throw new Error("Armor owner was removed");
+      if (change.regular !== undefined && this.protectionBinding(target, "regular")?.owner !== protection.owner
+        || change.powered !== undefined && this.protectionBinding(target, "powered")?.owner !== protection.owner)
+        throw new Error("Component reported protection owned by another provider");
+      return this.observeStore(target, binding, cursor, { kind: "armor",
+        before: { regular: change.regular?.before ?? cursor.armor.regular, powered: change.powered?.before ?? cursor.armor.powered },
+        after: { regular: change.regular?.after ?? cursor.armor.regular, powered: change.powered?.after ?? cursor.armor.powered } });
+    } };
     try {
-      const result = power.absorb(Object.freeze({ ...input, flags: Object.freeze({ ...input.flags }),
-        geometry: Object.freeze({ direction: copyVector(direction), point: copyVector(point), normal: copyVector(normal) }) }), {
-        stored: change => {
-          if (!open) throw new Error("Powered armor observer is closed");
-          if (this.poweredProtection.get(target)?.binding !== power) throw new Error("Powered armor owner was removed");
-          return this.observeStore(target, binding, cursor, { kind: "armor", before: { regular: cursor.armor.regular, powered: change.before },
-            after: { regular: cursor.armor.regular, powered: change.after } });
-        },
-      });
-      if (!Number.isFinite(result.saved) || result.saved < 0 || result.saved > input.amount) throw new Error("Powered armor savings must be within the current damage amount");
+      const captured = Object.freeze({ ...input, flags: Object.freeze({ ...input.flags }),
+        geometry: Object.freeze({ direction: copyVector(direction), point: copyVector(point), normal: copyVector(normal) }) });
+      const result = protection.absorb(captured, observer);
+      if (!Number.isFinite(result.saved) || result.saved < 0 || result.saved > input.amount) throw new Error("Armor savings must be within the current damage amount");
       if (this.actors.isLive(target.id)) {
         const current = this.readState(target, binding);
-        if (!armorEqual(current.armor, cursor.armor)) throw new Error("Powered armor stage omitted a committed armor observation");
-        if (current.health !== cursor.health) throw new Error("Powered armor stage changed health without damage observation");
+        if (!armorEqual(current.armor, cursor.armor)) throw new Error("Armor stage omitted a committed armor observation");
+        if (current.health !== cursor.health) throw new Error("Armor stage changed health without damage observation");
       }
       return { saved: result.saved };
     } finally { open = false; }
@@ -626,14 +695,21 @@ export class GameplayAuthority implements DamageAuthority {
         case "health":
           if (binding.read().health !== mutation.before) throw new Error("Combat health changed before its decision committed");
           binding.writeHealth(mutation.after);
+          this.observePublicWrite(target, binding, "health");
           break;
         case "armor":
           if (!armorEqual(this.readState(target, binding).armor, mutation.before)) throw new Error("Combat armor changed before its decision committed");
           this.writeArmor(target, binding, mutation.after);
+          this.observePublicWrite(target, binding, "armor");
           break;
-        case "impulse": this.hooks.impulse(target, mutation.impulse, mutation.movementProvider); break;
+        case "impulse": {
+          const cursor = this.currentCursor(target);
+          this.hooks.impulse(target, mutation.impulse, mutation.movementProvider);
+          this.advanceSourceCursors(target, mutation);
+          cursor?.mutations.push(mutation);
+          break;
+        }
       }
-      this.advanceSourceCursors(target, mutation);
     }
     return undefined;
   }

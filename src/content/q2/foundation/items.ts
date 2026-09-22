@@ -712,6 +712,7 @@ export class Q2ItemModule implements Q2SpawnModule {
 }
 
 function pickupQ2Armor(item: Extract<Item, { readonly kind: "armor" | "shard" }>, old: RegularArmorState): RegularArmorState | null {
+  if (old.kind === "source") return null;
   if (item.kind === "shard") {
     if (old.kind === "q2" && old.points > 0) return { ...old, points: old.points + 2 };
     return { kind: "q2", item: "q2:item_armor_jacket", points: 2, normalProtection: 0.3, energyProtection: 0 };

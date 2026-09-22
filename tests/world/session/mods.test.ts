@@ -104,13 +104,13 @@ test("powered component reservations precede source initialization and activate 
   const withPower = (selection: ModSelection): PreparedMod => {
     const source = prepared(w, selection, events, 0), key = modSelectionKey(selection);
     return { ...source, async initialize(context) {
-      const claim = { owner: context.instance, rule: "source:power", admission: { kind: "claim" } } satisfies import("../../../src/world/gameplay/authority.ts").PoweredProtectionClaim;
-      const reservation = w.combat.reservePoweredProtection(w.player, claim); context.resources.defer(() => reservation.close());
+      const claim = { owner: context.instance, rule: "source:power", admission: { kind: "claim" } } satisfies import("../../../src/world/gameplay/authority.ts").ProtectionClaim;
+      const reservation = w.combat.reserveProtection(w.player, "powered", claim); context.resources.defer(() => reservation.close());
       const runtime = await source.initialize(context); let active = false;
       return { ...runtime, activate() {
         events.push(`activate:${key}`);
         if (!active) {
-          reservation.bind({ ...claim, fuelItems: ["q2:cells"], read: () => ({ kind: "shield", cells: w.inventory.count(w.player.id, "q2:cells") }),
+          reservation.bind({ ...claim, channel: "powered", inventoryItems: ["q2:cells"], read: () => ({ kind: "shield", cells: w.inventory.count(w.player.id, "q2:cells") }),
             validateWrite: () => undefined, write: () => undefined, absorb: () => ({ saved: 0 }) }); active = true;
         }
         return undefined;

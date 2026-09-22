@@ -1078,10 +1078,10 @@ export class QuakeCSource {
     return this.damage.readArmor(this.entities.at(slot));
   }
   private admit(actor: OwnedActor, slot: number): undefined {
-    const words = this.entities.at(slot), stage = this.damage.poweredArmorStage(actor), binding = id1ProgramBinding(this.prepared.program);
+    const words = this.entities.at(slot), poweredStage = this.damage.protectionStage(actor, "powered"), regularStage = this.damage.protectionStage(actor, "regular"), binding = id1ProgramBinding(this.prepared.program);
     this.options.combat.bind(actor, {
       sourceDamage: () => { throw new Error("QC damage must enter the verified source function with explicit provenance"); },
-      ...(stage === null ? {} : { poweredArmorStage: stage }),
+      protection: { regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) }, powered: { owner: null, ...(poweredStage === null ? {} : { stage: poweredStage }) } },
       read: () => ({ health: words.float(this.field("health")), armor: this.armor(slot), mass: 200,
         canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) >= this.currentTime, team: null }),
       writeHealth: health => { words.setFloat(this.field("health"), health); return undefined; },

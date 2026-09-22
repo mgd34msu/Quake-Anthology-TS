@@ -14,13 +14,13 @@ export const rereleaseFreeSignature = signature([P]);
 // Win64 passes the three-byte by-value mod_t indirectly; the shared ABI planner owns that rule.
 export const rereleaseDamageSignature = signature([P, P, P, P, P, P, I, I, I, { kind: "aggregate", layout: rereleaseModLayout }]);
 export const rereleasePowerArmorSignature = signature([P, P, P, I, I], I);
-export interface RereleaseNativeEntries { readonly spawn: GuestAddress; readonly free: GuestAddress; readonly damage: GuestAddress; readonly powerArmor: GuestAddress; readonly processPain: GuestAddress; }
+export interface RereleaseNativeEntries { readonly spawn: GuestAddress; readonly free: GuestAddress; readonly damage: GuestAddress; readonly powerArmor: GuestAddress; readonly regularArmor: { readonly entry: GuestAddress; readonly join: GuestAddress }; readonly armorInfoTable: GuestAddress; readonly processPain: GuestAddress; }
 /** Retail entry boundaries verified through native give/pickup/trigger_hurt and monster-frame execution plus PE unwind records. */
 export function retailRereleaseEntries(module: Pick<RereleaseGuestModule, "memory">, imageBase: GuestAddress): RereleaseNativeEntries {
   const authority = retailRereleaseClientProfile.authority;
   if (authority.kind !== "artifact" || module.memory.module.digest !== authority.digest) throw new Error("Native entry profile requires the verified retail DLL");
   const entry = (rva: bigint): GuestAddress => { const address = module.memory.offset(imageBase, rva); module.memory.check(address, 1, "execute"); return address; };
-  return { spawn: entry(0x964b0n), free: entry(0x96600n), damage: entry(0x5cae0n), powerArmor: entry(0x5c100n), processPain: entry(0x76e20n) };
+  return { spawn: entry(0x964b0n), free: entry(0x96600n), damage: entry(0x5cae0n), powerArmor: entry(0x5c100n), regularArmor: { entry: entry(0x5d022n), join: entry(0x5d154n) }, armorInfoTable: module.memory.offset(imageBase, 0x1953a8n), processPain: entry(0x76e20n) };
 }
 
 /** T_Damage compares client+0x1a10 and monster+0xb88 against this saved level.time global. */

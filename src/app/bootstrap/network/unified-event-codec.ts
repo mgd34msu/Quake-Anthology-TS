@@ -938,11 +938,13 @@ case "screen": case "shield": return ({ "kind": value["kind"], "cells": value["c
 function readEventRegularArmorState(reader: SaveReader, identity: UnifiedIdentityDecoder): EventRegularArmorState { void identity; switch (reader.field('kind').string()) { case "none": return readEventQ3RailTrailImpactNone(reader, identity);
 case "q1": return ({ "kind": reader.field("kind").literal("q1"), "points": reader.field("points").finite(), "absorption": reader.field("absorption").finite(), "item": readItemId(reader.field("item"), identity) });
 case "q2": return ({ "kind": reader.field("kind").literal("q2"), "points": reader.field("points").finite(), "normalProtection": reader.field("normalProtection").finite(), "energyProtection": reader.field("energyProtection").finite(), "item": readItemId(reader.field("item"), identity) });
-case "q3": return ({ "kind": reader.field("kind").literal("q3"), "points": reader.field("points").finite(), "protection": reader.field("protection").finite() }); default: return reader.fail('unknown event variant'); } }
+case "q3": return ({ "kind": reader.field("kind").literal("q3"), "points": reader.field("points").finite(), "protection": reader.field("protection").finite() });
+case "source": return { kind: "source", points: reader.field("points").finite(), item: reader.field("item").nullable(value => readItemId(value, identity)) }; default: return reader.fail('unknown event variant'); } }
 function writeEventRegularArmorState(value: EventRegularArmorState): unknown { switch (value.kind) { case "none": return writeEventQ3RailTrailImpactNone(value);
 case "q1": return ({ "kind": value["kind"], "points": value["points"], "absorption": value["absorption"], "item": writeItemId(value["item"]) });
 case "q2": return ({ "kind": value["kind"], "points": value["points"], "normalProtection": value["normalProtection"], "energyProtection": value["energyProtection"], "item": writeItemId(value["item"]) });
-case "q3": return ({ "kind": value["kind"], "points": value["points"], "protection": value["protection"] }); } }
+case "q3": return ({ "kind": value["kind"], "points": value["points"], "protection": value["protection"] });
+case "source": return { kind: "source", points: value.points, item: value.item === null ? null : writeItemId(value.item) }; } }
 
 function readEventArmorState(reader: SaveReader, identity: UnifiedIdentityDecoder): EventArmorState {
   return { regular: readEventRegularArmorState(reader.field("regular"), identity), powered: readEventPoweredProtectionState(reader.field("powered"), identity) };

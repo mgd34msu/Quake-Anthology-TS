@@ -1,8 +1,8 @@
 import { normalizeLegacyPowerOnlyArmor } from "../../../world/gameplay/authority.ts";
 import type { GuestAddress, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
-import type { ArmorState, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
-import type { CombatStateBinding, SourceDamageResult, SourcePoweredArmorStage } from "../../../world/gameplay/authority.ts";
+import type { ArmorState, DamageRequest, ItemId, ProtectionChannel } from "../../../contracts/gameplay.ts";
+import type { CombatStateBinding, SourceDamageResult, SourceArmorStage } from "../../../world/gameplay/authority.ts";
 import { infoValueForKey } from "../../../core/info-string.ts";
 import { classicSignature, q2Int, q2Pointer } from "./layout.ts";
 import { readClassicString, readClassicVector, writeClassicVector } from "./records.ts";
@@ -18,15 +18,16 @@ const pointer = (value: GuestAddress | null) => ({ kind: "pointer", value } sati
 const integer = (value: number) => ({ kind: "int32", value: Math.trunc(value) } satisfies import("../../../contracts/execution.ts").GuestCallValue);
 const damageSignature = classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Pointer, q2Pointer, q2Pointer, q2Int, q2Int, q2Int, q2Int]);
 const powerSignature = classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Int, q2Int], q2Int);
-type PowerIntercept = Parameters<SourcePoweredArmorStage["bind"]>[0];
+const regularSignature = classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Int, q2Int, q2Int], q2Int);
+type ArmorIntercept = Parameters<SourceArmorStage["bind"]>[0];
 interface DamageFrame { readonly request: DamageRequest; readonly view: RawEntityView; stack: bigint | null; }
 
 /** Source ABI declarations allow shared damage without replacing the DLL's combat rules. */
 export class ClassicCombatBindings {
   private readonly frames: DamageFrame[] = [];
-  private readonly powerBindings = new Map<OwnedActor, PowerIntercept>();
-  private readonly powerHooks: (() => void)[] = [];
-  private powerBypass: bigint | "pending" | null = null;
+  private readonly armorBindings = new Map<OwnedActor, Partial<Record<ProtectionChannel, ArmorIntercept>>>();
+  private readonly armorHooks: (() => void)[] = [];
+  private armorBypass: { readonly channel: ProtectionChannel; stack: bigint | "pending" } | null = null;
   private constructor(private readonly host: ClassicQ2GuestHost, private readonly image: GuestAddress, private readonly profile: ClassicCombatProfile) {}
   static create(host: ClassicQ2GuestHost, image: GuestAddress): ClassicCombatBindings | null {
     const profile = classicCombatProfile(host.memory.module.digest);
@@ -61,8 +62,10 @@ export class ClassicCombatBindings {
       if (armor.powered.kind !== this.armor(view).powered.kind) throw new Error("Native power activation requires its original source equipment operation");
       return undefined;
     };
-    const binding: CombatStateBinding = { validateArmor, poweredProtectionOwner: memory.module.id,
-      ...(host.options.services.damageProvenance === undefined ? {} : { poweredArmorStage: this.powerStage(actor) }),
+    const binding: CombatStateBinding = { validateArmor, protection: {
+      regular: { owner: memory.module.id, ...(host.options.services.damageProvenance === undefined ? {} : { stage: this.armorStage(actor, "regular") }) },
+      powered: { owner: memory.module.id, ...(host.options.services.damageProvenance === undefined ? {} : { stage: this.armorStage(actor, "powered") }) },
+    },
       normalizeLegacyArmor: armor => normalizeLegacyPowerOnlyArmor(armor, this.armor(view), "q2:none"), sourceDamage: request => this.damage(request, view), read: () => {
       const client = this.client(view), flags = memory.readInt32(this.at(view, profile.fields.flags)), cvars = host.options.services.cvars;
       const skin = client === null ? "" : infoValueForKey(readClassicString(memory, memory.offset(client, BigInt(profile.client.userinfo)), 512), "skin"), rules = cvars.variableValue("dmflags") | 0;
@@ -85,20 +88,22 @@ export class ClassicCombatBindings {
     } };
     engine.combat.bind(actor, binding); return undefined;
   }
-  private powerStage(actor: OwnedActor): SourcePoweredArmorStage {
+  private armorStage(actor: OwnedActor, channel: ProtectionChannel): SourceArmorStage {
     return { bind: intercept => {
-      if (this.powerBindings.has(actor)) throw new Error("Classic source power stage already has an owner");
-      this.powerBindings.set(actor, intercept);
-      try { if (this.powerHooks.length === 0) this.installPowerHooks(); }
-      catch (error) { this.powerBindings.delete(actor); for (const remove of this.powerHooks.splice(0)) remove(); throw error; }
+      const entry = this.armorBindings.get(actor) ?? {};
+      if (entry[channel] !== undefined) throw new Error("Classic source armor stage already has an owner");
+      entry[channel] = intercept; this.armorBindings.set(actor, entry);
+      try { if (this.armorHooks.length === 0) this.installArmorHooks(); }
+      catch (error) { delete entry[channel]; if (entry.regular === undefined && entry.powered === undefined) this.armorBindings.delete(actor); for (const remove of this.armorHooks.splice(0)) remove(); throw error; }
       return () => {
-        if (this.powerBindings.get(actor) === intercept) this.powerBindings.delete(actor);
-        if (this.powerBindings.size === 0) for (const remove of this.powerHooks.splice(0)) remove();
+        if (entry[channel] === intercept) delete entry[channel];
+        if (entry.regular === undefined && entry.powered === undefined) this.armorBindings.delete(actor);
+        if (this.armorBindings.size === 0) for (const remove of this.armorHooks.splice(0)) remove();
         return undefined;
       };
     } };
   }
-  private installPowerHooks(): void {
+  private installArmorHooks(): void {
     const { host, profile } = this, { callbacks, cpu } = host.options.runner.options, memory = host.memory;
     const stack = () => cpu.state.registers.read("rsp", 32);
     const targetAtEntry = (): OwnedActor | null => {
@@ -106,45 +111,49 @@ export class ClassicCombatBindings {
       const address = memory.pointer(BigInt(memory.readUint32(memory.offset(frame, 4n))));
       return address === null ? null : host.edicts.observe(address);
     };
-    this.powerHooks.push(callbacks.observeEntry(this.entry(profile.entries.damage), () => {
+    this.armorHooks.push(callbacks.observeEntry(this.entry(profile.entries.damage), () => {
       const frame = this.frames.at(-1); if (frame !== undefined && frame.stack === null) frame.stack = stack();
     }));
-    this.powerHooks.push(callbacks.bindEntry(this.entry(profile.entries.damage), {
+    this.armorHooks.push(callbacks.bindEntry(this.entry(profile.entries.damage), {
       id: `${memory.module.id}:powered-damage`, signature: damageSignature,
       invoke: (_context, args) => { this.incomingDamage(args); return { kind: "void" }; },
     }, () => {
       if (this.frames.at(-1)?.stack === stack()) return false;
-      const actor = targetAtEntry(); return actor !== null && this.powerBindings.has(actor);
+      const actor = targetAtEntry(); return actor !== null && this.armorBindings.has(actor);
     }));
-    this.powerHooks.push(callbacks.observeEntry(this.entry(profile.entries.powerArmor), () => {
-      if (this.powerBypass === "pending") this.powerBypass = stack();
-    }));
-    this.powerHooks.push(callbacks.bindEntry(this.entry(profile.entries.powerArmor), {
-      id: `${memory.module.id}:powered-armor`, signature: powerSignature,
-      invoke: (_context, args) => {
-        const frame = this.frames.at(-1), actor = host.edicts.observe(classicRequiredPointer(args, 0));
-        const intercept = actor === null ? undefined : this.powerBindings.get(actor);
-        if (frame === undefined || actor === null || intercept === undefined || !frame.request.target.equals(actor.id))
-          throw new Error("Classic power stage has no active source damage request");
-        const original = (): number => {
-          const previous = this.powerBypass; this.powerBypass = "pending";
-          try {
-            const result = host.invoke(this.entry(profile.entries.powerArmor), powerSignature, args, frame.view);
-            if (result.kind !== "int32") throw new Error("Classic power stage returned a non-integer result");
-            return result.value;
-          } finally { this.powerBypass = previous; }
-        };
-        const saved = intercept({ request: frame.request, amount: classicNumber(args, 3),
-          geometry: { direction: frame.request.direction, point: readClassicVector(memory, classicRequiredPointer(args, 1)),
-            normal: readClassicVector(memory, classicRequiredPointer(args, 2)) },
-          flags: q2NativeArmorFlags(classicNumber(args, 4)) }, original);
-        if (!host.options.services.engine.actors.isLive(actor.id)) throw new RemovedNativeDamage(frame.request);
-        return integer(saved);
-      },
-    }, () => {
-      if (this.powerBypass === stack()) return false;
-      const actor = targetAtEntry(); return actor !== null && this.powerBindings.has(actor);
-    }));
+    for (const channel of ["regular", "powered"] satisfies readonly ProtectionChannel[]) {
+      const entry = this.entry(channel === "regular" ? profile.entries.regularArmor : profile.entries.powerArmor);
+      const signature = channel === "regular" ? regularSignature : powerSignature;
+      this.armorHooks.push(callbacks.observeEntry(entry, () => {
+        if (this.armorBypass?.channel === channel && this.armorBypass.stack === "pending") this.armorBypass.stack = stack();
+      }));
+      this.armorHooks.push(callbacks.bindEntry(entry, {
+        id: `${memory.module.id}:${channel}-armor`, signature,
+        invoke: (_context, args) => {
+          const frame = this.frames.at(-1), actor = host.edicts.observe(classicRequiredPointer(args, 0));
+          const intercept = actor === null ? undefined : this.armorBindings.get(actor)?.[channel];
+          if (frame === undefined || actor === null || intercept === undefined || !frame.request.target.equals(actor.id))
+            throw new Error("Classic armor stage has no active source damage request");
+          const original = (): number => {
+            const previous = this.armorBypass; this.armorBypass = { channel, stack: "pending" };
+            try {
+              const result = host.invoke(entry, signature, args, frame.view);
+              if (result.kind !== "int32") throw new Error("Classic armor stage returned a non-integer result");
+              return result.value;
+            } finally { this.armorBypass = previous; }
+          };
+          const saved = intercept({ request: frame.request, amount: classicNumber(args, 3),
+            geometry: { direction: frame.request.direction, point: readClassicVector(memory, classicRequiredPointer(args, 1)),
+              normal: readClassicVector(memory, classicRequiredPointer(args, 2)) },
+            flags: q2NativeArmorFlags(classicNumber(args, channel === "regular" ? 5 : 4)) }, original);
+          if (!host.options.services.engine.actors.isLive(actor.id)) throw new RemovedNativeDamage(frame.request);
+          return integer(saved);
+        },
+      }, () => {
+        if (this.armorBypass?.channel === channel && this.armorBypass.stack === stack()) return false;
+        const actor = targetAtEntry(); return actor !== null && this.armorBindings.get(actor)?.[channel] !== undefined;
+      }));
+    }
   }
   private incomingDamage(args: readonly GuestCallValue[]): void {
     const { host } = this, provenance = host.options.services.damageProvenance;
@@ -191,8 +200,12 @@ export class ClassicCombatBindings {
         if (client !== null) writes.push(memory.observeWrites(memory.offset(client, BigInt(profile.client.inventory)), profile.client.inventoryCount * 4, () => {
           const before = armor; armor = this.armor(view);
           const target = engine.actors.resolveOwned(request.target);
-          if (!current() || target === null || this.powerBindings.has(target) && isDeepStrictEqual(before.regular, armor.regular)) return;
-          observer.stored({ kind: "armor", before, after: armor });
+          if (!current() || target === null) return;
+          const stages = this.armorBindings.get(target), effective = engine.combat.read(request.target)?.armor;
+          if (effective === undefined) return;
+          const prior = { regular: stages?.regular === undefined ? before.regular : effective.regular, powered: stages?.powered === undefined ? before.powered : effective.powered };
+          if (isDeepStrictEqual(prior, effective)) return;
+          observer.stored({ kind: "armor", before: prior, after: effective });
         }));
         const { callbacks, cpu } = host.options.runner.options;
         for (const reaction of ["pain", "death"] satisfies readonly ("pain" | "death")[]) {

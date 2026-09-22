@@ -154,7 +154,7 @@ export class Q3CombatBridge {
       switch (value.kind) {
         case "complete": return value;
         case "source-continuation": return { ...value, resume: (current: CurrentCombatState) => progress(value.resume(project(value.request, current))) };
-        case "powered-armor": return { ...value, resume: (result, current) => progress(value.resume(result, project(value.request, current))) };
+        case "armor-stage": return { ...value, resume: (result, current) => progress(value.resume(result, project(value.request, current))) };
       }
     };
     return { id: policy.id, decide: (request, target, attacker) => progress(policy.decide(request, sourceState(request, target, false),

@@ -12,6 +12,8 @@ interface Operations {
   project(actor: ActorId): void;
   release(actor: ActorId): "released" | "deferred";
   invoke(call: ModSourceCall, actor: ActorId): void;
+  reserve?(actor: ActorId): void;
+  admitted?(actor: ActorId): void;
   readonly input?: {
     open(application: ModClientApplication): () => void;
     invoke(call: ModSourceCall, application: ModClientApplication): void;
@@ -43,8 +45,9 @@ export class QcModClientBindings {
   private invoke(calls: readonly ModSourceCall[], actor: ActorId): void { for (const call of calls) { this.require(actor); this.operations.invoke(call, actor); } }
   private admit(actor: ActorId): void {
     if (this.slot(actor) === null) throw new Error("QuakeC component admission requires a live client");
-    const entry = this.require(actor); this.operations.project(actor);
+    const entry = this.require(actor); this.operations.reserve?.(actor); this.operations.project(actor);
     if (!entry.admitted) { this.entries.set(actor, { ...entry, admitted: true }); this.invoke(this.operations.declaration.admit, actor); }
+    this.operations.admitted?.(actor);
   }
   start(): void {
     if (this.unsubscribe !== null) return;

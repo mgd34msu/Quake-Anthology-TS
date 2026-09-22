@@ -2,7 +2,7 @@ import { normalizeLegacyPowerOnlyArmor } from "../../world/gameplay/authority.ts
 import { isDeepStrictEqual } from "node:util";
 import type { GuestAddress } from "../../contracts/execution.ts";
 import type { ArmorState } from "../../contracts/gameplay.ts";
-import type { NativeModArmor, NativeModArmorField, NativeModArmorSelection, NativeModDeclaration, NativeModScalarField } from "../../contracts/native-mod-callbacks.ts";
+import type { NativeModArmor, NativeModArmorField, NativeModArmorSelection, NativeModDeclaration, NativeModScalarField, NativeModPowerArmorItem } from "../../contracts/native-mod-callbacks.ts";
 import type { NativeModHost } from "../../app/bootstrap/simulation/native-mod-host.ts";
 
 interface Location { readonly base: GuestAddress; readonly field: NativeModArmorField; }
@@ -41,7 +41,8 @@ export class NativeModArmorState {
       if (item.selection.field.encoding === "float32" && (Math.fround(item.selection.value) !== item.selection.value || Math.fround(item.selection.none) !== item.selection.none))
         throw new Error("Native armor selection is not exact in its declared storage");
     }
-    for (const item of definition.regular) if (![item.normalProtection, item.energyProtection].every(Number.isFinite)) throw new Error("Native armor protection must be finite");
+    if (definition.kind === "q2") for (const item of definition.regular)
+      if (![item.normalProtection, item.energyProtection].every(Number.isFinite)) throw new Error("Native armor protection must be finite");
     for (const item of definition.power) if (item.enabled !== null) {
       if (item.enabled.field.encoding.startsWith("float") || !Number.isSafeInteger(item.enabled.mask) || item.enabled.mask <= 0) throw new Error("Native power armor requires an integer enabled mask");
       validateValue(item.enabled.field, item.enabled.mask);
@@ -60,26 +61,25 @@ export class NativeModArmorState {
     const value = this.value(slot, field); if (value === null) throw new Error("Selected native armor has no source storage"); return value;
   }
   read(slot: number): ArmorState { return this.capture(field => this.value(slot, field)); }
-  readPowerCells(slot: number, kind: "screen" | "shield"): number {
-    const item = this.definition.kind === "none" ? undefined : this.definition.power.find(item => item.kind === kind);
-    if (item === undefined) throw new Error("Native power storage is not declared");
-    return this.required(slot, item.cells);
-  }
-  writePowerCells(slot: number, kind: "screen" | "shield", value: number): void {
-    const item = this.definition.kind === "none" ? undefined : this.definition.power.find(item => item.kind === kind);
-    if (item === undefined) throw new Error("Native power storage is not declared");
-    validateValue(item.cells, value);
-    const location = this.location(slot, item.cells); if (location === null) throw new Error("Native power fuel has no source storage");
-    this.scalar(location.base, item.cells, value);
+  readCount(slot: number, field: NativeModArmorField): number { return this.required(slot, field); }
+  writeCount(slot: number, field: NativeModArmorField, value: number): void {
+    validateValue(field, value);
+    const location = this.location(slot, field); if (location === null) throw new Error("Native armor count has no source storage");
+    this.scalar(location.base, field, value);
   }
   private capture(read: (field: NativeModArmorField) => number | null): ArmorState {
     const definition = this.definition; if (definition.kind === "none") return { regular: { kind: "none" }, powered: { kind: "none" } };
     const required = (field: NativeModArmorField): number => { const value = read(field); if (value === null) throw new Error("Selected native armor has no source storage"); return value; };
-    const regular = definition.regular.find(item => selected(item.selection, read(item.selection.field)));
+    const regular = definition.kind === "q2"
+      ? (() => { const item = definition.regular.find(item => selected(item.selection, read(item.selection.field)));
+        return item === undefined ? { kind: "none" } satisfies ArmorState["regular"] : { kind: "q2", item: item.item, points: required(item.points),
+          normalProtection: item.normalProtection, energyProtection: item.energyProtection } satisfies ArmorState["regular"]; })()
+      : (() => { const item = definition.regular.find(item => selected(item.selection, read(item.selection.field)));
+        return item === undefined ? { kind: "none" } satisfies ArmorState["regular"]
+          : { kind: "source", item: item.item, points: required(item.points) } satisfies ArmorState["regular"]; })();
     const power = definition.power.find(item => selected(item.selection, read(item.selection.field)) && (item.enabled === null
       || (BigInt(required(item.enabled.field)) & BigInt(item.enabled.mask)) !== 0n));
-    return { regular: regular === undefined ? { kind: "none" } : { kind: "q2", item: regular.item, points: required(regular.points),
-      normalProtection: regular.normalProtection, energyProtection: regular.energyProtection },
+    return { regular,
       powered: power === undefined ? { kind: "none" } : { kind: power.kind, cells: required(power.cells) } };
   }
 
@@ -96,11 +96,13 @@ export class NativeModArmorState {
   private stores(slot: number, armor: ArmorState): readonly Store[] {
     const definition = this.definition, requested = armor.regular;
     if (definition.kind === "none") { if (requested.kind !== "none" || armor.powered.kind !== "none") throw new Error("Native owned actor declares no armor storage"); return []; }
-    if (requested.kind !== "none" && requested.kind !== "q2") throw new Error("Native armor declaration cannot represent another armor family");
+    if (requested.kind !== "none" && requested.kind !== definition.kind) throw new Error("Native armor declaration cannot represent another armor family");
+    if (requested.kind !== "none" && requested.kind !== "q2" && requested.kind !== "source") throw new Error("Native armor requires its declared source representation");
     const regular = requested.kind === "none" ? undefined : definition.regular.find(item => item.item === requested.item);
     const power = armor.powered.kind === "none" ? undefined : definition.power.find(item => item.kind === armor.powered.kind);
-    if (armor.powered.kind !== "none" && power === undefined || requested.kind === "q2" && (regular === undefined
-      || regular !== undefined && (requested.normalProtection !== regular.normalProtection || requested.energyProtection !== regular.energyProtection)))
+    const declared = definition.kind === "q2" && requested.kind === "q2" ? definition.regular.find(item => item.item === requested.item) : undefined;
+    if (armor.powered.kind !== "none" && power === undefined || requested.kind !== "none" && regular === undefined
+      || requested.kind === "q2" && (declared === undefined || requested.normalProtection !== declared.normalProtection || requested.energyProtection !== declared.energyProtection))
       throw new Error("Armor state differs from its declared native representation");
     const stores = new Map<bigint, Store>();
     const pending = (field: NativeModArmorField): number | null => {
@@ -115,7 +117,7 @@ export class NativeModArmorState {
     };
     const select = (selection: NativeModArmorSelection, active: boolean): void => store(selection.field, selection.kind === "enum"
       ? active ? selection.value : selection.none : active ? Math.max(1, this.required(slot, selection.field)) : 0);
-    const enable = (item: Extract<NativeModArmor, { readonly kind: "q2" }>["power"][number], active: boolean): void => {
+    const enable = (item: NativeModPowerArmorItem, active: boolean): void => {
       if (item.enabled === null) select(item.selection, active);
       else {
         const current = pending(item.enabled.field); if (current === null) { if (active) throw new Error("Native power armor has no enabled storage"); return; }
@@ -129,20 +131,20 @@ export class NativeModArmorState {
     }
     const currentPower = this.read(slot).powered;
     if (currentPower.kind !== armor.powered.kind) for (const item of definition.power) enable(item, false);
-    if (requested.kind === "q2" && regular !== undefined) { select(regular.selection, true); store(regular.points, requested.points); }
+    if (requested.kind !== "none" && regular !== undefined) { select(regular.selection, true); store(regular.points, requested.points); }
     if (power !== undefined && armor.powered.kind !== "none") {
       if (currentPower.kind !== armor.powered.kind) enable(power, true);
       if (currentPower.kind === "none" || currentPower.kind !== armor.powered.kind || currentPower.cells !== armor.powered.cells) store(power.cells, armor.powered.cells);
     }
     const result = this.capture(pending), requestedPower = armor.powered.kind, actualPower = result.powered.kind;
-    const requestedPoints = requested.kind === "q2" ? regular?.points.encoding === "float32" ? Math.fround(requested.points) : requested.points : 0;
+    const requestedPoints = requested.kind !== "none" ? regular?.points.encoding === "float32" ? Math.fround(requested.points) : requested.points : 0;
     const requestedCells = armor.powered.kind === "none" ? 0 : power?.cells.encoding === "float32" ? Math.fround(armor.powered.cells) : armor.powered.cells;
     const emptyRegular = requested.kind === "none" || requestedPoints === 0 && regular?.selection.kind === "positive"
       && regular.selection.field.record === regular.points.record && regular.selection.field.offset === regular.points.offset;
-    if (requestedPower !== actualPower || requestedPoints !== (result.regular.kind === "q2" ? result.regular.points : 0)
+    if (requestedPower !== actualPower || requestedPoints !== (result.regular.kind !== "none" ? result.regular.points : 0)
       || emptyRegular && result.regular.kind !== "none"
       || requestedCells !== (result.powered.kind === "none" ? 0 : result.powered.cells)
-      || !emptyRegular && requested.kind === "q2" && (result.regular.kind !== "q2" || result.regular.item !== requested.item))
+      || !emptyRegular && (result.regular.kind !== "q2" && result.regular.kind !== "source" || result.regular.item !== requested.item))
       throw new Error("Native source selection cannot represent this armor without changing other ownership");
     return [...stores.values()];
   }

@@ -93,18 +93,37 @@ export interface NativeModPowerArmorItem {
   readonly cells: NativeModArmorField;
   readonly enabled: { readonly field: NativeModArmorField; readonly mask: number } | null;
 }
+export interface NativeModRegularArmorItem {
+  readonly item: ItemId | null;
+  readonly selection: NativeModArmorSelection;
+  readonly points: NativeModArmorField;
+}
 export type NativeModArmor = { readonly kind: "none" } | {
   readonly kind: "q2";
   readonly regular: readonly { readonly item: ItemId; readonly selection: NativeModArmorSelection; readonly points: NativeModArmorField;
     readonly normalProtection: number; readonly energyProtection: number }[];
   readonly power: readonly NativeModPowerArmorItem[];
+} | {
+  readonly kind: "source";
+  readonly regular: readonly NativeModRegularArmorItem[];
+  readonly power: readonly NativeModPowerArmorItem[];
 };
-export interface NativeModPoweredProtection {
+interface NativeModProtectionClaim {
   readonly id: string;
-  readonly admission?: { readonly kind: "claim" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
-  readonly storage: readonly NativeModPowerArmorItem[];
-  readonly absorb: { readonly entry: NativeModEntry; readonly abi: "q2-check-power-armor"; readonly flags: "q2-classic" | "q2-rerelease"; readonly globals?: NativeModSourceCall["globals"] };
+  readonly admission?: { readonly kind: "claim" } | { readonly kind: "replace-current-primary" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
 }
+type NativeModProtectionCall = { readonly abi: "source-call"; readonly call: NativeModSourceCall };
+interface NativeModQ2ArmorCall {
+  readonly entry: NativeModEntry;
+  readonly flags: "q2-classic" | "q2-rerelease";
+  readonly globals?: NativeModSourceCall["globals"];
+}
+export type NativeModProtectionDefinition = NativeModProtectionClaim & (
+  | { readonly channel: "powered"; readonly storage: readonly NativeModPowerArmorItem[];
+      readonly absorb: NativeModProtectionCall | (NativeModQ2ArmorCall & { readonly abi: "q2-check-power-armor" }) }
+  | { readonly channel: "regular"; readonly storage: readonly NativeModRegularArmorItem[];
+      readonly absorb: NativeModProtectionCall | (NativeModQ2ArmorCall & { readonly abi: "q2-check-armor"; readonly sparks: number }) }
+);
 export interface NativeModDeferredDamage {
   readonly process: NativeModEntry;
   readonly attacker: number;
@@ -134,7 +153,7 @@ export interface NativeModDeclaration {
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-classic-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-i386" }> }
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-rerelease-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-x86-64" }> };
   readonly sourceActors?: NativeModSourceActors;
-  readonly poweredProtection?: NativeModPoweredProtection;
+  readonly protection?: readonly NativeModProtectionDefinition[];
   readonly clients?: NativeModClients;
   readonly cvars: readonly { readonly name: string; readonly value: string }[];
   readonly spawnEntities: string | null;

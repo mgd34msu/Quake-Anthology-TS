@@ -1,10 +1,10 @@
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
-import type { ArmorState, AttackProvenance, DamageRequest } from "../../contracts/gameplay.ts";
+import type { ArmorState, AttackProvenance, DamageRequest, ProtectionChannel } from "../../contracts/gameplay.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import type { QvmGame } from "./game.ts";
 import type { SharedBodyTable } from "../../world/actors/body.ts";
-import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourcePoweredArmorStage } from "../../world/gameplay/authority.ts";
+import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../world/gameplay/authority.ts";
 import type { SessionActorRegistry } from "../../world/actors/registry.ts";
 import { attackDamageFlags } from "../../world/gameplay/armor.ts";
 import { QvmGameCombat, type QvmGameArmorDefinition, type QvmGameCombatDefinition, type QvmGameDamage } from "./game-combat.ts";
@@ -32,7 +32,7 @@ interface NativeCombatOptions {
   };
   slot(actor: ActorId): number | null;
 }
-type PowerIntercept = Parameters<SourcePoweredArmorStage["bind"]>[0];
+type ArmorIntercept = Parameters<SourceArmorStage["bind"]>[0];
 interface IncomingDamage { readonly request: DamageRequest; readonly observer: SourceDamageObserver; result: SourceDamageResult; }
 
 /** Qualified G_Damage calls retain their original stores, armor and reactions. */
@@ -40,9 +40,9 @@ export class QvmCombatBindings {
   private readonly source: QvmGameCombat;
   private readonly scopes: QvmDamageScopes;
   private readonly admitted = new Map<number, OwnedActor>();
-  private readonly power = new Map<OwnedActor, PowerIntercept>();
+  private readonly protection = { powered: new Map<OwnedActor, ArmorIntercept>(), regular: new Map<OwnedActor, ArmorIntercept>() };
   private readonly removals: (() => void)[] = [];
-  private removePower: (() => void) | null = null;
+  private removeArmor: (() => void) | null = null;
   private incoming: IncomingDamage | null = null;
   private closed = false;
   constructor(private readonly options: NativeCombatOptions) {
@@ -88,9 +88,9 @@ export class QvmCombatBindings {
           return result;
         }));
         this.removals.push(actors.onRelease(actor => {
-          this.power.delete(actor);
+          this.protection.powered.delete(actor); this.protection.regular.delete(actor);
           for (const [slot, current] of this.admitted) if (current === actor) this.admitted.delete(slot);
-          this.removeUnusedPowerHook();
+          this.removeUnusedArmorHook();
           return undefined;
         }));
       }
@@ -98,7 +98,7 @@ export class QvmCombatBindings {
   }
   close(): undefined {
     if (this.closed) return undefined;
-    this.closed = true; this.power.clear(); this.admitted.clear(); this.removeUnusedPowerHook();
+    this.closed = true; this.protection.powered.clear(); this.protection.regular.clear(); this.admitted.clear(); this.removeUnusedArmorHook();
     for (const remove of this.removals.splice(0)) remove();
     return undefined;
   }
@@ -133,13 +133,13 @@ export class QvmCombatBindings {
       return condition.comparison === "equal" ? value === condition.value : value !== condition.value;
     }) ? tiers : null;
   }
-  private protection(stats: readonly number[], tiers: QvmGameArmorDefinition["tiers"]): number {
+  private protectionFraction(stats: readonly number[], tiers: QvmGameArmorDefinition["tiers"]): number {
     return tiers === null ? this.options.definition.armor.protection : tiers.values.find(entry => entry.tier === stats[tiers.stat])?.protection ?? tiers.fallback;
   }
   private armor(slot: number): ArmorState {
     if (slot >= this.options.game.data.numClients) return { regular: { kind: "none" }, powered: { kind: "none" } };
     const stats = this.options.game.data.copyPlayerState(slot).stats;
-    return { regular: { kind: "q3", points: stats[this.options.definition.armor.pointsStat] ?? 0, protection: this.protection(stats, this.activeTiers()) }, powered: { kind: "none" } };
+    return { regular: { kind: "q3", points: stats[this.options.definition.armor.pointsStat] ?? 0, protection: this.protectionFraction(stats, this.activeTiers()) }, powered: { kind: "none" } };
   }
   private armorWrite(slot: number, armor: ArmorState): { readonly points: number; readonly tier: { readonly stat: number; readonly value: number } | null } | null {
     if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q3") throw new Error("Native Q3 armor requires Q3 armor values");
@@ -151,7 +151,7 @@ export class QvmCombatBindings {
     if (!Number.isInteger(points) || points < 0 || points > 0x7fffffff) throw new Error("Source armor points require a nonnegative signed integer");
     if (armor.regular.kind === "none") return { points, tier: null };
     const stats = this.options.game.data.copyPlayerState(slot).stats, tiers = this.activeTiers(), requested = Math.fround(armor.regular.protection);
-    if (requested === this.protection(stats, tiers)) return { points, tier: null };
+    if (requested === this.protectionFraction(stats, tiers)) return { points, tier: null };
     const selected = tiers?.values.find(entry => entry.protection === requested);
     if (tiers === null || selected === undefined) throw new Error("Requested protection is not representable by the source armor mode");
     return { points, tier: { stat: tiers.stat, value: selected.tier } };
@@ -168,7 +168,10 @@ export class QvmCombatBindings {
         team: team === 1 || team === 2 ? `q3:${team}` : null, invulnerable: (flags & 16) !== 0, noKnockback: (flags & 2048) !== 0 };
     };
     const binding = { read, sourceDamage: (request: DamageRequest) => this.damage(request),
-      ...(this.options.source === undefined ? {} : { poweredArmorStage: this.powerStage(actor) }),
+      protection: {
+        regular: { owner: definition.module.id, ...(this.options.source === undefined ? {} : { stage: this.armorStage(actor, "regular") }) },
+        powered: { owner: null, ...(this.options.source === undefined ? {} : { stage: this.armorStage(actor, "powered") }) },
+      },
       validateArmor: (armor: ArmorState): undefined => {
         this.armorWrite(slot, armor);
         return undefined;
@@ -186,24 +189,25 @@ export class QvmCombatBindings {
     if (combat.read(actor.id) === null) combat.bind(actor, binding); else combat.rebind(actor, binding);
     return undefined;
   }
-  private powerStage(actor: OwnedActor): SourcePoweredArmorStage {
+  private armorStage(actor: OwnedActor, channel: ProtectionChannel): SourceArmorStage {
     return { bind: intercept => {
-      if (!this.live(actor)) throw new Error("Source powered armor owner is retired");
-      if (this.power.has(actor)) throw new Error("Source powered armor stage already has an owner");
-      this.power.set(actor, intercept);
+      const bindings = this.protection[channel];
+      if (!this.live(actor)) throw new Error("Source armor owner is retired");
+      if (bindings.has(actor)) throw new Error(`Source ${channel} armor stage already has an owner`);
+      bindings.set(actor, intercept);
       try {
-        this.removePower ??= this.options.game.module.bindFunction({ kind: "qvm", module: this.options.definition.module,
+        this.removeArmor ??= this.options.game.module.bindFunction({ kind: "qvm", module: this.options.definition.module,
           instructionIndex: this.options.definition.armor.checkArmor }, call => this.checkArmor(call));
-      } catch (error) { this.power.delete(actor); throw error; }
+      } catch (error) { bindings.delete(actor); throw error; }
       return () => {
-        if (this.power.get(actor) === intercept) this.power.delete(actor);
-        this.removeUnusedPowerHook(); return undefined;
+        if (bindings.get(actor) === intercept) bindings.delete(actor);
+        this.removeUnusedArmorHook(); return undefined;
       };
     } };
   }
-  private removeUnusedPowerHook(): void {
-    if (this.power.size !== 0) return;
-    this.removePower?.(); this.removePower = null;
+  private removeUnusedArmorHook(): void {
+    if (this.protection.powered.size !== 0 || this.protection.regular.size !== 0) return;
+    this.removeArmor?.(); this.removeArmor = null;
   }
   private vector(word: number): Vec3 {
     if (word === 0) return { x: 0, y: 0, z: 0 };
@@ -212,18 +216,28 @@ export class QvmCombatBindings {
   }
   private checkArmor(call: QvmFunctionCall): number {
     const frame = this.scopes.current(call.words.getInt32(0, true));
-    const intercept = frame === null ? undefined : this.power.get(frame.actor);
-    if (frame === null || intercept === undefined) return call.proceed();
+    if (frame === null) return call.proceed();
+    const power = this.protection.powered.get(frame.actor);
+    if (power === undefined && !this.protection.regular.has(frame.actor)) return call.proceed();
     if (!this.live(frame.actor)) return this.scopes.cancel(frame, call);
     const amount = call.words.getInt32(4, true), flags = call.words.getInt32(8, true), originating = attackDamageFlags(frame.request);
-    const saved = intercept({ request: frame.request, amount,
-      geometry: { direction: this.vector(frame.call.words.getInt32(12, true)), point: this.vector(frame.call.words.getInt32(16, true)), normal: frame.request.normal },
+    const geometry = () => ({ direction: this.vector(frame.call.words.getInt32(12, true)), point: this.vector(frame.call.words.getInt32(16, true)), normal: frame.request.normal });
+    const saved = power?.({ request: frame.request, amount, geometry: geometry(),
       // Q3 owns its live armor flag; foreign power-only flags have no Q3 argument encoding.
-      flags: { stage: "power", noArmor: (flags & 2) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: false, energy: originating.energy } }, () => 0);
+      flags: { stage: "power", noArmor: (flags & 2) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: false, energy: originating.energy } }, () => 0) ?? 0;
     if (!this.live(frame.actor)) return this.scopes.cancel(frame, call);
-    if (!Number.isInteger(saved) || saved < 0 || saved > Math.max(0, amount)) throw new Error("QVM powered armor savings require an integer within the current source damage");
-    call.words.setInt32(4, amount - saved, true);
-    try { return saved + call.proceed(); }
+    if (!Number.isFinite(saved) || saved < 0 || saved > Math.max(0, amount)) throw new Error("QVM powered armor savings exceed the current source damage");
+    const powerSaved = Math.trunc(saved), remaining = amount - powerSaved;
+    call.words.setInt32(4, remaining, true);
+    try {
+      const regular = this.protection.regular.get(frame.actor);
+      const regularSaved = regular === undefined ? call.proceed() : regular({ request: frame.request, amount: remaining, geometry: geometry(),
+        flags: { stage: "regular", noArmor: (call.words.getInt32(8, true) & 2) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: originating.noRegularArmor,
+          energy: originating.energy, regularProtectionScale: originating.regularProtectionScale ?? 1 } }, () => call.proceed());
+      if (!this.live(frame.actor)) return this.scopes.cancel(frame, call);
+      if (!Number.isFinite(regularSaved) || regularSaved < 0 || regularSaved > Math.max(0, remaining)) throw new Error("QVM regular armor savings exceed the current source damage");
+      return powerSaved + Math.trunc(regularSaved);
+    }
     finally { call.words.setInt32(4, amount, true); }
   }
   private sourceActor(pointer: number): OwnedActor | null {

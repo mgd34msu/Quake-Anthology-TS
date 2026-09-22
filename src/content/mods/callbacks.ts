@@ -1,4 +1,4 @@
-import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage } from "../../contracts/mod-callbacks.ts";
+import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage, ModQcProtection } from "../../contracts/mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -6,7 +6,7 @@ import { readModClientInput } from "./client-input.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "string", "vector")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "string": return { kind: "string", value: reader.field("value").string() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
@@ -78,17 +78,45 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     ...(cvars.value === undefined ? {} : { cvars: cvars.list(entry => ({ name: entry.field("name").string(), value: entry.field("value").string() })) }),
     ...(commands.value === undefined ? {} : { commands: commands.list(entry => ({ name: entry.field("name").string(), function: entry.field("function").string(),
       arguments: entry.field("arguments").list(consoleValue), globals: entry.field("globals").list(global => ({ name: global.field("name").string(), value: consoleValue(global.field("value")) })) })) }),
+    ...(reader.field("protection").value === undefined ? {} : { protection: reader.field("protection").list(protection) }),
     ...(combat.value === undefined ? {} : { combat: { damage: sourceCall(combat.field("damage")),
       ...(combat.field("armorStage").value === undefined ? {} : { armorStage: armorStage(combat.field("armorStage")) }) } }) };
+}
+
+function protection(reader: SaveReader): ModQcProtection {
+  const admission = reader.field("admission"), source = reader.field("absorb"), flags = reader.field("flags"), storage = reader.field("storage"), selection = storage.field("selection");
+  const absorb = source.field("kind").choice("function", "region") === "function"
+    ? { kind: "function", call: sourceCall(source.field("call")) } satisfies ModQcProtection["absorb"]
+    : { kind: "region", call: sourceCall(source.field("call")), stage: armorStage(source.field("stage")) } satisfies ModQcProtection["absorb"];
+  const base = { id: namespaced(reader.field("id")), absorb,
+    ...(admission.value === undefined ? {} : { admission: readProtectionAdmission(admission) }),
+    flags: { noArmor: flags.field("noArmor").integer(0), noPowerArmor: flags.field("noPowerArmor").integer(0),
+      noRegularArmor: flags.field("noRegularArmor").integer(0), energy: flags.field("energy").integer(0), radius: flags.field("radius").integer(0) } };
+  if (reader.field("channel").choice("regular", "powered") === "regular") return { ...base, channel: "regular", storage: {
+    points: storage.field("points").string(), item: storage.field("item").value === null ? null : namespaced(storage.field("item")),
+    ...(selection.value === undefined ? {} : { selection: { field: selection.field("field").string(),
+      ...(selection.field("mask").value === undefined ? {} : { mask: selection.field("mask").integer(0) }),
+      values: selection.field("values").list(entry => ({ value: entry.field("value").number(), item: entry.field("item").value === null ? null : namespaced(entry.field("item")) })) } }) } };
+  return { ...base, channel: "powered", storage: { cells: storage.field("cells").string(), kind: storage.field("kind").choice("screen", "shield"),
+    ...(selection.value === undefined ? {} : { selection: { field: selection.field("field").string(),
+      ...(selection.field("mask").value === undefined ? {} : { mask: selection.field("mask").integer(0) }),
+      values: selection.field("values").list(entry => ({ value: entry.field("value").number(), kind: entry.field("kind").choice("none", "screen", "shield") })) } }) } };
 }
 
 function armorStage(reader: SaveReader): ModQcArmorStage {
   const flags = reader.field("flags");
   return { function: reader.field("function").string(), entry: reader.field("entry").integer(0), exit: reader.field("exit").integer(0),
     target: reader.field("target").integer(0), damage: reader.field("damage").integer(0), saved: reader.field("saved").integer(0),
+    ...(reader.field("regularScale").value === undefined ? {} : { regularScale: reader.field("regularScale").list(site => ({
+      caller: site.field("caller").string(), statement: site.field("statement").integer(0), scale: site.field("scale").number() })) }),
     flags: flags.field("kind").choice("none", "bits") === "none" ? { kind: "none" } : { kind: "bits", word: flags.field("word").integer(0),
       noArmor: flags.field("noArmor").integer(0), noPowerArmor: flags.field("noPowerArmor").integer(0),
       noRegularArmor: flags.field("noRegularArmor").integer(0), energy: flags.field("energy").integer(0) },
     statements: reader.field("statements").list(statement => ({ opcode: statement.field("opcode").integer(0), a: statement.field("a").integer(0),
       b: statement.field("b").integer(0), c: statement.field("c").integer(0) })) };
+}
+
+function readProtectionAdmission(reader: SaveReader): NonNullable<ModQcProtection["admission"]> {
+  const kind = reader.field("kind").choice("claim", "replace-primary", "replace-current-primary");
+  return kind === "replace-primary" ? { kind, owner: namespaced(reader.field("owner")) } : { kind };
 }

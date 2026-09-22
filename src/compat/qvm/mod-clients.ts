@@ -14,6 +14,7 @@ interface Operations {
   readonly services: ModClientServices;
   readonly declaration: QvmModClients;
   project(actor: ActorId): void;
+  admitted?(actor: ActorId): void;
   release(actor: ActorId): void;
   invoke(call: QvmModSourceCall, actor: ActorId, application?: ModClientApplication): void;
   reservedSlots?(): Iterable<number, undefined, unknown>;
@@ -30,6 +31,7 @@ export class QvmModClientBindings {
   constructor(private readonly operations: Operations) {}
 
   has(actor: ActorId): boolean { return this.entries.has(actor); }
+  admitted(actor: ActorId): boolean { return this.entries.has(actor) && this.require(actor).admitted; }
   slot(actor: ActorId): number | null {
     const client = this.operations.services.forActor(actor);
     if (client === null) return this.entries.has(actor) ? this.require(actor).slot : null;
@@ -64,6 +66,7 @@ export class QvmModClientBindings {
       this.entries.set(actor, { ...entry, admitted: true });
       this.calls(this.operations.declaration.admit, actor);
     }
+    this.operations.admitted?.(actor);
   }
   start(): void {
     if (this.unsubscribe !== null) return;
@@ -74,7 +77,7 @@ export class QvmModClientBindings {
         this.admit(actor); this.calls(this.operations.declaration.userinfo, actor);
       } else if (this.entries.has(actor)) {
         this.require(actor); this.calls(this.operations.declaration.disconnect, actor);
-        this.entries.delete(actor); this.operations.release(actor);
+        try { this.operations.release(actor); } finally { this.entries.delete(actor); }
       }
       return undefined;
     });

@@ -1,6 +1,6 @@
 import { NativeModActors, type SavedNativeActors } from "./native-mod-actors.ts";
 import { NativeModClientsBinding } from "./native-mod-clients.ts";
-import { NativeModProtection, type NativePowerFuelCommit } from "./native-mod-protection.ts";
+import { NativeModProtection, type NativeProtectionInventoryCommit } from "./native-mod-protection.ts";
 import { readNativeDeferredDamage } from "./native-mod-deferred.ts";
 import { asciiFold, type CommandInvocation } from "../../core/commands/index.ts";
 import type { FrameContext } from "../../contracts/time.ts";
@@ -81,9 +81,14 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
   }
   if (declaration.entityRecord !== null && records.get(declaration.entityRecord)?.base.kind !== "entities") throw new Error("Native engine entity record must use the source public edict table");
   const clients = declaration.clients;
-  const protection = declaration.poweredProtection;
-  if (protection !== undefined && (clients === undefined || declaration.entityRecord === null || !protection.id || protection.storage.length === 0
-    || protection.absorb.abi !== "q2-check-power-armor" || protection.absorb.flags !== expectedAbi)) throw new Error("Native powered protection requires declared clients and its matching source ABI");
+  const protections = declaration.protection ?? [];
+  const channels = new Set<string>();
+  for (const protection of protections) {
+    if (channels.has(protection.channel)) throw new Error("Duplicate native protection channel");
+    channels.add(protection.channel);
+    if (clients === undefined || declaration.entityRecord === null || !protection.id || protection.storage.length === 0
+      || protection.absorb.abi !== "source-call" && protection.absorb.flags !== expectedAbi) throw new Error("Native protection requires declared clients and its matching source ABI");
+  }
   if (clients !== undefined) {
     if (!Number.isSafeInteger(clients.maximum) || clients.maximum < 1 || clients.maximum > 256 || clients.records.length === 0
       || new Set(clients.records).size !== clients.records.length || declaration.entityRecord === null
@@ -115,7 +120,13 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
     }
   };
   const check = (call: NativeModSourceCall, available: ReadonlySet<ModCallbackInput>): void => checkValues([...call.arguments, ...call.globals.map(entry => entry.value)], available);
-  if (protection !== undefined) checkValues((protection.absorb.globals ?? []).map(global => global.value), new Set(["self", "time", "amount", "point", "normal"]));
+  for (const protection of protections) {
+    const available = new Set<ModCallbackInput>(["self", "attacker", "inflictor", "time", "amount", "damage-flags", "regular-protection-scale", "knockback", "direction", "point", "normal"]);
+    if (protection.absorb.abi === "source-call") {
+      if (protection.absorb.call.returns === "void") throw new Error("Native protection requires a source return value");
+      check(protection.absorb.call, available);
+    } else checkValues((protection.absorb.globals ?? []).map(global => global.value), available);
+  }
   for (const call of declaration.initialize) check(call, new Set(["time"]));
   for (const call of [...declaration.project, ...declaration.release]) check(call, new Set(["self", "time"]));
   if (clients !== undefined) for (const call of [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command]) check(call, new Set(["self", "time"]));
@@ -212,15 +223,15 @@ export class NativeModProvider implements NativeModProjection {
     readonly map: string, private readonly assertCurrent: () => void) {
     validateNativeModDeclaration(declaration); for (const record of declaration.actorRecords) this.records.set(record.id, record);
     this.nonclientRecords = declaration.actorRecords.filter(record => !declaration.clients?.records.includes(record.id));
-    this.protection = declaration.poweredProtection === undefined ? null : new NativeModProtection(declaration.poweredProtection, declaration, services, instance, {
+    this.protection = (declaration.protection?.length ?? 0) === 0 ? null : new NativeModProtection(declaration.protection ?? [], declaration, services, instance, {
       current: () => this.current(), slot: actor => this.slotOf(actor), eligible: actor => this.clients?.admitted(actor) === true,
       scalar: (base, field, value) => { const address = this.host.memory.offset(base, BigInt(field.offset)); if (value !== undefined) this.scalarWrite(address, value, field.encoding); return this.scalarRead(address, field.encoding); },
       transfer: invoke => this.transfer(invoke), flush: fuel => this.flush(fuel), invoke: (call, inputs) => this.execute(call, inputs, false),
     });
     this.unsubscribe = services.actors.onRelease(actor => { this.protection?.release(actor.id); if (this.projections.has(actor.id)) { this.pendingReleases.add(actor.id); this.host_?.presentation.release(actor.id); } return undefined; });
   }
-  reservePoweredProtection(): void { this.current(); this.protection?.reserve(); }
-  activatePoweredProtection(): void { this.current(); this.protection?.activate(); }
+  reserveProtection(): void { this.current(); this.protection?.reserve(); }
+  activateProtection(): void { this.current(); this.protection?.activate(); }
   attach(host: NativeModHost): void { if (this.host_ !== null) throw new Error("Native mod already attached"); this.host_ = host;
     this.protection?.attach(host);
     if (this.declaration.clients !== undefined) {
@@ -428,7 +439,7 @@ export class NativeModProvider implements NativeModProjection {
     }
     return values;
   }
-  private flush(fuel?: NativePowerFuelCommit): void {
+  private flush(inventoryCommit?: NativeProtectionInventoryCommit): void {
     const frame = this.frames.at(-1); if (frame === undefined) return;
     const memory = this.host.memory, changed = frame.observations.filter(entry => !isDeepStrictEqual(entry.bytes, memory.copy(entry.address, entry.bytes.length)));
     frame.observations = this.observe();
@@ -453,8 +464,8 @@ export class NativeModProvider implements NativeModProjection {
         committedInventory.add(changes); queue(actor, owner => {
           const entry = this.services.inventory.entries(actor).find(entry => entry.item === field.item); if (entry === undefined) throw new Error("Native mod wrote an undeclared destination item");
           if (changes.capacity !== undefined && !this.services.inventory.mutableCapacity(actor, field.item)) throw new Error(`Native mod requires mutable inventory capacity for ${field.item}`);
-          this.services.inventory.configure(owner, { ...entry, ...changes }, fuel?.actor.equals(actor) === true && fuel.item === field.item ? change => {
-            fuel.committed(change);
+          this.services.inventory.configure(owner, { ...entry, ...changes }, inventoryCommit?.actor.equals(actor) === true && inventoryCommit.items.includes(field.item) ? change => {
+            inventoryCommit.committed(change);
             for (const invocation of this.frames) invocation.observations = invocation.observations.map(observation => observation.actor.equals(actor)
               && observation.field.binding === "inventory" && observation.field.item === field.item
               ? { ...observation, bytes: memory.copy(observation.address, observation.bytes.length) } : observation);
@@ -658,7 +669,7 @@ export class NativeModProvider implements NativeModProjection {
     this.protection?.prepareRestore();
     this.lifecycle = true; this.restoring = true; this.restoreLinks.clear(); this.owned?.suspend(true);
     try { this.clients?.restore(clients); this.appearanceActors.clear(); for (const entry of actors) if (entry.appearance) this.appearanceActors.add(entry.actor); this.projections.clear(); for (const entry of actors) this.projections.set(entry.actor, entry.slot); this.pendingReleases.clear(); await this.host.restore(saved.source);
-      this.validateRecords(); this.protection?.validateRestoredFuel(); for (const [actor, slot] of this.projections) this.seed(actor, slot, false); this.refresh(); this.host.presentation.restore(saved.presentation);
+      this.validateRecords(); this.protection?.validateRestoredInventory(); for (const [actor, slot] of this.projections) this.seed(actor, slot, false); this.refresh(); this.host.presentation.restore(saved.presentation);
       if (saved.owned !== null) this.owned?.restore(saved.owned, ownedActors);
       for (const [slot, link] of this.restoreLinks) if (this.owned?.actorAt(slot) != null) {
         if (this.host.entity(slot).address.byteOffset !== link.address.byteOffset) throw new Error("Native restore retained a stale source link");

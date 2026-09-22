@@ -5,7 +5,7 @@ import { nativeCauseFromCanonical } from "../../content/q2/missionpacks/damage.t
 import type { Q2NativeCauseProfile } from "../../content/q2/missionpacks/damage.ts";
 
 export class RemovedNativeDamage extends Error {
-  constructor(readonly request: DamageRequest) { super("Native damage target was removed during powered protection"); }
+  constructor(readonly request: DamageRequest) { super("Native damage target was removed during armor protection"); }
 }
 
 /** Flags at the original armor callsite, after the source has applied its damage gates. */

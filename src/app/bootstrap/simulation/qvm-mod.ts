@@ -40,11 +40,13 @@ export function prepareQvmMod(options: PrepareQvmModOptions): PreparedMod {
       if (mounts !== undefined && mounts !== options.mounts) context.resources.defer(() => { mounts.close(); return undefined; });
       const source = new QvmModProvider(artifact, declaration, services, context.assertCurrent, description.source.content, mounts, writable);
       context.resources.own(source);
+      source.reserveProtection();
       if (services.commands !== undefined) source.bindCommands(services.commands.bind({ selection: description.selection, module, cvars: source.cvars,
         invoke: command => source.consoleCommand(command), readScript: name => source.readScript(name) }, context.resources));
       if (context.restoring !== true) await source.initialize();
       context.assertCurrent();
       return {
+        activate() { source.activateProtection(); return undefined; },
         register(registrations) { return registerModCallbacks(declaration.callbacks, registrations, () => services.time(), (callback, inputs) => source.invoke(callback, inputs)); },
         advance(frame) { return source.advance(frame); },
         presentations() { return source.presentations(); },

@@ -1,5 +1,5 @@
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
-import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors, NativeModArmor, NativeModArmorField, NativeModArmorSelection, NativeModPowerArmorItem } from "../../contracts/native-mod-callbacks.ts";
+import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors, NativeModArmor, NativeModArmorField, NativeModArmorSelection, NativeModPowerArmorItem, NativeModRegularArmorItem, NativeModProtectionDefinition } from "../../contracts/native-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -65,14 +65,46 @@ function armorSelection(reader: SaveReader): NativeModArmorSelection {
     : { kind: "enum", field, value: reader.field("value").number(), none: reader.field("none").number() };
 }
 function armor(reader: SaveReader): NativeModArmor {
-  if (reader.field("kind").choice("none", "q2") === "none") return { kind: "none" };
+  const kind = reader.field("kind").choice("none", "q2", "source");
+  if (kind === "none") return { kind };
+  if (kind === "source") return { kind, regular: reader.field("regular").list(regularArmorItem), power: reader.field("power").list(powerArmorItem) };
   return { kind: "q2", regular: reader.field("regular").list(value => ({ item: namespaced(value.field("item")), selection: armorSelection(value.field("selection")),
     points: armorField(value.field("points")), normalProtection: value.field("normalProtection").number(), energyProtection: value.field("energyProtection").number() })),
     power: reader.field("power").list(powerArmorItem) };
 }
+function regularArmorItem(reader: SaveReader): NativeModRegularArmorItem {
+  return { item: reader.field("item").nullable(namespaced), selection: armorSelection(reader.field("selection")), points: armorField(reader.field("points")) };
+}
 function powerArmorItem(reader: SaveReader): NativeModPowerArmorItem {
   return { item: namespaced(reader.field("item")), kind: reader.field("kind").choice("screen", "shield"), selection: armorSelection(reader.field("selection")),
     cells: armorField(reader.field("cells")), enabled: reader.field("enabled").nullable(value => ({ field: armorField(value.field("field")), mask: value.field("mask").integer(1) })) };
+}
+function protection(reader: SaveReader, legacy = false): NativeModProtectionDefinition {
+  const channel = legacy ? "powered" : reader.field("channel").choice("regular", "powered"), absorb = reader.field("absorb");
+  const claim = { id: reader.field("id").string(),
+    ...(reader.field("admission").value === undefined ? {} : { admission: reader.field("admission").field("kind").choice("claim", "replace-current-primary", "replace-primary") === "replace-primary"
+      ? { kind: "replace-primary", owner: namespaced(reader.field("admission").field("owner")) } satisfies NativeModProtectionDefinition["admission"]
+      : { kind: reader.field("admission").field("kind").choice("claim", "replace-current-primary") } satisfies NativeModProtectionDefinition["admission"] }) };
+  const abi = absorb.field("abi").choice("q2-check-power-armor", "q2-check-armor", "source-call");
+  if (abi === "source-call") {
+    if (legacy) return absorb.fail("Legacy powered protection requires its original Q2 ABI");
+    const call = sourceCall(absorb.field("call"));
+    return channel === "regular" ? { ...claim, channel, storage: reader.field("storage").list(regularArmorItem), absorb: { abi, call } }
+      : { ...claim, channel, storage: reader.field("storage").list(powerArmorItem), absorb: { abi, call } };
+  }
+  const call = { entry: entry(absorb.field("entry")), flags: absorb.field("flags").choice("q2-classic", "q2-rerelease"),
+    ...(absorb.field("globals").value === undefined ? {} : { globals: absorb.field("globals").list(global => ({ address: address(global.field("address")), value: argument(global.field("value")) })) }) };
+  if (channel === "regular") {
+    if (abi !== "q2-check-armor") return absorb.fail("Regular protection requires its original regular armor ABI");
+    return { ...claim, channel, storage: reader.field("storage").list(regularArmorItem), absorb: { ...call, abi, sparks: absorb.field("sparks").integer(0) } };
+  }
+  if (abi !== "q2-check-power-armor") return absorb.fail("Powered protection requires its original power armor ABI");
+  return { ...claim, channel, storage: reader.field("storage").list(powerArmorItem), absorb: { ...call, abi } };
+}
+function protections(reader: SaveReader): readonly NativeModProtectionDefinition[] {
+  const current = reader.field("protection"), legacy = reader.field("poweredProtection");
+  if (current.value !== undefined && legacy.value !== undefined) return current.fail("Protection declarations cannot mix legacy and current layouts");
+  return current.value !== undefined ? current.list(value => protection(value)) : legacy.value !== undefined ? [protection(legacy, true)] : [];
 }
 function sourceActors(reader: SaveReader): NativeModSourceActors {
   const fields = reader.field("fields"), nextthink = fields.field("nextthink"), update = reader.field("update");
@@ -109,15 +141,7 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("native"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) }, target: parsedTarget,
     ...(reader.field("sourceActors").value === undefined ? {} : { sourceActors: sourceActors(reader.field("sourceActors")) }),
-    ...(reader.field("poweredProtection").value === undefined ? {} : { poweredProtection: (() => {
-      const value = reader.field("poweredProtection"), absorb = value.field("absorb");
-      return { id: value.field("id").string(), storage: value.field("storage").list(powerArmorItem),
-        ...(value.field("admission").value === undefined ? {} : { admission: value.field("admission").field("kind").choice("claim", "replace-primary") === "claim"
-          ? { kind: "claim" } satisfies NonNullable<NativeModDeclaration["poweredProtection"]>["admission"]
-          : { kind: "replace-primary", owner: namespaced(value.field("admission").field("owner")) } satisfies NonNullable<NativeModDeclaration["poweredProtection"]>["admission"] }),
-        absorb: { entry: entry(absorb.field("entry")), abi: absorb.field("abi").literal("q2-check-power-armor"), flags: absorb.field("flags").choice("q2-classic", "q2-rerelease"),
-          ...(absorb.field("globals").value === undefined ? {} : { globals: absorb.field("globals").list(global => ({ address: address(global.field("address")), value: argument(global.field("value")) })) }) } };
-    })() }),
+    ...(reader.field("protection").value === undefined && reader.field("poweredProtection").value === undefined ? {} : { protection: protections(reader) }),
     ...(reader.field("clients").value === undefined ? {} : { clients: {
       maximum: reader.field("clients").field("maximum").integer(1), records: reader.field("clients").field("records").list(value => value.string()),
       admit: reader.field("clients").field("admit").list(reader => ({ ...sourceCall(reader), accepts: reader.field("accepts").choice("always", "nonzero") })), userinfo: reader.field("clients").field("userinfo").list(sourceCall),

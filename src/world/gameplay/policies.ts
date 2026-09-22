@@ -1,6 +1,6 @@
 // Core damage/armor/impulse ordering from original combat.qc, g_combat.c, and the TS donors.
 // AI, source event accumulation, powerup sounds, obelisks and score rules stay in the owning game provider.
-import type { ArmorDamageFlags, CombatPolicy, CombatProgress, CombatResult, CombatState, CurrentCombatState, DamageDecision, DamageMutation, DamagePreparation, DamageRequest } from "../../contracts/gameplay.ts";
+import type { ArmorDamageFlags, CombatPolicy, CombatProgress, CombatResult, CombatState, CurrentCombatState, DamageDecision, DamageMutation, DamagePreparation, DamageRequest, ProtectionChannel } from "../../contracts/gameplay.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import { sameActor } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -35,17 +35,13 @@ function continuation(request: DamageRequest, mutations: readonly DamageMutation
   return { kind: "source-continuation", request, mutations, resume };
 }
 
-function powerStage(request: DamageRequest, amount: number, flags: ArmorDamageFlags, armor: VictimArmorPolicy,
+function armorStage(channel: ProtectionChannel, request: DamageRequest, amount: number, flags: ArmorDamageFlags, armor: VictimArmorPolicy,
   resume: (saved: number, current: CurrentCombatState) => CombatProgress): CombatProgress {
-  return { kind: "powered-armor", request, mutations: [], input: { request, geometry: request, amount, flags: { ...flags, stage: "power" } },
-    fallback: current => armor(request, current, amount, { ...flags, stage: "power" }), resume: (result, current) => resume(result.saved, current) };
+  const stage = channel === "powered" ? "power" : "regular";
+  return { kind: "armor-stage", channel, request, mutations: [], input: { request, geometry: request, amount, flags: { ...flags, stage } },
+    fallback: current => armor(request, current, amount, { ...flags, stage }), resume: (result, current) => resume(result.saved, current) };
 }
 
-function regularArmor(request: DamageRequest, target: CombatState, damage: number, mutations: DamageMutation[], armor: VictimArmorPolicy): number {
-  const result = armor(request, target.armor, damage, { ...attackDamageFlags(request), stage: "regular" });
-  if (result.armor !== target.armor) mutations.push({ kind: "armor", before: target.armor, after: result.armor });
-  return result.regularSaved;
-}
 
 function addImpulse(request: DamageRequest, mutations: DamageMutation[], direction: Vec3, amount: number, arithmetic: Arithmetic): undefined {
   if (amount !== 0) mutations.push({ kind: "impulse", impulse: scale(direction, amount, arithmetic), movementProvider: request.attack.movementProvider });
@@ -126,12 +122,13 @@ export function createQ1CombatPolicy(options: Q1CombatPolicyOptions): CombatPoli
         const latest = current.target();
         if (latest === null) return decision(request, [], 0, "none");
         if (!allowed) return afterArmor(latest, Math.ceil(round(damage)), []);
-        return powerStage(request, damage, attackDamageFlags(request), options.armor, (powerSaved, state) => {
+        return armorStage("powered", request, damage, attackDamageFlags(request), options.armor, (powerSaved, state) => {
           const victim = state.target();
           if (victim === null) return decision(request, [], 0, "none");
-          const mutations: DamageMutation[] = [];
-          const saved = regularArmor(request, victim, damage - powerSaved, mutations, options.armor);
-          return afterArmor(victim, Math.ceil(round(damage - (powerSaved + saved))), mutations);
+          return armorStage("regular", request, damage - powerSaved, attackDamageFlags(request), options.armor, (saved, current) => {
+            const latest = current.target();
+            return latest === null ? decision(request, [], 0, "none") : afterArmor(latest, Math.ceil(round(damage - (powerSaved + saved))), []);
+          });
         });
       });
     } };
@@ -210,10 +207,8 @@ export function createQ2CombatPolicy(options: Q2CombatPolicyOptions): CombatPoli
           const allowed = options.sourceEffects?.armorAllowed?.(request, victim, current.attacker()) !== false;
           victim = current.target();
           if (victim === null) return decision(request, [], 0, "none");
-          const mutations: DamageMutation[] = [];
-          const regularSaved = allowed ? regularArmor(request, victim, afterPowerTake, mutations, options.armor) : 0;
-          const afterRegularTake = afterPowerTake - regularSaved;
-          return continuation(request, mutations, current => {
+          const afterRegular = (regularSaved: number, current: CurrentCombatState): CombatProgress => {
+            const afterRegularTake = afterPowerTake - regularSaved;
             let victim = current.target();
             if (victim === null) return decision(request, [], 0, "none");
             let take = Math.trunc(options.sourceEffects?.afterArmor?.(request, afterRegularTake, victim, current.attacker()) ?? afterRegularTake);
@@ -224,10 +219,12 @@ export function createQ2CombatPolicy(options: Q2CombatPolicyOptions): CombatPoli
             if (take === 0) return decision(request, [], 0, "none", feedback);
             const health = Math.max(-999, Math.trunc(victim.health - take));
             return decision(request, [{ kind: "health", before: victim.health, after: health }], take, health <= 0 ? "death" : context.suppressPain ? "none" : "pain", feedback);
-          });
+          };
+          return allowed ? armorStage("regular", request, afterPowerTake, flags, options.armor, afterRegular)
+            : continuation(request, [], current => afterRegular(0, current));
         };
         if (!allowed) return continuation(request, [], current => afterPower(0, current));
-        return powerStage(request, amount, flags, options.armor, saved => continuation(request, [], next => afterPower(saved, next)));
+        return armorStage("powered", request, amount, flags, options.armor, saved => continuation(request, [], next => afterPower(saved, next)));
       });
     });
   }, afterHealth(result, current) {
@@ -288,17 +285,18 @@ export function createQ3CombatPolicy(options: PolicyOptions<Q3CombatContext>): C
     if (selfDamage(request)) damage = Math.trunc(damage * 0.5);
     damage = Math.max(1, damage);
     const amount = damage;
-    return continuation(request, mutations, () => powerStage(request, amount, flags, options.armor, (powerSaved, current) => {
+    return continuation(request, mutations, () => armorStage("powered", request, amount, flags, options.armor, (powerSaved, current) => {
       const victim = current.target();
       if (victim === null) return decision(request, [], 0, "none");
-      const mutations: DamageMutation[] = [];
-      const saved = regularArmor(request, victim, amount - powerSaved, mutations, options.armor);
-      const take = (amount - (powerSaved + saved)) | 0;
-      const feedback: NonNullable<CombatResult["feedback"]> = { kind: "q3", knockback, battlesuit };
-      if (take === 0) return decision(request, mutations, 0, "none", feedback);
-      const health = Math.max(-999, (victim.health - take) | 0);
-      mutations.push({ kind: "health", before: victim.health, after: health });
-      return decision(request, mutations, take, health <= 0 ? "death" : "pain", feedback);
+      return armorStage("regular", request, amount - powerSaved, flags, options.armor, (saved, state) => {
+        const latest = state.target();
+        if (latest === null) return decision(request, [], 0, "none");
+        const take = (amount - (powerSaved + saved)) | 0;
+        const feedback: NonNullable<CombatResult["feedback"]> = { kind: "q3", knockback, battlesuit };
+        if (take === 0) return decision(request, [], 0, "none", feedback);
+        const health = Math.max(-999, (latest.health - take) | 0);
+        return decision(request, [{ kind: "health", before: latest.health, after: health }], take, health <= 0 ? "death" : "pain", feedback);
+      });
     }));
   } };
 }

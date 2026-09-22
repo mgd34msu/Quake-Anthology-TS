@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
-import type { ArmorState, AttackProvenance, DamageOutcome, DamageRequest, Q2NativeCause } from "../../../contracts/gameplay.ts";
+import type { ArmorState, AttackProvenance, DamageOutcome, DamageRequest, Q2NativeCause, ProtectionChannel } from "../../../contracts/gameplay.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import { canonicalCauseFromNative } from "../../../content/q2/missionpacks/damage.ts";
 import { integer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
-import type { SourceDamageResult, SourcePoweredArmorStage } from "../../../world/gameplay/authority.ts";
+import type { SourceDamageResult, SourceArmorStage } from "../../../world/gameplay/authority.ts";
 import { isDeepStrictEqual } from "node:util";
 import { RereleaseSourceEdict } from "./source-state.ts";
 import { RereleaseSourceClient } from "./source-state.ts";
@@ -32,8 +32,8 @@ export class RereleaseForeignActors {
   readonly #removeEntry: () => void;
   readonly #removeContinuation: () => void;
   readonly #damageFrames: { readonly request: DamageRequest; entered: boolean; stack: bigint | null }[] = [];
-  readonly #powerBindings = new Map<OwnedActor, { readonly intercept: Parameters<SourcePoweredArmorStage["bind"]>[0]; readonly armor: () => ArmorState }>();
-  readonly #powerHooks: (() => void)[] = [];
+  readonly #armorBindings = new Map<OwnedActor, { readonly stages: Partial<Record<ProtectionChannel, Parameters<SourceArmorStage["bind"]>[0]>>; readonly armor: () => ArmorState }>();
+  readonly #armorHooks: (() => void)[] = [];
   #powerBypass: bigint | "pending" | null = null;
   readonly deferred: RereleaseDeferredDamage;
   #restoring: { readonly actors: ReadonlyMap<number, SavedActorId>; readonly domain: "checkpoint" | "current" } | null = null;
@@ -70,32 +70,35 @@ export class RereleaseForeignActors {
     const view = module.entities().fromPointer(address);
     if (this.#slots.has(view.slot)) return false;
     const actor = this.host.actor(view);
-    return actor !== null && (engine.combat.damageOperation.active || this.#powerBindings.has(actor));
+    return actor !== null && (engine.combat.damageOperation.active || this.#armorBindings.has(actor));
   }
-  poweredArmorStage(view: RawEntityView, armor: () => ArmorState): SourcePoweredArmorStage {
+  armorStage(view: RawEntityView, armor: () => ArmorState, channel: ProtectionChannel): SourceArmorStage {
     return { bind: intercept => {
       const actor = this.host.actor(view);
-      if (actor === null || this.#powerBindings.has(actor)) throw new Error("Native power stage has no unclaimed live actor");
-      const binding = { intercept, armor }; this.#powerBindings.set(actor, binding);
-      try { if (this.#powerHooks.length === 0) this.#installPowerHooks(); }
-      catch (error) { this.#powerBindings.delete(actor); for (const remove of this.#powerHooks.splice(0)) remove(); throw error; }
+      if (actor === null) throw new Error("Native armor stage has no live actor");
+      const binding = this.#armorBindings.get(actor) ?? { stages: {}, armor };
+      if (binding.stages[channel] !== undefined) throw new Error("Native armor stage already has an owner");
+      binding.stages[channel] = intercept; this.#armorBindings.set(actor, binding);
+      try { if (this.#armorHooks.length === 0) this.#installArmorHooks(); }
+      catch (error) { delete binding.stages[channel]; if (binding.stages.regular === undefined && binding.stages.powered === undefined) this.#armorBindings.delete(actor); for (const remove of this.#armorHooks.splice(0)) remove(); throw error; }
       return () => {
-        if (this.#powerBindings.get(actor) === binding) this.#powerBindings.delete(actor);
-        if (this.#powerBindings.size === 0) for (const remove of this.#powerHooks.splice(0)) remove();
+        if (binding.stages[channel] === intercept) delete binding.stages[channel];
+        if (binding.stages.regular === undefined && binding.stages.powered === undefined) this.#armorBindings.delete(actor);
+        if (this.#armorBindings.size === 0) for (const remove of this.#armorHooks.splice(0)) remove();
         return undefined;
       };
     } };
   }
-  #installPowerHooks(): void {
+  #installArmorHooks(): void {
     const { module } = this.host, { callbacks, cpu } = module.options.runner.options, memory = module.memory;
     const stack = () => cpu.state.registers.read("rsp", 64);
-    this.#powerHooks.push(callbacks.observeEntry(this.entries.powerArmor, () => { if (this.#powerBypass === "pending") this.#powerBypass = stack(); }));
-    this.#powerHooks.push(callbacks.bindEntry(this.entries.powerArmor, {
+    this.#armorHooks.push(callbacks.observeEntry(this.entries.powerArmor, () => { if (this.#powerBypass === "pending") this.#powerBypass = stack(); }));
+    this.#armorHooks.push(callbacks.bindEntry(this.entries.powerArmor, {
       id: `${memory.module.id}:powered-armor`, signature: rereleasePowerArmorSignature,
       invoke: (_context, args) => {
         const view = module.entities().fromPointer(requiredPointer(args, 0)), actor = this.host.actor(view), frame = this.#damageFrames.at(-1);
-        const binding = actor === null ? undefined : this.#powerBindings.get(actor);
-        if (actor === null || binding === undefined || frame === undefined || !frame.request.target.equals(actor.id))
+        const intercept = actor === null ? undefined : this.#armorBindings.get(actor)?.stages.powered;
+        if (actor === null || intercept === undefined || frame === undefined || !frame.request.target.equals(actor.id))
           throw new Error("Native power stage has no active source damage request");
         const original = (): number => {
           const previous = this.#powerBypass; this.#powerBypass = "pending";
@@ -104,16 +107,42 @@ export class RereleaseForeignActors {
             if (result.kind !== "int32") throw new Error("Native power stage returned a non-integer result"); return result.value;
           } finally { this.#powerBypass = previous; }
         };
-        const saved = binding.intercept({ request: frame.request, amount: Number(integer(args, 3)),
+        const saved = intercept({ request: frame.request, amount: Number(integer(args, 3)),
           geometry: { direction: frame.request.direction, point: this.#vector(requiredPointer(args, 1)), normal: this.#vector(requiredPointer(args, 2)) },
           flags: q2NativeArmorFlags(Number(integer(args, 4))) }, original);
         if (!this.host.options.engine.actors.isLive(actor.id)) throw new RemovedNativeDamage(frame.request);
-        return guestInt(saved);
+        return guestInt(Math.trunc(saved));
       },
     }, () => {
       if (this.#powerBypass === stack()) return false;
       const address = memory.pointer(cpu.state.registers.read("rcx", 64)); if (address === null) return false;
-      const actor = this.host.actor(module.entities().fromPointer(address)); return actor !== null && this.#powerBindings.has(actor);
+      const actor = this.host.actor(module.entities().fromPointer(address)); return actor !== null && this.#armorBindings.get(actor)?.stages.powered !== undefined;
+    }));
+    this.#armorHooks.push(module.options.runner.bindInlineRegion(this.entries.regularArmor.entry, this.entries.regularArmor.join, rereleaseDamageSignature.abi, continuation => {
+      const address = memory.pointer(cpu.state.registers.read("rdi", 64));
+      const actor = address === null ? null : this.host.actor(module.entities().fromPointer(address));
+      const intercept = actor === null ? undefined : this.#armorBindings.get(actor)?.stages.regular;
+      if (intercept === undefined) return continuation.execute();
+      const frame = this.#damageFrames.at(-1);
+      if (actor === null || frame === undefined || !frame.request.target.equals(actor.id)) throw new Error("Native regular stage has no active source damage request");
+      const sourceStack = memory.pointer(stack()), point = memory.pointer(cpu.state.registers.read("r13", 64));
+      if (sourceStack === null || point === null) throw new Error("Native regular stage has no source arguments");
+      const normal = memory.readPointer(memory.offset(sourceStack, 0x108n));
+      if (normal === null) throw new Error("Native regular stage has no source normal");
+      let executed = false;
+      const saved = intercept({ request: frame.request, amount: Number(BigInt.asIntN(32, cpu.state.registers.read("r14", 32))),
+        geometry: { direction: frame.request.direction, point: this.#vector(point), normal: this.#vector(normal) },
+        flags: q2NativeArmorFlags(memory.readInt32(memory.offset(sourceStack, 0x120n))) }, () => {
+        continuation.execute(); executed = true;
+        return Number(BigInt.asIntN(32, cpu.state.registers.read("r12", 32)));
+      });
+      if (!this.host.options.engine.actors.isLive(actor.id)) throw new RemovedNativeDamage(frame.request);
+      if (!executed) {
+        continuation.skip();
+        cpu.state.registers.write("rbx", 32, BigInt(memory.readUint32(memory.offset(sourceStack, 0xe0n))));
+      }
+      cpu.state.registers.write("r12", 32, BigInt(Math.trunc(saved)));
+      return undefined;
     }));
   }
   released(actor: OwnedActor): void { this.deferred.release(actor); const entry = this.#actors.get(actor.id); if (entry !== undefined) this.#release(entry); }
@@ -203,7 +232,7 @@ export class RereleaseForeignActors {
       delivery: (damageFlags & 1) !== 0 ? "radius" : "direct", attack: { ...this.services.provenance(attacker, inflictor, target), attacker, inflictor,
         cause: { kind: "q2", meansOfDeath: canonical, damageFlags, native } } };
     const targetOwner = this.host.options.engine.actors.resolveOwned(target);
-    if (this.#actors.has(target) || targetOwner !== null && this.#powerBindings.has(targetOwner)) this.host.options.engine.combat.apply(request);
+    if (this.#actors.has(target) || targetOwner !== null && this.#armorBindings.has(targetOwner)) this.host.options.engine.combat.apply(request);
     else this.damageNative(request);
     const entry = this.#actors.get(target); if (entry !== undefined && !entry.releasing) this.#sync(entry);
   }
@@ -220,7 +249,7 @@ export class RereleaseForeignActors {
       const attacker = this.host.addressForActor(request.attack.attacker ?? engine.worldActor()), inflictor = this.host.addressForActor(request.attack.inflictor ?? engine.worldActor());
       const frame: { readonly request: DamageRequest; entered: boolean; stack: bigint | null } = { request, entered: false, stack: null };
       const state: { result: SourceDamageResult | null } = { result: null };
-      const targetOwner = engine.actors.resolveOwned(request.target), power = targetOwner === null ? undefined : this.#powerBindings.get(targetOwner);
+      const targetOwner = engine.actors.resolveOwned(request.target), power = targetOwner === null ? undefined : this.#armorBindings.get(targetOwner);
       const readArmor = power?.armor ?? (() => engine.combat.read(request.target)?.armor);
       let health = source.health, velocity = source.vector("velocity"), armor = readArmor(), appliedDamage = 0;
       if (armor === undefined) throw new Error("Native target lacks a combat binding");
@@ -248,8 +277,11 @@ export class RereleaseForeignActors {
             const before = armor; armor = after;
             if (!current()) return;
             if (after === undefined || before === undefined) throw new Error("Native armor binding disappeared during damage");
-            if (power !== undefined && isDeepStrictEqual(before.regular, after.regular)) return;
-            observer.stored({ kind: "armor", before, after });
+            const effective = engine.combat.read(request.target)?.armor;
+            if (effective === undefined) throw new Error("Native armor binding disappeared during damage");
+            const prior = { regular: power?.stages.regular === undefined ? before.regular : effective.regular, powered: power?.stages.powered === undefined ? before.powered : effective.powered };
+            if (isDeepStrictEqual(prior, effective)) return;
+            observer.stored({ kind: "armor", before: prior, after: effective });
           }));
         }
         const { callbacks, cpu } = module.options.runner.options;
@@ -309,8 +341,8 @@ export class RereleaseForeignActors {
   }
   endRestore(): void { this.#restoring = null; }
   close(): void {
-    for (const remove of this.#powerHooks.splice(0)) remove();
-    this.#powerBindings.clear();
+    for (const remove of this.#armorHooks.splice(0)) remove();
+    this.#armorBindings.clear();
     if (this.#closed) return; this.#closed = true;
     this.#removeEntry(); this.#removeContinuation(); this.deferred.close(); this.clear();
   }

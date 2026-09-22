@@ -1,5 +1,5 @@
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
-import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue } from "../../contracts/qvm-mod-callbacks.ts";
+import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue, QvmModProtection, QvmModProtectionScalar, QvmModProtectionSelection } from "../../contracts/qvm-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -7,7 +7,7 @@ import { readModClientInput } from "./client-input.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "damage-flags", "regular-protection-scale") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
     case "string": return { kind: "string", value: reader.field("value").string() };
@@ -53,6 +53,27 @@ function field(reader: SaveReader): QvmModActorField {
     default: return { offset, binding };
   }
 }
+function protectionScalar(reader: SaveReader): QvmModProtectionScalar {
+  return { record: reader.field("record").string(), offset: reader.field("offset").integer(0), encoding: reader.field("encoding").choice("int32", "float32") };
+}
+function protectionSelection<Value>(reader: SaveReader, selected: (reader: SaveReader) => Value): QvmModProtectionSelection<Value> {
+  return { field: protectionScalar(reader.field("field")), mask: reader.field("mask").nullable(value => value.integer(0)),
+    values: reader.field("values").list(value => ({ value: value.field("value").number(), selected: selected(value.field("selected")) })) };
+}
+function protection(reader: SaveReader): QvmModProtection {
+  const admission = reader.field("admission"), flags = reader.field("flags"), storage = reader.field("storage");
+  const kind = admission.field("kind").choice("claim", "replace-primary", "replace-current-primary");
+  const claim = kind !== "replace-primary" ? { kind } satisfies QvmModProtection["admission"]
+    : { kind: "replace-primary", owner: namespaced(admission.field("owner")) } satisfies QvmModProtection["admission"];
+  const common = { id: namespaced(reader.field("id")), admission: claim, absorb: sourceCall(reader.field("absorb")),
+    flags: { noArmor: flags.field("noArmor").integer(0), noPowerArmor: flags.field("noPowerArmor").integer(0), noRegularArmor: flags.field("noRegularArmor").integer(0),
+      energy: flags.field("energy").integer(0), radius: flags.field("radius").value === undefined ? 0 : flags.field("radius").integer(0) } };
+  return reader.field("channel").choice("regular", "powered") === "regular"
+    ? { ...common, channel: "regular", storage: { points: protectionScalar(storage.field("points")), item: storage.field("item").nullable(namespaced),
+      ...(storage.field("selection").value === undefined ? {} : { selection: protectionSelection(storage.field("selection"), value => value.nullable(namespaced)) }) } }
+    : { ...common, channel: "powered", storage: { cells: protectionScalar(storage.field("cells")),
+      selection: protectionSelection(storage.field("selection"), value => value.choice("none", "screen", "shield")) } };
+}
 export function readQvmModCallbacks(bytes: Uint8Array): QvmModCallbackDeclaration {
   const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   return readQvmModDeclaration(new SaveReader(value));
@@ -82,6 +103,7 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
       globals: combat.field("globals").list(global => ({ address: global.field("address").integer(0), value: argument(global.field("value")) })),
       client: combat.field("client").nullable(client => ({ pointer: client.field("pointer").integer(0), record: client.field("record").string(),
         health: client.field("health").integer(0), armor: client.field("armor").integer(0), protection: client.field("protection").number(), team: client.field("team").integer(0) })) } }),
+    ...(reader.field("protection").value === undefined ? {} : { protection: reader.field("protection").list(protection) }),
     actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(), address: record.field("address").integer(1),
       stride: record.field("stride").integer(4), capacity: record.field("capacity").integer(1), fields: record.field("fields").list(field) })),
     initialize: reader.field("initialize").list(sourceCall), callbacks: reader.field("callbacks").list(reader => ({ ...binding(reader), ...sourceCall(reader) })) };

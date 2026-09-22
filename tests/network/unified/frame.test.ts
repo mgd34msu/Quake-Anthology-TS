@@ -62,7 +62,7 @@ test('source grapple cable and looping sound retain client-owned actor identitie
 
 test('unified frame reconstructs mixed presentation identities and local resources without server paths',async()=>{
   const bytes=encodeUnifiedFrame(frame),text=new TextDecoder().decode(inflateRawSync(bytes));
-  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(2);
+  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(3);
   expect(text.includes('/server-private')).toBe(false);expect(text.includes('local-model')).toBe(false);
   const result=await decodeUnifiedFrame(bytes,context),snapshot=result.output.snapshot;
   expect(snapshot.session).toBe(client.session);expect(result.player.actor.equals(client.actor(4,2))).toBe(true);expect(result.player.actor.equals(id)).toBe(false);
@@ -84,4 +84,18 @@ test('unified frame rejects mismatched local resource and unsafe server path',as
 test('unified frame rejects wrong schema before resolving resources',async()=>{
   const value=new SaveReader(decodeCheckpointValue(inflateRawSync(encodeUnifiedFrame(frame))));
   await expect(decodeUnifiedFrame(deflateRawSync(encodeCheckpointValue({schema:'wrong',version:1,epoch:value.field('epoch').value})),context)).rejects.toThrow('qts-unified-frame');
+});
+
+test('unified frame preserves source armor projection without assigning an absorption formula',async()=>{
+  const armor = { regular: { kind: 'source', points: 39, item: 'mod:armor' }, powered: { kind: 'shield', cells: 17 } } satisfies UnifiedPresentationFrame['player']['ui']['armor'];
+  const event = { sequence: 4, time: { kind: 'seconds', value: 1 }, audience: { kind: 'world' }, payload: { kind: 'damage', outcome: { kind: 'committed', survived: true,
+    decision: { appliedDamage: 1, reaction: 'pain', mutations: [{ kind: 'armor', before: armor, after: armor }],
+      request: { target: id, amount: 1, knockback: 0, direction: origin, point: origin, normal: origin, delivery: 'direct',
+        attack: { sequence: 1, time: { kind: 'seconds', value: 1 }, attacker: id, inflictor: id, weapon: null, weaponProvider: 'q1:weapons', combatProvider: 'q1:combat',
+          inventoryProvider: 'q1:inventory', movementProvider: 'q1:movement', cause: { kind: 'q1', deathType: '' } } } } } } } satisfies UnifiedPresentationFrame['output']['events'][number];
+  const result = await decodeUnifiedFrame(encodeUnifiedFrame({ ...frame, output: { ...frame.output, events: [event] }, player: { ...frame.player, ui: { ...frame.player.ui, armor } } }), context);
+  expect(result.player.ui.armor).toEqual(armor);
+  const payload = result.output.events[0]?.payload;
+  if (payload?.kind !== 'damage' || payload.outcome.kind !== 'committed') throw new Error('Missing damage event');
+  expect(payload.outcome.decision.mutations).toEqual(event.payload.outcome.decision.mutations);
 });

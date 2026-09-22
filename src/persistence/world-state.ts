@@ -8,6 +8,7 @@ import type { GameplayAuthority } from "../world/gameplay/authority.ts";
 import type { SharedInventoryTable } from "../world/gameplay/inventory.ts";
 import { SaveFormatError } from "./value.ts";
 import { savedActorId } from "./save-image.ts";
+import { readPrimaryProtection } from "./protection.ts";
 
 export function captureSharedBodies(actors: SessionActorRegistry, bodies: SharedBodyTable): readonly BodyCheckpoint[] {
   const result: BodyCheckpoint[] = [];
@@ -55,10 +56,11 @@ export interface SharedWorldRestoreCompletion {
 /** Run before source-provider restore binds named callbacks; link bodies after source collision metadata exists. */
 export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost): undefined;
 export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost,
-  options: { readonly deferPoweredProtection: true }): SharedWorldRestoreCompletion;
+  options: { readonly deferProtection: true }): SharedWorldRestoreCompletion;
 export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost,
-  options?: { readonly deferPoweredProtection: true }): undefined | SharedWorldRestoreCompletion {
+  options?: { readonly deferProtection: true }): undefined | SharedWorldRestoreCompletion {
   host.combat.assertIdle();
+  const hidden = readPrimaryProtection(save, host.actors);
   const actor = (saved: SavedActorId): OwnedActor => {
     const restored = host.actors.resolveSaved(saved);
     if (restored === null) throw new SaveFormatError("world", `missing saved actor ${saved.slot}/${saved.generation}`);
@@ -66,6 +68,8 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   };
   const bodyActors = new Set(save.bodies.map(entry => actor(entry.actor)));
   const combatActors = new Set(save.combat.map(entry => actor(entry.actor)));
+  for (const owner of hidden.entries.keys()) if (!combatActors.has(owner) || host.storage(owner) !== "copied")
+    throw new SaveFormatError("world.combat", "hidden armor checkpoint requires a copied combat owner");
   const inventories = new Map(save.inventories.map(entry => [actor(entry.actor), entry.entries]));
   for (const entry of save.actors) if (entry.lifetime.kind === "active") {
     const restored = actor(entry);
@@ -100,7 +104,14 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
       const state = host.combat.read(restored.id);
       if (state === null) throw new SaveFormatError("world.combat", "source combat view has not been bound");
       if (options === undefined && storage === "prebound" && !isDeepStrictEqual(state, saved)) throw new SaveFormatError("world.combat", "source combat disagrees with saved shared state");
-    } else host.combat.create(restored, options === undefined ? saved : { ...saved, armor: { regular: saved.armor.regular, powered: { kind: "none" } } });
+    } else {
+      const primary = hidden.entries.get(restored);
+      if (options === undefined && primary !== undefined) throw new SaveFormatError("world.combat", "hidden primary armor requires component restoration");
+      host.combat.create(restored, options === undefined ? saved : { ...saved, armor: {
+        regular: primary?.regular ?? (saved.armor.regular.kind === "source" ? { kind: "none" } : saved.armor.regular),
+        powered: primary?.powered ?? { kind: "none" },
+      } });
+    }
   }
   for (const entry of save.inventories) {
     const restored = actor(entry.actor);
@@ -123,19 +134,29 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
           const restored = actor(entry.actor), storage = host.storage(restored);
           const saved = save.legacyArmorLayout === true && storage !== "copied"
             ? { ...entry.state, armor: host.combat.normalizeLegacyArmor(restored, entry.state.armor) } : entry.state;
-          const current = host.combat.read(restored.id), external = host.combat.poweredProtectionOwner(restored) !== null;
-          const fuels = host.combat.poweredProtectionFuelItems(restored);
+          const current = host.combat.read(restored.id);
+          const externalRegular = host.combat.protectionOwner(restored, "regular") !== null;
+          const externalPower = host.combat.protectionOwner(restored, "powered") !== null;
+          const componentItems = { regular: host.combat.protectionInventoryItems(restored, "regular"), powered: host.combat.protectionInventoryItems(restored, "powered") };
+          const primary = hidden.entries.get(restored), ownsCopy = host.combat.copiedPrimaryArmor(restored) !== null;
           if (current === null) throw new SaveFormatError("world.combat", "restored combat view has not been bound");
+          if (primary !== undefined && !ownsCopy) throw new SaveFormatError("world.combat", "source binding cannot restore copied primary armor");
+          if (ownsCopy && (hidden.recorded || externalRegular)) {
+            if ((primary?.regular !== undefined) !== externalRegular || (primary?.powered !== undefined) !== externalPower)
+              throw new SaveFormatError("world.combat", "hidden primary armor coverage differs from restored component ownership");
+          }
           if (storage === "source-reconstructed") {
-            if (external && !isDeepStrictEqual(current.armor.powered, saved.armor.powered))
-              throw new SaveFormatError("world.combat", "component powered protection disagrees with saved shared state");
-            for (const item of fuels) {
-              const savedFuel = inventories.get(restored)?.find(entry => entry.item === item);
-              const currentFuel = host.inventory.entries(restored.id).find(entry => entry.item === item);
-              if (savedFuel === undefined || currentFuel === undefined || !Object.is(savedFuel.count, currentFuel.count))
-                throw new SaveFormatError("world.inventories", "component powered fuel disagrees with saved shared state");
+            for (const channel of ["regular", "powered"] satisfies readonly ("regular" | "powered")[]) {
+              if (host.combat.protectionOwner(restored, channel) !== null && !isDeepStrictEqual(current.armor[channel], saved.armor[channel]))
+                throw new SaveFormatError("world.combat", `component ${channel} protection disagrees with saved shared state`);
+              for (const item of componentItems[channel]) {
+                const savedItem = inventories.get(restored)?.find(entry => entry.item === item);
+                const currentItem = host.inventory.entries(restored.id).find(entry => entry.item === item);
+                if (savedItem === undefined || currentItem === undefined || !Object.is(savedItem.count, currentItem.count))
+                  throw new SaveFormatError("world.inventories", "component protection inventory disagrees with saved shared state");
+              }
             }
-          } else if (storage === "copied" && !external) {
+          } else if (storage === "copied" && !externalPower) {
             if (!isDeepStrictEqual({ ...current, armor: { ...current.armor, powered: saved.armor.powered } }, saved))
               throw new SaveFormatError("world.combat", "copied combat disagrees with saved shared state");
             copied.push({ actor: restored, state: saved });

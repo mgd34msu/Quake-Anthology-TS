@@ -3,11 +3,14 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ArmorStageInput, DamageOutcome, PoweredProtectionState } from "../../../src/contracts/gameplay.ts";
-import type { ModQcArmorStage } from "../../../src/contracts/mod-callbacks.ts";
+import type { ModQcArmorStage, ModCallbackDeclaration, ModActorField } from "../../../src/contracts/mod-callbacks.ts";
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
-import { QcProgram, QcOpcode, loadQcProgram } from "../../../src/compat/qc/program.ts";
+import { QcProgram, QcOpcode, loadQcProgram, type QcDefinition, type QcFunction, type QcStatement } from "../../../src/compat/qc/program.ts";
 import { QcEntityMemory, QcMachine, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage } from "../../../src/compat/qc/index.ts";
-import { SessionActorRegistry, ActorCallbackTable, SourceActorSlots, quakeEdictLifetime } from "../../../src/world/actors/index.ts";
+import { SessionActorRegistry, ActorCallbackTable, SourceActorSlots, quakeEdictLifetime, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
+import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
+import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
 import { Id1DamageBinding } from "../../../src/content/q1/quakec/id1-damage.ts";
@@ -58,13 +61,13 @@ function fixture(program: QcProgram, declaration?: ModQcArmorStage) {
   const field = (name: string) => vm.fieldOffset(name), targetWords = entities.at(2), attackerWords = entities.at(1);
   const profile = id1ProgramBinding(program);
   for (const [slot, actor] of [[1, attacker], [2, target]] satisfies readonly (readonly [number, typeof target])[]) {
-    const words = entities.at(slot), stage = binding.poweredArmorStage(actor);
+    const words = entities.at(slot), stage = binding.protectionStage(actor, "powered"), regularStage = binding.protectionStage(actor, "regular");
     words.setFloat(field("health"), 100); words.setFloat(field("takedamage"), 2); words.setFloat(field("movetype"), 3);
     words.setFloat(field("armorvalue"), 40); words.setFloat(field("armortype"), 0.3); words.setFloat(field(profile.armorField), profile.armorMasks[0]);
     words.setInt(field("classname"), vm.strings.allocate(slot === 1 ? "attacker" : "target"));
     words.setInt(field("th_pain"), program.functionNamed("SUB_Null").index); words.setInt(field("th_die"), program.functionNamed("SUB_Null").index);
     words.setVector(field("origin"), { x: slot * 20, y: 0, z: 0 });
-    authority.bind(actor, { sourceDamage: () => { throw new Error("Use original source entry"); }, ...(stage === null ? {} : { poweredArmorStage: stage }),
+    authority.bind(actor, { sourceDamage: () => { throw new Error("Use original source entry"); }, protection: { powered: { owner: null, ...(stage === null ? {} : { stage }) }, regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) } },
       read: () => ({ health: words.float(field("health")), armor: binding.readArmor(words), mass: 200, canTakeDamage: true, invulnerable: false, team: null }),
       writeHealth: () => { throw new Error("Source health replay"); }, writeArmor: () => { throw new Error("Source armor replay"); } });
   }
@@ -77,13 +80,13 @@ function fixture(program: QcProgram, declaration?: ModQcArmorStage) {
   const bindPower = (effect?: () => void) => {
     let power: PoweredProtectionState = { kind: "shield", cells: 40 }, nested = false;
     const inputs: ArmorStageInput[] = [];
-    const remove = authority.bindPoweredProtection(target, { owner: "borrowed:power", rule: "test:absorb", admission: { kind: "claim" }, fuelItems: ["q2:ammo_cells"],
+    const remove = authority.bindProtection(target, { channel: "powered", owner: "borrowed:power", rule: "test:absorb", admission: { kind: "claim" }, inventoryItems: ["q2:ammo_cells"],
       read: () => power, validateWrite: () => undefined, write: next => { power = next; return undefined; }, absorb: (input, observer) => {
         inputs.push(input);
         if (nested) return { saved: 0 };
         const before = power;
         if (before.kind === "none") throw new Error("Missing powered state");
-        power = { ...before, cells: before.cells - 1 }; observer.stored({ before, after: power });
+        power = { ...before, cells: before.cells - 1 }; observer.stored({ powered: { before, after: power } });
         nested = true;
         try { effect?.(); } finally { nested = false; }
         return { saved: Math.min(20, input.amount) };
@@ -202,12 +205,91 @@ test("inline QC continuations execute once and preserve the original instruction
   const plain = make(undefined, 18), bounded = make((_region, execute) => execute(), 18);
   for (const vm of [plain, bounded]) { expect(() => vm.execute(damage, 4)).toThrow("runaway loop"); vm.snapshot(); }
   expect(bounded.profiling).toEqual(plain.profiling); expect(bounded.entities.bytes).toEqual(plain.entities.bytes);
+  const skipped = make((_region, execute) => execute.skipToJoin()); skipped.execute(damage, 4);
+  expect(skipped.entities.at(2).float(skipped.fieldOffset("armorvalue"))).toBe(40);
+  expect(skipped.entities.at(2).float(skipped.fieldOffset("health"))).toBe(60);
+  const twice = make((_region, execute) => { execute.skipToJoin(); try { execute(); } catch {} return undefined; });
+  expect(() => twice.execute(damage, 4)).toThrow("once inside its boundary"); twice.snapshot();
+});
+
+test("declared original Copper region supplies regular armor after power to original Hipnotic", async () => {
+  const primary = fixture(await readProgram("rerelease/hipnotic/pak0.pak")), program = loadQcProgram(await Bun.file(copper).bytes());
+  const fields: ModActorField[] = [], occupied = new Set<number>();
+  for (const field of program.fields) {
+    const width = field.type === "vector" ? 3 : 1, words = Array.from({ length: width }, (_, index) => field.offset + index);
+    if (field.name === "" || words.some(word => occupied.has(word))) continue;
+    words.forEach(word => occupied.add(word)); fields.push({ field: field.name, binding: "private" });
+  }
+  const declaration = readModCallbacks(new TextEncoder().encode(JSON.stringify({ version: 1, runtime: "quakec", program: { path: "progs.dat", digest: program.digest },
+    actorFields: fields, callbacks: [], clients: { maximum: 1, admit: [], userinfo: [], disconnect: [] }, protection: [{
+      id: "copper:regular", channel: "regular", admission: { kind: "replace-current-primary" }, storage: { points: "armorvalue", item: "q1:item_armor1" },
+      flags: { noArmor: 4, noPowerArmor: 0, noRegularArmor: 0, energy: 0, radius: 0 },
+      absorb: { kind: "region", stage: copperStage(program), call: { function: "T_DamageApply", arguments: [
+        { kind: "input", name: "self" }, { kind: "input", name: "inflictor" }, { kind: "input", name: "attacker" },
+        { kind: "input", name: "amount" }, { kind: "input", name: "damage-flags" }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] } },
+    }] } satisfies ModCallbackDeclaration)));
+  const client = createIdentityOwner("qc-regular-donor").client(0, 0), rng = new SourceRandom(17);
+  const createSource = (declaration: ModCallbackDeclaration) => new QcModProvider(program, { id: "mod:copper-armor", artifactPath: "progs.dat", digest: program.digest, revision: "test" }, declaration,
+    { actors: primary.actors, combat: primary.authority, inventory: new SharedInventoryTable(primary.actors), seed: 17, time: () => ({ kind: "seconds", value: 3 }),
+      bodies: new SharedBodyTable(primary.actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined }),
+      clients: { maximum: 1, clients: () => [{ client, actor: primary.target.id }], forActor: actor => actor.equals(primary.target.id) ? client : null,
+        actor: current => current.equals(client) ? primary.target.id : null, userinfo: () => "", setUserinfo: () => undefined, command: () => null,
+        subscribe: () => () => undefined, subscribeApplication: () => () => undefined, drop: () => undefined } },
+    { nextInteger: () => rng.nextInteger(), nextUnit: () => rng.nextUnit(), checkpoint: () => rng.checkpoint(), restore: state => {
+      if (state.kind !== "glibc-random") throw new Error("Wrong RNG"); return rng.restore(state);
+    } });
+  const source = createSource(declaration);
+  try {
+    source.initialize();
+    const words = source.machine.entities.at(1), field = (name: string) => source.machine.fieldOffset(name);
+    words.setFloat(field("armorvalue"), 100); words.setFloat(field("armortype"), 0.8); words.setFloat(field("takedamage"), 2);
+    words.setInt(field("classname"), source.machine.strings.allocate("donor"));
+    const beforeFrame = source.machine.globals.bytes.slice(program.functionNamed("T_DamageApply").parameterStart * 4,
+      (program.functionNamed("T_DamageApply").parameterStart + program.functionNamed("T_DamageApply").localWords) * 4);
+    const power = primary.bindPower(); primary.targetWords.setFloat(primary.field("flags"), 8);
+    primary.invoke(40);
+    expect(power.inputs[0]?.amount).toBe(40);
+    expect(words.float(field("armorvalue"))).toBe(84);
+    expect(primary.targetWords.float(primary.field("armorvalue"))).toBe(40);
+    expect(primary.targetWords.float(primary.field("health"))).toBe(96);
+    expect(primary.targetWords.float(primary.field("dmg_save"))).toBe(36);
+    expect(primary.authority.read(primary.target.id)?.armor.regular).toEqual({ kind: "source", points: 84, item: "q1:item_armor1" });
+    expect(source.machine.globals.bytes.slice(program.functionNamed("T_DamageApply").parameterStart * 4,
+      (program.functionNamed("T_DamageApply").parameterStart + program.functionNamed("T_DamageApply").localWords) * 4)).toEqual(beforeFrame);
+    const saved = source.checkpoint();
+    words.setFloat(field("armortype"), 0.2); primary.invoke(40);
+    expect(words.float(field("armorvalue"))).toBe(80); expect(primary.targetWords.float(primary.field("health"))).toBe(80);
+    source.restore(saved); expect(primary.authority.read(primary.target.id)?.armor.regular).toEqual({ kind: "source", points: 84, item: "q1:item_armor1" });
+    primary.authority.setRegularPoints(primary.target, 0);
+    expect(primary.authority.read(primary.target.id)?.armor.regular).toEqual({ kind: "source", points: 0, item: "q1:item_armor1" });
+    primary.authority.setRegularPoints(primary.target, 50); expect(words.float(field("armorvalue"))).toBe(50);
+    source.close(); expect(primary.authority.read(primary.target.id)?.armor.regular).toMatchObject({ kind: "q1", points: 40 });
+    primary.invoke(40); expect(primary.targetWords.float(primary.field("armorvalue"))).toBe(34);
+    power.remove();
+    const both = createSource({ ...declaration, protection: [...(declaration.protection ?? []), {
+      id: "copper:shared-pool", channel: "powered", storage: { cells: "armorvalue", kind: "shield" },
+      flags: { noArmor: 0, noPowerArmor: 0, noRegularArmor: 0, energy: 0, radius: 0 },
+      absorb: { kind: "function", call: { function: "SUB_Null", arguments: [], globals: [] } },
+    }] });
+    try {
+      both.initialize();
+      const donor = both.machine.entities.at(1);
+      donor.setFloat(field("armorvalue"), 100); donor.setFloat(field("armortype"), 0.8); donor.setFloat(field("takedamage"), 2);
+      donor.setInt(field("classname"), both.machine.strings.allocate("donor"));
+      primary.targetWords.setFloat(primary.field("health"), 100); primary.invoke(40);
+      expect(primary.authority.read(primary.target.id)?.armor).toEqual({ regular: { kind: "source", points: 68, item: "q1:item_armor1" }, powered: { kind: "shield", cells: 68 } });
+      const outcome = primary.outcomes.at(-1); if (outcome?.kind !== "committed") throw new Error("Missing cross-lane outcome");
+      expect(outcome.decision.mutations.filter(change => change.kind === "armor")).toHaveLength(1);
+      expect(primary.targetWords.float(primary.field("health"))).toBe(92);
+      expect(primary.targetWords.float(primary.field("armorvalue"))).toBe(34);
+    } finally { both.close(); }
+  } finally { source.close(); primary.actors.close(); }
 });
 
 test("QC armor admission validates original profiles and declared statement control flow", async () => {
   for (const path of ["id1/PAK0.PAK", "hipnotic/pak0.pak", "rogue/pak0.pak", "rerelease/id1/pak0.pak", "rerelease/hipnotic/pak0.pak",
     "rerelease/rogue/pak0.pak", "rerelease/ctf/pak0.pak", "rerelease/dopa/pak0.pak", "rerelease/mg3/pak0.pak"]) {
-    expect(qcArmorStage(await readProgram(path))).not.toBeNull();
+    expect(qcArmorStage(await readProgram(path))?.region.replaceable).toBe(true);
   }
   const program = loadQcProgram(await Bun.file(copper).bytes()), declaration = copperStage(program);
   expect(() => qcArmorStage(program, { ...declaration, entry: declaration.entry + 1 })).toThrow("incomplete instruction");
@@ -218,4 +300,30 @@ test("QC armor admission validates original profiles and declared statement cont
     program.strings, program.initialGlobals, program.entityFieldWords, program.checksum, createContentDigest("0".repeat(64)));
   expect(qcArmorStage(changed)).toBeNull();
   expect(() => qcArmorStage(changed, { ...declaration, statements: statements.slice(declaration.entry, declaration.exit + 1) })).toThrow("region exits");
+  const deathmatch = program.globalsByName.get("deathmatch"); if (deathmatch === undefined) throw new Error("Missing source global");
+  const privateWrite = program.statements.map((statement, index) => index === declaration.exit - 1
+    ? { opcode: QcOpcode.StoreF, a: declaration.damage, b: deathmatch.offset, c: 0 } : statement);
+  const unsafe = new QcProgram(program.source, program.api, privateWrite, program.globals, program.fields, program.functions,
+    program.strings, program.initialGlobals, program.entityFieldWords, program.checksum, createContentDigest("1".repeat(64)));
+  const unsafeStage = qcArmorStage(unsafe, { ...declaration, statements: privateWrite.slice(declaration.entry, declaration.exit + 1) });
+  expect(unsafeStage).not.toBeNull(); expect(unsafeStage?.region.replaceable).toBeUndefined(); expect(unsafeStage?.region.standalone).toBeUndefined();
+});
+
+test("standalone QC regions reject a caller local read through nested helpers", () => {
+  const statement = (opcode: QcOpcode, a = 0, b = 0, c = 0): QcStatement => ({ opcode, a, b, c });
+  const statements = [statement(QcOpcode.Done), statement(QcOpcode.StoreF, 41, 43),
+    statement(QcOpcode.LoadF, 40, 30, 44), statement(QcOpcode.Call0, 31), statement(QcOpcode.StoreF, 1, 42),
+    statement(QcOpcode.SubF, 41, 42, 41), statement(QcOpcode.Return, 41),
+    statement(QcOpcode.Call0, 32), statement(QcOpcode.Return, 1), statement(QcOpcode.StoreF, 43, 1), statement(QcOpcode.Return, 1)];
+  const definition = (name: string, offset: number, type: QcDefinition["type"], nativeType: number): QcDefinition => ({ name, offset, type, nativeType, save: false });
+  const fn = (index: number, name: string, firstStatement: number, parameterStart: number, localWords: number, parameterSizes: readonly number[]): QcFunction => ({ index, name, firstStatement, parameterStart, localWords, parameterSizes, file: "review.qc", namedBuiltin: false });
+  const initial = new Uint8Array(128 * 4), data = new DataView(initial.buffer); data.setInt32(31 * 4, 2, true); data.setInt32(32 * 4, 3, true); data.setFloat32(43 * 4, 7, true);
+  const program = new QcProgram("nested-frame-read", { kind: "q1-netquake", programVersion: 6, systemCrc: 5927 }, statements,
+    [definition("armortype", 30, "field", 5), definition("HelperA", 31, "function", 6), definition("HelperB", 32, "function", 6),
+      definition("target", 40, "entity", 4), definition("damage", 41, "float", 2), definition("saved", 42, "float", 2)],
+    [definition("armortype", 0, "float", 2)], [fn(0, "", 0, 0, 0, []), fn(1, "T_Damage", 1, 40, 5, [1, 1]), fn(2, "HelperA", 7, 50, 0, []), fn(3, "HelperB", 9, 55, 0, [])],
+    new Uint8Array([0]), initial, 1, 5927, createContentDigest("ef".repeat(32)));
+  const stage = qcArmorStage(program, { function: "T_Damage", entry: 2, exit: 5, target: 40, damage: 41, saved: 42, flags: { kind: "none" }, statements: statements.slice(2, 6) });
+  expect(stage?.region.replaceable).toBe(true);
+  expect(stage?.region.standalone).toBeUndefined();
 });

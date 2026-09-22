@@ -1,6 +1,7 @@
 import type { ContentDigest } from "./content.ts";
 import type { QvmAbiProfile } from "./execution.ts";
 import type { ItemId } from "./gameplay.ts";
+import type { ProviderId } from "./identity.ts";
 import type { Vec3 } from "./math.ts";
 import type { ModCallbackBinding, ModCallbackValue, ModClientInputBinding } from "./mod-callbacks.ts";
 
@@ -58,6 +59,25 @@ export interface QvmModCombat {
   readonly globals: QvmModSourceCall["globals"];
   readonly client: { readonly pointer: number; readonly record: string; readonly health: number; readonly armor: number; readonly protection: number; readonly team: number } | null;
 }
+export interface QvmModProtectionScalar { readonly record: string; readonly offset: number; readonly encoding: QvmModScalar; }
+export interface QvmModProtectionSelection<Value> {
+  readonly field: QvmModProtectionScalar;
+  readonly mask: number | null;
+  readonly values: readonly { readonly value: number; readonly selected: Value }[];
+}
+interface QvmModProtectionCall {
+  readonly id: string;
+  readonly admission: { readonly kind: "claim" | "replace-current-primary" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
+  readonly absorb: QvmModSourceCall;
+  readonly flags: { readonly noArmor: number; readonly noPowerArmor: number; readonly noRegularArmor: number; readonly energy: number; readonly radius: number };
+}
+/** Storage describes live source state; absorption always executes the declared original function. */
+export type QvmModProtection = QvmModProtectionCall & (
+  | { readonly channel: "regular"; readonly storage: { readonly points: QvmModProtectionScalar;
+      readonly item: ItemId | null; readonly selection?: QvmModProtectionSelection<ItemId | null> } }
+  | { readonly channel: "powered"; readonly storage: { readonly cells: QvmModProtectionScalar;
+      readonly selection: QvmModProtectionSelection<"none" | "screen" | "shield"> } }
+);
 export interface QvmModCallbackDeclaration {
   readonly version: 1;
   readonly runtime: "qvm";
@@ -70,6 +90,7 @@ export interface QvmModCallbackDeclaration {
   readonly entityRecord: string | null;
   readonly sourceActors?: QvmModSourceActors;
   readonly combat?: QvmModCombat;
+  readonly protection?: readonly QvmModProtection[];
   readonly initialize: readonly QvmModSourceCall[];
   readonly callbacks: readonly QvmModCallback[];
 }

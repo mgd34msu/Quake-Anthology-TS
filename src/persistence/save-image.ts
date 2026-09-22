@@ -27,9 +27,10 @@ function readActorSlot(reader: SaveReader): ActorSlotCheckpoint {
   return { ...actor, lifetime: lifetime.field("kind").choice("active", "free") === "free" ? { kind: "free", freedAt: lifetime.field("freedAt").nullable(readTime) }
     : { kind: "active", owner: namespaced(lifetime.field("owner")), definition: namespaced(lifetime.field("definition")) } };
 }
-function readRegularArmor(reader: SaveReader): RegularArmorState {
-  switch (reader.field("kind").choice("none", "q1", "q2", "q3")) {
+export function readRegularArmor(reader: SaveReader): RegularArmorState {
+  switch (reader.field("kind").choice("none", "q1", "q2", "q3", "source")) {
     case "none": return { kind: "none" };
+    case "source": return { kind: "source", points: reader.field("points").number(), item: reader.field("item").nullable(namespaced) };
     case "q1": return { kind: "q1", points: reader.field("points").number(), absorption: reader.field("absorption").number(), item: namespaced(reader.field("item")) };
     case "q3": return { kind: "q3", points: reader.field("points").number(), protection: reader.field("protection").number() };
     case "q2": return { kind: "q2", points: reader.field("points").number(), normalProtection: reader.field("normalProtection").number(), energyProtection: reader.field("energyProtection").number(), item: namespaced(reader.field("item")) };

@@ -35,6 +35,7 @@ export function absorbNativeArmor(armor: ArmorState, damage: number, flags: Armo
   let regular = armor.regular, regularSaved = 0;
   if (!flags.noRegularArmor && flags.stage !== "power") switch (regular.kind) {
     case "none": break;
+    case "source": throw new Error("Source regular armor requires its original absorption binding");
     case "q1":
       regularSaved = Math.min(regular.points, Math.ceil(multiply(multiply(regular.absorption, protectionScale), damage - powerSaved)));
       regular = { ...regular, points: regular.points - regularSaved, absorption: regularSaved >= regular.points ? 0 : regular.absorption };

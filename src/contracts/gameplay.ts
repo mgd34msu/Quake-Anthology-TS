@@ -59,7 +59,8 @@ export type RegularArmorState =
   | { readonly kind: "none" }
   | { readonly kind: "q1"; readonly points: number; readonly absorption: number; readonly item: ItemId }
   | { readonly kind: "q2"; readonly points: number; readonly normalProtection: number; readonly energyProtection: number; readonly item: ItemId }
-  | { readonly kind: "q3"; readonly points: number; readonly protection: number };
+  | { readonly kind: "q3"; readonly points: number; readonly protection: number }
+  | { readonly kind: "source"; readonly points: number; readonly item: ItemId | null };
 
 /** Effective protection; held equipment and inactive fuel remain in their inventory/source owner. */
 export type PoweredProtectionState = { readonly kind: "none" } | { readonly kind: "screen" | "shield"; readonly cells: number };
@@ -68,6 +69,8 @@ export interface ArmorState {
   readonly regular: RegularArmorState;
   readonly powered: PoweredProtectionState;
 }
+
+export type ProtectionChannel = keyof ArmorState;
 
 export interface ArmorDamageFlags {
   readonly stage?: "power" | "regular";
@@ -85,9 +88,13 @@ export interface ArmorStageInput {
   readonly flags: ArmorDamageFlags;
 }
 export interface ArmorStageResult { readonly saved: number; }
-/** Reports an already committed store; the observer never repeats the write. */
-export interface ArmorStageObserver {
-  stored(change: { readonly before: PoweredProtectionState; readonly after: PoweredProtectionState }): undefined;
+type ProtectionChange<K extends ProtectionChannel> = { readonly before: ArmorState[K]; readonly after: ArmorState[K] };
+export type ProtectionStore =
+  | { readonly regular: ProtectionChange<"regular">; readonly powered?: ProtectionChange<"powered"> }
+  | { readonly regular?: ProtectionChange<"regular">; readonly powered: ProtectionChange<"powered"> };
+/** Reports one committed store across the component's owned channels; never repeats the write. */
+export interface ProtectionObserver {
+  stored(change: ProtectionStore): undefined;
 }
 
 export interface CombatState {
@@ -125,7 +132,7 @@ export type CombatResult = Pick<DamageDecision, "appliedDamage" | "reaction" | "
 /** Synchronous execution only. Completed decisions contain no continuations. */
 export type CombatProgress = { readonly request: DamageRequest; readonly mutations: readonly DamageMutation[] } & (
   | { readonly kind: "complete"; readonly result: CombatResult }
-  | { readonly kind: "powered-armor"; readonly input: ArmorStageInput;
+  | { readonly kind: "armor-stage"; readonly channel: ProtectionChannel; readonly input: ArmorStageInput;
       readonly fallback: (current: ArmorState) => ArmorResult;
       readonly resume: (result: ArmorStageResult, current: CurrentCombatState) => CombatProgress }
   | { readonly kind: "source-continuation"; readonly resume: (current: CurrentCombatState) => CombatProgress }

@@ -36,6 +36,7 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
     return { model: "progs/armor.mdl", sound: "items/armor1.wav", bounds: "weapon", skin: name === "item_armor1" ? 0 : name === "item_armor2" ? 1 : 2, respawn: 20,
       take: (runtime, _entity, player) => {
         const armor = runtime.host.combat.read(player.actor.id)?.armor.regular;
+        if (armor?.kind === "source") return "refused";
         const current = armor === undefined || armor.kind === "none" ? 0 : armor.points * (armor.kind === "q1" ? armor.absorption : armor.kind === "q2" ? armor.normalProtection : armor.protection);
         if (current >= absorption * points) return "refused";
         runtime.host.combat.setRegularArmor(player.actor, { kind: "q1", points, absorption, item }); return "taken";

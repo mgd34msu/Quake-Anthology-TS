@@ -65,7 +65,7 @@ function readStyle(r: SaveReader): SceneLightStyle { const kind=r.field('kind').
 /** Encode public presentation state only; server model bytes and filesystem provenance never enter the wire. */
 export function encodeUnifiedFrame(frame: UnifiedPresentationFrame): Uint8Array {
   const snapshot=frame.output.snapshot,scene=snapshot.scene;
-  const value = encodeCheckpointValue({schema:'qts-unified-frame',version:2,epoch:frame.epoch,acknowledgedInput:frame.acknowledgedInput,prediction:encodeUnifiedPrediction(frame.prediction),
+  const value = encodeCheckpointValue({schema:'qts-unified-frame',version:3,epoch:frame.epoch,acknowledgedInput:frame.acknowledgedInput,prediction:encodeUnifiedPrediction(frame.prediction),
     output:{snapshot:{frame:snapshot.frame,actors:snapshot.actors.map(a=>({id:wireActor(a.id),owner:a.owner,definition:a.definition})),
       bodies:snapshot.bodies.map(b=>({actor:wireActor(b.actor),body:{...b.body,ground:b.body.ground===null?null:wireActor(b.body.ground)}})),
       inventories:snapshot.inventories.map(i=>({actor:wireActor(i.actor),entries:i.entries})),
@@ -82,7 +82,7 @@ export function encodeUnifiedFrame(frame: UnifiedPresentationFrame): Uint8Array 
 export function readUnifiedFrame(bytes:Uint8Array) {
   if(bytes.length>4*1024*1024)throw new RangeError('Unified frame exceeds channel byte limit');
   const r=new SaveReader(decodeCheckpointValue(inflateRawSync(bytes,{maxOutputLength:32*1024*1024})),'unified-frame');
-  r.field('schema').literal('qts-unified-frame');r.field('version').literal(2);
+  r.field('schema').literal('qts-unified-frame');r.field('version').choice(2,3);
   return {epoch:r.field('epoch').integer(1),decode:(context:UnifiedFrameDecoder)=>decodeFrameValue(r,context)};
 }
 

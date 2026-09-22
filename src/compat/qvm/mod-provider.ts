@@ -36,6 +36,7 @@ import { rejectQvmSyscall } from "./syscalls.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 import { writeQvmTrace, QVM_TRACE_BYTES } from "./trace-record.ts";
 import { QvmModActors, validateQvmModActors } from "./mod-actors.ts";
+import { QvmModProtection, validateQvmModProtection } from "./mod-protection.ts";
 import { Q3GuestWorld } from "../../app/bootstrap/simulation/q3/guest-world.ts";
 
 type Artifact = QvmModuleOptions["artifact"];
@@ -142,6 +143,9 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
   for (const binding of clients?.input ?? []) for (const call of binding.calls) checkCall(call, new Set(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse"]));
   if (declaration.combat !== undefined) checkCall({ entry: declaration.combat.entry, arguments: [], globals: declaration.combat.globals, returns: "void" }, new Set(["time"]));
   validateQvmModActors(artifact, declaration);
+  validateQvmModProtection(declaration);
+  for (const definition of declaration.protection ?? []) checkCall(definition.absorb,
+    new Set(["self", "attacker", "inflictor", "amount", "knockback", "damage-flags", "regular-protection-scale", "point", "direction", "normal", "time"]));
   const ids = new Set<string>();
   for (const call of declaration.callbacks) {
     if (ids.has(call.id) || call.stage !== "observe" && call.returns === "void") throw new Error("Duplicate QVM callback or missing source return value"); ids.add(call.id);
@@ -221,6 +225,7 @@ export class QvmModProvider {
   private readonly information: QvmServerInformationServices;
   private readonly entityTokens: QvmEntityTokens;
   private readonly clientBindings: QvmModClientBindings | null;
+  private readonly protection: readonly QvmModProtection[];
   private commands: ModCommandPort | null = null;
   private files: QvmFiles | null;
   private readonly unsubscribe: () => undefined;
@@ -300,7 +305,11 @@ export class QvmModProvider {
     });
     this.clientBindings = declaration.clients === undefined || services.clients === undefined ? null : new QvmModClientBindings({
       services: services.clients, declaration: declaration.clients, content,
-      project: actor => { const entity = declaration.entityRecord; if (entity === null) throw new Error("Missing QVM client entity record"); this.pointer(actor, entity); },
+      project: actor => {
+        for (const protection of this.protection) protection.reserveActor(actor);
+        const entity = declaration.entityRecord; if (entity === null) throw new Error("Missing QVM client entity record"); this.pointer(actor, entity);
+      },
+      admitted: actor => { for (const protection of this.protection) protection.bindActor(actor); },
       release: actor => this.releaseProjection(actor),
       reservedSlots: () => this.projections.values(),
       invoke: (call, actor, application) => {
@@ -316,8 +325,19 @@ export class QvmModProvider {
         services.engine.events.emit(content, { kind: "q3-source", event: { kind: "server-command", client: -1, text } }, services.time(), recipient ?? undefined);
       },
     });
+    this.protection = QvmModProtection.create(declaration.protection ?? [], this.module, services, artifact.module.id, {
+      current: () => this.current(),
+      eligible: actor => this.projections.has(actor) && !this.retiredProjections.has(actor)
+        && this.clientBindings?.admitted(actor) === true,
+      pointer: (actor, record) => {
+        if (!this.projections.has(actor)) throw new Error("QVM protection source projection is unavailable");
+        return this.pointer(actor, record);
+      },
+      invoke: (call, inputs) => this.invoke(call, inputs),
+    });
     this.rememberDefaults();
     this.unsubscribe = services.actors.onRelease(actor => {
+      for (const protection of this.protection) protection.release(actor.id);
       const slot = this.projections.get(actor.id), owned = this.owned.has(actor.id);
       this.physics.get(actor.id)?.(); this.physics.delete(actor.id); this.owned.delete(actor.id); this.eventKeys.delete(actor.id);
       this.clientBindings?.forget(actor.id);
@@ -374,6 +394,7 @@ export class QvmModProvider {
     return [...this.records.values()].filter(record => !clientRecord(this.declaration, record) || this.clientBindings?.has(actor));
   }
   private releaseProjection(actor: ActorId): void {
+    for (const protection of this.protection) protection.release(actor);
     const slot = this.projections.get(actor); if (slot === undefined) return;
     if (this.frames.length !== 0) { this.retiredProjections.add(actor); return; }
     for (const record of this.records.values()) if (slot < record.capacity) {
@@ -512,12 +533,15 @@ export class QvmModProvider {
     return this.commands;
   }
   async initialize(): Promise<void> {
+    this.reserveProtection();
     for (const call of this.declaration.initialize) {
       const execution = this.begin(call, new Map<ModCallbackInput, ModRuntimeValue>([["time", { kind: "float", value: seconds(this.services) }]]));
       try { const result = await this.module.callAsync(execution.words, call.entry, () => this.current()); this.completeDirectLifecycle(call, execution.words, result); } finally { execution.finish(); }
     }
     this.rememberDefaults(); this.clientBindings?.start(); this.publish();
   }
+  reserveProtection(): void { for (const protection of this.protection) protection.reserve(); }
+  activateProtection(): void { for (const protection of this.protection) protection.activate(); }
   private entityRecord(): QvmModActorRecord {
     const record = this.declaration.entityRecord === null ? undefined : this.records.get(this.declaration.entityRecord);
     if (record === undefined || record.stride < qvmSharedEntityBytes(this.declaration.abiProfile)) throw new Error("QVM engine service requires its declared sharedEntity_t array");
@@ -798,9 +822,10 @@ export class QvmModProvider {
     if (result instanceof Promise) return result.then(value => { refresh(); return value; });
     refresh(); return result;
   }
-  checkpoint(): QvmCheckpoint { this.current(); return this.module.checkpoint(); }
+  checkpoint(): QvmCheckpoint { this.current(); for (const protection of this.protection) protection.assertIdle(); return this.module.checkpoint(); }
   restore(checkpoint: QvmCheckpoint): undefined {
     this.current(); validateQvmModCheckpoint(this.artifact, this.declaration, checkpoint);
+    for (const protection of this.protection) protection.assertIdle();
     const saved = hostImage(checkpoint, this.declaration);
     for (const entry of saved.projections) {
       const actor = this.services.actors.resolveSaved(entry.actor);
@@ -813,12 +838,18 @@ export class QvmModProvider {
     if (this.mounts !== undefined) { const files = new QvmFiles({ mounts: this.mounts, writable: this.writable, assertCurrent: () => this.current() });
       try { files.restoreCheckpoint(saved.files); } finally { files.closeAll(); } }
     else if (saved.files !== null) throw new Error("Saved QVM mod filesystem is unavailable");
-    this.module.restore(checkpoint); this.clientBindings?.start(); return undefined;
+    const active = this.protection.some(protection => protection.isActive);
+    for (const protection of this.protection) protection.close();
+    this.reserveProtection();
+    this.module.restore(checkpoint); this.clientBindings?.start();
+    if (active) this.activateProtection();
+    return undefined;
   }
   close(): undefined {
     if (this.closed) return undefined;
-    this.closed = true;
     const errors: unknown[] = [];
+    for (const protection of this.protection) try { protection.close(); } catch (error) { errors.push(error); }
+    this.closed = true;
     for (const actor of [...this.owned.values()]) if (this.services.actors.isLive(actor.id)) {
       try { this.services.actors.release(actor); } catch (error) { errors.push(error); }
     }
