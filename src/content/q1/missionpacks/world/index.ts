@@ -51,6 +51,7 @@ export class Q1MissionpackWorld {
   }
   afterPhysics(actor: ActorId, _seconds: number): undefined { if (this.pack === "hipnotic") return earthquakeAfterPhysics(this.game, actor); if (this.game.world?.number("rogue:earthquake_active") === 1) rogueEarthquake(this.game, actor, this.game.world.number("rogue:earthquake_intensity")); this.teams?.frame(actor); this.runes?.frame(actor); return startRogueEnding(this.game, actor, this.hooks); }
   playerSpawned(actor: ActorId): undefined { return this.teams?.playerSpawned(actor); }
+  dropCarriedFlag(actor: ActorId): undefined { return this.teams?.dropCarriedFlag(actor); }
   impulse(actor: ActorId, impulse: number): boolean { return this.teams?.impulse(actor, impulse) ?? false; }
   savedTeam(actor: ActorId): number { return this.teams?.team(actor) ?? 0; }
   selectSpawn(actor: ActorId): Q1Actor | undefined { return this.teams?.selectSpawn(actor); }

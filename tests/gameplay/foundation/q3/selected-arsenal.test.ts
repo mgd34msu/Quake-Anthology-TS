@@ -1,3 +1,8 @@
+import { expansionSupply } from "../../../../src/content/composition/expansion-supply.ts";
+import { expansionSourceSupply } from "../../../../src/content/composition/expansion-source-supply.ts";
+import { Q1_Q3_SUPPLY_PROFILE, q1Q3SupplyLoadout } from "../../../../src/content/composition/q1-q3-supply.ts";
+import { Q3_Q2_SUPPLY_PROFILE } from "../../../../src/content/composition/q3-q2-supply.ts";
+import { SharedPickupAdmission } from "../../../../src/world/gameplay/pickups.ts";
 import type { ProviderReference } from "../../../../src/contracts/content.ts";
 import type { ItemId } from "../../../../src/contracts/gameplay.ts";
 import { q2WeaponStatus, q3WeaponStatus, q3ArsenalWarning } from "../../../../src/app/bootstrap/simulation/arsenal/weapon-status.ts";
@@ -68,4 +73,24 @@ test("weapon status distinguishes source ammo thresholds, unmetered weapons and 
   amounts.set("q2:ammo_cells", 50);
   expect(q2WeaponStatus(bfg, count, q2Source)?.ammo).toEqual({ kind: "finite", item: "q2:ammo_cells", count: 50, hasAmmoToStart: true, low: true });
   expect(q2WeaponStatus(blaster, count, q2Source)?.ammo).toEqual({ kind: "unmetered" });
+});
+
+
+test("Team Arena supply admits its actual extra inventory and retains source pickup quantities", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("team-arena-supply")), actor = actors.allocate("q1:game", "q1:player");
+  const inventory = new SharedInventoryTable(actors), loadout = q1Q3SupplyLoadout("q3:weapons/classic/missionpack", "missionpack");
+  inventory.create(actor, loadout.ammo);
+  const supply = new SharedPickupAdmission({ inventory, profile: expansionSupply(Q1_Q3_SUPPLY_PROFILE, ["q3-missionpack"]),
+    ammoGranted: () => undefined, weaponGranted: () => undefined });
+  expect(supply.weapon(actor, { item: "q1:weapon/nailgun", ammo: [{ item: "q1:ammo/nails", amount: 30 }] }, "better")).toBe(true);
+  for (const name of ["machinegun", "nailgun", "chaingun"]) {
+    expect(inventory.count(actor.id, `q3:weapon/${name}`)).toBe(1); expect(inventory.count(actor.id, `q3:ammo/${name}`)).toBe(30);
+  }
+  expect(supply.weapon(actor, { item: "q1:weapon/grenadelauncher", ammo: [{ item: "q1:ammo/rockets", amount: 5 }] }, "better")).toBe(true);
+  expect(inventory.count(actor.id, "q3:weapon/proxlauncher")).toBe(1); expect(inventory.count(actor.id, "q3:ammo/proxlauncher")).toBe(5);
+  inventory.configure(actor, { item: "q2:ammo_bullets", count: 0, capacity: 200 });
+  const destination = new SharedPickupAdmission({ inventory, profile: expansionSourceSupply(Q3_Q2_SUPPLY_PROFILE),
+    ammoGranted: () => undefined, weaponGranted: () => undefined });
+  expect(destination.ammo(actor, { item: "q3:ammo/nailgun", amount: 37 })).toBe(true);
+  expect(inventory.count(actor.id, "q2:ammo_bullets")).toBe(37);
 });

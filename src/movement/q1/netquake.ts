@@ -328,14 +328,16 @@ class NetQuakeMove {
   private physicsStep(): Q1MovementResult {
     const c = this.context, s = this.state;
     this.setState(c.lifecycle(s, "beforePhysics"));
-    if (!c.removed) this.playerActions();
+    if (!c.removed && this.input.environment.pose === undefined) this.playerActions();
     // Preserve the existing extension paths; the branch-local order below is SV_Physics_Client's classic set.
     const extensionThink = s.moveType === Q1_MOVE_STEP || s.moveType === Q1_MOVE_FLYMISSILE || s.moveType === Q1_MOVE_GIB;
     if (!c.removed && extensionThink) this.think();
     const think = (): boolean => extensionThink ? !c.removed : this.think();
     if (!c.removed) {
       this.velocityBounds();
-      switch (s.moveType) {
+      if (this.input.environment.pose !== undefined) {
+        if (think()) { s.velocity = ZERO; this.checkWater(); }
+      } else switch (s.moveType) {
         case Q1_MOVE_NONE: think(); break;
         case Q1_MOVE_WALK:
           if (!think()) break;
@@ -365,8 +367,9 @@ class NetQuakeMove {
     if (c.removed) return { kind: "q1-netquake", status: "actor-removed", actor: this.input.actor.id,
       commandSequence: this.input.commandSequence, effects: c.effects };
     this.idealPitch();
-    return { kind: "q1-netquake", status: "active", state: s,
-      ...finishMovement(c, s, s.viewAngles, (s.flags & Q1_FLAG_ONGROUND) !== 0 ? s.ground : NONE, s.waterLevel, s.waterType) };
+    const result = finishMovement(c, s, s.viewAngles, (s.flags & Q1_FLAG_ONGROUND) !== 0 ? s.ground : NONE, s.waterLevel, s.waterType);
+    if (result.kind !== "q1-netquake") throw new Error("Weapon callback changed NetQuake movement family");
+    return result;
   }
 }
 

@@ -3,6 +3,7 @@ import { SaveReader } from "../../../../persistence/value.ts";
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
 import { vec3 } from "../../../../core/math.ts";
+import type { Vec3 } from "../../../../contracts/math.ts";
 import type { ServerWorld } from "../world.ts";
 import { Powerup, statSchema } from "../shared/definitions.ts";
 import { findItem, findItemForPowerup, itemList } from "../shared/items.ts";
@@ -27,13 +28,20 @@ const PORTAL_LIFETIME = 2 * 60 * 1_000;
 const PORTAL_DESTINATION = "hi_portal destination";
 const PORTAL_SOURCE = "hi_portal source";
 
-export interface PersonalPortalHost {
+export type PersonalPortalHost = {
   readonly combat: Extract<CombatContext, { product: "missionpack" }>;
   readonly world: ServerWorld;
   readonly models: Pick<ConfigStringRegistry, "modelIndex">;
   readonly random: Pick<GameRandom, "random">;
+} & ({
   readonly items: Pick<LaunchItemContext, "touchItem" | "droppedFlagThink" | "checkDroppedTeamItem">;
-}
+  readonly mapTravel?: undefined;
+} | {
+  readonly mapTravel: {
+    dropCarriedFlag(player: GameEntity): void;
+    teleport(player: GameEntity, origin: Vec3, angles: Vec3): void;
+  };
+});
 
 /** Owns level.portalSequence and the source/destination entity lifecycle. */
 export class PersonalPortalRuntime {
@@ -76,15 +84,15 @@ export class PersonalPortalRuntime {
     this.host.combat.entities.free(entity);
   }
 
-  private dropContext(): DropItemContext {
+  private dropContext(items: Pick<LaunchItemContext, "touchItem" | "droppedFlagThink" | "checkDroppedTeamItem">): DropItemContext {
     return {
       entities: this.host.combat.entities,
       product: "missionpack",
       gameType: this.host.combat.gameType,
       time: this.time,
-      touchItem: this.host.items.touchItem,
-      droppedFlagThink: this.host.items.droppedFlagThink,
-      checkDroppedTeamItem: this.host.items.checkDroppedTeamItem,
+      touchItem: items.touchItem,
+      droppedFlagThink: items.droppedFlagThink,
+      checkDroppedTeamItem: items.checkDroppedTeamItem,
       random: (): number => this.host.random.random(),
     };
   }
@@ -102,6 +110,7 @@ export class PersonalPortalRuntime {
   }
 
   private dropCarriedFlag(player: GameEntity): void {
+    if (this.host.mapTravel !== undefined) { this.host.mapTravel.dropCarriedFlag(player); return; }
     const client = player.client;
     if (client === null) throw new Error("Portal touch requires a client entity");
     const powerup = client.ps.powerups.get(Powerup.PW_NEUTRALFLAG) !== 0 ? Powerup.PW_NEUTRALFLAG
@@ -110,7 +119,7 @@ export class PersonalPortalRuntime {
     if (powerup === Powerup.PW_NONE) return;
     const item = findItemForPowerup("missionpack", powerup);
     if (item === null) throw new Error(`Portal carried flag ${powerup} is absent from the missionpack item table`);
-    dropItem(this.dropContext(), player, item, 0);
+    dropItem(this.dropContext(this.host.items), player, item, 0);
     client.ps.powerups.set(powerup, 0);
   }
 
@@ -122,12 +131,17 @@ export class PersonalPortalRuntime {
     const destination = this.destination(source.count);
     if (destination === null) {
       if (source.pos1.x !== 0 || source.pos1.y !== 0 || source.pos1.z !== 0) {
-        teleportPlayer({ combat: this.host.combat, world: this.host.world }, other, source.pos1, source.s.angles);
+        this.teleport(other, source.pos1, source.s.angles);
       }
       damage(this.host.combat, other, other, other, null, null, 100_000, DamageFlags.NO_PROTECTION, MOD_TELEFRAG);
       return;
     }
-    teleportPlayer({ combat: this.host.combat, world: this.host.world }, other, destination.s.pos.base, destination.s.angles);
+    this.teleport(other, destination.s.pos.base, destination.s.angles);
+  }
+
+  private teleport(player: GameEntity, origin: Vec3, angles: Vec3): void {
+    if (this.host.mapTravel !== undefined) this.host.mapTravel.teleport(player, origin, angles);
+    else teleportPlayer({ combat: this.host.combat, world: this.host.world }, player, origin, angles);
   }
 
   private portalEnable(source: GameEntity): void {

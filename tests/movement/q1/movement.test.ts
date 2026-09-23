@@ -342,3 +342,22 @@ for (const fixture of fixtures) test.skipIf(!existsSync(resolve(root, fixture.pa
   expect(current.state.origin.x).toBeLessThanOrEqual(wallOrigin.x - 8 - shape.bounds.max.x + 0.1);
   expect(current.state.spectator).toBe(0);
 });
+
+
+test.skipIf(!existsSync(resolve(root, q1.path)))("weapon source continuation retains teleport state and synchronous removal", async () => {
+  const loaded = await fixtureScene(q1), host = services(loaded.scene), current = input(loaded.origin);
+  const destination = { x: loaded.origin.x + 40, y: loaded.origin.y, z: loaded.origin.z + 20 };
+  const moved = createQ1MovementProvider("q1:classic").move(current, { ...host, weaponStep: (step, state) => {
+    if (state.kind !== "q1-netquake") throw new Error("Unexpected source movement family");
+    return { arsenal: step.arsenal, animation: step.animation, effects: [], continuation: { kind: "continue",
+      state: { ...state, origin: destination, velocity: { x: 400, y: 0, z: 0 }, viewAngles: { x: 0, y: 90, z: 0 }, teleportTimeSeconds: 2 } } };
+  } });
+  if (moved.status !== "active") throw new Error("Unexpected removal");
+  expect(moved.state.origin).toEqual(destination); expect(moved.state.velocity).toEqual({ x: 400, y: 0, z: 0 });
+  expect(moved.viewAngles.y).toBe(90); expect(moved.state.teleportTimeSeconds).toBe(2);
+  let animated = false;
+  const removed = createQ1MovementProvider("q1:classic").move(current, { ...host,
+    weaponStep: step => ({ arsenal: step.arsenal, animation: step.animation, effects: [], continuation: { kind: "actor-removed" } }),
+    animationStep: step => { animated = true; return { animation: step.animation, effects: [] }; } });
+  expect(removed.status).toBe("actor-removed"); expect(animated).toBe(false);
+});

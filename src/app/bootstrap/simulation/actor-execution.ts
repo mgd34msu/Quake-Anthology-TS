@@ -21,6 +21,9 @@ export type ActorExecution =
   | { readonly kind: "q2"; readonly entity: Q2Entity; readonly services: Q2EntityServices; readonly content: ContentId;
       readMonster(): MonsterState | undefined }
   | { readonly kind: "q3"; readonly actor: OwnedActor; readonly owner: ActorId; readonly provider: ProviderId; readonly content: ContentId;
+      step(previousMilliseconds: number, milliseconds: number): void }
+  | { readonly kind: "q3-source"; readonly actor: OwnedActor; readonly provider: ProviderId; readonly content: ContentId;
+      motion(body: BodyState): Q2Motion; collision(): SharedSolid;
       step(previousMilliseconds: number, milliseconds: number): void };
 
 export interface ActorExecutionFrame {
@@ -40,6 +43,7 @@ function seconds(time: SourceTime): number { return time.kind === "seconds" ? ti
 function add(a: Vec3, b: Vec3): Vec3 { return { x: Math.fround(a.x + b.x), y: Math.fround(a.y + b.y), z: Math.fround(a.z + b.z) }; }
 
 export function actorMotion(entry: ActorExecution, body: BodyState): Q2Motion {
+  if (entry.kind === "q3-source") return entry.motion(body);
   if (entry.kind === "quakec") { const motion = entry.source.motion(entry.actor, body); if (motion === null) throw new Error("Missing live QC motion"); return motion; }
   if (entry.kind === "q3") return { actor: entry.actor, velocity: body.velocity, angularVelocity: { x: 0, y: 0, z: 0 }, kind: "stationary", gravity: 1, gravityVector: down, clipMask: 0x6000001, owner: entry.owner };
   const entity = entry.entity;
@@ -53,6 +57,7 @@ export function actorMotion(entry: ActorExecution, body: BodyState): Q2Motion {
 }
 
 export function actorCollision(entry: ActorExecution): SharedSolid {
+  if (entry.kind === "q3-source") return entry.collision();
   if (entry.kind === "quakec") { const collision = entry.source.collision(entry.actor); if (collision === null) throw new Error("Missing live QC collision"); return collision; }
   if (entry.kind === "q3") return { family: "q3", solid: "none", model: null, owner: entry.owner };
   if (entry.kind === "q1") {
@@ -70,7 +75,7 @@ export function actorCollision(entry: ActorExecution): SharedSolid {
 
 export function actorFlags(entry: ActorExecution): SharedPhysicsFlags {
   if (entry.kind === "quakec") return entry.source.flags(entry.actor);
-  if (entry.kind === "q3") return {};
+  if (entry.kind === "q3" || entry.kind === "q3-source") return {};
   if (entry.kind === "q1") {
     const entity = entry.entity;
     return { fly: (entity.movementFlags & 1) !== 0, swim: (entity.movementFlags & 2) !== 0, partialGround: (entity.movementFlags & 1024) !== 0,
@@ -83,7 +88,7 @@ export function actorFlags(entry: ActorExecution): SharedPhysicsFlags {
 
 export function writeActorFlags(entry: ActorExecution, changes: SharedPhysicsFlags): undefined {
   if (entry.kind === "quakec") return entry.source.writeFlags(entry.actor, changes);
-  if (entry.kind === "q3") return undefined;
+  if (entry.kind === "q3" || entry.kind === "q3-source") return undefined;
   if (entry.kind === "q1") {
     if (changes.waterLevel !== undefined) entry.entity.waterLevel = changes.waterLevel;
     const waterType = changes.waterType;
@@ -98,7 +103,7 @@ export function writeActorFlags(entry: ActorExecution, changes: SharedPhysicsFla
   return undefined;
 }
 
-export function executeActor(entry: Exclude<ActorExecution, { readonly kind: "q3" }>, context: ActorExecutionFrame): undefined {
+export function executeActor(entry: Exclude<ActorExecution, { readonly kind: "q3" | "q3-source" }>, context: ActorExecutionFrame): undefined {
   return entry.kind === "quakec" ? executeQuakeCActor(entry, context) : entry.kind === "q1" ? executeQ1Actor(entry, context) : executeQ2Actor(entry, context);
 }
 

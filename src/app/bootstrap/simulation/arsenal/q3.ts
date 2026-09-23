@@ -23,6 +23,12 @@ export interface Q3SelectedArsenalOptions {
   readonly product: "baseq3" | "missionpack";
   readonly inventory: SharedInventoryTable;
   readonly supply?: { readonly profile: ItemId; readonly loadout: ArsenalState; readonly replacedItems: readonly ItemId[] };
+  readonly equipment?: {
+    read(actor: OwnedActor): Pick<Q3ArsenalRuntimeState, "maxHealth" | "persistentPowerupTag" | "holdableItem" | "holdableTag">;
+    consume(actor: OwnedActor, item: number): undefined;
+    advance?(actor: OwnedActor, milliseconds: number): void;
+    restore?(actor: OwnedActor, state: Pick<Q3ArsenalRuntimeState, "maxHealth" | "persistentPowerupTag" | "holdableItem" | "holdableTag">): void;
+  };
   fire(actor: OwnedActor, weapon: number, input: WeaponStepInput): undefined;
   useHoldable(actor: OwnedActor, event: number, input: WeaponStepInput): undefined;
 }
@@ -130,6 +136,8 @@ export class Q3SelectedArsenal implements SelectedArsenal {
 
   step(input: WeaponStepInput, intent: ArsenalIntent | undefined): WeaponStepResult {
     const player = this.require(input.actor.id), arsenal = this.read(input.actor.id);
+    if (this.options.equipment !== undefined) player.runtime = { ...player.runtime, ...this.options.equipment.read(player.actor) };
+    const holdable = player.runtime.holdableItem;
     if (intent !== undefined && intent.provider !== this.provider) throw new Error("Arsenal intent belongs to a different provider");
     if (intent?.weapon != null) {
       const requested = Q3_WEAPON_ITEMS.find(entry => entry.item === intent.weapon);
@@ -139,8 +147,11 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     const weaponAnimation = { provider: this.provider, state: { ...q3SpawnAnimation(), torso: player.torsoAnimation } };
     const result = stepQ3Arsenal({ ...input, arsenal, animation: input.animation.state.kind === "q3" ? input.animation : weaponAnimation }, player.runtime,
       resolveQ3ArsenalControls(arsenal, intent, input.command, this.options.product));
+    const elapsed = input.frame.elapsed.kind === "milliseconds" ? input.frame.elapsed.value : input.frame.elapsed.value * 1000;
+    this.options.equipment?.advance?.(player.actor, Math.trunc(elapsed + player.runtime.fractionalMilliseconds));
     player.arsenal = result.arsenal;
     player.runtime = result.runtime;
+    if (holdable !== 0 && result.runtime.holdableItem === 0) this.options.equipment?.consume(player.actor, holdable);
     if (result.animation.state.kind === "q3") player.torsoAnimation = result.animation.state.torso;
     for (const entry of result.arsenal.ammo) this.options.inventory.configure(player.actor, entry);
     if (result.arsenal.state.kind !== "q3") throw new Error("Selected Q3 step returned a foreign arsenal");
@@ -156,7 +167,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
 
   capture(actor: ActorId): Q3SelectedArsenalCheckpoint {
     const player = this.require(actor);
-    return { supplyProfile: this.options.supply?.profile ?? null, arsenal: this.read(actor), runtime: { ...player.runtime }, torsoAnimation: player.torsoAnimation, lastFireMilliseconds: player.lastFireMilliseconds };
+    return { supplyProfile: this.options.supply?.profile ?? null, arsenal: this.read(actor), runtime: { ...player.runtime, ...this.options.equipment?.read(player.actor) }, torsoAnimation: player.torsoAnimation, lastFireMilliseconds: player.lastFireMilliseconds };
   }
 
   restore(actor: OwnedActor, checkpoint: Q3SelectedArsenalCheckpoint): undefined {
@@ -164,6 +175,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     if (checkpoint.arsenal.provider !== this.provider || checkpoint.arsenal.state.kind !== "q3" || checkpoint.runtime.product !== this.options.product) throw new Error("Saved arsenal differs from selected Q3 provider");
     this.clearReplacedItems(actor);
     for (const entry of checkpoint.arsenal.ammo) if (this.inventoryItems.has(entry.item)) this.options.inventory.configure(actor, entry);
+    this.options.equipment?.restore?.(actor, checkpoint.runtime);
     this.players.set(actor.id, { actor, arsenal: checkpoint.arsenal, runtime: { ...checkpoint.runtime }, torsoAnimation: checkpoint.torsoAnimation, lastFireMilliseconds: checkpoint.lastFireMilliseconds });
     return undefined;
   }

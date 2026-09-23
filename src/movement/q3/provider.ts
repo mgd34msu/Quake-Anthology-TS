@@ -6,7 +6,7 @@ import type { FrameContext } from "../../contracts/time.ts";
 import type { TracePolicy, TraceShape } from "../../contracts/scene.ts";
 import { vec3 } from "../../core/math.ts";
 import { movePlayer } from "./move.ts";
-import { MoveType } from "./constants.ts";
+import { MoveFlags, MoveType } from "./constants.ts";
 import type { Q3Command, Q3HookContext, Q3Motion, Q3MovementHooks, Q3Postures, Q3MotionOptions } from "./types.ts";
 
 export interface Q3MovementProviderOptions {
@@ -76,7 +76,7 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
     motion.eventSequence = state.predictableEventSequence; motion.grapplePoint = state.grapplePoint;
     motion.gravity = Math.trunc(state.gravity * input.environment.gravityMultiplier); motion.speed = state.speed;
   };
-  const context = (): Q3HookContext => ({ input, motion, command, frame, arsenal, animation, services });
+  const context = (): Q3HookContext => ({ input, motion, state: movementState(), command, frame, arsenal, animation, services });
   const append = (effect: MovementEffect): void => {
     let ordered = effect;
     if (effect.kind === "event") {
@@ -97,10 +97,12 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
       if (contents.kind !== "q3") throw new TypeError("Q3 point contents queries require Q3 content flags");
       return contents.contents;
     },
+    ...(input.environment.pose === undefined ? {} : { pose: input.environment.pose }),
     standingBounds: standing, postures: options.postures(input),
     traceMask: selectedPolicy.contentsMask, fixedMsec: input.profile.fixedMilliseconds, noFootsteps: input.profile.noFootsteps,
     ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
     beginStep(_state, activeCommand, msec, index) {
+      if (removed) return false;
       command = activeCommand; substep = index;
       frame = { ...input.frame, time: { kind: "milliseconds", value: command.serverTime },
         elapsed: { kind: "milliseconds", value: msec } };
@@ -132,6 +134,13 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
       const update = options.hooks.weapon(context());
       arsenal = update.arsenal; animation = update.animation; motion.pmFlags = update.movementFlags;
       for (const effect of update.effects) append(effect);
+      if (update.continuation?.kind === "actor-removed") { removed = true; return false; }
+      if (update.continuation?.kind === "continue") {
+        resume(update.continuation.state);
+        const weaponFlags = MoveFlags.RESPAWNED | MoveFlags.USE_ITEM_HELD;
+        motion.pmFlags = (motion.pmFlags & ~weaponFlags) | (update.movementFlags & weaponFlags);
+      }
+      return true;
     },
     torso() {
       const update = options.hooks.torso(context());

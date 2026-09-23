@@ -161,6 +161,11 @@ export class RogueTeams {
     if (!this.ctf) return undefined; const bits = state.number("ctf_flags");
     if (attacker !== null && this.game.isPlayer(attacker) && !sameActor(actor, attacker)) this.assists(actor, attacker);
     if ((bits & 3) !== 0) for (const player of this.game.host.players()) if (this.mode === 5 || (bits & 1) !== 0 && this.team(player) === 5 || (bits & 2) !== 0 && this.team(player) === 14) number(this.state(player), "ctf_lasthurtcarrier", -10);
+    return this.dropCarriedFlag(actor);
+  }
+  dropCarriedFlag(actor: ActorId): undefined {
+    if (!this.ctf) return undefined;
+    const state = this.state(actor), bits = state.number("ctf_flags");
     const flag = this.flags().find(flag => flag.classname === (this.mode === 5 && (bits & 1) !== 0 ? "item_flag" : (bits & 1) !== 0 ? "item_flag_team1" : (bits & 2) !== 0 ? "item_flag_team2" : ""));
     if (flag !== undefined) { number(state, "ctf_flags", bits & ~3); this.dropFlag(flag); } return undefined;
   }

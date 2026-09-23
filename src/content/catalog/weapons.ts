@@ -33,6 +33,13 @@ export function supportsSelectedWeaponProduct(product: ProductExpectation): bool
 
 export function canonicalWeaponSource(map: ProviderReference, weapon: ProviderReference, catalog: InstalledCatalog): ProviderReference {
   if (Object.values(EQUIPMENT_PROVIDERS).some(provider => provider === weapon.provider)) return weapon;
+  if (weapon.provider.startsWith("q3:")) {
+    const product = catalog.require(weapon.content).expectation;
+    if (product.family !== "q3" || product.campaign !== "missionpack") return weapon;
+    const provider: ProviderReference["provider"] = `q3:weapons/${product.edition}/missionpack`;
+    if (weapon.provider !== "q3:official" && weapon.provider !== provider) throw new Error(`Selected Q3 weapon role does not match ${weapon.content}`);
+    return weapon.content === map.content && map.provider === "q3:official" ? map : { provider, content: weapon.content };
+  }
   const family = weapon.provider.startsWith("q1:") ? "q1" : weapon.provider.startsWith("q2:") ? "q2" : null;
   if (family === null) return weapon;
   const role = weapon.provider.startsWith(`${family}:weapons/`);
@@ -147,7 +154,7 @@ export function selectedWeaponTiming(map: ProviderReference, weapons: readonly P
     if (weapon.content === map.content) return [];
     const product = catalog.require(weapon.content).expectation;
     const supported = supportsSelectedWeaponProduct(product) && weapon.provider.startsWith(`${product.family}:`) ||
-      weapon.provider.startsWith("q3:") && product.family === "q3" && product.campaign === "baseq3";
+      weapon.provider.startsWith("q3:") && product.family === "q3" && (product.campaign === "baseq3" || product.campaign === "missionpack");
     if (!supported) return [];
     const prior = providers.get(weapon.provider);
     if (weapon.provider === map.provider || prior !== undefined && prior !== weapon.content)

@@ -281,3 +281,9 @@ This support covers local declared player events. Full component snapshots, enti
 `--map-game` selects geometry independently from the game module. Shared collision queries adapt geometry to the module's source interface. The game module still interprets authored entities, objectives, scripts, and progression. Unknown entity classes retain their authored keys and reach the selected module; the host does not infer a replacement from a map or mod name.
 
 Local foreign-map support does not make an original network client understand another engine's BSP format. Native-wire admission preserves that distinction.
+
+### Selected Team Arena source services
+
+The ported source backend supplies Team Arena weapons and holdables in mixed ported worlds. It uses original missile, weapon, holdable and presentation code while the destination retains its view, character, map objectives, input and HUD. Original entity events and sounds have one per-seat consumer, and save restoration preserves their consumed event positions. The implementation includes proximity mines, the chaingun, nails, medkit, teleporter, invulnerability, kamikaze and personal portal behavior. Referenced portal meshes are absent from the installed official archive set; the existing original model fallback is retained.
+
+This does not establish original QC/QVM/DLL primary admission for every selected arsenal. Menu exposure, persistent Team Arena powerups and older base-Q3 projectile-save migration remain open under T12. The original-primary native pickup integration remains separately qualified by artifact and pickup kind.

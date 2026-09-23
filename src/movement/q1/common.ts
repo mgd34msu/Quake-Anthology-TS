@@ -55,9 +55,9 @@ export class MovementContext {
   substep = 0;
   constructor(readonly input: Q1PlayerInput, readonly services: MovementServices, readonly options: Q1MovementOptions) {
     this.math = new MovementMath(services.numeric);
-    this.viewHeight = options.viewHeight ?? 22;
+    this.viewHeight = input.environment.pose?.viewHeight ?? options.viewHeight ?? 22;
   }
-  get shape(): TraceShape { return this.options.hooks?.shape?.() ?? this.input.shape; }
+  get shape(): TraceShape { return this.input.environment.pose === undefined ? this.options.hooks?.shape?.() ?? this.input.shape : { kind: "box", bounds: this.input.environment.pose.bounds }; }
   get bounds(): Bounds { return shapeBounds(this.shape); }
   trace(start: Vec3, end: Vec3, shape = this.shape, move: "normal" | "no-monsters" | "missile" = "normal"): TraceResult {
     return this.services.scene.trace({ start, end, shape, target: { kind: "world" },

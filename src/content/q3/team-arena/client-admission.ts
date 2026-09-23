@@ -193,6 +193,22 @@ function resetClient(client: GameClient, product: Product): void {
   Object.assign(damageFrom, fresh.damageFrom);
 }
 
+/** Original CS_PLAYERS encoding, shared by primary and borrowed source client records. */
+export function clientPresentationConfig(client: GameClient, userinfo: string, gameType: number, botTeam: Team | null): string {
+  const model = byteBuffer(clientInfoValue(userinfo, gameType >= GameType.GT_TEAM ? "team_model" : "model"), MAX_QPATH, "model");
+  const headModel = byteBuffer(clientInfoValue(userinfo, gameType >= GameType.GT_TEAM ? "team_headmodel" : "headmodel"), MAX_QPATH, "head model");
+  const teamTask = gameAtoi(clientInfoValue(userinfo, "teamtask")), teamLeader = client.sess.teamLeader;
+  const color1 = clientInfoValue(userinfo, "color1"), color2 = clientInfoValue(userinfo, "color2");
+  return botTeam !== null
+    ? gameFormat("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\skill\\%s\\tt\\%d\\tl\\%d",
+      [client.pers.netname, botTeam, model, headModel, color1, color2, client.pers.maxHealth,
+        client.sess.wins, client.sess.losses, clientInfoValue(userinfo, "skill"), teamTask, teamLeader])
+    : gameFormat("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\g_redteam\\%s\\g_blueteam\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\tt\\%d\\tl\\%d",
+      [client.pers.netname, client.sess.sessionTeam, model, headModel, clientInfoValue(userinfo, "g_redteam"),
+        clientInfoValue(userinfo, "g_blueteam"), color1, color2, client.pers.maxHealth,
+        client.sess.wins, client.sess.losses, teamTask, teamLeader]);
+}
+
 export class ClientAdmissionRuntime {
   constructor(readonly host: ClientAdmissionHost) {
     if (host.pool.options.product !== host.product) throw new Error("Client admission product differs from its entity pool");
@@ -233,8 +249,6 @@ export class ClientAdmissionRuntime {
     client.ps.stats.set(statSchema(this.host.product).maxHealth, health);
 
     const settings = this.host.settings(), gameType = settings.gameType;
-    const model = byteBuffer(clientInfoValue(userinfo, gameType >= GameType.GT_TEAM ? "team_model" : "model"), MAX_QPATH, "model");
-    const headModel = byteBuffer(clientInfoValue(userinfo, gameType >= GameType.GT_TEAM ? "team_headmodel" : "headmodel"), MAX_QPATH, "head model");
     let team = client.sess.sessionTeam;
     if (gameType >= GameType.GT_TEAM && (entity.r.svFlags & ServerEntityFlags.BOT) !== 0) {
       const requested = clientInfoValue(userinfo, "team");
@@ -249,20 +263,7 @@ export class ClientAdmissionRuntime {
       const overlay = clientInfoValue(userinfo, "teamoverlay");
       client.pers.teamInfo = overlay.length === 0 || gameAtoi(overlay) !== 0;
     }
-    const teamTask = gameAtoi(clientInfoValue(userinfo, "teamtask"));
-    const teamLeader = client.sess.teamLeader;
-    const color1 = clientInfoValue(userinfo, "color1"), color2 = clientInfoValue(userinfo, "color2");
-    let config: string;
-    if ((entity.r.svFlags & ServerEntityFlags.BOT) !== 0) {
-      config = gameFormat("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\skill\\%s\\tt\\%d\\tl\\%d",
-        [client.pers.netname, team, model, headModel, color1, color2, client.pers.maxHealth,
-          client.sess.wins, client.sess.losses, clientInfoValue(userinfo, "skill"), teamTask, teamLeader]);
-    } else {
-      config = gameFormat("n\\%s\\t\\%i\\model\\%s\\hmodel\\%s\\g_redteam\\%s\\g_blueteam\\%s\\c1\\%s\\c2\\%s\\hc\\%i\\w\\%i\\l\\%i\\tt\\%d\\tl\\%d",
-        [client.pers.netname, client.sess.sessionTeam, model, headModel, clientInfoValue(userinfo, "g_redteam"),
-          clientInfoValue(userinfo, "g_blueteam"), color1, color2, client.pers.maxHealth,
-          client.sess.wins, client.sess.losses, teamTask, teamLeader]);
-    }
+    const config = clientPresentationConfig(client, userinfo, gameType, (entity.r.svFlags & ServerEntityFlags.BOT) !== 0 ? team : null);
     this.host.setConfigstring(CS_PLAYERS + clientNum, config);
     this.host.log(gameFormat("ClientUserinfoChanged: %i %s\n", [clientNum, config]));
   }

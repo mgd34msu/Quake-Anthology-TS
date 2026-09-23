@@ -226,7 +226,8 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
-    const visiblePresentations = presentations.filter(presentation => this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false);
+    const visiblePresentations = presentations.filter(presentation => presentation.renderOwner !== "source-client"
+      && this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false);
     const q1Messages = this.pendingQ1Messages.splice(0);
     const q2Messages = this.pendingQ2Messages.splice(0);
     const mirrored = new Set([...q1Messages.map(source => source.sequence), ...q2Messages.filter(source => source.kind === "q2"

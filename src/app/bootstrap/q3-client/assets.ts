@@ -25,6 +25,11 @@ export async function registerQ3ModelRequest(path: string, load: (path: string) 
   }
   return load(path);
 }
+export async function registerQ3ShaderRequest<T>(path: string, load: (path: string) => Promise<T | null>): Promise<T | null> {
+  try { path = normalizeResourcePath(path); }
+  catch (error) { if (error instanceof RangeError) return null; throw error; }
+  return load(path);
+}
 
 /** Synchronous source script/sound calls read bytes resolved through the actual mount plan. */
 export class ApplicationQ3Assets implements SoundAssetReader {
@@ -125,7 +130,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
       }),
       skin: async path => { const provider = await this.assets.provider(contentFor(path)), opened = await provider.mounts.open(path);
         return opened === null ? null : { path, surfaces: parseSkin(new TextDecoder().decode(opened.bytes)) }; },
-      shader: (path, mip) => this.provider.shaders.registerSourcePicture(path, mip),
+      shader: (path, mip) => registerQ3ShaderRequest(path, valid => this.provider.shaders.registerSourcePicture(valid, mip)),
       world: async () => ({ map: { models: this.assets.world.map.models } }),
       remapShader: async (original, replacement, offset) => {
         const value = Number.parseFloat(offset), timeOffset = Number.isNaN(value) ? 0 : value;

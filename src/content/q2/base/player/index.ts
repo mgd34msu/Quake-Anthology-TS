@@ -227,6 +227,10 @@ export class Q2Players implements Q2SpawnModule {
   }
   protected killBox(entity: Q2Entity, game: Q2GameServices): boolean { return q2KillBox(entity, game); }
 
+  selectTeleportSpawn(entity: Q2Entity, game: Q2GameServices): { readonly origin: Vec3; readonly angles: Vec3 } {
+    return this.spawnPlacement(entity, game, null);
+  }
+
   putInServer(entity: Q2Entity, game: Q2GameServices, restoreLoadout = true, landmark: Q2LandmarkCarry | null = null): undefined {
     const old = this.context(entity, game), state = old.state;
     const placement = this.spawnPlacement(entity, game, landmark), { origin, angles, velocity } = placement;

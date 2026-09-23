@@ -1,7 +1,7 @@
 import type { ActorId } from "../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { ActorAnimationState, AnimationStepResult, ArsenalState, MovementServices,
-  Q3MovementInput, MovementEffect } from "../../contracts/movement.ts";
+  Q3MovementInput, Q3MovementState, WeaponStepResult, FixedMovementPose } from "../../contracts/movement.ts";
 import type { TraceHit, TraceResult } from "../../contracts/scene.ts";
 import type { FrameContext } from "../../contracts/time.ts";
 
@@ -29,6 +29,7 @@ export type Q3AnimationRequest =
 export interface Q3HookContext {
   readonly input: Q3MovementInput;
   readonly motion: Readonly<Q3Motion>;
+  readonly state: Q3MovementState;
   readonly command: Readonly<Q3Command>;
   readonly frame: FrameContext;
   readonly arsenal: ArsenalState;
@@ -36,10 +37,7 @@ export interface Q3HookContext {
   readonly services: MovementServices;
 }
 
-export interface Q3WeaponPhaseResult {
-  readonly arsenal: ArsenalState;
-  readonly animation: ActorAnimationState;
-  readonly effects: readonly MovementEffect[];
+export interface Q3WeaponPhaseResult extends WeaponStepResult {
   readonly movementFlags: number;
 }
 
@@ -56,6 +54,7 @@ export type Q3MovementTraceFunction = (
 ) => TraceResult;
 
 export interface Q3MotionOptions {
+  readonly pose?: FixedMovementPose;
   readonly trace: Q3MovementTraceFunction;
   readonly pointContents: (point: Vec3, passActor: ActorId) => number;
   readonly standingBounds: Bounds;
@@ -67,7 +66,7 @@ export interface Q3MotionOptions {
   endStep?(state: Q3Motion): void | boolean;
   event(event: number): void;
   animation(request: Q3AnimationRequest): void;
-  weapon(): void;
+  weapon(): void | boolean;
   torso(): void;
   firing(): boolean;
   contact(trace: TraceResult): void;

@@ -110,12 +110,24 @@ export interface Q3ClientPresentationOptions {
   viewWeapon(state: SourcePlayerState, source: () => void): void;
   playerWeapon(parent: RefModelEntity, state: SourcePlayerState | null, entity: ClientEntity, team: Team, source: () => void): void;
 }
+/** Supplemental source scenes share cgame effects, but never own input, UI or the destination view. */
+export interface Q3ScenePresentationOptions extends Pick<Q3ClientPresentationOptions,
+  "assets" | "resources" | "scene" | "world" | "collision" | "sound" | "draw" | "fontRegistry" | "target" | "hardware" | "clock" | "bodyHidden" | "lightForPoint" | "memoryRemaining"> {
+  readonly scope: "scene";
+  readonly session: Omit<Q3PresentationSession, "addReliableCommand" | "appendConsoleCommand" | "registerCgameCommand" | "setUserCommandValue">;
+  centerPrint(text: string, timeMilliseconds: number, durationMilliseconds: number): void;
+}
 interface FrameContext { loading: boolean; demoPlayback: boolean; engineFrameNumber: number; }
 const VM_SYMBOLS = new Map<string, ClientVmCvarSymbol>();
 for (const symbol of Object.values(ClientVmCvarSymbol)) VM_SYMBOLS.set(symbol, symbol);
-export async function createQ3ClientPresentation(input: Q3ClientPresentationOptions) {
+async function createQ3Presentation(input: Q3ClientPresentationOptions | Q3ScenePresentationOptions) {
   input.session.assertCurrent();
     const options = input;
+    const sceneOnly = "scope" in options;
+    const clientOptions = (): Q3ClientPresentationOptions => {
+      if ("scope" in options) throw new Error("Supplemental cgame scene cannot take over primary input, UI or movement");
+      return options;
+    };
     const { session, resources, assets, sound, target } = options;
     const commands = options.draw.commands;
     const soundBank = sound.bank;
@@ -144,8 +156,12 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
     const numeric = (name: string) => readVm(name).numericValue;
     const enabled = (name: string) => integer(name) !== 0;
     const missionEnabled = (name: string) => session.product === "missionpack" && enabled(name);
-    const sendClientCommand = (text: string) => { session.addReliableCommand(text); };
-    const sendConsoleCommand = (text: string) => session.appendConsoleCommand(text);
+    const sendClientCommand = (text: string) => { clientOptions().session.addReliableCommand(text); };
+    const sendConsoleCommand = (text: string) => clientOptions().session.appendConsoleCommand(text);
+    const centerPrint = (text: string, y: number, width: number): void => {
+      if ("scope" in options) options.centerPrint(text, state.time, numeric("cg_centertime") * 1000);
+      else drawStatus().centerPrint(text, y, width);
+    };
     const startSound = (origin: Vec3 | null, entity: number, channel: number, pcm: PcmSound | null) => {
       sound.startSound(origin, entity, channel, pcm);
     };
@@ -174,14 +190,15 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
     const loading = new ClientLoadingScreen(state, media, session.cvars, { configString, updateScreen: async () => {
       session.assertCurrent();
       if (session.serverMessageSequence !== initialMessageSequence) throw new Error("Snapshot parsing must serialize behind cgame initialization");
-      await options.updateLoadingScreen(() => loading.drawInformation(draw));
+      if (!sceneOnly) await clientOptions().updateLoadingScreen(() => loading.drawInformation(draw));
     } });
     const serverCommands = new ClientServerCommandRuntime({ state, staticState, clients, resources, assets, random,
       resetPlayerEntity: entity => players.resetPlayerEntity(entity), getServerCommand: sequence => session.getServerCommand(sequence),
       refreshGameState: () => { strings = session.getGameState(); }, configString, readVmCvar: readVm, setCvar, print,
-      centerPrint: (text, y, width) => status.centerPrint(text, y, width), sendConsoleCommand,
+      centerPrint, sendConsoleCommand,
       sound: name => media.sounds[name], registerSound: (path, compressed) => soundBank.registerSound(path, compressed), startLocalSound,
-      startBackgroundTrack: (intro, loop) => sound.startBackgroundTrack(intro, loop), remapShader: (original, replacement, offset) => resources.remapShader(original, replacement, offset),
+      startBackgroundTrack: (intro, loop) => { clientOptions(); return sound.startBackgroundTrack(intro, loop); },
+      remapShader: (original, replacement, offset) => { clientOptions(); return resources.remapShader(original, replacement, offset); },
       clearLocalEntities: () => pool.initialize(), clearMarks: () => marks.reset(), clearParticles: () => particles.clear(resources),
       clearLoopingSounds: killAll => sound.clearLoopingSounds(killAll),
       setScoreSelection: () => { if (menus === null) throw new Error("Mission score selection called in baseq3"); menus.setScoreSelection(); },
@@ -189,16 +206,17 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
       memoryRemaining,
     });
     const snapshots = new SnapshotRuntime(state, { source: session.snapshots,
-      get demoPlayback() { return context.demoPlayback; }, get noPredict() { return enabled("cg_nopredict"); },
+      get demoPlayback() { return context.demoPlayback; }, get noPredict() { return sceneOnly || enabled("cg_nopredict"); },
       get synchronousClients() { return enabled("cg_synchronousClients"); },
       executeServerCommands: sequence => serverCommands.executeNewServerCommands(sequence), respawn: () => playerState.respawn(),
       resetPlayerEntity: entity => players.resetPlayerEntity(entity), checkEvents: entity => events.checkEvents(entity),
       transitionPlayerState: (current, previous) => playerState.transitionPlayerState(current, previous),
       lagometerSnapshot: snapshot => {
-        if (snapshot === null) { status.addLagometerSnapshotInfo(null); return; }
+        if (sceneOnly) return;
+        if (snapshot === null) { drawStatus().addLagometerSnapshotInfo(null); return; }
         const ping = session.snapshotPing(snapshot.messageNumber);
         if (ping === null) throw new Error("Cgame snapshot has no engine-owned ping record");
-        status.addLagometerSnapshotInfo({ ping, flags: snapshot.flags });
+        drawStatus().addLagometerSnapshotInfo({ ping, flags: snapshot.flags });
       }, warn: print,
     });
     const view = new ViewRuntime(state, { state,
@@ -215,26 +233,28 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
       setThirdPersonAngleValue: value => configuration.setVmNumericValue(ClientVmCvarSymbol.cg_thirdPersonAngle, value),
       registerModel: path => resources.registerModel(path), print,
     });
-    const menus = options.menus.kind === "baseq3" ? null : new MissionHud(state, staticState, media, {
-      ...options.menus, ...(options.weaponHud === undefined ? {} : { weaponHud: options.weaponHud }), modelPainter: new EngineUiModelPainter(resources, commands),
+    const primary = "scope" in options ? null : options;
+    const menus = primary === null || primary.menus.kind === "baseq3" ? null : new MissionHud(state, staticState, media, {
+      ...primary.menus, ...(primary.weaponHud === undefined ? {} : { weaponHud: primary.weaponHud }), modelPainter: new EngineUiModelPainter(resources, commands),
       assets, fontRegistry: options.fontRegistry, icons, configuration, cvars: session.cvars,
-      commands: { append: sendConsoleCommand }, commandContext: options.commandContext, clients, random, configString, resetPlayerEntity: entity => players.resetPlayerEntity(entity),
+      commands: { append: sendConsoleCommand }, commandContext: primary.commandContext, clients, random, configString, resetPlayerEntity: entity => players.resetPlayerEntity(entity),
       print, milliseconds: () => options.clock.milliseconds(),
     });
-    const status = new ClientDrawStatus(state, staticState, tools, menus === null ? { kind: "baseq3" } : { kind: "missionpack", fonts: menus.fonts },
+    const status = sceneOnly ? null : new ClientDrawStatus(state, staticState, tools, menus === null ? { kind: "baseq3" } : { kind: "missionpack", fonts: menus.fonts },
       { commands: session.commands, readVmCvar: readVm });
+    const drawStatus = (): ClientDrawStatus => { if (status === null) throw new Error("Supplemental cgame cannot own primary status messages"); return status; };
     const frameAudio = new ClientFrameAudio(state, media.sounds, { startSound, startLocalSound });
-    const console = new ClientConsoleRuntime(state, staticState, { cvars: session.cvars, view, weapons: new ClientWeaponSelection(state, options.weaponSelection), clients, serverCommands,
+    const console = new ClientConsoleRuntime(state, staticState, { cvars: session.cvars, view, weapons: new ClientWeaponSelection(state, primary?.weaponSelection), clients, serverCommands,
       hud: menus === null ? { kind: "unavailable", reason: "Base cgame has no mission menu console commands" } : menus,
       teamOrders: menus === null ? { kind: "unavailable", reason: "Base cgame has no mission team-order console commands" } : menus,
-      readVmCvar: readVm, resetPlayerEntity: entity => players.resetPlayerEntity(entity), addCommand: name => session.registerCgameCommand(name),
-      sendClientCommand, sendConsoleCommand, print, centerPrint: (text, y, width) => status.centerPrint(text, y, width),
+      readVmCvar: readVm, resetPlayerEntity: entity => players.resetPlayerEntity(entity), addCommand: name => clientOptions().session.registerCgameCommand(name),
+      sendClientCommand, sendConsoleCommand, print, centerPrint,
       sound: name => media.sounds[name], addBufferedSound: sound => frameAudio.addBufferedSound(sound),
     });
 
     await registerClientLoadingGraphics(media);
     configuration.registerCvars();
-    for (const name of clientConsoleCommandNames(session.product)) session.registerCgameCommand(name);
+    if (primary !== null) for (const name of clientConsoleCommandNames(session.product)) primary.session.registerCgameCommand(name);
     state.weaponSelect = Weapon.WP_MACHINEGUN;
     staticState.redflag = -1; staticState.blueflag = -1; staticState.flagStatus = -1;
     strings = session.getGameState();
@@ -253,10 +273,10 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
 
     // Registered scalar media projections are captured only after their source registration phase.
     const pool = new LocalEntityPool(session.product);
-    const prediction: PredictionRuntime = new PredictionRuntime(state, collision, { commandTiming: options.movement.commandTiming,
-      movePlayer: (state, command, settings) => options.movement.movePlayer(state, command, settings),
-      updateViewAngles: (state, command) => options.movement.updateViewAngles(state, command), commands: session.commands, predictItem: (entity, source) => options.predictItem(entity, source),
-      ...(options.sourceDebug ? { eventDebug: { kind: "source-debug", module: "cgame",
+    const prediction: PredictionRuntime = new PredictionRuntime(state, collision, { commandTiming: primary?.movement.commandTiming ?? "q3",
+      movePlayer: (state, command, settings) => clientOptions().movement.movePlayer(state, command, settings),
+      updateViewAngles: (state, command) => clientOptions().movement.updateViewAngles(state, command), commands: session.commands, predictItem: (entity, source) => clientOptions().predictItem(entity, source),
+      ...(primary?.sourceDebug ? { eventDebug: { kind: "source-debug", module: "cgame",
         showEvents: () => session.cvars.get("showevents")?.value ?? "", print } } : {}),
       settings: () => ({ gameType: staticState.gameType, dmFlags: staticState.dmFlags, demoPlayback: context.demoPlayback,
         noPredict: enabled("cg_nopredict"), synchronousClients: enabled("cg_synchronousClients"), predictItems: enabled("cg_predictItems"),
@@ -292,22 +312,22 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
       addEntity: entity => resources.addRefEntity(entity), addLight: light => resources.addLight(light), addPoly: poly => resources.addPoly(poly),
       lightForPoint: point => options.lightForPoint(point),
       addLoopingSound: (entity, origin, velocity, sound) => addLoopSound(entity, origin, velocity, sound, false),
-      addPlayerWeapon: (parent, ps, entity, team) => options.playerWeapon(parent, ps, entity, team, () => weapons.addPlayerWeapon(parent, ps, entity, team)), print,
+      addPlayerWeapon: (parent, ps, entity, team) => { if (primary !== null) primary.playerWeapon(parent, ps, entity, team, () => weapons.addPlayerWeapon(parent, ps, entity, team)); }, print,
       settings: () => ({ gameType: staticState.gameType, cameraMode: enabled("cg_cameraMode"), noPlayerAnimations: enabled("cg_noPlayerAnims"),
         animationSpeed: numeric("cg_animSpeed"), swingSpeed: numeric("cg_swingSpeed"), drawFriend: enabled("cg_drawFriend"), shadows: integer("cg_shadows"),
         enableBreath: missionEnabled("cg_enableBreath"), enableDust: missionEnabled("cg_enableDust"), debugPosition: enabled("cg_debugPosition"), debugAnimation: enabled("cg_debugAnim") }),
     });
     const packet = new PacketEntityPresenter(state, media.packet, {
       ...(options.bodyHidden === undefined ? {} : { bodyHidden: options.bodyHidden }),
-      ...(options.bodyPose === undefined ? {} : { pose: options.bodyPose }),
+      ...(primary?.bodyPose === undefined ? {} : { pose: primary.bodyPose }),
       addRefEntity: entity => resources.addRefEntity(entity), addLight: light => resources.addLight(light),
       updateSoundPosition: (number, position) => sound.updateSoundPosition(number, position), addLoopSound, startSound,
-      randomInteger: () => random.rand(), player: entity => options.character(entity, () => players.player(entity)),
+      randomInteger: () => random.rand(), player: entity => primary === null ? players.player(entity) : primary.character(entity, () => players.player(entity)),
       missileTrail: (kind, entity, weapon) => weapons.missileTrail(kind, entity, weapon), grappleTrail: (entity, weapon) => weapons.grappleTrail(entity, weapon),
       addEntityWithPowerups: (entity, state, team) => players.addRefEntityWithPowerups(entity, state, team),
     });
     const eventServices = {
-      presentEvent: (entity: ClientEntity, position: Vec3, source: () => Promise<void>) => options.event(entity, position, source),
+      presentEvent: (entity: ClientEntity, position: Vec3, source: () => Promise<void>) => primary === null ? source() : primary.event(entity, position, source),
       media: media.events, get options() { return { gameType: staticState.gameType, debugEvents: enabled("cg_debugEvents"),
         footsteps: enabled("cg_footsteps"), autoswitch: enabled("cg_autoswitch"), demoPlayback: context.demoPlayback, noPredict: enabled("cg_nopredict"),
         synchronousClients: enabled("cg_synchronousClients"), singlePlayerActive: missionEnabled("cg_singlePlayerActive"), cameraOrbit: enabled("cg_cameraOrbit") }; },
@@ -317,41 +337,55 @@ export async function createQ3ClientPresentation(input: Q3ClientPresentationOpti
       soundConfigString: (index: number) => configString(288 + index), customSound: (number: number, name: string) => clients.customSound(number, name),
       registerSound: (path: string | null, compressed: boolean) => soundBank.sound(path, compressed), startSound,
       stopLoopingSound: (number: number) => sound.stopLoopingSound(number), addBufferedSound: (sound: PcmSound | null) => frameAudio.addBufferedSound(sound), print,
-      centerPrint: (text: string, y: number, width: number) => status.centerPrint(text, y, width),
+      centerPrint,
     };
     const events: ClientEventRuntime = new ClientEventRuntime(state, session.product === "baseq3" ? { ...eventServices, get options() { return eventServices.options; }, product: "baseq3" }
       : { ...eventServices, get options() { return eventServices.options; }, product: "missionpack", missionSounds: media.sounds, missionEffects: effects, startLocalSound,
         voiceChatLocal: (mode, voiceOnly, clientNum, color, command) => serverCommands.voiceChatLocal(mode, voiceOnly, clientNum, color, command) });
-    const transitionServices = { ...(options.weaponHud === undefined ? {} : { weaponHud: options.weaponHud }), staticState, events, sounds: media.sounds, medals: media.graphics,
+    const transitionServices = { ...(primary?.weaponHud === undefined ? {} : { weaponHud: primary.weaponHud }), staticState, events, sounds: media.sounds, medals: media.graphics,
       get showMiss() { return enabled("cg_showmiss"); }, startLocalSound, addBufferedSound: (sound: PcmSound | null) => frameAudio.addBufferedSound(sound), print };
     const playerState: PlayerStateRuntime = new PlayerStateRuntime(state, session.product === "baseq3" ? { ...transitionServices, get showMiss() { return enabled("cg_showmiss"); }, product: "baseq3" }
       : { ...transitionServices, get showMiss() { return enabled("cg_showmiss"); }, product: "missionpack", missionSounds: media.sounds });
     if (menus !== null) { await menus.assetCache(); await menus.loadHudMenu(); }
     const corners = new ClientHudCorners(state, staticState, icons, { readVmCvar: readVm, configString, milliseconds: () => options.clock.milliseconds() });
-    const hud = new ClientHud(state, staticState, { ...(options.weaponHud === undefined ? {} : { weaponHud: options.weaponHud }), icons, status, corners, prediction, weapons, random, readVmCvar: readVm, startLocalSound },
+    const hud = status === null ? null : new ClientHud(state, staticState, { ...(primary?.weaponHud === undefined ? {} : { weaponHud: primary.weaponHud }), icons, status, corners, prediction, weapons, random, readVmCvar: readVm, startLocalSound },
       menus === null ? { kind: "baseq3", scoreboard: new BaseScoreboard(state, staticState, { icons, clients, players, readVmCvar: readVm, configString, sendClientCommand, print }) }
         : { kind: "missionpack", fonts: menus.fonts, menus });
 
     context.loading = false; pool.initialize(); marks.reset(); state.infoScreenText = "";
-    serverCommands.setConfigValues(); await serverCommands.startMusic(); await loading.loadingString("");
+    serverCommands.setConfigValues(); if (!sceneOnly) await serverCommands.startMusic(); await loading.loadingString("");
     if (menus !== null) menus.initTeamChat();
-    await serverCommands.shaderStateChanged(); sound.clearLoopingSounds(true);
-    const frames = new Q3PresentationFrameRuntime(state, {
-      configuration, media, snapshots, prediction, view, packet, marks, particles, localEntities, weapons, frameAudio,
-      serverCommands, hud, status, tools, scene: options.scene, hardware: options.hardware,
-      presentViewWeapon: (state, source) => options.viewWeapon(state, source),
+    if (!sceneOnly) await serverCommands.shaderStateChanged(); sound.clearLoopingSounds(true);
+    const sceneHost = { configuration, media, snapshots, packet, marks, particles, localEntities, frameAudio, serverCommands, scene: options.scene,
       packetOptions: () => ({ gameType: staticState.gameType, smoothClients: enabled("cg_smoothClients"), simpleItems: enabled("cg_simpleItems"), obeliskRespawnDelay: session.product === "missionpack" ? integer("cg_obeliskRespawnDelay") : 0 }),
-      enterFrame: frame => { session.assertCurrent(); context.demoPlayback = frame.demoPlayback; context.engineFrameNumber = frame.engineFrameNumber; },
-      setUserCommandValue: (weapon, sensitivity) => session.setUserCommandValue(weapon, sensitivity),
+      enterFrame: (frame: import("./frame.ts").Q3PresentationFrame) => { session.assertCurrent(); context.demoPlayback = frame.demoPlayback; context.engineFrameNumber = frame.engineFrameNumber; },
+      clearLoopingSounds: (killAll: boolean) => sound.clearLoopingSounds(killAll) };
+    const frames = new Q3PresentationFrameRuntime(state, hud === null || status === null ? { ...sceneHost, scope: "scene" } : {
+      ...sceneHost, prediction, view, weapons, hud, status, tools, hardware: options.hardware,
+      presentViewWeapon: (state, source) => clientOptions().viewWeapon(state, source),
+      setUserCommandValue: (weapon, sensitivity) => clientOptions().session.setUserCommandValue(weapon, sensitivity),
       clearLoopingSounds: killAll => sound.clearLoopingSounds(killAll), setListener: (client, origin, axis) => sound.setListener(client, origin, axis),
       loadingFrame: () => loading.drawInformation(draw), setTimescale: value => setCvar("timescale", gameFormat("%f", [value])), print,
     });
     session.assertCurrent();
-    return { state, staticState, configuration, media, clients, prediction, view, snapshots, packet, effects, localEntities, particles, marks, weapons, serverCommands, console, frameAudio, loading, hud, status, tools, menus, frames,
+    return { state, staticState, configuration, media, clients, prediction, view, snapshots, packet, events, effects, localEntities, particles, marks, weapons, serverCommands, console, frameAudio, loading, hud, status, tools, menus, frames,
       close: () => { frames.close(); menus?.dispose(); console.dispose(); serverCommands.dispose(); pool.initialize(); marks.reset(); particles.clear(resources); sound.clearLoopingSounds(true); options.scene.clearScene(); },
       keyEvent: async (key: number, down: boolean) => { session.assertCurrent(); await menus?.keyEvent(key, down); },
       mouseEvent: async (x: number, y: number) => { session.assertCurrent(); await menus?.mouseEvent(x, y); },
       eventHandling: async (type: number) => { session.assertCurrent(); await menus?.eventHandling(type); },
     };
 }
+export async function createQ3ClientPresentation(input: Q3ClientPresentationOptions) {
+  const result = await createQ3Presentation(input);
+  if (result.hud === null || result.status === null) throw new Error("Primary cgame lost its HUD owner");
+  return { ...result, hud: result.hud, status: result.status };
+}
+export async function createQ3ScenePresentation(input: Q3ScenePresentationOptions) {
+  const source = await createQ3Presentation(input);
+  return { state: source.state, configuration: source.configuration, media: source.media, clients: source.clients,
+    snapshots: source.snapshots, packet: source.packet, events: source.events, effects: source.effects,
+    localEntities: source.localEntities, particles: source.particles, marks: source.marks, weapons: source.weapons,
+    frameAudio: source.frameAudio, frames: source.frames, close: source.close };
+}
 export type Q3ClientPresentation = Awaited<ReturnType<typeof createQ3ClientPresentation>>;
+export type Q3ScenePresentation = Awaited<ReturnType<typeof createQ3ScenePresentation>>;

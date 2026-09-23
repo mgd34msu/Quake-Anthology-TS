@@ -1,4 +1,6 @@
 import { ApplicationModPresentations } from "./mod-presentations.ts";
+import { ApplicationSelectedQ3Presentations } from "./selected-q3-presentation.ts";
+import { q3Hardware } from "../../render/q3-hardware.ts";
 import type { WireSelection } from "../../network/common/session.ts";
 import { ModCommands, readModCommand } from "../../world/session/mod-commands.ts";
 import { ModUserFiles } from "../../world/session/mod-files.ts";
@@ -218,6 +220,7 @@ interface NativeQ2SeatClient { userinfo: string; readonly cvars: CvarRegistry; r
 
 interface GraphicalApplication {
   readonly modPresentations: ApplicationModPresentations;
+  readonly selectedQ3Presentations: ApplicationSelectedQ3Presentations;
   readonly renderer: NativeRenderer;
   readonly assets: ApplicationAssets;
   readonly input: ApplicationInput;
@@ -1983,6 +1986,9 @@ export class Application {
         presentations.push(presentation);
       }
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease, nativeQ2,
+        selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: this.simulation.scene,
+          print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
+          clock: { now: () => this.elapsed, frameNumber: () => this.frames }, hardware: () => q3Hardware(native.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
         modPresentations: new ApplicationModPresentations({ assets, audio, queries: this.simulation.scene,
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
           clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
@@ -2960,6 +2966,9 @@ export class Application {
           presentations.push(presentation);
         }
         nextGraphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease, nativeQ2: nextNativeQ2,
+          selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: current.scene,
+            print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
+            clock: { now: () => this.elapsed, frameNumber: () => this.frames }, hardware: () => q3Hardware(previous.renderer.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
           modPresentations: new ApplicationModPresentations({ assets, audio, queries: current.scene,
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
             clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
@@ -2991,6 +3000,7 @@ export class Application {
         for (const source of previous?.q3.values() ?? []) if (source.kind === "qvm")
           await retire("guest client retirement", () => source.client.close());
         await retire("component presentation retirement", () => previous?.modPresentations.close());
+        await retire("selected source presentation retirement", () => previous?.selectedQ3Presentations.close());
         await retire("guest shutdown", () => previousSimulation.shutdownQ3Guest());
         await retire("world retirement", () => retired.close());
         if (save === undefined && !preserveBots) for (const bot of previousBotClients)
@@ -4221,6 +4231,10 @@ export class Application {
         if (actor !== null) this.simulation.notifyClientEvent("userinfo", actor);
         native.userinfo = userinfo;
       }
+      for (const local of this.graphical?.input.locals ?? []) {
+        const player = this.simulation.movementPlayer(local.player.actor);
+        if (player?.arsenal.state.kind === "q3") this.graphical?.input.bindArsenalProvider(local.player.seat.id, player.arsenal.provider);
+      }
       for (const [seat, source] of this.graphical?.q3 ?? []) {
         const selection = source.client.userCommandSelection;
         this.graphical?.input.setQ3CommandSelection(seat, selection);
@@ -4283,7 +4297,10 @@ export class Application {
           source.prediction.captureSource(nativeQ3);
           source.client.receive(nativeQ3, this.sourceEvents.filter(event => event.recipient === undefined || event.recipient.equals(source.client.options.local.player.actor)), localCommands);
         }
-        const effectEvents = graphical.q3.size === 0 ? presentationEvents : presentationEvents.filter(event =>
+        const selectedQ3 = this.simulation.selectedQ3SourceState();
+        const sharedPresentationEvents = presentationEvents.filter(event => selectedQ3 === null || event.content !== selectedQ3.content
+          || event.kind !== "q3-source" || event.event.kind !== "entity-event");
+        const effectEvents = graphical.q3.size === 0 ? sharedPresentationEvents : sharedPresentationEvents.filter(event =>
           event.kind === "q3-source" ? event.event.kind === "sound" : event.kind !== "q3-character");
         const commonEvents = effectEvents.filter(event => event.recipient === undefined);
         const eventsFor = (actor: ActorId, events: readonly SimulationPresentationEvent[]) => events.filter(event => event.recipient === undefined || event.recipient.equals(actor));
@@ -4349,6 +4366,7 @@ export class Application {
           else await this.tools.measureAsync("presentation", () => presentation.prepare(output.snapshot, presentations, characters));
         }
         await graphical.modPresentations.prepare(graphical.presentations, this.simulation.modPresentationSources(), presentationEvents, this.frames);
+        await graphical.selectedQ3Presentations.prepare(graphical.presentations, selectedQ3, presentationEvents, this.frames);
         for (const presentation of graphical.presentations) {
           const render = () => presentation.local.player.seat.present(output.snapshot, graphical.renderer.backend);
           if (this.tools === null) render(); else this.tools.timer.measure("render", render);
@@ -4468,6 +4486,7 @@ export class Application {
       try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
     }
     try { graphical?.modPresentations.close(); } catch (error) { errors.push(error); }
+    try { graphical?.selectedQ3Presentations.close(); } catch (error) { errors.push(error); }
     for (const source of graphical?.q3.values() ?? []) { try { await source.client.shutdown(); } catch (error) { errors.push(error); } }
     for (const presentation of graphical?.presentations ?? []) {
       try {

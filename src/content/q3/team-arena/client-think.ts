@@ -133,17 +133,6 @@ export class ClientThinkRuntime {
     if (ps.jumppadFrame !== ps.pmoveFramecount) { ps.jumppadFrame = 0; ps.jumppadEnt = 0; }
   }
 
-  private stuckInOtherClient(entity: GameEntity): boolean {
-    const sourceZeroBounds: Bounds = { min: vec3(0, 0, 0), max: vec3(0, 0, 0) };
-    // Source absmin/absmax are memset-zero before an entity has ever been linked.
-    const bounds = this.host.world.linkState(entity.slot)?.absbounds ?? sourceZeroBounds;
-    for (let index = 0; index < MAX_CLIENTS; index++) {
-      const other = this.host.pool.at(index);
-      if (other === entity || !other.inuse || other.client === null || other.health <= 0) continue;
-      if (overlap(bounds, this.host.world.linkState(index)?.absbounds ?? sourceZeroBounds)) return true;
-    }
-    return false;
-  }
 
   clientThinkReal(entity: GameEntity): void {
     const client = clientFor(entity);
@@ -189,17 +178,7 @@ export class ClientThinkRuntime {
       entity.flags &= ~GameFlags.FORCE_GESTURE;
       command.buttons |= CommandButtons.GESTURE;
     }
-    if (ps.product === "missionpack" && ps.powerups.get(Powerup.PW_INVULNERABILITY) && !(ps.pmFlags & MoveFlags.INVULEXPAND)) {
-      const oldMins = entity.r.mins;
-      const oldMaxs = entity.r.maxs;
-      entity.r.mins = vec3(-42, -42, -42);
-      entity.r.maxs = vec3(42, 42, 42);
-      this.host.world.link(entity);
-      if (!this.stuckInOtherClient(entity)) ps.pmFlags |= MoveFlags.INVULEXPAND;
-      entity.r.mins = oldMins;
-      entity.r.maxs = oldMaxs;
-      this.host.world.link(entity);
-    }
+    expandQ3Invulnerability(this.host.pool, this.host.world, entity);
     const traceMask = ps.pmType === MoveType.PM_DEAD ? MASK_PLAYERSOLID & ~CONTENTS_BODY :
       entity.r.svFlags & ServerEntityFlags.BOT ? MASK_PLAYERSOLID | CONTENTS_BOTCLIP : MASK_PLAYERSOLID;
     client.oldOrigin = { ...ps.origin };
@@ -252,5 +231,32 @@ export class ClientThinkRuntime {
       return;
     }
     clientTimerActions(this.host.effects, entity, msec);
+  }
+}
+
+function stuckInOtherClient(pool: EntityPool, world: ServerWorld, entity: GameEntity): boolean {
+  const sourceZeroBounds: Bounds = { min: vec3(0, 0, 0), max: vec3(0, 0, 0) };
+  // Source absmin/absmax are memset-zero before an entity has ever been linked.
+  const bounds = world.linkState(entity.slot)?.absbounds ?? sourceZeroBounds;
+  for (let index = 0; index < MAX_CLIENTS; index++) {
+    const other = pool.at(index);
+    if (other === entity || !other.inuse || other.client === null || other.health <= 0) continue;
+    if (overlap(bounds, world.linkState(index)?.absbounds ?? sourceZeroBounds)) return true;
+  }
+  return false;
+}
+
+export function expandQ3Invulnerability(pool: EntityPool, world: ServerWorld, entity: GameEntity): void {
+  const ps = clientFor(entity).ps;
+  if (ps.product === "missionpack" && ps.powerups.get(Powerup.PW_INVULNERABILITY) && !(ps.pmFlags & MoveFlags.INVULEXPAND)) {
+    const oldMins = entity.r.mins;
+    const oldMaxs = entity.r.maxs;
+    entity.r.mins = vec3(-42, -42, -42);
+    entity.r.maxs = vec3(42, 42, 42);
+    world.link(entity);
+    if (!stuckInOtherClient(pool, world, entity)) ps.pmFlags |= MoveFlags.INVULEXPAND;
+    entity.r.mins = oldMins;
+    entity.r.maxs = oldMaxs;
+    world.link(entity);
   }
 }

@@ -810,6 +810,10 @@ export class ApplicationInput {
     if (selection === null) this.arsenalSelections.delete(seat);
     else this.arsenalSelections.set(seat, selection);
   }
+  bindArsenalProvider(seat: SeatId, provider: ProviderId): void {
+    if (this.arsenalSelections.get(seat)?.provider === provider) return;
+    this.setArsenalSelection(seat, { provider, weapon: null });
+  }
 
   clientCommandRegistration(seat: SeatId): ClientCommandRegistration { return this.clientCommands.createOwner(seat); }
 

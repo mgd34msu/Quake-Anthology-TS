@@ -5,6 +5,7 @@ const ammoAliases: readonly (readonly [ItemId, ItemId])[] = [
   ["rogue:ammo/lava-nails", "q1:ammo/nails"], ["rogue:ammo/multi-rockets", "q1:ammo/rockets"], ["rogue:ammo/plasma", "q1:ammo/cells"],
   ["q2:ammo_magslug", "q2:ammo_slugs"], ["q2:ammo_flechettes", "q2:ammo_bullets"], ["q2:ammo_disruptor", "q2:ammo_cells"],
   ["q2:ammo_trap", "q2:ammo_grenades"], ["q2:ammo_tesla", "q2:ammo_grenades"], ["q2:ammo_prox", "q2:ammo_grenades"],
+  ["q3:ammo/nailgun", "q3:ammo/machinegun"], ["q3:ammo/chaingun", "q3:ammo/machinegun"], ["q3:ammo/proxlauncher", "q3:ammo/grenadelauncher"],
 ];
 const weaponAliases: readonly (readonly [ItemId, ItemId])[] = [
   ["q1:weapon/hipnotic:laser", "q1:weapon/lightning"], ["q1:weapon/hipnotic:mjolnir", "q1:weapon/axe"], ["q1:weapon/hipnotic:proximity", "q1:weapon/grenadelauncher"],
@@ -15,6 +16,7 @@ const weaponAliases: readonly (readonly [ItemId, ItemId])[] = [
   ["q2:weapon_etf_rifle", "q2:weapon_machinegun"], ["q2:weapon_proxlauncher", "q2:weapon_grenadelauncher"],
   ["q2:weapon_disintegrator", "q2:weapon_bfg"], ["q2:weapon_chainfist", "q2:weapon_shotgun"],
   ["q2:ammo_trap", "q2:ammo_grenades"], ["q2:ammo_tesla", "q2:ammo_grenades"],
+  ["q3:weapon/nailgun", "q3:weapon/machinegun"], ["q3:weapon/chaingun", "q3:weapon/machinegun"], ["q3:weapon/proxlauncher", "q3:weapon/grenadelauncher"],
 ];
 
 /** Expansion pickups reuse the selected composition's explicit base supply groups, retaining original quantities. */

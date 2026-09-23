@@ -2,6 +2,7 @@ import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import type { ArsenalState } from "../../contracts/movement.ts";
 import { q3SpawnLoadout } from "../q3/foundation/arsenal.ts";
+import type { Product } from "../q3/base/shared/definitions.ts";
 import { Weapon } from "../../movement/q3/constants.ts";
 
 /** Base Q1 authored pickups with Q1 progression and selected base Q3 weapons. */
@@ -26,8 +27,8 @@ export const Q1_Q3_SUPPLY_PROFILE: PickupSupplyProfile = {
   ],
 };
 
-export function q1Q3SupplyLoadout(provider: ProviderId): ArsenalState {
-  const loadout = q3SpawnLoadout(provider, "baseq3", false);
+export function q1Q3SupplyLoadout(provider: ProviderId, product: Product = "baseq3"): ArsenalState {
+  const loadout = q3SpawnLoadout(provider, product, false);
   if (loadout.state.kind !== "q3") throw new Error("Q3 loadout returned a foreign weapon state");
   return { ...loadout, activeWeapon: "q3:weapon/shotgun", state: { ...loadout.state, sourceWeapon: Weapon.WP_SHOTGUN },
     ammo: loadout.ammo.map(entry => ({ ...entry, count: entry.item === "q3:weapon/gauntlet" || entry.item === "q3:weapon/shotgun" ? 1

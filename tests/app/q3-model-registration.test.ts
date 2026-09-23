@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { registerQ3ModelRequest } from "../../src/app/bootstrap/q3-client/assets.ts";
+import { registerQ3ModelRequest, registerQ3ShaderRequest } from "../../src/app/bootstrap/q3-client/assets.ts";
 import { normalizeResourcePath } from "../../src/content/mounts/paths.ts";
 import { ClientInfoStore } from "../../src/content/q3/presentation/players.ts";
 import { ClientInfo } from "../../src/content/q3/presentation/client-info.ts";
@@ -29,6 +29,15 @@ test("Q3 model registration rejects invalid requests without relaxing mounts or 
   for (const error of [new Error("I/O failure"), new RangeError("Malformed MD3")]) {
     await expect(registerQ3ModelRequest("models/present.md3", async () => { throw error; })).rejects.toBe(error);
   }
+});
+test("Q3 empty source model icon requests fail registration before original fallback and preserve loader errors", async () => {
+  const loaded: string[] = [];
+  const load = async (name: string) => { loaded.push(name); return { name }; };
+  expect(await registerQ3ShaderRequest("models/players//icon_default.tga", load)).toBeNull();
+  expect(loaded).toEqual([]);
+  expect(await registerQ3ShaderRequest("models/players/sarge/icon_default.tga", load)).toEqual({ name: "models/players/sarge/icon_default.tga" });
+  const error = new RangeError("Malformed image");
+  await expect(registerQ3ShaderRequest("models/players/sarge/icon_default.tga", async () => { throw error; })).rejects.toBe(error);
 });
 
 for (const gameType of [GameType.GT_FFA, GameType.GT_TEAM]) test(`sparse player info uses source default model and cleared info deletes it: ${gameType}`, async () => {

@@ -177,12 +177,7 @@ export function sendPendingPredictableEvents(context: EventContext, ps: PlayerSt
   ps.externalEvent = external;
 }
 
-export function clientEndFrame(context: ClientEffectsContext, entity: GameEntity): void {
-  const client = clientOf(entity);
-  if (client.sess.sessionTeam === Team.TEAM_SPECTATOR) {
-    context.spectatorEndFrame(entity);
-    return;
-  }
+export function updateQ3ClientPowerups(context: EventContext, client: GameClient): void {
   const time = context.combat.time;
   for (let index = 0; index < client.ps.powerups.length; index++) {
     if (client.ps.powerups.get(index) < time) client.ps.powerups.set(index, 0);
@@ -194,6 +189,16 @@ export function clientEndFrame(context: ClientEffectsContext, entity: GameEntity
     }
     if (client.invulnerabilityTime > time) client.ps.powerups.set(Powerup.PW_INVULNERABILITY, time);
   }
+}
+
+export function clientEndFrame(context: ClientEffectsContext, entity: GameEntity): void {
+  const client = clientOf(entity);
+  if (client.sess.sessionTeam === Team.TEAM_SPECTATOR) {
+    context.spectatorEndFrame(entity);
+    return;
+  }
+  const time = context.combat.time;
+  updateQ3ClientPowerups(context, client);
   if (context.intermissionTime !== 0) return;
   worldEffects(context, entity);
   damageFeedback(context, entity);

@@ -127,7 +127,14 @@ export type AnimationState = {
   readonly legsTimerMilliseconds: number; readonly torsoTimerMilliseconds: number;
 };
 export interface ActorAnimationState { readonly provider: ProviderId; readonly state: AnimationState; }
+export interface FixedMovementPose {
+  readonly kind: "fixed";
+  readonly crouched: boolean;
+  readonly bounds: Bounds;
+  readonly viewHeight: number;
+}
 export interface MovementEnvironment {
+  readonly pose?: FixedMovementPose;
   readonly health: number;
   readonly flight: boolean;
   readonly haste: boolean;
@@ -234,6 +241,7 @@ export interface WeaponStepInput {
   readonly gauntletHit: boolean;
 }
 export interface WeaponStepResult {
+  readonly continuation?: MovementContinuation;
   readonly arsenal: ArsenalState;
   readonly animation: ActorAnimationState;
   readonly effects: readonly MovementEffect[];
@@ -262,7 +270,7 @@ export interface MovementServices {
   readonly numeric: NumericOperations;
   /** Nested source touches finish here; the returned state includes teleports and velocity changes. */
   touch(contact: MovementTouchContact, state: MovementState): MovementContinuation;
-  weaponStep(input: WeaponStepInput): WeaponStepResult;
+  weaponStep(input: WeaponStepInput, state: MovementState): WeaponStepResult;
   animationStep(input: AnimationStepInput): AnimationStepResult;
 }
 export type MovementProvider = {

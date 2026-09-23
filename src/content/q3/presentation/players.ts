@@ -400,6 +400,7 @@ export class PlayerPresenter {
     const ci = this.host.clients.clientInfo(clientNum);
     if (!ci.infoValid) return;
     const options = this.host.settings();
+    const bodyVisible = this.host.bodyHidden?.(entity.currentState.number) !== true;
     let renderFlags = 0;
     if (entity.currentState.number === this.snapshot().clientNum) {
       if (!this.host.state.renderingThirdPerson) renderFlags = RF_THIRD_PERSON;
@@ -410,8 +411,9 @@ export class PlayerPresenter {
       timeMs: this.time, frameTimeMs: this.host.state.frameTime, swingSpeed: options.swingSpeed });
     legs.axis = pose.legs; torso.axis = pose.torso; head.axis = pose.head;
     this.animation(entity, ci, legs, torso, options);
-    this.sprites(entity, ci, options);
-    const shadow = this.shadow(entity, options); this.splash(entity, options);
+    if (bodyVisible) this.sprites(entity, ci, options);
+    const shadow = bodyVisible ? this.shadow(entity, options) : { visible: false, plane: 0 };
+    if (bodyVisible) this.splash(entity, options);
     if (options.shadows === 3 && shadow.visible) renderFlags |= RF_SHADOW_PLANE;
     renderFlags |= RF_LIGHTING_ORIGIN;
     if (this.host.product === "missionpack" && options.gameType === GameType.GT_HARVESTER) this.tokens(entity, ci, renderFlags, this.host.missionMedia);
@@ -427,7 +429,7 @@ export class PlayerPresenter {
     head.model = ci.headModel; head.customSkin = ci.headSkin; head.lightingOrigin = { ...entity.lerpOrigin };
     positionRotatedEntityOnTag(head, torso, ci.torsoModel, "tag_head"); head.shadowPlane = shadow.plane; head.renderFlags = renderFlags;
     this.addRefEntityWithPowerups(head, entity.currentState, ci.team);
-    if (this.host.product === "missionpack") { this.breath(entity, head, options, this.host.missionMedia); this.dust(entity, options, this.host.missionMedia); }
+    if (bodyVisible && this.host.product === "missionpack") { this.breath(entity, head, options, this.host.missionMedia); this.dust(entity, options, this.host.missionMedia); }
     this.host.addPlayerWeapon(torso, null, entity, ci.team);
     this.powerups(entity, torso, ci, options);
   }

@@ -1,3 +1,4 @@
+import { q3InvulnerabilityPose } from "./postures.ts";
 // Ported from id Software's code/game/bg_pmove.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 import { add3, dot3, length3, normalize3, scale3, vec3 } from "../../core/math.ts";
@@ -12,6 +13,12 @@ import { q3ViewAngles } from "./view.ts";
 import type { SlideMoveContext } from "./slide-move.ts";
 import type { Q3Motion, Q3Command, Q3MotionOptions, Q3MotionResult, Q3MovementTraceFunction } from "./types.ts";
 const ALL_TIMES = F.TIME_WATERJUMP | F.TIME_LAND | F.TIME_KNOCKBACK;
+export function dropQ3MovementTimers(state: { pmTime: number; pmFlags: number }, milliseconds: number): void {
+  if (state.pmTime) {
+    if (milliseconds >= state.pmTime) { state.pmFlags &= ~ALL_TIMES; state.pmTime = 0; }
+    else state.pmTime -= milliseconds;
+  }
+}
 const MASK_WATER = 32 | 16 | 8;
 const CONTENTS_BODY = 0x2000000;
 const SURF_SLICK = 2;
@@ -341,10 +348,11 @@ class MoveStep implements SlideMoveContext {
     const ps = this.state;
     const standingBounds = this.options.standingBounds;
     const postures = this.options.postures;
-    if (ps.invulnerable) {
-      this.bounds = ps.pmFlags & F.INVULEXPAND ? postures.invulnerabilityExpanded : postures.crouched.bounds;
-      ps.pmFlags |= F.DUCKED;
-      ps.viewheight = postures.crouched.viewHeight;
+    if (ps.invulnerable || this.options.pose !== undefined) {
+      const pose = this.options.pose ?? q3InvulnerabilityPose((ps.pmFlags & F.INVULEXPAND) !== 0, postures);
+      this.bounds = pose.bounds;
+      ps.pmFlags = pose.crouched ? ps.pmFlags | F.DUCKED : ps.pmFlags & ~F.DUCKED;
+      ps.viewheight = pose.viewHeight;
       return;
     }
     ps.pmFlags &= ~F.INVULEXPAND;
@@ -397,11 +405,7 @@ class MoveStep implements SlideMoveContext {
     if (previous === 3 && this.waterlevel !== 3) this.event(EntityEvent.EV_WATER_CLEAR);
   }
   private dropTimers(): void {
-    const ps = this.state;
-    if (ps.pmTime) {
-      if (this.msec >= ps.pmTime) { ps.pmFlags &= ~ALL_TIMES; ps.pmTime = 0; }
-      else ps.pmTime -= this.msec;
-    }
+    dropQ3MovementTimers(this.state, this.msec);
     this.options.animation({ kind: "drop-timers" });
   }
   run(): void {
@@ -436,7 +440,7 @@ class MoveStep implements SlideMoveContext {
       ps.velocity = speed <= 0 ? vec3(0, 0, 0) : scale3(normalize3(ps.velocity), speed);
     }
     this.dropTimers();
-    if (ps.product === "missionpack" && ps.invulnerable) {
+    if (this.options.pose !== undefined || ps.product === "missionpack" && ps.invulnerable) {
       cmd.forwardmove = 0; cmd.rightmove = 0; cmd.upmove = 0;
       ps.velocity = vec3(0, 0, 0);
     } else if (ps.flight) this.flyMove();
@@ -448,7 +452,7 @@ class MoveStep implements SlideMoveContext {
     this.options.animation({ kind: "gesture" });
     this.groundTrace();
     this.setWaterLevel();
-    this.options.weapon();
+    if (this.options.weapon() === false) return;
     this.options.torso();
     this.footsteps();
     this.waterEvents(previousWaterlevel);

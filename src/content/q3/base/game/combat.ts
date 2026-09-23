@@ -28,6 +28,13 @@ export enum DamageFlags {
 
 const MOD_JUICED = 27;
 
+/** The missionpack protection gate precedes momentum, armor and ordinary protection flags. */
+export function q3InvulnerabilityBlocks(context: CombatContext, target: GameEntity, direction: Vec3 | null, point: Vec3 | null, methodOfDeath: number): boolean {
+  if (context.product !== "missionpack" || target.client === null || methodOfDeath === MOD_JUICED || target.client.invulnerabilityTime <= context.time) return false;
+  if (direction !== null && point !== null) context.invulnerabilityEffect(target, direction, point);
+  return true;
+}
+
 export interface DamageDiagnostic {
   readonly time: number;
   readonly entityNum: number;
@@ -114,11 +121,7 @@ export function damage(context: CombatContext, target: DamageParticipant, inflic
     return;
   }
   if (!target.takedamage) return;
-  if (context.product === "missionpack" && target.client !== null && methodOfDeath !== MOD_JUICED &&
-    target.client.invulnerabilityTime > context.time) {
-    if (direction !== null && point !== null) context.invulnerabilityEffect(target, direction, point);
-    return;
-  }
+  if (q3InvulnerabilityBlocks(context, target, direction, point, methodOfDeath)) return;
   const source = inflictor ?? context.entities.at(ENTITYNUM_WORLD);
   const owner = attacker ?? context.entities.at(ENTITYNUM_WORLD);
   if (q3AdmitTargetDamage(context, target, source, owner) === "handled") return;

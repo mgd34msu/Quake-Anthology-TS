@@ -49,53 +49,78 @@ export function clientEvents(context: ClientEventsContext, entity: GameEntity, o
       case EntityEvent.EV_FIRE_WEAPON:
         if (context.primaryAttackAllowed?.(entity.actor.id) !== false) context.weapons.fire(entity);
         break;
-      case EntityEvent.EV_USE_ITEM1: {
-        context.combat.entities.rankings.useHoldable(entity.slot, 1);
-        const powerup = client.ps.powerups.get(Powerup.PW_REDFLAG) ? Powerup.PW_REDFLAG :
-          client.ps.powerups.get(Powerup.PW_BLUEFLAG) ? Powerup.PW_BLUEFLAG :
-            client.ps.powerups.get(Powerup.PW_NEUTRALFLAG) ? Powerup.PW_NEUTRALFLAG : Powerup.PW_NONE;
-        const flag = powerup === Powerup.PW_NONE ? null : findItemForPowerup(context.product, powerup);
-        if (flag !== null) {
-          const dropped = dropItem(context.drops, entity, flag, 0);
-          dropped.count = Math.max(1, Math.trunc(((client.ps.powerups.get(powerup) - context.combat.time) | 0) / 1000));
-          client.ps.powerups.set(powerup, 0);
-        }
-        if (context.product === "missionpack" && context.combat.gameType === GameType.GT_HARVESTER && client.ps.generic1 > 0) {
-          const cube = findItem(context.product, client.sess.sessionTeam === Team.TEAM_RED ? "Blue Cube" : "Red Cube");
-          if (cube !== null) {
-            for (let count = 0; count < client.ps.generic1; count = (count + 1) | 0) {
-              const dropped = dropItem(context.drops, entity, cube, 0);
-              dropped.spawnflags = client.sess.sessionTeam === Team.TEAM_RED ? Team.TEAM_BLUE : Team.TEAM_RED;
-            }
-          }
-          client.ps.generic1 = 0;
-        }
-        const spawn = context.spawns.selectSpawnPoint(client.ps.origin);
-        teleportPlayer({ combat: context.combat, world: context.world }, entity, spawn.origin, spawn.angles);
-        break;
-      }
-      case EntityEvent.EV_USE_ITEM2:
-        context.combat.entities.rankings.useHoldable(entity.slot, 2);
-        // Source updates gentity health here; ClientEndFrame later copies it into ps.
-        entity.health = (client.ps.stats.get(statSchema(context.product).maxHealth) + 25) | 0;
-        break;
-      case EntityEvent.EV_USE_ITEM3:
-        if (context.product === "missionpack") {
-          client.invulnerabilityTime = 0;
-          context.weapons.startKamikaze(entity);
-        }
-        break;
-      case EntityEvent.EV_USE_ITEM4:
-        if (context.product === "missionpack") {
-          if (client.portalID !== 0) context.personalPortal.dropPortalSource(entity);
-          else context.personalPortal.dropPortalDestination(entity);
-        }
-        break;
-      case EntityEvent.EV_USE_ITEM5:
-        if (context.product === "missionpack") client.invulnerabilityTime = (context.combat.time + 10000) | 0;
+      case EntityEvent.EV_USE_ITEM1: case EntityEvent.EV_USE_ITEM2: case EntityEvent.EV_USE_ITEM3:
+      case EntityEvent.EV_USE_ITEM4: case EntityEvent.EV_USE_ITEM5:
+        useQ3Holdable({ ...context, teleport: target => useTeleporter(context, target) }, entity, event);
         break;
       default:
         break;
     }
   }
+}
+
+export type Q3HoldableContext = {
+  readonly weapons: WeaponRuntime;
+  teleport(entity: GameEntity): void;
+} & (
+  | { readonly product: "baseq3"; readonly combat: Extract<CombatContext, { product: "baseq3" }> }
+  | { readonly product: "missionpack"; readonly combat: Extract<CombatContext, { product: "missionpack" }>; readonly personalPortal: PersonalPortalRuntime }
+);
+
+/** Original holdable effects; the current map owns carried objectives and the selected spawn. */
+export function useQ3Holdable(context: Q3HoldableContext, entity: GameEntity, event: number): void {
+  const client = entity.client;
+  if (client === null) throw new Error("Holdable effects require a client entity");
+  switch (event) {
+    case EntityEvent.EV_USE_ITEM1:
+      context.combat.entities.rankings.useHoldable(entity.slot, 1);
+      context.teleport(entity); break;
+    case EntityEvent.EV_USE_ITEM2:
+      context.combat.entities.rankings.useHoldable(entity.slot, 2);
+      entity.health = (client.ps.stats.get(statSchema(context.product).maxHealth) + 25) | 0; break;
+    case EntityEvent.EV_USE_ITEM3:
+      if (context.product === "missionpack") { client.invulnerabilityTime = 0; context.weapons.startKamikaze(entity); }
+      break;
+    case EntityEvent.EV_USE_ITEM4:
+      if (context.product === "missionpack") {
+        if (client.portalID !== 0) context.personalPortal.dropPortalSource(entity);
+        else context.personalPortal.dropPortalDestination(entity);
+      }
+      break;
+    case EntityEvent.EV_USE_ITEM5:
+      if (context.product === "missionpack") client.invulnerabilityTime = (context.combat.time + 10000) | 0;
+      break;
+  }
+}
+
+export function dropQ3TeleportObjectives(context: Pick<ClientEventsContext, "drops" | "product" | "combat">, entity: GameEntity): void {
+  const client = entity.client;
+  if (client === null) throw new Error("Teleporter requires a client entity");
+  const powerup = client.ps.powerups.get(Powerup.PW_REDFLAG) ? Powerup.PW_REDFLAG :
+    client.ps.powerups.get(Powerup.PW_BLUEFLAG) ? Powerup.PW_BLUEFLAG :
+      client.ps.powerups.get(Powerup.PW_NEUTRALFLAG) ? Powerup.PW_NEUTRALFLAG : Powerup.PW_NONE;
+  const flag = powerup === Powerup.PW_NONE ? null : findItemForPowerup(context.product, powerup);
+  if (flag !== null) {
+    const dropped = dropItem(context.drops, entity, flag, 0);
+    dropped.count = Math.max(1, Math.trunc(((client.ps.powerups.get(powerup) - context.combat.time) | 0) / 1000));
+    client.ps.powerups.set(powerup, 0);
+  }
+  if (context.product === "missionpack" && context.combat.gameType === GameType.GT_HARVESTER && client.ps.generic1 > 0) {
+    const cube = findItem(context.product, client.sess.sessionTeam === Team.TEAM_RED ? "Blue Cube" : "Red Cube");
+    if (cube !== null) {
+      for (let count = 0; count < client.ps.generic1; count = (count + 1) | 0) {
+        const dropped = dropItem(context.drops, entity, cube, 0);
+        dropped.spawnflags = client.sess.sessionTeam === Team.TEAM_RED ? Team.TEAM_BLUE : Team.TEAM_RED;
+      }
+    }
+    client.ps.generic1 = 0;
+  }
+}
+
+function useTeleporter(context: ClientEventsContext, entity: GameEntity): void {
+  const client = entity.client;
+  if (client === null) throw new Error("Teleporter requires a client entity");
+  dropQ3TeleportObjectives(context, entity);
+  const spawn = context.spawns.selectSpawnPoint(client.ps.origin);
+  teleportPlayer({ combat: context.combat, world: context.world }, entity, spawn.origin, spawn.angles);
 }

@@ -262,10 +262,11 @@ class QuakeWorldMove {
     this.forward = axes.forward; this.right = axes.right;
     if (this.state.spectator !== 0) { this.spectatorMove(); return; }
     const contactStart = c.contacts.length;
-    this.nudge();
+    if (this.input.environment.pose === undefined) this.nudge();
     this.state.angles = c.math.vec(command.angles.x, command.angles.y, command.angles.z);
     this.categorize();
-    if (this.input.environment.flight && this.input.environment.health > 0) {
+    if (this.input.environment.pose !== undefined) this.state.velocity = ZERO;
+    else if (this.input.environment.flight && this.input.environment.health > 0) {
       this.state.ground = NONE; this.state.waterJumpTimeSeconds = 0; this.spectatorMove(true);
     } else {
     if (this.waterLevel === 2) this.checkWaterJump();
@@ -303,8 +304,9 @@ class QuakeWorldMove {
     this.setState(this.context.lifecycle(this.state, "afterPhysics"));
     if (this.context.removed) return { kind: "q1-quakeworld", status: "actor-removed", actor: this.input.actor.id,
       commandSequence: this.input.commandSequence, effects: this.context.effects };
-    return { kind: "q1-quakeworld", status: "active", state: this.state,
-      ...finishMovement(this.context, this.state, this.state.angles, this.state.ground, this.waterLevel, this.waterType) };
+    const result = finishMovement(this.context, this.state, this.state.angles, this.state.ground, this.waterLevel, this.waterType);
+    if (result.kind !== "q1-quakeworld") throw new Error("Weapon callback changed QuakeWorld movement family");
+    return result;
   }
 }
 

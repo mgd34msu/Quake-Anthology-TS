@@ -258,6 +258,9 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   clearPrompt(): void { this.prompt.clear(); }
 
+  centerPrint(text: string, timeMilliseconds: number, durationMilliseconds: number): void {
+    this.messages.centerPrint(this.local.player.seat.id, text, { kind: "milliseconds", value: timeMilliseconds }, { kind: "milliseconds", value: durationMilliseconds });
+  }
   receive(events: readonly SimulationPresentationEvent[]): void {
     this.prompt.receive(events);
     for (const source of events) {

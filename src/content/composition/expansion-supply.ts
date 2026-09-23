@@ -1,7 +1,7 @@
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 
-export type ExpansionSupply = "q1-rogue" | "q1-mg3" | "q2-xatrix" | "q2-rogue";
+export type ExpansionSupply = "q1-rogue" | "q1-mg3" | "q2-xatrix" | "q2-rogue" | "q3-missionpack";
 type Expansion = ReadonlyMap<ItemId, readonly ItemId[]>;
 const ammo: Readonly<Record<ExpansionSupply, Expansion>> = {
   "q1-rogue": new Map([
@@ -14,6 +14,10 @@ const ammo: Readonly<Record<ExpansionSupply, Expansion>> = {
   "q2-rogue": new Map([
     ["q2:ammo_bullets", ["q2:ammo_flechettes"]], ["q2:ammo_grenades", ["q2:ammo_prox", "q2:ammo_tesla"]],
     ["q2:ammo_cells", ["q2:ammo_disruptor"]], ["q2:ammo_slugs", ["q2:ammo_disruptor"]],
+  ]),
+  "q3-missionpack": new Map([
+    ["q3:ammo/machinegun", ["q3:ammo/nailgun", "q3:ammo/chaingun"]],
+    ["q3:ammo/grenadelauncher", ["q3:ammo/proxlauncher"]],
   ]),
 };
 const weapons: Readonly<Record<ExpansionSupply, Expansion>> = {
@@ -30,6 +34,10 @@ const weapons: Readonly<Record<ExpansionSupply, Expansion>> = {
     ["q2:weapon_shotgun", ["q2:weapon_chainfist"]], ["q2:weapon_machinegun", ["q2:weapon_etf_rifle"]],
     ["q2:weapon_grenadelauncher", ["q2:weapon_proxlauncher"]], ["q2:weapon_hyperblaster", ["q2:weapon_plasmabeam", "q2:weapon_disintegrator"]],
     ["q2:weapon_railgun", ["q2:weapon_disintegrator"]],
+  ]),
+  "q3-missionpack": new Map([
+    ["q3:weapon/machinegun", ["q3:weapon/nailgun", "q3:weapon/chaingun"]],
+    ["q3:weapon/grenadelauncher", ["q3:weapon/proxlauncher"]],
   ]),
 };
 

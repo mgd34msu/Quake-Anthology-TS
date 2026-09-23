@@ -15,7 +15,7 @@ import type { FrameContext } from "../../../contracts/time.ts";
 import type { SceneQueries, TraceHit } from "../../../contracts/scene.ts";
 import { createNumericOperations } from "../../../core/numeric.ts";
 import { applyQ2MovementContacts } from "../../../movement/q2/index.ts";
-import { createPlayerMovementProvider, playerMovementEnvironment, playerStandingBounds, selectedMovementProfile } from "./player-movement.ts";
+import { createPlayerMovementProvider, playerMovementEnvironment, playerStandingBounds, playerCrouchedBounds, selectedMovementProfile } from "./player-movement.ts";
 import type { Q3MovementHooks } from "../../../movement/q3/types.ts";
 import type { SessionActorRegistry, SharedBodyTable } from "../../../world/actors/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
@@ -66,6 +66,7 @@ export interface PlayerMovementHost {
   touchTriggers(actor: OwnedActor): undefined;
   isBrush(actor: ActorId): boolean;
   worldActor(): ActorId | null;
+  fixedPose?(actor: OwnedActor): import("../../../contracts/movement.ts").FixedMovementPose | null;
   sourcePunch?(actor: ActorId): Vec3 | null;
   gibbed?(): boolean;
   jump(actor: OwnedActor, action: "jump" | "swim"): undefined;
@@ -137,6 +138,7 @@ export class MovementPlayer {
   waterType = 0;
   intermission = false;
   cutscene: { readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset: Vec3 } | null = null;
+  fixedPoseActive = false;
   gravityMultiplier = 1;
   flight = false;
   worldGravity = 800;
@@ -224,7 +226,13 @@ export class MovementPlayer {
     const owner = this;
     this.services = { scene: host.scene, numeric: createNumericOperations(this.profile.numeric),
       get inputApplication() { return host.inputApplications?.active === true ? owner.appliedMovement : undefined; },
-      touch: host.touch, weaponStep: host.weaponStep, animationStep: host.animationStep };
+      touch: host.touch, weaponStep: (input, state) => {
+        const before = this.commit(state, false, false);
+        if (before.kind === "actor-removed") return { arsenal: input.arsenal, animation: input.animation, effects: [], continuation: before };
+        const result = host.weaponStep(input, before.state);
+        return { ...result, continuation: this.host.actors.isLive(this.actor.id)
+          ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" } };
+      }, animationStep: host.animationStep };
     switch (this.profile.kind) {
       case "q1-netquake": this.state = { kind: "q1-netquake", origin, velocity: zero, angles,
         oldOrigin: origin, angularVelocity: zero, viewAngles: angles, punchAngles: zero, moveType: 3, flags: 4096,
@@ -237,6 +245,23 @@ export class MovementPlayer {
         origin, velocity: zero, gravity: 800, speed: 320, deltaAngleWords: [0, 0, 0], movementDirection: 0, grapplePoint: zero, flags: 0, viewAngles: angles,
         viewHeight: this.viewHeight, ground: this.ground, predictableEventSequence: 0, jumpPad: null, movementFrame: 0, jumpPadFrame: 0 }; break;
     }
+  }
+
+  private fixedEnvironment(): Pick<MovementInput["environment"], "pose"> {
+    const pose = this.host.fixedPose?.(this.actor);
+    if (pose == null && this.fixedPoseActive) {
+      this.bounds = this.profile.kind === "q1-quakeworld" ? playerCrouchedBounds(this) : this.standingBounds;
+      this.viewHeight = this.character === "q3" ? 26 : 22;
+      const body = this.host.bodies.read(this.actor.id);
+      if (body !== null) this.host.bodies.write(this.actor, { ...body, bounds: this.bounds });
+    }
+    if (pose != null) {
+      this.bounds = pose.bounds; this.viewHeight = pose.viewHeight;
+      const body = this.host.bodies.read(this.actor.id);
+      if (body !== null) this.host.bodies.write(this.actor, { ...body, bounds: pose.bounds });
+    }
+    this.fixedPoseActive = pose != null;
+    return pose == null ? {} : { pose };
   }
 
   setSourceViewRoll(roll: number): void {
@@ -320,6 +345,7 @@ export class MovementPlayer {
     return undefined;
   }
   private netQuakeInput(frame: FrameContext): Q1MovementInput {
+    const fixed = this.fixedEnvironment();
     const state = this.readState(), profile = selectedMovementProfile(this), combat = this.host.combat.read(this.actor.id);
     if (state.kind !== "q1-netquake" || profile.kind !== "q1-netquake" || combat === null) throw new Error("Missing NetQuake movement state");
     const effective = this.netQuakeSliceCommand ?? this.netQuakeApplication?.command;
@@ -327,7 +353,7 @@ export class MovementPlayer {
     const command = effective ?? this.netQuakeCommand ?? { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: this.viewAngles,
       forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
     return { kind: "q1-netquake", actor: this.actor, commandSequence: this.lastSequence, frame, shape: { kind: "box", bounds: this.bounds },
-      environment: playerMovementEnvironment(this, combat), arsenal: this.arsenal, animation: this.animation, execution: "authoritative", state, profile, command };
+      environment: { ...playerMovementEnvironment(this, combat), ...fixed }, arsenal: this.arsenal, animation: this.animation, execution: "authoritative", state, profile, command };
   }
   private netQuakeOptions(): Q1MovementOptions {
     const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id), binding = this.host.netQuake;
@@ -473,8 +499,9 @@ export class MovementPlayer {
     this.commandAngles = this.viewAngles;
     const combat = this.host.combat.read(this.actor.id);
     if (combat === null) throw new Error("Player has no combat state");
+    const fixed = this.fixedEnvironment();
     const base = { actor: this.actor, commandSequence: input.sequence, frame, shape: { kind: "box", bounds: this.profile.kind === "q1-quakeworld" && this.host.quakeWorld === undefined ? this.bounds : this.standingBounds },
-      environment: playerMovementEnvironment(this, combat),
+      environment: { ...playerMovementEnvironment(this, combat), ...fixed },
       arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
     const state = this.state, priorGround = this.ground, selectedProfile = selectedMovementProfile(this), command = input.command;
     const profile = selectedProfile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(selectedProfile) ?? selectedProfile : selectedProfile;
