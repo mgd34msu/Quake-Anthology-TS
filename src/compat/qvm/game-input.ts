@@ -1,10 +1,11 @@
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { FrameContext } from "../../contracts/time.ts";
+import type { UserCommand } from "../../contracts/protocol.ts";
 import type { ModClientApplication, ModClientCommand, ModClientIdentity } from "../../world/session/mod-clients.ts";
 import type { ModClientApplications } from "../../world/session/mod-client-applications.ts";
 import { q3ViewAngles } from "../../movement/q3/view.ts";
-import { readQvmUserCommand, QVM_USER_COMMAND_BYTES } from "./client-state-record.ts";
+import { readQvmUserCommand, writeQvmUserCommand, QVM_USER_COMMAND_BYTES } from "./client-state-record.ts";
 import type { QvmCancellationScope, QvmFunctionCall, QvmSystemCallResult } from "./interpreter.ts";
 import type { QvmGame } from "./game.ts";
 
@@ -45,6 +46,7 @@ export class QvmInputBinding {
   private readonly removals: (() => void)[] = [];
   private readonly clients: ClientScope[] = [];
   private readonly spawning: number[] = [];
+  private readonly commandFrames: { readonly scope: ClientScope; readonly address: number }[] = [];
   private current: ModClientApplication | null = null;
   constructor(private readonly source: QvmInputSource, private readonly services: QvmInputServices) {
     const { game, definition } = source;
@@ -110,33 +112,64 @@ export class QvmInputBinding {
   }
   private apply(call: QvmFunctionCall, scope: ClientScope, movement: number, kind: ModClientApplication["scope"]): QvmSystemCallResult {
     const { game, definition } = this.source, state = game.data.copyPlayerState(scope.slot);
-    const command = readQvmUserCommand(game.module.memory.view(movement + 4, QVM_USER_COMMAND_BYTES));
+    const address = movement + 4;
+    const command = readQvmUserCommand(game.module.memory.view(address, QVM_USER_COMMAND_BYTES));
+    const input: UserCommand = { kind: "q3", serverTimeMilliseconds: command.serverTime, angleWords: command.angles, buttons: command.buttons,
+      weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove };
+    const overlapping = this.commandFrames.some(frame => frame.address === address && frame.scope !== scope);
+    const suspended = overlapping ? game.module.memory.bytes.slice(address, address + QVM_USER_COMMAND_BYTES) : null;
+    const commandFrame = { scope, address };
+    this.commandFrames.push(commandFrame);
     const remaining = command.serverTime - state.commandTimeMilliseconds;
     const milliseconds = kind === "client-command" ? Math.max(0, Math.min(1000, remaining)) : Math.max(1, Math.min(200, remaining));
     const previous = this.current;
-    let application: ModClientApplication | null = null, failed = true;
+    let application: ModClientApplication | null = null, failed = true, finished = false;
     const finish = (): void => {
+      if (finished) return;
+      finished = true;
       try { this.services.applications.finish(application, failed); }
-      finally { this.current = previous; }
+      finally {
+        this.current = previous;
+        const index = this.commandFrames.lastIndexOf(commandFrame);
+        if (index !== -1) this.commandFrames.splice(index, 1);
+        if (suspended !== null) game.module.memory.writeBytes(address, suspended);
+      }
+    };
+    const applyOutput = (): void => {
+      const effective = application?.command;
+      if (effective === undefined || effective === input) return;
+      if (effective.kind !== "q3") throw new Error("QVM input output changed the source command dialect");
+      writeQvmUserCommand(game.module.memory.view(address, QVM_USER_COMMAND_BYTES), {
+        serverTime: effective.serverTimeMilliseconds, angles: effective.angleWords, buttons: effective.buttons, weapon: effective.weapon,
+        forwardmove: effective.forwardMove, rightmove: effective.rightMove, upmove: effective.upMove,
+      });
     };
     try {
       const aim = q3ViewAngles({ x: command.angles[0], y: command.angles[1], z: command.angles[2] },
         { x: state.deltaAngleWords[0], y: state.deltaAngleWords[1], z: state.deltaAngleWords[2] },
         state.viewAngles, state.stats[0] ?? 0, state.movementType, definition.intermission).angles;
       application = this.services.applications.begin({ identity: scope.identity, scope: kind,
-        command: { kind: "q3", serverTimeMilliseconds: command.serverTime, angleWords: command.angles, buttons: command.buttons,
-          weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove },
+        command: input,
+        arsenal: kind === "movement-slice" && previous?.identity.actor.equals(scope.identity.actor) ? previous.arsenal ?? null : null,
+        controls: { impulse: kind === "movement-slice" && previous?.identity.actor.equals(scope.identity.actor) ? previous.controls?.impulse ?? 0 : 0 },
         angleSpace: "source-relative", absoluteAim: aim, frame: { ...this.services.frame(), phase: "client-command", elapsed: { kind: "milliseconds", value: milliseconds } },
-        accepted: this.services.accepted(scope.identity.actor), parentInvocation: previous?.invocation ?? null });
+        accepted: this.services.accepted(scope.identity.actor), parentInvocation: previous?.invocation ?? null }, (aim, effective) => {
+          if (effective.kind !== "q3") throw new Error("QVM aim output changed the source command dialect");
+          const current = game.data.copyPlayerState(scope.slot);
+          const word = (degrees: number, delta: number): number => (Math.trunc(degrees * 65536 / 360) & 65535) - delta;
+          return { ...effective, angleWords: [word(aim.x, current.deltaAngleWords[0]), word(aim.y, current.deltaAngleWords[1]), word(aim.z, current.deltaAngleWords[2])] };
+        });
       this.current = application;
       if (call.execution === "asynchronous") return (async () => {
         await this.checkLive(call, scope);
+        applyOutput();
         const result = await call.proceedAsync(); failed = false;
         this.services.applications.finish(application); application = null;
         await this.checkLive(call, scope); return result;
       })().finally(finish);
       const before = this.checkLive(call, scope);
       if (typeof before !== "number") throw new Error("Synchronous QVM input cannot await disconnect");
+      applyOutput();
       const result = call.proceed(); failed = false;
       this.services.applications.finish(application); application = null;
       const after = this.checkLive(call, scope);

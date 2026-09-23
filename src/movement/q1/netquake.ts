@@ -324,21 +324,7 @@ class NetQuakeMove {
     this.clientThink();
     return this.state;
   }
-  physics(): Q1MovementResult {
-    const application = this.input.execution === "authoritative" ? this.context.services.inputApplication : undefined;
-    if (application === undefined) return this.physicsStep();
-    let result: Q1MovementResult;
-    try {
-      const before = application.begin(this.input.command, this.input.frame, this.state);
-      if (before.kind === "actor-removed") this.context.removed = true; else this.setState(before.state);
-      result = this.physicsStep();
-    } catch (error) { application.end(this.state, true); throw error; }
-    const after = application.end(this.state);
-    if (after.kind === "actor-removed" || result.status === "actor-removed") return { kind: "q1-netquake", status: "actor-removed",
-      actor: this.input.actor.id, commandSequence: this.input.commandSequence, effects: this.context.effects };
-    this.setState(after.state);
-    return { ...result, state: this.state };
-  }
+  physics(): Q1MovementResult { return this.physicsStep(); }
   private physicsStep(): Q1MovementResult {
     const c = this.context, s = this.state;
     this.setState(c.lifecycle(s, "beforePhysics"));
@@ -391,7 +377,22 @@ export function physicsNetQuake(input: Q1MovementInput, services: MovementServic
   return new NetQuakeMove(input, services, options).physics();
 }
 export function moveNetQuake(input: Q1MovementInput, services: MovementServices, options: Q1MovementOptions = {}): Q1MovementResult {
-  return physicsNetQuake({ ...input, state: prepareNetQuake(input, services, options) }, services, options);
+  const application = input.execution === "authoritative" ? services.inputApplication : undefined;
+  if (application === undefined) return physicsNetQuake({ ...input, state: prepareNetQuake(input, services, options) }, services, options);
+  let current = input, result: Q1MovementResult;
+  try {
+    const before = application.begin(input.command, input.frame, input.state);
+    if (before.kind === "actor-removed") result = { kind: "q1-netquake", status: "actor-removed", actor: input.actor.id, commandSequence: input.commandSequence, effects: [] };
+    else {
+      if (before.command.kind !== "q1-netquake" || before.state.kind !== "q1-netquake") throw new Error("Input output changed NetQuake dialect");
+      current = { ...input, command: before.command, state: before.state };
+      result = physicsNetQuake({ ...current, state: prepareNetQuake(current, services, options) }, services, options);
+    }
+  } catch (error) { application.end(current.state, true); throw error; }
+  const after = application.end(result.status === "active" ? result.state : current.state);
+  if (after.kind === "actor-removed" || result.status === "actor-removed") return { kind: "q1-netquake", status: "actor-removed", actor: input.actor.id, commandSequence: input.commandSequence, effects: result.effects };
+  if (after.state.kind !== "q1-netquake") throw new Error("Input completion changed NetQuake dialect");
+  return { ...result, state: after.state };
 }
 export function createQ1MovementProvider(id: ProviderId, options: Q1MovementOptions = {}): Extract<MovementProvider, { readonly kind: "q1-netquake" }> {
   return { kind: "q1-netquake", id, move: (input, services) => moveNetQuake(input, services, options) };

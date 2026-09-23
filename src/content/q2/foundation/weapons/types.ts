@@ -33,7 +33,7 @@ export interface Q2BaseWeaponDefinition extends Q2WeaponDefinition { readonly na
 
 export type Q2WeaponEvent =
   | { readonly kind: "muzzleflash"; readonly actor: ActorId; readonly flash: number; readonly silenced: boolean }
-  | { readonly kind: "beam"; readonly effect: "rail" | "rail-water" | "bfg-laser" | "bfg-zap" | "bubble-trail" | "bfg-lightning" | "heatbeam" | "monster-heatbeam"; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3; readonly duration: number }
+  | { readonly kind: "beam"; readonly effect: "rail" | "rail-water" | "bfg-laser" | "bfg-zap" | "bubble-trail" | "bfg-lightning" | "heatbeam" | "monster-heatbeam"; readonly actor: ActorId | null; readonly start: Vec3; readonly end: Vec3; readonly duration: number }
   | { readonly kind: "view-weapon"; readonly actor: ActorId; readonly weapon: Q2WeaponName | null; readonly model: string; readonly playerModel: number; readonly frame: number; readonly skin: number; readonly rate: number; readonly kickOrigin: Vec3; readonly kickAngles: Vec3 }
   | { readonly kind: "player-animation"; readonly actor: ActorId; readonly priority: "attack" | "pain" | "reverse"; readonly first: number; readonly last: number; readonly resetTime: boolean }
   | { readonly kind: "invisibility-reveal"; readonly actor: ActorId; readonly until: number };

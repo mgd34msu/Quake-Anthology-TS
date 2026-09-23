@@ -244,7 +244,7 @@ class QuakeWorldMove {
     if (application === undefined) { this.stepPhysics(command); return; }
     try {
       const before = application.begin(command, { ...this.input.frame, elapsed: { kind: "milliseconds", value: command.milliseconds } }, this.state);
-      if (before.kind === "actor-removed") this.context.removed = true; else { this.setState(before.state); this.stepPhysics(command); }
+      if (before.kind === "actor-removed") this.context.removed = true; else { if (before.command.kind !== "q1-quakeworld") throw new Error("Input output changed command dialect"); this.setState(before.state); this.stepPhysics(before.command); }
     } catch (error) { application.end(this.state, true); throw error; }
     const after = application.end(this.state);
     if (after.kind === "actor-removed") this.context.removed = true; else this.setState(after.state);

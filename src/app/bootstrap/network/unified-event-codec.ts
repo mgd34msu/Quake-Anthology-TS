@@ -1,3 +1,6 @@
+import { readModule } from '../../../persistence/execution.ts';
+import { qvmPlayerStateBytes, readSourceQvmPlayerState, writeQvmPlayerState } from '../../../compat/qvm/player-record.ts';
+import type { Q3PlayerState } from '../../../contracts/protocol.ts';
 import { SaveReader, namespaced } from '../../../persistence/value.ts';
 import type { ActorId, ClientId, SeatId, ProviderId } from '../../../contracts/identity.ts';
 import { createContentId } from '../../../contracts/content.ts';
@@ -384,12 +387,12 @@ function readEventQ2WeaponEventViewWeaponWeapon(reader: SaveReader, identity: Un
 function writeEventQ2WeaponEventViewWeaponWeapon(value: EventQ2WeaponEventViewWeaponWeapon): unknown { return value === null ? null : value; }
 
 function readEventQ2WeaponEvent(reader: SaveReader, identity: UnifiedIdentityDecoder): EventQ2WeaponEvent { void identity; switch (reader.field('kind').string()) { case "muzzleflash": return ({ "kind": reader.field("kind").literal("muzzleflash"), "actor": readActorId(reader.field("actor"), identity), "flash": reader.field("flash").finite(), "silenced": reader.field("silenced").boolean() });
-case "beam": return ({ "kind": reader.field("kind").literal("beam"), "effect": reader.field("effect").choice<"rail" | "rail-water" | "bfg-laser" | "bfg-zap" | "bubble-trail" | "bfg-lightning" | "heatbeam" | "monster-heatbeam">("rail", "rail-water", "bfg-laser", "bfg-zap", "bubble-trail", "bfg-lightning", "heatbeam", "monster-heatbeam"), "actor": readActorId(reader.field("actor"), identity), "start": readEventVec3(reader.field("start"), identity), "end": readEventVec3(reader.field("end"), identity), "duration": reader.field("duration").finite() });
+case "beam": return ({ "kind": reader.field("kind").literal("beam"), "effect": reader.field("effect").choice<"rail" | "rail-water" | "bfg-laser" | "bfg-zap" | "bubble-trail" | "bfg-lightning" | "heatbeam" | "monster-heatbeam">("rail", "rail-water", "bfg-laser", "bfg-zap", "bubble-trail", "bfg-lightning", "heatbeam", "monster-heatbeam"), "actor": reader.field("actor").nullable(value => readActorId(value, identity)), "start": readEventVec3(reader.field("start"), identity), "end": readEventVec3(reader.field("end"), identity), "duration": reader.field("duration").finite() });
 case "view-weapon": return ({ "kind": reader.field("kind").literal("view-weapon"), "actor": readActorId(reader.field("actor"), identity), "weapon": readEventQ2WeaponEventViewWeaponWeapon(reader.field("weapon"), identity), "model": reader.field("model").string(), "playerModel": reader.field("playerModel").finite(), "frame": reader.field("frame").finite(), "skin": reader.field("skin").finite(), "rate": reader.field("rate").finite(), "kickOrigin": readEventVec3(reader.field("kickOrigin"), identity), "kickAngles": readEventVec3(reader.field("kickAngles"), identity) });
 case "player-animation": return ({ "kind": reader.field("kind").literal("player-animation"), "actor": readActorId(reader.field("actor"), identity), "priority": reader.field("priority").choice<"attack" | "pain" | "reverse">("attack", "pain", "reverse"), "first": reader.field("first").finite(), "last": reader.field("last").finite(), "resetTime": reader.field("resetTime").boolean() });
 case "invisibility-reveal": return ({ "kind": reader.field("kind").literal("invisibility-reveal"), "actor": readActorId(reader.field("actor"), identity), "until": reader.field("until").finite() }); default: return reader.fail('unknown event variant'); } }
 function writeEventQ2WeaponEvent(value: EventQ2WeaponEvent): unknown { switch (value.kind) { case "muzzleflash": return ({ "kind": value["kind"], "actor": writeActorId(value["actor"]), "flash": value["flash"], "silenced": value["silenced"] });
-case "beam": return ({ "kind": value["kind"], "effect": value["effect"], "actor": writeActorId(value["actor"]), "start": writeEventVec3(value["start"]), "end": writeEventVec3(value["end"]), "duration": value["duration"] });
+case "beam": return ({ "kind": value["kind"], "effect": value["effect"], "actor": value["actor"] === null ? null : writeActorId(value["actor"]), "start": writeEventVec3(value["start"]), "end": writeEventVec3(value["end"]), "duration": value["duration"] });
 case "view-weapon": return ({ "kind": value["kind"], "actor": writeActorId(value["actor"]), "weapon": writeEventQ2WeaponEventViewWeaponWeapon(value["weapon"]), "model": value["model"], "playerModel": value["playerModel"], "frame": value["frame"], "skin": value["skin"], "rate": value["rate"], "kickOrigin": writeEventVec3(value["kickOrigin"]), "kickAngles": writeEventVec3(value["kickAngles"]) });
 case "player-animation": return ({ "kind": value["kind"], "actor": writeActorId(value["actor"]), "priority": value["priority"], "first": value["first"], "last": value["last"], "resetTime": value["resetTime"] });
 case "invisibility-reveal": return ({ "kind": value["kind"], "actor": writeActorId(value["actor"]), "until": value["until"] }); } }
@@ -801,12 +804,37 @@ type EventSimulationPresentationEventQ3Source = Extract<EventSimulationPresentat
 
 type EventQ3SourceEvent = EventSimulationPresentationEventQ3Source["event"];
 
+function readSourcePlayerState(reader: SaveReader): Q3PlayerState {
+  const bytes = reader.list(value => sourceClientInteger(value, 0, 255));
+  if (bytes.length !== qvmPlayerStateBytes("q3-modern")) return reader.fail("invalid source player state record length");
+  const state = readSourceQvmPlayerState(new DataView(Uint8Array.from(bytes).buffer), "q3-modern");
+  for (const vector of [state.origin, state.velocity, state.grapplePoint, state.viewAngles])
+    if (![vector.x, vector.y, vector.z].every(Number.isFinite)) return reader.fail("nonfinite source player vector");
+  return state;
+}
+function writeSourcePlayerState(state: Q3PlayerState): readonly number[] {
+  // The transport uses the complete modern record; source enums are not translated.
+  const bytes = new Uint8Array(qvmPlayerStateBytes("q3-modern"));
+  writeQvmPlayerState(new DataView(bytes.buffer), state, "q3-modern");
+  return [...bytes];
+}
 function readEventQ3SourceEvent(reader: SaveReader, identity: UnifiedIdentityDecoder): EventQ3SourceEvent { void identity; switch (reader.field('kind').string()) { case "print": case "log": return ({ "kind": reader.field("kind").choice<"print" | "log">("print", "log"), "text": reader.field("text").string() });
 case "sound": return { kind: "sound", actor: readActorId(reader.field("actor"), identity), origin: readEventVec3(reader.field("origin"), identity), velocity: readEventVec3(reader.field("velocity"), identity), path: reader.field("path").string(), channel: reader.field("channel").integer(0), volume: reader.field("volume").finite(), loop: reader.field("loop").boolean() };
 case "server-command": return ({ "kind": reader.field("kind").literal("server-command"), "client": reader.field("client").finite(), "text": reader.field("text").string() });
 case "console-command": return ({ "kind": reader.field("kind").literal("console-command"), "execution": reader.field("execution").choice<"append" | "now">("append", "now"), "text": reader.field("text").string() });
 case "drop-client": return ({ "kind": reader.field("kind").literal("drop-client"), "client": reader.field("client").finite(), "reason": reader.field("reason").string() });
 case "configstring": return ({ "kind": reader.field("kind").literal("configstring"), "index": reader.field("index").finite(), "value": reader.field("value").string() });
+case "player-event": {
+  const sequence = reader.field("sequence"), source = reader.field("source");
+  return { kind: "player-event", actor: readActorId(reader.field("actor"), identity),
+    source: { module: readModule(source.field("module")), abiProfile: source.field("abiProfile").choice("q3-modern", "q3-1.16n-base") },
+    playerState: readSourcePlayerState(reader.field("playerState")), event: sourceClientInteger(reader.field("event"), -0x80000000, 0x7fffffff),
+    parameter: sourceClientInteger(reader.field("parameter"), -0x80000000, 0x7fffffff),
+    sequence: sequence.field("kind").choice("external", "predictable") === "external"
+      ? { kind: "external", time: sourceClientInteger(sequence.field("time"), -0x80000000, 0x7fffffff) }
+      : { kind: "predictable", sequence: sourceClientInteger(sequence.field("sequence"), -0x80000000, 0x7fffffff) },
+    origin: readEventVec3(reader.field("origin"), identity), time: reader.field("time").finite() };
+}
 case "entity-event": return ({ "kind": reader.field("kind").literal("entity-event"), "actor": readActorId(reader.field("actor"), identity), "state": readEntityState(reader.field("state"), identity), "origin": readEventVec3(reader.field("origin"), identity), "time": reader.field("time").finite() }); default: return reader.fail('unknown event variant'); } }
 function writeEventQ3SourceEvent(value: EventQ3SourceEvent): unknown { switch (value.kind) { case "print": case "log": return ({ "kind": value["kind"], "text": value["text"] });
 case "sound": return { ...value, actor: writeActorId(value.actor), origin: writeEventVec3(value.origin), velocity: writeEventVec3(value.velocity) };
@@ -814,6 +842,7 @@ case "server-command": return ({ "kind": value["kind"], "client": value["client"
 case "console-command": return ({ "kind": value["kind"], "execution": value["execution"], "text": value["text"] });
 case "drop-client": return ({ "kind": value["kind"], "client": value["client"], "reason": value["reason"] });
 case "configstring": return ({ "kind": value["kind"], "index": value["index"], "value": value["value"] });
+case "player-event": return { ...value, actor: writeActorId(value.actor), playerState: writeSourcePlayerState(value.playerState), origin: writeEventVec3(value.origin) };
 case "entity-event": return ({ "kind": value["kind"], "actor": writeActorId(value["actor"]), "state": writeEntityState(value["state"]), "origin": writeEventVec3(value["origin"]), "time": value["time"] }); } }
 
 function readQ1ClientMetadata(reader: SaveReader): import('../simulation/types.ts').Q1ClientMetadataEvent {

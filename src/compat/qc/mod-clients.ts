@@ -1,5 +1,5 @@
 import type { ActorId, ClientId } from "../../contracts/identity.ts";
-import type { ModCallbackDeclaration, ModSourceCall } from "../../contracts/mod-callbacks.ts";
+import type { ModCallbackDeclaration, ModSourceCall, ModQcInputOutput, ModClientInputOutput } from "../../contracts/mod-callbacks.ts";
 import type { ModClientApplication, ModClientServices } from "../../world/session/mod-clients.ts";
 import { subscribeModClientInput } from "../../world/session/mod-client-input.ts";
 import { infoValueForKey } from "../../core/info-string.ts";
@@ -17,6 +17,7 @@ interface Operations {
   readonly input?: {
     open(application: ModClientApplication): () => void;
     invoke(call: ModSourceCall, application: ModClientApplication): void;
+    output(outputs: readonly ModQcInputOutput[], application: ModClientApplication, run: () => void): readonly ModClientInputOutput[];
   };
 }
 
@@ -71,6 +72,7 @@ export class QcModClientBindings {
           return input.open(application);
         },
         invoke: (call, application) => { this.require(application.identity.actor); input.invoke(call, application); },
+        output: (outputs, application, run) => input.output(outputs, application, run),
       });
     }
   }

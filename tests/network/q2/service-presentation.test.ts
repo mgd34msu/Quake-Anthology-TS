@@ -7,6 +7,9 @@ import { Q2ServerMessageReader, encodeQ2ServerEvent } from '../../../src/network
 import type { Q2ServerWriteEvent } from '../../../src/network/q2/index.ts';
 import type { SimulationPresentationEvent } from '../../../src/app/bootstrap/simulation/types.ts';
 import { translateQ2ServiceRecords, type Q2ServicePresentationHost } from '../../../src/app/bootstrap/network/q2-service-presentation.ts';
+import { Q2TempType } from '../../../src/network/q2/temp-types.ts';
+import { encodeUnifiedPresentationEvents, decodeUnifiedPresentationEvents } from '../../../src/app/bootstrap/network/unified-event-codec.ts';
+import type { Q2WeaponEvent } from '../../../src/content/q2/foundation/weapons/types.ts';
 
 test('decoded Q2 svc presentation shares state order and retains controls and unresolved actors', () => {
   const identity = createIdentityOwner('q2-service-presentation'), actor = identity.actor(1, 0);
@@ -78,4 +81,29 @@ test('rerelease source wire routes keyed POI removal and directional damage with
   { kind: 'remove-poi', actor, key: 37 },
   { kind: 'directional-damage', actor, damage: 12, health: true, armor: false, shield: true, direction: { x: 1, y: 0, z: 0 } },
  ]);
+});
+
+test('original Q2 two-point temporary effects retain endpoints without inventing an actor', () => {
+ const identity = createIdentityOwner('wire-trails'), events: SimulationPresentationEvent[] = [];
+ const reader = new Q2ServerMessageReader({ kind: 'q2-rerelease', version: 1038 }, { maxConfigStrings: 16384, inventorySlots: 256 });
+ const start = { x: -12, y: 34, z: 56 }, end = { x: 100, y: -30, z: 8 };
+ const host: Q2ServicePresentationHost = {
+  content: () => 'q2:rerelease:baseq2:test', seconds: 2, nextSequence: () => events.length, player: () => null,
+  actor: () => { throw new Error('Ownerless trail requested an actor'); }, entity: () => null,
+  soundConfigOffset: 0, imageConfigOffset: 200, playerSkinConfigOffset: 1000,
+  fog: value => q2FogFromWire(createQ2Fog(), value), configString: () => undefined,
+  setConfigString: () => {}, setInventory: () => {}, setLayout: () => {}, emit: value => { events.push(value); },
+ };
+ const types = [Q2TempType.TE_RAILTRAIL, Q2TempType.TE_BUBBLETRAIL, Q2TempType.TE_BFG_LASER, Q2TempType.TE_BFG_ZAP];
+ const records = types.flatMap(type => reader.read(encodeQ2ServerEvent(reader.wire, { kind: 'temporary-entity', value: {
+  type, fields: [{ kind: 'vector', name: 'position1', value: start }, { kind: 'vector', name: 'position2', value: end }], raw: new Uint8Array(0),
+ } })));
+ expect(translateQ2ServiceRecords(records, host)).toEqual([]);
+ const effects: readonly Extract<Q2WeaponEvent, { kind: 'beam' }>['effect'][] = ['rail', 'bubble-trail', 'bfg-laser', 'bfg-zap'];
+ expect(events.map(value => { if (value.kind !== 'q2-weapon') throw new Error('Expected weapon effect'); return value.event; })).toEqual(
+  effects.map(effect => ({ kind: 'beam', effect, actor: null, start, end, duration: 0.1 })));
+ expect(decodeUnifiedPresentationEvents(encodeUnifiedPresentationEvents(events), {
+  session: identity.session, actor: () => { throw new Error('Ownerless trail decoded an actor'); },
+  client: (slot, generation) => identity.client(slot, generation), seat: slot => identity.seat(slot), resourceId: () => 'resource:trail',
+ })).toEqual(events);
 });

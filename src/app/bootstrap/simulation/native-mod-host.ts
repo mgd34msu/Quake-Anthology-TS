@@ -23,7 +23,7 @@ import { ClassicGuestServices, type ClassicGuestServicesOptions } from "./classi
 import { RereleaseGuestServices } from "./rerelease-guest-services.ts";
 import type { ActorHostRuntime } from "./source-hosts.ts";
 import { SourceRandom } from "./random.ts";
-import type { GuestCallRunnerOptions } from "../../../guest/abi/runner.ts";
+import type { GuestCallRunnerOptions, GuestInlineContinuation } from "../../../guest/abi/runner.ts";
 import { RereleasePublicEdict } from "../../../compat/q2/rerelease/public-state.ts";
 import { CLASSIC_Q2_EXPORTS } from "../../../compat/q2/classic/layout.ts";
 import { gameExports, gameExportLayout } from "../../../compat/q2/rerelease/api.ts";
@@ -62,6 +62,8 @@ export interface NativeModHost {
   readonly cvars: CvarRegistry;
   readonly presentation: NativeModPresentation;
   readonly entries: Pick<GuestCallRunnerOptions, "callbacks" | "cpu">;
+  synchronizeFrame(seconds: number, frame: number): void;
+  bindInlineRegion(entry: GuestAddress, join: GuestAddress, intercept: (continuation: GuestInlineContinuation) => undefined): () => void;
   entity(slot: number): RawEntityView;
   client(slot: number): GuestAddress | null;
   active(slot: number): boolean;
@@ -111,9 +113,11 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
     if (asciiFold(command.argv[0] ?? "") !== "sv") return false;
     withCommand(command, run); return true;
   };
+  let sourceTime: number | null = null;
+  const frameSeconds = declaration.sourceActors?.frameSeconds ?? (rerelease ? context.frameMilliseconds / 1000 : 0.1);
   const runtime: ActorHostRuntime = { numeric: timing.numeric, random: new SourceRandom(services.seed, rerelease ? "q2-rerelease" : "classic"),
-    now: () => { const time = services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; },
-    frameSeconds: () => rerelease ? context.frameMilliseconds / 1000 : 0.1,
+    now: () => { const time = services.time(); return sourceTime ?? (time.kind === "seconds" ? time.value : time.value / 1000); },
+    frameSeconds: () => frameSeconds,
     schedule: () => { throw new Error("Native mod scheduling requires a declared source lifecycle callback"); } };
   const unavailable = (operation: string): never => { throw new Error(`Native gameplay mod requires a declared ${operation} binding`); };
   const shared: ClassicGuestServicesOptions = { engine: context.engine(options.source, runtime), scene: context.scene, cvars,
@@ -140,6 +144,8 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
           scale: 1, alpha: (state.renderEffects & 32) !== 0 ? 0.3 : 1, visible: record.bytes.getInt32(88, true) !== 0 && (record.bytes.getInt32(184, true) & 1) === 0,
           origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
     return { content: options.source.content, memory: source.memory, imageBase: source.imageBase, cvars, presentation, withCommand, entry: name => source.entry(name),
+      synchronizeFrame(seconds) { sourceTime = seconds; },
+      bindInlineRegion: (entry, join, intercept) => source.host.options.runner.bindInlineRegion(entry, join, declaration.target.abi, intercept),
       gameEntry(name) { const definition = CLASSIC_Q2_EXPORTS[name]; if (definition === undefined) throw new Error(`Unknown API3 game export ${name}`);
         const address = source.memory.readPointer(source.memory.offset(source.host.edicts.exports, BigInt(definition.offset)));
         if (address === null) throw new Error(`Null API3 game export ${name}`); return { address, signature: definition.signature }; },
@@ -148,7 +154,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
       clearEntityEvent: slot => { source.host.edicts.at(slot).bytes.setInt32(80, 0, true); },
       client: slot => source.memory.readPointer(source.memory.offset(source.host.edicts.at(slot).address, 84n)),
       entries: source.host.options.runner.options, entity: slot => source.host.edicts.at(slot), active: slot => source.host.edicts.at(slot).bytes.getInt32(88, true) !== 0,
-      entities: () => source.host.edicts.descriptor(), invoke: (entry, signature, values) => source.host.invoke(entry, signature, values),
+      entities: () => source.host.edicts.descriptor(), invoke: (entry, signature, values) => { source.host.cvars.refresh(); return source.host.invoke(entry, signature, values); },
       async initialize(restoring) { await source.initLoading(options.nextFrame); if (!restoring) await spawn(); },
       async checkpoint() { return { edition: "classic", original: encodeQ2ClassicOriginalSave(files.capture(identity,
         () => ({ cvars: encodeCheckpointValue(cvars.captureWorldTransferState()), configstrings: [...retained.configstrings()].map(([index, value]) => ({ index, value })), portals: [] }),
@@ -161,7 +167,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
           await source.host.saveLoading("ReadLevel", level, options.nextFrame); });
       }, close() { source.close(); return undefined; } };
   }
-  const adapter = new RereleaseGuestServices({ ...shared, engine: context.engine(options.source, runtime), frameMilliseconds: context.frameMilliseconds,
+  const adapter = new RereleaseGuestServices({ ...shared, engine: context.engine(options.source, runtime), frameMilliseconds: frameSeconds * 1000,
     localize: options.localize, clipboard: { kind: "dedicated" }, navigation: context.navigation,
     debugShapes: () => unavailable("debug shape presentation"), worldText: () => unavailable("world text presentation"),
     semanticBindings: { project: record => options.projection.project(record), foreignAddress: actor => options.projection.address(actor),
@@ -179,6 +185,8 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
         scale: state.scale === 0 ? 1 : state.scale, alpha: state.alpha === 0 ? (state.renderEffects & 32) !== 0 ? 0.3 : 1 : state.alpha,
         visible: info.active && (info.serverFlags & 1) === 0, origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
   return { content: options.source.content, memory: source.memory, imageBase: source.imageBase, cvars, presentation, withCommand, entry: name => source.entry(name),
+    synchronizeFrame(seconds, frame) { sourceTime = seconds; adapter.beginFrame(frame); },
+    bindInlineRegion: (entry, join, intercept) => source.host.module.options.runner.bindInlineRegion(entry, join, declaration.target.abi, intercept),
     gameEntry(name) { const definition = gameExports.find(entry => entry.name === name); if (definition === undefined) throw new Error(`Unknown API2023 game export ${name}`);
       const address = source.memory.readPointer(source.memory.offset(source.host.module.bindGame(), BigInt(fieldOffset(gameExportLayout, name))));
       if (address === null) throw new Error(`Null API2023 game export ${name}`); return { address, signature: definition.signature }; },
@@ -188,7 +196,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
     client: slot => new RereleasePublicEdict(source.memory, source.host.module.entities().atSlot(slot)).pointer("client"),
     entries: source.host.module.options.runner.options, entity: slot => source.host.module.entities().atSlot(slot), active: slot => adapter.entityInfo(slot).active,
     entities() { const table = source.host.module.entities(); return { base: table.base, stride: table.strideBytes, count: table.count, capacity: table.capacity }; },
-    invoke: (entry, signature, values) => source.host.module.invoke(entry, signature, values),
+    invoke: (entry, signature, values) => { source.host.core.refreshCvars(); return source.host.module.invoke(entry, signature, values); },
     async initialize(restoring) { await source.initLoading(options.nextFrame); if (!restoring) await spawn(); },
     async checkpoint() { const game = await source.host.writeSaveLoading("game", false, options.nextFrame), level = await source.host.writeSaveLoading("level", false, options.nextFrame);
       if (game.deferredDamage.length || game.projections.length || level.deferredDamage.length || level.projections.length) throw new Error("Unexpected whole-world native mod save state");

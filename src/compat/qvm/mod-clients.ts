@@ -1,7 +1,8 @@
 import type { ActorId, ClientId } from "../../contracts/identity.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { Q3PlayerState } from "../../contracts/protocol.ts";
-import type { QvmModClients, QvmModSourceCall } from "../../contracts/qvm-mod-callbacks.ts";
+import type { QvmModClients, QvmModSourceCall, QvmModInputOutput } from "../../contracts/qvm-mod-callbacks.ts";
+import type { ModClientInputOutput } from "../../contracts/mod-callbacks.ts";
 import type { ModClientApplication, ModClientServices } from "../../world/session/mod-clients.ts";
 import { subscribeModClientInput } from "../../world/session/mod-client-input.ts";
 import { q3CommandForControls, relativeQ3SourceCommand } from "../../app/bootstrap/simulation/q3-commands.ts";
@@ -17,6 +18,8 @@ interface Operations {
   admitted?(actor: ActorId): void;
   release(actor: ActorId): void;
   invoke(call: QvmModSourceCall, actor: ActorId, application?: ModClientApplication): void;
+  openInput?(application: ModClientApplication): () => void;
+  output?(outputs: readonly QvmModInputOutput[], application: ModClientApplication, run: () => void): readonly ModClientInputOutput[];
   reservedSlots?(): Iterable<number, undefined, unknown>;
   playerState(actor: ActorId): Q3PlayerState;
   send(text: string, recipient: ActorId | null): void;
@@ -31,6 +34,11 @@ export class QvmModClientBindings {
   constructor(private readonly operations: Operations) {}
 
   has(actor: ActorId): boolean { return this.entries.has(actor); }
+  live(actor: ActorId): boolean {
+    const entry = this.entries.get(actor), client = this.operations.services.forActor(actor);
+    return entry !== undefined && client !== null && (entry.client === null || entry.client.equals(client))
+      && this.operations.services.actor(client)?.equals(actor) === true;
+  }
   admitted(actor: ActorId): boolean { return this.entries.has(actor) && this.require(actor).admitted; }
   slot(actor: ActorId): number | null {
     const client = this.operations.services.forActor(actor);
@@ -87,17 +95,25 @@ export class QvmModClientBindings {
         const entry = this.require(application.identity.actor);
         if (!entry.admitted) throw new Error("QVM input callback requires admitted source client state");
         this.applications.push(application);
-        return () => { const index = this.applications.indexOf(application); if (index !== -1) this.applications.splice(index, 1); };
+        let close: (() => void) | undefined;
+        const remove = (): void => { const index = this.applications.indexOf(application); if (index !== -1) this.applications.splice(index, 1); };
+        try { close = this.operations.openInput?.(application); }
+        catch (error) { remove(); throw error; }
+        return () => { try { close?.(); } finally { remove(); } };
       },
       invoke: (call, application) => {
         this.require(application.identity.actor);
         this.operations.invoke(call, application.identity.actor, application);
       },
+      ...(this.operations.output === undefined ? {} : { output: this.operations.output }),
     });
   }
   restore(entries: readonly QvmModClientSlot[]): void {
     this.entries.clear();
     for (const entry of entries) this.entries.set(entry.actor, { ...entry, client: this.operations.services.forActor(entry.actor) });
+  }
+  players(): readonly QvmModClientSlot[] {
+    return [...this.entries.values()].map(({ actor }) => { const { slot, admitted } = this.require(actor); return { actor, slot, admitted }; });
   }
   checkpoint(): readonly QvmModClientSlot[] {
     if (this.applications.length !== 0) throw new Error("Cannot save during QVM component input application");

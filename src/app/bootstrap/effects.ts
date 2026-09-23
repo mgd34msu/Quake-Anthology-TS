@@ -50,11 +50,11 @@ interface Group {
   sampled: readonly SceneParticle[];
 }
 interface TimedLight extends SurfaceDynamicLight { readonly born: number; readonly die: number; readonly decay: number; readonly actor: ActorId | null; }
-interface Beam {
-  readonly content: ContentId; readonly actor: ActorId; readonly start: Vec3; readonly end: Vec3;
+type Beam = {
+  readonly content: ContentId; readonly start: Vec3; readonly end: Vec3;
   readonly die: number; readonly width: number; readonly color: number;
-  readonly model: string | null; readonly family: "q1" | "q2";
-}
+  readonly model: string | null;
+} & ({ readonly family: "q1"; readonly actor: ActorId } | { readonly family: "q2"; readonly actor: ActorId | null });
 interface Explosion {
   readonly content: ContentId; readonly origin: Vec3; readonly angles: Vec3; readonly start: number;
   readonly frames: number; readonly baseFrame: number; readonly path: string; readonly kind: "poly" | "misc" | "flash";
@@ -227,7 +227,8 @@ export class ApplicationEffects {
     this.lights.push({ origin, born: time, die: time + duration, radius, color, decay, minimum, actor });
   }
   private beam(beam: Beam): void {
-    const old = this.beams.findIndex(value => value.actor.equals(beam.actor) && value.family === beam.family && value.model === beam.model);
+    const actor = beam.actor;
+    const old = actor === null ? -1 : this.beams.findIndex(value => value.actor?.equals(actor) && value.family === beam.family && value.model === beam.model);
     if (old >= 0) this.beams.splice(old, 1);
     this.beams.push(beam);
   }
@@ -499,7 +500,7 @@ export class ApplicationEffects {
     if (event.kind === "effect") { await this.q2Effect(source, event); return; }
     if (event.kind === "beam" || event.kind === "monster-beam") {
       await this.group(source.content);
-      if (event.kind === "beam" && !event.visible) { this.beams = this.beams.filter(beam => !beam.actor.equals(event.actor)); return; }
+      if (event.kind === "beam" && !event.visible) { this.beams = this.beams.filter(beam => !beam.actor?.equals(event.actor)); return; }
       this.beam({ content: source.content, actor: event.actor, start: event.start, end: event.end,
         die: event.kind === "beam" ? Number.POSITIVE_INFINITY : source.seconds + 0.2, width: event.kind === "beam" ? event.width : 0,
         color: event.kind === "beam" ? event.color & 255 : 0,

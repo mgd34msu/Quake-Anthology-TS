@@ -5,6 +5,8 @@ import type { SourceTime } from "../../contracts/time.ts";
 import type { FrameContext } from "../../contracts/time.ts";
 import type { UserCommand } from "../../contracts/protocol.ts";
 import type { Vec3 } from "../../contracts/math.ts";
+import type { ModClientInputOutput } from "../../contracts/mod-callbacks.ts";
+import type { ArsenalIntent } from "../../contracts/gameplay.ts";
 
 export interface ModClientIdentity {
   readonly client: ClientId;
@@ -33,10 +35,12 @@ export interface ModClientApplication {
   readonly frame: FrameContext;
   /** Receipt is distinct from application; initial retained zero input has no receipt. */
   readonly accepted: ModClientCommand | null;
+  readonly arsenal?: ArsenalIntent | null;
+  readonly controls?: { readonly impulse: number };
 }
 
 export type ModClientApplicationEvent =
-  | { readonly phase: "before"; readonly application: ModClientApplication }
+  | { readonly phase: "before"; readonly application: ModClientApplication; output(value: ModClientInputOutput): undefined }
   | { readonly phase: "after"; readonly application: ModClientApplication; readonly outcome: "completed" | "actor-removed" | "failed" };
 
 /** Current destination clients; source adapters own their separate private client numbering. */
@@ -51,6 +55,8 @@ export interface ModClientServices {
   command(client: ClientId): ModClientCommand | null;
   /** Current source movement state, including an input operation's working state. */
   grounded?(client: ClientId): boolean;
+  /** Current authoritative view and stance, including an active movement working state. */
+  playerView?(client: ClientId): { readonly viewOffset: Vec3; readonly crouched: boolean };
   /** Queues the owning host's disconnect after the current source callback completes. */
   drop(client: ClientId, reason: string, content: ContentId): void;
   /** Disconnect notifications run while both handles still resolve; admission follows actor creation. */

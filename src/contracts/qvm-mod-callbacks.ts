@@ -3,7 +3,7 @@ import type { QvmAbiProfile } from "./execution.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { ProviderId } from "./identity.ts";
 import type { Vec3 } from "./math.ts";
-import type { ModCallbackBinding, ModCallbackValue, ModClientInputBinding } from "./mod-callbacks.ts";
+import type { ModCallbackBinding, ModCallbackValue, ModClientInput, ModClientInputBinding } from "./mod-callbacks.ts";
 
 export type QvmModScalar = "int32" | "float32";
 export type QvmModValue =
@@ -103,5 +103,25 @@ export interface QvmModClients {
   readonly admit: readonly QvmModSourceCall[];
   readonly userinfo: readonly QvmModSourceCall[];
   readonly disconnect: readonly QvmModSourceCall[];
-  readonly input?: readonly ModClientInputBinding<QvmModSourceCall>[];
+  readonly input?: readonly ModClientInputBinding<QvmModSourceCall, QvmModInputOutput>[];
 }
+
+/** Addresses are resolved only while the declared original source frame is live. */
+export type QvmModInputPointer = ({ readonly kind: "argument"; readonly index: number }
+  | { readonly kind: "global"; readonly address: number }) & {
+    readonly indirections: readonly number[];
+    readonly offset: number;
+  };
+interface QvmModInputHandler {
+  readonly entry: number;
+  readonly actor: { readonly record: string; readonly pointer: QvmModInputPointer };
+}
+export type QvmModInputOutput =
+  | { readonly kind: "field"; readonly record: string; readonly offset: number;
+      readonly value: { readonly input: "view-angles" } | {
+        readonly input: Exclude<ModClientInput, "view-angles">; readonly encoding: QvmModScalar; readonly scale: number;
+      } }
+  | (QvmModInputHandler & { readonly kind: "handler"; readonly inputs: readonly Exclude<ModClientInput, "view-angles">[];
+      readonly returns?: { readonly encoding: QvmModScalar; readonly value: number } })
+  | (QvmModInputHandler & { readonly kind: "command"; readonly command: QvmModInputPointer;
+      readonly inputs: readonly Exclude<ModClientInput, "impulse">[] });

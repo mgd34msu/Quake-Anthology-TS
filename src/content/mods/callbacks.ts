@@ -1,4 +1,4 @@
-import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage, ModQcProtection } from "../../contracts/mod-callbacks.ts";
+import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage, ModQcProtection, ModQcInputOutput } from "../../contracts/mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -6,7 +6,7 @@ import { readModClientInput } from "./client-input.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "string", "vector")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "string": return { kind: "string", value: reader.field("value").string() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
@@ -14,7 +14,7 @@ function value(reader: SaveReader): ModCallbackValue {
 }
 function field(reader: SaveReader): ModActorField {
   const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset", "userinfo", "client-input");
-  if (binding === "client-input") return { field: name, binding, input: reader.field("input").choice("view-angles", "attack", "jump", "impulse"), update: reader.field("update").choice("always", "nonzero") };
+  if (binding === "client-input") return { field: name, binding, input: reader.field("input").choice("view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"), update: reader.field("update").choice("always", "nonzero"), ...(reader.field("scale").value === undefined ? {} : { scale: reader.field("scale").number() }) };
   if (binding === "client-flags") return { field: name, binding,
     ...(reader.field("grounded").value === undefined ? {} : { grounded: reader.field("grounded").literal(true) }),
     ...(reader.field("privateMask").value === undefined ? {} : { privateMask: reader.field("privateMask").integer(0) }) };
@@ -72,7 +72,7 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     actorFields: reader.field("actorFields").list(field), callbacks: reader.field("callbacks").list(callback),
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1), admit: clients.field("admit").list(sourceCall),
       userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
-      ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall) }) } }),
+      ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall, inputOutput) }) } }),
     ...(initialize.value === undefined ? {} : { initialize: initialize.list(sourceCall) }),
     ...(frame.value === undefined ? {} : { frame: sourceCall(frame) }),
     ...(cvars.value === undefined ? {} : { cvars: cvars.list(entry => ({ name: entry.field("name").string(), value: entry.field("value").string() })) }),
@@ -119,4 +119,9 @@ function armorStage(reader: SaveReader): ModQcArmorStage {
 function readProtectionAdmission(reader: SaveReader): NonNullable<ModQcProtection["admission"]> {
   const kind = reader.field("kind").choice("claim", "replace-primary", "replace-current-primary");
   return kind === "replace-primary" ? { kind, owner: namespaced(reader.field("owner")) } : { kind };
+}
+
+function inputOutput(reader: SaveReader): ModQcInputOutput {
+  if (reader.field("kind").choice("field", "handler") === "field") return { kind: "field", field: reader.field("field").string() };
+  return { kind: "handler", function: reader.field("function").string(), inputs: reader.field("inputs").list(input => input.choice("attack", "jump", "impulse", "forward-move", "side-move", "up-move")) };
 }

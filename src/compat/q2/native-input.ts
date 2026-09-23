@@ -15,12 +15,14 @@ import type { RereleaseGuestModule } from "./rerelease/module.ts";
 import { gameExports, gameExportLayout } from "./rerelease/api.ts";
 import { edictLayout, fieldOffset, pmoveLayout, pmoveStateLayout, usercmdLayout } from "./rerelease/layouts.ts";
 import { readRereleaseUserCommand } from "./rerelease/player-state.ts";
+import { writeNativeUserCommand } from "./native-mod-client-stages.ts";
 import { bindNativeModEntry, type NativeModEntryBinding } from "./native-mod-entries.ts";
 
 type NativeCommand = Q2UserCommand | Q2RereleaseUserCommand;
 export interface NativeInputMotion {
   read(): { readonly origin: Vec3; readonly velocity: Vec3 };
   grounded(): boolean;
+  view(): { readonly viewOffset: Vec3; readonly crouched: boolean };
   write(value: { readonly origin: Vec3; readonly velocity: Vec3 }): undefined;
 }
 export interface NativeInputServices {
@@ -105,13 +107,13 @@ export class NativeInputBinding {
     this.commands.push(scope);
     try {
       const address = requiredPointer(values, 1), memory = source.host.memory;
-      const command = source.edition === "classic" ? readClassicUserCommand(memory.borrow(address, 16))
-        : readRereleaseUserCommand(memory.borrow(address, usercmdLayout.byteLength));
+      const commandView = memory.borrow(address, source.edition === "classic" ? 16 : usercmdLayout.byteLength);
+      const command = source.edition === "classic" ? readClassicUserCommand(commandView) : readRereleaseUserCommand(commandView);
       const state = source.edition === "classic" ? source.host.edicts.clientPrefix(record.slot)
         : (() => { const client = memory.readPointer(memory.offset(record.address, BigInt(fieldOffset(edictLayout, "client"))));
           return client === null ? null : memory.borrow(client, pmoveStateLayout.byteLength); })();
       if (state === null) throw new Error("Native input has no public client state");
-      return this.apply(scope, "client-command", command, state, () => original(values));
+      return this.apply(scope, "client-command", command, state, commandView, () => original(values));
     } catch (error) {
       if (!(error instanceof RemovedNativeInput) || error.scope !== scope) throw error;
       // Unlike guest faults, this controlled exit resumes this exact original caller.
@@ -119,17 +121,32 @@ export class NativeInputBinding {
       return { kind: "void" };
     } finally { this.commands.pop(); }
   }
-  private apply(scope: CommandScope, kind: ModClientApplication["scope"], command: NativeCommand, state: DataView,
+  private apply(scope: CommandScope, kind: ModClientApplication["scope"], command: NativeCommand, state: DataView, commandView: DataView,
     run: () => GuestCallResult): GuestCallResult {
     const previous = this.current;
+    const parent = previous?.identity.actor.equals(scope.identity.actor) === true ? previous : null;
     const frame = this.services.frame();
     let application: ModClientApplication | null = null, failed = true;
     try {
       application = this.services.applications.begin({ identity: scope.identity, scope: kind, command,
         angleSpace: "source-relative", absoluteAim: this.aim(command, state), accepted: this.services.accepted(scope.identity.actor),
-        parentInvocation: previous?.invocation ?? null, frame: { ...frame, phase: "client-command", elapsed: { kind: "milliseconds", value: command.milliseconds } } });
+        arsenal: kind === "movement-slice" ? parent?.arsenal ?? null : null,
+        controls: { impulse: command.kind === "q2-classic" ? command.impulse : kind === "movement-slice" ? parent?.controls?.impulse ?? 0 : 0 },
+        parentInvocation: previous?.invocation ?? null, frame: { ...frame, phase: "client-command", elapsed: { kind: "milliseconds", value: command.milliseconds } } },
+      (aim, value) => {
+        if (value.kind === "q2-classic") return { ...value, angleShorts: [
+          Math.trunc(aim.x * 65536 / 360) - state.getInt16(20, true), Math.trunc(aim.y * 65536 / 360) - state.getInt16(22, true), Math.trunc(aim.z * 65536 / 360) - state.getInt16(24, true)] };
+        if (value.kind === "q2-rerelease") return { ...value, angles: {
+          x: aim.x - state.getFloat32(36, true), y: aim.y - state.getFloat32(40, true), z: aim.z - state.getFloat32(44, true) } };
+        throw new Error("Native input output changed command dialect");
+      });
       this.current = application;
       this.assertLive(scope);
+      if (application !== null) {
+        const effective = application.command;
+        if (effective.kind === "q2-classic" || effective.kind === "q2-rerelease") writeNativeUserCommand(commandView, effective);
+        else throw new Error("Native input output changed command dialect");
+      }
       const result = run();
       failed = false;
       this.services.applications.finish(application);
@@ -162,6 +179,7 @@ export class NativeInputBinding {
     const commandOffset = classic ? 28 : fieldOffset(pmoveLayout, "cmd.msec");
     const cmd = new DataView(view.buffer, view.byteOffset + commandOffset, classic ? 16 : usercmdLayout.byteLength);
     const command = classic ? readClassicUserCommand(cmd) : readRereleaseUserCommand(cmd);
+    let moved = false;
     const vector = (offset: number): Vec3 => classic
       ? { x: view.getInt16(offset, true) * 0.125, y: view.getInt16(offset + 2, true) * 0.125, z: view.getInt16(offset + 4, true) * 0.125 }
       : { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) };
@@ -173,8 +191,20 @@ export class NativeInputBinding {
     };
     const projection: NativeInputMotion = { read: () => ({ origin: vector(4), velocity: vector(classic ? 10 : 16) }),
       grounded: () => ((classic ? view.getUint8(16) : view.getUint16(fieldOffset(pmoveStateLayout, "pm_flags"), true)) & 4) !== 0,
+      view: () => {
+        if (source.edition === "classic") {
+          const client = source.host.edicts.clientPrefix(scope.slot);
+          if (client === null) throw new Error("Native input has no public client view");
+          return { viewOffset: { x: client.getFloat32(40, true), y: client.getFloat32(44, true), z: moved ? view.getFloat32(192, true) : client.getFloat32(48, true) },
+            crouched: ((moved ? view.getUint8(16) : client.getUint8(16)) & 1) !== 0 };
+        }
+        const offset = vector(fieldOffset(pmoveLayout, "viewoffset"));
+        return { viewOffset: { ...offset, z: offset.z + view.getInt8(fieldOffset(pmoveStateLayout, "viewheight")) },
+        crouched: (view.getUint16(fieldOffset(pmoveStateLayout, "pm_flags"), true) & 1) !== 0 };
+      },
       write: value => { store(4, value.origin); store(classic ? 10 : 16, value.velocity); return undefined; } };
-    return this.services.movement(scope.identity, projection, () => this.apply(scope, "movement-slice", command, view, run));
+    return this.services.movement(scope.identity, projection, () => this.apply(scope, "movement-slice", command, view, cmd,
+      () => { const result = run(); moved = true; return result; }));
   }
   close(): undefined { for (const remove of this.removals.splice(0).reverse()) remove(); return undefined; }
 }

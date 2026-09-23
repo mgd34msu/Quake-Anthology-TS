@@ -1,11 +1,29 @@
 import type { Vec3 } from '../../../contracts/math.ts';
 import type { Q2PresentationEvent } from '../../../content/q2/foundation/host.ts';
+import type { Q2WeaponEvent } from '../../../content/q2/foundation/weapons/types.ts';
 import { Q2TempType } from '../../../network/q2/temp-types.ts';
 import type { Q2TempEntity, Q2TempField } from '../../../network/q2/temp-entities.ts';
 interface EffectEncoding {
     readonly name: string;
     readonly type: Q2TempType;
     readonly shape: 'position' | 'direction' | 'splash';
+}
+type BeamEvent = Extract<Q2WeaponEvent, { readonly kind: 'beam' }>;
+const trails: readonly { readonly type: Q2TempType; readonly effect: BeamEvent['effect'] }[] = [
+    { type: Q2TempType.TE_RAILTRAIL, effect: 'rail' },
+    { type: Q2TempType.TE_BUBBLETRAIL, effect: 'bubble-trail' },
+    { type: Q2TempType.TE_BFG_LASER, effect: 'bfg-laser' },
+    { type: Q2TempType.TE_BFG_ZAP, effect: 'bfg-zap' },
+];
+
+/** These wire effects carry endpoints, without an owning entity number. */
+export function q2BeamFromWire(value: Q2TempEntity): BeamEvent | null {
+    const trail = trails.find(entry => entry.type === value.type);
+    if (trail === undefined) return null;
+    const start = value.fields.find(field => field.kind === 'vector' && field.name === 'position1');
+    const end = value.fields.find(field => field.kind === 'vector' && field.name === 'position2');
+    if (start?.kind !== 'vector' || end?.kind !== 'vector') throw new Error('Q2 trail requires both source endpoints');
+    return { kind: 'beam', effect: trail.effect, actor: null, start: start.value, end: end.value, duration: 0.1 };
 }
 /** Q2 CL_ParseTEnt/g_utils message shapes; names match the source game presentation imports. */
 const effects: readonly EffectEncoding[] = [

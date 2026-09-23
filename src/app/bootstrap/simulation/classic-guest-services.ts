@@ -124,6 +124,16 @@ export class ClassicGuestServices {
     if (client === null) throw new Error("API3 movement state has no client");
     return (client.getUint8(16) & 4) !== 0;
   }
+  playerView(slot: number, actor: ActorId): ReturnType<NativeInputMotion["view"]> {
+    const record = this.host.edicts.at(slot);
+    if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
+      throw new Error("API3 player view requires the current client actor");
+    const motion = this.inputMotion.get(actor);
+    if (motion !== undefined) return motion.view();
+    const client = this.host.edicts.clientPrefix(slot);
+    if (client === null) throw new Error("API3 player view has no client");
+    return { viewOffset: vector(client, 40), crouched: (client.getUint8(16) & 1) !== 0 };
+  }
   setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
     const profile = classicCombatProfile(this.memory.module.digest), record = this.host.edicts.at(slot);
     if (profile === null) throw new Error("API3 source view writes require a declared private client layout");

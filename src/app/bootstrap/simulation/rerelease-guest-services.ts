@@ -110,6 +110,15 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     const motion = this.inputMotion.get(actor);
     return motion === undefined ? (this.view(slot).playerState().movement.flags & 4) !== 0 : motion.grounded();
   }
+  playerView(slot: number, actor: ActorId): ReturnType<NativeInputMotion["view"]> {
+    const record = this.host.module.entities().atSlot(slot);
+    if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
+      throw new Error("API2023 player view requires the current client actor");
+    const motion = this.inputMotion.get(actor);
+    if (motion !== undefined) return motion.view();
+    const state = this.view(slot).playerState();
+    return { viewOffset: { ...state.viewOffset, z: state.viewOffset.z + state.movement.viewHeight }, crouched: (state.movement.flags & 1) !== 0 };
+  }
   setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
     const profile = retailRereleaseClientProfile, host = this.host, record = host.module.entities().atSlot(slot);
     if (profile.authority.kind !== "artifact" || this.memory.module.digest !== profile.authority.digest)

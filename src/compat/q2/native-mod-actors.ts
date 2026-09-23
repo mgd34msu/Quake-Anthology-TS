@@ -23,6 +23,8 @@ interface SourceCalls {
   invoke(entry: GuestAddress, values: readonly Extract<GuestCallValue, { readonly kind: "pointer" }>[], returns: NativeModScalar | "void"): GuestCallResult;
   address(actor: ActorId): GuestAddress;
   actorAt(slot: number): ActorId | null;
+  clientFrame(slot: number): boolean;
+  synchronizeFrame(seconds: number, frame: number): void;
   beginFrame(): void;
   endFrame(): void;
   readonly combat: Pick<NativeModCombatCalls, "eligible" | "transfer" | "scalar" | "synchronize">;
@@ -68,6 +70,8 @@ export class NativeModActors {
     } catch (error) { behavior?.close(); this.unsubscribe(); for (const remove of this.removals.reverse()) remove(); throw error; }
   }
   get advancing(): boolean { return this.tickTime !== null; }
+  get sourceFrame(): number { return this.frame; }
+  get sourceTime(): number { return this.tickTime ?? this.now(); }
   private now(): number { const time = this.services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; }
   private entry(entry: NativeModEntry): GuestAddress { return entry.kind === "export" ? this.host.entry(entry.name) : this.host.memory.offset(this.host.imageBase, BigInt(entry.rva)); }
   private intercept(entry: NativeModEntry, name: "allocate" | "release", parameters: readonly "pointer"[], returns: "pointer" | "void",
@@ -117,7 +121,8 @@ export class NativeModActors {
   }
   synchronizeClock(): void {
     if (this.suspended) return;
-    const time = this.tickTime ?? this.now();
+    const time = this.sourceTime;
+    this.calls.synchronizeFrame(time, this.frame);
     for (const field of this.definition.clock) {
       const value = field.input === "frame" ? this.frame : time * (field.units === "milliseconds" ? 1000 : 1);
       this.calls.scalar(this.calls.resolve(field.address), field.input === "time" && field.units === "milliseconds" && field.encoding !== "float32" && field.encoding !== "float64" ? Math.round(value) : value, field.encoding);
@@ -157,6 +162,7 @@ export class NativeModActors {
         this.synchronizeClock();
         this.calls.beginFrame();
         for (let slot = 0; slot < this.host.entities().count; slot++) {
+          if (this.calls.clientFrame(slot)) continue;
           const actor = this.slots.get(slot); if (actor === undefined) continue;
           if (!this.services.actors.isLive(actor.id) || !this.host.active(slot)) { this.retire(slot); continue; }
           this.calls.invoke(this.entry(this.definition.update.entry), [{ kind: "pointer", value: this.host.entity(slot).address }], this.definition.update.returns);

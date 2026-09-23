@@ -8,7 +8,7 @@ import type { Q2ServerRecord } from '../../../network/q2/index.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import { SvcFogDataBitsT, type SvcFogDataT } from '../../../network/q2/fog.ts';
 import type { Q2FogState } from '../../../content/q2/rerelease/types.ts';
-import { q2EffectFromWire } from './q2-effects.ts';
+import { q2BeamFromWire, q2EffectFromWire } from './q2-effects.ts';
 
 export interface Q2ServicePresentationHost {
   readonly edition?: 'classic' | 'rerelease';
@@ -54,7 +54,11 @@ export function translateQ2ServiceRecords(records: readonly Q2ServerRecord[], ho
     else if (event.kind === 'temporary-entity') {
       const decoded = q2EffectFromWire(event.value);
       if (decoded !== null) host.emit({ kind: 'q2', sequence: host.nextSequence(), content: host.content(), seconds: host.seconds, sourceEntity: null, event: decoded });
-      else remaining.push(record);
+      else {
+        const beam = q2BeamFromWire(event.value);
+        if (beam !== null) host.emit({ kind: 'q2-weapon', sequence: host.nextSequence(), content: host.content(), seconds: host.seconds, sourceEntity: null, event: beam });
+        else remaining.push(record);
+      }
     } else if (event.kind === 'sound') {
       const path = host.configString(host.soundConfigOffset + event.sound.index);
       if (path === undefined) throw new Error(`Q2 sound ${event.sound.index} has no configstring`);

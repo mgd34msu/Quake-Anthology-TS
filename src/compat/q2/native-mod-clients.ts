@@ -1,5 +1,6 @@
 import type { ActorId, ClientId } from "../../contracts/identity.ts";
-import type { NativeModClients, NativeModSourceCall } from "../../contracts/native-mod-callbacks.ts";
+import type { NativeModClients, NativeModSourceCall, NativeModInputOutput } from "../../contracts/native-mod-callbacks.ts";
+import type { ModClientInputOutput } from "../../contracts/mod-callbacks.ts";
 import type { ModClientApplication, ModClientServices } from "../../world/session/mod-clients.ts";
 import { subscribeModClientInput } from "../../world/session/mod-client-input.ts";
 import type { CommandOrigin } from "../../contracts/common.ts";
@@ -19,6 +20,7 @@ interface Operations {
   invoke(call: NativeModSourceCall, actor: ActorId): number;
   invokeInput(call: NativeModSourceCall, application: ModClientApplication): void;
   openInput(application: ModClientApplication): () => void;
+  inputOutput(outputs: readonly NativeModInputOutput[], application: ModClientApplication, run: () => void): readonly ModClientInputOutput[];
   withCommand(command: CommandInvocation, invoke: () => void): void;
 }
 
@@ -93,7 +95,16 @@ export class NativeModClientsBinding {
         const actor = application.identity.actor;
         if (this.require(actor).admitted && !this.denied.has(actor)) this.operations.invokeInput(call, application);
       },
+      output: (outputs, application, run) => this.operations.inputOutput(outputs, application, run),
     });
+  }
+  frame(slot: number): boolean {
+    const entry = [...this.entries.values()].find(entry => entry.slot + 1 === slot);
+    if (entry === undefined) return false;
+    const client = this.operations.services.forActor(entry.actor);
+    if (client !== null && this.operations.services.actor(client)?.equals(entry.actor) === true && this.admitted(entry.actor))
+      this.calls(this.operations.declaration.frame ?? [], entry.actor);
+    return true;
   }
   private disconnect(actor: ActorId): void {
     try { if (this.require(actor).admitted) this.calls(this.operations.declaration.disconnect, actor); }

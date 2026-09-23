@@ -3,14 +3,18 @@ import type { ActorId, ProviderId } from "./identity.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { Vec3 } from "./math.ts";
 
-export type ModClientInput = "view-angles" | "attack" | "jump" | "impulse";
+export type ModClientInput = "view-angles" | "attack" | "jump" | "impulse" | "forward-move" | "side-move" | "up-move";
+export type ModClientInputOutput =
+  | { readonly kind: "set"; readonly input: "view-angles"; readonly value: Vec3 }
+  | { readonly kind: "set"; readonly input: Exclude<ModClientInput, "view-angles">; readonly value: number }
+  | { readonly kind: "consume"; readonly inputs: readonly Exclude<ModClientInput, "view-angles">[] };
 export type ModCallbackInput = ModClientInput | "self" | "other" | "activator" | "attacker" | "inflictor" | "amount" | "damage-flags" | "regular-protection-scale" | "knockback" | "point" | "direction" | "normal" | "item" | "time" | "elapsed" | "result";
 export type ModCallbackValue = { readonly kind: "input"; readonly name: ModCallbackInput }
   | { readonly kind: "float"; readonly value: number } | { readonly kind: "string"; readonly value: string } | { readonly kind: "vector"; readonly value: Vec3 };
 export type ModActorField = { readonly field: string } & (
   | { readonly binding: "health" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" | "think" | "nextthink" | "private" | "classname" | "view-offset" }
   | { readonly binding: "client-flags"; readonly grounded?: true; readonly privateMask?: number }
-  | { readonly binding: "client-input"; readonly input: ModClientInput; readonly update: "always" | "nonzero" }
+  | { readonly binding: "client-input"; readonly input: ModClientInput; readonly update: "always" | "nonzero"; readonly scale?: number }
   | { readonly binding: "userinfo"; readonly key: string }
   | { readonly binding: "inventory"; readonly item: ItemId }
   | { readonly binding: "constant"; readonly value: Exclude<ModCallbackValue, { readonly kind: "input" }> }
@@ -29,11 +33,13 @@ export type ModCallbackBinding = { readonly id: `${string}:${string}` } & (
   | { readonly operation: ModActorOperation; readonly stage: "replace"; readonly result: "boolean" }
 );
 export type ModCallback = ModSourceCall & ModCallbackBinding;
-export interface ModClientInputBinding<Call> {
+export type ModClientInputBinding<Call, Output = never> = {
   readonly scope: "client-command" | "movement-slice";
-  readonly phase: "before" | "after";
   readonly calls: readonly Call[];
-}
+} & ({ readonly phase: "before"; readonly outputs?: readonly Output[] } | { readonly phase: "after" });
+export type ModQcInputOutput =
+  | { readonly kind: "field"; readonly field: string }
+  | { readonly kind: "handler"; readonly function: string; readonly inputs: readonly Exclude<ModClientInput, "view-angles">[] };
 export type ModRuntimeValue = Exclude<ModCallbackValue, { readonly kind: "input" }> | { readonly kind: "actor"; readonly value: ActorId | null };
 
 export type ModConsoleValue = Exclude<ModCallbackValue, { readonly kind: "input" }>
@@ -82,7 +88,7 @@ export interface ModCallbackDeclaration {
   readonly callbacks: readonly ModCallback[];
   readonly clients?: { readonly maximum: number; readonly admit: readonly ModSourceCall[];
     readonly userinfo: readonly ModSourceCall[]; readonly disconnect: readonly ModSourceCall[];
-    readonly input?: readonly ModClientInputBinding<ModSourceCall>[] };
+    readonly input?: readonly ModClientInputBinding<ModSourceCall, ModQcInputOutput>[] };
   readonly cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly initialize?: readonly ModSourceCall[];
   readonly frame?: ModSourceCall;

@@ -1,13 +1,14 @@
-import type { ModClientInputBinding } from "../../contracts/mod-callbacks.ts";
+import type { ModClientInputBinding, ModClientInputOutput } from "../../contracts/mod-callbacks.ts";
 import type { ModClientApplication, ModClientServices } from "./mod-clients.ts";
 
-interface Operations<Call> {
+interface Operations<Call, Output> {
   open(application: ModClientApplication): () => void;
   invoke(call: Call, application: ModClientApplication): void;
+  output?(outputs: readonly Output[], application: ModClientApplication, run: () => void): readonly ModClientInputOutput[];
 }
 interface Scope { cleanup: (() => void) | null; opening: boolean; retired: boolean; }
 
-export function subscribeModClientInput<Call>(services: ModClientServices, bindings: readonly ModClientInputBinding<Call>[], operations: Operations<Call>): () => undefined {
+export function subscribeModClientInput<Call, Output = never>(services: ModClientServices, bindings: readonly ModClientInputBinding<Call, Output>[], operations: Operations<Call, Output>): () => undefined {
   if (bindings.length === 0) return () => undefined;
   const active = new Map<ModClientApplication, Scope>(), scopes: Scope[] = [];
   const drain = (): void => {
@@ -43,10 +44,15 @@ export function subscribeModClientInput<Call>(services: ModClientServices, bindi
     try {
       for (const binding of bindings) if ((event.phase === "before" || event.outcome === "completed")
         && binding.scope === application.scope && binding.phase === event.phase) {
-        for (const call of binding.calls) {
+        const run = (): void => { for (const call of binding.calls) {
           if (!active.has(application) || !live(application)) break;
           operations.invoke(call, application);
-        }
+        } };
+        if (event.phase === "before" && binding.phase === "before" && binding.outputs !== undefined) {
+          if (operations.output === undefined) throw new Error("Source input output adapter is unavailable");
+          const outputs = operations.output(binding.outputs, application, run);
+          if (active.has(application) && live(application)) for (const output of outputs) event.output(output);
+        } else run();
       }
     } catch (error) { errors.push(error); }
     if (event.phase === "after" && active.delete(application)) {

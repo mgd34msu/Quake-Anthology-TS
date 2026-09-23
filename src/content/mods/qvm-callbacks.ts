@@ -1,5 +1,5 @@
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
-import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue, QvmModProtection, QvmModProtectionScalar, QvmModProtectionSelection } from "../../contracts/qvm-mod-callbacks.ts";
+import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue, QvmModProtection, QvmModProtectionScalar, QvmModProtectionSelection, QvmModInputOutput, QvmModInputPointer } from "../../contracts/qvm-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -7,7 +7,7 @@ import { readModClientInput } from "./client-input.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "damage-flags", "regular-protection-scale") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move", "damage-flags", "regular-protection-scale") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
     case "string": return { kind: "string", value: reader.field("value").string() };
@@ -79,6 +79,32 @@ export function readQvmModCallbacks(bytes: Uint8Array): QvmModCallbackDeclaratio
   return readQvmModDeclaration(new SaveReader(value));
 }
 
+function inputPointer(reader: SaveReader): QvmModInputPointer {
+  const common = { indirections: reader.field("indirections").list(value => value.integer(0)), offset: reader.field("offset").integer(0) };
+  if (reader.field("kind").choice("argument", "global") === "global") return { ...common, kind: "global", address: reader.field("address").integer(0) };
+  const index = reader.field("index").integer(0);
+  if (index > 9) return reader.fail("Input pointer argument exceeds source call ABI");
+  return { ...common, kind: "argument", index };
+}
+function inputOutput(reader: SaveReader): QvmModInputOutput {
+  const kind = reader.field("kind").choice("field", "handler", "command");
+  if (kind === "field") {
+    const value = reader.field("value"), input = value.field("input").choice("view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move");
+    const common = { kind, record: reader.field("record").string(), offset: reader.field("offset").integer(0) };
+    if (input === "view-angles") return { ...common, value: { input } };
+    const scale = value.field("scale").number();
+    if (scale <= 0) return value.fail("Input field scale must be positive");
+    return { ...common, value: { input, encoding: value.field("encoding").choice("int32", "float32"), scale } };
+  }
+  const actor = reader.field("actor"), common = { entry: reader.field("entry").integer(0),
+    actor: { record: actor.field("record").string(), pointer: inputPointer(actor.field("pointer")) } };
+  if (kind === "command") return { ...common, kind, command: inputPointer(reader.field("command")),
+    inputs: reader.field("inputs").list(value => value.choice("view-angles", "attack", "jump", "forward-move", "side-move", "up-move")) };
+  return { ...common, kind, inputs: reader.field("inputs").list(value => value.choice("attack", "jump", "impulse", "forward-move", "side-move", "up-move")),
+    ...(reader.field("returns").value === undefined ? {} : { returns: {
+      encoding: reader.field("returns").field("encoding").choice("int32", "float32"), value: reader.field("returns").field("value").number() } }) };
+}
+
 export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclaration {
   const program = reader.field("program"), actors = reader.field("sourceActors"), combat = reader.field("combat"), clients = reader.field("clients");
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("qvm"),
@@ -88,7 +114,7 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1),
       records: clients.field("records").list(value => value.string()), playerStateRecord: clients.field("playerStateRecord").string(), admit: clients.field("admit").list(sourceCall),
       userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
-      ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall) }) } }),
+      ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall, inputOutput) }) } }),
     entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     ...(actors.value === undefined ? {} : { sourceActors: { allocate: actors.field("allocate").integer(0),
       release: { entry: actors.field("release").field("entry").integer(0), argument: actors.field("release").field("argument").integer(0) },

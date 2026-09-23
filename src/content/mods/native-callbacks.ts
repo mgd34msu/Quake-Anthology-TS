@@ -7,7 +7,7 @@ import { readModClientInput } from "./client-input.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
     case "string": return { kind: "string", value: reader.field("value").string() };
@@ -17,8 +17,9 @@ function address(reader: SaveReader): NativeModAddress { return { rva: reader.fi
 function entry(reader: SaveReader): NativeModEntry { return reader.field("kind").choice("export", "rva") === "export"
   ? { kind: "export", name: reader.field("name").string() } : { kind: "rva", rva: reader.field("rva").integer(0) }; }
 function argument(reader: SaveReader): NativeModValue {
-  const kind = reader.field("kind").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "vector", "string", "actor", "client", "userinfo", "time", "address");
+  const kind = reader.field("kind").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "vector", "string", "actor", "client", "userinfo", "time", "address", "user-command");
   switch (kind) {
+    case "user-command": return { kind };
     case "client": case "userinfo": return { kind, input: reader.field("input").choice("self", "other", "activator", "attacker", "inflictor") };
     case "actor": return { kind, record: reader.field("record").string(), input: reader.field("input").choice("self", "other", "activator", "attacker", "inflictor") };
     case "time": return { kind, input: reader.field("input").choice("time", "elapsed"), units: reader.field("units").choice("seconds", "milliseconds"), encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") };
@@ -29,7 +30,13 @@ function argument(reader: SaveReader): NativeModValue {
 function sourceCall(reader: SaveReader): NativeModSourceCall {
   return { entry: reader.field("entry").field("kind").string() === "game-export" ? { kind: "game-export", name: reader.field("entry").field("name").string() } : entry(reader.field("entry")), arguments: reader.field("arguments").list(argument),
     globals: reader.field("globals").list(global => ({ address: address(global.field("address")), value: argument(global.field("value")) })),
-    returns: reader.field("returns").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "void") };
+    returns: reader.field("returns").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64", "void"),
+    ...(reader.field("skips").value === undefined ? {} : { skips: reader.field("skips").list(region => ({ entry: region.field("entry").integer(0), join: region.field("join").integer(0) })) }) };
+}
+function inputOutput(reader: SaveReader): import("../../contracts/native-mod-callbacks.ts").NativeModInputOutput {
+  const kind = reader.field("kind").choice("field", "handler");
+  return kind === "field" ? { kind, record: reader.field("record").string(), offset: reader.field("offset").integer(0) }
+    : { kind, entry: entry(reader.field("entry")), arguments: reader.field("arguments").list(argument), inputs: reader.field("inputs").list(value => value.choice("attack", "jump", "impulse", "forward-move", "side-move", "up-move")) };
 }
 function binding(reader: SaveReader): ModCallbackBinding {
   const id = namespaced(reader.field("id")), operation = reader.field("operation").choice("damage", "inventory.give", "inventory.consume", "actor.think", "actor.touch", "actor.use", "actor.pain", "actor.die");
@@ -146,10 +153,14 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
       maximum: reader.field("clients").field("maximum").integer(1), records: reader.field("clients").field("records").list(value => value.string()),
       admit: reader.field("clients").field("admit").list(reader => ({ ...sourceCall(reader), accepts: reader.field("accepts").choice("always", "nonzero") })), userinfo: reader.field("clients").field("userinfo").list(sourceCall),
       disconnect: reader.field("clients").field("disconnect").list(sourceCall), command: reader.field("clients").field("command").list(sourceCall),
-      ...(reader.field("clients").field("input").value === undefined ? {} : { input: readModClientInput(reader.field("clients").field("input"), sourceCall) }),
+      ...(reader.field("clients").field("input").value === undefined ? {} : { input: readModClientInput(reader.field("clients").field("input"), sourceCall, inputOutput) }),
+      ...(reader.field("clients").field("frame").value === undefined ? {} : { frame: reader.field("clients").field("frame").list(sourceCall) }),
+      ...(reader.field("clients").field("pose").value === undefined ? {} : { pose: {
+        viewHeight: armorField(reader.field("clients").field("pose").field("viewHeight")),
+        crouched: { field: armorField(reader.field("clients").field("pose").field("crouched").field("field")), mask: reader.field("clients").field("pose").field("crouched").field("mask").integer(1) } } }),
       ...(reader.field("clients").field("inputFields").value === undefined ? {} : { inputFields: reader.field("clients").field("inputFields").list(field => {
         const value = argument(field.field("value"));
-        if (value.kind === "actor" || value.kind === "client" || value.kind === "userinfo" || value.kind === "address" || value.kind === "string") return field.fail("Native input fields require scalar, vector or time values");
+        if (value.kind === "actor" || value.kind === "client" || value.kind === "userinfo" || value.kind === "address" || value.kind === "string" || value.kind === "user-command") return field.fail("Native input fields require scalar, vector or time values");
         return { record: field.field("record").string(), offset: field.field("offset").integer(0), value: value.kind === "time" ? value : { kind: value.kind, value: value.value } };
       }) }),
     } }),

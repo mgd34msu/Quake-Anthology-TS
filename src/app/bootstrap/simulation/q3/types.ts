@@ -4,6 +4,8 @@ import type { ExecutableRecipe, ProviderReference } from "../../../../contracts/
 import type { DamageRequest } from "../../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../../contracts/identity.ts";
 import type { ActorCommand } from "../../../../contracts/session.ts";
+import type { ModuleIdentity, QvmAbiProfile } from "../../../../contracts/execution.ts";
+import type { Q3PlayerState } from "../../../../contracts/protocol.ts";
 import type { Vec3 } from "../../../../contracts/math.ts";
 import type { ActorCallbackTable, SessionActorRegistry, SharedBodyTable } from "../../../../world/actors/index.ts";
 import type { GameplayAuthority, SharedInventoryTable } from "../../../../world/gameplay/index.ts";
@@ -24,6 +26,19 @@ export interface Q3SourceEntityEvent {
   readonly kind: "entity-event";
   readonly actor: ActorId;
   readonly state: EntityState;
+  readonly origin: Vec3;
+  readonly time: number;
+}
+
+/** Original component enums and source client numbers require the originating presentation module. */
+export interface Q3SourcePlayerEvent {
+  readonly kind: "player-event";
+  readonly actor: ActorId;
+  readonly source: { readonly module: ModuleIdentity; readonly abiProfile: QvmAbiProfile };
+  readonly playerState: Q3PlayerState;
+  readonly event: number;
+  readonly parameter: number;
+  readonly sequence: { readonly kind: "external"; readonly time: number } | { readonly kind: "predictable"; readonly sequence: number };
   readonly origin: Vec3;
   readonly time: number;
 }

@@ -30,7 +30,7 @@ import type { Q2ApplicationClientHost, Q2ApplicationGameState, Q2ApplicationPlay
 import { q2WeaponStatus } from "../simulation/arsenal/weapon-status.ts";
 import { q2ApplicationLayout } from './q2-layout.ts';
 import { Q2DownloadReceiver } from './q2-downloads.ts';
-import { q2EffectFromWire } from './q2-effects.ts';
+import { q2BeamFromWire, q2EffectFromWire } from './q2-effects.ts';
 import { SelectedMovementPrediction } from '../simulation/prediction.ts';
 import type { MovementPredictionResult, MovementPredictionSnapshot } from '../simulation/prediction.ts';
 import { movementOrigin, movementProfile } from '../simulation/players.ts';
@@ -460,6 +460,10 @@ export class Q2RemotePresentation implements Q2ApplicationClientHost, RemotePres
                 const decoded = q2EffectFromWire(event.value);
                 if (decoded !== null)
                     this.events.push({ kind: 'q2', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: decoded });
+                else {
+                    const beam = q2BeamFromWire(event.value);
+                    if (beam !== null) this.events.push({ kind: 'q2-weapon', sequence: this.eventSequence++, content: content(), seconds, sourceEntity: null, event: beam });
+                }
             }
             else if (event.kind === 'sound') {
                 const path = this.configs.get(this.layout.sounds + event.sound.index);

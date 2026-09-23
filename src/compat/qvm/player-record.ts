@@ -38,6 +38,13 @@ function writeSlots(view: DataView, offset: number, slots: readonly number[]): v
 
 /** The caller resolves the VM pointer; this view starts at the complete C record. */
 export function readQvmPlayerState(view: DataView, profile: QvmAbiProfile = "q3-modern"): Q3PlayerState {
+  const source = readSourceQvmPlayerState(view, profile);
+  return { ...source, events: [qvmEvent(source.events[0], profile), qvmEvent(source.events[1], profile)],
+    externalEvent: qvmEvent(source.externalEvent, profile), persistent: qvmPersistent(source.persistent, profile), powerups: qvmPowerups(source.powerups, profile) };
+}
+
+/** Retains the original module's enum values and private slots without presentation translation. */
+export function readSourceQvmPlayerState(view: DataView, profile: QvmAbiProfile): Q3PlayerState {
   checkRecord(view, profile);
   return {
     commandTimeMilliseconds: view.getInt32(0, true),
@@ -60,9 +67,9 @@ export function readQvmPlayerState(view: DataView, profile: QvmAbiProfile = "q3-
     grapplePoint: readVector(view, 92),
     flags: view.getInt32(104, true),
     eventSequence: view.getInt32(108, true),
-    events: [qvmEvent(view.getInt32(112, true), profile), qvmEvent(view.getInt32(116, true), profile)],
+    events: [view.getInt32(112, true), view.getInt32(116, true)],
     eventParameters: [view.getInt32(120, true), view.getInt32(124, true)],
-    externalEvent: qvmEvent(view.getInt32(128, true), profile),
+    externalEvent: view.getInt32(128, true),
     externalEventParameter: view.getInt32(132, true),
     externalEventTimeMilliseconds: view.getInt32(136, true),
     clientNumber: view.getInt32(140, true),
@@ -75,8 +82,8 @@ export function readQvmPlayerState(view: DataView, profile: QvmAbiProfile = "q3-
     damagePitch: view.getInt32(176, true),
     damageCount: view.getInt32(180, true),
     stats: readSlots(view, 184),
-    persistent: qvmPersistent(readSlots(view, 248), profile),
-    powerups: qvmPowerups(readSlots(view, 312), profile),
+    persistent: readSlots(view, 248),
+    powerups: readSlots(view, 312),
     ammo: readSlots(view, 376),
     generic1: profile === "q3-modern" ? view.getInt32(440, true) : 0,
     loopSound: profile === "q3-modern" ? view.getInt32(444, true) : 0,

@@ -150,6 +150,8 @@ export class MovementPlayer {
   sourceEnvironment: MovementInput["environment"] | null = null;
   private applicationParent: ModClientApplication | null = null;
   private netQuakeApplication: ModClientApplication | null = null;
+  private netQuakeSliceCommand: Q1UserCommand | null = null;
+  private netQuakeSliceOpen = false;
   private readonly sliceApplications: (ModClientApplication | null)[] = [];
   private readonly appliedMovement: MovementInputApplication = {
     begin: (command, frame, state) => {
@@ -158,9 +160,13 @@ export class MovementPlayer {
       if (committed.kind === "actor-removed") return committed;
       const application = this.beginInputApplication("movement-slice", command, frame, state);
       this.sliceApplications[index] = application;
-      return this.applicationContinuation();
+      const continuation = this.applicationContinuation();
+      if (continuation.kind === "actor-removed") return continuation;
+      this.arsenalIntent = application?.arsenal ?? this.arsenalIntent;
+      return { ...continuation, command: application?.command ?? command };
     },
-    end: (state, failed = false) => {
+    end: (state, failed = false, posture) => {
+      if (posture !== undefined && !failed) { this.bounds = posture.bounds; this.viewHeight = posture.viewHeight; }
       if (this.host.actors.isLive(this.actor.id) && !failed) this.commit(state, false, false);
       this.host.inputApplications?.finish(this.sliceApplications.pop() ?? null, failed);
       return this.applicationContinuation();
@@ -170,13 +176,21 @@ export class MovementPlayer {
   private applicationContinuation(): MovementContinuation {
     return this.host.actors.isLive(this.actor.id) ? { kind: "continue", state: this.readState() } : { kind: "actor-removed" };
   }
-  private beginInputApplication(scope: ModClientApplication["scope"], command: MovementInput["command"], frame: FrameContext, state: MovementState): ModClientApplication | null {
+  private beginInputApplication(scope: ModClientApplication["scope"], command: MovementInput["command"], frame: FrameContext, state: MovementState, arsenal = this.arsenalIntent): ModClientApplication | null {
     const owner = this.host.inputApplications;
     if (owner === undefined || !owner.active) return null;
     return owner.begin({ identity: { actor: this.actor.id, client: this.client }, scope, command,
       angleSpace: command.kind === "q1-netquake" || command.kind === "q1-quakeworld" ? "absolute" : "source-relative",
-      absoluteAim: movementApplicationAim(command, state, this.host.combat.read(this.actor.id)?.health ?? 0, this.services.numeric), frame, accepted: this.host.acceptedInput?.() ?? null,
-      ...(this.applicationParent === null ? {} : { parentInvocation: this.applicationParent.invocation }) });
+      absoluteAim: movementApplicationAim(command, state, this.host.combat.read(this.actor.id)?.health ?? 0, this.services.numeric), frame, accepted: this.host.acceptedInput?.() ?? null, arsenal: arsenal ?? null,
+      ...(this.applicationParent === null ? {} : { parentInvocation: this.applicationParent.invocation }) }, (aim, current) => {
+        const state = this.readState(), word = (angle: number): number => Math.trunc(angle * 65536 / 360);
+        if (current.kind === "q1-netquake") return { ...current, viewAngles: aim };
+        if (current.kind === "q1-quakeworld") return { ...current, angles: aim };
+        if (current.kind === "q2-rerelease" && state.kind === current.kind) return { ...current, angles: { x: aim.x - state.deltaAngles.x, y: aim.y - state.deltaAngles.y, z: aim.z - state.deltaAngles.z } };
+        if (current.kind === "q2-classic" && state.kind === current.kind) return { ...current, angleShorts: [word(aim.x) - state.deltaAngleShorts[0], word(aim.y) - state.deltaAngleShorts[1], word(aim.z) - state.deltaAngleShorts[2]] };
+        if (current.kind === "q3" && state.kind === current.kind) return { ...current, angleWords: [word(aim.x) - state.deltaAngleWords[0], word(aim.y) - state.deltaAngleWords[1], word(aim.z) - state.deltaAngleWords[2]] };
+        throw new Error("Input aim output changed movement dialect");
+      });
   }
 
   setFlight(enabled: boolean): boolean {
@@ -308,7 +322,9 @@ export class MovementPlayer {
   private netQuakeInput(frame: FrameContext): Q1MovementInput {
     const state = this.readState(), profile = selectedMovementProfile(this), combat = this.host.combat.read(this.actor.id);
     if (state.kind !== "q1-netquake" || profile.kind !== "q1-netquake" || combat === null) throw new Error("Missing NetQuake movement state");
-    const command = this.netQuakeCommand ?? { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: this.viewAngles,
+    const effective = this.netQuakeSliceCommand ?? this.netQuakeApplication?.command;
+    if (effective !== undefined && effective.kind !== "q1-netquake") throw new Error("Input output changed NetQuake command dialect");
+    const command = effective ?? this.netQuakeCommand ?? { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: this.viewAngles,
       forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
     return { kind: "q1-netquake", actor: this.actor, commandSequence: this.lastSequence, frame, shape: { kind: "box", bounds: this.bounds },
       environment: playerMovementEnvironment(this, combat), arsenal: this.arsenal, animation: this.animation, execution: "authoritative", state, profile, command };
@@ -345,24 +361,43 @@ export class MovementPlayer {
         },
       } };
   }
-  prepareNetQuake(frame: FrameContext): undefined {
+  prepareNetQuake(frame: FrameContext, prepare?: (command: Q1UserCommand, arsenal: ArsenalIntent | undefined) => ArsenalIntent | undefined): undefined {
     const input = this.netQuakeInput(frame);
     this.netQuakeApplication = this.beginInputApplication("client-command", input.command, frame, input.state);
     this.applicationParent = this.netQuakeApplication;
     if (!this.host.actors.isLive(this.actor.id)) { this.host.inputApplications?.finish(this.netQuakeApplication); this.netQuakeApplication = null; this.applicationParent = null; return undefined; }
     try {
-      this.host.netQuake?.input(input.command);
-      const prepared = prepareNetQuake({ ...input, state: this.readStateQ1() }, this.services, this.netQuakeOptions());
+      let effective = this.netQuakeApplication?.command ?? input.command;
+      if (effective.kind !== "q1-netquake") throw new Error("Input output changed NetQuake command dialect");
+      this.arsenalIntent = this.netQuakeApplication?.arsenal ?? this.arsenalIntent;
+      if (prepare !== undefined) this.arsenalIntent = prepare(effective, this.arsenalIntent);
+      if (this.services.inputApplication !== undefined) {
+        this.netQuakeSliceOpen = true;
+        const before = this.appliedMovement.begin(effective, frame, this.readStateQ1());
+        if (before.kind === "actor-removed") { this.finishNetQuakeInput(); return undefined; }
+        if (before.command.kind !== "q1-netquake") throw new Error("Input output changed NetQuake command dialect");
+        effective = before.command; this.netQuakeSliceCommand = effective;
+      }
+      this.buttons = effective.buttons;
+      this.host.netQuake?.input(effective);
+      const prepared = prepareNetQuake({ ...input, command: effective, state: this.readStateQ1() }, this.services, this.netQuakeOptions());
       this.commit(prepared, false, false);
-    } catch (error) { this.host.inputApplications?.finish(this.netQuakeApplication, true); this.netQuakeApplication = null; this.applicationParent = null; throw error; }
+    } catch (error) { this.finishNetQuakeInput(true); throw error; }
     return undefined;
   }
   private readStateQ1(): Q1MovementState {
     const state = this.readState(); if (state.kind !== "q1-netquake") throw new Error("NetQuake source changed movement family"); return state;
   }
   finishNetQuakeInput(failed = false): void {
-    try { this.host.inputApplications?.finish(this.netQuakeApplication, failed); }
-    finally { this.netQuakeApplication = null; this.applicationParent = null; }
+    const errors: unknown[] = [];
+    if (this.netQuakeSliceOpen) {
+      this.netQuakeSliceOpen = false;
+      try { this.appliedMovement.end(this.host.actors.isLive(this.actor.id) ? this.readState() : this.state, failed); } catch (error) { errors.push(error); }
+    }
+    try { this.host.inputApplications?.finish(this.netQuakeApplication, failed || errors.length !== 0); } catch (error) { errors.push(error); }
+    finally { this.netQuakeApplication = null; this.netQuakeSliceCommand = null; this.applicationParent = null; }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "NetQuake input completion failed");
   }
   physicsNetQuake(frame: FrameContext): Q1MovementResult {
     const observed = this.netQuakeApplication !== null;
@@ -380,8 +415,10 @@ export class MovementPlayer {
 
   move(input: ActorCommand, frame: FrameContext, sourceCommand?: QwUserCommand): MovementResult {
     if (this.host.inputApplications?.active !== true) return this.moveCommand(input, frame, sourceCommand);
-    const result = this.withInputCommand<MovementResult>(input.command, frame, () => this.moveCommand(input, frame, sourceCommand),
-      () => ({ kind: this.profile.kind, status: "actor-removed", actor: this.actor.id, commandSequence: input.sequence, effects: [] }));
+    this.acceptArsenalIntent(input.arsenal);
+    const result = this.withInputCommand<MovementResult>(input.command, frame, (command, arsenal) => this.moveCommand({ ...input, command,
+      ...(arsenal === undefined ? {} : { arsenal }) }, frame, sourceCommand),
+      () => ({ kind: this.profile.kind, status: "actor-removed", actor: this.actor.id, commandSequence: input.sequence, effects: [] }), this.arsenalIntent);
     return this.refreshInputResult(result);
   }
 
@@ -403,17 +440,18 @@ export class MovementPlayer {
   }
 
   /** A source command may apply several selected-movement slices before its outer operation ends. */
-  withInputCommand<Result>(command: MovementInput["command"], frame: FrameContext, operation: () => Result, removed: () => Result): Result {
+  withInputCommand<Result>(command: MovementInput["command"], frame: FrameContext, operation: (command: MovementInput["command"], arsenal: ArsenalIntent | undefined) => Result, removed: () => Result, arsenal = this.arsenalIntent): Result {
     const owner = this.host.inputApplications;
-    if (owner?.active !== true) return operation();
+    if (owner?.active !== true) return operation(command, arsenal);
     const previous = this.applicationParent, state = this.readState();
     const application = this.beginInputApplication("client-command", command,
-      movementApplicationFrame(command, state, this.predictionProfile, frame), state);
+      movementApplicationFrame(command, state, this.predictionProfile, frame), state, arsenal);
     this.applicationParent = application;
     try {
       if (!this.host.actors.isLive(this.actor.id)) { owner.finish(application); return removed(); }
+      this.arsenalIntent = application?.arsenal ?? arsenal;
       let result: Result;
-      try { result = operation(); } catch (error) { owner.finish(application, true); throw error; }
+      try { result = operation(application?.command ?? command, application?.arsenal ?? arsenal); } catch (error) { owner.finish(application, true); throw error; }
       owner.finish(application);
       if (!this.host.actors.isLive(this.actor.id)) return removed();
       this.state = this.readState();

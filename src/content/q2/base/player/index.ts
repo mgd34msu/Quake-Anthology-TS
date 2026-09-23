@@ -491,7 +491,7 @@ export class Q2Players implements Q2SpawnModule {
   }
 
   weaponEvent(event: Q2WeaponEvent): undefined {
-    const state = this.states.get(event.actor);
+    const state = event.actor === null ? undefined : this.states.get(event.actor);
     if (state !== undefined && event.kind === "player-animation") {
       state.animationPriority = event.priority === "attack" ? 4 : event.priority === "pain" ? 3 : 6; state.animationEnd = event.last;
       const entity = this.playerEntities.get(event.actor);

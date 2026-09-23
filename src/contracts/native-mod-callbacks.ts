@@ -1,6 +1,6 @@
 import type { ContentDigest } from "./content.ts";
 import type { NativeAbi, Q2GameApiIdentity } from "./execution.ts";
-import type { ModCallbackBinding, ModCallbackValue, ModClientInputBinding } from "./mod-callbacks.ts";
+import type { ModCallbackBinding, ModCallbackValue, ModClientInput, ModClientInputBinding } from "./mod-callbacks.ts";
 import type { QvmModActorField } from "./qvm-mod-callbacks.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { ProviderId } from "./identity.ts";
@@ -17,6 +17,7 @@ export type NativeModValue =
   | { readonly kind: "actor"; readonly record: string; readonly input: "self" | "other" | "activator" | "attacker" | "inflictor" }
   | { readonly kind: "client"; readonly input: "self" | "other" | "activator" | "attacker" | "inflictor" }
   | { readonly kind: "userinfo"; readonly input: "self" | "other" | "activator" | "attacker" | "inflictor" }
+  | { readonly kind: "user-command" }
   | { readonly kind: "time"; readonly input: "time" | "elapsed"; readonly units: "seconds" | "milliseconds"; readonly encoding: NativeModScalar }
   | { readonly kind: "address"; readonly value: NativeModAddress | null };
 export interface NativeModSourceCall {
@@ -24,6 +25,8 @@ export interface NativeModSourceCall {
   readonly arguments: readonly NativeModValue[];
   readonly globals: readonly { readonly address: NativeModAddress; readonly value: NativeModValue }[];
   readonly returns: NativeModScalar | "void";
+  /** Source-reviewed exclusions inside the original active function frame, pinned by the module digest. */
+  readonly skips?: readonly { readonly entry: number; readonly join: number }[];
 }
 export type NativeModCallback = ModCallbackBinding & NativeModSourceCall;
 export interface NativeModAdmissionCall extends NativeModSourceCall { readonly accepts: "always" | "nonzero"; }
@@ -33,6 +36,8 @@ export interface NativeModClientInputField {
   readonly value: { readonly kind: NativeModScalar | "vector"; readonly value: ModCallbackValue }
     | Extract<NativeModValue, { readonly kind: "time" }>;
 }
+export type NativeModInputOutput = { readonly kind: "field"; readonly record: string; readonly offset: number }
+  | { readonly kind: "handler"; readonly entry: NativeModEntry; readonly arguments: readonly NativeModValue[]; readonly inputs: readonly Exclude<ModClientInput, "view-angles">[] };
 /** Private client arrays belong to the pinned module, separately from canonical client identities. */
 export interface NativeModClients {
   readonly maximum: number;
@@ -41,9 +46,12 @@ export interface NativeModClients {
   readonly userinfo: readonly NativeModSourceCall[];
   readonly disconnect: readonly NativeModSourceCall[];
   readonly command: readonly NativeModSourceCall[];
-  readonly input?: readonly ModClientInputBinding<NativeModSourceCall>[];
+  readonly input?: readonly ModClientInputBinding<NativeModSourceCall, NativeModInputOutput>[];
+  /** Original per-client work on the existing sourceActors clock. */
+  readonly frame?: readonly NativeModSourceCall[];
   /** Transient input words within declared private storage; the original module owns saved state. */
   readonly inputFields?: readonly NativeModClientInputField[];
+  readonly pose?: { readonly viewHeight: NativeModArmorField; readonly crouched: { readonly field: NativeModArmorField; readonly mask: number } };
 }
 export type NativeModActorField = Exclude<QvmModActorField, { readonly binding: "health" | "inventory" | "constant" }>
   | { readonly offset: number; readonly binding: "address"; readonly value: NativeModAddress | null }

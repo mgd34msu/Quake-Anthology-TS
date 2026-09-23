@@ -246,9 +246,11 @@ export interface AnimationStepInput {
 export interface AnimationStepResult { readonly animation: ActorAnimationState; readonly effects: readonly MovementEffect[]; }
 export type MovementContinuation = { readonly kind: "continue"; readonly state: MovementState }
   | { readonly kind: "actor-removed" };
+export type MovementInputContinuation = { readonly kind: "continue"; readonly state: MovementState; readonly command: UserCommand }
+  | { readonly kind: "actor-removed" };
 export interface MovementInputApplication {
-  begin(command: UserCommand, frame: FrameContext, state: MovementState): MovementContinuation;
-  end(state: MovementState, failed?: boolean): MovementContinuation;
+  begin(command: UserCommand, frame: FrameContext, state: MovementState): MovementInputContinuation;
+  end(state: MovementState, failed?: boolean, posture?: { readonly bounds: Bounds; readonly viewHeight: number }): MovementContinuation;
 }
 export type MovementTouchContact = Omit<TouchContact, "other" | "sourceTrace"> & {
   readonly other: Exclude<TraceHit, { readonly kind: "none" }>;

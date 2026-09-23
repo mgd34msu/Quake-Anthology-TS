@@ -88,6 +88,7 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
       && (!Number.isInteger(entry.privateMask) || entry.privateMask < 0 || entry.privateMask > 0x7fffff || (entry.privateMask & (8 | 128 | (entry.grounded ? 512 : 0))) !== 0))
       throw new Error("Mod private client flags overlap canonical flags or exceed the source flag word");
     if (entry.binding === "userinfo" && (declaration.clients === undefined || entry.key.length === 0 || /[\\\x00]/u.test(entry.key))) throw new Error("Mod userinfo field requires a declared client and valid info key");
+    if (entry.binding === "client-input" && entry.scale !== undefined && (!Number.isFinite(entry.scale) || entry.scale === 0 || entry.input === "view-angles")) throw new Error("QC input scale requires a finite nonzero scalar encoding");
     const field = program.fieldsByName.get(entry.field);
     if (field === undefined) throw new Error(`Missing mod actor field ${entry.field}`);
     const type = entry.binding === "private" ? field.type : entry.binding === "constant" ? entry.value.kind
@@ -105,8 +106,23 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
       throw new Error("Mod client capacity must fit reserved QuakeC edicts");
     for (const call of [...declaration.clients.admit, ...declaration.clients.userinfo, ...declaration.clients.disconnect])
       validateCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "client lifecycle");
+    for (const binding of declaration.clients.input ?? []) if (binding.phase === "before") {
+      const outputs = new Set<string>();
+      for (const output of binding.outputs ?? []) {
+        const key = output.kind === "field" ? `field:${output.field}` : `handler:${output.function}`;
+        if (outputs.has(key)) throw new Error("QC input output declaration is duplicated");
+        outputs.add(key);
+        if (output.kind === "field") {
+          if (!declaration.actorFields.some(field => field.binding === "client-input" && field.field === output.field)) throw new Error("QC output requires declared client input storage");
+        } else {
+          const fn = program.functionNamed(output.function);
+          if (fn.index === 0 || fn.firstStatement <= 0 || fn.namedBuiltin || program.globalsByName.get("self")?.type !== "entity"
+            || output.inputs.length === 0 || new Set(output.inputs).size !== output.inputs.length) throw new Error("QC output requires an original actor handler and distinct controls");
+        }
+      }
+    }
     for (const binding of declaration.clients.input ?? []) for (const call of binding.calls)
-      validateCall(program, call, new Set<ModCallbackInput>(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse"]), "client input");
+      validateCall(program, call, new Set<ModCallbackInput>(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"]), "client input");
   }
   const callbacks = new Set<string>();
   const commands = new Set<string>();
@@ -290,11 +306,11 @@ export class QcModProvider {
           return [...new Map([...(primary === null ? [] : [primary]), ...qcProtectionRegions(program, declaration)].map(stage => [stage.entry, stage.region])).values()];
         })(),
         run: (region, execute) => this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute),
-      }, observeCall: call => this.combat?.damage.observeCall(call), observeEntityStore: store => {
+      }, observeCall: call => { this.input.observeCall(call); return this.combat?.damage.observeCall(call); }, observeEntityStore: store => {
         this.protection?.observe(store); this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
       } });
     this.protection = declaration.protection === undefined ? null : new QcModProtection(declaration, module.id, services, { machine: this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference), invoke: (call, inputs, region) => this.invoke(call, inputs, region) });
-    this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor));
+    this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor), actor => services.actors.isLive(actor));
     this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
       reserve: actor => this.protection?.reserve(actor), admitted: actor => this.protection?.activate(actor),
       project: actor => { this.reference(actor); }, release: actor => { this.protection?.release(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor) => {
@@ -303,6 +319,7 @@ export class QcModProvider {
       }, input: {
         open: application => { const close = this.input.open(application); return () => { try { close(); } finally { this.drainRetiredProjections(); } }; },
         invoke: (call, application) => { this.invoke(call, this.input.values(application)); },
+        output: (outputs, application, run) => this.input.output(outputs, application, run),
       } });
     this.environment.initializeGlobals(this.machine);
     this.actorState = new QcActorState({ machine: this.machine, rerelease: media?.content.includes(":rerelease:") === true,
@@ -548,8 +565,14 @@ export class QcModProvider {
         }
         case "client-flags": {
           const before = new DataView(store.before.buffer, store.before.byteOffset, store.before.byteLength).getFloat32((field.offset - store.word) * 4, true);
-          if (declared.privateMask === undefined || ((Math.trunc(before) ^ Math.trunc(words.float(field.offset))) & ~declared.privateMask) !== 0)
-            throw new Error("Mod client-flags store requires its canonical owner");
+          const next = Math.trunc(words.float(field.offset));
+          const changed = (Math.trunc(before) ^ next) & ~(declared.privateMask ?? 0);
+          if (changed !== 0) {
+            if (!declared.grounded || changed !== 512 || (next & 512) !== 0) throw new Error("Mod client-flags store requires its canonical owner");
+            const body = this.services.bodies.read(actor.id);
+            if (body === null) throw new Error("Mod ground detachment requires a live body");
+            this.services.bodies.write(actor, { ...body, ground: null });
+          }
           break;
         }
         case "classname": case "view-offset": throw new Error(`Mod ${declared.binding} store requires its canonical owner`);

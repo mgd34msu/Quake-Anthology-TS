@@ -143,3 +143,39 @@ test("terminal input callbacks drain entered observers and scopes before propaga
   applications.restore(2);
   expect(order).toHaveLength(8);
 });
+
+test("effective output reaches every shared movement profile before source and weapon command work", async () => {
+  for (const movement of ["q1", "qw", "q2", "q2-rerelease-baseq2", "q3"]) {
+    const launch = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "start", "--movement", movement, "--character", "q3", "--dedicated"]);
+    if (launch.kind !== "run") throw new Error("Expected launch");
+    const content = await loadApplicationContent(launch.options);
+    const identity = createIdentityOwner(`output-${movement}`), baselineIdentity = createIdentityOwner(`output-baseline-${movement}`);
+    const options = { recipe: content.recipe, world: content.world, mounts: content.mounts, skill: 1, mode: "singleplayer", seed: 17, maxClients: 1 } satisfies Omit<Parameters<typeof createSimulation>[0], "identity">;
+    const simulation = createSimulation({ ...options, identity }), baseline = createSimulation({ ...options, identity: baselineIdentity });
+    try {
+      const client = identity.client(0, 0), plainClient = baselineIdentity.client(0, 0), actor = simulation.admitPlayer(client).actor, plainActor = baseline.admitPlayer(plainClient).actor;
+      const player = simulation.movementPlayer(actor), plain = baseline.movementPlayer(plainActor);
+      if (player === null || plain === null) throw new Error("Missing movement");
+      const raw = { ...command(player.state), buttons: 1 }, retained = structuredClone(raw);
+      const expected = { ...command(plain.state), forwardMove: 0, buttons: 0 };
+      const applications: ModClientApplicationEvent[] = [], heights: number[] = [];
+      simulation.modClients.subscribeApplication(event => {
+        applications.push(event);
+        if (event.phase === "after" && event.application.scope === "movement-slice") { const view = simulation.modClients.playerView?.(client); if (view === undefined) throw new Error("Missing live pose"); heights.push(view.viewOffset.z); }
+        if (event.phase === "before" && event.application.scope === "client-command") event.output({ kind: "consume", inputs: ["attack"] });
+        if (event.phase === "before" && event.application.scope === "movement-slice") event.output({ kind: "consume", inputs: ["forward-move"] });
+        return undefined;
+      });
+      simulation.step({ elapsedMilliseconds: 17, commands: [{ actor, source: { kind: "remote-client", client }, sequence: 1, command: raw }] });
+      baseline.step({ elapsedMilliseconds: 17, commands: [{ actor: plainActor, source: { kind: "remote-client", client: plainClient }, sequence: 1, command: expected }] });
+      expect(player.readState()).toEqual(plain.readState());
+      expect(player.arsenal).toEqual(plain.arsenal);
+      expect(heights.at(-1)).toBe(plain.viewHeight);
+      expect(raw).toEqual(retained);
+      expect(applications.filter(event => event.phase === "before" && event.application.scope === "client-command")).toHaveLength(1);
+      for (const event of applications) if (event.phase === "before" && event.application.scope === "movement-slice") {
+        expect(event.application.command.forwardMove).toBe(0); expect(event.application.command.buttons & 1).toBe(0);
+      }
+    } finally { simulation.close(); baseline.close(); await content.close(); }
+  }
+}, 60000);

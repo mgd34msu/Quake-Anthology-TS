@@ -110,6 +110,8 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
           angleWords: [command.angles.x, command.angles.y, command.angles.z], buttons: command.buttons,
           weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove }, frame, movementState());
         if (before.kind === "actor-removed") { removed = true; return false; }
+        if (before.command.kind !== "q3") throw new Error("Input output changed command dialect");
+        Object.assign(activeCommand, q3Command(before.command));
         resume(before.state);
       }
       return true;

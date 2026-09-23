@@ -1,5 +1,6 @@
 import { NativeModActors, type SavedNativeActors } from "./native-mod-actors.ts";
 import { NativeModClientsBinding } from "./native-mod-clients.ts";
+import { NativeModClientStages, nativeModUserCommand } from "./native-mod-client-stages.ts";
 import { NativeModProtection, type NativeProtectionInventoryCommit } from "./native-mod-protection.ts";
 import { readNativeDeferredDamage } from "./native-mod-deferred.ts";
 import { asciiFold, type CommandInvocation } from "../../core/commands/index.ts";
@@ -9,8 +10,8 @@ import type { GuestAddress, GuestCallResult, GuestCallValue, GuestValueLayout, M
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
-import type { ModCallbackInput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
-import type { NativeModActorField, NativeModActorRecord, NativeModAddress, NativeModDeclaration, NativeModScalar, NativeModSourceCall, NativeModValue } from "../../contracts/native-mod-callbacks.ts";
+import type { ModCallbackInput, ModClientInputOutput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
+import type { NativeModActorField, NativeModActorRecord, NativeModAddress, NativeModDeclaration, NativeModScalar, NativeModSourceCall, NativeModValue, NativeModInputOutput } from "../../contracts/native-mod-callbacks.ts";
 import type { ProviderCheckpoint, SavedActorId } from "../../contracts/session.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
 import type { ModClientApplication } from "../../world/session/mod-clients.ts";
@@ -22,6 +23,7 @@ import { readModule } from "../../persistence/execution.ts";
 import { decodeQ2ClassicOriginalSave } from "../../persistence/q2-classic-guest.ts";
 import { decodeCheckpointValue, encodeCheckpointValue, namespaced, SaveReader } from "../../persistence/value.ts";
 import { decodeValue, encodeValue, storageBytes } from "../../guest/abi/values.ts";
+import { X86AbiAdapter } from "../../guest/abi/adapter.ts";
 import { allocateClassicString, classicStringAllocationBytes, readClassicString, writeClassicString, readClassicVector, writeClassicVector } from "./classic/records.ts";
 
 type Inputs = ReadonlyMap<ModCallbackInput, ModRuntimeValue>;
@@ -54,7 +56,7 @@ function numberResult(result: GuestCallResult): number {
   return value;
 }
 function layout(value: NativeModValue): GuestValueLayout {
-  return { kind: "scalar", storage: value.kind === "time" ? value.encoding : value.kind === "client" ? "int32" : value.kind === "actor" || value.kind === "address" || value.kind === "vector" || value.kind === "string" || value.kind === "userinfo" ? "pointer" : value.kind };
+  return { kind: "scalar", storage: value.kind === "time" ? value.encoding : value.kind === "client" ? "int32" : value.kind === "actor" || value.kind === "address" || value.kind === "vector" || value.kind === "string" || value.kind === "userinfo" || value.kind === "user-command" ? "pointer" : value.kind };
 }
 export function validateNativeModDeclaration(declaration: NativeModDeclaration): void {
   const records = new Map<string, NativeModActorRecord>(), authority = new Set<string>();
@@ -109,6 +111,7 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
   if (records.size > 0 && (declaration.project.length === 0 || declaration.release.length === 0)) throw new Error("Native actor projections require authored initialization and release callbacks");
   const checkValues = (values: readonly NativeModValue[], available: ReadonlySet<ModCallbackInput>): void => {
     for (const value of values) {
+      if (value.kind === "user-command") { if (!available.has("view-angles")) throw new Error("Native user command requires an active input application"); continue; }
       if (value.kind === "address") continue;
       if (value.kind === "client" || value.kind === "userinfo") { if (clients === undefined || !available.has(value.input)) throw new Error("Unavailable native client input"); continue; }
       if (value.kind === "actor") { if (!available.has(value.input) || !records.has(value.record)) throw new Error("Unavailable native actor input"); continue; }
@@ -119,7 +122,14 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
       if (kind !== (value.kind === "vector" || value.kind === "string" ? value.kind : "float")) throw new Error("Native callback input representation differs from its declaration");
     }
   };
-  const check = (call: NativeModSourceCall, available: ReadonlySet<ModCallbackInput>): void => checkValues([...call.arguments, ...call.globals.map(entry => entry.value)], available);
+  const check = (call: NativeModSourceCall, available: ReadonlySet<ModCallbackInput>): void => {
+    checkValues([...call.arguments, ...call.globals.map(entry => entry.value)], available);
+    const regions = call.skips ?? [];
+    for (const [index, region] of regions.entries()) {
+      if (!Number.isSafeInteger(region.entry) || !Number.isSafeInteger(region.join) || region.entry < 0 || region.join <= region.entry
+        || regions.slice(0, index).some(other => region.entry === other.entry)) throw new Error("Invalid or repeated native source exclusion");
+    }
+  };
   for (const protection of protections) {
     const available = new Set<ModCallbackInput>(["self", "attacker", "inflictor", "time", "amount", "damage-flags", "regular-protection-scale", "knockback", "direction", "point", "normal"]);
     if (protection.absorb.abi === "source-call") {
@@ -129,9 +139,10 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
   }
   for (const call of declaration.initialize) check(call, new Set(["time"]));
   for (const call of [...declaration.project, ...declaration.release]) check(call, new Set(["self", "time"]));
-  if (clients !== undefined) for (const call of [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command]) check(call, new Set(["self", "time"]));
+  if (clients !== undefined) for (const call of [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command, ...clients.frame ?? []]) check(call, new Set(["self", "time"]));
   if (clients !== undefined) {
-    const available = new Set<ModCallbackInput>(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse"]);
+    if ((clients.frame?.length ?? 0) !== 0 && owned === undefined) throw new Error("Native client frames require the original source actor clock");
+    const available = new Set<ModCallbackInput>(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"]);
     for (const binding of clients.input ?? []) for (const call of binding.calls) check(call, available);
     const ranges = new Map<string, { readonly start: number; readonly end: number }[]>();
     if ((clients.inputFields?.length ?? 0) !== 0 && (clients.input?.length ?? 0) === 0) throw new Error("Native input fields require declared input callbacks");
@@ -145,6 +156,23 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
       if (previous.some(range => field.offset < range.end && range.start < field.offset + length)) throw new Error("Overlapping native input fields");
       previous.push({ start: field.offset, end: field.offset + length }); ranges.set(field.record, previous);
       checkValues([field.value], available);
+    }
+    for (const field of clients.pose === undefined ? [] : [clients.pose.viewHeight, clients.pose.crouched.field]) {
+      const record = records.get(field.record);
+      if (record === undefined || field.record !== declaration.entityRecord && !clients.records.includes(field.record)
+        || !Number.isSafeInteger(field.offset) || field.offset < 0 || field.offset + scalarSize(field.encoding) > record.stride
+        || record.fields.some(value => shared(value) && field.offset < value.offset + size(value, declaration.target.abi.pointerBytes) && value.offset < field.offset + scalarSize(field.encoding)))
+        throw new Error("Native client pose requires separate private source fields");
+    }
+    if (clients.pose !== undefined && (!Number.isSafeInteger(clients.pose.crouched.mask) || clients.pose.crouched.mask < 1 || clients.pose.crouched.mask > 0x7fffffff)) throw new Error("Invalid native source crouch mask");
+    for (const binding of clients.input ?? []) if (binding.phase === "before") for (const output of binding.outputs ?? []) {
+      if (output.kind === "handler") {
+        checkValues(output.arguments, available);
+        if (output.arguments.filter(value => value.kind === "actor" && value.input === "self").length !== 1)
+          throw new Error("Native output handler requires its exact client actor argument");
+      }
+      if (output.kind === "field" && !(clients.inputFields ?? []).some(field => field.record === output.record && field.offset === output.offset && field.value.kind !== "time" && field.value.value.kind === "input"
+        && ["view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"].includes(field.value.value.name))) throw new Error("Native input output requires its declared input field");
     }
   }
   const ids = new Set<string>();
@@ -203,6 +231,7 @@ export class NativeModProvider implements NativeModProjection {
   private host_: NativeModHost | null = null;
   private owned: NativeModActors | null = null;
   private clients: NativeModClientsBinding | null = null;
+  private stages: NativeModClientStages | null = null;
   private readonly protection: NativeModProtection | null;
   private readonly records = new Map<string, NativeModActorRecord>();
   private readonly nonclientRecords: readonly NativeModActorRecord[];
@@ -233,6 +262,7 @@ export class NativeModProvider implements NativeModProjection {
   reserveProtection(): void { this.current(); this.protection?.reserve(); }
   activateProtection(): void { this.current(); this.protection?.activate(); }
   attach(host: NativeModHost): void { if (this.host_ !== null) throw new Error("Native mod already attached"); this.host_ = host;
+    this.stages = new NativeModClientStages(host);
     this.protection?.attach(host);
     if (this.declaration.clients !== undefined) {
       const services = this.services.clients;
@@ -248,8 +278,9 @@ export class NativeModProvider implements NativeModProjection {
           const scope = this.inputScopes.find(current => current.application === application);
           if (scope === undefined) throw new Error("Native input callback has no active application");
           const previous = this.inputContext; this.inputContext = scope;
-          try { this.execute(call, scope.values, true); } finally { this.inputContext = previous; }
+          try { this.execute(call, modClientInputValues(application), true); } finally { this.inputContext = previous; }
         },
+        inputOutput: (outputs, application, run) => this.inputOutput(outputs, application, run),
         withCommand: (command, invoke) => host.withCommand(command, invoke) });
     }
     if (this.declaration.sourceActors !== undefined) this.owned = new NativeModActors(this.declaration.sourceActors, this.declaration, host, this.services, this.instance, {
@@ -257,13 +288,14 @@ export class NativeModProvider implements NativeModProjection {
       combat: { eligible: actor => !this.clients?.rejects(actor), transfer: invoke => this.transfer(invoke), scalar: (base, field, value) => { const address = host.memory.offset(base, BigInt(field.offset)); if (value !== undefined) this.scalarWrite(address, value, field.encoding); return this.scalarRead(address, field.encoding); },
         synchronize: () => { this.flush(); this.refresh(); const frame = this.frames.at(-1); if (frame !== undefined) frame.observations = this.observe(); } },
       invoke: (entry, values, returns) => this.executeEntry(entry, values, returns), address: actor => this.address(actor), actorAt: slot => this.actorAt(slot),
+      clientFrame: slot => this.clients?.frame(slot) ?? false, synchronizeFrame: (seconds, frame) => host.synchronizeFrame(seconds, frame),
       beginFrame: () => { for (const entry of this.entries()) this.host.clearEntityEvent(entry.slot); this.host.presentation.beginFrame(); }, endFrame: () => this.publish() });
   }
   private get host(): NativeModHost { if (this.host_ === null) throw new Error("Native mod has no source host"); return this.host_; }
   private current(): void { if (!this.closing) this.assertCurrent(); if (this.closed) throw new Error("Native mod is closed"); }
   private inputs(actor?: ActorId): Map<ModCallbackInput, ModRuntimeValue> {
     const scope = this.inputContext, values = new Map<ModCallbackInput, ModRuntimeValue>(scope?.values);
-    if (scope === null) { const time = this.services.time(); values.set("time", { kind: "float", value: time.kind === "seconds" ? time.value : time.value / 1000 }); }
+    if (scope === null) { const time = this.services.time(); values.set("time", { kind: "float", value: this.owned?.sourceTime ?? (time.kind === "seconds" ? time.value : time.value / 1000) }); }
     if (actor !== undefined) values.set("self", { kind: "actor", value: actor }); return values;
   }
   private openInput(application: ModClientApplication): () => void {
@@ -311,6 +343,45 @@ export class NativeModProvider implements NativeModProjection {
       throw error;
     }
     return () => close(false);
+  }
+  private inputOutput(outputs: readonly NativeModInputOutput[], application: ModClientApplication, run: () => void): readonly ModClientInputOutput[] {
+    const result: ModClientInputOutput[] = [], remove: (() => void)[] = [], read: (() => void)[] = [], memory = this.host.memory;
+    const actor = application.identity.actor, slot = this.projections.get(actor);
+    if (slot === undefined) throw new Error("Native output client has no source row");
+    const live = () => !this.closed && this.services.actors.isLive(actor) && this.clients?.admitted(actor) === true;
+    try {
+      for (const output of outputs) {
+        if (output.kind === "handler") {
+          const address = output.entry.kind === "export" ? this.host.entry(output.entry.name) : memory.offset(this.host.imageBase, BigInt(output.entry.rva));
+          let called = false;
+          const index = output.arguments.findIndex(value => value.kind === "actor" && value.input === "self"), value = output.arguments[index];
+          if (value?.kind !== "actor") throw new Error("Native output handler lacks its client actor argument");
+          const expected = this.pointer(actor, value.record), abi = new X86AbiAdapter(this.declaration.target.abi);
+          remove.push(this.host.entries.callbacks.observeEntry(address, () => {
+            if (this.inputContext?.application !== application || !live()) return;
+            const actual = abi.arguments(this.host.entries.cpu, { abi: this.declaration.target.abi,
+              parameters: output.arguments.map(layout), result: "void", variadic: false })[index];
+            if (actual?.kind === "pointer" && actual.value !== null && actual.value.byteOffset === expected?.byteOffset) called = true;
+          }));
+          read.push(() => { if (called) result.push({ kind: "consume", inputs: output.inputs }); });
+          continue;
+        }
+        const field = this.declaration.clients?.inputFields?.find(field => field.record === output.record && field.offset === output.offset), record = this.records.get(output.record);
+        if (field === undefined || record === undefined || field.value.kind === "time" || field.value.value.kind !== "input") throw new Error("Native output lacks its declared input field");
+        const name = field.value.value.name;
+        if (name !== "view-angles" && name !== "attack" && name !== "jump" && name !== "impulse" && name !== "forward-move" && name !== "side-move" && name !== "up-move") throw new Error("Native output field is not a client input");
+        const address = memory.offset(this.recordAddress(record, slot), BigInt(field.offset)), kind = field.value.kind;
+        const bytes = kind === "vector" ? 12 : scalarSize(kind), before = memory.copy(address, bytes);
+        read.push(() => {
+          if (isDeepStrictEqual(before, memory.copy(address, bytes))) return;
+          if (name === "view-angles" && kind === "vector") result.push({ kind: "set", input: name, value: readClassicVector(memory, address) });
+          else if (name !== "view-angles" && kind !== "vector") result.push({ kind: "set", input: name, value: this.scalarRead(address, kind) });
+          else throw new Error("Native output representation differs from its input");
+        });
+      }
+      run(); if (live()) for (const output of read) output();
+      return result;
+    } finally { for (const close of remove.reverse()) close(); }
   }
   private resolve(value: NativeModAddress): GuestAddress {
     const memory = this.host.memory; let address = memory.offset(this.host.imageBase, BigInt(value.rva));
@@ -429,6 +500,15 @@ export class NativeModProvider implements NativeModProjection {
         }
         else { const state = this.services.bodies.read(actor); writeClassicVector(memory, address, state === null ? zero : field.binding === "bounds-min" ? state.bounds.min : field.binding === "bounds-max" ? state.bounds.max : state[field.binding]); }
       }
+      const pose = this.declaration.clients?.pose;
+      if (pose !== undefined && this.clients?.admitted(actor)) {
+        const client = this.services.clients?.forActor(actor), view = client === undefined || client === null ? undefined : this.services.clients?.playerView?.(client);
+        if (view === undefined) throw new Error("Native client pose requires the live destination movement view");
+        const at = (field: typeof pose.viewHeight): GuestAddress => { const record = this.records.get(field.record); if (record === undefined) throw new Error("Native pose record is unavailable"); return memory.offset(this.recordAddress(record, slot), BigInt(field.offset)); };
+        const height = pose.viewHeight, crouch = pose.crouched, address = at(crouch.field), flags = this.scalarRead(address, crouch.field.encoding);
+        this.scalarWrite(at(height), height.encoding === "float32" || height.encoding === "float64" ? view.viewOffset.z : Math.trunc(view.viewOffset.z), height.encoding);
+        this.scalarWrite(address, view.crouched ? flags | crouch.mask : flags & ~crouch.mask, crouch.field.encoding);
+      }
     }
     if (this.frames.length !== 0) { const observations = this.observe(); for (const frame of this.frames) frame.observations = observations; }
   }
@@ -485,6 +565,14 @@ export class NativeModProvider implements NativeModProjection {
     frame.pending.length = 0; frame.cursor = 0;
   }
   private lower(value: NativeModValue, inputs: Inputs, allocations: { readonly address: GuestAddress; readonly bytes: number }[], corrections: (() => void)[]): GuestCallValue {
+    if (value.kind === "user-command") {
+      const application = this.inputContext?.application;
+      if (application === undefined) throw new Error("Native user command requires its active input application");
+      const bytes = nativeModUserCommand(application, this.declaration.target.api.kind === "q2-rerelease-game", this.owned?.sourceFrame ?? 0);
+      const address = this.host.memory.allocate({ byteLength: bytes.length, label: "native component command" });
+      allocations.push({ address, bytes: bytes.length }); this.host.memory.write(address, bytes);
+      return { kind: "pointer", value: address };
+    }
     if (value.kind === "address") return { kind: "pointer", value: value.value === null ? null : this.resolve(value.value) };
     if (value.kind === "actor") { const input = inputs.get(value.input); if (input?.kind !== "actor") throw new Error("Missing native actor input"); return { kind: "pointer", value: this.pointer(input.value, value.record) }; }
     if (value.kind === "client" || value.kind === "userinfo") {
@@ -542,7 +630,8 @@ export class NativeModProvider implements NativeModProjection {
       if (transfer) { this.refresh(); frame = { observations: this.observe(), pending: [], cursor: 0 }; this.frames.push(frame); }
       const target = call.entry.kind === "game-export" ? this.gameEntry(call) : call.entry.kind === "export" ? this.host.entry(call.entry.name) : this.host.memory.offset(this.host.imageBase, BigInt(call.entry.rva));
       this.host.memory.check(target, 1, "execute");
-      const result = this.host.invoke(target, { abi: this.declaration.target.abi, parameters: call.arguments.map(layout), result: call.returns === "void" ? "void" : { kind: "scalar", storage: call.returns }, variadic: false }, arguments_);
+      if (this.stages === null) throw new Error("Native source stages are unavailable");
+      const result = this.stages.run(call, () => this.host.invoke(target, { abi: this.declaration.target.abi, parameters: call.arguments.map(layout), result: call.returns === "void" ? "void" : { kind: "scalar", storage: call.returns }, variadic: false }, arguments_));
       for (const correct of corrections) correct();
       if (transfer) {
         this.flush();
@@ -636,7 +725,7 @@ export class NativeModProvider implements NativeModProjection {
     if (!restoring) { this.validateRecords(); for (const call of this.declaration.initialize) this.execute(call, this.inputs(), false); }
     const clients = this.declaration.clients;
     for (const call of [...this.declaration.initialize, ...this.declaration.project, ...this.declaration.release, ...this.declaration.callbacks,
-      ...(clients === undefined ? [] : [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command, ...(clients.input ?? []).flatMap(binding => binding.calls)])]) {
+      ...(clients === undefined ? [] : [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command, ...(clients.frame ?? []), ...(clients.input ?? []).flatMap(binding => binding.calls)])]) {
       const target = call.entry.kind === "game-export" ? this.gameEntry(call) : call.entry.kind === "export" ? this.host.entry(call.entry.name) : this.host.memory.offset(this.host.imageBase, BigInt(call.entry.rva)); this.host.memory.check(target, 1, "execute");
     }
     this.ready = true; if (!restoring) { this.clients?.start(); this.publish(); }
