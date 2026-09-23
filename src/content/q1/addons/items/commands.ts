@@ -4,7 +4,7 @@ import type { ItemId } from "../../../../contracts/gameplay.ts";
 import type { Q1PlayerState, Q1Weapon } from "../../foundation/types.ts";
 import { WEAPONS } from "../../foundation/types.ts";
 import type { Q1AddonContext } from "../context.ts";
-import { giveNextMg3Upgrade } from "./upgrades.ts";
+import { giveNextMg3Upgrade, setMg3InventoryCapacity } from "./upgrades.ts";
 import type { Mg3Upgrade } from "./upgrades.ts";
 import { MG3_BLOODY_SHOTGUN, MG3_BLOODY_SUPER_SHOTGUN } from "./pickups.ts";
 
@@ -60,8 +60,10 @@ export function handleMg3ItemImpulse(context: Q1AddonContext, actor: ActorId, im
   }
   if (impulse === 100) {
     developerMessage("Resetting to defaults\n"); player.maxHealth = 100; game.host.combat.setHealth(player.actor, 100);
-    for (const [item, capacity] of [["q1:ammo/shells", 100], ["q1:ammo/nails", 200], ["q1:ammo/rockets", 100], ["q1:ammo/cells", 100]] satisfies readonly (readonly [ItemId, number])[])
+    for (const [item, capacity] of [["q1:ammo/shells", 100], ["q1:ammo/nails", 200], ["q1:ammo/rockets", 100], ["q1:ammo/cells", 100]] satisfies readonly (readonly [ItemId, number])[]) {
+      setMg3InventoryCapacity(context, player, item, capacity);
       game.host.inventory.configure(player.actor, { item, capacity, count: game.host.inventory.count(actor, item) });
+    }
     return true;
   }
   if (impulse >= 111 && impulse <= 115) {

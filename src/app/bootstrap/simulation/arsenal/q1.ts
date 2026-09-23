@@ -17,11 +17,12 @@ import type { SelectedArsenal } from "./selected.ts";
 export interface Q1SelectedArsenalTravel {
   readonly weapon: Q1Weapon;
   readonly inventory: readonly InventoryEntry[];
+  readonly extensions?: readonly { readonly id: string; readonly bytes: Uint8Array }[];
 }
 
 export interface Q1SelectedArsenalOptions {
   readonly game: Q1EntityServices;
-  nativePlayer?(actor: ActorId): Q1PlayerState;
+  nativePlayer?(actor: ActorId): Pick<Q1PlayerState, "weapon" | "maxHealth"> & Partial<Pick<Q1PlayerState, "autoSwitch">>;
   readonly replacedItems?: readonly ItemId[];
   fired?(actor: ActorId, weapon: Q1Weapon, animation: WeaponStepInput["animation"]): WeaponStepResult["animation"];
   impulse?(player: Q1PlayerState, value: number): boolean;
@@ -55,13 +56,17 @@ export class Q1SelectedArsenal implements SelectedArsenal {
       game.host.inventory.configure(actor, { item, count: game.host.inventory.count(actor.id, item), capacity: 1 });
     }
     const player = game.attachPlayer(actor, { initializeInventory: false, maxHealth: native?.maxHealth ?? maxHealth, ...(native === undefined ? {} : { weapon: native.weapon }) });
-    if (native !== undefined) player.autoSwitch = native.autoSwitch;
+    if (native?.autoSwitch !== undefined) player.autoSwitch = native.autoSwitch;
     return this.read(actor.id);
   }
 
   captureTravel(actor: ActorId): Q1SelectedArsenalTravel {
     const player = this.require(actor);
-    return { weapon: player.weapon, inventory: this.read(actor).ammo };
+    const extensions = [...this.game.playerExtensions.values()].flatMap(extension => {
+      const bytes = extension.captureTravel?.(this.game, player);
+      return bytes === undefined ? [] : [{ id: extension.id, bytes: bytes.slice() }];
+    });
+    return { weapon: player.weapon, inventory: this.read(actor).ammo, extensions };
   }
 
   admitTravel(actor: OwnedActor, maxHealth: number, travel: Q1SelectedArsenalTravel): ArsenalState {
@@ -72,9 +77,16 @@ export class Q1SelectedArsenal implements SelectedArsenal {
     for (const entry of travel.inventory) {
       if (!this.weapons.some(weapon => game.weaponItem(weapon) === entry.item || game.weaponAmmo(weapon) === entry.item))
         throw new Error("Selected Q1 travel contains another component's inventory");
-      game.host.inventory.configure(actor, entry);
     }
-    game.attachPlayer(actor, { initializeInventory: false, maxHealth, weapon: travel.weapon });
+    const restored = new Set<string>();
+    const extensions = (travel.extensions ?? []).map(extension => {
+      const restore = game.playerExtensions.get(extension.id)?.restoreTravel;
+      if (restore === undefined || restored.has(extension.id)) throw new Error(`Invalid selected Q1 travel extension: ${extension.id}`);
+      restored.add(extension.id); return { restore, bytes: extension.bytes };
+    });
+    const player = game.attachPlayer(actor, { initializeInventory: false, maxHealth, weapon: travel.weapon });
+    for (const entry of travel.inventory) game.host.inventory.configure(actor, { ...entry, capacity: game.inventoryCapacity(actor.id, entry.item) ?? entry.capacity });
+    for (const extension of extensions) extension.restore(game, player, extension.bytes);
     return this.read(actor.id);
   }
 

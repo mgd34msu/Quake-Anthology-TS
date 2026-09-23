@@ -1,5 +1,7 @@
 # Functional target status
 
+Selected Q1/Q2 arsenals are now integrated on qualified original id1 alongside the accepted Q3/Team Arena path. Original pickups, damage, powerups and respawn remain source-owned; saved inventories and extension travel retain their actual state. Root's combined candidate passes strict compilation, ten-file policy, actual MG3 gameplay/save/travel/respawn with 33 assertions and mixed restore with 15. The five frozen source-family witnesses are retained. QuakeWorld/additional artifacts and original QVM/native-primary arsenal combinations remain open; target count remains 21/23 and installed executable remains `67f2cfd`.
+
 Newer source adds explicit component HUD/camera admission, native original end-frame stats/layouts, and QuakeC camera identities that survive saves and entity reuse. The exact candidate passes strict compilation and 22 checks with 191 assertions, including original Xatrix HUD media over Q1 and original id1 camera save/load. QVM component 2D output, remote transport and full native view qualification remain open. This is source progress within T10; the installed executable and 21/23 target count are unchanged.
 
 Current executable: `67f2cfd`, installed September 23. It includes the original QC selected-Q3, source item ownership, original cgame and persistent presentation changes described below. Compiled GL movement/fire/armor/save-load-save/quit passed separately from the source integration checks. **21/23 accepted; T10 and T12 remain open.** Earlier installation references below describe historical checkpoints. [Delivery](../execution-status.md).
@@ -59,7 +61,7 @@ These parts describe the remaining implementation; they do not replace the T01â€
 | T10 | New foreign items | Shared item ownership, selection and saved state plus the QuakeC weapon/ammo adapter are implemented. QVM/native component adapters and other source item behaviors remain unfinished. |
 | T10 | Complete component presentation | Native/QC local HUD and camera ownership are integrated. QVM 2D/HUD, remote transport, full native view qualification, remaining effects, music and cinematic services still need source consumers with correct ownership and lifetime. |
 | T10 | Remaining world services and composition | Authored rules/objectives and remaining source services cooperate across enabled mods, saves and travel, with explicit conflict handling. |
-| T12 | Selected arsenals on original QuakeC worlds | Original id1 with selected Q3/Team Arena is integrated, including pickups, equipment, saves, travel and respawn. Selected Q1/Q2 arsenals remain explicitly rejected pending implementation; QW and additional QC artifacts also remain. |
+| T12 | Selected arsenals on original QuakeC worlds | Qualified original id1 supports selected Q1/Q2/Q3 and their admitted expansions, including pickups, saves, travel and respawn. QuakeWorld and additional QC artifacts still require their original source qualification. |
 | T12 | Selected arsenals on original QVM worlds | Original QVM input/world logic retains its ownership while selected weapons, effects, supply and saves work. |
 | T12 | Selected arsenals on original native Q2 worlds | Classic/rerelease DLL callbacks retain world behavior while selected weapons own their attack, supply and saved state. |
 

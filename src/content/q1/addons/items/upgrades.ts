@@ -78,13 +78,35 @@ function definition(type: string): UpgradeDefinition {
 export function initializeMg3Capacities(context: Q1AddonContext, player: Q1PlayerState): undefined {
   const { game } = context;
   for (const upgrade of upgrades) {
-    const capacity = game.options.deathmatch !== 0 ? upgrade.deathmatch : mg3UpgradedMaximum(upgrade.base, context.playerNumber(player.actor.id, upgrade.parm));
+    const capacity = mg3Capacity(context, player, upgrade);
     if (upgrade.ammo === null) {
       player.maxHealth = capacity;
       if (game.health(player.actor.id) > capacity) game.host.combat.setHealth(player.actor, capacity);
-    } else game.host.inventory.configure(player.actor, { item: upgrade.ammo, capacity, count: Math.min(capacity, game.host.inventory.count(player.actor.id, upgrade.ammo)) });
+    } else {
+      setMg3InventoryCapacity(context, player, upgrade.ammo, capacity);
+      game.host.inventory.configure(player.actor, { item: upgrade.ammo, capacity, count: Math.min(capacity, game.host.inventory.count(player.actor.id, upgrade.ammo)) });
+    }
   }
   return undefined;
+}
+
+function mg3Capacity(context: Q1AddonContext, player: Q1PlayerState, upgrade: UpgradeDefinition): number {
+  return context.game.options.deathmatch !== 0 ? upgrade.deathmatch : mg3UpgradedMaximum(upgrade.base, context.playerNumber(player.actor.id, upgrade.parm));
+}
+
+export function mg3InventoryCapacity(context: Q1AddonContext, player: Q1PlayerState, item: ItemId): number | undefined {
+  const upgrade = upgrades.find(upgrade => upgrade.ammo === item);
+  if (upgrade === undefined) return undefined;
+  const saved = context.playerWord(player.actor.id, `ammo_${upgrade.type}_max`);
+  if (saved === undefined) return mg3Capacity(context, player, upgrade);
+  if (!Number.isFinite(saved) || saved <= 0) throw new Error("Invalid MG3 source ammo maximum");
+  return saved;
+}
+
+export function setMg3InventoryCapacity(context: Q1AddonContext, player: Q1PlayerState, item: ItemId, capacity: number): undefined {
+  const upgrade = upgrades.find(upgrade => upgrade.ammo === item);
+  if (upgrade === undefined) throw new Error(`Missing MG3 capacity word for ${item}`);
+  return context.setPlayerNumber(player.actor.id, `ammo_${upgrade.type}_max`, capacity);
 }
 
 function upgradeTouch(context: Q1AddonContext, entity: Q1Actor, other: ActorId): undefined {
@@ -94,14 +116,16 @@ function upgradeTouch(context: Q1AddonContext, entity: Q1Actor, other: ActorId):
   const collected = (flags & flag) !== 0;
   let maximum = player.maxHealth;
   if (!collected) {
+    const capacity = upgrade.ammo === null ? null : game.host.inventory.entries(other).find(entry => entry.item === upgrade.ammo)?.capacity ?? upgrade.base;
     context.setPlayerNumber(other, upgrade.parm, flags | flag);
     if (upgrade.ammo === null) {
       maximum = player.maxHealth = Math.fround(player.maxHealth + 10);
       const health = game.health(other);
       if (health > 0 && health < maximum) game.host.combat.setHealth(player.actor, Math.min(maximum, health + maximum));
     } else {
-      const current = game.host.inventory.entries(other).find(entry => entry.item === upgrade.ammo);
-      maximum = (current?.capacity ?? upgrade.base) + 10;
+      if (capacity === null) throw new Error("Missing MG3 source ammo capacity");
+      maximum = capacity + 10;
+      setMg3InventoryCapacity(context, player, upgrade.ammo, maximum);
       game.host.inventory.configure(player.actor, { item: upgrade.ammo, count: maximum, capacity: maximum });
     }
   }

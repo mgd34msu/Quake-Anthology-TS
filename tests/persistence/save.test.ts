@@ -208,7 +208,8 @@ test("prebound restore verifies exact source values and retains writable authori
   const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
   combat.bind(restored, { read: () => ({ ...state, health: words.getFloat32(4, true) }), writeHealth: value => { words.setFloat32(4, value, true); return undefined; }, writeArmor: () => undefined });
   const inventory = new SharedInventoryTable(actors);
-  inventory.bind(restored, { read: () => [{ ...entry, count: words.getFloat32(8, true) }], write: value => { words.setFloat32(8, value.count, true); return undefined; } });
+  let capacity = entry.capacity;
+  inventory.bind(restored, { read: () => [{ ...entry, capacity, count: words.getFloat32(8, true) }], write: value => { words.setFloat32(8, value.count, true); return undefined; } });
   const host = { actors, bodies, combat, inventory, storage: () => "prebound" } satisfies Parameters<typeof restoreSharedWorldState>[1];
   restoreSharedWorldState(decodeSaveImage(encodeSaveImage(image)), host);
   expect(bodies.read(restored.id)?.ground?.equals(restoredGround.id)).toBe(true);
@@ -218,6 +219,23 @@ test("prebound restore verifies exact source values and retains writable authori
   expect(() => restoreSharedWorldState({ ...image, inventories: [{ actor: savedActor, entries: [{ ...entry, countPolicy: { kind: "source-counter", arithmetic: "int32" } }] }] }, host)).toThrow("source inventory disagrees");
   expect(Object.is(words.getFloat32(0, true), -0)).toBe(true);
   expect(words.getFloat32(4, true)).toBe(73);
+  const bindComponent = () => inventory.bindItems(restored, { owner: "mod:ammo", items: [{ admission: "replace-primary", definition: {
+    kind: "counter", item: entry.item, label: "Component nails", source: { provider: "mod:ammo", content: "q1:classic:id1:fixture" },
+  } }], state: { read: () => [{ item: entry.item, count: 7, capacity: 50 }], write: () => { throw new Error("Restore must not rewrite the component source"); } } });
+  const component = bindComponent(), sourceItems = inventory.sourceItems(restored);
+  if (sourceItems === null) throw new Error("Missing component source items");
+  const mixed: SaveImage = { ...image, inventories: [{ actor: savedActor, entries: inventory.entries(restored.id) }], providers: [{
+    provider: "world:gameplay", schema: "world:source-items", version: 1,
+    bytes: encodeCheckpointValue([{ actor: savedActor, owner: restored.owner, ...sourceItems }]),
+  }] };
+  component.close(); capacity = 100;
+  let hydrated = 0;
+  const completion = restoreSharedWorldState(mixed, host, { deferProtection: true, hydrateInventorySources: () => {
+    expect(bodies.read(restored.id)).not.toBeNull(); expect(combat.read(restored.id)?.health).toBe(73);
+    capacity = entry.capacity; hydrated++; return undefined;
+  } });
+  const restoredComponent = bindComponent(); completion.finish(); completion.assertComplete(); expect(hydrated).toBe(1);
+  expect(inventory.count(restored.id, entry.item)).toBe(7); restoredComponent.close();
   expect(inventory.adjustSourceCounter(restored, entry.item, -1)).toBe(-4);
   expect(words.getFloat32(8, true)).toBe(-4);
   bodies.write(restored, { ...body, ground: restoredGround.id, origin: { ...zero, x: 5 } });

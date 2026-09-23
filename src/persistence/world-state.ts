@@ -57,9 +57,9 @@ export interface SharedWorldRestoreCompletion {
 /** Run before source-provider restore binds named callbacks; link bodies after source collision metadata exists. */
 export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost): undefined;
 export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost,
-  options: { readonly deferProtection: true }): SharedWorldRestoreCompletion;
+  options: { readonly deferProtection: true; hydrateInventorySources?(): undefined }): SharedWorldRestoreCompletion;
 export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestoreHost,
-  options?: { readonly deferProtection: true }): undefined | SharedWorldRestoreCompletion {
+  options?: { readonly deferProtection: true; hydrateInventorySources?(): undefined }): undefined | SharedWorldRestoreCompletion {
   host.combat.assertIdle();
   const hidden = readPrimaryProtection(save, host.actors);
   const sourceItems = new Map(readSourceItems(save).map(entry => [host.actors.resolveSaved(entry.actor), entry]));
@@ -115,6 +115,8 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
       } });
     }
   }
+  // Source graph hydration needs shared bodies/combat, and must finish before inventory receipt comparison. It must not run gameplay.
+  options?.hydrateInventorySources?.();
   for (const entry of save.inventories) {
     const restored = actor(entry.actor);
     const storage = host.storage(restored), primary = sourceItems.get(restored)?.primary ?? entry.entries;

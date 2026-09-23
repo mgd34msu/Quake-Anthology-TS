@@ -20,6 +20,7 @@ export interface Q1PlayerExtension {
   readonly id: string;
   /** New-player admission only. Saved inventories and private state restore through their owners. */
   attach?(game: Q1EntityServices, player: Q1PlayerState): undefined;
+  inventoryCapacity?(game: Q1EntityServices, player: Q1PlayerState, item: ItemId): number | undefined;
   /** Source prethink effects run before ordinary environment and timed-effect handling. */
   frame?(game: Q1EntityServices, player: Q1PlayerState, seconds: number): undefined;
   afterPhysics?(game: Q1EntityServices, player: Q1PlayerState, seconds: number): undefined;

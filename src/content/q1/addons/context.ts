@@ -85,8 +85,11 @@ export class Q1AddonContext {
   }
 
   playerNumber(actor: ActorId, name: string): number {
+    return this.playerWord(actor, name) ?? 0;
+  }
+  playerWord(actor: ActorId, name: string): number | undefined {
     const owner = this.game.host.actors.resolveOwned(actor);
-    return owner === null ? 0 : this.playerWords.get(owner)?.get(name) ?? 0;
+    return owner === null ? undefined : this.playerWords.get(owner)?.get(name);
   }
   setPlayerNumber(actor: ActorId, name: string, value: number): undefined {
     const owner = this.game.host.actors.resolveOwned(actor);

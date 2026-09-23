@@ -18,6 +18,7 @@ import { registerQ1CampaignAddons, BLOODY_NIGHTMARE_ACTIVE, BLOODY_NIGHTMARE_NEW
 import { spawnSpammer } from "../../../../src/content/q1/addons/monsters/bosses/oldnew-children.ts";
 import { giveNextMg3Upgrade, mg3UpgradeFlag, mg3UpgradedMaximum, mg3HammerBodyFrame } from "../../../../src/content/q1/addons/items/index.ts";
 import type { Mg3Upgrade } from "../../../../src/content/q1/addons/items/index.ts";
+import { handleMg3ItemImpulse } from "../../../../src/content/q1/addons/items/commands.ts";
 import { q1PowerupTimers } from "../../../../src/app/bootstrap/simulation/powerup-timers.ts";
 import { captureSharedBodies, restoreSharedBodyLinks } from "../../../../src/persistence/world-state.ts";
 import { encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint } from "../../../../src/persistence/q1-foundation.ts";
@@ -224,6 +225,24 @@ test("MG3 source level parameters survive ordinary, hub and death equipment rese
     expect(dead.game.health(dead.player.actor.id)).toBe(50); expect(dead.player.maxHealth).toBe(60);
     expect(dead.context.playerNumber(dead.player.actor.id, "parm15")).toBe(3);
   } finally { source.actors.close(); next.actors.close(); hub.actors.close(); dead.actors.close(); }
+});
+
+test("MG3 current capacity words preserve reset independently of travel upgrade flags", () => {
+  const source = session(), next = session();
+  try {
+    giveNextMg3Upgrade(source.context, "shells", source.player);
+    expect(source.game.inventoryCapacity(source.player.actor.id, "q1:ammo/shells")).toBe(60);
+    expect(handleMg3ItemImpulse(source.context, source.player.actor.id, 100, () => undefined)).toBe(true);
+    expect(source.game.inventoryCapacity(source.player.actor.id, "q1:ammo/shells")).toBe(100);
+    giveNextMg3Upgrade(source.context, "shells", source.player);
+    const restored = session(source.save());
+    try {
+      expect(restored.game.inventoryCapacity(restored.player.actor.id, "q1:ammo/shells")).toBe(110);
+      expect(restored.inventory.count(restored.player.actor.id, "q1:ammo/shells")).toBe(110);
+      admitQ1AddonTravel(next.context, next.player.actor, captureQ1AddonTravel(restored.context, restored.player.actor));
+      expect(next.game.inventoryCapacity(next.player.actor.id, "q1:ammo/shells")).toBe(70);
+    } finally { restored.actors.close(); }
+  } finally { source.actors.close(); next.actors.close(); }
 });
 
 test("MG3 Bloody Nightmare travel preserves hammer, Bloody SSG and armor with source weapon selection", () => {

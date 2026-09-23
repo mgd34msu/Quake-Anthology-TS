@@ -889,6 +889,18 @@ export class QuakeCSource {
     const words = this.entities.at(slot);
     return { maxHealth: words.float(this.field("max_health")), quadUntil: words.float(this.field("super_damage_finished")) };
   }
+  clientPowerupExpires(actor: ActorId, powerup: "quad" | "invulnerability" | "invisibility" | "suit"): number {
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC powerup client");
+    const fields = { quad: "super_damage_finished", invulnerability: "invincible_finished", invisibility: "invisible_finished", suit: "radsuit_finished" };
+    return this.entities.at(slot).float(this.field(fields[powerup]));
+  }
+  weaponTarget(actor: ActorId): { readonly monster: boolean; readonly aimedDamage: boolean } | null {
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.options.actors.isLive(actor)) return null;
+    const words = this.entities.at(slot);
+    return { monster: (Math.trunc(words.float(this.field("flags"))) & 32) !== 0, aimedDamage: words.float(this.field("takedamage")) === 2 };
+  }
   setClientMaxHealth(actor: ActorId, value: number): void {
     if (!Number.isFinite(Math.fround(value))) throw new RangeError("QC max health exceeds binary32 range");
     const slot = this.sourceSlot(actor);

@@ -179,6 +179,18 @@ export class Q1EntityServices {
     if (this.playerExtensions.has(extension.id)) throw new Error(`Duplicate Q1 player extension: ${extension.id}`);
     this.playerExtensions.set(extension.id, extension); return undefined;
   }
+  inventoryCapacity(actor: ActorId, item: ItemId): number | undefined {
+    const player = this.player(actor);
+    if (player === null) return undefined;
+    let capacity: number | undefined;
+    for (const extension of this.playerExtensions.values()) {
+      const value = extension.inventoryCapacity?.(this, player, item);
+      if (value === undefined) continue;
+      if (capacity !== undefined) throw new Error(`Multiple Q1 capacity owners for ${item}`);
+      capacity = value;
+    }
+    return capacity;
+  }
   weaponModel(weapon: Q1Weapon, player?: Q1PlayerState): string {
     const definition = this.registeredWeapons.get(weapon);
     if (player !== undefined && definition?.modelFor !== undefined) return definition.modelFor(this, player);
