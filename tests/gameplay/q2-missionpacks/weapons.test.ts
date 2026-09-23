@@ -1,3 +1,5 @@
+import { q3WeaponDelay } from "../../../src/movement/q3/weapon.ts";
+import { Powerup } from "../../../src/movement/q3/constants.ts";
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
 import { expansionSourceSupply } from "../../../src/content/composition/expansion-source-supply.ts";
 import { Q2_Q1_SUPPLY_PROFILE } from "../../../src/content/composition/q2-q1-supply.ts";
@@ -15,7 +17,7 @@ import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVi
 import { Q2Foundation } from "../../../src/content/q2/foundation/runtime.ts";
 import type { Q2Edition, Q2FoundationHost, Q2PresentationEvent, Q2TraceRequest } from "../../../src/content/q2/foundation/host.ts";
 import { Q2Weapons, Q2WeaponState, Q2_BASE_WEAPONS } from "../../../src/content/q2/foundation/weapons/index.ts";
-import type { Q2WeaponEvent, Q2WeaponInput, Q2WeaponName } from "../../../src/content/q2/foundation/weapons/index.ts";
+import type { Q2WeaponEvent, Q2WeaponHooks, Q2WeaponInput, Q2WeaponName } from "../../../src/content/q2/foundation/weapons/index.ts";
 import { Q2MissionPackProjectiles } from "../../../src/content/q2/missionpacks/projectiles/index.ts";
 import { Q2MissionPackWeapons } from "../../../src/content/q2/missionpacks/weapons/player.ts";
 import { canonicalCauseFromNative, nativeCauseFromCanonical } from "../../../src/content/q2/missionpacks/damage.ts";
@@ -310,7 +312,7 @@ const input: Q2WeaponInput = {
   haste: false, noStackDouble: false, instantSwitch: false, quickSwitch: true, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false,
 };
 
-function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, mode: "singleplayer" | "deathmatch" = "singleplayer", diagnostic: (message: string) => void = message => { throw new Error(message); }) {
+function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, mode: "singleplayer" | "deathmatch" = "singleplayer", diagnostic: (message: string) => void = message => { throw new Error(message); }, modifiers: Pick<Q2WeaponHooks, "firingInterval" | "sourceDamageMultiplier" | "quadMultiplier"> = {}) {
   let now = 0;
   const actors = new SessionActorRegistry(createIdentityOwner(`q2-weapons-${edition}-${name}`));
   const callbacks = new ActorCallbackTable(actors);
@@ -353,7 +355,7 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
   const game = new Q2Foundation(host, { edition, mapName: "weapon-check", skill: 1, mode, deathmatchFlags: 0, maxClients: 1,
     provider: "q2:game", campaign: "q2:campaign", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, []);
   const self = game.attachPlayer(player);
-  const weapons = new Q2Weapons({ emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
+  const weapons = new Q2Weapons({ ...modifiers, emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
     lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const state = weapons.bind(self, game, new Q2WeaponState(name));
   const definition = Q2_BASE_WEAPONS.find(weapon => weapon.name === name);
@@ -487,5 +489,50 @@ for (const pack of ["xatrix", "rogue"] satisfies readonly Q2MissionPack[]) test(
       expect(scene.inventory.entries(scene.player.id).some(entry => entry.item.startsWith("q1:") && entry.count > 0)).toBe(true);
       expect(scene.actors.isLive(pickup.actor.id)).toBe(false);
     }
+  } finally { scene.actors.close(); }
+});
+
+for (const persistent of [Powerup.PW_SCOUT, Powerup.PW_AMMOREGEN]) test(`classic source firing budget preserves fractional cadence ${persistent}, expansion damage and weapon lifetime`, () => {
+  const scene = fixture("classic", "blaster", 0.1, "singleplayer", undefined, {
+    firingInterval: (_actor, seconds) => q3WeaponDelay(seconds * 1000, persistent, true) / 1000,
+    quadMultiplier: () => 3, sourceDamageMultiplier: () => 2,
+  });
+  try {
+    const configured = registerSelectedQ2MissionWeapons(scene.game, scene.weapons, "rogue", { monster: () => null, playerEffect: () => undefined });
+    const arsenal = new Q2SelectedArsenal({ game: scene.game, weapons: scene.weapons, ...configured, observe: () => ({ owner: scene.self, input: { ...input, quadUntil: 100 } }) });
+    arsenal.remove(scene.player.id); arsenal.admit(scene.player, 100);
+    const state = scene.weapons.states.get(scene.player.id); if (state === undefined) throw new Error("Missing source weapon state");
+    scene.inventory.configure(scene.player, { item: "q2:ammo_flechettes", count: 100, capacity: 200 });
+    state.weapon = "etf_rifle"; state.phase = "firing"; state.frame = 6;
+    scene.setTime(0.1); arsenal.frame(scene.player.id);
+    const saved = arsenal.captureTurn(scene.player.id);
+    expect(saved.firing?.credit).toBeGreaterThan(0); expect(saved.firing?.credit).toBeLessThan(1);
+    expect([...scene.game.entities.values()].find(entity => entity.classname === "flechette")?.damage).toBe(60);
+    arsenal.restoreTurn(scene.player.id, saved);
+    expect(arsenal.captureTurn(scene.player.id)).toEqual(saved);
+    for (const credit of [NaN, Infinity, -0.1, 1]) expect(() => arsenal.restoreTurn(scene.player.id, { ...saved, firing: { weapon: "etf_rifle", credit } })).toThrow("Invalid saved");
+    expect(() => arsenal.restoreTurn(scene.player.id, { ...saved, firing: { weapon: "blaster", credit: 0.5 } })).toThrow("Invalid saved");
+    for (let frame = 2; frame <= 10; frame++) { scene.setTime(frame / 10); arsenal.frame(scene.player.id); }
+    const fired = 100 - scene.inventory.count(scene.player.id, "q2:ammo_flechettes");
+    expect(fired).toBe(persistent === Powerup.PW_SCOUT ? 15 : 13);
+    state.weapon = "blaster"; state.phase = "ready"; state.frame = 9;
+    scene.setTime(1.1); arsenal.frame(scene.player.id); expect(arsenal.captureTurn(scene.player.id).firing).toBe(null);
+    arsenal.remove(scene.player.id); arsenal.admit(scene.player, 100); expect(arsenal.captureTurn(scene.player.id).firing).toBe(null);
+  } finally { scene.actors.close(); }
+});
+
+for (const edition of ["classic", "rerelease"] satisfies readonly Q2Edition[]) test(`source firing acceleration keeps ${edition} held grenade fuse on actual time`, () => {
+  const scene = fixture(edition, "grenades", edition === "classic" ? 0.1 : 0.025, "singleplayer", undefined, {
+    firingInterval: (_actor, seconds) => q3WeaponDelay(seconds * 1000, Powerup.PW_SCOUT, false) / 1000,
+  });
+  try {
+    scene.step(1); scene.state.frame = 11; scene.step(1.1);
+    expect(scene.state.grenadeTime).toBeCloseTo(4.3, 8);
+    scene.step(2); expect(scene.state.grenadeTime).toBeCloseTo(4.3, 8);
+    scene.step(2.1, { ...input, attack: false });
+    if (edition === "classic") scene.step(2.2, { ...input, attack: false });
+    const grenade = [...scene.game.entities.values()].find(entity => entity.classname === (edition === "classic" ? "hgrenade" : "hand_grenade"));
+    expect(grenade?.nextThink).toBeCloseTo(4.3, 8);
+    expect(edition === "classic" ? scene.state.grenadeTime : scene.state.grenadeFinished).toBeCloseTo((edition === "classic" ? 2.2 : 2.1) + 0.666, 8);
   } finally { scene.actors.close(); }
 });

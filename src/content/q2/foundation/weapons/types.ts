@@ -41,6 +41,8 @@ export type Q2WeaponEvent =
 /** Hooks cross into session lag history and the selected monster/character providers. */
 export interface Q2WeaponHooks {
   quadMultiplier?(actor: ActorId): number;
+  sourceDamageMultiplier?(actor: ActorId): number;
+  firingInterval?(actor: ActorId, seconds: number): number;
   emit(event: Q2WeaponEvent): undefined;
   noise(actor: ActorId, origin: Vec3, secondary: boolean): undefined;
   dodge(monster: ActorId, attacker: ActorId, etaSeconds: number, trace: TraceResult): undefined;

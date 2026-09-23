@@ -12,11 +12,13 @@ import type { Q2GameServices } from "../../../../content/q2/foundation/host.ts";
 import { Q2_BASE_WEAPONS } from "../../../../content/q2/foundation/weapons/definitions.ts";
 import type { Q2Weapons } from "../../../../content/q2/foundation/weapons/player.ts";
 import { Q2WeaponState } from "../../../../content/q2/foundation/weapons/types.ts";
-import type { Q2WeaponDefinition, Q2WeaponInput, Q2WeaponOwner } from "../../../../content/q2/foundation/weapons/types.ts";
+import type { Q2WeaponDefinition, Q2WeaponInput, Q2WeaponName, Q2WeaponOwner } from "../../../../content/q2/foundation/weapons/types.ts";
 import type { SharedInventoryTable } from "../../../../world/gameplay/inventory.ts";
 import type { PlayerUi } from "../types.ts";
 import type { PrimaryWeaponHandoff } from "../weapon-slot.ts";
 import type { SelectedArsenal } from "./selected.ts";
+
+export interface Q2SelectedWeaponTurnState extends Q2WeaponTurnState { firing: { readonly weapon: Q2WeaponName; credit: number } | null; }
 
 export interface Q2SelectedArsenalOptions {
   readonly game: Q2GameServices;
@@ -41,7 +43,7 @@ export function projectQ2Arsenal(actor: ActorId, provider: ProviderId, weapons: 
 export class Q2SelectedArsenal implements SelectedArsenal {
   private readonly definitions: readonly Q2WeaponDefinition[];
   private readonly pickupOrder: readonly ItemId[];
-  private readonly turns = new Map<ActorId, Q2WeaponTurnState>();
+  private readonly turns = new Map<ActorId, Q2SelectedWeaponTurnState>();
   readonly family = "q2";
   readonly provider: ProviderId;
   constructor(private readonly options: Q2SelectedArsenalOptions) {
@@ -74,7 +76,7 @@ export class Q2SelectedArsenal implements SelectedArsenal {
     const weapon = loadout === undefined ? "blaster" : this.definitions.find(definition => definition.item === loadout.weapon)?.name;
     if (weapon === undefined || inventory.count(actor.id, weapons.definition(weapon).item) < 1) throw new Error("Selected Q2 starter weapon is not owned");
     weapons.bind({ actor }, game, new Q2WeaponState(weapon));
-    this.turns.set(actor.id, { buttons: 0, latchedButtons: 0, weaponThunk: false });
+    this.turns.set(actor.id, { buttons: 0, latchedButtons: 0, weaponThunk: false, firing: null });
     return this.read(actor.id);
   }
   read(actor: ActorId): ArsenalState {
@@ -123,19 +125,45 @@ export class Q2SelectedArsenal implements SelectedArsenal {
     const turn = this.requireTurn(input.actor.id);
     latchQ2WeaponButtons(turn, (input.command.buttons & ~1) | (observed.input.attack ? 1 : 0));
     if (!observed.input.spectator) earlyQ2WeaponTurn(turn, latchedAttack => this.options.weapons.tick(observed.owner, this.options.game, { ...observed.input, latchedAttack, weaponThunk: turn.weaponThunk }));
+    if (turn.firing?.weapon !== this.options.weapons.states.get(input.actor.id)?.weapon) turn.firing = null;
     return { arsenal: this.options.game.host.actors.isLive(input.actor.id) ? this.read(input.actor.id) : before, animation: input.animation, effects: [] };
   }
   frame(actor: ActorId): undefined {
-    const turn = this.requireTurn(actor), observed = this.options.observe(actor), game = this.options.game;
-    beginQ2WeaponTurn(turn, !observed.input.spectator, latchedAttack => this.options.weapons.tick(observed.owner, game, { ...observed.input, latchedAttack, weaponThunk: turn.weaponThunk }));
+    const turn = this.requireTurn(actor), observed = this.options.observe(actor), game = this.options.game, weapons = this.options.weapons;
+    const state = this.require(actor), elapsed = game.host.frameSeconds();
+    if (turn.firing?.weapon !== state.weapon) turn.firing = null;
+    if (game.options.edition === "classic" && !observed.input.spectator && state.phase === "firing" && state.weapon !== null && (game.host.combat.read(actor)?.health ?? 0) > 0) {
+      const interval = weapons.firingInterval(actor, elapsed);
+      if (interval !== elapsed) {
+        turn.firing ??= { weapon: state.weapon, credit: 0 };
+        turn.firing.credit += elapsed / interval - 1;
+      }
+    }
+    beginQ2WeaponTurn(turn, !observed.input.spectator, latchedAttack => weapons.tick(observed.owner, game, { ...observed.input, latchedAttack, weaponThunk: turn.weaponThunk }));
+    const firing = turn.firing;
+    while (firing !== null && firing.credit >= 1 && game.host.actors.isLive(actor) && this.turns.get(actor) === turn && weapons.states.get(actor) === state
+      && state.weapon === firing.weapon && state.phase === "firing" && (game.host.combat.read(actor)?.health ?? 0) > 0) {
+      firing.credit -= 1;
+      const current = this.options.observe(actor);
+      if (current.input.spectator) break;
+      weapons.tick(current.owner, game, { ...current.input, latchedAttack: false, weaponThunk: false });
+    }
+    if (firing !== null) {
+      if (state.weapon !== firing.weapon || weapons.states.get(actor) !== state) turn.firing = null;
+      else firing.credit %= 1;
+    }
     if ((game.host.combat.read(actor)?.health ?? 0) > 0) turn.latchedButtons = 0;
   }
-  captureTurn(actor: ActorId): Q2WeaponTurnState { return { ...this.requireTurn(actor) }; }
-  restoreTurn(actor: ActorId, turn: Q2WeaponTurnState): undefined {
-    this.require(actor);
-    this.turns.set(actor, { ...turn });
+  captureTurn(actor: ActorId): Q2SelectedWeaponTurnState {
+    const turn = this.requireTurn(actor), firing = turn.firing?.weapon === this.require(actor).weapon ? turn.firing : null;
+    return { ...turn, firing: firing === null ? null : { ...firing } };
   }
-  private requireTurn(actor: ActorId): Q2WeaponTurnState {
+  restoreTurn(actor: ActorId, turn: Q2SelectedWeaponTurnState): undefined {
+    const state = this.require(actor), firing = turn.firing;
+    if (firing !== null && (firing.weapon !== state.weapon || !Number.isFinite(firing.credit) || firing.credit < 0 || firing.credit >= 1)) throw new RangeError("Invalid saved Q2 firing credit");
+    this.turns.set(actor, { ...turn, firing: firing === null ? null : { ...firing } });
+  }
+  private requireTurn(actor: ActorId): Q2SelectedWeaponTurnState {
     const turn = this.turns.get(actor);
     if (turn === undefined) throw new Error("Selected Q2 arsenal has no command continuation");
     return turn;

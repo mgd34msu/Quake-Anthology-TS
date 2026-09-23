@@ -126,7 +126,7 @@ export class Q2MissionPackWeapons {
       const start = add(add(game.body(self).origin, scale(axes.right, side)), scale(axes.up, self.viewHeight - 22));
       this.projectiles.fireTesla(self, game, start, axes.forward, weapons.multiplier(context), speed);
     }
-    weapons.consume(context, 1, !trap); state.grenadeTime = context.now + 1;
+    weapons.consume(context, 1, !trap); state.grenadeTime = context.now + weapons.firingInterval(self.actor.id, 1);
     if (trap && weapons.ammo(context) === 0 && !held) weapons.noAmmo(context, false);
     if (!trap) weapons.animation(context, input.ducked ? "attack" : "reverse", input.ducked ? 159 : 119, input.ducked ? 162 : 112);
     return undefined;

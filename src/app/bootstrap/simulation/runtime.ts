@@ -1,4 +1,7 @@
 import { readLegacyQ3Source, migrateLegacyQ3Arsenal } from "./arsenal/q3-source-legacy.ts";
+import { itemAt } from "../../../content/q3/base/shared/items.ts";
+import { q3WeaponDelay } from "../../../movement/q3/weapon.ts";
+import { q3WeaponDamageFactor } from "../../../content/q3/base/game/weapon.ts";
 import { clientSpeedMultiplier } from "../../../content/q3/team-arena/client-effects.ts";
 import { returnQ3PersistentPowerup } from "../../../content/q3/base/game/death.ts";
 import { setInfoValue } from "../../../core/cvars/info.ts";
@@ -1404,6 +1407,14 @@ export class SharedSimulation implements Simulation {
     return entry;
   }
 
+  private selectedWeaponDelay(actor: ActorId, seconds: number): number {
+    const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
+    if (client == null) return seconds;
+    const schema = statSchema(client.ps.product), persistent = schema.product === "missionpack" ? itemAt(client.ps.product, client.ps.stats.get(schema.persistentPowerup)).tag : 0;
+    const milliseconds = seconds * 1000, delay = q3WeaponDelay(milliseconds, persistent, client.ps.powerups.get(Powerup.PW_HASTE) !== 0);
+    return delay === milliseconds ? seconds : delay / 1000;
+  }
+
   private selectedEquipmentCombat(policy: CombatPolicy): CombatPolicy {
     return { ...policy, prepare: (request, target, attacker) => this.selectedQ3Source?.blocksDamage(request) === true ? { kind: "cancel" }
       : policy.prepare?.(request, target, attacker) ?? { kind: "continue", amount: request.amount } };
@@ -1438,6 +1449,11 @@ export class SharedSimulation implements Simulation {
       for (const source of this.monsterSources.values()) if (source.kind === "q2") source.monsters.reportNoise(actor, origin, secondary);
       return undefined;
     }, dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace), quadMultiplier: () => this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
+      sourceDamageMultiplier: actor => {
+        const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
+        return client == null ? 1 : q3WeaponDamageFactor(client, 1, client.ps.product);
+      },
+      firingInterval: (actor, seconds) => this.selectedWeaponDelay(actor, seconds),
       lagCompensation: { kind: "current-world" },
       ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
       canTarget: (attacker, target) => attacker === null || !sameActor(attacker, target) });
@@ -1494,8 +1510,13 @@ export class SharedSimulation implements Simulation {
     const game = new Q1EntityServices({ ...host, powerupExpires,
       weaponVolume: actor => (this.q2ItemWeaponSource()?.weapons.silencerShots(actor) ?? 0) > 0 ? 0.2 : 1,
       weaponImpact: (actor, origin) => this.source.kind === "q2" ? this.source.weapons.playerNoiseForActor(actor, this.source.game, origin, "impact") : undefined,
-      sourceDamageMultiplier: attacker => providerFamily(this.recipe.combat.provider) === "q1" || powerupExpires(attacker, "quad") <= seconds(this.selectedQ1Frame().time) ? 1
-        : this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4 }, {
+      sourceDamageMultiplier: attacker => {
+        if (this.source.kind === "q3") {
+          const client = this.source.game.records.nativeByActor(attacker)?.client;
+          return client == null ? 1 : q3WeaponDamageFactor(client, this.source.game.quadDamageFactor(), client.ps.product);
+        }
+        return providerFamily(this.recipe.combat.provider) === "q1" || powerupExpires(attacker, "quad") <= seconds(this.selectedQ1Frame().time) ? 1 : 4;
+      } }, {
       provider: this.weaponProvider.provider, edition: this.weaponProvider.content.includes(":rerelease:") ? "rerelease" : "classic",
       physicsEdition: this.q1PhysicsEdition,
       skill: this.options.skill, deathmatch: this.options.mode === "deathmatch" ? 1 : 0, coop: this.options.mode === "coop", campaign: this.recipe.map.entities.provider,
@@ -1509,6 +1530,9 @@ export class SharedSimulation implements Simulation {
         if (registry === null) throw new Error("Selected Q1 weapons require the shared server settings registry");
         registry.set(name, value, true); return undefined; },
     });
+    if (this.source.kind === "q3") game.registerWeaponRules({ id: "composition:q3-cadence",
+      attackDelay: (_game, player, delay) => this.selectedWeaponDelay(player.actor.id, delay),
+      frameDelay: (_game, player, delay) => this.selectedWeaponDelay(player.actor.id, delay) });
     if (product === "mg3") this.q1CharacterAdjuncts.add(game);
     this.selectedWeaponSource = { kind: "q1", game, random, missionWeapons };
     const baseProfile: PickupSupplyProfile = product === "hipnotic"
@@ -2568,7 +2592,8 @@ export class SharedSimulation implements Simulation {
         const projectile = projectileId === null ? undefined : this.actorExecutions.get(projectileId);
         const selectedQ2Attack = source?.kind === "q2" && (projectile?.kind === "q2" && projectile.services === source.game
           || request.attack.attacker !== null && request.attack.inflictor === request.attack.attacker && source.weapons.states.has(request.attack.attacker));
-        const sourceScaled = selectedQ2Attack && request.attack.cause.kind === "q2" || this.selectedArsenal?.family === "q3" && request.attack.cause.kind === "q3";
+        const sourceScaled = selectedQ2Attack && request.attack.cause.kind === "q2" || this.selectedArsenal?.family === "q3" && request.attack.cause.kind === "q3"
+          || this.source.kind === "q3" && this.selectedArsenal?.family === "q1" && request.attack.cause.kind === "q1";
         return sourceScaled && request.attack.weaponProvider === this.weaponProvider.provider && request.attack.weapon !== null ? { ...context, quad: false } : context;
       } })));
     else if (providerFamily(id) === "q2") this.combat.register(this.selectedEquipmentCombat(createQ2CombatPolicy({ id, armor,
@@ -5493,7 +5518,8 @@ export class SharedSimulation implements Simulation {
           const arsenal = this.selectedArsenal;
           selectedSource.field("turns").list(value => {
             const state = value.field("state");
-            arsenal.restoreTurn(owner(value.field("actor")).id, { buttons: state.field("buttons").integer(), latchedButtons: state.field("latchedButtons").integer(), weaponThunk: state.field("weaponThunk").boolean() });
+            arsenal.restoreTurn(owner(value.field("actor")).id, { buttons: state.field("buttons").integer(), latchedButtons: state.field("latchedButtons").integer(), weaponThunk: state.field("weaponThunk").boolean(),
+              firing: state.field("firing").value === undefined || state.field("firing").value === null ? null : { weapon: state.field("firing").field("weapon").string(), credit: state.field("firing").field("credit").number() } });
           });
         }
       }

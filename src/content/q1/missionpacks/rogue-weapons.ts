@@ -11,7 +11,7 @@ import { grenadeVelocity, missionReference, moveMissile, setMissionReference, ve
 
 function finish(game: Q1EntityServices, player: Q1PlayerState, delay: number, model: string, repeating = false): boolean {
   delay = game.weaponAttackDelay(player, delay);
-  player.attackFinished = Math.fround(game.time + delay); player.nextWeaponFrame = Math.fround(game.time + (repeating ? 0.1 : delay));
+  player.attackFinished = Math.fround(game.time + delay); player.nextWeaponFrame = Math.fround(game.time + (repeating ? game.weaponFrameDelay(player, 0.1) : delay));
   player.continuousFiring = repeating; player.weaponFrame = repeating ? player.weaponFrame % 8 + 1 : player.weapon === "rogue:plasma" ? 0 : 1;
   player.weaponAnimationAt = repeating || player.weapon === "rogue:plasma" ? -1 : game.time; player.weaponAnimationBase = 1; player.hostileUntil = Math.fround(game.time + 1);
   game.weaponPunch(player, -2);

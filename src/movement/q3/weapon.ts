@@ -3,6 +3,12 @@
 import { EntityEvent, Holdable, Powerup, Weapon, WeaponState, CommandButtons as B, MoveFlags as F, PlayerAnimation as A } from "./constants.ts";
 import type { Q3Command } from "./types.ts";
 
+export function q3WeaponDelay(milliseconds: number, persistent: number, haste: boolean): number {
+  if (persistent === Powerup.PW_SCOUT) return Math.trunc(milliseconds / 1.5);
+  if (persistent === Powerup.PW_AMMOREGEN || haste) return Math.trunc(milliseconds / 1.3);
+  return milliseconds;
+}
+
 export type Q3ExternalWeaponSlot = "active" | "holster-requested" | "dropping" | "holstered" | "resume-requested";
 
 export interface Q3SourceWeaponState {
@@ -134,9 +140,7 @@ class WeaponStep {
       default: addTime = 400; break;
     }
     const persistent = ps.product === "missionpack" ? ps.persistentPowerupTag : 0;
-    if (persistent === Powerup.PW_SCOUT) addTime = Math.trunc(addTime / 1.5);
-    else if (persistent === Powerup.PW_AMMOREGEN || ps.haste) addTime = Math.trunc(addTime / 1.3);
-    ps.weaponTime += addTime;
+    ps.weaponTime += q3WeaponDelay(addTime, persistent, ps.haste);
   }
 }
 

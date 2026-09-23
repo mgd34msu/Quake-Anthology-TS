@@ -10,7 +10,7 @@ import { aim } from "../foundation/weapons.ts";
 import { grenadeVelocity, missionReference, moveMissile, setMissionNumber, setMissionReference, velocityAngles } from "./types.ts";
 
 function finish(game: Q1EntityServices, player: Q1PlayerState, delay: number, frame: number, model: string, punch: number): boolean {
-  player.attackFinished = Math.fround(game.time + delay); player.nextWeaponFrame = player.attackFinished;
+  player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, delay)); player.nextWeaponFrame = player.attackFinished;
   player.weaponFrame = frame; player.hostileUntil = Math.fround(game.time + 1);
   game.weaponPunch(player, punch);
   game.host.emit({ kind: "weapon", player: player.actor.id, weapon: player.weapon, viewModel: model, frame, punch });
@@ -150,7 +150,7 @@ function hammerStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
   const basis = game.makeVectors(player.viewAngles), source = vadd(body.origin, { x: 0, y: 0, z: 16 });
   let trace = game.host.trace({ start: source, end: vadd(source, vscale(basis.forward, 32)), bounds: POINT, ignore: player.actor.id, monsters: true });
   const cells = game.host.inventory.count(player.actor.id, "q1:ammo/cells");
-  player.attackFinished = Math.fround(game.time + 0.4);
+  player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, 0.4));
   if (trace.fraction === 1 && cells >= 15) {
     const start = vadd(source, vscale(basis.forward, 32));
     trace = game.host.trace({ start, end: vsub(start, vscale(basis.up, 50)), bounds: POINT, ignore: player.actor.id, monsters: true });
@@ -161,7 +161,7 @@ function hammerStrike(game: Q1EntityServices, strike: Q1Actor): undefined {
       } else {
         game.host.inventory.consume(player.actor, "q1:ammo/cells", 15); spawnHipnoticHammerBase(game, player, trace.end);
       }
-      player.attackFinished = Math.fround(game.time + 1.5); return game.remove(strike);
+      player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, 1.5)); return game.remove(strike);
     }
   }
   const origin = vsub(trace.end, vscale(basis.forward, 4));

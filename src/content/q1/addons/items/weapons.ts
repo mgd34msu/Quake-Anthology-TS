@@ -53,7 +53,7 @@ function fireLaser(context: Q1AddonContext, player: Q1PlayerState): boolean {
     launchHipnoticLaser(game, player.actor.id, vsub(first, vscale(basis.right, offset * 2)), direction, false, profile);
   } else launchHipnoticLaser(game, player.actor.id, vadd(origin, vscale(basis.up, 6)), direction, game.host.random() < 0.1, profile);
   player.continuousFiring = true; player.weaponAnimationAt = -1; player.weaponFrame = paired ? 1 : 4;
-  player.attackFinished = player.nextWeaponFrame = Math.fround(game.time + 0.1); player.hostileUntil = Math.fround(game.time + 1);
+  player.attackFinished = player.nextWeaponFrame = Math.fround(game.time + game.weaponFrameDelay(player, 0.1)); player.hostileUntil = Math.fround(game.time + 1);
   emitWeapon(game, player, -1); game.effect("muzzleflash", body.origin, player.actor.id); return true;
 }
 
@@ -64,7 +64,7 @@ function hammerStrike(context: Q1AddonContext, strike: Q1Actor): undefined {
   const basis = game.makeVectors(player.viewAngles), source = vadd(body.origin, { x: 0, y: 0, z: 16 });
   const trace = game.host.trace({ start: source, end: vadd(source, vscale(basis.forward, 64)), bounds: POINT, ignore: player.actor.id, monsters: true });
   const target = trace.actor, origin = vsub(trace.end, vscale(basis.forward, 4));
-  player.attackFinished = Math.fround(game.time + 0.4);
+  player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, 0.4));
   if (target !== null && game.host.combat.read(target)?.canTakeDamage) {
     game.sound(player.actor, "hipweap/mjolslap.wav", "weapon"); game.effect("blood", origin, target, 40);
     const victim = game.entity(target); if (victim !== null) context.setNumber(victim, "axhitme", 1);
@@ -77,10 +77,10 @@ function hammerStrike(context: Q1AddonContext, strike: Q1Actor): undefined {
         if (!infiniteAmmo(context, player)) game.host.inventory.consume(player.actor, "q1:ammo/cells", 15);
         spawnHipnoticHammerBase(game, player, floor.end, "mg3:mjolnir");
       } else game.damage(target, player.actor.id, player.actor.id, damage, "mg3:mjolnir");
-      context.setPlayerNumber(player.actor.id, "last_mjolnir_hit_time", game.time); player.attackFinished = Math.fround(game.time + 0.5);
+      context.setPlayerNumber(player.actor.id, "last_mjolnir_hit_time", game.time); player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, 0.5));
     } else {
       context.setPlayerNumber(player.actor.id, "last_mjolnir_hit_time", game.time + 0.5); context.setPlayerReference(player.actor.id, "last_mjolnir_hit", target);
-      player.attackFinished = Math.fround(game.time + 0.2);
+      player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, 0.2));
       if (game.host.inventory.count(player.actor.id, "q1:ammo/cells") >= 15) context.setPlayerNumber(player.actor.id, "mg3.hammerGlow", 1);
       game.damage(target, player.actor.id, player.actor.id, damage, "mg3:mjolnir");
     }
@@ -97,7 +97,7 @@ function fireHammer(context: Q1AddonContext, player: Q1PlayerState): boolean {
   context.setPlayerNumber(player.actor.id, "mg3.hammerBodyBase", game.host.inventory.count(player.actor.id, "q1:ammo/cells") < 30 ? 31 : 37);
   game.schedule(strike, 0.2, game.named.action(strike, "mg3:hammer_strike"));
   player.continuousFiring = false; player.weaponAnimationAt = game.time; player.weaponAnimationBase = 1; player.weaponFrame = 1;
-  player.attackFinished = Math.fround(game.time + 0.5); player.hostileUntil = Math.fround(game.time + 1);
+  player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, 0.5)); player.hostileUntil = Math.fround(game.time + 1);
   emitWeapon(game, player, 0); return true;
 }
 
@@ -111,11 +111,11 @@ function fireShotgun(context: Q1AddonContext, player: Q1PlayerState): boolean {
     const basis = game.makeVectors(player.viewAngles);
     fireBullets(game, player.actor, aim(game, player.actor, basis.forward), player.viewAngles, 28, 0.3, 0.08, "supershotgun");
     player.continuousFiring = false; player.weaponAnimationAt = game.time; player.weaponAnimationBase = 1; player.weaponFrame = 1;
-    player.attackFinished = Math.fround(game.time + 0.7); player.hostileUntil = Math.fround(game.time + 1);
+    player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, 0.7)); player.hostileUntil = Math.fround(game.time + 1);
     emitWeapon(game, player, -4); game.effect("muzzleflash", body.origin, player.actor.id); return true;
   }
   const fired = fireBaseWeapon(game, player);
-  if (fired && player.weapon === "shotgun" && (bloody & MG3_BLOODY_SHOTGUN) !== 0) player.attackFinished = Math.fround(game.time + 0.28);
+  if (fired && player.weapon === "shotgun" && (bloody & MG3_BLOODY_SHOTGUN) !== 0) player.attackFinished = Math.fround(game.time + game.weaponAttackDelay(player, 0.28));
   return fired;
 }
 

@@ -162,7 +162,7 @@ export function fireBaseWeapon(game: Q1EntityServices, player: Q1PlayerState): b
   const basis = game.makeVectors(player.viewAngles); const weapon = player.weapon; let delay = 0.1, punch = -2;
   let attack: Q1CharacterAttack = { kind: weapon === "shotgun" || weapon === "supershotgun" ? "shotgun" : weapon === "lightning" ? "lightning" : weapon === "nailgun" || weapon === "supernailgun" ? "nail" : "rocket" };
   player.continuousFiring = weapon === "nailgun" || weapon === "supernailgun" || weapon === "lightning";
-  player.nextWeaponFrame = Math.fround(game.time + 0.1);
+  player.nextWeaponFrame = Math.fround(game.time + game.weaponFrameDelay(player, 0.1));
   if (!player.continuousFiring) { player.weaponAnimationAt = game.time; player.weaponAnimationBase = 1; }
   player.hostileUntil = game.time + 1;
   switch (weapon) {

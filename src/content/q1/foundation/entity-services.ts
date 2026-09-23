@@ -153,6 +153,9 @@ export class Q1EntityServices {
   weaponAttackDelay(player: Q1PlayerState, initial: number): number {
     let delay = initial; for (const rules of this.weaponRules.values()) delay = rules.attackDelay?.(this, player, delay) ?? delay; return delay;
   }
+  weaponFrameDelay(player: Q1PlayerState, initial: number): number {
+    let delay = initial; for (const rules of this.weaponRules.values()) delay = rules.frameDelay?.(this, player, delay) ?? delay; return delay;
+  }
   nailSpeed(player: Q1PlayerState, initial: number): number {
     let speed = initial; for (const rules of this.weaponRules.values()) speed = rules.nailSpeed?.(this, player, speed) ?? speed; return speed;
   }

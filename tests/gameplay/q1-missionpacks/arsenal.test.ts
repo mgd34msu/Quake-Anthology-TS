@@ -1,3 +1,5 @@
+import { q3WeaponDelay } from "../../../src/movement/q3/weapon.ts";
+import { Powerup } from "../../../src/movement/q3/constants.ts";
 import type { WeaponBehaviorProjectilePort } from "../../../src/contracts/weapon-behavior.ts";
 import { launchHipnoticLaser } from "../../../src/content/q1/missionpacks/hipnotic-weapons.ts";
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
@@ -339,4 +341,26 @@ test.skipIf(!existsSync(archivePath))("routed base weapon pickups retain Rogue g
     pickup();
     expect(selections).toEqual(["never", "never", "always"]);
   } finally { scene.actors.close(); }
+});
+
+for (const program of ["hipnotic", "rogue", "mg3"] satisfies readonly ("hipnotic" | "rogue" | "mg3")[]) test(`selected ${program} original repeat deadlines use source Scout cadence`, async () => {
+  const native = await session("hipnotic");
+  try {
+    const game = new Q1EntityServices(native.game.host, { ...native.game.options, provider: `q1:weapons/rerelease/${program}` });
+    const installed = registerSelectedQ1MissionWeapons(game, program, { emit: () => undefined, isMonster: () => false, cvar: () => 0, setCvar: () => undefined });
+    game.registerWeaponRules({ id: "test:q3-cadence", attackDelay: (_game, _player, seconds) => q3WeaponDelay(seconds * 1000, Powerup.PW_SCOUT, true) / 1000,
+      frameDelay: (_game, _player, seconds) => q3WeaponDelay(seconds * 1000, Powerup.PW_SCOUT, true) / 1000 });
+    const arsenal = new Q1SelectedArsenal({ game, impulse: installed.impulse, preparePickup: installed.preparePickup, observe: () => ({ viewAngles: ZERO, waterLevel: 0 }) });
+    arsenal.admit(native.player.actor, 100);
+    const weapon = program === "hipnotic" ? "hipnotic:laser" : program === "rogue" ? "rogue:lava-nailgun" : "mg3:laser";
+    const definition = game.registeredWeapons.get(weapon); if (definition === undefined || definition.ammo === null) throw new Error("Missing source repeat weapon");
+    native.inventory.configure(native.player.actor, { item: game.weaponItem(weapon), count: 1, capacity: 1 });
+    native.inventory.configure(native.player.actor, { item: definition.ammo, count: 100, capacity: 200 });
+    expect(arsenal.select(native.player.actor.id, game.weaponItem(weapon))).toBe(true);
+    expect(game.weaponInput(native.player.actor, true, ZERO, 1)).toBe(true);
+    const player = game.player(native.player.actor.id); if (player === null) throw new Error("Missing source player");
+    expect(player.nextWeaponFrame).toBeCloseTo(1.066, 6);
+    expect(game.weaponInput(native.player.actor, true, ZERO, 1.05)).toBe(false);
+    expect(game.weaponInput(native.player.actor, true, ZERO, 1.067)).toBe(true);
+  } finally { native.actors.close(); }
 });

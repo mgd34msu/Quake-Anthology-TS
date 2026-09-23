@@ -20,6 +20,12 @@ import { MAX_CLIENTS } from "./state.ts";
 import { GameEntity } from "./state.ts";
 import type { GameClient } from "./state.ts";
 
+export function q3WeaponDamageFactor(client: GameClient, quadFactor: number, product: "baseq3" | "missionpack"): number {
+  let factor = client.ps.powerups.get(Powerup.PW_QUAD) ? Math.fround(quadFactor) : 1;
+  if (product === "missionpack" && client.persistantPowerup?.item?.tag === Powerup.PW_DOUBLER) factor = Math.fround(factor * 2);
+  return factor;
+}
+
 const MASK_SHOT = 0x6000001;
 const AWARD_FLAGS = 0x8 | 0x40 | 0x800 | 0x8000 | 0x10000 | 0x20000;
 
@@ -97,9 +103,7 @@ export class WeaponRuntime {
 
   private quad(entity: GameEntity): number {
     const client = clientOf(entity);
-    let factor = client.ps.powerups.get(Powerup.PW_QUAD) ? Math.fround(this.host.quadFactor) : 1;
-    if (this.host.missiles.host.combat.product === "missionpack" && client.persistantPowerup?.item?.tag === Powerup.PW_DOUBLER) factor = Math.fround(factor * 2);
-    return factor;
+    return q3WeaponDamageFactor(client, this.host.quadFactor, this.host.missiles.host.combat.product);
   }
 
   private attack(entity: GameEntity, quad: number): Attack {

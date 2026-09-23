@@ -42,6 +42,7 @@ export interface Q1WeaponRules {
   readonly id: string;
   consumeAmmo?(game: Q1EntityServices, player: Q1PlayerState, item: ItemId, amount: number): boolean;
   beforeFire?(game: Q1EntityServices, player: Q1PlayerState): undefined;
+  frameDelay?(game: Q1EntityServices, player: Q1PlayerState, delay: number): number;
   attackDelay?(game: Q1EntityServices, player: Q1PlayerState, delay: number): number;
   nailSpeed?(game: Q1EntityServices, player: Q1PlayerState, speed: number): number;
 }

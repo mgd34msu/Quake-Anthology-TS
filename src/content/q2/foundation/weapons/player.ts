@@ -1,3 +1,4 @@
+import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Q2WeaponOwner } from "./types.ts";
 import { q2AttackFrames, q2ReverseFrames, q2WeaponAnimationRate, q2PowerupSound, q2WeaponRecoil, setQ2WeaponRecoil } from "./presentation.ts";
 /* Quake II p_weapon.c / rerelease p_weapon.cpp. Copyright id Software.
@@ -349,12 +350,16 @@ export class Q2Weapons extends Q2Ballistics {
     return undefined;
   }
 
+  firingInterval(actor: ActorId, seconds: number): number { return this.hooks.firingInterval?.(actor, seconds) ?? seconds; }
+
   animationTime(context: Q2WeaponContext): number {
     const { state, input, game } = context;
     const rate = q2WeaponAnimationRate({ ...input, frameSeconds: game.host.frameSeconds(), phase: state.phase, frame: state.frame, now: context.now });
-    state.gunRate = rate;
     // rerelease gtime_t keeps integral milliseconds.
-    return Math.trunc(1000 / rate) / 1000;
+    const native = Math.trunc(1000 / rate) / 1000;
+    const interval = state.phase === "firing" ? this.firingInterval(context.self.actor.id, native) : native;
+    state.gunRate = interval === native ? rate : 1 / interval;
+    return interval;
   }
 
   genericClassic(context: Q2WeaponContext): undefined {
@@ -395,7 +400,7 @@ export class Q2Weapons extends Q2Ballistics {
 
   multiplier(context: Q2WeaponContext): number {
     const quad = context.input.quadUntil > context.now;
-    return (quad ? this.hooks.quadMultiplier?.(context.self.actor.id) ?? 4 : 1) * (context.input.doubleUntil > context.now && !(quad && context.input.noStackDouble) ? 2 : 1);
+    return (quad ? this.hooks.quadMultiplier?.(context.self.actor.id) ?? 4 : 1) * (context.input.doubleUntil > context.now && !(quad && context.input.noStackDouble) ? 2 : 1) * (this.hooks.sourceDamageMultiplier?.(context.self.actor.id) ?? 1);
   }
 
   powerupSound(context: Q2WeaponContext): undefined {
@@ -638,7 +643,7 @@ export class Q2Weapons extends Q2Ballistics {
       damageMultiplier: this.multiplier(context), gravity: input.gravity, held,
       project: (angles, offset) => this.project(context, offset, angles) });
     if (context.definition.name === "grenades") state.handReservation = { kind: "none" };
-    state.grenadeTime = rerelease ? 0 : now + 1;
+    state.grenadeTime = rerelease ? 0 : now + this.firingInterval(self.actor.id, 1);
     this.fireGrenade(self, game, spec.start, spec.direction, spec.damage, spec.speed, spec.fuse, spec.radius, true, spec.held);
     if (context.definition.name !== "grenades") this.consume(context, 1);
     if (!rerelease) {
@@ -731,7 +736,7 @@ export class Q2Weapons extends Q2Ballistics {
     state.lastFiringTime = millisecondSum(now, 2.5);
     if (state.thinkTime > now) return undefined;
     if (state.frame === soundFrame && cockSound !== "") game.sound(self, cockSound, 1);
-    const wait = handRecoverySeconds({ edition: "rerelease", haste: input.haste, quadFire: input.quadFireUntil > now });
+    const wait = this.firingInterval(self.actor.id, handRecoverySeconds({ edition: "rerelease", haste: input.haste, quadFire: input.quadFireUntil > now }));
     if (state.frame === holdFrame) {
       if (state.grenadeTime === 0 && state.grenadeFinished === 0) state.grenadeTime = handFuseDeadline(now, "rerelease");
       if (!state.grenadeBlewUp && holdSound !== "") this.setLoop(self, game, state, holdSound);
