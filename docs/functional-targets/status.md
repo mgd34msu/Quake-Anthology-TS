@@ -1,5 +1,9 @@
 # Functional target status
 
+Installed executable `0dc86b6` includes the accepted source changes through original mod client services and QuakeWorld arsenals. Build/help, exact archived source identity, and compiled original Threewave GL movement, firing, armor, save/load and normal quit passed. The restored frame and original/canonical save state were inspected. **21/23 targets are accepted; T10 and T12 remain active.** Shader remapping, component cinematic and remote presentation, player retirement, and original QVM/native primary selected arsenals remain unfinished. [Delivery](../execution-status.md#installed-executable-and-recent-fixes).
+
+Earlier checkpoints below retain their status at the time.
+
 Combined source now integrates original QVM HUD/initialization, source command and writable-file routing, retained local music, safe cinematic activation/retirement, and selected arsenals in original QuakeWorld. The exact candidate over `fcb848d` passes all-production strict compilation, 28 combined checks with 212 assertions, and the actual cinematic Application check with six assertions. Original QW command/fire/pickup/travel has separate frozen evidence. T10/T12 remain open, 21/23 accepted; installed executable remains `67f2cfd`. [Combined evidence](../../.artifacts/resume-20260923/client-services-integration/EVIDENCE.md).
 
 Original QVM item/weapon ownership is integrated: deferred switching, source ammo debit, pending-selection saves, original view weapons and source entity-frame cleanup retain their actual executable behavior. Root combined-source strict and the actual Threewave Application witness (270 assertions) pass. Graphical seat retirement, full HUD/initialization, LRCTF armed/release behavior and remaining weapon/artifact coverage are still open. This advances T10/T12 without changing the 21/23 count or installed `67f2cfd` executable.
