@@ -1,5 +1,7 @@
 # September 18 integration evidence
 
+Later scope clarification, September 22: the project owner accepted the replaceable ranking backend as the sole permitted placeholder. T19 is now accepted under that requirement; references below to its original external blocker are historical. [Current contract](../ranking-services.md).
+
 This record reconciles the original functional targets with actual production callers. It records source implementation and bounded execution separately from executable delivery, full playthroughs, physical audio, native peers, and overall frame rate.
 
 | Target | Implemented behavior and current evidence |

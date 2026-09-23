@@ -1,5 +1,5 @@
-/** Shared lifecycle for the operations in Q3 sv_rankings.c. A provider owns its
- * service protocol; this module does not fabricate the unavailable GRank SDK wire. */
+/** Shared lifecycle for Q3 sv_rankings.c; the optional backend is the project's
+ * sole permitted placeholder. Future services implement RankingServiceProvider. */
 export interface RankingAccount { readonly playerId: bigint; readonly rank: number }
 export interface RankingMatch { readonly gameId: bigint }
 export type RankingAccountRequest =
@@ -55,7 +55,7 @@ export class RankingLifecycle {
       if (this.match !== null) throw new Error("Ranking match is already active");
       if (!enabled || singlePlayer) { this.setState({ kind: "disabled" }); return; }
       if (this.provider === null) {
-        this.setState({ kind: "unavailable", reason: "No compatible ranking provider is configured; the original GRank SDK transport is not supplied." }); return;
+        this.setState({ kind: "unavailable", reason: "No ranking service is configured. Local progress and match records remain available." }); return;
       }
       this.setState({ kind: "starting" });
       this.match = await this.provider.begin(gameKey);
