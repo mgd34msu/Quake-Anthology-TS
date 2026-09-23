@@ -324,7 +324,8 @@ export class UnifiedAudio {
         const state = this.seat(seat);
         for (const [index, entry] of this.actors.entries()) if (entry.owner === owner) state.mixer.stopEntity(index + 1);
     }
-    addStaticSound(seat: SeatId, sound: SoundAsset, origin: Vec3, volume: number, attenuation: number): boolean { return this.seat(seat).mixer.addStaticSound(sound.pcm, origin, volume, attenuation); }
+    addStaticSound(seat: SeatId, sound: SoundAsset, origin: Vec3, volume: number, attenuation: number, key = 0): boolean { return this.seat(seat).mixer.addStaticSound(sound.pcm, origin, volume, attenuation, key); }
+    removeStaticSound(seat: SeatId, key: number): void { this.seat(seat).mixer.removeStaticSound(key); }
     updateAmbient(seat: SeatId, sounds: readonly SoundAsset[], levels: readonly number[], elapsedSeconds: number, level = 0.3, fade = 100): void {
         this.seat(seat).mixer.updateAmbient(sounds.map(sound => sound.pcm), levels, elapsedSeconds, level, fade);
     }

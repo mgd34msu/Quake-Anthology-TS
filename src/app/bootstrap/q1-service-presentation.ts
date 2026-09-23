@@ -1,3 +1,4 @@
+import { samePresentationOwner } from "../../contracts/presentation.ts";
 import type { ActorId } from '../../contracts/identity.ts';
 import type { ContentId } from '../../contracts/content.ts';
 import type { RendererImage } from '../../contracts/render.ts';
@@ -37,9 +38,29 @@ export class Q1ServicePresentation {
   private readonly skies = new Map<ActorId,SkySelection>();
   private readonly tables = new Map<ContentId,ClientTables>();
   private closed = false;
+  private readonly retained = new Map<string, SimulationPresentationEvent>();
 
   receive(events: readonly SimulationPresentationEvent[]): void {
     if(this.closed) throw new Error('Q1 service presentation is closed');
+    for(const source of events) {
+      if (source.kind === 'presentation-owner') {
+        if (source.event.kind === 'refreshed') {
+          if (this.sharedSky !== null) this.sharedSky = { ...this.sharedSky };
+          for (const [actor, sky] of this.skies) this.skies.set(actor, { ...sky });
+          continue;
+        }
+        for (const [key, event] of this.retained) if (samePresentationOwner(event.owner, source.event.owner)) this.retained.delete(key);
+        this.sharedSky = null; this.skies.clear(); this.tables.clear();
+        this.apply([...this.retained.values()].sort((a,b) => a.sequence - b.sequence));
+      } else if (source.kind === 'q1-sky' || source.kind === 'q1-client') {
+        const recipient = source.recipient === undefined ? 'world' : `${source.recipient.slot}:${source.recipient.generation}`;
+        const key = source.kind === 'q1-sky' ? `sky:${recipient}` : `${source.content}:${source.event.slot}:${source.event.kind}:${recipient}`;
+        this.retained.set(key, source); this.apply([source]);
+      }
+    }
+  }
+
+  private apply(events: readonly SimulationPresentationEvent[]): void {
     for(const source of events) {
       if(source.kind === 'q1-sky') {
         const value: SkySelection = {content:source.content,name:source.event.name,ready:false,value:null};
@@ -98,7 +119,10 @@ export class Q1ServicePresentation {
   clients(content:ContentId,actor:ActorId): readonly Q1ClientRow[] {
     const tables=this.tables.get(content);return [...(tables?.recipients.get(actor) ?? tables?.shared ?? new Map<number,Q1ClientRow>()).values()].sort((a,b)=>a.slot-b.slot);
   }
-  retire(actor:ActorId):void {this.skies.delete(actor);for(const tables of this.tables.values())tables.recipients.delete(actor);}
-  reset():void {this.sharedSky=null;this.skies.clear();this.tables.clear();}
+  retire(actor:ActorId):void {
+    this.skies.delete(actor);for(const tables of this.tables.values())tables.recipients.delete(actor);
+    for (const [key, source] of this.retained) if (source.recipient?.equals(actor)) this.retained.delete(key);
+  }
+  reset():void {this.retained.clear();this.sharedSky=null;this.skies.clear();this.tables.clear();}
   close():void {this.reset();this.closed=true;}
 }

@@ -1,3 +1,4 @@
+import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { createSourceSceneOrder, sceneModelBatches, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
 import { weaponViewOrigin } from "./weapon-view.ts";
@@ -60,7 +61,7 @@ export class ApplicationWorldScene {
   private readonly characters = new Map<string, Q3CharacterPresenter>();
   private readonly selectedWeapons = new Map<string, SelectedQ3WeaponPresenter>();
   private readonly foreignWeapons: ForeignHeldWeapons;
-  private readonly lightStyles = new Map<number, string>();
+  private readonly lightStyles = new Map<number, { readonly pattern: string; readonly owner?: PresentationOwner }>();
   private inlineModels: NonNullable<WorldViewInput["inlineModels"]> = [];
   private brushModels: readonly BrushPresentation[] = [];
   private preparedTime = 0;
@@ -73,12 +74,14 @@ export class ApplicationWorldScene {
   }
 
   receive(events: readonly SimulationPresentationEvent[]): void {
-    for (const source of events) if ((source.kind === "q1" || source.kind === "q2") && source.event.kind === "lightstyle")
-      this.lightStyles.set(source.event.style, source.event.pattern);
+    for (const source of events) if (source.kind === "presentation-owner" && source.event.kind === "retired") {
+      for (const [style, value] of this.lightStyles) if (samePresentationOwner(value.owner, source.event.owner)) this.lightStyles.delete(style);
+    } else if ((source.kind === "q1" || source.kind === "q2") && source.event.kind === "lightstyle")
+      this.lightStyles.set(source.event.style, { pattern: source.event.pattern, ...(source.owner === undefined ? {} : { owner: source.owner }) });
   }
 
   style(index: number, absent: number): number {
-    const pattern = this.lightStyles.get(index);
+    const pattern = this.lightStyles.get(index)?.pattern;
     return pattern === undefined || pattern.length === 0 ? absent : pattern.charCodeAt(Math.trunc(this.preparedTime * 10) % pattern.length) - 97;
   }
 

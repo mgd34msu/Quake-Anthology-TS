@@ -129,6 +129,7 @@ interface ActiveMod extends PreparedEntry { readonly resources: ResourceScope; r
 const emptyAppearances: ReadonlyMap<ActorId, readonly SimulationPresentation[]> = new Map<ActorId, readonly SimulationPresentation[]>();
 
 export interface SessionModsOptions {
+  readonly presentation?: Pick<SimulationEvents, "bindOwner" | "finishOwnerRestore" | "refreshOwner">;
   readonly services?: ModHostServices;
   readonly prepared: readonly PreparedMod[];
   readonly enabled: readonly ModSelection[];
@@ -184,6 +185,7 @@ export class SessionMods implements SessionResource {
     const owner = new SessionMods(options);
     try {
       await owner.exclusive(async () => { await owner.apply(owner.selection(options.enabled).enabled(), saved, travel); });
+      options.presentation?.finishOwnerRestore();
       return owner;
     } catch (error) {
       try { owner.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Mod initialization and cleanup failed"); }
@@ -266,6 +268,7 @@ export class SessionMods implements SessionResource {
           const checkpoint = saved.mods[index];
           if (checkpoint === undefined) throw new Error("Validated mod checkpoint disappeared");
           changed.push(index);
+          if (this.options.services?.engine !== undefined) this.options.presentation?.refreshOwner(modInstanceProvider(entry.identity.selection));
           await entry.runtime.restore(checkpoint.state); this.assertOpen(); entry.runtime.activate?.(); this.assertOpen();
         }
       } catch (error) {
@@ -274,7 +277,9 @@ export class SessionMods implements SessionResource {
         for (const index of changed.reverse()) {
           const entry = this.active[index], checkpoint = previous.mods[index];
           if (entry === undefined || checkpoint === undefined) throw new Error("Mod restore lost its rollback state");
-          try { await entry.runtime.restore(checkpoint.state); entry.runtime.activate?.(); } catch (rollback) { errors.push(rollback); }
+          try {
+            if (this.options.services?.engine !== undefined) this.options.presentation?.refreshOwner(modInstanceProvider(entry.identity.selection));
+            await entry.runtime.restore(checkpoint.state); entry.runtime.activate?.(); } catch (rollback) { errors.push(rollback); }
         }
         if (errors.length > 1) {
           try { this.close(); } catch (cleanup) { errors.push(cleanup); }
@@ -363,7 +368,13 @@ export class SessionMods implements SessionResource {
         scopes.push(resources); this.pending.add(resources);
         const assertCurrent = (): void => { this.assertOpen(); resources.assertOpen(); };
         const state = saved?.mods[index]?.state ?? travel?.mods[index]?.state;
-        const runtime = await entry.prepared.initialize({ instance: modInstanceProvider(entry.identity.selection), resources, assertCurrent, services: this.options.services ?? null, restoring: state != null,
+        let services = this.options.services ?? null;
+        if (services?.engine !== undefined) {
+          if (this.options.presentation === undefined) throw new Error("Component engine output requires presentation ownership");
+          const events = resources.own(this.options.presentation.bindOwner(modInstanceProvider(entry.identity.selection), entry.identity.source.content, state != null));
+          services = { ...services, engine: { ...services.engine, events } };
+        }
+        const runtime = await entry.prepared.initialize({ instance: modInstanceProvider(entry.identity.selection), resources, assertCurrent, services, restoring: state != null,
           nextFrame: async () => { assertCurrent(); await this.options.nextFrame(); assertCurrent(); } });
         if (resources.isClosed) { runtime.close(); throw new Error("Mod session closed during initialization"); }
         resources.own(runtime); assertCurrent();

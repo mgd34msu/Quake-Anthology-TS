@@ -38,6 +38,7 @@ export function unifiedPresentationFor(actor: ActorId, client: ClientId, value: 
   if (value.recipient !== undefined && !value.recipient.equals(actor)) return false;
   const own = (target: ActorId | null): boolean => target === null || target.equals(actor);
   switch (value.kind) {
+    case "presentation-owner": return true;
     case 'view-reset': return own(value.actor);
     case 'q1-fog': return own(value.event.player);
     case 'q1': {

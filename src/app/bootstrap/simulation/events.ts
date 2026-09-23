@@ -1,6 +1,7 @@
+import { presentationOwnerKey, samePresentationOwner, type PresentationOwner } from "../../../contracts/presentation.ts";
 import { SimulationQ1Fog, type SimulationQ1FogOptions } from "./q1-fog.ts";
 import type { ContentId, ResolvedResourceReference, ResourceId } from "../../../contracts/content.ts";
-import type { ActorId, ClientId } from "../../../contracts/identity.ts";
+import type { ActorId, ClientId, ProviderId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { NetworkEvent } from "../../../contracts/protocol.ts";
 import type { SceneLightStyle } from "../../../contracts/scene.ts";
@@ -18,29 +19,102 @@ import type { SavedActorId } from "../../../contracts/session.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function q2LoopKey(event: Extract<Q2PresentationEvent, { readonly kind: "sound" }>, recipient?: ActorId): string {
-  return event.loopOwner === undefined ? `sound:${event.actor?.slot ?? -1}:${event.channel}:${event.path}`
-    : JSON.stringify(["sound", event.loopOwner, event.actor?.slot ?? -1, event.actor?.generation ?? -1, event.channel, event.path,
-      recipient === undefined ? null : [recipient.slot, recipient.generation]]);
+  return JSON.stringify(["sound", event.loopOwner ?? null, event.actor?.slot ?? -1, event.actor?.generation ?? -1, event.channel, event.path,
+    recipient === undefined ? null : [recipient.slot, recipient.generation]]);
 }
 
 /** Retains source events until the application resolves their content-owned media. */
 export class SimulationEvents {
   private sequence = 0;
   private presentationSequence = 0;
+  private nextOwnerGeneration = 1;
+  private legacyPersistence = false;
+  private readonly owners = new Map<ProviderId, { readonly token: PresentationOwner; readonly content: ContentId; readonly fog: SimulationQ1Fog | null; status: "restored" | "active" }>();
   private readonly source: SimulationPresentationEvent[] = [];
   private readonly emitted: SimulationEvent[] = [];
   private readonly resources = new Map<string, ResolvedResourceReference>();
   private readonly resourcesById = new Map<ResourceId, ResolvedResourceReference>();
   private readonly styles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
+  private readonly legacyStyles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
   private readonly persistent = new Map<string, SimulationPresentationEvent>();
 
   private readonly fog: SimulationQ1Fog | null;
 
   constructor(private readonly bodies: SharedBodyTable, private readonly now: () => SourceTime,
-    private readonly clientFor: (actor: ActorId) => ClientId | null, private readonly sourceSlot: (actor: ActorId) => number | null, fog: SimulationQ1FogOptions | null = null) { this.fog = fog === null ? null : new SimulationQ1Fog(fog); }
+    private readonly clientFor: (actor: ActorId) => ClientId | null, private readonly sourceSlot: (actor: ActorId) => number | null, private readonly fogOptions: SimulationQ1FogOptions | null = null) { this.fog = fogOptions === null ? null : new SimulationQ1Fog(fogOptions); }
+
+  private ownerFog(content: ContentId): SimulationQ1Fog | null {
+    return this.fogOptions === null ? null : new SimulationQ1Fog({ ...this.fogOptions,
+      acceptedContents: new Set([...(this.fogOptions.acceptedContents ?? []), content]) });
+  }
+
+  bindOwner(provider: ProviderId, content: ContentId, restoring: boolean): Pick<SimulationEvents, "emit" | "registerResource"> & { close(): undefined } {
+    const prior = this.owners.get(provider);
+    if (prior?.status === "active") throw new Error(`Presentation owner is already active: ${provider}`);
+    if (prior !== undefined && (!restoring || prior.content !== content)) throw new Error(`Restored presentation owner differs: ${provider}`);
+    if (restoring && this.legacyPersistence && ([...this.persistent.values()].some(event => event.content === content)
+      || this.fog?.presentation().some(event => event.content === content) === true))
+      throw new Error(`Legacy save has persistent presentation in component ${provider}'s content without recorded ownership; primary and component output cannot be distinguished`);
+    if (prior === undefined && !Number.isSafeInteger(this.nextOwnerGeneration + 1)) throw new Error("Presentation owner generation exhausted");
+    const entry = prior ?? { token: { provider, generation: this.nextOwnerGeneration++ }, content, fog: this.ownerFog(content), status: "active" };
+    entry.status = "active"; this.owners.set(provider, entry);
+    let closed = false;
+    const current = (): void => { if (closed || this.owners.get(provider) !== entry) throw new Error(`Presentation owner retired: ${provider}`); };
+    return {
+      emit: (sourceContent, source, time, recipient) => {
+        current(); if (source.kind === "presentation-owner") throw new Error("Component source cannot emit owner lifecycle events");
+        return this.emitOwned(entry.token, sourceContent, source, time, recipient);
+      },
+      registerResource: (sourceContent, path, resource) => { current(); return this.registerResource(sourceContent, path, resource); },
+      close: () => {
+        if (closed) return undefined;
+        closed = true;
+        if (this.owners.get(provider) === entry) { this.owners.delete(provider); this.retireOwner(entry.token, content); }
+        return undefined;
+      },
+    };
+  }
+
+  finishOwnerRestore(): void {
+    for (const entry of this.owners.values()) if (entry.status === "restored") throw new Error(`Saved presentation owner was not restored: ${entry.token.provider}`);
+    this.legacyPersistence = false;
+  }
+
+  refreshOwner(provider: ProviderId): void {
+    const entry = this.owners.get(provider);
+    if (entry?.status !== "active") throw new Error(`Presentation owner is not active: ${provider}`);
+    this.emit(entry.content, { kind: "presentation-owner", event: { kind: "refreshed", owner: entry.token } });
+  }
+
+  private retireOwner(owner: PresentationOwner, content: ContentId): void {
+    const affected = new Set<string>();
+    for (const [key, event] of this.persistent) if (samePresentationOwner(event.owner, owner)) {
+      const domain = persistentDomain(event); if (domain !== null) affected.add(domain);
+      this.persistent.delete(key);
+    }
+    this.emit(content, { kind: "presentation-owner", event: { kind: "retired", owner } });
+    const replacements = new Map<string, SimulationPresentationEvent>();
+    for (const event of this.persistent.values()) {
+      const slot = persistentSlot(event);
+      if (slot !== null && affected.has(persistentDomain(event) ?? "") && (replacements.get(slot)?.sequence ?? -1) < event.sequence) replacements.set(slot, event);
+    }
+    for (const event of [...replacements.values()].sort((a, b) => a.sequence - b.sequence))
+      this.source.push({ ...event, sequence: this.presentationSequence++ });
+    const fog = [...(this.fog?.presentation() ?? []), ...[...this.owners.values()].flatMap(entry =>
+      entry.fog?.presentation().map(event => ({ ...event, owner: entry.token })) ?? [])];
+    for (const event of fog.sort((a, b) => a.sequence - b.sequence)) this.source.push({ ...event, sequence: this.presentationSequence++ });
+    this.rebuildStyles();
+  }
+
+  private rebuildStyles(): void {
+    this.styles.clear(); for (const [style, value] of this.legacyStyles) this.styles.set(style, value);
+    for (const source of [...this.persistent.values()].sort((a, b) => a.sequence - b.sequence))
+      if ((source.kind === "q1" || source.kind === "q2") && source.event.kind === "lightstyle" && source.recipient === undefined)
+        this.styles.set(source.event.style, { family: source.kind, pattern: source.event.pattern });
+  }
 
   retire(actor: ActorId): void {
-    this.fog?.retire(actor);
+    this.fog?.retire(actor); for (const entry of this.owners.values()) entry.fog?.retire(actor);
     for (const [key, event] of this.persistent) if (event.recipient?.equals(actor) === true) this.persistent.delete(key);
   }
 
@@ -57,27 +131,27 @@ export class SimulationEvents {
   }
 
   emit(content: ContentId, source: SourcePresentationEvent, time: SourceTime = this.now(), recipient?: ActorId): undefined {
+    return this.emitOwned(undefined, content, source, time, recipient);
+  }
+
+  private emitOwned(owner: PresentationOwner | undefined, content: ContentId, source: SourcePresentationEvent, time: SourceTime = this.now(), recipient?: ActorId): undefined {
     if (source.kind === "q1" && source.event.kind === "static-model") source = { kind: "q1", event: { ...source.event,
       frame: Math.trunc(source.event.frame), colorMap: Math.trunc(source.event.colorMap), skin: Math.trunc(source.event.skin),
       origin: { ...source.event.origin }, angles: { ...source.event.angles } } };
     const seconds = time.kind === "seconds" ? time.value : time.value / 1000;
     const event = source.kind === "view-reset" ? source : source.kind === "q2-composition" ? "event" in source.event ? source.event.event : source.event : source.event;
     const actor = "actor" in event ? event.actor : null;
-    const presentation = { ...source, ...(recipient === undefined ? {} : {recipient}), sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
+    const presentation: SimulationPresentationEvent = { ...source, ...(owner === undefined ? {} : { owner }), ...(recipient === undefined ? {} : {recipient}), sequence: this.presentationSequence++, content, seconds, sourceEntity: actor === null ? null : this.sourceSlot(actor) };
     this.source.push(presentation);
     if (source.kind === "q1-composition" && source.event.kind === "addon" && source.event.event.kind === "fog")
-      this.source.push(...(this.fog?.update(presentation, source.event.event) ?? []));
-    const recipientKey = recipient === undefined ? "world" : `${recipient.slot}:${recipient.generation}`;
-    if (source.kind === "q1-sky") this.persistent.set(`q1-sky:${content}:${recipientKey}`, presentation);
-    if (source.kind === "q1-client") this.persistent.set(`q1-client:${content}:${source.event.slot}:${source.event.kind}:${recipientKey}`, presentation);
-    if (source.kind === "q1" && source.event.kind === "lightstyle") this.persistent.set(`q1-style:${source.event.style}:${recipientKey}`, presentation);
-    if (source.kind === "q1" && source.event.kind === "finale") this.persistent.set(`q1-finale:${recipientKey}`, presentation);
-    if (source.kind === "music") this.persistent.set(`source-music:${source.event.kind}:${recipientKey}`, presentation);
-    if (source.kind === "q1" && source.event.kind === "ambient") this.persistent.set(`ambient:${this.presentationSequence}`, presentation);
-    if (source.kind === "q1" && source.event.kind === "static-model") this.persistent.set(`static-model:${this.presentationSequence}`, presentation);
-    if (source.kind === "q2" && source.event.kind === "music") this.persistent.set("music", presentation);
+      this.source.push(...((owner === undefined ? this.fog : this.owners.get(owner.provider)?.fog)?.update(presentation, source.event.event)
+        .map(event => ({ ...event, ...(owner === undefined ? {} : { owner }) })) ?? []));
+    const slot = persistentSlot(presentation), prefix = presentationOwnerKey(owner);
+    if (slot !== null) this.persistent.set(`${prefix}:${slot}`, presentation);
+    if (source.kind === "q1" && (source.event.kind === "ambient" || source.event.kind === "static-model"))
+      this.persistent.set(`${prefix}:${source.event.kind}:${presentation.sequence}`, presentation);
     if (source.kind === "q2" && source.event.kind === "sound" && source.event.loop !== "once") {
-      const key = q2LoopKey(source.event, recipient);
+      const key = `${prefix}:${q2LoopKey(source.event, recipient)}`;
       if (source.event.loop === "stop") this.persistent.delete(key); else this.persistent.set(key, presentation);
     }
     if (source.kind === "q2-composition" && (source.event.kind === "ctf" || source.event.kind === "lmctf")) {
@@ -116,34 +190,54 @@ export class SimulationEvents {
   }
 
   capture() {
-    return { q1Fog: this.fog?.capture() ?? null, sequence: this.sequence, presentationSequence: this.presentationSequence, styles: [...this.styles].map(([style, value]) => ({ style, ...value })),
+    return { ownership: { nextGeneration: this.nextOwnerGeneration, owners: [...this.owners.values()].map(entry => ({ ...entry.token, content: entry.content, fog: entry.fog?.capture() ?? null })) }, baseStyles: [...this.legacyStyles].map(([style, value]) => ({ style, ...value })), q1Fog: this.fog?.capture() ?? null, sequence: this.sequence, presentationSequence: this.presentationSequence, styles: [...this.styles].map(([style, value]) => ({ style, ...value })),
       persistent: [...this.persistent].sort((a, b) => a[1].sequence - b[1].sequence).map(([key, original]) => {
         const value = {...original, ...(original.recipient === undefined ? {} : {recipient:savedActorId(original.recipient)})};
         if (value.kind === "q2" && value.event.kind === "sound") return { key, ...value, event: { ...value.event, actor: value.event.actor === null ? null : savedActorId(value.event.actor) } };
-        if (value.kind === "q1-sky" || value.kind === "q1-client" || value.kind === "music" || value.kind === "q2" && value.event.kind === "music" || value.kind === "q1" && (value.event.kind === "ambient" || value.event.kind === "static-model" || value.event.kind === "finale" || value.event.kind === "lightstyle")) return { key, ...value };
+        if (value.kind === "q1-level" && value.event.kind === "finale" || value.kind === "q1-sky" || value.kind === "q1-client" || value.kind === "music" || value.kind === "q2" && (value.event.kind === "music" || value.event.kind === "lightstyle") || value.kind === "q1" && (value.event.kind === "ambient" || value.event.kind === "static-model" || value.event.kind === "finale" || value.event.kind === "lightstyle")) return { key, ...value };
         throw new Error("Unsupported persistent source event");
       }) };
   }
   restore(reader: SaveReader, reference: (actor: SavedActorId) => ActorId): undefined {
     this.sequence = reader.field("sequence").integer(0); this.presentationSequence = reader.field("presentationSequence").integer(0);
-    this.source.length = 0; this.emitted.length = 0; this.styles.clear(); this.persistent.clear();
+    this.source.length = 0; this.emitted.length = 0; this.styles.clear(); this.legacyStyles.clear(); this.persistent.clear();
+    this.owners.clear();
+    const ownership = reader.field("ownership"); this.legacyPersistence = ownership.value === undefined;
+    this.nextOwnerGeneration = ownership.value === undefined ? 1 : ownership.field("nextGeneration").integer(1);
+    if (!Number.isSafeInteger(this.nextOwnerGeneration)) return ownership.fail("Invalid presentation generation counter");
+    if (ownership.value !== undefined) ownership.field("owners").list(value => {
+      const token = readPresentationOwner(value), content = readContentId(value.field("content"));
+      if (token.generation >= this.nextOwnerGeneration || this.owners.has(token.provider)) return value.fail("Invalid saved presentation owner");
+      const fog = this.ownerFog(content);
+      if (value.field("fog").value !== null) {
+        if (fog === null) return value.fail("Owned fog requires a Q1 map");
+        this.source.push(...fog.restore(value.field("fog"), reference).map(event => ({ ...event, owner: token })));
+      }
+      this.owners.set(token.provider, { token, content, fog, status: "restored" });
+    });
     const fog = reader.field("q1Fog");
     if (fog.value !== undefined && fog.value !== null) {
       if (this.fog === null) return fog.fail("Q1 fog state requires a Q1 map");
       this.source.push(...this.fog.restore(fog, reference));
     } else this.fog?.reset();
     reader.field("styles").list(value => this.styles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
+    if (reader.field("baseStyles").value !== undefined) reader.field("baseStyles").list(value =>
+      this.legacyStyles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
+    if (this.legacyPersistence) for (const [style, value] of this.styles) this.legacyStyles.set(style, value);
     reader.field("persistent").list(value => {
-      const event = value.field("event"), family = value.field("kind").choice("q1", "q2", "music", "q1-sky", "q1-client"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model", "finale", "cd-track", "pause", "lightstyle", "skybox", "name", "social", "player-info", "colors", "frags", "ping");
+      const event = value.field("event"), family = value.field("kind").choice("q1", "q2", "music", "q1-sky", "q1-client", "q1-level"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model", "finale", "cd-track", "pause", "lightstyle", "skybox", "name", "social", "player-info", "colors", "frags", "ping");
       const recipient = value.field("recipient");
-      const base = { ...(recipient.value === undefined ? {} : {recipient:reference(readSavedActor(recipient))}), sequence: value.field("sequence").integer(0), content: readContentId(value.field("content")), seconds: value.field("seconds").number(), sourceEntity: value.field("sourceEntity").nullable(v => v.integer(0)) };
+      const owner = value.field("owner").value === undefined ? undefined : readPresentationOwner(value.field("owner"));
+      if (owner !== undefined && !samePresentationOwner(this.owners.get(owner.provider)?.token, owner)) return value.fail("Persistent event has no saved presentation owner");
+      const base = { ...(owner === undefined ? {} : { owner }), ...(recipient.value === undefined ? {} : {recipient:reference(readSavedActor(recipient))}), sequence: value.field("sequence").integer(0), content: readContentId(value.field("content")), seconds: value.field("seconds").number(), sourceEntity: value.field("sourceEntity").nullable(v => v.integer(0)) };
       let restored: SimulationPresentationEvent;
       if (family === "music" && kind === "cd-track") restored = {...base, kind:"music",event:{kind,track:event.field("track").integer(0)}};
       else if (family === "q1-sky" && kind === "skybox") restored = {...base,kind:"q1-sky",event:{kind,name:event.field("name").string()}};
       else if (family === "q1-client" && (kind === "name" || kind === "social" || kind === "player-info")) restored = {...base,kind:"q1-client",event:{kind,slot:sourceClientInteger(event.field("slot"),0,255),value:event.field("value").string()}};
       else if (family === "q1-client" && (kind === "colors" || kind === "frags" || kind === "ping")) restored = {...base,kind:"q1-client",event:{kind,slot:sourceClientInteger(event.field("slot"),0,255),value:sourceClientInteger(event.field("value"),-32768,32767)}};
       else if (family === "music" && kind === "pause") restored = {...base,kind:"music",event:{kind,paused:event.field("paused").boolean()}};
-      else if (family === "q1" && kind === "lightstyle") restored = {...base,kind:"q1",event:{kind,style:event.field("style").integer(0),pattern:event.field("pattern").string()}};
+      else if ((family === "q1" || family === "q2") && kind === "lightstyle") restored = {...base,kind:family,event:{kind,style:event.field("style").integer(0),pattern:event.field("pattern").string()}};
+      else if (family === "q1-level" && kind === "finale") restored = { ...base, kind: "q1-level", event: { kind, text: event.field("text").string(), track: event.field("track").integer(0) } };
       else if (family === "q1" && kind === "finale") restored = {...base,kind:"q1",event:{kind,text:event.field("text").string(),stage:event.field("stage").choice(1,2,3,4,5,6)}};
       else if (family === "q1" && kind === "ambient") restored = { ...base, kind: "q1", event: { kind, origin: readVector(event.field("origin")), path: event.field("path").string(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number() } };
       else if (family === "q1" && kind === "static-model") restored = { ...base, kind: "q1", event: { kind, path: event.field("path").string(), frame: event.field("frame").integer(),
@@ -152,9 +246,9 @@ export class SimulationEvents {
       else if (family === "q2" && kind === "sound") restored = { ...base, kind: "q2", event: { kind, actor: event.field("actor").nullable(v => reference(readSavedActor(v))), origin: readVector(event.field("origin")), path: event.field("path").string(), channel: event.field("channel").number(), volume: event.field("volume").number(), attenuation: event.field("attenuation").number(), reliable: event.field("reliable").boolean(), loop: event.field("loop").literal("start"),
         ...(event.field("loopOwner").value === undefined ? {} : { loopOwner: namespaced(event.field("loopOwner")) }) } };
       else return event.fail("Invalid persistent source event family");
-      const key = restored.kind === "q2" && restored.event.kind === "sound" && restored.event.loopOwner !== undefined
-        ? q2LoopKey(restored.event, restored.recipient)
-        : value.field("key").string();
+      const slot = persistentSlot(restored);
+      const key = `${presentationOwnerKey(owner)}:${slot ?? (restored.kind === "q2" && restored.event.kind === "sound"
+        ? q2LoopKey(restored.event, restored.recipient) : `${kind}:${restored.sequence}`)}`;
       this.persistent.set(key, restored); this.source.push(restored);
     });
     this.source.sort((a, b) => a.sequence - b.sequence);
@@ -206,4 +300,26 @@ export class SimulationEvents {
 
 function sourceClientInteger(reader: SaveReader, minimum: number, maximum: number): number {
   const value=reader.integer(minimum);return value>maximum ? reader.fail('source client value out of range') : value;
+}
+
+function readPresentationOwner(reader: SaveReader): PresentationOwner {
+  const generation = reader.field("generation").integer(1);
+  if (!Number.isSafeInteger(generation)) return reader.fail("Invalid presentation owner generation");
+  return { provider: namespaced(reader.field("provider")), generation };
+}
+
+function persistentSlot(source: SimulationPresentationEvent): string | null {
+  const domain = persistentDomain(source);
+  const recipient = source.recipient === undefined ? "world" : `${source.recipient.slot}:${source.recipient.generation}`;
+  return domain === null ? null : `${domain}:${recipient}`;
+}
+
+function persistentDomain(source: SimulationPresentationEvent): string | null {
+  if (source.kind === "q1-sky") return "sky";
+  if (source.kind === "q1-client") return `client:${source.content}:${source.event.slot}:${source.event.kind}`;
+  if ((source.kind === "q1" || source.kind === "q2") && source.event.kind === "lightstyle") return `style:${source.event.style}`;
+  if ((source.kind === "q1" || source.kind === "q1-level") && source.event.kind === "finale") return "finale";
+  if (source.kind === "music") return `music:${source.event.kind === "pause" ? "pause" : "track"}`;
+  if (source.kind === "q2" && source.event.kind === "music") return "music:track";
+  return null;
 }

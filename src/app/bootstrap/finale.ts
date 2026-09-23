@@ -1,3 +1,4 @@
+import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 // Quake screen.c center-string reveal and sbar.c finale overlay. GPL-2.0-or-later.
 import type { ContentId } from "../../contracts/content.ts";
 import type { ImagePicture, Draw2D } from "../../text/draw2d.ts";
@@ -7,7 +8,7 @@ import { decodeQpic, indexedRenderImage } from "../../formats/images/index.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 
-interface FinaleState { readonly content: ContentId; readonly sourceText: string; readonly started: number; readonly banner: boolean; }
+interface FinaleState { readonly owner?: PresentationOwner; readonly content: ContentId; readonly sourceText: string; readonly started: number; readonly banner: boolean; }
 interface FinaleAssets { readonly banner: ImagePicture; readonly width: number; readonly height: number; }
 
 /** The source game controls stages and input gating; each seat reveals its own text. */
@@ -16,6 +17,7 @@ export class SourceFinale {
   private readonly loaded = new Map<ContentId, Promise<FinaleAssets>>();
   private prepared: FinaleAssets | null = null;
   private message = "";
+  private revision = 0;
   constructor(private readonly assets: ApplicationAssets, private readonly text: SeatTextPresentation,
     private readonly messages = new Q1MessageLocalization(text.seat, assets)) {}
 
@@ -23,10 +25,13 @@ export class SourceFinale {
 
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const source of events) {
-      if (source.kind === "q1-level" && source.event.kind === "finale")
-        this.state = { content: source.content, sourceText: source.event.text, started: source.seconds, banner: true };
+      if (source.kind === "presentation-owner" && samePresentationOwner(this.state?.owner, source.event.owner)) {
+        this.revision++;
+        if (source.event.kind === "retired") { this.state = null; this.prepared = null; this.message = ""; }
+      } else if (source.kind === "q1-level" && source.event.kind === "finale")
+        this.state = { ...(source.owner === undefined ? {} : { owner: source.owner }), content: source.content, sourceText: source.event.text, started: source.seconds, banner: true };
       else if (source.kind === "q1" && source.event.kind === "finale" && source.event.stage <= 4)
-        this.state = { content: source.content, sourceText: source.event.text, started: source.seconds, banner: source.event.stage >= 4 };
+        this.state = { ...(source.owner === undefined ? {} : { owner: source.owner }), content: source.content, sourceText: source.event.text, started: source.seconds, banner: source.event.stage >= 4 };
     }
   }
 
@@ -46,9 +51,12 @@ export class SourceFinale {
   }
 
   async prepare(): Promise<void> {
-    if (this.state === null) return;
-    this.prepared = await this.load(this.state.content);
-    this.message = await this.messages.resolve(this.state.content, this.state.sourceText, []);
+    const state = this.state, revision = this.revision;
+    if (state === null) return;
+    const prepared = await this.load(state.content);
+    const message = await this.messages.resolve(state.content, state.sourceText, []);
+    if (this.state !== state || this.revision !== revision) return;
+    this.prepared = prepared; this.message = message;
   }
 
   draw(draw: Draw2D, seconds: number): void {

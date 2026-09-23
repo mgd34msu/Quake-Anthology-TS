@@ -85,3 +85,18 @@ test('fog retirement, foreign content and old saves do not leak actor/world stat
   expect(() => restored.events.restore(new SaveReader({ ...retained, q1Fog: { ...fog, actors: [...fog.actors, ...fog.actors] } }), saved => restored.identity.actor(saved.slot, saved.generation))).toThrow('duplicate fog actor');
   expect(() => restored.events.restore(new SaveReader({ ...retained, q1Fog: { ...fog, content: 'q1:classic:id1:retail' } }), saved => restored.identity.actor(saved.slot, saved.generation))).toThrow('another map content');
 });
+
+test('admitted component fog retires to the primary transition and rebinds after restoration', () => {
+  const source = fixture(), component = 'q1:rerelease:copper:installed', owner = source.events.bindOwner('mod:fog', component, false);
+  const seat = new Q1MapFog(entities, new Set([content]), source.first.id);
+  seat.receive(source.emit(null, 10, 1, 4));
+  owner.emit(component, { kind: 'q1-composition', event: { kind: 'addon', event: { kind: 'fog', player: source.first.id, density: 0.9, color: { x: 0, y: 1, z: 0 }, duration: 0, skyFactor: 0.1 } } });
+  seat.receive(source.events.takePresentation()); expect(seat.current(12).density).toBeCloseTo(0.9);
+  const checkpoint = decodeCheckpointValue(encodeCheckpointValue(source.events.capture())), restored = fixture();
+  restored.events.restore(new SaveReader(checkpoint), actor => restored.identity.actor(actor.slot, actor.generation));
+  const loaded = new Q1MapFog(entities, new Set([content]), restored.first.id), rebound = restored.events.bindOwner('mod:fog', component, true);
+  restored.events.finishOwnerRestore(); loaded.receive(restored.events.takePresentation()); expect(loaded.current(12)).toEqual(seat.current(12));
+  rebound.close(); loaded.receive(restored.events.takePresentation()); expect(loaded.current(12).density).toBeCloseTo(0.6);
+  owner.close(); seat.receive(source.events.takePresentation()); expect(seat.current(12)).toEqual(loaded.current(12));
+  source.actors.close(); restored.actors.close();
+});

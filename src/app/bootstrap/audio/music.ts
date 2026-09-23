@@ -122,6 +122,8 @@ export class ApplicationMusic {
     this.clearPlayback();
   }
 
+  invalidatePending(): void { this.request++; this.current?.cd.invalidatePending(); }
+
   private clearPlayback(): void {
     this.request++; this.current?.cd.stop(); this.engine.stopMusic("world");
   }

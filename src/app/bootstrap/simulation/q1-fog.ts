@@ -70,6 +70,7 @@ export class SimulationQ1Fog {
     }
     return apply(value);
   }
+  presentation(): readonly ResolvedFog[] { return [...resolved(this.global), ...[...this.actors.values()].flatMap(resolved)]; }
   capture() {
     const capture = (value: RetainedFog) => ({ transition: value.state.capture(), skyFactor: value.skyFactor, context: value.context });
     return { content: this.options.content, global: capture(this.global), actors: [...this.actors.values()].flatMap(value =>

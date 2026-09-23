@@ -1,3 +1,4 @@
+import { presentationOwnerKey, samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import { addQ2Blend } from "../../content/q2/base/player/view.ts";
 import type { Q3Hardware } from "../../render/q3-hardware.ts";
 import type { Q3SceneAdmission } from "../../content/q3/presentation/scene.ts";
@@ -45,12 +46,13 @@ interface Group {
   readonly particles: SourceParticles;
   readonly renderer: SceneModelRenderer;
   models: SceneEntity[];
-  readonly statics: SceneEntity[];
+  readonly statics: (SceneEntity & { readonly presentationOwner?: PresentationOwner })[];
   beams: { readonly actor: ActorId; readonly remote: readonly SceneEntity[]; readonly local: readonly SceneEntity[] | null }[];
   sampled: readonly SceneParticle[];
 }
 interface TimedLight extends SurfaceDynamicLight { readonly born: number; readonly die: number; readonly decay: number; readonly actor: ActorId | null; }
 type Beam = {
+  readonly presentationOwner?: PresentationOwner;
   readonly content: ContentId; readonly start: Vec3; readonly end: Vec3;
   readonly die: number; readonly width: number; readonly color: number;
   readonly model: string | null;
@@ -86,16 +88,18 @@ export class ApplicationEffects {
   private entityTrails = new Map<ActorId, { readonly content: ContentId; readonly origin: Vec3; readonly count: number }>();
   private q1Trails = new Map<ActorId, { readonly content: ContentId; readonly path: string; readonly origin: Vec3 }>();
   private pending: SimulationPresentationEvent[] = [];
+  private readonly retiredOwners = new Set<string>();
+  private readonly ownerRevisions = new Map<string, number>();
   private unhandled: UnhandledApplicationEffect[] = [];
   private beams: Beam[] = [];
   private explosions: Explosion[] = [];
-  private readonly staticBrushes: { readonly scene: WorldScene; readonly model: number; readonly transform: ModelTransform; readonly frame: number }[] = [];
+  private readonly staticBrushes: { readonly presentationOwner?: PresentationOwner; readonly scene: WorldScene; readonly model: number; readonly transform: ModelTransform; readonly frame: number }[] = [];
   private styles: readonly SceneLightStyle[] = [];
   private lights: TimedLight[] = [];
   private sampledLights: SurfaceDynamicLight[] = [];
-  private readonly flashlights = new Map<ActorId, Extract<SimulationPresentationEvent, { readonly kind: "q2-rerelease" }>["event"] & { readonly kind: "flashlight" }>();
-  private readonly shadowLights = new Map<ActorId, Q2ShadowLightState>();
-  private readonly sourceLights = new Map<ActorId, SurfaceDynamicLight>();
+  private readonly flashlights = new Map<ActorId, Extract<SimulationPresentationEvent, { readonly kind: "q2-rerelease" }>["event"] & { readonly kind: "flashlight"; readonly presentationOwner?: PresentationOwner }>();
+  private readonly shadowLights = new Map<ActorId, Q2ShadowLightState & { readonly presentationOwner?: PresentationOwner }>();
+  private readonly sourceLights = new Map<ActorId, SurfaceDynamicLight & { readonly presentationOwner?: PresentationOwner }>();
   private readonly playerViews = new Q2EffectViews();
   private readonly bonusFlashes = new Map<ActorId, number>();
   private readonly trackerPain = new Map<ActorId, { readonly content: ContentId; readonly until: number }>();
@@ -112,6 +116,24 @@ export class ApplicationEffects {
   receive(events: readonly SimulationPresentationEvent[]): void {
     if (this.closed) throw new Error("Effect world is closed");
     for (const event of events) {
+      if (event.kind === "presentation-owner") {
+        const owner = event.event.owner, key = presentationOwnerKey(owner);
+        if (event.event.kind === "retired") this.retiredOwners.add(key);
+        this.ownerRevisions.set(key, event.sequence);
+        this.pending = this.pending.filter(source => !samePresentationOwner(source.owner, owner));
+        for (const effects of this.recipients.values()) effects.receive([event]);
+        if (event.event.kind === "refreshed") continue;
+        this.beams = this.beams.filter(beam => !samePresentationOwner(beam.presentationOwner, owner));
+        for (const [actor, light] of this.flashlights) if (samePresentationOwner(light.presentationOwner, owner)) this.flashlights.delete(actor);
+        for (const [actor, light] of this.shadowLights) if (samePresentationOwner(light.presentationOwner, owner)) this.shadowLights.delete(actor);
+        for (const [actor, light] of this.sourceLights) if (samePresentationOwner(light.presentationOwner, owner)) this.sourceLights.delete(actor);
+        for (let index = this.staticBrushes.length - 1; index >= 0; index--)
+          if (samePresentationOwner(this.staticBrushes[index]?.presentationOwner, owner)) this.staticBrushes.splice(index, 1);
+        for (const group of this.groups.values()) for (let index = group.statics.length - 1; index >= 0; index--)
+          if (samePresentationOwner(group.statics[index]?.presentationOwner, owner)) group.statics.splice(index, 1);
+        continue;
+      }
+      if (event.owner !== undefined && this.retiredOwners.has(presentationOwnerKey(event.owner))) continue;
       if (event.recipient !== undefined) {
         const { recipient, ...shared } = event;
         let effects = this.recipients.get(recipient);
@@ -357,12 +379,17 @@ export class ApplicationEffects {
     return { x, y, z };
   }
   private async event(source: SimulationPresentationEvent): Promise<void> {
+    const ownerKey = presentationOwnerKey(source.owner), revision = this.ownerRevisions.get(ownerKey) ?? 0;
+    const current = (): boolean => !this.closed && !this.retiredOwners.has(ownerKey)
+      && source.sequence > (this.ownerRevisions.get(ownerKey) ?? -1) && (this.ownerRevisions.get(ownerKey) ?? 0) === revision;
+    if (!current()) return;
     if (source.kind === "view-reset" || source.kind === "q2-player" || source.kind === "q1-level") return;
     if (source.kind === "q3-ballistics") {
       if (source.event.kind === "rail-award") { this.reject(source, "Selected Q3 rail reward presentation has no source cgame binding"); return; }
       let effects = this.q3Weapons.get(source.content);
       if (effects === undefined) {
         effects = this.preparedQ3Weapons.get(source.content) ?? await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer, undefined, this.readHardware);
+        if (!current()) { effects.close(); return; }
         this.preparedQ3Weapons.delete(source.content);
         this.q3Weapons.set(source.content, effects);
       }
@@ -385,6 +412,7 @@ export class ApplicationEffects {
         else this.playerViews.receive(event.event);
       } else if (event.kind === "missionpack-entity") {
         const group = await this.group(source.content), effect = event.event;
+        if (!current()) return;
         if (effect.kind === "force-wall") group.particles.q2ForceWall(effect.start, effect.end, effect.color, source.seconds);
         else if (effect.id === -1) group.particles.q2Steam(effect.origin, effect.direction, effect.color, effect.count, effect.speed, source.seconds);
         else if (this.steam.length < 32) this.steam.push({ content: source.content, event: effect, end: source.seconds + effect.milliseconds / 1000, next: source.seconds });
@@ -392,7 +420,8 @@ export class ApplicationEffects {
         const effect = event.event;
         if (effect.kind === "grapple-cable") {
           await this.group(source.content);
-          this.beam({ content: source.content, actor: effect.actor, start: add3(effect.start, effect.offset), end: effect.end,
+      if (!current()) return;
+          this.beam({ ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), content: source.content, actor: effect.actor, start: add3(effect.start, effect.offset), end: effect.end,
             die: source.seconds + 0.2, width: 0, color: 0, model: Q2_TRANSIENT_MODELS.cable, family: "q2" });
         }
       } else if (event.kind === "kick" || event.kind === "grapple-prediction") {
@@ -403,9 +432,9 @@ export class ApplicationEffects {
     if (source.kind === "q2-rerelease") {
       const event = source.event;
       if (event.kind === "flashlight") {
-        if (event.enabled) this.flashlights.set(event.actor, event); else this.flashlights.delete(event.actor);
+        if (event.enabled) this.flashlights.set(event.actor, { ...event, ...(source.owner === undefined ? {} : { presentationOwner: source.owner }) }); else this.flashlights.delete(event.actor);
       } else if (event.kind === "dynamic-light") {
-        if (event.visible) this.sourceLights.set(event.actor, { origin: event.origin, radius: event.radius, color: event.color, minimum: 0 });
+        if (event.visible) this.sourceLights.set(event.actor, { ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), origin: event.origin, radius: event.radius, color: event.color, minimum: 0 });
         else this.sourceLights.delete(event.actor);
       }
       return;
@@ -414,7 +443,7 @@ export class ApplicationEffects {
       const pose = this.pose(source.event.actor);
       if (pose === undefined) { this.reject(source, "Q3 character event has no captured actor pose"); return; }
       let effects = this.q3.get(source.content);
-      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer, undefined, this.readHardware); this.q3.set(source.content, effects); }
+      if (effects === undefined) { effects = await Q3ApplicationEffects.create(this.assets, this.queries, source.content, this.isPlayer, undefined, this.readHardware); if (!current()) { effects.close(); return; } this.q3.set(source.content, effects); }
       if (!effects.event(source.event, pose.origin)) this.reject(source, "Q3 event requires the full cgame snapshot payload");
       return;
     }
@@ -427,13 +456,15 @@ export class ApplicationEffects {
       if (event.kind === "static-model") {
         if (event.path === "") return;
         const asset = await this.assets.model(source.content, event.path);
+        if (!current()) return;
         if (asset.model.kind === "brush-model") {
           if (asset.brushScene === null) throw new Error(`Static brush ${event.path} has no prepared world scene`);
-          this.staticBrushes.push({ scene: asset.brushScene, model: asset.model.model, transform: { origin: { ...event.origin }, axis: anglesToAxis(event.angles) }, frame: event.frame });
+          this.staticBrushes.push({ ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), scene: asset.brushScene, model: asset.model.model, transform: { origin: { ...event.origin }, axis: anglesToAxis(event.angles) }, frame: event.frame });
           return;
         }
         const group = await this.group(source.content);
-        group.statics.push({ actor: null, resource: asset.resource, model: asset.model,
+        if (!current()) return;
+        group.statics.push({ ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), actor: null, resource: asset.resource, model: asset.model,
           transform: { origin: { ...event.origin }, axis: anglesToAxis(event.angles), scale: white }, previousOrigin: { ...event.origin },
           pose: { kind: "frame", frame: event.frame, previousFrame: event.frame, backLerp: 0 }, skin: event.skin, color: { ...white, w: 1 },
           shaderTime: { kind: "seconds", value: 0 }, flags: { kind: "q1", bits: 0 }, lightingOrigin: { ...event.origin }, shadowPlane: 0, attachments: [] });
@@ -441,7 +472,8 @@ export class ApplicationEffects {
       }
       if (event.kind !== "effect" && event.kind !== "beam" && event.kind !== "colored-explosion") return;
       const group = await this.group(source.content), particles = group.particles, seconds = source.seconds;
-      if (event.kind === "beam") { this.beam({ content: source.content, actor: event.actor, start: event.start, end: event.end, die: seconds + 0.2, width: 0, color: 0, model: q1BeamModels[event.style], family: "q1" }); return; }
+      if (!current()) return;
+      if (event.kind === "beam") { this.beam({ ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), content: source.content, actor: event.actor, start: event.start, end: event.end, die: seconds + 0.2, width: 0, color: 0, model: q1BeamModels[event.style], family: "q1" }); return; }
       const sound = (path: string): void => { this.sounds.push({ content: source.content, path, origin: event.origin,
         channel: 0, volume: 1, seconds, playback: { kind: "once" } }); };
       if (event.kind === "colored-explosion") {
@@ -481,6 +513,7 @@ export class ApplicationEffects {
       const event = source.event;
       if (event.kind !== "beam" && event.kind !== "muzzleflash") return;
       const group = await this.group(source.content);
+      if (!current()) return;
       if (event.kind === "muzzleflash") {
         const pose = this.pose(event.actor); if (pose === undefined) { this.reject(source, "Q2 muzzle flash has no captured actor pose"); return; }
         const axis = anglesToAxis(pose.angles), origin = add3(add3(pose.origin, scale3(axis[0], 18)), scale3(axis[1], -16));
@@ -490,29 +523,31 @@ export class ApplicationEffects {
       }
       if (event.effect === "rail" || event.effect === "rail-water") group.particles.q2Rail(event.start, event.end, source.seconds);
       else if (event.effect === "bubble-trail") group.particles.q2Bubbles(event.start, event.end, source.seconds);
-      else if (event.effect === "bfg-laser" || event.effect === "bfg-zap" || event.effect === "bfg-lightning") this.beams.push({ content: source.content, actor: event.actor, start: event.start, end: event.end,
+      else if (event.effect === "bfg-laser" || event.effect === "bfg-zap" || event.effect === "bfg-lightning") this.beams.push({ ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), content: source.content, actor: event.actor, start: event.start, end: event.end,
         die: source.seconds + (event.duration > 0 ? event.duration : 0.1), width: 4, color: 0xd0 + (this.random.nextInteger() & 3),
         model: event.effect === "bfg-lightning" ? Q2_TRANSIENT_MODELS.lightning : null, family: "q2" });
       else this.reject(source, "Q2 heatbeam requires the source player-beam view and offset context");
       return;
     }
     const event = source.event;
-    if (event.kind === "effect") { await this.q2Effect(source, event); return; }
+    if (event.kind === "effect") { await this.q2Effect(source, event, current); return; }
     if (event.kind === "beam" || event.kind === "monster-beam") {
       await this.group(source.content);
+      if (!current()) return;
       if (event.kind === "beam" && !event.visible) { this.beams = this.beams.filter(beam => !beam.actor?.equals(event.actor)); return; }
-      this.beam({ content: source.content, actor: event.actor, start: event.start, end: event.end,
+      this.beam({ ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), content: source.content, actor: event.actor, start: event.start, end: event.end,
         die: event.kind === "beam" ? Number.POSITIVE_INFINITY : source.seconds + 0.2, width: event.kind === "beam" ? event.width : 0,
         color: event.kind === "beam" ? event.color & 255 : 0,
         model: event.kind === "monster-beam" ? Q2_TRANSIENT_MODELS.parasite : null, family: "q2" });
-    } else if (event.kind === "monster-muzzleflash") await this.monsterMuzzle(source, event.origin, event.flash);
+    } else if (event.kind === "monster-muzzleflash") await this.monsterMuzzle(source, event.origin, event.flash, current);
     else if (event.kind === "entity-event") {
       if (event.event === 1 || event.event === 6 || event.event === 7) {
         const pose = this.pose(event.actor); if (pose === undefined) { this.reject(source, "Q2 entity event has no captured actor pose"); return; }
         const group = await this.group(source.content);
+      if (!current()) return;
         if (event.event === 1) group.particles.q2Respawn(pose.origin, source.seconds, "item"); else group.particles.q2Teleport(pose.origin, source.seconds);
       }
-    } else if (event.kind === "dynamic-light") this.shadowLights.set(event.actor, event);
+    } else if (event.kind === "dynamic-light") this.shadowLights.set(event.actor, { ...event, ...(source.owner === undefined ? {} : { presentationOwner: source.owner }) });
   }
   private muzzle(origin: Vec3, seconds: number, flash: number, silenced: boolean, actor: ActorId): boolean {
     if (!(flash >= 0 && flash <= 20 && flash !== 15 || flash >= 30 && flash <= 39)) return false;
@@ -527,10 +562,11 @@ export class ApplicationEffects {
     this.light(origin, seconds, radius + (this.random.nextInteger() & 31), duration, color, 0, 32, actor);
     return true;
   }
-  private async monsterMuzzle(source: SimulationPresentationEvent, origin: Vec3, flash: number): Promise<void> {
+  private async monsterMuzzle(source: SimulationPresentationEvent, origin: Vec3, flash: number, current: () => boolean): Promise<void> {
     const profile = q2MonsterMuzzle(flash, this.assets.content.catalog.product(source.content).expectation.edition === "rerelease");
     if (profile === undefined) { this.reject(source, `Quake II monster muzzle flash ${flash} has no source definition`); return; }
     const group = await this.group(source.content);
+    if (!current()) return;
     this.light(origin, source.seconds, profile.radius + (this.random.nextInteger() & profile.mask), profile.radius === 300 ? 0.2 : 0, profile.color, 0, 32,
       source.kind === "q2" && source.event.kind === "monster-muzzleflash" ? source.event.actor : null);
     if (profile.particles) group.particles.q2Impact(origin, zero, 0, 40, source.seconds);
@@ -541,8 +577,9 @@ export class ApplicationEffects {
         path: Q2_TRANSIENT_MODELS.flash, kind: "flash", flags: 8, skin: 0, light: null });
     }
   }
-  private async q2Effect(source: SimulationPresentationEvent, event: Extract<Extract<SimulationPresentationEvent, { readonly kind: "q2" }>["event"], { readonly kind: "effect" }>): Promise<void> {
+  private async q2Effect(source: SimulationPresentationEvent, event: Extract<Extract<SimulationPresentationEvent, { readonly kind: "q2" }>["event"], { readonly kind: "effect" }>, current: () => boolean): Promise<void> {
     const original = event.effect, name = original.replace(/^q2:/, "").replaceAll("_", "-"), group = await this.group(source.content), p = group.particles, time = source.seconds;
+    if (!current()) return;
     switch (name) {
       case "heatbeam-sparks": case "heatbeam-steam":
         p.q2Steam(event.origin, event.direction, name === "heatbeam-sparks" ? 8 : 0xe0, name === "heatbeam-sparks" ? 50 : 20, 60, time);

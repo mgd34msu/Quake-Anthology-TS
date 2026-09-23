@@ -1,3 +1,4 @@
+import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 // Quakespasm/quake-1-re-ts Fog_Update, Fog_ParseWorldspawn and Fog_GetColor.
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ContentId } from '../../contracts/content.ts';
@@ -10,15 +11,21 @@ import type { SimulationPresentationEvent } from './simulation/types.ts';
 export class Q1MapFog {
   private readonly state = new Q1FogState();
   private skyFactor = 0.5;
+  private owner: PresentationOwner | undefined;
+  private readonly initial: ReturnType<typeof q1WorldFog>;
+  private readonly initialEnabled: boolean;
   constructor(entities: string, private readonly contents: ReadonlySet<ContentId>, private readonly actor: ActorId, private enabled = true) {
-    this.state.install(q1WorldFog(entities));
+    this.initialEnabled = enabled; this.initial = q1WorldFog(entities); this.state.install(this.initial);
   }
   receive(events: readonly SimulationPresentationEvent[]): void {
     for (const source of events) {
-      if (source.kind !== 'q1-fog' || !this.contents.has(source.content)) continue;
+      if (source.kind === 'presentation-owner' && source.event.kind === 'retired' && samePresentationOwner(this.owner, source.event.owner)) {
+        this.state.install(this.initial); this.enabled = this.initialEnabled; this.skyFactor = 0.5; this.owner = undefined;
+      }
+      if (source.kind !== 'q1-fog' || source.owner === undefined && !this.contents.has(source.content)) continue;
       const event = source.event;
       if (event.player !== null && !event.player.equals(this.actor)) continue;
-      this.enabled = true; this.state.install(event.transition); this.skyFactor = event.skyFactor;
+      this.enabled = true; this.owner = source.owner; this.state.install(event.transition); this.skyFactor = event.skyFactor;
     }
   }
   get active(): boolean { return this.enabled; }

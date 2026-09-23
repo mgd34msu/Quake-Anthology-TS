@@ -1,3 +1,4 @@
+import { presentationOwnerKey, samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import { mountedMusicTracks } from "./audio/playlist.ts";
 import { readMusicSettings, type MusicPreferences } from "./audio/playlist-settings.ts";
 import { geometryTransmission } from "../../audio/geometry.ts";
@@ -52,6 +53,8 @@ interface ActorAudio {
   painTime: number;
 }
 interface StaticAudio {
+  readonly key: number;
+  readonly owner?: PresentationOwner;
   readonly audience: AudioAudience;
   readonly sound: SoundAsset;
   readonly origin: Vec3;
@@ -89,7 +92,13 @@ export class ApplicationAudio {
   private readonly random: GameRandom;
   private readonly actorAudio: ActorAudio[] = [];
   private readonly statics: StaticAudio[] = [];
-  private readonly loops: LoopSound[] = [];
+  private nextStaticKey = 1;
+  private readonly retiredOwners = new Set<string>();
+  private readonly ownerRevisions = new Map<string, number>();
+  private musicOwner: PresentationOwner | undefined;
+  private pauseOwner: PresentationOwner | undefined;
+  private musicRequest = 0;
+  private readonly loops: (LoopSound & { readonly presentationOwner?: PresentationOwner })[] = [];
   private readonly sounds = new Map<string, Promise<SoundAsset | null>>();
   private readonly footsteps = new Map<ContentId, Promise<PlayerFootsteps>>();
   private readonly warned = new Set<string>();
@@ -208,8 +217,12 @@ export class ApplicationAudio {
     if (this.closed) throw new Error("Sound system is closed");
     const print = request.print ?? this.print;
     if (request.name === "snd_restart") { this.restartOutput(); return true; }
-    if (request.name === "music") { await this.music.musicCommand(request.args, print); return true; }
-    if (request.name === "cd") { await this.music.cdCommand(request.args, print); return true; }
+    if (request.name === "music") { this.musicOwner = undefined; this.musicRequest++; this.music.invalidatePending(); await this.music.musicCommand(request.args, print); return true; }
+    if (request.name === "cd") {
+      if (["play", "loop", "stop", "off", "reset"].includes(request.args[0]?.toLowerCase() ?? "")) { this.musicOwner = undefined; this.musicRequest++; this.music.invalidatePending(); }
+      if (["pause", "resume"].includes(request.args[0]?.toLowerCase() ?? "")) this.pauseOwner = undefined;
+      await this.music.cdCommand(request.args, print); return true;
+    }
     if (request.name === "soundinfo" || request.name === "s_info") {
       const output = this.engine.outputConfiguration;
       print(`Sound output: ${this.engine.outputState}\n`);
@@ -325,15 +338,18 @@ export class ApplicationAudio {
   }
 
   private async play(content: ContentId, family: GameFamily, path: string, actor: ActorId | null, origin: Vec3 | null,
-    channel: number, volume: number, attenuation: number, delaySeconds = 0, audience: AudioAudience = { kind: "world" }): Promise<void> {
+    channel: number, volume: number, attenuation: number, delaySeconds = 0, audience: AudioAudience = { kind: "world" }, owner?: PresentationOwner): Promise<void> {
+    const key = presentationOwnerKey(owner), revision = this.ownerRevisions.get(key) ?? 0;
     const sound = await this.sound(content, path, family, actor);
-    if (sound === null || this.closed) return;
+    if (sound === null || this.closed || this.retiredOwners.has(key) || (this.ownerRevisions.get(key) ?? 0) !== revision) return;
     this.playHaptics(content, sound, actor, audience);
     this.engine.play({ sound, family, actor, origin: origin !== null ? { kind: "fixed", position: origin }
       : actor === null ? { kind: "local" } : { kind: "actor", actor }, audience, channel, volume, attenuation, delaySeconds });
   }
 
-  async playMusic(content: ContentId, track: string): Promise<void> {
+  async playMusic(content: ContentId, track: string, owner?: PresentationOwner): Promise<void> {
+    if (owner !== undefined && this.retiredOwners.has(presentationOwnerKey(owner))) return;
+    const request = ++this.musicRequest; this.musicOwner = owner;
     const bank = await this.bank(content), product = this.content.catalog.product(content).expectation;
     const alternate = q1MusicFallback(content, this.content.catalog);
     let tracks: readonly string[] = [];
@@ -342,7 +358,7 @@ export class ApplicationAudio {
       if (pending === undefined) { pending = this.content.forContent(content).then(mountedMusicTracks); this.playlists.set(content, pending); }
       tracks = await pending;
     }
-    if (!this.closed) await this.music.play({ content, ...product }, bank, track,
+    if (!this.closed && request === this.musicRequest && (owner === undefined || !this.retiredOwners.has(presentationOwnerKey(owner)))) await this.music.play({ content, ...product }, bank, track,
       alternate === null ? null : async path => (await this.bank(alternate)).openMusic(path, alternate), { shuffle: this.musicPreferences.musicShuffle, tracks });
   }
 
@@ -424,50 +440,78 @@ export class ApplicationAudio {
 
   async receive(events: readonly SimulationPresentationEvent[], audience: AudioAudience = { kind: "world" }, music = true): Promise<void> {
     for (const source of events) {
+      if (source.kind === "presentation-owner") {
+        const owner = source.event.owner, key = presentationOwnerKey(owner);
+        if (source.event.kind === "retired") this.retiredOwners.add(key);
+        this.ownerRevisions.set(key, source.sequence);
+        if (source.event.kind === "refreshed") {
+          if (samePresentationOwner(this.musicOwner, owner)) { this.musicRequest++; this.music.invalidatePending(); }
+          continue;
+        }
+        for (let index = this.statics.length - 1; index >= 0; index--) {
+          const sound = this.statics[index];
+          if (sound !== undefined && samePresentationOwner(sound.owner, owner)) {
+            for (const seat of sound.seats) this.engine.removeStaticSound(seat, sound.key);
+            this.statics.splice(index, 1);
+          }
+        }
+        for (const loop of [...this.loops]) if (samePresentationOwner(loop.presentationOwner, owner)) this.stopLoop(loop.actor, loop.audience, loop.owner);
+        if (samePresentationOwner(this.musicOwner, owner)) {
+          this.musicRequest++; this.musicOwner = undefined; this.music.stopPlayback("source");
+          if (music) await this.startWorldMusic();
+        }
+        if (samePresentationOwner(this.pauseOwner, owner)) { this.pauseOwner = undefined; if (music) await this.music.cdCommand(["resume"]); }
+        continue;
+      }
+      const key = presentationOwnerKey(source.owner), revision = this.ownerRevisions.get(key) ?? 0;
+      const current = (): boolean => !this.closed && !this.retiredOwners.has(key)
+        && source.sequence > (this.ownerRevisions.get(key) ?? -1) && (this.ownerRevisions.get(key) ?? 0) === revision;
+      if (!current()) continue;
       if (source.kind === "music") {
         if (music) {
-          if (source.event.kind === "cd-track") await this.playMusic(source.content, String(source.event.track));
-          else await this.music.cdCommand([source.event.paused ? "pause" : "resume"]);
+          if (source.event.kind === "cd-track") await this.playMusic(source.content, String(source.event.track), source.owner);
+          else { this.pauseOwner = source.owner; await this.music.cdCommand([source.event.paused ? "pause" : "resume"]); }
         }
       } else if (source.kind === "q1") {
         const event = source.event;
         if (event.kind === "sound") {
           const channel = typeof event.channel === "number" ? event.channel : event.channel === "auto" ? 0 : event.channel === "weapon" ? 1 : event.channel === "voice" ? 2 : event.channel === "item" ? 3 : 4;
-          await this.play(source.content, "q1", event.path, event.actor, event.origin ?? null, channel, event.volume, event.attenuation, 0, audience);
+          await this.play(source.content, "q1", event.path, event.actor, event.origin ?? null, channel, event.volume, event.attenuation, 0, audience, source.owner);
         } else if (event.kind === "stop-sound") {
           const command = sourceSoundChannel("q1", event.channel);
           if (command.kind === "replace-actor") throw new Error("NetQuake stop sound requires a nonnegative channel");
           this.engine.stopSound(event.actor, command.kind === "auto" ? null : command.channel, audience);
         } else if (event.kind === "ambient") {
           const sound = await this.sound(source.content, event.path, "q1");
-          if (sound !== null && sound.pcm.loopStart !== null) this.statics.push({ audience, sound, origin: event.origin,
+          if (current() && sound !== null && sound.pcm.loopStart !== null) this.statics.push({ key: this.nextStaticKey++, ...(source.owner === undefined ? {} : { owner: source.owner }), audience, sound, origin: event.origin,
             volume: Math.trunc(event.volume * 255), attenuation: Math.trunc(event.attenuation * 64), seats: [] });
         }
       } else if (source.kind === "q1-level" && source.event.kind === "finale") {
-        if (music) await this.playMusic(source.content, String(source.event.track));
+        if (music) await this.playMusic(source.content, String(source.event.track), source.owner);
       } else if (source.kind === "q2") {
         const event = source.event;
-        if (event.kind === "music") { if (music) await this.playMusic(source.content, event.track); }
+        if (event.kind === "music") { if (music) await this.playMusic(source.content, event.track, source.owner); }
         else if (event.kind === "sound") {
           if (event.loop === "stop" && event.actor !== null) this.stopLoop(event.actor, audience, event.loopOwner);
           else if (event.loop === "start" && event.actor !== null) {
             const sound = await this.sound(source.content, event.path, "q2", event.actor);
+            if (!current()) continue;
             this.stopLoop(event.actor, audience, event.loopOwner);
             this.engine.updateActor(event.actor, event.origin);
-            if (sound !== null) this.loops.push({ sound, family: "q2", actor: event.actor, ...(event.loopOwner === undefined ? {} : { owner: event.loopOwner }), origin: { kind: "actor", actor: event.actor },
+            if (sound !== null) this.loops.push({ ...(source.owner === undefined ? {} : { presentationOwner: source.owner }), sound, family: "q2", actor: event.actor, ...(event.loopOwner === undefined ? {} : { owner: event.loopOwner }), origin: { kind: "actor", actor: event.actor },
               audience, volume: event.volume, attenuation: event.attenuation, velocity: { x: 0, y: 0, z: 0 },
               frameNumber: 0, lifetime: "frame" });
           } else {
             const live = event.actor !== null && this.snapshot?.actors.some(actor => event.actor?.equals(actor.id));
-            await this.play(source.content, "q2", event.path, event.actor, live ? null : event.origin, event.channel, event.volume, event.attenuation, 0, audience);
+            await this.play(source.content, "q2", event.path, event.actor, live ? null : event.origin, event.channel, event.volume, event.attenuation, 0, audience, source.owner);
           }
         } else if (event.kind === "monster-muzzleflash") {
           const sounds = q2MonsterMuzzleSounds(event.flash, () => this.random.rand(), this.content.catalog.product(source.content).expectation.edition === "rerelease");
           if (sounds === null) this.print(`Unresolved Quake II monster muzzle sound ${event.flash}\n`);
-          else for (const sound of sounds) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds, audience);
+          else for (const sound of sounds) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds, audience, source.owner);
         } else if (event.kind === "entity-event") {
           const sound = q2EntitySound(event.event, () => this.random.rand());
-          if (sound !== null) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation, 0, audience);
+          if (sound !== null) await this.play(source.content, "q2", sound.path, event.actor, null, sound.channel, sound.volume, sound.attenuation, 0, audience, source.owner);
         } else if (event.kind === "print" && event.level === "chat") await this.chat(source.content, "q2", event.actor, audience);
       } else if (source.kind === "q2-rerelease" && source.event.kind === "mission-objective" && source.event.talkSound) {
         await this.chat(source.content, "q2", source.event.actor, audience);
@@ -479,7 +523,7 @@ export class ApplicationAudio {
         else if (event.kind === "print" && event.level === "chat") await this.chat(source.content, "q2", event.target, audience);
       } else if (source.kind === "q2-weapon" && source.event.kind === "muzzleflash") {
         for (const sound of q2MuzzleSounds(source.event.flash, source.event.silenced, () => this.random.rand(), this.content.catalog.product(source.content).expectation.edition === "rerelease"))
-          await this.play(source.content, "q2", sound.path, source.event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds, audience);
+          await this.play(source.content, "q2", sound.path, source.event.actor, null, sound.channel, sound.volume, sound.attenuation, sound.delaySeconds, audience, source.owner);
       } else if (source.kind === "q3-character") await this.characterSound(source.content, source.event, audience);
     }
   }
@@ -541,7 +585,7 @@ export class ApplicationAudio {
         if (seat !== undefined && !listeners.some(listener => listener.seat.equals(seat))) sound.seats.splice(index, 1);
       }
       for (const listener of listeners) if ((sound.audience.kind === "world" || sound.audience.seat.equals(listener.seat)) && !sound.seats.some(seat => seat.equals(listener.seat))) {
-        this.engine.addStaticSound(listener.seat, sound.sound, sound.origin, sound.volume, sound.attenuation);
+        this.engine.addStaticSound(listener.seat, sound.sound, sound.origin, sound.volume, sound.attenuation, sound.key);
         sound.seats.push(listener.seat);
       }
     }

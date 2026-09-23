@@ -132,6 +132,7 @@ export class CdMusic {
     pause(): void { this.player.paused = true; }
     resume(): void { if (this.enabled)
         this.player.paused = false; }
+    invalidatePending(): void { this.request++; }
     stop(): void { this.request++; this.player.stop(); this.track = null; }
     close(): void { this.stop(); }
 }

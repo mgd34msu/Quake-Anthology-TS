@@ -511,10 +511,13 @@ export class AudioMixer {
         this.voiceStarted(voice);
         return true;
     }
-    addStaticSound(sound: PcmSound, origin: Vec3, volume: number, attenuation: number): boolean {
+    addStaticSound(sound: PcmSound, origin: Vec3, volume: number, attenuation: number, key = 0): boolean {
         if (sound.loopStart === null) throw new Error("Static sound requires a WAV loop marker");
         return this.admitSourceSound(sound, { entity: -1, origin: { kind: "fixed", position: origin }, volume: volume / 255, attenuation }, { kind: "auto" },
-            { attenuation: attenuation / 64000, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: null, synchronizedGainLimit: null, role: "static", key: 0 }, null);
+            { attenuation: attenuation / 64000, distanceOffset: 0, stereoScale: 1, unattenuatedMono: false, loopStart: null, synchronizedGainLimit: null, role: "static", key }, null);
+    }
+    removeStaticSound(key: number): void {
+        for (const [index, voice] of this.voices.entries()) if (voice?.policy?.role === "static" && voice.policy.key === key) this.freeChannel(index);
     }
     updateAmbient(sounds: readonly PcmSound[], levels: readonly number[], elapsedSeconds: number, level = 0.3, fade = 100): void {
         if (!this.enabled) return;

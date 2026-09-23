@@ -753,7 +753,7 @@ export class SharedSimulation implements Simulation {
       const enabled = options.enabledMods ?? (modState ?? options.modTravel)?.mods.map(mod => mod.identity.selection) ?? [];
       if (options.preparedMods !== undefined || enabled.length !== 0 || modState !== undefined || options.modTravel !== undefined) {
         const native = simulation.nativeModContext();
-        simulation.modOwner = await SessionMods.open({ prepared: options.preparedMods ?? [], enabled,
+        simulation.modOwner = await SessionMods.open({ presentation: simulation.events, prepared: options.preparedMods ?? [], enabled,
           services: { clients: simulation.modClients, weapons: {
             bind: (actor, binding) => {
               simulation.actors.assertOwned(actor);
@@ -791,6 +791,7 @@ export class SharedSimulation implements Simulation {
       }
       simulation.sourceItemsRestore?.finish(simulation.actors, simulation.inventory);
       for (const slot of simulation.weaponSlots.values()) slot.validateRestore();
+      simulation.events.finishOwnerRestore();
       simulation.pendingSharedRestore?.finish();
       simulation.pendingSharedRestore?.assertComplete();
       simulation.pendingSharedRestore = null;
