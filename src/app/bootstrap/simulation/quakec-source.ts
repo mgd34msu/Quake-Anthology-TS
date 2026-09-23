@@ -43,6 +43,8 @@ import type { BodyState } from "../../../contracts/world.ts";
 import type { MountedContent } from "../../../content/mounts/index.ts";
 import type { Q2Motion } from "../../../content/q2/foundation/host.ts";
 import { Id1DamageBinding } from "../../../content/q1/quakec/id1-damage.ts";
+import { Id1PickupBinding } from "../../../content/q1/quakec/id1-pickups.ts";
+import type { OriginalPickupAdmission } from "../../../contracts/original-pickups.ts";
 import type { Id1DamageCall } from "../../../content/q1/quakec/id1-damage.ts";
 import { decodeQuakeWav } from "../../../audio/wav.ts";
 import { parseQ12Model } from "../../../formats/q12-model/index.ts";
@@ -145,6 +147,7 @@ export interface QuakeCSourceOptions {
   readonly physics: SharedPhysics;
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
+  readonly pickups: OriginalPickupAdmission;
   readonly events: SimulationEvents;
   readonly random: SourceRandom;
   readonly skill: 0 | 1 | 2 | 3;
@@ -164,6 +167,7 @@ export class QuakeCSource {
   readonly attacks: Id1SynchronousAttacks;
   readonly projectiles: Id1ProjectileAttacks;
   readonly environment: Id1Environment;
+  private readonly pickups: Id1PickupBinding;
   readonly messages: QcBroadcastMessages;
   readonly entities: QcEntityMemory;
   readonly slots: SourceActorSlots;
@@ -295,10 +299,13 @@ export class QuakeCSource {
     this.environment = new Id1Environment(this.worldHost.options, () => this.machine);
     const damage = new Id1DamageBinding(this.worldHost.options, options.combat, () => this.machine, options.damageRequest);
     this.damage = damage;
+    const pickups = new Id1PickupBinding(this.worldHost.options, options.pickups, () => this.machine);
+    this.pickups = pickups;
     this.machine = new QcMachine({ program: prepared.program, entities: this.entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
       builtins: createQcBuiltins({ kind: binding.kind, random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
-      functionBoundary: this.projectiles.compose(this.attacks.compose(damage.functionBoundary)), observeCall: call => damage.observeCall(call),
-      inlineBoundary: damage.inlineBoundary,
+      functionBoundary: pickups.composeFunctions(this.projectiles.compose(this.attacks.compose(damage.functionBoundary))),
+      observeCall: call => { pickups.validate(); return damage.observeCall(call); },
+      inlineBoundary: pickups.composeRegions(damage.inlineBoundary), validateEntityAccess: () => pickups.validate(),
       observeEntityStore: store => { this.projectiles.observeStore(store); return damage.observeEntityStore(store); } });
     this.actorState = new QcActorState({ machine: this.machine, rerelease: options.recipe.engineBehavior.content.startsWith("q1:rerelease:"),
       sourceSlot: actor => this.sourceSlot(actor), reference: reference => this.slots.at(this.entities.slot(reference))?.id ?? null,
@@ -339,6 +346,7 @@ export class QuakeCSource {
       if (actor === null || !this.activeClients.has(actor.id)) throw new Error("QC save requires pending client handshakes to finish");
     }
     this.attacks.assertIdle();
+    this.pickups.assertIdle();
     return captureQcCheckpoint(this.machine, this.module, this.checkpointHost());
   }
   captureOriginalSave(format: Q1SaveData["format"], comment: string): Q1SaveData {

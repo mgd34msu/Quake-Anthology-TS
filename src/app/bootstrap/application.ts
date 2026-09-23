@@ -448,7 +448,7 @@ export class Application {
   private campaignUnit = new CampaignUnit();
   private get saveDirectory(): string { return this.host.saveDirectory ?? join(homedir(), ".local", "share", "quake-typescript", "saves"); }
   private saveUnavailable(purpose: SavePurpose): string | null {
-    const players = this.localPlayers.map(player => player.actor);
+    const players = this.options.dedicated ? this.simulation.players() : this.localPlayers.map(player => player.actor);
     const native = this.simulation.q2Native();
     if (native !== null && native.services.options.cvars.variableValue("deathmatch") !== 0) return "Native Quake II deathmatch games cannot be saved";
     return saveUnavailable({ authority: this.network === null && this.options.network.kind === "offline" ? "offline" : "server",

@@ -2082,7 +2082,7 @@ export class SharedSimulation implements Simulation {
       const checkpoint = this.options.restore === undefined ? null : simulationQuakeCCheckpoint(this.options.restore);
       const game: QuakeCSource = new QuakeCSource(this.options.preparedQuakeC, { ...(this.options.sourceRegistry === undefined ? {} : { sourceRegistry: this.options.sourceRegistry }), recipe, world: this.options.world, scene: this.scene,
         ...(this.options.originalSaveCandidate === true ? { originalSaveCandidate: true } : {}),
-        actors: this.actors, callbacks: this.callbacks, physics: this.physics, combat: this.combat, inventory: this.inventory, events: this.events,
+        actors: this.actors, callbacks: this.callbacks, physics: this.physics, combat: this.combat, inventory: this.inventory, pickups: this.originalPickups, events: this.events,
         random: this.random, skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients,
         initialSourceTimeSeconds: this.timeSeconds,
         ...(checkpoint === null ? {} : { restore: { checkpoint, clients: this.options.restoredClients ?? [] } }),
