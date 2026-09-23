@@ -4,9 +4,12 @@ import type { OriginalPickupOffer, OriginalPickupResolution, OriginalPickupRule 
 import type { SessionActorRegistry } from "../actors/registry.ts";
 import { ModOperation } from "./mod-composition.ts";
 import { captureOriginalPickupRules, type CapturedOriginalPickupRule } from "./original-pickups.ts";
+import type { SourceItemAdmission, SourceItemDefinition, SourceItemLease } from "../../contracts/source-items.ts";
+import { isDeepStrictEqual } from "node:util";
 
 export interface InventoryStateBinding {
   read(): readonly InventoryEntry[];
+  entry?(item: ItemId): InventoryEntry | undefined;
   write(entry: InventoryEntry): undefined;
   /** Explicit owner support, including its source consumers and saved continuation. */
   mutableCapacity?(item: ItemId): boolean;
@@ -23,8 +26,13 @@ export interface InventoryPickupBinding {
 interface BoundInventoryPickups { readonly owner: ProviderId; readonly rules: readonly CapturedOriginalPickupRule[]; readonly items: readonly ItemId[]; }
 interface InventoryStore {
   readonly binding: InventoryStateBinding;
+  readonly primary: InventoryStateBinding;
+  readonly items: Map<ItemId, BoundItems>;
+  readonly groups: Set<BoundItems>;
   readonly pickups: Map<ItemId, BoundInventoryPickups>;
 }
+interface BoundItems { readonly admissions: readonly SourceItemAdmission[]; readonly owner: ProviderId; readonly definitions: readonly SourceItemDefinition[]; readonly state: InventoryStateBinding; active: boolean; }
+export interface InventoryItemBinding { readonly owner: ProviderId; readonly items: readonly SourceItemAdmission[]; readonly state: InventoryStateBinding; }
 
 function quantity(value: number): number {
   if (!Number.isFinite(value) || value < 0) throw new RangeError("Inventory quantity must be finite and nonnegative");
@@ -79,8 +87,94 @@ export class SharedInventoryTable implements InventoryTable {
   bind(actor: OwnedActor, binding: InventoryStateBinding): undefined {
     this.actors.assertOwned(actor);
     if (this.stores.has(actor)) throw new Error("Actor already has an inventory binding");
-    this.stores.set(actor, { binding, pickups: new Map<ItemId, BoundInventoryPickups>() });
+    const items = new Map<ItemId, BoundItems>(), groups = new Set<BoundItems>();
+    const current = (): void => { this.actors.assertOwned(actor); if (this.stores.get(actor)?.items !== items) throw new Error("Inventory binding is no longer current"); };
+    this.stores.set(actor, { primary: binding, items, groups, binding: {
+      read: () => {
+        current();
+        if (items.size === 0) return binding.read();
+        const entries = binding.read().filter(entry => !items.has(entry.item));
+        for (const group of groups) entries.push(...group.state.read());
+        return entries;
+      },
+      write: entry => { current(); return (items.get(entry.item)?.state ?? binding).write(entry); },
+      mutableCapacity: item => { current(); return (items.get(item)?.state ?? binding).mutableCapacity?.(item) === true; },
+    }, pickups: new Map<ItemId, BoundInventoryPickups>() });
     return undefined;
+  }
+
+  private groupEntries(group: BoundItems): readonly InventoryEntry[] {
+    if (!group.active) throw new Error("Source item binding is no longer current");
+    const entries = group.state.read();
+    if (entries.length !== group.definitions.length || new Set(entries.map(entry => entry.item)).size !== entries.length
+      || group.definitions.some(definition => !entries.some(entry => entry.item === definition.item))) throw new Error("Source item storage differs from its admitted definitions");
+    return entries.map(copyEntry);
+  }
+
+  bindItems(actor: OwnedActor, requested: InventoryItemBinding): SourceItemLease {
+    this.actors.assertOwned(actor);
+    const store = this.stores.get(actor);
+    if (store === undefined || requested.items.length === 0) throw new Error("Source items require an existing primary inventory and a nonempty group");
+    const primary = new Set(store.primary.read().map(entry => entry.item)), seen = new Set<ItemId>();
+    const definitions = requested.items.map(({ definition, admission }) => {
+      if (seen.has(definition.item) || definition.source.provider !== requested.owner || definition.label.length === 0
+        || store.items.has(definition.item) || (admission === "add" ? primary.has(definition.item) : !primary.has(definition.item)))
+        throw new Error(`Source item ${definition.item} conflicts with its current owner or admission`);
+      seen.add(definition.item);
+      return Object.freeze({ ...definition, source: Object.freeze({ ...definition.source }) });
+    });
+    const admissions = Object.freeze(definitions.map((definition, index) => { const original = requested.items[index]; if (original === undefined) throw new Error("Missing admitted definition"); return Object.freeze({ definition, admission: original.admission }); }));
+    const group: BoundItems = { admissions, owner: requested.owner, definitions: Object.freeze(definitions), state: requested.state, active: true };
+    this.groupEntries(group);
+    for (const item of seen) if (store.pickups.has(item)) throw new Error(`Source item ${item} already has a pickup delegate`);
+    for (const item of seen) store.items.set(item, group);
+    store.groups.add(group);
+    const current = (): boolean => group.active && this.actors.resolveOwned(actor.id) === actor && this.stores.get(actor) === store
+      && store.groups.has(group);
+    return { current, stored: changes => {
+      if (!current()) throw new Error("Committed inventory source is no longer current");
+      const actual = this.groupEntries(group), changed = new Set<ItemId>();
+      const snapshots = changes.map(change => {
+        const before = copyEntry(change.before), after = copyEntry(change.after);
+        if (before.item !== after.item || !seen.has(after.item) || changed.has(after.item)
+          || !isDeepStrictEqual(actual.find(entry => entry.item === after.item), after)) throw new Error("Committed inventory differs from its source binding");
+        changed.add(after.item); return Object.freeze({ before, after });
+      });
+      for (const change of snapshots) {
+        if (!current()) throw new Error("Committed inventory source retired before delivery");
+        let published = false;
+        this.operations.configure.dispatch([actor, change.after], ([owner, entry]) => {
+          if (!current() || owner !== actor || !isDeepStrictEqual(entry, change.after)) throw new Error("Committed source inventory publication was changed");
+          published = true; return undefined;
+        }, () => { if (!published) throw new Error("Committed source inventory requires publication before observers"); });
+        if (!current()) throw new Error("Committed inventory source retired during delivery");
+      }
+      return undefined;
+    }, close: () => {
+      if (!group.active) return undefined;
+      group.active = false; store.groups.delete(group);
+      const delegates = new Set([...seen].flatMap(item => { const binding = store.pickups.get(item); return binding === undefined ? [] : [binding]; }));
+      for (const [item, binding] of store.pickups) if (delegates.has(binding)) store.pickups.delete(item);
+      for (const item of seen) if (store.items.get(item) === group) store.items.delete(item);
+      return undefined;
+    } };
+  }
+
+  itemDefinitions(actor: ActorId): readonly SourceItemDefinition[] {
+    const owner = this.actors.resolveOwned(actor), store = owner === null ? undefined : this.stores.get(owner);
+    return store === undefined ? [] : [...store.groups].flatMap(group => group.definitions);
+  }
+
+  sourceItems(actor: OwnedActor): { readonly primary: readonly InventoryEntry[]; readonly groups: readonly { readonly owner: ProviderId; readonly items: readonly SourceItemAdmission[] }[] } | null {
+    this.actors.assertOwned(actor);
+    const store = this.stores.get(actor);
+    if (store === undefined || store.groups.size === 0) return null;
+    return { primary: store.primary.read().map(copyEntry), groups: [...store.groups].map(group => ({ owner: group.owner, items: group.admissions })) };
+  }
+
+  itemOwner(actor: ActorId, item: ItemId): ProviderId | null {
+    const owner = this.actors.resolveOwned(actor);
+    return owner === null ? null : this.stores.get(owner)?.items.get(item)?.owner ?? null;
   }
 
   /** Delegate grant behavior only; the selected storage binding still owns the admitted item. */
@@ -94,6 +188,8 @@ export class SharedInventoryTable implements InventoryTable {
     for (const write of writes) {
       if (store === undefined || !store.binding.read().some(entry => entry.item === write.item))
         throw new Error(`Original pickup destination ${write.item} was not admitted`);
+      const source = store.items.get(write.item);
+      if (source !== undefined && source.owner !== requested.owner) throw new Error(`Original pickup destination ${write.item} belongs to another source`);
       if (store.pickups.has(write.item)) throw new Error(`Original pickup destination ${write.item} already has a grant owner`);
       if (write.fields !== "count" && store.binding.mutableCapacity?.(write.item) !== true)
         throw new Error(`Original pickup destination ${write.item} has no mutable capacity`);
@@ -118,7 +214,7 @@ export class SharedInventoryTable implements InventoryTable {
         captured: rule, write, current: () => this.actors.resolveOwned(actor.id) === actor && this.stores.get(actor) === store
           && binding.items.every(item => store.pickups.get(item) === binding && store.binding.read().some(entry => entry.item === item))
           && (write.fields === "count" || store.binding.mutableCapacity?.(write.item) === true) }))));
-    return { matches, blocksPrimary: false };
+    return { matches, blocksPrimary: offer.defaultResource?.kind === "inventory" && store.items.has(offer.defaultResource.item) };
   }
 
   create(actor: OwnedActor, entries: readonly InventoryEntry[]): undefined {
@@ -149,7 +245,9 @@ export class SharedInventoryTable implements InventoryTable {
     const owner = this.actors.resolveOwned(actor);
     if (owner === null) return 0;
     let result = 0, found = false;
-    for (const entry of this.stores.get(owner)?.binding.read() ?? []) {
+    const store = this.stores.get(owner), group = store?.items.get(item), source = group?.state ?? store?.primary;
+    if (group?.state.entry !== undefined) { const entry = group.state.entry(item); if (entry === undefined) return 0; quantity(entry.capacity); return sourceCount(entry, entry.count); }
+    for (const entry of source?.read() ?? []) {
       quantity(entry.capacity);
       const count = sourceCount(entry, entry.count);
       if (!found && entry.item === item) { result = count; found = true; }
@@ -204,12 +302,12 @@ export class SharedInventoryTable implements InventoryTable {
     this.actors.assertOwned(actor);
     const binding = this.stores.get(actor)?.binding;
     if (binding === undefined) throw new Error("Actor has no inventory binding");
-    const previous = binding.read().find(candidate => candidate.item === entry.item);
+    const group = this.stores.get(actor)?.items.get(entry.item), previous = binding.read().find(candidate => candidate.item === entry.item);
     const before = committed === undefined || previous === undefined ? null : copyEntry(previous), policy = entry.countPolicy ?? previous?.countPolicy;
     binding.write(copyEntry(policy === undefined ? entry : { ...entry, countPolicy: policy }));
     if (committed !== undefined) {
       this.actors.assertOwned(actor);
-      if (this.stores.get(actor)?.binding !== binding) throw new Error("Inventory owner changed during observed store");
+      if (this.stores.get(actor)?.binding !== binding || this.stores.get(actor)?.items.get(entry.item) !== group) throw new Error("Inventory owner changed during observed store");
       const after = binding.read().find(candidate => candidate.item === entry.item);
       if (after === undefined) throw new Error("Observed inventory entry disappeared during its store");
       committed({ actor, before, after: copyEntry(after) });

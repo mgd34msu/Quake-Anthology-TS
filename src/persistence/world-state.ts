@@ -1,3 +1,4 @@
+import { readSourceItems } from "./source-items.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { OwnedActor } from "../contracts/identity.ts";
 import type { BodyCheckpoint, SaveImage, SavedActorId, SavedBodyState } from "../contracts/session.ts";
@@ -61,6 +62,7 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   options?: { readonly deferProtection: true }): undefined | SharedWorldRestoreCompletion {
   host.combat.assertIdle();
   const hidden = readPrimaryProtection(save, host.actors);
+  const sourceItems = new Map(readSourceItems(save).map(entry => [host.actors.resolveSaved(entry.actor), entry]));
   const actor = (saved: SavedActorId): OwnedActor => {
     const restored = host.actors.resolveSaved(saved);
     if (restored === null) throw new SaveFormatError("world", `missing saved actor ${saved.slot}/${saved.generation}`);
@@ -115,12 +117,12 @@ export function restoreSharedWorldState(save: SaveImage, host: SharedWorldRestor
   }
   for (const entry of save.inventories) {
     const restored = actor(entry.actor);
-    const storage = host.storage(restored);
+    const storage = host.storage(restored), primary = sourceItems.get(restored)?.primary ?? entry.entries;
     if (storage !== "copied") {
       if (!host.inventory.has(restored.id)) throw new SaveFormatError("world.inventories", "source inventory view has not been bound");
-      if (storage === "prebound" && !isDeepStrictEqual(host.inventory.entries(restored.id), entry.entries))
+      if (storage === "prebound" && !isDeepStrictEqual(host.inventory.entries(restored.id), primary))
         throw new SaveFormatError("world.inventories", "source inventory disagrees with saved shared state");
-    } else host.inventory.create(restored, entry.entries);
+    } else host.inventory.create(restored, primary);
   }
   if (options === undefined) return undefined;
   let state: "pending" | "complete" | "failed" = "pending";

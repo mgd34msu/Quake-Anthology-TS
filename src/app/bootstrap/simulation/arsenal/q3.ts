@@ -112,6 +112,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
         const runtime = q3RequestWeaponResume(player.runtime);
         const requested = Q3_WEAPON_ITEMS.find(weapon => weapon.item === (item ?? player.arsenal.activeWeapon));
         player.runtime = requested === undefined ? runtime : q3RequestWeapon(runtime, requested.weapon);
+        return item === null || requested !== undefined && this.options.inventory.count(actor, item) > 0;
       },
     };
   }

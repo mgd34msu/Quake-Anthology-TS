@@ -35,13 +35,14 @@ import { createQcPusherServices } from "./pusher-host.ts";
 import type { Q1PusherServices } from "../../movement/q1/types.ts";
 import { executeQuakeCPhysics } from "../../app/bootstrap/simulation/actor-execution.ts";
 import { thinkCallbackTime } from "../../world/scheduler.ts";
+import { QcModItems, validateQcItems } from "./mod-items.ts";
 import { QcModPickups } from "./mod-pickups.ts";
 import type { SimulationPresentation } from "../../app/bootstrap/simulation/types.ts";
 import { q1WaterTransition } from "../../movement/q1/water-transition.ts";
 import { captureQcCheckpoint, restoreQcCheckpoint } from "./executor.ts";
 import type { QcExecutorHost } from "./executor.ts";
 import { QcMachine } from "./machine.ts";
-import type { QcBuiltin, QcEntityStoreObservation } from "./machine.ts";
+import type { QcBuiltin, QcEntityStoreObservation, QcFunctionExecution, QcInlineBoundary } from "./machine.ts";
 import { QcEntityMemory, QcWords } from "./memory.ts";
 import { classicQcEntityLayout } from "./profile.ts";
 import type { QcProgram, QcValueType } from "./program.ts";
@@ -80,6 +81,9 @@ function validateCall(program: QcProgram, call: ModSourceCall, available: Readon
 export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclaration): void {
   if (program.digest !== declaration.program.digest) throw new Error("Gameplay mod program differs from its declared artifact digest");
   qcProtectionRegions(program, declaration);
+  validateQcItems(program, declaration);
+  if (declaration.items?.weapons !== undefined) for (const call of [declaration.items.weapons.select.call, ...declaration.items.weapons.resume])
+    validateCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "source weapon");
   for (const protection of declaration.protection ?? []) validateCall(program, protection.absorb.call, new Set<ModCallbackInput>(["self", "attacker", "inflictor", "amount", "knockback", "damage-flags", "regular-protection-scale", "direction", "point", "normal", "time"]), "protection");
   const pickupIds = new Set<string>(), pickupItems = new Set<string>();
   for (const pickup of declaration.pickups ?? []) {
@@ -89,7 +93,9 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
     pickupIds.add(pickup.id); for (const item of pickup.offered) pickupItems.add(item);
     for (const resource of pickup.writes) {
       if (resource.kind === "protection" ? !declaration.protection?.some(value => value.channel === resource.channel)
-        : resource.fields !== "count" || !declaration.actorFields.some(field => field.binding === "inventory" && field.item === resource.item))
+        : !(resource.fields === "count" && declaration.actorFields.some(field => field.binding === "inventory" && field.item === resource.item))
+          && !declaration.items?.storage.some(storage => storage.kind === "bits" ? resource.fields === "count" && storage.items.some(item => item.item === resource.item)
+            : storage.item === resource.item && (resource.fields === "count" || storage.capacity.kind === "field")))
         throw new Error("QC pickup resource requires its declared source storage");
     }
     for (const call of pickup.operation.kind === "boolean-grant" ? [pickup.operation.grant] : [pickup.operation.gate, pickup.operation.grant])
@@ -191,6 +197,7 @@ export class QcModProvider {
   private readonly combat: QcModCombat | null;
   private readonly protection: QcModProtection | null;
   private readonly pickups: QcModPickups | null;
+  private readonly items: QcModItems | null;
   private readonly messages: QcModMessages | null;
   private readonly environment: QcModEnvironment;
   private readonly precached = new Map<string, QcPrecachedResource>();
@@ -307,6 +314,17 @@ export class QcModProvider {
       if (this.commands === null) return vm.fail("Mod localcmd requires the destination command service");
       this.commands.append(vm.argString(0));
     });
+    if (declaration.items !== undefined && media === undefined) throw new Error("QC source items require their prepared content owner");
+    this.items = declaration.items === undefined || media === undefined ? null : new QcModItems(declaration.items, module.id, services, media, {
+      machine: () => this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference), invoke: (call, inputs) => this.invoke(call, inputs),
+    }, program);
+    const weaponFunctions = this.items?.weapons?.composeFunctions({ functions: new Set(), run: (_call, execute) => execute() });
+    const armorRegions: QcInlineBoundary = {
+      regions: (() => {
+        const primary = declaration.combat === undefined ? null : qcArmorStage(program, declaration.combat.armorStage);
+        return [...new Map([...(primary === null ? [] : [primary]), ...qcProtectionRegions(program, declaration)].map(stage => [stage.entry, stage.region])).values()];
+      })(), run: (region, execute) => this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute),
+    };
     this.machine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE), serverActive: () => !this.loading,
       builtins: createQcBuiltins({ kind: program.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake", random, host,
         prepareEntities: () => this.prepareEntities(),
@@ -318,17 +336,25 @@ export class QcModProvider {
           throw new Error(`Mod ${module.id} accessed unmapped actor field word ${offset}`);
         if (kind === "read") this.refresh(actor, entities.slot(reference), word, words);
         return undefined;
-      }, ...(declaration.combat === undefined ? {} : { functionBoundary: {
-        functions: new Set(program.functions.filter(fn => fn.index > 0 && fn.firstStatement > 0 && !fn.namedBuiltin).map(fn => fn.index)),
-        run: (call, execute) => this.combat === null ? execute() : this.combat.damage.functionBoundary.run(call, execute),
-      } }), inlineBoundary: {
-        regions: (() => {
-          const primary = declaration.combat === undefined ? null : qcArmorStage(program, declaration.combat.armorStage);
-          return [...new Map([...(primary === null ? [] : [primary]), ...qcProtectionRegions(program, declaration)].map(stage => [stage.entry, stage.region])).values()];
-        })(),
-        run: (region, execute) => this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute),
-      }, observeCall: call => { this.input.observeCall(call); return this.combat?.damage.observeCall(call); }, observeEntityStore: store => {
-        this.validatePickupStore(store); this.protection?.observe(store); this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
+      }, functionBoundary: {
+        functions: declaration.combat === undefined ? weaponFunctions?.functions ?? new Set()
+          : new Set(program.functions.filter(fn => fn.index > 0 && fn.firstStatement > 0 && !fn.namedBuiltin).map(fn => fn.index)),
+        run: (call, execute) => {
+          if (weaponFunctions === undefined || !weaponFunctions.functions.has(call.functionIndex))
+            return this.combat === null ? execute() : this.combat.damage.functionBoundary.run(call, execute);
+          const wrapped: QcFunctionExecution = Object.assign((prepare?: (machine: QcMachine) => undefined) => {
+            const selected: QcFunctionExecution = Object.assign((inner?: (machine: QcMachine) => undefined) => execute(machine => {
+              prepare?.(machine); inner?.(machine); return undefined;
+            }), { skip: execute.skip, cancel: execute.cancel });
+            return weaponFunctions.run(call, selected);
+          }, { skip: execute.skip, cancel: execute.cancel });
+          return this.combat === null ? wrapped() : this.combat.damage.functionBoundary.run(call, wrapped);
+        },
+      }, inlineBoundary: this.items?.weapons?.composeRegions(armorRegions) ?? armorRegions, observeCall: call => { this.input.observeCall(call); return this.combat?.damage.observeCall(call); }, observeEntityStore: store => {
+        this.validatePickupStore(store); this.protection?.observe(store);
+        const pickup = this.pickupScopes.at(-1);
+        this.items?.observe(store, pickup?.actor.equals(this.actor(store.reference)) === true && pickup.depth === this.depth ? pickup.execution : undefined);
+        this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
       } });
     this.protection = declaration.protection === undefined ? null : new QcModProtection(declaration, module.id, services, { machine: this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference),
       invoke: (call, inputs, region) => this.invoke(call, inputs, region), pickups: (actor, channel) => this.pickups?.protection(actor, channel) ?? [] });
@@ -342,7 +368,7 @@ export class QcModProvider {
     this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor), actor => services.actors.isLive(actor));
     this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
       ...(declaration.actorFields.some(field => field.binding === "think") ? { think: (actor: ActorId, frame: FrameContext, live: () => boolean) => this.runClientThink(actor, frame, live) } : {}),
-      reserve: actor => this.protection?.reserve(actor), admitted: actor => { this.pickups?.admit(actor); this.protection?.activate(actor); },
+      reserve: actor => this.protection?.reserve(actor), admitted: actor => { this.items?.admit(actor); this.pickups?.admit(actor); this.protection?.activate(actor); },
       project: actor => { this.reference(actor); }, release: actor => { this.releaseClientBindings(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor, frame) => {
         const previous = this.frame, now = frame?.time ?? services.time();
         if (frame !== undefined) this.frame = frame;
@@ -480,7 +506,7 @@ export class QcModProvider {
             throw new Error("Saved QuakeC client projection differs from its reserved slot");
         } else if (clients.value !== undefined && clients.value !== null) throw new Error("Saved QuakeC clients require the declared lifecycle service");
         this.ownedActors.restored();
-        for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) { this.pickups?.admit(client.actor); this.protection?.activate(client.actor); } }
+        for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) { this.items?.admit(client.actor); this.pickups?.admit(client.actor); this.protection?.activate(client.actor); } }
         this.clients?.start();
         return undefined;
       },
@@ -532,12 +558,12 @@ export class QcModProvider {
   }
   private releaseClientBindings(actor: ActorId): void {
     const errors: unknown[] = [];
-    for (const release of [() => this.pickups?.release(actor), () => this.protection?.release(actor)]) try { release(); } catch (error) { errors.push(error); }
+    for (const release of [() => this.pickups?.release(actor), () => this.items?.release(actor), () => this.protection?.release(actor)]) try { release(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "QC client binding release failed");
   }
   private closeClientBindings(): void {
     const errors: unknown[] = [];
-    for (const close of [() => this.pickups?.close(), () => this.protection?.close()]) try { close(); } catch (error) { errors.push(error); }
+    for (const close of [() => this.pickups?.close(), () => this.items?.close(), () => this.protection?.close()]) try { close(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "QC client binding close failed");
   }
   private drainRetiredProjections(): void {

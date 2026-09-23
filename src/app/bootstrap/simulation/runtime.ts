@@ -76,9 +76,9 @@ import type { Q1ClientEye } from "../../../world/gameplay/q1-client-visibility.t
 import { selectedMonsterDefinitions } from "../../../content/catalog/monsters.ts";
 import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
 import { WeaponSlot } from "./weapon-slot.ts";
-import type { PrimaryWeaponHandoff, WeaponReference, WeaponSlotState } from "./weapon-slot.ts";
+import type { PrimaryWeaponHandoff, WeaponReference, WeaponSlotRestoreState } from "./weapon-slot.ts";
 import { projectWeaponSlot } from "./weapon-slot-projection.ts";
-import type { WeaponSlotProjection } from "./weapon-slot-projection.ts";
+import type { SourceWeaponProjection, WeaponSlotProjection } from "./weapon-slot-projection.ts";
 import { readWeaponSlots } from "./weapon-slot-checkpoint.ts";
 import { GrappleRuntime } from "./grapple-runtime.ts";
 import { QvmGrappleSource, type QvmGrappleTarget } from "./qvm-grapple-source.ts";
@@ -223,6 +223,8 @@ import type { SharedSolid } from "./physics.ts";
 import { MovementPlayer, movementOrigin, providerFamily, providerTiming } from "./players.ts";
 import { SimulationEvents } from "./events.ts";
 import { SourceRandom } from "./random.ts";
+import { captureSourceItems, prepareSourceItemRestore } from "../../../persistence/source-items.ts";
+import { qcWeaponStage } from "../../../content/q1/quakec/weapon-stage.ts";
 import { capturePrimaryProtection } from "../../../persistence/protection.ts";
 import { captureSharedBodies, restoreSharedBodyLinks, restoreSharedWorldState, sourceActorsCheckpoint, readSourceActorsCheckpoint,
   savedActorId, readSavedActor, encodeCheckpointValue, decodeCheckpointValue, SaveReader, encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint,
@@ -298,6 +300,7 @@ export class SharedSimulation implements Simulation {
   private readonly characterStarts = new Map<OwnedActor, ActorId | null>();
   private grapple: GrappleRuntime | null = null;
   private pendingQvmGrappleRestore: { readonly grapple: ReturnType<typeof readGrappleRuntimeCheckpoint>; readonly slots: ReturnType<typeof readWeaponSlots> } | null = null;
+  private readonly sourceItemsRestore: ReturnType<typeof prepareSourceItemRestore> | null;
   private readonly weaponSlots = new Map<ActorId, WeaponSlot>();
   private readonly nativeEquipmentPlayers = new Set<ActorId>();
   private readonly nativeEquipmentAlive = new Map<ActorId, boolean>();
@@ -410,6 +413,8 @@ export class SharedSimulation implements Simulation {
   private quakeWorldTouched: Set<number> | null = null;
 
   constructor(readonly options: SimulationOptions, loading?: typeof nativeLoading) {
+    this.sourceItemsRestore = options.restore === undefined ? null : prepareSourceItemRestore(options.restore);
+    if (this.sourceItemsRestore !== null) { options = { ...options, restore: this.sourceItemsRestore.primary }; this.options = options; }
     this.modClients = this.createModClients();
     if (loading !== nativeLoading && options.recipe.equipment.grapple.kind === "enabled" && options.recipe.equipment.grapple.mechanic === "q3-qvm")
       throw new Error("Authored QVM grapple requires asynchronous loadSimulation");
@@ -749,7 +754,16 @@ export class SharedSimulation implements Simulation {
       if (options.preparedMods !== undefined || enabled.length !== 0 || modState !== undefined || options.modTravel !== undefined) {
         const native = simulation.nativeModContext();
         simulation.modOwner = await SessionMods.open({ prepared: options.preparedMods ?? [], enabled,
-          services: { clients: simulation.modClients, ...(native === undefined ? {} : { native }), ...(options.modCommands === undefined ? {} : { commands: options.modCommands }),
+          services: { clients: simulation.modClients, weapons: {
+            bind: (actor, binding) => {
+              simulation.actors.assertOwned(actor);
+              if (simulation.source.kind === "quakec" && qcWeaponStage(simulation.source.game.prepared.program) === null) throw new Error("Primary QC weapon handoff lacks a qualified source boundary");
+              if (!simulation.weaponSlots.has(actor.id)) simulation.bindWeaponSlot(actor.id);
+              const slot = simulation.weaponSlots.get(actor.id); if (slot === undefined) throw new Error("Source weapon slot was not admitted");
+              return slot.bind(binding);
+            }, selected: (actor, provider) => simulation.weaponSlots.get(actor)?.selected(provider) ?? false,
+            request: (actor, weapon) => simulation.requestWeapon(actor, weapon),
+          }, ...(native === undefined ? {} : { native }), ...(options.modCommands === undefined ? {} : { commands: options.modCommands }),
             ...(options.modFiles === undefined ? {} : { files: options.modFiles }), actors: simulation.actors, bodies: simulation.bodies, combat: simulation.combat, inventory: simulation.inventory, seed: options.seed, time: () => simulation.sourceFrame.time,
             damageContext: source => ({ sequence: simulation.attackSequence++, weaponProvider: source, combatProvider: simulation.recipe.combat.provider,
               inventoryProvider: simulation.recipe.inventory.provider, movementProvider: simulation.recipe.movement.provider }),
@@ -775,6 +789,8 @@ export class SharedSimulation implements Simulation {
                 camera: actor => { const view = simulation.playerView(actor); return { origin: { ...view.origin, z: view.origin.z + view.viewHeight }, angles: view.angles }; } } } },
           operations: { damage: simulation.combat.damageOperation, actors: simulation.callbacks.operations, inventory: simulation.inventory.operations }, nextFrame }, modState, options.modTravel);
       }
+      simulation.sourceItemsRestore?.finish(simulation.actors, simulation.inventory);
+      for (const slot of simulation.weaponSlots.values()) slot.validateRestore();
       simulation.pendingSharedRestore?.finish();
       simulation.pendingSharedRestore?.assertComplete();
       simulation.pendingSharedRestore = null;
@@ -1771,10 +1787,15 @@ export class SharedSimulation implements Simulation {
         return true;
       };
       return { provider: this.weaponProvider.provider, accepts, select, holster: () => { holstered = true; }, isHolstered: () => holstered,
-        resume: item => { holstered = false; if (item !== null) select(item); } };
+        resume: item => { holstered = false; return item === null || select(item); } };
     }
     const player = this.requirePlayer(actor);
     if (this.selectedArsenal !== null) return this.selectedArsenal.handoff(actor);
+    if (source.kind === "quakec") return { provider: this.weaponProvider.provider,
+      accepts: item => this.primaryUi(actor).items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned),
+      select: item => source.game.requestClientWeapon(actor, item),
+      holster: () => { if (!this.actors.isLive(actor)) throw new Error("QC weapon owner retired"); }, isHolstered: () => source.game.clientWeaponSettled(actor),
+      resume: item => item === null || source.game.requestClientWeapon(actor, item) };
     if (source.kind === "q1") return source.game.primaryWeaponHandoff(player.actor);
     if (source.kind === "q2") {
       const entity = source.game.entity(actor); if (entity === null) throw new Error("Q2 primary has no source player");
@@ -1782,7 +1803,7 @@ export class SharedSimulation implements Simulation {
       return { provider: this.weaponProvider.provider, accepts: item => definition(item) !== undefined && this.inventory.count(actor, item) > 0,
         select: item => { const weapon = definition(item); if (weapon === undefined) return false; const result = source.weapons.requestWeapon(entity, source.game, weapon.name); return result === "selected" || result === "current"; },
         holster: () => source.weapons.requestHolster(entity), isHolstered: () => source.weapons.isHolstered(entity),
-        resume: item => source.weapons.resumePrimary(entity, source.game, this.q2WeaponInput(player), item === null ? null : definition(item)?.name ?? null) };
+        resume: item => { source.weapons.resumePrimary(entity, source.game, this.q2WeaponInput(player), item === null ? null : definition(item)?.name ?? null); return item === null || this.arsenal(player).activeWeapon === item; } };
     }
     if (source.kind !== "q3") throw new Error("Primary source is not ready");
     const runtime = () => { const state = this.q3Arsenals.get(player.actor); if (state === undefined) throw new Error("Missing Q3 primary continuation"); return state; };
@@ -1791,28 +1812,28 @@ export class SharedSimulation implements Simulation {
       this.q3Arsenals.set(player.actor, q3RequestWeapon(runtime(), weapon.weapon)); return true; };
     return { provider: this.weaponProvider.provider, accepts: item => Q3_WEAPON_ITEMS.some(weapon => weapon.item === item && (runtime().product === "missionpack" || weapon.weapon <= 10)) && this.inventory.count(actor, item) > 0,
       select, holster: () => { this.q3Arsenals.set(player.actor, q3RequestWeaponHolster(runtime())); }, isHolstered: () => runtime().externalSlot === "holstered",
-      resume: item => { this.q3Arsenals.set(player.actor, q3RequestWeaponResume(runtime())); if (item !== null) select(item); } };
+      resume: item => { this.q3Arsenals.set(player.actor, q3RequestWeaponResume(runtime())); return item === null || select(item); } };
   }
 
   private admitGrapple(actor: ActorId): undefined {
     this.grapple?.admit(actor);
-    this.weaponSlots.delete(actor);
     if (this.grapple?.selection.binding === "slot") {
       const owner = this.actors.resolveOwned(actor); if (owner === null) throw new Error("Grapple owner was released");
       if (!this.inventory.has(actor)) this.bindEquipmentInventory(owner);
       this.inventory.configure(owner, { item: this.grapple.weapon().item, count: 1, capacity: 1 });
-      this.bindWeaponSlot(actor, { kind: "primary" });
+      if (!this.weaponSlots.has(actor)) this.bindWeaponSlot(actor);
     }
     return undefined;
   }
-  private bindWeaponSlot(actor: ActorId, state: WeaponSlotState): undefined {
-    if (this.grapple === null || this.grapple.selection.binding !== "slot") throw new Error("Weapon slot has no selected equipment");
-    this.weaponSlots.set(actor, new WeaponSlot(this.primaryHandoff(actor), this.grapple.handoff(actor), state));
+  private bindWeaponSlot(actor: ActorId, state?: WeaponSlotRestoreState): undefined {
+    const owner = this.actors.resolveOwned(actor); if (owner === null) throw new Error("Weapon slot actor retired");
+    this.weaponSlots.set(actor, new WeaponSlot(this.primaryHandoff(actor), this.grapple?.selection.binding === "slot" ? this.grapple.handoff(actor) : undefined, state,
+      () => this.actors.resolveOwned(actor) === owner));
     return undefined;
   }
+  hasWeaponSlot(actor: ActorId): boolean { return this.weaponSlots.has(actor); }
   requestWeapon(actor: ActorId, weapon: WeaponReference): boolean {
     this.assertOpen(); this.requireEquipmentPlayer(actor);
-    if (this.source.kind === "quakec") return weapon.provider === this.weaponProvider.provider && this.source.game.requestClientWeapon(actor, weapon.item);
     const slot = this.weaponSlots.get(actor);
     if (slot !== undefined) { const accepted = slot.request(weapon); slot.reconcile(); return accepted; }
     const primary = this.primaryHandoff(actor);
@@ -2261,6 +2282,7 @@ export class SharedSimulation implements Simulation {
         actors: this.actors, callbacks: this.callbacks, physics: this.physics, combat: this.combat, inventory: this.inventory, pickups: this.originalPickups, events: this.events,
         random: this.random, skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients,
         initialSourceTimeSeconds: this.timeSeconds,
+        ...(qcWeaponStage(this.options.preparedQuakeC.program) === null ? {} : { primaryWeaponSelected: (actor: ActorId) => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true) }),
         ...(checkpoint === null ? {} : { restore: { checkpoint, clients: this.options.restoredClients ?? [] } }),
         admit: (actor, _slot, source) => this.registerActorExecution({ kind: "quakec", actor, source, content }),
         changeLevel: map => {
@@ -4172,8 +4194,25 @@ export class SharedSimulation implements Simulation {
     const pendingItem = this.selectedArsenal !== null ? this.selectedArsenal.pendingWeapon(actor) : arsenal?.state.kind === "q2" ? arsenal.state.pendingWeapon : q3Pending === null ? null : q3WeaponItem(q3Pending)?.item ?? null;
     const primary = { active: ui.activeWeapon === null ? null : { provider: this.weaponProvider.provider, item: ui.activeWeapon },
       pending: pendingItem === null ? null : { provider: this.weaponProvider.provider, item: pendingItem }, ui, model };
-    if (slot === undefined || grapple === null) return primary;
-    const gear = grapple.weaponView(actor), view = player === null || this.source.kind === "q2" && player.character === "q2" ? this.playerView(actor) : player.view(), weapon = grapple.weapon();
+    if (slot === undefined) return primary;
+    const view = this.playerView(actor), sources: SourceWeaponProjection[] = slot.presentations().map(source => {
+      const definitions = source.items.filter(item => item.kind === "weapon"), active = definitions.find(item => item.item === source.active);
+      const ammoItem = active?.ammo ?? null, ammo = ammoItem === null ? null : { item: ammoItem, count: this.inventory.count(actor, ammoItem) };
+      const weaponStatus: PlayerUi["weaponStatus"] = active === undefined ? null : { source: source.source, item: active.item, label: active.label,
+        ammo: ammo === null ? { kind: "unmetered" } : { kind: "finite", ...ammo, hasAmmoToStart: ammo.count > 0, low: false } };
+      const asset = source.model, model: SimulationPresentation | null = asset === null ? null : { actor, content: source.source.content,
+        family: source.source.content.startsWith("q1:") ? "q1" : source.source.content.startsWith("q2:") ? "q2" : "q3", path: asset.resource.requestedPath,
+        frame: asset.frame, oldFrame: asset.frame, skin: 0, effects: 0, renderFlags: 0, origin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), angles: view.angles,
+        scale: 1, visible: ui.health > 0 && (player === null || !player.intermission && player.cutscene === null), viewWeapon: true };
+      if (asset !== null) this.events.registerResource(source.source.content, asset.resource.requestedPath, asset.resource);
+      return { provider: source.source.provider, active: source.active === null ? null : { provider: source.source.provider, item: source.active },
+        pending: source.pending === null ? null : { provider: source.source.provider, item: source.pending }, model, ammo, weaponStatus,
+        items: definitions.map((definition, index) => ({ id: definition.item, label: definition.label, kind: "weapon", sourceOrdinal: ui.items.length + index,
+          owned: this.inventory.count(actor, definition.item) > 0, hasAmmo: definition.ammo === null || this.inventory.count(actor, definition.ammo) > 0,
+          count: definition.ammo === null ? null : this.inventory.count(actor, definition.ammo), warningCount: 0 })) };
+    });
+    if (grapple === null || grapple.selection.binding !== "slot") return projectWeaponSlot(slot.snapshot(), primary, undefined, sources);
+    const gear = grapple.weaponView(actor), weapon = grapple.weapon();
     const gearModel: SimulationPresentation | null = gear === null ? null : { actor, content: grapple.selection.source.content, family: grapple.source.kind === "q1-threewave" ? "q1" : grapple.source.kind === "q3-qvm" ? "q3" : "q2",
       path: gear.path, frame: gear.frame, oldFrame: gear.frame, skin: 0, effects: 0, renderFlags: 0,
       ...("modelAttachments" in gear ? { modelAttachments: gear.modelAttachments } : {}),
@@ -4181,7 +4220,7 @@ export class SharedSimulation implements Simulation {
       origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), gear.kickOrigin), angles: add(view.angles, { x: gear.kickPitch, y: 0, z: 0 }),
       scale: 1, visible: ui.health > 0 && (player === null || !player.intermission && player.cutscene === null), viewWeapon: true };
     return projectWeaponSlot(slot.snapshot(), primary, { source: grapple.selection.source, weapon, item: { id: weapon.item, label: grapple.selection.mechanic === "q2-lmctf" ? "Hook" : "Grapple", kind: "weapon",
-      sourceOrdinal: ui.items.length, owned: this.inventory.count(actor, weapon.item) > 0, hasAmmo: true, count: null, warningCount: 0 }, model: gearModel });
+      sourceOrdinal: ui.items.length, owned: this.inventory.count(actor, weapon.item) > 0, hasAmmo: true, count: null, warningCount: 0 }, model: gearModel }, sources);
   }
   private nativePlayerUi(actor: ActorId): PlayerUi {
     if (this.source.kind === "q3-qvm") {
@@ -5065,7 +5104,7 @@ export class SharedSimulation implements Simulation {
       const ui = this.playerUi(actor), owned = ui.items.filter(item => item.kind === "weapon" && item.owned), requested = args.join("").toLowerCase().replaceAll(" ", "");
       const selected = name === "use" ? owned.find(item => item.id === requested || item.id === `q1:weapon/${requested}` || item.label.toLowerCase().replaceAll(" ", "") === requested)
         : owned[(owned.findIndex(item => item.id === ui.activeWeapon) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length];
-      if (selected !== undefined) { const equipment = this.grapple?.weapon(); this.requestWeapon(actor, { provider: equipment?.item === selected.id ? equipment.provider : this.weaponProvider.provider, item: selected.id }); return undefined; }
+      if (selected !== undefined) { const equipment = this.grapple?.weapon(); this.requestWeapon(actor, { provider: this.inventory.itemOwner(actor, selected.id) ?? (equipment?.item === selected.id ? equipment.provider : this.weaponProvider.provider), item: selected.id }); return undefined; }
       if (name !== "use") return undefined;
     }
     if (this.selectedArsenal !== null && (name === "weapnext" || name === "weapprev" || name === "use")) {
@@ -5260,7 +5299,7 @@ export class SharedSimulation implements Simulation {
     })();
     const provider = this.recipe.map.entities.provider;
     for (const player of this.playerStates.values()) player.arsenal = this.arsenal(player);
-    const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint()), capturePrimaryProtection(this.actors, this.combat), ...(nativeOriginal === null ? [] : [nativeOriginal])];
+    const providers: SaveImage["providers"][number][] = [sourceActorsCheckpoint(this.actors.sourceCheckpoint()), capturePrimaryProtection(this.actors, this.combat), captureSourceItems(this.actors, this.inventory), ...(nativeOriginal === null ? [] : [nativeOriginal])];
     const add = (schema: SaveImage["providers"][number]["schema"], bytes: Uint8Array) => providers.push({ provider, schema, version: schema === "world:simulation" ? 11 : 1, bytes });
     const bots = this.botServices.checkpoint();
     if (bots !== null) {
@@ -5368,6 +5407,7 @@ export class SharedSimulation implements Simulation {
   }
 
   private restore(save: SaveImage, nativeRestored = false): undefined {
+    save = this.sourceItemsRestore?.primary ?? save;
     const source = this.source;
     if (source.kind === "loading") throw new Error("The selected source world does not expose a complete saved-game restore");
     if (source.kind === "q2-native") {
@@ -5471,7 +5511,7 @@ export class SharedSimulation implements Simulation {
         return slot !== null && slot < source.game.game.data.numClients && this.inventory.has(actor.id);
       }), true);
     }
-    const sharedSave = { ...save, inventories, combat: legacyQvmCombat === null ? save.combat : save.combat.map(entry => {
+    const sharedSave = { ...save, inventories: this.sourceItemsRestore?.effective(inventories) ?? inventories, combat: legacyQvmCombat === null ? save.combat : save.combat.map(entry => {
       const actor = this.actors.resolveSaved(entry.actor);
       if (actor === null || this.actors.sourceOf(actor.id)?.provider !== this.recipe.map.entities.provider) return entry;
       return { ...entry, state: { ...entry.state, armor: legacyQvmCombat.normalizeLegacyArmor(actor.id, entry.state.armor) } };

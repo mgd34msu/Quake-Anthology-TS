@@ -103,7 +103,8 @@ export class Q2SelectedArsenal implements SelectedArsenal {
       resume: item => { const observation = this.options.observe(actor);
         const definition = item === null ? null : this.definitions.find(definition => definition.item === item);
         if (definition === undefined) throw new Error("Weapon does not belong to selected Q2 arsenal");
-        weapons.resumePrimary(observation.owner, game, observation.input, definition?.name ?? null); } };
+        weapons.resumePrimary(observation.owner, game, observation.input, definition?.name ?? null);
+        return item === null || this.read(actor).activeWeapon === item; } };
   }
   pickupAmmo(actor: OwnedActor, grants: readonly PickupAmmoReceipt[], autoSwitch: boolean): undefined {
     if (autoSwitch && grants.some(grant => grant.item === "q2:ammo_grenades" && grant.before === 0)) this.pickupWeapons(actor, ["q2:ammo_grenades"], "better");

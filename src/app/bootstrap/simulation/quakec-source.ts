@@ -44,6 +44,7 @@ import type { MountedContent } from "../../../content/mounts/index.ts";
 import type { Q2Motion } from "../../../content/q2/foundation/host.ts";
 import { Id1DamageBinding } from "../../../content/q1/quakec/id1-damage.ts";
 import { Id1PickupBinding } from "../../../content/q1/quakec/id1-pickups.ts";
+import { qcWeaponStage, QcWeaponStageBinding } from "../../../content/q1/quakec/weapon-stage.ts";
 import type { OriginalPickupAdmission } from "../../../contracts/original-pickups.ts";
 import type { Id1DamageCall } from "../../../content/q1/quakec/id1-damage.ts";
 import { decodeQuakeWav } from "../../../audio/wav.ts";
@@ -148,6 +149,7 @@ export interface QuakeCSourceOptions {
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
   readonly pickups: OriginalPickupAdmission;
+  readonly primaryWeaponSelected?: (actor: ActorId) => boolean;
   readonly events: SimulationEvents;
   readonly random: SourceRandom;
   readonly skill: 0 | 1 | 2 | 3;
@@ -168,6 +170,7 @@ export class QuakeCSource {
   readonly projectiles: Id1ProjectileAttacks;
   readonly environment: Id1Environment;
   private readonly pickups: Id1PickupBinding;
+  private readonly weaponStage: QcWeaponStageBinding | null;
   readonly messages: QcBroadcastMessages;
   readonly entities: QcEntityMemory;
   readonly slots: SourceActorSlots;
@@ -301,11 +304,19 @@ export class QuakeCSource {
     this.damage = damage;
     const pickups = new Id1PickupBinding(this.worldHost.options, options.pickups, () => this.machine);
     this.pickups = pickups;
+    const weaponStage = qcWeaponStage(prepared.program);
+    if (options.primaryWeaponSelected !== undefined && weaponStage === null) throw new Error("QC artifact has no qualified primary weapon stage");
+    this.weaponStage = weaponStage === null ? null : new QcWeaponStageBinding(weaponStage, () => this.machine, reference => {
+      const actor = this.slots.at(this.entities.slot(reference));
+      return actor === null || !this.activeClients.has(actor.id) || (options.primaryWeaponSelected?.(actor.id) ?? true);
+    });
+    const functions = pickups.composeFunctions(this.projectiles.compose(this.attacks.compose(damage.functionBoundary)));
+    const regions = pickups.composeRegions(damage.inlineBoundary);
     this.machine = new QcMachine({ program: prepared.program, entities: this.entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
       builtins: createQcBuiltins({ kind: binding.kind, random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
-      functionBoundary: pickups.composeFunctions(this.projectiles.compose(this.attacks.compose(damage.functionBoundary))),
+      functionBoundary: this.weaponStage?.composeFunctions(functions) ?? functions,
       observeCall: call => { pickups.validate(); return damage.observeCall(call); },
-      inlineBoundary: pickups.composeRegions(damage.inlineBoundary), validateEntityAccess: () => pickups.validate(),
+      inlineBoundary: this.weaponStage?.composeRegions(regions) ?? regions, validateEntityAccess: () => pickups.validate(),
       observeEntityStore: store => { this.projectiles.observeStore(store); return damage.observeEntityStore(store); } });
     this.actorState = new QcActorState({ machine: this.machine, rerelease: options.recipe.engineBehavior.content.startsWith("q1:rerelease:"),
       sourceSlot: actor => this.sourceSlot(actor), reference: reference => this.slots.at(this.entities.slot(reference))?.id ?? null,
@@ -783,6 +794,12 @@ export class QuakeCSource {
         return undefined;
       },
     });
+  }
+  clientWeaponSettled(actor: ActorId): boolean {
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC weapon client");
+    if (this.weaponStage === null) throw new Error("QC artifact has no qualified weapon stage");
+    return this.weaponStage.settled(this.entities.reference(slot));
   }
   mixedClientPreThink(actor: OwnedActor, command: UserCommand, frame: FrameContext): QuakeCClientMovement {
     const input = quakeCClientCommand(command);

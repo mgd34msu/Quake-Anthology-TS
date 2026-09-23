@@ -33,6 +33,7 @@ import type { ModClientServices } from "./mod-clients.ts";
 import type { ActiveModPresentation, ModQvmPresentationSource } from "./mod-presentations.ts";
 import type { QvmModPresentationDeclaration } from "../../contracts/qvm-mod-presentation.ts";
 import type { QvmModuleOptions } from "../../compat/qvm/module.ts";
+import type { SourceWeaponServices } from "../../contracts/source-items.ts";
 
 export interface ModOperations {
   readonly actors: ActorCallbackTable["operations"];
@@ -65,6 +66,7 @@ export interface ModInitialization {
   assertCurrent(): void;
 }
 export interface ModHostServices {
+  readonly weapons?: SourceWeaponServices;
   readonly clients?: ModClientServices;
   readonly commands?: Pick<ModCommands, "bind">;
   readonly files?: Pick<ModUserFiles, "for">;

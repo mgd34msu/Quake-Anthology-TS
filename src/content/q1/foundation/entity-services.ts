@@ -627,11 +627,12 @@ export class Q1EntityServices {
         player.weaponFrame = 0; player.continuousFiring = false; player.weaponAnimationAt = -1;
       },
       isHolstered: (): boolean => player.primaryHolstered,
-      resume: (item: ItemId | null): void => {
+      resume: (item: ItemId | null): boolean => {
         const requested = item === null ? player.weapon : resolve(item);
         const weapon = requested !== null && this.weaponAvailable(player, requested) ? requested : bestWeapon(this, actor);
         this.selectWeapon(actor, weapon);
         player.primaryHolstered = false;
+        return item === null || this.weaponItem(player.weapon) === item;
       },
     };
   }

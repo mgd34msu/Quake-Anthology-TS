@@ -4002,8 +4002,8 @@ export class Application {
         const sourceClient = command.seat === null ? this.graphical?.q3.values().next().value : this.graphical?.q3.get(command.seat);
         if (sourceClient !== undefined && (command.name === "use" || command.name === "weapnext" || command.name === "weapprev")) {
           const actor = this.commandActor(command.seat);
-          const player = this.simulation.movementPlayer(actor), grapple = this.simulation.recipe.equipment.grapple;
-          if (player?.arsenal.state.kind === "q3" && grapple.kind === "enabled" && grapple.binding === "slot") {
+          const player = this.simulation.movementPlayer(actor);
+          if (player?.arsenal.state.kind === "q3" && this.simulation.hasWeaponSlot(actor)) {
             this.simulation.playerCommand(actor, command.name, command.arguments_);
             const slot = this.simulation.weaponSlot(actor), selected = slot.pending ?? slot.active;
             const weapon = selected?.provider === player.arsenal.provider ? Q3_WEAPON_ITEMS.find(weapon => weapon.item === selected.item) : undefined;

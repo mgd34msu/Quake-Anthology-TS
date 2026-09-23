@@ -1,4 +1,4 @@
-import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage, ModQcProtection, ModQcInputOutput } from "../../contracts/mod-callbacks.ts";
+import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage, ModQcProtection, ModQcInputOutput, ModQcItems } from "../../contracts/mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
@@ -82,8 +82,29 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
       arguments: entry.field("arguments").list(consoleValue), globals: entry.field("globals").list(global => ({ name: global.field("name").string(), value: consoleValue(global.field("value")) })) })) }),
     ...(reader.field("protection").value === undefined ? {} : { protection: reader.field("protection").list(protection) }),
     ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(entry => readModPickupRule(entry, sourceCall)) }),
+    ...(reader.field("items").value === undefined ? {} : { items: items(reader.field("items")) }),
     ...(combat.value === undefined ? {} : { combat: { damage: sourceCall(combat.field("damage")),
       ...(combat.field("armorStage").value === undefined ? {} : { armorStage: armorStage(combat.field("armorStage")) }) } }) };
+}
+
+function items(reader: SaveReader): ModQcItems {
+  const selection = (value: SaveReader) => ({ field: value.field("field").string(), values: value.field("values").list(entry => ({ value: entry.field("value").finite(), item: namespaced(entry.field("item")) })) });
+  const weapons = reader.field("weapons");
+  return { definitions: reader.field("definitions").list(entry => {
+    const base = { item: namespaced(entry.field("item")), label: entry.field("label").string(), admission: entry.field("admission").choice("add", "replace-primary") };
+    return entry.field("kind").choice("counter", "weapon") === "counter" ? { ...base, kind: "counter" } : { ...base, kind: "weapon", ammo: entry.field("ammo").value === null ? null : namespaced(entry.field("ammo")) };
+  }), storage: reader.field("storage").list(entry => {
+    const field = entry.field("field").string();
+    if (entry.field("kind").choice("counter", "bits") === "bits") return { kind: "bits", field, privateMask: entry.field("privateMask").integer(0),
+      items: entry.field("items").list(value => ({ item: namespaced(value.field("item")), mask: value.field("mask").integer(1) })) };
+    const capacity = entry.field("capacity");
+    return { kind: "counter", field, item: namespaced(entry.field("item")), capacity: capacity.field("kind").choice("constant", "field") === "constant"
+      ? { kind: "constant", value: capacity.field("value").finite() } : { kind: "field", field: capacity.field("field").string() } };
+  }), ...(weapons.value === undefined ? {} : { weapons: { stage: { dispatcher: weapons.field("stage").field("dispatcher").string(), continuations: weapons.field("stage").field("continuations").list(value => value.string()),
+    repeats: weapons.field("stage").field("repeats").list(value => ({ function: value.field("function").string(), entry: value.field("entry").integer(0), exit: value.field("exit").integer(0), result: { word: value.field("result").field("word").integer(28), value: value.field("result").field("value").choice(0, 1) },
+      statements: value.field("statements").list(statement => ({ opcode: statement.field("opcode").integer(0), a: statement.field("a").integer(), b: statement.field("b").integer(), c: statement.field("c").integer() })) })) }, selected: selection(weapons.field("selected")),
+    select: { ...selection(weapons.field("select")), call: sourceCall(weapons.field("select").field("call")) },
+    resume: weapons.field("resume").list(sourceCall), model: { field: weapons.field("model").field("field").string(), frame: weapons.field("model").field("frame").string() } } }) };
 }
 
 function protection(reader: SaveReader): ModQcProtection {

@@ -81,6 +81,25 @@ export type ModQcProtection = {
       readonly selection?: { readonly field: string; readonly mask?: number; readonly values: readonly { readonly value: number; readonly kind: "none" | "screen" | "shield" }[] } } }
 );
 
+export interface ModQcItems {
+  readonly definitions: readonly ({ readonly item: ItemId; readonly label: string; readonly admission: "add" | "replace-primary" } & (
+    { readonly kind: "counter" } | { readonly kind: "weapon"; readonly ammo: ItemId | null }
+  ))[];
+  readonly storage: readonly (
+    { readonly kind: "counter"; readonly field: string; readonly item: ItemId; readonly capacity: { readonly kind: "constant"; readonly value: number } | { readonly kind: "field"; readonly field: string } }
+    | { readonly kind: "bits"; readonly field: string; readonly privateMask: number; readonly items: readonly { readonly item: ItemId; readonly mask: number }[] }
+  )[];
+  readonly weapons?: {
+    readonly stage: { readonly dispatcher: string; readonly continuations: readonly string[];
+      readonly repeats: readonly { readonly function: string; readonly entry: number; readonly exit: number; readonly result: { readonly word: number; readonly value: 0 | 1 };
+        readonly statements: readonly { readonly opcode: number; readonly a: number; readonly b: number; readonly c: number }[] }[] };
+    readonly selected: { readonly field: string; readonly values: readonly { readonly value: number; readonly item: ItemId }[] };
+    readonly select: { readonly field: string; readonly values: readonly { readonly value: number; readonly item: ItemId }[]; readonly call: ModSourceCall };
+    readonly resume: readonly ModSourceCall[];
+    readonly model: { readonly field: string; readonly frame: string };
+  };
+}
+
 export interface ModCallbackDeclaration {
   readonly version: 1;
   readonly runtime: "quakec";
@@ -101,4 +120,5 @@ export interface ModCallbackDeclaration {
   /** Independent protection executes original source armor over its private client storage. */
   readonly protection?: readonly ModQcProtection[];
   readonly pickups?: readonly ModPickupRule<ModSourceCall>[];
+  readonly items?: ModQcItems;
 }

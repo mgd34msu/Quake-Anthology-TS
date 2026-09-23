@@ -1,5 +1,7 @@
 # Functional target status
 
+Source-owned item groups and multiple weapon owners now share the existing inventory and selection path. The QuakeC adapter runs declared original selection, firing and continuation code; ordinary controls and source viewmodels work in a foreign world. The combined candidate passed strict compilation and 15 checks with 211 assertions, including original Copper in Q2 and save/load during a committed shot with another weapon pending. QVM/native component item adapters, wider source services and original-primary arsenal combinations remain unfinished. This does not change the 21/23 count or installed `698166c` executable.
+
 Original QVM component scenes now consume their own snapshots for entity effects, loops and player events. Cached source publications feed each viewing seat while original animation continues between gameplay updates. The exact candidate passed strict compilation, 11-file policy and 8 checks with 88 assertions, including original Threewave effects over Q1 and public save/load. Component HUD/camera, persistent presentation services and foreign-character overlay fidelity remain unfinished. This newer source does not change the target count or the installed `698166c` executable.
 
 QVM components can now declare original per-client server-frame calls after source actor updates, independently of input. Original Threewave checks cover timed regeneration/expiration, mode-specific source branches and public save/load. This closes one ongoing-player service gap; general T10 interoperability remains unfinished.
@@ -46,7 +48,7 @@ These parts describe the remaining implementation; they do not replace the T01â€
 |---|---|---|
 | T10 | Player and weapon services | Original mod player/weapon behavior continues across supported destination games, beyond the input and held-fire paths already connected. |
 | T10 | Original-primary pickup callers | Remaining original QuakeC pickup kinds/artifacts and native Q2 worlds retain their map lifecycle while using selected original grants; qualified QVM and classic id1 armor/ammo callers are implemented. |
-| T10 | New foreign items | Mods can admit new weapons, ammo and equipment with storage, selection and consumers, rather than only delegate grants for existing items. |
+| T10 | New foreign items | Shared item ownership, selection and saved state plus the QuakeC weapon/ammo adapter are implemented. QVM/native component adapters and other source item behaviors remain unfinished. |
 | T10 | Complete component presentation | Mod entities and remaining effects, HUD/camera, music and cinematic services reach the selected world with correct ownership and lifetime. |
 | T10 | Remaining world services and composition | Authored rules/objectives and remaining source services cooperate across enabled mods, saves and travel, with explicit conflict handling. |
 | T12 | Selected arsenals on original QuakeC worlds | Selected weapons run alongside original QC movement/world callbacks, with original pickup lifetimes and saved continuation. |
