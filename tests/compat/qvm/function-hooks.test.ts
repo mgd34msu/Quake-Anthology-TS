@@ -425,3 +425,73 @@ test("module binding checks artifact identity, retains host hooks through restar
   module.retire();
   expect(() => module.bindFunction(reference, () => 1)).toThrow("retired");
 });
+
+const conditionalSource = bytecode([
+  [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 6], [QvmOpcode.OP_CALL], [QvmOpcode.OP_CONST, 20], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 16],
+  [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 15], [QvmOpcode.OP_CALL], [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_EQ, 13],
+  [QvmOpcode.OP_CONST, 3], [QvmOpcode.OP_LEAVE, 16], [QvmOpcode.OP_CONST, 7], [QvmOpcode.OP_LEAVE, 16],
+  [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_ADD], [QvmOpcode.OP_STORE4],
+  [QvmOpcode.OP_CONST, -1], [QvmOpcode.OP_CALL], [QvmOpcode.OP_POP], [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_LEAVE, 16],
+]);
+for (const semantics of ["interpreted", "compiled"] satisfies readonly import("../../../src/compat/qvm/interpreter.ts").QvmSemantics[]) {
+  test(`${semantics} invocation branches retain original operands and isolate recursive decisions until async unwind`, async () => {
+    for (const asynchronous of [false, true]) {
+      let recurse = true, depth = 0, nested = 0, escaped: QvmFunctionCall | null = null;
+      const observed: (readonly [number, boolean])[] = [];
+      const vm = new QvmInterpreter(parseQvm(conditionalSource), call => {
+        if (!recurse) return 0;
+        recurse = false;
+        if (asynchronous) return Promise.resolve().then(async () => { nested = await call.invokeAsync(qvmArguments([]), 6); return 0; });
+        nested = call.invoke(qvmArguments([]), 6); return 0;
+      }, undefined, null, semantics);
+      const remove = vm.bindInvocation(6, call => {
+        const ownDepth = ++depth; escaped = call;
+        call.branches([{ instructionIndex: 10, decide: taken => { observed.push([ownDepth, taken]); return ownDepth > 1; } }]);
+        if (asynchronous) return call.proceedAsync().finally(() => { depth--; });
+        try { return call.proceed(); } finally { depth--; }
+      });
+      expect(asynchronous ? await vm.invokeAsync(qvmArguments([])) : vm.invoke(qvmArguments([]))).toBe(23);
+      expect(nested).toBe(7); expect(observed).toEqual([[2, true], [1, true]]);
+      expect(vm.addressSpace.dataView(64, 4).getInt32(0, true)).toBe(2);
+      const oldCall = (): QvmFunctionCall => { if (escaped === null) throw new Error("Missing original invocation"); return escaped; };
+      expect(() => oldCall().branches([])).toThrow("active");
+      remove(); expect(vm.invoke(qvmArguments([]))).toBe(27);
+      expect(observed).toEqual([[2, true], [1, true]]); expect(vm.stackPointer).toBe(vm.memory.length);
+    }
+  });
+  test(`${semantics} branch decisions cancel only their current invocation and preserve unowned errors`, () => {
+    for (const cancel of [false, true]) {
+      const vm = new QvmInterpreter(parseQvm(conditionalSource), () => 0, undefined, null, semantics);
+      vm.bindInvocation(6, call => {
+        const scope = call.cancellationScope();
+        call.branches([{ instructionIndex: 10, decide: (_taken, control) => {
+          if (!cancel) throw null;
+          try { return control.cancelFunction(scope); } catch { return false; }
+        } }]);
+        return call.proceed();
+      });
+      if (cancel) expect(vm.invoke(qvmArguments([]))).toBe(20);
+      else {
+        let caught = false;
+        try { vm.invoke(qvmArguments([])); } catch (error) { caught = true; expect(error).toBe(null); }
+        expect(caught).toBe(true);
+      }
+      expect(vm.addressSpace.dataView(64, 4).getInt32(0, true)).toBe(1); expect(vm.isActive).toBe(false);
+    }
+  });
+}
+test("branch registration rejects other functions, nonconditionals, duplicates, repeated binding and late binding", () => {
+  for (const request of ["outside", "opcode", "duplicate", "twice", "late"]) {
+    const vm = new QvmInterpreter(parseQvm(conditionalSource), () => 0);
+    vm.bindInvocation(6, call => {
+      if (request === "late") call.proceed();
+      if (request === "twice") call.branches([]);
+      const index = request === "outside" ? 15 : request === "opcode" ? 9 : 10;
+      const binding = { instructionIndex: index, decide: (taken: boolean) => taken };
+      call.branches(request === "duplicate" ? [binding, binding] : [binding]);
+      return 0;
+    });
+    expect(() => vm.invoke(qvmArguments([]))).toThrow("QVM branch");
+    expect(vm.isActive).toBe(false); expect(vm.stackPointer).toBe(vm.memory.length);
+  }
+});

@@ -10,10 +10,11 @@ function readWeaponReference(reader: SaveReader): WeaponReference {
 }
 
 export function readWeaponSlotState(reader: SaveReader): WeaponSlotRestoreState {
-  const kind = reader.field("kind").choice("active", "switching", "primary", "equipment", "holstering-primary", "holstering-equipment");
+  const kind = reader.field("kind").choice("active", "switching", "activating", "primary", "equipment", "holstering-primary", "holstering-equipment");
   switch (kind) {
     case "active": return { kind, provider: namespaced(reader.field("provider")) };
     case "switching": return { kind, from: namespaced(reader.field("from")), next: readWeaponReference(reader.field("next")) };
+    case "activating": return { kind, from: namespaced(reader.field("from")), next: readWeaponReference(reader.field("next")), request: reader.field("request").integer(1) };
     case "primary": case "equipment": return { kind };
     case "holstering-primary": case "holstering-equipment": return { kind, next: readWeaponReference(reader.field("next")) };
   }

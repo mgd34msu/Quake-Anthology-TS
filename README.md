@@ -213,6 +213,8 @@ In **Custom game → Equipment**, **Hook** selects **Off**, **Weapon slot**, or 
 
 The source picker contains Threewave for Q1, Q2 and Q3, LMCTF for Q2, and LRCTF for Q3. The Q3 adapters execute their original hook code, including pull behavior, models, sounds and saved continuation. Cross-runtime equipment integration is still being completed. These controls are included in the installed executable.
 
+Declared original QVM components now supply weapons through the shared inventory and normal weapon selection. The original executable owns firing, ammo changes, switching and temporary-entity cleanup; its cgame renders the view weapon. Pending switches and source state survive save/load. Original Threewave in a Q1 world passed the combined Application check. Full component HUD/initialization, additional artifact and equipment qualifications, and a graphical seat-retirement defect remain open. This change is newer than installed `67f2cfd`. See [original QVM weapons](docs/mod-compatibility.md#original-qvm-items-and-weapons).
+
 **Original Quake saves**
 
 `save NAME` writes the shared format, including mixed-game state. For an ordinary NetQuake source session, `save NAME v5` and `save NAME v6` export original Quake formats. Mixed compositions require shared saves because the original formats cannot retain their extra state. `load NAME` detects the format; if an original save matches several installed products, use `load NAME PRODUCT_ID` to select the intended source. `help save` and `help load` show the same syntax in the console.

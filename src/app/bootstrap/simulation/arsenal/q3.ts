@@ -98,7 +98,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
 
   handoff(actor: ActorId): PrimaryWeaponHandoff {
     this.require(actor);
-    return {
+    return { kind: "immediate",
       provider: this.provider,
       accepts: item => Q3_WEAPON_ITEMS.some(weapon => weapon.item === item &&
         (this.options.product === "missionpack" || weapon.weapon <= 10)) && this.options.inventory.count(actor, item) > 0,

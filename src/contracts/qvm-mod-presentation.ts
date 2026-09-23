@@ -12,6 +12,7 @@ export type QvmPresentationArgument =
   | { readonly kind: "source"; readonly value: "player-state" | "entity-state" | "centity" | "origin" | "snapshot" | "client-number" | "time" | "event" | "parameter" | "snapshot-number" | "server-command-sequence" };
 export interface QvmPresentationCall {
   readonly entry: number;
+  readonly when?: "weapon-presented";
   readonly arguments: readonly QvmPresentationArgument[];
 }
 /** Every offset names the matched original executable's data, not a host event translation. */
@@ -34,6 +35,8 @@ export interface QvmPlayerEventPresentation extends QvmPresentationBase {
     readonly time: readonly number[];
     readonly frameTime: readonly number[];
     readonly viewOrigin: readonly number[];
+    readonly viewAngles?: readonly number[];
+    readonly viewAxis?: readonly number[];
   };
   /** Run full original context/media initialization; never pre-register selected event sounds. */
   readonly initialize: readonly QvmPresentationCall[];
@@ -56,6 +59,8 @@ export interface QvmScenePresentation extends QvmPresentationBase {
     readonly time: readonly number[];
     readonly frameTime: readonly number[];
     readonly viewOrigin: readonly number[];
+    readonly viewAngles?: readonly number[];
+    readonly viewAxis?: readonly number[];
     readonly centities: { readonly address: number; readonly stride: number; readonly capacity: number;
       readonly state: number; readonly previousEvent: number; readonly snapshotTime: number };
   };

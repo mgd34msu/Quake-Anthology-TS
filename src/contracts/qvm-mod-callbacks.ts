@@ -1,3 +1,5 @@
+import type { QvmModActorFrame } from "./qvm-mod-actor-frame.ts";
+import type { QvmModItems } from "./qvm-mod-items.ts";
 import type { ContentDigest } from "./content.ts";
 import type { QvmAbiProfile } from "./execution.ts";
 import type { ItemId } from "./gameplay.ts";
@@ -26,7 +28,7 @@ export interface QvmModPickup extends ModPickupRule<QvmModSourceCall> {
   readonly context: readonly { readonly record: string; readonly offset: number; readonly value: QvmModValue }[];
 }
 export type QvmModCallback = ModCallbackBinding & QvmModSourceCall;
-export type QvmModActorField = { readonly offset: number } & (
+export type QvmModActorField = { readonly offset: number; readonly access?: "read-only" | "read-write" } & (
   | { readonly binding: "health"; readonly encoding: QvmModScalar }
   | { readonly binding: "inventory"; readonly encoding: QvmModScalar; readonly item: ItemId }
   | { readonly binding: "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }
@@ -50,6 +52,9 @@ export interface QvmModSourceActors {
   readonly inuse: number;
   readonly eventEntityType: number;
   readonly update: QvmModSourceCall | null;
+  readonly frame?: QvmModActorFrame;
+  /** Exact CONST-address/CONST-value/STORE4 instructions, applied only at fresh initialization. */
+  readonly initialStores?: readonly number[];
   /** gentity_t function-pointer fields; null means this source has no such callback. */
   readonly callbacks?: { readonly touch: number | null; readonly use: number | null; readonly pain: number | null; readonly die: number | null };
 }
@@ -99,6 +104,7 @@ export interface QvmModCallbackDeclaration {
   readonly combat?: QvmModCombat;
   readonly protection?: readonly QvmModProtection[];
   readonly pickups?: readonly QvmModPickup[];
+  readonly items?: QvmModItems;
   readonly initialize: readonly QvmModSourceCall[];
   readonly callbacks: readonly QvmModCallback[];
 }

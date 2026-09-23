@@ -1,3 +1,4 @@
+import { readQvmModItems } from "./qvm-items.ts";
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
 import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue, QvmModProtection, QvmModProtectionScalar, QvmModProtectionSelection, QvmModInputOutput, QvmModInputPointer } from "../../contracts/qvm-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
@@ -45,14 +46,16 @@ function binding(reader: SaveReader): ModCallbackBinding {
 }
 function field(reader: SaveReader): QvmModActorField {
   const offset = reader.field("offset").integer(0), binding = reader.field("binding").choice("health", "inventory", "origin", "velocity", "angles", "bounds-min", "bounds-max", "record", "constant", "constant-vector", "private");
+  const access = reader.field("access").value === undefined ? {} : { access: reader.field("access").choice("read-only", "read-write") };
+  if ("access" in access && !["health", "inventory", "origin", "velocity", "angles", "bounds-min", "bounds-max"].includes(binding)) reader.fail("Projection access applies only to canonical actor fields");
   switch (binding) {
-    case "health": return { offset, binding, encoding: reader.field("encoding").choice("int32", "float32") };
-    case "inventory": return { offset, binding, encoding: reader.field("encoding").choice("int32", "float32"), item: namespaced(reader.field("item")) };
+    case "health": return { offset, binding, ...access, encoding: reader.field("encoding").choice("int32", "float32") };
+    case "inventory": return { offset, binding, ...access, encoding: reader.field("encoding").choice("int32", "float32"), item: namespaced(reader.field("item")) };
     case "record": return { offset, binding, record: reader.field("record").string() };
-    case "constant": return { offset, binding, encoding: reader.field("encoding").choice("int32", "float32"), value: reader.field("value").number() };
+    case "constant": return { offset, binding, ...access, encoding: reader.field("encoding").choice("int32", "float32"), value: reader.field("value").number() };
     case "constant-vector": return { offset, binding, value: readVector(reader.field("value")) };
     case "private": return { offset, binding, byteLength: reader.field("byteLength").integer(1) };
-    default: return { offset, binding };
+    default: return { offset, binding, ...access };
   }
 }
 function protectionScalar(reader: SaveReader): QvmModProtectionScalar {
@@ -122,7 +125,14 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
     entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     ...(actors.value === undefined ? {} : { sourceActors: { allocate: actors.field("allocate").integer(0),
       release: { entry: actors.field("release").field("entry").integer(0), argument: actors.field("release").field("argument").integer(0) },
+      ...(actors.field("initialStores").value === undefined ? {} : { initialStores: actors.field("initialStores").list(value => value.integer(0)) }),
       inuse: actors.field("inuse").integer(0), eventEntityType: actors.field("eventEntityType").integer(0), update: actors.field("update").nullable(sourceCall),
+      ...(actors.field("frame").value === undefined ? {} : { frame: {
+        call: sourceCall(actors.field("frame").field("call")),
+        clock: { address: actors.field("frame").field("clock").field("address").integer(0), store: actors.field("frame").field("clock").field("store").integer(0), argument: actors.field("frame").field("clock").field("argument").integer(0) },
+        owned: actors.field("frame").field("owned").list(value => ({ instruction: value.field("instruction").integer(0), localInstruction: value.field("localInstruction").integer(0) })),
+        end: { instruction: actors.field("frame").field("end").field("instruction").integer(0), completedTaken: actors.field("frame").field("end").field("completedTaken").boolean() },
+      } }),
       ...(actors.field("callbacks").value === undefined ? {} : { callbacks: {
         touch: actors.field("callbacks").field("touch").nullable(field => field.integer(0)), use: actors.field("callbacks").field("use").nullable(field => field.integer(0)),
         pain: actors.field("callbacks").field("pain").nullable(field => field.integer(0)), die: actors.field("callbacks").field("die").nullable(field => field.integer(0)),
@@ -134,6 +144,7 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
       client: combat.field("client").nullable(client => ({ pointer: client.field("pointer").integer(0), record: client.field("record").string(),
         health: client.field("health").integer(0), armor: client.field("armor").integer(0), protection: client.field("protection").number(), team: client.field("team").integer(0) })) } }),
     ...(reader.field("protection").value === undefined ? {} : { protection: reader.field("protection").list(protection) }),
+    ...(reader.field("items").value === undefined ? {} : { items: readQvmModItems(reader.field("items"), sourceCall) }),
     ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(rule => ({ ...readModPickupRule(rule, sourceCall),
       context: rule.field("context").list(field => ({ record: field.field("record").string(), offset: field.field("offset").integer(0), value: argument(field.field("value")) })) })) }),
     actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(), address: record.field("address").integer(1),

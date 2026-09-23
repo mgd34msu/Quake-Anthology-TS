@@ -1,3 +1,5 @@
+import { QvmModActorFrame, qvmActorBootstrap, validateQvmModActorFrame } from "./mod-actor-frame.ts";
+import { QvmModItems, validateQvmModItems } from "./mod-items.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { FrameContext } from "../../contracts/time.ts";
 import type { SimulationPresentation } from "../../app/bootstrap/simulation/types.ts";
@@ -93,7 +95,8 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
       if (!Number.isSafeInteger(field.offset) || field.offset < 0 || field.offset % 4 !== 0 || size < 1 || field.offset + size > record.stride)
         throw new Error("QVM mod actor field exceeds its source record");
       for (let byte = field.offset; byte < field.offset + size; byte++) { if (occupied.has(byte)) throw new Error("Overlapping QVM mod actor fields"); occupied.add(byte); }
-      if (shared(field)) {
+      if (field.access !== undefined && !shared(field)) throw new Error("QVM projection direction requires a canonical field");
+      if (shared(field) && field.access !== "read-only") {
         const key = field.binding === "inventory" ? `inventory:${field.item}` : field.binding;
         if (canonical.has(key)) throw new Error(`Multiple authoritative QVM mod stores for ${key}`);
         canonical.add(key);
@@ -136,6 +139,13 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
     }
   };
   const lifecycle = declaration.sourceActors;
+  qvmActorBootstrap(lifecycle?.initialStores ?? [], artifact.image, declaration.actorRecords);
+  if (lifecycle?.frame !== undefined) {
+    const record = declaration.actorRecords.find(record => record.id === declaration.entityRecord);
+    if (record === undefined || lifecycle.update !== null) throw new Error("QVM actor frame requires exclusive original lifecycle ownership");
+    validateQvmModActorFrame(lifecycle.frame, artifact.image, record, lifecycle.inuse);
+    checkCall(lifecycle.frame.call, new Set(["time", "elapsed"]));
+  }
   if (declaration.presentation?.runtime === "qvm-scene") {
     const record = declaration.entityRecord === null ? undefined : records.get(declaration.entityRecord);
     if (clients === undefined || record === undefined || record.stride < qvmSharedEntityBytes(declaration.abiProfile))
@@ -166,6 +176,7 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
   if (declaration.combat !== undefined) checkCall({ entry: declaration.combat.entry, arguments: [], globals: declaration.combat.globals, returns: "void" }, new Set(["time"]));
   validateQvmModActors(artifact, declaration);
   validateQvmModProtection(declaration);
+  if (declaration.items !== undefined) validateQvmModItems(declaration.items, declaration, artifact.image);
   for (const definition of declaration.protection ?? []) checkCall(definition.absorb,
     new Set(["self", "attacker", "inflictor", "amount", "knockback", "damage-flags", "regular-protection-scale", "point", "direction", "normal", "time"]));
   validateQvmModPickups(declaration);
@@ -279,6 +290,10 @@ export class QvmModProvider {
   private readonly playerEvents: QvmModPlayerEvents | null;
   private readonly protection: readonly QvmModProtection[];
   private readonly pickups: QvmModPickups;
+  private readonly actorFrame: QvmModActorFrame | null;
+  private readonly items: QvmModItems | null;
+  private savedItems: unknown = undefined;
+  private readonly weaponInputs: { readonly actor: ActorId; frame: Frame | null }[] = [];
   private pickupContexts = 0;
   private commands: ModCommandPort | null = null;
   private files: QvmFiles | null;
@@ -314,12 +329,14 @@ export class QvmModProvider {
         projections: [...this.projections].map(([actor, slot]) => ({ actor: savedActorId(actor), slot, owned: this.owned.has(actor), event: this.eventKeys.get(actor) ?? null })), nextSlot: this.nextSlot,
         clientSlots: this.clientBindings?.checkpoint().map(entry => ({ actor: savedActorId(entry.actor), slot: entry.slot, admitted: entry.admitted })) ?? [],
         ...(this.playerEvents === null ? {} : { playerEvents: this.playerEvents.checkpoint() }),
+        ...(this.items === null ? {} : { items: this.items.checkpoint() }),
         defaults: [...this.defaults].map(([id, bytes]) => ({ id, bytes })),
         configstrings: [...this.configstrings].map(([index, value]) => ({ index, value })),
         cvars: this.cvars.captureSaveState(), files: this.files?.captureCheckpoint() ?? null, portals: this.portals?.capturePortalCheckpoint() ?? null,
         entityTokens: this.entityTokens.captureSaveState() }) }, random: [], callbacks: [] }),
       restore: state => {
         const decoded = new SaveReader(decodeCheckpointValue(state.state.bytes));
+        this.savedItems = decoded.field("items").value;
         this.entityTokens.restoreSaveState(decoded.field("entityTokens").value);
         if (decoded.field("portals").value !== undefined && decoded.field("portals").value !== null) {
           if (this.portals === null) throw new Error("Saved QVM mod portals require destination topology");
@@ -378,14 +395,20 @@ export class QvmModProvider {
         const entity = declaration.entityRecord; if (entity === null) throw new Error("Missing QVM client entity record"); this.pointer(actor, entity);
         this.playerEvents?.track(actor, this.playerAddress(actor));
       },
-      admitted: actor => { for (const protection of this.protection) protection.bindActor(actor); this.pickups.bindActor(actor); },
+      admitted: actor => { this.items?.admit(actor); for (const protection of this.protection) protection.bindActor(actor); this.pickups.bindActor(actor); },
       release: actor => this.releaseProjection(actor),
       reservedSlots: () => this.projections.values(),
-      openInput: application => this.input.open(application),
+      openInput: application => { const closeInput = this.input.open(application), closeItems = this.items?.open(application);
+        return () => { try { closeItems?.(); } finally { closeInput(); } }; },
+      requestedWeapon: actor => this.items?.requested(actor) ?? null,
       output: (outputs, application, run) => this.input.output(outputs, application, run),
       invoke: (call, actor, application) => {
-        this.invoke(call, application === undefined ? new Map<ModCallbackInput, ModRuntimeValue>([["self", { kind: "actor", value: actor }],
+        const run = () => this.invoke(call, application === undefined ? new Map<ModCallbackInput, ModRuntimeValue>([["self", { kind: "actor", value: actor }],
           ["time", { kind: "float", value: seconds(services) }]]) : modClientInputValues(application));
+        if (application !== undefined && this.items?.applies(call) === true) {
+          const scope = { actor, frame: null }; this.weaponInputs.push(scope);
+          try { this.items.apply(application, run); } finally { this.weaponInputs.pop(); }
+        } else run();
       },
       playerState: actor => {
         const record = declaration.clients?.playerStateRecord; if (record === undefined) throw new Error("Missing QVM client player state");
@@ -418,11 +441,29 @@ export class QvmModProvider {
         return channel === undefined ? observe() : channel.observe(actor, execution, observe);
       },
     });
+    this.items = declaration.items === undefined ? null : new QvmModItems(declaration.items, this.module, artifact.image, services, artifact.module.id, content, {
+      pickup: () => this.pickupScope()?.execution,
+      pointer: (actor, record) => { if (!this.projections.has(actor)) throw new Error("QVM item actor has no source projection"); return this.pointer(actor, record); },
+      live: actor => !this.closed && services.actors.isLive(actor) && this.projections.has(actor) && !this.retiredProjections.has(actor) && this.clientBindings?.admitted(actor) === true,
+      invoke: (actor, call) => this.invoke(call, new Map<ModCallbackInput, ModRuntimeValue>([["self", { kind: "actor", value: actor }], ["time", { kind: "float", value: seconds(services) }]])),
+      ground: actor => { const body = services.bodies.read(actor), client = services.clients?.forActor(actor);
+        if (body === null || client == null) throw new Error("QVM weapon posture lost its authoritative client");
+        if (body.ground !== null && body.ground !== services.engine?.world()) return this.entitySlot(body.ground);
+        return services.clients?.grounded?.(client) === true ? 1022 : 1023;
+      },
+    });
+    this.actorFrame = declaration.sourceActors?.frame === undefined ? null : new QvmModActorFrame(declaration.sourceActors.frame, this.module, artifact.image, pointer => {
+      const record = this.entityRecord(), offset = pointer - record.address;
+      if (offset < 0 || offset % record.stride !== 0 || offset / record.stride >= record.capacity) throw new Error("Original actor loop escaped its declared source array");
+      const actor = this.actorAt(offset / record.stride), owner = actor === null ? undefined : this.owned.get(actor);
+      return owner !== undefined && this.services.actors.resolveOwned(owner.id) === owner && !this.retiredProjections.has(owner.id);
+    });
     this.rememberDefaults();
     this.unsubscribe = services.actors.onRelease(actor => {
       this.sceneDirty = true;
       this.playerEvents?.release(actor.id);
       this.pickups.release(actor.id);
+      this.items?.release(actor.id);
       for (const protection of this.protection) protection.release(actor.id);
       const slot = this.projections.get(actor.id), owned = this.owned.has(actor.id);
       this.physics.get(actor.id)?.(); this.physics.delete(actor.id); this.owned.delete(actor.id); this.eventKeys.delete(actor.id);
@@ -514,9 +555,9 @@ export class QvmModProvider {
       if (this.declaration.presentation?.runtime === "qvm-scene") {
         const state = this.scenePublication(), player = state.clients.find(row => row.actor.equals(viewer));
         if (player === undefined) return null;
-        return { gameState: state.gameState, gameStateRevision: state.gameStateRevision, snapshot: { serverTime: state.serverTime, playerState: player.state } };
+        return { weaponPresented: this.services.weapons?.presented(viewer, this.artifact.module.id) === true, gameState: state.gameState, gameStateRevision: state.gameStateRevision, snapshot: { serverTime: state.serverTime, playerState: player.state } };
       }
-      return { gameState: this.gameState(), gameStateRevision: this.presentationRevision,
+      return { weaponPresented: this.services.weapons?.presented(viewer, this.artifact.module.id) === true, gameState: this.gameState(), gameStateRevision: this.presentationRevision,
         snapshot: { serverTime: Math.trunc(seconds(this.services) * 1000),
           playerState: readSourceQvmPlayerState(this.view(this.playerAddress(viewer), qvmPlayerStateBytes(this.declaration.abiProfile)), this.declaration.abiProfile) } };
     },
@@ -636,7 +677,7 @@ export class QvmModProvider {
   }
   private observe(): readonly Observation[] {
     const result: Observation[] = [];
-    for (const [actor, slot] of this.projections) if (!this.owned.has(actor) && !this.retiredProjections.has(actor)) for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field)) {
+    for (const [actor, slot] of this.projections) if (!this.owned.has(actor) && !this.retiredProjections.has(actor)) for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field) && field.access !== "read-only") {
       const address = record.address + slot * record.stride + field.offset;
       result.push({ actor, address, field, bytes: this.module.memory.bytes.slice(address, address + fieldSize(field)) });
     }
@@ -644,7 +685,8 @@ export class QvmModProvider {
   }
   private captureWrites(): void {
     const frame = this.frames.at(-1); if (frame === undefined) return;
-    const changes = frame.observations.filter(entry => entry.bytes.some((byte, offset) => byte !== this.module.memory.bytes[entry.address + offset]));
+    const scope = this.weaponInputs.at(-1);
+    const changes = frame.observations.filter(entry => !(scope?.frame === frame && scope.actor.equals(entry.actor) && entry.field.binding !== "health" && entry.field.binding !== "inventory") && entry.bytes.some((byte, offset) => byte !== this.module.memory.bytes[entry.address + offset]));
     this.validatePickupWrites(changes);
     for (const active of this.frames) active.observations = this.observe();
     for (const { actor, address, field } of changes) {
@@ -752,6 +794,7 @@ export class QvmModProvider {
       }
       this.refresh(); const frame: Frame = { observations: this.observe(), pending: [], cursor: 0 }; this.frames.push(frame);
       const pickup = this.pickupScopes.at(-1); if (pickup?.frame === null) pickup.frame = frame;
+      const weapon = this.weaponInputs.at(-1); if (weapon?.frame === null) weapon.frame = frame;
       return { words, finish: (succeeded: boolean) => {
         try {
           if (!this.closed) {
@@ -816,6 +859,8 @@ export class QvmModProvider {
   }
   async initialize(): Promise<void> {
     this.reserveProtection();
+    for (const store of qvmActorBootstrap(this.declaration.sourceActors?.initialStores ?? [], this.artifact.image, this.declaration.actorRecords))
+      this.module.memory.dataView(store.address, 4).setInt32(0, store.value, true);
     for (const call of this.declaration.initialize) {
       const execution = this.begin(call, new Map<ModCallbackInput, ModRuntimeValue>([["time", { kind: "float", value: seconds(this.services) }]]));
       let succeeded = false;
@@ -946,7 +991,12 @@ export class QvmModProvider {
       if (this.closed) return undefined;
       if (this.services.actors.isLive(actor)) invoke(source.update, actor);
     }
-    if (!this.closed) this.clientBindings?.frame(invoke);
+    const clients = this.actorFrame === null || this.actorFrame.run(() => {
+      const call = this.declaration.sourceActors?.frame?.call;
+      if (call === undefined) throw new Error("Original actor frame declaration disappeared");
+      this.invoke(call, new Map<ModCallbackInput, ModRuntimeValue>([["time", { kind: "float", value: time }], ["elapsed", { kind: "float", value: elapsed }]]));
+    });
+    if (!this.closed && clients) this.clientBindings?.frame(invoke);
     if (!this.closed) this.publish(); return undefined;
   }
   presentations(): readonly SimulationPresentation[] {
@@ -1134,12 +1184,15 @@ export class QvmModProvider {
     else if (saved.files !== null) throw new Error("Saved QVM mod filesystem is unavailable");
     const active = this.pickups.isActive || this.protection.some(protection => protection.isActive);
     this.pickups.close();
+    this.items?.clear();
     for (const protection of this.protection) protection.close();
     this.reserveProtection();
     this.playerEvents?.close();
     this.module.restore(checkpoint);
     if (this.declaration.presentation?.runtime === "qvm-scene") this.sceneBaseline = this.scenePublication();
     this.clientBindings?.start();
+    for (const entry of this.clientBindings?.players() ?? []) this.items?.admit(entry.actor);
+    if (this.items !== null) { if (this.savedItems === undefined) throw new Error("Saved QVM items lack their source request checkpoint"); this.items.restore(this.savedItems); }
     if (active) this.activateProtection();
     return undefined;
   }
@@ -1147,6 +1200,8 @@ export class QvmModProvider {
     if (this.closed) return undefined;
     const errors: unknown[] = [];
     try { this.pickups.close(); } catch (error) { errors.push(error); }
+    try { this.actorFrame?.close(); } catch (error) { errors.push(error); }
+    try { this.items?.close(); } catch (error) { errors.push(error); }
     for (const protection of this.protection) try { protection.close(); } catch (error) { errors.push(error); }
     this.closed = true; this.playerEvents?.close();
     for (const actor of [...this.owned.values()]) if (this.services.actors.isLive(actor.id)) {

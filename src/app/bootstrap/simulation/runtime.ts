@@ -764,6 +764,7 @@ export class SharedSimulation implements Simulation {
               const slot = simulation.weaponSlots.get(actor.id); if (slot === undefined) throw new Error("Source weapon slot was not admitted");
               return slot.bind(binding);
             }, selected: (actor, provider) => simulation.weaponSlots.get(actor)?.selected(provider) ?? false,
+            presented: (actor, provider) => simulation.weaponSlots.get(actor)?.presented(provider) ?? false,
             request: (actor, weapon) => simulation.requestWeapon(actor, weapon),
           }, ...(native === undefined ? {} : { native }), ...(options.modCommands === undefined ? {} : { commands: options.modCommands }),
             ...(options.modFiles === undefined ? {} : { files: options.modFiles }), actors: simulation.actors, bodies: simulation.bodies, combat: simulation.combat, inventory: simulation.inventory, seed: options.seed, time: () => simulation.sourceFrame.time,
@@ -1839,12 +1840,12 @@ export class SharedSimulation implements Simulation {
         }
         return true;
       };
-      return { provider: this.weaponProvider.provider, accepts, select, holster: () => { holstered = true; }, isHolstered: () => holstered,
+      return { kind: "immediate", provider: this.weaponProvider.provider, accepts, select, holster: () => { holstered = true; }, isHolstered: () => holstered,
         resume: item => { holstered = false; return item === null || select(item); } };
     }
     const player = this.requirePlayer(actor);
     if (this.selectedArsenal !== null) return this.selectedArsenal.handoff(actor);
-    if (source.kind === "quakec") return { provider: this.weaponProvider.provider,
+    if (source.kind === "quakec") return { kind: "immediate", provider: this.weaponProvider.provider,
       accepts: item => this.primaryUi(actor).items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned),
       select: item => source.game.requestClientWeapon(actor, item),
       holster: () => { if (!this.actors.isLive(actor)) throw new Error("QC weapon owner retired"); }, isHolstered: () => source.game.clientWeaponSettled(actor),
@@ -1853,7 +1854,7 @@ export class SharedSimulation implements Simulation {
     if (source.kind === "q2") {
       const entity = source.game.entity(actor); if (entity === null) throw new Error("Q2 primary has no source player");
       const definition = (item: import("../../../contracts/gameplay.ts").ItemId) => source.weapons.registeredDefinitions().find(weapon => weapon.item === item);
-      return { provider: this.weaponProvider.provider, accepts: item => definition(item) !== undefined && this.inventory.count(actor, item) > 0,
+      return { kind: "immediate", provider: this.weaponProvider.provider, accepts: item => definition(item) !== undefined && this.inventory.count(actor, item) > 0,
         select: item => { const weapon = definition(item); if (weapon === undefined) return false; const result = source.weapons.requestWeapon(entity, source.game, weapon.name); return result === "selected" || result === "current"; },
         holster: () => source.weapons.requestHolster(entity), isHolstered: () => source.weapons.isHolstered(entity),
         resume: item => { source.weapons.resumePrimary(entity, source.game, this.q2WeaponInput(player), item === null ? null : definition(item)?.name ?? null); return item === null || this.arsenal(player).activeWeapon === item; } };
@@ -1863,7 +1864,7 @@ export class SharedSimulation implements Simulation {
     const select = (item: import("../../../contracts/gameplay.ts").ItemId): boolean => { const weapon = Q3_WEAPON_ITEMS.find(value => value.item === item);
       if (weapon === undefined || this.inventory.count(actor, item) <= 0 || runtime().product === "baseq3" && weapon.weapon > 10) return false;
       this.q3Arsenals.set(player.actor, q3RequestWeapon(runtime(), weapon.weapon)); return true; };
-    return { provider: this.weaponProvider.provider, accepts: item => Q3_WEAPON_ITEMS.some(weapon => weapon.item === item && (runtime().product === "missionpack" || weapon.weapon <= 10)) && this.inventory.count(actor, item) > 0,
+    return { kind: "immediate", provider: this.weaponProvider.provider, accepts: item => Q3_WEAPON_ITEMS.some(weapon => weapon.item === item && (runtime().product === "missionpack" || weapon.weapon <= 10)) && this.inventory.count(actor, item) > 0,
       select, holster: () => { this.q3Arsenals.set(player.actor, q3RequestWeaponHolster(runtime())); }, isHolstered: () => runtime().externalSlot === "holstered",
       resume: item => { this.q3Arsenals.set(player.actor, q3RequestWeaponResume(runtime())); return item === null || select(item); } };
   }

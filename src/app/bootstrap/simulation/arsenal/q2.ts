@@ -95,7 +95,7 @@ export class Q2SelectedArsenal implements SelectedArsenal {
   }
   handoff(actor: ActorId): PrimaryWeaponHandoff {
     const { weapons, game } = this.options;
-    return { provider: this.provider,
+    return { kind: "immediate", provider: this.provider,
       accepts: item => { const definition = this.definitions.find(definition => definition.item === item);
         return definition !== undefined && game.host.inventory.count(actor, item) > 0 && (definition.ammo === null || game.host.inventory.count(actor, definition.ammo) >= definition.quantity); },
       select: item => this.select(actor, item), holster: () => weapons.requestHolster(this.options.observe(actor).owner),

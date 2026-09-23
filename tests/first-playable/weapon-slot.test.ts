@@ -48,12 +48,12 @@ test("slot and grapple animation checkpoints retain cross-provider intent and so
 test("multiple admitted owners preserve committed outgoing traversal and validate saved ownership after binding", async () => {
   const { WeaponSlot } = await import("../../src/app/bootstrap/simulation/weapon-slot.ts");
   const calls: string[] = []; let settled = false, live = true;
-  const slot = new WeaponSlot({ provider: "q1:weapons", accepts: item => item === "q1:weapon/axe", select: () => true,
+  const slot = new WeaponSlot({ kind: "immediate", provider: "q1:weapons", accepts: item => item === "q1:weapon/axe", select: () => true,
     holster: () => { calls.push("retire"); }, isHolstered: () => settled, resume: () => { calls.push("primary"); return true; } }, undefined,
     { kind: "switching", from: "q1:weapons", next: { provider: "mod:weapons", item: "mod:weapon/beam" } });
   expect(() => slot.validateRestore()).toThrow("not admitted");
   const close = slot.bind({ current: () => live, read: () => ({ source: { provider: "mod:weapons", content: "q1:classic:id1:installed" }, active: "mod:weapon/beam", pending: null, model: null, items: [] }),
-    handoff: { provider: "mod:weapons", accepts: item => item === "mod:weapon/beam", select: () => true, holster: () => { calls.push("retire-mod"); }, isHolstered: () => true, resume: () => { calls.push("mod"); return true; } } });
+    handoff: { kind: "immediate", provider: "mod:weapons", accepts: item => item === "mod:weapon/beam", select: () => true, holster: () => { calls.push("retire-mod"); }, isHolstered: () => true, resume: () => { calls.push("mod"); return true; } } });
   slot.validateRestore(); slot.reconcile(); expect(slot.selected("mod:weapons")).toBe(false); expect(calls).toEqual([]);
   settled = true; slot.reconcile(); expect(calls).toEqual(["mod"]); expect(slot.selected("mod:weapons")).toBe(true);
   live = false; close(); expect(slot.primarySelected()).toBe(true); expect(calls).toEqual(["mod", "primary"]);
@@ -63,15 +63,43 @@ test("multiple admitted owners preserve committed outgoing traversal and validat
 test("original incoming refusal resumes the exact outgoing source and preserves reentrant replacement", async () => {
   const { WeaponSlot } = await import("../../src/app/bootstrap/simulation/weapon-slot.ts");
   const log: string[] = [];
-  const slot = new WeaponSlot({ provider: "q1:weapons", accepts: () => true, select: () => true, holster: () => { log.push("retire-primary"); }, isHolstered: () => true,
+  const slot = new WeaponSlot({ kind: "immediate", provider: "q1:weapons", accepts: () => true, select: () => true, holster: () => { log.push("retire-primary"); }, isHolstered: () => true,
     resume: () => { log.push("resume-primary"); return true; } });
   let refuse: () => boolean = () => false;
   const close = slot.bind({ current: () => true, read: () => ({ source: { provider: "mod:weapons", content: "q1:classic:id1:installed" }, active: null, pending: null, model: null, items: [] }),
-    handoff: { provider: "mod:weapons", accepts: () => true, select: () => true, holster: () => { log.push("retire-mod"); }, isHolstered: () => true,
+    handoff: { kind: "immediate", provider: "mod:weapons", accepts: () => true, select: () => true, holster: () => { log.push("retire-mod"); }, isHolstered: () => true,
       resume: () => { log.push("original-refusal"); return refuse(); } } });
   expect(slot.request({ provider: "mod:weapons", item: "mod:weapon/empty" })).toBe(true); slot.reconcile();
   expect(slot.primarySelected()).toBe(true); expect(log).toEqual(["retire-primary", "original-refusal", "resume-primary"]);
   log.length = 0; refuse = () => { close(); return false; };
   slot.request({ provider: "mod:weapons", item: "mod:weapon/empty" }); slot.reconcile();
   expect(log).toEqual(["retire-primary", "original-refusal", "resume-primary"]); expect(slot.primarySelected()).toBe(true);
+});
+
+test("deferred source selection restores its exact request without replay and preserves cancellation replacement", async () => {
+  const { WeaponSlot } = await import("../../src/app/bootstrap/simulation/weapon-slot.ts");
+  let resumed = 0, cancelled = 0, restored = 0, live = true;
+  let status: "pending" | "accepted" | "refused" = "pending";
+  let onCancel = () => {};
+  const request = { id: 7, status: () => status, cancel: () => { cancelled++; onCancel(); } };
+  const primary = { kind: "immediate", provider: "q1:weapons", accepts: () => true, select: () => true,
+    holster: () => {}, isHolstered: () => true, resume: () => true } satisfies import("../../src/contracts/source-items.ts").SourceWeaponHandoff;
+  const source = { current: () => live, read: () => ({ source: { provider: "mod:weapons", content: "q3:classic:baseq3:fixture" }, active: null, pending: null, model: null, items: [] }),
+    handoff: { kind: "source-input", provider: "mod:weapons", accepts: () => true, select: () => true,
+      holster: () => {}, isHolstered: () => true, resume: () => { resumed++; return request; },
+      restoreRequest: (id, item) => { restored++; expect(id).toBe(7); expect(item).toBe("mod:weapon/shotgun"); return request; },
+    } } satisfies import("../../src/contracts/source-items.ts").SourceWeaponBinding;
+  const slot = new WeaponSlot(primary); slot.bind(source);
+  slot.request({ provider: "mod:weapons", item: "mod:weapon/shotgun" }); slot.reconcile();
+  expect(slot.snapshot()).toEqual({ kind: "activating", from: "q1:weapons", next: { provider: "mod:weapons", item: "mod:weapon/shotgun" }, request: 7 });
+  expect(slot.selected("mod:weapons")).toBe(false);
+  const restoredSlot = new WeaponSlot(primary, undefined, slot.snapshot()); const close = restoredSlot.bind(source); restoredSlot.validateRestore();
+  expect([resumed, restored]).toEqual([1, 1]);
+  status = "accepted"; restoredSlot.reconcile(); expect(restoredSlot.selected("mod:weapons")).toBe(true);
+  status = "pending";
+  // A cancellation callback may change the slot; it must not be overwritten by the older request.
+  onCancel = () => { slot.request({ provider: "q1:weapons", item: "q1:weapon/axe" }); };
+  slot.request({ provider: "mod:weapons", item: "mod:weapon/other" });
+  expect(cancelled).toBe(1); expect(slot.primarySelected()).toBe(true);
+  live = false; close(); expect(restoredSlot.primarySelected()).toBe(true);
 });

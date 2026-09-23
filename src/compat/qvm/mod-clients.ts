@@ -22,6 +22,7 @@ interface Operations {
   output?(outputs: readonly QvmModInputOutput[], application: ModClientApplication, run: () => void): readonly ModClientInputOutput[];
   reservedSlots?(): Iterable<number, undefined, unknown>;
   playerState(actor: ActorId): Q3PlayerState;
+  requestedWeapon?(actor: ActorId): number | null;
   send(text: string, recipient: ActorId | null): void;
 }
 
@@ -164,7 +165,7 @@ export class QvmModClientBindings {
     if (application !== undefined && entry !== null) {
       const ps = this.operations.playerState(entry.actor), time = application.frame.time;
       const command = q3CommandForControls({ command: application.command }, time.kind === "seconds" ? time.value * 1000 : time.value,
-        { requestedWeapon: ps.weapon, useHoldable: application.command.kind === "q3" && (application.command.buttons & 4) !== 0 });
+        { requestedWeapon: this.operations.requestedWeapon?.(entry.actor) ?? ps.weapon, useHoldable: application.command.kind === "q3" && (application.command.buttons & 4) !== 0 });
       const words = (angle: number): number => Math.trunc(angle * 65536 / 360) & 65535;
       return { ...command, angles: [words(application.absoluteAim.x) - ps.deltaAngleWords[0],
         words(application.absoluteAim.y) - ps.deltaAngleWords[1], words(application.absoluteAim.z) - ps.deltaAngleWords[2]] };
@@ -174,7 +175,7 @@ export class QvmModClientBindings {
     const input = accepted.input, milliseconds = accepted.time.kind === "seconds" ? accepted.time.value * 1000 : accepted.time.value;
     const ps = this.operations.playerState(entry.actor);
     const command = relativeQ3SourceCommand(input.source, input.command.kind,
-      q3CommandForControls(input, milliseconds, { requestedWeapon: ps.weapon,
+      q3CommandForControls(input, milliseconds, { requestedWeapon: this.operations.requestedWeapon?.(entry.actor) ?? ps.weapon,
         useHoldable: input.arsenal?.useHoldable ?? (input.command.kind === "q3" && (input.command.buttons & 4) !== 0) }),
       { x: ps.deltaAngleWords[0], y: ps.deltaAngleWords[1], z: ps.deltaAngleWords[2] }, input.angleSpace);
     return { ...command, angles: [command.angles.x, command.angles.y, command.angles.z] };

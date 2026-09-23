@@ -1,3 +1,4 @@
+import { SourceItemRetired } from "../../contracts/source-items.ts";
 import type { InventoryEntry, InventoryTable, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { OriginalPickupOffer, OriginalPickupResolution, OriginalPickupRule } from "../../contracts/original-pickups.ts";
@@ -131,8 +132,8 @@ export class SharedInventoryTable implements InventoryTable {
     store.groups.add(group);
     const current = (): boolean => group.active && this.actors.resolveOwned(actor.id) === actor && this.stores.get(actor) === store
       && store.groups.has(group);
-    return { current, stored: changes => {
-      if (!current()) throw new Error("Committed inventory source is no longer current");
+    const lease: SourceItemLease = { current, stored: changes => {
+      if (!current()) throw new SourceItemRetired(lease, actor, requested.owner);
       const actual = this.groupEntries(group), changed = new Set<ItemId>();
       const snapshots = changes.map(change => {
         const before = copyEntry(change.before), after = copyEntry(change.after);
@@ -141,13 +142,14 @@ export class SharedInventoryTable implements InventoryTable {
         changed.add(after.item); return Object.freeze({ before, after });
       });
       for (const change of snapshots) {
-        if (!current()) throw new Error("Committed inventory source retired before delivery");
+        if (!current()) throw new SourceItemRetired(lease, actor, requested.owner);
         let published = false;
         this.operations.configure.dispatch([actor, change.after], ([owner, entry]) => {
-          if (!current() || owner !== actor || !isDeepStrictEqual(entry, change.after)) throw new Error("Committed source inventory publication was changed");
+          if (!current()) throw new SourceItemRetired(lease, actor, requested.owner);
+          if (owner !== actor || !isDeepStrictEqual(entry, change.after)) throw new Error("Committed source inventory publication was changed");
           published = true; return undefined;
         }, () => { if (!published) throw new Error("Committed source inventory requires publication before observers"); });
-        if (!current()) throw new Error("Committed inventory source retired during delivery");
+        if (!current()) throw new SourceItemRetired(lease, actor, requested.owner);
       }
       return undefined;
     }, close: () => {
@@ -158,6 +160,7 @@ export class SharedInventoryTable implements InventoryTable {
       for (const item of seen) if (store.items.get(item) === group) store.items.delete(item);
       return undefined;
     } };
+    return lease;
   }
 
   itemDefinitions(actor: ActorId): readonly SourceItemDefinition[] {

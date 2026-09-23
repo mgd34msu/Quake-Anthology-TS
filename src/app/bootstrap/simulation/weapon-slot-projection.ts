@@ -37,7 +37,7 @@ export function projectWeaponSlot(
   const supplied = new Map(projections.flatMap(source => source.items.map(item => [item.id, item] satisfies readonly [typeof item.id, PlayerUiItem])));
   const items = [...primary.ui.items.filter(item => !supplied.has(item.id)), ...supplied.values()];
   return { active: visible === undefined ? primary.active : visible.active,
-    pending: state.kind === "switching" ? state.next : visible === undefined ? primary.pending : visible.pending,
+    pending: state.kind !== "active" ? state.next : visible === undefined ? primary.pending : visible.pending,
     ui: { ...primary.ui, items, weaponStatus: visible === undefined ? primary.ui.weaponStatus : visible.weaponStatus,
       activeWeapon: visible === undefined ? primary.ui.activeWeapon : visible.active?.item ?? null, ammo: visible === undefined ? primary.ui.ammo : visible.ammo },
     model: visible === undefined ? primary.model : visible.model };

@@ -1,7 +1,7 @@
 import { freemem } from "node:os";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
 import type { Rect } from "../../contracts/render.ts";
-import type { Vec3 } from "../../contracts/math.ts";
+import type { Axis, Vec3 } from "../../contracts/math.ts";
 import { QvmCgameImport } from "../../compat/qvm/abi.ts";
 import { QvmModPresentation, type QvmSceneContext } from "../../compat/qvm/mod-presentation.ts";
 import { qvmCommonSyscall } from "../../compat/qvm/common-syscalls.ts";
@@ -48,6 +48,7 @@ export interface ApplicationModPresentationOptions {
   readonly commands?: Extract<QvmCommonServices, { readonly role: "cgame" }>["commands"];
   print(text: string): void;
   viewOrigin(): Vec3;
+  viewAxis?(): Axis;
   nextFrame(): Promise<void>;
   scalar?(call: QvmHostCall, owner: ApplicationModPresentation): QvmHostResult | null;
 }
@@ -121,9 +122,9 @@ export class ApplicationModPresentation {
       const timeMilliseconds = Math.trunc(Math.max(publication.current.serverTime, this.previousFrameTime ?? publication.current.serverTime,
         this.options.clock.now() + this.sceneTimeOffset));
       return { ...context, timeMilliseconds, frameTimeMilliseconds: this.previousFrameTime === null ? 0 : timeMilliseconds - this.previousFrameTime,
-        viewOrigin: this.options.viewOrigin(), scene: this.sceneContext };
+        viewOrigin: this.options.viewOrigin(), ...(this.options.viewAxis === undefined ? {} : { viewAxis: this.options.viewAxis() }), scene: this.sceneContext };
     }
-    return { ...context, frameTimeMilliseconds, viewOrigin: this.options.viewOrigin() };
+    return { ...context, frameTimeMilliseconds, viewOrigin: this.options.viewOrigin(), ...(this.options.viewAxis === undefined ? {} : { viewAxis: this.options.viewAxis() }) };
   }
   private selectScene(source: QvmModScenePublication): QvmSceneContext {
     const player = source.clients.find(row => row.actor.equals(this.options.viewer));

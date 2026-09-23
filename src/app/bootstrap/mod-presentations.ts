@@ -37,7 +37,7 @@ export class ApplicationModPresentations {
   private async create(presentation: WorldSeatPresentation, source: ActiveModPresentation): Promise<Entry> {
     const reject = (): never => { throw new Error("Component cgame requires an unsupported destination view or overlay takeover"); };
     const consumer = await ApplicationModPresentation.create({ ...this.options, source, viewer: presentation.local.player.actor,
-      seat: presentation.local.player.seat.id, viewport: presentation.viewport, viewOrigin: () => presentation.camera().origin,
+      seat: presentation.local.player.seat.id, viewport: presentation.viewport, viewOrigin: () => presentation.camera().origin, viewAxis: () => presentation.camera().axis,
       output: { scene: reject, command: reject, text: reject, listener: reject } });
     try {
       this.assertOpen();

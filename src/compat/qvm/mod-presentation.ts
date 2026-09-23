@@ -1,10 +1,12 @@
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { Q3PlayerState } from "../../contracts/protocol.ts";
-import type { Vec3 } from "../../contracts/math.ts";
+import type { Axis, Vec3 } from "../../contracts/math.ts";
 import type { QvmModPresentationDeclaration, QvmPresentationArgument, QvmPresentationCall, QvmScenePresentation } from "../../contracts/qvm-mod-presentation.ts";
 import type { Q3SourcePlayerEvent } from "../../app/bootstrap/simulation/q3/types.ts";
 import type { SourceGameStateRecord } from "../../network/q3/game-state.ts";
+import { dot3, vectorToAngles } from "../../core/math.ts";
+import { qvmAnglesToAxis } from "../../core/qvm-math.ts";
 import { float32ToBits } from "../../core/numeric.ts";
 import { QvmModule, type QvmModuleOptions } from "./module.ts";
 import { QvmOpcode } from "./image.ts";
@@ -31,6 +33,8 @@ export interface QvmPresentationContext {
   readonly frameTimeMilliseconds: number;
   readonly timeMilliseconds?: number;
   readonly viewOrigin: Vec3;
+  readonly viewAxis?: Axis;
+  readonly weaponPresented?: boolean;
   readonly snapshot: { readonly serverTime: number; readonly playerState: Q3PlayerState };
   readonly scene?: QvmSceneContext;
 }
@@ -66,7 +70,8 @@ export function validateQvmModPresentation(options: Pick<QvmModPresentationOptio
   };
   range(storage.gameState, QVM_GAME_STATE_BYTES);
   for (const address of [...storage.time, ...storage.frameTime]) range(address, 4);
-  for (const address of storage.viewOrigin) range(address, 12);
+  for (const address of [...storage.viewOrigin, ...(storage.viewAngles ?? [])]) range(address, 12);
+  for (const address of storage.viewAxis ?? []) range(address, 36);
   const entities = storage.centities;
   range(entities.address, entities.stride * entities.capacity);
   if (!Number.isSafeInteger(entities.capacity) || entities.capacity < 1 || !Number.isSafeInteger(entities.stride)
@@ -258,11 +263,23 @@ export class QvmModPresentation {
     }
     for (const address of storage.time) memory.dataView(address, 4).setInt32(0, int32(context.timeMilliseconds ?? snapshot.serverTime), true);
     for (const address of storage.frameTime) memory.dataView(address, 4).setInt32(0, context.frameTimeMilliseconds, true);
-    for (const address of storage.viewOrigin) {
-      const view = memory.dataView(address, 12);
-      view.setFloat32(0, context.viewOrigin.x, true); view.setFloat32(4, context.viewOrigin.y, true); view.setFloat32(8, context.viewOrigin.z, true);
-    }
+    this.view(context);
     return context;
+  }
+  private view(context: QvmPresentationContext): void {
+    const storage = this.options.declaration.storage;
+    const vector = (address: number, value: Vec3): void => {
+      const view = this.module.memory.dataView(address, 12);
+      view.setFloat32(0, value.x, true); view.setFloat32(4, value.y, true); view.setFloat32(8, value.z, true);
+    };
+    for (const address of storage.viewOrigin) vector(address, context.viewOrigin);
+    if ((storage.viewAngles?.length ?? 0) + (storage.viewAxis?.length ?? 0) === 0) return;
+    const axis = context.viewAxis;
+    if (axis === undefined) throw new Error("Declared original view storage requires the actual viewing camera axis");
+    for (const address of storage.viewAxis ?? []) for (const [index, value] of axis.entries()) vector(address + index * 12, value);
+    const angles = vectorToAngles(axis[0]), basis = qvmAnglesToAxis(angles);
+    const roll = Math.atan2(dot3(axis[1], basis[2]), dot3(axis[1], basis[1])) * 180 / Math.PI;
+    for (const address of storage.viewAngles ?? []) vector(address, { ...angles, z: roll });
   }
   private word(argument: QvmPresentationArgument, context: QvmPresentationContext, event?: Q3SourcePlayerEvent): number {
     if (argument.kind === "float32") return float32ToBits(argument.value) | 0;
@@ -296,6 +313,12 @@ export class QvmModPresentation {
   private async call(call: QvmPresentationCall, context: QvmPresentationContext, event?: Q3SourcePlayerEvent): Promise<void> {
     const current = () => { this.current(event ?? this.activeEvent); };
     current();
+    if (call.when === "weapon-presented") {
+      const selected = this.options.context().weaponPresented;
+      if (selected === undefined) throw new Error("Original weapon presentation requires a current source owner");
+      if (!selected) return;
+    }
+    this.view(context);
     await this.module.callAsync(call.arguments.map(argument => this.word(argument, context, event)), call.entry, current);
     current();
   }

@@ -121,6 +121,27 @@ test("source presentation advances original frame calls once with current camera
   } finally { f.owner.close(); }
 });
 
+test("source weapon presentation checks current ownership per call and preserves the final camera basis", async () => {
+  const { qvmAnglesToAxis } = await import("../../../src/core/qvm-math.ts");
+  const f = fixture(), axis = qvmAnglesToAxis({ x: 15, y: 73, z: 12 }); let selected = false;
+  const owner = new QvmModPresentation({ ...f.options,
+    context: () => ({ ...f.options.context(), viewAxis: axis, weaponPresented: selected }),
+    declaration: { ...f.declaration, storage: { ...f.declaration.storage, viewAngles: [79000], viewAxis: [79012] },
+      frame: [{ entry: 12, arguments: [], when: "weapon-presented" }, { entry: 12, arguments: [], when: "weapon-presented" }] },
+  });
+  try {
+    await owner.initialize(); await owner.advance(1); expect(f.calls).toEqual([0]);
+    selected = true; f.effect(() => { selected = false; }); await owner.advance(2); expect(f.calls).toEqual([0, 2]);
+    const view = owner.module.memory.dataView(79000, 48), angles = { x: view.getFloat32(0, true), y: view.getFloat32(4, true), z: view.getFloat32(8, true) };
+    const actual = qvmAnglesToAxis(angles);
+    for (const [index, vector] of axis.entries()) {
+      expect(view.getFloat32(12 + index * 12, true)).toBe(vector.x); expect(view.getFloat32(16 + index * 12, true)).toBe(vector.y); expect(view.getFloat32(20 + index * 12, true)).toBe(vector.z);
+      const restored = actual[index]; if (restored === undefined) throw new Error("Missing camera basis");
+      expect(restored.x).toBeCloseTo(vector.x, 5); expect(restored.y).toBeCloseTo(vector.y, 5); expect(restored.z).toBeCloseTo(vector.z, 5);
+    }
+  } finally { owner.close(); f.owner.close(); }
+});
+
 test("raw original player/configstring writers preserve legacy private values while normalized writers retain translation", () => {
   const entityView = new DataView(new ArrayBuffer(204)), entity = readSourceQvmEntityState(entityView, "q3-1.16n-base");
   entity.eType = 91; entity.event = 349; entity.powerups = 4096;

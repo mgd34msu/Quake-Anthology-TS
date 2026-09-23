@@ -22,7 +22,8 @@ function argument(reader: SaveReader): QvmPresentationArgument {
 function call(reader: SaveReader): QvmPresentationCall {
   const parameters = reader.field("arguments").list(argument);
   if (parameters.length > 10) return reader.fail("Source presentation call exceeds QVM argument ABI");
-  return { entry: reader.field("entry").integer(0), arguments: parameters };
+  return { entry: reader.field("entry").integer(0), arguments: parameters,
+    ...(reader.field("when").value === undefined ? {} : { when: reader.field("when").choice("weapon-presented") }) };
 }
 function program(reader: SaveReader): QvmPresentationProgram {
   return { path: normalizeResourcePath(reader.field("path").string()), digest: readDigest(reader.field("digest")),
@@ -40,7 +41,9 @@ export function readQvmModPresentationDeclaration(reader: SaveReader): QvmModPre
     initialize: reader.field("initialize").list(call), refresh: reader.field("refresh").list(call), frame: reader.field("frame").list(call) };
   const commonStorage = { gameState: storage.field("gameState").integer(0),
     time: storage.field("time").list(value => value.integer(0)), frameTime: storage.field("frameTime").list(value => value.integer(0)),
-    viewOrigin: storage.field("viewOrigin").list(value => value.integer(0)) };
+    viewOrigin: storage.field("viewOrigin").list(value => value.integer(0)),
+    ...(storage.field("viewAngles").value === undefined ? {} : { viewAngles: storage.field("viewAngles").list(value => value.integer(0)) }),
+    ...(storage.field("viewAxis").value === undefined ? {} : { viewAxis: storage.field("viewAxis").list(value => value.integer(0)) }) };
   const commonEntities = { address: centities.field("address").integer(0), stride: centities.field("stride").integer(1), capacity: centities.field("capacity").integer(1),
     state: centities.field("state").integer(0) };
   if (runtime === "qvm-scene") {
@@ -60,6 +63,8 @@ export function readQvmModPresentationDeclaration(reader: SaveReader): QvmModPre
       centities: { address: centities.field("address").integer(0), stride: centities.field("stride").integer(1), capacity: centities.field("capacity").integer(1),
         state: centities.field("state").integer(0), origin: centities.field("origin").integer(0) },
       time: storage.field("time").list(value => value.integer(0)), frameTime: storage.field("frameTime").list(value => value.integer(0)),
-      viewOrigin: storage.field("viewOrigin").list(value => value.integer(0)) },
+      viewOrigin: storage.field("viewOrigin").list(value => value.integer(0)),
+    ...(storage.field("viewAngles").value === undefined ? {} : { viewAngles: storage.field("viewAngles").list(value => value.integer(0)) }),
+    ...(storage.field("viewAxis").value === undefined ? {} : { viewAxis: storage.field("viewAxis").list(value => value.integer(0)) }) },
     project: reader.field("project").list(call), event: call(reader.field("event")) };
 }

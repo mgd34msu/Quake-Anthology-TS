@@ -1,3 +1,4 @@
+import type { SourceWeaponHandoff } from "../../../contracts/source-items.ts";
 import type { ProjectileRole } from "../../../contracts/weapon-behavior.ts";
 import { q1WaterTransition } from "../../../movement/q1/water-transition.ts";
 import { stepQ1Pusher } from "../../../movement/q1/pusher.ts";
@@ -620,14 +621,14 @@ export class Q1EntityServices {
     player.weapon = weapon; player.weaponFrame = 0; player.continuousFiring = false; player.weaponAnimationAt = -1;
     this.host.emit({ kind: "weapon", player: actor.id, weapon, viewModel: this.weaponModel(weapon, player), frame: 0, punch: 0 }); return true;
   }
-  primaryWeaponHandoff(actor: OwnedActor) {
+  primaryWeaponHandoff(actor: OwnedActor): SourceWeaponHandoff {
     const player = this.players.get(actor);
     if (player === undefined) throw new Error("Player has no Q1 weapon state");
     const resolve = (item: ItemId): Q1Weapon | null => {
       const weapon = [...WEAPONS, ...this.registeredWeapons.keys()].find(candidate => this.weaponItem(candidate) === item);
       return weapon !== undefined && this.weaponAvailable(player, weapon) ? weapon : null;
     };
-    return {
+    return { kind: "immediate",
       provider: this.provider,
       accepts: (item: ItemId): boolean => resolve(item) !== null,
       select: (item: ItemId): boolean => {

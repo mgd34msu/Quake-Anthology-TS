@@ -217,7 +217,7 @@ export class QcModItems {
       return this.current(entry) && this.active(actor) === item;
     };
     return { current: () => this.current(entry), read: () => this.presentation(entry), handoff: {
-      provider: this.provider, accepts, select, holster: () => { if (!this.current(entry)) throw new Error("QC source weapon retired while holstering"); }, isHolstered: () => this.current(entry) && stage.settled(entry.reference),
+      kind: "immediate", provider: this.provider, accepts, select, holster: () => { if (!this.current(entry)) throw new Error("QC source weapon retired while holstering"); }, isHolstered: () => this.current(entry) && stage.settled(entry.reference),
       resume: item => { if (!this.current(entry)) throw new Error("QC source weapon retired while resuming");
         if (item !== null) return select(item);
         for (const call of definition.resume) { if (!this.current(entry)) throw new Error("QC source weapon retired while resuming"); this.invoke(actor, call); }

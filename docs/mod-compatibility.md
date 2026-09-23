@@ -294,6 +294,14 @@ The `homing-source-built` package uses [Anup Shinde's authored Q3 homing source]
 
 The public workflow selected a Q2 rocket launcher on Q2 geometry, admitted two actual local players, observed authored steering, saved and loaded, then matched ten subsequent 50 ms trajectory samples through projectile retirement. The offline coop launch used this Q3 component's FFA-derived relationship; it does not establish cooperative team fidelity. The adapter does not automatically extract arbitrary mod subsystems or multi-projectile firing modes.
 
+### Original QVM items and weapons
+
+A component's `items` declaration maps its original weapon bits, ammo counters and capacity storage to the shared inventory. Its weapon stage names the actual selection values, conditional boundaries and original input continuation. Source-input switching remains pending until the original program accepts it; saves preserve that request without replaying a shot or ammo debit. The source cgame can use `when: "weapon-presented"` to draw the active or outgoing weapon during switching.
+
+The adapter uses the destination's applied movement timing and pose inside the original caller. Original weapon timers, firing, recoil and view-weapon code still execute; movement is applied once. Declared source entity frames preserve original temporary-event expiration, free/unlink and paused clocks while filtering actors owned by other components.
+
+The combined original Threewave-in-Q1 Application check covers selection, firing, cgame models, pending-switch save/load and source entity cleanup. This qualifies the declared artifact and exercised paths. LRCTF armed/release behavior, full original initialization/HUD and every weapon/holdable/offhand combination remain unfinished. A separate stale local-player UI defect remains recorded; source cancellation after a committed ammo debit is qualified through the public simulation boundary.
+
 ### Original QVM component sounds and effects
 
 A QVM callback declaration can include `presentation` with `version: 1` and `runtime: "qvm-player-events"`. Both `gameplay` and `cgame` identify the original program path, digest and ABI. The cgame must be present in the same component's mounts. Preparation rejects a mismatched program or storage layout before executing it. The enclosing declaration digest pins this presentation contract in saves.

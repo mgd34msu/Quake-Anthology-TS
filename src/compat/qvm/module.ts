@@ -7,7 +7,7 @@ import type { ResolvedQvmArtifact } from "./artifacts.ts";
 import type { QvmAllocationProfile } from "./allocation.ts";
 import { QvmGuestMemory } from "./guest-memory.ts";
 import { QvmInterpreter } from "./interpreter.ts";
-import type { QvmArguments, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall } from "./interpreter.ts";
+import type { QvmArguments, QvmCancellationScope, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall } from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
 import type { QvmMemory } from "./memory.ts";
 import type { VmRegistration } from "./registry.ts";
@@ -60,9 +60,14 @@ export class QvmModule implements GuestExecutor {
   readonly interpreter: QvmInterpreter;
   readonly memory: QvmMemory;
   readonly guestMemory: QvmGuestMemory;
-  private currentEntry: Pick<QvmSyscall, "invoke" | "invokeAsync"> | null = null;
+  private currentEntry: Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> | null = null;
   private currentCommandArguments: readonly string[] | null = null;
   private retired = false;
+
+  cancelFunction(scope: QvmCancellationScope): never {
+    if (this.currentEntry === null) throw new Error("QVM cancellation requires the current source invocation");
+    return this.currentEntry.cancelFunction(scope);
+  }
 
   constructor(private readonly options: QvmModuleOptions, initialization?: typeof deferredUiInitialization) {
     const artifact = options.artifact;

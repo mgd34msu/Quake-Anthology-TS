@@ -35,6 +35,11 @@ export interface QvmSyscall {
 export type QvmSystemCallResult = number | Promise<number>;
 export type QvmSystemCall = (call: QvmSyscall) => QvmSystemCallResult;
 
+export interface QvmBranchBinding {
+  readonly instructionIndex: number;
+  decide(originalTaken: boolean, control: Pick<QvmSyscall, "cancelFunction">): boolean;
+}
+
 export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> {
   readonly instructionIndex: number;
   readonly execution: "synchronous" | "asynchronous";
@@ -44,6 +49,8 @@ export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsyn
   readonly guest: QvmMemory;
   /** Open before proceeding; cancellation returns zero from this exact source call. */
   cancellationScope(): QvmCancellationScope;
+  /** Bind original conditional decisions once, before proceeding, for this exact invocation. */
+  branches(bindings: readonly QvmBranchBinding[]): void;
   /** Runs the original body once with its actual caller stack and argument addresses. */
   proceed(): number;
   proceedAsync(): Promise<number>;
@@ -145,6 +152,7 @@ interface SourceFunctionCall {
   readonly operandDepth: number;
   readonly parent: SourceFunctionCall | null;
   active: boolean;
+  branches: ReadonlyMap<number, QvmBranchBinding["decide"]> | null;
   cancellation: { readonly signal: Error; requested: boolean; failure: { readonly error: unknown } | null } | null;
 }
 
@@ -165,6 +173,7 @@ export class QvmInterpreter {
   private readonly observedData: DataView;
   private readonly code: Int32Array;
   private readonly instructionPointers: Int32Array;
+  private branchFunctionEnds: Map<number, number> | null = null;
   private readonly allocations: readonly QvmAllocation[];
   private readonly source: string;
   private readonly dataMask: number;
@@ -540,7 +549,7 @@ export class QvmInterpreter {
   private intercept(frame: Invocation, sp: number, returnPC: number, instructionIndex: number, hook: QvmFunctionHook | undefined,
     observers: readonly FunctionObserver[] | undefined): QvmSystemCallResult {
     const sourceCall: SourceFunctionCall = { stack: sp, returnPC, operands: frame.operands, operandDepth: frame.operands.count,
-      parent: frame.functionScope, active: true, cancellation: null };
+      parent: frame.functionScope, active: true, branches: null, cancellation: null };
     const unusedArguments: QvmArguments = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     let proceeded = false;
     const failure: { value: { readonly error: unknown } | null } = { value: null };
@@ -560,6 +569,25 @@ export class QvmInterpreter {
           sourceCall.cancellation = { signal: new Error("QVM function scope cancelled"), requested: false, failure: null };
           this.cancellationScopes.set(capability, sourceCall);
           return capability;
+        }),
+        branches: bindings => scope.control(() => {
+          if (proceeded || sourceCall.branches !== null) throw new Error("QVM branches must bind once before proceeding");
+          let end = this.branchFunctionEnds?.get(instructionIndex);
+          if (end === undefined) {
+            end = instructionIndex + 1;
+            while (end < this.instructionPointers.length && this.codeWord(this.targetPC(end)) !== QvmOpcode.OP_ENTER) end++;
+            this.branchFunctionEnds ??= new Map<number, number>(); this.branchFunctionEnds.set(instructionIndex, end);
+          }
+          const branches = new Map<number, QvmBranchBinding["decide"]>();
+          for (const binding of bindings) {
+            if (!Number.isSafeInteger(binding.instructionIndex) || binding.instructionIndex <= instructionIndex || binding.instructionIndex >= end)
+              throw new Error("QVM branch is outside its owning function");
+            const pc = this.targetPC(binding.instructionIndex), opcode = this.codeWord(pc);
+            if (opcode < QvmOpcode.OP_EQ || opcode > QvmOpcode.OP_GEF || branches.has(pc))
+              throw new Error("QVM branch requires a distinct original conditional instruction");
+            branches.set(pc, binding.decide);
+          }
+          sourceCall.branches = branches;
         }),
         proceed: () => scope.run(() => {
           try { begin(); return this.executeSync(unusedArguments, instructionIndex, sourceCall); }
@@ -592,7 +620,7 @@ export class QvmInterpreter {
     };
     const complete = (value: number): number => {
       try { this.checkCancellation(sourceCall); return value; }
-      finally { sourceCall.active = false; }
+      finally { sourceCall.active = false; sourceCall.branches = null; }
     };
     const failed = (error: unknown): number => {
       try {
@@ -604,7 +632,7 @@ export class QvmInterpreter {
           return 0;
         }
         throw error;
-      } finally { sourceCall.active = false; }
+      } finally { sourceCall.active = false; sourceCall.branches = null; }
     };
     let result: QvmSystemCallResult;
     try { result = observeNext(0); } catch (error) { return failed(error); }
@@ -824,7 +852,17 @@ export class QvmInterpreter {
             const right = operands.pop();
             const left = operands.pop();
             const target = this.codeWord(pc);
-            pc = evaluateQvmBranch(opcode, left, right) ? target : pc + 4;
+            const taken = evaluateQvmBranch(opcode, left, right), decide = frame.functionScope?.branches?.get(pc - 1);
+            if (decide === undefined) pc = taken ? target : pc + 4;
+            else {
+              const owner = frame.functionScope;
+              if (owner === null || !owner.active) throw new Error("QVM branch invocation has expired");
+              const result = this.hostCall(frame, scope => decide(taken, { cancelFunction: scope.cancelFunction }) ? 1 : 0, owner);
+              const chosen = typeof result === "number" ? result : yield result;
+              this.checkCancellation(owner); this.live(); frame.validate();
+              if (!owner.active || this.active !== frame) throw new Error("QVM branch invocation is no longer current");
+              pc = chosen !== 0 ? target : pc + 4;
+            }
             break;
           }
           // The release interpreter has no default trap. A return into an
