@@ -1,6 +1,6 @@
 # Functional target status
 
-T10 progress: declared QuakeC, QVM and native pickup functions now use the current armor or inventory binding. Original code decides acceptance, quantities and tier changes while ported Q1/Q2/Q3 maps retain targets, feedback and respawning. Original Copper, Threewave and native Q2 checks cover source rules, and a public Q1 Application check covers authored map touches and save/load. This source unit is installed in `9ddbb8d`. Original-primary VM pickup routing, arbitrary foreign item admission and remaining player/weapon services are unfinished. The installed executable also retains QuakeC client frames and component sounds/effects.
+T10 progress: declared original grants now work through ported Q1/Q2/Q3 map touches and qualified original Q3/Threewave primary pickup callers. The original primary retains targets, feedback and respawning; canonical inventory borrows its source weapon bits and ammo counters. The public Threewave Application check covers physical armor/ammo touches and save/load. Installed `9ddbb8d` contains the preceding ported-map unit, QuakeC client frames and component sounds/effects. Original QuakeC/native primary pickup routing, arbitrary foreign item admission and remaining player/weapon services are unfinished.
 
 **20/23 functional targets complete under the recorded acceptance scope. T10 and T12 are reopened; T19 remains externally blocked.** T10 is the first unfinished target and the current priority. Its dedicated enable/disable menu is connected in source. General source adapters and simultaneous composition across game systems remain unfinished. Multiple mods from Quake 1, Quake 2, Quake 3, expansions, and rereleases must run together across any supported game or mixed configuration. Composition must cover authored gameplay systems, including weapons, actors and AI, items, rules, and events. Full campaigns, native peers, physical devices, and whole-game performance retain the explicit limits below.
 
@@ -34,13 +34,29 @@ The accepted [Application](../../src/app/bootstrap/application.ts) now consumes 
 | T22 | Cameras, diagnostics and tools | Complete in accepted source | Source capture clocks, remote readback, camera handling and diagnostic/tool commands have consumers. Actual public replay produced an inspected complete frame. Broader capture/device workflows remain unqualified. |
 | T23 | LLM assistance | Complete in accepted source | Provider/model/effort selection, callbacks/cancellation, command documentation and validated execution are joined. Real existing-account ask/exec passed. Fresh real-provider sign-in is manual validation; no implementation defect is identified. |
 
+### Remaining work within the open targets
+
+These parts describe the remaining implementation; they do not replace the T01–T23 acceptance targets or represent equal amounts of work.
+
+| Target | Remaining part | Completion behavior |
+|---|---|---|
+| T10 | Player and weapon services | Original mod player/weapon behavior continues across supported destination games, beyond the input and held-fire paths already connected. |
+| T10 | Original-primary pickup callers | Original QuakeC and native Q2 worlds retain their map lifecycle while using selected original grants; qualified QVM callers are implemented. |
+| T10 | New foreign items | Mods can admit new weapons, ammo and equipment with storage, selection and consumers, rather than only delegate grants for existing items. |
+| T10 | Complete component presentation | Mod entities and remaining effects, HUD/camera, music and cinematic services reach the selected world with correct ownership and lifetime. |
+| T10 | Remaining world services and composition | Authored rules/objectives and remaining source services cooperate across enabled mods, saves and travel, with explicit conflict handling. |
+| T12 | Team Arena gameplay in mixed worlds | Weapons, holdables, timed actors, teleportation, invulnerability and objective interactions use their source behavior and survive saves. |
+| T12 | Team Arena presentation | Original projectile models, effects and sounds reach the mixed world and end at the correct source time. |
+| T12 | Expansion arsenal choices and supply | Menus expose supported expansion arsenals, and pickups supply the selected arsenal in both directions of mixing. |
+| T19 | Original GRank integration | A compatible original transport/provider connects the implemented ranking account/report interface; currently externally blocked. |
+
 Private evidence remains narrower than whole-target completion. T10's CTF callback-file reconstruction and Xatrix single-player check passed 2 tests with 77 assertions, in an earlier private composition; the subsequent public Application joins and restore evidence are recorded below. The CTF case does not authorize original deathmatch saves: its source reinitializes the player on admission; Xatrix retained living-player continuation. See the machine-local [source boundary](../../.artifacts/resume-20260916/targets/t10/final/source-boundary.md). T12's wave7 passed three mixed-expansion flows and failed the Rogue firing check; wave8 passed that corrected fourth flow. These are successive source checks, not an installed four-flow run. Machine-local evidence: [wave7](../../.artifacts/resume-20260916/targets/t12/wave7/run.qkFJHu/tests.log), [wave8](../../.artifacts/resume-20260916/targets/t12/wave8/run.izKbzF/tests.log).
 
 T23 real existing-account evidence covers public `llm_ask` and `llm_exec`, each with HTTP 200. The generated echo batch was displayed, validated, and executed by the ordinary handler. Controlled callback tests pass. Fresh real-provider browser sign-in remains manual validation; it does not imply a missing source handler. [Receipt](../../.artifacts/resume-20260916/targets/t23-real-fixed/receipt.md), [reconciliation](../../.artifacts/resume-20260918/t23-reconciliation/review.md).
 
 The historical 477-row source ledger is unchanged. This update neither re-audits that inventory nor converts reviewed rows into completed functional targets.
 
-Latest installed T10 checkpoint: `7bd9461` includes original QuakeC client frames and source think deadlines, original component client sounds/effects and saved event-cursor restoration, regular/powered protection composition, QVM committed-write tracking, armor/HUD/save corrections, component controls and native held-fire loops. Its compiled original Threewave GL check covers movement, firing, armor and save/load; archived original QuakeC checks cover held fire, private animation progression and checkpoint continuation. Public Application checks separately cover an original Threewave armor component in Q1, including save/load and continued damage. General mod composition remains unfinished; target totals remain 20/23. See [delivery and evidence](../execution-status.md).
+Latest installed T10 checkpoint: `9ddbb8d` includes original mod pickup operations, QuakeC client frames and source think deadlines, component client sounds/effects, regular/powered protection composition, QVM committed-write tracking, component controls and native held-fire loops. Its compiled original Threewave GL check covers movement, firing, armor and save/load; the archived public Q1 Application check covers original armor/ammo grants through authored map pickups and save/load. The newer original-primary QVM addition is qualified in source and awaits executable delivery. General mod composition remains unfinished; target totals remain 20/23. See [delivery and evidence](../execution-status.md).
 
 ## T01 session and resource lifetime
 

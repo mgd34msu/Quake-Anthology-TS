@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { DamageRequest, RegularArmorState } from "../../../src/contracts/gameplay.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import type { OriginalPickupOffer, OriginalPickupRule } from "../../../src/contracts/original-pickups.ts";
+import type { OriginalPickupOffer, OriginalPickupRule, SourcePickupSelection } from "../../../src/contracts/original-pickups.ts";
 import { ActorCallbackTable, SessionActorRegistry } from "../../../src/world/actors/index.ts";
 import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
 import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
@@ -115,5 +115,48 @@ test("pickup tier and quantity stores advance an already active original damage 
   if (result.kind !== "committed") throw new Error("Source target disappeared");
   expect(result.decision.mutations.map(change => change.kind)).toEqual(["armor", "health"]);
   expect(world.combat.read(world.player.id)).toMatchObject({ health: 95, armor: { regular: { item: "mod:red", points: 80 } } });
+  world.actors.close();
+});
+
+test("an asynchronous original caller retains the item scope through its targets and grants only once", async () => {
+  const world = fixture();
+  let grants = 0, release: () => void = () => {};
+  const targets = new Promise<void>(resolve => { release = resolve; });
+  world.bind([{ id: "original", offered: [world.offer.item], take: () => { grants++; return "accepted"; } }]);
+  const result = world.pickups.runSource(world.offer, async selection => {
+    if (selection.kind !== "replacement") throw new Error("Missing original grant owner");
+    expect(selection.grant()).toBe("accepted");
+    await targets;
+    expect(() => world.pickups.assertIdle()).toThrow("pickup execution");
+    expect(() => selection.grant()).toThrow("already consumed");
+    expect(world.pickups.runSource(world.offer, nested => nested.kind)).toBe("stale");
+    return 25;
+  });
+  expect(grants).toBe(1);
+  expect(() => world.pickups.assertIdle()).toThrow("pickup execution");
+  expect(world.pickups.touch(world.offer, { original: () => true, complete: () => { throw new Error("Reentered suspended source touch"); } })).toBe("stale");
+  release();
+  expect(await result).toBe(25);
+  expect(world.pickups.assertIdle()).toBeUndefined();
+  expect(grants).toBe(1);
+  world.actors.close();
+});
+
+test("original caller failure releases the scope and an escaped grant cannot outlive its caller", async () => {
+  const world = fixture(), captured: { selection: SourcePickupSelection | null } = { selection: null };
+  let grants = 0;
+  world.bind([{ id: "original", offered: [world.offer.item], take: () => { grants++; return "accepted"; } }]);
+  await expect(world.pickups.runSource(world.offer, async selection => {
+    captured.selection = selection;
+    await Promise.resolve();
+    throw new Error("original source failure");
+  })).rejects.toThrow("original source failure");
+  expect(world.pickups.assertIdle()).toBeUndefined();
+  if (captured.selection?.kind !== "replacement") throw new Error("Missing captured grant");
+  expect(captured.selection.current()).toBe(false);
+  expect(captured.selection.grant()).toBe("stale");
+  expect(grants).toBe(0);
+  expect(world.pickups.touch(world.offer, { original: () => false, complete: () => {} })).toBe("accepted");
+  expect(grants).toBe(1);
   world.actors.close();
 });

@@ -29,6 +29,7 @@ interface NativeCombatOptions {
     readonly actors: SessionActorRegistry;
     actor(slot: number): OwnedActor | null;
     provenance(attacker: ActorId | null, inflictor: ActorId | null, target: ActorId): Omit<AttackProvenance, "attacker" | "inflictor" | "cause">;
+    afterFree?(pointer: number, call: Pick<QvmFunctionCall, "cancelFunction">): void;
   };
   slot(actor: ActorId): number | null;
 }
@@ -82,9 +83,10 @@ export class QvmCombatBindings {
       if (options.source !== undefined) {
         const actors = options.source.actors;
         this.removals.push(options.game.module.bindInvocation({ kind: "qvm", module: options.definition.module, instructionIndex: options.definition.callbacks.free }, call => {
-          const slot = options.game.data.numberFromPointer(call.words.getInt32(0, true)), actor = this.admitted.get(slot);
+          const pointer = call.words.getInt32(0, true), slot = options.game.data.numberFromPointer(pointer), actor = this.admitted.get(slot);
           const result = call.proceed();
           if (actor !== undefined && actors.resolveOwned(actor.id) === actor && this.source.state(slot) === null) actors.release(actor);
+          options.source?.afterFree?.(pointer, call);
           return result;
         }));
         this.removals.push(actors.onRelease(actor => {

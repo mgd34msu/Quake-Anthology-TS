@@ -69,8 +69,13 @@ import { GrappleRuntime } from "./grapple-runtime.ts";
 import { QvmGrappleSource, type QvmGrappleTarget } from "./qvm-grapple-source.ts";
 import { QvmGameCombat } from "../../../compat/qvm/game-combat.ts";
 import { QvmCombatBindings } from "../../../compat/qvm/game-combat-binding.ts";
+import { QvmPrimaryPickups } from "../../../compat/qvm/game-pickups.ts";
+import { qvmInventoryBinding, type QvmInventoryProfile } from "../../../compat/qvm/game-inventory.ts";
+import { q3NativeInventoryProfile } from "../../../content/q3/equipment/inventory-profile.ts";
+import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 import { classicCombatProfile } from "../../../compat/q2/classic/combat-profile.ts";
 import { q3NativeCombatProfile } from "../../../content/q3/equipment/combat-profile.ts";
+import { q3NativePickupProfile } from "../../../content/q3/equipment/pickup-profile.ts";
 import { retailRereleaseClientProfile } from "../../../compat/q2/rerelease/client-profile.ts";
 import { q3GrappleProfile } from "../../../content/q3/equipment/grapple-profiles.ts";
 import { SelectedMonsters } from "./monster-runtime.ts";
@@ -233,7 +238,7 @@ type SourceRuntime = { readonly kind: "loading" }
   | { readonly kind: "quakec"; readonly game: QuakeCSource }
   | { readonly kind: "q1"; readonly game: Q1Foundation; readonly composition: Q1SourceComposition; readonly cvars: CvarRegistry }
   | { readonly kind: "q3"; readonly game: Q3SourceRuntime }
-  | { readonly kind: "q3-qvm"; readonly game: Q3QvmServerGame; readonly combat: QvmCombatBindings | null }
+  | { readonly kind: "q3-qvm"; readonly game: Q3QvmServerGame; readonly combat: QvmCombatBindings | null; readonly inventory: QvmInventoryProfile | null }
   | { readonly kind: "q2-native"; readonly edition: "classic"; readonly game: ClassicGuestWorld; readonly files: ClassicOriginalSaveFiles; readonly visited: Map<string, Q2ClassicVisitedLevel>; readonly clients: Map<ClientId, OwnedActor> }
   | { readonly kind: "q2-native"; readonly edition: "rerelease"; readonly game: RereleaseGuestWorld; readonly visited: Map<string, Q2RereleaseVisitedLevel>; readonly clients: Map<ClientId, OwnedActor> }
   | ({ readonly kind: "q2"; readonly product: Q2ProductRuntime } & Pick<Q2ProductRuntime, "game" | "weapons" | "monsters" | "movers" | "items" | "players" | "baseEntities">);
@@ -1498,6 +1503,11 @@ export class SharedSimulation implements Simulation {
   private bindEquipmentInventory(actor: OwnedActor, initial: readonly InventoryEntry[] = []): void {
     const source = this.source.kind === "q2-native" ? this.source.game.services.equipmentInventory(this.nativeQ2Client(actor.id).slot + 1) : null;
     if (source === null) { this.inventory.create(actor, initial); return; }
+    this.bindSourceInventory(actor, source, initial);
+  }
+
+  private bindSourceInventory(actor: OwnedActor, source: InventoryStateBinding, initial: readonly InventoryEntry[]): void {
+    if (new Set(initial.map(entry => entry.item)).size !== initial.length) throw new Error("Saved source inventory has duplicate items");
     const nativeItems = new Set(source.read().map(entry => entry.item));
     const supplemental = new Map(initial.filter(entry => !nativeItems.has(entry.item)).map(entry => [entry.item, entry]));
     this.inventory.bind(actor, { read: () => [...source.read(), ...supplemental.values()], write: entry => {
@@ -2001,14 +2011,29 @@ export class SharedSimulation implements Simulation {
       state.cvars.set("fs_game", guest.gameDirectory, true);
       this.initializeServerSettings(state.cvars);
       let combatBindings: QvmCombatBindings | null = null;
+      let pickupBindings: QvmPrimaryPickups | null = null;
+      const nativeInventory = q3NativeInventoryProfile(guest.prepared.artifact);
       const game = new Q3QvmServerGame({ artifact: guest.prepared.artifact, state,
         records: { actors: this.actors, bodies: this.bodies, scene: this.scene, provider: recipe.map.entities.provider,
-          admit: actor => combatBindings?.admit(actor),
+          admit: actor => {
+            combatBindings?.admit(actor);
+            const slot = game.records.slot(actor.id);
+            if (nativeInventory !== null && slot !== null && slot < game.game.data.numClients) {
+              const saved = this.options.restore?.inventories.find(entry => this.actors.resolveSaved(entry.actor) === actor);
+              this.bindSourceInventory(actor, qvmInventoryBinding({ module: game.game.module, data: game.game.data,
+                profile: nativeInventory, weapons: guest.prepared.weapons, client: () => {
+                  this.actors.assertOwned(actor);
+                  const current = game.records.slot(actor.id);
+                  if (current === null || game.records.isInputRetired(current)) throw new Error("QVM inventory owner is no longer admitted");
+                  return current;
+                } }), saved?.entries ?? []);
+            }
+          },
           collision: (actor, collision) => this.physics.setCollision(actor, collision) },
         mounts: this.options.mounts, writable: guest.writable, common: guest.common,
         maxClients: this.options.maxClients, seed: this.options.seed, dedicated: this.options.dedicated === true, entityText: this.options.world.entities,
         now, assertCurrent: () => { this.assertOpen(); }, clientChanged: (kind, actor) => this.notifyClientEvent(kind, actor),
-        beforeRetire: () => { combatBindings?.close(); },
+        beforeRetire: () => { pickupBindings?.close(); combatBindings?.close(); },
         botCommand: (actor, command) => this.observeClientCommand({ actor, source: { kind: "bot", provider: guest.prepared.artifact.module.id },
           sequence: (this.modClientCommands.get(actor)?.input.sequence ?? 0) + 1, command: { kind: "q3", serverTimeMilliseconds: command.serverTime,
             angleWords: command.angles, buttons: command.buttons, weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove } }),
@@ -2024,7 +2049,24 @@ export class SharedSimulation implements Simulation {
           provenance: () => ({ sequence: this.attackSequence++, time: { kind: "milliseconds", value: now() }, weapon: null,
             weaponProvider: recipe.map.entities.provider, combatProvider: recipe.combat.provider,
             inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider }),
+          afterFree: (pointer, call) => pickupBindings?.afterFree(pointer, call),
         } });
+      const nativePickups = q3NativePickupProfile(guest.prepared.artifact);
+      if (nativePickups !== null) pickupBindings = new QvmPrimaryPickups({ game: game.game, artifact: guest.prepared.artifact, profile: nativePickups,
+        actor: slot => game.records.isInputRetired(slot) ? null : this.actors.atSource(recipe.map.entities.provider, slot),
+        current: (actor, slot) => this.actors.resolveOwned(actor.id) === actor && game.records.slot(actor.id) === slot && !game.records.isInputRetired(slot),
+        resolveItem: record => {
+          const weapon = guest.prepared.weapons.find(weapon => weapon.weapon === record.tag);
+          const item: ItemId = record.type === nativePickups.items.weaponType ? weapon?.item ?? `q3:${record.className}`
+            : record.type === nativePickups.items.ammoType ? weapon?.ammo ?? `q3:${record.className}` : `q3:${record.className}`;
+          return { item, resource: record.type === ItemType.IT_ARMOR ? { kind: "protection", channel: "regular" }
+            : record.type === nativePickups.items.weaponType || record.type === nativePickups.items.ammoType ? { kind: "inventory", item } : null };
+        },
+        time: () => ({ kind: "milliseconds", value: now() }), runSource: (offer, execute) => this.originalPickups.runSource(offer, execute),
+        lifetime: combatBindings === null ? { kind: "own-free-hook", retire: actor => {
+          if (this.actors.resolveOwned(actor.id) === actor) this.actors.release(actor);
+        } } : { kind: "shared-free-hook" },
+      });
       if (this.options.restore !== undefined) {
         const checkpoint = simulationQvmCheckpoint(this.options.restore);
         if (checkpoint === null) throw new Error("Saved Q3 guest memory is missing");
@@ -2034,7 +2076,7 @@ export class SharedSimulation implements Simulation {
           return client;
         });
       }
-      return { kind: "q3-qvm", game, combat: combatBindings };
+      return { kind: "q3-qvm", game, combat: combatBindings, inventory: nativeInventory };
     }
     if (this.options.preparedQuakeC !== undefined) {
       const checkpoint = this.options.restore === undefined ? null : simulationQuakeCCheckpoint(this.options.restore);
@@ -5029,6 +5071,7 @@ export class SharedSimulation implements Simulation {
     add("world:simulation", encodeCheckpointValue({ settings: { skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients, seed: this.options.seed, startItems: this.startItems, initialSpawnPoint: this.initialSpawnPoint },
       modClientApplicationOrdinal: this.modClientApplications.checkpoint(), q1Punch: this.q1Punch.capture(),
       ...(source.kind === "q3-qvm" && source.combat !== null ? { qvmArmorProjection: 1 } : {}),
+      ...(source.kind === "q3-qvm" && source.inventory !== null ? { qvmInventoryProjection: 1 } : {}),
       players: [...this.playerStates.values()].map(captureMovementPlayer), hostMilliseconds: this.hostMilliseconds, q1Paused: this.q1PauseState,
       modClientCommands: [...this.modClientCommands.values()].map(value => {
         const client = this.playerClient(value.input.actor); if (client === null) throw new Error("Accepted command lost its live client");
@@ -5175,7 +5218,28 @@ export class SharedSimulation implements Simulation {
     const qvmArmorProjection = reader.field("qvmArmorProjection");
     if (qvmArmorProjection.value !== undefined) qvmArmorProjection.literal(1);
     const legacyQvmCombat = qvmArmorProjection.value === undefined && source.kind === "q3-qvm" ? source.combat : null;
-    const sharedSave = legacyQvmCombat === null ? save : { ...save, combat: save.combat.map(entry => {
+    const qvmInventoryProjection = reader.field("qvmInventoryProjection");
+    if (qvmInventoryProjection.value !== undefined) {
+      qvmInventoryProjection.literal(1);
+      if (source.kind !== "q3-qvm" || source.inventory === null) throw new Error("Saved QVM inventory requires qualified source storage");
+    }
+    let inventories = save.inventories;
+    if (qvmInventoryProjection.value === undefined && source.kind === "q3-qvm" && source.inventory !== null) {
+      inventories = [...save.inventories];
+      for (const actor of this.actors.ownedBy(this.recipe.map.entities.provider)) {
+        const slot = source.game.records.slot(actor.id);
+        if (slot === null || slot >= source.game.game.data.numClients || !this.inventory.has(actor.id)) continue;
+        const index = inventories.findIndex(entry => this.actors.resolveSaved(entry.actor) === actor);
+        const previous = index < 0 ? undefined : inventories[index], entries = this.inventory.entries(actor.id);
+        if (previous?.entries.some(entry => !isDeepStrictEqual(entry, entries.find(current => current.item === entry.item))))
+          throw new Error("Legacy QVM inventory disagrees with restored source storage");
+        const savedActor = previous?.actor ?? save.actors.find(entry => this.actors.resolveSaved(entry) === actor);
+        if (savedActor === undefined) throw new Error("Restored QVM inventory has no saved actor identity");
+        const migrated = { actor: { slot: savedActor.slot, generation: savedActor.generation }, entries };
+        inventories = index < 0 ? [...inventories, migrated] : inventories.map((entry, position) => position === index ? migrated : entry);
+      }
+    }
+    const sharedSave = { ...save, inventories, combat: legacyQvmCombat === null ? save.combat : save.combat.map(entry => {
       const actor = this.actors.resolveSaved(entry.actor);
       if (actor === null || this.actors.sourceOf(actor.id)?.provider !== this.recipe.map.entities.provider) return entry;
       return { ...entry, state: { ...entry.state, armor: legacyQvmCombat.normalizeLegacyArmor(actor.id, entry.state.armor) } };

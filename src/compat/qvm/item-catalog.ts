@@ -16,6 +16,7 @@ export interface QvmCatalogItem {
   readonly type: number;
   readonly tag: number;
 }
+export interface QvmCatalogRecord extends QvmCatalogItem { readonly index: number; readonly address: number; }
 
 export function parseQvmItemLayout(reader: SaveReader): QvmItemLayout {
   const fields = reader.field("fields"), stride = reader.field("stride").integer(4);
@@ -31,7 +32,7 @@ export function parseQvmItemLayout(reader: SaveReader): QvmItemLayout {
   return layout;
 }
 
-export function readQvmItemCatalog(data: Uint8Array, layout: QvmItemLayout): readonly QvmCatalogItem[] {
+export function readQvmItemRecords(data: Uint8Array, layout: QvmItemLayout, types?: ReadonlySet<number>): readonly QvmCatalogRecord[] {
   if (layout.address + layout.count * layout.stride > data.length) throw new Error("QVM item table exceeds initialized module data");
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const string = (pointer: number): string => {
@@ -42,16 +43,22 @@ export function readQvmItemCatalog(data: Uint8Array, layout: QvmItemLayout): rea
     for (const byte of data.subarray(pointer, end)) text += String.fromCharCode(byte);
     return text;
   };
-  const items: QvmCatalogItem[] = [];
+  const items: QvmCatalogRecord[] = [];
   for (let index = 0; index < layout.count; index++) {
     const address = layout.address + index * layout.stride;
     const word = (offset: number) => view.getInt32(address + offset, true);
     if (word(layout.fields.className) === 0) continue;
     const type = word(layout.fields.type);
-    if (type !== layout.weaponType && type !== layout.ammoType) continue;
-    const item = { className: string(word(layout.fields.className)), pickupName: string(word(layout.fields.pickupName)), type, tag: word(layout.fields.tag) };
-    if (item.tag < 1 || item.tag > 15 || !item.className || !item.pickupName) throw new Error("QVM item cannot be represented by its public weapon/ammo state");
+    if (types !== undefined && !types.has(type)) continue;
+    const item = { index, address, className: string(word(layout.fields.className)), pickupName: string(word(layout.fields.pickupName)), type, tag: word(layout.fields.tag) };
+    if (!item.className || !item.pickupName) throw new Error("QVM item has no source name");
     items.push(item);
   }
   return items;
+}
+export function readQvmItemCatalog(data: Uint8Array, layout: QvmItemLayout): readonly QvmCatalogItem[] {
+  return readQvmItemRecords(data, layout, new Set([layout.weaponType, layout.ammoType])).map(item => {
+    if (item.tag < 1 || item.tag > 15) throw new Error("QVM item cannot be represented by its public weapon/ammo state");
+    return { className: item.className, pickupName: item.pickupName, type: item.type, tag: item.tag };
+  });
 }

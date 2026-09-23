@@ -43,7 +43,12 @@ export interface OriginalPickupContinuation {
   /** Map feedback, targets and lifecycle run for a settled attempt while its touch scope is held. */
   complete(taken: boolean): void;
 }
+export type SourcePickupSelection =
+  | { readonly kind: "original" | "blocked" | "stale" }
+  | { readonly kind: "replacement"; current(): boolean; grant(): OriginalPickupOutcome };
 export interface OriginalPickupAdmission {
+  /** Keep the current grant owner and item scope until the complete original caller unwinds. */
+  runSource<Result>(offer: OriginalPickupOffer, execute: (selection: SourcePickupSelection) => Result | Promise<Result>): Result | Promise<Result>;
   touch(offer: OriginalPickupOffer, continuation: OriginalPickupContinuation): OriginalPickupOutcome;
 }
 

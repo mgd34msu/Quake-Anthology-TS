@@ -292,13 +292,16 @@ export class GameplayAuthority implements DamageAuthority {
 
   /** Original pickup stores can reenter combat; reconcile each committed source store before that happens. */
   withPickupProtection<T>(actor: OwnedActor, owner: ProviderId, operation: (observer: ProtectionObserver) => T): T {
-    const primary = this.binding(actor), slots = this.protection.get(actor);
+    this.actors.assertOwned(actor);
+    const primary = this.bindings.get(actor), slots = this.protection.get(actor);
     const regular = slots?.regular?.binding, powered = slots?.powered?.binding;
     let open = true;
-    const observer: ProtectionObserver = { stored: change => {
+    const failure: { value: { error: unknown } | null } = { value: null };
+    const stored: ProtectionObserver["stored"] = change => {
       if (!open) throw new Error("Pickup protection observer is closed");
       this.actors.assertOwned(actor);
       if (this.bindings.get(actor) !== primary) throw new Error("Pickup combat binding changed");
+      if (primary === undefined) throw new Error("Inventory-only pickup cannot report protection without a combat binding");
       if (change.regular !== undefined && (regular?.owner !== owner || this.protection.get(actor)?.regular?.binding !== regular)
         || change.powered !== undefined && (powered?.owner !== owner || this.protection.get(actor)?.powered?.binding !== powered))
         throw new Error("Pickup reported protection outside its current owner");
@@ -313,12 +316,20 @@ export class GameplayAuthority implements DamageAuthority {
       if (cursor.reaction === null) return this.observeStore(actor, primary, cursor, write);
       this.advanceSourceCursors(actor, write);
       return undefined;
+    };
+    const observer: ProtectionObserver = { stored: change => {
+      try { return stored(change); }
+      catch (error) { failure.value ??= { error }; throw error; }
     } };
     this.activePickups++;
     try {
       const result = operation(observer), cursor = this.currentCursor(actor);
-      if (this.actors.isLive(actor.id) && cursor !== undefined && !armorEqual(this.readState(actor, primary).armor, cursor.armor))
-        throw new Error("Pickup omitted a committed protection store");
+      if (failure.value !== null) throw failure.value.error;
+      if (this.actors.isLive(actor.id)) {
+        if (this.bindings.get(actor) !== primary) throw new Error("Pickup combat binding changed");
+        if (primary !== undefined && cursor !== undefined && !armorEqual(this.readState(actor, primary).armor, cursor.armor))
+          throw new Error("Pickup omitted a committed protection store");
+      }
       return result;
     } finally { open = false; this.activePickups--; }
   }

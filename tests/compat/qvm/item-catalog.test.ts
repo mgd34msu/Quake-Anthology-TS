@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { parseQvmItemLayout, readQvmItemCatalog } from "../../../src/compat/qvm/item-catalog.ts";
+import { parseQvmItemLayout, readQvmItemCatalog, readQvmItemRecords } from "../../../src/compat/qvm/item-catalog.ts";
 import { SaveReader } from "../../../src/persistence/value.ts";
 import { q3GuestPlayerUi } from "../../../src/app/bootstrap/simulation/q3/guest-player.ts";
 import { toQ3PlayerState } from "../../../src/network/q3/adapters.ts";
@@ -20,9 +20,12 @@ test("source item layout and all-weapons mask retain a mod's labels and weapon o
     { className: "weapon_arc", pickupName: "Arc Thrower", type: 7, tag: 14 },
     { className: "ammo_arc", pickupName: "Arc Charges", type: 9, tag: 14 },
   ]);
+  view.setInt32(16, 3, true); view.setInt32(24, 0, true);
+  expect(readQvmItemRecords(data, layout)[0]).toEqual({ index: 0, address: 16, className: "weapon_arc", pickupName: "Arc Thrower", type: 3, tag: 0 });
+  expect(readQvmItemCatalog(data, layout)).toEqual([{ className: "ammo_arc", pickupName: "Arc Charges", type: 9, tag: 14 }]);
   const state = new PlayerStateRecord("baseq3", 0, 14, 0);
   state.stats.set(2, -1); state.ammo.set(14, -1);
-  const ui = q3GuestPlayerUi(toQ3PlayerState(state), { provider: "q3:official", content: "q3:test" }, 0,
+  const ui = q3GuestPlayerUi(toQ3PlayerState(state), { provider: "q3:official", content: "q3:classic:baseq3:installed" }, 0,
     [{ weapon: 14, item: "q3:weapon/arc", ammo: "q3:ammo/arc", label: "Arc Thrower" }]);
   expect(ui.activeWeapon).toBe("q3:weapon/arc");
   expect(ui.items).toEqual([{ id: "q3:weapon/arc", label: "Arc Thrower", kind: "weapon", sourceOrdinal: 14, owned: true, hasAmmo: true, count: -1, warningCount: 0 }]);
@@ -34,9 +37,9 @@ test("source item layout and all-weapons mask retain a mod's labels and weapon o
 test("Team Arena uses its own weapon and armor stat indices", () => {
   const state = new PlayerStateRecord("missionpack", 0, 12, 0);
   state.stats.set(2, 99); state.stats.set(3, 1 << 12); state.stats.set(4, 75); state.ammo.set(12, 8);
-  const ui = q3GuestPlayerUi(toQ3PlayerState(state), { provider: "q3:official", content: "q3:test" }, 0, undefined, "missionpack");
+  const ui = q3GuestPlayerUi(toQ3PlayerState(state), { provider: "q3:official", content: "q3:classic:baseq3:installed" }, 0, undefined, "missionpack");
   expect(ui.activeWeapon).toBe("q3:weapon/proxlauncher");
   expect(ui.items.find(item => item.id === "q3:weapon/proxlauncher")?.owned).toBe(true);
-  expect(ui.armor).toEqual({ kind: "q3", points: 75, protection: Math.fround(0.66) });
+  expect(ui.armor).toEqual({ regular: { kind: "q3", points: 75, protection: Math.fround(0.66) }, powered: { kind: "none" } });
   expect(ui.ammo?.count).toBe(8);
 });
