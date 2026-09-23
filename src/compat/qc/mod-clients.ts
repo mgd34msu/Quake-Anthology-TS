@@ -1,4 +1,5 @@
 import type { ActorId, ClientId } from "../../contracts/identity.ts";
+import type { FrameContext } from "../../contracts/time.ts";
 import type { ModCallbackDeclaration, ModSourceCall, ModQcInputOutput, ModClientInputOutput } from "../../contracts/mod-callbacks.ts";
 import type { ModClientApplication, ModClientServices } from "../../world/session/mod-clients.ts";
 import { subscribeModClientInput } from "../../world/session/mod-client-input.ts";
@@ -11,7 +12,8 @@ interface Operations {
   readonly declaration: NonNullable<ModCallbackDeclaration["clients"]>;
   project(actor: ActorId): void;
   release(actor: ActorId): "released" | "deferred";
-  invoke(call: ModSourceCall, actor: ActorId): void;
+  invoke(call: ModSourceCall, actor: ActorId, frame?: FrameContext): void;
+  think?(actor: ActorId, frame: FrameContext, live: () => boolean): void;
   reserve?(actor: ActorId): void;
   admitted?(actor: ActorId): void;
   readonly input?: {
@@ -80,6 +82,22 @@ export class QcModClientBindings {
     const client = this.require(actor).client;
     if (client === null) throw new Error("QuakeC component userinfo requires a restored client");
     return infoValueForKey(this.operations.services.userinfo(client), key);
+  }
+  frame(slot: number, frame: FrameContext): boolean {
+    if (slot < 1 || slot > this.operations.declaration.maximum) return false;
+    const entry = [...this.entries.values()].find(value => value.slot === slot);
+    if (entry === undefined) return false;
+    const live = (): boolean => {
+      const client = this.operations.services.forActor(entry.actor);
+      return entry.admitted && this.entries.get(entry.actor) === entry && client !== null
+        && (entry.client === null || entry.client.equals(client)) && this.operations.services.actor(client)?.equals(entry.actor) === true;
+    };
+    if (live()) this.operations.think?.(entry.actor, frame, live);
+    for (const call of this.operations.declaration.frame ?? []) {
+      if (!live()) break;
+      this.operations.invoke(call, entry.actor, frame);
+    }
+    return true;
   }
   setUserinfo(actor: ActorId, key: string, value: string): void {
     if (/[\\\x00]/u.test(value)) throw new Error("QuakeC component userinfo field cannot contain a delimiter or NUL");

@@ -33,6 +33,7 @@ import { createQcBodyBinding, QcActorState } from "./actor-state.ts";
 import { createQcPusherServices } from "./pusher-host.ts";
 import type { Q1PusherServices } from "../../movement/q1/types.ts";
 import { executeQuakeCPhysics } from "../../app/bootstrap/simulation/actor-execution.ts";
+import { thinkCallbackTime } from "../../world/scheduler.ts";
 import type { SimulationPresentation } from "../../app/bootstrap/simulation/types.ts";
 import { q1WaterTransition } from "../../movement/q1/water-transition.ts";
 import { captureQcCheckpoint, restoreQcCheckpoint } from "./executor.ts";
@@ -106,6 +107,8 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
       throw new Error("Mod client capacity must fit reserved QuakeC edicts");
     for (const call of [...declaration.clients.admit, ...declaration.clients.userinfo, ...declaration.clients.disconnect])
       validateCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "client lifecycle");
+    for (const call of declaration.clients.frame ?? [])
+      validateCall(program, call, new Set<ModCallbackInput>(["self", "time", "elapsed"]), "client frame");
     for (const binding of declaration.clients.input ?? []) if (binding.phase === "before") {
       const outputs = new Set<string>();
       for (const output of binding.outputs ?? []) {
@@ -312,10 +315,17 @@ export class QcModProvider {
     this.protection = declaration.protection === undefined ? null : new QcModProtection(declaration, module.id, services, { machine: this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference), invoke: (call, inputs, region) => this.invoke(call, inputs, region) });
     this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor), actor => services.actors.isLive(actor));
     this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
+      ...(declaration.actorFields.some(field => field.binding === "think") ? { think: (actor: ActorId, frame: FrameContext, live: () => boolean) => this.runClientThink(actor, frame, live) } : {}),
       reserve: actor => this.protection?.reserve(actor), admitted: actor => this.protection?.activate(actor),
-      project: actor => { this.reference(actor); }, release: actor => { this.protection?.release(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor) => {
-        const now = services.time(); this.invoke(call, new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }],
-          ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]));
+      project: actor => { this.reference(actor); }, release: actor => { this.protection?.release(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor, frame) => {
+        const previous = this.frame, now = frame?.time ?? services.time();
+        if (frame !== undefined) this.frame = frame;
+        try {
+          const inputs = new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }],
+            ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }]]);
+          if (frame !== undefined) inputs.set("elapsed", { kind: "float", value: frame.elapsed.kind === "seconds" ? frame.elapsed.value : frame.elapsed.value / 1000 });
+          this.invoke(call, inputs);
+        } finally { this.frame = previous; }
       }, input: {
         open: application => { const close = this.input.open(application); return () => { try { close(); } finally { this.drainRetiredProjections(); } }; },
         invoke: (call, application) => { this.invoke(call, this.input.values(application)); },
@@ -326,6 +336,8 @@ export class QcModProvider {
       sourceSlot: actor => { const source = services.actors.sourceOf(actor); return source?.provider === module.id ? source.slot : null; },
       reference: reference => this.actor(reference), isClient: () => false });
     this.ownedActors = new QcModActors({ machine: this.machine, services, provider: module.id, firstDynamicSlot: (declaration.clients?.maximum ?? 0) + 1,
+      ...(declaration.clients === undefined || (declaration.clients.frame?.length ?? 0) === 0 && !declaration.actorFields.some(field => field.binding === "think")
+        ? {} : { clientFrame: (slot: number, frame: FrameContext) => this.clients?.frame(slot, frame) ?? false }),
       think: program.fieldsByName.get("think")?.offset ?? null,
       nextthink: program.fieldsByName.get("nextthink")?.offset ?? null,
       body: slot => createQcBodyBinding(program, entities, slot, { reference: actor => this.reference(actor), actor: reference => {
@@ -576,7 +588,9 @@ export class QcModProvider {
           break;
         }
         case "classname": case "view-offset": throw new Error(`Mod ${declared.binding} store requires its canonical owner`);
-        case "think": case "nextthink": this.ownedActors.schedule(actor); break;
+        case "think": case "nextthink":
+          if (this.machine.entities.slot(store.reference) > (this.declaration.clients?.maximum ?? 0)) this.ownedActors.schedule(actor);
+          break;
         case "health":
           if (this.services.combat.read(actor.id) === null) throw new Error("Mod health store requires a combat actor");
           this.services.combat.setHealth(actor, words.float(field.offset)); break;
@@ -656,6 +670,22 @@ export class QcModProvider {
       { name: "other", value: { kind: "input", name: "other" } }, { name: "time", value: { kind: "input", name: "time" } }] },
       new Map<ModCallbackInput, QcModValue>([["self", { kind: "actor", value: actor }], ["other", { kind: "actor", value: other }],
         ["time", { kind: "float", value: time.kind === "seconds" ? time.value : time.value / 1000 }]]));
+  }
+  private runClientThink(actor: ActorId, frame: FrameContext, live: () => boolean): void {
+    const nextthink = this.machine.fieldOffset("nextthink"), think = this.machine.fieldOffset("think");
+    const profile = this.program.api.kind === "q1-quakeworld"
+      ? { kind: "q1-quakeworld", maximumCommandMilliseconds: 100 } satisfies import("../../contracts/time.ts").ClockProfile
+      : { kind: "q1-netquake", minimumFrameSeconds: 0, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } satisfies import("../../contracts/time.ts").ClockProfile;
+    while (live()) {
+      const words = this.machine.entities.fromReference(this.reference(actor));
+      const time = thinkCallbackTime(profile, { kind: "seconds", value: words.float(nextthink) }, frame);
+      if (time === null) return;
+      const index = words.int(think); words.setFloat(nextthink, 0);
+      const previous = this.frame; this.frame = { ...frame, time, phase: "entity-think" };
+      try { this.invokeOwned(index, actor, null, time); }
+      finally { this.frame = previous; }
+      if (profile.kind !== "q1-quakeworld") return;
+    }
   }
   private invokeActorField(actor: ActorId, field: string, other: ActorId | null, activator: ActorId | null): undefined {
     const source = this.services.actors.sourceOf(actor);

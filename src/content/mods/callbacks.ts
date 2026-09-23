@@ -72,6 +72,7 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     actorFields: reader.field("actorFields").list(field), callbacks: reader.field("callbacks").list(callback),
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1), admit: clients.field("admit").list(sourceCall),
       userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
+      ...(clients.field("frame").value === undefined ? {} : { frame: clients.field("frame").list(sourceCall) }),
       ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall, inputOutput) }) } }),
     ...(initialize.value === undefined ? {} : { initialize: initialize.list(sourceCall) }),
     ...(frame.value === undefined ? {} : { frame: sourceCall(frame) }),

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
+import type { FrameContext } from "../../../src/contracts/time.ts";
 import type { ModActorField, ModCallbackDeclaration, ModCallbackInput, ModRuntimeValue, ModSourceCall } from "../../../src/contracts/mod-callbacks.ts";
 import type { ModClientEvent, ModClientServices } from "../../../src/world/session/mod-clients.ts";
 import type { SourcePresentationEvent, SimulationPresentationEvent } from "../../../src/app/bootstrap/simulation/types.ts";
@@ -120,6 +121,26 @@ test("QC userinfo field writes preserve other keys and do not recursively publis
   binding.start(); binding.setUserinfo(actor, "name", "Carol");
   expect(port.services.userinfo(client)).toBe("\\rate\\25000\\name\\Carol"); expect(calls).toBe(1); expect(binding.userinfo(actor, "name")).toBe("Carol");
   binding.close();
+});
+
+test("QC client frame thinks precede calls and retirement stops the old actor's call list", () => {
+  const ids = createIdentityOwner("qc-client-frames"), old = ids.actor(42, 4), replacement = ids.actor(42, 5), client = ids.client(7, 9), nextClient = ids.client(7, 10), port = clients();
+  const seen: string[] = [], frame: FrameContext = { frame: 7, phase: "frame-exit", time: { kind: "seconds", value: 0.7 }, elapsed: { kind: "seconds", value: 0.1 } };
+  port.entries.set(client, { actor: old, info: "" });
+  const binding = new QcModClientBindings({ services: port.services,
+    declaration: { maximum: 1, admit: [], userinfo: [], disconnect: [], frame: ["First", "Second"].map(name => ({ function: name, arguments: [], globals: [] })) },
+    project: () => {}, release: () => "released", think: actor => { seen.push(`think:${actor.generation}`); },
+    invoke: (call, actor, sourceFrame) => {
+      expect(sourceFrame).toBe(frame); seen.push(`${call.function}:${actor.generation}`);
+      if (actor.equals(old)) {
+        port.notify("disconnecting", client); port.entries.delete(client);
+        port.entries.set(nextClient, { actor: replacement, info: "" }); port.notify("admitted", nextClient);
+      }
+    } });
+  binding.start();
+  expect(binding.frame(1, frame)).toBe(true); expect(seen).toEqual(["think:4", "First:4"]);
+  expect(binding.frame(1, frame)).toBe(true); expect(seen).toEqual(["think:4", "First:4", "think:5", "First:5", "Second:5"]);
+  binding.close(); expect(binding.frame(1, frame)).toBe(false);
 });
 
 const quakeworld = "/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat";

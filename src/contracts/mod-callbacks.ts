@@ -88,6 +88,7 @@ export interface ModCallbackDeclaration {
   readonly callbacks: readonly ModCallback[];
   readonly clients?: { readonly maximum: number; readonly admit: readonly ModSourceCall[];
     readonly userinfo: readonly ModSourceCall[]; readonly disconnect: readonly ModSourceCall[];
+    readonly frame?: readonly ModSourceCall[];
     readonly input?: readonly ModClientInputBinding<ModSourceCall, ModQcInputOutput>[] };
   readonly cvars?: readonly { readonly name: string; readonly value: string }[];
   readonly initialize?: readonly ModSourceCall[];

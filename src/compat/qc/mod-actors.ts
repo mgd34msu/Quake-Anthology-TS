@@ -16,6 +16,7 @@ export interface QcModActorOptions {
   readonly think: number | null;
   readonly nextthink: number | null;
   readonly firstDynamicSlot?: number;
+  clientFrame?(slot: number, frame: FrameContext): boolean;
   body(slot: number): BodyStateBinding;
   admitted(actor: OwnedActor, slot: number): void;
   retired(actor: OwnedActor): void;
@@ -101,6 +102,7 @@ export class QcModActors {
     const value = (time: FrameContext["time"]): number => time.kind === "seconds" ? time.value : time.value / 1000;
     const sourceFrame: FrameContext = { ...frame, time: { kind: "seconds", value: value(frame.time) - value(frame.elapsed) }, elapsed: { kind: "seconds", value: value(frame.elapsed) } };
     for (let slot = 1; slot < this.options.machine.entities.count; slot++) {
+      if (slot < (this.options.firstDynamicSlot ?? 1) && this.options.clientFrame?.(slot, sourceFrame)) continue;
       const actor = this.slots.at(slot); if (actor === null) continue;
       this.options.step(actor, sourceFrame, () => { this.scheduler.run(actor.id, sourceFrame, "during-physics"); return undefined; });
     }
