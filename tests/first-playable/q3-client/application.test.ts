@@ -102,6 +102,7 @@ test("Team Arena give weapons registers newly owned media before synchronous pre
     expect(client.cgame.state.snap?.playerState.ammo.get(Weapon.WP_GRAPPLING_HOOK)).toBe(-1);
     expect(() => registry.requireWeapon(3)).toThrow("must finish registration");
     source.host.cvars.set("sv_cheats", "1", true);
+    await application.step(50);
     application.queueCommand("give", ["weapons"], local.seat.id);
     application.queueCommand("give", ["ammo"], local.seat.id);
     await application.step(50);
@@ -113,5 +114,9 @@ test("Team Arena give weapons registers newly owned media before synchronous pre
     for (let frame = 0; frame < 8; frame++) await application.step(50);
     expect(client.cgame.state.predictedPlayerState.weapon).toBe(3);
     expect(new Set(application.readPixels()).size).toBeGreaterThan(16);
+    application.queueCommand("giveall", [], local.seat.id);
+    await application.step(50);
+    expect(application.simulation.inventory.count(local.actor, "q3:weapon/shotgun")).toBe(1);
+    expect(sourcePlayer?.ammo.get(Weapon.WP_SHOTGUN)).toBe(999);
   } finally { await application.close(); }
 }, 60_000);
