@@ -50,6 +50,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   #options: RereleaseGuestServicesOptions;
   #memory: MappedGuestMemory | null = null;
   #host: RereleaseQ2GuestHost | null = null;
+  private inventoryItems: ReturnType<typeof rereleaseInventoryItems> | null = null;
   #combat: RereleaseCombatBindings | null = null;
   #loading = true;
   #frame = 0;
@@ -73,6 +74,10 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     };
     const semantics: RereleaseSemanticBindings = options.semanticBindings ?? { bind: (record: RawEntityView, actor: OwnedActor) => this.bindEntity(record, actor), foreignAddress: (actor: ActorId): GuestAddress => { throw new Error(`API2023 module requires a semantic projection extension for foreign actor ${actor.slot}`); } };
     this.hostOptions = { engine, frameMilliseconds: options.frameMilliseconds,
+      ...(options.pickups === undefined ? {} : { pickups: {
+        runSource: (offer, execute) => { const pickups = this.options.pickups; if (pickups === undefined) throw new Error("Native pickup authority is unavailable"); return pickups.runSource(offer, execute); },
+        touch: (offer, continuation) => { const pickups = this.options.pickups; if (pickups === undefined) throw new Error("Native pickup authority is unavailable"); return pickups.touch(offer, continuation); },
+      } satisfies import("../../../contracts/original-pickups.ts").OriginalPickupAdmission }),
       ...(options.foreignDamage === undefined ? {} : { foreignDamage: { provenance: (attacker, inflictor, target) => {
         const binding = this.options.foreignDamage; if (binding === undefined) throw new Error("Native damage provenance is unavailable");
         return binding.provenance(attacker, inflictor, target);
@@ -130,14 +135,21 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     const field = new RereleaseSourceClient(client, host.module, profile).at("v_angle");
     this.memory.writeFloat32(this.memory.offset(field, 8n), roll);
   }
-  equipmentInventory(slot: number): InventoryStateBinding | null {
+  get hasSourceInventory(): boolean {
+    const profile = retailRereleaseClientProfile;
+    return profile.authority.kind === "artifact" && this.host.module.memory.module.digest === profile.authority.digest;
+  }
+  sourceInventory(slot: number): InventoryStateBinding | null {
     const profile = retailRereleaseClientProfile, host = this.host;
-    if (profile.authority.kind !== "artifact" || host.module.memory.module.digest !== profile.authority.digest) return null;
-    const items = rereleaseInventoryItems(host.module, text => host.core.string(text)).filter(item => item.item === "q2:ammo_grenades");
-    if (items.length !== 1) throw new Error("Native grenade inventory item is missing");
+    if (!this.hasSourceInventory) return null;
+    const items = this.inventoryItems ??= rereleaseInventoryItems(host.module, text => host.core.string(text));
+    const actor = this.view(slot).record.currentActor();
+    if (actor === null) throw new Error("Native inventory requires a live source actor");
     const current = () => {
+      if (!this.options.engine.actors.isLive(actor) || this.view(slot).record.currentActor()?.equals(actor) !== true)
+        throw new Error("Native inventory owner was released");
       const address = this.view(slot).pointer("client");
-      if (address === null) throw new Error("Native grenade inventory requires a source client");
+      if (address === null) throw new Error("Native inventory requires a source client");
       return new RereleaseSourceClient(address, host.module, profile).inventory(items);
     };
     return { read: () => current().read(), write: entry => current().write(entry) };

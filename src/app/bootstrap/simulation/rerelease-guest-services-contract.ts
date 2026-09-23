@@ -4,6 +4,7 @@ import type { RereleaseDebugShapesEvent } from "../../../compat/q2/rerelease/deb
 import type { RereleaseWorldTextEvent } from "../../../compat/q2/rerelease/world-text.ts";
 import type { Q2FoundationHost } from "../../../content/q2/foundation/host.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
+import type { OriginalPickupAdmission } from "../../../contracts/original-pickups.ts";
 import type { Q2RereleaseEntityState, Q2RereleasePlayerState } from "../../../contracts/protocol.ts";
 import type { MappedGuestMemory } from "../../../guest/core/contracts.ts";
 import type { RereleaseCoreServices } from "../../../compat/q2/rerelease/imports.ts";
@@ -28,7 +29,7 @@ export interface RereleaseGuestMessage extends ClassicGuestMessage {
 }
 export interface RereleaseGuestServicesPort {
   readonly options: RereleaseGuestServicesOptions;
-  readonly hostOptions: Pick<RereleaseQ2HostOptions, "engine" | "spatial" | "semantics" | "messages" | "debugDrawing" | "debugShapes" | "worldText" | "sound" | "frameMilliseconds" | "foreignDamage">;
+  readonly hostOptions: Pick<RereleaseQ2HostOptions, "engine" | "spatial" | "semantics" | "messages" | "debugDrawing" | "debugShapes" | "worldText" | "sound" | "frameMilliseconds" | "foreignDamage"> & { readonly pickups?: OriginalPickupAdmission };
   bindMemory(memory: MappedGuestMemory): RereleaseCoreServices;
   bindHost(host: RereleaseQ2GuestHost): void;
   completeSpawn(): void;

@@ -14,6 +14,7 @@ import type { PeImage } from '../../../guest/pe/index.ts';
 import { WindowsGuestRuntime } from '../../../guest/runtime/windows/index.ts';
 import type { WindowsCapabilities } from '../../../guest/runtime/windows/contracts.ts';
 import { X64Cpu } from '../../../guest/x64/index.ts';
+import type { OriginalPickupAdmission } from '../../../contracts/original-pickups.ts';
 
 type NativeExecution = Extract<ResolvedExecutionModule, { readonly kind: 'native' }>;
 export interface PreparedRereleaseGuest { readonly edition: "rerelease"; readonly execution: NativeExecution; readonly bytes: Uint8Array; }
@@ -24,7 +25,8 @@ export async function prepareRereleaseGuest(execution: NativeExecution, mounts: 
     if (parsePe(bytes).abi.kind !== execution.profile.kind) throw new Error('Native artifact ABI differs from the selected profile');
     return { edition: "rerelease", execution, bytes };
 }
-export interface RereleaseGuestSourceOptions extends Omit<RereleaseQ2HostOptions, 'runner' | 'getGameApi' | 'getCgameApi' | 'services'> {
+export interface RereleaseGuestSourceOptions extends Omit<RereleaseQ2HostOptions, 'runner' | 'getGameApi' | 'getCgameApi' | 'services' | 'pickups'> {
+    readonly pickups?: OriginalPickupAdmission;
     services(memory: MappedGuestMemory): RereleaseCoreServices;
     readonly clock: Required<Pick<WindowsCapabilities, 'nowMilliseconds' | 'performanceCounter' | 'performanceFrequency'>>;
 }
@@ -55,7 +57,9 @@ export class RereleaseGuestSource {
             const context: GuestCallContext = { module, callback: { kind: 'native-guest', module, address: game, abi: rereleaseAbi }, parent: null, self: null, other: null };
             const budget = options.instructionBudget ?? 5_000_000;
             const nativeEntries = options.foreignDamage === undefined ? undefined : retailRereleaseEntries({ memory }, image.base);
-            host = new RereleaseQ2GuestHost({ ...options, ...(nativeEntries === undefined ? {} : { nativeEntries }), runner, getGameApi: game, getCgameApi: cgame, services: options.services(memory) });
+            const { pickups, ...hostOptions } = options;
+            host = new RereleaseQ2GuestHost({ ...hostOptions, ...(pickups === undefined ? {} : { pickups: { admission: pickups, imageBase: image.base } }),
+                ...(nativeEntries === undefined ? {} : { nativeEntries }), runner, getGameApi: game, getCgameApi: cgame, services: options.services(memory) });
             source = new RereleaseGuestSource(host, runtime, memory, image, context, budget);
             runtime.initialize(image, { context, instructionBudget: budget });
             return source;

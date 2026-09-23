@@ -14,6 +14,9 @@ import { CLASSIC_Q2_ABI, CLASSIC_Q2_EXPORTS, CLASSIC_Q2_IMPORTS, CLASSIC_Q2_IMPO
 import { classicPrintf, classicPrintfLayouts } from "./printf.ts";
 import { ClassicQ2Edicts, allocateClassicString, classicStringAllocationBytes, readClassicString, readClassicVector, writeClassicString, writeClassicVector } from "./records.ts";
 import type { ClassicQ2ActorProjection } from "./records.ts";
+import type { OriginalPickupAdmission } from "../../../contracts/original-pickups.ts";
+import { NativePrimaryPickups } from "../native-pickups.ts";
+import { classicPickupProfile } from "./pickup-profile.ts";
 
 export interface ClassicQ2WorldLink {
   readonly clusters: readonly number[] | null;
@@ -21,6 +24,7 @@ export interface ClassicQ2WorldLink {
   readonly areas: readonly [number, number];
 }
 export interface ClassicQ2EngineServices {
+  readonly pickups?: OriginalPickupAdmission;
   readonly damageProvenance?: (attacker: ActorId, inflictor: ActorId, target: ActorId) => Omit<AttackProvenance, "attacker" | "inflictor" | "cause">;
   readonly projection?: ClassicQ2ActorProjection;
   readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "combat" | "inventory" | "callbacks" | "trace" | "pointContents" | "inPvs" | "inPhs" | "setAreaPortal" | "setSolid" | "inlineModelBounds">;
@@ -81,6 +85,18 @@ export class ClassicQ2GuestHost {
   #exports: GuestAddress | null = null;
   #initialized = false;
   #suppressReconcile = false;
+  #pickups: NativePrimaryPickups | null = null;
+  bindPickups(image: GuestAddress): void {
+    if (this.#pickups !== null) throw new Error("API3 primary pickups already bound");
+    const profile = classicPickupProfile(this.memory.module.digest);
+    if (profile === null || this.options.services.pickups === undefined) return;
+    if (this.options.services.projection !== undefined) throw new Error("Primary pickup callers cannot bind a component projection");
+    this.#pickups = new NativePrimaryPickups({ memory: this.memory, runner: this.options.runner,
+      invoke: (target, signature, values) => this.invoke(target, signature, values), record: address => this.edicts.fromPointer(address),
+      current: record => this.edicts.current(record)?.id ?? null,
+      admission: () => { const pickups = this.options.services.pickups; if (pickups === undefined) throw new Error("API3 primary pickup authority disappeared"); return pickups; },
+    }, image, profile);
+  }
   private inputMovement: ((address: GuestAddress, run: () => undefined) => undefined) | null = null;
   bindInputMovement(boundary: (address: GuestAddress, run: () => undefined) => undefined): () => undefined {
     if (this.inputMovement !== null) throw new Error("API3 movement already has an input owner");
@@ -150,7 +166,7 @@ export class ClassicQ2GuestHost {
   }
   init(): undefined { if (this.#initialized) throw new Error("API 3 Init already completed"); this.call("Init"); this.#initialized = true; this.edicts.reconcile(); return undefined; }
   shutdown(): undefined {
-    this.call("Shutdown"); this.#initialized = false;
+    try { this.call("Shutdown"); } finally { this.#pickups?.close(); this.#pickups = null; this.#initialized = false; }
     if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
     return undefined;
   }
@@ -178,6 +194,7 @@ export class ClassicQ2GuestHost {
     return result;
   }
   async saveLoading(name: "ReadGame" | "ReadLevel", filename: string, nextFrame: () => Promise<void>): Promise<void> {
+    this.#pickups?.assertIdle();
     if (this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
     const address = allocateClassicString(this.memory, filename);
     try { await this.callLoading(name, [{ kind: "pointer", value: address }], nextFrame, Math.min(Number.MAX_SAFE_INTEGER, this.options.instructionBudget * 10)); }
@@ -200,6 +217,7 @@ export class ClassicQ2GuestHost {
     if (name === "") this.#models.delete(index); else this.#models.set(index, name);
   }
   rebindWorld(): void {
+    this.#pickups?.assertIdle();
     if (!this.#initialized || this.#exports === null || this.options.runner.depth !== 0) throw new Error("API 3 world rebind requires an idle initialized module");
     this.#edicts = new ClassicQ2Edicts(this.memory, this.#exports, this.options.services.engine.actors, this.options.provider, this.options.services.bindEntity, this.options.services.projection);
     this.#models.clear();
@@ -252,6 +270,7 @@ export class ClassicQ2GuestHost {
     return undefined;
   }
   save(name: "WriteGame" | "ReadGame" | "WriteLevel" | "ReadLevel", filename: string, autosave = false): undefined {
+    this.#pickups?.assertIdle();
     if ((name === "ReadGame" || name === "ReadLevel") && this.options.services.projection === undefined) for (const actor of this.options.services.engine.actors.ownedBy(this.options.provider)) this.options.services.engine.actors.release(actor);
     this.withStrings([filename], pointers => { this.call(name, name === "WriteGame" ? [...pointers, { kind: "int32", value: Number(autosave) }] : pointers); return undefined; });
     return undefined;

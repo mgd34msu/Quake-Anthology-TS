@@ -15,13 +15,14 @@ import { readClassicString, readClassicVector } from "../../../compat/q2/classic
 import { runClassicGuestPmove } from "../../../compat/q2/classic/pmove.ts";
 import { ClassicCombatBindings } from "../../../compat/q2/classic/combat-binding.ts";
 import { classicCombatProfile } from "../../../compat/q2/classic/combat-profile.ts";
-import { classicGrenadeInventory } from "../../../compat/q2/classic/grenade-inventory.ts";
+import { ClassicSourceInventory } from "../../../compat/q2/classic/inventory.ts";
 import { SizeBuf, SZ_Init, SZ_Clear, MSG_WriteChar, MSG_WriteByte, MSG_WriteShort, MSG_WriteLong, MSG_WriteFloat, MSG_WriteString, MSG_WritePos, MSG_WriteDir, MSG_WriteAngle } from "../../../network/q2/message.ts";
 import type { ActorCollision, SharedSceneQueries } from "../../../world/collision/index.ts";
 
 export type ClassicGuestAudience = { readonly kind: "unicast"; readonly slot: number } | { readonly kind: "multicast"; readonly origin: Vec3; readonly scope: "all" | "phs" | "pvs" };
 export interface ClassicGuestMessage { readonly audience: ClassicGuestAudience; readonly reliable: boolean; readonly bytes: Uint8Array }
 export interface ClassicGuestServicesOptions {
+  readonly pickups?: ClassicQ2EngineServices["pickups"];
   readonly damageProvenance?: ClassicQ2EngineServices["damageProvenance"];
   readonly engine: ClassicQ2EngineServices["engine"] & Pick<Q2FoundationHost, "emit">;
   readonly scene: SharedSceneQueries;
@@ -37,7 +38,7 @@ export interface ClassicGuestServicesOptions {
   readonly addCommand: ClassicQ2EngineServices["addCommand"];
   readonly debugGraph: ClassicQ2EngineServices["debugGraph"];
 }
-export type ClassicGuestMapServices = Pick<ClassicGuestServicesOptions, "engine" | "scene" | "mapPath" | "admit" | "collision" | "print" | "command" | "addCommand" | "debugGraph" | "damageProvenance">;
+export type ClassicGuestMapServices = Pick<ClassicGuestServicesOptions, "engine" | "scene" | "mapPath" | "admit" | "collision" | "print" | "command" | "addCommand" | "debugGraph" | "damageProvenance" | "pickups">;
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 function vector(view: DataView, offset: number): Vec3 { return { x: view.getFloat32(offset, true), y: view.getFloat32(offset + 4, true), z: view.getFloat32(offset + 8, true) }; }
 function storeVector(view: DataView, offset: number, value: Vec3): void { view.setFloat32(offset, value.x, true); view.setFloat32(offset + 4, value.y, true); view.setFloat32(offset + 8, value.z, true); }
@@ -51,6 +52,7 @@ export class ClassicGuestServices {
   readonly #buffer = new SizeBuf();
   #host: ClassicQ2GuestHost | null = null;
   #combat: ClassicCombatBindings | null = null;
+  #inventory: ClassicSourceInventory | null = null;
   #playerMovement: EquipmentMovement | undefined;
   #writePlayerVelocity: ((actor: OwnedActor, velocity: Vec3) => undefined) | null = null;
   private readonly inputMotion = new Map<ActorId, NativeInputMotion>();
@@ -73,6 +75,7 @@ export class ClassicGuestServices {
     for (let model = 1; model < options.scene.geometry.models.length; model++) this.#configstrings.set(33 + model, `*${model}`);
     const owner = this;
     this.services = {
+      ...(options.pickups === undefined ? {} : { get pickups() { const pickups = owner.options.pickups; if (pickups === undefined) throw new Error("Native pickup authority disappeared during travel"); return pickups; } }),
       ...(options.damageProvenance === undefined ? {} : { damageProvenance: (attacker, inflictor, target) => {
         const provenance = this.options.damageProvenance;
         if (provenance === undefined) throw new Error("Native damage provenance disappeared during travel");
@@ -101,8 +104,8 @@ export class ClassicGuestServices {
   }
   rebindWorld(binding: ClassicGuestMapServices): void {
     this.validateMap(binding);
-    const { engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance } = binding;
-    this.#options = { ...this.#options, engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance };
+    const { engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups } = binding;
+    this.#options = { ...this.#options, engine, scene, mapPath, admit, collision, print, command, addCommand, debugGraph, damageProvenance, pickups };
     this.#loading = true; this.#configstrings.clear(); this.#messages.length = 0; SZ_Clear(this.#buffer);
     this.#configstrings.set(33, binding.mapPath);
     for (let model = 1; model < binding.scene.geometry.models.length; model++) this.#configstrings.set(33 + model, `*${model}`);
@@ -111,6 +114,8 @@ export class ClassicGuestServices {
     if (this.#host !== null || host.memory !== this.memory) throw new Error("API 3 services already bound or guest memory mismatch");
     this.#host = host;
     this.#combat = imageBase === undefined ? null : ClassicCombatBindings.create(host, imageBase);
+    this.#inventory = imageBase === undefined ? null : ClassicSourceInventory.create(host, imageBase);
+    if (imageBase !== undefined) host.bindPickups(imageBase);
   }
   get host(): ClassicQ2GuestHost { if (this.#host === null) throw new Error("API 3 services have no guest host"); return this.#host; }
   notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.edicts.at(slot)) ?? null; }
@@ -143,7 +148,8 @@ export class ClassicGuestServices {
     if (client === null) throw new Error("API3 source view has no client");
     this.memory.writeFloat32(this.memory.offset(client, BigInt(profile.client.viewAngles + 8)), roll);
   }
-  equipmentInventory(slot: number) { return classicGrenadeInventory(this.host, this.host.edicts.at(slot)); }
+  get hasSourceInventory(): boolean { return this.#inventory !== null; }
+  sourceInventory(slot: number) { return this.#inventory?.bind(this.host.edicts.at(slot)) ?? null; }
   completeSpawn(): void { this.#loading = false; }
   setPlayerVelocityWriter(write: (actor: OwnedActor, velocity: Vec3) => undefined, read: (actor: ActorId) => Vec3 | undefined): void {
     this.#writePlayerVelocity = write; this.#readPlayerVelocity = read;

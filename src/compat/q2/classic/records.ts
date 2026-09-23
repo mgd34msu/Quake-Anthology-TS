@@ -86,6 +86,14 @@ export class ClassicQ2Edicts {
     if (difference < 0n || difference % BigInt(descriptor.stride) !== 0n) throw new RangeError("Pointer does not identify the start of an API 3 edict");
     return this.at(Number(difference / BigInt(descriptor.stride)));
   }
+  /** Primary callers resolve existing authority without reviving a retired input slot. */
+  current(record: RawEntityView): OwnedActor | null {
+    if (this.#retiredInputClients.has(record.slot)) return null;
+    const current = this.at(record.slot);
+    if (current.address.byteOffset !== record.address.byteOffset || current.address.addressSpace !== record.address.addressSpace) return null;
+    if (current.bytes.getInt32(88, true) === 0 && !this.#retainedClients.has(record.slot)) return null;
+    return this.actors.atSource(this.provider, record.slot);
+  }
   pointer(actor: ActorId): GuestAddress {
     if (this.projection !== undefined) return this.projection.address(actor);
     const source = this.actors.sourceOf(actor);

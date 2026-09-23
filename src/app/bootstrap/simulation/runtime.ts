@@ -1501,7 +1501,7 @@ export class SharedSimulation implements Simulation {
   }
 
   private bindEquipmentInventory(actor: OwnedActor, initial: readonly InventoryEntry[] = []): void {
-    const source = this.source.kind === "q2-native" ? this.source.game.services.equipmentInventory(this.nativeQ2Client(actor.id).slot + 1) : null;
+    const source = this.source.kind === "q2-native" ? this.source.game.services.sourceInventory(this.nativeQ2Client(actor.id).slot + 1) : null;
     if (source === null) { this.inventory.create(actor, initial); return; }
     this.bindSourceInventory(actor, source, initial);
   }
@@ -1947,6 +1947,7 @@ export class SharedSimulation implements Simulation {
       const runtime: ActorHostRuntime = { numeric: timing.numeric, random: this.random, now: () => this.timeSeconds, frameSeconds: () => native.edition === "classic" ? 0.1 : 0.025,
         schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) };
       const services: ClassicGuestServicesOptions = {
+        pickups: this.originalPickups,
         damageProvenance: () => ({ sequence: this.attackSequence++, time: { kind: "seconds", value: this.timeSeconds }, weapon: null,
           weaponProvider: recipe.map.entities.provider, combatProvider: recipe.combat.provider,
           inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider }),
@@ -4396,11 +4397,13 @@ export class SharedSimulation implements Simulation {
     if (begin) { this.source.game.begin(client.slot + 1); this.notifyClientEvent("admitted", actor.id); }
     return { actor: actor.id, viewHeight: this.playerView(actor.id).viewHeight };
   }
-  registerQ2NativeClient(client: ClientId): OwnedActor {
+  registerQ2NativeClient(client: ClientId, mode: "live" | "restore" = "live"): OwnedActor {
     if (this.source.kind !== "q2-native" || !this.options.identity.owns(client) || client.slot >= this.options.maxClients || this.source.clients.has(client)) throw new Error("Invalid native client registration");
     const id = this.source.game.actor(client.slot + 1), actor = id === null ? null : this.actors.resolveOwned(id);
     if (actor === null) throw new Error("Native ClientConnect did not reserve its source actor");
-    this.source.clients.set(client, actor); return actor;
+    this.source.clients.set(client, actor);
+    if (mode === "live" && this.source.game.services.hasSourceInventory) this.bindEquipmentInventory(actor);
+    return actor;
   }
   private nativeQ2Client(actor: ActorId): ClientId {
     if (this.source.kind !== "q2-native") throw new Error("No native Quake II source");
@@ -5072,6 +5075,7 @@ export class SharedSimulation implements Simulation {
       modClientApplicationOrdinal: this.modClientApplications.checkpoint(), q1Punch: this.q1Punch.capture(),
       ...(source.kind === "q3-qvm" && source.combat !== null ? { qvmArmorProjection: 1 } : {}),
       ...(source.kind === "q3-qvm" && source.inventory !== null ? { qvmInventoryProjection: 1 } : {}),
+      ...(source.kind === "q2-native" && source.game.services.hasSourceInventory ? { nativeInventoryProjection: 1 } : {}),
       players: [...this.playerStates.values()].map(captureMovementPlayer), hostMilliseconds: this.hostMilliseconds, q1Paused: this.q1PauseState,
       modClientCommands: [...this.modClientCommands.values()].map(value => {
         const client = this.playerClient(value.input.actor); if (client === null) throw new Error("Accepted command lost its live client");
@@ -5187,10 +5191,14 @@ export class SharedSimulation implements Simulation {
         if (client === undefined) throw new Error("Native saved client has no retained session identity");
         const connected = source.game.connect(client.slot + 1, saved.userinfo);
         if (!connected.allowed) throw new Error("Native source rejected restored client");
-        this.registerQ2NativeClient(client);
+        this.registerQ2NativeClient(client, "restore");
         if (saved.phase === "active") source.game.begin(client.slot + 1);
       }
       this.actors.rebindRestoredSource(source.game.module.id);
+      if (source.game.services.hasSourceInventory) for (const actor of source.clients.values()) {
+        const saved = save.inventories.find(entry => this.actors.resolveSaved(entry.actor) === actor);
+        this.bindEquipmentInventory(actor, saved?.entries ?? []);
+      }
     }
     const reconstructed = (actor: ActorId) => source.kind === "q2-native" && this.actors.sourceOf(actor)?.provider === source.game.module.id;
     const reader = simulationSaveReader(save), reference = (value: SaveReader) => this.actors.referenceSaved(readSavedActor(value));
@@ -5223,21 +5231,36 @@ export class SharedSimulation implements Simulation {
       qvmInventoryProjection.literal(1);
       if (source.kind !== "q3-qvm" || source.inventory === null) throw new Error("Saved QVM inventory requires qualified source storage");
     }
+    const nativeInventoryProjection = reader.field("nativeInventoryProjection");
+    if (nativeInventoryProjection.value !== undefined) {
+      nativeInventoryProjection.literal(1);
+      if (source.kind !== "q2-native" || !source.game.services.hasSourceInventory) throw new Error("Saved native inventory requires qualified source storage");
+    }
     let inventories = save.inventories;
-    if (qvmInventoryProjection.value === undefined && source.kind === "q3-qvm" && source.inventory !== null) {
-      inventories = [...save.inventories];
-      for (const actor of this.actors.ownedBy(this.recipe.map.entities.provider)) {
-        const slot = source.game.records.slot(actor.id);
-        if (slot === null || slot >= source.game.game.data.numClients || !this.inventory.has(actor.id)) continue;
+    const restoreInventoryCoverage = (actors: readonly OwnedActor[], legacy: boolean): void => {
+      inventories = [...inventories];
+      for (const actor of actors) {
         const index = inventories.findIndex(entry => this.actors.resolveSaved(entry.actor) === actor);
         const previous = index < 0 ? undefined : inventories[index], entries = this.inventory.entries(actor.id);
+        if (!legacy) {
+          if (previous === undefined || !isDeepStrictEqual(previous.entries, entries)) throw new Error("Saved native inventory disagrees with restored source storage");
+          continue;
+        }
         if (previous?.entries.some(entry => !isDeepStrictEqual(entry, entries.find(current => current.item === entry.item))))
-          throw new Error("Legacy QVM inventory disagrees with restored source storage");
+          throw new Error("Legacy source inventory disagrees with restored source storage");
         const savedActor = previous?.actor ?? save.actors.find(entry => this.actors.resolveSaved(entry) === actor);
-        if (savedActor === undefined) throw new Error("Restored QVM inventory has no saved actor identity");
+        if (savedActor === undefined) throw new Error("Restored source inventory has no saved actor identity");
         const migrated = { actor: { slot: savedActor.slot, generation: savedActor.generation }, entries };
         inventories = index < 0 ? [...inventories, migrated] : inventories.map((entry, position) => position === index ? migrated : entry);
       }
+    };
+    if (source.kind === "q2-native" && source.game.services.hasSourceInventory)
+      restoreInventoryCoverage([...source.clients.values()], nativeInventoryProjection.value === undefined);
+    if (qvmInventoryProjection.value === undefined && source.kind === "q3-qvm" && source.inventory !== null) {
+      restoreInventoryCoverage(this.actors.ownedBy(this.recipe.map.entities.provider).filter(actor => {
+        const slot = source.game.records.slot(actor.id);
+        return slot !== null && slot < source.game.game.data.numClients && this.inventory.has(actor.id);
+      }), true);
     }
     const sharedSave = { ...save, inventories, combat: legacyQvmCombat === null ? save.combat : save.combat.map(entry => {
       const actor = this.actors.resolveSaved(entry.actor);

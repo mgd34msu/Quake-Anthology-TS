@@ -36,6 +36,17 @@ test("raw edict descriptor rejects truncated public prefixes and count overflow"
   memory.writeInt32(memory.offset(exports, 68n), 320); memory.writeInt32(memory.offset(exports, 72n), 4);
   expect(() => edicts.descriptor()).toThrow("Invalid source API 3 edict descriptor");
 });
+test("current primary records resolve without allocating and reject retired input lifetimes", () => {
+  const { actors, edicts, memory, exports } = fixture(), record = edicts.at(1);
+  expect(edicts.current(record)).toBeNull(); expect(actors.observations()).toHaveLength(0);
+  const actor = edicts.retainClient(1);
+  expect(edicts.current(record)).toBe(actor);
+  edicts.retireInputClient(1); expect(edicts.current(record)).toBeNull();
+  edicts.finishInputRetirement(1); expect(edicts.current(record)).toBe(actor);
+  const replacement = memory.allocate({ byteLength: 320 * 3 });
+  memory.writePointer(memory.offset(exports, 64n), replacement);
+  expect(edicts.current(record)).toBeNull(); expect(actors.observations()).toHaveLength(1);
+});
 test("cvar_t pointer stays stable and reflects existing registry values, latch and source list", () => {
   const { memory, actors } = fixture();
   const registry = new CvarRegistry({ dialect: "q2-classic", context: { session: actors.session, origin: { kind: "server-console" } } });

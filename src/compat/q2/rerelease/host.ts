@@ -29,6 +29,9 @@ import { RereleaseForeignActors } from "./foreign-actors.ts";
 import type { RereleaseForeignDamageServices, RereleaseProjectionSave } from "./foreign-actors.ts";
 import type { RereleaseDeferredDamageSave } from "./deferred-damage.ts";
 import type { RereleaseNativeEntries } from "./native-entries.ts";
+import type { OriginalPickupAdmission } from "../../../contracts/original-pickups.ts";
+import { NativePrimaryPickups } from "../native-pickups.ts";
+import { rereleasePickupProfile } from "./pickup-profile.ts";
 
 export interface RereleaseActorBindings {
   readonly body: BodyStateBinding;
@@ -62,6 +65,7 @@ export interface RereleaseSpatialServices {
   linkMetadata(actor: OwnedActor, view: RawEntityView): { readonly area: number; readonly area2: number; readonly networkSolid: number };
 }
 export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "invokeImport" | "actorAtSlot"> {
+  readonly pickups?: { readonly admission: OriginalPickupAdmission; readonly imageBase: GuestAddress };
   readonly importBoundary?: (name: string, arguments_: readonly GuestCallValue[], invoke: () => GuestCallResult) => GuestCallResult;
   readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "callbacks" | "combat" | "inventory" | "trace" | "pointContents" | "setAreaPortal" | "setSolid" | "inlineModelBounds" | "worldActor">;
   readonly services: RereleaseCoreServices;
@@ -99,7 +103,9 @@ export class RereleaseQ2GuestHost {
   readonly #reservedClients = new Set<number>();
   #initialized = false;
   #closed = false;
+  readonly #pickups: NativePrimaryPickups | null;
   constructor(readonly options: RereleaseQ2HostOptions) {
+    if (options.pickups !== undefined && options.semantics.project !== undefined) throw new Error("Primary pickup callers cannot bind a component projection");
     if (options.debugDrawing === "headless" && (options.debugShapes !== undefined || options.worldText !== undefined))
       throw new Error("Headless Q2 debug drawing cannot bind renderer callbacks");
     this.core = new RereleaseCoreImports(options.runner.options.cpu.memory, options.services);
@@ -115,6 +121,12 @@ export class RereleaseQ2GuestHost {
     if (options.foreignDamage !== undefined && options.nativeEntries === undefined) throw new Error("Foreign native damage requires verified entry points");
     this.foreignActors = options.foreignDamage === undefined || options.nativeEntries === undefined ? null : new RereleaseForeignActors(this, options.nativeEntries, options.foreignDamage);
     this.#unsubscribe = options.engine.actors.onRelease(actor => { try { this.foreignActors?.released(actor); } finally { this.#botEntities.delete(actor.id); } return undefined; });
+    const profile = rereleasePickupProfile(this.module.memory.module.digest);
+    this.#pickups = options.pickups === undefined || profile === null ? null : new NativePrimaryPickups({ memory: this.module.memory, runner: options.runner,
+      invoke: (target, signature, values) => this.module.invoke(target, signature, values), record: address => this.module.entities().fromPointer(address),
+      current: record => this.#retiredInputClients.has(record.slot) ? null : this.options.engine.actors.atSource(this.module.memory.module.id, record.slot)?.id ?? null,
+      admission: () => { const pickups = this.options.pickups; if (pickups === undefined) throw new Error("API2023 primary pickup authority disappeared"); return pickups.admission; },
+    }, options.pickups.imageBase, profile);
   }
   #at(view: RawEntityView, name: string): GuestAddress { return this.module.memory.offset(view.address, BigInt(fieldOffset(edictLayout, name))); }
   #vector(address: GuestAddress): Vec3 {
@@ -170,6 +182,7 @@ export class RereleaseQ2GuestHost {
   isClientReserved(slot: number): boolean { return this.#reservedClients.has(slot); }
   releaseClientReservation(slot: number): void { this.#reservedClients.delete(slot); this.reconcile(); }
   rebindWorld(commit: () => void): void {
+    this.#pickups?.assertIdle();
     if (this.#closed || !this.#initialized || this.#filterDepth !== 0) throw new Error("Q2 world rebind requires an idle initialized host");
     this.foreignActors?.clear(); this.#reservedClients.clear(); this.#releaseActors(); this.#unsubscribe(); this.#botEntities.clear();
     for (const address of this.#surfaces.values()) this.module.memory.unmap(address, surfaceLayout.byteLength);
@@ -218,6 +231,7 @@ export class RereleaseQ2GuestHost {
     this.foreignActors?.synchronize(); await this.callLoading("RunFrame", [guestBool(mainLoop)], nextFrame);
   }
   async readSaveLoading(kind: "game" | "level", saved: RereleaseSourceSave, nextFrame: () => Promise<void>, domain: "checkpoint" | "current" = "current"): Promise<void> {
+    this.#pickups?.assertIdle();
     const bytes = saved.native;
     if (bytes.includes(0)) throw new Error("Q2 JSON save contains an embedded terminator");
     if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0)) throw new Error("Native save requires its foreign actor binding");
@@ -231,7 +245,7 @@ export class RereleaseQ2GuestHost {
   }
   shutdown(): void {
     if (this.#closed) return;
-    this.#closed = true;
+    this.#closed = true; this.#pickups?.close();
     try { try { this.foreignActors?.close(); } finally { if (this.#initialized) this.module.callGame("Shutdown"); } }
     finally { try { this.#releaseActors(); } finally { this.#unsubscribe(); } }
   }
@@ -255,6 +269,7 @@ export class RereleaseQ2GuestHost {
   clientDisconnect(slot: number): void { this.module.clientDisconnect(slot); this.reconcile(); }
   /** Save serialization runs in the guest so expanded source fields remain intact. */
   writeSave(kind: "game" | "level", automaticOrTransition: boolean): RereleaseSourceSave {
+    this.#pickups?.assertIdle();
     const memory = this.module.memory, size = memory.allocate({ byteLength: 8, alignment: 8n, label: "Q2 save size" });
     let output: GuestAddress | null = null;
     try {
@@ -267,6 +282,7 @@ export class RereleaseQ2GuestHost {
     } finally { if (output !== null) this.core.free(output); memory.unmap(size, 8); }
   }
   async writeSaveLoading(kind: "game" | "level", automaticOrTransition: boolean, nextFrame: () => Promise<void>): Promise<RereleaseSourceSave> {
+    this.#pickups?.assertIdle();
     if (this.#closed) throw new Error("Q2 guest host is closed");
     this.core.refreshCvars();
     const memory = this.module.memory, size = memory.allocate({ byteLength: 8, alignment: 8n, label: "Q2 save size" });
@@ -281,6 +297,7 @@ export class RereleaseQ2GuestHost {
     } finally { if (output !== null) this.core.free(output); memory.unmap(size, 8); }
   }
   readSave(kind: "game" | "level", saved: RereleaseSourceSave, domain: "checkpoint" | "current" = "current"): void {
+    this.#pickups?.assertIdle();
     const bytes = saved.native;
     if (bytes.includes(0)) throw new Error("Q2 JSON save contains an embedded terminator");
     if (this.foreignActors === null && (saved.deferredDamage.length !== 0 || saved.projections.length !== 0)) throw new Error("Native save requires its foreign actor binding");
