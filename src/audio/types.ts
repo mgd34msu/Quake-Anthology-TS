@@ -33,6 +33,7 @@ export type SoundOrigin = {
     readonly actor: ActorId;
 };
 export interface PlaySound {
+    readonly owner?: ProviderId;
     readonly sound: SoundAsset;
     readonly family: SoundFamily;
     readonly actor: ActorId | null;
@@ -47,7 +48,6 @@ export interface PlaySound {
 }
 export interface LoopSound extends Omit<PlaySound, "channel" | "delaySeconds" | "serverMilliseconds"> {
     readonly actor: ActorId;
-    readonly owner?: ProviderId;
     readonly velocity: Vec3;
     readonly frameNumber: number;
     readonly lifetime: "frame" | "persistent";

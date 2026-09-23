@@ -11,6 +11,7 @@ test("source player events retain store order, bounded rings, saved cursors and 
   const ids = createIdentityOwner("source-events"), first = ids.actor(4, 2), second = ids.actor(8, 3);
   const memory = new QvmMemory(new Uint8Array(2048)), events: Q3SourcePlayerEvent[] = [];
   const publisher = new QvmModPlayerEvents({ memory, module, abiProfile: "q3-modern", live: () => true,
+    referenceSaved: actor => ids.actor(actor.slot, actor.generation),
     origin: () => ({ x: 10, y: 20, z: 30 }), time: () => 1000, emit: event => { events.push(event); } });
   const a = memory.dataView(0, 468), b = memory.dataView(512, 468);
   a.setInt32(140, 11, true); publisher.track(first, 0); publisher.track(second, 512);
@@ -51,6 +52,7 @@ test("predictable sequence wraps as int32 and legacy saves begin at the current 
   const ids = createIdentityOwner("event-wrap"), actor = ids.actor(1, 1), memory = new QvmMemory(new Uint8Array(1024));
   const events: Q3SourcePlayerEvent[] = [], view = memory.dataView(0, 468);
   const publisher = new QvmModPlayerEvents({ memory, module, abiProfile: "q3-modern", live: () => true,
+    referenceSaved: actor => ids.actor(actor.slot, actor.generation),
     origin: () => ({ x: 0, y: 0, z: 0 }), time: () => 1, emit: event => { events.push(event); } });
   view.setInt32(108, 0x7fffffff, true); publisher.track(actor, 0);
   view.setInt32(116, 97, true); view.setInt32(124, 3, true); view.setInt32(108, -0x80000000, true);
@@ -63,4 +65,30 @@ test("predictable sequence wraps as int32 and legacy saves begin at the current 
   const saved = publisher.checkpoint(), cursor = saved.clients[0]; if (cursor === undefined) throw new Error("Missing cursor");
   expect(() => readQvmPlayerEvents(new SaveReader({ nextOrder: 1, clients: [{ ...cursor, externalOrder: 1 }] }))).toThrow("publication order");
   publisher.close();
+});
+
+test("restored player cursors resolve saved identities while preserving consumed and pending source events", () => {
+  const ids = createIdentityOwner("restored-source-events"), first = ids.actor(4, 2), second = ids.actor(8, 3);
+  const restoredFirst = ids.actor(12, 5), restoredSecond = ids.actor(13, 6), restored = [restoredFirst, restoredSecond];
+  const memory = new QvmMemory(new Uint8Array(2048)), events: Q3SourcePlayerEvent[] = [];
+  const publisher = new QvmModPlayerEvents({ memory, module, abiProfile: "q3-modern", live: () => true,
+    referenceSaved: actor => {
+      const mapped = actor.slot === first.slot && actor.generation === first.generation ? restoredFirst
+        : actor.slot === second.slot && actor.generation === second.generation ? restoredSecond : undefined;
+      if (mapped === undefined) throw new Error("Missing restored actor"); return mapped;
+    }, origin: () => ({ x: 0, y: 0, z: 0 }), time: () => 1, emit: event => { events.push(event); } });
+  const a = memory.dataView(0, 468), b = memory.dataView(512, 468);
+  publisher.track(first, 0); publisher.track(second, 512);
+  a.setInt32(128, 325, true); a.setInt32(136, 100, true); publisher.publish();
+  b.setInt32(128, 349, true); b.setInt32(136, 200, true);
+  a.setInt32(112, 93, true); a.setInt32(108, 1, true);
+  const saved = publisher.checkpoint(), source = memory.bytes.slice();
+  publisher.restore(saved, restored.map((actor, index) => ({ actor, address: index * 512 })));
+  publisher.publish();
+  expect(events.map(event => event.event)).toEqual([325, 349, 93]);
+  expect(events.slice(1).map(event => event.actor)).toEqual([restoredSecond, restoredFirst]);
+  expect(memory.bytes).toEqual(source);
+  publisher.publish(); expect(events).toHaveLength(3);
+  expect(publisher.checkpoint().clients.map(entry => entry.actor)).toEqual(restored.map(actor => ({ slot: actor.slot, generation: actor.generation })));
+  publisher.close(); expect(memory.observesWrites).toBe(false);
 });

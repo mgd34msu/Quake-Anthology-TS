@@ -16,7 +16,7 @@ import type { ModHostServices } from "../../world/session/mods.ts";
 import type { ModCommandPort } from "../../world/session/mod-commands.ts";
 import { modClientInputValues } from "../../world/session/mod-client-input-values.ts";
 import type { CommandInvocation } from "../../core/commands/index.ts";
-import { CvarRegistry } from "../../core/cvars/index.ts";
+import { CvarRegistry, CvarFlag } from "../../core/cvars/index.ts";
 import { float32ToBits, nativeAtoi, Q3_BINARY32_PROFILE } from "../../core/numeric.ts";
 import { createBoxModel, createCapsuleModel } from "../../world/collision/q3/model.ts";
 import { encodeCheckpointValue, decodeCheckpointValue, SaveReader } from "../../persistence/value.ts";
@@ -32,7 +32,9 @@ import { qvmClientGameSyscall } from "./client-game-syscalls.ts";
 import { QvmModClientBindings } from "./mod-clients.ts";
 import { QvmModInput } from "./mod-input.ts";
 import { QvmModPlayerEvents, readQvmPlayerEvents } from "./mod-player-events.ts";
-import { qvmPlayerStateBytes, readQvmPlayerState } from "./player-record.ts";
+import { qvmPlayerStateBytes, readQvmPlayerState, readSourceQvmPlayerState } from "./player-record.ts";
+import { ClientGameStateStorage, type SourceGameStateRecord } from "../../network/q3/game-state.ts";
+import type { ModQvmPresentationSource } from "../../world/session/mod-presentations.ts";
 import { QvmFiles, qvmFileSyscall } from "./file-syscalls.ts";
 import { rejectQvmSyscall } from "./syscalls.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
@@ -239,6 +241,9 @@ export class QvmModProvider {
   private readonly actorSemantics: QvmModActors | null;
   private readonly portals: Q3GuestWorld | null;
   private readonly configstrings = new Map<number, string>();
+  private presentationRevision = 0;
+  private presentationGeneration = 0;
+  private presentationState: SourceGameStateRecord | null = null;
   private readonly eventKeys = new Map<ActorId, string>();
   private readonly defaults = new Map<string, Uint8Array>();
   private readonly frames: Frame[] = [];
@@ -268,11 +273,8 @@ export class QvmModProvider {
     this.cvars = this.newCvars();
     this.entityTokens = new QvmEntityTokens(declaration.spawnEntities ?? "");
     this.information = { abiProfile: declaration.abiProfile, cvars: this.cvars, configstrings: {
-      get: index => this.configstrings.get(index) ?? "",
-      set: (index, value) => {
-        if ((this.configstrings.get(index) ?? "") === value) return;
-        this.configstrings.set(index, value);
-      },
+      get: index => { this.refreshServerInformation(); return this.configstrings.get(index) ?? ""; },
+      set: (index, value) => this.setConfigstring(index, value),
     } };
     const scene = services.engine?.scene, topology = scene?.geometry, adjust = scene?.adjustAreaPortalState,
       contribution = scene?.adjustAreaPortalContribution, native = scene?.nativeQ3ClipModels;
@@ -308,6 +310,8 @@ export class QvmModProvider {
           actor: this.services.referenceSaved?.(readSavedActor(entry.field("actor"))) ?? this.services.actors.referenceSaved(readSavedActor(entry.field("actor")), "current"), slot: entry.field("slot").integer(0), admitted: entry.field("admitted").boolean() })));
         this.configstrings.clear();
         for (const entry of decoded.field("configstrings").list(entry => ({ index: entry.field("index").integer(), value: entry.field("value").string() }))) this.configstrings.set(entry.index, entry.value);
+        this.bindServerVariables(this.cvars);
+        this.presentationRevision++; this.presentationGeneration++; this.presentationState = null;
         for (const entry of decoded.field("projections").list(entry => ({ actor: readSavedActor(entry.field("actor")), slot: entry.field("slot").integer(0), owned: entry.field("owned").boolean(), event: entry.field("event").nullable(value => value.string()) }))) {
           const actor = this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current");
           this.projections.set(actor, entry.slot);
@@ -319,6 +323,7 @@ export class QvmModProvider {
       },
     } });
     this.playerEvents = new QvmModPlayerEvents({ memory: this.module.memory, module: artifact.module, abiProfile: declaration.abiProfile,
+      referenceSaved: actor => services.referenceSaved?.(actor) ?? services.actors.referenceSaved(actor, "current"),
       live: actor => !this.closed && services.actors.isLive(actor) && this.projections.has(actor) && !this.retiredProjections.has(actor) && this.clientBindings?.live(actor) === true,
       origin: actor => { const body = services.bodies.read(actor); if (body === null) throw new Error("QVM player event requires a live destination body"); return body.origin; },
       time: () => Math.trunc(seconds(services) * 1000), emit: event => this.emit(event),
@@ -391,9 +396,61 @@ export class QvmModProvider {
     });
     this.bindLifecycle();
   }
-  private newCvars(): CvarRegistry { return new CvarRegistry({ dialect: "q3", context: { session: this.services.actors.session, origin: { kind: "server-console" } }, print: text => this.services.engine?.print(text) }); }
+  private newCvars(): CvarRegistry {
+    const cvars = new CvarRegistry({ dialect: "q3", context: { session: this.services.actors.session, origin: { kind: "server-console" } }, print: text => this.services.engine?.print(text) });
+    this.bindServerVariables(cvars);
+    return cvars;
+  }
+  private bindServerVariables(cvars: CvarRegistry): void {
+    const map = this.services.engine?.presentation?.map, environment = this.services.engine?.environment;
+    if (map !== undefined) {
+      const name = map.replace(/^maps\//, "").replace(/\.bsp$/, "");
+      cvars.register("mapname", name, CvarFlag.ServerInfo | CvarFlag.ReadOnly);
+      cvars.set("mapname", name, true);
+    }
+    if (environment !== undefined) {
+      cvars.register("sv_maxclients", String(environment.maxClients), CvarFlag.ServerInfo | CvarFlag.Latch);
+      cvars.set("sv_maxclients", String(environment.maxClients), true);
+    }
+  }
+  private setConfigstring(index: number, value: string): void {
+    if ((this.configstrings.get(index) ?? "") === value) return;
+    this.configstrings.set(index, value);
+    this.presentationRevision++; this.presentationState = null;
+  }
+  private refreshServerInformation(): void {
+    this.setConfigstring(0, this.cvars.infoString(CvarFlag.ServerInfo));
+    this.setConfigstring(1, this.cvars.infoString(CvarFlag.SystemInfo));
+  }
   private rememberDefaults(): void { for (const record of this.records.values()) this.defaults.set(record.id, this.module.memory.bytes.slice(record.address, record.address + record.stride * record.capacity)); }
   private current(): void { this.assertCurrent(); if (this.closed) throw new Error("QVM gameplay mod is closed"); }
+  readonly presentationSource: ModQvmPresentationSource = this.createPresentationSource();
+  private createPresentationSource(): ModQvmPresentationSource {
+    const owner = this;
+    return {
+    get module() { return owner.artifact.module; },
+    get abiProfile() { return owner.declaration.abiProfile; },
+    get generation() { return owner.presentationGeneration; },
+    context: viewer => {
+      this.current();
+      if (this.frames.length !== 0) throw new Error("Cannot read presentation during an original source call");
+      if (this.clientBindings?.live(viewer) !== true || !this.clientBindings.admitted(viewer)) return null;
+      this.refreshServerInformation();
+      if (this.presentationState === null) {
+        const storage = new ClientGameStateStorage(message => { throw new Error(message); });
+        storage.beginEntries();
+        for (const [index, value] of this.configstrings) if (value !== "") storage.append(index, value);
+        this.presentationState = storage.copySourceRecord();
+      }
+      return { gameState: this.presentationState, gameStateRevision: this.presentationRevision,
+        snapshot: { serverTime: Math.trunc(seconds(this.services) * 1000),
+          playerState: readSourceQvmPlayerState(this.view(this.playerAddress(viewer), qvmPlayerStateBytes(this.declaration.abiProfile)), this.declaration.abiProfile) } };
+    },
+    actor: slot => { this.current(); const actor = this.actorAt(slot); return actor !== null && this.services.actors.isLive(actor) ? actor : null; },
+    live: actor => !this.closed && this.services.actors.isLive(actor) && this.clientBindings?.live(actor) === true,
+    assertCurrent: () => this.current(),
+    };
+  }
   private view(address: number, size: number): DataView { return this.module.memory.dataView(address, size); }
   private vector(address: number): Vec3 { const view = this.view(address, 12); return { x: view.getFloat32(0, true), y: view.getFloat32(4, true), z: view.getFloat32(8, true) }; }
   private writeVector(address: number, value: Vec3): void { const view = this.view(address, 12); [value.x, value.y, value.z].forEach((value, index) => view.setInt32(index * 4, scalar(value, "float32"), true)); }

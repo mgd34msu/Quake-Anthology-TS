@@ -11,6 +11,37 @@ const axis: Axis = [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z:
 const origin = { x: 0, y: 0, z: 0 };
 const tone: PcmSound = { samples: new Int16Array(2048).fill(12000), sampleRate: 22050, channels: 1, frameCount: 2048, loopStart: null };
 const asset: SoundAsset = { resource: "resource:audio-smoke", name: "sound/test", pcm: tone };
+test("component Q3 loops and channels remain independent on the same actor and seat", () => {
+    const seat = identity.seat(0), listener = identity.actor(40, 0), actor = identity.actor(41, 0);
+    using audio = new UnifiedAudio({ sampleRate: 22050, milliseconds: () => 100, random: () => 0 });
+    audio.setListeners([{ seat, actor: listener, origin, axis, gain: 1, underwater: false }]);
+    const loop = { family: "q3", sound: asset, actor, origin: { kind: "fixed", position: origin }, audience: { kind: "seat", seat },
+        volume: 0.1, attenuation: 0, velocity: origin, frameNumber: 1, lifetime: "persistent" } satisfies import("../../src/audio/types.ts").LoopSound;
+    audio.loop(loop); audio.loop({ ...loop, owner: "mod:first" }); audio.loop({ ...loop, owner: "mod:second" });
+    audio.endLoopFrame();
+    const three = audio.mix(1)[0] ?? 0;
+    audio.clearQ3SeatLoops(seat, true, "mod:first");
+    audio.endLoopFrame();
+    const two = audio.mix(1)[0] ?? 0;
+    audio.stopQ3SeatLoop(seat, actor);
+    audio.endLoopFrame();
+    const one = audio.mix(1)[0] ?? 0;
+    expect(one).toBeGreaterThan(0); expect(two).toBeGreaterThan(one); expect(three).toBeGreaterThan(two);
+    audio.releaseQ3SeatOwner(seat, "mod:second");
+    audio.endLoopFrame();
+    expect(audio.mix(1).every(value => value === 0)).toBe(true);
+    audio.updateActor(actor, origin);
+    const shot = { family: "q3", sound: asset, actor, origin: { kind: "actor", actor }, audience: { kind: "seat", seat },
+        volume: 0.1, attenuation: 1, channel: 4 } satisfies import("../../src/audio/types.ts").PlaySound;
+    audio.play(shot); audio.play({ ...shot, owner: "mod:first" }); audio.play({ ...shot, owner: "mod:second" });
+    const allShots = audio.mix(1)[0] ?? 0;
+    audio.releaseQ3SeatOwner(seat, "mod:first");
+    const remaining = audio.mix(1)[0] ?? 0;
+    expect(allShots).toBeGreaterThan(remaining); expect(remaining).toBeGreaterThan(0);
+    audio.updateActor(actor, { x: 10000, y: 0, z: 0 });
+    audio.endLoopFrame();
+    expect(audio.mix(1).every(value => value === 0)).toBe(true);
+});
 test("real Q1, Q2 rerelease and Q3 archive sounds decode and mix", async () => {
     const corpus = join(import.meta.dir, "../../../qfiles");
     const cases = [{ path: "q1/rerelease/id1/pak0.pak", family: "q1" }, { path: "q2/rerelease/baseq2/pak0.pak", family: "q2" }, { path: "q3a/baseq3/pak0.pk3", family: "q3" }];

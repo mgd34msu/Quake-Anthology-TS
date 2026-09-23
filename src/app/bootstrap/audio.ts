@@ -561,9 +561,12 @@ export class ApplicationAudio {
           this.playHaptics(frame.content, operation.sound.sound, operation.sound.actor, operation.sound.audience);
           this.engine.play(operation.sound); break;
         case "loop": this.engine.loop(operation.sound); break;
-        case "position": this.engine.updateQ3SeatActor(frame.seat, operation.actor, operation.origin); break;
-        case "clear-loops": this.engine.clearQ3SeatLoops(frame.seat, operation.killAll); break;
-        case "stop-loop": this.engine.stopQ3SeatLoop(frame.seat, operation.actor); break;
+        case "position": this.engine.updateQ3SeatActor(frame.seat, operation.actor, operation.origin, frame.owner); break;
+        case "clear-loops": this.engine.clearQ3SeatLoops(frame.seat, operation.killAll, frame.owner); break;
+        case "stop-loop": this.engine.stopQ3SeatLoop(frame.seat, operation.actor, frame.owner); break;
+        case "release-owner":
+          if (frame.owner === undefined) throw new Error("Component audio retirement requires its source owner");
+          this.engine.releaseQ3SeatOwner(frame.seat, frame.owner); break;
       }
     }
     this.engine.endLoopFrame();

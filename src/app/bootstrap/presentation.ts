@@ -5,7 +5,7 @@ import { q3Hardware } from "../../render/q3-hardware.ts";
 import { prepareDebugShapes } from "../../render/scene/debug-shapes.ts";
 import { q1ChaseCamera, q1ViewCamera, q1ViewRectangle, type Q1ViewSettings } from "./q1-client-settings.ts";
 import type { DebugShapePresentationAccess } from "./simulation/types.ts";
-import { createSourceSceneOrder } from "../../render/scene/submissions.ts";
+import { createSourceSceneOrder, type SourceSceneOrder, type SceneOperation } from "../../render/scene/submissions.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { Q1MessageLocalization } from "./q1-localization.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -31,7 +31,7 @@ import { SeatTextPresentation } from "../../text/layout.ts";
 import { Draw2D, TextCommandSink } from "../../text/draw2d.ts";
 import type { TextFontSelection } from "../../text/atlas.ts";
 import type { ApplicationAssets, PreparedApplicationImages, PreparedApplicationImageBinding } from "./assets.ts";
-import type { ApplicationEffects } from "./effects.ts";
+import type { ApplicationEffects, ApplicationEffectFrame } from "./effects.ts";
 import { SourceFinale } from "./finale.ts";
 import type { LocalInput } from "./input.ts";
 import type { NativeRenderer } from "./renderer.ts";
@@ -40,6 +40,8 @@ import type { ApplicationSeatUi } from "./ui.ts";
 import type { ApplicationQ3Client } from "./q3-client.ts";
 import type { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
 import type { NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
+
+export type ComponentEffectFrame = (camera: SceneCamera, source: SourceSceneOrder, q1Fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }) => ApplicationEffectFrame;
 
 /** Viewport ownership is independent of the simulation actor and renderer. */
 export function seatViewport(index: number, count: number, width: number, height: number): Rect {
@@ -65,6 +67,7 @@ export function cameraWithCharacterDeath(camera: SceneCamera, player: PlayerView
 }
 
 export class WorldSeatPresentation implements SeatPresentation {
+  private readonly componentEffects = new Set<ComponentEffectFrame>();
   private readonly q1Messages: Q1MessageLocalization;
   private readonly pendingMessages: { readonly text: string; readonly sourcePresentationSequence: number | undefined }[] = [];
   private readonly pendingQ1Messages: Extract<SimulationPresentationEvent, { readonly kind: "q1" }>[] = [];
@@ -287,11 +290,26 @@ export class WorldSeatPresentation implements SeatPresentation {
       Math.atan(1 / this.camera().projection[0]) * 360 / Math.PI);
   }
 
+  get splitScreen(): boolean { return this.layoutCount > 1; }
+  bindComponentEffects(frame: ComponentEffectFrame): () => void {
+    this.componentEffects.add(frame);
+    return () => { this.componentEffects.delete(frame); };
+  }
+  private effectFrame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null, fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): ApplicationEffectFrame {
+    const base = this.effects.frame(camera, source, viewer, fog);
+    if (this.componentEffects.size === 0) return base;
+    const frames = [base, ...[...this.componentEffects].map(frame => frame(camera, source, fog))];
+    const operations = frames.flatMap(frame => frame.operations);
+    const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
+    return { q3Admissions: frames.flatMap(frame => frame.q3Admissions),
+      operations: [...operations.filter(polygon), ...operations.filter(operation => !polygon(operation))],
+      lights: frames.flatMap(frame => frame.lights), q3Lights: frames.flatMap(frame => frame.q3Lights).slice(0, 32) };
+  }
   frame(snapshot: WorldSnapshot): RenderFrame {
     const viewer = this.chaseSettings === null ? this.local.player.actor : null;
     const time = snapshot.frame.time, camera = this.camera(), source = this.q3Client === null ? createSourceSceneOrder(this.assets.materialRegistrations) : null,
       fog = this.q1Fog.active ? this.q1Fog.current(this.preparedTime) : undefined,
-      effects = source === null ? null : this.effects.frame(camera, source, viewer, fog);
+      effects = source === null ? null : this.effectFrame(camera, source, viewer, fog);
     const playerView = this.effects.playerView(this.local.player.actor, camera);
     const style = (index: number, absent: number): number => this.scene.style(index, absent);
     const input: WorldViewInput = { ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }), camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
@@ -302,7 +320,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
       ...this.scene.styles() };
     const nativeFrame = this.q3Client?.frame((camera, source) => {
-      const effects = this.effects.frame(camera, source, this.local.player.actor, fog);
+      const effects = this.effectFrame(camera, source, this.local.player.actor, fog);
       const input: WorldViewInput = { camera, time, target: { kind: "seat", seat: this.local.player.seat.id },
         source: createWorldSurfaceAdmission(source), lights: effects.lights, q3Lights: effects.q3Lights,
         ...(fog === undefined ? {} : { q1Fog: fog }) };
@@ -383,6 +401,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   close(): undefined {
+    this.componentEffects.clear();
     const errors: unknown[] = [];
     const close = (dispose: () => void): void => { try { dispose(); } catch (error) { errors.push(error); } };
     for (const font of this.worldFonts.values()) close(() => font.close());

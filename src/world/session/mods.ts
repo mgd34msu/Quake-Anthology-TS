@@ -30,6 +30,9 @@ import type { Q1ClientVisibilityScene, Q1VisibilityClient } from "../gameplay/q1
 import type { ModCommands } from "./mod-commands.ts";
 import type { ModUserFiles } from "./mod-files.ts";
 import type { ModClientServices } from "./mod-clients.ts";
+import type { ActiveModPresentation, ModQvmPresentationSource } from "./mod-presentations.ts";
+import type { QvmModPresentationDeclaration } from "../../contracts/qvm-mod-presentation.ts";
+import type { QvmModuleOptions } from "../../compat/qvm/module.ts";
 
 export interface ModOperations {
   readonly actors: ActorCallbackTable["operations"];
@@ -92,6 +95,7 @@ export interface ModHostServices {
 }
 
 export interface ModRuntime extends SessionResource {
+  qvmPresentation?(): ModQvmPresentationSource;
   /** Attach prepared actor bindings after original source state has initialized or restored. */
   activate?(): undefined;
   register(registrations: ModRegistrations): undefined;
@@ -107,6 +111,8 @@ export interface ModRuntime extends SessionResource {
 export interface PreparedMod {
   readonly description: ModDescription;
   readonly identity: ModIdentity;
+  readonly presentation?: { readonly kind: "qvm"; readonly artifact: QvmModuleOptions["artifact"];
+    readonly source: ModuleIdentity; readonly declaration: QvmModPresentationDeclaration };
   /** Native source save callbacks retain executable state through their declared provider records. */
   readonly moduleCheckpoint?: "guest" | "provider";
   /** Only adapters with state independent of the old world's actor graph may retain it. */
@@ -221,6 +227,18 @@ export class SessionMods implements SessionResource {
 
   async checkpoint(): Promise<ModSessionCheckpoint> {
     return await this.exclusive(() => this.capture());
+  }
+
+  presentationSources(): readonly ActiveModPresentation[] {
+    this.assertOpen();
+    if (this.busy) throw new Error("Cannot read mod presentation during a lifecycle operation");
+    return this.active.flatMap(entry => {
+      const prepared = entry.prepared.presentation;
+      if (prepared === undefined) return [];
+      const source = entry.runtime.qvmPresentation?.();
+      if (source === undefined) throw new Error("Declared QVM presentation has no live source context");
+      return [{ identity: entry.identity, prepared, source }];
+    });
   }
 
   async checkpointForTravel(): Promise<ModTravelCheckpoint> {

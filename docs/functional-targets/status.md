@@ -40,7 +40,7 @@ T23 real existing-account evidence covers public `llm_ask` and `llm_exec`, each 
 
 The historical 477-row source ledger is unchanged. This update neither re-audits that inventory nor converts reviewed rows into completed functional targets.
 
-Latest installed T10 checkpoint: `5ce1a80` includes original regular/powered protection composition, QVM committed-write tracking, armor/HUD/save corrections and component input callbacks. Its compiled original Threewave GL check covers movement, firing, armor and save/load. Public Application checks separately cover an original Threewave armor component in Q1, including save/load and continued damage. General mod composition remains unfinished; target totals remain 20/23. See [delivery and evidence](../execution-status.md).
+Latest installed T10 checkpoint: `af904e4` includes original regular/powered protection composition, QVM committed-write tracking, armor/HUD/save corrections, original component controls, native held-fire loops and shared water-impact trails. Its compiled original Threewave GL check covers movement, firing, armor and save/load. Public Application checks separately cover an original Threewave armor component in Q1, including save/load and continued damage. General mod composition remains unfinished; target totals remain 20/23. See [delivery and evidence](../execution-status.md).
 
 ## T01 session and resource lifetime
 

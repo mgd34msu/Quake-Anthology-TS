@@ -18,10 +18,19 @@ function requireBytes(view: DataView, size: number): void {
 }
 
 export function writeQvmGameState(memory: QvmMemory, view: DataView, state: SourceGameStateRecord, profile: QvmAbiProfile = "q3-modern"): void {
+  writeGameState(memory, view, state, profile);
+}
+
+/** Original module configstring indices are already in their source ABI. */
+export function writeSourceQvmGameState(memory: QvmMemory, view: DataView, state: SourceGameStateRecord): void {
+  writeGameState(memory, view, state, null);
+}
+
+function writeGameState(memory: QvmMemory, view: DataView, state: SourceGameStateRecord, profile: QvmAbiProfile | null): void {
   requireBytes(view, QVM_GAME_STATE_BYTES);
   if (state.stringOffsets.length !== 1024 || state.stringData.length !== 16000) throw new RangeError("Invalid source gameState_t extent");
   for (let index = 0; index < 1024; index++) {
-    const source = profile !== "q3-modern" && index >= 16 && index <= 26 ? -1 : qvmConfigstring(index, profile);
+    const source = profile === null ? index : profile !== "q3-modern" && index >= 16 && index <= 26 ? -1 : qvmConfigstring(index, profile);
     view.setInt32(index * 4, source < 0 ? 0 : state.stringOffsets[source] ?? 0, true);
   }
   memory.writeBytes(view.byteOffset - memory.bytes.byteOffset + 4096, state.stringData);

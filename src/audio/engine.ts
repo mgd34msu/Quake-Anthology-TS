@@ -72,7 +72,8 @@ export class UnifiedAudio {
     }
     private readonly seats: SeatAudio[] = [];
     private readonly roundMixers: { readonly seat: SeatId; readonly mixer: AudioMixer }[] = [];
-    private readonly actors: ActorId[] = [];
+    private readonly actors: { readonly actor: ActorId; readonly owner: ProviderId | undefined }[] = [];
+    private readonly actorAliases = new Map<number, number[]>();
     private dopplerEnabled = true;
     private readonly positions = new Map<number, Vec3>();
     private readonly streams = new Map<string, StreamBus>();
@@ -116,15 +117,27 @@ export class UnifiedAudio {
     }
     private check(): void { if (this.closed)
         throw new Error("Audio engine closed"); }
-    private entity(actor: ActorId): number {
-        const index = this.actors.findIndex(candidate => candidate.equals(actor));
+    private entity(actor: ActorId, owner?: ProviderId): number {
+        const index = this.actors.findIndex(candidate => candidate.actor.equals(actor) && candidate.owner === owner);
         if (index >= 0)
             return index + 1;
+        const original = owner === undefined ? null : this.entity(actor);
         const maximum = this.options.maxActors ?? 65536;
         if (this.actors.length + 1 >= maximum)
             throw new RangeError("Audio actor capacity exhausted");
-        this.actors.push(actor);
-        return this.actors.length;
+        this.actors.push({ actor, owner });
+        const entity = this.actors.length;
+        if (original === null) this.actorAliases.set(entity, [entity]);
+        if (original !== null) {
+            const aliases = this.actorAliases.get(original) ?? [];
+            aliases.push(entity); this.actorAliases.set(original, aliases);
+            const position = this.positions.get(original);
+            if (position !== undefined) {
+                this.positions.set(entity, position);
+                for (const state of this.seats) state.mixer.updateEntityPosition(entity, position);
+            }
+        }
+        return entity;
     }
     private seat(id: SeatId): SeatAudio {
         const seat = this.seats.find(value => value.listener.seat.equals(id));
@@ -192,20 +205,20 @@ export class UnifiedAudio {
     updateActor(actor: ActorId, origin: Vec3): void {
         this.check();
         const entity = this.entity(actor);
-        this.positions.set(entity, { ...origin });
-        for (const state of this.seats) {
-            state.mixer.updateEntityPosition(entity, origin);
+        for (const number of this.actorAliases.get(entity) ?? []) {
+            this.positions.set(number, { ...origin });
+            for (const state of this.seats) state.mixer.updateEntityPosition(number, origin);
         }
     }
-    updateQ3SeatActor(seat: SeatId, actor: ActorId, origin: Vec3): void {
+    updateQ3SeatActor(seat: SeatId, actor: ActorId, origin: Vec3, owner?: ProviderId): void {
         this.check();
-        this.seat(seat).mixer.updateEntityPosition(this.entity(actor), origin);
+        this.seat(seat).mixer.updateEntityPosition(this.entity(actor, owner), origin);
     }
     private origin(request: PlaySound | LoopSound): VoiceOrigin {
         switch (request.origin.kind) {
             case "local": return { kind: "local" };
             case "fixed": return { kind: "fixed", position: request.origin.position };
-            case "actor": return { kind: "entity", entity: this.entity(request.origin.actor) };
+            case "actor": return { kind: "entity", entity: this.entity(request.origin.actor, request.family === "q3" ? request.owner : undefined) };
         }
     }
     play(request: PlaySound): number {
@@ -213,13 +226,16 @@ export class UnifiedAudio {
         if (!Number.isFinite(request.volume) || request.volume < 0 || request.volume > 1)
             throw new RangeError("Sound volume must be 0..1");
         const channelCommand = sourceSoundChannel(request.family, request.channel);
-        const origin = this.origin(request), entity = request.actor === null ? -1 : this.entity(request.actor);
+        const owner = request.family === "q3" ? request.owner : undefined;
+        const origin = this.origin(request), entity = request.actor === null ? -1 : this.entity(request.actor, owner);
         let playing = 0;
         for (const state of this.seats) {
             if (!selected(request.audience, state.listener.seat))
                 continue;
-            const local = state.listener.actor === null ? 0 : this.entity(state.listener.actor);
-            const options = { entity: origin.kind === "local" ? local : entity, channel: request.channel, origin, volume: request.volume, attenuation: request.attenuation,
+            const local = state.listener.actor === null ? 0 : this.entity(state.listener.actor, owner);
+            const personal = owner !== undefined && request.actor !== null && state.listener.actor !== null && request.actor.equals(state.listener.actor);
+            const options = { entity: origin.kind === "local" ? local : entity, channel: request.channel,
+                origin: personal ? { kind: "local" } satisfies VoiceOrigin : origin, volume: request.volume, attenuation: request.attenuation,
                 ...(request.delaySeconds === undefined ? {} : { delaySeconds: request.delaySeconds }), ...(request.serverMilliseconds === undefined ? {} : { serverMilliseconds: request.serverMilliseconds }) };
             const accepted = request.family === "q3" ? state.mixer.startSharedSound(request.sound.pcm, { ...options, volume: Math.trunc(request.volume * 127) }, channelCommand, request.sound.name, request.sound)
                 : request.family === "q1" ? state.mixer.startQ1Sound(request.sound.pcm, options, channelCommand, this.options.random, request.sound)
@@ -256,7 +272,7 @@ export class UnifiedAudio {
         }
     }
     private q3Loop(state: SeatAudio, request: LoopSound, origin: Vec3): void {
-        const options = { entity: this.entity(request.actor), origin, velocity: request.velocity, frameNumber: request.frameNumber,
+        const options = { entity: this.entity(request.actor, request.owner), origin, velocity: request.velocity, frameNumber: request.frameNumber,
             volume: Math.trunc(request.volume * (request.lifetime === "frame" ? 127 : 90)) };
         if (request.lifetime === "frame") state.mixer.updateLoopingSound(request.sound.pcm, options);
         else state.mixer.updateRealLoopingSound(request.sound.pcm, options);
@@ -282,23 +298,31 @@ export class UnifiedAudio {
         const entity = this.entity(actor);
         for (const state of this.seats) {
             if (!selected(audience, state.listener.seat)) continue;
-            for (const [key, loop] of state.loops) if (loop.actor.equals(actor) && loop.owner === owner) state.loops.delete(key);
+            for (const [key, loop] of state.loops) if (loop.actor.equals(actor) && loop.owner === owner) {
+                state.loops.delete(key);
+                if (loop.family === "q3") state.mixer.stopLoopingSound(this.entity(actor, owner));
+            }
             if (owner === undefined) state.mixer.stopLoopingSound(entity);
         }
         this.endLoopFrame();
     }
-    clearQ3SeatLoops(seat: SeatId, killAll: boolean): void {
+    clearQ3SeatLoops(seat: SeatId, killAll: boolean, owner?: ProviderId): void {
         const state = this.seat(seat);
-        state.mixer.clearLoopingSounds(killAll);
         for (const [key, loop] of state.loops)
-            if (loop.family === "q3" && loop.audience.kind === "seat" && loop.audience.seat.equals(seat) && (killAll || loop.lifetime === "frame")) state.loops.delete(key);
-        for (const loop of state.loops.values()) if (loop.family === "q3") this.q3Loop(state, loop, this.loopPosition(loop, state.listener));
+            if (loop.family === "q3" && loop.owner === owner && loop.audience.kind === "seat" && loop.audience.seat.equals(seat) && (killAll || loop.lifetime === "frame")) {
+                state.loops.delete(key); state.mixer.stopLoopingSound(this.entity(loop.actor, owner));
+            }
     }
-    stopQ3SeatLoop(seat: SeatId, actor: ActorId): void {
-        const state = this.seat(seat), entity = this.entity(actor), key = `q3:${entity}`, loop = state.loops.get(key);
+    stopQ3SeatLoop(seat: SeatId, actor: ActorId, owner?: ProviderId): void {
+        const state = this.seat(seat), entity = this.entity(actor, owner), key = `q3:${this.entity(actor)}${owner === undefined ? "" : `:${owner}`}`, loop = state.loops.get(key);
         if (loop?.audience.kind === "world") return;
         if (loop !== undefined && loop.audience.kind === "seat" && loop.audience.seat.equals(seat)) state.loops.delete(key);
         state.mixer.stopLoopingSound(entity);
+    }
+    releaseQ3SeatOwner(seat: SeatId, owner: ProviderId): void {
+        this.clearQ3SeatLoops(seat, true, owner);
+        const state = this.seat(seat);
+        for (const [index, entry] of this.actors.entries()) if (entry.owner === owner) state.mixer.stopEntity(index + 1);
     }
     addStaticSound(seat: SeatId, sound: SoundAsset, origin: Vec3, volume: number, attenuation: number): boolean { return this.seat(seat).mixer.addStaticSound(sound.pcm, origin, volume, attenuation); }
     updateAmbient(seat: SeatId, sounds: readonly SoundAsset[], levels: readonly number[], elapsedSeconds: number, level = 0.3, fade = 100): void {
@@ -533,6 +557,7 @@ export class UnifiedAudio {
         }
         this.seats.length = 0;
         this.actors.length = 0;
+        this.actorAliases.clear();
         this.positions.clear();
         this.previousPumpFrame = null;
         this.pumpIntervals.length = 0;

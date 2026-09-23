@@ -4,6 +4,7 @@ import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import { readModClientInput } from "./client-input.ts";
+import { readQvmModPresentationDeclaration } from "./qvm-presentation.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
@@ -110,6 +111,7 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("qvm"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
     abiProfile: reader.field("abiProfile").choice("q3-modern", "q3-1.16n-base"),
+    ...(reader.field("presentation").value === undefined ? {} : { presentation: readQvmModPresentationDeclaration(reader.field("presentation")) }),
     spawnEntities: reader.field("spawnEntities").value === undefined ? null : reader.field("spawnEntities").nullable(value => value.string()),
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1),
       records: clients.field("records").list(value => value.string()), playerStateRecord: clients.field("playerStateRecord").string(), admit: clients.field("admit").list(sourceCall),

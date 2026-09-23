@@ -1,5 +1,5 @@
 import type { CollisionMapSettings } from "../../../world/collision/q3/settings.ts";
-import type { ActorId, SeatId } from '../../../contracts/identity.ts';
+import type { ActorId, ProviderId, SeatId } from '../../../contracts/identity.ts';
 import type { Axis, Vec3 } from '../../../contracts/math.ts';
 import type { Rect, RenderCommand } from '../../../contracts/render.ts';
 import type { SceneQueries } from '../../../contracts/scene.ts';
@@ -19,6 +19,7 @@ import { q3ClientCollision } from './collision.ts';
 import { SharedSceneQueries } from '../../../world/collision/index.ts';
 
 export interface ApplicationQ3ServiceOptions {
+  readonly owner?: ProviderId;
   readonly systemCinematics?: SystemCinematicHost;
   readonly collisionSettings: CollisionMapSettings;
   readonly media: ApplicationQ3Assets;
@@ -46,7 +47,8 @@ export async function createApplicationQ3Services(options: ApplicationQ3ServiceO
   const resources = new Q3RendererResources(await media.resourceHost(scene), map.kind === 'q3-bsp' && clip !== null
     ? { map, clusterPVS: cluster => clip.world.clusterPVS(cluster) } : undefined);
   const target = new Q3PresentationAudio({ seat, sounds: media.bank, actor: number => options.actorAt(number), frameNumber: options.clock.frameNumber,
-    play: sound => output.audio({ kind: 'play', sound }), loop: sound => output.audio({ kind: 'loop', sound }),
+    play: sound => output.audio({ kind: 'play', sound: options.owner === undefined ? sound : { ...sound, owner: options.owner } }),
+    loop: sound => output.audio({ kind: 'loop', sound: options.owner === undefined ? sound : { ...sound, owner: options.owner } }),
     updateActor: (actor, origin) => output.audio({ kind: 'position', actor, origin }), stopLoop: (_seat, actor) => output.audio({ kind: 'stop-loop', actor }) });
   const sound: Q3ClientSound = {
     bank: media.bank,

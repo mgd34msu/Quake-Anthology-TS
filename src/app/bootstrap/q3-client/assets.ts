@@ -36,7 +36,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
   readonly fonts: RendererFontRegistry;
   readonly fontRegistry: UiAssetRegistry;
   private readonly fontReader: MountedFontReader;
-  private constructor(readonly assets: ApplicationAssets, readonly content: ContentId, readonly provider: ProviderSceneAssets, readonly print: (text: string) => void, saveFontData: () => boolean) {
+  private constructor(readonly assets: ApplicationAssets, readonly content: ContentId, readonly provider: ProviderSceneAssets, readonly print: (text: string) => void, saveFontData: () => boolean, private readonly scope: "selected" | "source") {
     this.bank = new Q3PresentationSoundBank(new SoundBank(provider.mounts), null, path => this.sound(path));
     this.fontReader = new MountedFontReader(provider.mounts);
     const user = assets.content.catalog.product(content).userContent;
@@ -55,8 +55,8 @@ export class ApplicationQ3Assets implements SoundAssetReader {
     });
     this.fontRegistry = new UiAssetRegistry({ fonts: this.fonts, registerPicture: path => provider.shaders.registerPicture(path) }, print);
   }
-  static async create(assets: ApplicationAssets, content: ContentId, print: (text: string) => void, saveFontData: () => boolean, mode: "source-sync" | "guest-async" = "source-sync"): Promise<ApplicationQ3Assets> {
-    const provider = await assets.provider(content), result = new ApplicationQ3Assets(assets, content, provider, print, saveFontData);
+  static async create(assets: ApplicationAssets, content: ContentId, print: (text: string) => void, saveFontData: () => boolean, mode: "source-sync" | "guest-async" = "source-sync", scope: "selected" | "source" = "selected"): Promise<ApplicationQ3Assets> {
+    const provider = await assets.provider(content), result = new ApplicationQ3Assets(assets, content, provider, print, saveFontData, scope);
     const archives = new Set(provider.mounts.plan.mounts.flatMap(mount => mount.kind === "archive" ? [mount.archivePath] : []));
     for (const product of assets.content.catalog.products) for (const archive of product.archives) if (archives.has(archive.path))
       for (const entry of archive.entries) result.names.add(entry.path.toLowerCase());
@@ -99,6 +99,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
   async resourceHost(scene: Q3SceneRecorder): Promise<Q3ResourceHost> {
     const recipe = this.assets.content.recipe;
     const contentFor = (path: string): ContentId => {
+      if (this.scope === "source") return this.content;
       if (path.startsWith("models/players/")) {
         const content = recipe.character.appearance.content;
         if (this.assets.content.catalog.product(content).expectation.family === "q3") return content;

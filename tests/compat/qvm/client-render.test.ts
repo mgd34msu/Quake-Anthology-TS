@@ -42,9 +42,10 @@ async function fixture(world?: Q3ResourceWorld, load: () => Promise<void> = asyn
     const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
     words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
     return { words, memory: guest.bytes, guest, code, role: "cgame", kind: "engine", commandArguments: null,
+      cancelFunction: () => { throw new Error("Unexpected source cancellation"); },
       invoke: () => { throw new Error("Unexpected reentry"); }, invokeAsync: async () => { throw new Error("Unexpected reentry"); } };
   };
-  return { resources, draw, guest, call, scenes, pictures, picture, skin };
+  return { resources, draw, guest, call, scene, scenes, pictures, picture, skin };
 }
 
 test("guest handles register the same resource objects and submit through the shared scene and draw sink", async () => {
@@ -59,6 +60,11 @@ test("guest handles register the same resource objects and submit through the sh
   const entity = f.guest.view(1024, 140); entity.setInt32(0, 2, true); entity.setFloat32(68, 12, true); entity.setInt32(112, 17, true); entity.setFloat32(132, 8, true);
   expect(qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_ADDREFENTITYTOSCENE, [1024]), f.resources, f.draw)).toBe(0);
   entity.setFloat32(68, 900, true);
+  const captured = f.scene.capture();
+  expect(f.scenes).toHaveLength(0);
+  expect(captured.admission.entities).toHaveLength(1);
+  expect(captured.admission.entities[0]?.origin.x).toBe(12);
+  expect(captured.effects[0]?.shader).toBe(f.picture);
   const refdef = f.guest.view(1536, 368); refdef.setInt32(8, 640, true); refdef.setInt32(12, 480, true); refdef.setFloat32(16, 90, true); refdef.setFloat32(20, 75, true);
   for (const offset of [36, 52, 68]) refdef.setFloat32(offset, 1, true);
   qvmClientRenderSyscall(f.call(QvmCgameImport.CG_R_RENDERSCENE, [1536]), f.resources, f.draw);
@@ -66,6 +72,11 @@ test("guest handles register the same resource objects and submit through the sh
   const effectSource = f.scenes[0]?.effects[0]?.source;
   if (effectSource === undefined || !("kind" in effectSource) || effectSource.kind !== "sprite") throw new Error("Missing admitted guest sprite");
   expect(effectSource.origin.x).toBe(12);
+  expect(f.scenes[0]?.admission.id.equals(captured.admission.id)).toBe(false);
+  expect(f.scenes[0]?.effects).toEqual(captured.effects);
+  f.scene.clearScene();
+  expect(f.scene.capture().admission.entities).toHaveLength(0);
+  expect(captured.admission.entities).toHaveLength(1);
   const pictureCall = f.call(QvmCgameImport.CG_R_DRAWSTRETCHPIC, Array.from({ length: 9 }, () => 0));
   pictureCall.words.setFloat32(12, 32, true); pictureCall.words.setFloat32(16, 16, true); pictureCall.words.setInt32(36, 17, true);
   qvmClientRenderSyscall(pictureCall, f.resources, f.draw);

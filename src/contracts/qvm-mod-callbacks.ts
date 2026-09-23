@@ -4,6 +4,7 @@ import type { ItemId } from "./gameplay.ts";
 import type { ProviderId } from "./identity.ts";
 import type { Vec3 } from "./math.ts";
 import type { ModCallbackBinding, ModCallbackValue, ModClientInput, ModClientInputBinding } from "./mod-callbacks.ts";
+import type { QvmModPresentationDeclaration } from "./qvm-mod-presentation.ts";
 
 export type QvmModScalar = "int32" | "float32";
 export type QvmModValue =
@@ -83,6 +84,7 @@ export interface QvmModCallbackDeclaration {
   readonly runtime: "qvm";
   readonly program: { readonly path: string; readonly digest: ContentDigest };
   readonly abiProfile: QvmAbiProfile;
+  readonly presentation?: QvmModPresentationDeclaration;
   /** Explicit component additions, consumed only by declared source calls; absent/null is an empty stream. */
   readonly spawnEntities?: string | null;
   readonly clients?: QvmModClients;

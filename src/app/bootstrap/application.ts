@@ -1,3 +1,4 @@
+import { ApplicationModPresentations } from "./mod-presentations.ts";
 import type { WireSelection } from "../../network/common/session.ts";
 import { ModCommands, readModCommand } from "../../world/session/mod-commands.ts";
 import { ModUserFiles } from "../../world/session/mod-files.ts";
@@ -216,6 +217,7 @@ type Q3SeatClient = { readonly kind: "native"; readonly client: ApplicationQ3Cli
 interface NativeQ2SeatClient { userinfo: string; readonly cvars: CvarRegistry; readonly client: NativeQ2ClientPresentation; readonly effects: ApplicationEffects; readonly descriptor: { readonly frame: () => NativeQ2HudFrame; readonly ownsEffects: true }; }
 
 interface GraphicalApplication {
+  readonly modPresentations: ApplicationModPresentations;
   readonly renderer: NativeRenderer;
   readonly assets: ApplicationAssets;
   readonly input: ApplicationInput;
@@ -1980,7 +1982,10 @@ export class Application {
         if (client === null) local.player.seat.attachPresentation(presentation, () => presentation.close());
         presentations.push(presentation);
       }
-      this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease, nativeQ2 };
+      this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease, nativeQ2,
+        modPresentations: new ApplicationModPresentations({ assets, audio, queries: this.simulation.scene,
+          print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
+          clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
       this.refreshApplicationTools();
       this.capture = client?.capture ?? new ApplicationCapture(inputCaptureServices(input, applicationCaptureRoot(this.options.userContentRoot), () => this.options.map, text => this.host.print(text)), renderer);
       if (client === null) {
@@ -2954,7 +2959,10 @@ export class Application {
           stagedPresentations.push(presentation);
           presentations.push(presentation);
         }
-        nextGraphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease, nativeQ2: nextNativeQ2 };
+        nextGraphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease, nativeQ2: nextNativeQ2,
+          modPresentations: new ApplicationModPresentations({ assets, audio, queries: current.scene,
+            print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
+            clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
       }
       const previousCapture = this.capture;
       const nextCapture = nextGraphical === null ? null : this.ownership.kind === "borrowed" ? this.ownership.client.capture
@@ -2982,6 +2990,7 @@ export class Application {
         previousLocalGuest?.seats.clear();
         for (const source of previous?.q3.values() ?? []) if (source.kind === "qvm")
           await retire("guest client retirement", () => source.client.close());
+        await retire("component presentation retirement", () => previous?.modPresentations.close());
         await retire("guest shutdown", () => previousSimulation.shutdownQ3Guest());
         await retire("world retirement", () => retired.close());
         if (save === undefined && !preserveBots) for (const bot of previousBotClients)
@@ -4338,6 +4347,9 @@ export class Application {
           presentation.sourceEvents([...eventsFor(presentation.local.player.actor, presentationEvents), ...(nativeEvents.get(presentation.local.player.seat.id) ?? [])]);
           if (this.tools === null) await presentation.prepare(output.snapshot, presentations, characters);
           else await this.tools.measureAsync("presentation", () => presentation.prepare(output.snapshot, presentations, characters));
+        }
+        await graphical.modPresentations.prepare(graphical.presentations, this.simulation.modPresentationSources(), presentationEvents, this.frames);
+        for (const presentation of graphical.presentations) {
           const render = () => presentation.local.player.seat.present(output.snapshot, graphical.renderer.backend);
           if (this.tools === null) render(); else this.tools.timer.measure("render", render);
         }
@@ -4455,6 +4467,7 @@ export class Application {
       try { if (graphical !== null && !this.preparedStartup?.pending) await this.viewSettings.save(this.inputConfig); } catch (error) { errors.push(error); }
       try { if (graphical !== null) await saveAudioSettings(this.inputConfig, graphical.audio); } catch (error) { errors.push(error); }
     }
+    try { graphical?.modPresentations.close(); } catch (error) { errors.push(error); }
     for (const source of graphical?.q3.values() ?? []) { try { await source.client.shutdown(); } catch (error) { errors.push(error); } }
     for (const presentation of graphical?.presentations ?? []) {
       try {

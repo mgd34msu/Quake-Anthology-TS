@@ -46,6 +46,7 @@ export function readQvmPlayerEvents(reader: SaveReader): QvmPlayerEventsCheckpoi
 }
 interface Operations {
   readonly memory: QvmMemory; readonly module: ModuleIdentity; readonly abiProfile: QvmAbiProfile;
+  referenceSaved(actor: SavedActorId): ActorId;
   live(actor: ActorId): boolean;
   origin(actor: ActorId): Vec3;
   time(): number;
@@ -125,7 +126,7 @@ export class QvmModPlayerEvents {
   restore(saved: QvmPlayerEventsCheckpoint | null, players: readonly { readonly actor: ActorId; readonly address: number }[]): void {
     this.close(); this.nextOrder = saved?.nextOrder ?? 0;
     for (const player of players) {
-      const cursor = saved?.clients.find(entry => entry.actor.slot === player.actor.slot && entry.actor.generation === player.actor.generation);
+      const cursor = saved?.clients.find(entry => this.operations.referenceSaved(entry.actor).equals(player.actor));
       if (saved !== null && cursor === undefined) throw new Error("Missing restored player event cursor");
       this.track(player.actor, player.address, cursor);
     }

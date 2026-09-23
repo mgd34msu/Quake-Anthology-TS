@@ -2,8 +2,6 @@ import type { ApplicationKeyProfile } from "./keys.ts";
 import { SharedCvarMirror } from "../../core/cvars/mirror.ts";
 import { CollisionMapSettings, collisionMapCvarDefinitions } from "../../world/collision/q3/settings.ts";
 import { quakeMouseButton } from "../../input/mouse-buttons.ts";
-import { CommonError } from "../../core/common-error.ts";
-import { q3ProceduralFog } from "../../content/q3/presentation/scene.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { KEY_CHAR_FLAG, KeyCode } from "../../input/key-codes.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
@@ -26,7 +24,7 @@ import type { WeaponHudReader } from "../../content/q3/presentation/player-state
 import type { ActorCommand } from "../../contracts/session.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { CommandContext } from "../../contracts/common.ts";
-import type { Rect, RenderCommand, RenderFrame, RenderState, SceneCamera } from "../../contracts/render.ts";
+import type { Rect, RenderCommand, RenderFrame, SceneCamera } from "../../contracts/render.ts";
 import type { SceneQueries } from "../../contracts/scene.ts";
 import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import { freemem } from "node:os";
@@ -38,25 +36,22 @@ import type { CvarSnapshot } from "../../core/cvars/index.ts";
 import { createQ3ClientPresentation } from "../../content/q3/presentation/client.ts";
 import { cvarTable } from "../../content/q3/presentation/config.ts";
 import type { Q3ClientPresentation, Q3ClientPresentationOptions } from "../../content/q3/presentation/client.ts";
-import type { Q3PresentedScene, PresentedModel } from "../../content/q3/presentation/scene.ts";
+import type { Q3PresentedScene } from "../../content/q3/presentation/scene.ts";
 import type { PresentationMovementHost } from "../../content/q3/presentation/movement-host.ts";
 import type { UserCommand } from "../../content/q3/base/shared/player-state.ts";
 import { RDF_NOWORLDMODEL } from "../../content/q3/presentation/refdef.ts";
 import { SceneFrameBuilder } from "../../render/commands/frame.ts";
 import { prepareMaterialText } from "../../render/commands/material2d.ts";
-import { SceneModelRenderer } from "../../render/scene/models/renderer.ts";
 import { ModelLightSampler } from "../../render/scene/models/light-sampler.ts";
 import { lightForPoint } from "../../materials/q3-lighting.ts";
-import { createSourceSceneOrder, reserveSourceEntityRange, sourceDrawGroup, finishSceneOperations, type SourceSceneOrder, type SceneOperation } from "../../render/scene/submissions.ts";
-import { prepareMaterialBatches } from "../../materials/evaluate.ts";
-import { DEFAULT_RAIL_SETTINGS, beamBatch, defaultModelBatch, polyGeometry, railGeometry, spriteGeometry } from "../../render/scene/particles/primitives.ts";
+import { createSourceSceneOrder, reserveSourceEntityRange, finishSceneOperations, type SourceSceneOrder } from "../../render/scene/submissions.ts";
 import { visibleWorld } from "../../render/scene/visibility.ts";
 import { portalCamera, portalSurfaceOffscreen } from "../../render/scene/portal.ts";
-import { createViewProjector, perspectiveProjection } from "../../render/scene/view.ts";
+import { perspectiveProjection } from "../../render/scene/view.ts";
 import type { WorldViewInput } from "../../render/scene/world.ts";
 import type { MaterialTextDraw } from "../../text/draw2d.ts";
 import type { LocalInput } from "./input.ts";
-import type { ApplicationAssets, ProviderSceneAssets } from "./assets.ts";
+import type { ApplicationAssets } from "./assets.ts";
 import type { ApplicationAudio } from "./audio.ts";
 import type { ApplicationEffectFrame } from "./effects.ts";
 import { q3Hardware } from "../../render/q3-hardware.ts";
@@ -65,6 +60,7 @@ import type { Q3SourcePresentationState } from "./simulation/q3/presentation.ts"
 import type { SimulationPresentation, SimulationPresentationEvent } from "./simulation/types.ts";
 import { ApplicationQ3Source } from "./q3-client/source.ts";
 import { ApplicationQ3Assets } from "./q3-client/assets.ts";
+import { ApplicationQ3SceneRenderer } from "./q3-client/scene.ts";
 import { createApplicationQ3Services } from "./q3-client/services.ts";
 import type { ApplicationQ3Services } from "./q3-client/services.ts";
 import { ApplicationQ3Cinematics, type SystemCinematicHost } from "./q3-client/cinematics.ts";
@@ -136,8 +132,6 @@ export interface ApplicationQ3LocalRound {
 type Submission = { readonly kind: "scene"; readonly scene: Q3PresentedScene }
   | { readonly kind: "text"; readonly draw: MaterialTextDraw }
   | { readonly kind: "command"; readonly command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }> };
-const state: RenderState = { blend: { source: "one", destination: "zero" }, depthTest: "less-equal", depthWrite: true,
-  alphaTest: "none", cull: "back", depthRange: [0, 1], polygonOffset: null };
 
 /** A seat owns cgame state; source authority, resource mounts and audio output remain shared. */
 export class ApplicationQ3Client {
@@ -159,7 +153,7 @@ export class ApplicationQ3Client {
   private backend: { readonly kind: "typescript"; readonly game: Q3ClientPresentation } | { readonly kind: "qvm"; readonly game: ApplicationQvmClient } | null = null;
   private readonly submissions: Submission[] = [];
   private readonly audioOperations: Q3SeatAudioOperation[] = [];
-  private readonly renderers = new Map<ProviderSceneAssets, SceneModelRenderer>();
+  private readonly sceneRenderer: ApplicationQ3SceneRenderer;
   private readonly frames: SceneFrameBuilder;
   private readonly viewportValue: { x: number; y: number; width: number; height: number };
   private readonly lightSampler: ModelLightSampler;
@@ -213,6 +207,7 @@ export class ApplicationQ3Client {
     this.refreshSystemInfo();
     this.cvars.set("sv_running", options.kind === "remote" || options.kind === "qvm" && options.localServer !== true ? "0" : "1", true);
     this.frames = new SceneFrameBuilder(options.assets.images); this.lightSampler = new ModelLightSampler(options.assets.world);
+    this.sceneRenderer = new ApplicationQ3SceneRenderer(media, { picture: shader => this.requireServices().resources.picture(shader) });
   }
   private localRound(): ApplicationQ3LocalRound {
     if (this.round === null) throw new Error("Q3 client has no native local round");
@@ -440,10 +435,7 @@ export class ApplicationQ3Client {
     if (backend.kind === "typescript") {
       await backend.game.frames.drawActiveFrame({ serverTime: this.source.time, stereo: "center", demoPlayback: this.source.sourceMode === 'demo', engineFrameNumber: frameNumber });
     } else await backend.game.draw(this.source.time, this.source.sourceMode === 'demo');
-    for (const submission of this.submissions) if (submission.kind === "scene") {
-      for (const [provider, models] of this.models(submission.scene)) await this.renderer(provider).preload(models.map(model => model.entity), entity => models.find(model => model.entity === entity)?.options ?? {});
-    }
-    await Promise.all([...this.renderers.values()].map(renderer => renderer.refreshShaderRemaps()));
+    await this.sceneRenderer.preload(this.submissions.flatMap(submission => submission.kind === "scene" ? [submission.scene] : []));
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
   }
   command(argv: readonly string[]): Promise<boolean> { const backend = this.requireBackend(); return backend.kind === "typescript" ? backend.game.console.execute(argv) : backend.game.command(argv); }
@@ -468,80 +460,10 @@ export class ApplicationQ3Client {
       }
   }
   get capturesInput(): boolean { return this.backend?.kind === "qvm" ? this.backend.game.capturesInput : this.keyCatcher !== 0; }
-  private renderer(provider: ProviderSceneAssets): SceneModelRenderer { let renderer = this.renderers.get(provider); if (renderer === undefined) { renderer = new SceneModelRenderer(provider, this.options.assets.world); this.renderers.set(provider, renderer); } return renderer; }
-  private models(scene: Q3PresentedScene): ReadonlyMap<ProviderSceneAssets, readonly PresentedModel[]> {
-    const groups = new Map<ProviderSceneAssets, PresentedModel[]>();
-    for (const model of scene.models) {
-      if (model.entity.model.kind === "brush-model") continue;
-      const provider = this.media.modelProviders.get(model.source.model);
-      if (provider === undefined) throw new Error("Cgame model lost its selected asset provider");
-      const group = groups.get(provider); if (group === undefined) groups.set(provider, [model]); else group.push(model);
-    }
-    return groups;
-  }
   private light(point: Vec3) {
     const source = lightForPoint(this.lightSampler.grid, point, { ambientScale: 1, directedScale: 1 }); if (source !== null) return source;
     const sample = this.lightSampler.sample(point, { camera: this.latestCamera, time: { kind: "milliseconds", value: this.source.time }, target: { kind: "seat", seat: this.options.local.player.seat.id } });
     return { ambientLight: { x: sample.color.x * 255, y: sample.color.y * 255, z: sample.color.z * 255 }, directedLight: { x: 0, y: 0, z: 0 }, lightDir: { x: 0, y: 0, z: 1 } };
-  }
-  private operations(scene: Q3PresentedScene, input: WorldViewInput, firstEntity: number, additions: readonly SceneOperation[] = []): readonly SceneOperation[] {
-    const source = input.source;
-    if (source === undefined) throw new Error("Q3 view has no source admission");
-    const operations: SceneOperation[] = [], world = this.options.assets.world;
-    const noWorldModel = (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0;
-    const weaponInput = { ...input, camera: q3WeaponCamera(input.camera, this.options.splitScreen === true && !noWorldModel) };
-    for (const [index, poly] of scene.admission.polygons.entries()) {
-      const compiled = this.options.assets.materialRegistrations.requireMaterial(this.requireServices().resources.picture(poly.shader).material.compiled);
-      operations.push(sourceDrawGroup(compiled, { view: source.view, entity: { kind: "world" }, surface: index, fog: poly.fog === null ? 0 : poly.fog.index + 1, dlight: 0 },
-        prepareMaterialBatches(compiled, polyGeometry(poly), world.materialContext(input, undefined, poly.fog?.volume ?? null))));
-    }
-    const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
-    operations.push(...additions.filter(polygon));
-    const models = new Map(scene.models.map(model => [model.entityIndex, model]));
-    const project = createViewProjector(input.camera), white = this.media.provider.textures.white.image;
-    for (const [index, entity] of scene.admission.entities.entries()) {
-      const entityOrder = { kind: "refentity", index: firstEntity + index } satisfies import("../../render/scene/submissions.ts").SourceEntityOrder;
-      if (this.supplementalViewWeapon && !noWorldModel && (entity.renderFlags & 4) !== 0) continue;
-      if (input.camera.clip.kind === "portal" && (entity.renderFlags & 4) !== 0) continue;
-      if (entity.kind === "poly") throw new CommonError("drop", "R_AddEntitySurfaces: Bad reType");
-      if (entity.kind === "portal-surface") continue;
-      if (entity.kind === "model") {
-        if (entity.model.kind === "default") {
-          if (input.camera.clip.kind === "none" && (entity.renderFlags & 2) !== 0) continue;
-          operations.push(sourceDrawGroup(this.media.provider.shaders.sourceMaterials.default,
-            { view: source.view, entity: entityOrder, surface: 0, fog: 0, dlight: 0 },
-            [defaultModelBatch({ origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, project, state, white)]));
-          continue;
-        }
-        const model = models.get(index);
-        if (model === undefined) throw new Error("Admitted Q3 model lost its prepared descriptor");
-        const selected = (entity.renderFlags & 4) !== 0 ? weaponInput : input;
-        if (model.entity.model.kind === "brush-model") {
-          operations.push(...world.prepareModel(model.entity.model.model, { origin: entity.origin, axis: entity.axis },
-            { ...selected, animationFrame: entity.frame, materialContext: { ...selected.materialContext, entityRGBA: entity.shaderRGBA } }, entityOrder));
-        } else {
-          const provider = this.media.modelProviders.get(entity.model);
-          if (provider === undefined) throw new Error("Cgame model lost its selected asset provider");
-          operations.push(...this.renderer(provider).prepare([model.entity], selected,
-            () => ({ ...model.options, noWorldModel, shaderTexCoord: entity.shaderTexCoord, source: { view: source.view, entity: entityOrder } })));
-        }
-        continue;
-      }
-      if (input.camera.clip.kind === "none" && (entity.renderFlags & 2) !== 0) continue;
-      const compiled = entity.customShader === null ? this.media.provider.shaders.sourceMaterials.default
-        : this.options.assets.materialRegistrations.requireMaterial(this.requireServices().resources.picture(entity.customShader).material.compiled);
-      const fog = noWorldModel ? null : q3ProceduralFog(entity.origin, entity.radius, world.fogSelections);
-      const order = { view: source.view, entity: entityOrder, surface: 0, fog: fog === null ? 0 : fog.index + 1, dlight: 0 };
-      if (entity.kind === "beam") operations.push(sourceDrawGroup(compiled, order, [beamBatch(entity, project, state, white)]));
-      else {
-        const geometry = entity.kind === "sprite" ? spriteGeometry(entity, input.camera.axis, input.camera.clip.kind === "portal" && input.camera.clip.mirror)
-          : railGeometry(entity, input.camera.origin, DEFAULT_RAIL_SETTINGS);
-        operations.push(sourceDrawGroup(compiled, order, prepareMaterialBatches(compiled, geometry,
-          { ...world.materialContext(input, undefined, fog?.volume ?? null), entityRGBA: entity.shaderRGBA, shaderTexCoord: entity.shaderTexCoord, timeOffset: entity.shaderTime })));
-      }
-    }
-    operations.push(...additions.filter(operation => !polygon(operation)));
-    return operations;
   }
   private portal(scene: Q3PresentedScene, input: WorldViewInput): WorldViewInput | null {
     if (scene.portals.length === 0 || input.camera.clip.kind !== "none") return null;
@@ -578,7 +500,7 @@ export class ApplicationQ3Client {
         const source = createSourceSceneOrder(this.options.assets.materialRegistrations), selected = { ...input, source: createWorldSurfaceAdmission(source) };
         const firstEntity = reserveSourceEntityRange(source, scene.admission.entities.length);
         this.frames.view({ target: input.target, time, viewport: scene.viewport,
-          clear: input.clear ?? null, clipPlane: null, beforeView: [], operations: finishSceneOperations(this.operations(scene, selected, firstEntity)) });
+          clear: input.clear ?? null, clipPlane: null, beforeView: [], operations: finishSceneOperations(this.sceneRenderer.operations(scene, selected, firstEntity, { noWorldModel: true, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon })) });
       } else {
         const publish = (view: WorldViewInput): void => {
           const source = createSourceSceneOrder(this.options.assets.materialRegistrations);
@@ -587,7 +509,7 @@ export class ApplicationQ3Client {
           const combined: WorldViewInput = { ...view, source: createWorldSurfaceAdmission(source), ...(effects === undefined ? {} : { lights: effects.lights,
             q3Lights: [...view.q3Lights ?? [], ...effects.q3Lights].slice(0, 32) }) };
           world.prepareWorldOperations(combined);
-          this.frames.world(world.prepareView({ ...combined, operations: this.operations(scene, combined, firstEntity, effects?.operations) }));
+          this.frames.world(world.prepareView({ ...combined, operations: this.sceneRenderer.operations(scene, combined, firstEntity, { noWorldModel: false, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon }, effects?.operations) }));
         };
         const worldInput = { ...input, ...environment };
         const child = this.portal(scene, worldInput);
@@ -604,6 +526,6 @@ export class ApplicationQ3Client {
     this.timeMirror?.close(); this.timeMirror = null;
     this.backend?.game.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
-    this.closed = true; this.cinematics?.close(); this.media.close(); this.bodyPoses.clear(); this.poseActors.clear(); this.renderers.clear(); this.submissions.length = 0;
+    this.closed = true; this.cinematics?.close(); this.media.close(); this.bodyPoses.clear(); this.poseActors.clear(); this.sceneRenderer.close(); this.submissions.length = 0;
   }
 }

@@ -70,18 +70,20 @@ export interface PresentedGeometry {
   readonly shader: SceneShader | null;
   readonly source: Exclude<RefEntity, RefModelEntity | RefPortalEntity> | RefPoly;
 }
-export interface Q3PresentedScene {
+export interface Q3SceneContent {
   readonly admission: Q3SceneAdmission;
-  readonly seat: SeatId;
-  readonly viewport: Rect;
-  readonly camera: SceneCamera;
-  readonly source: Refdef;
   readonly models: readonly PresentedModel[];
   readonly effects: readonly PresentedGeometry[];
   /** The shared renderer preserves its source beam/default-model drawing paths. */
   readonly specialEntities: readonly PresentedSpecialEntity[];
   readonly portals: readonly PresentedPortal[];
   readonly lights: readonly SceneLight[];
+}
+export interface Q3PresentedScene extends Q3SceneContent {
+  readonly seat: SeatId;
+  readonly viewport: Rect;
+  readonly camera: SceneCamera;
+  readonly source: Refdef;
 }
 export interface Q3SceneTarget {
   readonly seat: SeatId;
@@ -108,9 +110,9 @@ export class Q3SceneRecorder {
     this.polygons.push(admitQ3Poly(poly, this.target.fogSelections()));
   }
   addLight(light: DynamicLight): void { this.lights.push({ ...light, origin: { ...light.origin }, color: { ...light.color }, additive: light.additive ?? false, profile: { kind: "q3" } }); }
-  renderScene(input: Refdef): void {
+  capture(): Q3SceneContent {
     const admission = snapshotQ3SceneAdmission("native", this.entities, this.polygons);
-    const source = copyRefdef(input), models: PresentedModel[] = [], effects: PresentedGeometry[] = [], portals: PresentedPortal[] = [];
+    const models: PresentedModel[] = [], effects: PresentedGeometry[] = [], portals: PresentedPortal[] = [];
     const specialEntities: PresentedSpecialEntity[] = [];
     for (const [entityIndex, entity] of admission.entities.entries()) {
       if (entity.kind === "poly") continue;
@@ -132,9 +134,13 @@ export class Q3SceneRecorder {
       effects.push({ admission: { kind: "refentity", index: entityIndex }, shader: entity.customShader, source: entity });
     }
     for (const [index, poly] of admission.polygons.entries()) effects.push({ admission: { kind: "polygon", index }, shader: poly.shader, source: poly });
+    return { admission, models, effects, portals, specialEntities, lights: this.lights.slice() };
+  }
+  renderScene(input: Refdef): void {
+    const source = copyRefdef(input), content = this.capture();
     const camera: SceneCamera = { viewport: { x: this.target.viewport.x + source.x, y: this.target.viewport.y + source.y, width: source.width, height: source.height }, origin: source.viewOrigin, axis: source.viewAxis,
       projection: perspectiveProjection(source.fovX, source.fovY, this.target.farClip, this.target.nearClip), clip: { kind: "none" } };
-    this.target.publish({ admission, seat: this.target.seat, viewport: { x: this.target.viewport.x + source.x, y: this.target.viewport.y + source.y,
-      width: source.width, height: source.height }, camera, source, models, effects, portals, specialEntities, lights: this.lights.slice() });
+    this.target.publish({ ...content, seat: this.target.seat, viewport: { x: this.target.viewport.x + source.x, y: this.target.viewport.y + source.y,
+      width: source.width, height: source.height }, camera, source });
   }
 }

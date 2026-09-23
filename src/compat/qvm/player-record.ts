@@ -101,6 +101,22 @@ export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profil
   for (const slots of [state.stats, state.persistent, state.powerups, state.ammo]) {
     if (slots.length !== 16) throw new RangeError("QVM player-state arrays require 16 slots");
   }
+  const persistent = profile === "q3-modern" ? [...state.persistent] : Array<number>(16).fill(0);
+  if (profile !== "q3-modern") {
+    for (const index of [0, 1, 2, 3, 4, 8, 9, 10]) persistent[index] = state.persistent[index] ?? 0;
+    persistent[7] = state.persistent[6] ?? 0; persistent[11] = state.persistent[13] ?? 0;
+  }
+  writeSourceQvmPlayerState(view, { ...state, persistent,
+    events: [qvmEvent(state.events[0], profile, true), qvmEvent(state.events[1], profile, true)],
+    externalEvent: qvmEvent(state.externalEvent, profile, true), powerups: qvmPowerups(state.powerups, profile) }, profile);
+}
+
+/** Writes original enum values and private slots directly, without stock presentation translation. */
+export function writeSourceQvmPlayerState(view: DataView, state: Q3PlayerState, profile: QvmAbiProfile): void {
+  checkRecord(view, profile);
+  for (const slots of [state.stats, state.persistent, state.powerups, state.ammo]) {
+    if (slots.length !== 16) throw new RangeError("QVM player-state arrays require 16 slots");
+  }
   view.setInt32(0, state.commandTimeMilliseconds, true);
   view.setInt32(4, state.movementType, true);
   view.setInt32(8, state.bobCycle, true);
@@ -123,9 +139,9 @@ export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profil
   writeVector(view, 92, state.grapplePoint);
   view.setInt32(104, state.flags, true);
   view.setInt32(108, state.eventSequence, true);
-  writeSlots(view, 112, state.events.map(event => qvmEvent(event, profile, true)));
+  writeSlots(view, 112, state.events);
   writeSlots(view, 120, state.eventParameters);
-  view.setInt32(128, qvmEvent(state.externalEvent, profile, true), true);
+  view.setInt32(128, state.externalEvent, true);
   view.setInt32(132, state.externalEventParameter, true);
   view.setInt32(136, state.externalEventTimeMilliseconds, true);
   view.setInt32(140, state.clientNumber, true);
@@ -138,14 +154,8 @@ export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profil
   view.setInt32(176, state.damagePitch, true);
   view.setInt32(180, state.damageCount, true);
   writeSlots(view, 184, state.stats);
-  if (profile === "q3-modern") writeSlots(view, 248, state.persistent);
-  else {
-    const values = Array<number>(16).fill(0);
-    for (const index of [0, 1, 2, 3, 4, 8, 9, 10]) values[index] = state.persistent[index] ?? 0;
-    values[7] = state.persistent[6] ?? 0; values[11] = state.persistent[13] ?? 0;
-    writeSlots(view, 248, values);
-  }
-  writeSlots(view, 312, qvmPowerups(state.powerups, profile));
+  writeSlots(view, 248, state.persistent);
+  writeSlots(view, 312, state.powerups);
   writeSlots(view, 376, state.ammo);
   if (profile !== "q3-modern") { view.setInt32(440, state.pingMilliseconds, true); return; }
   view.setInt32(440, state.generic1, true);
