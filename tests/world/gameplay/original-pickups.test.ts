@@ -21,9 +21,9 @@ function fixture() {
   const offer: OriginalPickupOffer = { recipient: player.id, pickup: item.id, source: "q1:world", item: "q1:item_armor1",
     defaultResource: { kind: "protection", channel: "regular" }, count: { kind: "default" }, dropped: false, time: { kind: "seconds", value: 3 } };
   const armor: { value: RegularArmorState } = { value: { kind: "source", item: "mod:green", points: 40 } };
-  const bind = (rules: readonly OriginalPickupRule[]) => combat.bindProtection(player, { owner: "mod:armor", rule: "armor", channel: "regular",
+  const bind = (rules: readonly Omit<OriginalPickupRule, "writes">[]) => combat.bindProtection(player, { owner: "mod:armor", rule: "armor", channel: "regular",
     admission: { kind: "replace-current-primary" }, inventoryItems: [], read: () => armor.value, validateWrite: () => undefined,
-    write: value => { armor.value = value; return undefined; }, absorb: () => ({ saved: 0 }), pickups: rules });
+    write: value => { armor.value = value; return undefined; }, absorb: () => ({ saved: 0 }), pickups: rules.map(rule => ({ ...rule, writes: [{ kind: "protection", channel: "regular" }] })) });
   return { actors, player, item, combat, inventory, pickups, offer, armor, bind };
 }
 
@@ -66,14 +66,14 @@ test("disabling the selected binding during its source grant cancels map continu
 
 test("inventory grant delegates require admitted storage and preserve signed authored count overrides", () => {
   const world = fixture();
-  const rule: OriginalPickupRule = { id: "shells", offered: ["q2:ammo_shells"], take: offer => {
+  const rule: OriginalPickupRule = { id: "shells", writes: [{ kind: "inventory", item: "q1:ammo/shells", fields: "count" }], offered: ["q2:ammo_shells"], take: offer => {
     expect(offer.count).toEqual({ kind: "override", amount: -1 });
     world.inventory.configure(world.player, { item: "q1:ammo/shells", count: 13, capacity: 100 });
     return "accepted";
   } };
-  expect(() => world.inventory.bindPickup(world.player, { owner: "mod:ammo", item: "mod:missing", rules: [rule] })).toThrow("not admitted");
-  const close = world.inventory.bindPickup(world.player, { owner: "mod:ammo", item: "q1:ammo/shells", rules: [rule] });
-  expect(() => world.inventory.bindPickup(world.player, { owner: "mod:second", item: "q1:ammo/shells", rules: [rule] })).toThrow("grant owner");
+  expect(() => world.inventory.bindPickup(world.player, { owner: "mod:ammo", rules: [{ ...rule, writes: [{ kind: "inventory", item: "mod:missing", fields: "count" }] }] })).toThrow("not admitted");
+  const close = world.inventory.bindPickup(world.player, { owner: "mod:ammo", rules: [rule] });
+  expect(() => world.inventory.bindPickup(world.player, { owner: "mod:second", rules: [rule] })).toThrow("grant owner");
   const offer: OriginalPickupOffer = { ...world.offer, item: "q2:ammo_shells", defaultResource: { kind: "inventory", item: "q1:ammo/shells" }, count: { kind: "override", amount: -1 } };
   expect(world.pickups.touch(offer, { original: () => { throw new Error("Unexpected fallback"); }, complete: taken => { expect(taken).toBe(true); } })).toBe("accepted");
   expect(world.inventory.count(world.player.id, "q1:ammo/shells")).toBe(13);
@@ -85,9 +85,9 @@ test("inventory grant delegates require admitted storage and preserve signed aut
 test("ambiguous grants and unsupported objective replacements reject before original mutation", () => {
   const world = fixture();
   let calls = 0;
-  const rule: OriginalPickupRule = { id: "same", offered: [world.offer.item], take: () => { calls++; return "accepted"; } };
+  const rule: OriginalPickupRule = { id: "same", writes: [{ kind: "protection", channel: "regular" }], offered: [world.offer.item], take: () => { calls++; return "accepted"; } };
   world.bind([rule]);
-  const close = world.inventory.bindPickup(world.player, { owner: "mod:ammo", item: "q1:ammo/shells", rules: [rule] });
+  const close = world.inventory.bindPickup(world.player, { owner: "mod:ammo", rules: [{ ...rule, writes: [{ kind: "inventory", item: "q1:ammo/shells", fields: "count" }] }] });
   const callbacks = { original: () => true, complete: () => { throw new Error("Unexpected continuation"); } };
   expect(() => world.pickups.touch(world.offer, callbacks)).toThrow("Multiple original pickup owners");
   close();
@@ -158,5 +158,45 @@ test("original caller failure releases the scope and an escaped grant cannot out
   expect(grants).toBe(0);
   expect(world.pickups.touch(world.offer, { original: () => false, complete: () => {} })).toBe("accepted");
   expect(grants).toBe(1);
+  world.actors.close();
+});
+
+test("a compound original grant requires every current binding and executes once across inventory and protection", () => {
+  const world = fixture(); let calls = 0, completions = 0;
+  const rule: OriginalPickupRule = { id: "compound", offered: [world.offer.item], writes: [
+    { kind: "inventory", item: "q1:ammo/shells", fields: "count-and-capacity" }, { kind: "protection", channel: "regular" },
+  ], take: (_offer, execution) => {
+    calls++; expect(execution.current()).toBe(true);
+    world.inventory.configure(world.player, { item: "q1:ammo/shells", count: 15, capacity: 150 });
+    const before = world.armor.value; world.armor.value = { kind: "source", points: 70, item: "mod:green" };
+    execution.stored({ regular: { before, after: world.armor.value } }); return "accepted";
+  } };
+  const inventoryClose = world.inventory.bindPickup(world.player, { owner: "mod:armor", rules: [rule] });
+  const continuation = { original: () => { throw new Error("Unexpected fallback"); }, complete: () => { completions++; } };
+  expect(() => world.pickups.touch(world.offer, continuation)).toThrow("incomplete"); expect(calls).toBe(0);
+  const close = world.combat.bindProtection(world.player, { owner: "mod:armor", rule: "armor", channel: "regular", admission: { kind: "replace-current-primary" },
+    inventoryItems: [], read: () => world.armor.value, validateWrite: () => undefined, write: next => { world.armor.value = next; return undefined; }, absorb: () => ({ saved: 0 }), pickups: [rule] });
+  expect(world.pickups.touch(world.offer, continuation)).toBe("accepted"); expect([calls, completions]).toEqual([1, 1]);
+  expect(world.inventory.entries(world.player.id)).toEqual([{ item: "q1:ammo/shells", count: 15, capacity: 150 }]);
+  inventoryClose(); expect(() => world.pickups.touch(world.offer, continuation)).toThrow("incomplete"); expect(calls).toBe(1);
+  close(); world.actors.close();
+});
+
+test("compound inventory admission is atomic and any removed binding cancels the whole continuation", () => {
+  const world = fixture(), rules: OriginalPickupRule[] = [{ id: "pack", offered: [world.offer.item], writes: [
+    { kind: "inventory", item: "q1:ammo/shells", fields: "count" }, { kind: "inventory", item: "q1:ammo/nails", fields: "count-and-capacity" },
+  ], take: () => "accepted" }];
+  expect(() => world.inventory.bindPickup(world.player, { owner: "mod:pack", rules })).toThrow("not admitted");
+  world.inventory.configure(world.player, { item: "q1:ammo/nails", count: 0, capacity: 200 });
+  const remove = world.inventory.bindPickup(world.player, { owner: "mod:pack", rules });
+  expect(world.pickups.runSource(world.offer, selection => {
+    if (selection.kind !== "replacement") throw new Error("Missing compound rule");
+    remove(); return selection.grant();
+  })).toBe("stale");
+  const fixed = world.actors.allocate("test:world", "test:player");
+  world.inventory.bind(fixed, { read: () => [{ item: "q1:ammo/shells", count: 0, capacity: 100 }, { item: "q1:ammo/nails", count: 0, capacity: 200 }], write: () => undefined });
+  expect(() => world.inventory.bindPickup(fixed, { owner: "mod:pack", rules })).toThrow("mutable capacity");
+  expect(world.inventory.bindPickup(fixed, { owner: "mod:other", rules: [{ ...rules[0], id: "count", offered: [world.offer.item],
+    writes: [{ kind: "inventory", item: "q1:ammo/shells", fields: "count" }], take: () => "accepted" }] })).toBeFunction();
   world.actors.close();
 });

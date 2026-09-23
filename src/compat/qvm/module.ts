@@ -73,7 +73,10 @@ export class QvmModule implements GuestExecutor {
       this.currentEntry = call;
       try { return systemCall(call); }
       finally { this.currentEntry = previous; }
-    }, options.allocation, options.registration, "compiled");
+    }, options.allocation, options.registration, "compiled", (scope, perform) => {
+      const previous = this.currentEntry; this.currentEntry = scope;
+      try { return perform(); } finally { this.currentEntry = previous; }
+    });
     this.memory = this.interpreter.addressSpace;
     this.guestMemory = new QvmGuestMemory(artifact.module, this.memory);
     if (artifact.role === "ui" && initialization !== deferredUiInitialization) {

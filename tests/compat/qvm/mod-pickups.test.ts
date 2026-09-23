@@ -24,7 +24,7 @@ function fixture(operation: QvmModPickup["operation"]) {
       clients: () => [{ actor: recipient.id, client }], forActor: actor => actor.equals(recipient.id) ? client : null,
       actor: value => value.equals(client) ? recipient.id : null, userinfo: () => "", setUserinfo: () => {}, command: () => null, drop: () => {},
       subscribe: () => () => undefined, subscribeApplication: () => () => undefined } };
-  const definition: QvmModPickup = { id: "source:ammo", offered: ["map:ammo"], resource: { kind: "inventory", item: "test:ammo" }, operation, context: [] };
+  const definition: QvmModPickup = { id: "source:ammo", offered: ["map:ammo"], writes: [{ kind: "inventory", item: "test:ammo", fields: "count" }], operation, context: [] };
   const calls: { call: QvmModSourceCall; inputs: ReadonlyMap<ModCallbackInput, ModRuntimeValue> }[] = [];
   let grant = 0, gate = 1, duringGate = () => {};
   const provider = new QvmModPickups([definition], services, "mod:source", {
@@ -82,7 +82,7 @@ test("QVM gate retirement or removal cannot grant, complete, or checkpoint its p
 });
 
 test("QVM pickup admission rejects context aliases and missing resource storage", () => {
-  const definition: QvmModPickup = { id: "source:ammo", resource: { kind: "inventory", item: "test:ammo" }, offered: ["map:ammo"], operation: { kind: "boolean-grant", grant },
+  const definition: QvmModPickup = { id: "source:ammo", writes: [{ kind: "inventory", item: "test:ammo", fields: "count" }], offered: ["map:ammo"], operation: { kind: "boolean-grant", grant },
     context: [{ record: "entity", offset: 0, value: { kind: "address", value: 64 } }] };
   const declaration: QvmModCallbackDeclaration = { version: 1, runtime: "qvm", program: { path: "vm/qagame.qvm", digest: `sha256:${"0".repeat(64)}` }, abiProfile: "q3-modern",
     clients: { maximum: 1, records: ["client"], playerStateRecord: "client", admit: [], userinfo: [], disconnect: [] }, entityRecord: "entity",
@@ -90,6 +90,6 @@ test("QVM pickup admission rejects context aliases and missing resource storage"
       { id: "client", address: 1024, stride: 512, capacity: 1, fields: [{ binding: "inventory", item: "test:ammo", offset: 0, encoding: "int32" }] }],
     pickups: [definition], callbacks: [], initialize: [] };
   expect(() => validateQvmModPickups(declaration)).toThrow("overlaps shared");
-  expect(() => validateQvmModPickups({ ...declaration, pickups: [{ ...definition, context: [], resource: { kind: "inventory", item: "test:missing" } }] })).toThrow("inventory storage");
+  expect(() => validateQvmModPickups({ ...declaration, pickups: [{ ...definition, context: [], writes: [{ kind: "inventory", item: "test:missing", fields: "count" }] }] })).toThrow("inventory storage");
   expect(() => validateQvmModPickups({ ...declaration, pickups: [{ ...definition, context: [{ record: "client", offset: 4, value: { kind: "address", value: 64 } }] }] })).toThrow("source context");
 });

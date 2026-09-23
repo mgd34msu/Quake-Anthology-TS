@@ -10,6 +10,8 @@ const xatrix: NativePickupProfile = {
   grants: [
     { entry: 0xa780, recipient: { entry: 0xa795, join: 0xa8cb }, resource: "regular" },
     { entry: 0xa3e0, recipient: { entry: 0xa3e4, join: 0xa4b8 }, resource: "inventory" },
+    { entry: 0x9960, recipient: { entry: 0x996b, join: 0x9a72 }, resource: "inventory" },
+    { entry: 0x9ac0, recipient: { entry: 0x9acb, join: 0x9d98 }, resource: "inventory" },
   ],
   items: { table: 0x4b828, stride: 76, count: 48, classname: 0, pickup: 4 },
   entity: { item: 0x288, count: 0x214, spawnflags: 0x11c, inuse: 88, inuseBytes: 4, generation: null },

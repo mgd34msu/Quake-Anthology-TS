@@ -132,7 +132,7 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
   const pickupOffers: OriginalPickupOffer[] = [];
   const removePickupOwner = combat.bindProtection(actor, { channel: "regular", owner: "mod:original-pickup", rule: "armor", admission: { kind: "replace-current-primary" }, inventoryItems: [],
     read: () => originalArmor, validateWrite: () => undefined, write: next => { originalArmor = next; return undefined; }, absorb: () => ({ saved: 0 }),
-    pickups: [{ id: "armor", offered: ["q3:item_armor_body"], take: (offer, stores) => {
+    pickups: [{ id: "armor", writes: [{ kind: "protection", channel: "regular" }], offered: ["q3:item_armor_body"], take: (offer, stores) => {
       pickupOffers.push(offer); const before = originalArmor;
       originalArmor = { kind: "source", points: 347, item: "mod:source-upgrade" };
       stores.stored({ regular: { before, after: originalArmor } }); return "accepted";

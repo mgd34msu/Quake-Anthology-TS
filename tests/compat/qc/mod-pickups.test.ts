@@ -23,7 +23,7 @@ test("QC inventory delegates keep admitted storage and scope gate inputs, retire
       actor: value => value.equals(client) ? actor.id : null, userinfo: () => "", setUserinfo: () => undefined, command: () => null,
       subscribe: () => () => undefined, subscribeApplication: () => () => undefined, drop: () => undefined } };
   const declaration: ModCallbackDeclaration = { version: 1, runtime: "quakec", program: { path: "test.dat", digest: "sha256:test" },
-    actorFields: [], callbacks: [], pickups: [{ id: "test:grant", resource: { kind: "inventory", item: "q1:ammo/shells" }, offered: ["q3:ammo_shells"],
+    actorFields: [], callbacks: [], pickups: [{ id: "test:grant", writes: [{ kind: "inventory", item: "q1:ammo/shells", fields: "count" }], offered: ["q3:ammo_shells"],
       operation: { kind: "gate-then-grant", gate: { function: "test_gate", arguments: [], globals: [] },
         grant: { function: "test_grant", arguments: [], globals: [] }, grantAccepts: "always" } }] };
   const calls: { readonly name: string; readonly inputs: ReadonlyMap<ModCallbackInput, ModRuntimeValue> }[] = [];

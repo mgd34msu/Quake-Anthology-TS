@@ -5,6 +5,9 @@ import type { SourceTime } from "./time.ts";
 export type PickupResource =
   | { readonly kind: "protection"; readonly channel: ProtectionChannel }
   | { readonly kind: "inventory"; readonly item: ItemId };
+export type PickupWrite = Extract<PickupResource, { readonly kind: "protection" }>
+  | { readonly kind: "inventory"; readonly item: ItemId; readonly fields: "count" | "capacity" | "count-and-capacity" };
+export type PickupWrites = readonly [PickupWrite, ...PickupWrite[]];
 export type PickupCount = { readonly kind: "default" } | { readonly kind: "override"; readonly amount: number };
 export interface OriginalPickupOffer {
   readonly recipient: ActorId;
@@ -25,12 +28,19 @@ export type OriginalPickupOutcome = OriginalPickupDecision | "stale";
 export interface OriginalPickupRule {
   readonly id: string;
   readonly offered: readonly ItemId[];
-  take(offer: OriginalPickupOffer, stores: ProtectionObserver): OriginalPickupDecision;
+  readonly writes: PickupWrites;
+  take(offer: OriginalPickupOffer, execution: OriginalPickupExecution): OriginalPickupDecision;
+}
+export interface OriginalPickupExecution extends ProtectionObserver {
+  readonly writes: PickupWrites;
+  current(): boolean;
 }
 export interface CurrentOriginalPickup {
   readonly owner: ProviderId;
+  readonly operation: OriginalPickupRule;
+  readonly captured: OriginalPickupRule;
+  readonly write: PickupWrite;
   current(): boolean;
-  take(offer: OriginalPickupOffer, stores: ProtectionObserver): OriginalPickupDecision;
 }
 export interface OriginalPickupResolution {
   readonly matches: readonly CurrentOriginalPickup[];
@@ -58,7 +68,7 @@ export type OriginalPickupOperation<Call> =
   | { readonly kind: "gate-then-grant"; readonly gate: Call; readonly grant: Call; readonly grantAccepts: "nonzero" | "always" };
 export interface ModPickupRule<Call> {
   readonly id: string;
-  readonly resource: PickupResource;
+  readonly writes: PickupWrites;
   readonly offered: readonly ItemId[];
   readonly operation: OriginalPickupOperation<Call>;
 }

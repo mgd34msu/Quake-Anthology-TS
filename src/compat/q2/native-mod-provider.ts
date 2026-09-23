@@ -13,7 +13,7 @@ import type { Vec3 } from "../../contracts/math.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ModCallbackInput, ModClientInputOutput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
 import type { NativeModActorField, NativeModActorRecord, NativeModAddress, NativeModDeclaration, NativeModScalar, NativeModSourceCall, NativeModValue, NativeModInputOutput, NativeModPickup } from "../../contracts/native-mod-callbacks.ts";
-import type { OriginalPickupOffer } from "../../contracts/original-pickups.ts";
+import type { OriginalPickupExecution, OriginalPickupOffer } from "../../contracts/original-pickups.ts";
 import type { ProviderCheckpoint, SavedActorId } from "../../contracts/session.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
 import type { ModClientApplication } from "../../world/session/mod-clients.ts";
@@ -265,6 +265,8 @@ export class NativeModProvider implements NativeModProjection {
   private readonly nonclientRecords: readonly NativeModActorRecord[];
   private readonly projections = new Map<ActorId, number>();
   private readonly frames: Invocation[] = [];
+  private readonly pickupScopes: { readonly actor: ActorId; readonly execution: OriginalPickupExecution; readonly frame: Invocation }[] = [];
+  private projectionWrites = 0;
   private readonly inputScopes: InputScope[] = [];
   private inputContext: InputScope | null = null;
   private readonly appearanceActors = new Set<ActorId>();
@@ -283,7 +285,10 @@ export class NativeModProvider implements NativeModProjection {
     this.pickups = new NativeModPickups(declaration.pickups ?? [], services, instance, {
       current: () => this.current(), eligible: actor => this.clients?.admitted(actor) === true,
       context: (definition, offer, inputs, execute) => this.pickupContext(definition, offer, inputs, execute),
-      observe: (actor, observer, execute) => this.protection === null ? this.transfer(execute) : this.protection.observe(actor, observer, execute),
+      observe: (actor, execution, execute) => {
+        const observe = () => this.observePickup(actor, execution, execute);
+        return this.protection === null ? this.transfer(observe) : this.protection.observe(actor, execution, observe);
+      },
       invoke: (call, inputs) => this.execute(call, inputs, false),
     });
     this.protection = (declaration.protection?.length ?? 0) === 0 ? null : new NativeModProtection(declaration.protection ?? [], declaration, services, instance, {
@@ -522,7 +527,37 @@ export class NativeModProvider implements NativeModProjection {
     for (const record of client ? this.declaration.actorRecords : this.nonclientRecords) for (const field of record.fields) if (field.binding === "inventory-capacity"
       && !this.services.inventory.mutableCapacity(actor, field.item)) throw new Error(`Native mod requires mutable inventory capacity for ${field.item}`);
   }
+  private observePickup<Result>(actor: ActorId, execution: OriginalPickupExecution, run: () => Result): Result {
+    const frame = this.frames.at(-1); if (frame === undefined) throw new Error("Pickup requires its native source frame");
+    const scope = { actor, execution, frame }, removers: (() => void)[] = [];
+    this.pickupScopes.push(scope);
+    try {
+      for (const [projected, slot] of this.projections) for (const record of this.actorRecords(projected))
+        removers.push(this.host.memory.observeWrites(this.recordAddress(record, slot), record.stride, () => {
+          if (this.pickupScopes.at(-1) !== scope || this.frames.at(-1) !== frame || this.projectionWrites !== 0) return;
+          if (!execution.current()) throw new Error("Original pickup resource binding is no longer current");
+          this.flush();
+        }));
+      return run();
+    } finally { for (const remove of removers) remove(); this.pickupScopes.pop(); }
+  }
+  private pickupScope() { const scope = this.pickupScopes.at(-1); return scope?.frame === this.frames.at(-1) ? scope : undefined; }
+  private validatePickupWrites(changes: readonly Observation[]): void {
+    const scope = this.pickupScope(); if (scope === undefined || changes.length === 0 || this.projectionWrites !== 0) return;
+    if (!scope.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+    const owner = this.services.actors.resolveOwned(scope.actor);
+    if (owner === null) throw new Error("Original pickup recipient was retired");
+    for (const { actor, field } of changes) {
+      if (!actor.equals(scope.actor) || field.binding !== "inventory" && field.binding !== "inventory-capacity") throw new Error("Original pickup changed an undeclared resource");
+      const permitted = scope.execution.writes.some(write => write.kind === "inventory" ? write.item === field.item
+        && (write.fields === "count-and-capacity" || write.fields === (field.binding === "inventory" ? "count" : "capacity"))
+        : field.binding === "inventory" && this.services.combat.protectionInventoryItems(owner, write.channel).includes(field.item));
+      if (!permitted) throw new Error(`Original pickup changed undeclared ${field.binding} ${field.item}`);
+    }
+  }
   private refresh(): void {
+    this.projectionWrites++;
+    try {
     const memory = this.host.memory;
     for (const [actor, slot] of this.projections) {
       this.validateInventoryCapacity(actor);
@@ -547,6 +582,7 @@ export class NativeModProvider implements NativeModProjection {
       }
     }
     if (this.frames.length !== 0) { const observations = this.observe(); for (const frame of this.frames) frame.observations = observations; }
+    } finally { this.projectionWrites--; }
   }
   private observe(): readonly Observation[] {
     const values: Observation[] = [], memory = this.host.memory;
@@ -558,7 +594,8 @@ export class NativeModProvider implements NativeModProjection {
   private flush(inventoryCommit?: NativeProtectionInventoryCommit): void {
     const frame = this.frames.at(-1); if (frame === undefined) return;
     const memory = this.host.memory, changed = frame.observations.filter(entry => !isDeepStrictEqual(entry.bytes, memory.copy(entry.address, entry.bytes.length)));
-    frame.observations = this.observe();
+    this.validatePickupWrites(changed);
+    for (const active of this.frames) active.observations = this.observe();
     if (changed.length === 0 && frame.cursor === frame.pending.length) return;
     const inventoryChanges = new Map<ActorId, Map<ItemId, InventoryChanges>>();
     for (const { actor, address, field } of changed) if (field.binding === "inventory" || field.binding === "inventory-capacity") {
@@ -580,13 +617,24 @@ export class NativeModProvider implements NativeModProjection {
         committedInventory.add(changes); queue(actor, owner => {
           const entry = this.services.inventory.entries(actor).find(entry => entry.item === field.item); if (entry === undefined) throw new Error("Native mod wrote an undeclared destination item");
           if (changes.capacity !== undefined && !this.services.inventory.mutableCapacity(actor, field.item)) throw new Error(`Native mod requires mutable inventory capacity for ${field.item}`);
-          this.services.inventory.configure(owner, { ...entry, ...changes }, inventoryCommit?.actor.equals(actor) === true && inventoryCommit.items.includes(field.item) ? change => {
-            inventoryCommit.committed(change);
-            for (const invocation of this.frames) invocation.observations = invocation.observations.map(observation => observation.actor.equals(actor)
-              && observation.field.binding === "inventory" && observation.field.item === field.item
-              ? { ...observation, bytes: memory.copy(observation.address, observation.bytes.length) } : observation);
+          const scope = this.pickupScope();
+          if (scope !== undefined && !scope.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+          this.services.inventory.configure(owner, { ...entry, ...changes }, scope !== undefined || inventoryCommit !== undefined ? change => {
+            if (inventoryCommit?.actor.equals(actor) === true && inventoryCommit.items.includes(field.item)) inventoryCommit.committed(change);
+            this.projectionWrites++;
+            try {
+              for (const observation of this.observe()) if (observation.actor.equals(actor)
+                && (observation.field.binding === "inventory" || observation.field.binding === "inventory-capacity") && observation.field.item === field.item)
+                this.scalarWrite(observation.address, observation.field.binding === "inventory" ? change.after.count : change.after.capacity, observation.field.encoding);
+            } finally { this.projectionWrites--; }
+            for (const invocation of this.frames) invocation.observations = this.observe();
+            this.flush(inventoryCommit);
             return undefined;
           } : undefined);
+          if (scope !== undefined) {
+            if (!scope.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+            this.refresh();
+          }
         });
       }
       else {

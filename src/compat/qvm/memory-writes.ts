@@ -1,7 +1,7 @@
 export interface QvmWriteRange { readonly byteOffset: number; readonly byteLength: number; }
 export interface QvmCommittedBytes { readonly byteOffset: number; readonly before: readonly number[]; readonly after: readonly number[]; }
 export interface QvmCommittedWrite { readonly sequence: number; readonly ranges: readonly QvmCommittedBytes[]; }
-interface Watch { readonly ranges: readonly QvmWriteRange[]; readonly publish: (event: QvmCommittedWrite) => undefined; active: boolean; }
+interface Watch { readonly ranges: readonly QvmWriteRange[]; readonly publish: (event: QvmCommittedWrite) => undefined; readonly afterPublication: ((event: QvmCommittedWrite) => undefined) | undefined; active: boolean; }
 interface CapturedRange { readonly byteOffset: number; readonly before: readonly number[]; }
 interface Capture { readonly watch: Watch; readonly ranges: readonly CapturedRange[]; }
 export type QvmWriteCapture = readonly Capture[] | null;
@@ -12,7 +12,7 @@ export class QvmMemoryWrites {
   private publishing = false;
   private closed = false;
   private sequence = 0;
-  constructor(private readonly bytes: Uint8Array) {}
+  constructor(private readonly bytes: Uint8Array, private readonly effect: (perform: () => undefined) => undefined = perform => perform()) {}
   get intercepts(): boolean { return this.watches.length !== 0 || this.publishing || this.closed; }
   assertNotPublishing(): void { if (this.publishing) throw new Error("QVM store publication permits bookkeeping only"); }
   assertLive(): void { if (this.closed) throw new Error("QVM memory has been retired"); }
@@ -21,7 +21,7 @@ export class QvmMemoryWrites {
     if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset > this.bytes.length - length)
       throw new RangeError("QVM raw memory range exceeds allocation");
   }
-  observe(ranges: readonly QvmWriteRange[], publish: Watch["publish"]): () => undefined {
+  observe(ranges: readonly QvmWriteRange[], publish: Watch["publish"], afterPublication?: Watch["afterPublication"]): () => undefined {
     this.assertLive();
     const sorted = ranges.map(range => { this.range(range.byteOffset, range.byteLength); return { ...range }; }).filter(range => range.byteLength !== 0).sort((a, b) => a.byteOffset - b.byteOffset);
     const merged: QvmWriteRange[] = [];
@@ -31,7 +31,7 @@ export class QvmMemoryWrites {
         merged[merged.length - 1] = { byteOffset: previous.byteOffset, byteLength: Math.max(previous.byteOffset + previous.byteLength, range.byteOffset + range.byteLength) - previous.byteOffset };
       else merged.push(range);
     }
-    const watch: Watch = { ranges: merged, publish, active: true }; this.watches = [...this.watches, watch];
+    const watch: Watch = { ranges: merged, publish, afterPublication, active: true }; this.watches = [...this.watches, watch];
     return () => { if (watch.active) { watch.active = false; this.watches = this.watches.filter(entry => entry !== watch); } return undefined; };
   }
   before(offset: number, length: number): QvmWriteCapture {
@@ -58,6 +58,10 @@ export class QvmMemoryWrites {
     finally { this.publishing = false; }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, "QVM committed store publication failed");
+    for (const { watch, event } of deliveries) if (watch.active && !this.closed && watch.afterPublication !== undefined) {
+      const afterPublication = watch.afterPublication;
+      this.effect(() => afterPublication(event));
+    }
   }
   clear(): void { this.assertNotPublishing(); for (const watch of this.watches) watch.active = false; this.watches = []; }
   close(): void { this.clear(); this.closed = true; }

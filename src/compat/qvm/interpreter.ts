@@ -122,6 +122,8 @@ class Operands {
 
 interface Invocation {
   readonly operands: Operands;
+  readonly stack: () => number;
+  readonly execution: object;
   readonly asynchronous: boolean;
   readonly validate: () => void;
   readonly functionScope: SourceFunctionCall | null;
@@ -169,6 +171,7 @@ export class QvmInterpreter {
   private programStack: number;
   private active: Invocation | null = null;
   private rootActive = false;
+  private executing: object | null = null;
   private breaks = 0;
   private debug = false;
   private functionHooks: Map<number, FunctionBinding> | null = null;
@@ -180,6 +183,7 @@ export class QvmInterpreter {
     profile: QvmAllocationProfile = { kind: "unaccounted" },
     private readonly registration: VmRegistration | null = null,
     private readonly semantics: QvmSemantics = "interpreted",
+    private readonly storeEffect: (scope: Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction">, perform: () => undefined) => undefined = (_scope, perform) => perform(),
   ) {
     this.source = image.source;
     const allocations: QvmAllocation[] = [];
@@ -191,7 +195,7 @@ export class QvmInterpreter {
     };
     this.memory = allocate("VM_Create:dataBase", image.allocatedDataLength);
     registration?.bindData(this.memory);
-    this.addressSpace = new QvmMemory(this.memory);
+    this.addressSpace = new QvmMemory(this.memory, perform => this.publishEffect(perform));
     this.memory.set(image.initializedData);
     this.data = new DataView(this.memory.buffer, this.memory.byteOffset, this.memory.byteLength);
     this.observedData = this.addressSpace.dataView(0, this.memory.byteLength);
@@ -348,8 +352,8 @@ export class QvmInterpreter {
   }
 
   private executeSync(args: QvmArguments, instructionIndex: number, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null): number {
-    const execution = this.execute(args, instructionIndex, false, () => {}, sourceCall, functionScope);
-    const result = execution.next();
+    const token = {}, execution = this.execute(token, args, instructionIndex, false, () => {}, sourceCall, functionScope);
+    const result = this.resume(token, () => execution.next());
     if (result.done) return result.value;
     // The trap boundary rejects promises before a synchronous invocation can yield.
     execution.return(0);
@@ -358,17 +362,41 @@ export class QvmInterpreter {
 
   private async executeAsync(args: QvmArguments, instructionIndex: number, validate: () => void, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null): Promise<number> {
     validate();
-    const execution = this.execute(args, instructionIndex, true, validate, sourceCall, functionScope);
-    let next = execution.next();
+    const token = {}, execution = this.execute(token, args, instructionIndex, true, validate, sourceCall, functionScope);
+    let next = this.resume(token, () => execution.next());
     while (!next.done) {
       try {
         const value = await next.value;
         this.live();
         validate();
-        next = execution.next(value);
-      } catch (error) { next = execution.throw(error); }
+        next = this.resume(token, () => execution.next(value));
+      } catch (error) { next = this.resume(token, () => execution.throw(error)); }
     }
     return next.value;
+  }
+
+  private resume<Result>(execution: object, perform: () => Result): Result {
+    const previous = this.executing; this.executing = execution;
+    try { return perform(); } finally { this.executing = previous; }
+  }
+
+  private publishEffect(perform: () => undefined): undefined {
+    const frame = this.active;
+    if (frame === null || this.executing !== frame.execution) return perform();
+    const previous = this.programStack; this.programStack = frame.stack() - 4;
+    try {
+      const result = this.hostCall(frame, scope => {
+        this.storeEffect({ invoke: scope.invoke, cancelFunction: scope.cancelFunction,
+          invokeAsync: () => scope.control(() => { throw new Error("QVM store effects cannot start asynchronous calls"); }),
+        }, perform);
+        return 0;
+      });
+      if (typeof result !== "number") {
+        void result.catch(() => {});
+        throw new Error("QVM store effects cannot suspend");
+      }
+      return undefined;
+    } finally { this.programStack = previous; }
   }
 
   private range(address: number, length: number): void {
@@ -583,7 +611,7 @@ export class QvmInterpreter {
     return typeof result === "number" ? complete(result) : result.then(complete, failed);
   }
 
-  private *execute(args: QvmArguments, instructionIndex: number, asynchronous: boolean,
+  private *execute(execution: object, args: QvmArguments, instructionIndex: number, asynchronous: boolean,
     validate: () => void, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null): Generator<Promise<number>, number, number> {
     for (const word of args) signedWord(word);
     if (sourceCall === undefined) this.registration?.printCall(args[0]);
@@ -597,7 +625,7 @@ export class QvmInterpreter {
     const previousCallLevel = this.callLevel;
     let sp = sourceCall === undefined ? this.stack(entryStack - 48) : sourceCall.stack;
     const previous = this.active;
-    const frame: Invocation = { operands: sourceCall?.operands ?? new Operands(debug), asynchronous, validate,
+    const frame: Invocation = { operands: sourceCall?.operands ?? new Operands(debug), stack: () => sp, execution, asynchronous, validate,
       functionScope: sourceCall ?? functionScope ?? previous?.functionScope ?? null };
     const operands = frame.operands;
     // vm_x86.c retains CALL/RET control on the host stack, outside writable guest locals.

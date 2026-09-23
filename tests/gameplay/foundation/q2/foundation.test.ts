@@ -510,7 +510,7 @@ test("Q2 original pickup scope includes eligibility, refused targets and accepte
   const offers: OriginalPickupOffer[] = [];
   const remove = host.combat.bindProtection(player, { channel: "regular", owner: "mod:original-pickup", rule: "armor", admission: { kind: "replace-current-primary" }, inventoryItems: [],
     read: () => armor, validateWrite: () => undefined, write: next => { armor = next; return undefined; }, absorb: () => ({ saved: 0 }),
-    pickups: [{ id: "armor", offered: ["q2:item_armor_jacket", "q2:item_armor_combat"], take: (offer, stores) => {
+    pickups: [{ id: "armor", writes: [{ kind: "protection", channel: "regular" }], offered: ["q2:item_armor_jacket", "q2:item_armor_combat"], take: (offer, stores) => {
       offers.push(offer); if (offer.item === "q2:item_armor_combat") return "refused";
       const before = armor; armor = { kind: "source", points: 419, item: "mod:original-upgrade" };
       stores.stored({ regular: { before, after: armor } }); return "accepted";

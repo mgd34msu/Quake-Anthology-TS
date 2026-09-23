@@ -347,7 +347,7 @@ test("Q1 foundation, horde and MG3 armor map callbacks retain original owner gra
       const offered = route === "mg3" ? "q1:item_armor_shard" : "q1:item_armor1";
       const remove = combat.bindProtection(player, { channel: "regular", owner: "mod:original-pickup", rule: "armor", admission: { kind: "replace-current-primary" }, inventoryItems: [],
         read: () => armor, validateWrite: () => undefined, write: next => { armor = next; return undefined; }, absorb: () => ({ saved: 0 }),
-        pickups: [{ id: "original-armor", offered: [offered], take: (offer, stores) => {
+        pickups: [{ id: "original-armor", writes: [{ kind: "protection", channel: "regular" }], offered: [offered], take: (offer, stores) => {
           offers.push(offer); if (!accepted) return "refused";
           const before = armor; armor = { kind: "source", points: 347, item: "mod:original-upgrade" };
           stores.stored({ regular: { before, after: armor } }); return "accepted";
@@ -378,8 +378,8 @@ test("Q1 substituted grants keep rerelease megahealth decay and cooperative key 
   try {
     const inventory = game.host.inventory;
     let granted = 0, targets = 0;
-    const remove = inventory.bindPickup(player, { owner: "mod:original-pickup", item: "q1:ammo/shells", rules: [
-      { id: "health-and-key", offered: ["q1:item_health", "q1:key/gold"], take: offer => {
+    const remove = inventory.bindPickup(player, { owner: "mod:original-pickup", rules: [
+      { id: "health-and-key", writes: [{ kind: "inventory", item: "q1:ammo/shells", fields: "count" }], offered: ["q1:item_health", "q1:key/gold"], take: offer => {
         granted++; if (offer.item === "q1:item_health") combat.setHealth(player, 150);
         return "accepted";
       } },

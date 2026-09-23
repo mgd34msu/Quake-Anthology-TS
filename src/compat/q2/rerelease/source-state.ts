@@ -54,6 +54,7 @@ export class RereleaseSourceClient {
       if (item.capacity.kind === "ammo") this.#ammo(item.capacity.sourceIndex);
     }
     return {
+      mutableCapacity: item => items.some(value => value.item === item && value.capacity.kind === "ammo"),
       read: () => items.map(item => ({ item: item.item, count: this.module.memory.readInt32(this.#item(item.sourceIndex)), countPolicy: { kind: "source-counter", arithmetic: "int32" }, capacity: item.capacity.kind === "fixed" ? item.capacity.count : this.module.memory.readInt16(this.#ammo(item.capacity.sourceIndex)) })),
       write: entry => {
         const item = items.find(value => value.item === entry.item);

@@ -6,7 +6,7 @@ import { copyVector } from "../actors/body.ts";
 import type { SessionActorRegistry } from "../actors/registry.ts";
 import { ModOperation } from "./mod-composition.ts";
 import type { OriginalPickupOffer, OriginalPickupResolution, OriginalPickupRule } from "../../contracts/original-pickups.ts";
-import { captureOriginalPickupRules } from "./original-pickups.ts";
+import { captureOriginalPickupRules, type CapturedOriginalPickupRule } from "./original-pickups.ts";
 
 export type CombatTraits = Pick<CombatState, "canTakeDamage" | "mass" | "invulnerable" | "team" | "noKnockback">;
 export interface PowerArmorCellBinding { read(): number; write(count: number): undefined; }
@@ -46,7 +46,8 @@ export interface SourceArmorStage {
 export type ProtectionReservation<K extends ProtectionChannel = ProtectionChannel> = {
   [P in K]: { readonly channel: P; readonly bind: (binding: ProtectionBinding<P>) => () => undefined; readonly close: () => undefined };
 }[K];
-interface ProtectionSlot { readonly claim: ProtectionClaim; binding: ProtectionBinding | null; removeSource: (() => undefined) | null; }
+type BoundProtection = { [K in ProtectionChannel]: Omit<ProtectionBinding<K>, "pickups"> & { readonly pickups: readonly CapturedOriginalPickupRule[] } }[ProtectionChannel];
+interface ProtectionSlot { readonly claim: ProtectionClaim; binding: BoundProtection | null; removeSource: (() => undefined) | null; }
 interface ProtectionSlots { regular: ProtectionSlot | null; powered: ProtectionSlot | null; }
 
 export interface CombatStateBinding {
@@ -238,7 +239,7 @@ export class GameplayAuthority implements DamageAuthority {
       return undefined;
     };
     const bind = (original: ProtectionBinding): (() => undefined) => {
-      const binding = { ...original, ...(original.pickups === undefined ? {} : { pickups: captureOriginalPickupRules(original.pickups) }) };
+      const binding = { ...original, pickups: captureOriginalPickupRules(original.pickups ?? []) };
       if (this.activeHits !== 0) throw new Error("Cannot attach protection during combat execution");
       this.actors.assertOwned(actor);
       if (this.protection.get(actor)?.[channel] !== slot || slot.binding !== null) throw new Error("Protection reservation is closed or bound");
@@ -283,9 +284,10 @@ export class GameplayAuthority implements DamageAuthority {
     const matches = [slots?.regular, slots?.powered].flatMap(slot => {
       const binding = slot?.binding;
       if (binding == null) return [];
-      return (binding.pickups ?? []).filter(rule => rule.offered.includes(offer.item)).map(rule => ({ owner: binding.owner,
+      return binding.pickups.filter(rule => rule.offered.includes(offer.item)).flatMap(rule => rule.writes
+        .filter(write => write.kind === "protection" && write.channel === binding.channel).map(write => ({ owner: binding.owner,
         current: () => this.actors.isLive(actor.id) && this.protection.get(actor)?.[binding.channel] === slot && slot?.binding === binding,
-        take: rule.take }));
+        operation: rule.operation, captured: rule, write })));
     });
     return { matches, blocksPrimary: offer.defaultResource?.kind === "protection" && slots?.[offer.defaultResource.channel] != null };
   }

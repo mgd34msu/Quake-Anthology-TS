@@ -3,7 +3,7 @@ import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.t
 import type { OriginalPickupOffer, OriginalPickupResolution, OriginalPickupRule } from "../../contracts/original-pickups.ts";
 import type { SessionActorRegistry } from "../actors/registry.ts";
 import { ModOperation } from "./mod-composition.ts";
-import { captureOriginalPickupRules } from "./original-pickups.ts";
+import { captureOriginalPickupRules, type CapturedOriginalPickupRule } from "./original-pickups.ts";
 
 export interface InventoryStateBinding {
   read(): readonly InventoryEntry[];
@@ -18,12 +18,12 @@ export interface InventoryCommittedChange {
 }
 export interface InventoryPickupBinding {
   readonly owner: ProviderId;
-  readonly item: ItemId;
   readonly rules: readonly OriginalPickupRule[];
 }
+interface BoundInventoryPickups { readonly owner: ProviderId; readonly rules: readonly CapturedOriginalPickupRule[]; readonly items: readonly ItemId[]; }
 interface InventoryStore {
   readonly binding: InventoryStateBinding;
-  readonly pickups: Map<ItemId, InventoryPickupBinding>;
+  readonly pickups: Map<ItemId, BoundInventoryPickups>;
 }
 
 function quantity(value: number): number {
@@ -79,7 +79,7 @@ export class SharedInventoryTable implements InventoryTable {
   bind(actor: OwnedActor, binding: InventoryStateBinding): undefined {
     this.actors.assertOwned(actor);
     if (this.stores.has(actor)) throw new Error("Actor already has an inventory binding");
-    this.stores.set(actor, { binding, pickups: new Map<ItemId, InventoryPickupBinding>() });
+    this.stores.set(actor, { binding, pickups: new Map<ItemId, BoundInventoryPickups>() });
     return undefined;
   }
 
@@ -87,16 +87,24 @@ export class SharedInventoryTable implements InventoryTable {
   bindPickup(actor: OwnedActor, requested: InventoryPickupBinding): () => undefined {
     this.actors.assertOwned(actor);
     const store = this.stores.get(actor);
-    if (store === undefined || !store.binding.read().some(entry => entry.item === requested.item))
-      throw new Error(`Original pickup destination ${requested.item} was not admitted`);
-    if (store.pickups.has(requested.item)) throw new Error(`Original pickup destination ${requested.item} already has a grant owner`);
-    const binding = Object.freeze({ ...requested, rules: captureOriginalPickupRules(requested.rules) });
-    if (binding.rules.length === 0) throw new Error("Original inventory pickup delegate has no rules");
+    const rules = captureOriginalPickupRules(requested.rules);
+    const writes = rules.flatMap(rule => rule.writes.filter(write => write.kind === "inventory"));
+    const items = [...new Set(writes.map(write => write.item))];
+    if (items.length === 0) throw new Error("Original inventory pickup delegate has no inventory writes");
+    for (const write of writes) {
+      if (store === undefined || !store.binding.read().some(entry => entry.item === write.item))
+        throw new Error(`Original pickup destination ${write.item} was not admitted`);
+      if (store.pickups.has(write.item)) throw new Error(`Original pickup destination ${write.item} already has a grant owner`);
+      if (write.fields !== "count" && store.binding.mutableCapacity?.(write.item) !== true)
+        throw new Error(`Original pickup destination ${write.item} has no mutable capacity`);
+    }
+    if (store === undefined) throw new Error("Original pickup inventory was not admitted");
+    const binding = Object.freeze({ owner: requested.owner, rules, items: Object.freeze(items) });
     for (const existing of store.pickups.values()) for (const rule of existing.rules) for (const offered of rule.offered)
       if (binding.rules.some(candidate => candidate.offered.includes(offered))) throw new Error(`Ambiguous original inventory pickup for ${offered}`);
-    store.pickups.set(binding.item, binding);
+    for (const item of items) store.pickups.set(item, binding);
     return () => {
-      if (this.stores.get(actor) === store && store.pickups.get(binding.item) === binding) store.pickups.delete(binding.item);
+      if (this.stores.get(actor) === store) for (const item of items) if (store.pickups.get(item) === binding) store.pickups.delete(item);
       return undefined;
     };
   }
@@ -105,9 +113,11 @@ export class SharedInventoryTable implements InventoryTable {
     this.actors.assertOwned(actor);
     const store = this.stores.get(actor);
     if (store === undefined) return { matches: [], blocksPrimary: false };
-    const matches = [...store.pickups.values()].flatMap(binding => binding.rules.filter(rule => rule.offered.includes(offer.item))
-      .map(rule => ({ owner: binding.owner, current: () => this.actors.isLive(actor.id) && this.stores.get(actor) === store
-        && store.pickups.get(binding.item) === binding && store.binding.read().some(entry => entry.item === binding.item), take: rule.take })));
+    const matches = [...new Set(store.pickups.values())].flatMap(binding => binding.rules.filter(rule => rule.offered.includes(offer.item))
+      .flatMap(rule => rule.writes.filter(write => write.kind === "inventory").map(write => ({ owner: binding.owner, operation: rule.operation,
+        captured: rule, write, current: () => this.actors.resolveOwned(actor.id) === actor && this.stores.get(actor) === store
+          && binding.items.every(item => store.pickups.get(item) === binding && store.binding.read().some(entry => entry.item === item))
+          && (write.fields === "count" || store.binding.mutableCapacity?.(write.item) === true) }))));
     return { matches, blocksPrimary: false };
   }
 

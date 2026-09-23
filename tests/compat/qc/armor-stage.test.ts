@@ -305,15 +305,15 @@ test("original Copper pickups decide refusal and publish each tier store during 
       absorb: { kind: "region", stage: copperStage(program), call: { function: "T_DamageApply", arguments: [
         { kind: "input", name: "self" }, { kind: "input", name: "inflictor" }, { kind: "input", name: "attacker" },
         { kind: "input", name: "amount" }, { kind: "input", name: "damage-flags" }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] } },
-    }], pickups: [{ id: "copper:green", resource: { kind: "protection", channel: "regular" }, offered: ["q1:item_armor1"], operation: { kind: "boolean-grant",
+    }], pickups: [{ id: "copper:green", writes: [{ kind: "protection", channel: "regular" }], offered: ["q1:item_armor1"], operation: { kind: "boolean-grant",
       grant: { function: "armor_give", arguments: [{ kind: "input", name: "self" }, { kind: "float", value: 100 }, { kind: "float", value: 0.3 }, { kind: "float", value: 1 }], globals: [] } } },
-    { id: "copper:red", resource: { kind: "protection", channel: "regular" }, offered: ["q1:item_armorInv"], operation: { kind: "boolean-grant",
+    { id: "copper:red", writes: [{ kind: "protection", channel: "regular" }], offered: ["q1:item_armorInv"], operation: { kind: "boolean-grant",
       grant: { function: "armor_give", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "pickup-count" }, { kind: "float", value: 0.7 }, { kind: "float", value: 1 }],
         globals: [{ name: "other", value: { kind: "input", name: "other" } }, { name: "time", value: { kind: "input", name: "time" } }] } } }] } satisfies ModCallbackDeclaration)));
   const client = createIdentityOwner("qc-pickup-client").client(0, 0), inventory = new SharedInventoryTable(primary.actors), rng = new SourceRandom(19);
   const firstRule = declaration.pickups?.[0]; if (firstRule === undefined) throw new Error("Missing declared pickup rule");
   expect(() => validateQcMod(program, { ...declaration, pickups: [...(declaration.pickups ?? []), { ...firstRule, id: "duplicate:offered" }] })).toThrow("distinct offered items");
-  expect(() => validateQcMod(program, { ...declaration, pickups: [{ ...firstRule, resource: { kind: "inventory", item: "q1:ammo/shells" } }] })).toThrow("declared source storage");
+  expect(() => validateQcMod(program, { ...declaration, pickups: [{ ...firstRule, writes: [{ kind: "inventory", item: "q1:ammo/shells", fields: "count" }] }] })).toThrow("declared source storage");
   inventory.create(primary.target, []);
   const source = new QcModProvider(program, { id: "mod:copper-pickup", artifactPath: "progs.dat", digest: program.digest, revision: "test" }, declaration,
     { actors: primary.actors, combat: primary.authority, inventory, seed: 19, time: () => ({ kind: "seconds", value: 3 }),
@@ -343,7 +343,7 @@ test("original Copper pickups decide refusal and publish each tier store during 
     const stores: string[] = [];
     let nested = false;
     const power = primary.bindPower(() => {
-      expect(primary.authority.withPickupProtection(primary.target, selected.owner, observer => selected.take(offer, { stored: change => {
+      expect(primary.authority.withPickupProtection(primary.target, selected.owner, observer => selected.captured.take(offer, { current: () => selected.current(), writes: selected.captured.writes, stored: change => {
         observer.stored(change);
         const armor = primary.authority.read(primary.target.id)?.armor.regular;
         if (armor?.kind !== "source") throw new Error("Missing source armor");

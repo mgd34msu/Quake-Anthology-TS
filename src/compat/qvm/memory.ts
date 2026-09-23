@@ -24,14 +24,15 @@ function qStrncpyz(destination: Uint8Array | null, source: string, size: number)
 /** Borrows an interpreter allocation; pointer masking applies only to its start. */
 export class QvmMemory {
   private readonly writes: QvmMemoryWrites;
-  constructor(readonly bytes: Uint8Array) {
+  constructor(readonly bytes: Uint8Array, effect?: (perform: () => undefined) => undefined) {
     const length = bytes.byteLength;
     if (length === 0 || length > 0x40000000 || (length & (length - 1)) !== 0) {
       throw new RangeError("QVM memory allocation must be a nonzero power of two at most 2^30 bytes");
     }
-    this.writes = new QvmMemoryWrites(bytes);
+    this.writes = new QvmMemoryWrites(bytes, effect);
   }
-  observeWrites(ranges: readonly QvmWriteRange[], publish: (event: QvmCommittedWrite) => undefined): () => undefined { return this.writes.observe(ranges, publish); }
+  observeWrites(ranges: readonly QvmWriteRange[], publish: (event: QvmCommittedWrite) => undefined,
+    afterPublication?: (event: QvmCommittedWrite) => undefined): () => undefined { return this.writes.observe(ranges, publish, afterPublication); }
   get observesWrites(): boolean { return this.writes.intercepts; }
   assertLive(): void { this.writes.assertLive(); }
   assertNotPublishing(): void { this.writes.assertNotPublishing(); }

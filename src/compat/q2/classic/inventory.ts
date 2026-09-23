@@ -59,6 +59,7 @@ export class ClassicSourceInventory {
     };
     const count = (address: GuestAddress, item: NativeItem) => memory.offset(address, BigInt(this.profile.client.inventory + item.index * 4));
     return {
+      mutableCapacity: item => { client(); return this.items.some(value => value.item === item && value.capacity.kind === "ammo"); },
       read: () => {
         const address = client();
         return this.items.map(item => ({ item: item.item, count: memory.readInt32(count(address, item)),

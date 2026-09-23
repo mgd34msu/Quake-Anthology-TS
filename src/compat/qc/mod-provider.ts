@@ -1,3 +1,4 @@
+import type { OriginalPickupExecution } from "../../contracts/original-pickups.ts";
 import type { ModuleIdentity, QuakeCCheckpoint } from "../../contracts/execution.ts";
 import type { ContentId, ResolvedResourceReference } from "../../contracts/content.ts";
 import type { Bounds } from "../../contracts/math.ts";
@@ -86,10 +87,11 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
       || new Set(pickup.offered).size !== pickup.offered.length || pickup.offered.some(item => pickupItems.has(item)))
       throw new Error("QC pickups require clients, unique rule ids and distinct offered items");
     pickupIds.add(pickup.id); for (const item of pickup.offered) pickupItems.add(item);
-    const resource = pickup.resource;
-    if (resource.kind === "protection" ? !declaration.protection?.some(value => value.channel === resource.channel)
-      : !declaration.actorFields.some(field => field.binding === "inventory" && field.item === resource.item))
-      throw new Error("QC pickup resource requires its declared source storage");
+    for (const resource of pickup.writes) {
+      if (resource.kind === "protection" ? !declaration.protection?.some(value => value.channel === resource.channel)
+        : resource.fields !== "count" || !declaration.actorFields.some(field => field.binding === "inventory" && field.item === resource.item))
+        throw new Error("QC pickup resource requires its declared source storage");
+    }
     for (const call of pickup.operation.kind === "boolean-grant" ? [pickup.operation.grant] : [pickup.operation.gate, pickup.operation.grant])
       validateCall(program, call, new Set<ModCallbackInput>(["self", "other", "item", "time", "pickup-count", "pickup-has-count", "pickup-dropped"]), "pickup");
   }
@@ -198,6 +200,7 @@ export class QcModProvider {
   private readonly releaseProjection: () => undefined;
   private frame: FrameContext | null = null;
   private depth = 0;
+  private readonly pickupScopes: { readonly actor: ActorId; readonly execution: OriginalPickupExecution; readonly depth: number }[] = [];
   private loading = false;
   private initialized = false;
   private closed = false;
@@ -325,12 +328,16 @@ export class QcModProvider {
         })(),
         run: (region, execute) => this.combat === null ? execute() : this.combat.damage.inlineBoundary.run(region, execute),
       }, observeCall: call => { this.input.observeCall(call); return this.combat?.damage.observeCall(call); }, observeEntityStore: store => {
-        this.protection?.observe(store); this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
+        this.validatePickupStore(store); this.protection?.observe(store); this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
       } });
     this.protection = declaration.protection === undefined ? null : new QcModProtection(declaration, module.id, services, { machine: this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference),
       invoke: (call, inputs, region) => this.invoke(call, inputs, region), pickups: (actor, channel) => this.pickups?.protection(actor, channel) ?? [] });
     this.pickups = declaration.pickups === undefined ? null : new QcModPickups(declaration, module.id, services, {
-      invoke: (call, inputs) => this.invoke(call, inputs), watch: (actor, observer, run) => this.protection === null ? run() : this.protection.watch(actor, observer, run),
+      invoke: (call, inputs) => this.invoke(call, inputs), watch: (actor, execution, run) => {
+        this.pickupScopes.push({ actor, execution, depth: this.depth + 1 });
+        try { return this.protection === null ? run() : this.protection.watch(actor, execution, run); }
+        finally { this.pickupScopes.pop(); }
+      },
     });
     this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor), actor => services.actors.isLive(actor));
     this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
@@ -584,6 +591,20 @@ export class QcModProvider {
       }
     }
   }
+  private pickupScope() { const scope = this.pickupScopes.at(-1); return scope?.depth === this.depth ? scope : undefined; }
+  private validatePickupStore(store: QcEntityStoreObservation): void {
+    const scope = this.pickupScope(); if (scope === undefined) return;
+    if (!scope.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+    const actor = this.actor(store.reference);
+    for (const field of this.fields) {
+      if (store.word + store.after.length / 4 <= field.offset || store.word >= field.offset + field.words) continue;
+      const declaration = field.declaration;
+      if (declaration.binding === "constant" || declaration.binding === "private") continue;
+      if (!actor.equals(scope.actor) || declaration.binding !== "inventory"
+        || !scope.execution.writes.some(write => write.kind === "inventory" && write.item === declaration.item && write.fields !== "capacity"))
+        throw new Error("Original pickup changed an undeclared resource");
+    }
+  }
   private writeThrough(store: QcEntityStoreObservation): undefined {
     const actor = this.services.actors.resolveOwned(this.actor(store.reference));
     if (actor === null) throw new Error("Mod actor was released before its source store");
@@ -594,6 +615,24 @@ export class QcModProvider {
         if (offset !== undefined && store.word <= offset && store.word + store.after.length / 4 > offset) return this.ownedActors.schedule(actor);
       }
       return undefined;
+    }
+    const pickup = this.pickupScope();
+    if (pickup !== undefined) {
+      const writes = this.fields.flatMap(field => field.declaration.binding === "inventory" && store.word < field.offset + field.words
+        && store.word + store.after.length / 4 > field.offset ? [{ item: field.declaration.item, offset: field.offset, count: words.float(field.offset) }] : []);
+      let cursor = 0;
+      const commit = (): undefined => {
+        const write = writes[cursor++]; if (write === undefined) return undefined;
+        if (!pickup.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+        const entry = this.services.inventory.entries(actor.id).find(entry => entry.item === write.item);
+        if (entry === undefined) throw new Error(`Mod inventory store requires ${write.item}`);
+        this.services.inventory.configure(actor, { ...entry, count: write.count }, change => {
+          words.setFloat(write.offset, change.after.count); return commit();
+        });
+        if (!pickup.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+        return undefined;
+      };
+      commit();
     }
     for (const field of this.fields) {
       if (store.word + store.after.length / 4 <= field.offset || store.word >= field.offset + field.words) continue;
@@ -625,6 +664,7 @@ export class QcModProvider {
           if (this.services.combat.read(actor.id) === null) throw new Error("Mod health store requires a combat actor");
           this.services.combat.setHealth(actor, words.float(field.offset)); break;
         case "inventory": {
+          if (pickup !== undefined) break;
           const entry = this.services.inventory.entries(actor.id).find(entry => entry.item === declared.item);
           if (entry === undefined) throw new Error(`Mod inventory store requires ${declared.item}`);
           this.services.inventory.configure(actor, { ...entry, count: words.float(field.offset) }); break;

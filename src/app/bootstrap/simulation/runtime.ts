@@ -1671,7 +1671,8 @@ export class SharedSimulation implements Simulation {
     if (new Set(initial.map(entry => entry.item)).size !== initial.length) throw new Error("Saved source inventory has duplicate items");
     const nativeItems = new Set(source.read().map(entry => entry.item));
     const supplemental = new Map(initial.filter(entry => !nativeItems.has(entry.item)).map(entry => [entry.item, entry]));
-    this.inventory.bind(actor, { read: () => [...source.read(), ...supplemental.values()], write: entry => {
+    this.inventory.bind(actor, { read: () => [...source.read(), ...supplemental.values()],
+      mutableCapacity: item => nativeItems.has(item) ? source.mutableCapacity?.(item) === true : supplemental.has(item), write: entry => {
       if (nativeItems.has(entry.item)) return source.write(entry);
       supplemental.set(entry.item, entry); return undefined;
     } });

@@ -10,7 +10,7 @@ import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorCollision } from "../../world/collision/index.ts";
 import type { ModCallbackInput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
 import type { QvmModActorField, QvmModActorRecord, QvmModCallbackDeclaration, QvmModPickup, QvmModScalar, QvmModSourceCall, QvmModValue } from "../../contracts/qvm-mod-callbacks.ts";
-import type { OriginalPickupOffer } from "../../contracts/original-pickups.ts";
+import type { OriginalPickupExecution, OriginalPickupOffer } from "../../contracts/original-pickups.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
 import type { UserFileStore } from "../../platform/files/writable.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
@@ -49,7 +49,7 @@ type Artifact = QvmModuleOptions["artifact"];
 type Inputs = ReadonlyMap<ModCallbackInput, ModRuntimeValue>;
 type SharedField = Extract<QvmModActorField, { readonly binding: "health" | "inventory" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }>;
 interface Observation { readonly actor: ActorId; readonly address: number; readonly field: SharedField; readonly bytes: Uint8Array; }
-interface Frame { observations: readonly Observation[]; }
+interface Frame { observations: readonly Observation[]; readonly pending: (() => void)[]; cursor: number; }
 function fieldSize(field: QvmModActorField): number {
   return field.binding === "private" ? field.byteLength
     : ["origin", "velocity", "angles", "bounds-min", "bounds-max", "constant-vector"].includes(field.binding) ? 12 : 4;
@@ -257,6 +257,8 @@ export class QvmModProvider {
   private readonly eventKeys = new Map<ActorId, string>();
   private readonly defaults = new Map<string, Uint8Array>();
   private readonly frames: Frame[] = [];
+  private readonly pickupScopes: { readonly actor: ActorId; readonly execution: OriginalPickupExecution; frame: Frame | null }[] = [];
+  private projectionWrites = 0;
   readonly cvars: CvarRegistry;
   private readonly information: QvmServerInformationServices;
   private readonly entityTokens: QvmEntityTokens;
@@ -396,7 +398,10 @@ export class QvmModProvider {
       eligible: actor => !this.closed && this.projections.has(actor) && !this.retiredProjections.has(actor) && this.clientBindings?.admitted(actor) === true,
       invoke: (call, inputs) => this.invoke(call, inputs),
       context: (definition, offer, inputs, execute) => this.pickupContext(definition, offer, inputs, execute),
-      observe: (actor, observer, execute) => { const channel = this.protection[0]; return channel === undefined ? execute() : channel.observe(actor, observer, execute); },
+      observe: (actor, execution, execute) => {
+        const observe = () => this.observePickup(actor, execution, execute), channel = this.protection[0];
+        return channel === undefined ? observe() : channel.observe(actor, execution, observe);
+      },
     });
     this.rememberDefaults();
     this.unsubscribe = services.actors.onRelease(actor => {
@@ -532,7 +537,34 @@ export class QvmModProvider {
     for (const actor of this.retiredProjections) this.releaseProjection(actor);
     this.retiredProjections.clear();
   }
+  private observePickup<Result>(actor: ActorId, execution: OriginalPickupExecution, run: () => Result): Result {
+    const scope: { readonly actor: ActorId; readonly execution: OriginalPickupExecution; frame: Frame | null } = { actor, execution, frame: null };
+    const ranges = [...this.projections].flatMap(([projected, slot]) => this.actorRecords(projected).map(record => ({ byteOffset: record.address + slot * record.stride, byteLength: record.stride })));
+    this.pickupScopes.push(scope);
+    const stop = this.module.memory.observeWrites(ranges, () => {
+      if (this.pickupScope() === scope && this.projectionWrites === 0) this.captureWrites();
+      return undefined;
+    }, () => {
+      if (this.pickupScope() === scope && this.projectionWrites === 0) this.flush();
+      return undefined;
+    });
+    try { return run(); } finally { stop(); this.pickupScopes.pop(); }
+  }
+  private pickupScope() { const scope = this.pickupScopes.at(-1); return scope?.frame === this.frames.at(-1) ? scope : undefined; }
+  private validatePickupWrites(changes: readonly Observation[]): void {
+    const scope = this.pickupScope(); if (scope === undefined || changes.length === 0 || this.projectionWrites !== 0) return;
+    if (!scope.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+    const owner = this.services.actors.resolveOwned(scope.actor);
+    if (owner === null) throw new Error("Original pickup recipient was retired");
+    for (const { actor, field } of changes) {
+      if (!actor.equals(scope.actor) || field.binding !== "inventory" || !scope.execution.writes.some(write => write.kind === "inventory"
+        ? write.item === field.item && write.fields !== "capacity" : this.services.combat.protectionInventoryItems(owner, write.channel).includes(field.item)))
+        throw new Error("Original pickup changed an undeclared resource");
+    }
+  }
   private refresh(): void {
+    this.projectionWrites++;
+    try {
     for (const [actor, slot] of this.projections) if (!this.owned.has(actor) && !this.retiredProjections.has(actor)) for (const record of this.actorRecords(actor)) for (const field of record.fields) {
       const address = record.address + slot * record.stride + field.offset;
       if (!shared(field)) continue;
@@ -547,6 +579,8 @@ export class QvmModProvider {
         this.writeVector(address, state === null ? { x: 0, y: 0, z: 0 } : field.binding === "bounds-min" ? state.bounds.min : field.binding === "bounds-max" ? state.bounds.max : state[field.binding]);
       }
     }
+    for (const frame of this.frames) frame.observations = this.observe();
+    } finally { this.projectionWrites--; }
   }
   private observe(): readonly Observation[] {
     const result: Observation[] = [];
@@ -556,27 +590,54 @@ export class QvmModProvider {
     }
     return result;
   }
-  private flush(): void {
+  private captureWrites(): void {
     const frame = this.frames.at(-1); if (frame === undefined) return;
     const changes = frame.observations.filter(entry => entry.bytes.some((byte, offset) => byte !== this.module.memory.bytes[entry.address + offset]));
-    frame.observations = this.observe();
+    this.validatePickupWrites(changes);
+    for (const active of this.frames) active.observations = this.observe();
     for (const { actor, address, field } of changes) {
       if (this.retiredProjections.has(actor)) continue;
-      const owner = this.services.actors.resolveOwned(actor); if (owner === null) throw new Error("QVM mod wrote an expired actor");
+      const scope = this.pickupScope();
+      const apply = (commit: (owner: OwnedActor) => void): void => { frame.pending.push(() => {
+        if (scope !== undefined && !scope.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+        const owner = this.services.actors.resolveOwned(actor); if (owner === null) throw new Error("QVM mod wrote an expired actor");
+        commit(owner);
+      }); };
       if (field.binding === "health" || field.binding === "inventory") {
         const value = field.encoding === "int32" ? this.view(address, 4).getInt32(0, true) : this.view(address, 4).getFloat32(0, true);
         scalar(value, field.encoding);
-        if (field.binding === "health") this.services.combat.setHealth(owner, value);
-        else { const entry = this.services.inventory.entries(actor).find(entry => entry.item === field.item);
-          if (entry === undefined) throw new Error("QVM mod inventory binding disappeared"); this.services.inventory.configure(owner, { ...entry, count: value }); }
+        if (field.binding === "health") apply(owner => { this.services.combat.setHealth(owner, value); });
+        else apply(owner => {
+          const entry = this.services.inventory.entries(actor).find(entry => entry.item === field.item);
+          if (entry === undefined) throw new Error("QVM mod inventory binding disappeared");
+          this.services.inventory.configure(owner, { ...entry, count: value }, scope === undefined ? undefined : change => {
+            this.projectionWrites++;
+            try { this.view(address, 4).setInt32(0, scalar(change.after.count, field.encoding), true); }
+            finally { this.projectionWrites--; }
+            for (const active of this.frames) active.observations = this.observe();
+            this.flush(); return undefined;
+          });
+          if (scope !== undefined) {
+            if (!scope.execution.current()) throw new Error("Original pickup resource binding is no longer current");
+            this.refresh();
+          }
+        });
       } else {
-        const state = this.services.bodies.read(actor); if (state === null) throw new Error("QVM mod body binding disappeared");
         const value = this.vector(address); for (const component of [value.x, value.y, value.z]) scalar(component, "float32");
-        const next = field.binding === "bounds-min" ? { ...state, bounds: { ...state.bounds, min: value } }
-          : field.binding === "bounds-max" ? { ...state, bounds: { ...state.bounds, max: value } } : { ...state, [field.binding]: value };
-        this.services.bodies.write(owner, next);
+        apply(owner => {
+          const state = this.services.bodies.read(actor); if (state === null) throw new Error("QVM mod body binding disappeared");
+          const next = field.binding === "bounds-min" ? { ...state, bounds: { ...state.bounds, min: value } }
+            : field.binding === "bounds-max" ? { ...state, bounds: { ...state.bounds, max: value } } : { ...state, [field.binding]: value };
+          this.services.bodies.write(owner, next);
+        });
       }
     }
+  }
+  private flush(): void {
+    this.captureWrites();
+    const frame = this.frames.at(-1); if (frame === undefined) return;
+    while (frame.cursor < frame.pending.length) { const commit = frame.pending[frame.cursor++]; if (commit === undefined) throw new Error("QVM source commit disappeared"); commit(); }
+    frame.pending.length = 0; frame.cursor = 0;
   }
   private allocate(size: number): number {
     const address = this.scratch; this.scratch += Math.ceil(size / 4) * 4;
@@ -637,13 +698,19 @@ export class QvmModProvider {
         if (actor !== null && !this.owned.has(actor)) throw new Error("QVM source removal of a foreign actor requires its owner continuation");
         if (actor !== null) this.actorSemantics?.beforeRelease(actor);
       }
-      this.refresh(); const frame: Frame = { observations: this.observe() }; this.frames.push(frame);
+      this.refresh(); const frame: Frame = { observations: this.observe(), pending: [], cursor: 0 }; this.frames.push(frame);
+      const pickup = this.pickupScopes.at(-1); if (pickup?.frame === null) pickup.frame = frame;
       return { words, finish: (succeeded: boolean) => {
         try {
-          if (!this.closed) { this.current(); this.flush(); if (succeeded) this.playerEvents.publish(); else this.playerEvents.discard(); }
+          if (!this.closed) {
+            this.current();
+            if (!succeeded && pickup?.frame === frame) { frame.pending.length = 0; frame.cursor = 0; }
+            else this.flush();
+            if (succeeded) this.playerEvents.publish(); else this.playerEvents.discard();
+          }
         } catch (error) { if (!this.closed) this.playerEvents.discard(); throw error; }
         finally {
-          this.frames.pop();
+          this.frames.pop(); if (pickup?.frame === frame) pickup.frame = null;
           try { if (!this.closed) {
             for (const global of globals) this.module.memory.writeBytes(global.address, global.bytes);
             this.playerEvents.discard();

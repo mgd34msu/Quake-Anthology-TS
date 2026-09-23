@@ -152,7 +152,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
       if (address === null) throw new Error("Native inventory requires a source client");
       return new RereleaseSourceClient(address, host.module, profile).inventory(items);
     };
-    return { read: () => current().read(), write: entry => current().write(entry) };
+    return { read: () => current().read(), write: entry => current().write(entry), mutableCapacity: item => current().mutableCapacity?.(item) === true };
   }
   validateMap(binding: RereleaseGuestMapServices): void { if (binding.scene.geometry.models.length >= 8191) throw new RangeError("API2023 map exceeds model capacity"); }
   private seedMap(): void { this.#strings.set(63, this.options.mapPath); for (let i = 1; i < this.options.scene.geometry.models.length; i++) this.#strings.set(63 + i + (i >= 254 ? 1 : 0), `*${i}`); }

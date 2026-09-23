@@ -16,7 +16,7 @@ function fixture() {
   inventory.create(player, [{ item: "q3:ammo/shotgun", count: 2, capacity: 50, countPolicy: { kind: "source-counter", arithmetic: "int32" } }]);
   const offer: OriginalPickupOffer = { recipient: player.id, pickup: item.id, source: "q3:world", item: "q3:ammo/shotgun",
     defaultResource: { kind: "inventory", item: "q3:ammo/shotgun" }, count: { kind: "default" }, dropped: false, time: { kind: "milliseconds", value: 1000 } };
-  const bind = (take: OriginalPickupRule["take"]) => inventory.bindPickup(player, { owner: "mod:ammo", item: "q3:ammo/shotgun", rules: [{ id: "shells", offered: [offer.item], take }] });
+  const bind = (take: OriginalPickupRule["take"]) => inventory.bindPickup(player, { owner: "mod:ammo", rules: [{ id: "shells", writes: [{ kind: "inventory", item: "q3:ammo/shotgun", fields: "count" }], offered: [offer.item], take }] });
   return { actors, player, combat, inventory, pickups, offer, bind };
 }
 const regular: ProtectionStore = { regular: { before: { kind: "none" }, after: { kind: "source", points: 1, item: null } } };
@@ -47,11 +47,11 @@ test("inventory-only protection reports fail the whole grant even if its callbac
   for (const change of [regular, powered]) {
     const f = fixture(); let completed = false;
     f.bind((_offer, observer) => {
-      expect(() => observer.stored(change)).toThrow("without a combat binding");
+      expect(() => observer.stored(change)).toThrow("undeclared protection");
       return "accepted";
     });
     try {
-      expect(() => f.pickups.touch(f.offer, { original: () => true, complete: () => { completed = true; } })).toThrow("without a combat binding");
+      expect(() => f.pickups.touch(f.offer, { original: () => true, complete: () => { completed = true; } })).toThrow("undeclared protection");
       expect(completed).toBe(false); expect(f.combat.read(f.player.id)).toBeNull();
       expect(f.combat.assertIdle()).toBeUndefined(); expect(f.pickups.assertIdle()).toBeUndefined();
     } finally { f.actors.close(); }
