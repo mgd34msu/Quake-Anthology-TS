@@ -122,6 +122,7 @@ export interface Q1FoundationHost {
   powerup(actor: OwnedActor, powerup: Q1Powerup, expiresSeconds: number): undefined;
   powerupExpires?(actor: ActorId, powerup: Q1Powerup): number;
   sourceDamageMultiplier?(attacker: ActorId): number;
+  readonly sourceDamagePowerupOwner?: ProviderId;
 }
 export interface Q1FoundationOptions {
   readonly provider?: ProviderId;

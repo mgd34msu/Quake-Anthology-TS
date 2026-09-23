@@ -395,6 +395,7 @@ export class Q1EntityServices {
     const scaled = Math.fround(Math.fround(amount) * Math.fround(attacker === null ? 1 : this.host.sourceDamageMultiplier?.(attacker) ?? 1));
     return this.host.combat.apply({ target, amount: scaled, knockback: scaled, direction, point, normal: ZERO, delivery,
       attack: { sequence: this.sequence++, time: { kind: "seconds", value: this.time }, attacker, inflictor,
+        ...(this.host.sourceDamagePowerupOwner === undefined ? {} : { damagePowerupOwner: this.host.sourceDamagePowerupOwner }),
         weapon: weapon === null ? null : this.weaponItem(weapon), weaponProvider: this.provider, combatProvider: this.options.combatProvider,
         inventoryProvider: this.options.inventoryProvider, movementProvider: this.options.movementProvider, cause: { kind: "q1", deathType, ...(armorEffect === undefined ? {} : { armorEffect }) } } });
   }
@@ -409,7 +410,7 @@ export class Q1EntityServices {
     const origin = projectile !== null ? vadd(projectile.origin, vscale(vadd(projectile.bounds.min, projectile.bounds.max), 0.5))
       : inflictor === null ? null : vscale(vadd(inflictor.absoluteBounds.min, inflictor.absoluteBounds.max), 0.5);
     const target = this.host.bodies.read(request.target);
-    return { arithmetic: "binary32", quad: request.attack.attacker !== null && this.powerupExpires(request.attack.attacker, "quad") > this.time,
+    return { arithmetic: "binary32", quad: request.attack.damagePowerupOwner === undefined && request.attack.attacker !== null && this.powerupExpires(request.attack.attacker, "quad") > this.time,
       teamplay: this.options.teamplay ?? 0, baseTeamHealth: this.baseTeamHealth, walk: this.isPlayer(request.target), momentumDirection: target === null || origin === null ? null :
         normalize(vsub(target.origin, origin)) };
   }

@@ -5,7 +5,7 @@ import type { ModQcArmorStage } from "../../../contracts/mod-callbacks.ts";
 import type { ArmorState, DamageOutcome, DamageRequest, ProtectionChannel } from "../../../contracts/gameplay.ts";
 import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcFunctionExecution, QcInlineBoundary, QcInlineContinuation, QcMachine } from "../../../compat/qc/machine.ts";
 import { QcWords } from "../../../compat/qc/memory.ts";
-import { QcProgramError } from "../../../compat/qc/program.ts";
+import { QcOpcode, QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
 import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../../world/gameplay/authority.ts";
 import { qcArmorStage, type QcArmorStage } from "./armor-stage.ts";
@@ -20,6 +20,7 @@ export interface Id1DamageCall {
 }
 
 export interface Id1DamageProjection {
+  admit?(request: DamageRequest): boolean;
   actor(reference: number): ActorId;
   reference(actor: ActorId | null): number;
   reaction?(request: DamageRequest, result: SourceDamageResult, execute: QcFunctionExecution): undefined;
@@ -47,7 +48,20 @@ export class Id1DamageBinding {
     const { program } = source;
     this.binding = id1ProgramBinding(program);
     this.armorStage = qcArmorStage(program, declaredArmor);
-    this.inlineBoundary = { regions: this.armorStage === null ? [] : [this.armorStage.region], run: (_region, execute) => this.runArmor(execute) };
+    const quad = program.digest === "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580" ? { functionIndex: 117, entry: 1426, exit: 1428 } : null;
+    if (quad !== null) {
+      for (const [index, opcode, a, b, c] of [[1426, QcOpcode.LoadF, 1582, 377, 1592], [1427, QcOpcode.Gt, 1592, 31, 1593], [1428, QcOpcode.IfNot, 1593, 3, 0]] satisfies readonly (readonly [number, QcOpcode, number, number, number])[]) {
+        const actual = program.statements[index];
+        if (actual?.opcode !== opcode || actual.a !== a || actual.b !== b || actual.c !== c) throw new QcProgramError("QC source Quad predicate differs from its original artifact");
+      }
+    }
+    this.inlineBoundary = { regions: [...(quad === null ? [] : [quad]), ...(this.armorStage === null ? [] : [this.armorStage.region])], run: (region, execute) => {
+      if (region.entry !== quad?.entry) return this.runArmor(execute);
+      const frame = this.active.at(-1);
+      execute();
+      if (frame?.request.attack.damagePowerupOwner !== undefined) this.vm().globals.setFloat(1593, 0);
+      return undefined;
+    } };
     const layout = this.binding.damage, damage = program.functionNamed("T_Damage");
     if (damage.index !== layout.index || damage.firstStatement !== layout.firstStatement || damage.parameterStart !== layout.parameterStart || damage.localWords !== layout.localWords
       || layout.kind === "sites" && (damage.parameterSizes.length !== 4 || damage.parameterSizes.some(size => size !== 1))) throw new QcProgramError("id1 damage function layout mismatch");
@@ -74,10 +88,11 @@ export class Id1DamageBinding {
       const captured = { call, target: actor(reference), inflictor: actor(vm.argInt(1)), attacker: actor(vm.argInt(2)), amount: vm.argFloat(3) };
       const request = resolveRequest(captured);
       const sameReference = (actor: ActorId | null, captured: ActorId, reference: number): boolean => actor === null ? reference === 0 : actor.equals(captured);
-      if (!request.target.equals(captured.target) || request.amount !== captured.amount || !sameReference(request.attack.attacker, captured.attacker, vm.argInt(2))
+      if (!request.target.equals(captured.target) || Math.fround(request.amount) !== captured.amount || !sameReference(request.attack.attacker, captured.attacker, vm.argInt(2))
         || !sameReference(request.attack.inflictor, captured.inflictor, vm.argInt(1))) throw new QcProgramError("id1 damage provenance changed source arguments");
       let executed = false;
       const outcome = authority.runSourceDamage(request, (observer, effective) => {
+        if (projection?.admit?.(effective) === false || !source.actors.isLive(effective.target)) return { appliedDamage: 0, reaction: "none" };
         if (authority.damageOperation.active && (!isDeepStrictEqual(
           { knockback: request.knockback, direction: request.direction, point: request.point, normal: request.normal, delivery: request.delivery,
             attack: { ...request.attack, attacker: null, inflictor: null } },
@@ -93,7 +108,7 @@ export class Id1DamageBinding {
           return source.entities.reference(slot.slot);
         };
         const targetReference = referenceFor(effective.target), inflictorReference = referenceFor(effective.attack.inflictor), attackerReference = referenceFor(effective.attack.attacker);
-        const frame: (typeof this.active)[number] = { request: effective, targetReference, observer, movementProvider: effective.attack.movementProvider, cancel: execute.cancel,
+        const frame: Id1DamageBinding["active"][number] = { request: effective, targetReference, observer, movementProvider: effective.attack.movementProvider, cancel: execute.cancel,
           regularScale: this.armorStage?.regularScale?.find(site => site.statement === call.statement && program.functionNamed(site.caller).index === call.caller)?.scale ?? 1,
           result: { appliedDamage: 0, reaction: "none" }, reactionDepth: 0, healthWritten: false };
         this.active.push(frame);

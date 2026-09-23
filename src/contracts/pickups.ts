@@ -1,5 +1,6 @@
 import type { ItemId } from "./gameplay.ts";
 import type { ActorId, OwnedActor } from "./identity.ts";
+import type { PickupCargoEntry } from "./original-pickups.ts";
 
 export interface PickupAmmoGrant { readonly item: ItemId; readonly amount: number; }
 export type PickupSelection = "never" | "always" | "better";
@@ -36,6 +37,7 @@ export interface PickupAdmission {
   ammo(actor: OwnedActor, offer: PickupAmmoGrant, autoSwitch?: boolean): boolean;
   ammoWeapon(actor: OwnedActor, offer: PickupAmmoGrant & { readonly weapon: ItemId }, selection: AmmoWeaponSelection): boolean;
   weapon(actor: OwnedActor, offer: { readonly item: ItemId; readonly ammo: readonly PickupAmmoGrant[] }, selection: PickupSelection): boolean;
+  cargo(actor: OwnedActor, cargo: readonly PickupCargoEntry[], selection: PickupSelection): boolean;
 }
 
 export interface PickupSupplyProfile {

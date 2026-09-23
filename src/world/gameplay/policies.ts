@@ -81,7 +81,7 @@ export function createQ1CombatPolicy(options: Q1CombatPolicyOptions): CombatPoli
       const round = (value: number): number => numberFor(context.arithmetic, value);
       const before = options.sourceEffects?.beforeQuad?.(request, round(request.amount), target, attacker);
       if (before?.kind === "cancel") return before;
-      const quad = options.sourceEffects?.beforeQuad === undefined ? context.quad : options.context(request, target, attacker).quad;
+      const quad = request.attack.damagePowerupOwner === undefined && (options.sourceEffects?.beforeQuad === undefined ? context.quad : options.context(request, target, attacker).quad);
       const damage = round(round(before?.amount ?? request.amount) * (quad ? 4 : 1));
       const after = options.sourceEffects?.afterQuad?.(request, damage, target, attacker);
       return after?.kind === "cancel" ? after : { kind: "continue", amount: round(after?.amount ?? damage) };
@@ -90,7 +90,7 @@ export function createQ1CombatPolicy(options: Q1CombatPolicyOptions): CombatPoli
       if (!target.canTakeDamage) return decision(request, [], 0, "none");
       const context = options.context(request, target, attacker);
       const round = (value: number): number => numberFor(context.arithmetic, value);
-      const damage = prepared?.amount ?? round(round(request.amount) * (context.quad ? 4 : 1));
+      const damage = prepared?.amount ?? round(round(request.amount) * (context.quad && request.attack.damagePowerupOwner === undefined ? 4 : 1));
       const afterArmor = (victim: CombatState, take: number, mutations: DamageMutation[]): CombatProgress => {
         if (context.walk && victim.noKnockback !== true && context.momentumDirection !== null)
           addImpulse(request, mutations, context.momentumDirection, round(damage * 8), context.arithmetic);

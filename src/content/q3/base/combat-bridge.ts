@@ -77,7 +77,7 @@ export class Q3CombatBridge {
         sequence: this.sequence++, time: { kind: "milliseconds", value: host.time() }, attacker: useActor(attacker), inflictor: useActor(inflictor),
         ...(originatingProjectile === undefined ? {} : { originatingProjectile }),
         weapon: weapon ?? q3WeaponItem((inflictor instanceof GameEntity ? inflictor.s.weapon : 0) || (attacker instanceof GameEntity ? attacker.s.weapon : 0))?.item ?? null, weaponProvider: host.weaponProvider, combatProvider: host.combatProvider, inventoryProvider: host.inventoryProvider,
-        movementProvider: host.movementProvider, cause: { kind: "q3", meansOfDeath, damageFlags: flags },
+        movementProvider: host.movementProvider, damagePowerupOwner: host.weaponProvider, cause: { kind: "q3", meansOfDeath, damageFlags: flags },
       }),
       dispatch: (call: Q3DamageCall, operation: () => DamageOutcome): DamageOutcome => {
         this.calls.push(call); try { return operation(); } finally { this.calls.pop(); }

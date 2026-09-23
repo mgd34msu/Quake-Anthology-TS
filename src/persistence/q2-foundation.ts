@@ -21,6 +21,7 @@ function cause(reader: SaveReader): AttackProvenance["cause"] {
 export function readQ2AttackCheckpoint(reader: SaveReader): Q2AttackCheckpoint {
   return { sequence: reader.field("sequence").integer(0), time: readTime(reader.field("time")), attacker: reader.field("attacker").nullable(readSavedActor), inflictor: reader.field("inflictor").nullable(readSavedActor),
     ...(reader.field("originatingProjectile").value === undefined ? {} : { originatingProjectile: readSavedActor(reader.field("originatingProjectile")) }),
+    ...(reader.field("damagePowerupOwner").value === undefined ? {} : { damagePowerupOwner: namespaced(reader.field("damagePowerupOwner")) }),
     weapon: reader.field("weapon").nullable(namespaced), weaponProvider: namespaced(reader.field("weaponProvider")), combatProvider: namespaced(reader.field("combatProvider")), inventoryProvider: namespaced(reader.field("inventoryProvider")), movementProvider: namespaced(reader.field("movementProvider")), cause: cause(reader.field("cause")) };
 }
 function entity(reader: SaveReader): Q2EntityCheckpoint {

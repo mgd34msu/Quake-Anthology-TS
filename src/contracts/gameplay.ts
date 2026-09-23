@@ -33,6 +33,8 @@ export interface AttackProvenance {
   readonly originatingProjectile?: ActorId;
   readonly weapon: ItemId | null;
   readonly weaponProvider: ProviderId;
+  /** This source already determined damage powerups, including a multiplier of one. */
+  readonly damagePowerupOwner?: ProviderId;
   readonly combatProvider: ProviderId;
   readonly inventoryProvider: ProviderId;
   readonly movementProvider: ProviderId;

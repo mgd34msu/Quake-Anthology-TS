@@ -109,17 +109,20 @@ function backpackTouch(game: Q1EntityServices, pack: Q1Actor, other: ActorId): u
     };
     const admission = game.pickupAdmission;
     if (admission !== null) {
-      const grants = ammo.filter(entry => entry.count > 0).map(entry => ({ item: entry.item, amount: entry.count }));
-      if (weapon === null) { for (const grant of grants) admission.ammo(actor, grant, false); }
-      else {
+      const cargo: import("../../../contracts/original-pickups.ts").PickupCargoEntry[] = ammo.map(entry => ({ kind: "counter", item: entry.item, count: entry.count }));
+      let selection: import("../../../contracts/pickups.ts").PickupSelection = "never";
+      if (weapon !== null) {
+        cargo.push({ kind: "weapon", item: weaponItem(weapon), count: 1 });
         const owned = admission.owns(other, weaponItem(weapon));
         const autoSwitch = player === null || (game.pickupRules?.autoSwitch?.(game, player, owned)
           ?? (game.options.edition === "classic" || player.autoSwitch === "always" || player.autoSwitch === "new" && !owned));
         const always = contents.selection !== "rank" && game.options.edition === "classic" && game.options.deathmatch === 0;
         const underwater = !always && player !== null && (contents.avoidUnderwaterLightning ?? game.options.edition === "rerelease") && player.waterLevel !== 0 && weapon === "lightning";
-        admission.weapon(actor, { item: weaponItem(weapon), ammo: grants }, !autoSwitch || underwater ? "never" : always ? "always" : "better");
+        selection = !autoSwitch || underwater ? "never" : always ? "always" : "better";
       }
-      feedback(); return game.remove(pack);
+      admission.cargo(actor, cargo, selection);
+      if (!game.live(pack) || game.host.actors.resolveOwned(other) !== actor) return undefined;
+      feedback(); return game.live(pack) ? game.remove(pack) : undefined;
     }
     if (player === null) return undefined;
     const hadWeapon = weapon === null || game.host.inventory.count(other, weaponItem(weapon)) > 0;

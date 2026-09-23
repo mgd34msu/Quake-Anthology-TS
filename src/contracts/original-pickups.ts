@@ -9,6 +9,7 @@ export type PickupWrite = Extract<PickupResource, { readonly kind: "protection" 
   | { readonly kind: "inventory"; readonly item: ItemId; readonly fields: "count" | "capacity" | "count-and-capacity" };
 export type PickupWrites = readonly [PickupWrite, ...PickupWrite[]];
 export type PickupCount = { readonly kind: "default" } | { readonly kind: "override"; readonly amount: number };
+export interface PickupCargoEntry { readonly kind: "counter" | "weapon"; readonly item: ItemId; readonly count: number; }
 export interface OriginalPickupOffer {
   readonly recipient: ActorId;
   readonly pickup: ActorId;
@@ -18,6 +19,7 @@ export interface OriginalPickupOffer {
   readonly count: PickupCount;
   readonly dropped: boolean;
   readonly time: SourceTime;
+  readonly cargo?: readonly PickupCargoEntry[];
   /** Some source grants also own map objectives; those require an explicit lifecycle handoff. */
   readonly grant?: "map-coupled";
 }
@@ -56,9 +58,13 @@ export interface OriginalPickupContinuation {
 export type SourcePickupSelection =
   | { readonly kind: "original" | "blocked" | "stale" }
   | { readonly kind: "replacement"; current(): boolean; grant(): OriginalPickupOutcome };
+export interface SourcePickupLifetime {
+  /** Only the qualified map executor can retire its pickup and continue with the recipient. */
+  consumePickup(remove: () => undefined): undefined;
+}
 export interface OriginalPickupAdmission {
   /** Keep the current grant owner and item scope until the complete original caller unwinds. */
-  runSource<Result>(offer: OriginalPickupOffer, execute: (selection: SourcePickupSelection) => Result | Promise<Result>): Result | Promise<Result>;
+  runSource<Result>(offer: OriginalPickupOffer, execute: (selection: SourcePickupSelection, lifetime: SourcePickupLifetime) => Result | Promise<Result>): Result | Promise<Result>;
   touch(offer: OriginalPickupOffer, continuation: OriginalPickupContinuation): OriginalPickupOutcome;
 }
 

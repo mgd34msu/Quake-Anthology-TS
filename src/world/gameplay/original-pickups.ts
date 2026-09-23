@@ -1,5 +1,5 @@
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
-import type { OriginalPickupAdmission, OriginalPickupContinuation, OriginalPickupOffer, OriginalPickupOutcome, OriginalPickupRule, PickupWrite, PickupWrites, SourcePickupSelection } from "../../contracts/original-pickups.ts";
+import type { OriginalPickupAdmission, OriginalPickupContinuation, OriginalPickupOffer, OriginalPickupOutcome, OriginalPickupRule, PickupWrite, PickupWrites, SourcePickupSelection, SourcePickupLifetime } from "../../contracts/original-pickups.ts";
 import type { SessionActorRegistry } from "../actors/registry.ts";
 import type { GameplayAuthority } from "./authority.ts";
 import type { SharedInventoryTable } from "./inventory.ts";
@@ -9,6 +9,8 @@ interface PickupScope {
   readonly pickup: OwnedActor;
   readonly request: OriginalPickupOffer;
   open: boolean;
+  consumption: "live" | "removing" | "consumed";
+  accepted: boolean;
 }
 
 export interface CapturedOriginalPickupRule extends OriginalPickupRule { readonly operation: OriginalPickupRule; }
@@ -46,14 +48,18 @@ export class SharedOriginalPickupAdmission implements OriginalPickupAdmission {
     if (recipient === null || pickup === null || this.touching.has(pickup.id)) return null;
     if (!Number.isFinite(offer.time.value) || offer.count.kind === "override" && !Number.isFinite(offer.count.amount))
       throw new RangeError("Pickup time and count must be finite");
+    if (offer.cargo !== undefined && (new Set(offer.cargo.map(row => row.item)).size !== offer.cargo.length
+      || offer.cargo.some(row => !Number.isFinite(row.count) || row.kind === "weapon" && row.count !== 1))) throw new RangeError("Pickup cargo has invalid counts or duplicate items");
     const request: OriginalPickupOffer = Object.freeze({ ...offer, count: Object.freeze({ ...offer.count }), time: Object.freeze({ ...offer.time }),
+      ...(offer.cargo === undefined ? {} : { cargo: Object.freeze(offer.cargo.map(row => Object.freeze({ ...row }))) }),
       defaultResource: offer.defaultResource === null ? null : Object.freeze({ ...offer.defaultResource }) });
     this.touching.add(pickup.id);
-    return { recipient, pickup, request, open: true };
+    return { recipient, pickup, request, open: true, consumption: "live", accepted: false };
   }
 
   private current(scope: PickupScope): boolean {
-    return scope.open && this.actors.resolveOwned(scope.recipient.id) === scope.recipient && this.actors.resolveOwned(scope.pickup.id) === scope.pickup;
+    return scope.open && this.actors.resolveOwned(scope.recipient.id) === scope.recipient
+      && (scope.consumption === "consumed" ? this.actors.resolveOwned(scope.pickup.id) === null : this.actors.resolveOwned(scope.pickup.id) === scope.pickup);
   }
 
   private close(scope: PickupScope): void {
@@ -101,15 +107,29 @@ export class SharedOriginalPickupAdmission implements OriginalPickupAdmission {
           return result;
         } finally { open = false; }
       });
-      return current() ? outcome : "stale";
+      if (!current()) return "stale";
+      scope.accepted = outcome === "accepted";
+      return outcome;
     } };
   }
 
-  runSource<Result>(offer: OriginalPickupOffer, execute: (selection: SourcePickupSelection) => Result | Promise<Result>): Result | Promise<Result> {
+  runSource<Result>(offer: OriginalPickupOffer, execute: (selection: SourcePickupSelection, lifetime: SourcePickupLifetime) => Result | Promise<Result>): Result | Promise<Result> {
     const scope = this.open(offer);
-    if (scope === null) return execute({ kind: "stale" });
+    if (scope === null) return execute({ kind: "stale" }, { consumePickup: () => { throw new Error("Stale pickup cannot be consumed"); } });
     try {
-      const result = execute(this.selection(scope));
+      const selected = this.selection(scope);
+      if (selected.kind === "original") scope.accepted = true;
+      const result = execute(selected, { consumePickup: remove => {
+        if (!scope.accepted || scope.consumption !== "live" || !this.current(scope) || selected.kind === "stale" || selected.kind === "blocked"
+          || selected.kind === "replacement" && !selected.current()) throw new Error("Original pickup consumption lost its source scope");
+        scope.consumption = "removing";
+        remove();
+        if (!scope.open || this.actors.resolveOwned(scope.recipient.id) !== scope.recipient || this.actors.resolveOwned(scope.pickup.id) !== null)
+          throw new Error("Original pickup consumption did not retire its exact pickup");
+        scope.consumption = "consumed";
+        if (selected.kind === "replacement" && !selected.current()) throw new Error("Original pickup consumption changed its recipient binding");
+        return undefined;
+      } });
       if (result instanceof Promise) return result.finally(() => this.close(scope));
       this.close(scope); return result;
     } catch (error) { this.close(scope); throw error; }

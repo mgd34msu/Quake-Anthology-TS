@@ -1,9 +1,9 @@
 /* items.qc, Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { PickupSelection, PickupSupplyOffer, PickupSupplyObservation, PickupSupplyPreview } from "../../../contracts/pickups.ts";
-import { previewPickupGrants } from "../../../world/gameplay/pickups.ts";
+import { previewPickupGrants, SharedPickupAdmission } from "../../../world/gameplay/pickups.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
-import type { OriginalPickupContinuation, PickupResource } from "../../../contracts/original-pickups.ts";
+import type { OriginalPickupContinuation, PickupResource, PickupCargoEntry } from "../../../contracts/original-pickups.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Powerup, Q1Weapon } from "./types.ts";
@@ -11,6 +11,7 @@ import { vadd, ZERO, WEAPONS, weaponItem } from "./types.ts";
 import { ammoItem } from "./entity-services.ts";
 
 interface Pickup {
+  readonly cargo?: readonly PickupCargoEntry[];
   readonly supply?: PickupSupplyOffer;
   readonly model: string;
   readonly sound: string;
@@ -84,8 +85,30 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
   if (powerup !== null) return { model: `progs/${powerup.model}.mdl`, sound: `items/${powerup.sound}.wav`, bounds: "artifact", skin: 0,
     respawn: powerup.kind === "invulnerability" || powerup.kind === "invisibility" ? 300 : 60,
     take: (runtime, _entity, player) => { runtime.givePowerup(player, powerup.kind); return "taken"; } };
-  if (name === "item_backpack") return { model: "progs/backpack.mdl", sound: "weapons/lock4.wav", bounds: "artifact", skin: 0, respawn: -1,
-    take: (runtime, item, player) => { runtime.host.inventory.give(player.actor, "q1:ammo/shells", item.number("shells")); return "taken"; } };
+  if (name === "item_backpack") {
+    const counters: readonly (readonly [string, ItemId])[] = [["shells", "q1:ammo/shells"], ["nails", "q1:ammo/nails"], ["rockets", "q1:ammo/rockets"], ["cells", "q1:ammo/cells"]];
+    const cargo: PickupCargoEntry[] = counters.map(([field, item]) => ({ kind: "counter", item, count: entity.number(field) }));
+    const carried = entity.fields.get("weapon");
+    if (carried !== undefined && carried !== "") {
+      const weapon = WEAPONS.find(weapon => weapon === carried || weaponItem(weapon) === carried);
+      if (weapon === undefined) throw new Error(`Unsupported Q1 backpack weapon ${carried}`);
+      cargo.push({ kind: "weapon", item: weaponItem(weapon), count: 1 });
+    }
+    return { cargo, model: "progs/backpack.mdl", sound: "weapons/lock4.wav", bounds: "artifact", skin: 0, respawn: -1,
+      take: (runtime, _item, player) => {
+        const admission = runtime.pickupAdmission ?? new SharedPickupAdmission({ inventory: runtime.host.inventory,
+          profile: { id: "q1:source-backpack", weaponOwnership: "all-destinations", ammo: counters.map(([, item]) => ({ source: item, destinations: [item] })),
+            weapons: WEAPONS.map(weapon => ({ source: weaponItem(weapon), destinations: [weaponItem(weapon)] })) },
+          ammoGranted: () => undefined, weaponGranted: (_actor, weapons, selection) => {
+            for (const item of weapons) { const weapon = WEAPONS.find(weapon => weaponItem(weapon) === item);
+              if (weapon === undefined) throw new Error("Q1 backpack selected a foreign weapon");
+              q1WeaponPickupSelection(runtime, player, weapon, selection);
+            }
+            return undefined;
+          } });
+        return admission.cargo(player.actor, cargo, runtime.options.deathmatch === 0 ? "always" : "better") ? "taken" : "refused";
+      } };
+  }
   return null;
 }
 function weaponOffer(weapon: Q1Weapon): Extract<PickupSupplyOffer, { readonly kind: "weapon" }>["offer"] {
@@ -209,12 +232,13 @@ export function givePickup(game: Q1EntityServices, entity: Q1Actor, other: Actor
 }
 
 export function touchQ1Pickup(game: Q1EntityServices, entity: Q1Actor, other: ActorId, item: ItemId,
-  defaultResource: PickupResource | null, continuation: OriginalPickupContinuation): undefined {
+  defaultResource: PickupResource | null, continuation: OriginalPickupContinuation, cargo?: readonly PickupCargoEntry[]): undefined {
   const live = () => game.live(entity) && game.host.actors.isLive(other);
   if (!live()) return undefined;
   const complete = (taken: boolean) => { if (live()) continuation.complete(taken); };
   if (game.host.originalPickups === undefined) { if ((continuation.eligible?.() ?? true) && live()) complete(continuation.original()); }
   else game.host.originalPickups.touch({ recipient: other, pickup: entity.actor.id, source: entity.actor.owner, item, defaultResource,
+    ...(cargo === undefined ? {} : { cargo }),
     count: entity.count === 0 ? { kind: "default" } : { kind: "override", amount: entity.count },
     dropped: entity.classname === "item_backpack", time: { kind: "seconds", value: game.time } }, { ...continuation, complete });
   return undefined;
@@ -244,6 +268,7 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
         if (!live()) return;
         game.effect("pickup", game.body(entity).origin, player.actor.id);
         if (!live()) return;
+        if (definition.cargo !== undefined) { game.remove(entity); return; }
         if (leave) { if (!entity.classname.startsWith("weapon_")) game.useTargets(entity, other); return; }
         entity.solid = "none"; entity.model = ""; game.link(entity);
         if (!live()) return;
@@ -257,7 +282,7 @@ function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): u
         else game.cancel(entity);
         if (live()) game.useTargets(entity, other);
       },
-    });
+    }, definition.cargo);
 }
 
 function placeItem(game: Q1EntityServices, entity: Q1Actor): undefined {

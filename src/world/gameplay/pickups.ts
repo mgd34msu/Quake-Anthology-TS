@@ -2,6 +2,7 @@ import { inventoryGive } from "./inventory.ts";
 import type { InventoryEntry, InventoryTable, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { AmmoWeaponSelection, PickupAdmission, PickupAmmoGrant, PickupAmmoReceipt, PickupSelection, PickupSupplyOffer, PickupSupplyPreview, PickupSupplyProfile } from "../../contracts/pickups.ts";
+import type { PickupCargoEntry } from "../../contracts/original-pickups.ts";
 
 export type PickupGrantPlan =
   | { readonly kind: "weapon"; readonly weapons: readonly PickupAmmoGrant[]; readonly ammo: readonly PickupAmmoGrant[] }
@@ -117,11 +118,18 @@ export class SharedPickupAdmission implements PickupAdmission {
   }
 
   weapon(actor: OwnedActor, offer: { readonly item: ItemId; readonly ammo: readonly PickupAmmoGrant[] }, selection: PickupSelection): boolean {
-    const weapons = this.destinations("weapons", offer.item), ammo = this.resolveAmmo(offer.ammo);
+    return this.cargo(actor, [{ kind: "weapon", item: offer.item, count: 1 }, ...offer.ammo.map(entry => ({ kind: "counter", item: entry.item, count: entry.amount } satisfies PickupCargoEntry))], selection);
+  }
+
+  cargo(actor: OwnedActor, cargo: readonly PickupCargoEntry[], selection: PickupSelection): boolean {
+    if (new Set(cargo.map(row => row.item)).size !== cargo.length || cargo.some(row => !Number.isFinite(row.count) || row.kind === "weapon" && row.count !== 1))
+      throw new Error("Invalid pickup cargo");
+    const weapons = [...new Set(cargo.filter(row => row.kind === "weapon").flatMap(row => this.destinations("weapons", row.item)))];
+    const ammo = this.resolveAmmo(cargo.filter(row => row.kind === "counter").map(row => ({ item: row.item, amount: row.count })));
     this.requireEntries(actor.id, [...weapons, ...ammo.map(grant => grant.item)]);
     for (const weapon of weapons) this.options.inventory.give(actor, weapon, 1);
     this.giveAmmo(actor, ammo);
-    this.options.weaponGranted(actor, weapons, selection);
+    if (weapons.length !== 0) this.options.weaponGranted(actor, weapons, selection);
     return true;
   }
 }

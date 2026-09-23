@@ -1,3 +1,4 @@
+import { QcBorrowedActors } from "../../../compat/qc/borrowed-actors.ts";
 import { QcActorState } from "../../../compat/qc/actor-state.ts";
 import { readQuakeCCompatibility } from "../../../compat/qc/compatibility.ts";
 import type { RereleaseMessages } from "../../../network/q1/profile.ts";
@@ -36,7 +37,7 @@ import { WEAPONS, weaponItem } from "../../../content/q1/foundation/types.ts";
 import type { ExecutableRecipe, ResolvedResourceReference } from "../../../contracts/content.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
-import type { DamageRequest, ArmorState } from "../../../contracts/gameplay.ts";
+import type { DamageRequest, DamageOutcome, ArmorState } from "../../../contracts/gameplay.ts";
 import type { DecodedWorld } from "../../../contracts/scene.ts";
 import type { FrameContext } from "../../../contracts/time.ts";
 import type { BodyState } from "../../../contracts/world.ts";
@@ -45,7 +46,8 @@ import type { Q2Motion } from "../../../content/q2/foundation/host.ts";
 import { Id1DamageBinding } from "../../../content/q1/quakec/id1-damage.ts";
 import { Id1PickupBinding } from "../../../content/q1/quakec/id1-pickups.ts";
 import { qcWeaponStage, QcWeaponStageBinding } from "../../../content/q1/quakec/weapon-stage.ts";
-import type { OriginalPickupAdmission } from "../../../contracts/original-pickups.ts";
+import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
+import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../contracts/original-pickups.ts";
 import type { Id1DamageCall } from "../../../content/q1/quakec/id1-damage.ts";
 import { decodeQuakeWav } from "../../../audio/wav.ts";
 import { parseQ12Model } from "../../../formats/q12-model/index.ts";
@@ -150,6 +152,12 @@ export interface QuakeCSourceOptions {
   readonly inventory: SharedInventoryTable;
   readonly pickups: OriginalPickupAdmission;
   readonly primaryWeaponSelected?: (actor: ActorId) => boolean;
+  readonly bindInventory?: (actor: OwnedActor, binding: InventoryStateBinding) => undefined;
+  readonly giveInventory?: (actor: ActorId, args: readonly string[]) => boolean;
+  readonly clientSpawned?: (actor: OwnedActor) => undefined;
+  readonly foreignClassname?: (actor: ActorId) => string;
+  readonly damageAllowed?: (request: DamageRequest) => boolean;
+  readonly ownsWeapon?: (actor: ActorId, item: ItemId) => boolean;
   readonly events: SimulationEvents;
   readonly random: SourceRandom;
   readonly skill: 0 | 1 | 2 | 3;
@@ -203,6 +211,8 @@ export class QuakeCSource {
   private physicsCallback: QuakeCPhysicsCallback | null = null;
   private spawning = true;
   private readonly damage: Id1DamageBinding;
+  private readonly borrowed: QcBorrowedActors;
+  private readonly incomingDamage: { readonly request: DamageRequest; entered: boolean; outcome: DamageOutcome | null }[] = [];
   private readonly models = new Map<string, { readonly index: number; readonly bounds: Bounds }>();
   private readonly precached = new Map<string, QcPrecachedResource>();
   private modelCount: number;
@@ -226,10 +236,13 @@ export class QuakeCSource {
     this.modelCount = options.world.models.length + 1;
     this.models.set(options.recipe.map.geometry.requestedPath, { index: 1, bounds: options.scene.modelBounds(0) });
     for (let model = 1; model < options.world.models.length; model++) this.models.set(`*${model}`, { index: model + 1, bounds: options.scene.modelBounds(model) });
+    this.borrowed = new QcBorrowedActors({ actors: options.actors, bodies: options.physics.bodies, combat: options.combat, slots: this.slots, machine: () => this.machine,
+      solid: actor => { const collision = options.physics.solidOf(actor); return collision === null || collision.solid === "none" ? 0 : collision.solid === "trigger" ? 1 : collision.solid === "brush" ? 4 : collision.monster === true ? 3 : 2; },
+      classname: actor => { if (options.foreignClassname === undefined) throw new Error("QC borrowed actor requires source classname metadata"); return options.foreignClassname(actor); } });
     this.worldHost = new QcWorldHost({ program: prepared.program, entities: this.entities, actors: options.actors, slots: this.slots,
       bodies: options.physics.bodies, scene: options.scene, numeric: Q1_DONOR_PROFILE,
       model: name => name === "" ? { index: 0, bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } } } : this.models.get(name) ?? null,
-      foreignReference: () => { throw new Error("Dedicated id1 QC does not admit foreign source actors"); }, admit: (actor, slot) => this.admit(actor, slot) });
+      foreignReference: actor => this.borrowed.reference(actor), foreignActor: slot => this.borrowed.actor(slot), admit: (actor, slot) => this.admit(actor, slot) });
     this.cvars = options.sourceRegistry ?? new CvarRegistry({ dialect: prepared.program.api.kind, context: { session: options.actors.session, origin: { kind: "server-console" } }, print: options.print });
     if (options.sourceRegistry === undefined) for (const [name, value] of Object.entries({ skill: String(options.skill), deathmatch: options.mode === "deathmatch" ? "1" : "0", coop: options.mode === "coop" ? "1" : "0",
       teamplay: "0", sv_cheats: "0", sv_aim: binding.kind === "quakeworld" ? "2" : "0.93", sv_gravity: "800", sv_maxspeed: "320", samelevel: "0", timelimit: "0", fraglimit: "0", gamecfg: "0", registered: "1" })) this.cvars.register(name, value);
@@ -264,6 +277,14 @@ export class QuakeCSource {
     if (this.cvars.find("developer") === undefined) this.cvars.register("developer", "0");
     host.set("dprint", vm => { if (this.cvars.variableValue("developer") !== 0) options.print(vm.varString(0)); });
     host.set("cvar", vm => { vm.returnFloat(this.cvars.variableValue(vm.argString(0))); });
+    host.set("setspawnparms", vm => {
+      const slot = this.entities.slot(vm.argInt(0)), actor = this.slots.at(slot), client = this.clientIdentities.get(slot);
+      const parameters = this.spawnParameters.get(slot);
+      if (slot < 1 || slot > options.maxClients || actor === null || options.actors.resolveOwned(actor.id) !== actor
+        || client === undefined || client.slot + 1 !== slot || parameters === undefined)
+        throw new Error("QC setspawnparms requires a current source client");
+      for (const [index, value] of parameters.entries()) vm.globals.setFloat(vm.globalOffset(`parm${index + 1}`), value);
+    });
     host.set("changelevel", vm => {
       if (this.changeLevelIssued) return undefined;
       this.changeLevelIssued = true;
@@ -300,9 +321,19 @@ export class QuakeCSource {
     this.attacks = new Id1SynchronousAttacks(this.worldHost.options, () => this.machine);
     this.projectiles = new Id1ProjectileAttacks(this.worldHost.options, () => this.machine);
     this.environment = new Id1Environment(this.worldHost.options, () => this.machine);
-    const damage = new Id1DamageBinding(this.worldHost.options, options.combat, () => this.machine, options.damageRequest);
+    const damage = new Id1DamageBinding(this.worldHost.options, options.combat, () => this.machine, call => {
+      const incoming = this.incomingDamage.at(-1);
+      if (incoming !== undefined && !incoming.entered) { incoming.entered = true; return incoming.request; }
+      return options.damageRequest(call);
+    },
+      { ...(options.damageAllowed === undefined ? {} : { admit: options.damageAllowed }),
+        actor: reference => { const slot = this.entities.slot(reference), actor = this.borrowed.actor(slot) ?? this.slots.at(slot); if (actor === null || !options.actors.isLive(actor.id)) throw new Error("QC damage references a free source actor"); return actor.id; },
+        reference: actor => actor === null ? this.entities.reference(0) : this.reference(actor),
+        completed: (request, outcome) => { const incoming = this.incomingDamage.at(-1); if (incoming?.request === request) incoming.outcome = outcome; return undefined; },
+      });
     this.damage = damage;
-    const pickups = new Id1PickupBinding(this.worldHost.options, options.pickups, () => this.machine);
+    const pickups = new Id1PickupBinding(this.worldHost.options, options.pickups, () => this.machine, actor => options.primaryWeaponSelected?.(actor.id) ?? true,
+      options.ownsWeapon === undefined ? undefined : (actor, item) => options.ownsWeapon?.(actor.id, item) ?? false);
     this.pickups = pickups;
     const weaponStage = qcWeaponStage(prepared.program);
     if (options.primaryWeaponSelected !== undefined && weaponStage === null) throw new Error("QC artifact has no qualified primary weapon stage");
@@ -310,13 +341,27 @@ export class QuakeCSource {
       const actor = this.slots.at(this.entities.slot(reference));
       return actor === null || !this.activeClients.has(actor.id) || (options.primaryWeaponSelected?.(actor.id) ?? true);
     });
-    const functions = pickups.composeFunctions(this.projectiles.compose(this.attacks.compose(damage.functionBoundary)));
+    const sourceFunctions = pickups.composeFunctions(this.projectiles.compose(this.attacks.compose(damage.functionBoundary)));
+    const spawned = options.clientSpawned, spawnFunction = weaponStage?.client?.spawn;
+    if (spawned !== undefined && spawnFunction === undefined) throw new Error("QC artifact has no qualified client spawn stage");
+    const functions = spawned === undefined || spawnFunction === undefined ? sourceFunctions : {
+      functions: new Set([...sourceFunctions.functions, spawnFunction]), run: (call: import("../../../compat/qc/machine.ts").QcCallSite, execute: import("../../../compat/qc/machine.ts").QcFunctionExecution): undefined => {
+        if (call.functionIndex !== spawnFunction) return sourceFunctions.run(call, execute);
+        const reference = this.machine.globals.int(this.machine.globalOffset("self")), actor = this.slots.at(this.entities.slot(reference));
+        if (sourceFunctions.functions.has(call.functionIndex)) sourceFunctions.run(call, execute); else execute();
+        if (actor !== null && options.actors.resolveOwned(actor.id) === actor && this.activeClients.has(actor.id)) spawned(actor);
+        return undefined;
+      },
+    };
     const regions = pickups.composeRegions(damage.inlineBoundary);
+    const remove = host.get("remove");
+    if (remove === undefined) throw new Error("Missing QC remove builtin");
+    host.set("remove", vm => { if (this.borrowed.actor(this.entities.slot(vm.argInt(0))) !== null) throw new Error("Original QC cannot remove a borrowed actor"); return remove(vm); });
     this.machine = new QcMachine({ program: prepared.program, entities: this.entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
       builtins: createQcBuiltins({ kind: binding.kind, random: options.random, host, isFreeEntity: this.worldHost.isFreeEntity }), serverActive: () => !this.spawning,
       functionBoundary: this.weaponStage?.composeFunctions(functions) ?? functions,
       observeCall: call => { pickups.validate(); return damage.observeCall(call); },
-      inlineBoundary: this.weaponStage?.composeRegions(regions) ?? regions, validateEntityAccess: () => pickups.validate(),
+      inlineBoundary: this.weaponStage?.composeRegions(regions) ?? regions, validateEntityAccess: (reference, word, words, kind) => { pickups.validate(); this.borrowed.access(reference, word, words, kind); },
       observeEntityStore: store => { this.projectiles.observeStore(store); return damage.observeEntityStore(store); } });
     this.actorState = new QcActorState({ machine: this.machine, rerelease: options.recipe.engineBehavior.content.startsWith("q1:rerelease:"),
       sourceSlot: actor => this.sourceSlot(actor), reference: reference => this.slots.at(this.entities.slot(reference))?.id ?? null,
@@ -337,6 +382,7 @@ export class QuakeCSource {
       for (let slot = 0; slot < this.entities.count; slot++) {
         const actor = this.slots.at(slot);
         if (actor === null) {
+          if (this.borrowed.actor(slot) !== null) continue;
           if (slot <= this.reservedClientSlots || !this.slots.options.storage.read(slot).free) throw new Error("Saved QC edict has no restored actor");
           continue;
         }
@@ -356,6 +402,7 @@ export class QuakeCSource {
       const actor = this.slots.at(slot);
       if (actor === null || !this.activeClients.has(actor.id)) throw new Error("QC save requires pending client handshakes to finish");
     }
+    if (this.incomingDamage.length !== 0) throw new Error("Cannot save during original incoming QC damage");
     this.attacks.assertIdle();
     this.pickups.assertIdle();
     return captureQcCheckpoint(this.machine, this.module, this.checkpointHost());
@@ -380,6 +427,7 @@ export class QuakeCSource {
     return { checkpoint: () => ({ state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
       kind: this.kind, messageDialect: this.prepared.messageDialect ?? "known-retail", maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
       changeLevelIssued: this.changeLevelIssued, spawning: this.spawning, activeClients: [...this.activeClients].map(savedQcActor),
+      borrowedActors: this.borrowed.checkpoint(),
       pendingWeapons: [...this.pendingWeapons].map(([actor, pending]) => ({ actor: savedQcActor(actor), weapon: pending.weapon.item, following: pending.following })),
       userInfo: [...this.userInfo].map(([slot, values]) => ({ slot, values: [...values].map(([key, value]) => ({ key, value })) })),
       spectatorSlots: [...this.spectatorSlots], originalSaveExtensionText: this.originalSaveExtensionText,
@@ -410,6 +458,7 @@ export class QuakeCSource {
     this.spawning = false; this.currentTime = reader.field("currentTime").finite();
     if (this.currentTime < 0) reader.fail("negative source frame-entry time");
     this.changeLevelIssued = reader.field("changeLevelIssued").boolean();
+    this.borrowed.restore(reader.field("borrowedActors"));
     const extension = reader.field("originalSaveExtensionText");
     this.originalSaveExtensionText = extension.value === undefined ? "" : extension.string();
     const reference = (entry: SaveReader) => this.options.actors.referenceSaved({ slot: entry.field("slot").integer(0), generation: entry.field("generation").integer(0) });
@@ -628,7 +677,7 @@ export class QuakeCSource {
     if (name === "give") {
       this.hostGive(actor, slot, args);
       const refresh = this.prepared.program.functionsByName.get("W_SetCurrentAmmo");
-      if (refresh !== undefined) this.invoke(refresh.index, slot, 0, this.currentTime);
+      if (refresh !== undefined && (this.options.primaryWeaponSelected?.(actor) ?? true)) this.invoke(refresh.index, slot, 0, this.currentTime);
       return undefined;
     }
     let enabled: boolean;
@@ -644,6 +693,7 @@ export class QuakeCSource {
   }
   private hostGive(actor: ActorId, slot: number, args: readonly string[]): undefined {
     const input = args[0]?.toLowerCase(); if (input === undefined) throw new Error("Usage: give <all|weapons|ammo|health|armor|keys|item> [amount]");
+    if (input !== "all" && this.options.giveInventory?.(actor, args) === true) return undefined;
     const words = this.entities.at(slot), all = input === "all", amount = args[1] === undefined ? undefined : nativeAtoi(args[1]);
     const write = (name: string, value: number) => { words.setFloat(this.field(name), value); };
     const addItems = (bits: number) => write("items", Math.trunc(words.float(this.field("items"))) | bits);
@@ -654,8 +704,8 @@ export class QuakeCSource {
       write("armorvalue", points); write("armortype", points > 150 ? 0.8 : points > 100 ? 0.6 : points > 0 ? 0.3 : 0);
       if (!all) return undefined;
     }
-    if (all || input === "weapons") { for (const weapon of this.weapons) addItems(weapon.bit); if (!all) return undefined; }
-    if (all || input === "ammo") {
+    if (all || input === "weapons") { if (this.options.giveInventory?.(actor, ["weapons"]) !== true) for (const weapon of this.weapons) addItems(weapon.bit); if (!all) return undefined; }
+    if ((all || input === "ammo") && this.options.giveInventory?.(actor, ["ammo"]) !== true) {
       for (const [field, value] of [["ammo_shells", 100], ["ammo_nails", 200], ["ammo_rockets", 100], ["ammo_cells", 100]] satisfies readonly (readonly [string, number])[]) write(field, value);
       for (const field of ["ammo_shells1", "ammo_nails1", "ammo_rockets1", "ammo_cells1", "ammo_lava_nails", "ammo_multi_rockets", "ammo_plasma"]) {
         const definition = this.prepared.program.fieldsByName.get(field); if (definition !== undefined) words.setFloat(definition.offset, field.includes("nails") ? 200 : 100);
@@ -782,7 +832,7 @@ export class QuakeCSource {
       { item: "q1:ammo/shells", field: "ammo_shells", capacity: 100 }, { item: "q1:ammo/nails", field: "ammo_nails", capacity: 200 },
       { item: "q1:ammo/rockets", field: "ammo_rockets", capacity: 100 }, { item: "q1:ammo/cells", field: "ammo_cells", capacity: 100 },
     ];
-    return this.options.inventory.bind(actor, {
+    const binding: InventoryStateBinding = {
       read: () => [...weapons.map(entry => ({ item: entry.item, count: (Math.trunc(words.float(itemOffset)) & entry.bit) === 0 ? 0 : 1, capacity: 1 })),
         ...ammo.map((entry): InventoryEntry => ({ item: entry.item, count: words.float(this.field(entry.field)), capacity: entry.capacity,
           countPolicy: { kind: "source-counter", arithmetic: "binary32" } }))],
@@ -793,7 +843,8 @@ export class QuakeCSource {
         else throw new Error(`Unsupported QC inventory field ${entry.item}`);
         return undefined;
       },
-    });
+    };
+    return this.options.bindInventory === undefined ? this.options.inventory.bind(actor, binding) : this.options.bindInventory(actor, binding);
   }
   clientWeaponSettled(actor: ActorId): boolean {
     const slot = this.sourceSlot(actor);
@@ -801,6 +852,34 @@ export class QuakeCSource {
     if (this.weaponStage === null) throw new Error("QC artifact has no qualified weapon stage");
     return this.weaponStage.settled(this.entities.reference(slot));
   }
+  clientEquipment(actor: ActorId): { readonly maxHealth: number; readonly quadUntil: number } {
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC equipment client");
+    const words = this.entities.at(slot);
+    return { maxHealth: words.float(this.field("max_health")), quadUntil: words.float(this.field("super_damage_finished")) };
+  }
+  setClientMaxHealth(actor: ActorId, value: number): void {
+    if (!Number.isFinite(Math.fround(value))) throw new RangeError("QC max health exceeds binary32 range");
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC equipment client");
+    this.entities.at(slot).setFloat(this.field("max_health"), value);
+  }
+  clientObjectives(actor: ActorId): "none" {
+    if (!this.activeClients.has(actor) || this.sourceSlot(actor) === null) throw new Error("Missing QC equipment client");
+    if (this.weaponStage?.stage.client === undefined) throw new Error("QC artifact has no qualified objective contract");
+    return this.weaponStage.stage.client.objectives;
+  }
+  clientSpawnPoint(actor: ActorId): { readonly origin: Vec3; readonly angles: Vec3 } {
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC equipment client");
+    if (this.weaponStage?.stage.client === undefined) throw new Error("QC artifact has no qualified spawn selection");
+    this.invoke(this.weaponStage.stage.client.selectSpawn, slot, 0, this.currentTime);
+    const reference = this.machine.globals.int(1), spawn = this.slots.at(this.entities.slot(reference));
+    if (spawn === null || !this.options.actors.isLive(spawn.id) || spawn.id.equals(this.worldActor.id)) throw new Error("Original QC source selected no spawn point");
+    const words = this.entities.fromReference(reference);
+    return { origin: words.vector(this.field("origin")), angles: words.vector(this.field("angles")) };
+  }
+  pickupSupply(offer: OriginalPickupOffer) { return this.pickups.supply(offer); }
   mixedClientPreThink(actor: OwnedActor, command: UserCommand, frame: FrameContext): QuakeCClientMovement {
     const input = quakeCClientCommand(command);
     this.clientInput(actor.id, input);
@@ -1102,10 +1181,31 @@ export class QuakeCSource {
   private armor(slot: number): ArmorState {
     return this.damage.readArmor(this.entities.at(slot));
   }
+  private applySourceDamage(request: DamageRequest): DamageOutcome {
+    if (this.weaponStage?.stage.client === undefined) throw new Error("QC incoming damage requires its qualified original source ABI");
+    const vm = this.machine;
+    if (!Number.isFinite(Math.fround(request.amount))) throw new RangeError("Incoming QC damage must fit its source binary32 ABI");
+    const target = this.reference(request.target), attacker = request.attack.attacker === null ? 0 : this.reference(request.attack.attacker),
+      inflictor = request.attack.inflictor === null ? 0 : this.reference(request.attack.inflictor);
+    const entry: QuakeCSource["incomingDamage"][number] = { request, entered: false, outcome: null };
+    const savedArguments = vm.globals.bytes.slice(4, 28 * 4), self = vm.globalOffset("self"), other = vm.globalOffset("other"), time = vm.globalOffset("time");
+    const previousSelf = vm.globals.int(self), previousOther = vm.globals.int(other), previousTime = vm.globals.int(time);
+    this.incomingDamage.push(entry);
+    try {
+      vm.globals.setInt(self, inflictor); vm.globals.setInt(other, target); vm.globals.setFloat(time, this.currentTime);
+      vm.globals.setInt(4, target); vm.globals.setInt(7, inflictor); vm.globals.setInt(10, attacker); vm.globals.setFloat(13, request.amount);
+      vm.execute(id1ProgramBinding(this.prepared.program).damage.index, 4);
+      if (entry.outcome === null) throw new Error("Incoming original QC damage did not complete its authority boundary");
+      return entry.outcome;
+    } finally {
+      this.incomingDamage.pop(); vm.globals.bytes.set(savedArguments, 4);
+      vm.globals.setInt(self, previousSelf); vm.globals.setInt(other, previousOther); vm.globals.setInt(time, previousTime);
+    }
+  }
   private admit(actor: OwnedActor, slot: number): undefined {
     const words = this.entities.at(slot), poweredStage = this.damage.protectionStage(actor, "powered"), regularStage = this.damage.protectionStage(actor, "regular"), binding = id1ProgramBinding(this.prepared.program);
     this.options.combat.bind(actor, {
-      sourceDamage: () => { throw new Error("QC damage must enter the verified source function with explicit provenance"); },
+      sourceDamage: request => this.applySourceDamage(request),
       protection: { regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) }, powered: { owner: null, ...(poweredStage === null ? {} : { stage: poweredStage }) } },
       read: () => ({ health: words.float(this.field("health")), armor: this.armor(slot), mass: 200,
         canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) >= this.currentTime, team: null }),

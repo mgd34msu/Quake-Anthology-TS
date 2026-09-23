@@ -27,6 +27,7 @@ export interface QcWorldHostOptions {
   /** Lookup only: setmodel must fail unless the source model was precached. */
   readonly model: (name: string) => { readonly index: number; readonly bounds: Bounds } | null;
   /** The application owns surrogate source slots for actors supplied by other modules. */
+  readonly foreignActor?: (slot: number) => OwnedActor | null;
   readonly foreignReference: (actor: ActorId) => number;
   readonly admit?: (actor: OwnedActor, slot: number) => undefined;
 }
@@ -69,6 +70,8 @@ export class QcWorldHost {
   /** May be called by the application when it opens map/client slots before execution. */
   actor(slot: number): OwnedActor {
     if (this.isFreeEntity(slot)) throw new QcProgramError("world builtin references a free source edict");
+    const borrowed = this.options.foreignActor?.(slot);
+    if (borrowed != null) { this.options.actors.assertOwned(borrowed); return borrowed; }
     const actor = this.options.slots.at(slot) ?? this.options.slots.bindExisting(slot, "quakec:edict");
     if (this.options.bodies.read(actor.id) === null) {
       this.options.bodies.bind(actor, this.body(slot));
@@ -78,7 +81,7 @@ export class QcWorldHost {
   }
   private body(slot: number): BodyStateBinding {
     return createQcBodyBinding(this.options.program, this.options.entities, slot, {
-      reference: actor => this.reference(actor), actor: reference => this.options.slots.at(this.options.entities.slot(reference))?.id ?? null,
+      reference: actor => this.reference(actor), actor: reference => { const slot = this.options.entities.slot(reference); return (this.options.foreignActor?.(slot) ?? this.options.slots.at(slot))?.id ?? null; },
     });
   }
   link(slot: number): void {
