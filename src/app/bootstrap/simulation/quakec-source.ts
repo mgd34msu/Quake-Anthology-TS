@@ -23,7 +23,7 @@ import { captureQcCheckpoint, restoreQcCheckpoint, type QcExecutorHost } from ".
 import type { QuakeCCheckpoint, ModuleIdentity } from "../../../contracts/execution.ts";
 import { savedQcActor, captureQcDestination, readQcDestination } from "../../../compat/qc/presentation-host.ts";
 import { Id1Environment, type Id1PhysicsCallback } from "../../../content/q1/quakec/id1-environment.ts";
-import { id1ProgramBinding } from "../../../content/q1/quakec/id1-program.ts";
+import { id1DamageMultiplier, id1ProgramBinding } from "../../../content/q1/quakec/id1-program.ts";
 import { donorAngleVectors } from "../../../core/math.ts";
 import { Id1ProjectileAttacks } from "../../../content/q1/quakec/id1-projectiles.ts";
 import { QcBroadcastMessages } from "../../../compat/qc/presentation-host.ts";
@@ -158,6 +158,7 @@ export interface QuakeCSourceOptions {
   readonly clientSpawned?: (actor: OwnedActor) => undefined;
   readonly foreignClassname?: (actor: ActorId) => string;
   readonly damageAllowed?: (request: DamageRequest) => boolean;
+  readonly pickupPolicy?: () => import("../../../content/q1/quakec/id1-pickups.ts").QcPickupPolicy | null;
   readonly ownsWeapon?: (actor: ActorId, item: ItemId) => boolean;
   readonly events: SimulationEvents;
   readonly random: SourceRandom;
@@ -341,7 +342,7 @@ export class QuakeCSource {
       });
     this.damage = damage;
     const pickups = new Id1PickupBinding(this.worldHost.options, options.pickups, () => this.machine, actor => options.primaryWeaponSelected?.(actor.id) ?? true,
-      options.ownsWeapon === undefined ? undefined : (actor, item) => options.ownsWeapon?.(actor.id, item) ?? false);
+      options.ownsWeapon === undefined ? undefined : (actor, item) => options.ownsWeapon?.(actor.id, item) ?? false, options.pickupPolicy);
     this.pickups = pickups;
     const weaponStage = qcWeaponStage(prepared.program);
     if (options.primaryWeaponSelected !== undefined && weaponStage === null) throw new Error("QC artifact has no qualified primary weapon stage");
@@ -370,7 +371,7 @@ export class QuakeCSource {
       functionBoundary: this.weaponStage?.composeFunctions(functions) ?? functions,
       observeCall: call => { pickups.validate(); return damage.observeCall(call); },
       inlineBoundary: this.weaponStage?.composeRegions(regions) ?? regions, validateEntityAccess: (reference, word, words, kind) => { pickups.validate(); this.borrowed.access(reference, word, words, kind); },
-      observeEntityStore: store => { this.projectiles.observeStore(store); return damage.observeEntityStore(store); } });
+      observeEntityStore: store => { pickups.observeStore(store); this.projectiles.observeStore(store); return damage.observeEntityStore(store); } });
     this.actorState = new QcActorState({ machine: this.machine, rerelease: options.recipe.engineBehavior.content.startsWith("q1:rerelease:"),
       sourceSlot: actor => this.sourceSlot(actor), reference: reference => this.slots.at(this.entities.slot(reference))?.id ?? null,
       isClient: actor => this.isReservedClient(actor) });
@@ -889,6 +890,12 @@ export class QuakeCSource {
     const words = this.entities.at(slot);
     return { maxHealth: words.float(this.field("max_health")), quadUntil: words.float(this.field("super_damage_finished")) };
   }
+  clientDamagePowerupFactor(actor: ActorId): number {
+    const slot = this.sourceSlot(actor);
+    if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC damage powerup client");
+    const reference = this.entities.reference(slot);
+    return id1DamageMultiplier(this.machine, reference, reference);
+  }
   clientPowerupExpires(actor: ActorId, powerup: "quad" | "invulnerability" | "invisibility" | "suit"): number {
     const slot = this.sourceSlot(actor);
     if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC powerup client");
@@ -922,6 +929,7 @@ export class QuakeCSource {
     const words = this.entities.fromReference(reference);
     return { origin: words.vector(this.field("origin")), angles: words.vector(this.field("angles")) };
   }
+  pickupSelectionDeferred(offer: OriginalPickupOffer) { return this.pickups.selectionDeferred(offer); }
   pickupSupply(offer: OriginalPickupOffer) { return this.pickups.supply(offer); }
   mixedClientPreThink(actor: OwnedActor, command: UserCommand, frame: FrameContext): QuakeCClientMovement {
     const input = quakeCClientCommand(command);

@@ -1,6 +1,12 @@
 import type { SeatId } from "../contracts/identity.ts";
 import { asciiFold, type CommandBuffer, type CommandHandler, type CommandInvocation } from "../core/commands/index.ts";
 
+export interface ClientCommandHandler {
+  readonly instance: symbol;
+  readonly label: string;
+  execute(command: CommandInvocation): void;
+}
+
 export interface ClientCommandRegistration {
   register(name: string): void;
   remove(name: string): void;
@@ -9,7 +15,7 @@ export interface ClientCommandRegistration {
 
 /** Guest instances own claims; one published input owns the shared dispatchers. */
 export class ClientCommandBindings {
-  private readonly owners = new Set<{ readonly seat: SeatId; readonly names: Set<string> }>();
+  private readonly owners = new Set<{ readonly seat: SeatId; readonly names: Set<string>; readonly handler?: ClientCommandHandler }>();
   private readonly installed = new Map<string, CommandHandler>();
   private active = false;
   constructor(private readonly commands: CommandBuffer, private seats: readonly SeatId[],
@@ -24,9 +30,9 @@ export class ClientCommandBindings {
     this.seats = [...seats];
   }
 
-  createOwner(seat: SeatId): ClientCommandRegistration {
+  createOwner(seat: SeatId, handler?: ClientCommandHandler): ClientCommandRegistration {
     if (!this.seats.some(value => value.equals(seat))) throw new Error("Client commands require a local seat");
-    const owner = { seat, names: new Set<string>() };
+    const owner = { seat, names: new Set<string>(), ...(handler === undefined ? {} : { handler }) };
     this.owners.add(owner);
     return {
       register: name => {
@@ -67,9 +73,19 @@ export class ClientCommandBindings {
       ? this.seats.find(candidate => [...this.owners].some(owner => owner.seat.equals(candidate))) : undefined;
     if (seat === undefined) return false;
     const name = asciiFold(command.argv[0] ?? "");
-    if (![...this.owners].some(owner => owner.seat.equals(seat) && owner.names.has(name))) return false;
-    this.execute(command, seat);
-    return true;
+    const claims = [...this.owners].filter(owner => owner.seat.equals(seat) && owner.names.has(name));
+    if (claims.length === 0) return false;
+    const producer = command.source.producer;
+    if (producer?.kind === "client-module") {
+      const claim = claims.find(owner => owner.handler?.instance === producer.instance);
+      if (claim?.handler === undefined) return false;
+      claim.handler.execute(command); return true;
+    }
+    if (claims.some(owner => owner.handler === undefined)) { this.execute(command, seat); return true; }
+    if (claims.length > 1) throw new Error(`Ambiguous component client command ${name}: ${claims.map(owner => owner.handler?.label).join(", ")}`);
+    const claim = claims[0];
+    if (claim?.handler === undefined) return false;
+    claim.handler.execute(command); return true;
   }
 
   private install(name: string): void {

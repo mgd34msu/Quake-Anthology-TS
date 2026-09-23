@@ -20,8 +20,8 @@ export interface OriginalPickupOffer {
   readonly dropped: boolean;
   readonly time: SourceTime;
   readonly cargo?: readonly PickupCargoEntry[];
-  /** Some source grants also own map objectives; those require an explicit lifecycle handoff. */
-  readonly grant?: "map-coupled";
+  /** Source effects have no inventory/protection grant; map-coupled grants also own objectives. */
+  readonly grant?: "map-coupled" | "source-effect";
 }
 export type OriginalPickupDecision = "accepted" | "refused";
 export type OriginalPickupOutcome = OriginalPickupDecision | "stale";

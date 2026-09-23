@@ -13,7 +13,7 @@ import { QvmOpcode } from "./image.ts";
 import { qvmPlayerStateBytes, writeSourceQvmPlayerState } from "./player-record.ts";
 import { qvmEntityStateBytes } from "./entity-record.ts";
 import { QVM_GAME_STATE_BYTES, qvmSnapshotBytes, writeSourceQvmGameState, writeSourceQvmSnapshot, type QvmSourceSnapshot } from "./client-state-record.ts";
-import { QvmCgameImport } from "./abi.ts";
+import { QvmCgameImport, QvmCgameExport } from "./abi.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 import type { QvmFunctionCall } from "./interpreter.ts";
 
@@ -109,7 +109,7 @@ export function validateQvmModPresentation(options: Pick<QvmModPresentationOptio
         throw new Error("Source presentation initialization requires an event-independent context");
     }
   };
-  for (const call of [...declaration.initialize, ...declaration.refresh, ...declaration.frame]) checkCall(call, true);
+  for (const call of [...declaration.initialize, ...declaration.refresh, ...declaration.frame, ...(declaration.hud?.frame ?? [])]) checkCall(call, true);
   if (declaration.runtime === "qvm-player-events") for (const call of [...declaration.project, declaration.event]) checkCall(call, false);
   else for (const call of declaration.snapshots) checkCall(call, true);
 }
@@ -122,6 +122,8 @@ export class QvmModPresentation {
   private sequence = -1;
   private revision = -1;
   private frame = -1;
+  private hudFrame = -1;
+  private commandArguments: readonly string[] | null = null;
   private readonly players = new Map<number, ActorId>();
   private defaults: Uint8Array | null = null;
   private activeEvent: Q3SourcePlayerEvent | undefined;
@@ -141,7 +143,7 @@ export class QvmModPresentation {
     this.module = new QvmModule({ artifact: options.artifact, host: call => { this.current(this.activeEvent); return this.sceneSyscall(call) ?? options.host(call); } });
     if (options.declaration.runtime === "qvm-scene") this.bindBody(options.declaration);
   }
-  get arguments(): readonly string[] { return this.arguments_; }
+  get arguments(): readonly string[] { return this.commandArguments ?? this.arguments_; }
   private async scoped(call: QvmFunctionCall, enter: () => () => void): Promise<number> {
     const leave = enter();
     try { return await call.proceedAsync(); } finally { leave(); }
@@ -401,6 +403,30 @@ export class QvmModPresentation {
         if (this.acceptScene(context.scene)) for (const call of this.options.declaration.snapshots) await this.call(call, context);
       }
       for (const call of this.options.declaration.frame) await this.call(call, context);
+    } catch (error) { this.fail(error); }
+    finally { this.busy = false; }
+  }
+  async consoleCommand(arguments_: readonly string[]): Promise<boolean> {
+    this.current();
+    if (this.busy || this.phase !== "initialized") throw new Error("Source console command requires an idle initialized owner");
+    this.busy = true; this.commandArguments = [...arguments_];
+    try {
+      const result = await this.module.commandAsync([QvmCgameExport.CG_CONSOLE_COMMAND], arguments_, () => this.current());
+      this.current(); return result !== 0;
+    } catch (error) { this.fail(error); }
+    finally { this.commandArguments = null; this.busy = false; }
+  }
+  async drawHud(frameSequence: number): Promise<void> {
+    this.current();
+    if (this.busy || this.phase !== "initialized" || this.frame !== frameSequence)
+      throw new Error("Source HUD requires its completed scene frame");
+    if (frameSequence <= this.hudFrame) return;
+    const hud = this.options.declaration.hud;
+    if (hud === undefined) throw new Error("Source presentation has no HUD admission");
+    this.hudFrame = frameSequence; this.busy = true;
+    try {
+      const context = this.context();
+      for (const call of hud.frame) await this.call(call, context);
     } catch (error) { this.fail(error); }
     finally { this.busy = false; }
   }

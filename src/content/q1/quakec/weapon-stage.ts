@@ -9,9 +9,10 @@ export interface QcWeaponStage {
   readonly repeats: readonly RepeatGate[];
 }
 
-/** Original progs106 weapons.qc dispatcher and player.qc next-shot release branches. */
+/** Artifact-qualified weapons.qc dispatchers and player.qc next-shot release branches. */
 export function qcWeaponStage(program: QcProgram): QcWeaponStage | null {
-  if (program.digest !== "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580") return null;
+  const qw = program.digest === "sha256:ff51cb5e77360d72b93487d89198dcf94629b92f8bae100fc6ea48a6c12a7830";
+  if (!qw && program.digest !== "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580") return null;
   const fn = (name: string, index: number, first: number): number => {
     const original = program.functionNamed(name);
     if (original.index !== index || original.firstStatement !== first || original.localWords !== 0
@@ -29,6 +30,41 @@ export function qcWeaponStage(program: QcProgram): QcWeaponStage | null {
       || original.parameterSizes.length !== 0 || original.namedBuiltin) throw new QcProgramError(`Unsupported original client stage ${name}`);
     return index;
   };
+  if (qw) {
+    const client = { spawn: clientFunction("PutClientInServer", 193, 5554, 3621, 2), selectSpawn: clientFunction("SelectSpawnPoint", 191, 5465, 3585, 9), objectives: "none" } satisfies QcWeaponStage["client"];
+    const dispatcher = fn("W_WeaponFrame", 170, 4618);
+    fn("player_run", 215, 7185);
+    const continuations = new Set<number>();
+    const families: readonly (readonly [string, number, readonly number[]])[] = [
+      ["shot", 217, [7237, 7242, 7246, 7250, 7254, 7258]],
+      ["axe", 223, [7262, 7266, 7270, 7275]], ["axeb", 227, [7279, 7283, 7287, 7292]],
+      ["axec", 231, [7296, 7300, 7304, 7309]], ["axed", 235, [7313, 7317, 7321, 7326]],
+      ["nail", 239, [7330, 7356]], ["light", 241, [7382, 7405]],
+      ["rocket", 243, [7428, 7433, 7437, 7441, 7445, 7449]],
+    ];
+    for (const [family, firstIndex, starts] of families) for (const [ordinal, first] of starts.entries())
+      continuations.add(fn(`player_${family}${ordinal + 1}`, firstIndex + ordinal, first));
+    const gates: readonly (readonly [number, number, number, boolean])[] = [[239, 7332, 4574, true], [240, 7358, 4588, true], [241, 7384, 4603, false], [242, 7407, 4615, false]];
+    const repeats = gates.map(([functionIndex, entry, held, impulse]): RepeatGate => {
+      const exact = (offset: number, opcode: QcOpcode, a: number, b: number, c: number): void => {
+        statement(entry + offset, opcode, a, b);
+        if (program.statements[entry + offset]?.c !== c) throw new QcProgramError("QW weapon release temporary differs");
+      };
+      exact(0, QcOpcode.LoadF, 28, 165, held);
+      exact(1, QcOpcode.NotF, held, 0, held + 1);
+      exact(2, QcOpcode.Or, held + 1, 3457, held + 2);
+      if (impulse) {
+        exact(3, QcOpcode.LoadF, 28, 168, held + 3);
+        exact(4, QcOpcode.Or, held + 2, held + 3, held + 4);
+      }
+      const exit = entry + (impulse ? 5 : 3), released = held + (impulse ? 4 : 2);
+      statement(exit, QcOpcode.IfNot, released, 3);
+      statement(exit + 1, QcOpcode.Call0, 2112, 0);
+      statement(exit + 2, QcOpcode.Return, 0, 0);
+      return { region: { functionIndex, entry, exit, replaceable: true }, released, value: 1 };
+    });
+    return { dispatcher, client, continuations, repeats };
+  }
   const client = { spawn: clientFunction("PutClientInServer", 229, 6083, 4114, 1), selectSpawn: clientFunction("SelectSpawnPoint", 228, 6007, 4093, 3), objectives: "none" } satisfies QcWeaponStage["client"];
   const dispatcher = fn("W_WeaponFrame", 206, 5047);
   fn("player_run", 248, 7380);

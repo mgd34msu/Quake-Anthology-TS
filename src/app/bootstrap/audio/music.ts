@@ -145,6 +145,14 @@ export class ApplicationMusic {
     if (shuffle) await this.nextAutomaticTrack(); else await this.startTrack(selected, true, false);
   }
 
+  async playTracks(source: MusicSource, bank: SoundBank, intro: string, loop: string, current: () => boolean): Promise<void> {
+    if (!current()) return;
+    this.select(source, bank); this.automatic = null;
+    if (this.current !== null) this.current.authoredCue = "";
+    if (intro === "") { this.clearPlayback(); return; }
+    await this.startTrack(`${musicFileCue(intro)}${loop === "" ? "" : ` ${musicFileCue(loop)}`}`, true, false, current);
+  }
+
   async updateAutomatic(shuffle: boolean): Promise<void> {
     const automatic = this.automatic, current = this.current;
     if (automatic === null || current === null || !this.controls.enabled || current.player.paused) return;
@@ -171,9 +179,9 @@ export class ApplicationMusic {
     }
   }
 
-  private async startTrack(selected: string, looping: boolean, numbered: boolean): Promise<void> {
+  private async startTrack(selected: string, looping: boolean, numbered: boolean, active: () => boolean = () => true): Promise<void> {
     const current = this.current;
-    if (current === null || !current.cd.enabled) return;
+    if (current === null || !current.cd.enabled || !active()) return;
     const { source: { content, family, edition, campaign }, bank, fallback, player, cd, opener } = current;
     const numeric = /^[0-9]+$/.test(selected) && (family !== "q3" || numbered);
     const mapped = !numeric ? null : family === "q2"
@@ -204,16 +212,16 @@ export class ApplicationMusic {
         for (const candidate of candidates) {
           const stream = await openTrack(candidate);
           if (stream !== null) return stream;
-          if (request !== this.request || !this.controls.enabled) return null;
+          if (request !== this.request || !this.controls.enabled || !active()) return null;
         }
       }
       return null;
     };
     const intro = await open(introName);
-    if (intro === null) { if (request === this.request) this.print(`Music unavailable: ${content}/${introName}\n`); return; }
-    if (request !== this.request || !this.controls.enabled) { intro.close(); return; }
+    if (intro === null) { if (request === this.request && active()) this.print(`Music unavailable: ${content}/${introName}\n`); return; }
+    if (request !== this.request || !this.controls.enabled || !active()) { intro.close(); return; }
     const loop = !looping ? null : loopName === undefined || loopName === "" || loopName === introName ? intro : await open(loopName);
-    if (request !== this.request || !this.controls.enabled) { intro.close(); if (loop !== intro) loop?.close(); return; }
+    if (request !== this.request || !this.controls.enabled || !active()) { intro.close(); if (loop !== intro) loop?.close(); return; }
     current.looping = loop !== null; player.start(intro, loop);
   }
 }

@@ -55,7 +55,7 @@ test("actual mixed Q2 campaign plays, skips and completes unit CIN without losin
     for (let frame = 0; frame < 15; frame++) await game.step(100);
     expect(game.simulation).toBe(old); expect(game.timeMilliseconds).toBe(pausedTime);
     expect(game.readPixels()).not.toEqual(beforePixels);
-    expect(streams.mock.calls.some(([target, pcm]) => target.id === "campaign-cinematic" && target.audience.kind === "world" && pcm.samples.length > 0)).toBe(true);
+    expect(streams.mock.calls.some(([target, pcm]) => target.id.startsWith("campaign-cinematic:") && target.audience.kind === "world" && pcm.samples.length > 0)).toBe(true);
     const artifact = Bun.env["QUAKE_CAMPAIGN_RECEIPTS"];
     if (artifact !== undefined) { await mkdir(artifact, { recursive: true }); await Bun.write(join(artifact, "unit-movie.png"), encodePng(320, 240, game.readPixels())); }
     tap(96); await game.step(100); expect(controls().input.focus.kind).toBe("console");

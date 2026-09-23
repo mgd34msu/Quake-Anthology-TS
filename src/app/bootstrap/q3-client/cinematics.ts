@@ -18,7 +18,8 @@ import type { CinematicStatus } from "../../../media/types.ts";
 import { cinematicPcx } from "../../../media/still.ts";
 
 export interface SystemCinematicHandle { readonly status: CinematicStatus; skip(): void; stop(): void; }
-export interface SystemCinematicHost { open(request: ScreenCinematicRequest): Promise<SystemCinematicHandle>; }
+export interface SystemCinematicHost { open(request: ScreenCinematicRequest, current: () => boolean): Promise<SystemCinematicHandle>; }
+let nextConsumer = 0;
 
 interface Q3CinematicMode {
   readonly loop: boolean;
@@ -38,7 +39,8 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
   private readonly sources = new Map<string, { readonly source: CinematicSource; readonly resource: ResolvedResourceReference }>();
   private closed = false;
   private readonly systems = new Map<number, SystemCinematicHandle>();
-  private readonly pendingSystems = new Set<number>();
+  private readonly pendingSystems = new Map<number, object>();
+  private readonly namespace = `q3-cinematic:${++nextConsumer}`;
   private readonly movies = new Map<number, { readonly playback: CinematicPlayback; readonly image: CinematicImage; readonly picture: MaterialPicture; readonly path: string; rect: Rect }>();
   readonly owner = { prepare: (path: string) => this.prepare(path), stopSlot: (index: number) => this.stop(index) };
   constructor(readonly assets: CinematicAssets, readonly audio: { readonly engine: CinematicMixer }, readonly seat: SeatId, readonly now: () => number,
@@ -65,8 +67,8 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
     let index = 0; while (this.movies.has(index) || this.systems.has(index) || this.pendingSystems.has(index)) index++;
     if (index >= 16) return undefined;
     const dimensions = cinematicDimensions(prepared.source);
-    const audio = cinematicAudio(this.audio.engine, `q3-ui:${this.seat.index}:${index}`);
-    const playback = new CinematicPlayback(prepared.source, { target: mode.shader ? { kind: "material", id: `q3-ui:${this.seat.index}:${index}` } : { kind: "seat", seat: this.seat },
+    const audio = cinematicAudio(this.audio.engine, `${this.namespace}:${index}`);
+    const playback = new CinematicPlayback(prepared.source, { target: mode.shader ? { kind: "material", id: `${this.namespace}:${index}` } : { kind: "seat", seat: this.seat },
       clock: { sample: this.now }, loop: mode.loop, hold: mode.hold, silent: mode.silent,
       onAudio: block => audio.onAudio(block, { kind: "seat", seat: this.seat }), onAudioReset: target => audio.onAudioReset(target), onAudioPause: (paused, target) => audio.onAudioPause(paused, target), onComplete: () => undefined, developerPrint: this.assets.print });
     try {
@@ -81,7 +83,7 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
         return image.resolve(frame, playback.revision, operation => { apply(operation); images.commit(operation); });
       },
     };
-    const name = `q3-cinematic:${this.seat.index}:${index}`;
+    const name = `${this.namespace}:${index}`;
     const picture: MaterialPicture = { kind: "material", name, material: { order: 0, compiled: compileImplicitMaterial({
       kind: "picture", name, profile: DEFAULT_SHADER_PROFILE, baseImage: { kind: "loaded", tmu: 0, binding: { kind: "video", source } },
     }) } };
@@ -95,12 +97,14 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
       if (this.system === undefined) throw new Error("System cinematic requires an attached client transition owner");
       let index = 0; while (this.movies.has(index) || this.systems.has(index) || this.pendingSystems.has(index)) index++;
       if (index >= 16) throw new Error("CIN_HandleForVideo: none free");
-      this.pendingSystems.add(index);
+      const token = {}; this.pendingSystems.set(index, token);
+      let installed: SystemCinematicHandle | null = null;
+      const current = (): boolean => !this.closed && (this.pendingSystems.get(index) === token || installed !== null && this.systems.get(index) === installed);
       try {
-        const movie = await this.system.open({ name: path, loop: (bits & 2) !== 0, hold: (bits & 4) !== 0, silent: (bits & 8) !== 0 });
-        if (this.closed) { movie.stop(); throw new Error("System cinematic loaded after close"); }
-        this.systems.set(index, movie); return index;
-      } finally { this.pendingSystems.delete(index); }
+        const movie = await this.system.open({ name: path, loop: (bits & 2) !== 0, hold: (bits & 4) !== 0, silent: (bits & 8) !== 0 }, current);
+        if (!current()) { movie.stop(); throw new Error("System cinematic loaded after close"); }
+        installed = movie; this.systems.set(index, movie); return index;
+      } finally { if (this.pendingSystems.get(index) === token) this.pendingSystems.delete(index); }
     }
     let asset: UiCinematicAsset;
     try { asset = await this.prepare(path); }
@@ -129,8 +133,9 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
     }
   }
   stopGuest(handle: number): number {
+    this.pendingSystems.delete(handle);
     const system = this.systems.get(handle);
-    if (system !== undefined) { this.systems.delete(handle); system.skip(); }
+    if (system !== undefined) { try { system.skip(); } finally { if (this.systems.get(handle) === system) this.systems.delete(handle); } }
     else this.stop(handle);
     return 2;
   }
@@ -147,6 +152,7 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
     draw.drawPic(rect, movie.picture);
   }
   stop(handle: number): void {
+    this.pendingSystems.delete(handle);
     const system = this.systems.get(handle);
     if (system !== undefined) { this.systems.delete(handle); system.stop(); return; }
     const movie = this.movies.get(handle); if (movie === undefined) return;
@@ -157,7 +163,7 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
   }
   close(): void {
     if (this.closed) return;
-    this.closed = true;
+    this.closed = true; this.pendingSystems.clear();
     for (const index of this.movies.keys()) this.stop(index);
     for (const index of this.systems.keys()) this.stop(index);
     this.sources.clear();

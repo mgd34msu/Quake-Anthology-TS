@@ -422,6 +422,33 @@ test("cd pending opens are cancelled by stop off reset retirement and source rep
   }
 });
 
+test("component intro and loop music respects retirement during an awaited open", async () => {
+  const content = createContentId({ family: "q3", edition: "test", package: "component-music", revision: "1" });
+  const source = { content, family: "q3", edition: "classic", campaign: "baseq3" } satisfies Parameters<ApplicationMusic["play"]>[0];
+  using mounts = new MenuMemoryMounts(content, new Map([["music/intro.wav", menuWave(1000)], ["music/loop.wav", menuWave(2000)]]));
+  using engine = new UnifiedAudio({ milliseconds: () => 0, random: () => 0 });
+  const music = new ApplicationMusic(engine, () => undefined, "immediate");
+  try {
+    await music.playTracks(source, new SoundBank(mounts), "intro.wav", "loop.wav", () => true);
+    expect([...new Set(engine.mix(32))]).toEqual([250]);
+    expect([...new Set(engine.mix(32))]).toEqual([500]);
+    await music.playTracks(source, new SoundBank(mounts), "", "loop.wav", () => true);
+    expect(engine.mix(32).every(value => value === 0)).toBe(true);
+    let active = true, release: ((stream: PcmStream) => void) | undefined;
+    class PendingBank extends SoundBank {
+      override openMusic(_path: string): Promise<PcmStream> { return new Promise(resolve => { release = resolve; }); }
+    }
+    const stream = new MemoryPcmStream({ samples: new Int16Array(32).fill(3000), channels: 1, sampleRate: 44100, frameCount: 32, loopStart: null });
+    const closed = spyOn(stream, "close");
+    const pending = music.playTracks(source, new PendingBank(mounts), "late.wav", "", () => active);
+    if (release === undefined) throw new Error("Music open did not begin");
+    active = false; release(stream); await pending;
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(engine.mix(32).every(value => value === 0)).toBe(true);
+    closed.mockRestore();
+  } finally { music.stop(); }
+});
+
 test("registered frontend cd commands await track opens in order with no automatic menu cue", async () => {
   for (const dialect of ["q1-netquake", "q1-quakeworld", "q2-classic", "q2-rerelease", "q3"] satisfies readonly CommandDialect[]) {
     const identity = createIdentityOwner("ordered-cd"), context: CommandContext = { session: identity.session, origin: { kind: "server-console" } };

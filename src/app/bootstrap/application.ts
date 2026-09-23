@@ -1,3 +1,5 @@
+import { componentMediaControl, preparePresentationAudio, presentationAudioControl } from "./component-media.ts";
+import type { ComponentClientCommandRequest } from "./mod-presentations.ts";
 import { ApplicationModPresentations } from "./mod-presentations.ts";
 import { ApplicationSelectedQ3Presentations } from "./selected-q3-presentation.ts";
 import { q3Hardware } from "../../render/q3-hardware.ts";
@@ -213,7 +215,7 @@ interface PreparedSourceCommands {
   readonly options: CommandBufferOptions | null;
   activate(commands: CommandBuffer): () => void;
 }
-interface ApplicationCommandRequest { readonly target: "application" | "client" | "source"; readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source?: CommandContext; }
+type ApplicationCommandRequest = ComponentClientCommandRequest | { readonly target: "application" | "client" | "source"; readonly name: string; readonly arguments_: readonly string[]; readonly seat: SeatId | null; readonly source?: CommandContext; };
 type Q3SeatClient = { readonly kind: "native"; readonly client: ApplicationQ3Client; readonly prediction: ReturnType<typeof createSimulationPredictionHost> }
   | { readonly kind: "qvm"; readonly client: ApplicationQ3Client; readonly state: LocalQ3ClientState };
 interface NativeQ2SeatClient { userinfo: string; readonly cvars: CvarRegistry; readonly client: NativeQ2ClientPresentation; readonly effects: ApplicationEffects; readonly descriptor: { readonly frame: () => NativeQ2HudFrame; readonly ownsEffects: true }; }
@@ -414,10 +416,11 @@ export class Application {
 
   private readonly transitions = new SharedTransitionCoordinator(decision => { this.pendingTransition = decision; return undefined; });
   private pendingTransition: Exclude<TransitionDecision, { readonly kind: "stay" }> | null = null;
-  private readonly movies = new Map<SharedSimulation, { readonly playback: CampaignCinematic; complete(): Promise<void> }>();
+  private readonly movieRequests = new WeakMap<SharedSimulation, object>();
+  private readonly movies = new Map<SharedSimulation, { readonly playback: CampaignCinematic; readonly request: object; current(): boolean; complete(): Promise<void> }>();
   private get campaignMovie() { return this.movies.get(this.simulation) ?? null; }
-  private set campaignMovie(movie: { readonly playback: CampaignCinematic; complete(): Promise<void> } | null) {
-    if (movie === null) this.movies.delete(this.simulation); else this.movies.set(this.simulation, movie);
+  private set campaignMovie(movie: { readonly playback: CampaignCinematic; readonly request: object; current(): boolean; complete(): Promise<void> } | null) {
+    if (movie === null) { this.movies.delete(this.simulation); this.movieRequests.delete(this.simulation); } else this.movies.set(this.simulation, movie);
   }
   private pendingMap: string | null = null;
   private pendingQ3Map: Q3MapLaunch | undefined;
@@ -1239,6 +1242,12 @@ export class Application {
 
   private async prepareSourceCommands(simulation: SharedSimulation, content: LoadedApplicationContent, restoring: boolean, action: (request: ApplicationCommandRequest) => undefined): Promise<PreparedSourceCommands> {
     const mods = simulation.options.modCommands;
+    const componentClients = (source: CommandContext): ApplicationModPresentations | null => {
+      if (source.producer?.kind !== "client-module") return null;
+      const clients = this.simulation === simulation ? this.graphical?.modPresentations : undefined;
+      if (clients === undefined) throw new Error("Component client command world is retired");
+      return clients;
+    };
     const engineCommands = new Set([...sourceAdministrationCommandNames(Application.contentDialect(content)).filter(name => name !== "sv"), ...applicationAudioCommands,
       ...q3ProductMapCommands(content.q3Product?.policy ?? { kind: "retail" }), "quit", "map", "gamemap", "changelevel", "map_restart", "save", "load", "exec", "cinematic"].map(name => name.toLowerCase()));
     const queue = (name: string, args: readonly string[], seat: SeatId | null, source?: CommandContext): undefined => {
@@ -1257,19 +1266,21 @@ export class Application {
       options = { ...selected,
         cvarRouting: {
           owner: (name, source) => {
-            const registry = mods?.cvars(source) ?? selected.cvarRouting?.owner(name, source) ?? selected.cvars;
+            const registry = componentClients(source)?.commandCvars(source) ?? mods?.cvars(source) ?? selected.cvarRouting?.owner(name, source) ?? selected.cvars;
             if (registry === undefined) throw new Error("Source command has no cvar registry"); return registry;
           },
-          visible: source => { const registry = mods?.cvars(source);
+          visible: source => { const registry = componentClients(source)?.commandCvars(source) ?? mods?.cvars(source);
             return registry === undefined || registry === null ? selected.cvarRouting?.visible(source) ?? (selected.cvars === undefined ? [] : [selected.cvars]) : [registry]; },
         },
         readScript: (name, source) => {
+          const clients = componentClients(source); if (clients !== null) return clients.readCommandScript(name, source);
           if (source.producer?.instance !== undefined) return mods?.readScript(name, source);
           return selected.readScript?.(name, source) ?? readSourceScript(name).then(bytes => bytes === undefined ? undefined : new TextDecoder().decode(bytes));
         },
         sourceCommand: (command, registered) => {
           const name = (command.argv[0] ?? "").toLowerCase();
           if (command.source.producer?.instance === undefined || engineCommands.has(name)) return false;
+          const clients = componentClients(command.source); if (clients !== null) return registered ? clients.queueConsole(command) : false;
           if (mods?.handles(name, command.source)
             || name === "sv" && mods?.cvars(command.source)?.dialect.startsWith("q2")) {
             if (mods?.invoke(command) !== true) throw new Error(`Component command was not handled: ${command.raw}`);
@@ -1279,9 +1290,11 @@ export class Application {
           return false;
         },
         clientGame: command => command.source.producer?.instance === undefined ? selected.clientGame?.(command) : false,
-        serverGame: command => command.source.producer?.instance === undefined ? selected.serverGame?.(command) : mods?.invoke(command) ?? false,
+        serverGame: command => command.source.producer?.instance === undefined ? selected.serverGame?.(command)
+          : componentClients(command.source)?.queueConsole(command) ?? mods?.invoke(command) ?? false,
         forwardToServer: command => {
           if (command.source.producer?.instance === undefined) return selected.forwardToServer?.(command);
+          const clients = componentClients(command.source); if (clients !== null) { clients.queueConsole(command); return undefined; }
           if (command.dialect === "q3" || mods?.invoke(command) !== true) this.host.print(`Unknown component command: ${command.raw}\n`);
           return undefined;
         },
@@ -1989,7 +2002,8 @@ export class Application {
         selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: this.simulation.scene,
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
           clock: { now: () => this.elapsed, frameNumber: () => this.frames }, hardware: () => q3Hardware(native.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
-        modPresentations: new ApplicationModPresentations({ assets, audio, queries: this.simulation.scene,
+        modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.push(request); }, renderer: native, queries: this.simulation.scene,
+          presentationMedia: componentMediaControl(this.simulation.events, audio),
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
           clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
       this.refreshApplicationTools();
@@ -2969,7 +2983,8 @@ export class Application {
           selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: current.scene,
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
             clock: { now: () => this.elapsed, frameNumber: () => this.frames }, hardware: () => q3Hardware(previous.renderer.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
-          modPresentations: new ApplicationModPresentations({ assets, audio, queries: current.scene,
+          modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.push(request); }, renderer: previous.renderer, queries: current.scene,
+            presentationMedia: componentMediaControl(current.events, audio),
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
             clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
       }
@@ -3529,13 +3544,34 @@ export class Application {
     const graphical = this.graphical, seat = this.localPlayers[0]?.seat.id;
     if (graphical === null || seat === undefined || this.network !== null)
       throw new Error("Campaign cinematics require an offline local presentation");
-    const playback = await CampaignCinematic.open(target, this.content, graphical.assets, graphical.audio, graphical.renderer, seat,
-      this.screenCaptions(this.simulation, this.content, seat));
+    const simulation = this.simulation, request = this.reserveMovie(simulation);
+    const current = (): boolean => !this.closed && !this.stopping && this.simulation === simulation && this.movieRequests.get(simulation) === request;
+    const playback = await CampaignCinematic.prepare({ name: target.name, loop: false, hold: false, silent: false }, this.content,
+      graphical.assets, graphical.audio, graphical.renderer, seat, current, this.screenCaptions(simulation, this.content, seat));
+    if (!current()) { playback.close(this.frames); throw new Error("Campaign cinematic belongs to a retired world request"); }
     const next = target.kind === "picture" && target.name.toLowerCase() === "victory.pcx" && this.options.mode === "coop"
       ? parseQ2Travel("*base1") : target.next;
-    this.campaignMovie = { playback, complete: async () => {
+    this.activateMovie(playback);
+    this.movies.set(simulation, { playback, request, current, complete: async () => {
+      if (!current()) return;
       if (next !== null) await this.advanceQ2Travel(carry === null && target.newUnit ? { ...next, newUnit: true } : next, carry); else this.requestQuit();
-    } };
+    } });
+  }
+
+  private activateMovie(playback: CampaignCinematic): void {
+    try { playback.activate(); }
+    catch (error) {
+      try { playback.close(this.frames); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], "Cinematic activation and cleanup failed"); }
+      throw error;
+    }
+  }
+
+  private reserveMovie(simulation: SharedSimulation): object {
+    const request = {}; this.movieRequests.set(simulation, request);
+    const previous = this.movies.get(simulation);
+    if (previous !== undefined) { this.movies.delete(simulation); previous.playback.close(this.frames); }
+    return request;
   }
 
   private screenCaptions(simulation: SharedSimulation, content: LoadedApplicationContent, seat: SeatId): ScreenCinematicCaptions {
@@ -3556,21 +3592,31 @@ export class Application {
 
   private systemCinematics(simulation: SharedSimulation, content: LoadedApplicationContent, assets: ApplicationAssets,
     audio: ApplicationAudio, renderer: NativeRenderer, seat: SeatId, input: ApplicationInput): SystemCinematicHost {
-    return { open: async (request: ScreenCinematicRequest) => {
-      const existing = this.movies.get(simulation);
-      if (existing !== undefined) { existing.playback.close(this.frames); this.movies.delete(simulation); }
-      const cvars = this.sourceCvars(simulation), next = cvars?.variableString("nextmap") ?? "";
+    return { open: async (request: ScreenCinematicRequest, consumerCurrent) => {
+      const ticket = this.reserveMovie(simulation), cvars = this.sourceCvars(simulation), next = cvars?.variableString("nextmap") ?? "";
       const localSeat = [...this.localSeats.values()].find(value => value.id.equals(seat));
       if (localSeat === undefined) throw new Error("Cinematic has no admitted local seat");
-      const playback = await CampaignCinematic.openMedia(request, content, assets, audio, renderer, seat, this.screenCaptions(simulation, content, seat));
-      const movie = { playback, complete: async (): Promise<void> => {
-        if (next.length === 0) return;
+      const current = (): boolean => !this.closed && !this.stopping && consumerCurrent() && this.movieRequests.get(simulation) === ticket
+        && this.localSeats.get(localSeat.client.id) === localSeat;
+      const playback = await CampaignCinematic.prepare(request, content, assets, audio, renderer, seat, current, this.screenCaptions(simulation, content, seat));
+      if (!current()) { playback.close(this.frames); throw new Error("System cinematic belongs to a retired destination request"); }
+      const complete = (): void => {
+        if (!current() || this.simulation !== simulation || next.length === 0) return;
         if (cvars?.variableString("nextmap") === next) cvars.set("nextmap", "", true);
         input.enqueueClientCommand(`${next}\n`, { session: this.session.session, origin: { kind: "script", name: "cinematic", caller: { kind: "local-seat", seat, client: localSeat.client.id } } });
-      } };
+      };
+      const movie = { playback, request: ticket, current, complete: async (): Promise<void> => { complete(); } };
+      if (this.simulation === simulation) this.activateMovie(playback);
       this.movies.set(simulation, movie);
-      return { get status() { return playback.status; }, skip: () => playback.skip(), stop: () => {
+      return { get status() { return current() ? playback.status : "stopped"; }, skip: () => {
+        if (!current()) return;
+        playback.skip();
         if (this.movies.get(simulation) === movie) this.movies.delete(simulation);
+        playback.close(this.frames);
+        try { complete(); } finally { if (this.movieRequests.get(simulation) === ticket) this.movieRequests.delete(simulation); }
+      }, stop: () => {
+        if (this.movies.get(simulation) === movie) this.movies.delete(simulation);
+        if (this.movieRequests.get(simulation) === ticket) this.movieRequests.delete(simulation);
         playback.close(this.frames);
       } };
     } };
@@ -3773,11 +3819,14 @@ export class Application {
     const pending = direct ?? this.requestedCommands;
     if (direct === undefined) this.requestedCommands = [];
     for (const [index, request] of pending.entries()) {
-      if (request.source?.producer?.instance !== undefined && this.simulation.options.modCommands?.active(request.source) !== true) continue;
+      if (request.source?.producer?.kind === "game-module" && request.source.producer.instance !== undefined && this.simulation.options.modCommands?.active(request.source) !== true) continue;
       if (this.stepping && (this.pendingShellPublication || this.videoRestart?.pending)) { this.requestedCommands.unshift(...pending.slice(index)); return; }
       if (request.source?.producer?.kind === "game-module" && (request.name === "map" || request.name === "gamemap")) {
         if (this.captureBlocksTransition()) { this.requestedCommands.unshift(...pending.slice(index)); return; }
         if (await this.nativeMatchTransition(request)) continue;
+      }
+      if (request.target === "component-client") {
+        await this.graphical?.modPresentations.dispatchCommand(request); continue;
       }
       if (routeApplications && request.target === "application" && this.sourcePublished && this.ownership.kind === "borrowed") {
         const source = request.source ?? this.ownership.client.prepared.commands.context;
@@ -3855,7 +3904,7 @@ export class Application {
           const mode = command.arguments_[1];
           await this.systemCinematics(this.simulation, this.content, graphical.assets, graphical.audio, graphical.renderer, seat, graphical.input)
             .open({ name, loop: mode?.startsWith("2") === true || mode === "loop",
-              hold: mode?.startsWith("1") === true || mode === "hold" || ["end.roq", "demoend.roq"].includes(name.toLowerCase().split("/").at(-1) ?? ""), silent: false });
+              hold: mode?.startsWith("1") === true || mode === "hold" || ["end.roq", "demoend.roq"].includes(name.toLowerCase().split("/").at(-1) ?? ""), silent: false }, () => true);
           continue;
         }
         if (command.name === "centerview") {
@@ -4138,16 +4187,24 @@ export class Application {
         if (!startupFrame) await this.graphical?.input.commands.executeAsync(() => this.flushClientCommands(), () => !this.clientCommandsBlocked);
       }
       this.enableStartupPersistence();
-      const movie = this.campaignMovie;
+      let movie = this.campaignMovie;
+      if (movie !== null && !movie.current()) {
+        const retired = movie; if (this.movies.get(this.simulation) === retired) this.movies.delete(this.simulation);
+        if (this.movieRequests.get(this.simulation) === retired.request) this.movieRequests.delete(this.simulation);
+        retired.playback.close(this.frames); movie = null;
+      }
       if (movie !== null) {
         const retained = this.lastOutput?.simulation === this.simulation ? this.lastOutput : { simulation: this.simulation, output: this.simulation.currentOutput() };
         try {
           const graphical = this.graphical;
           const consoleOpen = graphical?.input.locals.some(local => local.input.focus.kind === "console") ?? false;
           const menuOpen = graphical?.presentations.some(presentation => presentation.ui.pauseMenuOpen) ?? false;
+          movie.playback.activate();
           if (movie.playback.frame(elapsedMilliseconds, ++this.frames, consoleOpen, menuOpen)) {
-            movie.playback.close(this.frames); this.campaignMovie = null;
-            await movie.complete();
+            if (this.movies.get(retained.simulation) === movie) this.movies.delete(retained.simulation);
+            movie.playback.close(this.frames);
+            if (movie.current() && this.simulation === retained.simulation) await movie.complete();
+            if (this.movieRequests.get(retained.simulation) === movie.request) this.movieRequests.delete(retained.simulation);
           } else if (consoleOpen && graphical !== null) {
             const presentations = this.simulation.presentations(), characters = this.simulation.characterViews();
             for (const presentation of graphical.presentations) {
@@ -4157,7 +4214,8 @@ export class Application {
             graphical.renderer.execute({ owner: graphical.assets.images.owner, sequence: this.frames, commands: [{ kind: "swap-buffers" }] });
           }
         } catch (error) {
-          this.campaignMovie = null;
+          if (this.movies.get(retained.simulation) === movie) this.movies.delete(retained.simulation);
+          if (this.movieRequests.get(retained.simulation) === movie.request) this.movieRequests.delete(retained.simulation);
           try { movie.playback.close(this.frames); } catch (closeError) { this.host.print(`${String(closeError)}\n`); }
           this.reportCampaignTravelError(error);
         }
@@ -4361,6 +4419,7 @@ export class Application {
             this.host.print(`Unresolved ${effect.source.kind} effect: ${effect.reason}\n`);
           }
         }
+        await preparePresentationAudio(this.simulation.events, graphical.audio, commonEvents, seatAudio);
         for (const presentation of graphical.presentations) {
           presentation.sourceEvents([...eventsFor(presentation.local.player.actor, presentationEvents), ...(nativeEvents.get(presentation.local.player.seat.id) ?? [])]);
           if (this.tools === null) await presentation.prepare(output.snapshot, presentations, characters);
@@ -4378,7 +4437,8 @@ export class Application {
           return { seat: presentation.local.player.seat.id, actor: presentation.local.player.actor, origin: camera.origin,
             axis: camera.axis, gain: 1 / graphical.presentations.length, underwater: this.underwater(camera, presentation.local.player.actor) };
         });
-        await graphical.audio.frame(output.snapshot, listeners, commonEvents, frameStartedAt, seatAudio);
+        await graphical.audio.frame(output.snapshot, listeners, commonEvents.filter(event => !presentationAudioControl(event)), frameStartedAt,
+          seatAudio.map(batch => ({ ...batch, events: batch.events.filter(event => !presentationAudioControl(event)) })));
       }
       await this.capture?.drain();
       this.tools?.timer.stamp("frame end");

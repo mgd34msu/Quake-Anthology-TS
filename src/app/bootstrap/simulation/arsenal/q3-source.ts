@@ -81,7 +81,7 @@ export interface Q3SelectedSourceHost extends Pick<Q3RecordHost, "actors" | "bod
   now(): number;
   worldActor(): OwnedActor;
   player(actor: ActorId): Q3SelectedClientPose | null;
-  quadFactor(): number;
+  quadFactor(actor?: ActorId): number;
   proximityTimeout(): number;
   modelIndex(path: string): number;
   soundIndex(path: string): number;
@@ -185,7 +185,7 @@ export class Q3SelectedSource {
       damageFactor: entity => {
         if (host.equipment.kind === "primary") return host.equipment.damageFactor(entity.actor.id);
         if (entity.client === null) throw new Error("Selected weapon damage has no source client");
-        return q3WeaponDamageFactor(entity.client, host.quadFactor(), host.product);
+        return q3WeaponDamageFactor(entity.client, host.quadFactor(entity.actor.id), host.product);
       } });
     this.personalPortal = combat.product === "baseq3" ? null : new PersonalPortalRuntime({ combat, world: this.world, models: { modelIndex: host.modelIndex }, random: this.random,
       mapTravel: { dropCarriedFlag: entity => host.dropObjectives(entity.actor), teleport: (entity, origin, angles) => this.teleport(entity, origin, angles) } });

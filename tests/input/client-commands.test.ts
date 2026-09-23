@@ -123,7 +123,7 @@ test("actual cgame add/remove syscalls update runtime claims without removing an
   const invoke = (code: QvmCgameImport) => {
     const words = new DataView(new ArrayBuffer(8)); words.setInt32(0, code, true); words.setInt32(4, 512, true);
     return qvmCommonSyscall({ kind: "engine", role: "cgame", code, words, memory: guest.bytes, guest, commandArguments: null,
-      invoke: () => { throw new Error("Unexpected VM reentry"); }, invokeAsync: async () => { throw new Error("Unexpected VM reentry"); } }, services);
+      cancelFunction: () => { throw new Error("Unexpected VM cancellation"); }, invoke: () => { throw new Error("Unexpected VM reentry"); }, invokeAsync: async () => { throw new Error("Unexpected VM reentry"); } }, services);
   };
   f.bindings.activate();
   expect(invoke(QvmCgameImport.CG_ADDCOMMAND)).toBe(0);
@@ -154,4 +154,21 @@ test("default local console and its queued scripts address the first local clien
   expect(called).toEqual([0, 0]);
   commands.append("guest\n", { session: identity.session, origin: { kind: "script", name: "key-binding", caller: { kind: "local-seat", seat: second, client: identity.client(0, 1) } } });
   commands.execute(); expect(called).toEqual([0, 0, 1]);
+});
+
+
+test("component command claims preserve primary precedence and reject ambiguous unscoped owners", () => {
+  const f=fixture(), seat=f.seats[0], source=f.contexts[0];
+  if(seat===undefined || source===undefined) throw Error("Missing seat");
+  const primary=f.owner(0), firstInstance=Symbol("first"), secondInstance=Symbol("second"), received:string[]=[];
+  const first=f.bindings.createOwner(seat,{instance:firstInstance,label:"mod:first",execute:command=>{received.push(`first:${command.raw}`);}});
+  const second=f.bindings.createOwner(seat,{instance:secondInstance,label:"mod:second",execute:command=>{received.push(`second:${command.raw}`);}});
+  first.register("scores");second.register("scores");primary.register("scores");f.bindings.activate();
+  f.send(0,"scores");expect(f.calls).toEqual(["0:scores"]);expect(received).toEqual([]);
+  const context:CommandContext={...source,producer:{kind:"client-module",module:{id:"mod:first",artifactPath:"vm/cgame.qvm",digest:"sha256:abc",revision:"fixture"},instance:firstInstance}};
+  f.commands.append("scores\n",context);f.commands.execute();expect(received).toEqual(["first:scores"]);
+  primary.close();expect(()=>f.send(0,"scores")).toThrow("Ambiguous component client command scores");
+  second.close();f.send(0,"scores");expect(received.at(-1)).toBe("first:scores");
+  f.commands.append("scores\n",context);f.commands.discardProducer(firstInstance);first.close();f.commands.execute();
+  expect(received).toHaveLength(2);expect(f.commands.exists("scores")).toBe(false);
 });

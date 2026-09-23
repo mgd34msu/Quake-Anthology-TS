@@ -16,7 +16,7 @@ export interface CommandContext {
   readonly session: SessionId;
   readonly origin: CommandOrigin;
   /** Source producer is provenance, not permission to bypass the authority origin. */
-  readonly producer?: { readonly kind: "game-module"; readonly module: ModuleIdentity; readonly instance?: symbol };
+  readonly producer?: { readonly kind: "game-module" | "client-module"; readonly module: ModuleIdentity; readonly instance?: symbol };
 }
 
 export type CvarInfoTarget = "client-userinfo" | "server-info";

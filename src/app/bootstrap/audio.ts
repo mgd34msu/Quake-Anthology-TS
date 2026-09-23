@@ -1,4 +1,5 @@
 import { presentationOwnerKey, samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
+import type { LocalPresentationMedia } from "./simulation/events.ts";
 import { mountedMusicTracks } from "./audio/playlist.ts";
 import { readMusicSettings, type MusicPreferences } from "./audio/playlist-settings.ts";
 import { geometryTransmission } from "../../audio/geometry.ts";
@@ -360,6 +361,18 @@ export class ApplicationAudio {
     }
     if (!this.closed && request === this.musicRequest && (owner === undefined || !this.retiredOwners.has(presentationOwnerKey(owner)))) await this.music.play({ content, ...product }, bank, track,
       alternate === null ? null : async path => (await this.bank(alternate)).openMusic(path, alternate), { shuffle: this.musicPreferences.musicShuffle, tracks });
+  }
+
+  async playComponentMedia(source: LocalPresentationMedia, active: () => boolean): Promise<void> {
+    const key = presentationOwnerKey(source.owner);
+    if (this.closed || this.retiredOwners.has(key) || !active()) return;
+    const request = ++this.musicRequest; this.musicOwner = source.owner; this.music.invalidatePending();
+    const current = (): boolean => !this.closed && request === this.musicRequest && !this.retiredOwners.has(key) && active();
+    if (source.event.kind === "music-stop") { this.music.stopPlayback("source"); return; }
+    const bank = await this.bank(source.content);
+    if (!current()) return;
+    await this.music.playTracks({ content: source.content, ...this.content.catalog.product(source.content).expectation },
+      bank, source.event.intro, source.event.loop, current);
   }
 
   async startWorldMusic(): Promise<void> {

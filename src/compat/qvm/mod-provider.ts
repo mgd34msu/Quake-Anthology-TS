@@ -561,6 +561,8 @@ export class QvmModProvider {
         snapshot: { serverTime: Math.trunc(seconds(this.services) * 1000),
           playerState: readSourceQvmPlayerState(this.view(this.playerAddress(viewer), qvmPlayerStateBytes(this.declaration.abiProfile)), this.declaration.abiProfile) } };
     },
+    files: () => { this.current(); return this.mounts === undefined ? null : { mounts: this.mounts, writable: this.writable }; },
+    clientCommand: (viewer, arguments_) => this.presentationClientCommand(viewer, arguments_),
     actor: slot => { this.current(); const actor = this.actorAt(slot); return actor !== null && this.services.actors.isLive(actor) ? actor : null; },
     scene: () => {
       if (this.declaration.presentation?.runtime !== "qvm-scene") throw new Error("Event-only component has no source scene publication");
@@ -837,6 +839,26 @@ export class QvmModProvider {
     this.current();
     if (this.commands !== null) throw new Error("QVM mod commands are already bound");
     this.commands = commands;
+  }
+  private presentationClientCommand(actor: ActorId, arguments_: readonly string[]): void {
+    this.current();
+    if (this.clientBindings?.live(actor) !== true || !this.clientBindings.admitted(actor))
+      throw new Error("Component client command requires an admitted live source client");
+    const slot = this.projections.get(actor);
+    if (slot === undefined || !this.clientBindings.players().some(player => player.actor.equals(actor) && player.slot === slot && player.admitted))
+      throw new Error("Component client command has no current source projection");
+    const execution = this.begin({ entry: 0, arguments: [
+      { kind: "int32", value: { kind: "float", value: QvmGameExport.GAME_CLIENT_COMMAND } },
+      { kind: "int32", value: { kind: "float", value: slot } },
+    ], globals: [], returns: "void" }, new Map<ModCallbackInput, ModRuntimeValue>([
+      ["self", { kind: "actor", value: actor }], ["time", { kind: "float", value: seconds(this.services) }],
+    ]));
+    let succeeded = false;
+    try { this.module.command(execution.words, arguments_); succeeded = true; }
+    finally {
+      try { execution.finish(succeeded); } finally { this.finishRetiredProjections(); }
+      if (succeeded && !this.closed && this.frames.length === 0) this.publish();
+    }
   }
   consoleCommand(command: CommandInvocation): boolean {
     this.current(); command.assertActive();

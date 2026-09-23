@@ -300,7 +300,7 @@ A component's `items` declaration maps its original weapon bits, ammo counters a
 
 The adapter uses the destination's applied movement timing and pose inside the original caller. Original weapon timers, firing, recoil and view-weapon code still execute; movement is applied once. Declared source entity frames preserve original temporary-event expiration, free/unlink and paused clocks while filtering actors owned by other components.
 
-The combined original Threewave-in-Q1 Application check covers selection, firing, cgame models, pending-switch save/load and source entity cleanup. This qualifies the declared artifact and exercised paths. LRCTF armed/release behavior, full original initialization/HUD and every weapon/holdable/offhand combination remain unfinished. A separate stale local-player UI defect remains recorded; source cancellation after a committed ammo debit is qualified through the public simulation boundary.
+The combined original Threewave-in-Q1 Application check covers selection, firing, cgame models, pending-switch save/load and source entity cleanup. This qualifies the declared artifact and exercised paths. LRCTF armed/release behavior and every weapon/holdable/offhand combination remain unfinished. Original Threewave cgame initialization and declared status HUD calls are qualified separately below. A separate stale local-player UI defect remains recorded; source cancellation after a committed ammo debit is qualified through the public simulation boundary.
 
 ### Original QVM component sounds and effects
 
@@ -318,7 +318,11 @@ Each source publication is copied once and reused by viewing seats. Each seat co
 
 The qualified player mesh scope suppresses the original base body for a projected foreign character while preserving source powerup overlays and nearby effects. Those overlays currently retain the original source mesh shape. Matching them to a differently shaped selected character remains unfinished.
 
-Original Threewave checks cover an authored speaker, one-shot sound and temporary teleport effect over Q1 geometry, source expiry, actor release/reuse and restore without replay. A public Application check also exercises the actual mod provider, regeneration, cached snapshots and save/load. HUD/camera ownership, persistent QC/native state, background music, shader remapping and cinematics still need shared services. Required unimplemented operations reject explicitly. This is local declared scene support, not arbitrary cgame compatibility or new network transport.
+Original Threewave checks cover an authored speaker, one-shot sound and temporary teleport effect over Q1 geometry, source expiry, actor release/reuse and restore without replay. A public Application check also exercises the actual mod provider, regeneration, cached snapshots and save/load. Declared original HUD calls now run after scene capture, preserving picture, text and model-icon order. Original CG_Init receives actual renderer/font resources, source-scoped writable files and console command registration. Commands retain their exact client consumer; ambiguous claims report a collision and retired requests cannot become destination commands. Original Threewave status output and health-digit changes are qualified over Q1.
+
+Background-track and explicit-stop requests use the existing activation ledger. Local requests retain their order against gameplay cues, survive saves and stay out of initial and ongoing replication. Restored defaults cannot replace later saved cues. Disabling an owner restores the surviving cue; failed local delivery remains pending and prevents an inconsistent save. Headless restoration retains local cues without requiring a nonexistent audio client.
+
+Shader remapping, component cinematic traps, remote component client execution and full arbitrary cgame compatibility remain unfinished. Shared cinematic loading now separates preparation from activation and gives each consumer its own handles and audio lanes; exact saved cinematic position/handle continuation remains unfinished. Required unimplemented operations reject explicitly.
 
 ## Maps and source rules
 

@@ -1,3 +1,9 @@
+export type { ComponentPresentationMediaRequest } from "../../contracts/presentation.ts";
+import type { ComponentPresentationMediaRequest } from "../../contracts/presentation.ts";
+import { samePresentationOwner } from "../../contracts/presentation.ts";
+import { RDF_NOWORLDMODEL } from "../../content/q3/presentation/refdef.ts";
+import { qvmDisplaySyscall, type QvmDisplayOptions } from "./q3-client/qvm-display.ts";
+import type { Q3OverlaySubmission } from "./q3-client/overlay.ts";
 import { freemem } from "node:os";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
 import type { Rect } from "../../contracts/render.ts";
@@ -42,10 +48,12 @@ export interface ApplicationModPresentationOptions {
   readonly seat: SeatId;
   readonly viewer: ActorId;
   readonly viewport: Rect;
+  readonly renderer?: QvmDisplayOptions["renderer"];
   readonly source: ActiveModPresentation;
   readonly clock: ApplicationQ3ServiceOptions["clock"];
   readonly output: Omit<ApplicationQ3ServiceOptions["output"], "audio">;
   readonly commands?: Extract<QvmCommonServices, { readonly role: "cgame" }>["commands"];
+  presentationMedia?(request: ComponentPresentationMediaRequest, initializing: boolean): Promise<void>;
   print(text: string): void;
   viewOrigin(): Vec3;
   viewAxis?(): Axis;
@@ -64,6 +72,10 @@ export class ApplicationModPresentation {
   private core: QvmModPresentation | null = null;
   private rendererValue: ApplicationQ3SceneRenderer | null = null;
   private captured: Q3SceneContent | null = null;
+  private pendingHud: Q3OverlaySubmission[] = [];
+  private hudColor = { x: 1, y: 1, z: 1, w: 1 };
+  private capturedHud: readonly Q3OverlaySubmission[] = [];
+  get hud(): readonly Q3OverlaySubmission[] { this.assertCurrent(); return this.capturedHud; }
   private frameSequence = -1;
   private previousFrameTime: number | null = null;
   private files: QvmFiles | null = null;
@@ -71,6 +83,7 @@ export class ApplicationModPresentation {
   private collision: QvmClientClipModels | null = null;
   private marks: ReturnType<typeof worldMarkProjector> | null = null;
   private closed = false;
+  private initializing = true;
   private sceneContext: QvmSceneContext | null = null;
   private sceneBaseline: QvmSceneContext | undefined;
   private sceneTimeOffset: number | null = null;
@@ -85,6 +98,7 @@ export class ApplicationModPresentation {
       throw new Error("Component presentation source differs from its prepared gameplay module");
     this.assertCurrent();
   }
+  get fileMounts() { this.assertCurrent(); return this.options.source.source.files?.()?.mounts ?? this.media.provider.mounts; }
   get media(): ApplicationQ3Assets {
     this.assertCurrent(); if (this.mediaValue === null) throw new Error("Component presentation media are not initialized"); return this.mediaValue;
   }
@@ -97,6 +111,7 @@ export class ApplicationModPresentation {
   get time(): number { return this.previousFrameTime ?? this.context().snapshot.serverTime; }
   owns(source: ActiveModPresentation, viewer: ActorId): boolean {
     return !this.closed && source.source === this.options.source.source && source.prepared === this.options.source.prepared
+      && samePresentationOwner(source.owner, this.options.source.owner)
       && source.source.generation === this.generation && viewer.equals(this.options.viewer) && source.source.live(viewer);
   }
   private assertCurrent(): void {
@@ -157,21 +172,39 @@ export class ApplicationModPresentation {
           if (actor === null) throw new Error(`Component sound source slot ${slot} has no live actor`);
           return actor;
         }, clock: options.clock, output: {
-          scene: scene => { owner.assertCurrent(); options.output.scene(scene); },
-          command: command => { owner.assertCurrent(); options.output.command(command); },
-          text: draw => { owner.assertCurrent(); options.output.text(draw); },
+          scene: scene => {
+            owner.assertCurrent();
+            if (options.source.prepared.declaration.hud === undefined) { options.output.scene(scene); return; }
+            if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) throw new Error("Component HUD cannot replace the world view");
+            owner.pendingHud.push({ kind: "scene", scene });
+          },
+          command: command => {
+            owner.assertCurrent();
+            if (options.source.prepared.declaration.hud === undefined) { options.output.command(command); return; }
+            if (command.kind !== "set-color" && command.kind !== "stretch-pic") throw new Error("Component HUD cannot control the framebuffer");
+            if (command.kind === "set-color") owner.hudColor = command.color;
+            else owner.pendingHud.push({ kind: "command", command: { kind: "set-color", color: owner.hudColor } });
+            owner.pendingHud.push({ kind: "command", command });
+          },
+          text: draw => {
+            owner.assertCurrent();
+            if (options.source.prepared.declaration.hud === undefined) { options.output.text(draw); return; }
+            owner.pendingHud.push({ kind: "text", draw });
+          },
           listener: (origin, axis) => { owner.assertCurrent(); options.output.listener(origin, axis); },
           audio: operation => { owner.assertCurrent(); owner.audioOperations.push(operation); },
         } });
       owner.assertCurrent();
       owner.rendererValue = new ApplicationQ3SceneRenderer(owner.media, owner.services.resources);
-      const fileOptions = { mounts: owner.media.provider.mounts, writable: null, print: options.print, assertCurrent: () => owner.assertCurrent() };
+      const sourceFiles = options.source.source.files?.();
+      const fileOptions = { mounts: sourceFiles?.mounts ?? owner.media.provider.mounts, writable: sourceFiles?.writable ?? null,
+        print: options.print, assertCurrent: () => owner.assertCurrent() };
       owner.files = new QvmFiles(fileOptions);
       owner.scripts = new QvmClientScripts({ ...fileOptions, globals: owner.globals });
       owner.core = new QvmModPresentation({ ...options.source.prepared, host: call => owner.host(call), context: () => owner.context(),
         actor: slot => options.source.source.actor(slot), live: actor => options.source.source.live(actor), assertCurrent: () => owner.assertCurrent() });
       await owner.core.initialize(baselineSequence);
-      owner.assertCurrent(); owner.services.scene.clearScene(); owner.flushAudio(); return owner;
+      owner.assertCurrent(); owner.initializing = false; owner.services.scene.clearScene(); owner.pendingHud = []; owner.flushAudio(); return owner;
     } catch (error) {
       try { owner.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation initialization and cleanup failed"); }
       throw error;
@@ -182,7 +215,14 @@ export class ApplicationModPresentation {
     if (call.role !== "cgame" || this.files === null || this.scripts === null || this.collision === null || this.marks === null) return rejectQvmSyscall(call);
     if (call.kind === "engine") switch (call.code) {
       case QvmCgameImport.CG_S_STARTBACKGROUNDTRACK:
-      case QvmCgameImport.CG_S_STOPBACKGROUNDTRACK:
+      case QvmCgameImport.CG_S_STOPBACKGROUNDTRACK: {
+        const deliver = this.options.presentationMedia;
+        if (deliver === undefined) return rejectQvmSyscall(call);
+        const path = (offset: number): string => { const pointer = call.words.getInt32(offset, true); return pointer === 0 ? "" : call.guest.readString(pointer); };
+        const request: ComponentPresentationMediaRequest = call.code === QvmCgameImport.CG_S_STOPBACKGROUNDTRACK
+          ? { kind: "music-stop" } : { kind: "music", intro: path(4), loop: path(8) };
+        return deliver(request, this.initializing).then(() => { this.assertCurrent(); return 0; });
+      }
       case QvmCgameImport.CG_R_REMAP_SHADER:
       case QvmCgameImport.CG_CIN_PLAYCINEMATIC:
       case QvmCgameImport.CG_CIN_STOPCINEMATIC:
@@ -201,6 +241,8 @@ export class ApplicationModPresentation {
       writeSourceQvmGameState(call.guest, call.guest.view(call.words.getInt32(4, true), QVM_GAME_STATE_BYTES), this.context().gameState); return 0;
     }
     return qvmCommonSyscall(call, { role: "cgame", cvars: this.cvars, print: options.print, milliseconds: options.clock.now, arguments: () => this.core?.arguments ?? [], commands })
+      ?? (options.renderer === undefined ? null : qvmDisplaySyscall(call, { renderer: options.renderer, media: this.media, services,
+        viewport: () => options.viewport, assertCurrent: () => this.assertCurrent() }))
       ?? qvmFileSyscall(call, this.files)
       ?? qvmClientScriptSyscall(call, this.scripts)
       ?? qvmClientRenderSyscall(call, services.resources, services.draw)
@@ -219,6 +261,17 @@ export class ApplicationModPresentation {
     this.assertCurrent();
     this.options.audio.receiveCgameFrame({ content: this.options.source.identity.source.content, seat: this.options.seat,
       owner: this.options.source.prepared.source.id, operations: this.audioOperations.splice(0) });
+  }
+  async command(arguments_: readonly string[]): Promise<boolean> {
+    this.assertCurrent();
+    if (this.core === null) throw new Error("Component presentation has not initialized");
+    try {
+      const result = await this.core.consoleCommand(arguments_);
+      this.assertCurrent(); this.flushAudio(); return result;
+    } catch (error) {
+      try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component command and cleanup failed"); }
+      throw error;
+    }
   }
   async consume(event: Q3SourcePlayerEvent, sequence: number): Promise<void> {
     this.assertCurrent(); if (this.core === null) throw new Error("Component presentation has not initialized");
@@ -243,9 +296,13 @@ export class ApplicationModPresentation {
       this.assertCurrent();
       const scene = this.services.scene.capture();
       this.services.scene.clearScene();
-      await this.renderer.preload([scene]);
+      if (this.options.source.prepared.declaration.hud !== undefined) await this.core.drawHud(sequence);
+      this.assertCurrent();
+      const hud = this.pendingHud.splice(0);
+      this.services.scene.clearScene();
+      await this.renderer.preload([scene, ...hud.flatMap(submission => submission.kind === "scene" ? [submission.scene] : [])]);
       this.assertCurrent(); this.flushAudio();
-      this.previousFrameTime = time; this.frameSequence = sequence; this.captured = scene;
+      this.previousFrameTime = time; this.frameSequence = sequence; this.captured = scene; this.capturedHud = hud;
       return scene;
     } catch (error) {
       try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation frame and cleanup failed"); }
@@ -254,7 +311,7 @@ export class ApplicationModPresentation {
   }
   close(): void {
     if (this.closed) return;
-    this.closed = true; this.audioOperations.length = 0;
+    this.closed = true; this.audioOperations.length = 0; this.pendingHud = []; this.capturedHud = [];
     const failures: unknown[] = [];
     for (const cleanup of [() => this.core?.close(), () => this.files?.closeAll(), () => this.scripts?.closeAll(), () => this.globals.clear(),
       () => this.servicesValue?.cinematics.close(), () => this.rendererValue?.close(), () => this.mediaValue?.bank.bank.clear(), () => this.mediaValue?.close(),

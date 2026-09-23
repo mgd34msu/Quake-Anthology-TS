@@ -48,9 +48,15 @@ export class Id1DamageBinding {
     const { program } = source;
     this.binding = id1ProgramBinding(program);
     this.armorStage = qcArmorStage(program, declaredArmor);
-    const quad = program.digest === "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580" ? { functionIndex: 117, entry: 1426, exit: 1428 } : null;
+    const qw = program.digest === "sha256:ff51cb5e77360d72b93487d89198dcf94629b92f8bae100fc6ea48a6c12a7830";
+    const quad = qw ? { functionIndex: 83, entry: 364, exit: 369, result: 875 }
+      : program.digest === "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580" ? { functionIndex: 117, entry: 1426, exit: 1428, result: 1593 } : null;
     if (quad !== null) {
-      for (const [index, opcode, a, b, c] of [[1426, QcOpcode.LoadF, 1582, 377, 1592], [1427, QcOpcode.Gt, 1592, 31, 1593], [1428, QcOpcode.IfNot, 1593, 3, 0]] satisfies readonly (readonly [number, QcOpcode, number, number, number])[]) {
+      const predicate: readonly (readonly [number, QcOpcode, number, number, number])[] = qw
+        ? [[364, QcOpcode.LoadF, 857, 396, 870], [365, QcOpcode.Gt, 870, 31, 871], [366, QcOpcode.LoadS, 856, 124, 872],
+          [367, QcOpcode.NeS, 872, 873, 874], [368, QcOpcode.And, 871, 874, 875], [369, QcOpcode.IfNot, 875, 8, 0]]
+        : [[1426, QcOpcode.LoadF, 1582, 377, 1592], [1427, QcOpcode.Gt, 1592, 31, 1593], [1428, QcOpcode.IfNot, 1593, 3, 0]];
+      for (const [index, opcode, a, b, c] of predicate) {
         const actual = program.statements[index];
         if (actual?.opcode !== opcode || actual.a !== a || actual.b !== b || actual.c !== c) throw new QcProgramError("QC source Quad predicate differs from its original artifact");
       }
@@ -59,7 +65,7 @@ export class Id1DamageBinding {
       if (region.entry !== quad?.entry) return this.runArmor(execute);
       const frame = this.active.at(-1);
       execute();
-      if (frame?.request.attack.damagePowerupOwner !== undefined) this.vm().globals.setFloat(1593, 0);
+      if (frame?.request.attack.damagePowerupOwner !== undefined && quad !== null) this.vm().globals.setFloat(quad.result, 0);
       return undefined;
     } };
     const layout = this.binding.damage, damage = program.functionNamed("T_Damage");

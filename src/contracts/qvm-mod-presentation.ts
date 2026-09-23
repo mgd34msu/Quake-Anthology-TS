@@ -23,6 +23,7 @@ interface QvmPresentationBase {
   readonly initialize: readonly QvmPresentationCall[];
   readonly refresh: readonly QvmPresentationCall[];
   readonly frame: readonly QvmPresentationCall[];
+  readonly hud?: { readonly mode: "overlay" | "replace-status"; readonly frame: readonly QvmPresentationCall[] };
 }
 export interface QvmPlayerEventPresentation extends QvmPresentationBase {
   readonly runtime: "qvm-player-events";

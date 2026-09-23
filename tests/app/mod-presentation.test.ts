@@ -17,6 +17,9 @@ import { digestBytes } from "../../src/content/mounts/index.ts";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import type { ModuleIdentity } from "../../src/contracts/execution.ts";
 import type { QvmModPresentationDeclaration } from "../../src/contracts/qvm-mod-presentation.ts";
+import { drawQ3Overlay } from "../../src/app/bootstrap/q3-client/overlay.ts";
+import { SceneFrameBuilder } from "../../src/render/commands/frame.ts";
+import { float32ToBits } from "../../src/core/numeric.ts";
 import { BinaryWriter } from "../../src/core/binary/index.ts";
 import { anglesToAxis, identityMat4 } from "../../src/core/math.ts";
 import { ClientGameStateStorage } from "../../src/network/q3/game-state.ts";
@@ -46,13 +49,31 @@ function executable() {
     });
   const frameEntry = operations.length;
   add(QvmOpcode.OP_ENTER, 32); trap(QvmCgameImport.CG_MEMORY_REMAINING); add(QvmOpcode.OP_POP); add(QvmOpcode.OP_CONST, 0); add(QvmOpcode.OP_LEAVE, 32);
+  const hudEntry = operations.length;
+  add(QvmOpcode.OP_ENTER, 64);
+  add(QvmOpcode.OP_CONST, 90084); constantArgument(8, 90030); trap(QvmCgameImport.CG_R_REGISTERSHADERNOMIP); add(QvmOpcode.OP_STORE4);
+  constantArgument(8, 0); trap(QvmCgameImport.CG_R_SETCOLOR); add(QvmOpcode.OP_POP);
+  const picture = () => {
+    [-10, 4, 40, 30, 0, 0, 1, 1].forEach((value, index) => constantArgument(8 + index * 4, float32ToBits(value) | 0));
+    add(QvmOpcode.OP_CONST, 90084); add(QvmOpcode.OP_LOAD4); add(QvmOpcode.OP_ARG, 40);
+    trap(QvmCgameImport.CG_R_DRAWSTRETCHPIC); add(QvmOpcode.OP_POP);
+  };
+  picture(); trap(QvmCgameImport.CG_R_CLEARSCENE); add(QvmOpcode.OP_POP);
+  constantArgument(8, 82000); trap(QvmCgameImport.CG_R_ADDREFENTITYTOSCENE); add(QvmOpcode.OP_POP);
+  constantArgument(8, 82500); trap(QvmCgameImport.CG_R_RENDERSCENE); add(QvmOpcode.OP_POP);
+  picture(); add(QvmOpcode.OP_CONST, 0); add(QvmOpcode.OP_LEAVE, 64);
   const code = new BinaryWriter(operations.length * 5);
   for (const [opcode, operand] of operations) { code.u8(opcode); if (operand !== undefined) { if (opcode === QvmOpcode.OP_ARG) code.u8(operand); else code.i32(operand); } }
   const instructions = code.finish(), data = new Uint8Array(90100); data.set(new TextEncoder().encode("sound/items/regen.wav\0"), 90000);
+  data.set(new TextEncoder().encode("white\0"), 90030);
+  const view = new DataView(data.buffer,82500,368);
+  [-10,4,40,30].forEach((value,index)=>view.setInt32(index*4,value,true));
+  view.setFloat32(16,30,true);view.setFloat32(20,30,true);
+  [0,4,8].forEach(index=>view.setFloat32(36+index*4,1,true));view.setInt32(76,1,true);
   const ref = new DataView(data.buffer, 82000, 140); ref.setInt32(0, 2, true); ref.setFloat32(132, 8, true);
   const output = new BinaryWriter(32 + instructions.length + data.length);
   for (const word of [0x12721444, operations.length, 32, instructions.length, 32 + instructions.length, data.length, 0, 65536]) output.i32(word);
-  output.bytes(instructions); output.bytes(data); return { bytes: output.finish(), eventEntry, unsupported, frameEntry };
+  output.bytes(instructions); output.bytes(data); return { bytes: output.finish(), eventEntry, unsupported, frameEntry, hudEntry };
 }
 
 test("component cgame uses source media and actor mapping, preserves baseline delivery and retires across an awaited trap", async () => {
@@ -75,12 +96,12 @@ test("component cgame uses source media and actor mapping, preserves baseline de
         gameplay: { path: module.artifactPath, digest, abiProfile: "q3-modern" }, cgame: { path: artifact.module.artifactPath, digest, abiProfile: "q3-modern" },
         storage: { gameState: 0, playerState: 21000, snapshot: { kind: "synthetic-player-event", address: 22000, pointers: [81000] },
           centities: { address: 76000, stride: 800, capacity: 2, state: 0, origin: 708 }, time: [81004], frameTime: [81008], viewOrigin: [81012] },
-        initialize: [{ entry: 0, arguments: [] }], refresh: [], project: [], frame: [{ entry: fixture.frameEntry, arguments: [] }], event: { entry: fixture.eventEntry, arguments: [] } };
+        initialize: [{ entry: 0, arguments: [] }], refresh: [], project: [], hud: { mode: "overlay", frame: [{ entry: fixture.hudEntry, arguments: [] }] }, frame: [{ entry: fixture.frameEntry, arguments: [] }], event: { entry: fixture.eventEntry, arguments: [] } };
       const state = new ClientGameStateStorage(message => { throw new Error(message); }); state.beginEntries();
       const playerState = readSourceQvmPlayerState(new DataView(new ArrayBuffer(468)), "q3-modern");
       let generation = 0, yields = 0, retireAtYield = false, time = 1000, cameraX = 5;
       const frameContexts: number[][] = [];
-      const source: ActiveModPresentation = { identity: { selection: { product: "source", id: "component" }, source: { provider: "q3:source", content: sourceContent },
+      const source: ActiveModPresentation = { owner: { provider: module.id, generation: 1 }, identity: { selection: { product: "source", id: "component" }, source: { provider: "q3:source", content: sourceContent },
         declarationDigest: digest, modules: [module], providers: [] }, prepared: { kind: "qvm", source: module, artifact, declaration },
         source: { module, abiProfile: "q3-modern", get generation() { return generation; }, assertCurrent: () => {},
           live: actor => actor.equals(viewer) || actor.equals(target), actor: slot => slot === 0 ? viewer : slot === 1 ? target : null,
@@ -107,6 +128,14 @@ test("component cgame uses source media and actor mapping, preserves baseline de
       expect(play.sound.actor).toBe(target); expect(play.sound.owner).toBe(module.id); expect(play.sound.channel).toBe(4);
       expect(play.sound.sound.name).toBe("sound/items/regen.wav"); expect(owner.owns(source, viewer)).toBe(true);
       const firstFrame = await owner.frame(0); expect(firstFrame.admission.entities).toHaveLength(1); expect(await owner.frame(0)).toBe(firstFrame);
+      const hud = owner.hud;
+      expect(hud.filter(submission=>submission.kind!=="command").map(submission=>submission.kind)).toEqual(["text","scene","text"]);
+      expect(owner.hud).toBe(hud);
+      const drawFrames=new SceneFrameBuilder(assets.images), camera={origin:options.viewOrigin(),axis:anglesToAxis({x:0,y:0,z:0}),projection:identityMat4(),viewport:options.viewport,clip:{kind:"none"}} satisfies import("../../src/contracts/render.ts").SceneCamera;
+      drawFrames.begin();drawQ3Overlay({submissions:hud,renderer:owner.renderer,assets,frames:drawFrames,camera,viewport:options.viewport,seat,time});
+      const hudViews=drawFrames.finish(false).commands.flatMap(command=>command.kind==="view"?[command.view]:[]);
+      expect(hudViews).toHaveLength(3);expect(hudViews[1]?.viewport).toEqual({x:0,y:4,width:30,height:30});
+      expect(hudViews[0]?.clear).toBeNull();expect(hudViews[1]?.clear?.depth).toBe(1);expect(hudViews[2]?.clear).toBeNull();
       expect(() => retiringRenderer.operations(firstFrame, { camera: { origin: options.viewOrigin(), axis: anglesToAxis({ x: 0, y: 0, z: 0 }),
         projection: identityMat4(), viewport: options.viewport, clip: { kind: "none" } }, time: { kind: "milliseconds", value: time },
         target: { kind: "seat", seat } }, 0, { noWorldModel: false, splitScreen: false, supplementalViewWeapon: false })).toThrow("closed");

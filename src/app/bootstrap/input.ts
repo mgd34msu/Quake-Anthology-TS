@@ -27,7 +27,7 @@ import { defaultBindings, registerBindingCommands, registerWheelCommands } from 
 import type { WeaponBindingItem } from "../../input/weapon-bindings.ts";
 import { InputRouter } from "../../input/router.ts";
 import { SeatInput, registerInputCommands } from "../../input/seat.ts";
-import { ClientCommandBindings, type ClientCommandRegistration } from "../../input/client-commands.ts";
+import { ClientCommandBindings, type ClientCommandRegistration, type ClientCommandHandler } from "../../input/client-commands.ts";
 import type { SeatInputSample } from "../../input/seat.ts";
 import { InputCommandBuilder } from "../../input/user-command.ts";
 import { MouseInput } from "../../input/mouse.ts";
@@ -815,7 +815,7 @@ export class ApplicationInput {
     this.setArsenalSelection(seat, { provider, weapon: null });
   }
 
-  clientCommandRegistration(seat: SeatId): ClientCommandRegistration { return this.clientCommands.createOwner(seat); }
+  clientCommandRegistration(seat: SeatId, handler?: ClientCommandHandler): ClientCommandRegistration { return this.clientCommands.createOwner(seat, handler); }
 
   attachUi(seat: SeatId, ui: ApplicationInputUi): () => void {
     if (!this.locals.some(local => local.player.seat.id.equals(seat))) throw new Error("UI seat has no local input");

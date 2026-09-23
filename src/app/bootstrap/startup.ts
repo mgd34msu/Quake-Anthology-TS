@@ -840,18 +840,19 @@ export class StartupApplication {
         assertCurrent(); const bytes = await scripts.readMounted(path); assertCurrent(); return bytes ?? null;
       }, null, "subtitle", { read: () => readSeatLanguage(client.imageSettings.cvars, seat.seat.id.index), failed: error => this.print(`Caption language reload failed: ${String(error)}\n`) });
       const preferences = new SeatUiPreferences(seat.seat.id, client.imageSettings.cvars);
-      prepared = await CampaignCinematic.openMedia(request, { mounts: { open: async path => {
+      prepared = await CampaignCinematic.prepare(request, { mounts: { open: async path => {
         assertCurrent();
         const resource = await scripts.openMounted(path, context);
         assertCurrent();
         return resource;
       } } },
-        { images }, { engine: output }, client.renderer, seat.seat.id, {
+        { images }, { engine: output }, client.renderer, seat.seat.id, () => { assertCurrent(); return true; }, {
           prepare: async source => { assertCurrent(); await captions.prepare(source, readSeatLanguage(client.imageSettings.cvars, seat.seat.id.index)); assertCurrent(); },
           commands: (timeline, viewport) => client.captionCommands(captions.active(timeline,
             { subtitles: preferences.values.captions, soundCaptions: preferences.values.captions, speakers: true }), viewport, timeline.elapsedMilliseconds),
         });
       assertCurrent();
+      prepared.activate(); assertCurrent();
       this.frontendMovie = { movie: prepared, images }; prepared = null; this.lastFrame = performance.now();
     } catch (error) {
       const failures: unknown[] = [error];

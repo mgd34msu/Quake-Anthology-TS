@@ -3,6 +3,7 @@ import type { ModDescription } from "../../../contracts/mods.ts";
 import { modInstanceProvider } from "../../../contracts/mods.ts";
 import type { QvmModCallbackDeclaration } from "../../../contracts/qvm-mod-callbacks.ts";
 import type { MountedContent } from "../../../content/mounts/index.ts";
+import type { ModClientPresentationSource } from "../../../world/session/mod-client-presentation.ts";
 import type { PreparedMod } from "../../../world/session/mods.ts";
 import { borrowModFileMounts } from "../../../world/session/mod-files.ts";
 import { resolveQvmArtifact } from "../../../compat/qvm/artifacts.ts";
@@ -48,6 +49,7 @@ export function prepareQvmMod(options: PrepareQvmModOptions): PreparedMod {
   } else if (options.presentationProgram !== undefined) throw new Error("QVM mod presentation bytes require a declaration");
   return { description, identity: { selection: description.selection, source: description.source, declarationDigest, modules: [module], providers: [] },
     ...(presentation === undefined ? {} : { presentation }),
+    ...(declaration.presentation?.hud === undefined ? {} : { clientPresentation: { hud: declaration.presentation.hud.mode === "overlay" ? "overlay" : "replace", view: false } }),
     validateState(state) {
       const guest = state.guests[0];
       if (state.guests.length !== 1 || state.providers.length !== 0 || guest?.kind !== "qvm") throw new Error("Missing QVM gameplay mod checkpoint");
@@ -65,7 +67,14 @@ export function prepareQvmMod(options: PrepareQvmModOptions): PreparedMod {
         invoke: command => source.consoleCommand(command), readScript: name => source.readScript(name) }, context.resources));
       if (context.restoring !== true) await source.initialize();
       context.assertCurrent();
+      const hud = declaration.presentation?.hud;
+      const clientPresentation: ModClientPresentationSource | undefined = hud === undefined ? undefined : {
+        get generation() { return source.presentationSource.generation; },
+        assertCurrent() { source.presentationSource.assertCurrent(); },
+        frame(actor) { return source.presentationSource.context(actor) === null ? null : { kind: "qvm", hud: { mode: hud.mode }, view: null }; },
+      };
       return {
+        ...(clientPresentation === undefined ? {} : { clientPresentation: () => clientPresentation }),
         qvmPresentation() { return source.presentationSource; },
         activate() { source.activateProtection(); return undefined; },
         register(registrations) { return registerModCallbacks(declaration.callbacks, registrations, () => services.time(), (callback, inputs) => source.invoke(callback, inputs)); },

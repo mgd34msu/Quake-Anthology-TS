@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../src/contracts/identity.ts";
 import { SessionActorRegistry, SharedBodyTable } from "../../src/world/actors/index.ts";
 import { SimulationEvents } from "../../src/app/bootstrap/simulation/events.ts";
+import { preparePresentationAudio } from "../../src/app/bootstrap/component-media.ts";
 import { SaveReader, decodeCheckpointValue, encodeCheckpointValue } from "../../src/persistence/value.ts";
 import { decodeUnifiedPresentationEvents, encodeUnifiedPresentationEvents } from "../../src/app/bootstrap/network/unified-event-codec.ts";
 import { UnifiedAudio } from "../../src/audio/engine.ts";
@@ -13,6 +14,72 @@ function world() {
   const bodies = new SharedBodyTable(actors, { absoluteBounds: (_actor, body) => body.bounds, onLink: () => undefined, onUnlink: () => undefined });
   return { ids, actors, events: new SimulationEvents(bodies, () => ({ kind: "seconds", value: 1 }), () => null, actor => actor.slot) };
 }
+
+test("local music retains silence and saved chronology without entering replication", () => {
+  const first = world(), one = first.events.bindOwner("mod:one", modContent, false), two = first.events.bindOwner("mod:two", modContent, false);
+  first.events.emit(content, { kind: "music", event: { kind: "cd-track", track: 2 } });
+  first.events.publishLocalMedia(one.owner, modContent, { kind: "music", intro: "music/one.wav", loop: "music/loop.wav" }, false);
+  first.events.publishLocalMedia(two.owner, modContent, { kind: "music-stop" }, false);
+  expect(first.events.persistentPresentation()).toHaveLength(1);
+  expect(first.events.takePresentation()).toHaveLength(1);
+  expect(() => first.events.assertLocalMediaConsumed()).toThrow("completed local");
+  for (const request of first.events.pendingLocalMedia()) first.events.acknowledgeLocalMedia(request);
+  first.events.assertLocalMediaConsumed();
+  const state = decodeCheckpointValue(encodeCheckpointValue(first.events.capture())), restored = world();
+  restored.events.restore(new SaveReader(state), actor => restored.ids.actor(actor.slot, actor.generation));
+  restored.events.bindOwner("mod:one", modContent, true);
+  const restoredTwo = restored.events.bindOwner("mod:two", modContent, true);
+  restored.events.finishOwnerRestore();
+  restored.events.assertLocalMediaConsumed();
+  expect(restored.events.pendingLocalMedia()).toHaveLength(0);
+  restored.events.enableLocalMedia();
+  const queued = restored.events.pendingLocalMedia();
+  expect(queued.map(request => request.kind === "local-media" ? request.event.kind : request.kind)).toEqual(["music", "music-stop"]);
+  restored.events.publishLocalMedia(restoredTwo.owner, modContent, { kind: "music", intro: "default.wav", loop: "" }, true);
+  expect(restored.events.pendingLocalMedia()).toEqual(queued);
+  for (const request of queued) restored.events.acknowledgeLocalMedia(request);
+  restored.events.takePresentation(); restoredTwo.close();
+  expect(restored.events.takePresentation().map(value => value.kind)).toEqual(["presentation-owner"]);
+  expect(restored.events.pendingLocalMedia().map(value => value.kind === "local-media" ? value.event : null)).toEqual([{ kind: "music", intro: "music/one.wav", loop: "music/loop.wav" }]);
+});
+
+test("retiring local music reveals a later gameplay cue only locally", () => {
+  const first = world(), one = first.events.bindOwner("mod:one", modContent, false);
+  first.events.publishLocalMedia(one.owner, modContent, { kind: "music-stop" }, false);
+  const pending = first.events.pendingLocalMedia()[0]; if (pending === undefined) throw new Error("Missing local cue");
+  first.events.emit(content, { kind: "music", event: { kind: "cd-track", track: 7 } });
+  first.events.takePresentation(); one.close();
+  expect(first.events.localMediaCurrent(pending)).toBe(false);
+  expect(first.events.takePresentation().map(value => value.kind)).toEqual(["presentation-owner"]);
+  expect(first.events.pendingLocalMedia().map(value => value.kind === "music" ? value.event : null)).toEqual([{ kind: "cd-track", track: 7 }]);
+  expect(() => first.events.publishLocalMedia(one.owner, modContent, { kind: "music-stop" }, false)).toThrow("active presentation owner");
+  const next = first.events.bindOwner("mod:one", modContent, false);
+  expect(() => first.events.publishLocalMedia(next.owner, content, { kind: "music-stop" }, false)).toThrow("active presentation owner");
+});
+
+test("awaited local media keeps failures pending and older delayed controls cannot replace a newer cue", async () => {
+  const first = world(), owner = first.events.bindOwner("mod:one", modContent, false), played: string[] = [];
+  first.events.emit(content, { kind: "music", event: { kind: "cd-track", track: 2 } });
+  const older = first.events.takePresentation();
+  first.events.publishLocalMedia(owner.owner, modContent, { kind: "music-stop" }, false);
+  let fail = true;
+  const audio: Parameters<typeof preparePresentationAudio>[1] = {
+    receive: async events => { for (const event of events) if (event.kind === "music") played.push(event.event.kind); },
+    playComponentMedia: async (request, current) => {
+      if (fail) throw new Error("Media unavailable");
+      if (current()) played.push(request.event.kind);
+    },
+  };
+  await expect(preparePresentationAudio(first.events, audio)).rejects.toThrow("Media unavailable");
+  expect(() => first.events.assertLocalMediaConsumed()).toThrow("completed local");
+  fail = false; await preparePresentationAudio(first.events, audio);
+  first.events.assertLocalMediaConsumed();
+  await preparePresentationAudio(first.events, audio, older);
+  expect(played).toEqual(["music-stop"]);
+  first.events.emit(content, { kind: "music", event: { kind: "cd-track", track: 3 } });
+  await preparePresentationAudio(first.events, audio, first.events.takePresentation());
+  expect(played).toEqual(["music-stop", "cd-track"]);
+});
 
 test("persistent component output retires its activation and restores prior source overrides across save and wire", () => {
   const first = world(), style = (pattern: string) => ({ kind: "q1", event: { kind: "lightstyle", style: 0, pattern } } satisfies import("../../src/app/bootstrap/simulation/types.ts").SourcePresentationEvent);

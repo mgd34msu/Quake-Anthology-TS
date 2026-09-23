@@ -121,6 +121,14 @@ export class SharedPickupAdmission implements PickupAdmission {
     return this.cargo(actor, [{ kind: "weapon", item: offer.item, count: 1 }, ...offer.ammo.map(entry => ({ kind: "counter", item: entry.item, count: entry.amount } satisfies PickupCargoEntry))], selection);
   }
 
+  /** A reached source selection branch can select an already granted weapon without granting it again. */
+  selectWeapon(actor: OwnedActor, item: ItemId, selection: PickupSelection): undefined {
+    const weapons = this.destinations("weapons", item);
+    this.requireEntries(actor.id, weapons);
+    this.options.weaponGranted(actor, weapons, selection);
+    return undefined;
+  }
+
   cargo(actor: OwnedActor, cargo: readonly PickupCargoEntry[], selection: PickupSelection): boolean {
     if (new Set(cargo.map(row => row.item)).size !== cargo.length || cargo.some(row => !Number.isFinite(row.count) || row.kind === "weapon" && row.count !== 1))
       throw new Error("Invalid pickup cargo");

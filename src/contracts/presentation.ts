@@ -3,6 +3,10 @@ import type { ProviderId } from "./identity.ts";
 /** A component activation, retained with its output across a world checkpoint. */
 export interface PresentationOwner { readonly provider: ProviderId; readonly generation: number; }
 
+export type ComponentPresentationMediaRequest =
+  | { readonly kind: "music"; readonly intro: string; readonly loop: string }
+  | { readonly kind: "music-stop" };
+
 export function presentationOwnerKey(owner: PresentationOwner | undefined): string {
   return owner === undefined ? "primary" : JSON.stringify([owner.provider, owner.generation]);
 }

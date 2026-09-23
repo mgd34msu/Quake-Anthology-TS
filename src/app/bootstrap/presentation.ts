@@ -42,6 +42,7 @@ import type { ApplicationRereleasePresentation } from "./rerelease-presentation.
 import type { NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
 import { ApplicationQ2NativeHud } from "./q2-native-hud.ts";
 import type { ActiveModClientPresentation, ModClientPresentationFrame } from "../../world/session/mod-client-presentation.ts";
+import type { PresentationOwner } from "../../contracts/presentation.ts";
 import { samePresentationOwner } from "../../contracts/presentation.ts";
 
 interface ComponentClientFrame {
@@ -77,7 +78,7 @@ export function cameraWithCharacterDeath(camera: SceneCamera, player: PlayerView
 }
 
 export class WorldSeatPresentation implements SeatPresentation {
-  private readonly componentEffects = new Set<ComponentEffectFrame>();
+  private readonly componentEffects = new Map<ComponentEffectFrame, { readonly owner: PresentationOwner; draw(frames: SceneFrameBuilder, camera: SceneCamera): void } | undefined>();
   private readonly q1Messages: Q1MessageLocalization;
   private readonly pendingMessages: { readonly text: string; readonly sourcePresentationSequence: number | undefined }[] = [];
   private readonly pendingQ1Messages: Extract<SimulationPresentationEvent, { readonly kind: "q1" }>[] = [];
@@ -346,14 +347,14 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   get splitScreen(): boolean { return this.layoutCount > 1; }
-  bindComponentEffects(frame: ComponentEffectFrame): () => void {
-    this.componentEffects.add(frame);
+  bindComponentEffects(frame: ComponentEffectFrame, overlay?: { readonly owner: PresentationOwner; draw(frames: SceneFrameBuilder, camera: SceneCamera): void }): () => void {
+    this.componentEffects.set(frame, overlay);
     return () => { this.componentEffects.delete(frame); };
   }
   private effectFrame(camera: SceneCamera, source: SourceSceneOrder, viewer: ActorId | null, fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }): ApplicationEffectFrame {
     const base = this.effects.frame(camera, source, viewer, fog);
     if (this.componentEffects.size === 0) return base;
-    const frames = [base, ...[...this.componentEffects].map(frame => frame(camera, source, fog))];
+    const frames = [base, ...[...this.componentEffects.keys()].map(frame => frame(camera, source, fog))];
     const operations = frames.flatMap(frame => frame.operations);
     const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
     return { q3Admissions: frames.flatMap(frame => frame.q3Admissions),
@@ -428,7 +429,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     }
     this.finale.draw(draw, this.preparedTime);
     this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, this.viewport.height / 480));
-    const nativeReplacement = this.componentClients.some(client => client.frame.kind === "native" && client.frame.hud?.mode === "replace-status");
+    const nativeReplacement = this.componentClients.some(client => client.frame.kind !== "quakec" && client.frame.hud?.mode === "replace-status");
     const qcStatus = this.componentClients.find(client => client.frame.kind === "quakec" && client.frame.hud !== null)?.frame;
     this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,
       !this.finale.active && (this.viewSize()?.size ?? 100) < 120 && (this.q3Client?.weaponHudView().visible ?? true), !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
@@ -436,9 +437,13 @@ export class WorldSeatPresentation implements SeatPresentation {
       nativeReplacement ? { kind: "native" } : qcStatus?.kind === "quakec" && qcStatus.hud !== null ? { kind: "vitals", ...qcStatus.hud } : undefined);
     if (this.nativeQ2Frame !== null && !nativeReplacement && qcStatus === undefined) this.ui.drawNativeQ2Hud(this.nativeQ2Frame,
       { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, command => this.frames.command(command), material);
-    for (const client of this.componentClients) if (client.frame.kind === "native" && client.frame.hud !== null) this.ui.drawNativeQ2Hud(client.frame.hud.frame,
-      { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, command => this.frames.command(command), material, undefined,
-      { renderer: client.hud, mode: client.frame.hud.mode });
+    for (const client of this.componentClients) {
+      if (client.frame.kind === "native" && client.frame.hud !== null) this.ui.drawNativeQ2Hud(client.frame.hud.frame,
+        { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, command => this.frames.command(command), material, undefined,
+        { renderer: client.hud, mode: client.frame.hud.mode });
+      else if (client.frame.kind === "qvm") for (const overlay of this.componentEffects.values())
+        if (overlay !== undefined && samePresentationOwner(overlay.owner, client.source.owner)) overlay.draw(this.frames, camera);
+    }
     this.graphOverlay?.(draw, { x: camera.viewport.x - area.x, y: camera.viewport.y - area.y,
       width: camera.viewport.width, height: camera.viewport.height });
     if (this.local.input.focus.kind === "console") {

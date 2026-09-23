@@ -4,23 +4,27 @@ import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, create
 import type { QcBuiltin, QcHostBuiltinName } from "../../../src/compat/qc/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { qcWeaponStage, QcWeaponStageBinding } from "../../../src/content/q1/quakec/weapon-stage.ts";
+import { id1DamageMultiplier } from "../../../src/content/q1/quakec/id1-program.ts";
 import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 
-test("original id1 selected weapon boundary preserves committed axe, retires repeat shots, and continues post-think", async () => {
+for (const kind of ["netquake", "quakeworld"] satisfies readonly ("netquake" | "quakeworld")[]) test(`original ${kind} selected weapon boundary preserves committed axe, retires repeat shots, and continues post-think`, async () => {
   const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK");
   try {
     const entry = archive.findEntries("progs.dat").at(-1); if (entry === undefined) throw new Error("Missing original id1 program");
-    const program = loadQcProgram(await archive.readEntry(entry)), stage = qcWeaponStage(program);
+    const program = loadQcProgram(kind === "quakeworld" ? await Bun.file("/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat").bytes() : await archive.readEntry(entry)), stage = qcWeaponStage(program);
     if (stage === null) throw new Error("Missing qualified original weapon stage");
     const entities = new QcEntityMemory(classicQcEntityLayout(program), 4, 3);
-    const selected = new Set([entities.reference(2)]), sounds: string[] = [], traces: number[] = [];
+    const selected = new Set([entities.reference(2)]), sounds: string[] = [], traces: number[] = [], messages: number[] = [];
     const host = new Map<QcHostBuiltinName, QcBuiltin>([
+      ["WriteByte", vm => { messages.push(vm.argFloat(1)); return undefined; }],
+      ["WriteEntity", vm => { messages.push(vm.argInt(1)); return undefined; }],
+      ["multicast", () => undefined],
       ["sound", vm => { sounds.push(vm.strings.get(vm.globals.int(10))); return undefined; }],
       ["traceline", vm => { traces.push(vm.globals.int(vm.globalOffset("self"))); vm.globals.setFloat(vm.globalOffset("trace_fraction"), 1); return undefined; }],
     ]);
     const binding = new QcWeaponStageBinding(stage, () => vm, reference => selected.has(reference));
     const vm: QcMachine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
-      builtins: createQcBuiltins({ kind: "netquake", host, random: new SourceRandom(1) }), serverActive: () => true,
+      builtins: createQcBuiltins({ kind, host, random: new SourceRandom(1) }), serverActive: () => true,
       functionBoundary: binding.composeFunctions({ functions: new Set(), run: (_call, execute) => execute() }),
       inlineBoundary: binding.composeRegions({ regions: [], run: (_region, execute) => execute() }) });
     const words = entities.at(1), field = (name: string) => vm.fieldOffset(name), run = (name: string) => vm.execute(program.functionNamed(name).index);
@@ -38,12 +42,22 @@ test("original id1 selected weapon boundary preserves committed axe, retires rep
       expect(words.float(field("ammo_nails"))).toBe(20); expect(words.float(field("ammo_cells"))).toBe(20);
       expect(words.float(field("currentammo"))).toBe(20); expect(words.float(field("attack_finished"))).toBe(0);
     }
+    if (kind === "quakeworld") expect(messages).toEqual([39, entities.reference(1), 39, entities.reference(1), 39, entities.reference(1), 39, entities.reference(1)]);
     words.setVector(field("view_ofs"), { x: 0, y: 0, z: 22 }); words.setFloat(field("health"), 100);
     words.setFloat(field("flags"), 512); words.setFloat(field("jump_flag"), -400); words.setFloat(field("watertype"), -1);
     words.setFloat(field("super_damage_finished"), 9); words.setFloat(field("super_time"), 20); words.setFloat(field("items"), 4194304);
     run("PlayerPostThink");
     expect(sounds).toContain("player/land.wav"); expect(words.float(field("jump_flag"))).toBe(0);
     expect(words.float(field("super_damage_finished"))).toBe(0); expect(words.float(field("items"))).toBe(0);
+    for (const [deathmatch, quadUntil, classname, factor] of [
+      [1, 20, "player", 4], [4, 20, "player", kind === "quakeworld" ? 8 : 4],
+      [4, 20, "door", kind === "quakeworld" ? 1 : 4], [4, 0, "player", 1],
+    ] satisfies readonly (readonly [number, number, string, number])[]) {
+      vm.globals.setFloat(vm.globalOffset("deathmatch"), deathmatch);
+      words.setFloat(field("super_damage_finished"), quadUntil);
+      words.setInt(field("classname"), vm.strings.allocate(classname));
+      expect(id1DamageMultiplier(vm, entities.reference(1), entities.reference(1))).toBe(factor);
+    }
     const other = entities.at(2);
     other.setFloat(field("weapon"), 4096); other.setFloat(field("items"), 4096); other.setFloat(field("button0"), 1);
     vm.globals.setInt(vm.globalOffset("self"), entities.reference(2)); run("W_WeaponFrame");

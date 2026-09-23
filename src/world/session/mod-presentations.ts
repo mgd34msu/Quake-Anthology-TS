@@ -1,3 +1,6 @@
+import type { MountedContent } from "../../content/mounts/index.ts";
+import type { UserFileStore } from "../../platform/files/writable.ts";
+import type { PresentationOwner } from "../../contracts/presentation.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";
 import type { ModIdentity } from "../../contracts/mods.ts";
@@ -19,19 +22,22 @@ export interface QvmModScenePublication {
   readonly commands: readonly { readonly sequence: number; readonly recipient: ActorId | null; readonly text: string }[];
 }
 
-/** Read-only original source context; presentation never changes gameplay state. */
+/** Original presentation context and explicitly admitted client services. */
 export interface ModQvmPresentationSource {
   readonly module: ModuleIdentity;
   readonly abiProfile: QvmAbiProfile;
   readonly generation: number;
   context(viewer: ActorId): Omit<QvmPresentationContext, "frameTimeMilliseconds" | "viewOrigin"> | null;
   scene?(): { readonly current: QvmModScenePublication; readonly baseline: QvmModScenePublication | null };
+  files?(): { readonly mounts: MountedContent; readonly writable: UserFileStore | null } | null;
+  clientCommand?(viewer: ActorId, arguments_: readonly string[]): void;
   actor(slot: number): ActorId | null;
   live(actor: ActorId): boolean;
   assertCurrent(): void;
 }
 
 export interface ActiveModPresentation {
+  readonly owner: PresentationOwner;
   readonly identity: ModIdentity;
   readonly prepared: NonNullable<PreparedMod["presentation"]>;
   readonly source: ModQvmPresentationSource;

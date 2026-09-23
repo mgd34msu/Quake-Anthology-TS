@@ -256,7 +256,8 @@ export class SessionMods implements SessionResource {
       if (prepared === undefined) return [];
       const source = entry.runtime.qvmPresentation?.();
       if (source === undefined) throw new Error("Declared QVM presentation has no live source context");
-      return [{ identity: entry.identity, prepared, source }];
+      if (entry.presentationOwner === null) throw new Error("Component presentation has no active presentation owner");
+      return [{ owner: entry.presentationOwner, identity: entry.identity, prepared, source }];
     });
   }
 

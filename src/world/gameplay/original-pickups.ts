@@ -72,6 +72,10 @@ export class SharedOriginalPickupAdmission implements OriginalPickupAdmission {
     const allowed = this.eligible?.(request) !== false;
     if (!this.current(scope)) return { kind: "stale" };
     if (!allowed) return { kind: "blocked" };
+    if (request.grant === "source-effect") {
+      if (scope.pickup.owner !== request.source) throw new Error("Original pickup effect belongs to another source owner");
+      return { kind: "original" };
+    }
     const armor = this.combat.resolvePickup(recipient, request), items = this.inventory.resolvePickup(recipient, request);
     const matches = [...armor.matches, ...items.matches];
     const selected = matches[0];

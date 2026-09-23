@@ -38,6 +38,8 @@ export function readQvmModPresentationDeclaration(reader: SaveReader): QvmModPre
   const runtime = reader.field("runtime").choice("qvm-player-events", "qvm-scene");
   const base = { version: reader.field("version").literal(1),
     gameplay: program(reader.field("gameplay")), cgame: program(reader.field("cgame")),
+    ...(reader.field("hud").value === undefined ? {} : { hud: { mode: reader.field("hud").field("mode").choice("overlay", "replace-status"),
+      frame: reader.field("hud").field("frame").list(call) } }),
     initialize: reader.field("initialize").list(call), refresh: reader.field("refresh").list(call), frame: reader.field("frame").list(call) };
   const commonStorage = { gameState: storage.field("gameState").integer(0),
     time: storage.field("time").list(value => value.integer(0)), frameTime: storage.field("frameTime").list(value => value.integer(0)),

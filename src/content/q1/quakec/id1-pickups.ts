@@ -2,12 +2,17 @@ import type { OwnedActor } from "../../../contracts/identity.ts";
 import type { OriginalPickupAdmission, OriginalPickupOffer, SourcePickupSelection, SourcePickupLifetime, PickupCargoEntry } from "../../../contracts/original-pickups.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { PickupSupplyOffer } from "../../../contracts/pickups.ts";
-import type { QcFunctionBoundary, QcFunctionExecution, QcInlineBoundary, QcMachine } from "../../../compat/qc/machine.ts";
+import type { QcEntityStoreObservation, QcFunctionBoundary, QcFunctionExecution, QcInlineBoundary, QcMachine, QcInlineRegion } from "../../../compat/qc/machine.ts";
 import { QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
 import { qcPickupStages, type QcPickupStage, type QcPickupDescriptor } from "./pickup-stage.ts";
 
 interface SourceActor { readonly actor: OwnedActor; readonly slot: number; }
+export interface QcPickupPolicy {
+  current(actor: OwnedActor): ItemId | null;
+  select(actor: OwnedActor, item: ItemId): undefined;
+  counter(actor: OwnedActor, item: ItemId, original: (count: number) => number | null): undefined;
+}
 interface PickupCall {
   readonly stage: QcPickupStage;
   readonly descriptor: QcPickupDescriptor;
@@ -17,6 +22,7 @@ interface PickupCall {
   readonly execute: QcFunctionExecution;
   readonly lifetime: SourcePickupLifetime;
   readonly newWeapon: boolean;
+  readonly sourceEffect: boolean;
   accepted: boolean;
   consuming: boolean;
   consumed: boolean;
@@ -26,13 +32,31 @@ interface PickupCall {
 export class Id1PickupBinding {
   private readonly stages: readonly QcPickupStage[];
   private readonly active: (PickupCall | null)[] = [];
+  private projection: { readonly region: QcInlineRegion; readonly reference: number; readonly word: number; value: number | null } | null = null;
   constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,
     private readonly admission: OriginalPickupAdmission, private readonly machine: () => QcMachine,
     private readonly primaryWeaponSelected: (actor: OwnedActor) => boolean = () => true,
-    private readonly ownsWeapon?: (actor: OwnedActor, item: ItemId) => boolean) {
+    private readonly ownsWeapon?: (actor: OwnedActor, item: ItemId) => boolean, private readonly policy?: () => QcPickupPolicy | null) {
     this.stages = qcPickupStages(source.program);
   }
   assertIdle(): void { if (this.active.length !== 0) throw new QcProgramError("Cannot save during an original pickup caller"); }
+  observeStore(store: QcEntityStoreObservation): undefined {
+    const projected = this.projection;
+    if (projected === null) return undefined;
+    if (store.reference !== projected.reference || store.word !== projected.word || store.after.byteLength !== 4
+      || store.functionIndex !== projected.region.functionIndex || store.statement < projected.region.entry || store.statement >= projected.region.exit)
+      throw new QcProgramError("Original pickup counter region wrote outside its qualified field");
+    if (projected.value !== null) throw new QcProgramError("Original pickup counter region stored more than once");
+    projected.value = new DataView(store.after.buffer, store.after.byteOffset, 4).getFloat32(0, true);
+    return undefined;
+  }
+  selectionDeferred(offer: OriginalPickupOffer): boolean {
+    const frame = this.active.at(-1);
+    if (frame == null || !frame.pickup.actor.id.equals(offer.pickup) || !frame.recipient.actor.id.equals(offer.recipient))
+      throw new QcProgramError("Pickup selection requires its held source caller");
+    this.validate();
+    return frame.stage.sourceSelection !== undefined;
+  }
   supply(offer: OriginalPickupOffer): { readonly offer: PickupSupplyOffer; readonly leave: boolean } {
     const frame = this.active.at(-1);
     if (frame == null || !frame.pickup.actor.id.equals(offer.pickup) || !frame.recipient.actor.id.equals(offer.recipient)
@@ -69,7 +93,25 @@ export class Id1PickupBinding {
   }
   composeFunctions(inner: QcFunctionBoundary): QcFunctionBoundary {
     if (this.stages.some(stage => inner.functions.has(stage.functionIndex))) throw new QcProgramError("Original pickup caller already has a function boundary");
-    return { functions: new Set([...inner.functions, ...this.stages.map(stage => stage.functionIndex)]), run: (call, execute) => {
+    const selectionFunctions = this.stages.flatMap(stage => stage.sourceSelection === undefined ? [] : [stage.sourceSelection.functionIndex]);
+    return { functions: new Set([...inner.functions, ...this.stages.map(stage => stage.functionIndex), ...selectionFunctions]), run: (call, execute) => {
+      if (selectionFunctions.includes(call.functionIndex)) {
+        const frame = this.active.at(-1), source = frame?.stage.sourceSelection;
+        if (frame != null && source?.functionIndex === call.functionIndex && call.caller === frame.stage.functionIndex
+          && source.calls.includes(call.statement) && frame.selection.kind !== "original" && !this.primaryWeaponSelected(frame.recipient.actor)) {
+          this.validate();
+          const vm = this.vm(), item = source.weapons.find(weapon => vm.globals.float(weapon.word) === vm.argFloat(1))?.item;
+          if (!frame.accepted || vm.globals.int(vm.globalOffset("self")) !== this.source.entities.reference(frame.recipient.slot))
+            throw new QcProgramError("Original pickup selection lost its accepted recipient");
+          if (item !== undefined) {
+            const policy = this.policy?.();
+            if (policy == null) throw new QcProgramError("Original pickup has no selected weapon continuation");
+            policy.select(frame.recipient.actor, item); this.validate();
+          }
+          return execute.skip([0, 0, 0]);
+        }
+        return inner.functions.has(call.functionIndex) ? inner.run(call, execute) : execute();
+      }
       const stage = this.stages.find(stage => stage.functionIndex === call.functionIndex);
       if (stage === undefined) return inner.run(call, execute);
       const vm = this.vm(), pickup = this.actor(vm.globals.int(vm.globalOffset("self"))), recipient = this.actor(vm.globals.int(vm.globalOffset("other")));
@@ -82,9 +124,10 @@ export class Id1PickupBinding {
         this.active.push(null);
         try { return execute(); } finally { this.active.pop(); }
       }
+      const sourceEffect = stage.sourceEffect !== undefined && vm.globals.float(stage.sourceEffect.word) === stage.sourceEffect.value;
       const cargo: PickupCargoEntry[] = [];
       let newWeapon = false;
-      if (declaration.kind === "cargo") {
+      if (declaration.kind === "cargo" && !sourceEffect) {
         for (const counter of declaration.counters) cargo.push({ kind: "counter", item: counter.item, count: words.float(vm.fieldOffset(counter.field)) });
         const bits = words.float(vm.fieldOffset("items"));
         if (bits !== 0) {
@@ -97,10 +140,10 @@ export class Id1PickupBinding {
       }
       const result = this.admission.runSource({ recipient: recipient.actor.id, pickup: pickup.actor.id, source: this.source.slots.options.provider,
         item: descriptor.item, defaultResource: descriptor.resource, count: { kind: "default" }, dropped: declaration.kind === "cargo",
-        ...(declaration.kind === "cargo" ? { cargo } : {}),
+        ...(sourceEffect ? { grant: "source-effect" } : declaration.kind === "cargo" ? { cargo } : {}),
         time: { kind: "seconds", value: vm.globals.float(vm.globalOffset("time")) } }, (selection, lifetime) => {
         if (selection.kind === "stale") return execute.skip([0, 0, 0]);
-        this.active.push({ stage, descriptor, pickup, recipient, selection, execute, lifetime, newWeapon, accepted: false, consuming: false, consumed: false });
+        this.active.push({ stage, descriptor, pickup, recipient, selection, execute, lifetime, newWeapon, sourceEffect, accepted: false, consuming: false, consumed: false });
         try { return execute(); } finally { this.active.pop(); }
       });
       if (result instanceof Promise) throw new QcProgramError("Original QuakeC pickup admission must complete synchronously");
@@ -114,17 +157,41 @@ export class Id1PickupBinding {
       if (entry === undefined) return inner.run(region, execute);
       const frame = this.active.at(-1);
       if (frame == null || frame.stage.functionIndex !== region.functionIndex) return execute();
+      if (this.projection?.region.entry === region.entry) return execute();
       this.validate();
       const vm = this.vm();
-      const callerCurrent = (): boolean => vm.globals.int(vm.globalOffset("self")) === this.source.entities.reference(frame.consumed ? frame.recipient.slot : frame.pickup.slot)
+      const callerCurrent = (): boolean => vm.globals.int(vm.globalOffset("self")) === this.source.entities.reference(frame.consumed || entry.self === "recipient" ? frame.recipient.slot : frame.pickup.slot)
         && vm.globals.int(vm.globalOffset("other")) === this.source.entities.reference(frame.recipient.slot);
       if (!callerCurrent()) frame.execute.cancel([0, 0, 0]);
+      if (entry.operation.kind === "source-effect") {
+        if (!frame.sourceEffect || frame.selection.kind !== "original") frame.execute.cancel([0, 0, 0]);
+        execute(); this.validate(); frame.accepted = true;
+        return undefined;
+      }
       if (entry.operation.kind === "consume") {
+        if (frame.sourceEffect && !frame.accepted) throw new QcProgramError("Original source effect did not reach its grant");
         frame.consuming = true;
         try { frame.lifetime.consumePickup(execute); frame.consumed = true; }
         finally { frame.consuming = false; }
         this.validate();
         return undefined;
+      }
+      const policy = this.policy?.();
+      if (entry.operation.kind === "counter" && !this.primaryWeaponSelected(frame.recipient.actor) && policy != null) {
+        const operation = entry.operation;
+        policy.counter(frame.recipient.actor, operation.item, count => {
+          this.validate();
+          if (!Number.isFinite(Math.fround(count)) || this.projection !== null) throw new QcProgramError("Invalid original pickup counter projection");
+          const fields = this.source.entities.at(frame.recipient.slot), word = vm.fieldOffset(operation.field), saved = fields.int(word);
+          const projected: NonNullable<Id1PickupBinding["projection"]> = { region, reference: this.source.entities.reference(frame.recipient.slot), word, value: null };
+          this.projection = projected;
+          try { fields.setFloat(word, count); vm.executeRegion(region, 0); }
+          finally { fields.setInt(word, saved); this.projection = null; }
+          this.validate();
+          return projected.value;
+        });
+        this.validate();
+        return execute.skipToJoin();
       }
       if (frame.selection.kind === "original") return execute();
       if (entry.operation.kind === "weapon-selection" && this.primaryWeaponSelected(frame.recipient.actor)) return execute();
@@ -138,6 +205,10 @@ export class Id1PickupBinding {
         if (entry.operation.kind === "decision") vm.globals.setFloat(entry.operation.word, entry.operation.accepted);
       } else if (!frame.accepted) throw new QcProgramError("Original pickup grant has no accepted recipient decision");
       if (entry.operation.kind === "cargo-ownership") vm.globals.setFloat(entry.operation.word, frame.newWeapon ? 1 : 0);
+      if (entry.operation.kind === "cargo-current") {
+        const current = policy?.current(frame.recipient.actor), source = frame.stage.sourceSelection?.weapons.find(weapon => weapon.item === current);
+        vm.globals.setFloat(entry.operation.word, source === undefined ? 0 : vm.globals.float(source.word));
+      }
       return execute.skipToJoin();
     } };
   }
