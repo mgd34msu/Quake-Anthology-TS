@@ -4,19 +4,21 @@ import { EntityStateRecord } from "../../../network/q3/state/entity.ts";
 import type { PlayerStateFields } from "../../../network/q3/state/player.ts";
 import { selectQ3SnapshotEntities } from "../../../network/q3/visibility.ts";
 import type { Q3VisibilityEntity, Q3VisibilityLink, Q3VisibleEntities } from "../../../network/q3/visibility.ts";
-import type { Q3SourcePresentationState } from "../simulation/q3/presentation.ts";
+import type { EntityStateFields } from "../../../network/q3/state/entity.ts";
 
 type Queries = Pick<SharedSceneQueries, "pointLeaf" | "leafCluster" | "leafArea" | "areaBits" | "boxLeaves" | "clusterVisible" | "areasConnected">;
 
 /** The local transport runs the same Q3 visibility selection as a network snapshot. */
-export function selectApplicationQ3Snapshot(player: Pick<PlayerStateFields, "clientNum" | "origin" | "viewheight">, source: Q3SourcePresentationState,
+export function selectApplicationQ3Snapshot(player: Pick<PlayerStateFields, "clientNum" | "origin" | "viewheight">,
+  source: { readonly entities: readonly { readonly state: EntityStateFields; readonly linked: boolean; readonly serverFlags: number; readonly singleClient: number }[] },
   queries: Queries, bounds: (number: number) => Bounds | null, leafCount: number, print: (text: string) => void): Q3VisibleEntities {
   const entities = new Map<number, Q3VisibilityEntity>(), links = new Map<number, Q3VisibilityLink>();
   let entityCount = 0;
   for (const row of source.entities) {
     const number = row.state.number;
     entityCount = Math.max(entityCount, number + 1);
-    entities.set(number, { state: row.state.copy(), linked: row.linked, flags: row.serverFlags, singleClient: row.singleClient });
+    const state = new EntityStateRecord<number>(0); state.copyFrom(row.state);
+    entities.set(number, { state, linked: row.linked, flags: row.serverFlags, singleClient: row.singleClient });
     if (!row.linked) continue;
     const box = bounds(number);
     if (box === null) throw new Error(`Linked Q3 source entity ${number} lost its shared body bounds`);

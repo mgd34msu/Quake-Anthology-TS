@@ -1,8 +1,9 @@
+import { freemem } from "node:os";
 import type { ActorId, SeatId } from "../../contracts/identity.ts";
 import type { Rect } from "../../contracts/render.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import { QvmCgameImport } from "../../compat/qvm/abi.ts";
-import { QvmModPresentation } from "../../compat/qvm/mod-presentation.ts";
+import { QvmModPresentation, type QvmSceneContext } from "../../compat/qvm/mod-presentation.ts";
 import { qvmCommonSyscall } from "../../compat/qvm/common-syscalls.ts";
 import type { QvmCommonServices } from "../../compat/qvm/common-syscalls.ts";
 import { QvmFiles, qvmFileSyscall } from "../../compat/qvm/file-syscalls.ts";
@@ -21,7 +22,9 @@ import { CvarRegistry } from "../../core/cvars/index.ts";
 import { ScriptGlobalDefines } from "../../ui/common/legacy/script/preprocessor.ts";
 import { CollisionMapSettings } from "../../world/collision/q3/settings.ts";
 import type { SharedSceneQueries } from "../../world/collision/index.ts";
-import type { ActiveModPresentation } from "../../world/session/mod-presentations.ts";
+import type { ActiveModPresentation, QvmModScenePublication } from "../../world/session/mod-presentations.ts";
+import { selectApplicationQ3Snapshot } from "./q3-client/visibility.ts";
+import { tokenizeCommand } from "../../core/commands/index.ts";
 import type { ApplicationAssets } from "./assets.ts";
 import type { ApplicationAudio } from "./audio.ts";
 import type { Q3SeatAudioOperation } from "./audio/q3.ts";
@@ -67,6 +70,9 @@ export class ApplicationModPresentation {
   private collision: QvmClientClipModels | null = null;
   private marks: ReturnType<typeof worldMarkProjector> | null = null;
   private closed = false;
+  private sceneContext: QvmSceneContext | null = null;
+  private sceneBaseline: QvmSceneContext | undefined;
+  private sceneTimeOffset: number | null = null;
 
   private constructor(readonly options: ApplicationModPresentationOptions) {
     this.generation = options.source.source.generation;
@@ -87,6 +93,7 @@ export class ApplicationModPresentation {
   get renderer(): ApplicationQ3SceneRenderer {
     this.assertCurrent(); if (this.rendererValue === null) throw new Error("Component scene renderer is not initialized"); return this.rendererValue;
   }
+  get time(): number { return this.previousFrameTime ?? this.context().snapshot.serverTime; }
   owns(source: ActiveModPresentation, viewer: ActorId): boolean {
     return !this.closed && source.source === this.options.source.source && source.prepared === this.options.source.prepared
       && source.source.generation === this.generation && viewer.equals(this.options.viewer) && source.source.live(viewer);
@@ -102,12 +109,41 @@ export class ApplicationModPresentation {
     const context = this.options.source.source.context(this.options.viewer);
     if (context === null) throw new Error("Component presentation viewer has no original source context");
     const frameTimeMilliseconds = this.previousFrameTime === null ? 0 : context.snapshot.serverTime - this.previousFrameTime;
-    if (frameTimeMilliseconds < 0) throw new Error("Component presentation source time moved backward");
+    if (frameTimeMilliseconds < 0 && this.options.source.prepared.declaration.runtime === "qvm-player-events") throw new Error("Component presentation source time moved backward");
+    if (this.options.source.prepared.declaration.runtime === "qvm-scene") {
+      const publication = this.options.source.source.scene?.();
+      if (publication === undefined) throw new Error("Scene cgame requires an admitted gameplay entity snapshot source");
+      if (this.sceneContext?.revision !== publication.current.revision) {
+        if (this.sceneBaseline === undefined && publication.baseline !== null) this.sceneBaseline = this.selectScene(publication.baseline);
+        this.sceneContext = { ...this.selectScene(publication.current), ...(this.sceneBaseline === undefined ? {} : { baseline: this.sceneBaseline }) };
+      }
+      this.sceneTimeOffset ??= publication.current.serverTime - this.options.clock.now();
+      const timeMilliseconds = Math.trunc(Math.max(publication.current.serverTime, this.previousFrameTime ?? publication.current.serverTime,
+        this.options.clock.now() + this.sceneTimeOffset));
+      return { ...context, timeMilliseconds, frameTimeMilliseconds: this.previousFrameTime === null ? 0 : timeMilliseconds - this.previousFrameTime,
+        viewOrigin: this.options.viewOrigin(), scene: this.sceneContext };
+    }
     return { ...context, frameTimeMilliseconds, viewOrigin: this.options.viewOrigin() };
+  }
+  private selectScene(source: QvmModScenePublication): QvmSceneContext {
+    const player = source.clients.find(row => row.actor.equals(this.options.viewer));
+    if (player === undefined) throw new Error("Component snapshot has no admitted viewing player");
+    const bounds = new Map(source.entities.map(row => [row.state.number, row.bounds]));
+    const visible = selectApplicationQ3Snapshot({ clientNum: player.slot, origin: player.state.origin, viewheight: player.state.viewHeight }, source,
+      this.options.queries, slot => bounds.get(slot) ?? null, this.options.assets.world.map.leaves.length, this.options.print);
+    const areaMask = new Uint8Array(32); areaMask.set(visible.areaMask);
+    return { revision: source.revision, gameState: source.gameState, gameStateRevision: source.gameStateRevision,
+      snapshot: { serverTime: source.serverTime, flags: 0, areaMask, playerState: player.state,
+      entities: visible.entities, serverCommandSequence: source.commands.at(-1)?.sequence ?? 0 },
+      actors: source.entities.map(row => ({ actor: row.actor, slot: row.state.number, owned: row.owned })),
+      commands: source.commands.map(command => ({ sequence: command.sequence,
+        arguments: command.recipient === null || command.recipient.equals(this.options.viewer) ? tokenizeCommand(command.text, "q3").argv : [] })) };
   }
   static async create(options: ApplicationModPresentationOptions, baselineSequence = -1): Promise<ApplicationModPresentation> {
     const owner = new ApplicationModPresentation(options);
     try {
+      if (options.source.prepared.declaration.runtime === "qvm-scene") for (const variable of options.source.prepared.declaration.cvars)
+        owner.cvars.set(variable.name, variable.value);
       owner.mediaValue = await ApplicationQ3Assets.create(options.assets, options.source.identity.source.content, options.print, () => false, "guest-async", "source");
       owner.assertCurrent();
       const collisionSettings = new CollisionMapSettings(owner.cvars); collisionSettings.registerMap();
@@ -163,7 +199,7 @@ export class ApplicationModPresentation {
     if (call.kind === "engine" && call.code === QvmCgameImport.CG_GETGAMESTATE) {
       writeSourceQvmGameState(call.guest, call.guest.view(call.words.getInt32(4, true), QVM_GAME_STATE_BYTES), this.context().gameState); return 0;
     }
-    return qvmCommonSyscall(call, { role: "cgame", cvars: this.cvars, print: options.print, milliseconds: options.clock.now, arguments: () => [], commands })
+    return qvmCommonSyscall(call, { role: "cgame", cvars: this.cvars, print: options.print, milliseconds: options.clock.now, arguments: () => this.core?.arguments ?? [], commands })
       ?? qvmFileSyscall(call, this.files)
       ?? qvmClientScriptSyscall(call, this.scripts)
       ?? qvmClientRenderSyscall(call, services.resources, services.draw)
@@ -174,7 +210,8 @@ export class ApplicationModPresentation {
         this.assertCurrent(); if (path !== options.assets.content.recipe.map.geometry.requestedPath) throw new Error(`Component requested a different collision map: ${path}`);
       } })
       ?? qvmClientMarkSyscall(call, this.marks)
-      ?? options.scalar?.(call, this) ?? rejectQvmSyscall(call);
+      ?? options.scalar?.(call, this)
+      ?? (call.kind === "engine" && call.code === QvmCgameImport.CG_MEMORY_REMAINING ? Math.min(0x7fffffff, freemem()) : rejectQvmSyscall(call));
   }
   private flushAudio(): void {
     if (this.audioOperations.length === 0) return;
@@ -200,7 +237,7 @@ export class ApplicationModPresentation {
     if (sequence <= this.frameSequence && this.captured !== null) return this.captured;
     if (this.core === null) throw new Error("Component presentation has not initialized");
     try {
-      const time = this.context().snapshot.serverTime;
+      const context = this.context(), time = context.timeMilliseconds ?? context.snapshot.serverTime;
       await this.core.advance(sequence);
       this.assertCurrent();
       const scene = this.services.scene.capture();

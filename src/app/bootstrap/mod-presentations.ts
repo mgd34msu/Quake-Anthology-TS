@@ -87,14 +87,14 @@ export class ApplicationModPresentations {
           entries.set(id, entry);
         }
         try {
-          for (const event of events) {
+          if (source.prepared.declaration.runtime === "qvm-player-events") for (const event of events) {
             if (event.kind !== "q3-source" || event.event.kind !== "player-event" || event.recipient !== undefined && !event.recipient.equals(viewer)) continue;
             const actual = event.event.source, expected = source.prepared.source;
             if (actual.module.id !== expected.id || actual.module.artifactPath !== expected.artifactPath || actual.module.digest !== expected.digest
               || actual.module.revision !== expected.revision || actual.abiProfile !== source.source.abiProfile) continue;
             await entry.consumer.consume(event.event, event.sequence); this.assertOpen();
           }
-          entry.scene = await entry.consumer.frame(frameSequence); this.assertOpen(); entry.time = context.snapshot.serverTime;
+          entry.scene = await entry.consumer.frame(frameSequence); this.assertOpen(); entry.time = entry.consumer.time;
         } catch (error) {
           try { if (entries !== undefined) this.remove(entries, id, entry); }
           catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation preparation and cleanup failed"); }

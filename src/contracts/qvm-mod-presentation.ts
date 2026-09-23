@@ -9,17 +9,22 @@ export interface QvmPresentationProgram {
 /** Original C arguments, with pointers supplied by the declared caller storage. */
 export type QvmPresentationArgument =
   | { readonly kind: "int32" | "float32" | "address"; readonly value: number }
-  | { readonly kind: "source"; readonly value: "player-state" | "entity-state" | "centity" | "origin" | "snapshot" | "client-number" | "time" | "event" | "parameter" };
+  | { readonly kind: "source"; readonly value: "player-state" | "entity-state" | "centity" | "origin" | "snapshot" | "client-number" | "time" | "event" | "parameter" | "snapshot-number" | "server-command-sequence" };
 export interface QvmPresentationCall {
   readonly entry: number;
   readonly arguments: readonly QvmPresentationArgument[];
 }
 /** Every offset names the matched original executable's data, not a host event translation. */
-export interface QvmModPresentationDeclaration {
+interface QvmPresentationBase {
   readonly version: 1;
-  readonly runtime: "qvm-player-events";
   readonly gameplay: QvmPresentationProgram;
   readonly cgame: QvmPresentationProgram;
+  readonly initialize: readonly QvmPresentationCall[];
+  readonly refresh: readonly QvmPresentationCall[];
+  readonly frame: readonly QvmPresentationCall[];
+}
+export interface QvmPlayerEventPresentation extends QvmPresentationBase {
+  readonly runtime: "qvm-player-events";
   readonly storage: {
     readonly gameState: number;
     readonly playerState: number;
@@ -40,3 +45,29 @@ export interface QvmModPresentationDeclaration {
   readonly project: readonly QvmPresentationCall[];
   readonly event: QvmPresentationCall;
 }
+
+/** The original cgame owns snapshot transitions and all player/entity events together. */
+export interface QvmScenePresentation extends QvmPresentationBase {
+  readonly runtime: "qvm-scene";
+  readonly cvars: readonly { readonly name: string; readonly value: string }[];
+  readonly storage: {
+    readonly gameState: number;
+    readonly serverCommandSequence: number;
+    readonly time: readonly number[];
+    readonly frameTime: readonly number[];
+    readonly viewOrigin: readonly number[];
+    readonly centities: { readonly address: number; readonly stride: number; readonly capacity: number;
+      readonly state: number; readonly previousEvent: number; readonly snapshotTime: number };
+  };
+  /** Original CG_ProcessSnapshots or the artifact's equivalent caller. */
+  readonly snapshots: readonly QvmPresentationCall[];
+  /** Source enum boundary used only for seeding original one-shot event cursors after restore. */
+  readonly eventEntityType: number;
+  readonly eventCheck: { readonly entry: number; readonly centityArgument: number };
+  /** Qualified original player mesh submission; effects continue through its original helper. */
+  readonly body: {
+    readonly player: { readonly entry: number; readonly centityArgument: number };
+    readonly mesh: { readonly entry: number; readonly entityArgument: number; readonly stateArgument: number; readonly shaderOffset: number };
+  };
+}
+export type QvmModPresentationDeclaration = QvmPlayerEventPresentation | QvmScenePresentation;

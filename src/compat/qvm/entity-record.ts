@@ -51,12 +51,12 @@ function writeTrajectory(view: DataView, offset: number, value: QvmTrajectory): 
 
 /** Borrows live fields; immutable vectors and trajectories are sampled on access. */
 class BorrowedEntityState implements QvmEntityState {
-  constructor(private readonly view: DataView, private readonly profile: QvmAbiProfile = "q3-modern") {}
+  constructor(private readonly view: DataView, private readonly profile: QvmAbiProfile = "q3-modern", private readonly source = false) {}
 
   get number(): number { return this.view.getInt32(0, true); }
   set number(value: number) { this.view.setInt32(0, value, true); }
-  get eType(): number { return qvmEntityType(this.view.getInt32(4, true), this.profile); }
-  set eType(value: number) { this.view.setInt32(4, qvmEntityType(value, this.profile, true), true); }
+  get eType(): number { const value = this.view.getInt32(4, true); return this.source ? value : qvmEntityType(value, this.profile); }
+  set eType(value: number) { this.view.setInt32(4, this.source ? value : qvmEntityType(value, this.profile, true), true); }
   get eFlags(): number { return this.view.getInt32(8, true); }
   set eFlags(value: number) { this.view.setInt32(8, value, true); }
   get pos(): QvmTrajectory { return readTrajectory(this.view, 12); }
@@ -95,12 +95,12 @@ class BorrowedEntityState implements QvmEntityState {
   set frame(value: number) { this.view.setInt32(172, value, true); }
   get solid(): number { return this.view.getInt32(176, true); }
   set solid(value: number) { this.view.setInt32(176, value, true); }
-  get event(): number { return qvmEvent(this.view.getInt32(180, true), this.profile); }
-  set event(value: number) { this.view.setInt32(180, qvmEvent(value, this.profile, true), true); }
+  get event(): number { const value = this.view.getInt32(180, true); return this.source ? value : qvmEvent(value, this.profile); }
+  set event(value: number) { this.view.setInt32(180, this.source ? value : qvmEvent(value, this.profile, true), true); }
   get eventParm(): number { return this.view.getInt32(184, true); }
   set eventParm(value: number) { this.view.setInt32(184, value, true); }
-  get powerups(): number { return qvmPowerupBits(this.view.getInt32(188, true), this.profile); }
-  set powerups(value: number) { this.view.setInt32(188, qvmPowerupBits(value, this.profile), true); }
+  get powerups(): number { const value = this.view.getInt32(188, true); return this.source ? value : qvmPowerupBits(value, this.profile); }
+  set powerups(value: number) { this.view.setInt32(188, this.source ? value : qvmPowerupBits(value, this.profile), true); }
   get weapon(): number { return this.view.getInt32(192, true); }
   set weapon(value: number) { this.view.setInt32(192, value, true); }
   get legsAnim(): number { return this.view.getInt32(196, true); }
@@ -117,11 +117,11 @@ class BorrowedEntityState implements QvmEntityState {
     const QVM_ENTITY_STATE_BYTES = qvmEntityStateBytes(this.profile);
     const bytes = new Uint8Array(QVM_ENTITY_STATE_BYTES);
     bytes.set(new Uint8Array(this.view.buffer, this.view.byteOffset, QVM_ENTITY_STATE_BYTES));
-    return new BorrowedEntityState(new DataView(bytes.buffer), this.profile);
+    return new BorrowedEntityState(new DataView(bytes.buffer), this.profile, this.source);
   }
 
   copyFrom(source: Readonly<QvmEntityStateFields>): void {
-    writeQvmEntityState(this.view, source, this.profile);
+    writeEntityState(this.view, source, this.profile, this.source);
   }
 }
 
@@ -136,9 +136,22 @@ export function readQvmEntityState(view: DataView): QvmEntityState {
   return borrowQvmEntityState(view).copy();
 }
 
+/** A gameplay module and its matched cgame exchange source tags without protocol translation. */
+export function readSourceQvmEntityState(view: DataView, profile: QvmAbiProfile): QvmEntityState {
+  requireRecord(view, profile);
+  return new BorrowedEntityState(view, profile, true).copy();
+}
+export function writeSourceQvmEntityState(view: DataView, state: Readonly<QvmEntityStateFields>, profile: QvmAbiProfile): void {
+  writeEntityState(view, state, profile, true);
+}
+
 /** Writes exactly one source ABI record, checking its extent before mutation. */
 export function writeQvmEntityState(view: DataView, state: Readonly<QvmEntityStateFields>, profile: QvmAbiProfile = "q3-modern"): void {
-  const target = borrowQvmEntityState(view, profile);
+  writeEntityState(view, state, profile, false);
+}
+function writeEntityState(view: DataView, state: Readonly<QvmEntityStateFields>, profile: QvmAbiProfile, source: boolean): void {
+  requireRecord(view, profile);
+  const target = new BorrowedEntityState(view, profile, source);
   target.number = state.number;
   target.eType = state.eType;
   target.eFlags = state.eFlags;

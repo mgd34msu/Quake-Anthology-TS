@@ -4,14 +4,37 @@ import type { SourceGameStateRecord } from "../../network/q3/game-state.ts";
 import type { WireUserCommand } from "../../network/q3/message.ts";
 import type { Snapshot } from "../../network/q3/server-message.ts";
 import { qvmConfigstring } from "./legacy-presentation.ts";
-import { writeQvmEntityState } from "./entity-record.ts";
-import { writeQvmPlayerState } from "./player-record.ts";
+import { writeQvmEntityState, writeSourceQvmEntityState, type QvmEntityStateFields } from "./entity-record.ts";
+import { writeQvmPlayerState, writeSourceQvmPlayerState } from "./player-record.ts";
+import type { Q3PlayerState } from "../../contracts/protocol.ts";
 import type { QvmMemory } from "./memory.ts";
 
 export const QVM_GAME_STATE_BYTES = 20100;
 export const QVM_SNAPSHOT_BYTES = 53772;
 export function qvmSnapshotBytes(profile: QvmAbiProfile): number { return profile === "q3-modern" ? QVM_SNAPSHOT_BYTES : 52724; }
 export const QVM_USER_COMMAND_BYTES = 24;
+
+export interface QvmSourceSnapshot {
+  readonly number: number;
+  readonly serverTime: number;
+  readonly flags: number;
+  readonly areaMask: Uint8Array;
+  readonly playerState: Q3PlayerState;
+  readonly entities: readonly QvmEntityStateFields[];
+  readonly serverCommandSequence: number;
+}
+export function writeSourceQvmSnapshot(memory: QvmMemory, view: DataView, snapshot: QvmSourceSnapshot, profile: QvmAbiProfile): void {
+  requireBytes(view, qvmSnapshotBytes(profile));
+  if (snapshot.areaMask.length !== 32 || snapshot.entities.length > 256) throw new RangeError("Invalid source snapshot_t extent");
+  const psBytes = profile === "q3-modern" ? 468 : 444, entityBytes = profile === "q3-modern" ? 208 : 204;
+  const offset = view.byteOffset - memory.bytes.byteOffset;
+  view.setInt32(0, snapshot.flags, true); view.setInt32(4, snapshot.playerState.pingMilliseconds, true); view.setInt32(8, snapshot.serverTime, true);
+  memory.writeBytes(offset + 12, snapshot.areaMask);
+  writeSourceQvmPlayerState(memory.dataView(offset + 44, psBytes), snapshot.playerState, profile);
+  view.setInt32(44 + psBytes, snapshot.entities.length, true);
+  snapshot.entities.forEach((entity, index) => writeSourceQvmEntityState(memory.dataView(offset + 48 + psBytes + index * entityBytes, entityBytes), entity, profile));
+  view.setInt32(qvmSnapshotBytes(profile) - 4, snapshot.serverCommandSequence, true);
+}
 
 function requireBytes(view: DataView, size: number): void {
   if (view.byteLength < size) throw new RangeError(`QVM client record requires ${size} bytes`);

@@ -12,13 +12,14 @@ import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
 import { readQvmPlayerState, readSourceQvmPlayerState, writeQvmPlayerState, writeSourceQvmPlayerState } from "../../../src/compat/qvm/player-record.ts";
 import { writeQvmGameState, writeSourceQvmGameState } from "../../../src/compat/qvm/client-state-record.ts";
 import { readQvmModPresentation } from "../../../src/content/mods/qvm-presentation.ts";
+import { readSourceQvmEntityState, writeSourceQvmEntityState } from "../../../src/compat/qvm/entity-record.ts";
 import { ClientGameStateStorage } from "../../../src/network/q3/game-state.ts";
 
 function fixture() {
   const code = new BinaryWriter(128), operations: (readonly [QvmOpcode, number?])[] = [];
   for (let trap = 0; trap < 3; trap++) operations.push([QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_CONST, -1 - trap],
     [QvmOpcode.OP_CALL], [QvmOpcode.OP_POP], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 8]);
-  for (const [opcode, operand] of operations) { code.u8(opcode); if (operand !== undefined) code.i32(operand); }
+  for (const [opcode, operand] of operations) { code.u8(opcode); if (operand !== undefined) { if (opcode === QvmOpcode.OP_ARG) code.u8(operand); else code.i32(operand); } }
   const instructions = code.finish(), file = new BinaryWriter(32 + instructions.length);
   for (const value of [0x12721444, operations.length, 32, instructions.length, 32 + instructions.length, 0, 0, 131072]) file.i32(value);
   file.bytes(instructions); const bytes = file.finish(), digest = digestBytes(bytes);
@@ -31,6 +32,7 @@ function fixture() {
       centities: { address: 76000, stride: 800, capacity: 2, state: 0, origin: 708 }, time: [78004], frameTime: [78008], viewOrigin: [78012] },
     initialize: [{ entry: 0, arguments: [] }], refresh: [{ entry: 6, arguments: [] }], frame: [{ entry: 6, arguments: [] }], project: [],
     event: { entry: 12, arguments: [{ kind: "source", value: "centity" }, { kind: "source", value: "origin" }] } })));
+  if (declaration.runtime !== "qvm-player-events") throw new Error("Expected bounded event fixture");
   const ids = createIdentityOwner("source-presentation"), actor = ids.actor(7, 1);
   let currentActor: ActorId | null = actor, revision = 0, elapsed = 50;
   const raw = readSourceQvmPlayerState(new DataView(new ArrayBuffer(468)), "q3-modern");
@@ -120,6 +122,10 @@ test("source presentation advances original frame calls once with current camera
 });
 
 test("raw original player/configstring writers preserve legacy private values while normalized writers retain translation", () => {
+  const entityView = new DataView(new ArrayBuffer(204)), entity = readSourceQvmEntityState(entityView, "q3-1.16n-base");
+  entity.eType = 91; entity.event = 349; entity.powerups = 4096;
+  writeSourceQvmEntityState(entityView, entity, "q3-1.16n-base");
+  expect([entityView.getInt32(4, true), entityView.getInt32(180, true), entityView.getInt32(188, true)]).toEqual([91, 349, 4096]);
   const view = new DataView(new ArrayBuffer(444)), raw = readSourceQvmPlayerState(view, "q3-1.16n-base");
   const powerups = [...raw.powerups]; powerups[12] = 12345;
   const persistent = [...raw.persistent]; persistent[5] = 123; persistent[7] = 17;
@@ -138,4 +144,62 @@ test("raw original player/configstring writers preserve legacy private values wh
   expect(memory.dataView(80, 4).getInt32(0, true)).toBe(1);
   writeQvmGameState(memory, memory.dataView(0, 20100), state.copySourceRecord(), "q3-1.16n-base");
   expect(memory.dataView(80, 4).getInt32(0, true)).toBe(0); expect(memory.dataView(48, 4).getInt32(0, true)).toBe(1);
+});
+
+test("scene snapshots advance once while scoped foreign meshes retain overlays and source-owned submissions", async () => {
+  const code = new BinaryWriter(256), operations: (readonly [QvmOpcode, number?])[] = [];
+  const add = (opcode: QvmOpcode, operand?: number) => operations.push(operand === undefined ? [opcode] : [opcode, operand]);
+  const enter = () => { const entry = operations.length; add(QvmOpcode.OP_ENTER, 32); return entry; };
+  const leave = () => { add(QvmOpcode.OP_CONST, 0); add(QvmOpcode.OP_LEAVE, 32); };
+  const invoke = (entry: number) => { add(QvmOpcode.OP_CONST, entry); add(QvmOpcode.OP_CALL); add(QvmOpcode.OP_POP); };
+  const argument = (offset: number, value: number) => { add(QvmOpcode.OP_CONST, value); add(QvmOpcode.OP_ARG, offset); };
+  const initialize = enter(); leave();
+  const snapshots = enter(); invoke(-1); leave();
+  const eventCheck = enter(); leave();
+  const mesh = enter();
+  argument(8, 80000); invoke(-42); // CG_R_ADDREFENTITYTOSCENE
+  add(QvmOpcode.OP_CONST, 80112); add(QvmOpcode.OP_CONST, 7); add(QvmOpcode.OP_STORE4);
+  argument(8, 80000); invoke(-42);
+  add(QvmOpcode.OP_CONST, 80112); add(QvmOpcode.OP_CONST, 0); add(QvmOpcode.OP_STORE4); leave();
+  const player = enter(); argument(8, 80000); argument(12, 76000); invoke(mesh); leave();
+  const frame = enter(); argument(8, 76000); invoke(player);
+  argument(8, 80000); argument(12, 76000); invoke(mesh); invoke(-3); leave();
+  for (const [opcode, operand] of operations) { code.u8(opcode); if (operand !== undefined) { if (opcode === QvmOpcode.OP_ARG) code.u8(operand); else code.i32(operand); } }
+  const instructions = code.finish(), file = new BinaryWriter(32 + instructions.length);
+  for (const value of [0x12721444, operations.length, 32, instructions.length, 32 + instructions.length, 0, 0, 131072]) file.i32(value);
+  file.bytes(instructions); const bytes = file.finish(), digest = digestBytes(bytes);
+  const source = { id: "mod:scene", artifactPath: "vm/qagame.qvm", revision: "1", digest } satisfies ModuleIdentity;
+  const artifact = resolveQvmArtifact({ role: "cgame", bytes, module: { ...source, artifactPath: "vm/cgame.qvm" } });
+  if (artifact.kind !== "bytecode") throw new Error("Missing scene fixture");
+  const declaration = readQvmModPresentation(new TextEncoder().encode(JSON.stringify({ version: 1, runtime: "qvm-scene", cvars: [],
+    gameplay: { path: source.artifactPath, digest, abiProfile: "q3-modern" }, cgame: { path: artifact.module.artifactPath, digest, abiProfile: "q3-modern" },
+    storage: { gameState: 0, serverCommandSequence: 75000, centities: { address: 76000, stride: 800, capacity: 2, state: 0, previousEvent: 428, snapshotTime: 436 },
+      time: [78004], frameTime: [78008], viewOrigin: [78012] }, initialize: [{ entry: initialize, arguments: [] }], refresh: [],
+    snapshots: [{ entry: snapshots, arguments: [] }], frame: [{ entry: frame, arguments: [] }], eventEntityType: 14, eventCheck: { entry: eventCheck, centityArgument: 0 },
+    body: { player: { entry: player, centityArgument: 0 }, mesh: { entry: mesh, entityArgument: 0, stateArgument: 1, shaderOffset: 112 } } })));
+  const ids = createIdentityOwner("scene"), state = new ClientGameStateStorage(message => { throw new Error(message); }); state.beginEntries();
+  const gameState = state.copySourceRecord(), playerState = readSourceQvmPlayerState(new DataView(new ArrayBuffer(468)), "q3-modern");
+  let actor = ids.actor(4, 1), revision = 1, time = 1000, owned = false, publications = 0, frames = 0;
+  const shaders: number[] = [];
+  const owner = new QvmModPresentation({ artifact, source, declaration, actor: slot => slot === 0 ? actor : null,
+    live: value => value.equals(actor), assertCurrent: () => {}, context: () => ({ gameState, gameStateRevision: 0,
+      frameTimeMilliseconds: 0, timeMilliseconds: time, viewOrigin: { x: 0, y: 0, z: 0 }, snapshot: { serverTime: 1000, playerState },
+      scene: { revision, gameState, gameStateRevision: 0, snapshot: { serverTime: 1000, flags: 0, areaMask: new Uint8Array(32), playerState, entities: [], serverCommandSequence: 0 },
+        actors: [{ actor, slot: 0, owned }], commands: [] } }), host: call => {
+      if (call.kind !== "engine") throw new Error("Unexpected intrinsic");
+      if (call.code === 0) publications++;
+      else if (call.code === 2) frames++;
+      else if (call.code === 41) shaders.push(call.guest.view(call.words.getInt32(4, true) + 112, 4).getInt32(0, true));
+      else throw new Error(`Unexpected scene trap ${call.code}`);
+      return 0;
+    } });
+  try {
+    await owner.initialize(); await owner.advance(1); time = 1050; await owner.advance(2); await owner.advance(2);
+    expect(publications).toBe(1); expect(frames).toBe(2); expect(shaders).toEqual([7, 0, 7, 7, 0, 7]);
+    expect(owner.module.memory.dataView(78004, 4).getInt32(0, true)).toBe(1050);
+    owner.module.memory.dataView(76500, 4).setInt32(0, 99, true); actor = ids.actor(4, 2); revision++; owned = true;
+    shaders.length = 0; await owner.advance(3);
+    expect(publications).toBe(2); expect(owner.module.memory.dataView(76500, 4).getInt32(0, true)).toBe(0);
+    expect(shaders).toEqual([0, 7, 0, 7]);
+  } finally { owner.close(); }
 });
