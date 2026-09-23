@@ -35,7 +35,7 @@ export function prepareQuakeCMod(options: PrepareQuakeCModOptions): PreparedMod 
   const { description, declaration, declarationDigest } = options, program = loadQcProgram(options.program);
   validateQcMod(program, declaration);
   const module = { id: modInstanceProvider(description.selection), artifactPath: declaration.program.path, digest: program.digest, revision: declarationDigest };
-  return { description, identity: { selection: description.selection, source: description.source, declarationDigest, modules: [module], providers: [] },
+  return { description, ...(declaration.clientPresentation === undefined ? {} : { clientPresentation: { hud: declaration.clientPresentation.hud === "none" ? "none" : "replace", view: declaration.clientPresentation.view !== "none" } }), identity: { selection: description.selection, source: description.source, declarationDigest, modules: [module], providers: [] },
     validateState(state) {
       const guest = state.guests[0];
       if (state.guests.length !== 1 || state.providers.length !== 0 || guest?.kind !== "quakec" || guest.module.id !== module.id || guest.module.digest !== program.digest
@@ -65,6 +65,7 @@ export function prepareQuakeCMod(options: PrepareQuakeCModOptions): PreparedMod 
         async checkpoint() { return { guests: [source.checkpoint()], providers: [] }; },
         advance(frame) { return source.advance(frame); },
         presentations() { return source.presentations(); },
+        clientPresentation: () => source.clientPresentation(),
         async restore(state) { const guest = state.guests[0]; if (guest?.kind !== "quakec") throw new Error("Missing QuakeC mod checkpoint"); source.restore(guest); },
         close() { return source.close(); },
       };

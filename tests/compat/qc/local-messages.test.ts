@@ -6,7 +6,7 @@ import { readQuakeCCompatibility } from '../../../src/compat/qc/compatibility.ts
 import { NetQuakeDecoder, writeNetQuakeMessage } from '../../../src/network/q1/netquake.ts';
 import { SizeBuf } from '../../../src/network/q1/message.ts';
 import type { NetQuakeMessage } from '../../../src/network/q1/netquake.ts';
-import { QuakeCLocalMessages, presentQuakeCLocalMessage, type QuakeCLocalMessageHost } from '../../../src/app/bootstrap/simulation/quakec-local-messages.ts';
+import { QuakeCLocalMessages, quakeCLocalView, presentQuakeCLocalMessage, type QuakeCLocalMessageHost } from '../../../src/app/bootstrap/simulation/quakec-local-messages.ts';
 
 test('QC local service effects retain recipient, listener and source counters', () => {
   const identity = createIdentityOwner('qc-local-services'), first = identity.actor(1,0), second = identity.actor(2,0), camera = identity.actor(3,0);
@@ -26,7 +26,7 @@ test('QC local service effects retain recipient, listener and source counters', 
     session:(kind,recipient)=>{sessions.push({kind,recipient});},prompt:value=>{prompts.push(value);},
     fog:(value,recipient)=>{fog.push({value,recipient});},
   };
-  const receive = (message:NetQuakeMessage,target:ActorId|null):void => {state.receive([message],target);presentQuakeCLocalMessage(message,target,state,host);};
+  const receive = (message:NetQuakeMessage,target:ActorId|null):void => {state.receive([message],target,message.kind === 'set-view' ? host.actor(message.entity) : undefined);presentQuakeCLocalMessage(message,target,state,host);};
   receive({kind:'set-view',entity:3},first);
   receive({kind:'local-sound',index:1},first);
   expect(effects.shift()).toEqual({recipient:first,event:{kind:'sound',actor:camera,path:'misc/menu1.wav',channel:-1,volume:1,attenuation:1}});
@@ -56,7 +56,7 @@ test('QC local service effects retain recipient, listener and source counters', 
   expect(()=>receive({kind:'time',seconds:100},first)).toThrow('Unsupported local QuakeC service time');
 });
 
- test('QC private prompts retain incremental per-client choices, restore, and clear on source impulse', () => {
+test('QC private prompts retain incremental per-client choices, restore, and clear on source impulse', () => {
   const identity = createIdentityOwner('qc-prompts'), first = identity.actor(1,0), second = identity.actor(2,0);
   const state = new QuakeCLocalMessages(); state.admit(first); state.admit(second);
   state.receive([{kind:'prompt-begin',text:'Choose team',choices:2},{kind:'prompt-choice',text:'Red',impulse:101}],first);
@@ -75,6 +75,50 @@ test('QC local service effects retain recipient, listener and source counters', 
   restored.receive([{kind:'prompt-clear'}],first);
   expect(restored.prompt(second).kind).toBe('prompt');
  });
+
+const originalPak = '/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK';
+test.skipIf(!await Bun.file(originalPak).exists())('original NQ entity writer captures camera generation through buffered flush and save', async () => {
+  const { openArchive } = await import('../../../src/content/archive/index.ts');
+  const { QcBroadcastMessages } = await import('../../../src/compat/qc/presentation-host.ts');
+  const { QcMachine, QcEntityMemory, loadQcProgram, classicQcEntityLayout, createQcBuiltins } = await import('../../../src/compat/qc/index.ts');
+  const { SessionActorRegistry } = await import('../../../src/world/actors/registry.ts');
+  const { createNumericOperations, Q1_DONOR_PROFILE } = await import('../../../src/core/numeric.ts');
+  const archive = await openArchive(originalPak), entry = archive.findEntries('progs.dat')[0];
+  if (entry === undefined) throw Error('Missing original program');
+  const program = loadQcProgram(await archive.readEntry(entry)), actors = new SessionActorRegistry(createIdentityOwner('nq-camera'));
+  const player = actors.allocate('q1:base', 'q1:player'), camera = actors.allocate('mod:camera', 'quakec:camera');
+  const slots = new Map([[1, player], [2, camera]]), entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 3);
+  const state = new QuakeCLocalMessages(); state.admit(player.id);
+  const messages = new QcBroadcastMessages({ options: { program, entities, slots: { at: slot => slots.get(slot) ?? null } },
+    actor: slot => { const actor = slots.get(slot); if (actor === undefined) throw Error('Missing source actor'); return actor; } }, () => undefined, undefined,
+    { native: () => false, loading: () => false, client: actor => actor.equals(player.id), route: (values, destination, targets) => {
+      if (destination.kind !== 'client') throw Error('Expected source recipient');
+      for (const [index, message] of values.entries()) state.receive([message], destination.actor, targets?.get(index));
+      return undefined;
+    } });
+  const vm = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
+    builtins: createQcBuiltins({ kind: 'netquake', host: messages.host }), serverActive: () => true });
+  const target = (slot: number) => {
+    vm.globals.setInt(vm.globalOffset('msg_entity'), entities.reference(1)); vm.globals.setFloat(4, 1); vm.globals.setFloat(7, 5);
+    vm.execute(program.functionNamed('WriteByte').index); vm.globals.setFloat(4, 1); vm.globals.setInt(7, entities.reference(slot));
+    vm.execute(program.functionNamed('WriteEntity').index);
+  };
+  let x = 10;
+  const source = { read: (actor: ActorId) => actors.isLive(actor) ? { origin: { x, y: 20, z: 30 }, angles: { x: 0, y: 90, z: 0 } } : null,
+    offset: () => ({ x: 0, y: 0, z: 22 }) };
+  try {
+    target(2); messages.flush(); expect(state.viewTarget(player.id)).toBe(camera.id);
+    expect(quakeCLocalView(player.id, state, source)?.origin.x).toBe(10);
+    x = 40; expect(quakeCLocalView(player.id, state, source)?.origin.x).toBe(40);
+    const saved = state.capture(), views = state.captureViews(), restored = new QuakeCLocalMessages();
+    restored.restore(saved.baseline, saved.clients); restored.restoreViews(views.baseline, views.clients);
+    expect(quakeCLocalView(player.id, restored, source)?.viewHeight).toBe(22);
+    target(1); messages.flush(); expect(quakeCLocalView(player.id, state, source)).toBeNull();
+    target(2); actors.release(camera); const replacement = actors.allocate('mod:camera', 'quakec:camera'); slots.set(2, replacement);
+    messages.flush(); expect(state.viewTarget(player.id)).toBe(camera.id);
+    expect(quakeCLocalView(player.id, state, source)).toBeNull(); expect(quakeCLocalView(player.id, restored, source)).toBeNull();
+  } finally { actors.close(); archive.close(); }
+});
 
 test('private QC message dialect requires matching artifact metadata and decodes prompt service bytes', () => {
   const digest = 'sha256:' + 'a'.repeat(64), encode = (value:unknown) => new TextEncoder().encode(JSON.stringify(value));

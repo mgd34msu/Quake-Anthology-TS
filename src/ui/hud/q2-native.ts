@@ -93,10 +93,11 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
 
 /** Q2 client/cl_inv.c: fixed authored background, selected-item scroll and source bindings. */
 export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, height: number,
-  binding: (command: string) => string = () => ""): readonly NativeQ2HudOperation[] {
-  const out = [...q2LayoutOperations(frame.configstrings.get(5) ?? "", frame, width, height)];
+  binding: (command: string) => string = () => "", mode: "layout-overlay" | "replace-status" = "replace-status"): readonly NativeQ2HudOperation[] {
+  const out = mode === "layout-overlay" ? [] : [...q2LayoutOperations(frame.configstrings.get(5) ?? "", frame, width, height)];
   const layouts = frame.stats[13] ?? 0;
   if ((layouts & 1) !== 0) out.push(...q2LayoutOperations(frame.layout, frame, width, height));
+  if (mode === "layout-overlay") return out;
   if ((layouts & 2) === 0) return out;
   const config = q2ApplicationLayout(frame.protocol), selected = frame.stats[12] ?? 0;
   const items = frame.inventory.flatMap((count, index) => count === 0 ? [] : [index]);

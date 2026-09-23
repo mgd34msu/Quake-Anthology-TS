@@ -6,6 +6,8 @@ import type { NetQuakeMessage } from '../../../network/q1/netquake.ts';
 export class QuakeCLocalMessages {
   private readonly baseline = new Map<string, NetQuakeMessage>();
   private readonly clients = new Map<ActorId, Map<string, NetQuakeMessage>>();
+  private baselineView: ActorId | null = null;
+  private readonly views = new Map<ActorId, ActorId>();
   private retained(state: Map<string, NetQuakeMessage>, message: NetQuakeMessage): void {
     switch (message.kind) {
       case 'server-vars': case 'set-views': case 'sequence': case 'level-completed': case 'back-to-lobby':
@@ -38,10 +40,19 @@ export class QuakeCLocalMessages {
       default: break;
     }
   }
-  admit(actor: ActorId): void { if (!this.clients.has(actor)) this.clients.set(actor, new Map(this.baseline)); }
+  admit(actor: ActorId): void { if (!this.clients.has(actor)) { this.clients.set(actor, new Map(this.baseline));
+    if (this.baselineView !== null) this.views.set(actor, this.baselineView); } }
   hasClient(actor: ActorId): boolean { return this.clients.has(actor); }
-  retire(actor: ActorId): void { this.clients.delete(actor); }
-  receive(messages: readonly NetQuakeMessage[], actor: ActorId | null): void {
+  retire(actor: ActorId): void { this.clients.delete(actor); this.views.delete(actor);
+    if (this.baselineView?.equals(actor) === true) this.baselineView = null;
+    for (const [recipient, target] of this.views) if (target.equals(actor)) this.views.delete(recipient); }
+  receive(messages: readonly NetQuakeMessage[], actor: ActorId | null, viewTarget?: ActorId | null): void {
+    if (actor !== null) this.admit(actor);
+    for (const message of messages) if (message.kind === 'set-view' && viewTarget !== undefined) {
+      if (actor === null) { this.baselineView = viewTarget; for (const recipient of this.clients.keys()) {
+        if (viewTarget === null) this.views.delete(recipient); else this.views.set(recipient, viewTarget);
+      } } else if (viewTarget === null) this.views.delete(actor); else this.views.set(actor, viewTarget);
+    }
     if (actor === null) for (const message of messages) {
       this.retained(this.baseline, message);
       for (const state of this.clients.values()) this.retained(state, message);
@@ -57,6 +68,15 @@ export class QuakeCLocalMessages {
   }
   angles(actor: ActorId) { const message = this.clients.get(actor)?.get('set-angle'); return message?.kind === 'set-angle' ? message.angles : null; }
   view(actor: ActorId): number | null { const message = this.clients.get(actor)?.get('set-view'); return message?.kind === 'set-view' ? message.entity : null; }
+  viewTarget(actor: ActorId): ActorId | null { return this.views.get(actor) ?? null; }
+  captureViews() { return { baseline: this.baselineView, clients: [...this.views].map(([actor, target]) => ({ actor, target })) }; }
+  restoreViews(baseline: ActorId | null, clients: readonly { readonly actor: ActorId; readonly target: ActorId }[]): void {
+    this.baselineView = baseline; this.views.clear();
+    for (const entry of clients) {
+      if (!this.clients.has(entry.actor) || this.views.has(entry.actor)) throw new Error('Invalid retained QC view recipient');
+      this.views.set(entry.actor, entry.target);
+    }
+  }
   sessionState(actor: ActorId) {
     const state = this.clients.get(actor), server = state?.get('server-vars'), views = state?.get('set-views'), sequence = state?.get('sequence');
     return {serverVars:server?.kind === 'server-vars' ? server.text : '',views:views?.kind === 'set-views' ? views.value : 1,
@@ -80,7 +100,7 @@ export class QuakeCLocalMessages {
   }
   capture() { return { baseline: [...this.baseline.values()], clients: [...this.clients].map(([actor, messages]) => ({actor,messages:[...messages.values()]})) }; }
   restore(baseline: readonly NetQuakeMessage[], clients: readonly {readonly actor: ActorId; readonly messages: readonly NetQuakeMessage[]}[]): void {
-    this.baseline.clear(); this.clients.clear();
+    this.baseline.clear(); this.clients.clear(); this.baselineView = null; this.views.clear();
     for (const message of baseline) this.retained(this.baseline, message);
     for (const entry of clients) {
       if (this.clients.has(entry.actor)) throw new Error('Duplicate restored local QC client');
@@ -89,6 +109,19 @@ export class QuakeCLocalMessages {
       this.clients.set(entry.actor,state);
     }
   }
+}
+
+/** Source camera targets retain the generation captured by WriteEntity. */
+export function quakeCLocalView(actor: ActorId, state: Pick<QuakeCLocalMessages, "viewTarget" | "angles" | "intermission">,
+  source: { read(actor: ActorId): { readonly origin: import('../../../contracts/math.ts').Vec3; readonly angles: import('../../../contracts/math.ts').Vec3 } | null;
+    offset(actor: ActorId): import('../../../contracts/math.ts').Vec3 }): import('./types.ts').PlayerView | null {
+  const intermission = state.intermission(actor), target = state.viewTarget(actor);
+  if (!intermission && (target === null || target.equals(actor))) return null;
+  const viewed = source.read(target ?? actor);
+  if (viewed === null) return null;
+  const offset = intermission ? { x: 0, y: 0, z: 0 } : source.offset(actor);
+  return { origin: { x: viewed.origin.x + offset.x, y: viewed.origin.y + offset.y, z: viewed.origin.z },
+    viewHeight: offset.z, angles: state.angles(actor) ?? viewed.angles };
 }
 
 export interface QuakeCLocalMessageHost {
@@ -144,7 +177,7 @@ export function presentQuakeCLocalMessage(message: NetQuakeMessage, target: Acto
       break;
     case 'local-sound':
       for (const actor of recipients) {
-        const entity = state.view(actor), listener = entity === null ? actor : host.actor(entity);
+        const listener = state.viewTarget(actor) ?? actor;
         host.emit({kind:'sound',actor:listener,path:host.sound(message.index),channel:-1,volume:1,attenuation:1},actor);
       }
       break;

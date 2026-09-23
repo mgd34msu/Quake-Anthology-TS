@@ -56,12 +56,13 @@ export class QcModMessages {
         else if (event.kind === "disconnecting") this.retireClient(event.identity.actor);
         return undefined;
       });
-    } else this.routes = { nq: { native: () => false, loading: source.loading, client, route: (messages, destination) => {
+    } else this.routes = { nq: { native: () => false, loading: source.loading, client, route: (messages, destination, viewTargets) => {
       if (destination.kind === "multicast") throw new Error("NetQuake cannot route a multicast message");
       const target = destination.kind === "client" ? destination.actor : null;
       for (const actor of this.players()) this.local.admit(actor);
-      for (const message of messages) {
-        this.local.receive([message], target);
+      for (const [index, message] of messages.entries()) {
+        if (message.kind === "set-view" && !viewTargets?.has(index)) throw new Error("QC camera message has no captured source actor");
+        this.local.receive([message], target, viewTargets?.get(index));
         presentQuakeCLocalMessage(message, target, this.local, this.host(target));
       }
       return undefined;
@@ -111,11 +112,15 @@ export class QcModMessages {
     this.admitted.set(actor, this.signon.length);
   }
   private retireClient(actor: ActorId): void { this.local.retire(actor); this.admitted.delete(actor); }
+  clientState(): QuakeCLocalMessages { return this.local; }
   start(): void { if (this.routes.qw !== undefined) for (const actor of this.players()) this.admit(actor); }
   capture() {
     const local = this.local.capture();
+    const views = this.local.captureViews();
     const state = { messages: this.messages.capture(), baseline: this.messages.captureNetQuakeMessages(local.baseline),
-      clients: local.clients.map(client => ({ actor: savedActorId(client.actor), messages: this.messages.captureNetQuakeMessages(client.messages) })) };
+      clients: local.clients.map(client => ({ actor: savedActorId(client.actor), messages: this.messages.captureNetQuakeMessages(client.messages) })),
+      views: { baseline: views.baseline === null ? null : savedActorId(views.baseline),
+        clients: views.clients.map(entry => ({ actor: savedActorId(entry.actor), target: savedActorId(entry.target) })) } };
     return this.routes.qw === undefined ? state : { ...state, quakeworld: { signon: this.messages.captureEntries(this.signon),
       admitted: [...this.admitted].map(([actor, cursor]) => ({ actor: savedActorId(actor), cursor })) } };
   }
@@ -123,6 +128,9 @@ export class QcModMessages {
     this.messages.restore(reader.field("messages").value, resolve);
     this.local.restore(this.messages.restoreNetQuakeMessages(reader.field("baseline").bytes()),
       reader.field("clients").list(client => ({ actor: resolve(readSavedActor(client.field("actor"))), messages: this.messages.restoreNetQuakeMessages(client.field("messages").bytes()) })));
+    const views = reader.field("views");
+    if (views.value !== undefined) this.local.restoreViews(views.field("baseline").nullable(entry => resolve(readSavedActor(entry))),
+      views.field("clients").list(entry => ({ actor: resolve(readSavedActor(entry.field("actor"))), target: resolve(readSavedActor(entry.field("target"))) })));
     if (this.routes.qw !== undefined) {
       const state = reader.field("quakeworld");
       this.signon.splice(0, this.signon.length, ...this.messages.restoreEntries(state.field("signon").value, resolve));

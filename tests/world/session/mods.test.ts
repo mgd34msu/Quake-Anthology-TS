@@ -96,6 +96,26 @@ function prepared(world: TestWorld, selection: ModSelection, events: string[], v
 }
 const first: ModSelection = { product: "q3-one", id: "amount" }, second: ModSelection = { product: "q3-two", id: "amount" };
 
+test("declared component HUD and camera conflicts reject before source admission", async () => {
+  const w = world(), events: string[] = [];
+  const a = prepared(w, first, events, 1), b = prepared(w, second, events, 2);
+  try {
+    await expect(SessionMods.open({ prepared: [
+      { ...a, clientPresentation: { hud: "replace", view: false } }, { ...b, clientPresentation: { hud: "replace", view: false } },
+    ], enabled: [first, second], operations: w.operations, nextFrame: async () => {} })).rejects.toThrow("HUD replacement conflict");
+    expect(events).toEqual([]);
+    await expect(SessionMods.open({ prepared: [
+      { ...a, clientPresentation: { hud: "overlay", view: true } }, { ...b, clientPresentation: { hud: "none", view: true } },
+    ], enabled: [first, second], operations: w.operations, nextFrame: async () => {} })).rejects.toThrow("camera control conflict");
+    expect(events).toEqual([]);
+    const owner = await SessionMods.open({ prepared: [
+      { ...a, clientPresentation: { hud: "overlay", view: false } }, { ...b, clientPresentation: { hud: "overlay", view: false } },
+    ], enabled: [first, second], operations: w.operations, nextFrame: async () => {} });
+    try { expect(owner.enabled()).toEqual([first, second]); }
+    finally { owner.close(); }
+  } finally { w.actors.close(); }
+});
+
 test("powered component reservations precede source initialization and activate after restore", async () => {
   const w = world(), events: string[] = [];
   const regular = { kind: "q1", points: 50, absorption: 0.6, item: "q1:armor/yellow" } satisfies import("../../../src/contracts/gameplay.ts").RegularArmorState;

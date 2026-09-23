@@ -188,6 +188,16 @@ Component presentation output retains its provider and activation generation acr
 
 Pre-ownership saves remain readable when persistent output is primary or unrelated to the restored component. A legacy persistent event or fog state in a restored component's declared content has ambiguous provenance: the old format cannot distinguish primary output from component output. Loading that combination fails with an explanatory error instead of assigning guessed ownership. Fresh saves record the required provenance. Source HUD/view admission and source-shaped QVM powerup overlays on foreign characters remain separate unfinished presentation work.
 
+### Component client presentation
+
+Client output requires an explicit `clientPresentation` declaration. QuakeC uses `hud: "none" | "replace-vitals"` and `view: "none" | "set-view"`. Native Q2 uses `hud: "none" | "layout-overlay" | "replace-status"` and `view: "none" | "playerstate"`. Native declarations also require original `clients.endFrame` calls. End-frame callbacks run after the source actor loop; retaining a stat or layout alone does not grant display ownership.
+
+Several layout overlays can coexist in enabled order. A second HUD replacement or camera controller is rejected before source initialization, naming both components. Original source stats, layouts, inventories and media namespaces stay with their owner. Retirement cancels pending HUD images. Q3 status masking changes the effective client read and restores guest caches without changing archived cvars.
+
+QuakeC camera messages capture the referenced actor generation when the original writer emits it. Slot reuse cannot retarget a view or listener; a view-to-self message releases control. Saves retain these identities. Older saves containing a retained or queued camera message without identity report an explicit migration error rather than guessing its target.
+
+Original Xatrix G_SetStats, its help layout and real source pictures are qualified in a Q1 world. Original id1 camera save/load and self-release are also qualified. Remote component HUD/camera transport, arbitrary QC HUD protocols and QVM component 2D output remain unfinished. Native playerstate view consumption exists, but full original ClientEndServerFrame camera behavior still requires qualification of its world and falling-damage ownership.
+
 ### Component console commands
 
 `modcmd PRODUCT/COMPONENT_ID <command>` selects one enabled component explicitly. Component-generated commands enter the same Application command program with their source dialect and instance identity. Cvars and script files resolve within that component; aliases and deferred commands retain the same owner. Disabling an instance cancels its pending commands, waits and script reads while preserving the other components and the primary world. Prepared worlds stage engine actions until publication.

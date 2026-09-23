@@ -9,28 +9,37 @@ export class ApplicationQ2NativeHud {
   private readonly pictures = new Map<ResourceId, PictureAsset>();
   private readonly ids = new Map<string, ResourceId>();
   private content: ContentId | null = null;
-  clear(): void { this.content = null; this.ids.clear(); this.pictures.clear(); }
+  private revision = 0;
+  clear(): void { this.revision++; this.content = null; this.ids.clear(); this.pictures.clear(); }
   picture(id: ResourceId): PictureAsset | undefined { return this.pictures.get(id); }
-  async prepare(content: ContentId, assets: ApplicationAssets, frame: NativeQ2HudFrame, context: UiDrawContext, scale = 1): Promise<void> {
-    if (this.content !== content) { this.content = content; this.ids.clear(); this.pictures.clear(); }
+  async prepare(content: ContentId, assets: ApplicationAssets, frame: NativeQ2HudFrame, context: UiDrawContext, scale = 1,
+    mode: "layout-overlay" | "replace-status" = "replace-status", assertCurrent: () => void = () => undefined): Promise<void> {
+    if (this.content !== content) { this.clear(); this.content = content; }
+    const revision = this.revision;
+    const current = (): void => { assertCurrent(); if (revision !== this.revision) throw new Error("Native HUD media is retired"); };
+    current();
     const area = context.binding.safeArea;
-    const ops = q2NativeHudOperations(frame, area.width / scale, area.height / scale);
+    const ops = q2NativeHudOperations(frame, area.width / scale, area.height / scale, undefined, mode);
     const provider = await assets.provider(content);
+    current();
     const numbers = ["num", "anum"].flatMap(prefix => [...Array.from({ length: 10 }, (_, digit) => `${prefix}_${digit}`), `${prefix}_minus`]);
     const names = new Set(["conchars", "field_3", ...numbers, ...ops.flatMap(op => op.kind === "picture" ? [op.name] : [])]);
     await Promise.all([...names].map(async name => {
       if (this.ids.has(name)) return;
       const path = name.startsWith("/") || name.startsWith("\\") ? name.slice(1) : `pics/${name}.pcx`;
       let texture = await provider.textures.load(path, { family: "q2", mipmap: false, wrap: "clamp" });
+      current();
       if (texture === null && path.startsWith("players/")) texture = await provider.textures.load("players/male/grunt_i.pcx", { family: "q2", mipmap: false, wrap: "clamp" });
+      current();
       const image = (texture ?? provider.textures.missing).image, id: ResourceId = `resource:q2-native-hud:${content}/${path}`;
       this.ids.set(name, id); this.pictures.set(id, { kind: "image", name: path, image });
     }));
   }
-  commands(frame: NativeQ2HudFrame, context: UiDrawContext, scale = 1, binding: (command: string) => string = () => ""): readonly UiDrawCommand[] {
+  commands(frame: NativeQ2HudFrame, context: UiDrawContext, scale = 1, binding: (command: string) => string = () => "",
+    mode: "layout-overlay" | "replace-status" = "replace-status"): readonly UiDrawCommand[] {
     const area = context.binding.safeArea, out: UiDrawCommand[] = [{ kind: "clip", rect: area }];
     const font = this.ids.get("conchars");
-    for (const op of q2NativeHudOperations(frame, area.width / scale, area.height / scale, binding)) {
+    for (const op of q2NativeHudOperations(frame, area.width / scale, area.height / scale, binding, mode)) {
       if (op.kind === "picture") {
         const id = this.ids.get(op.name), picture = id === undefined ? undefined : this.pictures.get(id);
         if (id === undefined || picture?.kind !== "image") continue;

@@ -3,6 +3,7 @@ import type { ActorId, ProviderId } from "./identity.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { Vec3 } from "./math.ts";
 import type { ModPickupRule } from "./original-pickups.ts";
+import type { QcModClientPresentation } from "./mod-client-presentation.ts";
 
 export type ModClientInput = "view-angles" | "attack" | "jump" | "impulse" | "forward-move" | "side-move" | "up-move";
 export type ModClientInputOutput =
@@ -101,6 +102,7 @@ export interface ModQcItems {
 }
 
 export interface ModCallbackDeclaration {
+  readonly clientPresentation?: QcModClientPresentation;
   readonly version: 1;
   readonly runtime: "quakec";
   readonly program: { readonly path: string; readonly digest: ContentDigest };

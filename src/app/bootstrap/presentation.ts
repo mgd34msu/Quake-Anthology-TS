@@ -40,6 +40,16 @@ import type { ApplicationSeatUi } from "./ui.ts";
 import type { ApplicationQ3Client } from "./q3-client.ts";
 import type { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
 import type { NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
+import { ApplicationQ2NativeHud } from "./q2-native-hud.ts";
+import type { ActiveModClientPresentation, ModClientPresentationFrame } from "../../world/session/mod-client-presentation.ts";
+import { samePresentationOwner } from "../../contracts/presentation.ts";
+
+interface ComponentClientFrame {
+  readonly source: ActiveModClientPresentation;
+  readonly generation: number;
+  readonly frame: ModClientPresentationFrame;
+  readonly hud: ApplicationQ2NativeHud;
+}
 
 export type ComponentEffectFrame = (camera: SceneCamera, source: SourceSceneOrder, q1Fog?: import("../../contracts/render.ts").SceneFog & { readonly kind: "q1" }) => ApplicationEffectFrame;
 
@@ -84,9 +94,11 @@ export class WorldSeatPresentation implements SeatPresentation {
   private layoutIndex: number;
   private layoutCount: number;
   private nativeQ2Frame: NativeQ2HudFrame | null = null;
+  private componentClients: readonly ComponentClientFrame[] = [];
+  private closed = false;
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
-    private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText">, seatCount: number,
+    private readonly simulation: Pick<SimulationPresentationAccess, "playerView" | "worldText" | "modClientPresentationSources">, seatCount: number,
     font: TextFontSelection, characterAssets: Q3CharacterAssets | null, readonly ui: ApplicationSeatUi,
     private readonly effects: ApplicationEffects, private currentQ3Client: ApplicationQ3Client | null = null,
     private readonly rerelease: ApplicationRereleasePresentation | null = null,
@@ -134,6 +146,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       const sky = await this.q1Services.prepareImageRefresh(images);
       return { commit: () => {
         this.text.font = font; this.ui.refreshImages(font, typography); hud(); sky();
+        for (const client of this.componentClients) client.hud.clear();
         for (const font of this.worldFonts.values()) font.close();
         this.worldFonts.clear(); for (const [content, font] of replacements) this.worldFonts.set(content, font);
       }, discard: () => { for (const font of replacements.values()) font.close(); } };
@@ -152,6 +165,8 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   private sourceCamera(): SceneCamera {
+    const controlled = this.componentView();
+    if (controlled !== null) return this.clientCamera(controlled);
     if (this.q3Client?.options.kind === "qvm") return cameraWithKick(this.q3Client.camera(), this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 });
     const player = this.simulation.playerView(this.local.player.actor), size = this.viewSize();
     const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
@@ -166,6 +181,38 @@ export class WorldSeatPresentation implements SeatPresentation {
     const recipe = this.assets.content.recipe, timing = recipe.timing.find(value => value.provider === recipe.engineBehavior.provider);
     if (timing === undefined) throw new Error("Chase camera requires the selected numeric profile");
     return q1ChaseCamera(firstPerson, player.angles, chase, this.effects.queries, timing.numeric, this.local.player.actor);
+  }
+  private componentView(): PlayerView | null { return this.componentClients.find(client => client.frame.view !== null)?.frame.view ?? null; }
+  private clientCamera(view: PlayerView): SceneCamera {
+    const viewport = this.viewport, x = view.fieldOfView ?? this.fieldOfView();
+    const y = Math.atan(viewport.height / viewport.width * Math.tan(x * Math.PI / 360)) * 360 / Math.PI;
+    return cameraWithKick({ origin: { ...view.origin, z: view.origin.z + view.viewHeight }, axis: anglesToAxis(view.angles), viewport,
+      projection: perspectiveProjection(x, y, 16384), clip: { kind: "none" } }, view.kickAngles ?? { x: 0, y: 0, z: 0 });
+  }
+  private async prepareComponentClients(): Promise<void> {
+    const sources = this.simulation.modClientPresentationSources?.() ?? [], actor = this.local.player.actor;
+    const next: ComponentClientFrame[] = [];
+    for (const source of sources) {
+      source.source.assertCurrent();
+      const frame = source.source.frame(actor);
+      if (frame === null) continue;
+      const previous = this.componentClients.find(client => samePresentationOwner(client.source.owner, source.owner)
+        && client.source.source === source.source && client.generation === source.source.generation);
+      next.push({ source, generation: source.source.generation, frame, hud: previous?.hud ?? new ApplicationQ2NativeHud() });
+    }
+    for (const previous of this.componentClients) if (!next.some(client => client.hud === previous.hud)) previous.hud.clear();
+    this.componentClients = next;
+    for (const client of next) if (client.frame.kind === "native" && client.frame.hud !== null) {
+      const assertCurrent = (): void => {
+        client.source.source.assertCurrent();
+        if (this.closed || !this.local.player.actor.equals(actor) || client.generation !== client.source.source.generation
+          || !this.componentClients.includes(client) || client.source.source.frame(actor) === null) throw new Error("Component client presentation is retired");
+      };
+      await this.ui.prepareNativeQ2Hud(client.frame.hud.frame, client.source.identity.source.content, this.assets,
+        { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 },
+        { renderer: client.hud, mode: client.frame.hud.mode, assertCurrent });
+      assertCurrent();
+    }
   }
 
   get q3Client(): ApplicationQ3Client | null { return this.currentQ3Client; }
@@ -193,6 +240,10 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   sourceEvents(incoming: readonly SimulationPresentationEvent[]): void {
     const events = incoming.filter(event => event.recipient === undefined || event.recipient.equals(this.local.player.actor));
+    for (const event of events) if (event.kind === "presentation-owner") {
+      for (const client of this.componentClients) if (samePresentationOwner(client.source.owner, event.event.owner)) client.hud.clear();
+      this.componentClients = this.componentClients.filter(client => !samePresentationOwner(client.source.owner, event.event.owner));
+    }
     this.q1Fog.receive(events);
     this.q1Services.receive(events);
     for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.push(source);
@@ -226,6 +277,8 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
+    this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
+    await this.prepareComponentClients();
     const visiblePresentations = presentations.filter(presentation => presentation.renderOwner !== "source-client"
       && this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false);
     const q1Messages = this.pendingQ1Messages.splice(0);
@@ -276,7 +329,8 @@ export class WorldSeatPresentation implements SeatPresentation {
     if (q3Client !== null) {
       const size = this.viewSize();
       const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
-      await q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations);
+      await q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations,
+        !this.componentClients.some(client => client.frame.hud !== null && (client.frame.kind === "quakec" || client.frame.hud.mode === "replace-status")));
       const thirdPerson = (q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0;
       const drawWeapon = (q3Client.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0;
       const supplemental = visiblePresentations.filter(source => source.renderOwner !== "source-client" && (!source.viewWeapon || drawWeapon)).map(source => {
@@ -327,6 +381,8 @@ export class WorldSeatPresentation implements SeatPresentation {
         ...(fog === undefined ? {} : { q1Fog: fog }) };
       return { ...effects, operations: [...effects.operations, ...this.scene.supplemental(input, this.q3Client?.supplementalWeaponCamera(camera) ?? camera)] };
     }, camera => {
+      const controlled = this.componentView();
+      if (controlled !== null) return this.cameraOverride(this.clientCamera(controlled));
       if (this.q3Client?.options.kind === "qvm") return this.cameraOverride(cameraWithKick(camera, this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 }));
       const player = this.simulation.playerView(this.local.player.actor);
       return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));
@@ -362,7 +418,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
       this.frames.command(command);
     }, material), "pixels");
-    const sourceView = this.simulation.playerView(this.local.player.actor);
+    const sourceView = this.componentView() ?? this.simulation.playerView(this.local.player.actor);
     const blend = sourceView.blend ?? playerView.blend;
     if (this.q3Client === null && blend !== null) draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height },
       blend, { kind: "image", name: "white", image: this.assets.world.shaders.textures.white.image });
@@ -372,11 +428,17 @@ export class WorldSeatPresentation implements SeatPresentation {
     }
     this.finale.draw(draw, this.preparedTime);
     this.rerelease?.drawStory(this.local.player.actor, draw, this.text, Math.max(1, this.viewport.height / 480));
+    const nativeReplacement = this.componentClients.some(client => client.frame.kind === "native" && client.frame.hud?.mode === "replace-status");
+    const qcStatus = this.componentClients.find(client => client.frame.kind === "quakec" && client.frame.hud !== null)?.frame;
     this.ui.draw({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, camera, command => this.frames.command(command), material,
       !this.finale.active && (this.viewSize()?.size ?? 100) < 120 && (this.q3Client?.weaponHudView().visible ?? true), !(this.rerelease?.storyActive(this.local.player.actor) ?? false),
-      this.q3Client !== null || this.nativeQ2 !== undefined, this.q3Client?.weaponHudView().aggregateWarning ?? true, this.q3Client !== null);
-    if (this.nativeQ2Frame !== null) this.ui.drawNativeQ2Hud(this.nativeQ2Frame,
+      nativeReplacement || this.q3Client !== null || this.nativeQ2 !== undefined, this.q3Client?.weaponHudView().aggregateWarning ?? true, this.q3Client !== null,
+      nativeReplacement ? { kind: "native" } : qcStatus?.kind === "quakec" && qcStatus.hud !== null ? { kind: "vitals", ...qcStatus.hud } : undefined);
+    if (this.nativeQ2Frame !== null && !nativeReplacement && qcStatus === undefined) this.ui.drawNativeQ2Hud(this.nativeQ2Frame,
       { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, command => this.frames.command(command), material);
+    for (const client of this.componentClients) if (client.frame.kind === "native" && client.frame.hud !== null) this.ui.drawNativeQ2Hud(client.frame.hud.frame,
+      { binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, command => this.frames.command(command), material, undefined,
+      { renderer: client.hud, mode: client.frame.hud.mode });
     this.graphOverlay?.(draw, { x: camera.viewport.x - area.x, y: camera.viewport.y - area.y,
       width: camera.viewport.width, height: camera.viewport.height });
     if (this.local.input.focus.kind === "console") {
@@ -402,6 +464,9 @@ export class WorldSeatPresentation implements SeatPresentation {
   }
 
   close(): undefined {
+    this.closed = true;
+    for (const client of this.componentClients) client.hud.clear();
+    this.componentClients = [];
     this.componentEffects.clear();
     const errors: unknown[] = [];
     const close = (dispose: () => void): void => { try { dispose(); } catch (error) { errors.push(error); } };

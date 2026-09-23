@@ -5,6 +5,7 @@ import type { QvmModActorField } from "./qvm-mod-callbacks.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { ProviderId } from "./identity.ts";
 import type { ModPickupRule } from "./original-pickups.ts";
+import type { NativeModClientPresentation } from "./mod-client-presentation.ts";
 
 export type NativeModScalar = "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "int64" | "uint64" | "float32" | "float64";
 /** Image-relative addresses are rebound after each original source save restoration. */
@@ -55,6 +56,8 @@ export interface NativeModClients {
   readonly input?: readonly ModClientInputBinding<NativeModSourceCall, NativeModInputOutput>[];
   /** Original per-client work on the existing sourceActors clock. */
   readonly frame?: readonly NativeModSourceCall[];
+  /** Original per-client work after all source entities finish their frame. */
+  readonly endFrame?: readonly NativeModSourceCall[];
   /** Transient input words within declared private storage; the original module owns saved state. */
   readonly inputFields?: readonly NativeModClientInputField[];
   readonly pose?: { readonly viewHeight: NativeModArmorField; readonly crouched: { readonly field: NativeModArmorField; readonly mask: number } };
@@ -160,6 +163,7 @@ export interface NativeModCombat {
   readonly deferred?: NativeModDeferredDamage;
 }
 export interface NativeModDeclaration {
+  readonly clientPresentation?: NativeModClientPresentation;
   readonly version: 1;
   readonly runtime: "native";
   readonly program: { readonly path: string; readonly digest: ContentDigest };

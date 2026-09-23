@@ -2,6 +2,11 @@ import type { ContentId } from "../../../contracts/content.ts";
 import type { ActorId, ProviderId } from "../../../contracts/identity.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import type { Q2ProtocolIdentity } from "../../../contracts/protocol.ts";
+import type { Q2PlayerState, Q2RereleasePlayerState } from "../../../contracts/protocol.ts";
+import type { NativeModClientPresentation } from "../../../contracts/mod-client-presentation.ts";
+import type { ModClientPresentationFrame } from "../../../world/session/mod-client-presentation.ts";
+import { classicGuestPlayerView } from "./classic-guest-player.ts";
+import { rereleaseGuestPlayerView } from "./rerelease-guest-player.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { createQ2Fog, type Q2FogState } from "../../../content/q2/rerelease/types.ts";
 import { Q2ServerMessageReader } from "../../../network/q2/index.ts";
@@ -36,11 +41,14 @@ export interface NativeModPresentationSource {
   drainMessages(): readonly ClassicGuestMessage[];
   appearance(slot: number): NativeModAppearance;
   signature(slot: number): string;
+  playerState(slot: number): Q2PlayerState | Q2RereleasePlayerState;
+  clock(): { readonly serverFrame: number; readonly timeMilliseconds: number };
   state(slot: number): { readonly active: boolean; readonly sound: number; readonly event: number; readonly origin: Vec3;
     readonly volume: number; readonly attenuation: number };
 }
 export interface NativeModPresentationCheckpoint {
   readonly fog: readonly { readonly actor: SavedActorId; readonly value: Q2FogState }[];
+  readonly clients?: readonly { readonly actor: SavedActorId; readonly layout: string; readonly inventory: readonly number[] }[];
 }
 interface NativeLoop {
   readonly path: string;
@@ -51,7 +59,11 @@ interface NativeLoop {
 export function readNativeModPresentation(reader: SaveReader): NativeModPresentationCheckpoint {
   const fog = reader.field("fog").list(entry => ({ actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) }, value: readQ2FogState(entry.field("value")) }));
   if (new Set(fog.map(entry => `${entry.actor.slot}:${entry.actor.generation}`)).size !== fog.length) throw new Error("Duplicate native mod presentation recipient");
-  return { fog };
+  const clients = reader.field("clients").value === undefined ? [] : reader.field("clients").list(entry => ({
+    actor: { slot: entry.field("actor").field("slot").integer(0), generation: entry.field("actor").field("generation").integer(0) },
+    layout: entry.field("layout").string(), inventory: entry.field("inventory").list(value => value.integer()) }));
+  if (new Set(clients.map(entry => `${entry.actor.slot}:${entry.actor.generation}`)).size !== clients.length) reader.fail("Duplicate native client presentation");
+  return { fog, clients };
 }
 
 /** Each source has its own configstring namespace, decoded by the existing protocol reader. */
@@ -62,21 +74,37 @@ export class NativeModPresentation {
   private readonly configs = new Map<number, string>();
   private readonly loops = new Map<ActorId, NativeLoop>();
   private readonly entityEvents = new Map<ActorId, number>();
+  private readonly clients = new Map<ActorId, { layout: string; inventory: readonly number[] }>();
+  private readonly clientFrames = new Map<ActorId, ModClientPresentationFrame>();
+  private revision = 0;
+  get generation(): number { return this.revision; }
+  clientFrame(actor: ActorId): ModClientPresentationFrame | null {
+    return this.services.actors.isLive(actor) ? this.clientFrames.get(actor) ?? null : null;
+  }
   constructor(private readonly source: NativeModPresentationSource, private readonly content: ContentId,
     private readonly projection: NativeModProjection, private readonly services: ModHostServices, private readonly context: NativeModHostContext,
-    private readonly owner: ProviderId) {
+    private readonly owner: ProviderId, private readonly admission?: NativeModClientPresentation) {
     const protocol: Q2ProtocolIdentity = source.edition === "classic" ? { kind: "q2-classic", version: 34 } : { kind: "q2-rerelease", version: 1038 };
     this.layout = q2ApplicationLayout(protocol);
     this.reader = new Q2ServerMessageReader(protocol, { maxConfigStrings: this.layout.maxConfigStrings, inventorySlots: 256 });
   }
   publish(actors: readonly { readonly actor: ActorId; readonly slot: number }[], events = true): void {
     this.drain();
+    this.clientFrames.clear();
+    const configstrings = this.admission === undefined ? null : new Map(this.source.configstrings());
     const time = this.services.time();
     const activeActors = new Set(actors.map(entry => entry.actor));
     for (const actor of new Set([...this.entityEvents.keys(), ...this.loops.keys()])) if (!activeActors.has(actor)) this.release(actor);
     for (const { actor, slot } of actors) {
       const state = this.source.state(slot);
       if (!state.active || !this.services.actors.isLive(actor)) { this.release(actor); continue; }
+      if (this.admission !== undefined && configstrings !== null && this.projection.acceptsClient(slot)) {
+        const player = this.source.playerState(slot), received = this.clients.get(actor);
+        this.clientFrames.set(actor, { kind: "native", hud: this.admission.hud === "none" ? null : {
+          mode: this.admission.hud, frame: { protocol: player.kind === "q2-classic" ? { kind: "q2-classic", version: 34 } : { kind: "q2-rerelease", version: 1038 },
+            stats: player.stats, configstrings, layout: received?.layout ?? "", inventory: received?.inventory ?? [], playerNumber: slot - 1, ...this.source.clock() } },
+          view: this.admission.view === "none" ? null : player.kind === "q2-classic" ? classicGuestPlayerView(player) : rereleaseGuestPlayerView(player) });
+      }
       const previous = this.entityEvents.get(actor);
       if (events && state.event !== 0 && previous !== state.event) {
         const engine = this.services.engine; if (engine === undefined) throw new Error("Native mod output requires presentation services");
@@ -110,9 +138,15 @@ export class NativeModPresentation {
   }
   release(actor: ActorId): void {
     const loop = this.loops.get(actor); if (loop !== undefined) this.stop(actor, loop);
-    this.entityEvents.delete(actor); this.fog.delete(actor);
+    this.entityEvents.delete(actor); this.fog.delete(actor); this.clients.delete(actor); this.clientFrames.delete(actor);
   }
-  close(): void { for (const actor of this.loops.keys()) this.release(actor); this.entityEvents.clear(); }
+  close(): void { this.revision++; for (const actor of this.loops.keys()) this.release(actor); this.entityEvents.clear(); this.clients.clear(); this.clientFrames.clear(); }
+  private clientMessages(actor: ActorId | null) {
+    if (actor === null) throw new Error("Native client presentation requires an admitted recipient");
+    let state = this.clients.get(actor);
+    if (state === undefined) { state = { layout: "", inventory: [] }; this.clients.set(actor, state); }
+    return state;
+  }
   private recipients(message: ClassicGuestMessage): readonly (ActorId | null)[] {
     if (message.audience.kind === "unicast") {
       const actor = this.projection.actorAt(message.audience.slot);
@@ -142,8 +176,8 @@ export class NativeModPresentation {
           entity: slot => { const actor = this.projection.actorAt(slot), body = actor === null ? null : this.services.bodies.read(actor); return body ?? this.source.appearance(slot); },
           soundConfigOffset: this.layout.sounds, imageConfigOffset: this.layout.images, playerSkinConfigOffset: this.layout.playerSkins,
           configString: index => this.configs.get(index), setConfigString: (index, value) => { this.configs.set(index, value); },
-          setInventory: counts => { if (engine.message === undefined) throw new Error("Native inventory output requires message services"); engine.message({ kind: "q2-inventory", counts }, recipient); },
-          setLayout: program => { if (engine.message === undefined) throw new Error("Native layout output requires message services"); engine.message({ kind: "q2-layout", program }, recipient); },
+          setInventory: counts => { this.clientMessages(recipient).inventory = [...counts]; },
+          setLayout: program => { this.clientMessages(recipient).layout = program; },
           fog: value => { if (recipient === null) throw new Error("Native fog requires a destination player"); const next = q2FogFromWire(this.fog.get(recipient) ?? createQ2Fog(), value); this.fog.set(recipient, next); return next; },
           emit: event => { engine.events.emit(this.content, event.kind === "q2" && event.event.kind === "sound" ? { ...event, event: { ...event.event, reliable: message.reliable } } : event, time, recipient ?? undefined); },
         });
@@ -163,10 +197,17 @@ export class NativeModPresentation {
     return [base, ...source.attachedModels.filter(path => path !== "").map(path => ({ ...base, path, skin: 0, skinPath: null }))];
   }
   signature(slot: number): string { return this.source.signature(slot); }
-  checkpoint(): NativeModPresentationCheckpoint { return { fog: [...this.fog].filter(([actor]) => this.services.actors.isLive(actor)).map(([actor, value]) => ({ actor: { slot: actor.slot, generation: actor.generation }, value })) }; }
+  checkpoint(): NativeModPresentationCheckpoint { return {
+    fog: [...this.fog].filter(([actor]) => this.services.actors.isLive(actor)).map(([actor, value]) => ({ actor: { slot: actor.slot, generation: actor.generation }, value })),
+    clients: [...this.clients].filter(([actor]) => this.services.actors.isLive(actor)).map(([actor, state]) => ({ actor: { slot: actor.slot, generation: actor.generation }, ...state })) }; }
   restore(saved: NativeModPresentationCheckpoint): void {
     const entries = saved.fog.map(entry => ({ actor: this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current"), value: entry.value }));
     if (entries.some(entry => !this.services.actors.isLive(entry.actor))) throw new Error("Native mod fog recipient is unavailable");
     this.close(); this.source.drainMessages(); this.fog.clear(); this.configs.clear(); for (const entry of entries) this.fog.set(entry.actor, entry.value);
+    for (const entry of saved.clients ?? []) {
+      const actor = this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current");
+      if (!this.services.actors.isLive(actor)) throw new Error("Native client presentation recipient is unavailable");
+      this.clients.set(actor, { layout: entry.layout, inventory: entry.inventory });
+    }
   }
 }

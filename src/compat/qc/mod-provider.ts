@@ -1,3 +1,5 @@
+import type { ModClientPresentationSource, ModClientPresentationFrame } from "../../world/session/mod-client-presentation.ts";
+import { quakeCLocalView } from "../../app/bootstrap/simulation/quakec-local-messages.ts";
 import type { OriginalPickupExecution } from "../../contracts/original-pickups.ts";
 import type { ModuleIdentity, QuakeCCheckpoint } from "../../contracts/execution.ts";
 import type { ContentId, ResolvedResourceReference } from "../../contracts/content.ts";
@@ -124,6 +126,13 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
       fields.add(word);
     }
   }
+  if (declaration.clientPresentation !== undefined) {
+    if (declaration.clients === undefined) throw new Error("QC client presentation requires declared clients");
+    const names = declaration.clientPresentation.hud === "none" ? [] : ["health", "armorvalue"];
+    for (const name of names) if (program.fieldsByName.get(name)?.type !== "float") throw new Error(`QC status requires original ${name}`);
+    if (declaration.clientPresentation.view !== "none") for (const name of ["origin", "angles", "view_ofs"])
+      if (program.fieldsByName.get(name)?.type !== "vector") throw new Error(`QC view requires original ${name}`);
+  }
   if (declaration.clients !== undefined) {
     if (!Number.isInteger(declaration.clients.maximum) || declaration.clients.maximum < 1 || declaration.clients.maximum >= 8191)
       throw new Error("Mod client capacity must fit reserved QuakeC edicts");
@@ -211,6 +220,8 @@ export class QcModProvider {
   private loading = false;
   private initialized = false;
   private closed = false;
+  private presentationGeneration = 0;
+  private clientSource: ModClientPresentationSource | null = null;
   private commands: ModCommandPort | null = null;
   constructor(readonly program: QcProgram, readonly module: ModuleIdentity, readonly declaration: ModCallbackDeclaration,
     readonly services: ModHostServices, readonly random: QcModRandom, readonly media?: QcModMedia) {
@@ -814,6 +825,25 @@ export class QcModProvider {
     words.setFloat(field("watertype"), decision.waterType); words.setFloat(field("waterlevel"), decision.waterLevel);
     return undefined;
   }
+  clientPresentation(): ModClientPresentationSource {
+    const provider = this;
+    return this.clientSource ??= { get generation() { return provider.presentationGeneration; },
+      frame: actor => this.clientFrame(actor), assertCurrent: () => { if (this.closed) throw new Error("QC client presentation is retired"); } };
+  }
+  private clientFrame(actor: ActorId): ModClientPresentationFrame | null {
+    if (this.closed || this.depth !== 0) throw new Error("QC client presentation requires an idle live source");
+    const declaration = this.declaration.clientPresentation, slot = this.projections.get(actor);
+    if (declaration === undefined || slot === undefined || !this.services.actors.isLive(actor) || this.clients?.admitted(actor) !== true) return null;
+    const local = this.messages?.clientState();
+    if (local === undefined) throw new Error("QC client presentation has no source messages");
+    const words = this.machine.entities.at(slot), field = (name: string) => this.machine.fieldOffset(name);
+    const hud = declaration.hud === "none" ? null : { health: words.float(field("health")), armor: words.float(field("armorvalue")) };
+    return { kind: "quakec", hud, view: declaration.view === "none" ? null : quakeCLocalView(actor, local, {
+      read: target => { const targetSlot = this.projections.get(target);
+        if (targetSlot === undefined || !this.services.actors.isLive(target)) return null;
+        const value = this.machine.entities.at(targetSlot); return { origin: value.vector(field("origin")), angles: value.vector(field("angles")) }; },
+      offset: () => words.vector(field("view_ofs")) }) };
+  }
   presentations(): readonly SimulationPresentation[] {
     const result: SimulationPresentation[] = [];
     for (const actor of this.services.actors.ownedBy(this.module.id)) {
@@ -858,6 +888,7 @@ export class QcModProvider {
     return this.ownedActors.advance(frame);
   }
   restore(saved: QuakeCCheckpoint): undefined {
+    this.presentationGeneration++;
     this.protection?.assertIdle();
     if (this.depth !== 0 || this.input.active) throw new Error("Mod restore requires an idle callback boundary");
     this.closeClientBindings();

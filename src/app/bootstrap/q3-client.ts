@@ -293,6 +293,7 @@ export class ApplicationQ3Client {
     return { models: resources.registeredModels(), skins: resources.registeredSkins() };
   }
   private requireBackend() { if (this.closed || this.backend === null) throw new Error("Q3 cgame seat is closed or uninitialized"); return this.backend; }
+  private statusVisible = true;
   private requireGame(): Q3ClientPresentation { const backend = this.requireBackend(); if (backend.kind !== "typescript") throw new Error("This seat runs native guest cgame"); return backend.game; }
   private async initialize(): Promise<void> {
     const o = this.options, seat = o.local.player.seat.id, source = this.source, media = this.media;
@@ -313,7 +314,7 @@ export class ApplicationQ3Client {
     this.cinematics = cinematics;
     const cvarClient = this;
     const session: Q3PresentationSession = { product: this.product, clientNumber: source.clientNumber, serverMessageSequence: source.serverMessageSequence ?? 0, lastExecutedServerCommand: source.lastExecutedServerCommand ?? 0,
-        mode: { kind: "live" }, commands: source.commands, snapshots: source, get cvars() { return cvarClient.cvars; },
+        mode: { kind: "live" }, commands: source.commands, snapshots: source, get cvars() { return cvarClient.cvars; }, statusVisible: () => this.statusVisible,
         getGameState: () => source.getGameState(), getServerCommand: sequence => source.getServerCommand(sequence), snapshotPing: number => source.snapshotPing?.(number) ?? 0,
         addReliableCommand: o.commands.reliable, appendConsoleCommand: o.commands.console, registerCgameCommand: name => { this.commandNames.add(name); o.commandRegistration.register(name); },
         setUserCommandValue: (weapon, sensitivity) => { this.selection = { weapon, sensitivity }; },
@@ -418,7 +419,7 @@ export class ApplicationQ3Client {
     this.localSource.receiveEvents(events);
   }
   receive(state: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void { this.requireGame(); if (this.localSource === null) throw new Error("Remote Q3 cgame receives snapshots through its network connection"); this.localSource.receive(state, events, commands); }
-  async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = []): Promise<void> {
+  async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = [], statusVisible = true): Promise<void> {
     this.hiddenBodies.clear();
     this.bodyPoses.clear();
     this.poseActors.clear();
@@ -432,9 +433,18 @@ export class ApplicationQ3Client {
     for (const setting of this.serverSettings()) {
       if (this.sharedCvarNames.has(setting.name.toLowerCase())) this.cvars.set(setting.name, setting.value, true);
     }
-    if (backend.kind === "typescript") {
-      await backend.game.frames.drawActiveFrame({ serverTime: this.source.time, stereo: "center", demoPlayback: this.source.sourceMode === 'demo', engineFrameNumber: frameNumber });
-    } else await backend.game.draw(this.source.time, this.source.sourceMode === 'demo');
+    const previousStatus = this.statusVisible; this.statusVisible = statusVisible;
+    let failure: { readonly error: unknown } | null = null;
+    try {
+      if (backend.kind === "typescript") {
+        await backend.game.frames.drawActiveFrame({ serverTime: this.source.time, stereo: "center", demoPlayback: this.source.sourceMode === 'demo', engineFrameNumber: frameNumber });
+      } else await backend.game.draw(this.source.time, this.source.sourceMode === 'demo');
+    } catch (error) { failure = { error }; throw error; }
+    finally {
+      this.statusVisible = previousStatus;
+      if (backend.kind === "qvm") try { backend.game.refreshStatus(); }
+      catch (error) { if (failure !== null) throw new AggregateError([failure.error, error], "Cgame frame and status restoration failed"); throw error; }
+    }
     await this.sceneRenderer.preload(this.submissions.flatMap(submission => submission.kind === "scene" ? [submission.scene] : []));
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
   }

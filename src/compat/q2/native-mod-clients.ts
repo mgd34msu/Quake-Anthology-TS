@@ -106,6 +106,14 @@ export class NativeModClientsBinding {
       this.calls(this.operations.declaration.frame ?? [], entry.actor);
     return true;
   }
+  endFrame(): void {
+    if ((this.operations.declaration.endFrame?.length ?? 0) === 0) return;
+    for (const entry of [...this.entries.values()].sort((left, right) => left.slot - right.slot)) {
+      const client = this.operations.services.forActor(entry.actor);
+      if (client !== null && this.operations.services.actor(client)?.equals(entry.actor) === true && this.admitted(entry.actor))
+        this.calls(this.operations.declaration.endFrame ?? [], entry.actor);
+    }
+  }
   private disconnect(actor: ActorId): void {
     try { if (this.require(actor).admitted) this.calls(this.operations.declaration.disconnect, actor); }
     finally { this.operations.release(actor); this.entries.delete(actor); }

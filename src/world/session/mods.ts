@@ -1,3 +1,5 @@
+import type { PresentationOwner } from "../../contracts/presentation.ts";
+import type { ActiveModClientPresentation, ModClientPresentationAdmission, ModClientPresentationSource } from "./mod-client-presentation.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { Bounds } from "../../contracts/math.ts";
@@ -97,6 +99,7 @@ export interface ModHostServices {
 }
 
 export interface ModRuntime extends SessionResource {
+  clientPresentation?(): ModClientPresentationSource;
   qvmPresentation?(): ModQvmPresentationSource;
   /** Attach prepared actor bindings after original source state has initialized or restored. */
   activate?(): undefined;
@@ -111,6 +114,7 @@ export interface ModRuntime extends SessionResource {
 }
 
 export interface PreparedMod {
+  readonly clientPresentation?: ModClientPresentationAdmission;
   readonly description: ModDescription;
   readonly identity: ModIdentity;
   readonly presentation?: { readonly kind: "qvm"; readonly artifact: QvmModuleOptions["artifact"];
@@ -125,7 +129,7 @@ export interface PreparedMod {
 }
 
 interface PreparedEntry { readonly prepared: PreparedMod; readonly identity: ModIdentity; }
-interface ActiveMod extends PreparedEntry { readonly resources: ResourceScope; readonly runtime: ModRuntime; }
+interface ActiveMod extends PreparedEntry { readonly presentationOwner: PresentationOwner | null; readonly resources: ResourceScope; readonly runtime: ModRuntime; }
 const emptyAppearances: ReadonlyMap<ActorId, readonly SimulationPresentation[]> = new Map<ActorId, readonly SimulationPresentation[]>();
 
 export interface SessionModsOptions {
@@ -231,6 +235,17 @@ export class SessionMods implements SessionResource {
 
   async checkpoint(): Promise<ModSessionCheckpoint> {
     return await this.exclusive(() => this.capture());
+  }
+
+  clientPresentationSources(): readonly ActiveModClientPresentation[] {
+    this.assertOpen();
+    if (this.busy) throw new Error("Cannot read component client output during a lifecycle operation");
+    return this.active.flatMap(entry => {
+      if (entry.prepared.clientPresentation === undefined) return [];
+      const source = entry.runtime.clientPresentation?.();
+      if (source === undefined || entry.presentationOwner === null) throw new Error("Declared client presentation has no source owner");
+      return [{ owner: entry.presentationOwner, identity: entry.identity, source }];
+    });
   }
 
   presentationSources(): readonly ActiveModPresentation[] {
@@ -356,6 +371,18 @@ export class SessionMods implements SessionResource {
 
   private async apply(selections: readonly ModSelection[], saved?: ModSessionCheckpoint, travel?: ModTravelCheckpoint): Promise<void> {
     const prepared = this.entries(selections);
+    let hud: PreparedEntry | null = null, view: PreparedEntry | null = null;
+    for (const entry of prepared) {
+      const claim = entry.prepared.clientPresentation;
+      if (claim?.hud === "replace") {
+        if (hud !== null) throw new Error(`Component HUD replacement conflict: ${modSelectionKey(hud.identity.selection)} and ${modSelectionKey(entry.identity.selection)}`);
+        hud = entry;
+      }
+      if (claim?.view === true) {
+        if (view !== null) throw new Error(`Component camera control conflict: ${modSelectionKey(view.identity.selection)} and ${modSelectionKey(entry.identity.selection)}`);
+        view = entry;
+      }
+    }
     if (saved !== undefined) this.validateSaved(prepared, saved);
     if (travel !== undefined) this.validateTravel(prepared, travel);
     const retained = new Map(this.active.map(entry => [modSelectionKey(entry.identity.selection), entry]));
@@ -369,16 +396,18 @@ export class SessionMods implements SessionResource {
         const assertCurrent = (): void => { this.assertOpen(); resources.assertOpen(); };
         const state = saved?.mods[index]?.state ?? travel?.mods[index]?.state;
         let services = this.options.services ?? null;
+        let presentationOwner: PresentationOwner | null = null;
         if (services?.engine !== undefined) {
           if (this.options.presentation === undefined) throw new Error("Component engine output requires presentation ownership");
           const events = resources.own(this.options.presentation.bindOwner(modInstanceProvider(entry.identity.selection), entry.identity.source.content, state != null));
+          presentationOwner = events.owner;
           services = { ...services, engine: { ...services.engine, events } };
         }
         const runtime = await entry.prepared.initialize({ instance: modInstanceProvider(entry.identity.selection), resources, assertCurrent, services, restoring: state != null,
           nextFrame: async () => { assertCurrent(); await this.options.nextFrame(); assertCurrent(); } });
         if (resources.isClosed) { runtime.close(); throw new Error("Mod session closed during initialization"); }
         resources.own(runtime); assertCurrent();
-        const active = { ...entry, resources, runtime }; opened.push(active); next.push(active);
+        const active = { ...entry, resources, runtime, presentationOwner }; opened.push(active); next.push(active);
         if (state !== undefined && state !== null) { await runtime.restore(state); assertCurrent(); }
         runtime.activate?.(); assertCurrent();
       }

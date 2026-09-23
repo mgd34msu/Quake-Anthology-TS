@@ -62,6 +62,7 @@ import { ClientWeaponRuntime, ClientWeaponSelection } from "./weapons.ts";
 
 
 export interface Q3PresentationSession {
+  statusVisible?(): boolean;
   readonly product: Product; readonly clientNumber: number; readonly serverMessageSequence: number;
   readonly lastExecutedServerCommand: number; readonly mode: { readonly kind: "demo" | "live" };
   readonly commands: CommandSource; readonly snapshots: SnapshotSource; readonly cvars: CvarRegistry;
@@ -183,7 +184,8 @@ async function createQ3Presentation(input: Q3ClientPresentationOptions | Q3Scene
         blueTeamName: session.product === "missionpack" ? readVm("cg_blueTeamName").value : "",
         deferPlayers: enabled("cg_deferPlayers"), buildScript: enabled("cg_buildScript"), loading: context.loading }),
     }, staticState.clientInfo);
-    const configuration = new ClientConfiguration(session.product, { state, staticState, cvars: session.cvars, clients, configString });
+    const configuration = new ClientConfiguration(session.product, { state, staticState, cvars: session.cvars, clients, configString,
+      ...(session.statusVisible === undefined ? {} : { statusVisible: () => session.statusVisible?.() !== false }) });
     const media = new ClientMedia(session.product, staticState, resources, soundBank);
     const draw = options.draw, tools = new ClientDrawTools(draw, media);
     const icons = new ClientDrawIcons(state, tools, () => ({ drawIcons: enabled("cg_drawIcons"), draw3dIcons: enabled("cg_draw3dIcons") }), commands);

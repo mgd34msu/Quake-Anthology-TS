@@ -213,6 +213,7 @@ export interface DebugShapePresentationAccess {
 }
 
 export interface SimulationPresentationAccess {
+  modClientPresentationSources?(): readonly import("../../../world/session/mod-client-presentation.ts").ActiveModClientPresentation[];
   worldText(): readonly WorldText[];
   playerUi(actor: ActorId): PlayerUi;
   captureTravel(spawnPoint?: string): SimulationTravel;

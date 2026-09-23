@@ -39,7 +39,7 @@ export function prepareNativeMod(options: PrepareNativeModOptions): PreparedMod 
     api: declaration.target.api, profile: declaration.target.abi, artifact: options.artifact };
   const prepared = declaration.target.api.kind === "q2-classic-game" ? { edition: "classic", execution, bytes: options.program } satisfies import("./classic-guest-source.ts").PreparedClassicGuest
     : { edition: "rerelease", execution, bytes: options.program } satisfies import("./rerelease-guest-source.ts").PreparedRereleaseGuest;
-  return { description, moduleCheckpoint: "provider", identity: { selection: description.selection, source: description.source, declarationDigest, modules: [module], providers: [{ provider: instance, schema: "native:mod", version: 1 }] },
+  return { description, ...(declaration.clientPresentation === undefined ? {} : { clientPresentation: { hud: declaration.clientPresentation.hud === "none" ? "none" : declaration.clientPresentation.hud === "layout-overlay" ? "overlay" : "replace", view: declaration.clientPresentation.view !== "none" } }), moduleCheckpoint: "provider", identity: { selection: description.selection, source: description.source, declarationDigest, modules: [module], providers: [{ provider: instance, schema: "native:mod", version: 1 }] },
     validateState(state) { const record = state.providers[0];
       if (state.guests.length !== 0 || state.providers.length !== 1 || record === undefined) throw new Error("Missing native gameplay mod checkpoint");
       validateNativeModCheckpoint(record, module, declaration);
@@ -58,7 +58,7 @@ export function prepareNativeMod(options: PrepareNativeModOptions): PreparedMod 
         register: registrations => registerModCallbacks(declaration.callbacks, registrations, () => services.time(), (callback, inputs) => provider.invoke(callback, inputs)),
         async checkpoint() { return { guests: [], providers: [await provider.checkpoint()] }; },
         async restore(state) { const record = state.providers[0]; if (record === undefined) throw new Error("Missing native gameplay mod checkpoint"); await provider.restore(record); },
-        advance: frame => provider.advance(frame), presentations: () => provider.presentations(),
+        clientPresentation: () => provider.clientPresentation(), advance: frame => provider.advance(frame), presentations: () => provider.presentations(),
         appearanceOverrides: () => provider.appearanceOverrides(),
         close: () => provider.close() };
     } };

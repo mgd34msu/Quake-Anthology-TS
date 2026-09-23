@@ -40,7 +40,7 @@ export interface QcNetQuakeMessageServices {
   local?(): boolean;
   loading(): boolean;
   client(actor: ActorId): boolean;
-  route(messages: readonly NetQuakeMessage[], destination: QcMessageDestination): undefined;
+  route(messages: readonly NetQuakeMessage[], destination: QcMessageDestination, viewTargets?: ReadonlyMap<number, ActorId | null>): undefined;
 }
 export interface QcQuakeWorldMessageServices {
   loading(): boolean;
@@ -360,7 +360,13 @@ export class QcBroadcastMessages {
   private routeBuffer(entry: { readonly buffer: SizeBuf; readonly owners: ReadonlyMap<number, ActorId | null> }, destination: QcMessageDestination): void {
     if (this.nq !== undefined) {
       const messages = this.decoder.decode(entry.buffer.bytes());
-      this.nq.route(messages, destination);
+      const encoded = new SizeBuf(entry.buffer.maxsize), viewTargets = new Map<number, ActorId | null>();
+      for (const [index, message] of messages.entries()) {
+        if (message.kind === "entity") throw new Error("QC cannot write host entity snapshots");
+        if (message.kind === "set-view") viewTargets.set(index, entry.owners.get(encoded.cursize + 1) ?? null);
+        writeNetQuakeMessage(encoded, this.decoder.protocol, message, this.decoder.rereleaseMessages);
+      }
+      this.nq.route(messages, destination, viewTargets);
       if (!this.nq.native() || this.nq.local?.() === true || destination.kind === "broadcast" && !destination.reliable) this.emitNetQuakeEffects(messages, entry.owners, entry.buffer.maxsize, true, destination.kind === "client" ? destination.actor : undefined);
       return;
     }

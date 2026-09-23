@@ -113,7 +113,8 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
     if (asciiFold(command.argv[0] ?? "") !== "sv") return false;
     withCommand(command, run); return true;
   };
-  let sourceTime: number | null = null;
+  let sourceTime: number | null = null, sourceFrame = 0;
+  const presentationClock = () => { const now = services.time(); return { serverFrame: sourceFrame, timeMilliseconds: (sourceTime ?? (now.kind === "seconds" ? now.value : now.value / 1000)) * 1000 }; };
   const frameSeconds = declaration.sourceActors?.frameSeconds ?? (rerelease ? context.frameMilliseconds / 1000 : 0.1);
   const runtime: ActorHostRuntime = { numeric: timing.numeric, random: new SourceRandom(services.seed, rerelease ? "q2-rerelease" : "classic"),
     now: () => { const time = services.time(); return sourceTime ?? (time.kind === "seconds" ? time.value : time.value / 1000); },
@@ -136,15 +137,15 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
     const retained: ClassicGuestServices = adapter; retained.bindHost(source.host);
     const spawn = async (): Promise<void> => { if (declaration.spawnEntities !== null) await source.host.spawnEntitiesLoading(map, declaration.spawnEntities, "", options.nextFrame); retained.completeSpawn(); };
     const identity = { module: source.memory.module, map: context.mapPath };
-    const presentation = new NativeModPresentation({ edition: "classic", configstrings: () => retained.configstrings(), drainMessages: () => retained.drainMessages(),
+    const presentation = new NativeModPresentation({ edition: "classic", playerState: slot => retained.playerState(slot), clock: presentationClock, configstrings: () => retained.configstrings(), drainMessages: () => retained.drainMessages(),
       state(slot) { const state = retained.entityState(slot), record = source.host.edicts.at(slot); return { active: record.bytes.getInt32(88, true) !== 0 && (record.bytes.getInt32(184, true) & 1) === 0, sound: state.sound, event: state.event, origin: state.origin, volume: 1, attenuation: 1 }; },
       signature(slot) { const state = retained.entityState(slot); return JSON.stringify([state.modelIndexes, state.skin]); },
       appearance(slot) { const state = retained.entityState(slot), record = source.host.edicts.at(slot);
         return { ...retained.modelAppearance(slot), frame: state.frame, oldFrame: state.frame, effects: state.effects, renderFlags: state.renderEffects,
           scale: 1, alpha: (state.renderEffects & 32) !== 0 ? 0.3 : 1, visible: record.bytes.getInt32(88, true) !== 0 && (record.bytes.getInt32(184, true) & 1) === 0,
-          origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
+          origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider, declaration.clientPresentation);
     return { content: options.source.content, memory: source.memory, imageBase: source.imageBase, cvars, presentation, withCommand, entry: name => source.entry(name),
-      synchronizeFrame(seconds) { sourceTime = seconds; },
+      synchronizeFrame(seconds, frame) { sourceTime = seconds; sourceFrame = frame; },
       bindInlineRegion: (entry, join, intercept) => source.host.options.runner.bindInlineRegion(entry, join, declaration.target.abi, intercept),
       gameEntry(name) { const definition = CLASSIC_Q2_EXPORTS[name]; if (definition === undefined) throw new Error(`Unknown API3 game export ${name}`);
         const address = source.memory.readPointer(source.memory.offset(source.host.edicts.exports, BigInt(definition.offset)));
@@ -176,16 +177,16 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
     importBoundary: (name, values, invoke) => options.projection.importBoundary(name, values, invoke) });
   adapter.bindHost(source.host);
   const spawn = async (): Promise<void> => { if (declaration.spawnEntities !== null) await source.host.spawnEntitiesLoading(map, declaration.spawnEntities, "", options.nextFrame); adapter.completeSpawn(); };
-  const presentation = new NativeModPresentation({ edition: "rerelease", configstrings: () => adapter.configstrings(), drainMessages: () => adapter.drainMessages(),
+  const presentation = new NativeModPresentation({ edition: "rerelease", playerState: slot => adapter.playerState(slot), clock: presentationClock, configstrings: () => adapter.configstrings(), drainMessages: () => adapter.drainMessages(),
     state(slot) { const state = adapter.entityState(slot), info = adapter.entityInfo(slot); return { active: info.active && (info.serverFlags & 1) === 0, sound: state.sound, event: state.event, origin: state.origin, volume: state.loopVolume, attenuation: state.loopAttenuation }; },
     signature(slot) { const state = adapter.entityState(slot); return JSON.stringify([state.modelIndexes, state.skin]); },
     appearance(slot) { const state = adapter.entityState(slot), info = adapter.entityInfo(slot);
       if (state.effects > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Native mod effects exceed lossless shared presentation");
       return { ...adapter.modelAppearance(slot), frame: state.frame, oldFrame: state.oldFrame, effects: Number(state.effects), renderFlags: state.renderEffects,
         scale: state.scale === 0 ? 1 : state.scale, alpha: state.alpha === 0 ? (state.renderEffects & 32) !== 0 ? 0.3 : 1 : state.alpha,
-        visible: info.active && (info.serverFlags & 1) === 0, origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider);
+        visible: info.active && (info.serverFlags & 1) === 0, origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider, declaration.clientPresentation);
   return { content: options.source.content, memory: source.memory, imageBase: source.imageBase, cvars, presentation, withCommand, entry: name => source.entry(name),
-    synchronizeFrame(seconds, frame) { sourceTime = seconds; adapter.beginFrame(frame); },
+    synchronizeFrame(seconds, frame) { sourceTime = seconds; sourceFrame = frame; adapter.beginFrame(frame); },
     bindInlineRegion: (entry, join, intercept) => source.host.module.options.runner.bindInlineRegion(entry, join, declaration.target.abi, intercept),
     gameEntry(name) { const definition = gameExports.find(entry => entry.name === name); if (definition === undefined) throw new Error(`Unknown API2023 game export ${name}`);
       const address = source.memory.readPointer(source.memory.offset(source.host.module.bindGame(), BigInt(fieldOffset(gameExportLayout, name))));

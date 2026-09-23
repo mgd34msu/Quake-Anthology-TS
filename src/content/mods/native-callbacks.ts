@@ -148,6 +148,9 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
     : { api: { kind: targetKind, version: api.field("version").literal(2023) }, abi: { kind: abi.field("kind").literal("windows-x86-64"), image: abi.field("image").literal("pe32+"), pointerBytes: abi.field("pointerBytes").literal(8), call: abi.field("call").literal("microsoft-x64") } };
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("native"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) }, target: parsedTarget,
+    ...(reader.field("clientPresentation").value === undefined ? {} : { clientPresentation: {
+      hud: reader.field("clientPresentation").field("hud").choice("none", "layout-overlay", "replace-status"),
+      view: reader.field("clientPresentation").field("view").choice("none", "playerstate") } }),
     ...(reader.field("sourceActors").value === undefined ? {} : { sourceActors: sourceActors(reader.field("sourceActors")) }),
     ...(reader.field("protection").value === undefined && reader.field("poweredProtection").value === undefined ? {} : { protection: protections(reader) }),
     ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(pickup => ({
@@ -162,6 +165,7 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
       disconnect: reader.field("clients").field("disconnect").list(sourceCall), command: reader.field("clients").field("command").list(sourceCall),
       ...(reader.field("clients").field("input").value === undefined ? {} : { input: readModClientInput(reader.field("clients").field("input"), sourceCall, inputOutput) }),
       ...(reader.field("clients").field("frame").value === undefined ? {} : { frame: reader.field("clients").field("frame").list(sourceCall) }),
+      ...(reader.field("clients").field("endFrame").value === undefined ? {} : { endFrame: reader.field("clients").field("endFrame").list(sourceCall) }),
       ...(reader.field("clients").field("pose").value === undefined ? {} : { pose: {
         viewHeight: armorField(reader.field("clients").field("pose").field("viewHeight")),
         crouched: { field: armorField(reader.field("clients").field("pose").field("crouched").field("field")), mask: reader.field("clients").field("pose").field("crouched").field("mask").integer(1) } } }),

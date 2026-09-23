@@ -71,6 +71,9 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("quakec"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
     actorFields: reader.field("actorFields").list(field), callbacks: reader.field("callbacks").list(callback),
+    ...(reader.field("clientPresentation").value === undefined ? {} : { clientPresentation: {
+      hud: reader.field("clientPresentation").field("hud").choice("none", "replace-vitals"),
+      view: reader.field("clientPresentation").field("view").choice("none", "set-view") } }),
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1), admit: clients.field("admit").list(sourceCall),
       userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
       ...(clients.field("frame").value === undefined ? {} : { frame: clients.field("frame").list(sourceCall) }),

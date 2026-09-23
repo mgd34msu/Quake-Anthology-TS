@@ -35,8 +35,7 @@ export function presentQuakeWorldMessage(entry: QcRoutedMessage, target: ActorId
       return;
     }
     case "set-view":
-      // Camera ownership belongs to the destination player; a component cannot replace it with a source edict number.
-      throw new Error("QW component set-view requires an explicit destination camera binding");
+      state.receive([{ kind: "set-view", entity: message.entity }], target, entry.actor); return;
     case "nop": case "stat": case "stufftext": case "center-print": case "finale":
     case "set-angle": case "light-style": case "static": case "static-sound": case "damage": case "pause":
     case "killed-monster": case "found-secret": case "sell-screen":

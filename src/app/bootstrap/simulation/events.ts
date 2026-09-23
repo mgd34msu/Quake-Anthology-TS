@@ -48,7 +48,7 @@ export class SimulationEvents {
       acceptedContents: new Set([...(this.fogOptions.acceptedContents ?? []), content]) });
   }
 
-  bindOwner(provider: ProviderId, content: ContentId, restoring: boolean): Pick<SimulationEvents, "emit" | "registerResource"> & { close(): undefined } {
+  bindOwner(provider: ProviderId, content: ContentId, restoring: boolean): Pick<SimulationEvents, "emit" | "registerResource"> & { readonly owner: PresentationOwner; close(): undefined } {
     const prior = this.owners.get(provider);
     if (prior?.status === "active") throw new Error(`Presentation owner is already active: ${provider}`);
     if (prior !== undefined && (!restoring || prior.content !== content)) throw new Error(`Restored presentation owner differs: ${provider}`);
@@ -61,6 +61,7 @@ export class SimulationEvents {
     let closed = false;
     const current = (): void => { if (closed || this.owners.get(provider) !== entry) throw new Error(`Presentation owner retired: ${provider}`); };
     return {
+      owner: entry.token,
       emit: (sourceContent, source, time, recipient) => {
         current(); if (source.kind === "presentation-owner") throw new Error("Component source cannot emit owner lifecycle events");
         return this.emitOwned(entry.token, sourceContent, source, time, recipient);

@@ -351,6 +351,7 @@ export class SharedSimulation implements Simulation {
   private sourceSchedulingMilliseconds = 0;
   private closed = false;
   private modOwner: SessionMods | null = null;
+  modClientPresentationSources() { return this.modOwner?.clientPresentationSources() ?? []; }
   modPresentationSources() { return this.modOwner?.presentationSources() ?? []; }
   private readonly modClientListeners = new Set<(event: ModClientEvent) => undefined>();
   private readonly modClientAdmissions = new Set<ActorId>();

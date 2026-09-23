@@ -247,6 +247,7 @@ export function cvarTable(product: Product): readonly CvarDefinition[] {
 }
 
 export interface ClientConfigurationHost {
+  statusVisible?(): boolean;
   readonly cvars: CvarRegistry;
   readonly state: ClientGameState;
   readonly staticState: ClientGameStaticState;
@@ -320,6 +321,8 @@ export class ClientConfiguration {
   readVmSymbol(symbol: ClientVmCvarSymbol): CvarSnapshot {
     const value = this.cache.get(symbol);
     if (value === undefined) throw new Error(`VM cvar ${symbol} is not registered for ${this.product}`);
+    if (symbol === ClientVmCvarSymbol.cg_drawStatus && this.host.statusVisible?.() === false)
+      return { ...value, value: "0", numericValue: 0, integerValue: 0 };
     return value;
   }
 

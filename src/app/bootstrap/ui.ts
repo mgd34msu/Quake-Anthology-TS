@@ -301,9 +301,11 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   }
 
   draw(context: UiDrawContext, camera: SceneCamera, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
-    material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true, nativeStatus = false, showAggregateWarning = true, nativeCrosshair = nativeStatus): void {
+    material: (draw: MaterialTextDraw) => void, gameVisible = true, crosshairVisible = true, nativeStatus = false, showAggregateWarning = true, nativeCrosshair = nativeStatus,
+    sourceStatus?: { readonly kind: "vitals"; readonly health: number; readonly armor: number } | { readonly kind: "native" }): void {
+    const sourceVitals = sourceStatus?.kind === "vitals" ? sourceStatus : undefined;
     this.text.bind(this.art.skin.font, this.hudFont); this.menuText.bind(this.art.skin.font, this.menuFont);
-    if (this.guestUi && gameVisible && this.local.input.focus.kind === "game") {
+    if (this.guestUi && sourceStatus?.kind !== "native" && gameVisible && this.local.input.focus.kind === "game") {
       const status = this.simulation.playerUi(this.local.player.actor).weaponStatus;
       if (status !== null) {
         const base = emptyHudData(this.local.player.seat.id);
@@ -316,7 +318,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
           { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
       }
     }
-    if (!this.guestUi) {
+    if (!this.guestUi || sourceVitals !== undefined) {
       const player = this.simulation.playerUi(this.local.player.actor);
       this.messages.setSourcePoints(this.local.player.seat.id, this.sourceHud.points());
       const sourceHud = this.sourceHud.presentation(context.timeMilliseconds);
@@ -325,11 +327,11 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       const hud: CommonHudData = { ...base, ...sourceHud, captions: this.soundCaptions.active({ subtitles: true, soundCaptions: this.preferences.values.captions, speakers: true }), powerups: player.powerups, prompts: [...this.match.prompts, ...sourceHud.prompts,
         ...(player.armor.powered.kind !== "none" ? [{ action: `Power ${player.armor.powered.kind} ${player.armor.powered.cells}`, binding: "", icon: null }] : [])], ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
         crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeCrosshair },
-        ...(player.weaponStatus === null ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
+        ...(player.weaponStatus === null || sourceStatus?.kind === "native" || this.guestUi ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
           weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,
           iconAspect: this.weaponAssets?.aspect(this.weaponIcons.weapon ?? this.weaponIcons.ammo) ?? 1, ammoAspect: this.weaponAssets?.aspect(this.weaponIcons.ammo) ?? 1,
           measureText: this.measureHudText, nativeStatus } }),
-        vitals: nativeStatus ? [] : [{ label: "Health", value: player.health, icon: null, warning: player.health <= 25 }, { label: "Armor", value: armor, icon: null, warning: false }] };
+        vitals: nativeStatus && sourceVitals === undefined ? [] : [{ label: "Health", value: sourceVitals?.health ?? player.health, icon: null, warning: (sourceVitals?.health ?? player.health) <= 25 }, { label: "Armor", value: sourceVitals?.armor ?? armor, icon: null, warning: false }] };
       const commands = [...drawCommonHud(context, hud, { skin: hudSkinFont(this.art.skin, this.hudFont), measureText: this.measureHudText, preferences: this.preferences.values, messages: this.messages, camera, localize: text => text }),
         ];
       renderUiCommands(context, commands, { text: this.text, white: this.art.white, picture: resource => this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
@@ -340,13 +342,17 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
-  prepareNativeQ2Hud(frame: NativeQ2HudFrame, content: ContentId, assets: ApplicationAssets, context: UiDrawContext): Promise<void> {
-    return this.nativeQ2Hud.prepare(content, assets, frame, context, this.preferences.values.hudScale * context.binding.hudScale);
+  prepareNativeQ2Hud(frame: NativeQ2HudFrame, content: ContentId, assets: ApplicationAssets, context: UiDrawContext,
+    component?: { readonly renderer: ApplicationQ2NativeHud; readonly mode: "layout-overlay" | "replace-status"; assertCurrent(): void }): Promise<void> {
+    return (component?.renderer ?? this.nativeQ2Hud).prepare(content, assets, frame, context, this.preferences.values.hudScale * context.binding.hudScale,
+      component?.mode, component?.assertCurrent);
   }
   drawNativeQ2Hud(frame: NativeQ2HudFrame, context: UiDrawContext, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
-    material: (draw: MaterialTextDraw) => void, binding?: (command: string) => string): void {
-    renderUiCommands(context, this.nativeQ2Hud.commands(frame, context, this.preferences.values.hudScale * context.binding.hudScale, binding),
-      { text: this.text, white: this.art.white, picture: resource => this.nativeQ2Hud.picture(resource) ?? this.art.picture(resource), emit, material });
+    material: (draw: MaterialTextDraw) => void, binding?: (command: string) => string,
+    component?: { readonly renderer: ApplicationQ2NativeHud; readonly mode: "layout-overlay" | "replace-status" }): void {
+    const renderer = component?.renderer ?? this.nativeQ2Hud;
+    renderUiCommands(context, renderer.commands(frame, context, this.preferences.values.hudScale * context.binding.hudScale, binding, component?.mode),
+      { text: this.text, white: this.art.white, picture: resource => renderer.picture(resource) ?? this.art.picture(resource), emit, material });
   }
 
   captionCommands(captions: readonly ActiveCaption[], context: UiDrawContext): readonly Exclude<RenderCommand, { readonly kind: "swap-buffers" }>[] {

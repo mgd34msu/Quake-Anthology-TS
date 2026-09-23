@@ -29,6 +29,7 @@ export class QcModClientBindings {
   private unsubscribe: (() => undefined) | null = null;
   private unsubscribeInput: (() => undefined) | null = null;
   constructor(private readonly operations: Operations) {}
+  admitted(actor: ActorId): boolean { return this.entries.has(actor) && this.require(actor).admitted; }
   slot(actor: ActorId): number | null {
     const client = this.operations.services.forActor(actor);
     if (client === null) return this.entries.has(actor) ? this.require(actor).slot : null;

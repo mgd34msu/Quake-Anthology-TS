@@ -24,6 +24,9 @@ test("svc_layout scoreboard uses public clientinfo and source stat layout gate",
   expect(ops).toContainEqual({ kind: "picture", x: 160, y: 120, name: "/players/male/grunt_i.pcx" });
   expect(ops).toContainEqual({ kind: "text", x: 192, y: 120, text: "Ranger", alternate: true });
   expect(ops).toContainEqual({ kind: "text", x: 160, y: 176, text: "  9 999 Ranger      ", alternate: true });
+  const overlay = q2NativeHudOperations(snapshot, 640, 480, undefined, "layout-overlay");
+  expect(overlay).toContainEqual({ kind: "text", x: 192, y: 120, text: "Ranger", alternate: true });
+  expect(overlay.some(op => op.kind === "picture" && op.name === "i_health")).toBe(false);
   stats[13] = 0; expect(q2NativeHudOperations(snapshot, 640, 480).some(op => op.kind === "text" && op.text === "Ranger")).toBe(false);
 });
 test("svc_inventory retains source item indices, selected-row scroll and exact use bindings", () => {
@@ -35,6 +38,7 @@ test("svc_inventory retains source item indices, selected-row scroll and exact u
   const rows = ops.filter(op => op.kind === "text" && op.text.includes("Item ")); expect(rows).toHaveLength(17);
   expect(rows[0]).toMatchObject({ text: "        10 Item 10", alternate: true });
   expect(rows).toContainEqual({ kind: "text", x: 216, y: 264, text: "     Q  23 Item 23", alternate: false });
+  expect(q2NativeHudOperations({ ...source, stats, inventory, configstrings }, 640, 480, undefined, "layout-overlay")).toEqual([]);
 });
 test("donor numeric flashing, suppression and malformed index boundaries", () => {
   const source = frame(), stats = [...source.stats]; stats[1] = 12; stats[3] = -1; stats[5] = 0; stats[15] = 1;

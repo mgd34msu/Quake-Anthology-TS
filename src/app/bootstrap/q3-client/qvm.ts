@@ -40,6 +40,7 @@ import { q3PresentationSnapshot, type Q3EquipmentPresentation } from './equipmen
 import { q3EquipmentHudSelector } from '../../../content/q3/equipment/cgame-weapon-hud.ts';
 import { QvmBodySubmissions } from '../../../compat/qvm/cgame-body.ts';
 import { readCgameBodyProfile } from '../../../content/q3/presentation/cgame-body-profile.ts';
+import { CgameStatusView } from './status.ts';
 
 export type QvmPresentationArtifacts = Readonly<Record<"ui" | "cgame", QvmModuleOptions["artifact"]>>;
 
@@ -91,9 +92,11 @@ export class ApplicationQvmClient {
   private equipmentSelectorIndex: number | null = null;
   private equipmentSelector: (() => void) | null = null;
   private equipmentHudRequested = false;
+  private readonly status: CgameStatusView;
   get sharedEquipmentHud(): boolean { return this.equipmentHudRequested; }
 
   private constructor(readonly options: ApplicationQvmClientOptions) {
+    this.status = new CgameStatusView(options.cvars, () => options.session.statusVisible?.() !== false);
     this.commandServices = { ui: qvmClientCommands(options.commands, options.commandContext, 'ui'),
       cgame: qvmClientCommands(options.commands, options.commandContext, 'cgame') };
     this.generation = options.connection.generation;
@@ -115,8 +118,9 @@ export class ApplicationQvmClient {
     this.assertCurrent();
     if (this.bodySubmissions?.suppress(call)) return 0;
     if (call.role !== 'cgame' && call.role !== 'ui') return rejectQvmSyscall(call);
+    if (call.role === 'cgame') { const result = this.status.syscall(call.words, call.guest); if (result !== null) return result; }
     const o = this.options, session = o.session;
-    const common = { cvars: o.cvars, print: session.print, milliseconds: o.now, arguments: () => this.arguments };
+    const common = { cvars: call.role === 'cgame' ? this.status.cvars : o.cvars, print: session.print, milliseconds: o.now, arguments: () => this.arguments };
     const commands = this.commandServices[call.role];
     return qvmCommonSyscall(call, call.role === 'cgame'
       ? { ...common, role: 'cgame', commands: { append: commands.append, register: session.registerCgameCommand,
@@ -202,6 +206,7 @@ export class ApplicationQvmClient {
     await this.cgame.drawActiveFrame(time, 'center', demoPlayback);
     if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.refresh(Math.trunc(this.options.now()));
   }
+  refreshStatus(): void { if (!this.retired) { this.assertCurrent(); this.status.refresh(); } }
   async command(argv: readonly string[]): Promise<boolean> { this.assertCurrent(); if (await this.cgame?.consoleCommand(argv)) return true; return await this.ui?.consoleCommand(Math.trunc(this.options.now()), argv) ?? false; }
   async keyEvent(key: number, down: boolean): Promise<void> { this.assertCurrent(); if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.keyEvent(key, down); else if (this.cgame?.supportsInputEvents) await this.cgame.keyEvent(key, down); }
   async mouseEvent(x: number, y: number): Promise<void> { this.assertCurrent(); if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.mouseEvent(x, y); else if (this.cgame?.supportsInputEvents) await this.cgame.mouseEvent(x, y); }
