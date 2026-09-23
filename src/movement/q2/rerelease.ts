@@ -18,12 +18,13 @@ export class Q2RereleaseMovementContext {
     }
 }
 
-export function createRereleaseMovement(numericOps: NumericOperations, context: Q2RereleaseMovementContext, flight = false) {
+export function createRereleaseMovement(numericOps: NumericOperations, context: Q2RereleaseMovementContext, flight = false, speedMultiplier = 1) {
+    const equipmentSpeed = (value: number): number => speedMultiplier === 1 ? value : numericOps.multiply(value, speedMultiplier);
     const sourceFloat = (value: number): number => numericOps.profile.arithmetic.kind === "donor-binary64" ? value : numericOps.store(value);
     const { vec3, VectorCopy, clamp, G_AddBlend, vec3_add, vec3_sub, vec3_muls, vec3_mulEqs, vec3_addEq, vec3_dot, vec3_cross, vec3_normalize, vec3_length, vec3_lengthSquared, SlideClipVelocity, AngleVectors } = createMovementMath(numericOps, "rerelease");
     const pm_stopspeed = 100;
-    const pm_maxspeed = 300;
-    const pm_duckspeed = 100;
+    const pm_maxspeed = equipmentSpeed(300);
+    const pm_duckspeed = equipmentSpeed(100);
     const pm_accelerate = 10;
     const pm_wateraccelerate = 10;
     const pm_friction = 6;
@@ -445,16 +446,16 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
             }
         }
         function PM_WaterMove(): void {
-            const wishvel = vec3(numericOps.add(numericOps.multiply(element(pml.forward, 0), pm.cmd.forwardmove), numericOps.multiply(element(pml.right, 0), pm.cmd.sidemove)), numericOps.add(numericOps.multiply(element(pml.forward, 1), pm.cmd.forwardmove), numericOps.multiply(element(pml.right, 1), pm.cmd.sidemove)), numericOps.add(numericOps.multiply(element(pml.forward, 2), pm.cmd.forwardmove), numericOps.multiply(element(pml.right, 2), pm.cmd.sidemove)));
+            const wishvel = vec3(numericOps.add(numericOps.multiply(element(pml.forward, 0), equipmentSpeed(pm.cmd.forwardmove)), numericOps.multiply(element(pml.right, 0), equipmentSpeed(pm.cmd.sidemove))), numericOps.add(numericOps.multiply(element(pml.forward, 1), equipmentSpeed(pm.cmd.forwardmove)), numericOps.multiply(element(pml.right, 1), equipmentSpeed(pm.cmd.sidemove))), numericOps.add(numericOps.multiply(element(pml.forward, 2), equipmentSpeed(pm.cmd.forwardmove)), numericOps.multiply(element(pml.right, 2), equipmentSpeed(pm.cmd.sidemove))));
             if (!pm.cmd.forwardmove && !pm.cmd.sidemove && !(pm.cmd.buttons & (ButtonT.BUTTON_JUMP | ButtonT.BUTTON_CROUCH))) {
                 if (!pm.groundentity)
                     wishvel[2] = numericOps.store(numericOps.subtract(element(wishvel, 2), 60));
             }
             else {
                 if (pm.cmd.buttons & ButtonT.BUTTON_CROUCH)
-                    wishvel[2] = numericOps.store(numericOps.subtract(element(wishvel, 2), numericOps.multiply(pm_waterspeed, sourceFloat(0.5))));
+                    wishvel[2] = numericOps.store(numericOps.subtract(element(wishvel, 2), equipmentSpeed(numericOps.multiply(pm_waterspeed, sourceFloat(0.5)))));
                 else if (pm.cmd.buttons & ButtonT.BUTTON_JUMP)
-                    wishvel[2] = numericOps.store(numericOps.add(element(wishvel, 2), numericOps.multiply(pm_waterspeed, sourceFloat(0.5))));
+                    wishvel[2] = numericOps.store(numericOps.add(element(wishvel, 2), equipmentSpeed(numericOps.multiply(pm_waterspeed, sourceFloat(0.5)))));
             }
             PM_AddCurrents(wishvel);
             const wishdir = vec3(element(wishvel, 0), element(wishvel, 1), element(wishvel, 2));
@@ -472,8 +473,8 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
             PM_StepSlideMove();
         }
         function PM_AirMove(): void {
-            const fmove = pm.cmd.forwardmove;
-            const smove = pm.cmd.sidemove;
+            const fmove = equipmentSpeed(pm.cmd.forwardmove);
+            const smove = equipmentSpeed(pm.cmd.sidemove);
             const wishvel = vec3(numericOps.add(numericOps.multiply(element(pml.forward, 0), fmove), numericOps.multiply(element(pml.right, 0), smove)), numericOps.add(numericOps.multiply(element(pml.forward, 1), fmove), numericOps.multiply(element(pml.right, 1), smove)), 0);
             PM_AddCurrents(wishvel);
             const wishdir = vec3(element(wishvel, 0), element(wishvel, 1), element(wishvel, 2));
@@ -686,15 +687,15 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
                 newspeed = numericOps.divide(newspeed, speed);
                 vec3_mulEqs(pml.velocity, newspeed);
             }
-            const fmove = pm.cmd.forwardmove;
-            const smove = pm.cmd.sidemove;
+            const fmove = equipmentSpeed(pm.cmd.forwardmove);
+            const smove = equipmentSpeed(pm.cmd.sidemove);
             vec3_normalize(pml.forward);
             vec3_normalize(pml.right);
             const wishvel = vec3(numericOps.add(numericOps.multiply(element(pml.forward, 0), fmove), numericOps.multiply(element(pml.right, 0), smove)), numericOps.add(numericOps.multiply(element(pml.forward, 1), fmove), numericOps.multiply(element(pml.right, 1), smove)), numericOps.add(numericOps.multiply(element(pml.forward, 2), fmove), numericOps.multiply(element(pml.right, 2), smove)));
             if (pm.cmd.buttons & ButtonT.BUTTON_JUMP)
-                wishvel[2] = numericOps.store(numericOps.add(element(wishvel, 2), numericOps.multiply(pm_waterspeed, sourceFloat(0.5))));
+                wishvel[2] = numericOps.store(numericOps.add(element(wishvel, 2), equipmentSpeed(numericOps.multiply(pm_waterspeed, sourceFloat(0.5)))));
             if (pm.cmd.buttons & ButtonT.BUTTON_CROUCH)
-                wishvel[2] = numericOps.store(numericOps.subtract(element(wishvel, 2), numericOps.multiply(pm_waterspeed, sourceFloat(0.5))));
+                wishvel[2] = numericOps.store(numericOps.subtract(element(wishvel, 2), equipmentSpeed(numericOps.multiply(pm_waterspeed, sourceFloat(0.5)))));
             const wishdir = vec3(element(wishvel, 0), element(wishvel, 1), element(wishvel, 2));
             let wishspeed = vec3_normalize(wishdir);
             if (wishspeed > pm_maxspeed) {
@@ -940,6 +941,6 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
     }
     return { Pmove, PM_StepSlideMove_Generic, G_FixStuckObject_Generic };
 }
-export function pmoveRerelease(pm: KexPmoveT, numericOps: NumericOperations, config: PmConfigT, context: Q2RereleaseMovementContext, flight = false): void {
-    createRereleaseMovement(numericOps, context, flight).Pmove(pm, config);
+export function pmoveRerelease(pm: KexPmoveT, numericOps: NumericOperations, config: PmConfigT, context: Q2RereleaseMovementContext, flight = false, speedMultiplier = 1): void {
+    createRereleaseMovement(numericOps, context, flight, speedMultiplier).Pmove(pm, config);
 }

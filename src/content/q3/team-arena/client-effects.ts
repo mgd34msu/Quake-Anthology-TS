@@ -123,7 +123,19 @@ function persistentTag(client: GameClient): number {
   return schema.product === "baseq3" ? Powerup.PW_NONE : itemAt("missionpack", client.ps.stats.get(schema.persistentPowerup)).tag;
 }
 
-export function clientTimerActions(context: EventContext, entity: GameEntity, msec: number): void {
+export function clientSpeedMultiplier(ps: PlayerState): number {
+  const schema = statSchema(ps.product);
+  if (schema.product === "missionpack" && itemAt(ps.product, ps.stats.get(schema.persistentPowerup)).tag === Powerup.PW_SCOUT) return 1.5;
+  return ps.powerups.get(Powerup.PW_HASTE) !== 0 ? 1.3 : 1;
+}
+
+export interface ClientTimerOwnership {
+  readonly ordinaryDecay: boolean;
+  readonly ammo: ReadonlySet<Weapon> | null;
+}
+const nativeTimers: ClientTimerOwnership = { ordinaryDecay: true, ammo: null };
+
+export function clientTimerActions(context: EventContext, entity: GameEntity, msec: number, ownership: ClientTimerOwnership = nativeTimers): void {
   const client = clientOf(entity);
   const ps = client.ps;
   const schema = statSchema(ps.product);
@@ -144,11 +156,12 @@ export function clientTimerActions(context: EventContext, entity: GameEntity, ms
         if (entity.health > Math.imul(maxHealth, 2)) entity.health = Math.imul(maxHealth, 2);
         context.combat.entities.addEvent(entity, EntityEvent.EV_POWERUP_REGEN, 0);
       }
-    } else if (entity.health > maximum) entity.health = (entity.health - 1) | 0;
-    if (ps.stats.get(schema.armor) > maximum) ps.stats.set(schema.armor, ps.stats.get(schema.armor) - 1);
+    } else if (ownership.ordinaryDecay && entity.health > maximum) entity.health = (entity.health - 1) | 0;
+    if (ownership.ordinaryDecay && ps.stats.get(schema.armor) > maximum) ps.stats.set(schema.armor, ps.stats.get(schema.armor) - 1);
   }
   if (ps.product === "missionpack" && persistentTag(client) === Powerup.PW_AMMOREGEN) {
     for (const rule of ammoRegeneration) {
+      if (ownership.ammo !== null && !ownership.ammo.has(rule.weapon)) continue;
       let elapsed = (client.ammoTimes.get(rule.weapon) + msec) | 0;
       if (ps.ammo.get(rule.weapon) >= rule.max) elapsed = 0;
       if (elapsed >= rule.time) {

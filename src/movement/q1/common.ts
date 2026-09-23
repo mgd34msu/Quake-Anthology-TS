@@ -57,6 +57,10 @@ export class MovementContext {
     this.math = new MovementMath(services.numeric);
     this.viewHeight = input.environment.pose?.viewHeight ?? options.viewHeight ?? 22;
   }
+  speed(value: number): number {
+    const multiplier = this.input.environment.speedMultiplier ?? 1;
+    return multiplier === 1 ? value : this.math.n.multiply(value, multiplier);
+  }
   get shape(): TraceShape { return this.input.environment.pose === undefined ? this.options.hooks?.shape?.() ?? this.input.shape : { kind: "box", bounds: this.input.environment.pose.bounds }; }
   get bounds(): Bounds { return shapeBounds(this.shape); }
   trace(start: Vec3, end: Vec3, shape = this.shape, move: "normal" | "no-monsters" | "missile" = "normal"): TraceResult {

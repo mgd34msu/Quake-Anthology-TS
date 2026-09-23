@@ -5,6 +5,12 @@ import type { PickupSupplyProfile } from "../../contracts/pickups.ts";
 export const Q3_Q1_SUPPLY_PROFILE: PickupSupplyProfile = {
   id: "composition:q3-base-q1-supply",
   weaponOwnership: "all-destinations",
+  ammoOwners: [
+    { item: "q1:ammo/shells", source: "q3:ammo/shotgun" },
+    { item: "q1:ammo/nails", source: "q3:ammo/machinegun" },
+    { item: "q1:ammo/rockets", source: "q3:ammo/rocketlauncher" },
+    { item: "q1:ammo/cells", source: "q3:ammo/lightning" },
+  ],
   ammo: [
     { source: "q3:ammo/shotgun", destinations: ["q1:ammo/shells"] },
     { source: "q3:ammo/machinegun", destinations: ["q1:ammo/nails"] },

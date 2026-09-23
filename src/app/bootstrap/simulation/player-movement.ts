@@ -68,12 +68,13 @@ export function selectedMovementProfile(player: Pick<MovementPlayer, "profile" |
   if (q2 !== null && profile.kind === "q2-rerelease") return { ...profile, ...q2 };
   return profile;
 }
-export function playerMovementEnvironment(player: Pick<MovementPlayer, "sourceEnvironment" | "gravityMultiplier" | "state" | "flight">,
+export function playerMovementEnvironment(player: Pick<MovementPlayer, "sourceEnvironment" | "gravityMultiplier" | "state" | "flight" | "movementSpeedMultiplier">,
   combat: { readonly health: number; readonly invulnerable: boolean }): MovementEnvironment {
-  const source = player.sourceEnvironment;
-  return source === null ? { health: combat.health, flight: player.flight && combat.health > 0, haste: false, invulnerable: combat.invulnerable,
+  const source = player.sourceEnvironment, multiplier = player.movementSpeedMultiplier;
+  const speed = multiplier === 1 ? {} : { speedMultiplier: multiplier };
+  return source === null ? { ...speed, health: combat.health, flight: player.flight && combat.health > 0, haste: false, invulnerable: combat.invulnerable,
     gravityMultiplier: player.state.kind === "q3" ? 1 : player.gravityMultiplier }
-    : { ...source, flight: (source.flight || player.flight) && combat.health > 0, health: combat.health, invulnerable: source.invulnerable || combat.invulnerable,
+    : { ...source, ...speed, flight: (source.flight || player.flight) && combat.health > 0, health: combat.health, invulnerable: source.invulnerable || combat.invulnerable,
       gravityMultiplier: player.state.kind === "q3" ? 1 : source.gravityMultiplier };
 }
 export interface PlayerMovementHooks {
@@ -100,7 +101,7 @@ export function createPlayerMovementProvider(player: Pick<MovementPlayer, "profi
 }
 export type MovementPredictionPlayer = Readonly<Pick<MovementPlayer,
   "client" | "actor" | "profile" | "standingBounds" | "bounds" | "sourceMovement" | "character" | "worldGravity" | "q2MovementConfig" | "flight"
-  | "sourceEnvironment" | "gravityMultiplier" | "state" | "arsenal" | "animation" | "viewHeight">> & {
+  | "sourceEnvironment" | "gravityMultiplier" | "movementSpeedMultiplier" | "state" | "arsenal" | "animation" | "viewHeight">> & {
   readonly services: Pick<MovementServices, "numeric">;
   readonly q3Arsenal?: import("../../../content/q3/foundation/arsenal.ts").Q3ArsenalRuntimeState;
 };

@@ -133,6 +133,7 @@ export class Q3SourceRuntime {
     this.random.reset(options.seed);
     this.unobserve = host.actors.onRelease(actor => { this.publishedEvents.delete(actor); return undefined; });
     this.records = new Q3EntityRecords({ actors: host.actors, bodies: host.bodies, callbacks: host.callbacks,
+      ...(host.ammo === undefined ? {} : { ammo: host.ammo }),
       combat: host.combat, inventory: host.inventory, schedule: host.schedule, runThink: host.runThink,
       admitDamage: (entity, request): "continue" | "handled" => q3AdmitTargetDamage(this.combat, entity,
         request.attack.inflictor === null ? this.pool.at(1022) : this.records.useParticipant(request.attack.inflictor),
@@ -174,6 +175,7 @@ export class Q3SourceRuntime {
     this.team = this.createTeam();
     this.death = this.createDeath();
     this.think = new ClientThinkRuntime({ pool: this.pool, world: this.world, spatial: this.world,
+      ...(host.timerOwnership === undefined ? {} : { timerOwnership: host.timerOwnership }),
       touches: { native: actor => this.records.nativeByActor(actor),
         isTrigger: actor => host.scene.spatial.get(actor)?.collision.role === "trigger",
         touch: (self, other) => { const actor = host.actors.resolveOwned(self);

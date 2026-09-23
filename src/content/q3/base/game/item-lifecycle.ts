@@ -99,6 +99,7 @@ export interface SourcePickupDescriptor {
   readonly playerActor: import("../../../../contracts/identity.ts").ActorId;
   readonly item: ItemDefinition;
   readonly count: number;
+  readonly generic1: number;
   readonly dropped: boolean;
   readonly gameType: number;
   readonly weaponRespawnSeconds: number;
@@ -176,7 +177,7 @@ function requirePublishedItem(context: ItemLifecycleContext, entity: GameEntity)
   return item;
 }
 
-function inventory(client: GameClient): PlayerInventory {
+export function q3ItemInventory(client: GameClient): PlayerInventory {
   const ps = client.ps;
   const schema = statSchema(ps.product);
   const shared = {
@@ -277,7 +278,7 @@ export function respawnItem(entity: GameEntity, context: ItemLifecycleContext): 
 
 function pickupDescriptor(entity: GameEntity, recipient: GameEntity, item: ItemDefinition, context: ItemLifecycleContext): SourcePickupDescriptor {
   return { itemActor: entity.actor.id, playerActor: recipient.actor.id, item,
-    count: entity.count, dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0, gameType: context.gameType,
+    count: entity.count, generic1: entity.s.generic1, dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0, gameType: context.gameType,
     weaponRespawnSeconds: context.weaponRespawnSeconds, teamWeaponRespawnSeconds: context.teamWeaponRespawnSeconds };
 }
 
@@ -324,7 +325,7 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
     originalRan = true;
     const admission = context.admitPickup?.(pickupDescriptor(entity, other, item, context)) ?? { kind: "native" };
     if (!live() || admission.kind === "rejected") return false;
-    if (admission.kind === "native" && !canItemBeGrabbed(context.gameType, pickupState, inventory(client))) return false;
+    if (admission.kind === "native" && !canItemBeGrabbed(context.gameType, pickupState, q3ItemInventory(client))) return false;
     context.log(`Item: ${other.s.number} ${className}\n`);
     if (!live()) return false;
     if (admission.kind === "picked") respawn = admission.respawnSeconds;

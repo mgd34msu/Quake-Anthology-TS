@@ -1,3 +1,5 @@
+import { restoreLegacyQ3Source, type LegacyQ3Source } from "./q3-source-legacy.ts";
+import type { Q3SelectedArsenalCheckpoint } from "./q3.ts";
 import { expandQ3Invulnerability } from "../../../../content/q3/team-arena/client-think.ts";
 import { q3InvulnerabilityPose } from "../../../../movement/q3/postures.ts";
 import { dropQ3MovementTimers } from "../../../../movement/q3/move.ts";
@@ -30,8 +32,12 @@ import { teleportPlayer } from "../../../../content/q3/base/game/misc.ts";
 import { EntityEvent, EntityType, ItemType, PersistentIndex, Powerup, statSchema } from "../../../../content/q3/base/shared/definitions.ts";
 import { playerStateToEntityState } from "../../../../content/q3/base/shared/snapshot-state.ts";
 import { updateQ3ClientPowerups } from "../../../../content/q3/team-arena/client-effects.ts";
-import { itemAt, itemList } from "../../../../content/q3/base/shared/items.ts";
-import { pickupHoldable } from "../../../../content/q3/base/game/item-pickup.ts";
+import { clientSpeedMultiplier, clientTimerActions } from "../../../../content/q3/team-arena/client-effects.ts";
+import { canItemBeGrabbed, canQ3ArmorBeGrabbed, itemAt, itemList } from "../../../../content/q3/base/shared/items.ts";
+import { pickupHoldable, pickupPersistentPowerup } from "../../../../content/q3/base/game/item-pickup.ts";
+import { q3ItemInventory, type SourcePickupDescriptor, type SourcePickupAdmission } from "../../../../content/q3/base/game/item-lifecycle.ts";
+import { returnQ3PersistentPowerup, tossQ3ClientPersistentPowerup } from "../../../../content/q3/base/game/death.ts";
+import type { OriginalPickupOffer } from "../../../../contracts/original-pickups.ts";
 import { TrajectoryType } from "../../../../content/q3/base/shared/trajectory.ts";
 import { useQ3Holdable } from "../../../../content/q3/team-arena/client-events.ts";
 import { captureQ3Graph, prepareQ3Graph, restoreQ3Graph } from "../../../../content/q3/base/game/save-state.ts";
@@ -63,6 +69,7 @@ export interface Q3SelectedSourceHost extends Pick<Q3RecordHost, "actors" | "bod
   Pick<Q3WorldAdapterHost, "queries" | "collision" | "curves" | "playerCurveClip">,
   Pick<Q3CombatBridgeHost, "combatProvider" | "inventoryProvider" | "movementProvider" | "armorContext" | "gameType" | "friendlyFire" | "knockback" | "intermissionQueued" | "checkHurtCarrier"> {
   readonly provider: ProviderId;
+  readonly product: "baseq3" | "missionpack";
   readonly content: ProviderReference["content"];
   readonly configstrings: ConfigStringStore;
   userinfo(actor: ActorId): string;
@@ -85,6 +92,7 @@ export interface Q3SelectedSourceHost extends Pick<Q3RecordHost, "actors" | "bod
   clientChanged(actor: OwnedActor, before: Q3SelectedClientEffects, after: Q3SelectedClientEffects): void;
   checkObeliskAttack(target: GameEntity, attacker: GameEntity): boolean;
   dropObjectives(actor: OwnedActor): void;
+  returnPickup(actor: ActorId): void;
   spawnPoint(actor: OwnedActor): { readonly origin: Vec3; readonly angles: Vec3 };
 }
 
@@ -95,6 +103,7 @@ export interface Q3SelectedClientEffects {
   readonly pmFlags: number;
   readonly pmTime: number;
   readonly invulnerabilityTime: number;
+  readonly maxHealth: number;
 }
 
 export type Q3SelectedEquipmentState = Pick<Q3ArsenalRuntimeState, "maxHealth" | "persistentPowerupTag" | "holdableItem" | "holdableTag">;
@@ -103,15 +112,16 @@ export type Q3SelectedEquipmentState = Pick<Q3ArsenalRuntimeState, "maxHealth" |
 const zero = { x: 0, y: 0, z: 0 };
 function clientEffects(client: GameClient): Q3SelectedClientEffects {
   return { teleportBit: client.ps.eFlags & 4, viewAngles: { ...client.ps.viewangles }, deltaAngles: { ...client.ps.deltaAngles }, pmFlags: client.ps.pmFlags,
-    pmTime: client.ps.pmTime, invulnerabilityTime: client.invulnerabilityTime };
+    pmTime: client.ps.pmTime, invulnerabilityTime: client.invulnerabilityTime,
+    maxHealth: client.ps.stats.get(statSchema(client.ps.product).maxHealth) };
 }
 function sameEffects(a: Q3SelectedClientEffects, b: Q3SelectedClientEffects): boolean {
-  return a.teleportBit === b.teleportBit && a.pmFlags === b.pmFlags && a.pmTime === b.pmTime && a.invulnerabilityTime === b.invulnerabilityTime
+  return a.teleportBit === b.teleportBit && a.pmFlags === b.pmFlags && a.pmTime === b.pmTime && a.invulnerabilityTime === b.invulnerabilityTime && a.maxHealth === b.maxHealth
     && a.viewAngles.x === b.viewAngles.x && a.viewAngles.y === b.viewAngles.y && a.viewAngles.z === b.viewAngles.z
     && a.deltaAngles.x === b.deltaAngles.x && a.deltaAngles.y === b.deltaAngles.y && a.deltaAngles.z === b.deltaAngles.z;
 }
 
-/** Original Team Arena weapon/equipment records over actors admitted by their actual world. */
+/** Original Q3 weapon/equipment records over actors admitted by their actual world. */
 export class Q3SelectedSource {
   readonly records: Q3EntityRecords;
   readonly pool: EntityPool;
@@ -119,7 +129,7 @@ export class Q3SelectedSource {
   readonly bridge: Q3CombatBridge;
   readonly missiles: MissileRuntime;
   readonly weapons: WeaponRuntime;
-  readonly personalPortal: PersonalPortalRuntime;
+  readonly personalPortal: PersonalPortalRuntime | null;
   readonly random: GameRandom;
   private readonly projected = new Map<OwnedActor, number>();
   private readonly clientEffects = new Map<OwnedActor, Q3SelectedClientEffects>();
@@ -146,7 +156,7 @@ export class Q3SelectedSource {
         try { entity.nextthink = 0; if (entity.think === null) throw new Error("NULL ent->think"); entity.think(entity); }
         finally { this.clock = previous; }
         return undefined;
-      }, damageCall: () => this.bridge.currentCall, foreign: actor => this.project(actor), isPlayer: actor => host.player(actor) !== null }, host.provider, "missionpack");
+      }, damageCall: () => this.bridge.currentCall, foreign: actor => this.project(actor), isPlayer: actor => host.player(actor) !== null }, host.provider, host.product);
     this.world = new class extends Q3WorldAdapter {
       override traceActor(input: ActorTraceQuery) {
         const trace = super.traceActor(input);
@@ -155,27 +165,26 @@ export class Q3SelectedSource {
       }
     }({ queries: host.queries, bodies: host.bodies, collision: (actor, collision) => source.owns(actor) ? host.collision(actor, collision) : undefined,
       curves: host.curves, playerCurveClip: host.playerCurveClip }, this.records);
-    this.pool = new EntityPool({ records: this.records, product: "missionpack", maxClients: host.maxClients,
+    this.pool = new EntityPool({ records: this.records, product: host.product, maxClients: host.maxClients,
       mapStartTime: host.now(), time: () => this.now(), print: host.print,
       link: entity => { this.world.link(entity); this.track(entity.actor); }, unlink: entity => this.world.unlink(entity.slot) });
-    this.bridge = new Q3CombatBridge({ product: "missionpack", authority: host.combat, entities: this.pool, records: this.records, world: this.world,
+    this.bridge = new Q3CombatBridge({ product: host.product, authority: host.combat, entities: this.pool, records: this.records, world: this.world,
       weaponProvider: host.provider, combatProvider: host.combatProvider, inventoryProvider: host.inventoryProvider, movementProvider: host.movementProvider,
       armorContext: host.armorContext, time: () => this.now(), intermissionQueued: host.intermissionQueued, gameType: host.gameType, friendlyFire: host.friendlyFire,
       knockback: host.knockback, debugDamage: null, checkHurtCarrier: host.checkHurtCarrier, checkObeliskAttack: host.checkObeliskAttack,
       logAccuracyHit: (target, attacker) => logAccuracyHit(host.gameType(), target, attacker), projectileParent: actor => this.missiles.ownerOf(actor),
       invulnerabilityEffect: (target, direction, point) => { invulnerabilityEffect(this.pool, target, direction, point); } });
     const combat = this.bridge.context;
-    if (combat.product !== "missionpack") throw new Error("Selected Team Arena source requires its combat layout");
-    this.missiles = new MissileRuntime({ ...(host.weaponBehavior === undefined ? {} : { weaponBehavior: host.weaponBehavior }), combat, world: this.world, bodies: host.bodies, actors: host.actors,
-      get previousTime() { return source.previous; }, missionpack: { get proxMineTimeout() { return host.proximityTimeout(); }, random: this.random,
-        soundIndex: host.soundIndex, invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } });
+    this.missiles = new MissileRuntime({ ...(host.weaponBehavior === undefined ? {} : { weaponBehavior: host.weaponBehavior }), world: this.world, bodies: host.bodies, actors: host.actors,
+      get previousTime() { return source.previous; }, ...(combat.product === "baseq3" ? { combat, missionpack: null } : { combat, missionpack: { get proxMineTimeout() { return host.proximityTimeout(); }, random: this.random,
+        soundIndex: host.soundIndex, invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } }) });
     this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return host.quadFactor(); } });
-    this.personalPortal = new PersonalPortalRuntime({ combat, world: this.world, models: { modelIndex: host.modelIndex }, random: this.random,
+    this.personalPortal = combat.product === "baseq3" ? null : new PersonalPortalRuntime({ combat, world: this.world, models: { modelIndex: host.modelIndex }, random: this.random,
       mapTravel: { dropCarriedFlag: entity => host.dropObjectives(entity.actor), teleport: (entity, origin, angles) => this.teleport(entity, origin, angles) } });
     this.unobserve = host.actors.onRelease(actor => {
       this.executing.delete(actor); this.published.delete(actor); this.clientEffects.delete(actor);
       const slot = this.projected.get(actor); this.projected.delete(actor);
-      if (slot !== undefined) { if (slot < this.host.maxClients) this.host.configstrings.set(544 + slot, ""); this.records.release(this.pool.at(slot)); }
+      if (slot !== undefined) { if (slot < this.host.maxClients) { this.returnPersistent(this.pool.at(slot)); this.host.configstrings.set(544 + slot, ""); } this.records.release(this.pool.at(slot)); }
       return undefined;
     });
     if (restored !== undefined) this.restore(restored);
@@ -224,6 +233,11 @@ export class Q3SelectedSource {
     dropQ3MovementTimers(entity.client.ps, milliseconds);
     this.publishClient(entity, entity.client);
   }
+  endCommand(actor: OwnedActor, milliseconds: number): void {
+    const entity = this.player(actor);
+    if (entity.health <= 0) return;
+    this.run(() => clientTimerActions({ combat: this.bridge.context }, entity, milliseconds, { ordinaryDecay: false, ammo: null }));
+  }
   blocksDamage(request: DamageRequest): boolean {
     this.assertOpen(); const target = this.records.nativeByActor(request.target);
     return target === null ? false : this.run(() => q3InvulnerabilityBlocks(this.bridge.context, target, request.direction, request.point,
@@ -246,7 +260,7 @@ export class Q3SelectedSource {
     const entity = this.records.attach(slot, owned, pose !== null); this.projected.set(owned, slot);
     if (slot >= this.pool.numEntities) this.pool.restoreCounts({ numEntities: slot + 1, maxClients: this.host.maxClients });
     if (pose !== null) {
-      const client = this.records.client(slot), ps = client.ps, fresh = new GameClient("missionpack");
+      const client = this.records.client(slot), ps = client.ps, fresh = new GameClient(this.host.product);
       Object.assign(client, fresh, { ps }); ps.copyFrom(fresh.ps, "preserve-authority");
       this.records.restoreClientBacking(slot, { sourceStats: Array.from({ length: 16 }, () => 0), specialAmmo: Array.from({ length: 16 }, () => 0) });
       entity.s.eType = EntityType.ET_PLAYER; entity.s.clientNum = slot; ps.clientNum = slot;
@@ -262,7 +276,7 @@ export class Q3SelectedSource {
     this.publishClient(entity, client);
     client.ps.viewangles = { ...pose.angles }; client.ps.viewheight = pose.viewHeight; client.sess.sessionTeam = pose.team;
     client.pers.maxHealth = pose.maxHealth; client.ps.persistant.set(PersistentIndex.PERS_TEAM, pose.team);
-    client.ps.stats.set(statSchema("missionpack").maxHealth, pose.maxHealth);
+    client.ps.stats.set(statSchema(this.host.product).maxHealth, pose.maxHealth);
     client.ps.powerups.set(Powerup.PW_QUAD, pose.quadUntil); client.ps.powerups.set(Powerup.PW_HASTE, pose.hasteUntil);
     client.pers.netname = cleanClientName(clientInfoValue(this.host.userinfo(entity.actor.id), "name"));
     this.host.configstrings.set(544 + entity.slot, clientPresentationConfig(client, this.host.userinfo(entity.actor.id), this.host.gameType(), null));
@@ -281,10 +295,11 @@ export class Q3SelectedSource {
     const entity = this.records.nativeByActor(actor), client = entity?.client;
     if (entity === null || client == null) return undefined;
     this.releaseHook(actor);
+    this.returnPersistent(entity);
     this.run(() => {
       const { pers, sess, ps, accuracyHits, accuracyShots } = client;
       const persistant = ps.persistant.copy(), eventSequence = ps.eventSequence, ping = ps.ping;
-      const fresh = new GameClient("missionpack");
+      const fresh = new GameClient(this.host.product);
       Object.assign(client, fresh, { pers, sess, ps, accuracyHits, accuracyShots }); ps.copyFrom(fresh.ps, "preserve-authority");
       for (const [index, value] of persistant.entries()) ps.persistant.set(index, value);
       ps.eventSequence = eventSequence; ps.ping = ping; ps.clientNum = entity.slot;
@@ -317,20 +332,60 @@ export class Q3SelectedSource {
   equipment(actor: OwnedActor): Q3SelectedEquipmentState {
     const entity = this.player(actor), client = entity.client;
     if (client === null) throw new Error("Missing selected Q3 client");
-    const schema = statSchema("missionpack");
-    if (schema.product !== "missionpack") throw new Error("Missing missionpack stat layout");
+    const schema = statSchema(this.host.product);
     const holdableItem = client.ps.stats.get(schema.holdableItem);
-    return { maxHealth: client.ps.stats.get(schema.maxHealth), persistentPowerupTag: itemAt("missionpack", client.ps.stats.get(schema.persistentPowerup)).tag,
-      holdableItem, holdableTag: itemAt("missionpack", holdableItem).tag };
+    return { maxHealth: client.ps.stats.get(schema.maxHealth), persistentPowerupTag: schema.product === "baseq3" ? Powerup.PW_NONE : itemAt(this.host.product, client.ps.stats.get(schema.persistentPowerup)).tag,
+      holdableItem, holdableTag: itemAt(this.host.product, holdableItem).tag };
+  }
+  speedMultiplier(actor: ActorId): number {
+    const client = this.records.nativeByActor(actor)?.client;
+    return client == null ? 1 : clientSpeedMultiplier(client.ps);
+  }
+  pickupAllowed(offer: OriginalPickupOffer): boolean {
+    if (offer.defaultResource?.kind !== "protection" || offer.defaultResource.channel !== "regular") return true;
+    const client = this.records.nativeByActor(offer.recipient)?.client;
+    if (client == null || client.ps.product !== "missionpack") return true;
+    const inventory = q3ItemInventory(client);
+    if (inventory.product !== "missionpack") return true;
+    const tag = itemAt("missionpack", inventory.persistentPowerupIndex).tag;
+    return tag !== Powerup.PW_SCOUT && tag !== Powerup.PW_GUARD || canQ3ArmorBeGrabbed(inventory);
+  }
+  takePickup(offer: SourcePickupDescriptor): SourcePickupAdmission {
+    if (offer.item.type !== ItemType.IT_HOLDABLE && offer.item.type !== ItemType.IT_PERSISTANT_POWERUP) return { kind: "native" };
+    const item = itemList(this.host.product).find(item => item.className === offer.item.className);
+    if (item === undefined) return { kind: "rejected" };
+    const actor = this.host.actors.resolveOwned(offer.playerActor);
+    if (actor === null || !this.host.actors.isLive(offer.itemActor)) return { kind: "rejected" };
+    const player = this.player(actor), client = player.client;
+    if (client === null) throw new Error("Original equipment pickup requires a source client");
+    const modelIndex = itemList(this.host.product).indexOf(item);
+    if (!canItemBeGrabbed(offer.gameType, { modelIndex, modelIndex2: offer.dropped ? 1 : 0, generic1: offer.generic1 }, q3ItemInventory(client))) return { kind: "rejected" };
+    const pickup = this.project(offer.itemActor);
+    if (pickup === null) return { kind: "rejected" };
+    pickup.item = item; pickup.count = offer.count; pickup.s.modelindex = modelIndex; pickup.s.generic1 = offer.generic1;
+    const respawnSeconds = this.run(() => item.type === ItemType.IT_HOLDABLE ? pickupHoldable(pickup, player)
+      : pickupPersistentPowerup(pickup, player, clientInfoValue(this.host.userinfo(actor.id), "handicap")));
+    return { kind: "picked", respawnSeconds };
+  }
+  private returnPersistent(entity: GameEntity): void {
+    tossQ3ClientPersistentPowerup(entity, pickup => {
+      if (!pickup.inuse) return;
+      if (this.owns(pickup.actor)) returnQ3PersistentPowerup(pickup, this.world);
+      else this.host.returnPickup(pickup.actor.id);
+    });
+  }
+  died(actor: ActorId): void {
+    const entity = this.records.nativeByActor(actor);
+    if (entity?.client != null) this.run(() => this.returnPersistent(entity));
   }
   consume(actor: OwnedActor, item: number): undefined {
     const entity = this.player(actor), client = entity.client;
-    if (client === null || client.ps.stats.get(statSchema("missionpack").holdableItem) !== item || itemAt("missionpack", item).type !== ItemType.IT_HOLDABLE)
+    if (client === null || client.ps.stats.get(statSchema(this.host.product).holdableItem) !== item || itemAt(this.host.product, item).type !== ItemType.IT_HOLDABLE)
       throw new Error("Selected Q3 holdable consumption differs from its current source item");
-    client.ps.stats.set(statSchema("missionpack").holdableItem, 0); return undefined;
+    client.ps.stats.set(statSchema(this.host.product).holdableItem, 0); return undefined;
   }
   giveHoldable(actor: OwnedActor, name: string): boolean {
-    const item = itemList("missionpack").find(item => item.type === ItemType.IT_HOLDABLE &&
+    const item = itemList(this.host.product).find(item => item.type === ItemType.IT_HOLDABLE &&
       (item.className?.toLowerCase() === name.toLowerCase() || item.pickupName?.toLowerCase() === name.toLowerCase()));
     if (item === undefined) return false;
     const player = this.player(actor);
@@ -345,9 +400,9 @@ export class Q3SelectedSource {
     this.assertOpen(); this.host.actors.assertOwned(actor);
     const client = this.records.nativeByActor(actor.id)?.client;
     if (client == null) throw new Error("Restored selected equipment has no source client");
-    const item = itemAt("missionpack", saved.holdableItem);
+    const item = itemAt(this.host.product, saved.holdableItem);
     if (saved.holdableItem !== 0 && (item.type !== ItemType.IT_HOLDABLE || item.tag !== saved.holdableTag)) throw new Error("Restored selected holdable differs from its source item");
-    client.ps.stats.set(statSchema("missionpack").holdableItem, saved.holdableItem);
+    client.ps.stats.set(statSchema(this.host.product).holdableItem, saved.holdableItem);
   }
   fire(actor: OwnedActor, weapon: number, _input: WeaponStepInput): undefined {
     const entity = this.player(actor); entity.s.weapon = weapon;
@@ -358,11 +413,17 @@ export class Q3SelectedSource {
   }
   useHoldable(actor: OwnedActor, event: number): undefined {
     const entity = this.player(actor), combat = this.bridge.context;
-    if (combat.product !== "missionpack") throw new Error("Missing missionpack holdable context");
     this.pool.addPredictableEvent(entity, event); entity.eventTime = this.now();
-    this.run(() => useQ3Holdable({ product: "missionpack", combat, weapons: this.weapons, personalPortal: this.personalPortal, teleport: player => {
+    const teleport = (player: GameEntity): void => {
       this.host.dropObjectives(player.actor); const spawn = this.host.spawnPoint(player.actor); this.teleport(player, spawn.origin, spawn.angles);
-    } }, entity, event));
+    };
+    this.run(() => {
+      if (combat.product === "baseq3") useQ3Holdable({ product: "baseq3", combat, weapons: this.weapons, teleport }, entity, event);
+      else {
+        if (this.personalPortal === null) throw new Error("Missionpack holdable has no portal service");
+        useQ3Holdable({ product: "missionpack", combat, weapons: this.weapons, personalPortal: this.personalPortal, teleport }, entity, event);
+      }
+    });
     return undefined;
   }
   private teleport(entity: GameEntity, origin: Vec3, angles: Vec3): void {
@@ -414,22 +475,52 @@ export class Q3SelectedSource {
       this.published.set(entity.actor, { event, time: entity.eventTime }); this.host.event(entity.actor, entity.s.copy(), entity.eventTime);
     }
   }
-  sourceState() { return q3PoolPresentationState(this.pool, "missionpack", this.now(), this.host.configstrings); }
-  presentations() { return q3PoolModels(this.pool, "missionpack", this.now(), this.host.content, this.host.configstrings); }
+  sourceState() { return q3PoolPresentationState(this.pool, this.host.product, this.now(), this.host.configstrings); }
+  presentations() { return q3PoolModels(this.pool, this.host.product, this.now(), this.host.content, this.host.configstrings); }
   capture() {
     this.assertOpen(); if (this.depth !== 0) throw new Error("Cannot save selected Q3 during a source call");
     this.bindWorld();
-    return { version: 1, provider: this.host.provider, graph: captureQ3Graph(this.records, this.pool), bridge: this.bridge.captureSaveState(),
-      missiles: this.missiles.captureSaveState(), personalPortal: this.personalPortal.captureSaveState(), random: this.random.seed,
+    return { version: 1, provider: this.host.provider, product: this.host.product, graph: captureQ3Graph(this.records, this.pool), bridge: this.bridge.captureSaveState(),
+      missiles: this.missiles.captureSaveState(), personalPortal: this.personalPortal?.captureSaveState() ?? null, random: this.random.seed,
       published: [...this.published].map(([actor, value]) => ({ actor: savedActorId(actor.id), ...value })) };
   }
+  restoreLegacy(saved: LegacyQ3Source, clients: readonly { readonly actor: OwnedActor; readonly state: Q3SelectedArsenalCheckpoint }[]): void {
+    this.assertOpen();
+    if (this.depth !== 0 || this.projected.size !== 0 || this.executing.size !== 0 || this.host.product !== "baseq3")
+      throw new Error("Legacy Q3 restore requires an unused base source owner");
+    this.bindWorld();
+    for (const { actor, state } of clients) {
+      if (state.runtime.product !== "baseq3" || state.arsenal.provider !== this.host.provider || state.arsenal.state.kind !== "q3")
+        throw new Error("Legacy Q3 player arsenal differs from its source");
+      const entity = this.player(actor), client = entity.client;
+      if (client === null) throw new Error("Legacy Q3 player lost its source client");
+      this.restoreEquipment(actor, state.runtime);
+      const weapon = state.arsenal.state;
+      client.ps.weapon = weapon.sourceWeapon; client.ps.weaponState = weapon.state; client.ps.weaponTime = weapon.timeMilliseconds;
+      client.ps.torsoAnim = state.torsoAnimation; client.ps.eventSequence = state.runtime.eventSequence;
+      client.ps.entityEventSequence = state.runtime.eventSequence;
+      entity.s.weapon = weapon.sourceWeapon;
+    }
+    restoreLegacyQ3Source(this, saved, actor => this.project(actor));
+    for (const { actor } of saved.projectiles) {
+      const entity = this.records.nativeByActor(actor.id);
+      if (entity === null) throw new Error("Imported Q3 projectile disappeared");
+      this.track(actor);
+      if (entity.s.event !== 0) this.published.set(actor, { event: entity.s.event, time: entity.eventTime });
+    }
+    this.restoredPresentation = this.sourceState(); this.revision++;
+  }
+
   restore(value: unknown): void {
     this.assertOpen();
     if (this.depth !== 0 || this.projected.size !== 0 || this.executing.size !== 0) throw new Error("Selected Q3 restore requires an unused source owner");
     const reader = new SaveReader(value, "selected Q3 source"); reader.field("version").literal(1); reader.field("provider").literal(this.host.provider);
+    if ((reader.field("product").value === undefined ? "missionpack" : reader.field("product").choice("baseq3", "missionpack")) !== this.host.product) reader.fail("Saved Q3 equipment product changed");
     const graph = readQ3Graph(reader.field("graph").value);
     prepareQ3Graph(this.records, graph, this.host.actors); restoreQ3Graph(this.records, this.pool, graph, this.host.actors);
-    this.bridge.restoreSaveState(reader.field("bridge").value); this.personalPortal.restoreSaveState(reader.field("personalPortal").value);
+    this.bridge.restoreSaveState(reader.field("bridge").value);
+    if (this.personalPortal !== null) this.personalPortal.restoreSaveState(reader.field("personalPortal").value);
+    else if (reader.field("personalPortal").value !== null) reader.fail("Base Q3 equipment has missionpack portal state");
     this.missiles.restoreSaveState(reader.field("missiles").value, actor => this.host.actors.referenceSaved(actor)); this.random.reset(reader.field("random").integer());
     for (const entry of reader.field("published").list(entry => {
       const actor = this.host.actors.resolveSaved(readSavedActor(entry.field("actor")));
@@ -451,7 +542,9 @@ export class Q3SelectedSource {
   close(): void {
     if (this.closed) return;
     if (this.depth !== 0) throw new Error("Cannot close selected Q3 during a source call");
-    this.closed = true; const errors: unknown[] = [];
+    const errors: unknown[] = [];
+    for (const slot of this.projected.values()) if (slot < this.host.maxClients) try { this.returnPersistent(this.pool.at(slot)); } catch (error) { errors.push(error); }
+    this.closed = true;
     for (const record of this.records.captureOwnership()) if (record.actor !== null && !record.borrowed && this.host.actors.isLive(record.actor.id))
       try { this.host.actors.release(record.actor); } catch (error) { errors.push(error); }
     for (const dispose of [() => this.missiles.close(), () => this.records.close(), this.unobserve]) try { dispose(); } catch (error) { errors.push(error); }

@@ -27,7 +27,8 @@ export function captureOriginalPickupRules(rules: readonly OriginalPickupRule[])
 /** The map retains its complete touch continuation; resource bindings select original recipient code. */
 export class SharedOriginalPickupAdmission implements OriginalPickupAdmission {
   private readonly touching = new Set<ActorId>();
-  constructor(private readonly actors: SessionActorRegistry, private readonly combat: GameplayAuthority, private readonly inventory: SharedInventoryTable) {}
+  constructor(private readonly actors: SessionActorRegistry, private readonly combat: GameplayAuthority, private readonly inventory: SharedInventoryTable,
+    private readonly eligible?: (offer: OriginalPickupOffer) => boolean) {}
 
   assertIdle(): undefined {
     if (this.touching.size !== 0) throw new Error("Cannot checkpoint during pickup execution");
@@ -56,6 +57,9 @@ export class SharedOriginalPickupAdmission implements OriginalPickupAdmission {
 
   private selection(scope: PickupScope): SourcePickupSelection {
     const { recipient, request } = scope;
+    const allowed = this.eligible?.(request) !== false;
+    if (!this.current(scope)) return { kind: "stale" };
+    if (!allowed) return { kind: "blocked" };
     const armor = this.combat.resolvePickup(recipient, request), items = this.inventory.resolvePickup(recipient, request);
     const matches = [...armor.matches, ...items.matches];
     if (matches.length > 1) throw new Error(`Multiple original pickup owners accept ${request.item}`);

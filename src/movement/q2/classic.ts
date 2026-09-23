@@ -6,8 +6,9 @@ import { characterHeight } from "./dimensions.ts";
 import { createMovementMath } from "./math.ts";
 import { classicViewAngles } from "./view.ts";
 import { type Vec3, type TraceT, type CsurfaceT, type CplaneT, type ClassicPmove, plane, PmTypeT, PMF_DUCKED, PMF_JUMP_HELD, PMF_ON_GROUND, PMF_TIME_WATERJUMP, PMF_TIME_LAND, PMF_TIME_TELEPORT, MAXTOUCH, PITCH, CONTENTS_SOLID, CONTENTS_WATER, CONTENTS_SLIME, CONTENTS_LADDER, MASK_WATER, MASK_CURRENT, CONTENTS_CURRENT_0, CONTENTS_CURRENT_90, CONTENTS_CURRENT_180, CONTENTS_CURRENT_270, CONTENTS_CURRENT_UP, CONTENTS_CURRENT_DOWN, SURF_SLICK, axes, element } from "./types.ts";
-export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, airAccelerate = 0, strafejumpHack = false, flight = false): void {
+export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, airAccelerate = 0, strafejumpHack = false, flight = false, speedMultiplier = 1): void {
     const { vec3, DotProduct, VectorCopy, VectorClear, VectorMA, VectorScale, VectorNormalize, VectorLength, AngleVectors } = createMovementMath(numericOps);
+    const equipmentSpeed = (value: number): number => speedMultiplier === 1 ? value : numericOps.multiply(value, speedMultiplier);
     const STEPSIZE = 18;
     class PmlT {
         origin: Vec3 = vec3();
@@ -24,8 +25,8 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
     }
     let pml: PmlT = new PmlT();
     let pm_stopspeed = 100;
-    let pm_maxspeed = 300;
-    let pm_duckspeed = 100;
+    let pm_maxspeed = equipmentSpeed(300);
+    let pm_duckspeed = equipmentSpeed(100);
     let pm_accelerate = 10;
     const pm_airaccelerate = airAccelerate;
     let pm_wateraccelerate = 10;
@@ -214,11 +215,11 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
     function PM_WaterMove(): void {
         const wishvel = vec3();
         for (const i of axes)
-            wishvel[i] = numericOps.store(numericOps.add(numericOps.multiply(element(pml.forward, i), pm.cmd.forwardmove), numericOps.multiply(element(pml.right, i), pm.cmd.sidemove)));
+            wishvel[i] = numericOps.store(numericOps.add(numericOps.multiply(element(pml.forward, i), equipmentSpeed(pm.cmd.forwardmove)), numericOps.multiply(element(pml.right, i), equipmentSpeed(pm.cmd.sidemove))));
         if (!pm.cmd.forwardmove && !pm.cmd.sidemove && !pm.cmd.upmove)
             wishvel[2] = numericOps.store(numericOps.subtract(element(wishvel, 2), 60));
         else
-            wishvel[2] = numericOps.store(numericOps.add(element(wishvel, 2), pm.cmd.upmove));
+            wishvel[2] = numericOps.store(numericOps.add(element(wishvel, 2), equipmentSpeed(pm.cmd.upmove)));
         PM_AddCurrents(wishvel);
         const wishdir = vec3();
         VectorCopy(wishvel, wishdir);
@@ -233,8 +234,8 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
     }
     function PM_AirMove(): void {
         const wishvel = vec3();
-        const fmove = pm.cmd.forwardmove;
-        const smove = pm.cmd.sidemove;
+        const fmove = equipmentSpeed(pm.cmd.forwardmove);
+        const smove = equipmentSpeed(pm.cmd.sidemove);
         for (let i = 0; i < 2; i++)
             wishvel[i] = numericOps.store(numericOps.add(numericOps.multiply(element(pml.forward, i), fmove), numericOps.multiply(element(pml.right, i), smove)));
         wishvel[2] = numericOps.store(0);
@@ -422,14 +423,14 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
             newspeed = numericOps.divide(newspeed, speed);
             VectorScale(pml.velocity, newspeed, pml.velocity);
         }
-        const fmove = pm.cmd.forwardmove;
-        const smove = pm.cmd.sidemove;
+        const fmove = equipmentSpeed(pm.cmd.forwardmove);
+        const smove = equipmentSpeed(pm.cmd.sidemove);
         VectorNormalize(pml.forward);
         VectorNormalize(pml.right);
         const wishvel = vec3();
         for (const i of axes)
             wishvel[i] = numericOps.store(numericOps.add(numericOps.multiply(element(pml.forward, i), fmove), numericOps.multiply(element(pml.right, i), smove)));
-        wishvel[2] = numericOps.store(numericOps.add(element(wishvel, 2), pm.cmd.upmove));
+        wishvel[2] = numericOps.store(numericOps.add(element(wishvel, 2), equipmentSpeed(pm.cmd.upmove)));
         const wishdir = vec3();
         VectorCopy(wishvel, wishdir);
         let wishspeed = VectorNormalize(wishdir);

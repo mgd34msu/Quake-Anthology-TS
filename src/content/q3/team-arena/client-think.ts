@@ -5,14 +5,14 @@ import { add3, sub3, vec3 } from "../../../core/math.ts";
 import type { Bounds, Vec3 } from "../../../core/math.ts";
 import type { ActorSpatialQueries, ServerWorld } from "../base/world.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
-import { EntityType, MoveType, Powerup, Team, Weapon, statSchema } from "../base/shared/definitions.ts";
+import { EntityType, MoveType, Powerup, Team, Weapon } from "../base/shared/definitions.ts";
 import { ServerEntityFlags } from "../base/shared/entity-shared.ts";
-import { itemAt, playerTouchesItem } from "../base/shared/items.ts";
+import { playerTouchesItem } from "../base/shared/items.ts";
 import type { ClientMovementHost } from "./movement-host.ts";
 import { CommandButtons, MoveFlags } from "../base/shared/player-state.ts";
 import type { UserCommand } from "../base/shared/player-state.ts";
 import { playerStateToEntityState, playerStateToEntityStateExtraPolate } from "../base/shared/snapshot-state.ts";
-import { clientTimerActions, sendPendingPredictableEvents } from "./client-effects.ts";
+import { clientSpeedMultiplier, clientTimerActions, sendPendingPredictableEvents } from "./client-effects.ts";
 import type { ClientEffectsContext } from "./client-effects.ts";
 import type { EntityPool } from "../base/game/entities.ts";
 import { ConnectionState, GameFlags, MAX_CLIENTS, MAX_GENTITIES, SpectatorState } from "../base/game/state.ts";
@@ -51,6 +51,7 @@ export interface ClientThinkHost extends ClientMovementHost {
   readonly spatial: ActorSpatialQueries;
   readonly touches: ClientTouchAccess;
   readonly effects: Pick<ClientEffectsContext, "combat">;
+  timerOwnership?(actor: ActorId): import("./client-effects.ts").ClientTimerOwnership;
   frame(): ClientThinkFrame;
   settings(): ClientThinkSettings;
   setPmoveMsec(milliseconds: number): void;
@@ -164,10 +165,8 @@ export class ClientThinkRuntime {
     ps.pmType = client.noclip ? MoveType.PM_NOCLIP : ps.health <= 0 ? MoveType.PM_DEAD : MoveType.PM_NORMAL;
     ps.gravity = Math.trunc(Math.fround(settings.gravity)) | 0;
     ps.speed = Math.trunc(Math.fround(settings.speed)) | 0;
-    const schema = statSchema(ps.product);
-    if (schema.product === "missionpack" && itemAt(ps.product, ps.stats.get(schema.persistentPowerup)).tag === Powerup.PW_SCOUT) {
-      ps.speed = Math.trunc(Math.fround(Math.fround(ps.speed) * Math.fround(1.5))) | 0;
-    } else if (ps.powerups.get(Powerup.PW_HASTE)) ps.speed = Math.trunc(Math.fround(Math.fround(ps.speed) * Math.fround(1.3))) | 0;
+    const speedMultiplier = clientSpeedMultiplier(ps);
+    if (speedMultiplier !== 1) ps.speed = Math.trunc(Math.fround(Math.fround(ps.speed) * Math.fround(speedMultiplier))) | 0;
     if (ps.weapon === Weapon.WP_GRAPPLING_HOOK && client.hook !== null && !(command.buttons & CommandButtons.ATTACK)) {
       this.host.freeHook(client.hook);
     }
@@ -230,7 +229,7 @@ export class ClientThinkRuntime {
       }
       return;
     }
-    clientTimerActions(this.host.effects, entity, msec);
+    clientTimerActions(this.host.effects, entity, msec, this.host.timerOwnership?.(entity.actor.id));
   }
 }
 

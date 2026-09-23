@@ -62,6 +62,8 @@ export type Q3SourceBots = ClientBotServices & (
 
 /** W73 supplies the existing owners; this provider contains source game records and phase functions. */
 export interface Q3SourceHost extends ClientMovementHost {
+  readonly ammo?: import("../../../../content/q3/base/records.ts").Q3RecordHost["ammo"];
+  timerOwnership?(actor: ActorId): import("../../../../content/q3/team-arena/client-effects.ts").ClientTimerOwnership;
   readonly serverState: import("./server-state.ts").Q3ServerState;
   readonly moverActors: Pick<MoverActorAccess, "observe" | "write" | "link" | "release">;
   primaryAttackAllowed?(actor: ActorId): boolean;

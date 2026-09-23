@@ -23,6 +23,10 @@ export interface Q3RecordHost {
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
   readonly callbacks: ActorCallbackTable;
+  readonly ammo?: {
+    read(actor: ActorId, weapon: number): number | null;
+    write(actor: OwnedActor, weapon: number, count: number): boolean;
+  };
   schedule(actor: OwnedActor, dueMilliseconds: number | null): undefined;
   runThink(actor: OwnedActor, timeMilliseconds: number): undefined;
   /** The innermost source call is retained until all synchronous pain/death callbacks return. */
@@ -128,11 +132,32 @@ export class Q3EntityRecords {
     const actor = this.host.actors.allocateAtSource(this.provider, slot, slot < MAX_CLIENTS ? "q3:player" : "q3:entity");
     record.actor = actor;
     this.host.bodies.create(actor, ZERO_BODY);
-    this.host.combat.create(actor, { health: 0, armor: { regular: { kind: "q3", points: 0, protection: Math.fround(0.66) }, powered: { kind: "none" } },
-      mass: 200, canTakeDamage: false, invulnerable: false, team: null }, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
-    this.host.inventory.create(actor, []);
-    this.bindCallbacks(record);
+    this.bindOwnedServices(record);
     return actor;
+  }
+
+  private bindOwnedServices(record: SourceRecord): void {
+    const actor = record.actor;
+    if (actor === null) throw new Error("Cannot bind Q3 services without an actor");
+    if (this.host.combat.read(actor.id) === null) this.host.combat.create(actor, {
+      health: 0, armor: { regular: { kind: "q3", points: 0, protection: Math.fround(0.66) }, powered: { kind: "none" } },
+      mass: 200, canTakeDamage: false, invulnerable: false, team: null,
+    }, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
+    else this.host.combat.bindDamageAdmission(actor, request => this.host.admitDamage?.(record.entity, request) ?? "continue");
+    if (!this.host.inventory.has(actor.id)) this.host.inventory.create(actor, []);
+    this.bindCallbacks(record);
+  }
+
+  /** Restore an existing owned actor without reallocating its identity or body. */
+  adopt(slot: number, actor: OwnedActor): GameEntity {
+    this.host.actors.assertOwned(actor);
+    const record = this.record(slot);
+    if (slot < MAX_CLIENTS || slot >= 1022 || actor.owner !== this.provider || record.actor !== null
+      || this.nativeByActor(actor.id) !== null || this.host.bodies.read(actor.id) === null)
+      throw new Error("Q3 owned actor adoption requires an unused entity slot and its existing body");
+    record.actor = actor; record.active = true; record.borrowed = false; record.entity.s.number = slot;
+    this.bindOwnedServices(record);
+    return record.entity;
   }
 
   /** Attach an already admitted foreign or foundation actor without creating another actor or changing its callbacks. */
@@ -252,9 +277,10 @@ export class Q3EntityRecords {
       },
       ammo: {
         read: index => { const weapon = q3WeaponItem(index); if (weapon?.ammo != null) { const current = this.record(slot).actor;
-          return current === null ? 0 : this.host.inventory.count(current.id, weapon.ammo); }
+          return current === null ? 0 : this.host.ammo?.read(current.id, index) ?? this.host.inventory.count(current.id, weapon.ammo); }
           const value = specialAmmo[index]; if (value === undefined) throw new RangeError(`Q3 ammo ${index} outside 0..15`); return value; },
-        write: (index, value) => { const weapon = q3WeaponItem(index); if (weapon?.ammo != null) { configure(weapon.ammo, value, 200); return; }
+        write: (index, value) => { const weapon = q3WeaponItem(index); if (weapon?.ammo != null) {
+          if (this.host.ammo?.write(actor(), index, value) !== true) configure(weapon.ammo, value, 200); return; }
           if (!Number.isInteger(index) || index < 0 || index >= 16) throw new RangeError(`Q3 ammo ${index} outside 0..15`); specialAmmo[index] = value; },
       },
     };

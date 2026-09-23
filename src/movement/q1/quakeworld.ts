@@ -123,15 +123,15 @@ class QuakeWorldMove {
   }
   private wishVelocity(): Vec3 {
     const m = this.context.math, n = m.n, command = this.command;
-    return m.vec(n.add(n.multiply(this.forward.x, command.forwardMove), n.multiply(this.right.x, command.sideMove)),
-      n.add(n.multiply(this.forward.y, command.forwardMove), n.multiply(this.right.y, command.sideMove)),
-      n.add(n.multiply(this.forward.z, command.forwardMove), n.multiply(this.right.z, command.sideMove)));
+    return m.vec(n.add(n.multiply(this.forward.x, this.context.speed(command.forwardMove)), n.multiply(this.right.x, this.context.speed(command.sideMove))),
+      n.add(n.multiply(this.forward.y, this.context.speed(command.forwardMove)), n.multiply(this.right.y, this.context.speed(command.sideMove))),
+      n.add(n.multiply(this.forward.z, this.context.speed(command.forwardMove)), n.multiply(this.right.z, this.context.speed(command.sideMove))));
   }
   private waterMove(): void {
     const c = this.context, m = c.math, n = m.n, s = this.state, command = this.command, p = this.input.profile.parameters;
     let wish = this.wishVelocity();
-    wish = m.vec(wish.x, wish.y, n.add(wish.z, command.forwardMove === 0 && command.sideMove === 0 && command.upMove === 0 ? -60 : command.upMove));
-    const normalized = m.normalize(wish), speed = n.multiply(Math.min(normalized.length, p.maxSpeed), 0.7);
+    wish = m.vec(wish.x, wish.y, n.add(wish.z, command.forwardMove === 0 && command.sideMove === 0 && command.upMove === 0 ? -60 : this.context.speed(command.upMove)));
+    const normalized = m.normalize(wish), speed = n.multiply(Math.min(normalized.length, this.context.speed(p.maxSpeed)), 0.7);
     this.accelerate(normalized.direction, speed, p.waterAccelerate);
     const destination = m.ma(s.origin, this.frameSeconds, s.velocity);
     const start = m.add(destination, { x: 0, y: 0, z: Q1_STEP_HEIGHT + 1 });
@@ -143,7 +143,7 @@ class QuakeWorldMove {
     const m = this.context.math, n = m.n, s = this.state, p = this.input.profile.parameters;
     this.forward = m.normalize(m.vec(this.forward.x, this.forward.y, 0)).direction;
     this.right = m.normalize(m.vec(this.right.x, this.right.y, 0)).direction;
-    const wish = m.normalize(this.wishVelocity()), speed = Math.min(wish.length, p.maxSpeed);
+    const wish = m.normalize(this.wishVelocity()), speed = Math.min(wish.length, this.context.speed(p.maxSpeed));
     const gravity = n.multiply(n.multiply(n.multiply(p.entityGravity, this.input.environment.gravityMultiplier), p.gravity), this.frameSeconds);
     if (s.ground.kind !== "none") {
       s.velocity = m.vec(s.velocity.x, s.velocity.y, 0);
@@ -226,8 +226,8 @@ class QuakeWorldMove {
     }
     this.forward = m.normalize(this.forward).direction; this.right = m.normalize(this.right).direction;
     let wish = this.wishVelocity();
-    wish = m.vec(wish.x, wish.y, n.add(wish.z, this.command.upMove));
-    const normalized = m.normalize(wish), wishSpeed = Math.min(normalized.length, collide ? p.maxSpeed : p.spectatorMaxSpeed);
+    wish = m.vec(wish.x, wish.y, n.add(wish.z, this.context.speed(this.command.upMove)));
+    const normalized = m.normalize(wish), wishSpeed = Math.min(normalized.length, collide ? this.context.speed(p.maxSpeed) : this.context.speed(p.spectatorMaxSpeed));
     const add = n.subtract(wishSpeed, m.dot(s.velocity, normalized.direction));
     // This early return also skips origin integration in original SpectatorMove.
     if (add <= 0 && !collide) return;

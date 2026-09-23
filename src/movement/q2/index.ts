@@ -127,7 +127,7 @@ function moveQ2ClassicPhysics(input: Q2MovementInput, services: MovementServices
     mins: sourceVector(body.min), maxs: sourceVector(body.max), groundentity: null, watertype: 0, waterlevel: 0, characterBounds: body,
     trace: (start, mins, maxs, end) => scene.trace(start, mins, maxs, end, MASK_CLASSIC_PLAYERSOLID), pointcontents: scene.pointcontents,
   };
-  pmoveClassic(pm, services.numeric, input.profile.airAccelerate, input.profile.strafejumpHack ?? false, input.environment.flight && input.environment.health > 0);
+  pmoveClassic(pm, services.numeric, input.profile.airAccelerate, input.profile.strafejumpHack ?? false, input.environment.flight && input.environment.health > 0, input.environment.speedMultiplier ?? 1);
   if (pose !== undefined) { pm.s.pm_type = input.state.type; pm.viewheight = pose.viewHeight;
     pm.s.pm_flags = pose.crouched ? pm.s.pm_flags | PMF_DUCKED : pm.s.pm_flags & ~PMF_DUCKED; }
   const state: Q2MovementState = { kind: "q2-classic", type: pm.s.pm_type, originEighths: [...pm.s.origin], velocityEighths: [...pm.s.velocity],
@@ -173,7 +173,7 @@ function moveQ2RereleasePhysics(input: Q2RereleaseMovementInput, services: Movem
     clip: (start, mins, maxs, end, mask) => scene.trace(start, mins, maxs, end, mask, true), pointcontents: scene.pointcontents,
     viewoffset: sourceVector(input.viewOffset), screen_blend: [0, 0, 0, 0], rdflags: 0, jump_sound: false, step_clip: false, impact_delta: 0,
   };
-  pmoveRerelease(pm, services.numeric, { airaccel: input.profile.airAccelerate, n64_physics: input.profile.n64Physics }, context, input.environment.flight && input.environment.health > 0);
+  pmoveRerelease(pm, services.numeric, { airaccel: input.profile.airAccelerate, n64_physics: input.profile.n64Physics }, context, input.environment.flight && input.environment.health > 0, input.environment.speedMultiplier ?? 1);
   if (pose !== undefined) { pm.s.pm_type = input.state.type; pm.s.viewheight = pose.viewHeight;
     pm.s.pm_flags = pose.crouched ? pm.s.pm_flags | PmflagsT.PMF_DUCKED : pm.s.pm_flags & ~PmflagsT.PMF_DUCKED; }
   const presentation: Q2RereleaseMovementPresentation = { screenBlend: { x: pm.screen_blend[0], y: pm.screen_blend[1], z: pm.screen_blend[2], w: pm.screen_blend[3] },

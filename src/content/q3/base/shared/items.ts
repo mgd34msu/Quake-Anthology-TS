@@ -456,6 +456,16 @@ export type PlayerInventory = Inventory & (
   | { readonly product: "missionpack"; readonly persistentPowerupIndex: number }
 );
 
+export function canQ3ArmorBeGrabbed(ps: PlayerInventory): boolean {
+  if (ps.product === "missionpack") {
+    if (itemAt(ps.product, ps.persistentPowerupIndex).tag === Powerup.PW_SCOUT) return false;
+    const upperBound = itemAt(ps.product, ps.persistentPowerupIndex).tag === Powerup.PW_GUARD
+      ? ps.maxHealth : ps.maxHealth * 2;
+    return ps.armor < upperBound;
+  }
+  return ps.armor < ps.maxHealth * 2;
+}
+
 export function canItemBeGrabbed(gametype: number, ent: PickupEntity, ps: PlayerInventory): boolean {
   if (ent.modelIndex < 1 || ent.modelIndex >= itemList(ps.product).length) {
     throw new CommonError("drop", "BG_CanItemBeGrabbed: index out of range");
@@ -466,15 +476,7 @@ export function canItemBeGrabbed(gametype: number, ent: PickupEntity, ps: Player
       return true;
     case ItemType.IT_AMMO:
       return ps.ammo(item.tag) < 200;
-    case ItemType.IT_ARMOR: {
-      if (ps.product === "missionpack") {
-        if (itemAt(ps.product, ps.persistentPowerupIndex).tag === Powerup.PW_SCOUT) return false;
-        const upperBound = itemAt(ps.product, ps.persistentPowerupIndex).tag === Powerup.PW_GUARD
-          ? ps.maxHealth : ps.maxHealth * 2;
-        return ps.armor < upperBound;
-      }
-      return ps.armor < ps.maxHealth * 2;
-    }
+    case ItemType.IT_ARMOR: return canQ3ArmorBeGrabbed(ps);
     case ItemType.IT_HEALTH:
       if (ps.product === "missionpack" && itemAt(ps.product, ps.persistentPowerupIndex).tag === Powerup.PW_GUARD) return ps.health < ps.maxHealth;
       return ps.health < ps.maxHealth * (item.quantity === 5 || item.quantity === 100 ? 2 : 1);

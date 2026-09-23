@@ -293,6 +293,14 @@ for (const edition of ["classic", "rerelease"]) test.skipIf(!installed)(`Q2 ${ed
     if (result.status !== "active") throw new Error("Flight removed player");
     current = { ...current, state: result.state }; return { origin: result.state.origin, bounds: result.bounds };
   };
+  if (current.kind === "q2-rerelease") {
+    const vertical = { ...current, command: { ...current.command, buttons: ButtonT.BUTTON_JUMP } };
+    const normal = rereleaseProvider.move(vertical, host);
+    const accelerated = rereleaseProvider.move({ ...vertical, environment: { ...vertical.environment, speedMultiplier: 1.5 } }, host);
+    if (normal.status !== "active" || accelerated.status !== "active") throw new Error("Flight removed player");
+    expect(normal.state.velocity.z).toBeGreaterThan(0);
+    expect(accelerated.state.velocity.z).toBeCloseTo(normal.state.velocity.z * 1.5, 4);
+  }
   let position = initial;
   for (let index = 0; index < 10; index++) position = step(0, 300).origin;
   expect(position.z).toBeGreaterThan(initial.z);

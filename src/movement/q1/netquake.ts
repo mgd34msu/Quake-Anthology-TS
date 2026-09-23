@@ -197,12 +197,12 @@ class NetQuakeMove {
   private waterMove(): void {
     const c = this.context, m = c.math, n = m.n, s = this.state, p = this.input.profile.parameters, command = this.input.command;
     const axes = m.angles(s.viewAngles);
-    let wish = m.vec(n.add(n.multiply(axes.forward.x, command.forwardMove), n.multiply(axes.right.x, command.sideMove)),
-      n.add(n.multiply(axes.forward.y, command.forwardMove), n.multiply(axes.right.y, command.sideMove)),
-      n.add(n.multiply(axes.forward.z, command.forwardMove), n.multiply(axes.right.z, command.sideMove)));
-    wish = m.vec(wish.x, wish.y, n.add(wish.z, command.forwardMove === 0 && command.sideMove === 0 && command.upMove === 0 ? -60 : command.upMove));
+    let wish = m.vec(n.add(n.multiply(axes.forward.x, this.context.speed(command.forwardMove)), n.multiply(axes.right.x, this.context.speed(command.sideMove))),
+      n.add(n.multiply(axes.forward.y, this.context.speed(command.forwardMove)), n.multiply(axes.right.y, this.context.speed(command.sideMove))),
+      n.add(n.multiply(axes.forward.z, this.context.speed(command.forwardMove)), n.multiply(axes.right.z, this.context.speed(command.sideMove))));
+    wish = m.vec(wish.x, wish.y, n.add(wish.z, command.forwardMove === 0 && command.sideMove === 0 && command.upMove === 0 ? -60 : this.context.speed(command.upMove)));
     let wishSpeed = m.length(wish);
-    if (wishSpeed > p.maxSpeed) { wish = m.scale(wish, n.divide(p.maxSpeed, wishSpeed)); wishSpeed = p.maxSpeed; }
+    if (wishSpeed > this.context.speed(p.maxSpeed)) { wish = m.scale(wish, n.divide(this.context.speed(p.maxSpeed), wishSpeed)); wishSpeed = this.context.speed(p.maxSpeed); }
     wishSpeed = n.multiply(wishSpeed, 0.7);
     const speed = m.length(s.velocity);
     let newSpeed = 0;
@@ -220,11 +220,11 @@ class NetQuakeMove {
     const m = this.context.math, n = m.n, s = this.state, command = this.input.command, p = this.input.profile.parameters;
     const axes = m.angles(s.angles);
     const forwardMove = this.timeSeconds < s.teleportTimeSeconds && command.forwardMove < 0 ? 0 : command.forwardMove;
-    let wish = m.vec(n.add(n.multiply(axes.forward.x, forwardMove), n.multiply(axes.right.x, command.sideMove)),
-      n.add(n.multiply(axes.forward.y, forwardMove), n.multiply(axes.right.y, command.sideMove)), s.moveType === Q1_MOVE_WALK ? 0 : command.upMove);
+    let wish = m.vec(n.add(n.multiply(axes.forward.x, this.context.speed(forwardMove)), n.multiply(axes.right.x, this.context.speed(command.sideMove))),
+      n.add(n.multiply(axes.forward.y, this.context.speed(forwardMove)), n.multiply(axes.right.y, this.context.speed(command.sideMove))), s.moveType === Q1_MOVE_WALK ? 0 : this.context.speed(command.upMove));
     const normalized = m.normalize(wish);
     let wishSpeed = normalized.length;
-    if (wishSpeed > p.maxSpeed) { wish = m.scale(wish, n.divide(p.maxSpeed, wishSpeed)); wishSpeed = p.maxSpeed; }
+    if (wishSpeed > this.context.speed(p.maxSpeed)) { wish = m.scale(wish, n.divide(this.context.speed(p.maxSpeed), wishSpeed)); wishSpeed = this.context.speed(p.maxSpeed); }
     if (s.moveType === Q1_MOVE_NOCLIP) s.velocity = wish;
     else if ((s.flags & Q1_FLAG_ONGROUND) !== 0) { this.friction(); this.accelerate(normalized.direction, wishSpeed, false); }
     else this.accelerate(wish, wishSpeed, true);
@@ -232,11 +232,11 @@ class NetQuakeMove {
   private alternateNoclip(): void {
     const m = this.context.math, n = m.n, s = this.state, command = this.input.command;
     const axes = m.angles(s.viewAngles);
-    const wish = m.vec(n.add(n.multiply(axes.forward.x, command.forwardMove), n.multiply(axes.right.x, command.sideMove)),
-      n.add(n.multiply(axes.forward.y, command.forwardMove), n.multiply(axes.right.y, command.sideMove)),
-      n.add(n.add(n.multiply(axes.forward.z, command.forwardMove), n.multiply(axes.right.z, command.sideMove)), n.multiply(command.upMove, 2)));
+    const wish = m.vec(n.add(n.multiply(axes.forward.x, this.context.speed(command.forwardMove)), n.multiply(axes.right.x, this.context.speed(command.sideMove))),
+      n.add(n.multiply(axes.forward.y, this.context.speed(command.forwardMove)), n.multiply(axes.right.y, this.context.speed(command.sideMove))),
+      n.add(n.add(n.multiply(axes.forward.z, this.context.speed(command.forwardMove)), n.multiply(axes.right.z, this.context.speed(command.sideMove))), n.multiply(this.context.speed(command.upMove), 2)));
     const normalized = m.normalize(wish);
-    s.velocity = normalized.length > this.input.profile.parameters.maxSpeed ? m.scale(normalized.direction, this.input.profile.parameters.maxSpeed) : wish;
+    s.velocity = normalized.length > this.context.speed(this.input.profile.parameters.maxSpeed) ? m.scale(normalized.direction, this.context.speed(this.input.profile.parameters.maxSpeed)) : wish;
   }
   private clientThink(): void {
     const c = this.context, m = c.math, n = m.n, s = this.state;

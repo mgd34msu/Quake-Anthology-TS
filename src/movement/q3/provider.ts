@@ -30,12 +30,13 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
   if (input.profile.numeric.arithmetic.kind !== "binary32" || services.numeric.profile.arithmetic.kind !== "binary32") {
     throw new TypeError("The Q3 movement implementation requires binary32 operations");
   }
-  const source = input.state;
+  const source = input.state, multiplier = input.environment.speedMultiplier ?? 1;
+  const movementSpeed = (speed: number): number => multiplier === 1 ? speed : Math.trunc(Math.fround(Math.fround(speed) * Math.fround(multiplier))) | 0;
   const motion: Q3Motion = {
     commandTime: source.commandTimeMilliseconds, pmType: source.movementType, bobCycle: source.bobCycle,
     pmFlags: source.movementFlags, pmTime: source.movementTimeMilliseconds, origin: source.origin,
     velocity: source.velocity, gravity: Math.trunc(source.gravity * input.environment.gravityMultiplier),
-    speed: source.speed, deltaAngles: { x: source.deltaAngleWords[0], y: source.deltaAngleWords[1], z: source.deltaAngleWords[2] },
+    speed: movementSpeed(source.speed), deltaAngles: { x: source.deltaAngleWords[0], y: source.deltaAngleWords[1], z: source.deltaAngleWords[2] },
     ground: source.ground, movementDir: source.movementDirection, grapplePoint: source.grapplePoint,
     eFlags: source.flags, viewangles: source.viewAngles, viewheight: source.viewHeight,
     pmoveFramecount: source.movementFrame, eventSequence: source.predictableEventSequence,
@@ -74,7 +75,7 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
     motion.movementDir = state.movementDirection; motion.eFlags = state.flags;
     motion.viewangles = state.viewAngles; motion.viewheight = state.viewHeight; motion.pmoveFramecount = state.movementFrame;
     motion.eventSequence = state.predictableEventSequence; motion.grapplePoint = state.grapplePoint;
-    motion.gravity = Math.trunc(state.gravity * input.environment.gravityMultiplier); motion.speed = state.speed;
+    motion.gravity = Math.trunc(state.gravity * input.environment.gravityMultiplier); motion.speed = movementSpeed(state.speed);
   };
   const context = (): Q3HookContext => ({ input, motion, state: movementState(), command, frame, arsenal, animation, services });
   const append = (effect: MovementEffect): void => {

@@ -27,6 +27,7 @@ export interface Q3SelectedArsenalOptions {
     read(actor: OwnedActor): Pick<Q3ArsenalRuntimeState, "maxHealth" | "persistentPowerupTag" | "holdableItem" | "holdableTag">;
     consume(actor: OwnedActor, item: number): undefined;
     advance?(actor: OwnedActor, milliseconds: number): void;
+    endCommand?(actor: OwnedActor, milliseconds: number): void;
     restore?(actor: OwnedActor, state: Pick<Q3ArsenalRuntimeState, "maxHealth" | "persistentPowerupTag" | "holdableItem" | "holdableTag">): void;
   };
   fire(actor: OwnedActor, weapon: number, input: WeaponStepInput): undefined;
@@ -148,7 +149,8 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     const result = stepQ3Arsenal({ ...input, arsenal, animation: input.animation.state.kind === "q3" ? input.animation : weaponAnimation }, player.runtime,
       resolveQ3ArsenalControls(arsenal, intent, input.command, this.options.product));
     const elapsed = input.frame.elapsed.kind === "milliseconds" ? input.frame.elapsed.value : input.frame.elapsed.value * 1000;
-    this.options.equipment?.advance?.(player.actor, Math.trunc(elapsed + player.runtime.fractionalMilliseconds));
+    const milliseconds = Math.trunc(elapsed + player.runtime.fractionalMilliseconds);
+    this.options.equipment?.advance?.(player.actor, milliseconds);
     player.arsenal = result.arsenal;
     player.runtime = result.runtime;
     if (holdable !== 0 && result.runtime.holdableItem === 0) this.options.equipment?.consume(player.actor, holdable);
@@ -160,7 +162,9 @@ export class Q3SelectedArsenal implements SelectedArsenal {
       if (effect.value.event === EntityEvent.EV_FIRE_WEAPON) { player.lastFireMilliseconds = input.frame.time.kind === "milliseconds" ? input.frame.time.value : input.frame.time.value * 1000; this.options.fire(player.actor, result.arsenal.state.sourceWeapon, input); }
       else if (effect.value.event >= EntityEvent.EV_USE_ITEM0 && effect.value.event <= EntityEvent.EV_USE_ITEM15) this.options.useHoldable(player.actor, effect.value.event, input);
     }
-    return { ...result, animation: input.animation.state.kind === "q3" ? result.animation : input.animation };
+    if (this.players.has(player.actor.id)) this.options.equipment?.endCommand?.(player.actor, milliseconds);
+    return { ...result, arsenal: this.players.has(player.actor.id) ? this.read(player.actor.id) : result.arsenal,
+      animation: input.animation.state.kind === "q3" ? result.animation : input.animation };
   }
 
   remove(actor: ActorId): undefined { this.players.delete(actor); return undefined; }
@@ -173,7 +177,6 @@ export class Q3SelectedArsenal implements SelectedArsenal {
   restore(actor: OwnedActor, checkpoint: Q3SelectedArsenalCheckpoint): undefined {
     if (checkpoint.supplyProfile !== (this.options.supply?.profile ?? null)) throw new Error("Saved pickup supply differs from selected arsenal composition");
     if (checkpoint.arsenal.provider !== this.provider || checkpoint.arsenal.state.kind !== "q3" || checkpoint.runtime.product !== this.options.product) throw new Error("Saved arsenal differs from selected Q3 provider");
-    this.clearReplacedItems(actor);
     for (const entry of checkpoint.arsenal.ammo) if (this.inventoryItems.has(entry.item)) this.options.inventory.configure(actor, entry);
     this.options.equipment?.restore?.(actor, checkpoint.runtime);
     this.players.set(actor.id, { actor, arsenal: checkpoint.arsenal, runtime: { ...checkpoint.runtime }, torsoAnimation: checkpoint.torsoAnimation, lastFireMilliseconds: checkpoint.lastFireMilliseconds });

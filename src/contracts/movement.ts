@@ -134,6 +134,7 @@ export interface FixedMovementPose {
   readonly viewHeight: number;
 }
 export interface MovementEnvironment {
+  readonly speedMultiplier?: number;
   readonly pose?: FixedMovementPose;
   readonly health: number;
   readonly flight: boolean;

@@ -22,7 +22,7 @@ export function guestMovementProjection(guest: Q3QvmServerGame, player: Q3Applic
     haste: powerup(Powerup.PW_HASTE), invulnerable: product === "missionpack" && powerup(Powerup.PW_INVULNERABILITY), gravityMultiplier: 1 });
   return {
     ...template, client: player.client, actor: guest.records.actor(player.sourceEntity),
-    services: { numeric: createNumericOperations(profile.numeric) }, gravityMultiplier: 1,
+    services: { numeric: createNumericOperations(profile.numeric) }, gravityMultiplier: 1, movementSpeedMultiplier: 1,
     get flight() { return environment().flight; },
     get worldGravity() { return state().gravity; },
     get sourceEnvironment() { return environment(); },

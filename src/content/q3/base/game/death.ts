@@ -30,6 +30,21 @@ const COMMON_MOD_NAMES = ["MOD_UNKNOWN", "MOD_SHOTGUN", "MOD_GAUNTLET", "MOD_MAC
   "MOD_WATER", "MOD_SLIME", "MOD_LAVA", "MOD_CRUSH", "MOD_TELEFRAG", "MOD_FALLING",
   "MOD_SUICIDE", "MOD_TARGET_LASER", "MOD_TRIGGER_HURT"];
 
+export function returnQ3PersistentPowerup(powerup: GameEntity, world: Pick<ServerWorld, "link">): void {
+  powerup.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
+  powerup.s.eFlags &= ~EF_NODRAW;
+  powerup.r.contents = CONTENTS_TRIGGER;
+  world.link(powerup);
+}
+
+export function tossQ3ClientPersistentPowerup(entity: GameEntity, returnItem: (powerup: GameEntity) => void): void {
+  const client = entity.client;
+  if (client === null || client.persistantPowerup === null) return;
+  returnItem(client.persistantPowerup);
+  client.ps.stats.set(MissionpackStatIndex.STAT_PERSISTANT_POWERUP, 0);
+  client.persistantPowerup = null;
+}
+
 export interface DeathFrame {
   readonly time: number;
   readonly gameType: number;
@@ -157,15 +172,7 @@ export class DeathRuntime {
 
   tossClientPersistantPowerups(entity: GameEntity): void {
     if (this.host.product !== "missionpack") throw new Error("Persistent powerup tossing requires missionpack");
-    const client = entity.client;
-    if (client === null || client.persistantPowerup === null) return;
-    const powerup = client.persistantPowerup;
-    powerup.r.svFlags &= ~ServerEntityFlags.NOCLIENT;
-    powerup.s.eFlags &= ~EF_NODRAW;
-    powerup.r.contents = CONTENTS_TRIGGER;
-    this.host.world.link(powerup);
-    client.ps.stats.set(MissionpackStatIndex.STAT_PERSISTANT_POWERUP, 0);
-    client.persistantPowerup = null;
+    tossQ3ClientPersistentPowerup(entity, powerup => returnQ3PersistentPowerup(powerup, this.host.world));
   }
 
   lookAtKiller(self: GameEntity, inflictor: DamageInflictor | null, attacker: DamageParticipant | null): void {

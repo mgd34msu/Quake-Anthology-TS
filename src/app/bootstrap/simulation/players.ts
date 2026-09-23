@@ -66,6 +66,7 @@ export interface PlayerMovementHost {
   touchTriggers(actor: OwnedActor): undefined;
   isBrush(actor: ActorId): boolean;
   worldActor(): ActorId | null;
+  speedMultiplier?(actor: OwnedActor): number;
   fixedPose?(actor: OwnedActor): import("../../../contracts/movement.ts").FixedMovementPose | null;
   sourcePunch?(actor: ActorId): Vec3 | null;
   gibbed?(): boolean;
@@ -116,6 +117,7 @@ export class MovementPlayer {
     const profile = selectedMovementProfile(this);
     return profile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(profile) ?? profile : profile;
   }
+  get movementSpeedMultiplier(): number { return this.host.speedMultiplier?.(this.actor) ?? 1; }
   get predictionEnvironment(): MovementInput["environment"] {
     const combat = this.host.combat.read(this.actor.id);
     if (combat === null) throw new Error("Prediction player has no combat state");

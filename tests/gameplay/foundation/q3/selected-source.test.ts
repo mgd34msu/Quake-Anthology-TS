@@ -16,10 +16,10 @@ import { openArchive } from "../../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../../src/formats/q1-map/index.ts";
 import { parseEntities } from "../../../../src/core/common-parse.ts";
 import { Q3SelectedSource } from "../../../../src/app/bootstrap/simulation/arsenal/q3-source.ts";
-import type { Q3SelectedClientEffects } from "../../../../src/app/bootstrap/simulation/arsenal/q3-source.ts";
+import type { Q3SelectedClientEffects, Q3SelectedSourceHost } from "../../../../src/app/bootstrap/simulation/arsenal/q3-source.ts";
 import { Q3SelectedArsenal } from "../../../../src/app/bootstrap/simulation/arsenal/q3.ts";
 import { q3SpawnAnimation } from "../../../../src/content/q3/foundation/arsenal.ts";
-import { EntityEvent, EntityType, Team, statSchema } from "../../../../src/content/q3/base/shared/definitions.ts";
+import { EntityEvent, EntityType, Powerup, Team, statSchema } from "../../../../src/content/q3/base/shared/definitions.ts";
 import { itemList } from "../../../../src/content/q3/base/shared/items.ts";
 import { ConfigStringRegistry } from "../../../../src/content/q3/base/game/utilities.ts";
 import { pickupHoldable } from "../../../../src/content/q3/base/game/item-pickup.ts";
@@ -51,7 +51,7 @@ interface SavedFixture {
   readonly states: readonly { readonly id: SavedActorId; readonly body: BodyState | null; readonly combat: CombatState | null;
     readonly inventory: readonly InventoryEntry[] | null; readonly player: boolean; readonly collision: ActorCollision | undefined; readonly linked: boolean }[];
 }
-function fixture(data: Awaited<ReturnType<typeof map>>, previous?: SavedFixture) {
+function fixture(data: Awaited<ReturnType<typeof map>>, previous?: SavedFixture, product: Q3SelectedSourceHost["product"] = "missionpack") {
   const actors = previous === undefined ? new SessionActorRegistry(createIdentityOwner("selected-team-arena"))
     : SessionActorRegistry.restore(createIdentityOwner("selected-team-arena-restored"), previous.actors, previous.sourceActors);
   const callbacks = new ActorCallbackTable(actors), scene = new SharedSceneQueries(data.world), collisions = new Map<ActorId, ActorCollision>();
@@ -65,6 +65,7 @@ function fixture(data: Awaited<ReturnType<typeof map>>, previous?: SavedFixture)
       bodies.write(actor, { ...body, velocity: { x: body.velocity.x + impulse.x, y: body.velocity.y + impulse.y, z: body.velocity.z + impulse.z } }); return undefined; },
     beforeReaction: (_actor, decision) => { source?.bridge.beforeReaction(decision); return undefined; }, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors), players = new Set<ActorId>();
+  let maxHealth = 100;
   let time = previous?.time ?? 100, angles: Vec3 = { x: 90, y: 0, z: 0 };
   const strings = new Map<number, string>(previous?.strings), indices = new ConfigStringRegistry({ get: index => strings.get(index) ?? "", set: (index, value) => { strings.set(index, value); } });
   const executions = new Map<OwnedActor, (previous: number, time: number) => void>();
@@ -90,16 +91,17 @@ function fixture(data: Awaited<ReturnType<typeof map>>, previous?: SavedFixture)
   const player = previous === undefined ? create("q1:player", data.origin) : actors.resolveSaved(previous.player);
   if (world === null || player === null) throw new Error("Missing restored fixture principals");
   source = new Q3SelectedSource({ actors, bodies, callbacks, combat, inventory, queries: scene,
-    provider: "q3:weapons/classic/missionpack", content: "q3:classic:missionpack:retail", configstrings: indices.store, userinfo: () => "\\name\\Source player",
+    provider: `q3:weapons/classic/${product}`, product, content: `q3:classic:${product}:retail`, configstrings: indices.store, userinfo: () => "\\name\\Source player",
     maxClients: 2, seed: 1, now: () => time, worldActor: () => world, player: actor => players.has(actor)
-      ? { angles, viewHeight: 22, maxHealth: 100, team: Team.TEAM_FREE, quadUntil: 0, hasteUntil: 0 } : null,
+      ? { angles, viewHeight: 22, maxHealth, team: Team.TEAM_FREE, quadUntil: 0, hasteUntil: 0 } : null,
     combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q1:movement",
     collision: (actor, collision) => { collisions.set(actor.id, collision); return undefined; }, curves: () => true, playerCurveClip: () => true,
     armorContext: () => ({ screenFacingDot: 1, arithmetic: "binary32" }), gameType: () => 0, friendlyFire: () => false,
     knockback: () => 1000, intermissionQueued: () => 0, checkHurtCarrier: () => {}, checkObeliskAttack: () => false,
     quadFactor: () => 4, proximityTimeout: () => 20000, modelIndex: path => indices.modelIndex(path), soundIndex: path => indices.soundIndex(path), print: () => {},
     execute: (actor, step) => { executions.set(actor, step); }, event: (_actor, state) => { events.push(state.eType >= EntityType.ET_EVENTS ? state.eType - EntityType.ET_EVENTS : state.event & 255); },
-    clientChanged: (_actor, before, after) => { changes.push({ before, after }); angles = after.viewAngles; },
+    clientChanged: (_actor, before, after) => { changes.push({ before, after }); angles = after.viewAngles; maxHealth = after.maxHealth; },
+    returnPickup: () => { throw new Error("Fixture has no borrowed map item lifecycle"); },
     dropObjectives: () => {}, spawnPoint: () => ({ origin: data.origin, angles: { x: 0, y: 90, z: 0 } }) }, previous?.source);
   combat.register(source.bridge.policy()); source.admit(player);
   const active = source;
@@ -197,5 +199,66 @@ test.skipIf(!existsSync(archivePath))("original holdable grant and selected use 
     value.advance(value.now() + 100); expect(explosion.count).toBe(100);
     expect(value.changes.at(-1)?.after.deltaAngles).not.toEqual(zero);
     source.respawn(actor.id); expect(source.equipment(actor).holdableItem).toBe(0); expect(player.client?.portalID).toBe(0);
+  } finally { source.close(); }
+});
+
+
+test.skipIf(!existsSync(archivePath))("base Q3 selected source uses original medkit and teleporter leaves with its own saved item layout", async () => {
+  const data = await map(), value = fixture(data, undefined, "baseq3");
+  const source = value.source, actor = value.player;
+  const arsenal = new Q3SelectedArsenal({ provider: source.host.provider, product: "baseq3", inventory: value.inventory,
+    fire: (actor, weapon, input) => source.fire(actor, weapon, input), useHoldable: (actor, event) => source.useHoldable(actor, event),
+    equipment: { read: actor => source.equipment(actor), consume: (actor, item) => source.consume(actor, item) } });
+  arsenal.admit(actor, 100); arsenal.step(input(value, arsenal), undefined);
+  try {
+    expect(source.giveHoldable(actor, "holdable_invulnerability")).toBe(false);
+    expect(source.giveHoldable(actor, "holdable_medkit")).toBe(true);
+    arsenal.step(input(value, arsenal), { provider: arsenal.provider, weapon: null, useHoldable: true });
+    expect(value.combat.read(actor.id)?.health).toBe(125);
+    arsenal.step(input(value, arsenal), { provider: arsenal.provider, weapon: null, useHoldable: false });
+    expect(source.giveHoldable(actor, "holdable_teleporter")).toBe(true);
+    const restored = fixture(data, capture(value), "baseq3");
+    try {
+      expect(restored.source.equipment(restored.player).holdableTag).toBe(source.equipment(actor).holdableTag);
+      restored.source.useHoldable(restored.player, EntityEvent.EV_USE_ITEM1);
+      expect(restored.changes.at(-1)?.after.pmTime).toBe(160);
+      expect(restored.changes.at(-1)?.after.viewAngles).toEqual({ x: 0, y: 90, z: 0 });
+    } finally { restored.source.close(); }
+  } finally { source.close(); }
+});
+
+
+test.skipIf(!existsSync(archivePath))("original persistent pickup keeps its item lifetime and grants source Guard, Scout and ammo timers", async () => {
+  const value = fixture(await map()), source = value.source, actor = value.player;
+  const arsenal = new Q3SelectedArsenal({ provider: source.host.provider, product: "missionpack", inventory: value.inventory,
+    fire: (actor, weapon, input) => source.fire(actor, weapon, input), useHoldable: (actor, event) => source.useHoldable(actor, event),
+    equipment: { read: actor => source.equipment(actor), consume: (actor, item) => source.consume(actor, item), endCommand: (actor, msec) => source.endCommand(actor, msec) } });
+  arsenal.admit(actor, 100);
+  const player = source.records.nativeByActor(actor.id); if (player?.client == null) throw new Error("Missing source player");
+  const grant = (classname: string) => {
+    const item = itemList("missionpack").find(item => item.className === classname); if (item === undefined) throw new Error("Missing original item");
+    const pickup = source.pool.spawn(); pickup.item = item;
+    const result = source.takePickup({ itemActor: pickup.actor.id, playerActor: actor.id, item, count: 0, generic1: 0, dropped: false, gameType: 0, weaponRespawnSeconds: 5, teamWeaponRespawnSeconds: 30 });
+    if (result.kind !== "picked") throw new Error("Original persistent pickup refused");
+    expect(result.respawnSeconds).toBe(-1);
+    pickup.r.contents = 0; pickup.r.svFlags |= 1; pickup.s.eFlags |= 0x80;
+    return pickup;
+  };
+  try {
+    const guard = grant("item_guard");
+    expect(value.combat.read(actor.id)?.health).toBe(200); expect(value.combat.read(actor.id)?.armor.regular).toMatchObject({ points: 200 });
+    expect(source.equipment(actor).maxHealth).toBe(200); expect(player.client.persistantPowerup).toBe(guard);
+    value.combat.setHealth(actor, 50); source.endCommand(actor, 1000);
+    expect(value.combat.read(actor.id)?.health).toBe(65);
+    source.died(actor.id); expect(guard.r.contents).toBe(0x40000000); expect(guard.r.svFlags & 1).toBe(0); expect(player.client.persistantPowerup).toBeNull();
+    const scout = grant("item_scout");
+    expect(value.combat.read(actor.id)?.armor.regular).toMatchObject({ points: 0 }); expect(source.speedMultiplier(actor.id)).toBe(1.5);
+    expect(source.equipment(actor).persistentPowerupTag).toBe(Powerup.PW_SCOUT);
+    source.respawn(actor.id); expect(scout.r.contents).toBe(0x40000000); expect(source.speedMultiplier(actor.id)).toBe(1);
+    grant("item_ammoregen");
+    value.inventory.configure(actor, { item: "q3:ammo/machinegun", count: 0, capacity: 200 });
+    for (let step = 0; step < 10; step++) arsenal.step(input(value, arsenal), undefined);
+    expect(value.inventory.count(actor.id, "q3:ammo/machinegun")).toBe(4);
+    expect(arsenal.read(actor.id).ammo.find(entry => entry.item === "q3:ammo/machinegun")?.count).toBe(4);
   } finally { source.close(); }
 });
