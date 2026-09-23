@@ -23,10 +23,7 @@ export interface Q3RecordHost {
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
   readonly callbacks: ActorCallbackTable;
-  readonly ammo?: {
-    read(actor: ActorId, weapon: number): number | null;
-    write(actor: OwnedActor, weapon: number, count: number): boolean;
-  };
+  ammoTimerStored?(actor: ActorId, weapon: number, value: number): void;
   schedule(actor: OwnedActor, dueMilliseconds: number | null): undefined;
   runThink(actor: OwnedActor, timeMilliseconds: number): undefined;
   /** The innermost source call is retained until all synchronous pain/death callbacks return. */
@@ -113,7 +110,9 @@ export class Q3EntityRecords {
       });
       return { entity, actor: null, active: false, borrowed: false };
     });
-    this.clients = Array.from({ length: MAX_CLIENTS }, (_, slot) => new GameClient(product, this.playerBinding(slot)));
+    this.clients = Array.from({ length: MAX_CLIENTS }, (_, slot) => new GameClient(product, this.playerBinding(slot), host.ammoTimerStored === undefined ? undefined : (weapon, value) => {
+      const actor = this.record(slot).actor; if (actor !== null) host.ammoTimerStored?.(actor.id, weapon, value);
+    }));
     this.unobserve = host.actors.onRelease(actor => {
       for (const record of this.records) if (record.actor === actor) { record.actor = null; record.active = false; }
       return undefined;
@@ -277,10 +276,10 @@ export class Q3EntityRecords {
       },
       ammo: {
         read: index => { const weapon = q3WeaponItem(index); if (weapon?.ammo != null) { const current = this.record(slot).actor;
-          return current === null ? 0 : this.host.ammo?.read(current.id, index) ?? this.host.inventory.count(current.id, weapon.ammo); }
+          return current === null ? 0 : this.host.inventory.count(current.id, weapon.ammo); }
           const value = specialAmmo[index]; if (value === undefined) throw new RangeError(`Q3 ammo ${index} outside 0..15`); return value; },
         write: (index, value) => { const weapon = q3WeaponItem(index); if (weapon?.ammo != null) {
-          if (this.host.ammo?.write(actor(), index, value) !== true) configure(weapon.ammo, value, 200); return; }
+          configure(weapon.ammo, value, 200); return; }
           if (!Number.isInteger(index) || index < 0 || index >= 16) throw new RangeError(`Q3 ammo ${index} outside 0..15`); specialAmmo[index] = value; },
       },
     };

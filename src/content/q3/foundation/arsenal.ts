@@ -77,7 +77,7 @@ export interface Q3ArsenalStep extends WeaponStepResult {
 }
 
 /** The selected input adapter supplies Q3 actions; foreign button words are never reinterpreted. */
-export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeState, controls: Q3ArsenalControls): Q3ArsenalStep {
+export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeState, controls: Q3ArsenalControls, firingDelay?: (milliseconds: number) => number): Q3ArsenalStep {
   if (input.arsenal.state.kind !== "q3") throw new TypeError("Q3 arsenal adapter requires Q3 weapon state");
   const elapsed = input.frame.elapsed.kind === "milliseconds" ? input.frame.elapsed.value : input.frame.elapsed.value * 1000;
   const clock = elapsed + runtime.fractionalMilliseconds;
@@ -138,7 +138,7 @@ export function stepQ3Arsenal(input: WeaponStepInput, runtime: Q3ArsenalRuntimeS
   if (input.environment.health > 0 && !controls.attack && !controls.useHoldable) state.pmFlags &= ~MoveFlags.RESPAWNED;
   runQ3WeaponStep(state, { buttons: (controls.attack ? CommandButtons.ATTACK : 0) | (controls.useHoldable ? CommandButtons.USE_HOLDABLE : 0),
     weapon: runtime.requestedWeapon ?? controls.requestedWeapon }, {
-    msec, gauntletHit: input.gauntletHit, externalSlot,
+    msec, gauntletHit: input.gauntletHit, externalSlot, ...(firingDelay === undefined ? {} : { firingDelay }),
     event(event) { effects.push({ kind: "event", value: { provider: input.arsenal.provider, sequence: eventSequence++, event, parameter: 0 } }); },
     startTorso(torso) {
       torsoAnimations.push(torso);

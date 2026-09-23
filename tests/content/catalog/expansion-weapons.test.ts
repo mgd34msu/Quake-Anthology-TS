@@ -2,26 +2,38 @@ import { expect, test } from "bun:test";
 import { discoverInstalledContent, presetChoice, resolveLaunch } from "../../../src/content/catalog/index.ts";
 import { applicationPreset } from "../../../src/app/bootstrap/content.ts";
 import { parseApplicationCommand } from "../../../src/app/bootstrap/options.ts";
-import type { ProviderId } from "../../../src/contracts/identity.ts";
+import { StartupSelectionModel } from "../../../src/app/bootstrap/startup-selection.ts";
 import { expansionSupply } from "../../../src/content/composition/expansion-supply.ts";
 import { Q1_Q2_SUPPLY_PROFILE } from "../../../src/content/composition/q1-q2-supply.ts";
 import { Q3_Q2_SUPPLY_PROFILE } from "../../../src/content/composition/q3-q2-supply.ts";
 import { xatrixWeaponDefinitions, rogueWeaponDefinitions } from "../../../src/content/q2/missionpacks/weapons/definitions.ts";
 
-for (const product of ["q1-classic-rogue", "q1-rerelease-rogue", "q1-rerelease-mg3", "q2-classic-xatrix", "q2-classic-rogue", "q2-rerelease-xatrix", "q2-rerelease-rogue", "q2-rerelease-mg2"]) {
-  test(`${product} selected arsenal resolves its actual retail weapon resources`, async () => {
-    const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
-    const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
-    if (command.kind !== "run") throw new Error("Missing launch");
-    const preset = applicationPreset(catalog, command.options);
-    const provider: ProviderId = product.startsWith("q1") ? "q1:official" : "q2:official";
+test("expansion menu arsenals resolve retail resources and distinct same-family source roles", async () => {
+  const catalog = await discoverInstalledContent({ corpusRoot: "/home/buzzkill/Projects/qfiles", discoverMods: false });
+  const command = parseApplicationCommand(["--game", "q2-classic-baseq2", "--map", "base1", "--dedicated"]);
+  if (command.kind !== "run") throw new Error("Missing launch");
+  const menu = new StartupSelectionModel(catalog, command.options);
+  await menu.prepareMaps();
+  for (const product of ["q1-classic-rogue", "q1-rerelease-rogue", "q1-rerelease-mg3", "q2-classic-xatrix", "q2-classic-rogue", "q2-rerelease-xatrix", "q2-rerelease-rogue", "q2-rerelease-mg2", "q3-missionpack"]) {
+    menu.select("weapons", product);
     const selected = catalog.require(product);
-    const recipe = await resolveLaunch({ catalog, preset, choice: { ...presetChoice(preset.id), weapons: { kind: "selected", value: [{ provider, content: selected.id }] } } });
+    const { recipe } = await menu.resolve();
     expect(recipe.weapons.some(reference => reference.content === selected.id)).toBe(true);
     for (const weapon of recipe.weapons) expect(recipe.timing.some(timing => timing.provider === weapon.provider)).toBe(true);
-    expect(recipe.resources.some(resource => resource.requestedPath.startsWith("progs/v_") || resource.requestedPath.startsWith("models/weapons/"))).toBe(true);
-  });
-}
+    expect(recipe.resources.some(resource => resource.requestedPath.startsWith(product.startsWith("q1") ? "progs/v_" : product.startsWith("q2") ? "models/weapons/" : "icons/"))).toBe(true);
+  }
+  menu.select("mode", "deathmatch");
+  for (const pair of [{ world: "q3-missionpack", map: "maps/mpteam1.bsp", arsenal: "q3-baseq3" }, { world: "q3-baseq3", map: "maps/q3dm1.bsp", arsenal: "q3-missionpack" }]) {
+    menu.select("product", pair.world); menu.select("map", pair.map); menu.select("weapons", pair.arsenal);
+    const { recipe } = await menu.resolve();
+    const weapon = recipe.weapons[0];
+    if (weapon === undefined) throw new Error("Missing selected arsenal");
+    expect(weapon.content).toBe(catalog.require(pair.arsenal).id);
+    expect(weapon.provider).not.toBe(recipe.map.entities.provider);
+    expect(recipe.timing.filter(entry => entry.provider === weapon.provider)).toHaveLength(1);
+    expect(recipe.timing.filter(entry => entry.provider === recipe.map.entities.provider)).toHaveLength(1);
+  }
+}, 60000);
 
 test("Q1 and Q3 supply exposes every selected Q2 expansion weapon and its ammunition", () => {
   for (const base of [Q1_Q2_SUPPLY_PROFILE, Q3_Q2_SUPPLY_PROFILE]) {

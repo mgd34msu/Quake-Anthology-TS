@@ -52,6 +52,7 @@ export interface ClientThinkHost extends ClientMovementHost {
   readonly touches: ClientTouchAccess;
   readonly effects: Pick<ClientEffectsContext, "combat">;
   timerOwnership?(actor: ActorId): import("./client-effects.ts").ClientTimerOwnership;
+  speedMultiplier?(actor: ActorId): number;
   frame(): ClientThinkFrame;
   settings(): ClientThinkSettings;
   setPmoveMsec(milliseconds: number): void;
@@ -165,7 +166,7 @@ export class ClientThinkRuntime {
     ps.pmType = client.noclip ? MoveType.PM_NOCLIP : ps.health <= 0 ? MoveType.PM_DEAD : MoveType.PM_NORMAL;
     ps.gravity = Math.trunc(Math.fround(settings.gravity)) | 0;
     ps.speed = Math.trunc(Math.fround(settings.speed)) | 0;
-    const speedMultiplier = clientSpeedMultiplier(ps);
+    const speedMultiplier = this.host.speedMultiplier?.(entity.actor.id) ?? clientSpeedMultiplier(ps);
     if (speedMultiplier !== 1) ps.speed = Math.trunc(Math.fround(Math.fround(ps.speed) * Math.fround(speedMultiplier))) | 0;
     if (ps.weapon === Weapon.WP_GRAPPLING_HOOK && client.hook !== null && !(command.buttons & CommandButtons.ATTACK)) {
       this.host.freeHook(client.hook);

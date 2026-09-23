@@ -29,7 +29,7 @@ export interface PlayerSlotBinding { read(index: number): number; write(index: n
 export class PlayerStateSlots {
   private readonly values: Int32Array;
 
-  constructor(readonly length: number, sourceValues: Int32Array | null = null, private readonly binding: PlayerSlotBinding | null = null) {
+  constructor(readonly length: number, sourceValues: Int32Array | null = null, private readonly binding: PlayerSlotBinding | null = null, private readonly stored?: (index: number, value: number) => void) {
     if (sourceValues !== null && sourceValues.length !== length) {
       throw new RangeError(`Player state source slots require ${length} values, got ${sourceValues.length}`);
     }
@@ -47,6 +47,7 @@ export class PlayerStateSlots {
       throw new RangeError(`Player state slot ${index} outside ${this.length}`);
     }
     if (this.binding === null) this.values[index] = value; else this.binding.write(index, value | 0);
+    this.stored?.(index, this.get(index));
   }
 
   copy(): Int32Array { return Int32Array.from({ length: this.length }, (_, index) => this.get(index)); }

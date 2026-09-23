@@ -23,7 +23,9 @@ export interface Q3SelectedArsenalOptions {
   readonly product: "baseq3" | "missionpack";
   readonly inventory: SharedInventoryTable;
   readonly supply?: { readonly profile: ItemId; readonly loadout: ArsenalState; readonly replacedItems: readonly ItemId[] };
+  firingDelay?(actor: OwnedActor, milliseconds: number): number;
   readonly equipment?: {
+    readonly ownsHoldables?: boolean;
     read(actor: OwnedActor): Pick<Q3ArsenalRuntimeState, "maxHealth" | "persistentPowerupTag" | "holdableItem" | "holdableTag">;
     consume(actor: OwnedActor, item: number): undefined;
     advance?(actor: OwnedActor, milliseconds: number): void;
@@ -146,8 +148,11 @@ export class Q3SelectedArsenal implements SelectedArsenal {
       this.select(input.actor.id, intent.weapon);
     }
     const weaponAnimation = { provider: this.provider, state: { ...q3SpawnAnimation(), torso: player.torsoAnimation } };
+    const firingDelay = this.options.firingDelay;
+    const controls = resolveQ3ArsenalControls(arsenal, intent, input.command, this.options.product);
     const result = stepQ3Arsenal({ ...input, arsenal, animation: input.animation.state.kind === "q3" ? input.animation : weaponAnimation }, player.runtime,
-      resolveQ3ArsenalControls(arsenal, intent, input.command, this.options.product));
+      this.options.equipment?.ownsHoldables === false ? { ...controls, useHoldable: false } : controls,
+      firingDelay === undefined ? undefined : milliseconds => firingDelay(player.actor, milliseconds));
     const elapsed = input.frame.elapsed.kind === "milliseconds" ? input.frame.elapsed.value : input.frame.elapsed.value * 1000;
     const milliseconds = Math.trunc(elapsed + player.runtime.fractionalMilliseconds);
     this.options.equipment?.advance?.(player.actor, milliseconds);

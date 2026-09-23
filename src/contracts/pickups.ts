@@ -42,7 +42,7 @@ export interface PickupSupplyProfile {
   readonly id: ItemId;
   readonly weaponOwnership: "all-destinations";
   readonly ammo: readonly { readonly source: ItemId; readonly destinations: readonly [ItemId, ...ItemId[]] }[];
-  /** One original source slot owns each selected ammo pool for periodic effects; pickup aliases remain independent. */
+  /** Each selected ammo pool has an independent timer using an original source rule; rules may repeat, pickup aliases remain independent. */
   readonly ammoOwners?: readonly { readonly item: ItemId; readonly source: ItemId }[];
   readonly weapons: readonly { readonly source: ItemId; readonly destinations: readonly [ItemId, ...ItemId[]] }[];
 }

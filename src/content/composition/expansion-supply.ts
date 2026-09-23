@@ -20,6 +20,25 @@ const ammo: Readonly<Record<ExpansionSupply, Expansion>> = {
     ["q3:ammo/grenadelauncher", ["q3:ammo/proxlauncher"]],
   ]),
 };
+const periodicAmmo: Readonly<Record<ExpansionSupply, NonNullable<PickupSupplyProfile["ammoOwners"]>>> = {
+  "q1-rogue": [
+    { item: "rogue:ammo/lava-nails", source: "q3:ammo/nailgun" },
+    { item: "rogue:ammo/multi-rockets", source: "q3:ammo/proxlauncher" },
+    { item: "rogue:ammo/plasma", source: "q3:ammo/plasmagun" },
+  ],
+  "q1-mg3": [],
+  "q2-xatrix": [
+    { item: "q2:ammo_magslug", source: "q3:ammo/railgun" },
+    { item: "q2:ammo_trap", source: "q3:ammo/proxlauncher" },
+  ],
+  "q2-rogue": [
+    { item: "q2:ammo_flechettes", source: "q3:ammo/nailgun" },
+    { item: "q2:ammo_prox", source: "q3:ammo/proxlauncher" },
+    { item: "q2:ammo_tesla", source: "q3:ammo/proxlauncher" },
+    { item: "q2:ammo_disruptor", source: "q3:ammo/bfg" },
+  ],
+  "q3-missionpack": [],
+};
 const weapons: Readonly<Record<ExpansionSupply, Expansion>> = {
   "q1-rogue": new Map([
     ["q1:weapon/nailgun", ["q1:weapon/rogue:lava-nailgun"]], ["q1:weapon/supernailgun", ["q1:weapon/rogue:lava-supernailgun"]],
@@ -48,5 +67,6 @@ export function expansionSupply(profile: PickupSupplyProfile, expansions: readon
     const additional = expansions.flatMap(expansion => row.destinations.flatMap(item => catalogs[expansion].get(item) ?? []));
     return { source: row.source, destinations: [first, ...new Set([...rest, ...additional].filter(item => item !== first))] };
   });
-  return { ...profile, id: `${profile.id}/${expansions.join("+")}`, ammo: extend(profile.ammo, ammo), weapons: extend(profile.weapons, weapons) };
+  return { ...profile, id: `${profile.id}/${expansions.join("+")}`, ammo: extend(profile.ammo, ammo), weapons: extend(profile.weapons, weapons),
+    ...(profile.ammoOwners === undefined ? {} : { ammoOwners: [...profile.ammoOwners, ...expansions.flatMap(expansion => periodicAmmo[expansion])] }) };
 }

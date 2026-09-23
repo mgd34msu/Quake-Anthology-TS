@@ -23,6 +23,7 @@ export interface Q3SourceWeaponState {
 export interface Q3SourceWeaponOptions {
   readonly msec: number; readonly gauntletHit: boolean;
   readonly externalSlot?: { phase: Q3ExternalWeaponSlot };
+  firingDelay?(milliseconds: number): number;
   event(event: number): void;
   startTorso(animation: number): void;
 }
@@ -140,7 +141,7 @@ class WeaponStep {
       default: addTime = 400; break;
     }
     const persistent = ps.product === "missionpack" ? ps.persistentPowerupTag : 0;
-    ps.weaponTime += q3WeaponDelay(addTime, persistent, ps.haste);
+    ps.weaponTime += this.options.firingDelay?.(addTime) ?? q3WeaponDelay(addTime, persistent, ps.haste);
   }
 }
 

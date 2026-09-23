@@ -91,7 +91,7 @@ function fixture(data: Awaited<ReturnType<typeof map>>, previous?: SavedFixture,
   const player = previous === undefined ? create("q1:player", data.origin) : actors.resolveSaved(previous.player);
   if (world === null || player === null) throw new Error("Missing restored fixture principals");
   source = new Q3SelectedSource({ actors, bodies, callbacks, combat, inventory, queries: scene,
-    provider: `q3:weapons/classic/${product}`, product, content: `q3:classic:${product}:retail`, configstrings: indices.store, userinfo: () => "\\name\\Source player",
+    provider: `q3:weapons/classic/${product}`, product, equipment: { kind: "source" }, content: `q3:classic:${product}:retail`, configstrings: indices.store, userinfo: () => "\\name\\Source player",
     maxClients: 2, seed: 1, now: () => time, worldActor: () => world, player: actor => players.has(actor)
       ? { angles, viewHeight: 22, maxHealth, team: Team.TEAM_FREE, quadUntil: 0, hasteUntil: 0 } : null,
     combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q1:movement",

@@ -120,9 +120,9 @@ export class GameClient {
   invulnerabilityTime = 0;
   areabits: Uint8Array | null = null;
 
-  constructor(product: Product, authority: PlayerAuthorityBinding | null = null) {
+  constructor(product: Product, authority: PlayerAuthorityBinding | null = null, ammoTimerStored?: (index: number, value: number) => void) {
     this.ps = createPlayerState(product, authority);
-    this.ammoTimes = new PlayerStateSlots(weaponCount(product));
+    this.ammoTimes = new PlayerStateSlots(weaponCount(product), null, null, ammoTimerStored);
   }
 }
 

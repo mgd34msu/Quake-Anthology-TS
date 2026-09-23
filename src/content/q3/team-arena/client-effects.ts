@@ -104,7 +104,8 @@ export function setClientSound(context: ClientEffectsContext, entity: GameEntity
     : entity.waterlevel !== 0 && (entity.watertype & (CONTENTS_LAVA | CONTENTS_SLIME)) !== 0 ? context.frySound : 0;
 }
 
-const ammoRegeneration: readonly { readonly weapon: Weapon; readonly max: number; readonly increment: number; readonly time: number }[] = [
+export interface Q3AmmoRegenerationRule { readonly weapon: Weapon; readonly max: number; readonly increment: number; readonly time: number; }
+const ammoRegeneration: readonly Q3AmmoRegenerationRule[] = [
   { weapon: Weapon.WP_MACHINEGUN, max: 50, increment: 4, time: 1000 },
   { weapon: Weapon.WP_SHOTGUN, max: 10, increment: 1, time: 1500 },
   { weapon: Weapon.WP_GRENADE_LAUNCHER, max: 10, increment: 1, time: 2000 },
@@ -129,9 +130,30 @@ export function clientSpeedMultiplier(ps: PlayerState): number {
   return ps.powerups.get(Powerup.PW_HASTE) !== 0 ? 1.3 : 1;
 }
 
+export function q3AmmoRegenerationRule(weapon: number): Q3AmmoRegenerationRule {
+  const rule = ammoRegeneration.find(rule => rule.weapon === weapon);
+  if (rule === undefined) throw new Error("Weapon has no original Ammo Regen rule");
+  return rule;
+}
+
+export function stepQ3AmmoRegeneration(rule: Q3AmmoRegenerationRule, count: number, milliseconds: number, msec: number): { readonly milliseconds: number; readonly count: number | null } {
+  let elapsed = (milliseconds + msec) | 0;
+  if (count >= rule.max) elapsed = 0;
+  if (elapsed < rule.time) return { milliseconds: elapsed, count: null };
+  while (elapsed >= rule.time) elapsed -= rule.time;
+  return { milliseconds: elapsed, count: Math.min(rule.max, (count + rule.increment) | 0) };
+}
+
+export interface Q3MappedAmmoTimer {
+  readonly rule: Q3AmmoRegenerationRule;
+  current(): boolean;
+  count: number;
+  elapsedMilliseconds: number;
+}
+
 export interface ClientTimerOwnership {
   readonly ordinaryDecay: boolean;
-  readonly ammo: ReadonlySet<Weapon> | null;
+  readonly ammo: readonly Q3MappedAmmoTimer[] | null;
 }
 const nativeTimers: ClientTimerOwnership = { ordinaryDecay: true, ammo: null };
 
@@ -160,15 +182,15 @@ export function clientTimerActions(context: EventContext, entity: GameEntity, ms
     if (ownership.ordinaryDecay && ps.stats.get(schema.armor) > maximum) ps.stats.set(schema.armor, ps.stats.get(schema.armor) - 1);
   }
   if (ps.product === "missionpack" && persistentTag(client) === Powerup.PW_AMMOREGEN) {
-    for (const rule of ammoRegeneration) {
-      if (ownership.ammo !== null && !ownership.ammo.has(rule.weapon)) continue;
-      let elapsed = (client.ammoTimes.get(rule.weapon) + msec) | 0;
-      if (ps.ammo.get(rule.weapon) >= rule.max) elapsed = 0;
-      if (elapsed >= rule.time) {
-        while (elapsed >= rule.time) elapsed -= rule.time;
-        ps.ammo.set(rule.weapon, Math.min(rule.max, (ps.ammo.get(rule.weapon) + rule.increment) | 0));
-      }
-      client.ammoTimes.set(rule.weapon, elapsed);
+    if (ownership.ammo === null) for (const rule of ammoRegeneration) {
+      const next = stepQ3AmmoRegeneration(rule, ps.ammo.get(rule.weapon), client.ammoTimes.get(rule.weapon), msec);
+      if (next.count !== null) ps.ammo.set(rule.weapon, next.count);
+      client.ammoTimes.set(rule.weapon, next.milliseconds);
+    } else for (const timer of ownership.ammo) {
+      if (!timer.current()) break;
+      const next = stepQ3AmmoRegeneration(timer.rule, timer.count, timer.elapsedMilliseconds, msec);
+      if (next.count !== null) timer.count = next.count;
+      if (timer.current()) timer.elapsedMilliseconds = next.milliseconds;
     }
   }
 }

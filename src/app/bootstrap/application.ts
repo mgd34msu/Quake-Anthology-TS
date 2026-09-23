@@ -4010,7 +4010,7 @@ export class Application {
             if (weapon !== undefined) await sourceClient.client.command(["weapon", String(weapon.weapon)]);
             continue;
           }
-          if (player?.arsenal.state.kind !== "q3") {
+          if (player?.arsenal.state.kind !== "q3" || player.arsenal.provider !== this.simulation.recipe.map.entities.provider) {
             this.simulation.playerCommand(actor, command.name, command.arguments_); continue;
           }
         }
@@ -4242,7 +4242,8 @@ export class Application {
         const explicitWeapon = source.client.consumeWeaponSelection();
         const slot = player === null ? null : this.simulation.weaponSlot(player.actor.id);
         const supplemental = slot !== null && [slot.active, slot.pending].some(weapon => weapon !== null && weapon.provider !== player?.arsenal.provider);
-        const weapon = supplemental ? explicitWeapon : selection.weapon;
+        const selectedSource = player !== null && player.arsenal.provider !== this.simulation.recipe.map.entities.provider;
+        const weapon = supplemental || selectedSource ? explicitWeapon : selection.weapon;
         this.graphical?.input.setArsenalSelection(seat, player?.arsenal.state.kind === "q3"
           ? { provider: player.arsenal.provider, weapon: weapon === null ? null : q3WeaponItem(weapon)?.item ?? null } : null);
       }

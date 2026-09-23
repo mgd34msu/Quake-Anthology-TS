@@ -26,7 +26,7 @@ import { EntityPool, runThink } from "../../../../content/q3/base/game/entities.
 import { GameClient, GameEntity, MAX_CLIENTS } from "../../../../content/q3/base/game/state.ts";
 import { GameRandom } from "../../../../content/q3/base/game/numeric.ts";
 import { MissileRuntime } from "../../../../content/q3/base/game/missile.ts";
-import { WeaponRuntime, invulnerabilityEffect, logAccuracyHit } from "../../../../content/q3/base/game/weapon.ts";
+import { WeaponRuntime, invulnerabilityEffect, logAccuracyHit, q3WeaponDamageFactor } from "../../../../content/q3/base/game/weapon.ts";
 import { PersonalPortalRuntime } from "../../../../content/q3/base/game/personal-portal.ts";
 import { teleportPlayer } from "../../../../content/q3/base/game/misc.ts";
 import { EntityEvent, EntityType, ItemType, PersistentIndex, Powerup, statSchema } from "../../../../content/q3/base/shared/definitions.ts";
@@ -70,6 +70,8 @@ export interface Q3SelectedSourceHost extends Pick<Q3RecordHost, "actors" | "bod
   Pick<Q3CombatBridgeHost, "combatProvider" | "inventoryProvider" | "movementProvider" | "armorContext" | "gameType" | "friendlyFire" | "knockback" | "intermissionQueued" | "checkHurtCarrier"> {
   readonly provider: ProviderId;
   readonly product: "baseq3" | "missionpack";
+  readonly equipment: { readonly kind: "source" } | { readonly kind: "primary";
+    damageFactor(actor: ActorId): number; firingDelay(actor: ActorId, milliseconds: number): number; };
   readonly content: ProviderReference["content"];
   readonly configstrings: ConfigStringStore;
   userinfo(actor: ActorId): string;
@@ -142,6 +144,7 @@ export class Q3SelectedSource {
   private closed = false;
   private revision = 0;
   get generation(): number { return this.revision; }
+  get ownsEquipment(): boolean { return this.host.equipment.kind === "source"; }
   private restoredPresentation: Q3SourcePresentationState | null = null;
   get presentationBaseline(): Q3SourcePresentationState | null { return this.restoredPresentation; }
 
@@ -178,7 +181,12 @@ export class Q3SelectedSource {
     this.missiles = new MissileRuntime({ ...(host.weaponBehavior === undefined ? {} : { weaponBehavior: host.weaponBehavior }), world: this.world, bodies: host.bodies, actors: host.actors,
       get previousTime() { return source.previous; }, ...(combat.product === "baseq3" ? { combat, missionpack: null } : { combat, missionpack: { get proxMineTimeout() { return host.proximityTimeout(); }, random: this.random,
         soundIndex: host.soundIndex, invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } }) });
-    this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return host.quadFactor(); } });
+    this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return host.quadFactor(); },
+      damageFactor: entity => {
+        if (host.equipment.kind === "primary") return host.equipment.damageFactor(entity.actor.id);
+        if (entity.client === null) throw new Error("Selected weapon damage has no source client");
+        return q3WeaponDamageFactor(entity.client, host.quadFactor(), host.product);
+      } });
     this.personalPortal = combat.product === "baseq3" ? null : new PersonalPortalRuntime({ combat, world: this.world, models: { modelIndex: host.modelIndex }, random: this.random,
       mapTravel: { dropCarriedFlag: entity => host.dropObjectives(entity.actor), teleport: (entity, origin, angles) => this.teleport(entity, origin, angles) } });
     this.unobserve = host.actors.onRelease(actor => {
@@ -234,6 +242,7 @@ export class Q3SelectedSource {
     this.publishClient(entity, entity.client);
   }
   endCommand(actor: OwnedActor, milliseconds: number): void {
+    if (!this.ownsEquipment) return;
     const entity = this.player(actor);
     if (entity.health <= 0) return;
     this.run(() => clientTimerActions({ combat: this.bridge.context }, entity, milliseconds, { ordinaryDecay: false, ammo: null }));
@@ -342,6 +351,7 @@ export class Q3SelectedSource {
     return client == null ? 1 : clientSpeedMultiplier(client.ps);
   }
   pickupAllowed(offer: OriginalPickupOffer): boolean {
+    if (!this.ownsEquipment) return true;
     if (offer.defaultResource?.kind !== "protection" || offer.defaultResource.channel !== "regular") return true;
     const client = this.records.nativeByActor(offer.recipient)?.client;
     if (client == null || client.ps.product !== "missionpack") return true;
@@ -351,6 +361,7 @@ export class Q3SelectedSource {
     return tag !== Powerup.PW_SCOUT && tag !== Powerup.PW_GUARD || canQ3ArmorBeGrabbed(inventory);
   }
   takePickup(offer: SourcePickupDescriptor): SourcePickupAdmission {
+    if (!this.ownsEquipment) return { kind: "native" };
     if (offer.item.type !== ItemType.IT_HOLDABLE && offer.item.type !== ItemType.IT_PERSISTANT_POWERUP) return { kind: "native" };
     const item = itemList(this.host.product).find(item => item.className === offer.item.className);
     if (item === undefined) return { kind: "rejected" };
@@ -385,6 +396,7 @@ export class Q3SelectedSource {
     client.ps.stats.set(statSchema(this.host.product).holdableItem, 0); return undefined;
   }
   giveHoldable(actor: OwnedActor, name: string): boolean {
+    if (!this.ownsEquipment) return false;
     const item = itemList(this.host.product).find(item => item.type === ItemType.IT_HOLDABLE &&
       (item.className?.toLowerCase() === name.toLowerCase() || item.pickupName?.toLowerCase() === name.toLowerCase()));
     if (item === undefined) return false;

@@ -33,6 +33,7 @@ const AWARD_FLAGS = 0x8 | 0x40 | 0x800 | 0x8000 | 0x10000 | 0x20000;
 export interface WeaponHost {
   readonly missiles: MissileRuntime;
   readonly quadFactor: number;
+  damageFactor?(entity: GameEntity): number;
   readonly random: Pick<GameRandom, "rand" | "random" | "crandom">;
   unlink(actor: ActorId): (() => void) | null;
 }
@@ -103,7 +104,7 @@ export class WeaponRuntime {
 
   private quad(entity: GameEntity): number {
     const client = clientOf(entity);
-    return q3WeaponDamageFactor(client, this.host.quadFactor, this.host.missiles.host.combat.product);
+    return this.host.damageFactor?.(entity) ?? q3WeaponDamageFactor(client, this.host.quadFactor, this.host.missiles.host.combat.product);
   }
 
   private attack(entity: GameEntity, quad: number): Attack {

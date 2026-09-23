@@ -1,3 +1,4 @@
+import { Q3MappedAmmoRegeneration } from "./arsenal/q3-ammo-regen.ts";
 import { readLegacyQ3Source, migrateLegacyQ3Arsenal } from "./arsenal/q3-source-legacy.ts";
 import { itemAt } from "../../../content/q3/base/shared/items.ts";
 import { q3WeaponDelay } from "../../../movement/q3/weapon.ts";
@@ -306,8 +307,7 @@ export class SharedSimulation implements Simulation {
   private handGrenades: HandGrenadeRuntime | null = null;
   private equipmentFrame: FrameContext;
   private selectedQ3Source: Q3SelectedSource | null = null;
-  private readonly selectedAmmoOwners = new Map<number, ItemId>();
-  private readonly selectedAmmoSlots = new Set<number>();
+  private selectedAmmoTimers: Q3MappedAmmoRegeneration | null = null;
   private selectedQ3Time = 0;
   private selectedQ3Next = 0;
   private readonly selectedQ3Strings = new Map<number, string>();
@@ -1256,8 +1256,21 @@ export class SharedSimulation implements Simulation {
         serverHighCharacters: true, print: text => { this.events.message({ kind: "print", level: 2, text }); } });
     }
     strings.set(0, serverInfo);
+    const primaryEquipment = this.source.kind === "q3" && this.source.game.options.product === "missionpack";
+    const equipment: import("./arsenal/q3-source.ts").Q3SelectedSourceHost["equipment"] = primaryEquipment ? { kind: "primary",
+      damageFactor: actor => {
+        if (this.source.kind !== "q3") throw new Error("Primary Q3 equipment lost its source");
+        const client = this.source.game.records.nativeByActor(actor)?.client;
+        if (client == null) throw new Error("Primary Q3 equipment lost its client");
+        return q3WeaponDamageFactor(client, this.source.game.quadDamageFactor(), client.ps.product);
+      }, firingDelay: (actor, milliseconds) => {
+        if (this.source.kind !== "q3") throw new Error("Primary Q3 equipment lost its source");
+        const client = this.source.game.records.nativeByActor(actor)?.client;
+        if (client == null) throw new Error("Primary Q3 equipment lost its client");
+        return q3WeaponDelay(milliseconds, client.persistantPowerup?.item?.tag ?? 0, client.ps.powerups.get(Powerup.PW_HASTE) !== 0);
+      } } : { kind: "source" };
     const source = new Q3SelectedSource({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
-      queries: this.scene, weaponBehavior: this.weaponBehavior, provider: this.weaponProvider.provider, product, content: this.weaponProvider.content,
+      queries: this.scene, weaponBehavior: this.weaponBehavior, provider: this.weaponProvider.provider, product, equipment, content: this.weaponProvider.content,
       configstrings: config.store, userinfo: actor => this.sourcePlayerUserinfo(actor) ?? "", maxClients: this.options.maxClients, seed: this.options.seed, now: () => this.selectedQ3Time,
       worldActor: () => { const actor = this.worldActor(), owner = actor === null ? null : this.actors.resolveOwned(actor); if (owner === null) throw new Error("Selected Q3 source has no map world"); return owner; },
       player: actor => {
@@ -1313,7 +1326,9 @@ export class SharedSimulation implements Simulation {
       loadout: this.source.kind === "q1" ? q1Q3SupplyLoadout(this.weaponProvider.provider, product) : q3SpawnLoadout(this.weaponProvider.provider, product, false),
       replacedItems: [...replacedSupplyItems(profile), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])] };
     const selected = new Q3SelectedArsenal({ provider: this.weaponProvider.provider, product, inventory: this.inventory,
-      ...(supply === undefined ? {} : { supply }), equipment: { read: actor => source.equipment(actor), consume: (actor, item) => source.consume(actor, item), restore: (actor, state) => source.restoreEquipment(actor, state), advance: (actor, milliseconds) => source.advanceMovement(actor, milliseconds), endCommand: (actor, milliseconds) => source.endCommand(actor, milliseconds) },
+      ...(supply === undefined ? {} : { supply }),
+      ...(equipment.kind === "primary" ? { firingDelay: (actor: OwnedActor, milliseconds: number) => equipment.firingDelay(actor.id, milliseconds) } : {}),
+      equipment: { ownsHoldables: source.ownsEquipment, read: actor => source.equipment(actor), consume: (actor, item) => source.consume(actor, item), restore: (actor, state) => source.restoreEquipment(actor, state), advance: (actor, milliseconds) => source.advanceMovement(actor, milliseconds), endCommand: (actor, milliseconds) => source.endCommand(actor, milliseconds) },
       fire: (actor, weapon, input) => {
         source.fire(actor, weapon, input);
         if (!this.actors.isLive(actor.id)) return undefined;
@@ -1388,23 +1403,21 @@ export class SharedSimulation implements Simulation {
   }
 
   private bindSelectedAmmo(profile: PickupSupplyProfile): void {
-    if (this.source.kind !== "q3") return;
-    const items = new Set<ItemId>();
-    for (const owner of profile.ammoOwners ?? []) {
-      const source = Q3_WEAPON_ITEMS.find(weapon => weapon.ammo === owner.source);
-      if (source === undefined || !profile.ammo.some(row => row.source === owner.source && row.destinations.includes(owner.item)))
-        throw new Error("Periodic ammo owner has no declared source supply lane");
-      if (this.selectedAmmoOwners.has(source.weapon) || items.has(owner.item)) throw new Error("Periodic ammo source and selected pool require one owner");
-      items.add(owner.item); this.selectedAmmoOwners.set(source.weapon, owner.item); this.selectedAmmoSlots.add(source.weapon);
-    }
+    if (this.source.kind !== "q3" || providerFamily(this.weaponProvider.provider) === "q3") return;
+    if (this.selectedAmmoTimers !== null) throw new Error("Selected ammo timers already have a source owner");
+    const legacy = providerFamily(this.weaponProvider.provider) === "q1" ? Q3_Q1_SUPPLY_PROFILE : Q3_Q2_SUPPLY_PROFILE;
+    this.selectedAmmoTimers = new Q3MappedAmmoRegeneration(profile, this.actors, this.inventory, legacy.ammoOwners ?? []);
   }
 
-  private selectedAmmo(actor: ActorId, weapon: number): import("../../../contracts/gameplay.ts").InventoryEntry | null {
-    if (this.selectedArsenal?.has(actor) !== true) return null;
-    const item = this.selectedAmmoOwners.get(weapon); if (item === undefined) return null;
-    const entry = this.inventory.entries(actor).find(entry => entry.item === item);
-    if (entry === undefined) throw new Error("Periodic source ammo owner lost its admitted selected inventory");
-    return entry;
+  private selectedAmmo(actor: ActorId): readonly import("../../../content/q3/team-arena/client-effects.ts").Q3MappedAmmoTimer[] | null {
+    if (this.selectedArsenal === null || this.selectedArsenal.family === "q3" || !this.selectedArsenal.has(actor)) return null;
+    const owner = this.actors.resolveOwned(actor);
+    if (owner === null || this.selectedAmmoTimers === null) throw new Error("Selected ammunition has no live timer owner");
+    return this.selectedAmmoTimers.timers(owner);
+  }
+
+  private selectedAmmoActors(): readonly OwnedActor[] {
+    return [...this.playerStates.values()].filter(player => this.selectedArsenal?.has(player.actor.id) === true).map(player => player.actor);
   }
 
   private selectedWeaponDelay(actor: ActorId, seconds: number): number {
@@ -2312,10 +2325,14 @@ export class SharedSimulation implements Simulation {
         primaryAttackAllowed: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
         admitPickup: item => this.admitSelectedQ3Pickup(item),
         originalPickups: this.originalPickups,
-        ammo: { read: (actor, weapon) => this.selectedAmmo(actor, weapon)?.count ?? null,
-          write: (actor, weapon, count) => { const entry = this.selectedAmmo(actor.id, weapon); if (entry === null) return false;
-            this.inventory.configure(actor, { ...entry, count }); return true; } },
-        timerOwnership: actor => ({ ordinaryDecay: true, ammo: this.selectedArsenal?.has(actor) === true ? this.selectedAmmoSlots : null }),
+        ammoTimerStored: (actor, weapon, value) => this.selectedAmmoTimers?.stored(actor, weapon, value),
+        timerOwnership: actor => ({ ordinaryDecay: true, ammo: this.selectedAmmo(actor) }),
+        speedMultiplier: actor => {
+          if (this.selectedQ3Source?.ownsEquipment === true) return this.selectedQ3Source.speedMultiplier(actor);
+          const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
+          if (client == null) throw new Error("Q3 movement speed lost its client");
+          return clientSpeedMultiplier(client.ps);
+        },
         previewPickup: item => this.previewSelectedQ3Pickup(item),
         foreign: actor => { if (this.actors.isLive(actor)) throw new Error("Foreign Q3 actor projection is not attached"); return null; },
         isPlayer: actor => this.player(actor) !== null,
@@ -2816,9 +2833,10 @@ export class SharedSimulation implements Simulation {
       q2MovementConfig: () => this.q2MovementConfig(),
       gibbed: () => this.q2Characters.get(actor)?.state.gibbed ?? (this.source.kind === "q2" && this.source.players.states.get(actor.id)?.gibbed === true),
       speedMultiplier: actor => {
-        if (this.selectedQ3Source !== null) return this.selectedQ3Source.speedMultiplier(actor.id);
+        if (this.source.kind === "q3" && this.requirePlayer(actor.id).profile.kind === "q3") return 1;
+        if (this.selectedQ3Source?.ownsEquipment === true) return this.selectedQ3Source.speedMultiplier(actor.id);
         const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor.id)?.client : null;
-        return client == null || this.requirePlayer(actor.id).profile.kind === "q3" ? 1 : clientSpeedMultiplier(client.ps);
+        return client == null ? 1 : clientSpeedMultiplier(client.ps);
       },
       fixedPose: actor => { const player = this.requirePlayer(actor.id); return this.selectedQ3Source?.fixedPose(actor, playerPostures(player)) ?? null; },
       weaponStep: input => this.weaponStep(input), animationStep: input => this.animationStep(input), touch: (contact, state) => this.touch(contact, state),
@@ -2960,7 +2978,8 @@ export class SharedSimulation implements Simulation {
       const weapon = this.weaponStep({ actor: player.actor, command: input.command, frame: { ...this.sourceFrame, phase: "client-command", elapsed: { kind: "milliseconds", value: elapsed } },
         arsenal: this.arsenal(player), animation: player.animation, environment: player.sourceEnvironment, gauntletHit: options.gauntletHit });
       player.arsenal = weapon.arsenal; player.animation = weapon.animation;
-      for (const effect of weapon.effects) if (effect.kind === "event" && providerFamily(effect.value.provider) === "q3") client.ps.addEvent(effect.value.event, effect.value.parameter);
+      for (const effect of weapon.effects) if (effect.kind === "event" && providerFamily(effect.value.provider) === "q3"
+        && effect.value.provider !== this.selectedQ3Source?.host.provider) client.ps.addEvent(effect.value.event, effect.value.parameter);
     }
     client.ps.commandTime = command.serverTime; client.ps.viewangles = player.viewAngles; client.ps.viewheight = player.viewHeight;
     client.ps.groundEntityNum = player.ground.kind === "world" ? 1022 : player.ground.kind === "actor" ? this.source.game.records.nativeByActor(player.ground.actor)?.slot ?? 1023 : 1023;
@@ -2971,7 +2990,7 @@ export class SharedSimulation implements Simulation {
     }
     writeQ3CharacterAnimation(entity, player.animation);
     for (const { effect } of result.effects) if (effect.kind === "event" && providerFamily(effect.value.provider) === "q3"
-      && publishQ3CharacterMovementEvent(player.character, effect.value.event)) client.ps.addEvent(effect.value.event, effect.value.parameter);
+      && effect.value.provider !== this.selectedQ3Source?.host.provider && publishQ3CharacterMovementEvent(player.character, effect.value.event)) client.ps.addEvent(effect.value.event, effect.value.parameter);
     const worldActor = this.source.game.pool.at(1022).actor.id;
     return { contacts: result.contacts.flatMap(contact => contact.target.kind === "actor" ? [contact.target.actor] : contact.target.kind === "world" ? [worldActor] : []),
       bounds: player.bounds, waterlevel: player.waterLevel, watertype: player.waterType < 0 ? player.waterType === -3 ? 32 : player.waterType === -4 ? 16 : player.waterType === -5 ? 8 : 0 : player.waterType,
@@ -3323,7 +3342,7 @@ export class SharedSimulation implements Simulation {
         if (client == null) throw new Error("Selected primary on Q3 map has no admitted source client");
         const useHoldable = player.arsenalIntent?.useHoldable ?? (input.command.kind === "q3" && (input.command.buttons & CommandButtons.USE_HOLDABLE) !== 0);
         if ((input.command.buttons & CommandButtons.ATTACK) === 0 && !useHoldable && input.environment.health > 0) client.ps.pmFlags &= ~MoveFlags.RESPAWNED;
-        if (this.source.game.stepHoldable(player.actor.id, useHoldable)) {
+        if (this.selectedQ3Source?.ownsEquipment !== true && this.source.game.stepHoldable(player.actor.id, useHoldable)) {
           this.primaryCommandBlocks.add(player.actor.id);
           return { arsenal, animation: input.animation, effects: [] };
         }
@@ -5284,6 +5303,7 @@ export class SharedSimulation implements Simulation {
       nativeEquipmentVelocity: [...this.nativeEquipmentVelocity].map(([actor, velocity]) => ({ actor: savedActorId(actor), velocity })),
       nativeWeaponRequests: [...this.nativeWeaponRequests].map(([actor, weapon]) => ({ actor: savedActorId(actor), weapon })),
       selectedMonsters: this.captureSelectedMonsters(), weaponBehaviors: weaponBehaviors ?? this.weaponBehavior.checkpoint(),
+      selectedAmmoTimers: this.selectedAmmoTimers?.capture(this.selectedAmmoActors()) ?? null,
       selectedWeaponSource: this.selectedWeaponSource === null ? null : this.selectedWeaponSource.kind === "q1" ? {
         kind: "q1", entities: this.selectedWeaponSource.game.capture(), random: this.selectedWeaponSource.random.checkpoint() } : {
         kind: "q2", entities: this.selectedWeaponSource.game.capture(), weapons: this.selectedWeaponSource.weapons.capture(this.selectedWeaponSource.game),
@@ -5660,6 +5680,13 @@ export class SharedSimulation implements Simulation {
       actor: saved => this.actors.referenceSaved(saved), client: actor => this.playerClient(actor) })) this.modClientCommands.set(value.input.actor, value);
     this.events.restore(reader.field("events"), actor => this.actors.referenceSaved(actor));
     this.resumeQ2Presentation();
+    const ammoTimers = reader.field("selectedAmmoTimers");
+    if (this.selectedAmmoTimers !== null && source.kind === "q3") this.selectedAmmoTimers.restore(ammoTimers, this.selectedAmmoActors(), (actor, weapon) => {
+      const client = source.game.records.nativeByActor(actor)?.client;
+      if (client == null) return ammoTimers.fail("Saved ammo timer has no original source client");
+      return client.ammoTimes.get(weapon);
+    });
+    else if (ammoTimers.value !== undefined && ammoTimers.value !== null) ammoTimers.fail("Saved ammo timers have no selected source owner");
     if (this.events.nextSequence !== save.nextEventSequence) throw new Error("Save event sequence disagrees with its source journal");
     return undefined;
   }
@@ -5677,7 +5704,7 @@ export class SharedSimulation implements Simulation {
     this.modClientApplications.close();
     this.modClientListeners.clear(); this.modClientAdmissions.clear(); this.modClientCommands.clear(); this.modClientDrops.length = 0;
     this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = [];
-    for (const close of [() => this.selectedQ3Source?.close(), () => this.actors.close(), () => this.q3Source()?.close(), () => this.disposeSourceCombat?.(), () => this.scheduler.close()]) {
+    for (const close of [() => this.selectedAmmoTimers?.close(), () => this.selectedQ3Source?.close(), () => this.actors.close(), () => this.q3Source()?.close(), () => this.disposeSourceCombat?.(), () => this.scheduler.close()]) {
       try { close(); } catch (error) { errors.push(error); }
     }
     this.disposeSourceCombat = null;

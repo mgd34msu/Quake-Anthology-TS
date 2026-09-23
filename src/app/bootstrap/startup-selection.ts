@@ -29,7 +29,7 @@ import { EQUIPMENT_PROVIDERS, disabledEquipment, nativeEquipment, grappleStyles,
 import { applicationQvmGrappleSelection } from "./qvm-grapple-selection.ts";
 import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../../content/catalog/monsters.ts";
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
-import { canonicalWeaponSource } from "../../content/catalog/weapons.ts";
+import { canonicalWeaponSource, supportsSelectedWeaponProduct } from "../../content/catalog/weapons.ts";
 import { loadTeamArenaCampaign, planTeamArenaSkirmish, type TeamArenaCampaign, type TeamArenaTeams } from "./team-arena-skirmish.ts";
 import { applicationPreset } from "./content.ts";
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
@@ -65,12 +65,6 @@ function monsterSourceTitle(family: GameFamily, program: string, title: string |
   return program === "id1" || program === "baseq2" ? family === "q1" ? "Quake" : "Quake II" : title ?? program;
 }
 const baseProduct = (family: GameFamily): string => family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3";
-function baseArsenalPair(map: CatalogProduct, weapon: CatalogProduct): boolean {
-  if (weapon.expectation.family === "q1" && weapon.expectation.campaign === "hipnotic" && (weapon.expectation.edition === "classic" || weapon.expectation.edition === "rerelease")) return true;
-  const family = map.expectation.family, program = family === "q1" ? "id1" : "baseq2";
-  return (family === "q1" || family === "q2") && [map, weapon].every(product => product.expectation.family === family && product.expectation.campaign === program
-    && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease"));
-}
 function unavailable(product: CatalogProduct): string | null {
   const state = product.availability;
   return state.kind === "installed" ? null : state.kind === "unresolved" ? state.reason : `Missing: ${state.requirements.join(", ")}`;
@@ -592,11 +586,8 @@ export class StartupSelectionModel {
       row("map", "Starting map", this.maps()),
       row("movement", "Movement", movementChoices),
       row("character", "Character source", this.baseChoices()), row("model", "Character model", this.models()),
-      row("weapons", "Weapons", [nativeWeapons, ...[...this.baseChoices(), ...this.catalog.products.filter(product => product.expectation.family === "q1" && product.expectation.campaign === "hipnotic" && (product.expectation.edition === "classic" || product.expectation.edition === "rerelease")).map(productChoice)].map(option => {
-        const product = this.catalog.product(option.id), current = this.product("product");
-        return option.unavailable === null && product.expectation.family === current.expectation.family && product.id !== current.id && !baseArsenalPair(current, product)
-          ? { ...option, unavailable: "Another edition or campaign within this weapon family is not implemented; use campaign defaults." } : option;
-      })]), row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
+      row("weapons", "Weapons", [nativeWeapons, ...this.catalog.products.filter(product => supportsSelectedWeaponProduct(product.expectation)).map(productChoice)]),
+      row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
       row("grapple", "Hook", [choice("disabled", "Off"), choice("slot", "Weapon slot", hookUnavailable), choice("offhand", "Offhand", hookUnavailable)], placement),
       ...(placement === "disabled" ? [] : [row("grappleStyle", "Hook style", styles.map(style => choice(style.id, style.title, style.unavailable)), style)]),
       row("grenades", "Offhand grenades", [choice("disabled", "Off"), choice("enabled", "On", grenadeSource === null ? "Requires Quake II grenade assets" : null)], grenades),
@@ -724,9 +715,6 @@ export class StartupSelectionModel {
     selections = { ...selections, campaign: { kind: "selected", value: campaign } };
     if (this.values.weapons !== "native") {
       const product = this.catalog.require(this.values.weapons);
-      if (product.expectation.family === this.product("product").expectation.family && product.id !== base.map.entities.content
-        && !baseArsenalPair(this.product("product"), product))
-        throw new Error("Selecting another edition's weapons within the same game family is not implemented; choose campaign weapons or a different family.");
       selections = { ...selections, weapons: { kind: "selected", value: [canonicalWeaponSource(base.map.entities, { provider: `${product.expectation.family}:official`, content: product.id }, this.catalog)] } };
     }
     if (this.values.enemies === "custom") {
