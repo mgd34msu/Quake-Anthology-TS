@@ -3,10 +3,11 @@ import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import { readModClientInput } from "./client-input.ts";
+import { readModPickupRule } from "./pickups.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "string", "vector")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move", "pickup-count", "pickup-has-count", "pickup-dropped") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "string": return { kind: "string", value: reader.field("value").string() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
@@ -80,6 +81,7 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     ...(commands.value === undefined ? {} : { commands: commands.list(entry => ({ name: entry.field("name").string(), function: entry.field("function").string(),
       arguments: entry.field("arguments").list(consoleValue), globals: entry.field("globals").list(global => ({ name: global.field("name").string(), value: consoleValue(global.field("value")) })) })) }),
     ...(reader.field("protection").value === undefined ? {} : { protection: reader.field("protection").list(protection) }),
+    ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(entry => readModPickupRule(entry, sourceCall)) }),
     ...(combat.value === undefined ? {} : { combat: { damage: sourceCall(combat.field("damage")),
       ...(combat.field("armorStage").value === undefined ? {} : { armorStage: armorStage(combat.field("armorStage")) }) } }) };
 }

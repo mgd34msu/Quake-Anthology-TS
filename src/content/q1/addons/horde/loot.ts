@@ -3,6 +3,7 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import type { ItemId } from "../../../../contracts/gameplay.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import { ZERO, vadd, vsub } from "../../foundation/types.ts";
+import { touchQ1Pickup } from "../../foundation/pickups.ts";
 import type { Q1Horde } from "./index.ts";
 
 interface HordeAmmo { readonly item: ItemId; readonly classname: string; readonly model: string; readonly label: string; readonly amount: number; readonly capacity: number }
@@ -17,7 +18,10 @@ export function registerHordeLoot(horde: Q1Horde): undefined {
   const { game, context } = horde;
   const taken = (entity: Q1Actor, player: ActorId, sound: string): undefined => {
     const actor = game.host.actors.resolveOwned(player); if (actor !== null) game.sound(actor, sound, "item");
-    game.effect("pickup", game.body(entity).origin, player); entity.solid = "none"; entity.model = ""; return game.link(entity);
+    if (!game.live(entity) || !game.host.actors.isLive(player)) return undefined;
+    game.effect("pickup", game.body(entity).origin, player);
+    if (!game.live(entity) || !game.host.actors.isLive(player)) return undefined;
+    entity.solid = "none"; entity.model = ""; return game.link(entity);
   };
   game.named.register("mg1:horde:ammo_touch", { touch: (_game, entity, other) => {
     if (!game.isPlayer(other) || game.health(other) <= 0) return undefined;
@@ -43,15 +47,26 @@ export function registerHordeLoot(horde: Q1Horde): undefined {
   game.named.register("mg1:horde:armor_touch", { touch: (_game, entity, other) => {
     if (!game.isPlayer(other) || game.health(other) <= 0) return undefined;
     const actor = game.host.actors.resolveOwned(other); if (actor === null) return undefined;
-    const absorption = entity.classname === "item_armor1" ? 0.3 : entity.classname === "item_armor2" ? 0.6 : 0.8;
-    const points = entity.classname === "item_armor1" ? 100 : entity.classname === "item_armor2" ? 150 : 200;
-    const armor = game.host.combat.read(other)?.armor.regular;
-    if (armor?.kind === "source") return undefined;
-    const protection = armor === undefined || armor.kind === "none" ? 0 : armor.points * (armor.kind === "q1" ? armor.absorption : armor.kind === "q2" ? armor.normalProtection : armor.protection);
-    if (protection >= absorption * points) return undefined;
-    game.host.combat.setRegularArmor(actor, { kind: "q1", points, absorption, item: `q1:${entity.classname}` });
-    game.message(other, "$qc_item_armor", false); taken(entity, other, "items/armor1.wav");
-    const owner = game.entity(entity.owner); if (owner !== null) owner.wait = 0; return game.remove(entity);
+    return touchQ1Pickup(game, entity, other, `q1:${entity.classname}`, { kind: "protection", channel: "regular" }, {
+      original: () => {
+        const absorption = entity.classname === "item_armor1" ? 0.3 : entity.classname === "item_armor2" ? 0.6 : 0.8;
+        const points = entity.classname === "item_armor1" ? 100 : entity.classname === "item_armor2" ? 150 : 200;
+        const armor = game.host.combat.read(other)?.armor.regular;
+        if (armor?.kind === "source") return false;
+        const protection = armor === undefined || armor.kind === "none" ? 0 : armor.points * (armor.kind === "q1" ? armor.absorption : armor.kind === "q2" ? armor.normalProtection : armor.protection);
+        if (protection >= absorption * points) return false;
+        game.host.combat.setRegularArmor(actor, { kind: "q1", points, absorption, item: `q1:${entity.classname}` });
+        return true;
+      },
+      complete: accepted => {
+        if (!accepted) return;
+        game.message(other, "$qc_item_armor", false);
+        if (!game.live(entity) || !game.host.actors.isLive(other)) return;
+        taken(entity, other, "items/armor1.wav");
+        if (!game.live(entity)) return;
+        const owner = game.entity(entity.owner); if (owner !== null) owner.wait = 0; game.remove(entity);
+      },
+    });
   } });
   game.named.register("mg1:horde:key_touch", { touch: (_game, entity, other) => {
     if (!game.isPlayer(other) || game.health(other) <= 0 || horde.services.isBot(other)) return undefined;

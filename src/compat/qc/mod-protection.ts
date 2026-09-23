@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { ActorId, ClientId, ProviderId } from "../../contracts/identity.ts";
-import type { ArmorStageInput, ArmorStageResult, ProtectionObserver, RegularArmorState, PoweredProtectionState } from "../../contracts/gameplay.ts";
+import type { ArmorStageInput, ArmorStageResult, ProtectionChannel, ProtectionObserver, RegularArmorState, PoweredProtectionState } from "../../contracts/gameplay.ts";
+import type { OriginalPickupRule } from "../../contracts/original-pickups.ts";
 import type { ModCallbackDeclaration, ModCallbackInput, ModQcProtection, ModRuntimeValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
 import type { ProtectionReservation } from "../../world/gameplay/authority.ts";
@@ -15,12 +16,13 @@ type Lane = { readonly channel: "regular"; readonly definition: Regular; readonl
   | { readonly channel: "powered"; readonly definition: Powered; readonly reservation: ProtectionReservation<"powered"> };
 interface Entry { readonly client: ClientId; readonly lanes: readonly Lane[]; bound: boolean; }
 interface Projection { readonly regular?: RegularArmorState; readonly powered?: PoweredProtectionState; }
-interface Stage { readonly actor: ActorId; readonly definition: ModQcProtection; readonly observer: ProtectionObserver; before: Projection; }
+interface Stage { readonly actor: ActorId; readonly observer: ProtectionObserver; before: Projection; }
 interface Operations {
   readonly machine: QcMachine;
   reference(actor: ActorId): number;
   actor(reference: number): ActorId;
   invoke(call: ModSourceCall, inputs: ReadonlyMap<ModCallbackInput, ModRuntimeValue>, region?: QcArmorStage): number;
+  pickups?(actor: ActorId, channel: ProtectionChannel): readonly OriginalPickupRule[];
 }
 
 export function qcProtectionRegions(program: QcProgram, declaration: ModCallbackDeclaration): readonly QcArmorStage[] {
@@ -152,7 +154,8 @@ export class QcModProtection {
     const entry = this.require(actor); if (entry.bound) return;
     try {
       for (const lane of entry.lanes) {
-        const base = { owner: this.provider, rule: lane.definition.id, admission: lane.definition.admission ?? { kind: "claim" } satisfies NonNullable<ModQcProtection["admission"]>, inventoryItems: [] };
+        const base = { owner: this.provider, rule: lane.definition.id, admission: lane.definition.admission ?? { kind: "claim" } satisfies NonNullable<ModQcProtection["admission"]>, inventoryItems: [],
+          pickups: this.operations.pickups?.(actor, lane.channel) ?? [] };
         if (lane.channel === "regular") {
           const definition = lane.definition;
           lane.reservation.bind({ ...base, channel: "regular", read: () => this.regular(actor, definition),
@@ -164,7 +167,7 @@ export class QcModProtection {
                 this.select(actor, selection, selected.value);
               }
               this.count(actor, definition.storage.points, next.kind === "none" ? 0 : next.points); this.rebase(actor); return undefined;
-            }, absorb: (input, observer) => this.absorb({ actor, definition, observer, before: this.projection(actor) }, input) });
+            }, absorb: (input, observer) => this.absorb(actor, definition, input, observer) });
         } else {
           const definition = lane.definition;
           lane.reservation.bind({ ...base, channel: "powered", read: () => this.powered(actor, definition),
@@ -176,7 +179,7 @@ export class QcModProtection {
                 this.select(actor, selection, selected.value);
               }
               this.count(actor, definition.storage.cells, next.kind === "none" ? 0 : next.cells); this.rebase(actor); return undefined;
-            }, absorb: (input, observer) => this.absorb({ actor, definition, observer, before: this.projection(actor) }, input) });
+            }, absorb: (input, observer) => this.absorb(actor, definition, input, observer) });
         }
       }
       entry.bound = true;
@@ -199,11 +202,18 @@ export class QcModProtection {
     }
     return undefined;
   }
-  private absorb(stage: Stage, input: ArmorStageInput): ArmorStageResult {
-    this.require(stage.actor);
-    const definition = stage.definition, flags = definition.flags;
+  watch<T>(actor: ActorId, observer: ProtectionObserver, run: () => T): T {
+    if (!this.entries.has(actor)) return run();
+    const stage: Stage = { actor, observer, before: this.projection(actor) };
+    this.stages.push(stage);
+    try { return run(); }
+    finally { this.stages.pop(); }
+  }
+  private absorb(actor: ActorId, definition: ModQcProtection, input: ArmorStageInput, observer: ProtectionObserver): ArmorStageResult {
+    this.require(actor);
+    const flags = definition.flags;
     const scale = input.flags.regularProtectionScale ?? 1;
-    if (stage.definition.channel === "regular" && scale !== 1
+    if (definition.channel === "regular" && scale !== 1
       && ![...definition.absorb.call.arguments, ...definition.absorb.call.globals.map(global => global.value)]
         .some(value => value.kind === "input" && value.name === "regular-protection-scale"))
       throw new Error("QC regular protection scale requires an explicit source input");
@@ -211,21 +221,20 @@ export class QcModProtection {
       | (input.flags.noRegularArmor ? flags.noRegularArmor : 0) | (input.flags.energy ? flags.energy : 0) | (input.request.delivery === "radius" ? flags.radius : 0);
     const now = this.services.time();
     const inputs = new Map<ModCallbackInput, ModRuntimeValue>([
-      ["self", { kind: "actor", value: stage.actor }], ["attacker", { kind: "actor", value: input.request.attack.attacker }],
+      ["self", { kind: "actor", value: actor }], ["attacker", { kind: "actor", value: input.request.attack.attacker }],
       ["inflictor", { kind: "actor", value: input.request.attack.inflictor }], ["amount", { kind: "float", value: input.amount }],
       ["damage-flags", { kind: "float", value: damageFlags }], ["knockback", { kind: "float", value: input.request.knockback }], ["direction", { kind: "vector", value: input.geometry.direction }],
       ["regular-protection-scale", { kind: "float", value: scale }],
       ["point", { kind: "vector", value: input.geometry.point }], ["normal", { kind: "vector", value: input.geometry.normal }],
       ["time", { kind: "float", value: now.kind === "seconds" ? now.value : now.value / 1000 }],
     ]);
-    this.stages.push(stage);
-    try {
+    return this.watch(actor, observer, () => {
       const source = definition.absorb;
       const region = source.kind === "region" ? this.regions.find(region => region.entry === source.stage.entry) : undefined;
       const saved = this.operations.invoke(source.call, inputs, region);
-      if (this.services.actors.isLive(stage.actor) && this.entries.has(stage.actor)) this.require(stage.actor);
+      if (this.services.actors.isLive(actor) && this.entries.has(actor)) this.require(actor);
       return { saved };
-    } finally { this.stages.pop(); }
+    });
   }
   release(actor: ActorId): void {
     const entry = this.entries.get(actor); if (entry === undefined) return;

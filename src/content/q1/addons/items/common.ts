@@ -18,8 +18,13 @@ export function finishMg3Pickup(context: Q1AddonContext, entity: Q1Actor, other:
   message: string, sound: string, args: readonly (string | number)[] = []): undefined {
   const { game } = context, player = game.host.actors.resolveOwned(other);
   if (player === null) return undefined;
+  const live = () => game.live(entity) && game.host.actors.isLive(other);
   if (message !== "") game.message(other, message, true, args);
-  game.sound(player, sound, "item"); game.effect("pickup", game.body(entity).origin, other);
+  if (!live()) return undefined;
+  game.sound(player, sound, "item");
+  if (!live()) return undefined;
+  game.effect("pickup", game.body(entity).origin, other);
+  if (!live()) return undefined;
   entity.activator = other; game.useTargets(entity, other);
   return game.live(entity) ? game.remove(entity) : undefined;
 }

@@ -160,7 +160,7 @@ export class Q3SourceRuntime {
       touch: this.pool.callbacks.touch.register("q3.item.touch", (entity, other, contact) => { touchItem(entity, other, contact, this.itemLifecycle); }),
       respawn: this.pool.callbacks.think.register("q3.item.respawn", entity => { respawnItem(entity, this.itemLifecycle); }),
     };
-    this.itemLifecycle = { callbacks: itemCallbacks, previewPickup: item => host.previewPickup?.(item) ?? { kind: "native" }, admitPickup: item => host.admitPickup?.(item) ?? { kind: "native" }, entities: this.pool, world: this.world, product: options.product,
+    this.itemLifecycle = { callbacks: itemCallbacks, ...(host.originalPickups === undefined ? {} : { originalPickups: host.originalPickups }), previewPickup: item => host.previewPickup?.(item) ?? { kind: "native" }, admitPickup: item => host.admitPickup?.(item) ?? { kind: "native" }, entities: this.pool, world: this.world, product: options.product,
       get gameType() { return runtime.gameType; }, get weaponRespawnSeconds() { return runtime.integer("g_weaponrespawn"); },
       get teamWeaponRespawnSeconds() { return runtime.integer("g_weaponTeamRespawn"); }, handicapForClient: number => this.userinfo(number, "handicap"),
       teamPickup: (item, player) => this.team.pickupTeam(item, player), useTargets: (item, player) => useTargets(this.targets(), item, player),

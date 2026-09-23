@@ -34,6 +34,7 @@ import { createQcPusherServices } from "./pusher-host.ts";
 import type { Q1PusherServices } from "../../movement/q1/types.ts";
 import { executeQuakeCPhysics } from "../../app/bootstrap/simulation/actor-execution.ts";
 import { thinkCallbackTime } from "../../world/scheduler.ts";
+import { QcModPickups } from "./mod-pickups.ts";
 import type { SimulationPresentation } from "../../app/bootstrap/simulation/types.ts";
 import { q1WaterTransition } from "../../movement/q1/water-transition.ts";
 import { captureQcCheckpoint, restoreQcCheckpoint } from "./executor.ts";
@@ -79,6 +80,19 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
   if (program.digest !== declaration.program.digest) throw new Error("Gameplay mod program differs from its declared artifact digest");
   qcProtectionRegions(program, declaration);
   for (const protection of declaration.protection ?? []) validateCall(program, protection.absorb.call, new Set<ModCallbackInput>(["self", "attacker", "inflictor", "amount", "knockback", "damage-flags", "regular-protection-scale", "direction", "point", "normal", "time"]), "protection");
+  const pickupIds = new Set<string>(), pickupItems = new Set<string>();
+  for (const pickup of declaration.pickups ?? []) {
+    if (declaration.clients === undefined || pickup.id.length === 0 || pickupIds.has(pickup.id) || pickup.offered.length === 0
+      || new Set(pickup.offered).size !== pickup.offered.length || pickup.offered.some(item => pickupItems.has(item)))
+      throw new Error("QC pickups require clients, unique rule ids and distinct offered items");
+    pickupIds.add(pickup.id); for (const item of pickup.offered) pickupItems.add(item);
+    const resource = pickup.resource;
+    if (resource.kind === "protection" ? !declaration.protection?.some(value => value.channel === resource.channel)
+      : !declaration.actorFields.some(field => field.binding === "inventory" && field.item === resource.item))
+      throw new Error("QC pickup resource requires its declared source storage");
+    for (const call of pickup.operation.kind === "boolean-grant" ? [pickup.operation.grant] : [pickup.operation.gate, pickup.operation.grant])
+      validateCall(program, call, new Set<ModCallbackInput>(["self", "other", "item", "time", "pickup-count", "pickup-has-count", "pickup-dropped"]), "pickup");
+  }
   const fields = new Set<number>();
   const think = declaration.actorFields.filter(field => field.binding === "think"), nextthink = declaration.actorFields.filter(field => field.binding === "nextthink");
   if (think.length !== nextthink.length || think.length > 1) throw new Error("Mod source scheduling requires one think and one nextthink binding together");
@@ -174,6 +188,7 @@ export class QcModProvider {
   private readonly retiredProjections = new Set<ActorId>();
   private readonly combat: QcModCombat | null;
   private readonly protection: QcModProtection | null;
+  private readonly pickups: QcModPickups | null;
   private readonly messages: QcModMessages | null;
   private readonly environment: QcModEnvironment;
   private readonly precached = new Map<string, QcPrecachedResource>();
@@ -312,12 +327,16 @@ export class QcModProvider {
       }, observeCall: call => { this.input.observeCall(call); return this.combat?.damage.observeCall(call); }, observeEntityStore: store => {
         this.protection?.observe(store); this.writeThrough(store); return this.combat?.damage.observeEntityStore(store);
       } });
-    this.protection = declaration.protection === undefined ? null : new QcModProtection(declaration, module.id, services, { machine: this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference), invoke: (call, inputs, region) => this.invoke(call, inputs, region) });
+    this.protection = declaration.protection === undefined ? null : new QcModProtection(declaration, module.id, services, { machine: this.machine, reference: actor => this.reference(actor), actor: reference => this.actor(reference),
+      invoke: (call, inputs, region) => this.invoke(call, inputs, region), pickups: (actor, channel) => this.pickups?.protection(actor, channel) ?? [] });
+    this.pickups = declaration.pickups === undefined ? null : new QcModPickups(declaration, module.id, services, {
+      invoke: (call, inputs) => this.invoke(call, inputs), watch: (actor, observer, run) => this.protection === null ? run() : this.protection.watch(actor, observer, run),
+    });
     this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor), actor => services.actors.isLive(actor));
     this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
       ...(declaration.actorFields.some(field => field.binding === "think") ? { think: (actor: ActorId, frame: FrameContext, live: () => boolean) => this.runClientThink(actor, frame, live) } : {}),
-      reserve: actor => this.protection?.reserve(actor), admitted: actor => this.protection?.activate(actor),
-      project: actor => { this.reference(actor); }, release: actor => { this.protection?.release(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor, frame) => {
+      reserve: actor => this.protection?.reserve(actor), admitted: actor => { this.pickups?.admit(actor); this.protection?.activate(actor); },
+      project: actor => { this.reference(actor); }, release: actor => { this.releaseClientBindings(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor, frame) => {
         const previous = this.frame, now = frame?.time ?? services.time();
         if (frame !== undefined) this.frame = frame;
         try {
@@ -454,13 +473,14 @@ export class QcModProvider {
             throw new Error("Saved QuakeC client projection differs from its reserved slot");
         } else if (clients.value !== undefined && clients.value !== null) throw new Error("Saved QuakeC clients require the declared lifecycle service");
         this.ownedActors.restored();
-        for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) this.protection?.activate(client.actor); }
+        for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) { this.pickups?.admit(client.actor); this.protection?.activate(client.actor); } }
         this.clients?.start();
         return undefined;
       },
     };
     this.releaseProjection = services.actors.onRelease(actor => {
-      this.protection?.release(actor.id); this.retiredProjections.add(actor.id); this.drainRetiredProjections();
+      try { this.releaseClientBindings(actor.id); }
+      finally { this.retiredProjections.add(actor.id); this.drainRetiredProjections(); }
       return undefined;
     });
   }
@@ -502,6 +522,16 @@ export class QcModProvider {
     const slot = this.projections.get(actor);
     if (slot !== undefined) { this.projections.delete(actor); this.actorsBySlot.delete(slot); this.machine.entities.at(slot).bytes.fill(0); }
     return "released";
+  }
+  private releaseClientBindings(actor: ActorId): void {
+    const errors: unknown[] = [];
+    for (const release of [() => this.pickups?.release(actor), () => this.protection?.release(actor)]) try { release(); } catch (error) { errors.push(error); }
+    if (errors.length !== 0) throw new AggregateError(errors, "QC client binding release failed");
+  }
+  private closeClientBindings(): void {
+    const errors: unknown[] = [];
+    for (const close of [() => this.pickups?.close(), () => this.protection?.close()]) try { close(); } catch (error) { errors.push(error); }
+    if (errors.length !== 0) throw new AggregateError(errors, "QC client binding close failed");
   }
   private drainRetiredProjections(): void {
     if (this.depth !== 0 || this.input.active) return;
@@ -764,17 +794,18 @@ export class QcModProvider {
   restore(saved: QuakeCCheckpoint): undefined {
     this.protection?.assertIdle();
     if (this.depth !== 0 || this.input.active) throw new Error("Mod restore requires an idle callback boundary");
-    this.protection?.close();
+    this.closeClientBindings();
     return restoreQcCheckpoint(this.machine, this.module, this.hostState, saved);
   }
   close(): undefined {
     if (this.closed) return undefined;
-    this.protection?.close(); this.closed = true; this.clients?.close();
-    try { this.ownedActors.close(); } finally {
-      this.releaseProjection();
-      this.messages?.close();
-      for (const release of this.sourcePhysics.values()) release(); this.sourcePhysics.clear(); this.projections.clear(); this.actorsBySlot.clear();
-    }
+    this.closed = true;
+    const errors: unknown[] = [];
+    for (const close of [() => this.closeClientBindings(), () => this.clients?.close(), () => this.ownedActors.close(),
+      () => this.releaseProjection(), () => this.messages?.close(), ...this.sourcePhysics.values()])
+      try { close(); } catch (error) { errors.push(error); }
+    this.sourcePhysics.clear(); this.projections.clear(); this.actorsBySlot.clear();
+    if (errors.length !== 0) throw new AggregateError(errors, "QC component close failed");
     return undefined;
   }
 }

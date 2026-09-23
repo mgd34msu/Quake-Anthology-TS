@@ -5,6 +5,8 @@ import type { ActorCallbackTable } from "../actors/callbacks.ts";
 import { copyVector } from "../actors/body.ts";
 import type { SessionActorRegistry } from "../actors/registry.ts";
 import { ModOperation } from "./mod-composition.ts";
+import type { OriginalPickupOffer, OriginalPickupResolution, OriginalPickupRule } from "../../contracts/original-pickups.ts";
+import { captureOriginalPickupRules } from "./original-pickups.ts";
 
 export type CombatTraits = Pick<CombatState, "canTakeDamage" | "mass" | "invulnerable" | "team" | "noKnockback">;
 export interface PowerArmorCellBinding { read(): number; write(count: number): undefined; }
@@ -31,6 +33,7 @@ export type ProtectionBinding<K extends ProtectionChannel = ProtectionChannel> =
   [P in K]: ProtectionClaim & {
     readonly channel: P;
     readonly inventoryItems: readonly ItemId[];
+    readonly pickups?: readonly OriginalPickupRule[];
     readonly read: () => ArmorState[P];
     readonly validateWrite: (next: ArmorState[P]) => undefined;
     readonly write: (next: ArmorState[P]) => undefined;
@@ -135,6 +138,7 @@ export class GameplayAuthority implements DamageAuthority {
   private readonly copiedBindings = new WeakSet<CombatStateBinding>();
   private readonly policies = new Map<ProviderId, CombatPolicy>();
   private activeHits = 0;
+  private activePickups = 0;
 
   constructor(private readonly actors: SessionActorRegistry, private readonly callbacks: ActorCallbackTable, private readonly hooks: GameplayHooks) {
     actors.onRelease(actor => {
@@ -233,7 +237,8 @@ export class GameplayAuthority implements DamageAuthority {
       }
       return undefined;
     };
-    const bind = (binding: ProtectionBinding): (() => undefined) => {
+    const bind = (original: ProtectionBinding): (() => undefined) => {
+      const binding = { ...original, ...(original.pickups === undefined ? {} : { pickups: captureOriginalPickupRules(original.pickups) }) };
       if (this.activeHits !== 0) throw new Error("Cannot attach protection during combat execution");
       this.actors.assertOwned(actor);
       if (this.protection.get(actor)?.[channel] !== slot || slot.binding !== null) throw new Error("Protection reservation is closed or bound");
@@ -272,6 +277,52 @@ export class GameplayAuthority implements DamageAuthority {
     return Object.freeze([...slot.binding.inventoryItems]);
   }
 
+  resolvePickup(actor: OwnedActor, offer: OriginalPickupOffer): OriginalPickupResolution {
+    this.actors.assertOwned(actor);
+    const slots = this.protection.get(actor);
+    const matches = [slots?.regular, slots?.powered].flatMap(slot => {
+      const binding = slot?.binding;
+      if (binding == null) return [];
+      return (binding.pickups ?? []).filter(rule => rule.offered.includes(offer.item)).map(rule => ({ owner: binding.owner,
+        current: () => this.actors.isLive(actor.id) && this.protection.get(actor)?.[binding.channel] === slot && slot?.binding === binding,
+        take: rule.take }));
+    });
+    return { matches, blocksPrimary: offer.defaultResource?.kind === "protection" && slots?.[offer.defaultResource.channel] != null };
+  }
+
+  /** Original pickup stores can reenter combat; reconcile each committed source store before that happens. */
+  withPickupProtection<T>(actor: OwnedActor, owner: ProviderId, operation: (observer: ProtectionObserver) => T): T {
+    const primary = this.binding(actor), slots = this.protection.get(actor);
+    const regular = slots?.regular?.binding, powered = slots?.powered?.binding;
+    let open = true;
+    const observer: ProtectionObserver = { stored: change => {
+      if (!open) throw new Error("Pickup protection observer is closed");
+      this.actors.assertOwned(actor);
+      if (this.bindings.get(actor) !== primary) throw new Error("Pickup combat binding changed");
+      if (change.regular !== undefined && (regular?.owner !== owner || this.protection.get(actor)?.regular?.binding !== regular)
+        || change.powered !== undefined && (powered?.owner !== owner || this.protection.get(actor)?.powered?.binding !== powered))
+        throw new Error("Pickup reported protection outside its current owner");
+      const after = this.readState(actor, primary).armor;
+      if (change.regular !== undefined && !regularArmorEqual(change.regular.after, after.regular)
+        || change.powered !== undefined && !poweredArmorEqual(change.powered.after, after.powered))
+        throw new Error("Pickup protection report does not match committed source state");
+      const cursor = this.currentCursor(actor);
+      if (cursor === undefined) return undefined;
+      const write = { kind: "armor", before: { regular: change.regular?.before ?? cursor.armor.regular,
+        powered: change.powered?.before ?? cursor.armor.powered }, after } satisfies DamageMutation;
+      if (cursor.reaction === null) return this.observeStore(actor, primary, cursor, write);
+      this.advanceSourceCursors(actor, write);
+      return undefined;
+    } };
+    this.activePickups++;
+    try {
+      const result = operation(observer), cursor = this.currentCursor(actor);
+      if (this.actors.isLive(actor.id) && cursor !== undefined && !armorEqual(this.readState(actor, primary).armor, cursor.armor))
+        throw new Error("Pickup omitted a committed protection store");
+      return result;
+    } finally { open = false; this.activePickups--; }
+  }
+
   copiedPrimaryArmor(actor: OwnedActor): ArmorState | null {
     this.actors.assertOwned(actor);
     const binding = this.bindings.get(actor);
@@ -281,7 +332,7 @@ export class GameplayAuthority implements DamageAuthority {
   }
 
   assertIdle(): undefined {
-    if (this.activeHits !== 0) throw new Error("Cannot checkpoint during combat execution");
+    if (this.activeHits !== 0 || this.activePickups !== 0) throw new Error("Cannot checkpoint during combat or pickup execution");
     return undefined;
   }
 

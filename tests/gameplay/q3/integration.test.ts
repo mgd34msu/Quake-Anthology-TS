@@ -1,3 +1,6 @@
+import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
+import type { RegularArmorState } from "../../../src/contracts/gameplay.ts";
+import type { OriginalPickupOffer } from "../../../src/contracts/original-pickups.ts";
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -17,7 +20,7 @@ import { Q3CharacterActor, Q3DeathAnimationSequence, q3InitialCombat } from "../
 import { damage } from "../../../src/content/q3/base/game/combat.ts";
 import { ServerEntityFlags } from "../../../src/content/q3/base/shared/entity-shared.ts";
 import { useActor } from "../../../src/content/q3/base/game/use-participant.ts";
-import { Weapon, PersistentIndex } from "../../../src/content/q3/base/shared/definitions.ts";
+import { Weapon, PersistentIndex, statSchema } from "../../../src/content/q3/base/shared/definitions.ts";
 import { parseQ3Bsp, adaptQ3Bsp } from "../../../src/formats/q3-map/index.ts";
 import { openArchive } from "../../../src/content/archive/index.ts";
 
@@ -64,7 +67,7 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
   let time = 100;
   const frame = (): FrameContext => ({ frame: time / 100, time: { kind: "milliseconds", value: time }, elapsed: { kind: "milliseconds", value: 100 }, phase: "entity-physics" });
   const events: Q3SourceEvent[] = [];
-  const host = createQ3SourceHost({ actors, bodies: physics.bodies, callbacks, combat, inventory, scene,
+  const host = createQ3SourceHost({ actors, bodies: physics.bodies, callbacks, combat, inventory, scene, originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory),
     moverActors: {
       observe: id => {
         const actor = actors.resolveOwned(id), state = physics.bodies.read(id), linked = physics.bodies.linked(id);
@@ -121,6 +124,33 @@ test.skipIf(!existsSync(archivePath))("retail Q3 map, selected player admission,
   expect(physics.bodies.read(actor.id)?.bounds).toEqual(selectedBounds);
   expect(player.s.solid).toBe((64 << 16) | (24 << 8) | 16);
   expect(inventory.count(actor.id, "q2:weapon/blaster")).toBe(1);
+  const armorPickup = actors.observations().map(value => runtime.records.byActor(value.id)).find(value => value?.classname === "item_armor_body");
+  if (armorPickup == null || armorPickup.touch === null || player.client === null) throw new Error("Retail armor pickup/client missing");
+  const armorTouch = armorPickup.touch, armorIndex = statSchema("baseq3").armor;
+  player.client.ps.stats.set(armorIndex, 200);
+  let originalArmor: RegularArmorState = { kind: "source", points: 333, item: "mod:source-armor" };
+  const pickupOffers: OriginalPickupOffer[] = [];
+  const removePickupOwner = combat.bindProtection(actor, { channel: "regular", owner: "mod:original-pickup", rule: "armor", admission: { kind: "replace-current-primary" }, inventoryItems: [],
+    read: () => originalArmor, validateWrite: () => undefined, write: next => { originalArmor = next; return undefined; }, absorb: () => ({ saved: 0 }),
+    pickups: [{ id: "armor", offered: ["q3:item_armor_body"], take: (offer, stores) => {
+      pickupOffers.push(offer); const before = originalArmor;
+      originalArmor = { kind: "source", points: 347, item: "mod:source-upgrade" };
+      stores.stored({ regular: { before, after: originalArmor } }); return "accepted";
+    } }] });
+  let pickupTargets = 0;
+  const pickupTarget = runtime.pool.spawn(); pickupTarget.targetname = "original-pickup-reentry";
+  armorPickup.target = pickupTarget.targetname;
+  pickupTarget.use = () => {
+    pickupTargets++; armorTouch(armorPickup, player, { self: armorPickup.actor, other: actor.id, plane: null, surface: null });
+  };
+  armorTouch(armorPickup, player, { self: armorPickup.actor, other: actor.id, plane: null, surface: null });
+  expect(pickupOffers).toHaveLength(1); expect(pickupTargets).toBe(1);
+  expect(pickupOffers[0]).toMatchObject({ item: "q3:item_armor_body", count: { kind: "default" }, source: armorPickup.actor.owner,
+    defaultResource: { kind: "protection", channel: "regular" }, time: { kind: "milliseconds", value: time } });
+  expect(combat.read(actor.id)?.armor.regular).toEqual(originalArmor);
+  expect(player.client.ps.stats.get(armorIndex)).toBe(347);
+  expect(armorPickup.r.contents).toBe(0); expect(armorPickup.nextthink).toBe(time + 25000);
+  removePickupOwner(); expect(player.client.ps.stats.get(armorIndex)).toBe(200); runtime.pool.free(pickupTarget);
   // Impacts retain first-seen actor identity, including world and released foreign contacts.
   const bot = runtime.pool.spawn();
   bot.r.svFlags |= ServerEntityFlags.BOT;

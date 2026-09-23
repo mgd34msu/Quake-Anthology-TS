@@ -4,6 +4,9 @@ import { SaveReader } from "../../../../persistence/value.ts";
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
 import type { PickupSupplyOffer, PickupSupplyObservation, PickupSupplyPreview } from "../../../../contracts/pickups.ts";
+import type { OriginalPickupAdmission, PickupResource } from "../../../../contracts/original-pickups.ts";
+import type { ItemId } from "../../../../contracts/gameplay.ts";
+import { q3WeaponItem } from "../../foundation/arsenal.ts";
 import { vec3 } from "../../../../core/math.ts";
 import type { Vec3 } from "../../../../core/math.ts";
 import { qvmFloatToInt } from "../../../../core/numeric.ts";
@@ -18,7 +21,7 @@ import type { ItemDefinition, PlayerInventory } from "../shared/items.ts";
 import { ENTITYNUM_NONE } from "../shared/player-state.ts";
 import type { TouchContact } from "../../../../contracts/world.ts";
 import type { DamageParticipant } from "./state.ts";
-import { pickupItem } from "./item-pickup.ts";
+import { pickupItem, q3ItemRespawnSeconds } from "./item-pickup.ts";
 import type { ItemPickupContext } from "./item-pickup.ts";
 import { EntityPool, setOrigin } from "./entities.ts";
 import { gameFormat } from "./format.ts";
@@ -111,6 +114,7 @@ export type SourcePickupPreview =
   | { readonly kind: "selected"; readonly offer: PickupSupplyOffer; readonly preview: PickupSupplyPreview };
 
 export interface ItemLifecycleContext {
+  readonly originalPickups?: OriginalPickupAdmission;
   readonly callbacks?: { readonly touch: NonNullable<GameEntity["touch"]>; readonly respawn: NonNullable<GameEntity["think"]> };
   readonly previewPickup?: (item: SourcePickupDescriptor) => SourcePickupPreview;
   readonly admitPickup?: (item: SourcePickupDescriptor) => SourcePickupAdmission;
@@ -310,77 +314,99 @@ export function touchItem(entity: GameEntity, other: DamageParticipant, _contact
   const item = requirePublishedItem(context, entity);
   const pickupState = { modelIndex: entity.s.modelindex, modelIndex2: entity.s.modelindex2, generic1: entity.s.generic1 };
   const itemActor = entity.actor.id, playerActor = other.actor.id;
-  const admission = context.admitPickup?.(pickupDescriptor(entity, other, item, context)) ?? { kind: "native" };
-  if (!entity.inuse || !other.inuse || context.entities.get(entity.slot) !== entity || context.entities.get(other.slot) !== other
-    || !entity.actor.id.equals(itemActor) || !other.actor.id.equals(playerActor)) return;
-  if (admission.kind === "rejected") return;
-  if (admission.kind === "native" && !canItemBeGrabbed(context.gameType, pickupState, inventory(client))) return;
+  const live = () => entity.inuse && other.inuse && context.entities.get(entity.slot) === entity && context.entities.get(other.slot) === other
+    && entity.actor.id.equals(itemActor) && other.actor.id.equals(playerActor);
   const className = item.className;
   if (className === null) throw new Error("Pickup item has no classname");
-  context.log(`Item: ${other.s.number} ${className}\n`);
-
-  let predict = client.pers.predictItemPickup;
   const now = gameTime(context);
-  let respawn: number;
-  if (admission.kind === "picked") respawn = admission.respawnSeconds;
-  else if (item.type === ItemType.IT_TEAM) respawn = context.teamPickup(entity, other);
-  else {
-    respawn = pickupItem(entity, other, pickupContext(context, now));
-    if (item.type === ItemType.IT_POWERUP) predict = false;
-  }
-  if (respawn === 0) return;
-  if (admission.kind === "native") {
-    const reports = context.entities.rankings, quantity = entity.count !== 0 ? entity.count : item.quantity;
-    switch (item.type) {
-      case ItemType.IT_WEAPON: reports.pickupWeapon(other.slot, item.tag); break;
-      case ItemType.IT_AMMO: reports.pickupAmmo(other.slot, item.tag, quantity); break;
-      case ItemType.IT_HEALTH: reports.pickupHealth(other.slot, quantity); break;
-      case ItemType.IT_ARMOR: reports.pickupArmor(other.slot, item.quantity); break;
-      case ItemType.IT_POWERUP: reports.pickupPowerup(other.slot, item.tag); break;
-      case ItemType.IT_HOLDABLE: reports.pickupHoldable(other.slot, item.tag); break;
-    }
-  }
-
-
-  if (predict) context.entities.addPredictableEvent(other, EntityEvent.EV_ITEM_PICKUP, entity.s.modelindex);
-  else context.entities.addEvent(other, EntityEvent.EV_ITEM_PICKUP, entity.s.modelindex);
-
-  if (item.type === ItemType.IT_POWERUP || item.type === ItemType.IT_TEAM) {
-    const temporary = context.entities.tempEntity(entity.s.pos.base, EntityEvent.EV_GLOBAL_ITEM_PICKUP);
-    temporary.s.eventParm = entity.s.modelindex;
-    if (entity.speed === 0) temporary.r.svFlags |= ServerEntityFlags.BROADCAST;
+  let predict = client.pers.predictItemPickup, respawn = 0, originalRan = false;
+  const original = (): boolean => {
+    originalRan = true;
+    const admission = context.admitPickup?.(pickupDescriptor(entity, other, item, context)) ?? { kind: "native" };
+    if (!live() || admission.kind === "rejected") return false;
+    if (admission.kind === "native" && !canItemBeGrabbed(context.gameType, pickupState, inventory(client))) return false;
+    context.log(`Item: ${other.s.number} ${className}\n`);
+    if (!live()) return false;
+    if (admission.kind === "picked") respawn = admission.respawnSeconds;
+    else if (item.type === ItemType.IT_TEAM) respawn = context.teamPickup(entity, other);
     else {
-      temporary.r.svFlags |= ServerEntityFlags.SINGLECLIENT;
-      temporary.r.singleClient = other.s.number;
+      respawn = pickupItem(entity, other, pickupContext(context, now));
+      if (item.type === ItemType.IT_POWERUP) predict = false;
     }
-  }
-
-  context.useTargets(entity, other);
-  if (entity.wait === -1) {
+    if (respawn === 0 || !live()) return false;
+    if (admission.kind === "native") {
+      const reports = context.entities.rankings, quantity = entity.count !== 0 ? entity.count : item.quantity;
+      switch (item.type) {
+        case ItemType.IT_WEAPON: reports.pickupWeapon(other.slot, item.tag); break;
+        case ItemType.IT_AMMO: reports.pickupAmmo(other.slot, item.tag, quantity); break;
+        case ItemType.IT_HEALTH: reports.pickupHealth(other.slot, quantity); break;
+        case ItemType.IT_ARMOR: reports.pickupArmor(other.slot, item.quantity); break;
+        case ItemType.IT_POWERUP: reports.pickupPowerup(other.slot, item.tag); break;
+        case ItemType.IT_HOLDABLE: reports.pickupHoldable(other.slot, item.tag); break;
+      }
+    }
+    return true;
+  };
+  const complete = (taken: boolean): void => {
+    if (!taken || !live()) return;
+    if (!originalRan) {
+      respawn = q3ItemRespawnSeconds(item, context);
+      if (respawn === 0) return;
+      if (item.type === ItemType.IT_POWERUP) predict = false;
+      context.log(`Item: ${other.s.number} ${className}\n`);
+      if (!live()) return;
+    }
+    if (predict) context.entities.addPredictableEvent(other, EntityEvent.EV_ITEM_PICKUP, entity.s.modelindex);
+    else context.entities.addEvent(other, EntityEvent.EV_ITEM_PICKUP, entity.s.modelindex);
+    if (!live()) return;
+    if (item.type === ItemType.IT_POWERUP || item.type === ItemType.IT_TEAM) {
+      const temporary = context.entities.tempEntity(entity.s.pos.base, EntityEvent.EV_GLOBAL_ITEM_PICKUP);
+      if (!live()) return;
+      temporary.s.eventParm = entity.s.modelindex;
+      if (entity.speed === 0) temporary.r.svFlags |= ServerEntityFlags.BROADCAST;
+      else {
+        temporary.r.svFlags |= ServerEntityFlags.SINGLECLIENT;
+        temporary.r.singleClient = other.s.number;
+      }
+    }
+    context.useTargets(entity, other);
+    if (!live()) return;
+    if (entity.wait === -1) {
+      entity.r.svFlags |= ServerEntityFlags.NOCLIENT;
+      entity.s.eFlags |= EF_NODRAW;
+      entity.r.contents = 0;
+      entity.unlinkAfterEvent = true;
+      return;
+    }
+    if (entity.wait !== 0) respawn = qvmFloatToInt(entity.wait);
+    if (entity.random !== 0) {
+      respawn = qvmFloatToInt(Math.fround(Math.fround(respawn) + Math.fround(crandom(context.random) * entity.random)));
+      if (!live()) return;
+      if (respawn < 1) respawn = 1;
+    }
+    if ((entity.flags & GameFlags.DROPPED_ITEM) !== 0) entity.freeAfterEvent = true;
     entity.r.svFlags |= ServerEntityFlags.NOCLIENT;
     entity.s.eFlags |= EF_NODRAW;
     entity.r.contents = 0;
-    entity.unlinkAfterEvent = true;
-    return;
-  }
-
-  if (entity.wait !== 0) respawn = qvmFloatToInt(entity.wait);
-  if (entity.random !== 0) {
-    respawn = qvmFloatToInt(Math.fround(Math.fround(respawn) + Math.fround(crandom(context.random) * entity.random)));
-    if (respawn < 1) respawn = 1;
-  }
-  if ((entity.flags & GameFlags.DROPPED_ITEM) !== 0) entity.freeAfterEvent = true;
-  entity.r.svFlags |= ServerEntityFlags.NOCLIENT;
-  entity.s.eFlags |= EF_NODRAW;
-  entity.r.contents = 0;
-  if (respawn <= 0) {
-    entity.nextthink = 0;
-    entity.think = null;
-  } else {
-    entity.nextthink = (now + Math.imul(respawn, 1_000)) | 0;
-    entity.think = context.callbacks?.respawn ?? context.entities.callbacks.think.resolve("q3.base.game.item-lifecycle.touchItem.think");
-  }
-  context.entities.options.link(entity);
+    if (respawn <= 0) {
+      entity.nextthink = 0;
+      entity.think = null;
+    } else {
+      entity.nextthink = (now + Math.imul(respawn, 1_000)) | 0;
+      entity.think = context.callbacks?.respawn ?? context.entities.callbacks.think.resolve("q3.base.game.item-lifecycle.touchItem.think");
+    }
+    context.entities.options.link(entity);
+  };
+  if (context.originalPickups === undefined) { complete(original()); return; }
+  const weapon = item.type === ItemType.IT_WEAPON || item.type === ItemType.IT_AMMO ? q3WeaponItem(item.tag) : null;
+  const offered: ItemId = item.type === ItemType.IT_WEAPON ? weapon?.item ?? `q3:${className}`
+    : item.type === ItemType.IT_AMMO ? weapon?.ammo ?? `q3:${className}` : `q3:${className}`;
+  const defaultResource: PickupResource | null = item.type === ItemType.IT_ARMOR ? { kind: "protection", channel: "regular" }
+    : item.type === ItemType.IT_WEAPON || item.type === ItemType.IT_AMMO ? { kind: "inventory", item: offered } : null;
+  context.originalPickups.touch({ recipient: playerActor, pickup: itemActor, source: entity.actor.owner, item: offered, defaultResource,
+    count: entity.count === 0 ? { kind: "default" } : { kind: "override", amount: entity.count },
+    dropped: (entity.flags & GameFlags.DROPPED_ITEM) !== 0, time: { kind: "milliseconds", value: now },
+    ...(item.type === ItemType.IT_TEAM ? { grant: "map-coupled" } : {}) }, { original, complete });
 }
 
 function sourceFloatSchedule(time: number, seconds: number): number {

@@ -1,3 +1,6 @@
+import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
+import type { RegularArmorState } from "../../../src/contracts/gameplay.ts";
+import type { OriginalPickupOffer } from "../../../src/contracts/original-pickups.ts";
 import { SharedPhysics } from "../../../src/app/bootstrap/simulation/physics.ts";
 import { createNativeQ1PusherServices } from "../../../src/app/bootstrap/simulation/native-q1-pusher.ts";
 import { actorCollision, actorMotion, actorFlags } from "../../../src/app/bootstrap/simulation/actor-execution.ts";
@@ -20,7 +23,7 @@ import { openArchive } from "../../../src/content/archive/index.ts";
 import { readQ1Bsp } from "../../../src/formats/q1-map/index.ts";
 import type { Q1Entity } from "../../../src/formats/q1-map/index.ts";
 
-function world(program: "mg1" | "mg3", withHorde = false, walkable = false) {
+function world(program: "mg1" | "mg3", withHorde = false, walkable = false, coop = false) {
   const actors = new SessionActorRegistry(createIdentityOwner("q1-addon-smoke")), callbacks = new ActorCallbackTable(actors);
   let runtime: Q1Foundation | null = null;
   const bounds = { min: { x: -1024, y: -1024, z: -1024 }, max: { x: 1024, y: 1024, z: 1024 } };
@@ -40,7 +43,7 @@ function world(program: "mg1" | "mg3", withHorde = false, walkable = false) {
   const combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
   const inventory = new SharedInventoryTable(actors), events: Q1Event[] = [], addonEvents: Q1AddonEvent[] = [], pending = new Map<OwnedActor, number>(), players: ActorId[] = [];
   const cvars = new Map<string, number>(), transitions: TransitionIntent[] = [];
-  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, random: () => 0.4,
+  const host: Q1FoundationHost = { actors, callbacks, bodies, combat, inventory, originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory), random: () => 0.4,
     trace: request => ({ fraction: 1, end: request.end, normal: ZERO, actor: null, startSolid: false, allSolid: false, sky: false, inOpen: true, inWater: false }),
     contents: () => "empty", walkMove: () => walkable, moveToGoal: () => undefined, changeYaw: () => { throw new Error("This check does not drive monster turning"); }, checkBottom: () => false,
     pusherServices: game => createNativeQ1PusherServices(game, physics),
@@ -48,7 +51,7 @@ function world(program: "mg1" | "mg3", withHorde = false, walkable = false) {
     emit: event => { events.push(event); return undefined; }, transition: intent => { transitions.push(intent); return undefined; }, players: () => players, checkClient: () => null,
     classname: actor => runtime?.entity(actor)?.classname ?? "player", powerup: () => undefined,
   };
-  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop: false, gravity: 800, maxClients: 4,
+  const game = new Q1Foundation(host, { edition: "rerelease", skill: 1, deathmatch: 0, coop, gravity: 800, maxClients: 4,
     campaign: program === "mg1" ? "q1:mg1" : "q1:mg3", combatProvider: "q1:combat", inventoryProvider: "q1:inventory", movementProvider: "q2:movement" }); runtime = game;
   combat.register(createQ1CombatPolicy({ id: "q1:combat", context: request => game.combatContext(request), armor: nativeVictimArmor(() => ({ arithmetic: "binary32", screenFacingDot: 0 })) }));
   const base = registerQ1Base(game), context = registerQ1CampaignAddons(base, program, {
@@ -330,4 +333,65 @@ test("addon static overrides preserve raw pose, ambient ordering and dynamic gas
       expect(events.slice(first).some(event => event.kind === "static-model")).toBe(false);
     } finally { actors.close(); }
   }
+});
+
+
+test("Q1 foundation, horde and MG3 armor map callbacks retain original owner grants and refusal", () => {
+  for (const route of ["foundation", "horde", "mg3"]) {
+    const state = world(route === "horde" ? "mg1" : "mg3", route === "horde");
+    const { game, player, combat, actors, spawn, touch } = state;
+    try {
+      let armor: RegularArmorState = { kind: "source", points: 333, item: "mod:original-armor" };
+      let accepted = true;
+      const offers: OriginalPickupOffer[] = [];
+      const offered = route === "mg3" ? "q1:item_armor_shard" : "q1:item_armor1";
+      const remove = combat.bindProtection(player, { channel: "regular", owner: "mod:original-pickup", rule: "armor", admission: { kind: "replace-current-primary" }, inventoryItems: [],
+        read: () => armor, validateWrite: () => undefined, write: next => { armor = next; return undefined; }, absorb: () => ({ saved: 0 }),
+        pickups: [{ id: "original-armor", offered: [offered], take: (offer, stores) => {
+          offers.push(offer); if (!accepted) return "refused";
+          const before = armor; armor = { kind: "source", points: 347, item: "mod:original-upgrade" };
+          stores.stored({ regular: { before, after: armor } }); return "accepted";
+        } }] });
+      const pickup = () => {
+        const entity = spawn(route === "mg3" ? "item_armor_shard" : "item_armor1");
+        entity.solid = "trigger";
+        if (route === "horde") entity.touch = game.named.touch(entity, "mg1:horde:armor_touch");
+        return entity;
+      };
+      const first = pickup(); game.time = 3; touch(first);
+      expect(offers).toHaveLength(1); expect(offers[0]).toMatchObject({ item: offered, source: first.actor.owner, count: { kind: "default" },
+        defaultResource: { kind: "protection", channel: "regular" }, time: { kind: "seconds", value: 3 } });
+      expect(combat.read(player.id)?.armor.regular).toEqual({ kind: "source", points: 347, item: "mod:original-upgrade" });
+      expect(game.live(first) && first.solid === "trigger").toBe(false);
+      accepted = false;
+      const declined = pickup(); touch(declined);
+      expect(game.live(declined)).toBe(true); expect(declined.solid).toBe("trigger");
+      expect(offers).toHaveLength(2); expect(combat.read(player.id)?.armor.regular).toEqual(armor);
+      remove(); expect(combat.read(player.id)?.armor.regular).toEqual({ kind: "none" });
+    } finally { actors.close(); }
+  }
+});
+
+
+test("Q1 substituted grants keep rerelease megahealth decay and cooperative key lifecycle", () => {
+  const { game, player, combat, actors, spawn, touch } = world("mg3", false, false, true);
+  try {
+    const inventory = game.host.inventory;
+    let granted = 0, targets = 0;
+    const remove = inventory.bindPickup(player, { owner: "mod:original-pickup", item: "q1:ammo/shells", rules: [
+      { id: "health-and-key", offered: ["q1:item_health", "q1:key/gold"], take: offer => {
+        granted++; if (offer.item === "q1:item_health") combat.setHealth(player, 150);
+        return "accepted";
+      } },
+    ] });
+    const health = spawn("item_health", { spawnflags: "2" }); health.solid = "trigger";
+    game.time = 7; touch(health);
+    expect(game.player(player.id)?.megaRotAt).toBe(12); expect(health).toMatchObject({ solid: "none" }); expect(combat.read(player.id)?.health).toBe(150);
+    const key = spawn("item_key2"); key.solid = "trigger"; key.target = "key-reentry";
+    const target = game.create("test_key_target"); target.targetname = key.target;
+    target.use = () => { targets++; touch(key); return undefined; };
+    touch(key);
+    expect(granted).toBe(2); expect(targets).toBe(1); expect(key.solid).toBe("trigger"); expect(game.live(key)).toBe(true);
+    remove();
+  } finally { actors.close(); }
 });

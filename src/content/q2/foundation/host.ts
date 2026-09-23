@@ -93,6 +93,7 @@ export interface Q2WeaponTarget {
 }
 
 export interface Q2FoundationHost {
+  readonly originalPickups?: import("../../../contracts/original-pickups.ts").OriginalPickupAdmission;
   readonly weaponBehavior?: WeaponBehaviorProjectilePort;
   weaponTarget?(actor: ActorId): Q2WeaponTarget | null;
   monsterTarget?(actor: ActorId): import("../../monsters/target.ts").MonsterTargetObservation | null;

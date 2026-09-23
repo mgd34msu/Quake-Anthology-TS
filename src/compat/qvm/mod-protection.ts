@@ -5,6 +5,7 @@ import type { QvmModCallbackDeclaration, QvmModProtection as QvmModProtectionDef
 import type { ModHostServices } from "../../world/session/mods.ts";
 import type { ProtectionClaim, ProtectionReservation } from "../../world/gameplay/authority.ts";
 import type { QvmModule } from "./module.ts";
+import type { OriginalPickupRule } from "../../contracts/original-pickups.ts";
 
 function fields(definition: QvmModProtectionDefinition): readonly QvmModProtectionScalar[] {
   return definition.channel === "regular" ? [definition.storage.points, ...(definition.storage.selection === undefined ? [] : [definition.storage.selection.field])]
@@ -51,6 +52,7 @@ interface Operations {
   eligible(actor: ActorId): boolean;
   pointer(actor: ActorId, record: string): number;
   invoke(call: QvmModSourceCall, inputs: ReadonlyMap<ModCallbackInput, ModRuntimeValue>): number;
+  pickups?(actor: ActorId, channel: ProtectionChannel): readonly OriginalPickupRule[];
 }
 
 /** One source client and its original storage own each admitted protection channel. */
@@ -142,7 +144,7 @@ export class QvmModProtection {
     const entry = this.require(actor); if (entry.bound) return;
     if (entry.reservation.channel === "regular") {
       this.regular(actor);
-      entry.reservation.bind({ ...this.claim, channel: "regular", inventoryItems: [], read: () => this.regular(actor), validateWrite: next => this.validateRegular(actor, next),
+      entry.reservation.bind({ ...this.claim, channel: "regular", inventoryItems: [], pickups: this.operations.pickups?.(actor, "regular") ?? [], read: () => this.regular(actor), validateWrite: next => this.validateRegular(actor, next),
         write: next => {
           this.validateRegular(actor, next);
           if (this.definition.channel !== "regular" || next.kind !== "source") throw new Error("Missing QVM regular source storage");
@@ -150,7 +152,7 @@ export class QvmModProtection {
         }, absorb: (input, observer) => this.absorb(actor, input, observer) });
     } else {
       this.powered(actor);
-      entry.reservation.bind({ ...this.claim, channel: "powered", inventoryItems: [], read: () => this.powered(actor), validateWrite: next => this.validatePowered(actor, next),
+      entry.reservation.bind({ ...this.claim, channel: "powered", inventoryItems: [], pickups: this.operations.pickups?.(actor, "powered") ?? [], read: () => this.powered(actor), validateWrite: next => this.validatePowered(actor, next),
         write: next => {
           this.validatePowered(actor, next);
           if (this.definition.channel !== "powered") throw new Error("Missing QVM powered source storage");
@@ -164,7 +166,7 @@ export class QvmModProtection {
   private absorb(actor: ActorId, input: ArmorStageInput, observer: ProtectionObserver): ArmorStageResult {
     if (!input.request.target.equals(actor)) throw new Error("QVM protection target differs from its source owner");
     this.require(actor);
-    const stage: Stage = { actor, stop: () => {} }, masks = this.definition.flags, flags = input.flags;
+    const masks = this.definition.flags, flags = input.flags;
     const scale = flags.regularProtectionScale ?? 1;
     if (this.definition.channel === "regular" && scale !== 1 && ![...this.definition.absorb.arguments, ...this.definition.absorb.globals.map(global => global.value)]
       .some(value => (value.kind === "int32" || value.kind === "float32") && value.value.kind === "input" && value.value.name === "regular-protection-scale"))
@@ -180,6 +182,10 @@ export class QvmModProtection {
       ["point", { kind: "vector", value: input.geometry.point }], ["direction", { kind: "vector", value: input.geometry.direction }],
       ["normal", { kind: "vector", value: input.geometry.normal }], ["time", { kind: "float", value: time.kind === "seconds" ? time.value : time.value / 1000 }],
     ]);
+    return { saved: this.observe(actor, observer, () => this.operations.invoke(this.definition.absorb, inputs)) };
+  }
+  observe<Result>(actor: ActorId, observer: ProtectionObserver, execute: () => Result): Result {
+    const stage: Stage = { actor, stop: () => {} };
     const channels = this.component.channels.filter(channel => channel.entries.get(actor)?.bound === true);
     const regular = channels.find(channel => channel.definition.channel === "regular"), powered = channels.find(channel => channel.definition.channel === "powered");
     let beforeRegular = regular?.regular(actor), beforePowered = powered?.powered(actor);
@@ -204,12 +210,12 @@ export class QvmModProtection {
         }
         return undefined;
       });
-      const saved = this.operations.invoke(this.definition.absorb, inputs);
+      const result = execute();
       if (this.entries.has(actor) && this.services.actors.isLive(actor)) this.require(actor);
-      return { saved };
+      return result;
     } finally { stage.stop(); const index = this.component.stages.indexOf(stage); if (index >= 0) this.component.stages.splice(index, 1); }
   }
-  assertIdle(): void { if (this.component.stages.length !== 0) throw new Error("Cannot save or restore during QVM protection absorption"); }
+  assertIdle(): void { if (this.component.stages.length !== 0) throw new Error("Cannot save or restore during QVM protection execution"); }
   release(actor: ActorId): void {
     for (const stage of this.component.stages) if (stage.actor.equals(actor)) stage.stop();
     const entry = this.entries.get(actor); if (entry === undefined) return;

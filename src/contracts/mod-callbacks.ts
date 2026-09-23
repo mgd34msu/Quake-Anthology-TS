@@ -2,13 +2,14 @@ import type { ContentDigest } from "./content.ts";
 import type { ActorId, ProviderId } from "./identity.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { Vec3 } from "./math.ts";
+import type { ModPickupRule } from "./original-pickups.ts";
 
 export type ModClientInput = "view-angles" | "attack" | "jump" | "impulse" | "forward-move" | "side-move" | "up-move";
 export type ModClientInputOutput =
   | { readonly kind: "set"; readonly input: "view-angles"; readonly value: Vec3 }
   | { readonly kind: "set"; readonly input: Exclude<ModClientInput, "view-angles">; readonly value: number }
   | { readonly kind: "consume"; readonly inputs: readonly Exclude<ModClientInput, "view-angles">[] };
-export type ModCallbackInput = ModClientInput | "self" | "other" | "activator" | "attacker" | "inflictor" | "amount" | "damage-flags" | "regular-protection-scale" | "knockback" | "point" | "direction" | "normal" | "item" | "time" | "elapsed" | "result";
+export type ModCallbackInput = ModClientInput | "self" | "other" | "activator" | "attacker" | "inflictor" | "amount" | "damage-flags" | "regular-protection-scale" | "knockback" | "point" | "direction" | "normal" | "item" | "time" | "elapsed" | "result" | "pickup-count" | "pickup-has-count" | "pickup-dropped";
 export type ModCallbackValue = { readonly kind: "input"; readonly name: ModCallbackInput }
   | { readonly kind: "float"; readonly value: number } | { readonly kind: "string"; readonly value: string } | { readonly kind: "vector"; readonly value: Vec3 };
 export type ModActorField = { readonly field: string } & (
@@ -99,4 +100,5 @@ export interface ModCallbackDeclaration {
   readonly combat?: { readonly damage: ModSourceCall; readonly armorStage?: ModQcArmorStage };
   /** Independent protection executes original source armor over its private client storage. */
   readonly protection?: readonly ModQcProtection[];
+  readonly pickups?: readonly ModPickupRule<ModSourceCall>[];
 }

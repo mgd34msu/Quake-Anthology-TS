@@ -3,7 +3,7 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import type { Q1Actor } from "../../foundation/entity.ts";
 import type { Q1Weapon } from "../../foundation/types.ts";
 import { vadd, vscale, vectors } from "../../foundation/types.ts";
-import { spawnPickup } from "../../foundation/pickups.ts";
+import { spawnPickup, touchQ1Pickup } from "../../foundation/pickups.ts";
 import type { Q1AddonContext } from "../context.ts";
 import { BLOODY_NIGHTMARE_ACTIVE, BLOODY_NIGHTMARE_DISCOVERED, BLOODY_NIGHTMARE_NEWGAME } from "../campaign.ts";
 import { finishMg3Pickup, MG3_ITEM_PREFIX, MG3_SPAWNED_ITEM, startMg3Item } from "./common.ts";
@@ -78,13 +78,19 @@ export function registerMg3Pickups(context: Q1AddonContext): undefined {
   });
   game.named.register(MG3_ITEM_PREFIX + "shard_touch", { touch: (_game, entity, other) => {
     const player = game.player(other); if (player === null || game.health(other) <= 0) return undefined;
-    const armor = game.host.combat.read(other)?.armor.regular;
-    if (armor?.kind === "q1" && armor.absorption < 0.3) game.host.combat.setRegularArmor(player.actor, { ...armor, absorption: 0.3 });
-    const points = armor === undefined || armor.kind === "none" ? 0 : armor.points;
-    if (points >= 200) return undefined;
-    game.host.combat.setRegularArmor(player.actor, { kind: "q1", points: Math.min(200, points + 5), absorption: armor?.kind === "q1" ? Math.max(0.3, armor.absorption) : 0.3,
-      item: armor?.kind === "q1" ? armor.item : "q1:item_armor1" });
-    return finishMg3Pickup(context, entity, other, "$mg3_qc_armor_shard_touch", "items/armor1.wav");
+    return touchQ1Pickup(game, entity, other, "q1:item_armor_shard", { kind: "protection", channel: "regular" }, {
+      original: () => {
+        const armor = game.host.combat.read(other)?.armor.regular;
+        if (armor?.kind === "source") return false;
+        if (armor?.kind === "q1" && armor.absorption < 0.3) game.host.combat.setRegularArmor(player.actor, { ...armor, absorption: 0.3 });
+        const points = armor === undefined || armor.kind === "none" ? 0 : armor.points;
+        if (points >= 200) return false;
+        game.host.combat.setRegularArmor(player.actor, { kind: "q1", points: Math.min(200, points + 5), absorption: armor?.kind === "q1" ? Math.max(0.3, armor.absorption) : 0.3,
+          item: armor?.kind === "q1" ? armor.item : "q1:item_armor1" });
+        return true;
+      },
+      complete: taken => { if (taken) finishMg3Pickup(context, entity, other, "$mg3_qc_armor_shard_touch", "items/armor1.wav"); },
+    });
   } });
   game.registerSpawn("item_armor_shard", (_game, entity) => {
     entity.model = "progs/armorshard.mdl"; entity.touch = game.named.touch(entity, MG3_ITEM_PREFIX + "shard_touch");

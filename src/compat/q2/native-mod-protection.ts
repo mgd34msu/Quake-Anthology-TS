@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import type { OriginalPickupRule } from "../../contracts/original-pickups.ts";
 import type { GuestAddress } from "../../contracts/execution.ts";
 import type { ActorId, ClientId, ProviderId } from "../../contracts/identity.ts";
 import type { ArmorStageInput, ArmorStageResult, ArmorState, ItemId, ProtectionChannel, ProtectionObserver } from "../../contracts/gameplay.ts";
@@ -20,6 +21,7 @@ export interface NativeProtectionInventoryCommit {
 }
 interface Operations {
   current(): void;
+  pickups(actor: ActorId, channel: ProtectionChannel): readonly OriginalPickupRule[];
   slot(actor: ActorId): number | null;
   eligible(actor: ActorId): boolean;
   scalar(base: GuestAddress, field: NativeModScalarField, value?: number): number;
@@ -145,7 +147,7 @@ export class NativeModProtection {
     try { for (const reservation of entry.reservations) {
       const definition = this.definitions.find(definition => definition.channel === reservation.channel);
       if (definition === undefined) throw new Error("Native protection reservation has no declaration");
-      const shared = { ...this.claim(definition), inventoryItems: this.inventoryItems(reservation.channel) };
+      const shared = { ...this.claim(definition), inventoryItems: this.inventoryItems(reservation.channel), pickups: this.operations.pickups(actor, reservation.channel) };
       if (reservation.channel === "regular") reservation.bind({ ...shared, channel: "regular", read: () => this.read(actor).regular,
         validateWrite: regular => this.validateWrite(actor, "regular", { ...this.read(actor), regular }),
         write: regular => this.write(actor, "regular", { ...this.read(actor), regular }),
@@ -174,19 +176,22 @@ export class NativeModProtection {
       || ![...absorb.call.arguments, ...absorb.call.globals.map(global => global.value)].some(value =>
         (value.kind === "float32" || value.kind === "float64") && value.value.kind === "input" && value.value.name === "regular-protection-scale")))
       throw new Error("Native regular protection scale requires an explicit source input");
+    const time = this.services.time();
+    const inputs = new Map<ModCallbackInput, ModRuntimeValue>([
+      ["self", { kind: "actor", value: actor }], ["attacker", { kind: "actor", value: input.request.attack.attacker }],
+      ["inflictor", { kind: "actor", value: input.request.attack.inflictor }], ["amount", { kind: "float", value: input.amount }],
+      ["damage-flags", { kind: "float", value: this.damageFlags(definition, input) }], ["regular-protection-scale", { kind: "float", value: scale }],
+      ["point", { kind: "vector", value: input.geometry.point }], ["normal", { kind: "vector", value: input.geometry.normal }],
+      ["direction", { kind: "vector", value: input.geometry.direction }], ["knockback", { kind: "float", value: input.request.knockback }],
+      ["time", { kind: "float", value: time.kind === "seconds" ? time.value : time.value / 1000 }],
+    ]);
+    const record = this.declaration.entityRecord; if (record === null) throw new Error("Native protection requires a declared source entity");
+    const call = this.sourceCall(definition, record, input);
+    return { saved: this.observe(actor, observer, () => this.operations.invoke(call, inputs)) };
+  }
+  observe<Result>(actor: ActorId, observer: ProtectionObserver, invoke: () => Result): Result {
     return this.operations.transfer(() => {
       const { storage, slot } = this.source(actor), stage: Stage = { actor, armor: this.read(actor), suppressed: 0, stop: () => {} };
-      const time = this.services.time();
-      const inputs = new Map<ModCallbackInput, ModRuntimeValue>([
-        ["self", { kind: "actor", value: actor }], ["attacker", { kind: "actor", value: input.request.attack.attacker }],
-        ["inflictor", { kind: "actor", value: input.request.attack.inflictor }], ["amount", { kind: "float", value: input.amount }],
-        ["damage-flags", { kind: "float", value: this.damageFlags(definition, input) }], ["regular-protection-scale", { kind: "float", value: scale }],
-        ["point", { kind: "vector", value: input.geometry.point }], ["normal", { kind: "vector", value: input.geometry.normal }],
-        ["direction", { kind: "vector", value: input.geometry.direction }], ["knockback", { kind: "float", value: input.request.knockback }],
-        ["time", { kind: "float", value: time.kind === "seconds" ? time.value : time.value / 1000 }],
-      ]);
-      const record = this.declaration.entityRecord; if (record === null) throw new Error("Native protection requires a declared source entity");
-      const call = this.sourceCall(definition, record, input);
       this.stages.push(stage);
       try {
         const publish = (): void => {
@@ -213,7 +218,7 @@ export class NativeModProtection {
           } });
           publish();
         });
-        return { saved: this.operations.invoke(call, inputs) };
+        return invoke();
       } finally { stage.stop(); const index = this.stages.indexOf(stage); if (index >= 0) this.stages.splice(index, 1); }
     });
   }

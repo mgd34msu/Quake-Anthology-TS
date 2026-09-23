@@ -4,6 +4,7 @@ import type { ModCallbackBinding, ModCallbackValue, ModClientInput, ModClientInp
 import type { QvmModActorField } from "./qvm-mod-callbacks.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { ProviderId } from "./identity.ts";
+import type { ModPickupRule } from "./original-pickups.ts";
 
 export type NativeModScalar = "int8" | "uint8" | "int16" | "uint16" | "int32" | "uint32" | "int64" | "uint64" | "float32" | "float64";
 /** Image-relative addresses are rebound after each original source save restoration. */
@@ -29,6 +30,11 @@ export interface NativeModSourceCall {
   readonly skips?: readonly { readonly entry: number; readonly join: number }[];
 }
 export type NativeModCallback = ModCallbackBinding & NativeModSourceCall;
+export interface NativeModPickup extends ModPickupRule<NativeModSourceCall> {
+  readonly context: readonly { readonly record: string; readonly offset: number;
+    readonly value: { readonly kind: NativeModScalar | "vector"; readonly value: ModCallbackValue }
+      | Extract<NativeModValue, { readonly kind: "time" | "address" }> }[];
+}
 export interface NativeModAdmissionCall extends NativeModSourceCall { readonly accepts: "always" | "nonzero"; }
 export interface NativeModClientInputField {
   readonly record: string;
@@ -162,6 +168,7 @@ export interface NativeModDeclaration {
     | { readonly api: Extract<Q2GameApiIdentity, { readonly kind: "q2-rerelease-game" }>; readonly abi: Extract<NativeAbi, { readonly kind: "windows-x86-64" }> };
   readonly sourceActors?: NativeModSourceActors;
   readonly protection?: readonly NativeModProtectionDefinition[];
+  readonly pickups?: readonly NativeModPickup[];
   readonly clients?: NativeModClients;
   readonly cvars: readonly { readonly name: string; readonly value: string }[];
   readonly spawnEntities: string | null;

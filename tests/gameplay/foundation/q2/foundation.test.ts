@@ -1,3 +1,6 @@
+import { SharedOriginalPickupAdmission } from "../../../../src/world/gameplay/original-pickups.ts";
+import type { RegularArmorState } from "../../../../src/contracts/gameplay.ts";
+import type { OriginalPickupOffer } from "../../../../src/contracts/original-pickups.ts";
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../src/contracts/identity.ts";
 import type { ActorId, OwnedActor } from "../../../../src/contracts/identity.ts";
@@ -73,7 +76,7 @@ function targetGame(selected: Q2GameOptions = options) {
     context: request => ({ arithmetic: "binary64", player: players.includes(request.target), monster: false, attackerPlayer: false,
       hasEnemy: false, easySkill: false, deathmatch: false, defenderSphere: false, teamDamageEnabled: false,
       friendlyFire: false, nuke: false, noKnockback: true, movable: false, rejectTeamDamage: false, suppressPain: false }) }));
-  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
+  const host: Q2FoundationHost = { actors, bodies, callbacks, combat, inventory, originalPickups: new SharedOriginalPickupAdmission(actors, combat, inventory), now: () => now, gravity: () => 800, frameSeconds: () => 0.1, random: () => 0.5,
     schedule: (actor, due) => { if (due === null) scheduled.delete(actor); else scheduled.set(actor, due); return undefined; },
     touchTriggers: () => undefined,
     trace: () => { throw new Error("This target-only check must not query geometry"); },
@@ -498,4 +501,39 @@ describe("Q2 permanent gameplay foundation", () => {
       expect(inhibitQ2Spawn(coopOnly, { ...options, edition: "rerelease", mode: "coop" })).toBe(false);
     } finally { classicArchive.close(); rereleaseArchive.close(); }
   });
+});
+
+
+test("Q2 original pickup scope includes eligibility, refused targets and accepted map respawn", () => {
+  const { game, host, player, items } = targetGame({ ...options, mode: "deathmatch" });
+  let armor: RegularArmorState = { kind: "source", points: 400, item: "mod:original-armor" };
+  const offers: OriginalPickupOffer[] = [];
+  const remove = host.combat.bindProtection(player, { channel: "regular", owner: "mod:original-pickup", rule: "armor", admission: { kind: "replace-current-primary" }, inventoryItems: [],
+    read: () => armor, validateWrite: () => undefined, write: next => { armor = next; return undefined; }, absorb: () => ({ saved: 0 }),
+    pickups: [{ id: "armor", offered: ["q2:item_armor_jacket", "q2:item_armor_combat"], take: (offer, stores) => {
+      offers.push(offer); if (offer.item === "q2:item_armor_combat") return "refused";
+      const before = armor; armor = { kind: "source", points: 419, item: "mod:original-upgrade" };
+      stores.stored({ regular: { before, after: armor } }); return "accepted";
+    } }] });
+  const [accepted, refused] = game.load('{ "classname" "item_armor_jacket" "target" "again" "count" "17" } { "classname" "item_armor_combat" "target" "again" }').spawned;
+  if (accepted === undefined || refused === undefined) throw new Error("Missing map pickups");
+  let targets = 0, eligibility = 0;
+  items.setPickupPolicy({ canPickup: () => true, beforePickup: () => { eligibility++; return true; }, afterPickup: () => undefined, keepAfterPickup: () => false });
+  const target = game.create("pickup_scope_target"); target.targetname = "again";
+  target.use = (_entity, _game, other) => {
+    targets++;
+    const item = game.entity(other); if (item !== null) items.touch(item, game, player.id);
+    return undefined;
+  };
+  items.touch(accepted, game, player.id);
+  expect(offers).toHaveLength(1); expect(eligibility).toBe(1); expect(targets).toBe(1);
+  expect(offers[0]).toMatchObject({ item: "q2:item_armor_jacket", count: { kind: "override", amount: 17 }, source: accepted.actor.owner,
+    defaultResource: { kind: "protection", channel: "regular" } });
+  expect(accepted.nextThink).toBe(20); expect(accepted.visible).toBe(false); expect(host.actors.isLive(accepted.actor.id)).toBe(true);
+  items.touch(refused, game, player.id);
+  expect(offers).toHaveLength(2); expect(eligibility).toBe(2); expect(targets).toBe(2);
+  expect(host.actors.isLive(refused.actor.id)).toBe(true);
+  expect(host.combat.read(player.id)?.armor.regular).toEqual(armor);
+  remove(); expect(host.combat.read(player.id)?.armor.regular).toEqual({ kind: "none" });
+  host.actors.close();
 });

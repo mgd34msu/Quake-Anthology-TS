@@ -103,6 +103,20 @@ export function q3WeaponRespawnSeconds(context: WeaponPickupContext): number {
   return context.gameType === GameType.GT_TEAM ? context.teamWeaponRespawnSeconds : context.weaponRespawnSeconds;
 }
 
+export function q3ItemRespawnSeconds(item: ItemDefinition, context: WeaponPickupContext): number {
+  switch (item.type) {
+    case ItemType.IT_WEAPON: return q3WeaponRespawnSeconds(context);
+    case ItemType.IT_AMMO: return RESPAWN_AMMO;
+    case ItemType.IT_ARMOR: return RESPAWN_ARMOR;
+    case ItemType.IT_HEALTH: return item.quantity === 100 ? RESPAWN_MEGAHEALTH : RESPAWN_HEALTH;
+    case ItemType.IT_HOLDABLE: return RESPAWN_HOLDABLE;
+    case ItemType.IT_POWERUP: return RESPAWN_POWERUP;
+    case ItemType.IT_PERSISTANT_POWERUP: return -1;
+    case ItemType.IT_TEAM: throw new Error("Team objective lifecycle requires its original pickup handler");
+    case ItemType.IT_BAD: throw new Error("Invalid item has no pickup lifecycle");
+  }
+}
+
 function pickupWeaponFrom(
   itemEntity: GameEntity,
   client: GameClient,

@@ -5,6 +5,7 @@ import type { ProviderId } from "./identity.ts";
 import type { Vec3 } from "./math.ts";
 import type { ModCallbackBinding, ModCallbackValue, ModClientInput, ModClientInputBinding } from "./mod-callbacks.ts";
 import type { QvmModPresentationDeclaration } from "./qvm-mod-presentation.ts";
+import type { ModPickupRule } from "./original-pickups.ts";
 
 export type QvmModScalar = "int32" | "float32";
 export type QvmModValue =
@@ -19,6 +20,10 @@ export interface QvmModSourceCall {
   readonly arguments: readonly QvmModValue[];
   readonly globals: readonly { readonly address: number; readonly value: QvmModValue }[];
   readonly returns: QvmModScalar | "void";
+}
+/** Synchronous original pickup calls borrow private words on the actual offered actor's projection. */
+export interface QvmModPickup extends ModPickupRule<QvmModSourceCall> {
+  readonly context: readonly { readonly record: string; readonly offset: number; readonly value: QvmModValue }[];
 }
 export type QvmModCallback = ModCallbackBinding & QvmModSourceCall;
 export type QvmModActorField = { readonly offset: number } & (
@@ -93,6 +98,7 @@ export interface QvmModCallbackDeclaration {
   readonly sourceActors?: QvmModSourceActors;
   readonly combat?: QvmModCombat;
   readonly protection?: readonly QvmModProtection[];
+  readonly pickups?: readonly QvmModPickup[];
   readonly initialize: readonly QvmModSourceCall[];
   readonly callbacks: readonly QvmModCallback[];
 }

@@ -2,6 +2,7 @@ import { NativeModActors, type SavedNativeActors } from "./native-mod-actors.ts"
 import { NativeModClientsBinding } from "./native-mod-clients.ts";
 import { NativeModClientStages, nativeModUserCommand } from "./native-mod-client-stages.ts";
 import { NativeModProtection, type NativeProtectionInventoryCommit } from "./native-mod-protection.ts";
+import { NativeModPickups, validateNativeModPickups } from "./native-mod-pickups.ts";
 import { readNativeDeferredDamage } from "./native-mod-deferred.ts";
 import { asciiFold, type CommandInvocation } from "../../core/commands/index.ts";
 import type { FrameContext } from "../../contracts/time.ts";
@@ -11,7 +12,8 @@ import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.t
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ModCallbackInput, ModClientInputOutput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
-import type { NativeModActorField, NativeModActorRecord, NativeModAddress, NativeModDeclaration, NativeModScalar, NativeModSourceCall, NativeModValue, NativeModInputOutput } from "../../contracts/native-mod-callbacks.ts";
+import type { NativeModActorField, NativeModActorRecord, NativeModAddress, NativeModDeclaration, NativeModScalar, NativeModSourceCall, NativeModValue, NativeModInputOutput, NativeModPickup } from "../../contracts/native-mod-callbacks.ts";
+import type { OriginalPickupOffer } from "../../contracts/original-pickups.ts";
 import type { ProviderCheckpoint, SavedActorId } from "../../contracts/session.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
 import type { ModClientApplication } from "../../world/session/mod-clients.ts";
@@ -59,6 +61,7 @@ function layout(value: NativeModValue): GuestValueLayout {
   return { kind: "scalar", storage: value.kind === "time" ? value.encoding : value.kind === "client" ? "int32" : value.kind === "actor" || value.kind === "address" || value.kind === "vector" || value.kind === "string" || value.kind === "userinfo" || value.kind === "user-command" ? "pointer" : value.kind };
 }
 export function validateNativeModDeclaration(declaration: NativeModDeclaration): void {
+  validateNativeModPickups(declaration);
   const records = new Map<string, NativeModActorRecord>(), authority = new Set<string>();
   const owned = declaration.sourceActors;
   if (owned !== undefined && (!Number.isFinite(owned.frameSeconds) || owned.frameSeconds <= 0 || owned.clock.length === 0)) throw new Error("Native owned actors require a positive source frame period and clock");
@@ -130,6 +133,30 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
         || regions.slice(0, index).some(other => region.entry === other.entry)) throw new Error("Invalid or repeated native source exclusion");
     }
   };
+  for (const pickup of declaration.pickups ?? []) {
+    const available = new Set<ModCallbackInput>(["self", "other", "item", "time", "pickup-count", "pickup-has-count", "pickup-dropped"]);
+    check(pickup.operation.grant, available);
+    if (pickup.operation.kind === "gate-then-grant") check(pickup.operation.gate, available);
+    const ranges: { readonly record: string; readonly start: number; readonly end: number }[] = [];
+    for (const field of pickup.context) {
+      checkValues([field.value], available);
+      const record = records.get(field.record), length = field.value.kind === "vector" ? 12
+        : field.value.kind === "address" ? declaration.target.abi.pointerBytes : scalarSize(field.value.kind === "time" ? field.value.encoding : field.value.kind);
+      if (record === undefined || clients?.records.includes(record.id) || !Number.isSafeInteger(field.offset) || field.offset < 0 || field.offset + length > record.stride
+        || !record.fields.some(value => (value.binding === "private" || value.binding === "constant" || value.binding === "address" || value.binding === "constant-vector")
+          && value.offset <= field.offset && field.offset + length <= value.offset + size(value, declaration.target.abi.pointerBytes))
+        || ranges.some(range => range.record === field.record && field.offset < range.end && range.start < field.offset + length))
+        throw new Error("Native pickup context requires separate declared source storage");
+      ranges.push({ record: field.record, start: field.offset, end: field.offset + length });
+      if (field.record === declaration.entityRecord && owned !== undefined) {
+        const pointers = [owned.fields.ground, owned.fields.think, ...owned.fields.use === null ? [] : [owned.fields.use],
+          ...Object.values(owned.callbacks ?? {}).filter((offset): offset is number => typeof offset === "number")];
+        if (pointers.some(offset => field.offset < offset + declaration.target.abi.pointerBytes && offset < field.offset + length)
+          || field.offset < owned.fields.nextthink.offset + scalarSize(owned.fields.nextthink.encoding) && owned.fields.nextthink.offset < field.offset + length)
+          throw new Error("Native pickup context overlaps source actor lifetime");
+      }
+    }
+  }
   for (const protection of protections) {
     const available = new Set<ModCallbackInput>(["self", "attacker", "inflictor", "time", "amount", "damage-flags", "regular-protection-scale", "knockback", "direction", "point", "normal"]);
     if (protection.absorb.abi === "source-call") {
@@ -233,6 +260,7 @@ export class NativeModProvider implements NativeModProjection {
   private clients: NativeModClientsBinding | null = null;
   private stages: NativeModClientStages | null = null;
   private readonly protection: NativeModProtection | null;
+  private readonly pickups: NativeModPickups;
   private readonly records = new Map<string, NativeModActorRecord>();
   private readonly nonclientRecords: readonly NativeModActorRecord[];
   private readonly projections = new Map<ActorId, number>();
@@ -252,15 +280,22 @@ export class NativeModProvider implements NativeModProjection {
     readonly map: string, private readonly assertCurrent: () => void) {
     validateNativeModDeclaration(declaration); for (const record of declaration.actorRecords) this.records.set(record.id, record);
     this.nonclientRecords = declaration.actorRecords.filter(record => !declaration.clients?.records.includes(record.id));
+    this.pickups = new NativeModPickups(declaration.pickups ?? [], services, instance, {
+      current: () => this.current(), eligible: actor => this.clients?.admitted(actor) === true,
+      context: (definition, offer, inputs, execute) => this.pickupContext(definition, offer, inputs, execute),
+      observe: (actor, observer, execute) => this.protection === null ? this.transfer(execute) : this.protection.observe(actor, observer, execute),
+      invoke: (call, inputs) => this.execute(call, inputs, false),
+    });
     this.protection = (declaration.protection?.length ?? 0) === 0 ? null : new NativeModProtection(declaration.protection ?? [], declaration, services, instance, {
       current: () => this.current(), slot: actor => this.slotOf(actor), eligible: actor => this.clients?.admitted(actor) === true,
+      pickups: (actor, channel) => this.pickups.protection(actor, channel),
       scalar: (base, field, value) => { const address = this.host.memory.offset(base, BigInt(field.offset)); if (value !== undefined) this.scalarWrite(address, value, field.encoding); return this.scalarRead(address, field.encoding); },
       transfer: invoke => this.transfer(invoke), flush: fuel => this.flush(fuel), invoke: (call, inputs) => this.execute(call, inputs, false),
     });
-    this.unsubscribe = services.actors.onRelease(actor => { this.protection?.release(actor.id); if (this.projections.has(actor.id)) { this.pendingReleases.add(actor.id); this.host_?.presentation.release(actor.id); } return undefined; });
+    this.unsubscribe = services.actors.onRelease(actor => { this.pickups.release(actor.id); this.protection?.release(actor.id); if (this.projections.has(actor.id)) { this.pendingReleases.add(actor.id); this.host_?.presentation.release(actor.id); } return undefined; });
   }
   reserveProtection(): void { this.current(); this.protection?.reserve(); }
-  activateProtection(): void { this.current(); this.protection?.activate(); }
+  activateProtection(): void { this.current(); this.protection?.activate(); this.pickups.activate(); }
   attach(host: NativeModHost): void { if (this.host_ !== null) throw new Error("Native mod already attached"); this.host_ = host;
     this.stages = new NativeModClientStages(host);
     this.protection?.attach(host);
@@ -268,7 +303,8 @@ export class NativeModProvider implements NativeModProjection {
       const services = this.services.clients;
       if (services === undefined) throw new Error("Native component clients require destination client services");
       this.clients = new NativeModClientsBinding({ services, declaration: this.declaration.clients, content: host.content,
-        project: actor => { this.protection?.reserveActor(actor); this.address(actor); }, admitted: actor => this.protection?.bindActor(actor), release: actor => {
+        project: actor => { this.protection?.reserveActor(actor); this.address(actor); }, admitted: actor => { this.protection?.bindActor(actor); this.pickups.bindActor(actor); }, release: actor => {
+          this.pickups.release(actor);
           this.protection?.release(actor);
           if (this.closing) { host.presentation.release(actor); this.projections.delete(actor); this.appearanceActors.delete(actor); this.pendingReleases.delete(actor); }
           else { this.pendingReleases.add(actor); this.releasePending(); }
@@ -599,7 +635,42 @@ export class NativeModProvider implements NativeModProjection {
     const resolved = value.value.kind === "input" ? inputs.get(value.value.name) : value.value;
     if (value.kind === "vector") { if (resolved?.kind !== "vector") throw new Error("Missing native vector input"); const address = this.host.memory.allocate({ byteLength: 12, label: "native mod vector argument" }); allocations.push({ address, bytes: 12 }); writeClassicVector(this.host.memory, address, resolved.value); return { kind: "pointer", value: address }; }
     if (value.kind === "string") { if (resolved?.kind !== "string") throw new Error("Missing native string input"); const address = allocateClassicString(this.host.memory, resolved.value); allocations.push({ address, bytes: classicStringAllocationBytes(resolved.value) }); return { kind: "pointer", value: address }; }
-    if (resolved?.kind !== "float") throw new Error("Missing native scalar input"); return scalar(resolved.value, value.kind);
+    if (resolved?.kind !== "float") throw new Error("Missing native scalar input");
+    if (value.value.kind === "input" && value.value.name === "pickup-count" && value.kind !== "float32" && value.kind !== "float64" && !Number.isInteger(resolved.value))
+      throw new Error("Native pickup count does not fit its declared integer ABI");
+    return scalar(resolved.value, value.kind);
+  }
+  private pickupContext<Result>(definition: NativeModPickup, offer: OriginalPickupOffer, inputs: Inputs, execute: () => Result): Result {
+    this.current();
+    if (offer.pickup.equals(offer.recipient) || this.services.actors.resolveOwned(offer.pickup)?.owner === this.instance || this.owned?.slotOf(offer.pickup) != null
+      || this.services.clients?.forActor(offer.pickup) != null || this.services.engine?.world()?.equals(offer.pickup) === true)
+      throw new Error("Native pickup context requires a borrowed foreign pickup actor");
+    const memory = this.host.memory, stores: { readonly address: GuestAddress; readonly bytes: Uint8Array }[] = [];
+    const allocations: { readonly address: GuestAddress; readonly bytes: number }[] = [], corrections: (() => void)[] = [];
+    try {
+      for (const field of definition.context) {
+        this.current();
+        const base = this.pointer(offer.pickup, field.record);
+        if (base === null) throw new Error("Native pickup has no original source projection");
+        if (field.record === this.declaration.entityRecord) {
+          const slot = this.slotOf(offer.pickup);
+          if (slot === null || field.offset < this.host.entity(slot).publicLayout.byteLength) throw new Error("Native pickup context overlaps the public entity record");
+        }
+        const address = memory.offset(base, BigInt(field.offset)), value = this.lower(field.value, inputs, allocations, corrections), storage = layout(field.value);
+        const length = field.value.kind === "vector" ? 12 : storage.kind === "scalar" ? storageBytes(storage.storage, memory.pointerBytes) : storage.layout.byteLength;
+        stores.push({ address, bytes: memory.copy(address, length) });
+        if (field.value.kind === "vector") {
+          if (value.kind !== "pointer" || value.value === null) throw new Error("Native pickup vector storage is unavailable");
+          memory.write(address, memory.copy(value.value, length));
+        } else if (value.kind === "pointer") memory.writePointer(address, value.value);
+        else if (value.kind === "aggregate") throw new Error("Native pickup requires a scalar context field");
+        else memory.write(address, encodeValue(storage, value, memory));
+      }
+      return execute();
+    } finally {
+      if (!this.closed) try { for (const store of stores.reverse()) memory.write(store.address, store.bytes); }
+      finally { for (const allocation of allocations.reverse()) memory.unmap(allocation.address, allocation.bytes); }
+    }
   }
   private gameEntry(call: NativeModSourceCall): GuestAddress {
     if (call.entry.kind !== "game-export") throw new Error("Expected public native game entry");
@@ -736,6 +807,7 @@ export class NativeModProvider implements NativeModProjection {
     return this.execute(call, inputs, true);
   }
   async checkpoint(): Promise<ProviderCheckpoint> {
+    this.pickups.assertIdle();
     this.current(); if (this.frames.length !== 0 || this.inputScopes.length !== 0) throw new Error("Cannot save an active native mod callback"); this.releasePending();
     this.flush(); this.refresh();
     const clients = this.clients?.checkpoint() ?? [];
@@ -745,6 +817,7 @@ export class NativeModProvider implements NativeModProjection {
       actors: [...this.projections].map(([actor, slot]) => ({ actor: { slot: actor.slot, generation: actor.generation }, slot, appearance: this.appearanceActors.has(actor) })) }) };
   }
   async restore(record: ProviderCheckpoint): Promise<void> {
+    this.pickups.assertIdle();
     this.current(); if (this.frames.length !== 0 || this.inputScopes.length !== 0) throw new Error("Cannot restore an active native callback");
     const saved = readCheckpoint(record, this.host.memory.module, this.declaration); if (saved.map !== this.map) throw new Error("Native mod source save belongs to another map");
     const actors = saved.actors.map(entry => ({ actor: this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current"), slot: entry.slot, appearance: entry.appearance }));
@@ -755,7 +828,7 @@ export class NativeModProvider implements NativeModProjection {
     for (const entry of actors) this.validateInventoryCapacity(entry.actor, clientActors.has(entry.actor));
     for (const entry of saved.presentation.fog) { const actor = this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current"); if (!this.services.actors.isLive(actor)) throw new Error("Saved native presentation player is unavailable"); }
     const ownedActors = saved.owned === null ? [] : this.owned?.validateSaved(saved.owned) ?? [];
-    this.protection?.prepareRestore();
+    this.pickups.close(); this.protection?.prepareRestore();
     this.lifecycle = true; this.restoring = true; this.restoreLinks.clear(); this.owned?.suspend(true);
     try { this.clients?.restore(clients); this.appearanceActors.clear(); for (const entry of actors) if (entry.appearance) this.appearanceActors.add(entry.actor); this.projections.clear(); for (const entry of actors) this.projections.set(entry.actor, entry.slot); this.pendingReleases.clear(); await this.host.restore(saved.source);
       this.validateRecords(); this.protection?.validateRestoredInventory(); for (const [actor, slot] of this.projections) this.seed(actor, slot, false); this.refresh(); this.host.presentation.restore(saved.presentation);
@@ -771,6 +844,7 @@ export class NativeModProvider implements NativeModProjection {
   close(): undefined {
     if (this.closed || this.closing) return undefined; this.closing = true;
     const errors: unknown[] = [];
+    try { this.pickups.close(); } catch (error) { errors.push(error); }
     try { this.protection?.close(); } catch (error) { errors.push(error); }
     try { this.clients?.close(); } catch (error) { errors.push(error); }
     try { this.owned?.close(); } catch (error) { errors.push(error); }

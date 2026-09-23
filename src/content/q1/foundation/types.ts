@@ -84,6 +84,7 @@ export interface Q1PrecacheTables {
 
 /** Engine builtins operate on the same actor/body/combat tables used by every game. */
 export interface Q1FoundationHost {
+  readonly originalPickups?: import("../../../contracts/original-pickups.ts").OriginalPickupAdmission;
   readonly punchAngles?: { read(actor: ActorId): Vec3; write(actor: ActorId, angles: Vec3): undefined };
   readonly weaponBehavior?: WeaponBehaviorProjectilePort;
   weaponImpact?(owner: ActorId, origin: Vec3): undefined;

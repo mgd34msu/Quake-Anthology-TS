@@ -4,10 +4,11 @@ import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import { readModClientInput } from "./client-input.ts";
+import { readModPickupRule } from "./pickups.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move", "pickup-count", "pickup-has-count", "pickup-dropped") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
     case "string": return { kind: "string", value: reader.field("value").string() };
@@ -149,6 +150,12 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) }, target: parsedTarget,
     ...(reader.field("sourceActors").value === undefined ? {} : { sourceActors: sourceActors(reader.field("sourceActors")) }),
     ...(reader.field("protection").value === undefined && reader.field("poweredProtection").value === undefined ? {} : { protection: protections(reader) }),
+    ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(pickup => ({
+      ...readModPickupRule(pickup, sourceCall), context: pickup.field("context").value === undefined ? [] : pickup.field("context").list(field => {
+        const value = argument(field.field("value"));
+        if (value.kind === "actor" || value.kind === "client" || value.kind === "userinfo" || value.kind === "string" || value.kind === "user-command") return field.fail("Native pickup context requires scalar, vector, time or image address values");
+        return { record: field.field("record").string(), offset: field.field("offset").integer(0), value: value.kind === "time" || value.kind === "address" ? value : { kind: value.kind, value: value.value } };
+      }) })) }),
     ...(reader.field("clients").value === undefined ? {} : { clients: {
       maximum: reader.field("clients").field("maximum").integer(1), records: reader.field("clients").field("records").list(value => value.string()),
       admit: reader.field("clients").field("admit").list(reader => ({ ...sourceCall(reader), accepts: reader.field("accepts").choice("always", "nonzero") })), userinfo: reader.field("clients").field("userinfo").list(sourceCall),

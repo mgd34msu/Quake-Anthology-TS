@@ -122,6 +122,7 @@ import { expansionSupply } from "../../../content/composition/expansion-supply.t
 import { expansionSourceSupply } from "../../../content/composition/expansion-source-supply.ts";
 import { Q2_Q3_SUPPLY_PROFILE } from "../../../content/composition/q2-q3-supply.ts";
 import { SharedPickupAdmission } from "../../../world/gameplay/pickups.ts";
+import { SharedOriginalPickupAdmission } from "../../../world/gameplay/original-pickups.ts";
 import { Q1_Q3_SUPPLY_PROFILE, q1Q3SupplyLoadout } from "../../../content/composition/q1-q3-supply.ts";
 import { Q1_Q2_SUPPLY_PROFILE, q1Q2PickupSelect, q1Q2SupplyLoadout } from "../../../content/composition/q1-q2-supply.ts";
 import { Q3SharedBallistics, readQ3ProjectileStates, readQ3WeaponStatistics } from "./q3-ballistics.ts";
@@ -253,6 +254,7 @@ export class SharedSimulation implements Simulation {
   readonly physics: SharedPhysics;
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
+  readonly originalPickups: SharedOriginalPickupAdmission;
   readonly scheduler: FrameScheduler;
   readonly random: SourceRandom;
   readonly botServices = new SimulationBotServices();
@@ -566,6 +568,7 @@ export class SharedSimulation implements Simulation {
         return this.events.append({ kind: "damage", outcome });
       },
     });
+    this.originalPickups = new SharedOriginalPickupAdmission(this.actors, this.combat, this.inventory);
     this.registerCombat();
     this.scheduler = new FrameScheduler({ actors: this.actors, ordering: this.recipe.ordering, clocks: this.recipe.timing.map(value => ({ provider: value.provider, profile: value.clock })),
       sourceSlot: actor => this.actors.sourceOf(actor)?.slot ?? null,
@@ -1400,7 +1403,7 @@ export class SharedSimulation implements Simulation {
     const content = source.content;
     const movement = source.provider === this.recipe.map.entities.provider ? this.q1Movement : this.createMonsterMovement(runtime.numeric, runtime.random);
     const visibilityNumeric = createNumericOperations(runtime.numeric);
-    return createQ1ActorHost({ punchAngles: this.q1Punch, weaponBehavior: this.weaponBehavior, actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+    return createQ1ActorHost({ punchAngles: this.q1Punch, weaponBehavior: this.weaponBehavior, actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory, originalPickups: this.originalPickups,
         monsterTarget: actor => this.monsterTarget(actor),
         registerEntity: (entity, services) => this.registerActorExecution({ kind: "q1", entity, services, content }),
         sourceTarget: actor => { const entry = this.actorExecutions.get(actor), player = this.playerClient(actor) !== null;
@@ -1442,7 +1445,7 @@ export class SharedSimulation implements Simulation {
   private q2ActorHost(source: ProviderReference, runtime: ActorHostRuntime,
     readMonster: (actor: ActorId) => Q2MonsterState | undefined, authority: SourceLevelAuthority = "actor-source"): Q2FoundationHost {
     const content = source.content;
-    return createQ2ActorHost({ weaponBehavior: this.weaponBehavior, actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
+    return createQ2ActorHost({ weaponBehavior: this.weaponBehavior, actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory, originalPickups: this.originalPickups,
       gravity: () => this.physics.gravity,
       monsterTarget: actor => this.monsterTarget(actor),
       weaponTarget: actor => this.q2WeaponTarget(actor),
@@ -2103,6 +2106,7 @@ export class SharedSimulation implements Simulation {
         collision: (actor, collision) => this.physics.setCollision(actor, collision), armorContext: request => this.victimArmorContext(request),
         primaryAttackAllowed: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
         admitPickup: item => this.admitSelectedQ3Pickup(item),
+        originalPickups: this.originalPickups,
         previewPickup: item => this.previewSelectedQ3Pickup(item),
         foreign: actor => { if (this.actors.isLive(actor)) throw new Error("Foreign Q3 actor projection is not attached"); return null; },
         isPlayer: actor => this.player(actor) !== null,
@@ -4944,6 +4948,7 @@ export class SharedSimulation implements Simulation {
   private assertCheckpointReady(): void {
     this.pendingSharedRestore?.assertComplete();
     this.combat.assertIdle();
+    this.originalPickups.assertIdle();
     this.assertOpen();
     this.assertBotRestoreReady();
     if (this.sourceRoundSettlement.kind === "active" || this.sourceRoundSettlement.kind === "failed") throw new Error("Save requires completed source round settlement");

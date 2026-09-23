@@ -4,12 +4,14 @@ import { createContentDigest } from "../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ArmorStageInput, DamageOutcome, PoweredProtectionState } from "../../../src/contracts/gameplay.ts";
 import type { ModQcArmorStage, ModCallbackDeclaration, ModActorField } from "../../../src/contracts/mod-callbacks.ts";
+import type { OriginalPickupOffer } from "../../../src/contracts/original-pickups.ts";
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 import { QcProgram, QcOpcode, loadQcProgram, type QcDefinition, type QcFunction, type QcStatement } from "../../../src/compat/qc/program.ts";
 import { QcEntityMemory, QcMachine, classicQcEntityLayout, createQcActorBindings, createQcBuiltins, createQcSourceSlotStorage } from "../../../src/compat/qc/index.ts";
 import { SessionActorRegistry, ActorCallbackTable, SourceActorSlots, quakeEdictLifetime, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
 import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
-import { QcModProvider } from "../../../src/compat/qc/mod-provider.ts";
+import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
+import { QcModProvider, validateQcMod } from "../../../src/compat/qc/mod-provider.ts";
 import { SourceRandom } from "../../../src/app/bootstrap/simulation/random.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
@@ -283,6 +285,88 @@ test("declared original Copper region supplies regular armor after power to orig
       expect(primary.targetWords.float(primary.field("health"))).toBe(92);
       expect(primary.targetWords.float(primary.field("armorvalue"))).toBe(34);
     } finally { both.close(); }
+  } finally { source.close(); primary.actors.close(); }
+});
+
+test("original Copper pickups decide refusal and publish each tier store during nested source damage", async () => {
+  const primary = fixture(await readProgram("rerelease/hipnotic/pak0.pak")), program = loadQcProgram(await Bun.file(copper).bytes());
+  const fields: ModActorField[] = [], occupied = new Set<number>();
+  for (const field of program.fields) {
+    const width = field.type === "vector" ? 3 : 1, words = Array.from({ length: width }, (_, index) => field.offset + index);
+    if (field.name === "" || words.some(word => occupied.has(word))) continue;
+    words.forEach(word => occupied.add(word)); fields.push({ field: field.name, binding: "private" });
+  }
+  const declaration = readModCallbacks(new TextEncoder().encode(JSON.stringify({ version: 1, runtime: "quakec", program: { path: "progs.dat", digest: program.digest },
+    actorFields: fields, callbacks: [], clients: { maximum: 1, admit: [], userinfo: [], disconnect: [] }, protection: [{
+      id: "copper:regular", channel: "regular", admission: { kind: "replace-current-primary" }, storage: { points: "armorvalue", item: null,
+        selection: { field: "items", mask: 8192 | 16384 | 32768, values: [{ value: 0, item: null }, { value: 8192, item: "q1:item_armor1" },
+          { value: 16384, item: "q1:item_armor2" }, { value: 32768, item: "q1:item_armorInv" }] } },
+      flags: { noArmor: 4, noPowerArmor: 0, noRegularArmor: 0, energy: 0, radius: 0 },
+      absorb: { kind: "region", stage: copperStage(program), call: { function: "T_DamageApply", arguments: [
+        { kind: "input", name: "self" }, { kind: "input", name: "inflictor" }, { kind: "input", name: "attacker" },
+        { kind: "input", name: "amount" }, { kind: "input", name: "damage-flags" }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] } },
+    }], pickups: [{ id: "copper:green", resource: { kind: "protection", channel: "regular" }, offered: ["q1:item_armor1"], operation: { kind: "boolean-grant",
+      grant: { function: "armor_give", arguments: [{ kind: "input", name: "self" }, { kind: "float", value: 100 }, { kind: "float", value: 0.3 }, { kind: "float", value: 1 }], globals: [] } } },
+    { id: "copper:red", resource: { kind: "protection", channel: "regular" }, offered: ["q1:item_armorInv"], operation: { kind: "boolean-grant",
+      grant: { function: "armor_give", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "pickup-count" }, { kind: "float", value: 0.7 }, { kind: "float", value: 1 }],
+        globals: [{ name: "other", value: { kind: "input", name: "other" } }, { name: "time", value: { kind: "input", name: "time" } }] } } }] } satisfies ModCallbackDeclaration)));
+  const client = createIdentityOwner("qc-pickup-client").client(0, 0), inventory = new SharedInventoryTable(primary.actors), rng = new SourceRandom(19);
+  const firstRule = declaration.pickups?.[0]; if (firstRule === undefined) throw new Error("Missing declared pickup rule");
+  expect(() => validateQcMod(program, { ...declaration, pickups: [...(declaration.pickups ?? []), { ...firstRule, id: "duplicate:offered" }] })).toThrow("distinct offered items");
+  expect(() => validateQcMod(program, { ...declaration, pickups: [{ ...firstRule, resource: { kind: "inventory", item: "q1:ammo/shells" } }] })).toThrow("declared source storage");
+  inventory.create(primary.target, []);
+  const source = new QcModProvider(program, { id: "mod:copper-pickup", artifactPath: "progs.dat", digest: program.digest, revision: "test" }, declaration,
+    { actors: primary.actors, combat: primary.authority, inventory, seed: 19, time: () => ({ kind: "seconds", value: 3 }),
+      bodies: new SharedBodyTable(primary.actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined }),
+      clients: { maximum: 1, clients: () => [{ client, actor: primary.target.id }], forActor: actor => actor.equals(primary.target.id) ? client : null,
+        actor: current => current.equals(client) ? primary.target.id : null, userinfo: () => "", setUserinfo: () => undefined, command: () => null,
+        subscribe: () => () => undefined, subscribeApplication: () => () => undefined, drop: () => undefined } },
+    { nextInteger: () => rng.nextInteger(), nextUnit: () => rng.nextUnit(), checkpoint: () => rng.checkpoint(), restore: state => {
+      if (state.kind !== "glibc-random") throw new Error("Wrong RNG"); return rng.restore(state);
+    } });
+  const pickup = primary.actors.allocate("map:items", "q1:item_armorInv"), admission = new SharedOriginalPickupAdmission(primary.actors, primary.authority, inventory);
+  const offer: OriginalPickupOffer = { recipient: primary.target.id, pickup: pickup.id, source: "map:items", item: "q1:item_armorInv",
+    defaultResource: { kind: "protection", channel: "regular" }, count: { kind: "override", amount: 200 }, dropped: false, time: { kind: "milliseconds", value: 3000 } };
+  let fallback = 0; const completed: boolean[] = [];
+  const continuation = { original: () => { fallback++; return true; }, complete: (taken: boolean) => { completed.push(taken); } };
+  try {
+    source.initialize();
+    const words = source.machine.entities.at(1), field = (name: string) => source.machine.fieldOffset(name);
+    words.setFloat(field("armorvalue"), 100); words.setFloat(field("armortype"), 0.7); words.setFloat(field("items"), 32768);
+    words.setFloat(field("takedamage"), 2); words.setInt(field("classname"), source.machine.strings.allocate("player"));
+    expect(admission.touch({ ...offer, item: "q1:item_armor1", count: { kind: "default" } }, continuation)).toBe("refused");
+    expect(words.float(field("armorvalue"))).toBe(100); expect(completed).toEqual([false]); expect(fallback).toBe(0);
+    expect(admission.touch({ ...offer, item: "q2:item_armor_body" }, continuation)).toBe("refused");
+    expect(fallback).toBe(0);
+    words.setFloat(field("armorvalue"), 40); words.setFloat(field("armortype"), 0.3); words.setFloat(field("items"), 8192);
+    const selected = primary.authority.resolvePickup(primary.target, offer).matches[0]; if (selected === undefined) throw new Error("Missing source pickup rule");
+    const stores: string[] = [];
+    let nested = false;
+    const power = primary.bindPower(() => {
+      expect(primary.authority.withPickupProtection(primary.target, selected.owner, observer => selected.take(offer, { stored: change => {
+        observer.stored(change);
+        const armor = primary.authority.read(primary.target.id)?.armor.regular;
+        if (armor?.kind !== "source") throw new Error("Missing source armor");
+        stores.push(`${armor.points}:${armor.item}`);
+        if (!nested) { nested = true; primary.invoke(10); }
+        return undefined;
+      } }))).toBe("accepted");
+    });
+    primary.invoke(40);
+    expect(stores).toEqual(["200:q1:item_armor1", "197:null", "197:q1:item_armorInv"]);
+    expect(words.float(field("armorvalue"))).toBe(183);
+    expect(words.float(field("armortype"))).toBe(Math.fround(0.7));
+    expect(primary.targetWords.float(primary.field("armorvalue"))).toBe(40);
+    expect(primary.targetWords.float(primary.field("health"))).toBe(87);
+    power.remove();
+    const saved = source.checkpoint(); source.restore(saved); expect(selected.current()).toBe(false);
+    expect(admission.touch(offer, continuation)).toBe("accepted");
+    expect(primary.authority.read(primary.target.id)?.armor.regular).toEqual({ kind: "source", points: 200, item: "q1:item_armorInv" });
+    expect(completed).toEqual([false, false, true]); expect(fallback).toBe(0);
+    expect(() => admission.touch({ ...offer, count: { kind: "override", amount: 16777217 } }, continuation)).toThrow("source scalar ABI");
+    source.close();
+    expect(admission.touch(offer, continuation)).toBe("accepted"); expect(fallback).toBe(1);
+    expect(primary.authority.read(primary.target.id)?.armor.regular).toMatchObject({ kind: "q1", points: 40 });
   } finally { source.close(); primary.actors.close(); }
 });
 

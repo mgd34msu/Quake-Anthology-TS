@@ -1,7 +1,9 @@
 import type { InventoryEntry, InventoryTable, ItemId } from "../../contracts/gameplay.ts";
-import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
+import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
+import type { OriginalPickupOffer, OriginalPickupResolution, OriginalPickupRule } from "../../contracts/original-pickups.ts";
 import type { SessionActorRegistry } from "../actors/registry.ts";
 import { ModOperation } from "./mod-composition.ts";
+import { captureOriginalPickupRules } from "./original-pickups.ts";
 
 export interface InventoryStateBinding {
   read(): readonly InventoryEntry[];
@@ -13,6 +15,15 @@ export interface InventoryCommittedChange {
   readonly actor: OwnedActor;
   readonly before: InventoryEntry | null;
   readonly after: InventoryEntry;
+}
+export interface InventoryPickupBinding {
+  readonly owner: ProviderId;
+  readonly item: ItemId;
+  readonly rules: readonly OriginalPickupRule[];
+}
+interface InventoryStore {
+  readonly binding: InventoryStateBinding;
+  readonly pickups: Map<ItemId, InventoryPickupBinding>;
 }
 
 function quantity(value: number): number {
@@ -59,7 +70,7 @@ export class SharedInventoryTable implements InventoryTable {
     configure: new ModOperation<readonly [actor: OwnedActor, entry: InventoryEntry], undefined>("inventory.configure"),
     adjustSourceCounter: new ModOperation<readonly [actor: OwnedActor, item: ItemId, delta: number], number>("inventory.adjust-source-counter"),
   };
-  private readonly stores = new Map<OwnedActor, InventoryStateBinding>();
+  private readonly stores = new Map<OwnedActor, InventoryStore>();
 
   constructor(private readonly actors: SessionActorRegistry) {
     actors.onRelease(actor => { this.stores.delete(actor); return undefined; });
@@ -68,8 +79,36 @@ export class SharedInventoryTable implements InventoryTable {
   bind(actor: OwnedActor, binding: InventoryStateBinding): undefined {
     this.actors.assertOwned(actor);
     if (this.stores.has(actor)) throw new Error("Actor already has an inventory binding");
-    this.stores.set(actor, binding);
+    this.stores.set(actor, { binding, pickups: new Map<ItemId, InventoryPickupBinding>() });
     return undefined;
+  }
+
+  /** Delegate grant behavior only; the selected storage binding still owns the admitted item. */
+  bindPickup(actor: OwnedActor, requested: InventoryPickupBinding): () => undefined {
+    this.actors.assertOwned(actor);
+    const store = this.stores.get(actor);
+    if (store === undefined || !store.binding.read().some(entry => entry.item === requested.item))
+      throw new Error(`Original pickup destination ${requested.item} was not admitted`);
+    if (store.pickups.has(requested.item)) throw new Error(`Original pickup destination ${requested.item} already has a grant owner`);
+    const binding = Object.freeze({ ...requested, rules: captureOriginalPickupRules(requested.rules) });
+    if (binding.rules.length === 0) throw new Error("Original inventory pickup delegate has no rules");
+    for (const existing of store.pickups.values()) for (const rule of existing.rules) for (const offered of rule.offered)
+      if (binding.rules.some(candidate => candidate.offered.includes(offered))) throw new Error(`Ambiguous original inventory pickup for ${offered}`);
+    store.pickups.set(binding.item, binding);
+    return () => {
+      if (this.stores.get(actor) === store && store.pickups.get(binding.item) === binding) store.pickups.delete(binding.item);
+      return undefined;
+    };
+  }
+
+  resolvePickup(actor: OwnedActor, offer: OriginalPickupOffer): OriginalPickupResolution {
+    this.actors.assertOwned(actor);
+    const store = this.stores.get(actor);
+    if (store === undefined) return { matches: [], blocksPrimary: false };
+    const matches = [...store.pickups.values()].flatMap(binding => binding.rules.filter(rule => rule.offered.includes(offer.item))
+      .map(rule => ({ owner: binding.owner, current: () => this.actors.isLive(actor.id) && this.stores.get(actor) === store
+        && store.pickups.get(binding.item) === binding && store.binding.read().some(entry => entry.item === binding.item), take: rule.take })));
+    return { matches, blocksPrimary: false };
   }
 
   create(actor: OwnedActor, entries: readonly InventoryEntry[]): undefined {
@@ -83,7 +122,7 @@ export class SharedInventoryTable implements InventoryTable {
 
   entries(actor: ActorId): readonly InventoryEntry[] {
     const owner = this.actors.resolveOwned(actor);
-    return owner === null ? [] : (this.stores.get(owner)?.read() ?? []).map(copyEntry);
+    return owner === null ? [] : (this.stores.get(owner)?.binding.read() ?? []).map(copyEntry);
   }
 
   has(actor: ActorId): boolean {
@@ -92,7 +131,7 @@ export class SharedInventoryTable implements InventoryTable {
   }
 
   mutableCapacity(actor: ActorId, item: ItemId): boolean {
-    const owner = this.actors.resolveOwned(actor), binding = owner === null ? undefined : this.stores.get(owner);
+    const owner = this.actors.resolveOwned(actor), binding = owner === null ? undefined : this.stores.get(owner)?.binding;
     return binding?.read().some(entry => entry.item === item) === true && binding.mutableCapacity?.(item) === true;
   }
 
@@ -100,7 +139,7 @@ export class SharedInventoryTable implements InventoryTable {
     const owner = this.actors.resolveOwned(actor);
     if (owner === null) return 0;
     let result = 0, found = false;
-    for (const entry of this.stores.get(owner)?.read() ?? []) {
+    for (const entry of this.stores.get(owner)?.binding.read() ?? []) {
       quantity(entry.capacity);
       const count = sourceCount(entry, entry.count);
       if (!found && entry.item === item) { result = count; found = true; }
@@ -115,7 +154,7 @@ export class SharedInventoryTable implements InventoryTable {
 
   private consumeCanonical(actor: OwnedActor, item: ItemId, count: number): boolean {
     this.actors.assertOwned(actor); quantity(count);
-    const binding = this.stores.get(actor);
+    const binding = this.stores.get(actor)?.binding;
     const entry = binding?.read().find(candidate => candidate.item === item);
     if (entry === undefined || binding === undefined) return count === 0;
     if (entry.count < count) return false;
@@ -130,7 +169,7 @@ export class SharedInventoryTable implements InventoryTable {
 
   private giveCanonical(actor: OwnedActor, item: ItemId, count: number): number {
     this.actors.assertOwned(actor); quantity(count);
-    const binding = this.stores.get(actor);
+    const binding = this.stores.get(actor)?.binding;
     const entry = binding?.read().find(candidate => candidate.item === item);
     if (entry === undefined || binding === undefined) return 0;
     const transition = inventoryGive(entry, count);
@@ -153,14 +192,14 @@ export class SharedInventoryTable implements InventoryTable {
 
   private configureCanonical(actor: OwnedActor, entry: InventoryEntry, committed?: (change: InventoryCommittedChange) => undefined): undefined {
     this.actors.assertOwned(actor);
-    const binding = this.stores.get(actor);
+    const binding = this.stores.get(actor)?.binding;
     if (binding === undefined) throw new Error("Actor has no inventory binding");
     const previous = binding.read().find(candidate => candidate.item === entry.item);
     const before = committed === undefined || previous === undefined ? null : copyEntry(previous), policy = entry.countPolicy ?? previous?.countPolicy;
     binding.write(copyEntry(policy === undefined ? entry : { ...entry, countPolicy: policy }));
     if (committed !== undefined) {
       this.actors.assertOwned(actor);
-      if (this.stores.get(actor) !== binding) throw new Error("Inventory owner changed during observed store");
+      if (this.stores.get(actor)?.binding !== binding) throw new Error("Inventory owner changed during observed store");
       const after = binding.read().find(candidate => candidate.item === entry.item);
       if (after === undefined) throw new Error("Observed inventory entry disappeared during its store");
       committed({ actor, before, after: copyEntry(after) });
@@ -176,7 +215,7 @@ export class SharedInventoryTable implements InventoryTable {
 
   private adjustSourceCounterCanonical(actor: OwnedActor, item: ItemId, delta: number): number {
     this.actors.assertOwned(actor);
-    const binding = this.stores.get(actor), entry = binding?.read().find(candidate => candidate.item === item);
+    const binding = this.stores.get(actor)?.binding, entry = binding?.read().find(candidate => candidate.item === item);
     if (binding === undefined || entry === undefined || entry.countPolicy?.kind !== "source-counter") throw new Error("Item is not a signed source counter");
     const next = copyEntry({ ...entry, count: sourceCount(entry, entry.count) + sourceCount(entry, delta) });
     binding.write(next);

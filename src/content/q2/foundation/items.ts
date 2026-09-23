@@ -2,6 +2,7 @@ import { previewPickupGrants } from "../../../world/gameplay/pickups.ts";
 /* Pickup and inventory behaviors adapted from Quake II game/g_items.c and p_weapon.c. */
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { RegularArmorState, InventoryEntry, ItemId } from "../../../contracts/gameplay.ts";
+import type { PickupResource } from "../../../contracts/original-pickups.ts";
 import type { PickupAdmission, PickupAmmoGrant, PickupSupplyObservation, PickupSupplyOffer, PickupSupplyPreview } from "../../../contracts/pickups.ts";
 import { add, movedir, scale, zero } from "./fields.ts";
 import type { Q2Entity, Q2GameServices, Q2SpawnModule, Q2Think } from "./host.ts";
@@ -243,7 +244,7 @@ export class Q2ItemModule implements Q2SpawnModule {
       const temporary = game.create(item.classname);
       temporary.count = count; temporary.spawnflags |= 0x10000;
       this.pickups.set(temporary, { item, targetsUsed: false, retained: false, expiresAt: null });
-      try { this.take(temporary, game, player, item); }
+      try { if (this.grant(temporary, game, player, item)) this.finishGrant(temporary, game, player, item); }
       finally { if (game.host.actors.isLive(temporary.actor.id)) game.remove(temporary); }
     }
     return undefined;
@@ -480,7 +481,10 @@ export class Q2ItemModule implements Q2SpawnModule {
 
   private setRespawn(entity: Q2Entity, game: Q2GameServices, seconds: number): undefined {
     this.pickup(entity).retained = true; entity.visible = false;
-    game.solid(entity, "none"); game.show(entity);
+    game.solid(entity, "none");
+    if (!game.host.actors.isLive(entity.actor.id)) return undefined;
+    game.show(entity);
+    if (!game.host.actors.isLive(entity.actor.id)) return undefined;
     return game.schedule(entity, seconds, this.respawn);
   }
 
@@ -509,33 +513,67 @@ export class Q2ItemModule implements Q2SpawnModule {
 
   touch(entity: Q2Entity, game: Q2GameServices, player: ActorId): undefined {
     if (!game.host.isPlayer(player) || (game.host.combat.read(player)?.health ?? 0) < 1) return undefined;
-    if (this.pickupPolicy !== null && !this.pickupPolicy.beforePickup(entity, game, player)) return undefined;
     const state = this.pickup(entity), item = state.item;
     const owner = game.host.actors.resolveOwned(player);
     if (owner === null) return undefined;
-    state.retained = false;
-    const taken = this.take(entity, game, owner, item);
-    if (taken) {
-      game.host.emit({ kind: "pickup", player, item: id(item), icon: item.icon, name: item.name });
-      const body = game.host.bodies.read(player);
-      if (body !== null) game.host.emit({ kind: "sound", actor: player, origin: body.origin, path: item.sound, channel: 3, volume: 1, attenuation: 1, reliable: false, loop: "once" });
-    }
-    this.pickupPolicy?.beforeTargets?.(entity, game, player, taken);
-    // Source items fire targets on the first attempted pickup, even when full.
-    if (!state.targetsUsed) { game.useTargets(entity, player); state.targetsUsed = true; }
-    if (!game.host.actors.isLive(entity.actor.id)) return undefined;
-    this.pickupPolicy?.afterPickup(entity, game, player, taken);
-    if (!taken || !game.host.actors.isLive(entity.actor.id)) return undefined;
-    const stays = game.options.mode === "coop" && staysCoop(item);
-    if ((!stays || isDropped(entity)) && !state.retained && !(this.pickupPolicy?.keepAfterPickup(entity, game, player) ?? false)) game.remove(entity);
+    const live = () => game.entity(entity.actor.id) === entity && game.host.actors.resolveOwned(player) === owner;
+    const eligible = () => (this.pickupPolicy?.beforePickup(entity, game, player) ?? true) && live();
+    let originalRan = false;
+    const original = () => { originalRan = true; state.retained = false; return this.grant(entity, game, owner, item); };
+    const complete = (taken: boolean): void => {
+      if (!live()) return;
+      if (taken) {
+        if (!originalRan) state.retained = false;
+        this.finishGrant(entity, game, owner, item);
+        if (!live()) return;
+        game.host.emit({ kind: "pickup", player, item: id(item), icon: item.icon, name: item.name });
+        if (!live()) return;
+        const body = game.host.bodies.read(player);
+        if (body !== null) game.host.emit({ kind: "sound", actor: player, origin: body.origin, path: item.sound, channel: 3, volume: 1, attenuation: 1, reliable: false, loop: "once" });
+        if (!live()) return;
+      }
+      this.pickupPolicy?.beforeTargets?.(entity, game, player, taken);
+      if (!live()) return;
+      // Source items fire targets on the first attempted pickup, even when full.
+      if (!state.targetsUsed) { game.useTargets(entity, player); state.targetsUsed = true; }
+      if (!live()) return;
+      this.pickupPolicy?.afterPickup(entity, game, player, taken);
+      if (!taken || !live()) return;
+      const stays = game.options.mode === "coop" && staysCoop(item);
+      if ((!stays || isDropped(entity)) && !state.retained && !(this.pickupPolicy?.keepAfterPickup(entity, game, player) ?? false) && live()) game.remove(entity);
+    };
+    if (game.host.originalPickups === undefined) { if (eligible()) complete(original()); return undefined; }
+    const defaultResource: PickupResource | null = item.kind === "armor" || item.kind === "shard" ? { kind: "protection", channel: "regular" }
+      : item.kind === "power-armor" ? { kind: "protection", channel: "powered" }
+      : item.kind === "ammo" || item.kind === "weapon" || item.kind === "key" ? { kind: "inventory", item: id(item) } : null;
+    game.host.originalPickups.touch({ recipient: player, pickup: entity.actor.id, source: entity.actor.owner, item: id(item), defaultResource,
+      count: entity.count === 0 ? { kind: "default" } : { kind: "override", amount: entity.count },
+      dropped: isDropped(entity), time: { kind: "seconds", value: game.host.now() } }, { eligible, original, complete });
     return undefined;
   }
 
-  private take(entity: Q2Entity, game: Q2GameServices, player: OwnedActor, item: Item): boolean {
+  private finishGrant(entity: Q2Entity, game: Q2GameServices, player: OwnedActor, item: Item): undefined {
+    if (item.kind === "key") return undefined;
+    if (item.kind === "weapon" && !isDropped(entity)
+      && (game.options.mode === "coop" || game.options.mode === "deathmatch" && (game.options.deathmatchFlags & 4) !== 0)) {
+      this.pickup(entity).retained = true; return undefined;
+    }
+    if (item.kind === "health" && item.timed) {
+      entity.owner = player.id; this.pickup(entity).retained = true; entity.visible = false;
+      game.solid(entity, "none");
+      if (!game.host.actors.isLive(entity.actor.id)) return undefined;
+      game.show(entity);
+      return game.host.actors.isLive(entity.actor.id) ? game.schedule(entity, 5, this.megaHealth) : undefined;
+    }
+    const respawn = item.kind === "weapon" ? this.hooks.weaponRespawnSeconds?.() ?? item.respawn : item.respawn;
+    if (!isDropped(entity) && game.options.mode === "deathmatch" && game.host.actors.isLive(entity.actor.id)) this.setRespawn(entity, game, respawn);
+    return undefined;
+  }
+
+  private grant(entity: Q2Entity, game: Q2GameServices, player: OwnedActor, item: Item): boolean {
     const current = game.host.combat.read(player.id);
     if (current === null) return false;
     const playerEntity = game.entity(player.id), maximum = playerEntity?.maxHealth || 100;
-    const respawn = item.kind === "weapon" ? this.hooks.weaponRespawnSeconds?.() ?? item.respawn : item.respawn;
     switch (item.kind) {
       case "custom": {
         this.ensure(player, game, id(item), item.capacity);
@@ -598,19 +636,12 @@ export class Q2ItemModule implements Q2SpawnModule {
         }
         if (admission === null) this.hooks.weaponPicked(player.id, id(item), previous === 0);
         else if (!admission.weapon(player, { item: id(item), ammo: grants }, previous === 0 ? "always" : "never")) return false;
-        if (!isDropped(entity) && (game.options.mode === "coop" || game.options.mode === "deathmatch" && (game.options.deathmatchFlags & 4) !== 0)) {
-          this.pickup(entity).retained = true; return true;
-        }
         break;
       }
       case "health": {
         if (!item.ignoreMaximum && current.health >= maximum) return false;
         const amount = entity.count || item.amount;
         game.host.combat.setHealth(player, item.ignoreMaximum ? current.health + amount : Math.min(maximum, current.health + amount));
-        if (item.timed) {
-          entity.owner = player.id; this.pickup(entity).retained = true; entity.visible = false;
-          game.solid(entity, "none"); game.show(entity); game.schedule(entity, 5, this.megaHealth); return true;
-        }
         break;
       }
       case "armor": case "shard": {
@@ -644,7 +675,6 @@ export class Q2ItemModule implements Q2SpawnModule {
         break;
       }
     }
-    if (!isDropped(entity) && game.options.mode === "deathmatch") this.setRespawn(entity, game, respawn);
     return true;
   }
 

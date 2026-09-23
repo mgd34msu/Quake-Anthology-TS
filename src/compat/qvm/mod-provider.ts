@@ -9,7 +9,8 @@ import type { QvmCheckpoint } from "../../contracts/execution.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorCollision } from "../../world/collision/index.ts";
 import type { ModCallbackInput, ModRuntimeValue } from "../../contracts/mod-callbacks.ts";
-import type { QvmModActorField, QvmModActorRecord, QvmModCallbackDeclaration, QvmModScalar, QvmModSourceCall, QvmModValue } from "../../contracts/qvm-mod-callbacks.ts";
+import type { QvmModActorField, QvmModActorRecord, QvmModCallbackDeclaration, QvmModPickup, QvmModScalar, QvmModSourceCall, QvmModValue } from "../../contracts/qvm-mod-callbacks.ts";
+import type { OriginalPickupOffer } from "../../contracts/original-pickups.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
 import type { UserFileStore } from "../../platform/files/writable.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
@@ -41,6 +42,7 @@ import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 import { writeQvmTrace, QVM_TRACE_BYTES } from "./trace-record.ts";
 import { QvmModActors, validateQvmModActors } from "./mod-actors.ts";
 import { QvmModProtection, validateQvmModProtection } from "./mod-protection.ts";
+import { QvmModPickups, validateQvmModPickups } from "./mod-pickups.ts";
 import { Q3GuestWorld } from "../../app/bootstrap/simulation/q3/guest-world.ts";
 
 type Artifact = QvmModuleOptions["artifact"];
@@ -159,6 +161,13 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
   validateQvmModProtection(declaration);
   for (const definition of declaration.protection ?? []) checkCall(definition.absorb,
     new Set(["self", "attacker", "inflictor", "amount", "knockback", "damage-flags", "regular-protection-scale", "point", "direction", "normal", "time"]));
+  validateQvmModPickups(declaration);
+  for (const rule of declaration.pickups ?? []) {
+    const available = new Set<ModCallbackInput>(["self", "other", "item", "time", "pickup-count", "pickup-has-count", "pickup-dropped"]);
+    for (const field of rule.context) checkValue(field.value, available);
+    if (rule.operation.kind === "gate-then-grant") checkCall(rule.operation.gate, available);
+    checkCall(rule.operation.grant, available);
+  }
   const ids = new Set<string>();
   for (const call of declaration.callbacks) {
     if (ids.has(call.id) || call.stage !== "observe" && call.returns === "void") throw new Error("Duplicate QVM callback or missing source return value"); ids.add(call.id);
@@ -254,6 +263,8 @@ export class QvmModProvider {
   private readonly input: QvmModInput;
   private readonly playerEvents: QvmModPlayerEvents;
   private readonly protection: readonly QvmModProtection[];
+  private readonly pickups: QvmModPickups;
+  private pickupContexts = 0;
   private commands: ModCommandPort | null = null;
   private files: QvmFiles | null;
   private readonly unsubscribe: () => undefined;
@@ -350,7 +361,7 @@ export class QvmModProvider {
         const entity = declaration.entityRecord; if (entity === null) throw new Error("Missing QVM client entity record"); this.pointer(actor, entity);
         this.playerEvents.track(actor, this.playerAddress(actor));
       },
-      admitted: actor => { for (const protection of this.protection) protection.bindActor(actor); },
+      admitted: actor => { for (const protection of this.protection) protection.bindActor(actor); this.pickups.bindActor(actor); },
       release: actor => this.releaseProjection(actor),
       reservedSlots: () => this.projections.values(),
       openInput: application => this.input.open(application),
@@ -377,10 +388,19 @@ export class QvmModProvider {
         return this.pointer(actor, record);
       },
       invoke: (call, inputs) => this.invoke(call, inputs),
+      pickups: (actor, channel) => this.pickups.protection(actor, channel),
+    });
+    this.pickups = new QvmModPickups(declaration.pickups ?? [], services, artifact.module.id, {
+      current: () => this.current(),
+      eligible: actor => !this.closed && this.projections.has(actor) && !this.retiredProjections.has(actor) && this.clientBindings?.admitted(actor) === true,
+      invoke: (call, inputs) => this.invoke(call, inputs),
+      context: (definition, offer, inputs, execute) => this.pickupContext(definition, offer, inputs, execute),
+      observe: (actor, observer, execute) => { const channel = this.protection[0]; return channel === undefined ? execute() : channel.observe(actor, observer, execute); },
     });
     this.rememberDefaults();
     this.unsubscribe = services.actors.onRelease(actor => {
       this.playerEvents.release(actor.id);
+      this.pickups.release(actor.id);
       for (const protection of this.protection) protection.release(actor.id);
       const slot = this.projections.get(actor.id), owned = this.owned.has(actor.id);
       this.physics.get(actor.id)?.(); this.physics.delete(actor.id); this.owned.delete(actor.id); this.eventKeys.delete(actor.id);
@@ -496,9 +516,10 @@ export class QvmModProvider {
   }
   private releaseProjection(actor: ActorId): void {
     this.playerEvents.release(actor);
+    this.pickups.release(actor);
     for (const protection of this.protection) protection.release(actor);
     const slot = this.projections.get(actor); if (slot === undefined) return;
-    if (this.frames.length !== 0) { this.retiredProjections.add(actor); return; }
+    if (this.frames.length !== 0 || this.pickupContexts !== 0) { this.retiredProjections.add(actor); return; }
     for (const record of this.records.values()) if (slot < record.capacity) {
       const defaults = this.defaults.get(record.id); if (defaults === undefined) throw new Error("Missing QVM source client defaults");
       this.module.memory.writeBytes(record.address + slot * record.stride, defaults.subarray(slot * record.stride, (slot + 1) * record.stride));
@@ -506,7 +527,7 @@ export class QvmModProvider {
     this.projections.delete(actor); this.eventKeys.delete(actor);
   }
   private finishRetiredProjections(): void {
-    if (this.frames.length !== 0) return;
+    if (this.frames.length !== 0 || this.pickupContexts !== 0) return;
     for (const actor of this.retiredProjections) this.releaseProjection(actor);
     this.retiredProjections.clear();
   }
@@ -576,6 +597,26 @@ export class QvmModProvider {
       case "vector": { if (resolved?.kind !== "vector") throw new Error("Missing vector QVM input"); const address = this.allocate(12); this.writeVector(address, resolved.value); return address; }
       case "string": { if (resolved?.kind !== "string" || resolved.value.includes("\0")) throw new Error("Invalid QVM string input");
         const address = this.allocate(resolved.value.length + 1); this.module.memory.writeString(address, resolved.value, resolved.value.length + 1); return address; }
+    }
+  }
+  private pickupContext<Result>(definition: QvmModPickup, offer: OriginalPickupOffer, inputs: Inputs, execute: () => Result): Result {
+    this.current();
+    if (offer.pickup.equals(offer.recipient) || this.clientBindings?.has(offer.pickup) === true
+      || this.services.engine?.world()?.equals(offer.pickup) === true || this.owned.has(offer.pickup))
+      throw new Error("QVM pickup context requires a foreign non-player pickup actor");
+    const record = this.declaration.entityRecord;
+    if (record === null) throw new Error("QVM pickup requires an actor projection");
+    this.pickupContexts++;
+    const scratch = this.scratch, restore: { readonly address: number; readonly bytes: Uint8Array }[] = [];
+    try {
+      this.pointer(offer.recipient, record); this.pointer(offer.pickup, record);
+      const fields = definition.context.map(field => ({ address: this.pointer(offer.pickup, field.record) + field.offset, word: this.lower(field.value, inputs) }));
+      for (const field of fields) restore.push({ address: field.address, bytes: this.module.memory.bytes.slice(field.address, field.address + 4) });
+      for (const field of fields) this.view(field.address, 4).setInt32(0, field.word, true);
+      return execute();
+    } finally {
+      try { if (!this.closed) for (const field of restore) this.module.memory.writeBytes(field.address, field.bytes); }
+      finally { this.scratch = scratch; this.pickupContexts--; this.finishRetiredProjections(); }
     }
   }
   private begin(call: QvmModSourceCall, inputs: Inputs) {
@@ -663,7 +704,7 @@ export class QvmModProvider {
     this.rememberDefaults(); this.clientBindings?.start(); this.publish();
   }
   reserveProtection(): void { for (const protection of this.protection) protection.reserve(); }
-  activateProtection(): void { for (const protection of this.protection) protection.activate(); }
+  activateProtection(): void { for (const protection of this.protection) protection.activate(); this.pickups.activate(); }
   private entityRecord(): QvmModActorRecord {
     const record = this.declaration.entityRecord === null ? undefined : this.records.get(this.declaration.entityRecord);
     if (record === undefined || record.stride < qvmSharedEntityBytes(this.declaration.abiProfile)) throw new Error("QVM engine service requires its declared sharedEntity_t array");
@@ -945,9 +986,10 @@ export class QvmModProvider {
     if (result instanceof Promise) return result.then(value => { refresh(); return value; });
     refresh(); return result;
   }
-  checkpoint(): QvmCheckpoint { this.current(); for (const protection of this.protection) protection.assertIdle(); return this.module.checkpoint(); }
+  checkpoint(): QvmCheckpoint { this.current(); this.pickups.assertIdle(); for (const protection of this.protection) protection.assertIdle(); return this.module.checkpoint(); }
   restore(checkpoint: QvmCheckpoint): undefined {
     this.current(); validateQvmModCheckpoint(this.artifact, this.declaration, checkpoint);
+    this.pickups.assertIdle();
     for (const protection of this.protection) protection.assertIdle();
     const saved = hostImage(checkpoint, this.declaration);
     for (const entry of saved.projections) {
@@ -961,7 +1003,8 @@ export class QvmModProvider {
     if (this.mounts !== undefined) { const files = new QvmFiles({ mounts: this.mounts, writable: this.writable, assertCurrent: () => this.current() });
       try { files.restoreCheckpoint(saved.files); } finally { files.closeAll(); } }
     else if (saved.files !== null) throw new Error("Saved QVM mod filesystem is unavailable");
-    const active = this.protection.some(protection => protection.isActive);
+    const active = this.pickups.isActive || this.protection.some(protection => protection.isActive);
+    this.pickups.close();
     for (const protection of this.protection) protection.close();
     this.reserveProtection();
     this.playerEvents.close();
@@ -972,6 +1015,7 @@ export class QvmModProvider {
   close(): undefined {
     if (this.closed) return undefined;
     const errors: unknown[] = [];
+    try { this.pickups.close(); } catch (error) { errors.push(error); }
     for (const protection of this.protection) try { protection.close(); } catch (error) { errors.push(error); }
     this.closed = true; this.playerEvents.close();
     for (const actor of [...this.owned.values()]) if (this.services.actors.isLive(actor.id)) {

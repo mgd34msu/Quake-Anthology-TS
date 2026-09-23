@@ -74,6 +74,7 @@ export interface Q3SourceHost extends ClientMovementHost {
   readonly callbacks: ActorCallbackTable;
   readonly combat: GameplayAuthority;
   readonly inventory: SharedInventoryTable;
+  readonly originalPickups?: import("../../../../contracts/original-pickups.ts").OriginalPickupAdmission;
   readonly scene: SharedSceneQueries;
   readonly engine: Q3SourceEngine;
   readonly cvars: CvarRegistry;

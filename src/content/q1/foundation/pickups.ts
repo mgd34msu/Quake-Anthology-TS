@@ -3,6 +3,7 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import type { PickupSelection, PickupSupplyOffer, PickupSupplyObservation, PickupSupplyPreview } from "../../../contracts/pickups.ts";
 import { previewPickupGrants } from "../../../world/gameplay/pickups.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
+import type { OriginalPickupContinuation, PickupResource } from "../../../contracts/original-pickups.ts";
 import type { Q1Actor } from "./entity.ts";
 import type { Q1EntityServices } from "./entity-services.ts";
 import type { Q1PlayerState, Q1Powerup, Q1Weapon } from "./types.ts";
@@ -26,7 +27,7 @@ function pickupDefinition(game: Q1EntityServices, entity: Q1Actor): Pickup | nul
       respawn: mega ? 120 : 20, take: (runtime, _item, player) => {
         const health = runtime.health(player.actor.id); if (health <= 0 || health >= (mega ? 250 : player.maxHealth)) return "refused";
         runtime.host.combat.setHealth(player.actor, Math.min(mega ? 250 : player.maxHealth, health + amount));
-        if (mega && runtime.options.edition === "rerelease") player.megaRotAt = runtime.time + 5; return "taken";
+        return "taken";
       } };
   }
   if (name === "item_armor1" || name === "item_armor2" || name === "item_armorInv") {
@@ -207,22 +208,56 @@ export function givePickup(game: Q1EntityServices, entity: Q1Actor, other: Actor
   return true;
 }
 
-function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: import("../../../contracts/identity.ts").ActorId): undefined {
+export function touchQ1Pickup(game: Q1EntityServices, entity: Q1Actor, other: ActorId, item: ItemId,
+  defaultResource: PickupResource | null, continuation: OriginalPickupContinuation): undefined {
+  const live = () => game.live(entity) && game.host.actors.isLive(other);
+  if (!live()) return undefined;
+  const complete = (taken: boolean) => { if (live()) continuation.complete(taken); };
+  if (game.host.originalPickups === undefined) { if ((continuation.eligible?.() ?? true) && live()) complete(continuation.original()); }
+  else game.host.originalPickups.touch({ recipient: other, pickup: entity.actor.id, source: entity.actor.owner, item, defaultResource,
+    count: entity.count === 0 ? { kind: "default" } : { kind: "override", amount: entity.count },
+    dropped: entity.classname === "item_backpack", time: { kind: "seconds", value: game.time } }, { ...continuation, complete });
+  return undefined;
+}
+
+function pickupTouch(game: Q1EntityServices, entity: Q1Actor, other: ActorId): undefined {
     const definition = pickupDefinition(game, entity); if (definition === null) throw new Error(`Unknown saved Q1 pickup: ${entity.classname}`);
     if (entity.solid !== "trigger") return undefined;
     const player = pickupPlayer(game, other); if (player === null) return undefined;
-    const result = definition.take(game, entity, player); if (result === "refused") return undefined;
-    game.sound(player.actor, definition.sound, "item"); game.effect("pickup", game.body(entity).origin, player.actor.id);
-    if (result === "leave") { if (!entity.classname.startsWith("weapon_")) game.useTargets(entity, other); return undefined; }
-    entity.solid = "none"; entity.model = ""; game.link(entity);
-    const respawn = game.pickupRules?.respawn?.(game, entity, definition.respawn) ?? definition.respawn;
-    const respawns = game.options.deathmatch !== 0 && respawn > 0 && (game.options.deathmatch !== 2 || entity.classname.startsWith("item_artifact_"));
-    if (game.options.edition === "classic" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2) {
-      entity.owner = player.actor.id;
-      game.schedule(entity, 5, game.named.action(entity, "health_rot"));
-    } else if (respawns) game.schedule(entity, respawn, game.named.action(entity, "SUB_regen"));
-    else game.cancel(entity);
-    game.useTargets(entity, other); return undefined;
+    const key = entity.classname === "item_key1" ? "q1:key/silver" : entity.classname === "item_key2" ? "q1:key/gold" : null;
+    const item: ItemId = definition.supply?.offer.item ?? key ?? `q1:${entity.classname}`;
+    const armor = ["item_armor1", "item_armor2", "item_armorInv"].includes(entity.classname);
+    const resource: PickupResource | null = armor ? { kind: "protection", channel: "regular" }
+      : definition.supply !== undefined || key !== null ? { kind: "inventory", item } : null;
+    let leave = false, originalRan = false;
+    const live = () => game.live(entity) && game.host.actors.isLive(other);
+    return touchQ1Pickup(game, entity, other, item, resource, {
+      original: () => { originalRan = true; const result = definition.take(game, entity, player); leave = result === "leave"; return result !== "refused"; },
+      complete: taken => {
+        if (!taken) return;
+        if (!originalRan) leave = definition.supply?.kind === "weapon"
+          ? game.pickupRules?.weaponLeave?.(game) ?? (game.options.coop || [2, 3, 5].includes(game.options.deathmatch))
+          : key !== null && game.options.coop;
+        if (!live()) return;
+        if (game.options.edition === "rerelease" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2) player.megaRotAt = game.time + 5;
+        game.sound(player.actor, definition.sound, "item");
+        if (!live()) return;
+        game.effect("pickup", game.body(entity).origin, player.actor.id);
+        if (!live()) return;
+        if (leave) { if (!entity.classname.startsWith("weapon_")) game.useTargets(entity, other); return; }
+        entity.solid = "none"; entity.model = ""; game.link(entity);
+        if (!live()) return;
+        const respawn = game.pickupRules?.respawn?.(game, entity, definition.respawn) ?? definition.respawn;
+        if (!live()) return;
+        const respawns = game.options.deathmatch !== 0 && respawn > 0 && (game.options.deathmatch !== 2 || entity.classname.startsWith("item_artifact_"));
+        if (game.options.edition === "classic" && entity.classname === "item_health" && (entity.spawnflags & 3) === 2) {
+          entity.owner = player.actor.id;
+          game.schedule(entity, 5, game.named.action(entity, "health_rot"));
+        } else if (respawns) game.schedule(entity, respawn, game.named.action(entity, "SUB_regen"));
+        else game.cancel(entity);
+        if (live()) game.useTargets(entity, other);
+      },
+    });
 }
 
 function placeItem(game: Q1EntityServices, entity: Q1Actor): undefined {

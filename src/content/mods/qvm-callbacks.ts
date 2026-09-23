@@ -5,10 +5,11 @@ import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import { readModClientInput } from "./client-input.ts";
 import { readQvmModPresentationDeclaration } from "./qvm-presentation.ts";
+import { readModPickupRule } from "./pickups.ts";
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move", "damage-flags", "regular-protection-scale") };
+    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move", "damage-flags", "regular-protection-scale", "pickup-count", "pickup-has-count", "pickup-dropped") };
     case "float": return { kind: "float", value: reader.field("value").number() };
     case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
     case "string": return { kind: "string", value: reader.field("value").string() };
@@ -132,6 +133,8 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
       client: combat.field("client").nullable(client => ({ pointer: client.field("pointer").integer(0), record: client.field("record").string(),
         health: client.field("health").integer(0), armor: client.field("armor").integer(0), protection: client.field("protection").number(), team: client.field("team").integer(0) })) } }),
     ...(reader.field("protection").value === undefined ? {} : { protection: reader.field("protection").list(protection) }),
+    ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(rule => ({ ...readModPickupRule(rule, sourceCall),
+      context: rule.field("context").list(field => ({ record: field.field("record").string(), offset: field.field("offset").integer(0), value: argument(field.field("value")) })) })) }),
     actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(), address: record.field("address").integer(1),
       stride: record.field("stride").integer(4), capacity: record.field("capacity").integer(1), fields: record.field("fields").list(field) })),
     initialize: reader.field("initialize").list(sourceCall), callbacks: reader.field("callbacks").list(reader => ({ ...binding(reader), ...sourceCall(reader) })) };
