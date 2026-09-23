@@ -117,6 +117,7 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1),
       records: clients.field("records").list(value => value.string()), playerStateRecord: clients.field("playerStateRecord").string(), admit: clients.field("admit").list(sourceCall),
       userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
+      ...(clients.field("frame").value === undefined ? {} : { frame: clients.field("frame").list(sourceCall) }),
       ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall, inputOutput) }) } }),
     entityRecord: reader.field("entityRecord").nullable(value => value.string()),
     ...(actors.value === undefined ? {} : { sourceActors: { allocate: actors.field("allocate").integer(0),

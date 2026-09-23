@@ -146,6 +146,7 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
   }
   for (const call of declaration.initialize) checkCall(call, new Set(["time"]));
   if (clients !== undefined) for (const call of [...clients.admit, ...clients.userinfo, ...clients.disconnect]) checkCall(call, new Set(["self", "time"]));
+  for (const call of clients?.frame ?? []) checkCall(call, new Set(["self", "time", "elapsed"]));
   for (const binding of clients?.input ?? []) {
     for (const call of binding.calls) checkCall(call, new Set(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"]));
     if (binding.phase === "before") for (const output of binding.outputs ?? []) {
@@ -811,15 +812,21 @@ export class QvmModProvider {
     }
   }
   advance(frame: FrameContext): undefined {
-    const source = this.declaration.sourceActors; if (source === undefined) { this.playerEvents.publish(); return undefined; }
+    this.current();
+    const source = this.declaration.sourceActors;
     const time = frame.time.kind === "seconds" ? frame.time.value : frame.time.value / 1000;
     const elapsed = frame.elapsed.kind === "seconds" ? frame.elapsed.value : frame.elapsed.value / 1000;
-    if (source.update !== null) for (const [actor] of [...this.owned].sort(([a], [b]) => (this.projections.get(a) ?? 0) - (this.projections.get(b) ?? 0))) {
-      if (this.services.actors.isLive(actor)) this.invoke(source.update, new Map<ModCallbackInput, ModRuntimeValue>([
+    const invoke = (call: QvmModSourceCall, actor: ActorId): void => {
+      this.invoke(call, new Map<ModCallbackInput, ModRuntimeValue>([
         ["self", { kind: "actor", value: actor }], ["time", { kind: "float", value: time }], ["elapsed", { kind: "float", value: elapsed }],
       ]));
+    };
+    if (source?.update != null) for (const [actor] of [...this.owned].sort(([a], [b]) => (this.projections.get(a) ?? 0) - (this.projections.get(b) ?? 0))) {
+      if (this.closed) return undefined;
+      if (this.services.actors.isLive(actor)) invoke(source.update, actor);
     }
-    this.publish(); return undefined;
+    if (!this.closed) this.clientBindings?.frame(invoke);
+    if (!this.closed) this.publish(); return undefined;
   }
   presentations(): readonly SimulationPresentation[] {
     const result: SimulationPresentation[] = [];

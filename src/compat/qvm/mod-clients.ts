@@ -112,6 +112,16 @@ export class QvmModClientBindings {
     this.entries.clear();
     for (const entry of entries) this.entries.set(entry.actor, { ...entry, client: this.operations.services.forActor(entry.actor) });
   }
+  frame(invoke: (call: QvmModSourceCall, actor: ActorId) => void): void {
+    const calls = this.operations.declaration.frame ?? [];
+    if (calls.length === 0) return;
+    const clients = [...this.entries.values()].filter(entry => entry.admitted && this.live(entry.actor))
+      .map(entry => this.require(entry.actor)).sort((a, b) => a.slot - b.slot);
+    for (const entry of clients) for (const call of calls) {
+      if (this.entries.get(entry.actor) !== entry || !this.live(entry.actor)) break;
+      invoke(call, entry.actor);
+    }
+  }
   players(): readonly QvmModClientSlot[] {
     return [...this.entries.values()].map(({ actor }) => { const { slot, admitted } = this.require(actor); return { actor, slot, admitted }; });
   }

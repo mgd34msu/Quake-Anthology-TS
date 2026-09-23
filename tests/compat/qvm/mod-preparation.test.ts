@@ -8,7 +8,7 @@ import { readQvmModCallbacks } from "../../../src/content/mods/qvm-callbacks.ts"
 import { digestBytes, openMountPlan } from "../../../src/content/mounts/index.ts";
 import { createMountIdentity } from "../../../src/contracts/content.ts";
 import type { ModDescription } from "../../../src/contracts/mods.ts";
-import type { QvmModCallbackDeclaration } from "../../../src/contracts/qvm-mod-callbacks.ts";
+import type { QvmModCallbackDeclaration, QvmModSourceCall } from "../../../src/contracts/qvm-mod-callbacks.ts";
 import type { QvmModPresentationDeclaration } from "../../../src/contracts/qvm-mod-presentation.ts";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 
@@ -38,6 +38,23 @@ const declarationDigest = digestBytes(new TextEncoder().encode(JSON.stringify({ 
 function prepare(value: QvmModPresentationDeclaration = presentation) {
   return prepareQvmMod({ description, declaration: { ...declaration, presentation: value }, declarationDigest, program, presentationProgram });
 }
+
+test("source client frames parse and qualify only original self/time/elapsed calls", () => {
+  const frame: QvmModSourceCall = { entry: 0, arguments: [{ kind: "actor", record: "entity", input: "self" },
+    { kind: "time", input: "time", units: "milliseconds", encoding: "int32" },
+    { kind: "time", input: "elapsed", units: "seconds", encoding: "float32" }], globals: [], returns: "void" };
+  const value = { ...declaration, entityRecord: "entity",
+    actorRecords: [{ id: "entity", address: 1024, stride: 600, capacity: 1, fields: [] },
+      { id: "client", address: 2048, stride: 1024, capacity: 1, fields: [] }],
+    clients: { maximum: 1, records: ["client"], playerStateRecord: "client", admit: [], userinfo: [], disconnect: [], frame: [frame] } };
+  const parsed = readQvmModCallbacks(new TextEncoder().encode(JSON.stringify(value)));
+  expect(parsed.clients?.frame).toEqual([frame]);
+  expect(() => prepareQvmMod({ description, declaration: parsed, declarationDigest, program })).not.toThrow();
+  const invalid = (entry: number, input: string) => readQvmModCallbacks(new TextEncoder().encode(JSON.stringify({ ...value,
+    clients: { ...value.clients, frame: [{ ...frame, entry, arguments: [{ kind: "actor", record: "entity", input }] }] } })));
+  expect(() => prepareQvmMod({ description, declaration: invalid(1, "self"), declarationDigest, program })).toThrow("source function entry");
+  expect(() => prepareQvmMod({ description, declaration: invalid(0, "other"), declarationDigest, program })).toThrow("actor argument");
+});
 
 test("inline source presentation prepares independently of the gameplay checkpoint identity", () => {
   const parsed = readQvmModCallbacks(new TextEncoder().encode(JSON.stringify({ ...declaration, presentation })));

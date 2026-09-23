@@ -111,6 +111,7 @@ export interface QvmModClients {
   readonly admit: readonly QvmModSourceCall[];
   readonly userinfo: readonly QvmModSourceCall[];
   readonly disconnect: readonly QvmModSourceCall[];
+  readonly frame?: readonly QvmModSourceCall[];
   readonly input?: readonly ModClientInputBinding<QvmModSourceCall, QvmModInputOutput>[];
 }
 

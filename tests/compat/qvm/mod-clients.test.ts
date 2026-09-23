@@ -5,6 +5,7 @@ import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import type { ActorId, ClientId } from "../../../src/contracts/identity.ts";
 import type { ModClientCommand, ModClientEvent, ModClientServices } from "../../../src/world/session/mod-clients.ts";
 import { ModClientApplications } from "../../../src/world/session/mod-client-applications.ts";
+import type { QvmModSourceCall } from "../../../src/contracts/qvm-mod-callbacks.ts";
 
 test("component clients route targeted effects and accepted commands through live identities", () => {
   const ids = createIdentityOwner("component-clients"), first = ids.actor(40, 1), second = ids.actor(7, 3);
@@ -50,6 +51,43 @@ test("component clients route targeted effects and accepted commands through liv
   expect(binding.slot(replacement)).toBe(0); expect(binding.getUserinfo(1)).toBe("new second");
   binding.sendServerCommand(0, "print replacement"); expect(messages.at(-1)).toEqual({ text: "print replacement", recipient: replacement });
   binding.close(); expect(listeners.size).toBe(0); expect(identities.size).toBe(2);
+});
+
+test("QVM server frame calls retain source order and stop captured clients on retirement, reuse, close or failure", () => {
+  const ids = createIdentityOwner("component-frame"), first = ids.actor(10, 1), second = ids.actor(20, 1), pending = ids.actor(30, 1);
+  const client = ids.client(1, 1), secondClient = ids.client(2, 1);
+  const identities = new Map<ClientId, ActorId>([[client, first], [secondClient, second], [ids.client(3, 1), pending]]);
+  const services: ModClientServices = { maximum: 3, clients: () => [],
+    forActor: actor => [...identities].find(([, value]) => value.equals(actor))?.[0] ?? null, actor: client => identities.get(client) ?? null,
+    userinfo: () => "", setUserinfo: () => {}, command: () => null, drop: () => {},
+    subscribe: () => () => undefined, subscribeApplication: () => () => undefined };
+  const calls: readonly QvmModSourceCall[] = [1, 2].map(entry => ({ entry, arguments: [], globals: [], returns: "void" }));
+  const binding = new QvmModClientBindings({ services, content: "q3:classic:component:test",
+    declaration: { maximum: 3, records: ["client"], playerStateRecord: "client", admit: [], userinfo: [], disconnect: [], frame: calls },
+    project: () => {}, release: () => {}, invoke: () => { throw new Error("Frame must use its server context"); },
+    playerState: () => readQvmPlayerState(new DataView(new ArrayBuffer(468))), send: () => {} });
+  const saved = [{ actor: second, slot: 1, admitted: true }, { actor: first, slot: 0, admitted: true }, { actor: pending, slot: 2, admitted: false }];
+  binding.restore(saved); binding.start();
+  const seen: string[] = [];
+  const observe = (call: QvmModSourceCall, actor: ActorId): void => { seen.push(`${actor.slot}:${call.entry}`); };
+  binding.frame(observe); expect(seen).toEqual(["10:1", "10:2", "20:1", "20:2"]);
+  const replacement = ids.actor(10, 2);
+  seen.length = 0;
+  binding.frame((call, actor) => {
+    observe(call, actor);
+    if (actor.equals(first)) { binding.forget(first); identities.set(client, replacement); expect(binding.slot(replacement)).toBe(0); }
+  });
+  expect(seen).toEqual(["10:1", "20:1", "20:2"]);
+  expect(binding.checkpoint().find(entry => entry.actor.equals(replacement))?.admitted).toBe(false);
+  seen.length = 0;
+  binding.frame((call, actor) => { observe(call, actor); identities.delete(secondClient); });
+  expect(seen).toEqual(["20:1"]);
+  identities.set(secondClient, second); identities.set(client, first); binding.restore(saved);
+  expect(() => binding.frame(() => { throw new Error("original frame failed"); })).toThrow("original frame failed");
+  seen.length = 0;
+  binding.frame((call, actor) => { observe(call, actor); binding.close(); });
+  expect(seen).toEqual(["10:1"]);
+  binding.frame(observe); expect(seen).toEqual(["10:1"]);
 });
 
 test("QVM input callbacks read nested applied commands and retire every scoped override", () => {
