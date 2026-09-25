@@ -384,7 +384,7 @@ export class ApplicationEffects {
     const current = (): boolean => !this.closed && !this.retiredOwners.has(ownerKey)
       && source.sequence > (this.ownerRevisions.get(ownerKey) ?? -1) && (this.ownerRevisions.get(ownerKey) ?? 0) === revision;
     if (!current()) return;
-    if (source.kind === "view-reset" || source.kind === "q2-player" || source.kind === "q1-level") return;
+    if (source.kind === "view-reset" || source.kind === "q2-player" || source.kind === "q1-level" || source.kind === "debug-graph") return;
     if (source.kind === "q3-ballistics") {
       if (source.event.kind === "rail-award") { this.reject(source, "Selected Q3 rail reward presentation has no source cgame binding"); return; }
       let effects = this.q3Weapons.get(source.content);

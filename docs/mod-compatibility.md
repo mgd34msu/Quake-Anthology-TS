@@ -438,3 +438,5 @@ Native primary declarations include ordered damage, armor and reaction arguments
 Original QC, QVM and native incoming damage retains its captured continuation only while the same actor lifetime and combat binding still own the target. A redirected hit or replaced binding uses the current target owner. Incoming source reentry does not apply the same registered transformation twice.
 
 Original Classic native damage participates in enabled damage-only components without requiring an armor component. Disabling the component restores ordinary source execution; re-enabling it does not duplicate the hook. Its lifetime follows the source session through retained travel and final teardown.
+
+Native component `DebugGraph` samples use the existing graph controls (`debuggraph`, `graphheight`, `graphscale`, `graphshift`) in any destination world. Each component uses its own mounted palette and graph history. Disabling or refreshing its presentation owner clears that graph; simultaneous component graphs occupy separate rows. Unified peers negotiate `qts:snapshot-v8` for these source-owned samples.

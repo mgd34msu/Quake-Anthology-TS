@@ -132,7 +132,12 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
     print: text => services.engine?.print(text), command: () => {
       currentCommand?.assertActive(); return { arguments: currentCommand?.argv ?? [], args: currentCommand?.argsText ?? "" };
     },
-    addCommand: text => { if (commands === null) return unavailable("command buffer"); commands.append(text, currentCommand?.source); return undefined; }, debugGraph: () => unavailable("debug graph") };
+    addCommand: text => { if (commands === null) return unavailable("command buffer"); commands.append(text, currentCommand?.source); return undefined; },
+    debugGraph: (value, color) => {
+      const engine = services.engine;
+      if (engine === undefined) return unavailable("destination presentation");
+      return engine.events.emit(options.source.content, { kind: "debug-graph", event: { kind: "sample", value, color } }, { kind: "seconds", value: runtime.now() });
+    } };
   const map = context.mapPath.replace(/^maps\//, "").replace(/\.bsp$/, "");
   if (prepared.edition === "classic") {
     const files = new ClassicOriginalSaveFiles(); let adapter: ClassicGuestServices | null = null;

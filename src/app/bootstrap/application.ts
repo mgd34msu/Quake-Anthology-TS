@@ -35,7 +35,8 @@ import type { ApplicationAudioSeatEvents } from "./audio.ts";
 import { createClassicQ2ApplicationServerHost } from "./simulation/network-q2-guest.ts";
 import { mkdirSync } from "node:fs";
 import { classicGuestFiles } from "./simulation/classic-guest-files.ts";
-import { SourceDebugGraph, type DebugGraphSettings } from "../../render/debug-graph.ts";
+import { SourceDebugGraph, debugGraphColor, type DebugGraphSettings } from "../../render/debug-graph.ts";
+import type { ComponentDrawings } from "./component-drawings.ts";
 import type { Draw2D } from "../../text/draw2d.ts";
 import { readStartupCommand } from "./startup-commands.ts";
 import { teamArenaDemo, type TeamArenaDemo } from "./team-arena-demo.ts";
@@ -1160,17 +1161,16 @@ export class Application {
       scale: cvars?.variableValue("graphscale") ?? 1, shift: cvars?.variableValue("graphshift") ?? 0 };
   }
 
-  private async createDebugGraphOverlay(assets: ApplicationAssets): Promise<(draw: Draw2D, view: Rect) => void> {
+  private async createDebugGraphOverlay(assets: ApplicationAssets): Promise<(draw: Draw2D, view: Rect, components: ComponentDrawings) => void> {
     const provider = await assets.provider(assets.content.recipe.presentation.assets);
-    return (draw, view) => {
-      if (provider.family !== "q2") return;
-      const palette = provider.palette;
-      if (palette === null) throw new Error("Quake II debug graph requires its mounted palette");
-      this.debugGraph.draw(draw, view, this.debugGraphSettings(), index => {
-        const offset = (index & 255) * 3, r = palette.colors[offset], g = palette.colors[offset + 1], b = palette.colors[offset + 2];
-        if (r === undefined || g === undefined || b === undefined) throw new Error("Incomplete debug graph palette");
-        return { x: r / 255, y: g / 255, z: b / 255, w: 1 };
-      }, { kind: "image", name: "white", image: assets.world.shaders.textures.white.image });
+    return (draw, view, components) => {
+      const settings = this.debugGraphSettings(), white = { kind: "image", name: "white", image: assets.world.shaders.textures.white.image } satisfies import("../../text/draw2d.ts").PictureAsset;
+      const occupied = components.drawGraphs(draw, view, settings, white);
+      if (provider.family === "q2" && occupied < view.height) {
+        const palette = provider.palette;
+        if (palette === null) throw new Error("Quake II debug graph requires its mounted palette");
+        this.debugGraph.draw(draw, { ...view, height: view.height - occupied }, settings, index => debugGraphColor(palette, index), white);
+      }
     };
   }
 

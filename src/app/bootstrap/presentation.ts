@@ -117,7 +117,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     private readonly viewSize: () => Q1ViewSettings | null = () => null,
     planarShadows: () => boolean = () => false,
     private readonly cameraOverride: (camera: SceneCamera) => SceneCamera = camera => camera,
-    private readonly graphOverlay: ((draw: Draw2D, view: Rect) => void) | null = null,
+    private readonly graphOverlay: ((draw: Draw2D, view: Rect, components: ComponentDrawings) => void) | null = null,
     private readonly nativeQ2?: { readonly frame: () => NativeQ2HudFrame; readonly ownsEffects: boolean }) {
     this.layoutIndex = local.player.seat.id.index;
     effects.bindRendererHardware(() => {
@@ -302,6 +302,11 @@ export class WorldSeatPresentation implements SeatPresentation {
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     this.componentMovementOrigin = snapshot.bodies.find(body => body.actor.equals(this.local.player.actor))?.body.origin ?? null;
     await this.prepareComponentClients();
+    await this.componentDrawings.prepareGraphs(async content => {
+      const provider = await this.assets.provider(content);
+      if (provider.palette === null) throw new Error("Native component debug graph requires its source palette");
+      return provider.palette;
+    });
     const bodies = [...this.componentEffects.values()].flatMap(owner => owner?.bodies?.() ?? []);
     const visiblePresentations = presentations.filter(presentation => presentation.renderOwner !== "source-client"
       && this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false);
@@ -473,7 +478,7 @@ export class WorldSeatPresentation implements SeatPresentation {
         if (overlay !== undefined && samePresentationOwner(overlay.owner, client.source.owner)) overlay.draw(this.frames, camera);
     }
     this.graphOverlay?.(draw, { x: camera.viewport.x - area.x, y: camera.viewport.y - area.y,
-      width: camera.viewport.width, height: camera.viewport.height });
+      width: camera.viewport.width, height: camera.viewport.height }, this.componentDrawings);
     if (this.local.input.focus.kind === "console") {
       const height = Math.trunc(this.viewport.height * 0.5);
       const logical = this.native.window.logicalSize, drawable = this.native.window.drawableSize;

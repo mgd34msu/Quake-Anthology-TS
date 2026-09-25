@@ -193,6 +193,7 @@ export type Q3CharacterPresentationEvent = Omit<Q3CharacterEvent, "actor"> & { r
 export type Q1ClientMetadataEvent = { readonly kind: "name" | "social" | "player-info"; readonly slot: number; readonly value: string }
   | { readonly kind: "colors" | "frags" | "ping"; readonly slot: number; readonly value: number };
 export type SourcePresentationEvent = { readonly kind: "presentation-owner"; readonly event: { readonly kind: "retired" | "refreshed"; readonly owner: PresentationOwner } }
+  | { readonly kind: "debug-graph"; readonly event: { readonly kind: "sample"; readonly value: number; readonly color: number } }
   | { readonly kind: "q1"; readonly event: Q1Event }
   | { readonly kind: "q1-sky"; readonly event: { readonly kind: "skybox"; readonly name: string } }
   | { readonly kind: "q1-client"; readonly event: Q1ClientMetadataEvent }

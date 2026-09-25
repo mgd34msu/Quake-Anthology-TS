@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Quake II cl_scrn.c: SCR_DebugGraph, SCR_DrawDebugGraph, CL_AddNetgraph.
 import type { Vec4 } from "../contracts/math.ts";
-import type { Rect } from "../contracts/render.ts";
+import type { Palette, Rect } from "../contracts/render.ts";
 import type { Draw2D, PictureAsset } from "../text/draw2d.ts";
 
 export interface DebugGraphSettings {
@@ -13,6 +13,11 @@ export interface DebugGraphSettings {
   readonly shift: number;
 }
 export interface DebugGraphBar { readonly rect: Rect; readonly color: number; }
+export function debugGraphColor(palette: Palette, index: number): Vec4 {
+  const offset = (index & 255) * 3, r = palette.colors[offset], g = palette.colors[offset + 1], b = palette.colors[offset + 2];
+  if (r === undefined || g === undefined || b === undefined) throw new Error("Incomplete debug graph palette");
+  return { x: r / 255, y: g / 255, z: b / 255, w: 1 };
+}
 export class SourceDebugGraph {
   private readonly values = new Float32Array(1024);
   private readonly colors = new Int32Array(1024);
