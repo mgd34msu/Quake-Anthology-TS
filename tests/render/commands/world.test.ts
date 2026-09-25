@@ -341,14 +341,15 @@ for (const fixture of cases) test.skipIf(!existsSync(`${root}/${fixture.archive}
         expect(surface.shader.finished.hasLightmapStage).toBe(true);
         expect(overridden.surfaces.some(other => other.shader === null)).toBe(true);
         const directed = { ...input, camera: { ...camera, origin: { x: surface.bounds.min.x, y: surface.bounds.min.y, z: surface.bounds.max.z + 32 } } };
-        const preparedOverride = overridden.prepareModel(0, { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }) }, directed);
+        const modelTransform = { origin: { x: 0, y: 0, z: 0 }, axis: anglesToAxis({ x: 0, y: 0, z: 0 }) };
+        const preparedOverride = overridden.prepareModel(0, modelTransform, directed);
         expect(finishSceneOperations(preparedOverride).some(operation => operation.kind === "draw" && operation.batches.some(batch => (batch.texture.kind === "bind-image" && batch.texture.image === surface.lightmap?.image || batch.texturing === "pair" && batch.secondTexture.binding.kind === "bind-image" && batch.secondTexture.binding.image === surface.lightmap?.image)))).toBe(true);
         const near = { origin: { x: (surface.bounds.min.x + surface.bounds.max.x) / 2,
           y: (surface.bounds.min.y + surface.bounds.max.y) / 2, z: (surface.bounds.min.z + surface.bounds.max.z) / 2 },
           radius: 512, color: { x: 1, y: 0.25, z: 0.1 }, additive: false };
         const far = { ...near, origin: { x: 100000, y: 100000, z: 100000 } };
         const projected = (lights: typeof near[]) => finishSceneOperations(overridden.prepareModel(0,
-          { origin: { x: 0, y: 0, z: 0 }, axis: camera.axis }, { ...directed, q3Lights: lights }))
+          modelTransform, { ...directed, q3Lights: lights }))
           .flatMap(operation => operation.kind === "draw" ? operation.batches : [])
           .filter(batch => batch.texture.kind === "bind-image" && batch.texture.image.source.kind === "generated" && batch.texture.image.source.name === "*dlight");
         const firstLight = projected([near]), secondLight = projected([far, near]);
