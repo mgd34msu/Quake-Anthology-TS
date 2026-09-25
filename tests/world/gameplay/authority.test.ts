@@ -42,6 +42,42 @@ function evaluate(actors: SessionActorRegistry, policy: CombatPolicy, request: D
 }
 
 describe("shared actor and gameplay authority", () => {
+  test("selected protection sees composed damage once across source and ported calls", () => {
+    const actors = new SessionActorRegistry(createIdentityOwner("selected-protection"));
+    const target = actors.allocate("q2:game", "q2:player"), attacker = actors.allocate("q1:game", "q1:player");
+    const requests: DamageRequest[] = [], decisions: DamageDecision[] = [];
+    let allowed = false, executions = 0, health = 100;
+    const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), {
+      damageAllowed: request => { requests.push(request); return allowed; },
+      impulse: () => undefined, beforeReaction: (_actor, decision) => { decisions.push(decision); return undefined; }, confirmed: () => undefined,
+    });
+    authority.create(target, state()); authority.create(attacker, state());
+    authority.register(createQ3CombatPolicy({ id: "q3:combat", context: () => q3Context,
+      armor: nativeVictimArmor(() => ({ screenFacingDot: 1, arithmetic: "binary64", q2: { product: "classic", ctf: false, alive: true } })) }));
+    authority.damageOperation.register({ provider: "q1:mod", id: "double:damage", order: 0, kind: "transform", transform: input => ({ ...input, amount: input.amount * 2 }) });
+    const original = (input: DamageRequest) => authority.runSourceDamage(input, (observer, request) => {
+      executions++;
+      const before = health; health -= request.amount;
+      observer.stored({ kind: "health", before, after: health });
+      return { appliedDamage: request.amount, reaction: "none" };
+    });
+    authority.apply(attack(target.id, attacker.id));
+    original(attack(target.id, attacker.id, 2));
+    authority.rebind(target, { sourceDamage: original, read: () => state(health),
+      writeHealth: value => { health = value; return undefined; }, writeArmor: () => undefined });
+    authority.apply(attack(target.id, attacker.id, 3));
+    expect(requests.map(request => request.amount)).toEqual([80, 80, 80]);
+    expect(executions).toBe(0); expect(health).toBe(100);
+    expect(decisions.map(decision => [decision.appliedDamage, decision.reaction, decision.mutations])).toEqual([
+      [0, "none", []], [0, "none", []], [0, "none", []],
+    ]);
+    allowed = true;
+    authority.apply(attack(target.id, attacker.id, 4, 7));
+    expect(requests).toHaveLength(4); expect(executions).toBe(1); expect(health).toBe(86);
+    expect(decisions[3]?.appliedDamage).toBe(14);
+    actors.close();
+  });
+
   test("restored damage admission preserves the existing authoritative store", () => {
     const actors = new SessionActorRegistry(createIdentityOwner("restored-admission"));
     const target = actors.allocate("q3:game", "q3:obelisk"), attacker = actors.allocate("q1:game", "q1:player");

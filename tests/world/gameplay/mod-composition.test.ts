@@ -146,21 +146,20 @@ test("source-owned damage consumes transformed arguments once and keeps nested c
   combat.damageOperation.register({ provider: "q1:mod", id: "scale:damage", order: 0, kind: "transform", transform: input => { transforms++; return { ...input, amount: input.amount * 2 }; } });
   combat.damageOperation.register({ provider: "q2:mod", id: "observe:damage", order: 0, kind: "observe", observe: () => { observations++; return undefined; } });
   combat.bindDamageAdmission(target, input => {
-    combat.runSourceDamage(input, (observer, effective) => {
+    combat.runSourceDamage(input, (_observer, effective) => {
       const before = combat.read(target.id)?.health;
       if (before === undefined) throw new Error("Missing source health");
       combat.setHealth(target, before - effective.amount);
-      observer.stored({ kind: "health", before, after: before - effective.amount });
       return { appliedDamage: effective.amount, reaction: "none" };
     });
     return "handled";
   });
   combat.apply(request(target.id, 4));
   expect(combat.read(target.id)?.health).toBe(92); expect(transforms).toBe(1); expect(observations).toBe(1);
-  combat.runSourceDamage(request(target.id, 3, 2), (observer, effective) => {
+  combat.runSourceDamage(request(target.id, 3, 2), (_observer, effective) => {
     const before = combat.read(target.id)?.health;
     if (before === undefined) throw new Error("Missing source health");
-    combat.setHealth(target, before - effective.amount); observer.stored({ kind: "health", before, after: before - effective.amount });
+    combat.setHealth(target, before - effective.amount);
     return { appliedDamage: effective.amount, reaction: "none" };
   });
   expect(combat.read(target.id)?.health).toBe(86); expect(transforms).toBe(2); expect(observations).toBe(2); actors.close();

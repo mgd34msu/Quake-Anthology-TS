@@ -1,4 +1,4 @@
-import type { ArmorStageInput, ProtectionObserver, ProtectionChannel, ArmorStageResult, ArmorState, RegularArmorState, PoweredProtectionState, CombatPolicy, CombatProgress, CombatState, DamageAuthority, DamageDecision, DamageMutation, DamageOutcome, DamageRequest, ItemId } from "../../contracts/gameplay.ts";
+import type { ArmorStageInput, ProtectionObserver, ProtectionChannel, ArmorStageResult, ArmorState, RegularArmorState, PoweredProtectionState, CombatPolicy, CombatProgress, CombatState, DamageAuthority, DamageDecision, DamageMutation, DamageOutcome, DamagePreparation, DamageRequest, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ActorCallbackTable } from "../actors/callbacks.ts";
@@ -66,6 +66,8 @@ export interface CombatStateBinding {
 }
 
 export interface GameplayHooks {
+  /** Selected equipment protection applies after mod composition, before source damage. */
+  damageAllowed?(request: DamageRequest): boolean;
   /** Applies at the source mutation site, including the selected movement provider's arithmetic. */
   impulse(actor: OwnedActor, impulse: Vec3, movement: ProviderId): undefined;
   /** Feedback and game-specific reactions run before the ordinary pain/death callback. */
@@ -421,6 +423,8 @@ export class GameplayAuthority implements DamageAuthority {
   private runSourceDamageCanonical(input: DamageRequest, execute: (observer: SourceDamageObserver, request: DamageRequest) => SourceDamageResult): DamageOutcome {
     const request = this.dispatchedDamage.has(input) ? input : captureRequest(input), target = this.actors.resolveOwned(request.target);
     if (target === null) return { kind: "stale-target", request };
+    const allowed = this.hooks.damageAllowed?.(request) !== false;
+    if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
     const binding = this.binding(target), initial = this.readState(target, binding);
     const cursor = this.openCursor(target, request, initial);
     const decision = (result: SourceDamageResult): DamageDecision => {
@@ -429,7 +433,7 @@ export class GameplayAuthority implements DamageAuthority {
     };
     let result: SourceDamageResult;
     try {
-      result = execute({
+      result = !allowed ? { appliedDamage: 0, reaction: "none" } : execute({
         stored: write => {
           if (write.kind === "armor") {
             const regular = this.protectionBinding(target, "regular"), powered = this.protectionBinding(target, "powered");
@@ -504,7 +508,10 @@ export class GameplayAuthority implements DamageAuthority {
     const adjustment = binding.adjustDamage?.(request);
     if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
     if (adjustment != null) request = captureRequest({ ...request, amount: adjustment.amount, knockback: adjustment.knockback });
-    const prepared = policy.prepare?.(request, this.readState(target, binding), request.attack.attacker === null ? null : this.read(request.attack.attacker));
+    const allowed = this.hooks.damageAllowed?.(request) !== false;
+    if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
+    const prepared: DamagePreparation | undefined = !allowed ? { kind: "cancel" }
+      : policy.prepare?.(request, this.readState(target, binding), request.attack.attacker === null ? null : this.read(request.attack.attacker));
     if (!this.actors.isLive(target.id)) return { kind: "stale-target", request };
     if (prepared?.kind === "continue" && !Number.isFinite(prepared.amount)) throw new RangeError("Prepared source damage must be finite");
     const initial = this.readState(target, binding);

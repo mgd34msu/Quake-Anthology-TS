@@ -13,7 +13,6 @@ import { returnQ3PersistentPowerup } from "../../../content/q3/base/game/death.t
 import { setInfoValue } from "../../../core/cvars/info.ts";
 import { Q2Ctf } from "../../../content/q2/multiplayer/ctf/index.ts";
 import { Q3SelectedSource, type Q3SelectedClientEffects } from "./arsenal/q3-source.ts";
-import type { CombatPolicy } from "../../../contracts/gameplay.ts";
 import { ConfigStringRegistry } from "../../../content/q3/base/game/utilities.ts";
 import { Team, GameType, statSchema } from "../../../content/q3/base/shared/definitions.ts";
 import { dropQ3TeleportObjectives } from "../../../content/q3/team-arena/client-events.ts";
@@ -581,6 +580,7 @@ export class SharedSimulation implements Simulation {
     this.inventory = new SharedInventoryTable(this.actors);
     this.events = new SimulationEvents(this.physics.bodies, () => this.sourceFrame.time, actor => this.player(actor)?.client ?? null, actor => this.actors.sourceOf(actor)?.slot ?? null, { content: this.recipe.map.entities.content, acceptedContents: new Set(this.recipe.mounts.mounts.map(mount => mount.identity.content)), entities: options.world.kind === "q1-bsp" ? options.world.entities : "", alive: actor => this.actors.resolveOwned(actor) !== null });
     this.combat = new GameplayAuthority(this.actors, this.callbacks, {
+      damageAllowed: request => this.selectedQ3Source?.blocksDamage(request) !== true,
       impulse: (actor, impulse, movement) => {
         const body = this.physics.bodies.read(actor.id);
         if (body === null) throw new Error("Damaged actor has no body");
@@ -746,7 +746,7 @@ export class SharedSimulation implements Simulation {
     }
     else if (this.source.kind === "q3") {
       this.source.game.host.cvars.clearModified("sv_maxclients");
-      if (providerFamily(this.recipe.combat.provider) === "q3") this.disposeSourceCombat = this.combat.register(this.selectedEquipmentCombat(this.source.game.bridge.policy()));
+      if (providerFamily(this.recipe.combat.provider) === "q3") this.disposeSourceCombat = this.combat.register(this.source.game.bridge.policy());
       this.source.game.load();
       this.source.game.host.cvars.clearModified("g_gametype");
     }
@@ -1735,11 +1735,6 @@ export class SharedSimulation implements Simulation {
     return delay === milliseconds ? seconds : delay / 1000;
   }
 
-  private selectedEquipmentCombat(policy: CombatPolicy): CombatPolicy {
-    return { ...policy, prepare: (request, target, attacker) => this.selectedQ3Source?.blocksDamage(request) === true ? { kind: "cancel" }
-      : policy.prepare?.(request, target, attacker) ?? { kind: "continue", amount: request.amount } };
-  }
-
   private createSelectedQ2Arsenal(): Q2SelectedArsenal {
     const product = this.weaponProvider.content.split(":")[2];
     if (product !== "baseq2" && product !== "xatrix" && product !== "rogue" && product !== "mg2") throw new Error("Selected Q2 arsenal has an unsupported source program");
@@ -2630,7 +2625,6 @@ export class SharedSimulation implements Simulation {
         actors: this.actors, callbacks: this.callbacks, physics: this.physics, combat: this.combat, inventory: this.inventory, pickups: this.originalPickups, events: this.events,
         random: this.random, skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients,
         initialSourceTimeSeconds: this.timeSeconds,
-        damageAllowed: request => this.selectedQ3Source?.blocksDamage(request) !== true,
         foreignClassname: actor => this.selectedQ3Source?.records.nativeByActor(actor)?.classname ?? this.classname(actor),
         ...(recipe.weapons.some(weapon => !isDeepStrictEqual(weapon, recipe.map.entities)) ? { clientSpawned: (actor: OwnedActor) => this.quakeCClientSpawned(actor) } : {}),
         pickupPolicy: () => this.selectedPickupPolicy,
@@ -2962,7 +2956,7 @@ export class SharedSimulation implements Simulation {
   private registerCombat(): undefined {
     const id = this.recipe.combat.provider;
     const armor = nativeVictimArmor(request => this.victimArmorContext(request));
-    if (providerFamily(id) === "q1") this.combat.register(this.selectedEquipmentCombat(createQ1CombatPolicy({ id, armor, sourceEffects: {
+    if (providerFamily(id) === "q1") this.combat.register(createQ1CombatPolicy({ id, armor, sourceEffects: {
       beforeQuad: (request, amount, target, attacker) => {
         const game = this.q1CombatSource();
         return game.damageSourceEffects.beforeQuad?.(request, amount, target, attacker) ?? { kind: "continue", amount };
@@ -2982,8 +2976,8 @@ export class SharedSimulation implements Simulation {
         const game = this.q1CombatSource();
         return game.damageSourceEffects.afterArmor?.(request, amount, target, attacker) ?? amount;
       } },
-      context: request => this.q1CombatSource().combatContext(request) })));
-    else if (providerFamily(id) === "q2") this.combat.register(this.selectedEquipmentCombat(createQ2CombatPolicy({ id, armor,
+      context: request => this.q1CombatSource().combatContext(request) }));
+    else if (providerFamily(id) === "q2") this.combat.register(createQ2CombatPolicy({ id, armor,
       ...(this.recipe.match.provider === "q2:ctf" || this.recipe.match.provider === "q2:lmctf" ? { sourceEffects: {
         beforeMomentum: (request, damage, target, attacker) => this.q2MatchDamageEffects().beforeMomentum?.(request, damage, target, attacker) ?? damage,
         powerArmorAllowed: (request, target, attacker) => this.q2MatchDamageEffects().powerArmorAllowed?.(request, target, attacker) ?? true,
@@ -2996,7 +2990,7 @@ export class SharedSimulation implements Simulation {
       hasEnemy: this.source.kind === "q2" && (this.source.game.entity(request.target)?.enemy ?? null) !== null, easySkill: this.options.skill === 0, deathmatch: this.options.mode === "deathmatch",
       defenderSphere: false,
       teamDamageEnabled: this.source.kind === "q2" && (this.recipe.match.provider === "q2:ctf" || this.recipe.match.provider === "q2:lmctf" || (this.source.game.options.deathmatchFlags & (64 | 128)) !== 0),
-      friendlyFire: this.q2ServerRegistry === null || (this.q2ServerRegistry.variableValue("dmflags") & 256) === 0, nuke: false, noKnockback: false, movable: !this.physics.isBrush(request.target), rejectTeamDamage: false, suppressPain: false }) })));
+      friendlyFire: this.q2ServerRegistry === null || (this.q2ServerRegistry.variableValue("dmflags") & 256) === 0, nuke: false, noKnockback: false, movable: !this.physics.isBrush(request.target), rejectTeamDamage: false, suppressPain: false }) }));
     return undefined;
   }
 
