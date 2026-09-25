@@ -1,6 +1,6 @@
 import { SaveReader } from "../../../persistence/value.ts";
 import type { VictimArmorContext } from "../../../world/gameplay/armor.ts";
-import type { AttackProvenance, CombatPolicy, CombatProgress, CurrentCombatState, CombatState, DamageDecision, DamageOutcome, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
+import type { AttackProvenance, CombatPolicy, CombatProgress, CurrentCombatState, CombatState, DamageDecision, DamageOutcome, DamageRequest, ItemId, SourceDamageModifier } from "../../../contracts/gameplay.ts";
 import type { ActorId, ProviderId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
@@ -25,6 +25,7 @@ interface CombatBridgeServices {
   readonly world: ServerWorld & ActorSpatialQueries;
   readonly weaponProvider: ProviderId;
   readonly damagePowerupOwner?: ProviderId;
+  readonly sourceDamageModifier?: SourceDamageModifier;
   readonly combatProvider: ProviderId;
   readonly inventoryProvider: ProviderId;
   readonly movementProvider: ProviderId;
@@ -62,7 +63,9 @@ export class Q3CombatBridge {
   constructor(readonly host: Q3CombatBridgeHost) {
     const shared = {
       authority: host.authority, entities: host.entities, spatial: host.world,
+      ...(host.sourceDamageModifier === undefined ? {} : { sourceDamageModifier: host.sourceDamageModifier }),
       actors: {
+        isLive: (actor: ActorId) => host.records.host.actors.isLive(actor),
         participant: (actor: ActorId) => host.records.damageInflictor(actor),
         parent: (actor: ActorId): ActorId | null => host.product === "missionpack" ? host.projectileParent(actor) : null,
         linkedBounds: (actor: ActorId) => host.records.host.bodies.linked(actor)?.absoluteBounds ?? null,

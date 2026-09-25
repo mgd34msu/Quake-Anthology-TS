@@ -3,7 +3,7 @@ import type { WeaponBehaviorLaunch, WeaponBehaviorProjectilePort } from "../../.
 import { describe, expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../../../src/contracts/identity.ts";
 import type { ActorId } from "../../../../../src/contracts/identity.ts";
-import type { DamageOutcome, InventoryEntry } from "../../../../../src/contracts/gameplay.ts";
+import type { DamageOutcome, InventoryEntry, SourceDamageModifier } from "../../../../../src/contracts/gameplay.ts";
 import type { Vec3 } from "../../../../../src/contracts/math.ts";
 import type { TraceResult } from "../../../../../src/contracts/scene.ts";
 import { SessionActorRegistry, ActorCallbackTable, SharedBodyTable, translatedBodyBounds } from "../../../../../src/world/actors/index.ts";
@@ -30,7 +30,7 @@ const input: Q2WeaponInput = {
   haste: false, noStackDouble: false, instantSwitch: false, quickSwitch: true, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false,
 };
 
-function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, infiniteAmmo = false, mode: "singleplayer" | "deathmatch" = "singleplayer", weaponBehavior?: WeaponBehaviorProjectilePort) {
+function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSeconds = 0.1, infiniteAmmo = false, mode: "singleplayer" | "deathmatch" = "singleplayer", weaponBehavior?: WeaponBehaviorProjectilePort, sourceDamageModifier?: SourceDamageModifier) {
   let now = 0;
   const actors = new SessionActorRegistry(createIdentityOwner(`q2-weapons-${edition}-${name}`));
   const callbacks = new ActorCallbackTable(actors);
@@ -70,9 +70,10 @@ function fixture(edition: Q2Edition, name: Q2WeaponName = "blaster", frameSecond
     emit: event => { presentation.push(event); return undefined; }, transition: () => undefined, diagnostic: message => { throw new Error(message); },
   };
   const game = new Q2Foundation(host, { edition, mapName: "weapon-check", skill: 1, mode, deathmatchFlags: infiniteAmmo ? 8192 : 0, maxClients: 1,
+    ...(sourceDamageModifier === undefined ? {} : { sourceDamageModifier }),
     provider: "q2:game", campaign: "q2:campaign", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, []);
   const self = game.attachPlayer(player);
-  const weapons = new Q2Weapons({ emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
+  const weapons = new Q2Weapons({ ...(sourceDamageModifier === undefined ? {} : { quadMultiplier: () => 1, sourceDamageMultiplier: () => 1 }), emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
     lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const state = weapons.bind(self, game, new Q2WeaponState(name));
   const definition = Q2_BASE_WEAPONS.find(weapon => weapon.name === name);
@@ -531,4 +532,40 @@ test("selected trajectory survives tracker primary aim while unselected tracker 
       expect(bolt.damage).toBe(50); expect(bolt.touch).toBe(touch); expect(bolt.nextThink).toBe(0.1);
     } finally { scene.actors.close(); }
   }
+});
+
+
+test("selected source damage executes at rocket impact after falloff and resolves retired attackers", () => {
+  let impactTime = 0;
+  const queries: { attacker: ActorId | null; amount: number; time: number }[] = [];
+  const scene = fixture("classic", "rocketlauncher", 0.1, false, "singleplayer", undefined, {
+    owner: "q1:original", transform: (attacker, amount) => {
+      queries.push({ attacker, amount, time: impactTime });
+      return attacker === null ? amount : Math.fround(amount * (impactTime < 0.5 ? 4 : 1) + 1);
+    } });
+  const direct = scene.target(100), splash = scene.target(140);
+  scene.step(0, { ...input, quadUntil: 0.5 }); scene.step(0.1, { ...input, quadUntil: 0.5 });
+  const rocket = [...scene.game.entities.values()].find(entity => entity.classname === "rocket");
+  if (rocket === undefined) throw new Error("Original selected rocket did not fire");
+  expect(rocket.damage).toBe(110); expect(rocket.radiusDamage).toBe(120); expect(queries).toHaveLength(0);
+  scene.game.move(rocket, { origin: { x: 100, y: 0, z: 0 } });
+  impactTime = 1;
+  rocket.touch?.(rocket, scene.game, { self: rocket.actor, other: direct.actor.id, plane, surface: null });
+  const hits = scene.outcomes.flatMap(outcome => outcome.kind === "committed" ? [outcome.decision.request] : []);
+  expect(hits.find(hit => hit.target.equals(direct.actor.id))?.amount).toBe(111);
+  const radial = hits.find(hit => hit.target.equals(splash.actor.id));
+  expect(radial?.amount).toBe(101); expect(radial?.knockback).toBe(100);
+  expect(radial?.attack.damagePowerupOwner).toBe("q1:original");
+  expect(queries.every(query => query.time === 1)).toBe(true);
+  expect(queries.some(query => query.amount === 100)).toBe(true);
+  const retained = scene.weapons.fireRocket(scene.self, scene.game, { x: 100, y: 0, z: 0 }, forward, 20, 650, 20, 20);
+  const original = scene.player.id; scene.actors.release(scene.player);
+  const replacement = scene.actors.allocate("q3:character", "q3:replacement");
+  expect(replacement.id.equals(original)).toBe(false);
+  queries.length = 0;
+  retained.touch?.(retained, scene.game, { self: retained.actor, other: direct.actor.id, plane, surface: null });
+  expect(queries[0]?.attacker).toBeNull(); expect(queries[0]?.amount).toBe(20);
+  const last = scene.outcomes.at(-1);
+  expect(last?.kind === "committed" ? last.decision.request.attack.attacker : "missing").toBeNull();
+  scene.actors.close();
 });

@@ -8,6 +8,7 @@ import { createMutableVectorMath } from "../../../core/math.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import { sameActor } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
+import { applySourceDamageModifier } from "../../../world/gameplay/damage-modifier.ts";
 import type { CombatState, DamageOutcome, DamagePreparation, DamageRequest, ItemId } from "../../../contracts/gameplay.ts";
 import type { PickupAdmission } from "../../../contracts/pickups.ts";
 import type { Q1CombatContext, Q1DamageSourceEffects } from "../../../world/gameplay/policies.ts";
@@ -406,11 +407,12 @@ export class Q1EntityServices {
     const point = targetBody?.origin ?? ZERO;
     const direction = normalize(vsub(point, source?.origin ?? point));
     const scaled = Math.fround(Math.fround(amount) * Math.fround(attacker === null ? 1 : this.host.sourceDamageMultiplier?.(attacker) ?? 1));
-    return this.host.combat.apply({ target, amount: scaled, knockback: scaled, direction, point, normal: ZERO, delivery,
+    const request = applySourceDamageModifier({ target, amount: scaled, knockback: scaled, direction, point, normal: ZERO, delivery,
       attack: { sequence: this.sequence++, time: { kind: "seconds", value: this.time }, attacker, inflictor,
         ...(this.host.sourceDamagePowerupOwner === undefined ? {} : { damagePowerupOwner: this.host.sourceDamagePowerupOwner }),
         weapon: weapon === null ? null : this.weaponItem(weapon), weaponProvider: this.provider, combatProvider: this.options.combatProvider,
-        inventoryProvider: this.options.inventoryProvider, movementProvider: this.options.movementProvider, cause: { kind: "q1", deathType, ...(armorEffect === undefined ? {} : { armorEffect }) } } });
+        inventoryProvider: this.options.inventoryProvider, movementProvider: this.options.movementProvider, cause: { kind: "q1", deathType, ...(armorEffect === undefined ? {} : { armorEffect }) } } }, this.host.sourceDamageModifier, actor => this.host.actors.isLive(actor));
+    return this.host.combat.apply({ ...request, knockback: request.amount });
   }
   powerupExpires(actor: ActorId, powerup: Q1Powerup): number {
     return this.host.powerupExpires?.(actor, powerup) ?? this.player(actor)?.powerups.get(powerup) ?? 0;

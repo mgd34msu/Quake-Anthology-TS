@@ -919,11 +919,10 @@ export class QuakeCSource {
     const words = this.entities.at(slot);
     return { maxHealth: words.float(this.field("max_health")), quadUntil: words.float(this.field("super_damage_finished")) };
   }
-  clientDamagePowerupFactor(actor: ActorId): number {
-    const slot = this.sourceSlot(actor);
-    if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC damage powerup client");
-    const reference = this.entities.reference(slot);
-    return this.damage.damageMultiplier(actor, reference, this.currentTime) ?? id1DamageMultiplier(this.machine, reference, reference);
+  damageAmount(actor: ActorId | null, amount: number): number {
+    const owner = actor ?? this.worldActor.id, reference = this.reference(owner);
+    return this.damage.damageAmount(owner, reference, this.currentTime, amount)
+      ?? Math.fround(Math.fround(amount) * Math.fround(id1DamageMultiplier(this.machine, reference, reference)));
   }
   clientPowerupExpires(actor: ActorId, powerup: "quad" | "invulnerability" | "invisibility" | "suit"): number {
     const slot = this.sourceSlot(actor);

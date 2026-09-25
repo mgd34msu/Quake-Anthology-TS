@@ -7,6 +7,7 @@ import { qcDamageCallLayout } from "./damage-call.ts";
 import { qcRegionPrivateWritesAreDead, qcStatementAccess } from "./armor-stage.ts";
 
 export interface QcDamageScale {
+  readonly kind: "multiplier" | "identity" | "transform";
   readonly region: QcInlineRegion;
   readonly scratch: readonly number[];
   readonly constants: readonly { readonly word: number; readonly bits: number }[];
@@ -18,7 +19,7 @@ const words = (start: number, length = 1): number[] => Array.from({ length }, (_
 const binary = new Set([QcOpcode.AddF, QcOpcode.SubF, QcOpcode.MulF, QcOpcode.DivF, QcOpcode.EqF, QcOpcode.NeF,
   QcOpcode.EqS, QcOpcode.NeS, QcOpcode.Le, QcOpcode.Ge, QcOpcode.Lt, QcOpcode.Gt, QcOpcode.And, QcOpcode.Or, QcOpcode.BitAnd, QcOpcode.BitOr]);
 
-/** Prove an attacker-only linear multiplier and its exact original suppression boundary. */
+/** Qualify the exact pure attacker policy and its original suppression boundary. */
 export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: ModQcDamageScale | undefined): QcDamageScale | null {
   if (source === undefined) return null;
   const reject = (reason: string): never => { throw new QcProgramError(`Unsupported QC damage scale: ${reason}`, program.source); };
@@ -63,7 +64,10 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
   for (const statement of program.statements) for (const word of qcStatementAccess(statement).write) mutable.add(word);
   const initial = new DataView(program.initialGlobals.buffer, program.initialGlobals.byteOffset, program.initialGlobals.byteLength), scratch = new Set<number>(), constants = new Set<number>();
   const merge = (left: Value, right: Value): Value => {
-    if (left.kind !== right.kind) return reject("control flow replaces damage with an independent value");
+    if (left.kind !== right.kind) {
+      if (source.kind === "transform" && left.kind !== "actor" && right.kind !== "actor") return { kind: "scaled", operations: 0, identity: false, powersOfTwo: false };
+      return reject("control flow replaces damage with an independent value");
+    }
     if (left.kind === "actor" && right.kind === "actor") return left;
     if (left.kind === "scalar" && right.kind === "scalar") return left.constant === right.constant ? { ...left,
       ...((left.origins?.length ?? 0) + (right.origins?.length ?? 0) === 0 ? {} : { origins: [...(left.origins ?? []), ...(right.origins ?? [])] }) } : scalar;
@@ -86,8 +90,8 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     if (values === undefined) return reject("missing source path");
     if (pc === source.exit) {
       const result = values.get(damage);
-      if (result?.kind !== "scaled") return reject("join does not retain scaled damage");
-      if (source.kind === "identity" && !result.identity) reject("identity region changes its original damage input");
+      if (result === undefined || result.kind === "actor" || source.kind !== "transform" && result.kind !== "scaled") return reject("join does not retain scalar damage");
+      if (source.kind === "identity" && (result.kind !== "scaled" || !result.identity)) reject("identity region changes its original damage input");
       joined = true; continue;
     }
     const statement = program.statements[pc]; if (statement === undefined) return reject("missing source instruction");
@@ -108,20 +112,23 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     const write = (word: number, value: Value): void => {
       if (!Number.isInteger(word) || word < 28 || word * 4 + 4 > initial.byteLength
         || word !== damage && (word >= fn.parameterStart && word < parameterEnd || named.has(word) && !(word >= parameterEnd && word < fn.parameterStart + fn.localWords))) reject("source write outside private frame");
-      if (word === damage && value.kind !== "scaled") reject("damage overwritten by independent value");
+      if (word === damage && (value.kind === "actor" || source.kind !== "transform" && value.kind !== "scaled")) reject("damage overwritten by independent value");
       scratch.add(word); values.set(word, value);
     };
-    if (opcode === QcOpcode.If || opcode === QcOpcode.IfNot) { independent(a); edge(pc, pc + signedQcBranch(b), values); }
+    if (opcode === QcOpcode.If || opcode === QcOpcode.IfNot) { if (source.kind === "transform") read(a); else independent(a); edge(pc, pc + signedQcBranch(b), values); }
     else if (opcode === QcOpcode.Goto) { edge(pc, pc + signedQcBranch(a), values); continue; }
     else if (opcode === QcOpcode.LoadF || opcode === QcOpcode.LoadS) {
       if (read(a).kind !== "actor") reject("entity reads must belong to the original attacker");
       independent(b); write(c, scalar);
     }
     else if (opcode === QcOpcode.StoreF || opcode === QcOpcode.StoreEnt || opcode === QcOpcode.StoreS) write(b, read(a));
-    else if (opcode === QcOpcode.NotF || opcode === QcOpcode.NotS || opcode === QcOpcode.NotEnt) { independent(a); write(c, scalar); }
+    else if (opcode === QcOpcode.NotF || opcode === QcOpcode.NotS || opcode === QcOpcode.NotEnt) { const value = source.kind === "transform" ? read(a) : independent(a); write(c, value.kind === "scaled" ? { ...value, identity: false } : scalar); }
     else if (binary.has(opcode)) {
       const left = read(a), right = read(b);
-      if (left.kind !== "scaled" && right.kind !== "scaled") write(c, scalar);
+      if (source.kind === "transform") {
+        if (left.kind === "actor" || right.kind === "actor") reject("damage arithmetic cannot consume entity references");
+        write(c, left.kind === "scaled" || right.kind === "scaled" ? { kind: "scaled", operations: 0, identity: false, powersOfTwo: false } : scalar);
+      } else if (left.kind !== "scaled" && right.kind !== "scaled") write(c, scalar);
       else {
         const scaled = left.kind === "scaled" ? left : right, factor = left.kind === "scalar" ? left : right;
         if (scaled.kind !== "scaled" || factor.kind !== "scalar" || opcode !== QcOpcode.MulF && opcode !== QcOpcode.DivF || opcode === QcOpcode.DivF && left.kind !== "scaled")
@@ -136,7 +143,7 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     } else return reject("region must contain only source reads and scalar frame operations");
     edge(pc, pc + 1, values);
   }
-  if (!joined || source.kind !== "identity" && !multiplied) reject("region has no original multiplicative result");
+  if (!joined || source.kind !== "identity" && source.kind !== "transform" && !multiplied) reject("region has no original multiplicative result");
   for (let pc = fn.firstStatement; pc < end; pc++) {
     if (pc >= source.entry && pc < source.exit) continue;
     const statement = program.statements[pc]; if (statement === undefined) continue;
@@ -148,25 +155,30 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
   }
   const privateWrites = new Set(scratch); privateWrites.delete(damage);
   if (!qcRegionPrivateWritesAreDead(program, source.exit, end, privateWrites)) reject("private scale outputs remain live after suppression");
-  return Object.freeze({ call, scratch: Object.freeze([...scratch]), constants: Object.freeze([...constants].map(word => Object.freeze({ word, bits: initial.getInt32(word * 4, true) }))), region: Object.freeze({ functionIndex: fn.index, entry: source.entry, exit: source.exit,
+  return Object.freeze({ kind: source.kind ?? "multiplier", call, scratch: Object.freeze([...scratch]), constants: Object.freeze([...constants].map(word => Object.freeze({ word, bits: initial.getInt32(word * 4, true) }))), region: Object.freeze({ functionIndex: fn.index, entry: source.entry, exit: source.exit,
     replaceable: true, standalone: Object.freeze({ saved: damage }) }) });
 }
 
 /** Borrow only the qualified original frame and scratch words, restoring them before returning. */
 export function evaluateQcDamageScale(machine: QcMachine, scale: QcDamageScale, owner: ActorId, actorReference: number, seconds: number): number {
+  if (scale.kind === "transform") throw new QcProgramError("Original QC amount transform cannot be queried as a multiplier");
+  return evaluateQcDamageAmount(machine, scale, owner, actorReference, seconds, 1);
+}
+
+export function evaluateQcDamageAmount(machine: QcMachine, scale: QcDamageScale, owner: ActorId, actorReference: number, seconds: number, amount: number): number {
   const actor = { kind: "actor", value: owner } satisfies ModRuntimeValue;
   const inputs = new Map<ModCallbackInput, ModRuntimeValue>([["self", actor], ["attacker", actor], ["inflictor", actor],
-    ["amount", { kind: "float", value: 1 }], ["time", { kind: "float", value: seconds }]]);
+    ["amount", { kind: "float", value: amount }], ["time", { kind: "float", value: seconds }]]);
   for (const { word, bits } of scale.constants) if (machine.globals.int(word) !== bits)
     throw new QcProgramError("Original QC scaling constant changed after qualification");
   const scratch = scale.scratch.map(word => ({ word, value: machine.globals.int(word) }));
   try {
-    const factor = withQcSourceCall(machine, scale.call, inputs, actor => {
+    const result = withQcSourceCall(machine, scale.call, inputs, actor => {
       if (actor === null) return machine.entities.reference(0);
       if (!actor.equals(owner)) throw new QcProgramError("QC damage scale changed its source attacker");
       return actorReference;
     }, count => machine.executeRegion(scale.region, count));
-    if (!Number.isFinite(factor) || factor < 0) throw new QcProgramError("Original QC damage multiplier is not finite and nonnegative");
-    return factor;
+    if (!Number.isFinite(result) || result < 0) throw new QcProgramError("Original QC damage amount is not finite and nonnegative");
+    return result;
   } finally { for (const { word, value } of scratch) machine.globals.setInt(word, value); }
 }

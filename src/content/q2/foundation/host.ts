@@ -1,7 +1,7 @@
 import type { WeaponBehaviorProjectilePort, WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
 /* Q2 gameplay provider boundary. Gameplay logic is adapted from id Software's
  * Quake II game and the rerelease game DLL. GPL-2.0-or-later. */
-import type { AttackProvenance, DamageOutcome, ItemId, TransitionIntent } from "../../../contracts/gameplay.ts";
+import type { AttackProvenance, DamageOutcome, ItemId, SourceDamageModifier, TransitionIntent } from "../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
 import type { TraceResult } from "../../../contracts/scene.ts";
@@ -26,6 +26,7 @@ export interface Q2GameOptions {
   readonly maxClients: number;
   readonly provider: ProviderId;
   readonly damagePowerupOwner?: ProviderId;
+  readonly sourceDamageModifier?: SourceDamageModifier;
   readonly campaign: ProviderId;
   readonly combatProvider: ProviderId;
   readonly inventoryProvider: ProviderId;

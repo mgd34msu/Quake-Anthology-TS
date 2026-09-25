@@ -28,14 +28,14 @@ function changedProgram(program: QcProgram, statements: readonly QcStatement[]):
 }
 function run(program: QcProgram, observed: boolean, variant: "normal" | "death" | "empathy" | "wetsuit", mods?: (authority: GameplayAuthority, actors: SessionActorRegistry) => void,
   scaling?: { readonly declaration: NonNullable<ModCallbackDeclaration["combat"]>; readonly quad: boolean; readonly strength: boolean;
-    readonly resistance: boolean; readonly owner?: ProviderId },
+    readonly resistance: boolean; readonly owner?: ProviderId; readonly time?: number },
   nativeCall?: { readonly amount?: number; readonly worldAttacker?: boolean; readonly extra?: { readonly index: number; readonly value: number } }) {
   const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 3);
   const actors = new SessionActorRegistry(createIdentityOwner(`mod-${observed}-${variant}`));
   const slots = new SourceActorSlots(actors, { provider: "test:qc", capacity: 8, lifetime: quakeEdictLifetime(1),
     storage: createQcSourceSlotStorage({ program, entities }, { freeOffsetBytes: 0, freeTimeOffsetBytes: 92 }),
     now: () => ({ kind: "seconds", value: 3 }), unlink: () => undefined, exhausted: () => { throw new Error("No slots"); } });
-  slots.bindExisting(0, "test:world");
+  const world = slots.bindExisting(0, "test:world");
   const attacker = slots.bindExisting(1, "test:attacker"), target = slots.bindExisting(2, "test:target");
   const outcomes: DamageOutcome[] = [];
   const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), {
@@ -81,24 +81,28 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
     entities.at(2).setFloat(field("wetsuit_finished"), 10);
     vm.globals.setFloat(vm.globalOffset("discharged"), 1);
   }
-  let factor: number | null = null;
+  let factor: number | null = null, transformed: number | null = null;
+  const amount = nativeCall?.amount ?? (variant === "death" ? 150 : 40), hitTime = scaling?.time ?? 3;
   if (scaling !== undefined) {
     entities.at(1).setFloat(field("super_damage_finished"), scaling.quad ? 10 : 0);
     entities.at(1).setFloat(field("player_flag"), scaling.strength ? 2 : 0);
     entities.at(2).setFloat(field("player_flag"), scaling.resistance ? 1 : 0);
-    entities.at(2).setFloat(field("invincible_sound"), 10);
+    entities.at(2).setFloat(field("invincible_sound"), hitTime + 10);
     entities.at(2).setFloat(field("health"), 1000);
     entities.at(2).setFloat(field("armorvalue"), 0); entities.at(2).setFloat(field("armortype"), 0);
     if (observed) {
       const globals = vm.globals.bytes.slice(), state = entities.bytes.slice();
-      factor = binding.damageMultiplier(attacker.id, entities.reference(1), 3);
+      const queryActor = nativeCall?.worldAttacker ? world : attacker, queryReference = entities.reference(nativeCall?.worldAttacker ? 0 : 1);
+      if (scaling.declaration.damageScale?.kind !== "transform") factor = binding.damageMultiplier(queryActor.id, queryReference, hitTime);
+      else expect(() => binding.damageMultiplier(queryActor.id, queryReference, hitTime)).toThrow("cannot be queried as a multiplier");
+      transformed = binding.damageAmount(queryActor.id, queryReference, hitTime, amount);
       expect(vm.globals.bytes).toEqual(globals); expect(entities.bytes).toEqual(state);
     }
   }
-  vm.globals.setFloat(vm.globalOffset("time"), 3); vm.globals.setInt(vm.globalOffset("self"), entities.reference(2));
+  vm.globals.setFloat(vm.globalOffset("time"), hitTime); vm.globals.setInt(vm.globalOffset("self"), entities.reference(2));
   const sourceCall = id1ProgramBinding(program).damage.call;
   const values = { self: entities.reference(2), inflictor: entities.reference(1), attacker: entities.reference(nativeCall?.worldAttacker ? 0 : 1),
-    amount: (nativeCall?.amount ?? (variant === "death" ? 150 : 40)) * (scaling?.owner === "test:qc" ? factor ?? 1 : 1) };
+    amount: scaling?.owner === "test:qc" ? transformed ?? amount : amount };
   vm.globals.setFloat(16, 0);
   for (const role of ["self", "inflictor", "attacker", "amount"] satisfies readonly (keyof typeof values)[])
     for (const location of sourceCall.roles[role]) {
@@ -108,7 +112,7 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
   if (nativeCall?.extra !== undefined) vm.globals.setFloat(4 + nativeCall.extra.index * 3, nativeCall.extra.value);
   vm.execute(sourceCall.functionIndex, sourceCall.parameters.length);
   const attackerContext = sourceCall.roles.attacker.map(location => location.kind === "global" ? vm.globals.int(location.word) : null);
-  return { factor, attackerContext, sourceAttacker: entities.reference(1), bytes: entities.bytes.slice(), outcomes, health: entities.at(2).float(field("health")), attackerHealth: entities.at(1).float(field("health")) };
+  return { factor, transformed, attackerContext, sourceAttacker: entities.reference(1), bytes: entities.bytes.slice(), outcomes, health: entities.at(2).float(field("health")), attackerHealth: entities.at(1).float(field("health")) };
 }
 test("registered transforms change actual QC damage arguments after saved call staging", async () => {
   const program = await readProgram("id1/PAK0.PAK");
@@ -324,6 +328,44 @@ test("declared attacker scaling queries original rune and quad paths once while 
   const nonLinear = changedProgram(program, statements);
   expect(() => qcDamageScale(nonLinear, declaration.damage, { ...scale, statements: statements.slice(scale.entry, scale.exit + 1) })).toThrow("nonmultiplicative");
   expect(() => qcDamageScale(nonLinear, declaration.damage, scale)).toThrow("differ");
+  const operation = { ...declaration, damageScale: { ...scale, kind: "transform", statements: statements.slice(scale.entry, scale.exit + 1) } } satisfies NonNullable<ModCallbackDeclaration["combat"]>;
+  validateQcModCombat(nonLinear, operation);
+  const transformedOptions = { declaration: operation, quad: true, strength: true, resistance: true };
+  const originalTransform = run(nonLinear, false, "normal", undefined, transformedOptions);
+  const selectedTransform = run(nonLinear, true, "normal", undefined, { ...transformedOptions, owner: "test:qc" });
+  expect(selectedTransform.transformed).toBe(88); expect(selectedTransform.health).toBe(956);
+  expect(selectedTransform.bytes).toEqual(originalTransform.bytes);
+  // Original current time at impact removes Quad's addition without removing Strength.
+  const expired = { ...transformedOptions, time: 12 };
+  const expiredSelected = run(nonLinear, true, "normal", undefined, { ...expired, owner: "test:qc" });
+  expect(expiredSelected.transformed).toBe(80);
+  expect(expiredSelected.bytes).toEqual(run(nonLinear, false, "normal", undefined, expired).bytes);
+  const worldSelected = run(nonLinear, true, "normal", undefined, { ...transformedOptions, owner: "test:qc" }, { worldAttacker: true });
+  expect(worldSelected.transformed).toBe(40);
+  expect(worldSelected.bytes).toEqual(run(nonLinear, false, "normal", undefined, transformedOptions, { worldAttacker: true }).bytes);
+  const dependentStatements = statements.map((statement, index) => index === 2958 ? { ...statement, b: scale.damage } : statement);
+  const dependent = changedProgram(program, dependentStatements);
+  const dependentDeclaration = { ...operation, damageScale: { ...operation.damageScale, statements: dependentStatements.slice(scale.entry, scale.exit + 1) } };
+  validateQcModCombat(dependent, dependentDeclaration);
+  for (const amount of [6, 12]) {
+    const options = { ...transformedOptions, declaration: dependentDeclaration };
+    const selected = run(dependent, true, "normal", undefined, { ...options, owner: "test:qc" }, { amount });
+    expect(selected.transformed).toBe(amount < 10 ? (amount + 4) * 2 : amount * 2);
+    expect(selected.bytes).toEqual(run(dependent, false, "normal", undefined, options, { amount }).bytes);
+  }
+  const initial = new DataView(program.initialGlobals.buffer, program.initialGlobals.byteOffset, program.initialGlobals.byteLength);
+  const three = program.globals.find(global => global.type === "float" && initial.getFloat32(global.offset * 4, true) === 3);
+  if (three === undefined) throw new Error("Original source constant three is missing");
+  const roundedStatements = program.statements.map((statement, index) => index === 2960 ? { ...statement, opcode: QcOpcode.DivF, b: three.offset } : statement);
+  const rounded = changedProgram(program, roundedStatements);
+  const roundedDeclaration = { ...operation, damageScale: { ...operation.damageScale, statements: roundedStatements.slice(scale.entry, scale.exit + 1) } };
+  validateQcModCombat(rounded, roundedDeclaration);
+  const roundedOptions = { ...transformedOptions, declaration: roundedDeclaration };
+  const roundedSelected = run(rounded, true, "normal", undefined, { ...roundedOptions, owner: "test:qc" }, { amount: 0.3 });
+  expect(roundedSelected.transformed).toBe(Math.fround(Math.fround(Math.fround(0.3) / 3) * 2));
+  expect(roundedSelected.transformed).not.toBe(Math.fround(Math.fround(0.3) * Math.fround(Math.fround(1 / 3) * 2)));
+  expect(roundedSelected.bytes).toEqual(run(rounded, false, "normal", undefined, roundedOptions, { amount: 0.3 }).bytes);
+
 });
 
 

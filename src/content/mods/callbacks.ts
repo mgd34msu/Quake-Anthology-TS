@@ -97,7 +97,7 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
 export function readQcCombat(reader: SaveReader): NonNullable<ModCallbackDeclaration["combat"]> {
   const scale = reader.field("damageScale");
   return { damage: sourceCall(reader.field("damage")),
-    ...(scale.value === undefined ? {} : { damageScale: { ...(scale.field("kind").value === undefined ? {} : { kind: scale.field("kind").choice("multiplier", "identity") }), function: scale.field("function").string(), entry: scale.field("entry").integer(0), exit: scale.field("exit").integer(0), damage: scale.field("damage").integer(28),
+    ...(scale.value === undefined ? {} : { damageScale: { ...(scale.field("kind").value === undefined ? {} : { kind: scale.field("kind").choice("multiplier", "identity", "transform") }), function: scale.field("function").string(), entry: scale.field("entry").integer(0), exit: scale.field("exit").integer(0), damage: scale.field("damage").integer(28),
       statements: scale.field("statements").list(at => ({ opcode: at.field("opcode").integer(0), a: at.field("a").integer(), b: at.field("b").integer(), c: at.field("c").integer() })) } }),
     ...(reader.field("armorStage").value === undefined ? {} : { armorStage: armorStage(reader.field("armorStage")) }),
     ...(reader.field("emptyArmor").value === undefined ? {} : { emptyArmor: { item: reader.field("emptyArmor").field("item").choice("q1:item_armor1", "q1:item_armor2", "q1:item_armorInv"), absorption: reader.field("emptyArmor").field("absorption").finite() } }) };

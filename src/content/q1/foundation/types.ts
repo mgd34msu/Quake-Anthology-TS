@@ -3,7 +3,7 @@ import type { WeaponBehaviorProjectilePort } from "../../../contracts/weapon-beh
  * Copyright (C) 1996-2022 id Software LLC. GPL-2.0-or-later. */
 import type { ActorId, OwnedActor, ProviderId } from "../../../contracts/identity.ts";
 import type { Bounds, Vec3 } from "../../../contracts/math.ts";
-import type { ItemId, TransitionIntent } from "../../../contracts/gameplay.ts";
+import type { ItemId, SourceDamageModifier, TransitionIntent } from "../../../contracts/gameplay.ts";
 import type { SessionActorRegistry, SharedBodyTable, ActorCallbackTable } from "../../../world/actors/index.ts";
 import type { GameplayAuthority } from "../../../world/gameplay/authority.ts";
 import type { SharedInventoryTable } from "../../../world/gameplay/inventory.ts";
@@ -122,6 +122,7 @@ export interface Q1FoundationHost {
   powerup(actor: OwnedActor, powerup: Q1Powerup, expiresSeconds: number): undefined;
   powerupExpires?(actor: ActorId, powerup: Q1Powerup): number;
   sourceDamageMultiplier?(attacker: ActorId): number;
+  readonly sourceDamageModifier?: SourceDamageModifier;
   readonly sourceDamagePowerupOwner?: ProviderId;
 }
 export interface Q1FoundationOptions {

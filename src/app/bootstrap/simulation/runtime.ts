@@ -1443,6 +1443,12 @@ export class SharedSimulation implements Simulation {
     } finally { this.currentQvmArsenalApplication = previous; }
   }
 
+  private qcDamageModifier(): import("../../../contracts/gameplay.ts").SourceDamageModifier {
+    const source = this.source;
+    if (source.kind !== "quakec") throw new Error("QC damage modifier lost its original source");
+    return { owner: this.recipe.map.entities.provider, transform: (attacker, amount) => source.game.damageAmount(attacker, amount) };
+  }
+
   private createSelectedQ3Arsenal(): Q3SelectedArsenal {
     const product = this.weaponProvider.content.includes(":missionpack:") ? "missionpack" : "baseq3";
     const timing = providerTiming(this.recipe, this.weaponProvider.provider).clock;
@@ -1469,7 +1475,7 @@ export class SharedSimulation implements Simulation {
     const equipment: import("./arsenal/q3-source.ts").Q3SelectedSourceHost["equipment"] = { kind: primaryEquipment ? "primary" : "source" };
     const weaponEffects: import("./arsenal/q3-source.ts").Q3SelectedSourceHost["weaponEffects"] = primaryEquipment || this.source.kind === "quakec" || this.source.kind === "q2-native" || this.source.kind === "q3-qvm" ? {
       damageFactor: actor => {
-        if (this.source.kind === "quakec") return this.source.game.clientDamagePowerupFactor(actor);
+        if (this.source.kind === "quakec") return 1;
         if (this.source.kind === "q2-native") return this.requireNativeWeapons().damageFactor(actor);
         if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(actor);
         if (this.source.kind !== "q3") throw new Error("Primary Q3 equipment lost its source");
@@ -1487,7 +1493,7 @@ export class SharedSimulation implements Simulation {
         return q3WeaponDelay(milliseconds, client.persistantPowerup?.item?.tag ?? 0, client.ps.powerups.get(Powerup.PW_HASTE) !== 0);
       } } : undefined;
     const source = new Q3SelectedSource({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
-      ...(this.source.kind === "quakec" ? { damagePowerupOwner: this.recipe.map.entities.provider } : {}),
+      ...(this.source.kind === "quakec" ? { sourceDamageModifier: this.qcDamageModifier() } : {}),
       queries: this.scene, weaponBehavior: this.weaponBehavior, provider: this.weaponProvider.provider, product, equipment, ...(weaponEffects === undefined ? {} : { weaponEffects }), content: this.weaponProvider.content,
       configstrings: config.store, userinfo: actor => this.sourcePlayerUserinfo(actor) ?? "", maxClients: this.options.maxClients, seed: this.options.seed, now: () => this.selectedQ3Time,
       worldActor: () => { const actor = this.worldActor(), owner = actor === null ? null : this.actors.resolveOwned(actor); if (owner === null) throw new Error("Selected Q3 source has no map world"); return owner; },
@@ -1521,7 +1527,7 @@ export class SharedSimulation implements Simulation {
         const nativeTarget = this.source.game.records.nativeByActor(target.actor.id), nativeAttacker = this.source.game.records.nativeByActor(attacker.actor.id);
         return nativeTarget !== null && nativeAttacker !== null && this.source.game.team.checkObeliskAttack(nativeTarget, nativeAttacker);
       },
-      quadFactor: actor => this.source.kind === "quakec" && actor !== undefined ? this.source.game.clientDamagePowerupFactor(actor) : this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
+      quadFactor: () => this.source.kind === "quakec" ? 1 : this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
       proximityTimeout: () => this.source.kind === "q3" ? this.source.game.host.cvars.variableValue("g_proxMineTimeout") : 20000,
       modelIndex: path => config.modelIndex(path), soundIndex: path => config.soundIndex(path),
       print: text => { this.events.message({ kind: "print", level: 2, text }); },
@@ -1815,7 +1821,7 @@ export class SharedSimulation implements Simulation {
     const runtime: ActorHostRuntime = { numeric: timing.numeric, random, now: () => seconds(current().frame.time),
       frameSeconds: () => intervalMilliseconds / 1000, schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) };
     const game = new Q2EntityServices(this.q2ActorHost(this.weaponProvider, runtime, () => undefined), {
-      ...(this.source.kind === "quakec" ? { damagePowerupOwner: this.recipe.map.entities.provider } : {}),
+      ...(this.source.kind === "quakec" ? { sourceDamageModifier: this.qcDamageModifier() } : {}),
       provider: this.weaponProvider.provider, edition, mapName: this.recipe.map.geometry.requestedPath, skill: this.options.skill,
       mode: this.options.mode, deathmatchFlags: 0, maxClients: this.options.maxClients, campaign: this.recipe.map.entities.provider,
       combatProvider: this.recipe.combat.provider, inventoryProvider: this.recipe.inventory.provider, movementProvider: this.recipe.movement.provider }, []);
@@ -1828,7 +1834,7 @@ export class SharedSimulation implements Simulation {
       return undefined;
     }, dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace), quadMultiplier: () => this.source.kind === "quakec" ? 1 : this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
       sourceDamageMultiplier: actor => {
-        if (this.source.kind === "quakec") return this.source.game.clientDamagePowerupFactor(actor);
+        if (this.source.kind === "quakec") return 1;
         if (this.source.kind === "q2-native") return this.requireNativeWeapons().damageFactor(actor);
         if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(actor);
         const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
@@ -1892,13 +1898,14 @@ export class SharedSimulation implements Simulation {
       return 0;
     };
     const game = new Q1EntityServices({ ...host, powerupExpires,
-      ...(this.source.kind === "q3" || this.source.kind === "q3-qvm" || this.source.kind === "quakec" ? { sourceDamagePowerupOwner: this.recipe.map.entities.provider } : {}),
+      ...(this.source.kind === "quakec" ? { sourceDamageModifier: this.qcDamageModifier() } : {}),
+      ...(this.source.kind === "q3" || this.source.kind === "q3-qvm" ? { sourceDamagePowerupOwner: this.recipe.map.entities.provider } : {}),
       weaponVolume: actor => (this.q2ItemWeaponSource()?.weapons.silencerShots(actor) ?? 0) > 0 ? 0.2 : 1,
       weaponImpact: (actor, origin) => this.source.kind === "q2" ? this.source.weapons.playerNoiseForActor(actor, this.source.game, origin, "impact") : undefined,
       sourceDamageMultiplier: attacker => {
         if (this.source.kind === "q2-native") return this.requireNativeWeapons().damageFactor(attacker);
         if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(attacker);
-        if (this.source.kind === "quakec") return this.source.game.clientDamagePowerupFactor(attacker);
+        if (this.source.kind === "quakec") return 1;
         if (this.source.kind === "q3") {
           const client = this.source.game.records.nativeByActor(attacker)?.client;
           return client == null ? 1 : q3WeaponDamageFactor(client, this.source.game.quadDamageFactor(), client.ps.product);
@@ -2408,6 +2415,7 @@ export class SharedSimulation implements Simulation {
       schedule: (actor, due) => due === null ? this.scheduler.cancel(actor) : this.schedule(actor, due) }, () => undefined);
     const game = new Q2EntityServices(host, { edition: selection.edition, mapName: this.recipe.map.geometry.requestedPath,
       skill: this.options.skill, mode: this.options.mode, deathmatchFlags: 0, maxClients: this.options.maxClients,
+      ...(this.source.kind === "quakec" ? { sourceDamageModifier: this.qcDamageModifier() } : {}),
       provider: selection.source.provider, campaign: this.recipe.campaign.kind === "campaign" ? this.recipe.campaign.mission.provider : this.recipe.map.entities.provider,
       combatProvider: this.recipe.combat.provider, inventoryProvider: this.recipe.inventory.provider, movementProvider: this.recipe.movement.provider }, []);
     const ballistics = new Q2Ballistics({ emit: event => this.events.emit(selection.source.content, { kind: "q2-weapon", event }, this.equipmentFrame.time),

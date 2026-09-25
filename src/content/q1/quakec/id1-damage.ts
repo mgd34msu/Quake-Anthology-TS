@@ -9,7 +9,7 @@ import { QcOpcode, QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
 import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../../world/gameplay/authority.ts";
 import { qcArmorStage, type QcArmorStage } from "./armor-stage.ts";
-import { qcDamageScale, evaluateQcDamageScale, type QcDamageScale } from "./damage-scale.ts";
+import { qcDamageScale, evaluateQcDamageAmount, evaluateQcDamageScale, type QcDamageScale } from "./damage-scale.ts";
 import { readQcDamageCall, projectQcDamageCall } from "./damage-call.ts";
 import { attackDamageFlags } from "../../../world/gameplay/armor.ts";
 
@@ -146,6 +146,9 @@ export class Id1DamageBinding {
   }
   damageMultiplier(actor: ActorId, reference: number, seconds: number): number | null {
     return this.damageScale === null ? null : evaluateQcDamageScale(this.vm(), this.damageScale, actor, reference, seconds);
+  }
+  damageAmount(actor: ActorId, reference: number, seconds: number, amount: number): number | null {
+    return this.damageScale === null ? null : evaluateQcDamageAmount(this.vm(), this.damageScale, actor, reference, seconds, amount);
   }
   protectionStage(actor: OwnedActor, channel: ProtectionChannel): SourceArmorStage | null {
     if (this.armorStage === null || channel === "regular" && this.armorStage.region.replaceable !== true) return null;

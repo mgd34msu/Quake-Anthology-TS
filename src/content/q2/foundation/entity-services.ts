@@ -1,4 +1,5 @@
 import type { WeaponTrajectoryUpdate } from "../../../contracts/weapon-behavior.ts";
+import { applySourceDamageModifier } from "../../../world/gameplay/damage-modifier.ts";
 import type { AttackProvenance, DamageOutcome, ItemId } from "../../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
@@ -359,8 +360,8 @@ export class Q2EntityServices implements Q2GameServices {
 
   damage(target: ActorId, inflictor: Q2Entity | ActorId, attacker: ActorId | null, amount: number, knockback: number, direction: Vec3,
     point: Vec3, normal: Vec3, meansOfDeath: number, flags = 0, weapon: ItemId | null = null): DamageOutcome {
-    return this.host.combat.apply({ attack: this.attack(inflictor, attacker, meansOfDeath, flags, weapon), target,
-      amount, knockback, direction, point, normal, delivery: "direct" });
+    return this.host.combat.apply(applySourceDamageModifier({ attack: this.attack(inflictor, attacker, meansOfDeath, flags, weapon), target,
+      amount, knockback, direction, point, normal, delivery: "direct" }, this.options.sourceDamageModifier, actor => this.host.actors.isLive(actor)));
   }
 
   canDamage(target: ActorId, inflictor: Pick<Q2Entity, "actor">): boolean {
@@ -388,8 +389,8 @@ export class Q2EntityServices implements Q2GameServices {
       let points = damage - 0.5 * length(subtract(center, origin));
       if (attacker !== null && target.equals(attacker)) points *= 0.5;
       if (points <= 0 || !this.canDamage(target, inflictor)) continue;
-      this.host.combat.apply({ attack: this.attack(inflictor, attacker, meansOfDeath, damageFlags | 1, weapon), target,
-        amount: Math.trunc(points), knockback: Math.trunc(points), direction: subtract(body.origin, origin), point: origin, normal: zero, delivery: "radius" });
+      this.host.combat.apply(applySourceDamageModifier({ attack: this.attack(inflictor, attacker, meansOfDeath, damageFlags | 1, weapon), target,
+        amount: Math.trunc(points), knockback: Math.trunc(points), direction: subtract(body.origin, origin), point: origin, normal: zero, delivery: "radius" }, this.options.sourceDamageModifier, actor => this.host.actors.isLive(actor)));
     }
     return undefined;
   }

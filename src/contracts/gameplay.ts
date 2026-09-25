@@ -24,6 +24,12 @@ export type Q2NativeCause =
   | { readonly edition: "classic"; readonly game: "base" | "xatrix" | "rogue" | "ctf"; readonly value: number }
   | { readonly edition: "rerelease"; readonly id: number; readonly friendlyFire: boolean; readonly noPointLoss: boolean };
 
+/** Original attacker damage policy evaluated at hit time over the actual source amount. */
+export interface SourceDamageModifier {
+  readonly owner: ProviderId;
+  transform(attacker: ActorId | null, amount: number): number;
+}
+
 /** Captured before any combat mutation, including source flags and selected decision owners. */
 export interface AttackProvenance {
   readonly sequence: number;
@@ -33,7 +39,7 @@ export interface AttackProvenance {
   readonly originatingProjectile?: ActorId;
   readonly weapon: ItemId | null;
   readonly weaponProvider: ProviderId;
-  /** This source already determined damage powerups, including a multiplier of one. */
+  /** This source already applied its damage modifier, including an unchanged result. */
   readonly damagePowerupOwner?: ProviderId;
   readonly combatProvider: ProviderId;
   readonly inventoryProvider: ProviderId;

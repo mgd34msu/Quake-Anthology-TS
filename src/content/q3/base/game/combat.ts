@@ -9,7 +9,8 @@ import type { ActorId } from "../../../../contracts/identity.ts";
 import { useActor } from "./use-participant.ts";
 import { ARMOR_PROTECTION, EntityEvent, EntityType, GameType, PersistentIndex, Powerup, statSchema } from "../shared/definitions.ts";
 import { ENTITYNUM_NONE, ENTITYNUM_WORLD } from "../shared/player-state.ts";
-import type { AttackProvenance, DamageDecision, DamageOutcome, ItemId } from "../../../../contracts/gameplay.ts";
+import { applySourceDamageModifier } from "../../../../world/gameplay/damage-modifier.ts";
+import type { AttackProvenance, DamageDecision, DamageOutcome, ItemId, SourceDamageModifier } from "../../../../contracts/gameplay.ts";
 import type { GameplayAuthority } from "../../../../world/gameplay/authority.ts";
 import { itemAt } from "../shared/items.ts";
 import type { EntityPool } from "./entities.ts";
@@ -48,6 +49,7 @@ export interface DamageDirection { x: number; y: number; z: number }
 
 interface CombatServices {
   readonly authority: GameplayAuthority;
+  readonly sourceDamageModifier?: SourceDamageModifier;
   attack(inflictor: DamageParticipant, attacker: UseParticipant, weapon: ItemId | null, meansOfDeath: number, flags: number, originatingProjectile?: ActorId): AttackProvenance;
   /** Runs apply synchronously while retaining this source call for beforeReaction feedback. */
   dispatch(call: Q3DamageCall, operation: () => DamageOutcome): DamageOutcome;
@@ -59,6 +61,7 @@ interface CombatServices {
   readonly entities: EntityPool;
   readonly spatial: ActorSpatialQueries;
   readonly actors: {
+    isLive(actor: ActorId): boolean;
     participant(actor: ActorId): DamageParticipant;
     parent(actor: ActorId): ActorId | null;
     linkedBounds(actor: ActorId): Bounds | null;
@@ -116,8 +119,8 @@ export function damage(context: CombatContext, target: DamageParticipant, inflic
     const impulseDirection = direction === null ? vec3(0, 0, 0) : { ...direction };
     if (direction === null) flags |= DamageFlags.NO_KNOCKBACK;
     else { const normalized = normalize3(direction); direction.x = normalized.x; direction.y = normalized.y; direction.z = normalized.z; }
-    context.authority.apply({ target: target.actor, attack: context.attack(source, owner, null, methodOfDeath, flags, originatingProjectile),
-      amount, knockback: amount, direction: impulseDirection, point: origin, normal: vec3(0, 0, 0), delivery: (flags & DamageFlags.RADIUS) !== 0 ? "radius" : "direct" });
+    context.authority.apply(applySourceDamageModifier({ target: target.actor, attack: context.attack(source, owner, null, methodOfDeath, flags, originatingProjectile),
+      amount, knockback: amount, direction: impulseDirection, point: origin, normal: vec3(0, 0, 0), delivery: (flags & DamageFlags.RADIUS) !== 0 ? "radius" : "direct" }, context.sourceDamageModifier, context.actors.isLive));
     return;
   }
   if (!target.takedamage) return;
@@ -131,9 +134,9 @@ export function damage(context: CombatContext, target: DamageParticipant, inflic
   if (direction === null) flags |= DamageFlags.NO_KNOCKBACK;
   else { const normalized = normalize3(direction); direction.x = normalized.x; direction.y = normalized.y; direction.z = normalized.z; }
   const attack = context.attack(source, owner, null, methodOfDeath, flags, originatingProjectile);
-  const apply = () => context.authority.apply({ attack, target: target.actor.id,
+  const apply = () => context.authority.apply(applySourceDamageModifier({ attack, target: target.actor.id,
     amount, knockback: amount, direction: impulseDirection, point: point ?? target.r.currentOrigin,
-    normal: vec3(0, 0, 0), delivery: (flags & DamageFlags.RADIUS) !== 0 ? "radius" : "direct" });
+    normal: vec3(0, 0, 0), delivery: (flags & DamageFlags.RADIUS) !== 0 ? "radius" : "direct" }, context.sourceDamageModifier, context.actors.isLive));
   context.dispatch({ target, source, owner, direction, point, amount, flags, methodOfDeath }, apply);
 }
 
