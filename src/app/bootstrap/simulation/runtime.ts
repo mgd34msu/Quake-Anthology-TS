@@ -81,7 +81,7 @@ import { q3GameCvarDefinitions } from "../../../content/q3/base/settings.ts";
 import { giveQ1 } from "../../../content/composition/q1/give.ts";
 import { q2CheatsAllowed } from "../../../content/q2/base/player/commands.ts";
 import type { NetQuakeClientBinding } from "./players.ts";
-import { QuakeCSource } from "./quakec-source.ts";
+import { QuakeCSource, preparedQuakeCWeaponStage } from "./quakec-source.ts";
 import type { QwUserCommand, UserCommand } from "../../../contracts/protocol.ts";
 import { id1DamageMultiplier } from "../../../content/q1/quakec/id1-program.ts";
 import { createNativeQ1PusherServices } from "./native-q1-pusher.ts";
@@ -242,7 +242,6 @@ import { MovementPlayer, movementOrigin, providerFamily, providerTiming } from "
 import { SimulationEvents } from "./events.ts";
 import { SourceRandom } from "./random.ts";
 import { captureSourceItems, prepareSourceItemRestore } from "../../../persistence/source-items.ts";
-import { qcWeaponStage } from "../../../content/q1/quakec/weapon-stage.ts";
 import { capturePrimaryProtection } from "../../../persistence/protection.ts";
 import { captureSharedBodies, restoreSharedBodyLinks, restoreSharedWorldState, sourceActorsCheckpoint, readSourceActorsCheckpoint,
   savedActorId, readSavedActor, encodeCheckpointValue, decodeCheckpointValue, SaveReader, encodeQ1FoundationCheckpoint, decodeQ1FoundationCheckpoint,
@@ -838,7 +837,7 @@ export class SharedSimulation implements Simulation {
           services: { clients: simulation.modClients, weapons: {
             bind: (actor, binding) => {
               simulation.actors.assertOwned(actor);
-              if (simulation.source.kind === "quakec" && qcWeaponStage(simulation.source.game.prepared.program) === null) throw new Error("Primary QC weapon handoff lacks a qualified source boundary");
+              if (simulation.source.kind === "quakec" && preparedQuakeCWeaponStage(simulation.source.game.prepared) === null) throw new Error("Primary QC weapon handoff lacks a qualified source boundary");
               if (!simulation.weaponSlots.has(actor.id)) simulation.bindWeaponSlot(actor.id);
               const slot = simulation.weaponSlots.get(actor.id); if (slot === undefined) throw new Error("Source weapon slot was not admitted");
               return slot.bind(binding);
@@ -1721,7 +1720,7 @@ export class SharedSimulation implements Simulation {
     }
     if (source.kind === "q3-qvm") { this.requireQvmWeapons().dropObjectives(actor.id); return; }
     if (source.kind === "q2-native") { this.selectedNativePlayer().dropObjectives(actor.id); return; }
-    if (source.kind === "quakec" && source.game.clientObjectives(actor.id) === "none") return;
+    if (source.kind === "quakec") { source.game.dropClientObjectives(actor.id); return; }
     throw new Error("Selected objective drop has no source map owner");
   }
 
@@ -2708,7 +2707,7 @@ export class SharedSimulation implements Simulation {
         giveInventory: (actor, args) => { const category = args[0]?.toLowerCase(); return category === "weapons" || category === "ammo" ? this.grantSelectedArsenal(actor, category) : this.giveSelectedItem(actor, args); },
         bindInventory: (actor, binding) => { this.bindSourceInventory(actor, binding,
           this.options.restore?.inventories.find(entry => this.actors.resolveSaved(entry.actor) === actor)?.entries ?? []); return undefined; },
-        ...(qcWeaponStage(this.options.preparedQuakeC.program) === null ? {} : { primaryWeaponSelected: (actor: ActorId) => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true) }),
+        ...(preparedQuakeCWeaponStage(this.options.preparedQuakeC) === null ? {} : { primaryWeaponSelected: (actor: ActorId) => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true) }),
         ...(checkpoint === null ? {} : { restore: { checkpoint, clients: this.options.restoredClients ?? [] } }),
         admit: (actor, _slot, source) => this.registerActorExecution({ kind: "quakec", actor, source, content }),
         changeLevel: map => {

@@ -6,8 +6,8 @@ import type { ModCallbackDeclaration, ModCallbackInput, ModQcItems, ModRuntimeVa
 import type { SourceItemAdmission, SourceItemDefinition, SourceItemLease, SourceItemStore, SourceWeaponBinding, SourceWeaponPresentation } from "../../contracts/source-items.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
 import type { QcEntityStoreObservation, QcMachine } from "./machine.ts";
-import { QcOpcode, signedQcBranch, type QcFunction, type QcProgram } from "./program.ts";
-import { type QcWeaponStage, QcWeaponStageBinding } from "../../content/q1/quakec/weapon-stage.ts";
+import type { QcProgram } from "./program.ts";
+import { qcDeclaredWeaponStage, QcWeaponStageBinding } from "../../content/q1/quakec/weapon-stage.ts";
 import type { QcModMedia } from "./mod-provider.ts";
 import type { OriginalPickupExecution } from "../../contracts/original-pickups.ts";
 
@@ -19,45 +19,6 @@ interface Operations {
 }
 interface Entry { readonly actor: OwnedActor; readonly reference: number; readonly lease: SourceItemLease; readonly removeWeapon: () => undefined; }
 
-function weaponStage(program: QcProgram, declared: NonNullable<ModQcItems["weapons"]>["stage"]): QcWeaponStage {
-  const fn = (name: string) => {
-    const value = program.functionNamed(name);
-    if (value.index === 0 || value.firstStatement <= 0 || value.namedBuiltin || value.parameterSizes.length !== 0) throw new Error("QC weapon stage requires original parameterless source functions");
-    const end = program.functions.reduce((end, other) => other.firstStatement > value.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
-    if (program.statements.slice(value.firstStatement, end).some(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0)) throw new Error("QC weapon stage function returns a source value");
-    return value;
-  };
-  const dispatcher = fn(declared.dispatcher), continuations = new Set(declared.continuations.map(name => fn(name).index));
-  const ranges: { entry: number; exit: number }[] = [];
-  const named = new Set(program.globals.filter(global => global.name !== "" && global.name !== "IMMEDIATE").flatMap(global => Array.from({ length: global.type === "vector" ? 3 : 1 }, (_, index) => global.offset + index)));
-  const temporary = (word: number, owner: QcFunction): boolean => Number.isInteger(word) && word >= 28 && word * 4 < program.initialGlobals.length
-    && (!named.has(word) || word >= owner.parameterStart && word < owner.parameterStart + owner.localWords);
-  const pure = new Set([QcOpcode.LoadF, QcOpcode.NotF, QcOpcode.EqF, QcOpcode.NeF, QcOpcode.Le, QcOpcode.Ge, QcOpcode.Lt, QcOpcode.Gt, QcOpcode.And, QcOpcode.Or, QcOpcode.BitAnd, QcOpcode.BitOr,
-    QcOpcode.AddF, QcOpcode.SubF, QcOpcode.MulF, QcOpcode.DivF]);
-  if (continuations.size === 0 || continuations.size !== declared.continuations.length || continuations.has(dispatcher.index)) throw new Error("QC weapon continuation declarations overlap or are empty");
-  const repeats = declared.repeats.map(source => {
-    const owner = fn(source.function), end = program.functions.reduce((end, other) => other.firstStatement > owner.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
-    if (!continuations.has(owner.index) || ranges.some(range => source.entry <= range.exit && source.exit >= range.entry) || !Number.isInteger(source.entry) || !Number.isInteger(source.exit)
-      || source.entry < owner.firstStatement || source.exit <= source.entry || source.exit + 2 >= end || !temporary(source.result.word, owner)
-      || source.result.value !== 0 && source.result.value !== 1 || source.statements.length !== source.exit - source.entry + 1) throw new Error("QC weapon repeat boundary is outside its original continuation");
-    ranges.push({ entry: source.entry, exit: source.exit });
-    let resultWritten = false;
-    source.statements.forEach((expected, offset) => { const actual = program.statements[source.entry + offset];
-      if (actual === undefined || actual.opcode !== expected.opcode || actual.a !== expected.a || actual.b !== expected.b || actual.c !== expected.c) throw new Error("QC weapon repeat boundary differs from its declared original instructions");
-      if (offset === source.statements.length - 1) return;
-      if (!pure.has(actual.opcode) || !temporary(actual.c, owner)) throw new Error("QC weapon repeat must be a pure scalar predicate using source temporaries");
-      resultWritten ||= actual.c === source.result.word;
-    });
-    const join = program.statements[source.exit], release = program.statements[source.exit + 1], returned = program.statements[source.exit + 2];
-    if (!resultWritten || join?.a !== source.result.word || join.opcode !== (source.result.value === 0 ? QcOpcode.If : QcOpcode.IfNot) || signedQcBranch(join.b) !== 3
-      || release?.opcode !== QcOpcode.Call0 || returned?.opcode !== QcOpcode.Return || returned.a !== 0) throw new Error("QC weapon predicate does not join its original release-call and return branch");
-    const original = new DataView(program.initialGlobals.buffer, program.initialGlobals.byteOffset, program.initialGlobals.byteLength);
-    if (release.a < 0 || release.a * 4 + 4 > original.byteLength) throw new Error("QC weapon release call is outside source globals");
-    const callee = program.functionAt(original.getInt32(release.a * 4, true)); fn(callee.name);
-    return { region: { functionIndex: owner.index, entry: source.entry, exit: source.exit, replaceable: true }, released: source.result.word, value: source.result.value } satisfies QcWeaponStage["repeats"][number];
-  });
-  return { dispatcher: dispatcher.index, continuations, repeats };
-}
 
 export function validateQcItems(program: QcProgram, declaration: ModCallbackDeclaration): void {
   const items = declaration.items; if (items === undefined) return;
@@ -95,7 +56,7 @@ export function validateQcItems(program: QcProgram, declaration: ModCallbackDecl
   const weapons = items.definitions.filter(definition => definition.kind === "weapon");
   if (weapons.length === 0 ? items.weapons !== undefined : items.weapons === undefined) throw new Error("QC weapon definitions require their original source consumer");
   if (items.weapons !== undefined) {
-    weaponStage(program, items.weapons.stage);
+    qcDeclaredWeaponStage(program, items.weapons.stage);
     for (const name of ["think", "nextthink"]) if (!declaration.actorFields.some(field => field.field === name && field.binding === name)) throw new Error("QC weapons require continuing source think ownership");
     for (const mapping of [items.weapons.selected, items.weapons.select]) {
       field(mapping.field, "float", mapping === items.weapons.select);
@@ -128,7 +89,7 @@ export class QcModItems {
     this.watchedWords = [...new Set(this.watched.flatMap(entry => entry.words))];
     this.storageByItem = new Map(definition.storage.flatMap(storage => (storage.kind === "counter" ? [storage.item] : storage.items.map(entry => entry.item)).map(item => [item, storage] satisfies readonly [ItemId, ModQcItems["storage"][number]])));
     if (definition.weapons !== undefined && services.weapons === undefined) throw new Error("QC weapons require the destination weapon slot service");
-    const stage = definition.weapons === undefined ? null : weaponStage(program, definition.weapons.stage);
+    const stage = definition.weapons === undefined ? null : qcDeclaredWeaponStage(program, definition.weapons.stage);
     this.weapons = stage === null ? null : new QcWeaponStageBinding(stage, operations.machine, reference => {
       const actor = operations.actor(reference);
       return services.clients?.forActor(actor) == null || services.weapons?.selected(actor, provider) === true;

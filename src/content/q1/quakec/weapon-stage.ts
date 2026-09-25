@@ -1,16 +1,32 @@
+import type { QcPrimaryWeaponStageDeclaration, QcWeaponStageDeclaration } from "../../../contracts/qc-weapon-stage.ts";
 import type { QcFunctionBoundary, QcInlineBoundary, QcInlineRegion, QcMachine } from "../../../compat/qc/machine.ts";
-import { QcOpcode, QcProgramError, type QcProgram } from "../../../compat/qc/program.ts";
+import { QcOpcode, QcProgramError, signedQcBranch, type QcFunction, type QcProgram } from "../../../compat/qc/program.ts";
 
 interface RepeatGate { readonly region: QcInlineRegion; readonly released: number; readonly value: number; }
 export interface QcWeaponStage {
   readonly dispatcher: number;
-  readonly client?: { readonly spawn: number; readonly selectSpawn: number; readonly objectives: "none" };
+  readonly client?: { readonly spawn: number; readonly selectSpawn: number; readonly objectives: { readonly kind: "none" } | { readonly kind: "call"; readonly functionIndex: number } };
   readonly continuations: ReadonlySet<number>;
   readonly repeats: readonly RepeatGate[];
 }
 
 /** Artifact-qualified weapons.qc dispatchers and player.qc next-shot release branches. */
-export function qcWeaponStage(program: QcProgram): QcWeaponStage | null {
+export function qcWeaponStage(program: QcProgram, declared?: QcPrimaryWeaponStageDeclaration): QcWeaponStage | null {
+  if (declared !== undefined) {
+    const stage = qcDeclaredWeaponStage(program, declared);
+    const source = (name: string, result: "void" | "entity"): number => {
+      const fn = program.functionNamed(name);
+      if (fn.firstStatement <= 0 || fn.namedBuiltin || fn.parameterSizes.length !== 0) throw new QcProgramError("QC client stage requires an original parameterless source function");
+      const end = program.functions.reduce((end, other) => other.firstStatement > fn.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
+      const returns = program.statements.slice(fn.firstStatement, end).filter(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0);
+      if (result === "void" ? returns.length !== 0 : returns.length === 0 || returns.some(statement => !program.globals.some(global => global.offset === statement.a && global.type === "entity")))
+        throw new QcProgramError(`QC client stage ${name} does not return ${result}`);
+      return fn.index;
+    };
+    const client = declared.client, objectives = client.objectives;
+    return Object.freeze({ ...stage, client: Object.freeze({ spawn: source(client.spawn, "void"), selectSpawn: source(client.selectSpawn, "entity"),
+      objectives: objectives.kind === "none" ? Object.freeze({ kind: objectives.kind }) : Object.freeze({ kind: objectives.kind, functionIndex: source(objectives.function, "void") }) }) });
+  }
   const qw = program.digest === "sha256:ff51cb5e77360d72b93487d89198dcf94629b92f8bae100fc6ea48a6c12a7830";
   if (!qw && program.digest !== "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580") return null;
   const fn = (name: string, index: number, first: number): number => {
@@ -31,7 +47,7 @@ export function qcWeaponStage(program: QcProgram): QcWeaponStage | null {
     return index;
   };
   if (qw) {
-    const client = { spawn: clientFunction("PutClientInServer", 193, 5554, 3621, 2), selectSpawn: clientFunction("SelectSpawnPoint", 191, 5465, 3585, 9), objectives: "none" } satisfies QcWeaponStage["client"];
+    const client = { spawn: clientFunction("PutClientInServer", 193, 5554, 3621, 2), selectSpawn: clientFunction("SelectSpawnPoint", 191, 5465, 3585, 9), objectives: { kind: "none" } } satisfies QcWeaponStage["client"];
     const dispatcher = fn("W_WeaponFrame", 170, 4618);
     fn("player_run", 215, 7185);
     const continuations = new Set<number>();
@@ -65,7 +81,7 @@ export function qcWeaponStage(program: QcProgram): QcWeaponStage | null {
     });
     return { dispatcher, client, continuations, repeats };
   }
-  const client = { spawn: clientFunction("PutClientInServer", 229, 6083, 4114, 1), selectSpawn: clientFunction("SelectSpawnPoint", 228, 6007, 4093, 3), objectives: "none" } satisfies QcWeaponStage["client"];
+  const client = { spawn: clientFunction("PutClientInServer", 229, 6083, 4114, 1), selectSpawn: clientFunction("SelectSpawnPoint", 228, 6007, 4093, 3), objectives: { kind: "none" } } satisfies QcWeaponStage["client"];
   const dispatcher = fn("W_WeaponFrame", 206, 5047);
   fn("player_run", 248, 7380);
   const continuations = new Set<number>();
@@ -91,6 +107,47 @@ export function qcWeaponStage(program: QcProgram): QcWeaponStage | null {
   });
   return { dispatcher, client, continuations, repeats };
 }
+
+export function qcDeclaredWeaponStage(program: QcProgram, declared: QcWeaponStageDeclaration): QcWeaponStage {
+  const fn = (name: string) => {
+    const value = program.functionNamed(name);
+    if (value.index === 0 || value.firstStatement <= 0 || value.namedBuiltin || value.parameterSizes.length !== 0) throw new Error("QC weapon stage requires original parameterless source functions");
+    const end = program.functions.reduce((end, other) => other.firstStatement > value.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
+    if (program.statements.slice(value.firstStatement, end).some(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0)) throw new Error("QC weapon stage function returns a source value");
+    return value;
+  };
+  const dispatcher = fn(declared.dispatcher), continuations = new Set(declared.continuations.map(name => fn(name).index));
+  const ranges: { entry: number; exit: number }[] = [];
+  const named = new Set(program.globals.filter(global => global.name !== "" && global.name !== "IMMEDIATE").flatMap(global => Array.from({ length: global.type === "vector" ? 3 : 1 }, (_, index) => global.offset + index)));
+  const temporary = (word: number, owner: QcFunction): boolean => Number.isInteger(word) && word >= 28 && word * 4 < program.initialGlobals.length
+    && (!named.has(word) || word >= owner.parameterStart && word < owner.parameterStart + owner.localWords);
+  const pure = new Set([QcOpcode.LoadF, QcOpcode.NotF, QcOpcode.EqF, QcOpcode.NeF, QcOpcode.Le, QcOpcode.Ge, QcOpcode.Lt, QcOpcode.Gt, QcOpcode.And, QcOpcode.Or, QcOpcode.BitAnd, QcOpcode.BitOr,
+    QcOpcode.AddF, QcOpcode.SubF, QcOpcode.MulF, QcOpcode.DivF]);
+  if (continuations.size === 0 || continuations.size !== declared.continuations.length || continuations.has(dispatcher.index)) throw new Error("QC weapon continuation declarations overlap or are empty");
+  const repeats = declared.repeats.map(source => {
+    const owner = fn(source.function), end = program.functions.reduce((end, other) => other.firstStatement > owner.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
+    if (!continuations.has(owner.index) || ranges.some(range => source.entry <= range.exit && source.exit >= range.entry) || !Number.isInteger(source.entry) || !Number.isInteger(source.exit)
+      || source.entry < owner.firstStatement || source.exit <= source.entry || source.exit + 2 >= end || !temporary(source.result.word, owner)
+      || source.result.value !== 0 && source.result.value !== 1 || source.statements.length !== source.exit - source.entry + 1) throw new Error("QC weapon repeat boundary is outside its original continuation");
+    ranges.push({ entry: source.entry, exit: source.exit });
+    let resultWritten = false;
+    source.statements.forEach((expected, offset) => { const actual = program.statements[source.entry + offset];
+      if (actual === undefined || actual.opcode !== expected.opcode || actual.a !== expected.a || actual.b !== expected.b || actual.c !== expected.c) throw new Error("QC weapon repeat boundary differs from its declared original instructions");
+      if (offset === source.statements.length - 1) return;
+      if (!pure.has(actual.opcode) || !temporary(actual.c, owner)) throw new Error("QC weapon repeat must be a pure scalar predicate using source temporaries");
+      resultWritten ||= actual.c === source.result.word;
+    });
+    const join = program.statements[source.exit], release = program.statements[source.exit + 1], returned = program.statements[source.exit + 2];
+    if (!resultWritten || join?.a !== source.result.word || join.opcode !== (source.result.value === 0 ? QcOpcode.If : QcOpcode.IfNot) || signedQcBranch(join.b) !== 3
+      || release?.opcode !== QcOpcode.Call0 || returned?.opcode !== QcOpcode.Return || returned.a !== 0) throw new Error("QC weapon predicate does not join its original release-call and return branch");
+    const original = new DataView(program.initialGlobals.buffer, program.initialGlobals.byteOffset, program.initialGlobals.byteLength);
+    if (release.a < 0 || release.a * 4 + 4 > original.byteLength) throw new Error("QC weapon release call is outside source globals");
+    const callee = program.functionAt(original.getInt32(release.a * 4, true)); fn(callee.name);
+    return { region: { functionIndex: owner.index, entry: source.entry, exit: source.exit, replaceable: true }, released: source.result.word, value: source.result.value } satisfies QcWeaponStage["repeats"][number];
+  });
+  return Object.freeze({ dispatcher: dispatcher.index, continuations, repeats: Object.freeze(repeats.map(gate => Object.freeze({ ...gate, region: Object.freeze({ ...gate.region }) }))) });
+}
+
 
 /** Selection gates new attacks; committed melee hits and source animation finish normally. */
 export class QcWeaponStageBinding {

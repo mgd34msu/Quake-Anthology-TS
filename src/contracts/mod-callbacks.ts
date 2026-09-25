@@ -1,3 +1,4 @@
+import type { QcWeaponStageDeclaration } from "./qc-weapon-stage.ts";
 import type { SourceItemIconDeclaration } from "./source-items.ts";
 import type { SourceItemActionCalls, SourceWeaponItem } from "./source-items.ts";
 import type { ContentDigest } from "./content.ts";
@@ -95,9 +96,7 @@ export interface ModQcItems {
     | { readonly kind: "bits"; readonly field: string; readonly privateMask: number; readonly items: readonly { readonly item: ItemId; readonly mask: number }[] }
   )[];
   readonly weapons?: {
-    readonly stage: { readonly dispatcher: string; readonly continuations: readonly string[];
-      readonly repeats: readonly { readonly function: string; readonly entry: number; readonly exit: number; readonly result: { readonly word: number; readonly value: 0 | 1 };
-        readonly statements: readonly { readonly opcode: number; readonly a: number; readonly b: number; readonly c: number }[] }[] };
+    readonly stage: QcWeaponStageDeclaration;
     readonly selected: { readonly field: string; readonly values: readonly { readonly value: number; readonly item: ItemId }[] };
     readonly select: { readonly field: string; readonly values: readonly { readonly value: number; readonly item: ItemId }[]; readonly call: ModSourceCall };
     readonly resume: readonly ModSourceCall[];

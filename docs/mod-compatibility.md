@@ -353,6 +353,8 @@ Rerelease native HUDs execute their own localized layout commands, tables, healt
 
 ## Selected arsenals in original games
 
+Primary QuakeC packages can declare `weaponStage` in their artifact-bound `quakec-compatibility.json`. It names original dispatch/continuation functions, exact release predicates, zero-argument client spawn and typed spawn-selection routines, plus explicit objective behavior (`none` or an original call). Primary and component weapons share the same source qualifier; saves reject a changed declaration. Additional combat argument shapes remain separate source contracts. This removes the built-in-only weapon/client stage gate without guessing another mod's behavior.
+
 The qualified original Threewave server now admits selected Q1/Q2/Q3 arsenals, including the admitted expansions. Its original weapon decision, timing, damage modifiers, cheat policy, pickups and death-drop code retain control over source behavior. Selected weapon and ammo grants use the shared inventory; native records are restored before unrelated original effects. Save/load, respawn and map reconnection rebind the selected state without a second movement simulation.
 
 The original cgame decides when its view weapon and status bar appear. Selected ammo replaces only the original ammo drawing regions; original health, armor and warning layout remain. Its actual torso attachment and shader submissions place the selected held weapon, keeping geometry assets with the selected provider and powerup shaders with their source. Classic Q2 held models fall back only to their own original player weapon; Q1 carried mesh subsets require a qualified asset or authored binding.

@@ -1,3 +1,4 @@
+import { readQuakeCCompatibility } from "../../../src/compat/qc/compatibility.ts";
 import { expect, test } from "bun:test";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins } from "../../../src/compat/qc/index.ts";
@@ -11,8 +12,22 @@ for (const kind of ["netquake", "quakeworld"] satisfies readonly ("netquake" | "
   const archive = await openArchive("/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK");
   try {
     const entry = archive.findEntries("progs.dat").at(-1); if (entry === undefined) throw new Error("Missing original id1 program");
-    const program = loadQcProgram(kind === "quakeworld" ? await Bun.file("/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat").bytes() : await archive.readEntry(entry)), stage = qcWeaponStage(program);
-    if (stage === null) throw new Error("Missing qualified original weapon stage");
+    const program = loadQcProgram(kind === "quakeworld" ? await Bun.file("/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat").bytes() : await archive.readEntry(entry)), originalStage = qcWeaponStage(program);
+    if (originalStage === null || originalStage.client === undefined) throw new Error("Missing qualified original weapon stage");
+    const declaration = readQuakeCCompatibility(new TextEncoder().encode(JSON.stringify({ version: 1, artifactDigest: program.digest, weaponStage: {
+      dispatcher: program.functionAt(originalStage.dispatcher).name,
+      continuations: [...originalStage.continuations].map(index => program.functionAt(index).name),
+      repeats: originalStage.repeats.map(gate => ({ function: program.functionAt(gate.region.functionIndex).name, entry: gate.region.entry, exit: gate.region.exit,
+        result: { word: gate.released, value: gate.value }, statements: program.statements.slice(gate.region.entry, gate.region.exit + 1) })),
+      client: { spawn: program.functionAt(originalStage.client.spawn).name, selectSpawn: program.functionAt(originalStage.client.selectSpawn).name, objectives: { kind: "none" } },
+    } })), program.digest).weaponStage;
+    if (declaration === undefined) throw new Error("Missing declared weapon stage");
+    const stage = qcWeaponStage(program, declaration);
+    if (stage === null) throw new Error("Declared original weapon stage was not admitted");
+    expect(stage).toEqual(originalStage);
+    expect(() => qcWeaponStage(program, { ...declaration, client: { ...declaration.client, spawn: declaration.client.selectSpawn } })).toThrow("does not return void");
+    expect(() => qcWeaponStage(program, { ...declaration, client: { ...declaration.client, selectSpawn: declaration.dispatcher } })).toThrow("does not return entity");
+    expect(() => qcWeaponStage(program, { ...declaration, client: { ...declaration.client, objectives: { kind: "call", function: "T_Damage" } } })).toThrow("parameterless");
     const entities = new QcEntityMemory(classicQcEntityLayout(program), 4, 3);
     const selected = new Set([entities.reference(2)]), sounds: string[] = [], traces: number[] = [], messages: number[] = [];
     const host = new Map<QcHostBuiltinName, QcBuiltin>([

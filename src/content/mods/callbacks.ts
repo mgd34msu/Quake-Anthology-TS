@@ -1,3 +1,4 @@
+import { readQcWeaponStageDeclaration } from "../q1/quakec/weapon-stage-declaration.ts";
 import { readItemIconDeclaration } from "../item-icon.ts";
 import { readItemActions } from "./item-actions.ts";
 import { readHeldWeaponDeclaration } from "../held-weapon.ts";
@@ -107,9 +108,7 @@ function items(reader: SaveReader): ModQcItems {
     const capacity = entry.field("capacity");
     return { kind: "counter", field, item: namespaced(entry.field("item")), capacity: capacity.field("kind").choice("constant", "field") === "constant"
       ? { kind: "constant", value: capacity.field("value").finite() } : { kind: "field", field: capacity.field("field").string() } };
-  }), ...(weapons.value === undefined ? {} : { weapons: { stage: { dispatcher: weapons.field("stage").field("dispatcher").string(), continuations: weapons.field("stage").field("continuations").list(value => value.string()),
-    repeats: weapons.field("stage").field("repeats").list(value => ({ function: value.field("function").string(), entry: value.field("entry").integer(0), exit: value.field("exit").integer(0), result: { word: value.field("result").field("word").integer(28), value: value.field("result").field("value").choice(0, 1) },
-      statements: value.field("statements").list(statement => ({ opcode: statement.field("opcode").integer(0), a: statement.field("a").integer(), b: statement.field("b").integer(), c: statement.field("c").integer() })) })) }, selected: selection(weapons.field("selected")),
+  }), ...(weapons.value === undefined ? {} : { weapons: { stage: readQcWeaponStageDeclaration(weapons.field("stage")), selected: selection(weapons.field("selected")),
     select: { ...selection(weapons.field("select")), call: sourceCall(weapons.field("select").field("call")) },
     resume: weapons.field("resume").list(sourceCall), model: { field: weapons.field("model").field("field").string(), frame: weapons.field("model").field("frame").string() } } }) };
 }
