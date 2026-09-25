@@ -68,7 +68,8 @@ export class RereleaseCombatBindings {
       if (state.powered.kind !== "none") memory.writeInt32(itemAddress(value, "q2:ammo_cells"), state.powered.cells);
       return undefined;
     };
-    return { validateArmor, protection: {
+    return { validateArmor, emptyRegularArmor: points => ({ kind: "q2", item: "q2:item_armor_body", points,
+      normalProtection: protection("q2:item_armor_body", 8n), energyProtection: protection("q2:item_armor_body", 12n) }), protection: {
       regular: { owner: memory.module.id, stage: damage.armorStage(view, armor, "regular") },
       powered: { owner: memory.module.id, stage: damage.armorStage(view, armor, "powered") },
     },

@@ -6,6 +6,8 @@ import type { Vec3 } from "./math.ts";
 import type { ModPickupRule } from "./original-pickups.ts";
 import type { QcModClientPresentation } from "./mod-client-presentation.ts";
 
+export interface ModQcEmptyArmor { readonly item: "q1:item_armor1" | "q1:item_armor2" | "q1:item_armorInv"; readonly absorption: number; }
+
 export type ModClientInput = "view-angles" | "attack" | "jump" | "impulse" | "forward-move" | "side-move" | "up-move";
 export type ModClientInputOutput =
   | { readonly kind: "set"; readonly input: "view-angles"; readonly value: Vec3 }
@@ -119,7 +121,7 @@ export interface ModCallbackDeclaration {
   /** Explicit console names and argument lowering into original compiled functions. */
   readonly commands?: readonly ModConsoleCommand[];
   /** Declared lowering of canonical damage into the artifact's verified T_Damage ABI. */
-  readonly combat?: { readonly damage: ModSourceCall; readonly armorStage?: ModQcArmorStage };
+  readonly combat?: { readonly damage: ModSourceCall; readonly armorStage?: ModQcArmorStage; readonly emptyArmor?: ModQcEmptyArmor };
   /** Independent protection executes original source armor over its private client storage. */
   readonly protection?: readonly ModQcProtection[];
   readonly pickups?: readonly ModPickupRule<ModSourceCall>[];

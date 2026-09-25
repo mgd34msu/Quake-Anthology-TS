@@ -4,7 +4,7 @@ import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { ArsenalIntent, ItemId } from "../../../../contracts/gameplay.ts";
 import type { PickupAmmoReceipt, PickupSelection } from "../../../../contracts/pickups.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../../../contracts/identity.ts";
-import type { ArsenalState, WeaponStepInput, WeaponStepResult } from "../../../../contracts/movement.ts";
+import type { ArsenalState, MovementCommand, WeaponStepInput, WeaponStepResult } from "../../../../contracts/movement.ts";
 import { Q3_WEAPON_ITEMS, q3RequestWeapon, q3RequestWeaponHolster, q3RequestWeaponResume, q3SpawnArsenalRuntime, q3SpawnLoadout, q3SpawnAnimation, q3WeaponItem, stepQ3Arsenal } from "../../../../content/q3/foundation/arsenal.ts";
 import type { Q3ArsenalRuntimeState } from "../../../../content/q3/foundation/arsenal.ts";
 import { ItemType } from "../../../../content/q3/base/shared/definitions.ts";
@@ -44,6 +44,7 @@ export interface Q3SelectedArsenalCheckpoint {
   readonly runtime: Q3ArsenalRuntimeState;
   readonly torsoAnimation: number;
   readonly lastFireMilliseconds: number | null;
+  readonly pendingUse?: ItemId | null;
 }
 
 interface PlayerArsenal {
@@ -52,6 +53,7 @@ interface PlayerArsenal {
   runtime: Q3ArsenalRuntimeState;
   torsoAnimation: number;
   lastFireMilliseconds: number | null;
+  pendingUse: ItemId | null;
 }
 
 export class Q3SelectedArsenal implements SelectedArsenal {
@@ -84,7 +86,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     if (arsenal.provider !== this.provider || arsenal.state.kind !== "q3") throw new Error("Selected Q3 starter belongs to a different arsenal");
     this.clearReplacedItems(actor);
     for (const entry of arsenal.ammo) this.options.inventory.configure(actor, entry);
-    this.players.set(actor.id, { actor, arsenal, runtime: q3SpawnArsenalRuntime(this.options.product, maxHealth), torsoAnimation: q3SpawnAnimation().torso, lastFireMilliseconds: null });
+    this.players.set(actor.id, { actor, arsenal, runtime: q3SpawnArsenalRuntime(this.options.product, maxHealth), torsoAnimation: q3SpawnAnimation().torso, lastFireMilliseconds: null, pendingUse: null });
     return this.read(actor.id);
   }
 
@@ -98,6 +100,29 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     if (this.options.inventory.count(actor, item) <= 0) return false;
     player.runtime = q3RequestWeapon(player.runtime, weapon.weapon);
     return true;
+  }
+
+  ownsHoldableInput(actor: ActorId): boolean {
+    const player = this.require(actor);
+    return this.options.equipment?.ownsHoldables !== false && (player.runtime.useItemHeld || (this.options.equipment?.read(player.actor).holdableItem ?? player.runtime.holdableItem) !== 0);
+  }
+
+  observeHoldableInput(actor: ActorId, command: MovementCommand, intent: ArsenalIntent | undefined): void {
+    if (this.options.equipment?.ownsHoldables === false) return;
+    const player = this.require(actor), controls = resolveQ3ArsenalControls(this.read(actor), intent, command, this.options.product);
+    if (!controls.useHoldable) { player.runtime = { ...player.runtime, useItemHeld: false, respawned: controls.attack && player.runtime.respawned }; return; }
+    if (player.runtime.useItemHeld) return;
+    const held = this.options.equipment?.read(player.actor).holdableItem ?? player.runtime.holdableItem;
+    const item = itemList(this.options.product)[held];
+    if (item?.type === ItemType.IT_HOLDABLE) player.pendingUse = `q3:${item.className}`;
+  }
+
+  useItem(actor: ActorId, item: ItemId): boolean {
+    if (this.options.equipment?.ownsHoldables === false) return false;
+    const player = this.require(actor), held = this.options.equipment?.read(player.actor).holdableItem ?? player.runtime.holdableItem;
+    const definition = itemList(this.options.product)[held];
+    if (definition?.type !== ItemType.IT_HOLDABLE || item !== `q3:${definition.className}`) return false;
+    player.pendingUse = item; return true;
   }
 
   pendingWeapon(actor: ActorId): ItemId | null { const requested = this.require(actor).runtime.requestedWeapon; return requested === null ? null : q3WeaponItem(requested)?.item ?? null; }
@@ -157,14 +182,16 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     const weaponAnimation = { provider: this.provider, state: { ...q3SpawnAnimation(), torso: player.torsoAnimation } };
     const firingDelay = this.options.firingDelay;
     const controls = resolveQ3ArsenalControls(arsenal, intent, input.command, this.options.product);
+    const pendingUse = player.pendingUse; player.pendingUse = null;
+    const use = pendingUse !== null && pendingUse === `q3:${itemList(this.options.product)[holdable]?.className}`;
     const result = stepQ3Arsenal({ ...input, arsenal, animation: input.animation.state.kind === "q3" ? input.animation : weaponAnimation }, player.runtime,
-      this.options.equipment?.ownsHoldables === false ? { ...controls, useHoldable: false } : controls,
+      this.options.equipment?.ownsHoldables === false ? { ...controls, useHoldable: false } : { ...controls, useHoldable: controls.useHoldable || use },
       firingDelay === undefined ? undefined : milliseconds => firingDelay(player.actor, milliseconds));
     const elapsed = input.frame.elapsed.kind === "milliseconds" ? input.frame.elapsed.value : input.frame.elapsed.value * 1000;
     const milliseconds = Math.trunc(elapsed + player.runtime.fractionalMilliseconds);
     this.options.equipment?.advance?.(player.actor, milliseconds);
     player.arsenal = result.arsenal;
-    player.runtime = result.runtime;
+    player.runtime = use && !controls.useHoldable ? { ...result.runtime, useItemHeld: false } : result.runtime;
     if (holdable !== 0 && result.runtime.holdableItem === 0) this.options.equipment?.consume(player.actor, holdable);
     if (result.animation.state.kind === "q3") player.torsoAnimation = result.animation.state.torso;
     for (const entry of result.arsenal.ammo) this.options.inventory.configure(player.actor, entry);
@@ -183,7 +210,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
 
   capture(actor: ActorId): Q3SelectedArsenalCheckpoint {
     const player = this.require(actor);
-    return { supplyProfile: this.options.supply?.profile ?? null, arsenal: this.read(actor), runtime: { ...player.runtime, ...this.options.equipment?.read(player.actor) }, torsoAnimation: player.torsoAnimation, lastFireMilliseconds: player.lastFireMilliseconds };
+    return { supplyProfile: this.options.supply?.profile ?? null, arsenal: this.read(actor), runtime: { ...player.runtime, ...this.options.equipment?.read(player.actor) }, torsoAnimation: player.torsoAnimation, lastFireMilliseconds: player.lastFireMilliseconds, pendingUse: player.pendingUse };
   }
 
   restore(actor: OwnedActor, checkpoint: Q3SelectedArsenalCheckpoint): undefined {
@@ -191,7 +218,7 @@ export class Q3SelectedArsenal implements SelectedArsenal {
     if (checkpoint.arsenal.provider !== this.provider || checkpoint.arsenal.state.kind !== "q3" || checkpoint.runtime.product !== this.options.product) throw new Error("Saved arsenal differs from selected Q3 provider");
     for (const entry of checkpoint.arsenal.ammo) if (this.inventoryItems.has(entry.item)) this.options.inventory.configure(actor, entry);
     this.options.equipment?.restore?.(actor, checkpoint.runtime);
-    this.players.set(actor.id, { actor, arsenal: checkpoint.arsenal, runtime: { ...checkpoint.runtime }, torsoAnimation: checkpoint.torsoAnimation, lastFireMilliseconds: checkpoint.lastFireMilliseconds });
+    this.players.set(actor.id, { actor, arsenal: checkpoint.arsenal, runtime: { ...checkpoint.runtime }, torsoAnimation: checkpoint.torsoAnimation, lastFireMilliseconds: checkpoint.lastFireMilliseconds, pendingUse: checkpoint.pendingUse ?? null });
     return undefined;
   }
 
@@ -242,5 +269,6 @@ export function readQ3SelectedArsenalCheckpoint(reader: SaveReader): Q3SelectedA
       externalSlot: runtime.field("externalSlot").value === undefined ? "active" :
         runtime.field("externalSlot").choice("active", "holster-requested", "dropping", "holstered", "resume-requested"), requestedWeapon: runtime.field("requestedWeapon").nullable(value => value.integer(0)) },
     torsoAnimation: reader.field("torsoAnimation").integer(0), lastFireMilliseconds: reader.field("lastFireMilliseconds").nullable(value => value.finite()),
+    pendingUse: reader.field("pendingUse").value === undefined ? null : reader.field("pendingUse").nullable(namespaced),
   };
 }

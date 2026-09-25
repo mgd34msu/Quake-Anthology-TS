@@ -266,9 +266,7 @@ export class Q3EntityRecords {
         },
         write: (index, value) => {
           if (index === schema.health) { this.host.combat.setHealth(actor(), value); return; }
-          if (index === schema.armor) { const armor = this.host.combat.read(actor().id)?.armor.regular;
-            if (armor === undefined || armor.kind === "none") this.host.combat.setRegularArmor(actor(), { kind: "q3", points: value, protection: Math.fround(0.66) });
-            else this.host.combat.setRegularPoints(actor(), value); return; }
+          if (index === schema.armor) { this.host.combat.setRegularPoints(actor(), value, { kind: "q3", points: value, protection: Math.fround(0.66) }); return; }
           if (index === schema.weapons) { for (const weapon of Q3_WEAPON_ITEMS) configure(weapon.item, value & (1 << weapon.weapon) ? 1 : 0, 1); return; }
           if (!Number.isInteger(index) || index < 0 || index >= 16) throw new RangeError(`Q3 stat ${index} outside 0..15`);
           sourceStats[index] = value;

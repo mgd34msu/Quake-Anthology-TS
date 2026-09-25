@@ -25,6 +25,7 @@ export interface QvmInputServices {
   accepted(actor: ActorId): ModClientCommand | null;
   frame(): FrameContext;
   spawned?(identity: ModClientIdentity): void;
+  movement?(call: QvmFunctionCall, kind: ModClientApplication["scope"], run: () => QvmSystemCallResult): QvmSystemCallResult;
   onRelease(listener: (actor: ActorId) => undefined): () => void;
 }
 export interface QvmInputSource {
@@ -76,8 +77,8 @@ export class QvmInputBinding {
       });
       bind(definition.entries.clientThink, call => this.envelope(call, call.words.getInt32(0, true)));
       bind(definition.entries.runClient, call => this.envelope(call, game.data.numberFromPointer(call.words.getInt32(0, true))));
-      bind(definition.entries.move, call => this.movement(call, "client-command"));
-      bind(definition.entries.slice, call => this.movement(call, "movement-slice"));
+      bind(definition.entries.move, call => this.runMovement(call, "client-command"));
+      bind(definition.entries.slice, call => this.runMovement(call, "movement-slice"));
       this.removals.push(services.onRelease(actor => {
         for (const scope of this.clients) if (scope.identity.actor.equals(actor)) source.retiring(scope.slot, scope.identity);
         return undefined;
@@ -114,6 +115,10 @@ export class QvmInputBinding {
     const result = this.source.disconnect(scope.slot, scope.identity, call);
     if (typeof result === "number") return call.cancelFunction(this.cancellation(scope));
     return result.then(() => call.cancelFunction(this.cancellation(scope)));
+  }
+  private runMovement(call: QvmFunctionCall, kind: ModClientApplication["scope"]): QvmSystemCallResult {
+    const run = () => this.movement(call, kind);
+    return this.services.movement === undefined ? run() : this.services.movement(call, kind, run);
   }
   private movement(call: QvmFunctionCall, kind: ModClientApplication["scope"]): QvmSystemCallResult {
     if (!this.services.applications.active || this.clients.length === 0) return proceed(call);

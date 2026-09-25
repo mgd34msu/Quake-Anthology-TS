@@ -5,6 +5,8 @@ import { NativePrimaryDrop } from "../../../compat/q2/native-primary-drop.ts";
 import { withRereleasePrimaryProtection } from "../../../compat/q2/rerelease/pickup-protection.ts";
 import { nativePrimaryDropProfile } from "../../../compat/q2/native-primary-drop-profile.ts";
 import { selectedAmmoLabel } from "./arsenal/inventory-labels.ts";
+import { NativePrimaryPlayer } from "../../../compat/q2/native-primary-player.ts";
+import { nativePrimaryPlayerProfile } from "../../../compat/q2/native-primary-player-profile.ts";
 import { NativePrimaryWeapons } from "../../../compat/q2/native-primary-weapons.ts";
 import { SourcePickupCargo } from "./dropped-pickups.ts";
 import { nativePrimaryWeaponProfile } from "../../../compat/q2/native-primary-weapon-profile.ts";
@@ -691,6 +693,8 @@ export class SharedSimulation implements Simulation {
         accepted: actor => this.modClientCommands.get(actor) ?? null,
         frame: () => this.sourceFrame,
         spawned: identity => this.qvmClientSpawned(identity.actor),
+        movement: (call, kind, run) => this.source.kind === "q3-qvm" && this.source.weapons !== null
+          ? this.source.weapons.equipmentMovement(call, kind, run) : run(),
         onRelease: listener => this.actors.onRelease(actor => listener(actor.id)),
       });
     }
@@ -713,7 +717,12 @@ export class SharedSimulation implements Simulation {
       if (nativePrimaryWeaponProfile(this.source.game.module.digest) === null) throw new Error("Selected native arsenal requires a qualified original weapon profile");
       this.modClientApplications.subscribe(event => {
         if (event.application.scope !== "client-command") return undefined;
-        if (event.phase === "before") this.nativeWeaponApplications.push(event.application);
+        if (event.phase === "before") {
+          this.nativeWeaponApplications.push(event.application);
+          const arsenal = this.selectedArsenal, application = event.application;
+          if (arsenal?.family === "q3" && arsenal.has(application.identity.actor))
+            arsenal.observeHoldableInput(application.identity.actor, application.command, application.arsenal ?? undefined);
+        }
         else {
           if (this.nativeWeaponApplications.at(-1) !== event.application) throw new Error("Native weapon input scope changed before completion");
           this.nativeWeaponApplications.pop();
@@ -1450,6 +1459,7 @@ export class SharedSimulation implements Simulation {
     const config = new ConfigStringRegistry({ get: index => strings.get(index) ?? "", set: (index, value) => { strings.set(index, value); } });
     strings.set(20, "baseq3-1"); strings.set(21, String(this.selectedQ3Time));
     const gameType = (): number => this.source.kind === "q3" ? this.source.game.gameType
+      : this.source.kind === "q3-qvm" ? this.source.game.state.cvars.variableValue("g_gametype")
       : this.recipe.match.provider === "q1:ctf" || this.recipe.match.provider === "q2:ctf" || this.recipe.match.provider === "q2:lmctf" ? GameType.GT_CTF
         : this.teamGame() ? GameType.GT_TEAM : GameType.GT_FFA;
     let serverInfo = "";
@@ -1461,8 +1471,9 @@ export class SharedSimulation implements Simulation {
         serverHighCharacters: true, print: text => { this.events.message({ kind: "print", level: 2, text }); } });
     }
     strings.set(0, serverInfo);
-    const primaryEquipment = this.source.kind === "q2-native" || this.source.kind === "q3-qvm" || this.source.kind === "q3" && this.source.game.options.product === "missionpack";
-    const equipment: import("./arsenal/q3-source.ts").Q3SelectedSourceHost["equipment"] = primaryEquipment ? { kind: "primary",
+    const primaryEquipment = this.source.kind === "q3" && this.source.game.options.product === "missionpack";
+    const equipment: import("./arsenal/q3-source.ts").Q3SelectedSourceHost["equipment"] = { kind: primaryEquipment ? "primary" : "source" };
+    const weaponEffects: import("./arsenal/q3-source.ts").Q3SelectedSourceHost["weaponEffects"] = primaryEquipment || this.source.kind === "q2-native" || this.source.kind === "q3-qvm" ? {
       damageFactor: actor => {
         if (this.source.kind === "q2-native") return this.requireNativeWeapons().damageFactor(actor);
         if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(actor);
@@ -1470,16 +1481,17 @@ export class SharedSimulation implements Simulation {
         const client = this.source.game.records.nativeByActor(actor)?.client;
         if (client == null) throw new Error("Primary Q3 equipment lost its client");
         return q3WeaponDamageFactor(client, this.source.game.quadDamageFactor(), client.ps.product);
-      }, firingDelay: (actor, milliseconds) => {
-        if (this.source.kind === "q2-native") return this.selectedWeaponDelay(actor, milliseconds / 1000) * 1000;
-        if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().weaponDelay(actor, milliseconds);
+      }, firingDelay: (actor, milliseconds, persistent) => {
+        if (this.source.kind === "q2-native") return q3WeaponDelay(this.selectedWeaponDelay(actor, milliseconds / 1000) * 1000, persistent, false);
+        if (this.source.kind === "q3-qvm") return persistent === Powerup.PW_SCOUT || persistent === Powerup.PW_AMMOREGEN
+          ? q3WeaponDelay(milliseconds, persistent, false) : this.requireQvmWeapons().weaponDelay(actor, milliseconds);
         if (this.source.kind !== "q3") throw new Error("Primary Q3 equipment lost its source");
         const client = this.source.game.records.nativeByActor(actor)?.client;
         if (client == null) throw new Error("Primary Q3 equipment lost its client");
         return q3WeaponDelay(milliseconds, client.persistantPowerup?.item?.tag ?? 0, client.ps.powerups.get(Powerup.PW_HASTE) !== 0);
-      } } : { kind: "source" };
+      } } : undefined;
     const source = new Q3SelectedSource({ actors: this.actors, bodies: this.bodies, callbacks: this.callbacks, combat: this.combat, inventory: this.inventory,
-      queries: this.scene, weaponBehavior: this.weaponBehavior, provider: this.weaponProvider.provider, product, equipment, content: this.weaponProvider.content,
+      queries: this.scene, weaponBehavior: this.weaponBehavior, provider: this.weaponProvider.provider, product, equipment, ...(weaponEffects === undefined ? {} : { weaponEffects }), content: this.weaponProvider.content,
       configstrings: config.store, userinfo: actor => this.sourcePlayerUserinfo(actor) ?? "", maxClients: this.options.maxClients, seed: this.options.seed, now: () => this.selectedQ3Time,
       worldActor: () => { const actor = this.worldActor(), owner = actor === null ? null : this.actors.resolveOwned(actor); if (owner === null) throw new Error("Selected Q3 source has no map world"); return owner; },
       player: actor => {
@@ -1490,8 +1502,8 @@ export class SharedSimulation implements Simulation {
         const q3 = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
         const team = this.combat.read(actor)?.team?.toLowerCase();
         return { angles: player.viewAngles, viewHeight: player.viewHeight, maxHealth: this.source.kind === "q2" ? this.source.game.entity(actor)?.maxHealth ?? 100
-          : this.source.kind === "q3-qvm" ? this.requireQvmWeapons().maxHealth(actor) : q3?.ps.stats.get(statSchema(q3.ps.product).maxHealth) ?? q1?.maxHealth ?? qc?.maxHealth ?? 100,
-          team: q3?.sess.sessionTeam ?? (team === "red" || team === "5" ? Team.TEAM_RED : team === "blue" || team === "14" ? Team.TEAM_BLUE : Team.TEAM_FREE),
+          : this.source.kind === "q2-native" ? this.selectedNativePlayer().maxHealth(actor) : this.source.kind === "q3-qvm" ? this.requireQvmWeapons().maxHealth(actor) : q3?.ps.stats.get(statSchema(q3.ps.product).maxHealth) ?? q1?.maxHealth ?? qc?.maxHealth ?? 100,
+          team: q3?.sess.sessionTeam ?? (team === "red" || team === "5" || team === "q3:1" || team === "q2:1" ? Team.TEAM_RED : team === "blue" || team === "14" || team === "q3:2" || team === "q2:2" ? Team.TEAM_BLUE : Team.TEAM_FREE),
           quadUntil: this.source.kind === "q3-qvm" ? this.requireQvmWeapons().powerupUntil(actor, "quad") : q3?.ps.powerups.get(Powerup.PW_QUAD) ?? Math.trunc((q1?.powerups.get("quad") ?? q2?.quadUntil ?? qc?.quadUntil ?? 0) * 1000),
           hasteUntil: this.source.kind === "q3-qvm" ? this.requireQvmWeapons().powerupUntil(actor, "haste") : q3?.ps.powerups.get(Powerup.PW_HASTE) ?? 0 };
       },
@@ -1548,7 +1560,7 @@ export class SharedSimulation implements Simulation {
           ammo: defaults.ammo.map(entry => inventory.find(current => current.item === entry.item) ?? { ...entry, count: 0 }) };
       } }),
       ...(supply === undefined ? {} : { supply }),
-      ...(equipment.kind === "primary" ? { firingDelay: (actor: OwnedActor, milliseconds: number) => equipment.firingDelay(actor.id, milliseconds) } : {}),
+      firingDelay: (actor, milliseconds) => source.firingDelay(actor, milliseconds),
       equipment: { ownsHoldables: source.ownsEquipment, read: actor => source.equipment(actor), consume: (actor, item) => source.consume(actor, item), restore: (actor, state) => source.restoreEquipment(actor, state), advance: (actor, milliseconds) => source.advanceMovement(actor, milliseconds), endCommand: (actor, milliseconds) => source.endCommand(actor, milliseconds) },
       fire: (actor, weapon, input) => {
         source.fire(actor, weapon, input);
@@ -1673,6 +1685,13 @@ export class SharedSimulation implements Simulation {
       this.inventory.bindPickup(actor, { owner: this.weaponProvider.provider, rules: this.selectedOriginalPickups }));
   }
 
+  private selectedNativePlayer(): NativePrimaryPlayer {
+    if (this.source.kind !== "q2-native") throw new Error("Selected native equipment requires its source player");
+    const weapon = nativePrimaryWeaponProfile(this.source.game.module.digest), player = nativePrimaryPlayerProfile(this.source.game.module.digest);
+    if (weapon === null || player === null) throw new Error("Selected equipment requires qualified original native player services");
+    return new NativePrimaryPlayer(nativePrimaryWeaponHost(this.source.game, this.actors), weapon, player);
+  }
+
   private selectedQ3Spawn(actor: OwnedActor): { readonly origin: Vec3; readonly angles: Vec3 } {
     const source = this.source;
     if (source.kind === "q1") { const spot = source.composition.selectSpawn(actor.id, true);
@@ -1682,7 +1701,9 @@ export class SharedSimulation implements Simulation {
     if (source.kind === "q2") { const entity = source.game.entity(actor.id); if (entity === null) throw new Error("Selected teleporter has no Q2 player"); return source.players.selectTeleportSpawn(entity, source.game); }
     if (source.kind === "q3") { const body = this.bodies.read(actor.id); if (body === null) throw new Error("Selected teleporter lost its body"); return source.game.spawns.selectSpawnPoint(body.origin); }
     if (source.kind === "quakec") return source.game.clientSpawnPoint(actor.id);
-    throw new Error("Selected Team Arena map travel has no source owner");
+    if (source.kind === "q3-qvm") return this.requireQvmWeapons().spawnPoint(actor.id);
+    if (source.kind === "q2-native") return this.selectedNativePlayer().spawnPoint(actor.id);
+    throw new Error("Selected map travel is unavailable while the world is loading");
   }
 
   private dropSelectedQ3Objectives(actor: OwnedActor): void {
@@ -1695,11 +1716,25 @@ export class SharedSimulation implements Simulation {
     if (source.kind === "q3") { const entity = source.game.records.nativeByActor(actor.id); if (entity === null) throw new Error("Selected objective drop has no map player");
       dropQ3TeleportObjectives({ product: source.game.options.product, combat: source.game.bridge.context, drops: source.game.drops }, entity); return;
     }
+    if (source.kind === "q3-qvm") { this.requireQvmWeapons().dropObjectives(actor.id); return; }
+    if (source.kind === "q2-native") { this.selectedNativePlayer().dropObjectives(actor.id); return; }
     if (source.kind === "quakec" && source.game.clientObjectives(actor.id) === "none") return;
     throw new Error("Selected objective drop has no source map owner");
   }
 
   private selectedQ3ClientChanged(actor: OwnedActor, before: Q3SelectedClientEffects, after: Q3SelectedClientEffects): void {
+    if (this.source.kind === "q2-native" || this.source.kind === "q3-qvm") {
+      const original = this.source.kind === "q2-native" ? this.selectedNativePlayer() : this.requireQvmWeapons();
+      if (before.maxHealth !== after.maxHealth) original.setMaxHealth(actor.id, after.maxHealth);
+      if (before.teleportBit !== after.teleportBit) {
+        const body = this.bodies.read(actor.id); if (body === null) throw new Error("Selected teleport lost its original player body");
+        if (original instanceof NativePrimaryPlayer) original.teleport(actor.id, body.origin, body.velocity, after.viewAngles, after.pmTime);
+        else original.teleportState(actor.id, body.origin, body.velocity, after.viewAngles, after.pmTime);
+        this.grapple?.release(actor.id); this.selectedQ3Source?.releaseHook(actor.id);
+        this.events.emit(this.weaponProvider.content, { kind: "view-reset", reason: "teleport", actor: actor.id, angles: after.viewAngles });
+      }
+      return;
+    }
     const player = this.playerStates.get(actor); if (player === undefined) return;
     if (before.maxHealth !== after.maxHealth) {
       if (this.source.kind === "q1") {
@@ -2615,6 +2650,16 @@ export class SharedSimulation implements Simulation {
       if (primaryProfile !== null) primaryWeapons = new QvmPrimaryWeapons(game.game, guest.prepared.artifact, primaryProfile, {
         actor: slot => game.records.reference(slot), slot: actor => game.records.slot(actor),
         selected: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
+        equipmentMovement: actor => {
+          const source = this.selectedQ3Source, owner = this.actors.resolveOwned(actor);
+          if (source?.ownsEquipment !== true || owner === null || this.selectedArsenal?.has(actor) !== true || primaryWeapons?.available(actor) !== true) return null;
+          const state = game.records.player(game.records.requireSlot(actor));
+          const postures = playerPostures({ character: providerFamily(this.recipe.character.definition.provider),
+            standingBounds: playerStandingBounds(providerFamily(this.recipe.character.definition.provider)), viewHeight: state.viewHeight });
+          const pose = source.fixedPose(owner, postures);
+          return { speedMultiplier: source.speedMultiplier(actor) / (primaryWeapons.powerupUntil(actor, "haste") === 0 ? 1 : 1.3), pose,
+            ownsHoldableInput: this.selectedArsenal instanceof Q3SelectedArsenal && this.selectedArsenal.ownsHoldableInput(actor) };
+        },
         attempted: (actor, weapon) => { if (this.nativeWeaponRequests.get(actor) !== weapon) this.nativeWeaponRequests.delete(actor); },
         accepted: (actor, weapon) => this.nativeWeaponRequests.set(actor, weapon),
         give: (actor, category) => { this.grantSelectedArsenal(actor, category); },

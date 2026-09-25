@@ -8,6 +8,7 @@ export function q3PrimaryWeaponProfile(artifact: QvmModuleOptions["artifact"], w
   if (artifact.module.digest !== THREEWAVE_GRAPPLE_DIGEST) return null;
   const field = (offset: number) => ({ record: "client", offset });
   return { module: artifact.module, abiProfile: "q3-modern", entityStride: 876, clientStride: 944, clientPointer: 516, maxHealth: 220, persistentMaxHealth: 548,
+    equipmentMovement: { move: 35535, slice: 34707, duck: 32561, movementGlobal: 1091860, locomotion: { entry: 35397, join: 35503 }, mins: 180, maxs: 192 },
     availability: { movementType: 4, excluded: [1, 2, 4, 7, 8], health: 184, team: 260, spectatorTeam: 3, flags: 12, respawnFlag: 512 },
     powerups: { quad: 312, haste: 320, flight: 332 },
     torsoAnimation: { entry: 27646, attack: 7, melee: 8 },
@@ -17,7 +18,8 @@ export function q3PrimaryWeaponProfile(artifact: QvmModuleOptions["artifact"], w
     damageFactor: { entry: 217003, result: 1616724, stop: { entry: 217081, join: 217113 } },
     delay: { entry: 34318, join: 34350, inputs: [12], result: 12 },
     delayPlayer: { movementGlobal: 1091860, playerOffset: 0 },
-    teleport: { entry: 118339, region: { entry: 118552, join: 118726, inputs: [], result: null } },
+    teleport: { entry: 118339, region: { entry: 118552, join: 118726, inputs: [], result: null },
+      objectives: { entry: 118552, join: 118701, inputs: [], result: null }, spawn: 127849, view: 128463 },
     stage: {
       dispatcher: { entry: 33648, actor: { record: "client", pointer: { kind: "global", address: 1091860, indirections: [0], offset: 0 } } },
       predicates: [{ instruction: 34044, unselected: false }],

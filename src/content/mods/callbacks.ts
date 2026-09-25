@@ -88,7 +88,8 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(entry => readModPickupRule(entry, sourceCall)) }),
     ...(reader.field("items").value === undefined ? {} : { items: items(reader.field("items")) }),
     ...(combat.value === undefined ? {} : { combat: { damage: sourceCall(combat.field("damage")),
-      ...(combat.field("armorStage").value === undefined ? {} : { armorStage: armorStage(combat.field("armorStage")) }) } }) };
+      ...(combat.field("armorStage").value === undefined ? {} : { armorStage: armorStage(combat.field("armorStage")) }),
+      ...(combat.field("emptyArmor").value === undefined ? {} : { emptyArmor: { item: combat.field("emptyArmor").field("item").choice("q1:item_armor1", "q1:item_armor2", "q1:item_armorInv"), absorption: combat.field("emptyArmor").field("absorption").finite() } }) } }) };
 }
 
 function items(reader: SaveReader): ModQcItems {

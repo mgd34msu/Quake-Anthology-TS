@@ -62,7 +62,12 @@ export class ClassicCombatBindings {
       if (armor.powered.kind !== this.armor(view).powered.kind) throw new Error("Native power activation requires its original source equipment operation");
       return undefined;
     };
-    const binding: CombatStateBinding = { validateArmor, protection: {
+    const binding: CombatStateBinding = { validateArmor, emptyRegularArmor: points => {
+      const item = this.entry(profile.globals.itemList + profile.items.body * profile.globals.itemBytes);
+      const classname = readClassicString(memory, memory.readPointer(item)), info = memory.readPointer(memory.offset(item, 64n));
+      if (info === null) throw new Error("Original native Body Armor has no armor information");
+      return { kind: "q2", item: `q2:${classname}`, points, normalProtection: memory.readFloat32(memory.offset(info, 8n)), energyProtection: memory.readFloat32(memory.offset(info, 12n)) };
+    }, protection: {
       regular: { owner: memory.module.id, ...(host.options.services.damageProvenance === undefined ? {} : { stage: this.armorStage(actor, "regular") }) },
       powered: { owner: memory.module.id, ...(host.options.services.damageProvenance === undefined ? {} : { stage: this.armorStage(actor, "powered") }) },
     },

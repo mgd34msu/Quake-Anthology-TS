@@ -1,3 +1,4 @@
+import { qcEmptyArmor } from "../../content/q1/quakec/armor-points.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { ArmorState, DamageOutcome, DamageRequest } from "../../contracts/gameplay.ts";
@@ -22,6 +23,7 @@ export function validateQcModCombat(program: QcProgram, declaration: Declaration
     if (value?.kind !== "input" || value.name !== name) throw new Error(`QC damage argument ${index} must lower ${name}`);
   }
   id1ProgramBinding(program);
+  qcEmptyArmor(program, declaration.emptyArmor);
   qcArmorStage(program, declaration.armorStage);
   for (const name of ["health", "takedamage", "flags", "invincible_finished", "armorvalue", "armortype"])
     if (program.fieldsByName.get(name)?.type !== "float") throw new Error(`QC combat requires float field ${name}`);
@@ -68,7 +70,8 @@ export class QcModCombat {
       return undefined;
     };
     const poweredStage = this.damage.protectionStage(actor, "powered"), regularStage = this.damage.protectionStage(actor, "regular");
-    const state = { sourceDamage: (request: DamageRequest) => this.apply(request), protection: { regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) }, powered: { owner: null, ...(poweredStage === null ? {} : { stage: poweredStage }) } },
+    const emptyRegularArmor = qcEmptyArmor(this.options.program, this.options.declaration.emptyArmor);
+    const state = { ...(emptyRegularArmor === undefined ? {} : { emptyRegularArmor }), sourceDamage: (request: DamageRequest) => this.apply(request), protection: { regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) }, powered: { owner: null, ...(poweredStage === null ? {} : { stage: poweredStage }) } },
       read: () => ({ health: words.float(this.field("health")), armor: this.damage.readArmor(words), mass: 200,
         canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) > this.seconds(), team: null }),
       validateArmor: (armor: ArmorState): undefined => {

@@ -1,3 +1,4 @@
+import { qcEmptyArmor } from "../../../content/q1/quakec/armor-points.ts";
 import { QcBorrowedActors } from "../../../compat/qc/borrowed-actors.ts";
 import { QcActorState } from "../../../compat/qc/actor-state.ts";
 import { readQuakeCCompatibility } from "../../../compat/qc/compatibility.ts";
@@ -1254,7 +1255,9 @@ export class QuakeCSource {
   }
   private admit(actor: OwnedActor, slot: number): undefined {
     const words = this.entities.at(slot), poweredStage = this.damage.protectionStage(actor, "powered"), regularStage = this.damage.protectionStage(actor, "regular"), binding = id1ProgramBinding(this.prepared.program);
+    const emptyRegularArmor = qcEmptyArmor(this.prepared.program);
     this.options.combat.bind(actor, {
+      ...(emptyRegularArmor === undefined ? {} : { emptyRegularArmor }),
       sourceDamage: request => this.applySourceDamage(request),
       protection: { regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) }, powered: { owner: null, ...(poweredStage === null ? {} : { stage: poweredStage }) } },
       read: () => ({ health: words.float(this.field("health")), armor: this.armor(slot), mass: 200,

@@ -50,6 +50,8 @@ import { SaveReader } from "../../../../persistence/value.ts";
 import type { ActorTraceQuery } from "../../../../content/q3/base/world.ts";
 import type { WeaponStepInput } from "../../../../contracts/movement.ts";
 import type { BodyState } from "../../../../contracts/world.ts";
+import type { ItemId } from "../../../../contracts/gameplay.ts";
+import { q3WeaponDelay } from "../../../../movement/q3/weapon.ts";
 import type { DamageRequest } from "../../../../contracts/gameplay.ts";
 import type { Q2Motion } from "../../../../content/q2/foundation/host.ts";
 import type { SharedSolid } from "../physics.ts";
@@ -70,8 +72,8 @@ export interface Q3SelectedSourceHost extends Pick<Q3RecordHost, "actors" | "bod
   Pick<Q3CombatBridgeHost, "combatProvider" | "inventoryProvider" | "movementProvider" | "armorContext" | "gameType" | "friendlyFire" | "knockback" | "intermissionQueued" | "checkHurtCarrier"> {
   readonly provider: ProviderId;
   readonly product: "baseq3" | "missionpack";
-  readonly equipment: { readonly kind: "source" } | { readonly kind: "primary";
-    damageFactor(actor: ActorId): number; firingDelay(actor: ActorId, milliseconds: number): number; };
+  readonly equipment: { readonly kind: "source" } | { readonly kind: "primary" };
+  readonly weaponEffects?: { damageFactor(actor: ActorId): number; firingDelay(actor: ActorId, milliseconds: number, persistentPowerup: number): number; };
   readonly content: ProviderReference["content"];
   readonly configstrings: ConfigStringStore;
   userinfo(actor: ActorId): string;
@@ -183,7 +185,10 @@ export class Q3SelectedSource {
         soundIndex: host.soundIndex, invulnerabilityImpact: (target, direction, point) => invulnerabilityEffect(this.pool, target, direction, point) } }) });
     this.weapons = new WeaponRuntime({ missiles: this.missiles, random: this.random, unlink: actor => this.world.unlinkActor(actor), get quadFactor() { return host.quadFactor(); },
       damageFactor: entity => {
-        if (host.equipment.kind === "primary") return host.equipment.damageFactor(entity.actor.id);
+        if (host.weaponEffects !== undefined) {
+          const sourceFactor = this.ownsEquipment && entity.client?.persistantPowerup?.item?.tag === Powerup.PW_DOUBLER ? 2 : 1;
+          return Math.fround(host.weaponEffects.damageFactor(entity.actor.id) * sourceFactor);
+        }
         if (entity.client === null) throw new Error("Selected weapon damage has no source client");
         return q3WeaponDamageFactor(entity.client, host.quadFactor(entity.actor.id), host.product);
       } });
@@ -345,6 +350,24 @@ export class Q3SelectedSource {
     const holdableItem = client.ps.stats.get(schema.holdableItem);
     return { maxHealth: client.ps.stats.get(schema.maxHealth), persistentPowerupTag: schema.product === "baseq3" ? Powerup.PW_NONE : itemAt(this.host.product, client.ps.stats.get(schema.persistentPowerup)).tag,
       holdableItem, holdableTag: itemAt(this.host.product, holdableItem).tag };
+  }
+  inventory(actor: OwnedActor): readonly { readonly item: ItemId; readonly label: string; readonly count: number; readonly usable: boolean }[] {
+    if (!this.ownsEquipment) return [];
+    const equipment = this.equipment(actor), items = itemList(this.host.product);
+    return items.flatMap((item, index) => {
+      const held = item.type === ItemType.IT_HOLDABLE && index === equipment.holdableItem;
+      const persistent = item.type === ItemType.IT_PERSISTANT_POWERUP && item.tag === equipment.persistentPowerupTag;
+      if ((!held && !persistent) || item.className === null || item.pickupName === null) return [];
+      const id: ItemId = `q3:${item.className}`;
+      return [{ item: id, label: item.pickupName, count: 1, usable: held }];
+    });
+  }
+  firingDelay(actor: OwnedActor, milliseconds: number): number {
+    const entity = this.player(actor), client = entity.client;
+    if (client === null) throw new Error("Selected firing delay requires its source client");
+    const persistent = this.ownsEquipment ? client.persistantPowerup?.item?.tag ?? 0 : 0;
+    return this.host.weaponEffects?.firingDelay(actor.id, milliseconds, persistent)
+      ?? q3WeaponDelay(milliseconds, persistent, client.ps.powerups.get(Powerup.PW_HASTE) !== 0);
   }
   speedMultiplier(actor: ActorId): number {
     const client = this.records.nativeByActor(actor)?.client;

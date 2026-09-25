@@ -93,6 +93,7 @@ export interface QvmWeaponDispatcherOperations {
   attempted(actor: ActorId, value: number): void;
   accepted(actor: ActorId, value: number): void;
   completed(actor: ActorId, reachedAttackDecision: boolean): void;
+  prepare?(actor: ActorId, call: QvmFunctionCall): (() => void) | undefined;
 }
 
 /** Invocation-owned weapon decisions shared by original primary and component callers. */
@@ -142,11 +143,14 @@ export class QvmWeaponDispatcher {
       reachedAttackDecision = true;
       return this.operations.selected(actor) ? original : predicate.unselected;
     } })));
+    let restore: (() => void) | undefined;
+    const cleanup = (): void => { const operation = restore; restore = undefined; operation?.(); };
     try {
-      const result = finish(proceed(call), value => { if (this.operations.live(actor)) this.operations.completed(actor, reachedAttackDecision); return value; });
-      if (typeof result !== "number") return result.finally(remove);
+      restore = this.operations.prepare?.(actor, call);
+      const result = finish(proceed(call), value => { cleanup(); if (this.operations.live(actor)) this.operations.completed(actor, reachedAttackDecision); return value; });
+      if (typeof result !== "number") return result.finally(() => { try { cleanup(); } finally { remove(); } });
       remove(); return result;
-    } catch (error) { remove(); throw error; }
+    } catch (error) { try { cleanup(); } finally { remove(); } throw error; }
   }
   private request(call: QvmFunctionCall): QvmSystemCallResult {
     const scope = this.dispatchers.at(-1);

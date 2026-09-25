@@ -58,6 +58,8 @@ export interface CombatStateBinding {
   read(): CombatState;
   writeHealth(health: number): undefined;
   writeArmor(armor: ArmorState): undefined;
+  /** Authored source armor for a points-only grant when no regular armor is selected. */
+  emptyRegularArmor?(points: number): Exclude<RegularArmorState, { readonly kind: "none" }>;
   /** Reject unsupported source representations before a bound fuel reservoir is changed. */
   validateArmor?(armor: ArmorState): undefined;
   normalizeLegacyArmor?(armor: ArmorState): ArmorState;
@@ -385,11 +387,15 @@ export class GameplayAuthority implements DamageAuthority {
     return this.binding(actor).normalizeLegacyArmor?.(armor) ?? armor;
   }
 
-  setRegularPoints(actor: OwnedActor, points: number): undefined {
+  setRegularPoints(actor: OwnedActor, points: number, initial?: Exclude<RegularArmorState, { readonly kind: "none" }>): undefined {
     if (!Number.isFinite(points)) throw new RangeError("Armor points must be finite");
     const binding = this.binding(actor), armor = this.readState(actor, binding).armor;
-    if (armor.regular.kind === "none") throw new Error("Armor points require an explicit regular armor selection");
-    return this.setArmor(actor, { ...armor, regular: { ...armor.regular, points } });
+    if (armor.regular.kind !== "none") return this.setArmor(actor, { ...armor, regular: { ...armor.regular, points } });
+    if (points === 0) return undefined;
+    const source = this.protectionBinding(actor, "regular") === null ? binding.emptyRegularArmor?.(points) : undefined;
+    const selected = source ?? initial;
+    if (selected === undefined) throw new Error("Armor points require an explicit regular armor selection");
+    return this.setArmor(actor, { ...armor, regular: { ...selected, points } });
   }
 
   setRegularArmor(actor: OwnedActor, regular: RegularArmorState): undefined {
