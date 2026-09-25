@@ -2,15 +2,19 @@
 
 ## Installed executable and recent fixes
 
+Installed executable `f670b7e9` includes authored player dimensions through selected movement, indirect original objective selectors, and invocation-local native decode cursors, alongside the earlier T12, live-catalog and source-match work. All 2880 archived Git blobs match the committed tree. Build/help and the existing compiled original Threewave GL movement/fire/armor/save-load-save/quit check passed; played/restored frames and original/canonical saved state were inspected. Previous `807e7c0b` is preserved locally. [Delivery receipt](../.artifacts/resume-20260925/delivery-f670b7e9/RUNTIME-RECEIPT.md).
+
+**22/23 targets are accepted in source. Native execution performance is the remaining identified T10 implementation work.** The measured original rerelease save is about 38 seconds, down from 62 seconds before the shared execution changes; that remains slow. The player-dimensions integration passed combined strict/policy and 51 focused checks with 496 assertions, including original retail/Threewave calls. Unified peers require `qts:snapshot-v10`. This does not establish complete campaigns, physical audio quality, arbitrary-artifact compatibility or general rendered FPS.
+
+## September 25 implementation checkpoints
+
+These entries retain their source, measurement and installed-build status at the time. The current installed build is identified above.
+
 Installed executable `807e7c0b` includes T12 closure, live primary QVM item catalogs, source-owned player eye/stance/movement modes, shared teams/scores/objectives, and native decode/memory improvements. All 2876 archived Git blobs match the committed tree. Build/help and the existing compiled original Threewave GL movement/fire/armor/save-load-save/quit check passed; played/restored frames and original/canonical saved state were inspected. Previous `d3814f1c` is preserved locally. **Current source: 22/23 targets accepted; T10 remains open.** Newer source supports indirect objective fields and reuses a decode cursor within each native CPU invocation. Authored body dimensions are integrated in newer source; native execution performance remains active. [Delivery receipt](../.artifacts/resume-20260925/delivery-807e7c0b/RUNTIME-RECEIPT.md).
 
 The latest objective changes follow original QC entity fields, QVM pointer walks and native records through relocation and restoration. Shared match consumers retain the original owner and callbacks. Native execution now reuses a decode cursor within each invocation, including distinct cursors for nested calls. The original rerelease save measured 38.0 seconds, down from 62.1 before the execution improvements. This is still slow; the measured original native frame took 351 ms. These source changes are newer than installed `807e7c0b` and do not close T10 performance.
 
 Authored player dimensions now reach selected collision, stepping and ground probes. Blocked enlargement keeps the accepted hull; disable restores source dimensions through clearance. Original API3/API2023 and declared QVM movement retain their source trace policies. Unified peers require `qts:snapshot-v10`. Root combined strict, 34-file policy and 51 focused checks with 496 assertions pass, including actual original native and Threewave movement calls. This is newer source than installed `807e7c0b`. Native execution performance is the remaining identified T10 implementation work.
-
-## September 25 implementation checkpoints
-
-These entries retain their source, measurement and installed-build status at the time. The current installed build is identified above.
 
 The combined source passed production/changed-fixture strict compilation and scoped policy checks. Affected original QC, QVM and native calls passed 48 tests/645 assertions; the subsequent native hook lifecycle passed three existing checks/81 assertions. Newer source extends original QC damage regions to exact amount transformations applied at hit time, including selected Q1/Q2/Q3 weapons and offhand grenades. Root combined strict, 15-file policy and the existing QC/Q2 fixtures pass (43 tests/556 assertions). This amount-transform change is newer than installed `edcfada8`. This remains separate from broader mod composition and whole-target acceptance.
 
