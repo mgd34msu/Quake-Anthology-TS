@@ -22,13 +22,21 @@ const cancellationScope = Symbol("QVM cancellation scope");
 /** A capability for one live intercepted call, issued and checked by its interpreter. */
 export interface QvmCancellationScope { readonly [cancellationScope]: true; }
 
+export interface QvmEvaluationStack { readonly start: number; readonly end: number; }
+
+export interface QvmReadOnlyEvaluation {
+  readonly stack?: QvmEvaluationStack;
+  readonly region: QvmRegionEvaluation;
+  readonly inputs: readonly number[];
+}
+
 export interface QvmSyscall {
   /** Live little-endian words: syscall number, followed by its arguments. */
   readonly words: DataView;
   readonly memory: Uint8Array;
   readonly guest: QvmMemory;
   /** Recursive entry is valid only while this callback owns the suspended frame. */
-  invoke(args: QvmArguments, instructionIndex?: number): number;
+  invoke(args: QvmArguments, instructionIndex?: number, evaluation?: QvmReadOnlyEvaluation): number;
   invokeAsync(args: QvmArguments, instructionIndex?: number, validate?: () => void): Promise<number>;
   cancelFunction(scope: QvmCancellationScope): never;
 }
@@ -200,6 +208,11 @@ export class QvmInterpreter {
   callLevel = 0;
   readonly addressSpace: QvmMemory;
   private readonly qualifiedRegions = new Map<string, number>();
+  private counterEvaluation: { readonly address: number; value: number; readonly stackEnd: number; readonly stackStart: number;
+    readonly functions: ReadonlySet<number>; readonly ranges: readonly { readonly start: number; readonly end: number }[]; remaining: number } | null = null;
+  private readonly sourceDataEnd: number;
+  private readonly memoryInitializedEnd: number;
+  private readonly counterFunctions = new Map<string, { readonly functions: ReadonlySet<number>; readonly ranges: readonly { readonly start: number; readonly end: number }[] }>();
   private readonly qualifiedEvaluations = new Map<string, number>();
   private readonly data: DataView;
   private readonly observedData: DataView;
@@ -229,6 +242,8 @@ export class QvmInterpreter {
   ) {
     this.source = image.source;
     this.instructions = image.instructions;
+    this.sourceDataEnd = image.dataLength + image.literalLength + image.bssLength;
+    this.memoryInitializedEnd = image.dataLength + image.literalLength;
     const allocations: QvmAllocation[] = [];
     const allocate = (source: string, bytes: number, resource = image.source): Uint8Array => {
       if (profile.kind === "unaccounted") return new Uint8Array(bytes);
@@ -378,11 +393,11 @@ export class QvmInterpreter {
     this.memory.set(image.initializedData);
   }
 
-  invoke(args: QvmArguments, instructionIndex = 0): number {
+  invoke(args: QvmArguments, instructionIndex = 0, evaluation?: QvmReadOnlyEvaluation): number {
     if (this.rootActive) throw new Error("QVM is already active; recursive calls belong to the current syscall");
     this.live();
     this.rootActive = true;
-    try { return this.executeSync(args, instructionIndex); }
+    try { return this.executeSync(args, instructionIndex, undefined, undefined, evaluation); }
     finally { this.rootActive = false; }
   }
 
@@ -394,8 +409,21 @@ export class QvmInterpreter {
     finally { this.rootActive = false; }
   }
 
-  private executeSync(args: QvmArguments, instructionIndex: number, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null): number {
-    const token = {}, execution = this.execute(token, args, instructionIndex, false, () => {}, sourceCall, functionScope);
+  private readonly readOnlyRegions = new Map<string, number>();
+  private executeSync(args: QvmArguments, instructionIndex: number, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null, evaluation?: QvmReadOnlyEvaluation): number {
+    let qualified: SourceFunctionCall["evaluation"] = null;
+    if (evaluation !== undefined) {
+      const { region, inputs } = evaluation, key = `${instructionIndex}:${region.entry}:${region.join}:${region.inputs.join(",")}:${region.result}`;
+      let frameSize = this.readOnlyRegions.get(key);
+      if (frameSize === undefined) {
+        frameSize = qualifyQvmRegionEvaluation(this.instructions, instructionIndex, region, "read-only");
+        this.readOnlyRegions.set(key, frameSize);
+      }
+      if (inputs.length !== region.inputs.length) throw new Error("Read-only QVM region live-ins differ from its qualified frame");
+      for (const word of inputs) signedWord(word);
+      qualified = { region, inputs, frameSize };
+    }
+    const token = {}, execution = this.execute(token, args, instructionIndex, false, () => {}, sourceCall, functionScope, qualified, evaluation?.stack);
     const result = this.resume(token, () => execution.next());
     if (result.done) return result.value;
     // The trap boundary rejects promises before a synchronous invocation can yield.
@@ -457,14 +485,60 @@ export class QvmInterpreter {
     return address;
   }
 
+  /** Runs an original counter leaf with one virtual word; no source stores or host callbacks escape. */
+  evaluateCounter(address: number, initial: number, functions: readonly number[], execute: () => number, stack?: QvmEvaluationStack): number {
+    this.live(); this.range(address, 4); signedWord(initial);
+    if (address % 4 !== 0 || address + 4 > this.sourceDataEnd || this.counterEvaluation !== null)
+      throw new Error("QVM counter evaluation requires one live aligned source word and a fresh scope");
+    const key = functions.join(":");
+    let qualified = this.counterFunctions.get(key);
+    if (qualified === undefined) {
+      const admitted = new Set(functions);
+      if (admitted.size !== functions.length || admitted.size === 0) throw new Error("QVM counter evaluation requires distinct original functions");
+      const ranges = functions.map(entry => {
+        if (this.instructions[entry]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("QVM counter evaluation entry is not an original function");
+        let end = entry + 1; while (end < this.instructions.length && this.instructions[end]?.opcode !== QvmOpcode.OP_ENTER) end++;
+        return { start: this.targetPC(entry), end: end === this.instructions.length ? this.code.length : this.targetPC(end) };
+      });
+      qualified = { functions: admitted, ranges }; this.counterFunctions.set(key, qualified);
+    }
+    const stackStart = this.evaluationStackStart(stack);
+    if (address + 4 > stackStart) throw new Error("QVM counter word overlaps its evaluation stack");
+    const scope = { address, value: initial, stackStart, stackEnd: this.programStack, ...qualified, remaining: 100000 };
+    this.counterEvaluation = scope;
+    try { execute(); return scope.value; } finally { this.counterEvaluation = null; }
+  }
+  private evaluationStackStart(stack?: QvmEvaluationStack): number {
+    if (stack === undefined) return Math.ceil(this.sourceDataEnd / 4) * 4;
+    if (!Number.isSafeInteger(stack.start) || !Number.isSafeInteger(stack.end) || stack.start % 4 !== 0 || stack.end % 4 !== 0
+      || stack.start < this.memoryInitializedEnd || stack.start >= stack.end || stack.end > this.memory.length || this.programStack > stack.end)
+      throw new Error("QVM evaluation stack is outside its declared source reservation or active caller");
+    return stack.start;
+  }
+  private counterRead(address: number, length: number): number | null {
+    const scope = this.counterEvaluation;
+    if (scope === null || address + length <= scope.address || address >= scope.address + 4) return null;
+    if (address !== scope.address || length !== 4) throw new Error("QVM counter evaluation cannot partially read its isolated word");
+    return scope.value;
+  }
+  private counterWrite(address: number, length: number, value: number): boolean {
+    const scope = this.counterEvaluation;
+    if (scope === null) return false;
+    if (address === scope.address && length === 4) { scope.value = value | 0; return true; }
+    if (address < Math.max(scope.stackStart, this.active?.stack() ?? scope.stackEnd) || address + length > scope.stackEnd)
+      throw new Error("QVM counter evaluation attempted an unrelated source write");
+    return false;
+  }
+
   private readWord(address: number): number {
     this.range(address, 4);
-    return this.data.getInt32(address, true);
+    return this.counterEvaluation === null ? this.data.getInt32(address, true) : this.counterRead(address, 4) ?? this.data.getInt32(address, true);
   }
 
   private writeWord(address: number, word: number): void {
     this.range(address, 4);
-    (this.addressSpace.observesWrites ? this.observedData : this.data).setInt32(address, word, true);
+    if (this.counterEvaluation !== null && this.counterWrite(address, 4, word)) return;
+    (this.counterEvaluation === null && this.addressSpace.observesWrites ? this.observedData : this.data).setInt32(address, word, true);
   }
 
   private targetPC(index: number): number {
@@ -569,7 +643,7 @@ export class QvmInterpreter {
     try {
       const result = perform({ run, runAsync, control,
         cancelFunction: capability => control(() => this.cancelFunction(capability, functionScope)),
-        invoke: (args, instructionIndex = 0) => run(() => this.executeSync(args, instructionIndex, undefined, functionScope)),
+        invoke: (args, instructionIndex = 0, evaluation) => run(() => this.executeSync(args, instructionIndex, undefined, functionScope, evaluation)),
         invokeAsync: (args, instructionIndex = 0, validate = () => {}) => runAsync(() => this.executeAsync(args, instructionIndex, () => { frame.validate(); validate(); }, undefined, functionScope)),
       });
       if (typeof result === "number") return complete(result);
@@ -588,6 +662,17 @@ export class QvmInterpreter {
       words: this.addressSpace.dataView(sp + 4, this.memory.byteLength - sp - 4),
       memory: this.memory, guest: this.addressSpace, invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
     }));
+  }
+
+  private decision(frame: Invocation, owner: SourceFunctionCall, decide: QvmBranchBinding["decide"], taken: boolean): QvmSystemCallResult {
+    const previousStack = this.programStack; this.programStack = frame.stack() - 4;
+    try { return this.hostCall(frame, scope => {
+      let result = 0;
+      this.storeEffect({ invoke: scope.invoke, cancelFunction: scope.cancelFunction,
+        invokeAsync: () => scope.control(() => { throw new Error("QVM decision effects cannot start asynchronous calls"); }),
+      }, () => { result = decide(taken, { cancelFunction: scope.cancelFunction }) ? 1 : 0; return undefined; });
+      return result;
+    }, owner); } finally { this.programStack = previousStack; }
   }
 
   private region(frame: Invocation, owner: SourceFunctionCall, region: SourceRegion, phase: "enter" | "complete"): QvmSystemCallResult {
@@ -754,18 +839,22 @@ export class QvmInterpreter {
   }
 
   private *execute(execution: object, args: QvmArguments, instructionIndex: number, asynchronous: boolean,
-    validate: () => void, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null): Generator<Promise<number>, number, number> {
+    validate: () => void, sourceCall?: SourceFunctionCall, functionScope?: SourceFunctionCall | null,
+    readOnlyEvaluation: SourceFunctionCall["evaluation"] = null, readOnlyStack?: QvmEvaluationStack): Generator<Promise<number>, number, number> {
     for (const word of args) signedWord(word);
     if (sourceCall === undefined) this.registration?.printCall(args[0]);
     const profile = this.registration?.executionProfile() ?? { kind: "release" };
     const debug = profile.kind === "debug";
+    const evaluationFloor = this.counterEvaluation?.stackStart ?? (readOnlyEvaluation === null ? null : this.evaluationStackStart(readOnlyStack));
     const previousDebug = this.debug;
-    this.debug = debug;
     const trace = profile.kind === "debug" ? profile.trace : 0;
     const print = (text: string): void => { this.registration?.print(text); };
     const entryStack = this.programStack;
     const previousCallLevel = this.callLevel;
     let sp = sourceCall === undefined ? this.stack(entryStack - 48) : sourceCall.stack;
+    if (evaluationFloor !== null && sp < evaluationFloor) throw new Error("QVM evaluation stack would overlap source data");
+    this.debug = debug;
+    const evaluationStack = sp, evaluation = readOnlyEvaluation ?? sourceCall?.evaluation;
     const previous = this.active;
     const frame: Invocation = { operands: sourceCall?.operands ?? new Operands(debug), stack: () => sp, execution, asynchronous, validate,
       functionScope: sourceCall ?? functionScope ?? previous?.functionScope ?? null };
@@ -781,7 +870,7 @@ export class QvmInterpreter {
         this.callLevel = 0;
         this.registration?.debug(0);
         const binding = this.functionHooks?.get(instructionIndex);
-        if (binding?.scope === "invocations") {
+        if (binding?.scope === "invocations" && readOnlyEvaluation === null && this.counterEvaluation === null) {
           this.programStack = sp - 4;
           const result = this.intercept(frame, sp, -1, instructionIndex, binding.hook, undefined);
           return typeof result === "number" ? result : yield result;
@@ -792,10 +881,12 @@ export class QvmInterpreter {
       let profileSymbol = debug ? this.symbols.valueToFunctionSymbol(0) : null;
       const debugString = (): string => `${this.indent()}${operands.count}`;
       for (;;) {
-        const owner = frame.functionScope;
-        const evaluation = sourceCall?.evaluation;
-        if (sourceCall !== undefined && evaluation != null && sp === sourceCall.stack - evaluation.frameSize && pc === this.targetPC(evaluation.region.join)) {
-          if (operands.count !== sourceCall.operandDepth) throw new Error("QVM region evaluation lost its caller operands");
+        const counter = this.counterEvaluation;
+        if (counter !== null && (--counter.remaining < 0 || !counter.ranges.some(range => pc >= range.start && pc < range.end)))
+          throw new Error("QVM counter evaluation escaped its admitted original functions or instruction budget");
+        const owner = counter === null ? frame.functionScope : null;
+        if (evaluation != null && sp === evaluationStack - evaluation.frameSize && pc === this.targetPC(evaluation.region.join)) {
+          if (operands.count !== (sourceCall?.operandDepth ?? 0)) throw new Error("QVM region evaluation lost its caller operands");
           return evaluation.region.result === null ? 0 : this.readWord(sp + evaluation.region.result);
         }
         if (owner?.regions !== null && owner !== null) {
@@ -832,7 +923,9 @@ export class QvmInterpreter {
           case QvmOpcode.OP_UNDEF: case QvmOpcode.OP_IGNORE:
             if (debug) throw new CommonError("drop", "Bad VM instruction");
             break;
-          case QvmOpcode.OP_BREAK: this.breaks = (this.breaks + 1) | 0; break;
+          case QvmOpcode.OP_BREAK:
+            if (counter !== null) throw new Error("QVM counter evaluation cannot trigger a debug break");
+            this.breaks = (this.breaks + 1) | 0; break;
           case QvmOpcode.OP_CONST: operands.push(this.codeWord(pc)); pc += 4; break;
           case QvmOpcode.OP_LOCAL: operands.push((sp + this.codeWord(pc)) | 0); pc += 4; break;
           case QvmOpcode.OP_PUSH: operands.reserve(); break;
@@ -840,9 +933,11 @@ export class QvmInterpreter {
           case QvmOpcode.OP_ENTER: {
             if (debug) profileSymbol = this.symbols.valueToFunctionSymbol(pc);
             const size = this.codeWord(pc);
+            if (evaluationFloor !== null && (size < 0 || size % 4 !== 0 || sp - size < evaluationFloor))
+              throw new Error("QVM evaluation stack would overlap source data");
             sp = this.stack(sp - size);
             pc += 4;
-            if (evaluation != null && sourceCall !== undefined && !evaluationStarted && pc - 5 === this.targetPC(instructionIndex)) {
+            if (evaluation != null && !evaluationStarted && pc - 5 === this.targetPC(instructionIndex)) {
               evaluationStarted = true;
               for (const [index, offset] of evaluation.region.inputs.entries()) {
                 const value = evaluation.inputs[index]; if (value === undefined) throw new Error("Missing QVM region live-in");
@@ -886,8 +981,9 @@ export class QvmInterpreter {
             this.writeWord(sp, pc);
             const target = operands.pop();
             if (target >= 0) {
-              const binding = this.functionHooks?.get(target), observers = this.functionObservers?.get(target);
-              const hook = binding?.hook ?? this.functionResolver?.resolve(target, this.readWord(sp + 8));
+              if (counter !== null && !counter.functions.has(target)) throw new Error("QVM counter evaluation called an undeclared source function");
+              const binding = counter === null ? this.functionHooks?.get(target) : undefined, observers = counter === null ? this.functionObservers?.get(target) : undefined;
+              const hook = counter === null ? binding?.hook ?? this.functionResolver?.resolve(target, this.readWord(sp + 8)) : undefined;
               if (binding === undefined && hook !== undefined && this.codeWord(this.targetPC(target)) !== QvmOpcode.OP_ENTER)
                 throw new Error("QVM resolver requires a function entry instruction");
               if (hook === undefined && observers === undefined) { returns?.push(sp, returnPC); pc = this.targetPC(target); }
@@ -902,6 +998,7 @@ export class QvmInterpreter {
               }
             }
             else {
+              if (counter !== null) throw new Error("QVM counter evaluation cannot call an engine service");
               if (trace !== 0) print(`${debugString()}---> systemcall(${-1 - target})\n`);
               const savedCallLevel = this.callLevel;
               this.programStack = sp - 4;
@@ -920,12 +1017,14 @@ export class QvmInterpreter {
           case QvmOpcode.OP_JUMP: pc = this.targetPC(operands.pop()); break;
           case QvmOpcode.OP_LOAD1: {
             const address = operands.peek() & this.dataMask;
+            if (counter !== null) this.counterRead(address, 1);
             operands.set(this.data.getUint8(address));
             break;
           }
           case QvmOpcode.OP_LOAD2: {
             const address = operands.peek() & this.dataMask;
             this.range(address, 2);
+            if (counter !== null) this.counterRead(address, 2);
             operands.set(this.data.getUint16(address, true));
             break;
           }
@@ -935,14 +1034,17 @@ export class QvmInterpreter {
             break;
           case QvmOpcode.OP_STORE1: {
             const value = operands.pop();
-            (this.addressSpace.observesWrites ? this.observedData : this.data).setUint8(operands.pop() & this.dataMask, value);
+            const address = operands.pop() & this.dataMask;
+            if (counter !== null) this.counterWrite(address, 1, value);
+            (this.counterEvaluation === null && this.addressSpace.observesWrites ? this.observedData : this.data).setUint8(address, value);
             break;
           }
           case QvmOpcode.OP_STORE2: {
             const value = operands.pop();
             const address = operands.pop() & (this.dataMask & ~1);
             this.range(address, 2);
-            (this.addressSpace.observesWrites ? this.observedData : this.data).setUint16(address, value, true);
+            if (counter !== null) this.counterWrite(address, 2, value);
+            (this.counterEvaluation === null && this.addressSpace.observesWrites ? this.observedData : this.data).setUint16(address, value, true);
             break;
           }
           case QvmOpcode.OP_STORE4: {
@@ -952,6 +1054,7 @@ export class QvmInterpreter {
           }
           case QvmOpcode.OP_ARG: this.writeWord(sp + this.codeWord(pc++), operands.pop()); break;
           case QvmOpcode.OP_BLOCK_COPY: {
+            if (counter !== null) throw new Error("QVM counter evaluation cannot copy source memory");
             const source = operands.pop();
             const destination = operands.pop();
             const count = this.codeWord(pc);
@@ -996,12 +1099,12 @@ export class QvmInterpreter {
             const right = operands.pop();
             const left = operands.pop();
             const target = this.codeWord(pc);
-            const taken = evaluateQvmBranch(opcode, left, right), decide = frame.functionScope?.branches?.get(pc - 1);
+            const taken = evaluateQvmBranch(opcode, left, right), decide = counter === null ? frame.functionScope?.branches?.get(pc - 1) : undefined;
             if (decide === undefined) pc = taken ? target : pc + 4;
             else {
               const owner = frame.functionScope;
               if (owner === null || !owner.active) throw new Error("QVM branch invocation has expired");
-              const result = this.hostCall(frame, scope => decide(taken, { cancelFunction: scope.cancelFunction }) ? 1 : 0, owner);
+              const result = this.decision(frame, owner, decide, taken);
               const chosen = typeof result === "number" ? result : yield result;
               this.checkCancellation(owner); this.live(); frame.validate();
               if (!owner.active || this.active !== frame) throw new Error("QVM branch invocation is no longer current");

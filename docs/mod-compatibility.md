@@ -46,6 +46,29 @@ Threewave 1.7's verified layout is built in. This equivalent declaration shows t
 
 The current interface covers a static QVM item table and the standard public weapon/ammo records. Mods that replace those records or generate their catalogs dynamically need an additional source interface. Q3 sound effects also follow the original client's WAV policy: cue/sampler loop metadata does not control Q3 channel playback.
 
+## Original QVM primary player interfaces
+
+A modern Q3 module can declare its original primary player interface in its matching `qvm-compatibility.json` module entry. This enables selected arsenals without adding a mod name or binary digest to the engine. The entry still requires `role: "qagame"`, the exact `artifactPath` and `artifactDigest`, and `profile: "q3-modern"`. Its `primary` record is complete: missing interfaces do not inherit parts of a built-in profile.
+
+| `primary` field | Original source interface |
+| --- | --- |
+| `items` | Initialized item table layout, using the `qvm-items.json` layout above. The selected catalog and pickup profile must identify the same table. |
+| `input` | Entity/client strides, the client pointer, original intermission values and the `clientThink`, `runClient`, `clientSpawn`, `move` and `slice` entries. |
+| `weapons` | Original weapon dispatch and selection, attack decisions, settled state, give/drop continuations, damage/cadence regions, torso animation, equipment movement and player/objective/spawn services. |
+| `inventory` | Original weapon bits and signed ammo words, with source-qualified capacity operands or a pure original capacity region. |
+| `pickups` | Original touch, eligibility, grant, targets and free boundaries. Resource decisions delegate while other original admission and map continuation remain intact. |
+| `combat` | Original entity fields, allocate/free/damage entries, pain/death fields and armor interface. Original damage and absorption functions continue to execute. |
+
+The field schemas are implemented in [primary-player-profile.ts](../src/compat/qvm/primary-player-profile.ts), [primary-inventory-profile.ts](../src/compat/qvm/primary-inventory-profile.ts) and [primary-pickup-profile.ts](../src/compat/qvm/primary-pickup-profile.ts). Instruction locations are decoded QVM instruction indices; memory offsets are byte offsets. Functions must be original `OP_ENTER` entries. Regions must stay within their owning function and satisfy the existing operand/local-state qualification. Shared records and movement entries must agree across interfaces. Armor fractions retain the exact original binary32 value.
+
+For inline clamp limits, `inventory.capacity` can use `kind: "counter"`, an original `function`, a nonempty `functions` list containing that entry and its admitted helpers, and ordered `arguments`. Argument kinds are `entity`, `client`, `client-number`, `weapon`, `constant` (an original `OP_CONST` instruction), or `maximum-grant`. The last supplies signed-int32 maximum to the original saturating grant operation. Its one ammo word starts at zero in private evaluation storage. Original reads and writes of that word stay private; the original live mode and class fields remain readable. Other source writes, partial counter access, undeclared calls and engine traps reject before effects. Invocation locals are isolated, and the operation has a bounded instruction budget. This form requires an original saturating ammo operation; it does not infer a cap from arbitrary gameplay code or replay map grants.
+
+Capacity queries use only the unused allocated tail after the QVM data, literals, and BSS by default. Every query entry and original stack frame must remain in that tail before any local write. A module whose original stack reservation lies within BSS can explicitly declare `capacity.stack: { "start": byteOffset, "end": byteOffset }` for a `region` or `counter` operation. The compatibility document binds that reservation to the module digest; its aligned bounds must exclude initialized data, fit the allocation, and contain the active caller stack. Declare the actual reserved range from the original artifact; the loader does not infer a stack reservation size from another compiler or mod. Counter words must remain outside the declared stack.
+
+A matching `role: "cgame"` entry can declare `equipmentPresentation`. It describes the original weapon selector (`hud`), warning entry/state and source warning values, ammo status functions or regions, final view-weapon visibility decision and branch direction, and the original held-weapon parent/actor arguments and local `refEntity`. See [primary-presentation-profile.ts](../src/compat/qvm/primary-presentation-profile.ts). The original cgame still decides status visibility, camera policy, body animation and attachment pose. Source health/armor rendering is retained. A cgame without these qualified boundaries cannot present a selected arsenal.
+
+An external primary's compatibility-document digest is retained in saves. Loading rejects changed or removed interfaces, including changed client presentation declarations in that document. Built-in profiles retain their existing save compatibility. This interface covers the modern public Q3 records and the declared original call conventions; it does not qualify undocumented private record formats, arbitrary bytecode regions or a new weapon's cross-game supply semantics automatically.
+
 ## Independent components
 
 **Custom game → Mods** lists installed independent components with individual enable/disable controls. Multiple components can be selected; their source game does not restrict the destination world. The list reports missing dependencies, declared conflicts, and unavailable components. From the command line, repeat `--mod PRODUCT/COMPONENT_ID` for each selection.

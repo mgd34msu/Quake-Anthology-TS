@@ -24,7 +24,7 @@ export interface QvmPickupGrant {
     | { readonly kind: "return"; readonly acceptedReturn: number }
     | { readonly kind: "region"; readonly entry: number; readonly join: number; readonly quantity: number;
       readonly weapon?: { readonly bitsOffset: number; readonly ammoOffset: number; readonly quantity: QvmRegionEvaluation } };
-  eligible(context: QvmPickupEligibility): boolean;
+  eligible(context: QvmPickupEligibility): boolean | Promise<boolean>;
 }
 export interface QvmPickupProfile {
   readonly module: ModuleIdentity;
@@ -206,7 +206,9 @@ export class QvmPrimaryPickups {
       || call.words.getInt32(profile.gate.playerArgument * 4, true) !== frame.playerPointer) return proceed(call);
     if (!this.live(frame)) this.cancel(frame, call);
     if (frame.selection.kind !== "replacement" || frame.grant === undefined) return proceed(call);
-    return frame.grant.eligible({ call, item: this.entity(frame.itemSlot), player: this.options.game.module.memory.dataView(frame.playerPointer, this.options.profile.clientStride) }) ? 1 : 0;
+    const eligible = frame.grant.eligible({ call, item: this.entity(frame.itemSlot), player: this.options.game.module.memory.dataView(frame.playerPointer, this.options.profile.clientStride) });
+    const finish = (value: boolean): number => { call.effect(() => { if (!this.live(frame)) this.cancel(frame, call); return undefined; }); return value ? 1 : 0; };
+    return typeof eligible === "boolean" ? finish(eligible) : eligible.then(finish);
   }
   supply(offer: OriginalPickupOffer): { readonly offer: PickupSupplyOffer; readonly quantity?: (count: number) => number } {
     const frame = this.frames.at(-1);
@@ -283,7 +285,7 @@ export class QvmPrimaryPickups {
     const frame = this.frames.at(-1);
     if (frame === undefined || !this.from(call, this.options.profile.targets.calls)) return proceed(call);
     if (!this.live(frame)) this.cancel(frame, call);
-    const finish = (result: number): number => { if (!this.live(frame)) this.cancel(frame, call); return result; };
+    const finish = (result: number): number => { call.effect(() => { if (!this.live(frame)) this.cancel(frame, call); return undefined; }); return result; };
     const result = proceed(call); return typeof result === "number" ? finish(result) : result.then(finish);
   }
   afterFree(pointer: number, control: Pick<QvmFunctionCall, "cancelFunction">): void {

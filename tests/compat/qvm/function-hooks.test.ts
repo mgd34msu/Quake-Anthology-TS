@@ -6,7 +6,7 @@ import type { QvmCancellationScope, QvmFunctionCall, QvmFunctionHook } from "../
 import type { QvmRegionControl } from "../../../src/compat/qvm/interpreter.ts";
 
 type Operation = readonly [QvmOpcode, number?];
-function bytecode(operations: readonly Operation[]): Uint8Array {
+function bytecode(operations: readonly Operation[], bssLength = 4096): Uint8Array {
   const code = new BinaryWriter(operations.length * 5);
   for (const [opcode, operand] of operations) {
     code.u8(opcode);
@@ -16,7 +16,7 @@ function bytecode(operations: readonly Operation[]): Uint8Array {
     }
   }
   const instructions = code.finish(), output = new BinaryWriter(32 + instructions.length);
-  for (const word of [0x12721444, operations.length, 32, instructions.length, 32 + instructions.length, 0, 0, 4096]) output.i32(word);
+  for (const word of [0x12721444, operations.length, 32, instructions.length, 32 + instructions.length, 0, 0, bssLength]) output.i32(word);
   output.bytes(instructions);
   return output.finish();
 }
@@ -97,6 +97,36 @@ test("standalone original region consumes only explicit live-ins and preserves c
   vm.bindInvocation(0, call => call.evaluateRegion({ entry: 4, join: 10, inputs: [], result: 24 }, []));
   expect(() => vm.invoke(qvmArguments([]))).toThrow("undeclared source local 24");
   expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
+});
+
+test("read-only original regions use live memory without replacing existing entry ownership", () => {
+  const source = bytecode([
+    [QvmOpcode.OP_ENTER, 32], [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_LEAVE, 32],
+  ], 2049);
+  const identity = { id: "test:read-only", artifactPath: "vm/qagame.qvm", revision: "test",
+    digest: createContentDigest(new Bun.CryptoHasher("sha256").update(source).digest("hex")) } satisfies import("../../../src/contracts/execution.ts").ModuleIdentity;
+  const artifact = resolveQvmArtifact({ module: identity, role: "qagame", bytes: source });
+  if (artifact.kind !== "bytecode") throw new Error("Missing original region bytecode");
+  const module = new QvmModule({ artifact, host: rejectQvmSyscall });
+  const region = { entry: 1, join: 5, inputs: [], result: 24 };
+  let entered = 0;
+  module.bindInvocation({ kind: "qvm", module: identity, instructionIndex: 0 }, call => {
+    entered++; expect(module.evaluateRegion([], 0, region, [])).toBe(77); return call.proceed();
+  });
+  module.memory.dataView(64, 4).setInt32(0, 31, true);
+  expect(module.evaluateRegion([], 0, region, [])).toBe(31); expect(entered).toBe(0);
+  module.memory.dataView(64, 4).setInt32(0, 77, true);
+  expect(module.call([])).toBe(77); expect(entered).toBe(1);
+  expect(module.memory.dataView(64, 4).getInt32(0, true)).toBe(77);
+  expect(module.interpreter.stackPointer).toBe(module.memory.bytes.length);
+  module.retire();
+  const mutating = new QvmInterpreter(parseQvm(bytecode([
+    [QvmOpcode.OP_ENTER, 32], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 12], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 32],
+  ])), unexpectedTrap);
+  expect(() => mutating.invoke(qvmArguments([]), 0, { region: { entry: 1, join: 4, inputs: [], result: null }, inputs: [] })).toThrow("cannot write outside");
+  expect(new DataView(mutating.memory.buffer).getInt32(64, true)).toBe(0);
 });
 
 test("invocation effects restore current module reentry after await and expire with their call", async () => {
@@ -603,4 +633,55 @@ test("branch registration rejects other functions, nonconditionals, duplicates, 
     expect(() => vm.invoke(qvmArguments([]))).toThrow("QVM branch");
     expect(vm.isActive).toBe(false); expect(vm.stackPointer).toBe(vm.memory.length);
   }
+});
+
+
+test("source counter queries isolate their word, preserve hooks and reject unrelated or partial stores", () => {
+  const source = bytecode([
+    [QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_LOAD4],
+    [QvmOpcode.OP_CONST, 5], [QvmOpcode.OP_ADD], [QvmOpcode.OP_STORE4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 16],
+  ], 2049);
+  const identity = { id: "test:counter", artifactPath: "vm/qagame.qvm", revision: "test",
+    digest: createContentDigest(new Bun.CryptoHasher("sha256").update(source).digest("hex")) } satisfies import("../../../src/contracts/execution.ts").ModuleIdentity;
+  const artifact = resolveQvmArtifact({ module: identity, role: "qagame", bytes: source });
+  if (artifact.kind !== "bytecode") throw new Error("Missing source counter bytecode");
+  const module = new QvmModule({ artifact, host: rejectQvmSyscall });
+  let hooks = 0, stores = 0;
+  module.memory.dataView(64, 4).setInt32(0, 13, true);
+  module.memory.observeWrites([{ byteOffset: 64, byteLength: 4 }], () => { stores++; return undefined; });
+  module.bindInvocation({ kind: "qvm", module: identity, instructionIndex: 0 }, call => {
+    hooks++; expect(module.evaluateCounter([], 0, 64, [0])).toBe(5); return call.proceed();
+  });
+  expect(module.evaluateCounter([], 0, 64, [0])).toBe(5); expect(hooks).toBe(0); expect(stores).toBe(0);
+  expect(module.memory.dataView(64, 4).getInt32(0, true)).toBe(13);
+  module.call([]); expect(hooks).toBe(1); expect(stores).toBe(1);
+  expect(module.memory.dataView(64, 4).getInt32(0, true)).toBe(18);
+  expect(module.interpreter.stackPointer).toBe(module.memory.bytes.length); module.retire();
+  for (const [address, opcode] of [[88, QvmOpcode.OP_STORE4], [65, QvmOpcode.OP_STORE1]] satisfies readonly (readonly [number, QvmOpcode])[]) {
+    const vm = new QvmInterpreter(parseQvm(bytecode([[QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, address], [QvmOpcode.OP_CONST, 7], [opcode],
+      [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 16]], 2049)), unexpectedTrap);
+    expect(() => vm.evaluateCounter(64, 0, [0], () => vm.invoke(qvmArguments([])))).toThrow("unrelated source write");
+    expect(vm.memory[address]).toBe(0); expect(vm.stackPointer).toBe(vm.memory.length);
+    vm.invoke(qvmArguments([])); expect(vm.memory[address]).toBe(7);
+  }
+});
+
+
+test("source evaluations reject frames entering data and accept an explicitly declared original stack", () => {
+  const source = bytecode([[QvmOpcode.OP_ENTER, 2048], [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_CONST, 7], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 2048]], 2049);
+  for (const query of ["counter", "region"]) {
+    const vm = new QvmInterpreter(parseQvm(source), unexpectedTrap), before = vm.memory.slice(0, 2052);
+    const run = () => query === "counter" ? vm.evaluateCounter(64, 0, [0], () => vm.invoke(qvmArguments([])))
+      : vm.invoke(qvmArguments([]), 0, { region: { entry: 1, join: 4, inputs: [], result: 24 }, inputs: [] });
+    expect(run).toThrow("overlap source data"); expect(vm.memory.slice(0, 2052)).toEqual(before); expect(vm.isActive).toBe(false);
+    expect(vm.stackPointer).toBe(vm.memory.length);
+  }
+  const vm = new QvmInterpreter(parseQvm(bytecode([[QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 9], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 16]])), unexpectedTrap);
+  const before = vm.memory.slice();
+  expect(() => vm.evaluateCounter(64, 0, [0], () => vm.invoke(qvmArguments([])))).toThrow("overlap source data");
+  expect(vm.memory).toEqual(before);
+  expect(vm.evaluateCounter(64, 0, [0], () => vm.invoke(qvmArguments([])), { start: 2048, end: 4096 })).toBe(9);
+  expect(vm.memory[64]).toBe(0);
 });

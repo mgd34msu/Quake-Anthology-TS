@@ -46,7 +46,8 @@ import type { ApplicationQ3Services } from './services.ts';
 import type { SharedSceneQueries } from '../../../world/collision/index.ts';
 import { UserFileStore } from '../../../platform/files/writable.ts';
 import { q3EquipmentCommand, type Q3EquipmentPresentation } from './equipment.ts';
-import { q3EquipmentPresentationProfile } from '../../../content/q3/equipment/cgame-weapon-hud.ts';
+import type { QvmEquipmentPresentationProfile } from '../../../content/q3/equipment/cgame-weapon-hud.ts';
+import { readQvmEquipmentPresentation } from "../../../compat/qvm/primary-presentation-profile.ts";
 import { QvmBodySubmissions } from '../../../compat/qvm/cgame-body.ts';
 import { readCgameBodyProfile } from '../../../content/q3/presentation/cgame-body-profile.ts';
 import { CgameStatusView } from './status.ts';
@@ -108,7 +109,7 @@ export class ApplicationQvmClient {
   private bodySubmissions: QvmBodySubmissions | null = null;
   private ui: QvmUi | null = null;
   private equipment: Q3EquipmentPresentation | null = null;
-  private equipmentProfile: ReturnType<typeof q3EquipmentPresentationProfile> = null;
+  private equipmentProfile: QvmEquipmentPresentationProfile | null = null;
   private readonly equipmentStatusObservers: (() => void)[] = [];
   private equipmentHeldObserver: (() => void) | null = null;
   private readonly heldInvocations: HeldWeaponInvocation[] = [];
@@ -208,12 +209,12 @@ export class ApplicationQvmClient {
         assertCurrentOperation: () => owner.assertCurrent(), current: () => ({ generation: options.connection.generation, serverMessageNumber: options.connection.serverMessageSequence, dropped: null }),
         beginLoading: () => { owner.ready = false; return undefined; }, prime: () => { owner.ready = true; return undefined; },
       });
-      owner.equipmentProfile = q3EquipmentPresentationProfile(cgameOptions.artifact);
+      owner.equipmentProfile = await readQvmEquipmentPresentation(cgameOptions.artifact, options.media.provider.mounts);
       const view = owner.equipmentProfile?.view;
       if (view !== undefined) owner.equipmentViewObserver = owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: view.entry }, call => {
         if (owner.options.viewWeaponVisible?.() === false) return 0;
         call.branches([{ instructionIndex: view.decision, decide: originalTaken => {
-          if (originalTaken) owner.equipmentViewVisible = true;
+          if (originalTaken === view.taken) owner.equipmentViewVisible = true;
           return originalTaken;
         } }]);
         return call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
@@ -222,7 +223,7 @@ export class ApplicationQvmClient {
       if (status?.kind === "regions") for (const entry of status.entries) {
         owner.equipmentStatusObservers.push(owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: entry.entry }, call => {
           if (owner.equipment !== null) {
-            call.branches([{ instructionIndex: entry.decision, decide: originalTaken => { if (originalTaken) owner.equipmentHudRequested = true; return originalTaken; } }]);
+            call.branches([{ instructionIndex: entry.decision, decide: originalTaken => { if (originalTaken === entry.taken) owner.equipmentHudRequested = true; return originalTaken; } }]);
             call.regions(entry.ammo.map(region => ({ ...region, run: () => "skip" })));
           }
           return call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
@@ -237,7 +238,7 @@ export class ApplicationQvmClient {
       if (warning !== undefined) owner.equipmentStatusObservers.push(owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: warning.entry }, call => {
         if (owner.equipment === null) return call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
         const state = call.guest.view(warning.state, 4), original = state.getInt32(0, true);
-        state.setInt32(0, owner.equipment.warning === "empty" ? 2 : owner.equipment.warning === "low" ? 1 : 0, true);
+        state.setInt32(0, owner.equipment.warning === "empty" ? warning.states.empty : owner.equipment.warning === "low" ? warning.states.low : warning.states.none, true);
         if (call.execution === "asynchronous") return (async () => { try { return await call.proceedAsync(); } finally { state.setInt32(0, original, true); } })();
         try { return call.proceed(); } finally { state.setInt32(0, original, true); }
       }));
@@ -247,11 +248,11 @@ export class ApplicationQvmClient {
         if (enter?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Original held-weapon entry is invalid");
         owner.equipmentHeldObserver = owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: held.entry }, call => {
           const proceed = () => call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
-          if (call.words.getInt32(4, true) !== 0) return proceed();
-          const number = call.guest.view(call.words.getInt32(8, true), 4).getInt32(0, true);
+          if (call.words.getInt32(held.stateArgument * 4, true) !== 0) return proceed();
+          const number = call.guest.view(call.words.getInt32(held.entityArgument * 4, true) + held.entityNumberOffset, 4).getInt32(0, true);
           const actor = options.heldWeaponActor?.(number) ?? null;
           if (actor === null) return proceed();
-          const ref = readQvmRefEntity(call.guest.view(call.words.getInt32(0, true), QVM_REF_ENTITY_BYTES));
+          const ref = readQvmRefEntity(call.guest.view(call.words.getInt32(held.parentArgument * 4, true), QVM_REF_ENTITY_BYTES));
           if (ref.kind !== "model") throw new Error("Original weapon parent is not a model");
           const model = typeof ref.model === "number" ? options.services.resources.modelForHandle(ref.model) : ref.model;
           if (model.kind !== "model") throw new Error("Original weapon parent has no decoded model");

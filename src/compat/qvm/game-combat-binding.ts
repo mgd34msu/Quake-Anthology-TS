@@ -13,7 +13,7 @@ import { QvmOpcode } from "./image.ts";
 import { QvmDamageScopes } from "./game-combat-scope.ts";
 import { isDeepStrictEqual } from "node:util";
 
-interface NativeCombatDefinition extends QvmGameCombatDefinition {
+export interface QvmPrimaryCombatProfile extends QvmGameCombatDefinition {
   readonly fields: QvmGameCombatDefinition["fields"] & { readonly client: number };
   readonly armor: QvmGameArmorDefinition;
   readonly reactions: { readonly flags: number; readonly pain: number; readonly die: number };
@@ -22,7 +22,7 @@ interface NativeCombatDefinition extends QvmGameCombatDefinition {
 interface NativeCombatOptions {
   readonly game: QvmGame;
   readonly artifact: QvmModuleOptions["artifact"];
-  readonly definition: NativeCombatDefinition;
+  readonly definition: QvmPrimaryCombatProfile;
   readonly bodies: SharedBodyTable;
   readonly combat: GameplayAuthority;
   readonly source?: {

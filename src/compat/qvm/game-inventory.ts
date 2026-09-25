@@ -10,7 +10,7 @@ export interface QvmInventoryProfile {
   readonly abiProfile: QvmAbiProfile;
   readonly weaponsOffset: number;
   readonly ammoOffset: number;
-  capacity(memory: QvmMemory, weapon: number): number;
+  capacity(memory: QvmMemory, weapon: number, context: { readonly module: QvmModule; readonly client: number; readonly entity: number; readonly clientNumber: number }): number;
 }
 interface QvmInventoryWeapon { readonly weapon: number; readonly item: ItemId; readonly ammo: ItemId | null; }
 interface QvmInventoryOptions {
@@ -52,8 +52,12 @@ export function qvmInventoryBinding(options: QvmInventoryOptions): InventoryStat
       throw new Error("QVM inventory fields exceed the public player record");
     return result;
   };
+  const capacityContext = { module,
+    get clientNumber(): number { return options.client(); },
+    get client(): number { return data.clientBytes(options.client()).byteOffset - module.memory.bytes.byteOffset; },
+    get entity(): number { return data.entityBytes(options.client()).byteOffset - module.memory.bytes.byteOffset; } };
   const capacity = (field: InventoryField): number => {
-    const value = field.kind === "weapon" ? 1 : profile.capacity(module.memory, field.weapon);
+    const value = field.kind === "weapon" ? 1 : profile.capacity(module.memory, field.weapon, capacityContext);
     if (!Number.isInteger(value) || value < 0 || value > 0x7fffffff) throw new Error("QVM source ammo capacity is not a nonnegative int32");
     return value;
   };

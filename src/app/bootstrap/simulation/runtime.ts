@@ -69,7 +69,6 @@ import type { DebugLine } from "../../../debug/shapes.ts";
 import { fromQ3UserCommand } from "../../../network/q3/adapters.ts";
 import { assertQ3GuestRecipe } from "./q3/guest-artifact.ts";
 import { Q3QvmServerGame } from "./q3/guest-runtime.ts";
-import { q3InputProfile } from "../../../content/q3/input-profile.ts";
 import { Q3ServerState } from "./q3/server-state.ts";
 import { createSelectedQ2MonsterModules } from "./q2-monster-sources.ts";
 import { WorldTextStore } from "../../../text/world.ts";
@@ -101,14 +100,10 @@ import { QvmGameCombat } from "../../../compat/qvm/game-combat.ts";
 import { QvmCombatBindings } from "../../../compat/qvm/game-combat-binding.ts";
 import { QvmPrimaryWeapons } from "../../../compat/qvm/game-weapons.ts";
 import { selectedWeaponSources } from "../../../world/gameplay/pickups.ts";
-import { q3PrimaryWeaponProfile } from "../../../content/q3/equipment/weapon-profile.ts";
 import { QvmPrimaryPickups } from "../../../compat/qvm/game-pickups.ts";
 import { qvmInventoryBinding, type QvmInventoryProfile } from "../../../compat/qvm/game-inventory.ts";
-import { q3NativeInventoryProfile } from "../../../content/q3/equipment/inventory-profile.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 import { classicCombatProfile } from "../../../compat/q2/classic/combat-profile.ts";
-import { q3NativeCombatProfile } from "../../../content/q3/equipment/combat-profile.ts";
-import { q3NativePickupProfile } from "../../../content/q3/equipment/pickup-profile.ts";
 import { retailRereleaseClientProfile } from "../../../compat/q2/rerelease/client-profile.ts";
 import { q3GrappleProfile } from "../../../content/q3/equipment/grapple-profiles.ts";
 import { SelectedMonsters } from "./monster-runtime.ts";
@@ -482,7 +477,7 @@ export class SharedSimulation implements Simulation {
     this.recipe = options.recipe;
     if (options.recipe.equipment.grapple.kind === "enabled" || options.recipe.equipment.handGrenades.kind === "enabled") {
       const native = options.q2Guest, qvm = options.q3Guest;
-      const supported = native === undefined ? qvm === undefined || q3NativeCombatProfile(qvm.prepared.artifact) !== null
+      const supported = native === undefined ? qvm === undefined || qvm.prepared.primary.combat !== null
         : native.edition === "classic" ? classicCombatProfile(native.prepared.execution.artifact.digest) !== null
           : retailRereleaseClientProfile.authority.kind === "artifact" && native.prepared.execution.artifact.digest === retailRereleaseClientProfile.authority.digest;
       if (!supported) throw new Error(`${options.recipe.map.entities.content} lacks a supported shared combat interface. Disable Hook and Offhand grenades or choose a supported game module.`);
@@ -681,8 +676,7 @@ export class SharedSimulation implements Simulation {
         const slot = game.records.requireSlot(actor.id), state = game.records.player(slot);
         game.game.data.writePlayerState(slot, { ...state, velocity, groundEntityNumber: 1023 }); return undefined;
       });
-      const artifact = this.options.q3Guest?.prepared.artifact;
-      const definition = artifact === undefined ? null : q3InputProfile(artifact);
+      const definition = this.options.q3Guest?.prepared.primary.input ?? null;
       if (definition !== null) game.bindInput(definition, {
         applications: this.modClientApplications,
         identity: slot => {
@@ -2591,7 +2585,7 @@ export class SharedSimulation implements Simulation {
       let combatBindings: QvmCombatBindings | null = null;
       let pickupBindings: QvmPrimaryPickups | null = null;
       let primaryWeapons: QvmPrimaryWeapons | null = null;
-      const nativeInventory = q3NativeInventoryProfile(guest.prepared.artifact);
+      const nativeInventory = guest.prepared.primary.inventory;
       const game = new Q3QvmServerGame({ artifact: guest.prepared.artifact, state,
         records: { actors: this.actors, bodies: this.bodies, scene: this.scene, provider: recipe.map.entities.provider,
           admit: actor => {
@@ -2620,7 +2614,7 @@ export class SharedSimulation implements Simulation {
           this.notifyClientEvent("disconnecting", actor);
           if (this.actors.isLive(actor)) { this.grapple?.release(actor); this.stepHandGrenade(actor, "removing"); }
         } });
-      const nativeCombat = q3NativeCombatProfile(guest.prepared.artifact);
+      const nativeCombat = guest.prepared.primary.combat;
       if (nativeCombat !== null) combatBindings = new QvmCombatBindings({ game: game.game, artifact: guest.prepared.artifact, definition: nativeCombat,
         bodies: this.bodies, combat: this.combat, slot: actor => game.records.slot(actor), source: {
           actors: this.actors,
@@ -2630,7 +2624,7 @@ export class SharedSimulation implements Simulation {
             inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider }),
           afterFree: (pointer, call) => pickupBindings?.afterFree(pointer, call),
         } });
-      const nativePickups = q3NativePickupProfile(guest.prepared.artifact);
+      const nativePickups = guest.prepared.primary.pickups;
       if (nativePickups !== null) pickupBindings = new QvmPrimaryPickups({ game: game.game, artifact: guest.prepared.artifact, profile: nativePickups,
         actor: slot => game.records.isInputRetired(slot) ? null : this.actors.atSource(recipe.map.entities.provider, slot),
         current: (actor, slot) => this.actors.resolveOwned(actor.id) === actor && game.records.slot(actor.id) === slot && !game.records.isInputRetired(slot),
@@ -2648,7 +2642,7 @@ export class SharedSimulation implements Simulation {
           if (this.actors.resolveOwned(actor.id) === actor) this.actors.release(actor);
         } } : { kind: "shared-free-hook" },
       });
-      const primaryProfile = q3PrimaryWeaponProfile(guest.prepared.artifact, guest.prepared.weapons);
+      const primaryProfile = guest.prepared.primary.weapons;
       if (primaryProfile !== null) primaryWeapons = new QvmPrimaryWeapons(game.game, guest.prepared.artifact, primaryProfile, {
         actor: slot => game.records.reference(slot), slot: actor => game.records.slot(actor),
         selected: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
@@ -6102,6 +6096,7 @@ export class SharedSimulation implements Simulation {
 
     add("world:simulation", encodeCheckpointValue({ settings: { skill: this.options.skill, mode: this.options.mode, maxClients: this.options.maxClients, seed: this.options.seed, startItems: this.startItems, initialSpawnPoint: this.initialSpawnPoint },
       modClientApplicationOrdinal: this.modClientApplications.checkpoint(), q1Punch: this.q1Punch.capture(),
+      ...(source.kind === "q3-qvm" ? { qvmPrimaryDeclaration: this.options.q3Guest?.prepared.primary.declaration?.digest ?? null } : {}),
       ...(source.kind === "q3-qvm" && source.combat !== null ? { qvmArmorProjection: 1 } : {}),
       ...(source.kind === "q3-qvm" && source.inventory !== null ? { qvmInventoryProjection: 1 } : {}),
       ...(source.kind === "q2-native" && source.game.services.hasSourceInventory ? { nativeInventoryProjection: 1 } : {}),
@@ -6257,6 +6252,10 @@ export class SharedSimulation implements Simulation {
         if (actor !== null && this.playerClient(actor.id) !== null && !this.inventory.has(actor.id)) this.bindEquipmentInventory(actor, entry.entries);
       }
     }
+    const declaration = reader.field("qvmPrimaryDeclaration");
+    const expectedDeclaration = source.kind === "q3-qvm" ? this.options.q3Guest?.prepared.primary.declaration?.digest ?? null : null;
+    if ((declaration.value === undefined ? null : declaration.nullable(value => value.string())) !== expectedDeclaration)
+      declaration.fail("saved primary QVM interfaces differ from the mounted compatibility declaration");
     const qvmArmorProjection = reader.field("qvmArmorProjection");
     if (qvmArmorProjection.value !== undefined) qvmArmorProjection.literal(1);
     const legacyQvmCombat = qvmArmorProjection.value === undefined && source.kind === "q3-qvm" ? source.combat : null;

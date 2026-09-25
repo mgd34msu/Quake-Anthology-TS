@@ -498,6 +498,10 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       && preparedQuakeCWeaponStage(prepared) === null) throw new Error("Selected arsenal requires a qualified original QuakeC weapon stage");
     const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
     const q3Prepared = presentationSource?.kind !== "unified" && q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
+    if (q3Prepared !== null && recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content)
+      && Object.values({ input: q3Prepared.primary.input, weapons: q3Prepared.primary.weapons, inventory: q3Prepared.primary.inventory,
+        pickups: q3Prepared.primary.pickups, combat: q3Prepared.primary.combat }).some(profile => profile === null))
+      throw new Error("Selected QVM arsenal requires complete artifact-qualified primary player, weapon, inventory, pickup and combat interfaces");
     const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game");
     const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? q2Execution.api.kind === "q2-rerelease-game" ? await prepareRereleaseGuest(q2Execution, mounts) : await prepareClassicGuest(q2Execution, mounts) : null;
     if (q2Prepared !== null) prepareNativeQ2Map(world, q2Prepared.execution.api.kind === "q2-rerelease-game" ? "rerelease" : "classic", options.mode);

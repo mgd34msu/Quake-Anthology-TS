@@ -14,7 +14,7 @@ const localDerived: Operand = { kind: "local-derived" };
 function local(value: Operand | undefined): boolean { return value?.kind === "local" || value?.kind === "local-derived"; }
 
 /** Check scalar live-ins of a standalone source frame; arguments retain their original caller ABI. */
-export function qualifyQvmRegionEvaluation(instructions: QvmImage["instructions"], owner: number, region: QvmRegionEvaluation): number {
+export function qualifyQvmRegionEvaluation(instructions: QvmImage["instructions"], owner: number, region: QvmRegionEvaluation, access: "source" | "read-only" = "source"): number {
   const frame = qualifyQvmRegion(instructions, owner, region.entry, region.join);
   const valid = (offset: number): boolean => Number.isSafeInteger(offset) && offset >= 8 && offset % 4 === 0 && offset + 4 <= frame;
   if (region.inputs.some(offset => !valid(offset)) || new Set(region.inputs).size !== region.inputs.length || region.result !== null && !valid(region.result))
@@ -37,6 +37,8 @@ export function qualifyQvmRegionEvaluation(instructions: QvmImage["instructions"
     }
     const instruction = instructions[pc]; if (instruction === undefined) throw new Error("Missing QVM region instruction");
     const stack = [...path.stack], initialized = new Set(path.initialized), opcode = instruction.opcode;
+    if (access === "read-only" && (opcode === QvmOpcode.OP_CALL || opcode === QvmOpcode.OP_ARG || opcode === QvmOpcode.OP_BLOCK_COPY || opcode === QvmOpcode.OP_BREAK))
+      throw new Error("Read-only QVM region cannot call, publish arguments, copy memory or break");
     const pop = (): Operand => { const value = stack.pop(); if (value === undefined) throw new Error("Invalid QVM region operand proof"); return value; };
     if (opcode === QvmOpcode.OP_LOCAL) {
       if (instruction.operand < 8 || instruction.operand % 4 !== 0 || instruction.operand + 4 > frame + 48) throw new Error("QVM region local address exceeds its source frame and arguments");
@@ -53,7 +55,10 @@ export function qualifyQvmRegionEvaluation(instructions: QvmImage["instructions"
       stack.push(unknown);
     } else if (opcode >= QvmOpcode.OP_STORE1 && opcode <= QvmOpcode.OP_STORE4) {
       if (local(pop())) throw new Error("QVM region stores an escaping source local pointer");
-      const address = pop(); if (address.kind === "local" && opcode === QvmOpcode.OP_STORE4) initialized.add(address.offset);
+      const address = pop();
+      if (access === "read-only" && (address.kind !== "local" || address.offset < 8 || address.offset + 4 > frame))
+        throw new Error("Read-only QVM region cannot write outside its own local frame");
+      if (address.kind === "local" && opcode === QvmOpcode.OP_STORE4) initialized.add(address.offset);
     } else if (opcode === QvmOpcode.OP_BLOCK_COPY) {
       const source = pop(); if (source.kind === "local-derived") throw new Error("QVM region copies an unresolved source local address");
       if (source.kind === "local") for (let offset = 0; offset < instruction.operand; offset += 4)

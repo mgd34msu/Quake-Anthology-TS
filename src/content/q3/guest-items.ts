@@ -26,9 +26,9 @@ const layouts: ReadonlyMap<string, QvmItemLayout> = new Map([
   }],
 ]);
 
-export async function q3GuestWeapons(artifact: QvmModuleOptions["artifact"], mounts: Pick<MountedContent, "open">): Promise<readonly Q3GuestWeapon[]> {
-  let layout = layouts.get(artifact.module.digest);
-  const metadata = await mounts.open("qvm-items.json");
+export async function q3GuestWeapons(artifact: QvmModuleOptions["artifact"], mounts: Pick<MountedContent, "open">, declaredLayout?: QvmItemLayout): Promise<readonly Q3GuestWeapon[]> {
+  let layout = declaredLayout ?? layouts.get(artifact.module.digest);
+  const metadata = declaredLayout === undefined ? await mounts.open("qvm-items.json") : null;
   if (metadata !== null) {
     const value: unknown = JSON.parse(new TextDecoder().decode(metadata.bytes));
     const reader = new SaveReader(value, "qvm-items.json"); reader.field("version").literal(1);

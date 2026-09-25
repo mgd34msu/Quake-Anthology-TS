@@ -7,9 +7,10 @@ import type { ResolvedQvmArtifact } from "./artifacts.ts";
 import type { QvmAllocationProfile } from "./allocation.ts";
 import { QvmGuestMemory } from "./guest-memory.ts";
 import { QvmInterpreter } from "./interpreter.ts";
-import type { QvmArguments, QvmCancellationScope, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall } from "./interpreter.ts";
+import type { QvmArguments, QvmEvaluationStack, QvmCancellationScope, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall } from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
 import type { QvmMemory } from "./memory.ts";
+import type { QvmRegionEvaluation } from "./regions.ts";
 import type { VmRegistration } from "./registry.ts";
 import { createQvmSystemCall } from "./syscalls.ts";
 import type { QvmHost, QvmRole } from "./syscalls.ts";
@@ -170,6 +171,19 @@ export class QvmModule implements GuestExecutor {
     this.options.registration?.called();
     const arguments_ = qvmArguments(words);
     return this.currentEntry === null ? this.interpreter.invoke(arguments_, instructionIndex) : this.currentEntry.invoke(arguments_, instructionIndex);
+  }
+
+  evaluateRegion(words: readonly number[], instructionIndex: number, region: QvmRegionEvaluation, inputs: readonly number[], stack?: QvmEvaluationStack): number {
+    this.live();
+    const arguments_ = qvmArguments(words), evaluation = { region, inputs, ...(stack === undefined ? {} : { stack }) };
+    return this.currentEntry === null ? this.interpreter.invoke(arguments_, instructionIndex, evaluation)
+      : this.currentEntry.invoke(arguments_, instructionIndex, evaluation);
+  }
+
+  evaluateCounter(words: readonly number[], instructionIndex: number, address: number, functions: readonly number[], stack?: QvmEvaluationStack): number {
+    this.live();
+    if (!functions.includes(instructionIndex)) throw new Error("Counter operation lacks its original entry");
+    return this.interpreter.evaluateCounter(address, 0, functions, () => this.call(words, instructionIndex), stack);
   }
 
   async callAsync(words: readonly number[], instructionIndex = 0, validate: () => void = () => {}): Promise<number> {
