@@ -597,6 +597,38 @@ test("common camera kick preserves zero basis and raises a pitched yawed view wi
   expect(camera.axis).toEqual(anglesToAxis(aim));
 });
 
+for (const product of ["q1-classic-id1", "q1-rerelease-id1"]) test(`${product} end train follows its path despite authored angular velocity`, async () => {
+  const command = parseApplicationCommand(["--game", product, "--map", "end", "--movement", "q2", "--character", "q2"]);
+  if (command.kind !== "run") throw new Error("Expected Q1 finale launch");
+  const content = await loadApplicationContent(command.options), identity = createIdentityOwner(`pusher-translation-${product}`);
+  const simulation = createSimulation({ identity, recipe: content.recipe, world: content.world, mounts: content.mounts,
+    skill: 0, mode: "singleplayer", seed: 17, maxClients: 1 });
+  try {
+    simulation.admitPlayer(identity.client(0, 0));
+    const source = simulation.q1Source();
+    if (source === null) throw new Error("Missing Q1 source");
+    const train = [...source.game.entities.values()].find(entity => entity.classname === "misc_teleporttrain");
+    if (train === undefined) throw new Error("Missing authored end train");
+    expect(train.angularVelocity).toEqual({ x: 100, y: 200, z: 300 });
+    simulation.step({ elapsedMilliseconds: 100, commands: [] });
+    train.use?.(null, null);
+    let movingFrames = 0;
+    for (let frame = 0; frame < 30; frame++) {
+      const before = source.game.body(train), localTime = train.number("ltime"), deadline = train.nextThink;
+      const travelling = train.move !== null && deadline > localTime + 0.1;
+      simulation.step({ elapsedMilliseconds: 100, commands: [] });
+      if (!travelling) continue;
+      const after = source.game.body(train), elapsed = train.number("ltime") - localTime;
+      expect(Math.hypot(before.velocity.x, before.velocity.y, before.velocity.z)).toBeGreaterThan(0);
+      for (const axis of ["x", "y", "z"] satisfies (keyof typeof before.origin)[])
+        expect(after.origin[axis]).toBeCloseTo(before.origin[axis] + before.velocity[axis] * elapsed, 3);
+      expect(after.angles).toEqual(before.angles);
+      movingFrames++;
+    }
+    expect(movingFrames).toBeGreaterThan(10);
+  } finally { simulation.close(); await content.close(); }
+}, 30000);
+
 test("authored Q1 platform pauses local time when blocked and restores its source deadline", async () => {
   const command = parseApplicationCommand(["--game", "q1-classic-id1", "--map", "e1m1", "--movement", "q2", "--character", "q2"]);
   if (command.kind !== "run") throw new Error("Expected native Q1 map");

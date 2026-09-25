@@ -497,9 +497,7 @@ export class Q1EntityServices {
     if (entity === undefined || !this.live(entity)) return undefined;
     this.applyProjectileBehavior(actor, seconds);
     if (entity.movement === "push") {
-      const angular = entity.angularVelocity;
-      stepQ1Pusher({ actor: actor.id, elapsedSeconds,
-        movement: angular.x !== 0 || angular.y !== 0 || angular.z !== 0 ? "rotate" : "translate" }, this.host.pusherServices(this));
+      stepQ1Pusher({ actor: actor.id, elapsedSeconds, movement: "translate" }, this.host.pusherServices(this));
     } else if (entity.movement === "toss" || entity.movement === "bounce" || entity.movement === "gib" || entity.movement === "fly" || entity.movement === "flymissile") this.projectilePhysics(entity, elapsedSeconds);
     return undefined;
   }
