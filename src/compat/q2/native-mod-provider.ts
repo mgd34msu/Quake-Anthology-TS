@@ -1,3 +1,5 @@
+import { captureAbiProcessorState, restoreAbiProcessorState } from "../../guest/abi/runner.ts";
+import { NativeModItems, validateNativeModItems, readNativeItemCheckpoint, type NativeItemCheckpoint } from "./native-mod-items.ts";
 import { NativeModActors, type SavedNativeActors } from "./native-mod-actors.ts";
 import { NativeModClientsBinding } from "./native-mod-clients.ts";
 import type { ModClientPresentationSource } from "../../world/session/mod-client-presentation.ts";
@@ -62,6 +64,7 @@ function layout(value: NativeModValue): GuestValueLayout {
   return { kind: "scalar", storage: value.kind === "time" ? value.encoding : value.kind === "client" ? "int32" : value.kind === "actor" || value.kind === "address" || value.kind === "vector" || value.kind === "string" || value.kind === "userinfo" || value.kind === "user-command" ? "pointer" : value.kind };
 }
 export function validateNativeModDeclaration(declaration: NativeModDeclaration): void {
+  validateNativeModItems(declaration);
   validateNativeModPickups(declaration);
   const records = new Map<string, NativeModActorRecord>(), authority = new Set<string>();
   const owned = declaration.sourceActors;
@@ -167,6 +170,7 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
       check(protection.absorb.call, available);
     } else checkValues((protection.absorb.globals ?? []).map(global => global.value), available);
   }
+  for (const value of declaration.items?.weapons?.selection.values ?? []) check(value.request, new Set(["self", "time"]));
   for (const call of declaration.initialize) check(call, new Set(["time"]));
   for (const call of [...declaration.project, ...declaration.release]) check(call, new Set(["self", "time"]));
   if (clients !== undefined) for (const call of [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command, ...clients.frame ?? [], ...clients.endFrame ?? []]) check(call, new Set(["self", "time"]));
@@ -215,7 +219,7 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
     for (const name of extra) available.add(name); check(call, available);
   }
 }
-interface SavedNativeMod { readonly owned: SavedNativeActors | null; readonly map: string; readonly source: NativeModSourceSave; readonly presentation: NativeModPresentationCheckpoint; readonly actors: readonly { readonly actor: SavedActorId; readonly slot: number; readonly appearance: boolean }[];
+interface SavedNativeMod { readonly items: NativeItemCheckpoint | null; readonly owned: SavedNativeActors | null; readonly map: string; readonly source: NativeModSourceSave; readonly presentation: NativeModPresentationCheckpoint; readonly actors: readonly { readonly actor: SavedActorId; readonly slot: number; readonly appearance: boolean }[];
   readonly clients: readonly { readonly actor: SavedActorId; readonly slot: number; readonly admitted: boolean }[]; }
 function readCheckpoint(record: ProviderCheckpoint, module: ModuleIdentity, declaration: NativeModDeclaration): SavedNativeMod {
   if (record.provider !== module.id || record.schema !== "native:mod" || record.version !== 1) throw new Error("Invalid native mod checkpoint owner");
@@ -252,7 +256,10 @@ function readCheckpoint(record: ProviderCheckpoint, module: ModuleIdentity, decl
   if ((owned !== null) !== (declaration.sourceActors !== undefined) || owned !== null && (new Set(owned.actors.map(entry => entry.slot)).size !== owned.actors.length || new Set(owned.actors.map(entry => `${entry.actor.slot}:${entry.actor.generation}`)).size !== owned.actors.length)) throw new Error("Invalid native owned actor checkpoint");
   if (owned !== null && (owned.deferred.length > 0 && declaration.sourceActors?.combat?.deferred === undefined || new Set(owned.deferred.map(entry => `${entry.target.slot}:${entry.target.generation}`)).size !== owned.deferred.length
     || owned.deferred.some(entry => !owned.actors.some(actor => actor.actor.slot === entry.target.slot && actor.actor.generation === entry.target.generation)))) throw new Error("Invalid native deferred attack checkpoint");
-  return { map, source, actors, owned, clients, presentation: readNativeModPresentation(reader.field("presentation")) };
+  if ((reader.field("items").value != null) !== (declaration.items !== undefined)) throw new Error("Native item checkpoint differs from source declaration");
+  const items = declaration.items === undefined ? null : readNativeItemCheckpoint(reader.field("items"), declaration.items);
+  if (items?.requests.some(request => !clients.some(client => client.admitted && client.actor.slot === request.actor.slot && client.actor.generation === request.actor.generation))) throw new Error("Saved native item request has no admitted client");
+  return { items, map, source, actors, owned, clients, presentation: readNativeModPresentation(reader.field("presentation")) };
 }
 export function validateNativeModCheckpoint(record: ProviderCheckpoint, module: ModuleIdentity, declaration: NativeModDeclaration): void { readCheckpoint(record, module, declaration); }
 
@@ -262,6 +269,7 @@ export class NativeModProvider implements NativeModProjection {
   private owned: NativeModActors | null = null;
   private clients: NativeModClientsBinding | null = null;
   private stages: NativeModClientStages | null = null;
+  private items: NativeModItems | null = null;
   private readonly protection: NativeModProtection | null;
   private readonly pickups: NativeModPickups;
   private readonly records = new Map<string, NativeModActorRecord>();
@@ -277,6 +285,8 @@ export class NativeModProvider implements NativeModProjection {
   private readonly unsubscribe: () => undefined;
   private closed = false;
   private closing = false;
+  private sourceCalls = 0;
+  private pendingHostClose = false;
   private ready = false;
   private lifecycle = false;
   private restoring = false;
@@ -300,18 +310,27 @@ export class NativeModProvider implements NativeModProjection {
       scalar: (base, field, value) => { const address = this.host.memory.offset(base, BigInt(field.offset)); if (value !== undefined) this.scalarWrite(address, value, field.encoding); return this.scalarRead(address, field.encoding); },
       transfer: invoke => this.transfer(invoke), flush: fuel => this.flush(fuel), invoke: (call, inputs) => this.execute(call, inputs, false),
     });
-    this.unsubscribe = services.actors.onRelease(actor => { this.pickups.release(actor.id); this.protection?.release(actor.id); if (this.projections.has(actor.id)) { this.pendingReleases.add(actor.id); this.host_?.presentation.release(actor.id); } return undefined; });
+    this.unsubscribe = services.actors.onRelease(actor => { this.items?.release(actor.id); this.pickups.release(actor.id); this.protection?.release(actor.id); if (this.projections.has(actor.id)) { this.pendingReleases.add(actor.id); this.host_?.presentation.release(actor.id); } return undefined; });
   }
   reserveProtection(): void { this.current(); this.protection?.reserve(); }
   activateProtection(): void { this.current(); this.protection?.activate(); this.pickups.activate(); }
   attach(host: NativeModHost): void { if (this.host_ !== null) throw new Error("Native mod already attached"); this.host_ = host;
     this.stages = new NativeModClientStages(host);
     this.protection?.attach(host);
+    if (this.declaration.items !== undefined) this.items = new NativeModItems(this.declaration.items, this.declaration.target.abi, host, this.services, this.instance, host.content, {
+      pointer: (actor, record) => { const address = this.pointer(actor, record); if (address === null) throw new Error("Native source item lost its record"); return address; },
+      resolve: value => this.resolve(value), live: actor => !this.closed && !this.closing && !this.restoring && this.clients?.admitted(actor) === true && this.services.actors.isLive(actor),
+      read: (address, encoding) => this.scalarRead(address, encoding), write: (address, encoding, value) => this.scalarWrite(address, value, encoding),
+      invoke: (actor, call) => { this.execute(call, this.inputs(actor), true); },
+      model: actor => { const slot = this.clients?.slot(actor); if (slot === null || slot === undefined) throw new Error("Native viewmodel lost its client"); return host.weaponModel(slot + 1); },
+      pickup: () => this.pickupScopes.at(-1)?.execution,
+    });
     if (this.declaration.clients !== undefined) {
       const services = this.services.clients;
       if (services === undefined) throw new Error("Native component clients require destination client services");
       this.clients = new NativeModClientsBinding({ services, declaration: this.declaration.clients, content: host.content,
-        project: actor => { this.protection?.reserveActor(actor); this.address(actor); }, admitted: actor => { this.protection?.bindActor(actor); this.pickups.bindActor(actor); }, release: actor => {
+        project: actor => { this.protection?.reserveActor(actor); this.address(actor); }, admitted: actor => { this.items?.admit(actor); this.protection?.bindActor(actor); this.pickups.bindActor(actor); }, release: actor => {
+          this.items?.release(actor);
           this.pickups.release(actor);
           this.protection?.release(actor);
           if (this.closing) { host.presentation.release(actor); this.projections.delete(actor); this.appearanceActors.delete(actor); this.pendingReleases.delete(actor); }
@@ -322,7 +341,7 @@ export class NativeModProvider implements NativeModProjection {
           const scope = this.inputScopes.find(current => current.application === application);
           if (scope === undefined) throw new Error("Native input callback has no active application");
           const previous = this.inputContext; this.inputContext = scope;
-          try { this.execute(call, modClientInputValues(application), true); } finally { this.inputContext = previous; }
+          try { this.execute(call, scope.values, true); } finally { this.inputContext = previous; }
         },
         inputOutput: (outputs, application, run) => this.inputOutput(outputs, application, run),
         withCommand: (command, invoke) => host.withCommand(command, invoke) });
@@ -333,7 +352,7 @@ export class NativeModProvider implements NativeModProjection {
         synchronize: () => { this.flush(); this.refresh(); const frame = this.frames.at(-1); if (frame !== undefined) frame.observations = this.observe(); } },
       invoke: (entry, values, returns) => this.executeEntry(entry, values, returns), address: actor => this.address(actor), actorAt: slot => this.actorAt(slot),
       clientFrame: slot => this.clients?.frame(slot) ?? false, synchronizeFrame: (seconds, frame) => host.synchronizeFrame(seconds, frame),
-      beginFrame: () => { for (const entry of this.entries()) this.host.clearEntityEvent(entry.slot); this.host.presentation.beginFrame(); }, endFrame: () => { this.clients?.endFrame(); this.publish(); } });
+      beginFrame: () => { for (const entry of this.entries()) this.host.clearEntityEvent(entry.slot); this.host.presentation.beginFrame(); }, endFrame: () => { this.clients?.endFrame(); if (!this.closed) this.publish(); } });
   }
   clientPresentation() {
     const provider = this;
@@ -353,7 +372,9 @@ export class NativeModProvider implements NativeModProjection {
     this.current();
     const actor = application.identity.actor, slot = this.projections.get(actor), memory = this.host.memory;
     if (slot === undefined) throw new Error("Native input client has no source row");
-    const values = modClientInputValues(application), scope: InputScope = { application, values };
+    const values = new Map(modClientInputValues(application));
+    if (this.items?.acceptsAttack(actor) === false) values.set("attack", { kind: "float", value: 0 });
+    const scope: InputScope = { application, values };
     let outer: InputScope | undefined;
     for (const current of this.inputScopes) if (current.application.identity.actor.equals(actor)) outer = current;
     const stores = (this.declaration.clients?.inputFields ?? []).map(field => {
@@ -662,7 +683,7 @@ export class NativeModProvider implements NativeModProjection {
     if (value.kind === "user-command") {
       const application = this.inputContext?.application;
       if (application === undefined) throw new Error("Native user command requires its active input application");
-      const bytes = nativeModUserCommand(application, this.declaration.target.api.kind === "q2-rerelease-game", this.owned?.sourceFrame ?? 0);
+      const bytes = nativeModUserCommand(application, this.declaration.target.api.kind === "q2-rerelease-game", this.owned?.sourceFrame ?? 0, this.inputContext?.values);
       const address = this.host.memory.allocate({ byteLength: bytes.length, label: "native component command" });
       allocations.push({ address, bytes: bytes.length }); this.host.memory.write(address, bytes);
       return { kind: "pointer", value: address };
@@ -742,6 +763,9 @@ export class NativeModProvider implements NativeModProjection {
     this.current(); this.owned?.synchronizeClock(); if (transfer) this.flush();
     const allocations: { readonly address: GuestAddress; readonly bytes: number }[] = [], globals: { readonly address: GuestAddress; readonly bytes: Uint8Array }[] = [], corrections: (() => void)[] = [];
     let frame: Invocation | null = null;
+    const self = inputs.get("self"), cancellation = self?.kind === "actor" && self.value !== null ? this.items?.cancellation(self.value) : undefined;
+    const processor = cancellation === undefined ? null : captureAbiProcessorState(this.host.entries.cpu.state);
+    this.sourceCalls++;
     try {
       const arguments_ = call.arguments.map(value => this.lower(value, inputs, allocations, corrections));
       for (const global of call.globals) {
@@ -768,20 +792,26 @@ export class NativeModProvider implements NativeModProjection {
         this.publish();
       }
       return numberResult(result);
+    } catch (error) {
+      if (cancellation === undefined || processor === null || !cancellation.accepts(error)) throw error;
+      restoreAbiProcessorState(this.host.entries.cpu.state, processor); return 0;
     } finally {
       if (frame !== null) this.frames.pop();
-      for (const global of globals.reverse()) this.host.memory.write(global.address, global.bytes);
-      for (const allocation of allocations.reverse()) this.host.memory.unmap(allocation.address, allocation.bytes);
-      if (transfer && this.frames.length === 0) this.releasePending();
+      try {
+        if (!this.closed) for (const global of globals.reverse()) this.host.memory.write(global.address, global.bytes);
+        if (!this.closed) for (const allocation of allocations.reverse()) this.host.memory.unmap(allocation.address, allocation.bytes);
+        if (!this.closed && transfer && this.frames.length === 0) this.releasePending();
+      }
+      finally { this.sourceCalls--; this.finishHostClose(); }
     }
   }
   private transfer<Result>(invoke: () => Result): Result {
     this.current(); this.owned?.synchronizeClock(); this.flush(); this.refresh();
-    const frame: Invocation = { observations: this.observe(), pending: [], cursor: 0 }; this.frames.push(frame);
+    const frame: Invocation = { observations: this.observe(), pending: [], cursor: 0 }; this.frames.push(frame); this.sourceCalls++;
     try {
-      const result = invoke(); this.flush();
+      const result = invoke(); if (this.closed || this.closing) return result; this.flush();
       if (this.owned?.advancing !== true) this.publish(); return result;
-    } finally { this.frames.pop(); }
+    } finally { this.frames.pop(); this.sourceCalls--; this.finishHostClose(); }
   }
   private executeEntry(entry: GuestAddress, values: readonly Extract<GuestCallValue, { readonly kind: "pointer" }>[], returns: NativeModScalar | "void"): GuestCallResult {
     return this.transfer(() => this.host.invoke(entry, { abi: this.declaration.target.abi,
@@ -804,9 +834,9 @@ export class NativeModProvider implements NativeModProjection {
     for (const actor of this.projections.keys()) { const slot = this.slotOf(actor); if (slot !== null && this.services.actors.isLive(actor)) result.push({ actor, slot }); }
     return result;
   }
-  private publish(events = true): void { this.host.presentation.publish(this.entries(), events); }
+  private publish(events = true): void { if (!this.closing) this.host.presentation.publish(this.entries(), events); }
   presentations(): readonly SimulationPresentation[] { return (this.owned?.entries() ?? []).flatMap(({ actor, slot }) => this.host.presentation.appearance(actor, slot)); }
-  advance(frame: FrameContext): undefined { this.current(); this.releasePending(); this.owned?.advance(frame); this.publish(); if (this.owned === null) { for (const entry of this.entries()) this.host.clearEntityEvent(entry.slot); this.host.presentation.beginFrame(); } return undefined; }
+  advance(frame: FrameContext): undefined { this.current(); this.releasePending(); this.owned?.advance(frame); if (this.closed) return undefined; this.publish(); if (this.owned === null) { for (const entry of this.entries()) this.host.clearEntityEvent(entry.slot); this.host.presentation.beginFrame(); } return undefined; }
   importBoundary(name: string, values: readonly GuestCallValue[], invoke: () => GuestCallResult): GuestCallResult {
     if (!this.ready) return invoke();
     // ReadLevel and projection retirement rebuild private edicts; the destination owns their live links.
@@ -853,7 +883,7 @@ export class NativeModProvider implements NativeModProjection {
     if (!restoring) this.owned?.validate();
     if (!restoring) { this.validateRecords(); for (const call of this.declaration.initialize) this.execute(call, this.inputs(), false); }
     const clients = this.declaration.clients;
-    for (const call of [...this.declaration.initialize, ...this.declaration.project, ...this.declaration.release, ...this.declaration.callbacks,
+    for (const call of [...this.declaration.initialize, ...this.declaration.project, ...this.declaration.release, ...this.declaration.callbacks, ...(this.declaration.items?.weapons?.selection.values.map(value => value.request) ?? []),
       ...(clients === undefined ? [] : [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command, ...(clients.frame ?? []), ...(clients.endFrame ?? []), ...(clients.input ?? []).flatMap(binding => binding.calls)])]) {
       const target = call.entry.kind === "game-export" ? this.gameEntry(call) : call.entry.kind === "export" ? this.host.entry(call.entry.name) : this.host.memory.offset(this.host.imageBase, BigInt(call.entry.rva)); this.host.memory.check(target, 1, "execute");
     }
@@ -870,7 +900,7 @@ export class NativeModProvider implements NativeModProjection {
     this.flush(); this.refresh();
     const clients = this.clients?.checkpoint() ?? [];
     const source = await this.host.checkpoint(); this.current(); if (this.pendingReleases.size !== 0) throw new Error("Actors changed during native mod capture");
-    return { provider: this.instance, schema: "native:mod", version: 1, bytes: encodeCheckpointValue({ module: this.host.memory.module, map: this.map, source, owned: this.owned?.checkpoint() ?? null, presentation: this.host.presentation.checkpoint(),
+    return { provider: this.instance, schema: "native:mod", version: 1, bytes: encodeCheckpointValue({ module: this.host.memory.module, map: this.map, source, items: this.items?.checkpoint() ?? null, owned: this.owned?.checkpoint() ?? null, presentation: this.host.presentation.checkpoint(),
       clients: clients.map(entry => ({ actor: { slot: entry.actor.slot, generation: entry.actor.generation }, slot: entry.slot, admitted: entry.admitted })),
       actors: [...this.projections].map(([actor, slot]) => ({ actor: { slot: actor.slot, generation: actor.generation }, slot, appearance: this.appearanceActors.has(actor) })) }) };
   }
@@ -886,7 +916,7 @@ export class NativeModProvider implements NativeModProjection {
     for (const entry of actors) this.validateInventoryCapacity(entry.actor, clientActors.has(entry.actor));
     for (const entry of saved.presentation.fog) { const actor = this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current"); if (!this.services.actors.isLive(actor)) throw new Error("Saved native presentation player is unavailable"); }
     const ownedActors = saved.owned === null ? [] : this.owned?.validateSaved(saved.owned) ?? [];
-    this.pickups.close(); this.protection?.prepareRestore();
+    this.items?.clear(); this.pickups.close(); this.protection?.prepareRestore();
     this.lifecycle = true; this.restoring = true; this.restoreLinks.clear(); this.owned?.suspend(true);
     try { this.clients?.restore(clients); this.appearanceActors.clear(); for (const entry of actors) if (entry.appearance) this.appearanceActors.add(entry.actor); this.projections.clear(); for (const entry of actors) this.projections.set(entry.actor, entry.slot); this.pendingReleases.clear(); await this.host.restore(saved.source);
       this.validateRecords(); this.protection?.validateRestoredInventory(); for (const [actor, slot] of this.projections) this.seed(actor, slot, false); this.refresh(); this.host.presentation.restore(saved.presentation);
@@ -897,18 +927,26 @@ export class NativeModProvider implements NativeModProjection {
       }
       this.publish(false); }
     finally { this.lifecycle = false; this.restoring = false; this.restoreLinks.clear(); this.owned?.suspend(false); }
+    for (const client of clients) if (client.admitted) this.items?.admit(client.actor);
+    if (this.items !== null && saved.items !== null) this.items.restore(saved.items);
     this.clients?.start();
+  }
+  private finishHostClose(): void {
+    if (!this.pendingHostClose || this.sourceCalls !== 0) return;
+    this.pendingHostClose = false; this.host_?.close();
   }
   close(): undefined {
     if (this.closed || this.closing) return undefined; this.closing = true;
     const errors: unknown[] = [];
+    try { this.items?.close(); } catch (error) { errors.push(error); }
     try { this.pickups.close(); } catch (error) { errors.push(error); }
     try { this.protection?.close(); } catch (error) { errors.push(error); }
     try { this.clients?.close(); } catch (error) { errors.push(error); }
     try { this.owned?.close(); } catch (error) { errors.push(error); }
     this.closed = true; this.unsubscribe(); this.projections.clear(); this.appearanceActors.clear(); this.pendingReleases.clear();
     try { this.host_?.presentation.close(); } catch (error) { errors.push(error); }
-    try { this.host_?.close(); } catch (error) { errors.push(error); }
+    this.pendingHostClose = true;
+    try { this.finishHostClose(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "Native mod cleanup failed");
     return undefined;
   }

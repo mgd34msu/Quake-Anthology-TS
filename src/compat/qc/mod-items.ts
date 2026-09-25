@@ -231,7 +231,7 @@ export class QcModItems {
     const words = this.words(entry.actor.id), path = this.operations.machine().strings.get(words.int(this.offset(definition.model.field))), asset = this.media.resources.get(path);
     if (path !== "" && asset === undefined) throw new Error(`Original QC weapon model was not prepared: ${path}`);
     return { source: { provider: this.provider, content: this.media.content }, active: this.active(entry.actor.id), pending: null,
-      model: asset === undefined ? null : { resource: asset.resource, frame: words.float(this.offset(definition.model.frame)) },
+      model: asset === undefined ? null : { kind: "resolved", resource: asset.resource, frame: words.float(this.offset(definition.model.frame)) },
       items: this.definitions };
   }
   observe(store: QcEntityStoreObservation, pickup?: OriginalPickupExecution): void {

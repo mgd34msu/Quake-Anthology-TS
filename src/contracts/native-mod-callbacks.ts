@@ -1,3 +1,4 @@
+import type { NativeModItems } from "./native-mod-items.ts";
 import type { ContentDigest } from "./content.ts";
 import type { NativeAbi, Q2GameApiIdentity } from "./execution.ts";
 import type { ModCallbackBinding, ModCallbackValue, ModClientInput, ModClientInputBinding } from "./mod-callbacks.ts";
@@ -173,6 +174,7 @@ export interface NativeModDeclaration {
   readonly sourceActors?: NativeModSourceActors;
   readonly protection?: readonly NativeModProtectionDefinition[];
   readonly pickups?: readonly NativeModPickup[];
+  readonly items?: NativeModItems;
   readonly clients?: NativeModClients;
   readonly cvars: readonly { readonly name: string; readonly value: string }[];
   readonly spawnEntities: string | null;

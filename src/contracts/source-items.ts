@@ -39,7 +39,7 @@ export interface SourceWeaponPresentation {
   readonly source: ProviderReference;
   readonly active: ItemId | null;
   readonly pending: ItemId | null;
-  readonly model: { readonly resource: ResolvedResourceReference; readonly frame: number } | null;
+  readonly model: ({ readonly kind: "resolved"; readonly resource: ResolvedResourceReference } | { readonly kind: "source-path"; readonly path: string }) & { readonly frame: number } | null;
   readonly items: readonly SourceItemDefinition[];
 }
 export interface SourceWeaponBinding {

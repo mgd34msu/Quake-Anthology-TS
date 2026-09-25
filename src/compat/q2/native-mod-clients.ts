@@ -53,7 +53,8 @@ export class NativeModClientsBinding {
   admitted(actor: ActorId): boolean { return this.entries.has(actor) && this.require(actor).admitted && !this.denied.has(actor); }
   rejects(actor: ActorId): boolean { return this.denied.has(actor); }
   private calls(calls: readonly NativeModSourceCall[], actor: ActorId): void {
-    for (const call of calls) { this.require(actor); this.operations.invoke(call, actor); }
+    const entry = this.require(actor);
+    for (const call of calls) { if (this.entries.get(actor) !== entry) break; this.require(actor); this.operations.invoke(call, actor); }
   }
   private admit(actor: ActorId): boolean {
     if (this.denied.has(actor)) return false;

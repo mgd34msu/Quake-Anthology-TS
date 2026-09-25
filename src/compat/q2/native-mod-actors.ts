@@ -156,18 +156,18 @@ export class NativeModActors {
     if (this.suspended || this.closing) return;
     const now = frame.time.kind === "seconds" ? frame.time.value : frame.time.value / 1000;
     this.drainReleases();
-    while (this.nextFrame <= now + 1e-9) {
+    while (!this.closing && this.nextFrame <= now + 1e-9) {
       this.tickTime = this.nextFrame; this.nextFrame += this.definition.frameSeconds; this.frame++;
       try {
         this.synchronizeClock();
         this.calls.beginFrame();
-        for (let slot = 0; slot < this.host.entities().count; slot++) {
+        for (let slot = 0; !this.closing && slot < this.host.entities().count; slot++) {
           if (this.calls.clientFrame(slot)) continue;
           const actor = this.slots.get(slot); if (actor === undefined) continue;
           if (!this.services.actors.isLive(actor.id) || !this.host.active(slot)) { this.retire(slot); continue; }
           this.calls.invoke(this.entry(this.definition.update.entry), [{ kind: "pointer", value: this.host.entity(slot).address }], this.definition.update.returns);
         }
-        this.calls.endFrame();
+        if (!this.closing) this.calls.endFrame();
       } finally { this.tickTime = null; }
     }
   }

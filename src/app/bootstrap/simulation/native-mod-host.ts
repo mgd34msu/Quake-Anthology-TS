@@ -1,3 +1,6 @@
+import type { SourceWeaponPresentation } from "../../../contracts/source-items.ts";
+import { normalizeResourcePath } from "../../../content/mounts/paths.ts";
+import { q2ApplicationLayout } from "../network/q2-layout.ts";
 import type { ProviderReference } from "../../../contracts/content.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, RawEntityView } from "../../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
@@ -68,6 +71,7 @@ export interface NativeModHost {
   client(slot: number): GuestAddress | null;
   active(slot: number): boolean;
   clearEntityEvent(slot: number): void;
+  weaponModel(slot: number): SourceWeaponPresentation["model"];
   encodeTrace(trace: TraceResult): Uint8Array;
   invokeCommand(command: CommandInvocation): boolean;
   withCommand(command: CommandInvocation, invoke: () => void): void;
@@ -152,6 +156,9 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
         if (address === null) throw new Error(`Null API3 game export ${name}`); return { address, signature: definition.signature }; },
       encodeTrace: trace => source.host.traceBytes(trace),
       invokeCommand: command => invokeCommand(command, () => { source.host.call("ServerCommand"); }),
+      weaponModel(slot) { const state = retained.playerState(slot); if (state.gunIndex === 0) return null;
+        const path = retained.configstrings().get(32 + state.gunIndex); if (path === undefined || path === "") throw new Error("Original native viewmodel has no model configstring");
+        return { kind: "source-path", path: normalizeResourcePath(path), frame: state.gunFrame }; },
       clearEntityEvent: slot => { source.host.edicts.at(slot).bytes.setInt32(80, 0, true); },
       client: slot => source.memory.readPointer(source.memory.offset(source.host.edicts.at(slot).address, 84n)),
       entries: source.host.options.runner.options, entity: slot => source.host.edicts.at(slot), active: slot => source.host.edicts.at(slot).bytes.getInt32(88, true) !== 0,
@@ -196,6 +203,9 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
       if (address === null) throw new Error(`Null API2023 game export ${name}`); return { address, signature: definition.signature }; },
     encodeTrace: trace => { const result = source.host.encodeTrace(trace); if (result.kind !== "aggregate") throw new Error("Native trace must be an aggregate"); return result.bytes; },
     invokeCommand: command => invokeCommand(command, () => { source.host.module.callGame("ServerCommand"); }),
+    weaponModel(slot) { const state = adapter.playerState(slot); if (state.gunIndex === 0) return null;
+      const path = adapter.configstrings().get(q2ApplicationLayout({ kind: "q2-rerelease", version: 1038 }).models + state.gunIndex); if (path === undefined || path === "") throw new Error("Original native viewmodel has no model configstring");
+      return { kind: "source-path", path: normalizeResourcePath(path), frame: state.gunFrame }; },
     clearEntityEvent: slot => { const record = new RereleasePublicEdict(source.memory, source.host.module.entities().atSlot(slot)); source.memory.writeUint8(record.address("s.event"), 0); },
     client: slot => new RereleasePublicEdict(source.memory, source.host.module.entities().atSlot(slot)).pointer("client"),
     entries: source.host.module.options.runner.options, entity: slot => source.host.module.entities().atSlot(slot), active: slot => adapter.entityInfo(slot).active,

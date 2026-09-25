@@ -4504,10 +4504,10 @@ export class SharedSimulation implements Simulation {
       const weaponStatus: PlayerUi["weaponStatus"] = active === undefined ? null : { source: source.source, item: active.item, label: active.label,
         ammo: ammo === null ? { kind: "unmetered" } : { kind: "finite", ...ammo, hasAmmoToStart: ammo.count > 0, low: false } };
       const asset = source.model, model: SimulationPresentation | null = asset === null ? null : { actor, content: source.source.content,
-        family: source.source.content.startsWith("q1:") ? "q1" : source.source.content.startsWith("q2:") ? "q2" : "q3", path: asset.resource.requestedPath,
+        family: source.source.content.startsWith("q1:") ? "q1" : source.source.content.startsWith("q2:") ? "q2" : "q3", path: asset.kind === "resolved" ? asset.resource.requestedPath : asset.path,
         frame: asset.frame, oldFrame: asset.frame, skin: 0, effects: 0, renderFlags: 0, origin: add(view.origin, { x: 0, y: 0, z: view.viewHeight }), angles: view.angles,
         scale: 1, visible: ui.health > 0 && (player === null || !player.intermission && player.cutscene === null), viewWeapon: true };
-      if (asset !== null) this.events.registerResource(source.source.content, asset.resource.requestedPath, asset.resource);
+      if (asset?.kind === "resolved") this.events.registerResource(source.source.content, asset.resource.requestedPath, asset.resource);
       return { provider: source.source.provider, active: source.active === null ? null : { provider: source.source.provider, item: source.active },
         pending: source.pending === null ? null : { provider: source.source.provider, item: source.pending }, model, ammo, weaponStatus,
         items: definitions.map((definition, index) => ({ id: definition.item, label: definition.label, kind: "weapon", sourceOrdinal: ui.items.length + index,

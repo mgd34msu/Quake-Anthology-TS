@@ -45,8 +45,7 @@ export function writeNativeUserCommand(view: DataView, command: Q2UserCommand | 
   view.setUint8(14, command.impulse); view.setUint8(15, command.lightLevel);
 }
 
-export function nativeModUserCommand(application: ModClientApplication, rerelease: boolean, frame: number): Uint8Array {
-  const values = modClientInputValues(application);
+export function nativeModUserCommand(application: ModClientApplication, rerelease: boolean, frame: number, values = modClientInputValues(application)): Uint8Array {
   const input = (name: "attack" | "jump" | "impulse" | "forward-move" | "side-move" | "up-move"): number => {
     const value = values.get(name);
     if (value?.kind !== "float" || !Number.isFinite(value.value)) throw new Error(`Missing native command input ${name}`);

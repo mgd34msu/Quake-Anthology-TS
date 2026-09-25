@@ -1,6 +1,6 @@
 # Functional target status
 
-**21/23 targets remain accepted; T10 and T12 are open.** Newer source transfers original component body materials/invisibility onto selected geometry and connects original Xatrix/retail rerelease weapon-ammo pickup supply. Both native source boundaries pass their focused ownership, refusal and capacity checks; the combined body witness passes 9 checks with 138 assertions. Native component item adapters, full native-primary selected arsenals, native component camera qualification and remaining artifact/composition coverage are still required. Installed executable remains `434a4d3e`. [Current delivery](../execution-status.md).
+**21/23 targets remain accepted; T10 and T12 are open.** Current source integrates native component items and weapons, original buffered attacks, shared ammo limits, pending switches and saved source state. Original Xatrix and q2eaks checks cover firing, selection and retirement during a shot. Full native-primary selected arsenals, native camera integration and remaining artifact/composition coverage are still required. Installed executable remains `434a4d3e`. [Current delivery](../execution-status.md).
 
 Earlier checkpoints below retain their status at the time.
 

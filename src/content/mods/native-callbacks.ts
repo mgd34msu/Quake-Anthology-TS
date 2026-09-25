@@ -1,3 +1,4 @@
+import type { NativeModItems, NativeItemStorage, NativeItemTest } from "../../contracts/native-mod-items.ts";
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
 import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors, NativeModArmor, NativeModArmorField, NativeModArmorSelection, NativeModPowerArmorItem, NativeModRegularArmorItem, NativeModProtectionDefinition } from "../../contracts/native-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
@@ -136,6 +137,30 @@ function sourceActors(reader: SaveReader): NativeModSourceActors {
     fields: { velocity: fields.field("velocity").integer(0), ground: fields.field("ground").integer(0), use: fields.field("use").nullable(value => value.integer(0)),
       think: fields.field("think").integer(0), nextthink: { offset: nextthink.field("offset").integer(0), encoding: encoding(nextthink.field("encoding")), units: nextthink.field("units").choice("seconds", "milliseconds") } } };
 }
+function nativeItems(reader: SaveReader): NativeModItems {
+  const pointer = (value: SaveReader) => ({ record: value.field("record").string(), offset: value.field("offset").integer(0) });
+  const test = (value: SaveReader): NativeItemTest => value.field("kind").choice("scalar", "pointer") === "pointer"
+    ? { kind: "pointer", field: pointer(value.field("field")), value: value.field("value").nullable(address) }
+    : { kind: "scalar", field: armorField(value.field("field")), mask: value.field("mask").nullable(value => value.integer(0)), comparison: value.field("comparison").choice("equals", "at-most"), value: value.field("value").number() };
+  return { definitions: reader.field("definitions").list(value => {
+    const common = { item: namespaced(value.field("item")), label: value.field("label").string(), admission: value.field("admission").choice("add", "replace-primary") };
+    return value.field("kind").choice("counter", "weapon") === "counter" ? { ...common, kind: "counter" }
+      : { ...common, kind: "weapon", ammo: value.field("ammo").nullable(namespaced) };
+  }), storage: reader.field("storage").list((value): NativeItemStorage => {
+    const field = armorField(value.field("field"));
+    if (value.field("kind").choice("counter", "bits") === "bits") return { kind: "bits", field, privateMask: value.field("privateMask").integer(0), items: value.field("items").list(value => ({ item: namespaced(value.field("item")), mask: value.field("mask").integer(1) })) };
+    const capacity = value.field("capacity"), kind = capacity.field("kind").choice("constant", "field", "source");
+    return { kind: "counter", field, item: namespaced(value.field("item")), capacity: kind === "constant" ? { kind, value: capacity.field("value").number() }
+      : kind === "field" ? { kind, field: armorField(capacity.field("field")) }
+      : { kind, address: address(capacity.field("address")), encoding: capacity.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") } };
+  }), ...(reader.field("weapons").value === undefined ? {} : { weapons: (() => {
+    const weapon = reader.field("weapons"), dispatcher = weapon.field("dispatcher"), selection = weapon.field("selection");
+    return { dispatcher: { entry: entry(dispatcher.field("entry")), record: dispatcher.field("record").string(), argument: dispatcher.field("argument").integer(0), arguments: dispatcher.field("arguments").integer(1) },
+      decisions: weapon.field("decisions").list(value => ({ entry: value.field("entry").integer(0), join: value.field("join").integer(0), fields: value.field("fields").list(value => ({ field: armorField(value.field("field")), clearMask: value.field("clearMask").integer(1) })) })),
+      ...(weapon.field("committedInput").value === undefined ? {} : { committedInput: weapon.field("committedInput").list(value => value.list(test)) }),
+      continuations: weapon.field("continuations").list(value => value.list(test)), settled: weapon.field("settled").list(value => value.list(test)), selection: { active: pointer(selection.field("active")), pending: selection.field("pending").nullable(pointer), values: selection.field("values").list(value => ({ item: namespaced(value.field("item")), address: address(value.field("address")), request: sourceCall(value.field("request")) })) } };
+  })() }) };
+}
 export function readNativeModCallbacks(bytes: Uint8Array): NativeModDeclaration {
   const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   return readNativeModDeclaration(new SaveReader(value));
@@ -147,6 +172,7 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
     ? { api: { kind: targetKind, version: api.field("version").literal(3) }, abi: { kind: abi.field("kind").literal("windows-i386"), image: abi.field("image").literal("pe32"), pointerBytes: abi.field("pointerBytes").literal(4), call: abi.field("call").literal("cdecl") } }
     : { api: { kind: targetKind, version: api.field("version").literal(2023) }, abi: { kind: abi.field("kind").literal("windows-x86-64"), image: abi.field("image").literal("pe32+"), pointerBytes: abi.field("pointerBytes").literal(8), call: abi.field("call").literal("microsoft-x64") } };
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("native"),
+    ...(reader.field("items").value === undefined ? {} : { items: nativeItems(reader.field("items")) }),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) }, target: parsedTarget,
     ...(reader.field("clientPresentation").value === undefined ? {} : { clientPresentation: {
       hud: reader.field("clientPresentation").field("hud").choice("none", "layout-overlay", "replace-status"),

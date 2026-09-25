@@ -27,9 +27,10 @@ export function validateNativeModPickups(declaration: NativeModDeclaration): voi
     for (const resource of rule.writes) {
       if (resource.kind === "protection") {
         if (!declaration.protection?.some(protection => protection.channel === resource.channel)) throw new Error("Native pickup has no protection owner");
-      } else if (resource.fields !== "capacity" && !declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory" && field.item === resource.item)))
+      } else if (resource.fields !== "capacity" && !declaration.items?.definitions.some(item => item.item === resource.item) && !declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory" && field.item === resource.item)))
         throw new Error("Native pickup has no declared inventory storage");
       if (resource.kind === "inventory" && resource.fields !== "count"
+        && !declaration.items?.storage.some(storage => storage.kind === "counter" && storage.item === resource.item && storage.capacity.kind === "field")
         && !declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory-capacity" && field.item === resource.item)))
         throw new Error("Native pickup has no declared inventory capacity storage");
     }
