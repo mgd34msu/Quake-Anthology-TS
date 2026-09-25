@@ -11,7 +11,7 @@ interface Operations {
   eligible(actor: ActorId): boolean;
   context<Result>(definition: NativeModPickup, offer: OriginalPickupOffer, inputs: Inputs, execute: () => Result): Result;
   observe<Result>(actor: ActorId, observer: OriginalPickupExecution, execute: () => Result): Result;
-  invoke(call: NativeModSourceCall, inputs: Inputs): number;
+  invoke(call: NativeModSourceCall, inputs: Inputs): number | null;
 }
 
 export function validateNativeModPickups(declaration: NativeModDeclaration): void {
@@ -90,8 +90,11 @@ export class NativeModPickups {
     try {
       return this.operations.context(definition, offer, inputs, () => this.operations.observe(actor, observer, () => {
         const operation = definition.operation;
-        if (operation.kind === "gate-then-grant" && (this.operations.invoke(operation.gate, inputs) === 0 || !current())) return "refused";
+        if (operation.kind === "gate-then-grant") {
+          const gate = this.operations.invoke(operation.gate, inputs); if (gate === null || gate === 0 || !current()) return "refused";
+        }
         const result = this.operations.invoke(operation.grant, inputs);
+        if (result === null || !current()) return "refused";
         return operation.kind === "gate-then-grant" && operation.grantAccepts === "always" || result !== 0 ? "accepted" : "refused";
       }));
     } finally { this.depth--; }

@@ -1,3 +1,5 @@
+import type { NativeModRegionAuthority } from "./native-mod-region.ts";
+import type { NativeModProtectionRegion } from "../../contracts/native-mod-region.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { OriginalPickupRule } from "../../contracts/original-pickups.ts";
 import type { GuestAddress } from "../../contracts/execution.ts";
@@ -27,7 +29,7 @@ interface Operations {
   scalar(base: GuestAddress, field: NativeModScalarField, value?: number): number;
   transfer<Result>(invoke: () => Result): Result;
   flush(inventory?: NativeProtectionInventoryCommit): void;
-  invoke(call: NativeModSourceCall, inputs: ReadonlyMap<ModCallbackInput, ModRuntimeValue>): number;
+  invoke(call: NativeModSourceCall, inputs: ReadonlyMap<ModCallbackInput, ModRuntimeValue>, region?: NativeModProtectionRegion, authority?: NativeModRegionAuthority): number | null;
 }
 
 /** Component armor uses original storage and original absorption code. */
@@ -65,9 +67,10 @@ export class NativeModProtection {
       regular: this.definitions.flatMap(definition => definition.channel === "regular" ? definition.storage : []),
       power: this.definitions.flatMap(definition => definition.channel === "powered" ? definition.storage : []) }, this.declaration, host, this.operations.scalar);
     for (const definition of this.definitions) {
-      const entry = definition.absorb.abi === "source-call" ? definition.absorb.call.entry : definition.absorb.entry;
+      const entry = definition.absorb.abi === "source-call" || definition.absorb.abi === "source-region" ? definition.absorb.call.entry : definition.absorb.entry;
       const target = entry.kind === "game-export" ? host.gameEntry(entry.name).address : entry.kind === "export" ? host.entry(entry.name) : host.memory.offset(host.imageBase, BigInt(entry.rva));
       host.memory.check(target, 1, "execute");
+      if (definition.absorb.abi === "source-region") for (const rva of [definition.absorb.frame.entry, definition.absorb.entry, definition.absorb.join, definition.absorb.frame.exit]) host.memory.check(host.memory.offset(host.imageBase, BigInt(rva)), 1, "execute");
     }
   }
   reserve(): void {
@@ -172,8 +175,8 @@ export class NativeModProtection {
     observer: ProtectionObserver): ArmorStageResult {
     if (!input.request.target.equals(actor)) throw new Error("Native armor stage target differs from its binding");
     const scale = input.flags.regularProtectionScale ?? 1, absorb = definition.absorb;
-    if (definition.channel === "regular" && scale !== 1 && (absorb.abi !== "source-call"
-      || ![...absorb.call.arguments, ...absorb.call.globals.map(global => global.value)].some(value =>
+    if (definition.channel === "regular" && scale !== 1 && (absorb.abi !== "source-call" && absorb.abi !== "source-region"
+      || ![...absorb.call.arguments, ...absorb.call.globals.map(global => global.value), ...(absorb.abi === "source-region" ? absorb.inputs.map(input => input.value) : [])].some(value =>
         (value.kind === "float32" || value.kind === "float64") && value.value.kind === "input" && value.value.name === "regular-protection-scale")))
       throw new Error("Native regular protection scale requires an explicit source input");
     const time = this.services.time();
@@ -187,14 +190,22 @@ export class NativeModProtection {
     ]);
     const record = this.declaration.entityRecord; if (record === null) throw new Error("Native protection requires a declared source entity");
     const call = this.sourceCall(definition, record, input);
-    return { saved: this.observe(actor, observer, () => this.operations.invoke(call, inputs)) };
+    const reserved = this.require(actor), host = this.host, slot = this.operations.slot(actor);
+    const authority: NativeModRegionAuthority | undefined = absorb.abi !== "source-region" ? undefined : {
+      error: new Error("Native protection donor owner retired"), current: () => this.active && this.host === host && host !== null && slot !== null
+        && this.entries.get(actor) === reserved && this.services.actors.isLive(actor) && this.services.clients?.forActor(actor)?.equals(reserved.client) === true
+        && this.services.clients.actor(reserved.client)?.equals(actor) === true && this.operations.eligible(actor) && this.operations.slot(actor) === slot && host.active(slot),
+    };
+    const assertCurrent = authority === undefined ? undefined : () => { if (!authority.current()) throw authority.error; };
+    return { saved: this.observe(actor, observer, () => this.operations.invoke(call, inputs, absorb.abi === "source-region" ? absorb : undefined, authority), assertCurrent) ?? 0 };
   }
-  observe<Result>(actor: ActorId, observer: ProtectionObserver, invoke: () => Result): Result {
+  observe<Result>(actor: ActorId, observer: ProtectionObserver, invoke: () => Result, assertCurrent?: () => void): Result {
     return this.operations.transfer(() => {
       const { storage, slot } = this.source(actor), stage: Stage = { actor, armor: this.read(actor), suppressed: 0, stop: () => {} };
       this.stages.push(stage);
       try {
         const publish = (): void => {
+          assertCurrent?.();
           if (!this.services.actors.isLive(actor)) return;
           this.source(actor);
           const before = stage.armor, after = this.read(actor);
@@ -203,12 +214,14 @@ export class NativeModProtection {
           for (const active of this.stages) if (active.actor.equals(actor)) active.armor = after;
           if (regular !== undefined) observer.stored({ regular, ...(powered === undefined ? {} : { powered }) });
           else if (powered !== undefined) observer.stored({ powered });
+          assertCurrent?.();
         };
         stage.stop = storage.observe(slot, () => {
+          assertCurrent?.();
           if (this.stages.at(-1) !== stage || stage.suppressed > 0 || !this.services.actors.isLive(actor)) return;
           this.require(actor);
           this.operations.flush({ actor, items: this.inventoryItems(), committed: change => {
-            this.source(actor);
+            assertCurrent?.(); this.source(actor);
             if (change.before === null) throw new Error("Native protection count lost its canonical baseline");
             this.suppressCurrent(() => {
               for (const counter of this.counters) if (counter.inventory === change.after.item && storage.readCount(slot, counter.field) !== change.after.count)
@@ -230,7 +243,7 @@ export class NativeModProtection {
   }
   private sourceCall(definition: NativeModProtectionDefinition, record: string, input: ArmorStageInput): NativeModSourceCall {
     const absorb = definition.absorb;
-    if (absorb.abi === "source-call") return absorb.call;
+    if (absorb.abi === "source-call" || absorb.abi === "source-region") return absorb.call;
     const lowered = this.damageFlags(definition, input);
 
     return { entry: absorb.entry, globals: absorb.globals ?? [], returns: "int32",

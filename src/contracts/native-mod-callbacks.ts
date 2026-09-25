@@ -1,3 +1,4 @@
+import type { NativeModProtectionRegion } from "./native-mod-region.ts";
 import type { NativeModItems } from "./native-mod-items.ts";
 import type { ContentDigest } from "./content.ts";
 import type { NativeAbi, Q2GameApiIdentity } from "./execution.ts";
@@ -130,7 +131,7 @@ interface NativeModProtectionClaim {
   readonly id: string;
   readonly admission?: { readonly kind: "claim" } | { readonly kind: "replace-current-primary" } | { readonly kind: "replace-primary"; readonly owner: ProviderId };
 }
-type NativeModProtectionCall = { readonly abi: "source-call"; readonly call: NativeModSourceCall };
+type NativeModProtectionCall = { readonly abi: "source-call"; readonly call: NativeModSourceCall } | NativeModProtectionRegion;
 interface NativeModQ2ArmorCall {
   readonly entry: NativeModEntry;
   readonly flags: "q2-classic" | "q2-rerelease";

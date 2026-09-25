@@ -66,7 +66,7 @@ export interface NativeModHost {
   readonly presentation: NativeModPresentation;
   readonly entries: Pick<GuestCallRunnerOptions, "callbacks" | "cpu">;
   synchronizeFrame(seconds: number, frame: number): void;
-  bindInlineRegion(entry: GuestAddress, join: GuestAddress, intercept: (continuation: GuestInlineContinuation) => undefined): () => void;
+  bindInlineRegion(entry: GuestAddress, join: GuestAddress, intercept: (continuation: GuestInlineContinuation) => undefined, accepts?: () => boolean): () => void;
   entity(slot: number): RawEntityView;
   client(slot: number): GuestAddress | null;
   active(slot: number): boolean;
@@ -151,7 +151,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
           origin: state.origin, angles: state.angles }; } }, options.source.content, options.projection, services, context, options.source.provider, declaration.clientPresentation);
     return { content: options.source.content, memory: source.memory, imageBase: source.imageBase, cvars, presentation, withCommand, entry: name => source.entry(name),
       synchronizeFrame(seconds, frame) { sourceTime = seconds; sourceFrame = frame; },
-      bindInlineRegion: (entry, join, intercept) => source.host.options.runner.bindInlineRegion(entry, join, declaration.target.abi, intercept),
+      bindInlineRegion: (entry, join, intercept, accepts) => source.host.options.runner.bindInlineRegion(entry, join, declaration.target.abi, intercept, accepts),
       gameEntry(name) { const definition = CLASSIC_Q2_EXPORTS[name]; if (definition === undefined) throw new Error(`Unknown API3 game export ${name}`);
         const address = source.memory.readPointer(source.memory.offset(source.host.edicts.exports, BigInt(definition.offset)));
         if (address === null) throw new Error(`Null API3 game export ${name}`); return { address, signature: definition.signature }; },
@@ -204,7 +204,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
       const record = new RereleasePublicEdict(source.memory, source.host.module.entities().atSlot(slot));
       source.memory.writeInt8(source.memory.offset(record.client(), 48n), height);
     },
-    bindInlineRegion: (entry, join, intercept) => source.host.module.options.runner.bindInlineRegion(entry, join, declaration.target.abi, intercept),
+    bindInlineRegion: (entry, join, intercept, accepts) => source.host.module.options.runner.bindInlineRegion(entry, join, declaration.target.abi, intercept, accepts),
     gameEntry(name) { const definition = gameExports.find(entry => entry.name === name); if (definition === undefined) throw new Error(`Unknown API2023 game export ${name}`);
       const address = source.memory.readPointer(source.memory.offset(source.host.module.bindGame(), BigInt(fieldOffset(gameExportLayout, name))));
       if (address === null) throw new Error(`Null API2023 game export ${name}`); return { address, signature: definition.signature }; },

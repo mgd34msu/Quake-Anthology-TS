@@ -1,5 +1,6 @@
 import { readItemIconDeclaration } from "../item-icon.ts";
 import { readItemActions } from "./item-actions.ts";
+import type { NativeModRegionLocation } from "../../contracts/native-mod-region.ts";
 import { readHeldWeaponDeclaration } from "../held-weapon.ts";
 import type { NativeModItems, NativeItemStorage, NativeItemTest } from "../../contracts/native-mod-items.ts";
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
@@ -91,18 +92,31 @@ function powerArmorItem(reader: SaveReader): NativeModPowerArmorItem {
   return { item: namespaced(reader.field("item")), kind: reader.field("kind").choice("screen", "shield"), selection: armorSelection(reader.field("selection")),
     cells: armorField(reader.field("cells")), enabled: reader.field("enabled").nullable(value => ({ field: armorField(value.field("field")), mask: value.field("mask").integer(1) })) };
 }
+function regionLocation(reader: SaveReader): NativeModRegionLocation {
+  const kind = reader.field("kind").choice("register", "stack", "simd");
+  const scalar = () => reader.field("storage").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64");
+  if (kind === "simd") return { kind, index: reader.field("index").integer(0), offset: reader.field("offset").integer(0), storage: scalar() };
+  const storage = reader.field("storage").value === "pointer" ? "pointer" : scalar();
+  return kind === "stack" ? { kind, offset: reader.field("offset").integer(0), storage }
+    : { kind, register: reader.field("register").choice("rax", "rcx", "rdx", "rbx", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"), storage };
+}
 function protection(reader: SaveReader, legacy = false): NativeModProtectionDefinition {
   const channel = legacy ? "powered" : reader.field("channel").choice("regular", "powered"), absorb = reader.field("absorb");
   const claim = { id: reader.field("id").string(),
     ...(reader.field("admission").value === undefined ? {} : { admission: reader.field("admission").field("kind").choice("claim", "replace-current-primary", "replace-primary") === "replace-primary"
       ? { kind: "replace-primary", owner: namespaced(reader.field("admission").field("owner")) } satisfies NativeModProtectionDefinition["admission"]
       : { kind: reader.field("admission").field("kind").choice("claim", "replace-current-primary") } satisfies NativeModProtectionDefinition["admission"] }) };
-  const abi = absorb.field("abi").choice("q2-check-power-armor", "q2-check-armor", "source-call");
-  if (abi === "source-call") {
+  const abi = absorb.field("abi").choice("q2-check-power-armor", "q2-check-armor", "source-call", "source-region");
+  if (abi === "source-call" || abi === "source-region") {
     if (legacy) return absorb.fail("Legacy powered protection requires its original Q2 ABI");
     const call = sourceCall(absorb.field("call"));
-    return channel === "regular" ? { ...claim, channel, storage: reader.field("storage").list(regularArmorItem), absorb: { abi, call } }
-      : { ...claim, channel, storage: reader.field("storage").list(powerArmorItem), absorb: { abi, call } };
+    const definition = abi === "source-call" ? { abi, call } : { abi, call,
+      frame: { entry: absorb.field("frame").field("entry").integer(0), exit: absorb.field("frame").field("exit").integer(0),
+        stackBytes: absorb.field("frame").field("stackBytes").integer(0), argumentBytes: absorb.field("frame").field("argumentBytes").integer(0) },
+      entry: absorb.field("entry").integer(0), join: absorb.field("join").integer(0), result: regionLocation(absorb.field("result")),
+      inputs: absorb.field("inputs").list(value => ({ target: regionLocation(value.field("target")), value: argument(value.field("value")) })) };
+    return channel === "regular" ? { ...claim, channel, storage: reader.field("storage").list(regularArmorItem), absorb: definition }
+      : { ...claim, channel, storage: reader.field("storage").list(powerArmorItem), absorb: definition };
   }
   const call = { entry: entry(absorb.field("entry")), flags: absorb.field("flags").choice("q2-classic", "q2-rerelease"),
     ...(absorb.field("globals").value === undefined ? {} : { globals: absorb.field("globals").list(global => ({ address: address(global.field("address")), value: argument(global.field("value")) })) }) };

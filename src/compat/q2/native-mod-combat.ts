@@ -1,3 +1,4 @@
+import type { NativeModInvocationResult } from "./native-mod-invocations.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, GuestValueLayout } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { AttackProvenance, DamageOutcome, DamageRequest, Q2NativeCause } from "../../contracts/gameplay.ts";
@@ -29,6 +30,7 @@ export interface NativeModCombatCalls {
   owner(slot: number): OwnedActor | null;
   scalar(address: GuestAddress, field: NativeModScalarField, value?: number): number;
   transfer<Result>(invoke: () => Result): Result;
+  sourceExecution<Result>(actor: ActorId, invoke: () => Result): NativeModInvocationResult<Result>;
   synchronize(): void;
 }
 
@@ -144,7 +146,9 @@ export class NativeModCombat {
       die: reaction => this.withDie(reaction, args => this.call("die", slot, args)) };
   }
   private call(kind: Kind, slot: number, args: readonly GuestCallValue[]): undefined {
-    const entry = this.ensure(kind, slot); if (entry !== null) this.calls.transfer(() => entry.original(args)); return undefined;
+    const entry = this.ensure(kind, slot), actor = this.calls.owner(slot);
+    if (entry !== null && actor !== null) this.calls.transfer(() => this.calls.sourceExecution(actor.id, () => entry.original(args)));
+    return undefined;
   }
   private source(kind: Kind, self: OwnedActor, args: readonly GuestCallValue[], original: NativeModEntryBinding["original"]): GuestCallResult {
     const callbacks = this.services.callbacks; if (callbacks === undefined) throw new Error("Native callbacks require shared actor operations");
@@ -240,9 +244,9 @@ export class NativeModCombat {
           [request.direction, request.point, request.normal].forEach((value, index) => writeClassicVector(memory, memory.offset(vectors, BigInt(index * 12)), value));
           const cause = q2NativeDamageArguments(request, definition.causes), native = cause.native;
           if (native === null) throw new Error("Shared attack has no declared native cause representation");
-          damage.original([pointer(target), inflictor, attacker,
+          this.calls.sourceExecution(request.target, () => damage.original([pointer(target), inflictor, attacker,
             pointer(vectors), pointer(memory.offset(vectors, 12n)), pointer(memory.offset(vectors, 24n)), int(request.amount), int(request.knockback), int(cause.damageFlags),
-            native.edition === "classic" ? int(native.value) : { kind: "aggregate", layout: rereleaseModLayout, bytes: new Uint8Array([native.id, Number(native.friendlyFire), Number(native.noPointLoss)]) }]);
+            native.edition === "classic" ? int(native.value) : { kind: "aggregate", layout: rereleaseModLayout, bytes: new Uint8Array([native.id, Number(native.friendlyFire), Number(native.noPointLoss)]) }]));
           return frame.result ?? { reaction: "none", appliedDamage: frame.applied };
         } finally { this.frames.pop(); for (const remove of removals) remove(); memory.unmap(vectors, 36); }
       });

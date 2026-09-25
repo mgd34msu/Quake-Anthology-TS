@@ -20,14 +20,14 @@ export interface SavedNativeActors {
 interface SourceCalls {
   resolve(address: NativeModAddress): GuestAddress;
   scalar(address: GuestAddress, value: number, encoding: NativeModScalar): void;
-  invoke(entry: GuestAddress, values: readonly Extract<GuestCallValue, { readonly kind: "pointer" }>[], returns: NativeModScalar | "void"): GuestCallResult;
+  invoke(entry: GuestAddress, values: readonly Extract<GuestCallValue, { readonly kind: "pointer" }>[], returns: NativeModScalar | "void", actor: ActorId | null): GuestCallResult | null;
   address(actor: ActorId): GuestAddress;
   actorAt(slot: number): ActorId | null;
   clientFrame(slot: number): boolean;
   synchronizeFrame(seconds: number, frame: number): void;
   beginFrame(): void;
   endFrame(): void;
-  readonly combat: Pick<NativeModCombatCalls, "eligible" | "transfer" | "scalar" | "synchronize">;
+  readonly combat: Pick<NativeModCombatCalls, "eligible" | "transfer" | "sourceExecution" | "scalar" | "synchronize">;
 }
 
 /** Source edicts retain their private words, function pointers, allocator and update loop. */
@@ -140,7 +140,7 @@ export class NativeModActors {
   drainReleases(): void {
     if (this.suspended) return;
     for (const slot of [...this.pending]) {
-      if (this.host.active(slot)) this.calls.invoke(this.entry(this.definition.release), [{ kind: "pointer", value: this.host.entity(slot).address }], "void");
+      if (this.host.active(slot)) this.calls.invoke(this.entry(this.definition.release), [{ kind: "pointer", value: this.host.entity(slot).address }], "void", null);
       if (!this.closing && this.host.active(slot)) throw new Error("Native source refused to release its owned actor");
       this.retire(slot);
     }
@@ -165,7 +165,7 @@ export class NativeModActors {
           if (this.calls.clientFrame(slot)) continue;
           const actor = this.slots.get(slot); if (actor === undefined) continue;
           if (!this.services.actors.isLive(actor.id) || !this.host.active(slot)) { this.retire(slot); continue; }
-          this.calls.invoke(this.entry(this.definition.update.entry), [{ kind: "pointer", value: this.host.entity(slot).address }], this.definition.update.returns);
+          this.calls.invoke(this.entry(this.definition.update.entry), [{ kind: "pointer", value: this.host.entity(slot).address }], this.definition.update.returns, actor.id);
         }
         if (!this.closing) this.calls.endFrame();
       } finally { this.tickTime = null; }

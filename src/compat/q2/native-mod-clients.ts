@@ -17,7 +17,7 @@ interface Operations {
   project(actor: ActorId): void;
   admitted?(actor: ActorId): void;
   release(actor: ActorId): void;
-  invoke(call: NativeModSourceCall, actor: ActorId): number;
+  invoke(call: NativeModSourceCall, actor: ActorId): number | null;
   invokeInput(call: NativeModSourceCall, application: ModClientApplication): void;
   openInput(application: ModClientApplication): () => void;
   inputOutput(outputs: readonly NativeModInputOutput[], application: ModClientApplication, run: () => void): readonly ModClientInputOutput[];
@@ -54,7 +54,7 @@ export class NativeModClientsBinding {
   rejects(actor: ActorId): boolean { return this.denied.has(actor); }
   private calls(calls: readonly NativeModSourceCall[], actor: ActorId): void {
     const entry = this.require(actor);
-    for (const call of calls) { if (this.entries.get(actor) !== entry) break; this.require(actor); this.operations.invoke(call, actor); }
+    for (const call of calls) { if (this.entries.get(actor) !== entry) break; this.require(actor); if (this.operations.invoke(call, actor) === null) break; }
   }
   private admit(actor: ActorId): boolean {
     if (this.denied.has(actor)) return false;
@@ -66,6 +66,7 @@ export class NativeModClientsBinding {
       for (const call of this.operations.declaration.admit) {
         this.require(actor);
         const result = this.operations.invoke(call, actor);
+        if (result === null) return false;
         if (call.accepts === "nonzero" && result === 0) {
           const reason = q2Userinfo(this.userinfo(actor)).get("rejmsg") || "Connection refused";
           this.operations.services.drop(this.require(actor).client, reason, this.operations.content);

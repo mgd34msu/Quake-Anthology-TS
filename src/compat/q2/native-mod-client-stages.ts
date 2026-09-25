@@ -7,18 +7,19 @@ import { writeRereleaseUserCommand } from "./rerelease/player-state.ts";
 
 /** Exclusions apply only while their declaring original call is active. */
 export class NativeModClientStages {
-  private active: { readonly call: NativeModSourceCall; readonly removals: (() => void)[] } | null = null;
+  private active: { readonly call: NativeModSourceCall; readonly removals: (() => void)[]; readonly extra: (() => () => void) | undefined } | null = null;
   constructor(private readonly host: Pick<NativeModHost, "memory" | "imageBase" | "bindInlineRegion">) {}
   private bind(scope: NonNullable<NativeModClientStages["active"]>): void {
     const { memory, imageBase } = this.host;
     for (const region of scope.call.skips ?? []) scope.removals.push(this.host.bindInlineRegion(
       memory.offset(imageBase, BigInt(region.entry)), memory.offset(imageBase, BigInt(region.join)), continuation => continuation.skip()));
+    if (scope.extra !== undefined) scope.removals.push(scope.extra());
   }
   private unbind(scope: NativeModClientStages["active"]): void {
     for (const remove of scope?.removals.splice(0).reverse() ?? []) remove();
   }
-  run<T>(call: NativeModSourceCall, invoke: () => T): T {
-    const previous = this.active, scope = { call, removals: [] } satisfies NonNullable<NativeModClientStages["active"]>;
+  run<T>(call: NativeModSourceCall, invoke: () => T, extra?: () => () => void): T {
+    const previous = this.active, scope = { call, removals: [], extra } satisfies NonNullable<NativeModClientStages["active"]>;
     this.unbind(previous); this.active = scope;
     try {
       this.bind(scope);
