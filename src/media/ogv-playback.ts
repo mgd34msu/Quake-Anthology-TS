@@ -1,3 +1,5 @@
+import { SaveReader } from "../persistence/value.ts";
+import { copyCinematicFrame, readCinematicFrame } from "./types.ts";
 import { VorbisPcmStream } from "../audio/streams.ts";
 import { TheoraDecoder } from "../platform/theora.ts";
 import { decodeOggMovie, type OggMovie } from "./ogg.ts";
@@ -20,15 +22,47 @@ export class OgvPlayback {
   private state: "playing" | "held" | "ended" = "playing";
   private closed = false;
   private resetAudio = true;
-  constructor(bytes: Uint8Array, private readonly options: OgvPlaybackOptions) {
+  private closedAudioPosition: number | null = null;
+  constructor(bytes: Uint8Array, private readonly options: OgvPlaybackOptions, checkpoint?: unknown) {
     this.movie = decodeOggMovie(bytes);
     this.decoder = new TheoraDecoder(this.movie.video.slice(0, 3));
     try {
       this.audio = this.movie.audio === null || options.silent ? null : VorbisPcmStream.fromBytes(this.movie.audio);
       this.epoch = options.clock.sample();
-      this.decodeFrame(); this.queueAudio(0);
+      if (checkpoint === undefined) { this.decodeFrame(); this.queueAudio(0); }
+      else this.restoreCheckpoint(checkpoint);
     } catch (error) { try { this.audio?.close(); } finally { this.decoder.close(); } throw error; }
   }
+  captureCheckpoint() {
+    return { epoch: this.epoch, pass: this.pass, nextIndex: this.nextIndex, picture: copyCinematicFrame(this.picture),
+      state: this.state, closed: this.closed, resetAudio: this.resetAudio, audioPosition: this.closed ? this.closedAudioPosition : this.audio?.positionFrames ?? null };
+  }
+  private restoreCheckpoint(value: unknown): void {
+    const r = new SaveReader(value, "ogv-playback");
+    this.epoch = r.field("epoch").finite(); this.pass = r.field("pass").integer(0);
+    const nextIndex = r.field("nextIndex").integer(0), picture = readCinematicFrame(r.field("picture"));
+    if (nextIndex > this.movie.video.length - 3) r.fail("video packet cursor exceeds movie");
+    // Opaque native state is reconstructed from the exact packet prefix, without output callbacks.
+    while (this.nextIndex < nextIndex) this.decodeFrame();
+    const actual = this.picture;
+    if ((picture === null) !== (actual === null) || picture !== null && actual !== null
+      && (picture.index !== actual.index || picture.width !== actual.width || picture.height !== actual.height
+        || picture.rgba.length !== actual.rgba.length || picture.rgba.some((byte, index) => byte !== actual.rgba[index]))) {
+      r.fail("reconstructed Theora frame differs from checkpoint");
+    }
+    const audioPosition = r.field("audioPosition").nullable(a => a.integer(0));
+    if ((audioPosition === null) !== (this.audio === null)) r.fail("Vorbis stream ownership differs");
+    if (this.audio !== null && audioPosition !== null) {
+      if (audioPosition > this.audio.frameCount) r.fail("Vorbis sample cursor exceeds movie");
+      while (this.audio.positionFrames < audioPosition) {
+        if (this.audio.read(Math.min(4096, audioPosition - this.audio.positionFrames)) === null) r.fail("Vorbis prefix ended early");
+      }
+    }
+    this.picture = picture; this.state = r.field("state").choice("playing", "held", "ended");
+    this.resetAudio = r.field("resetAudio").boolean();
+    if (r.field("closed").boolean()) this.close();
+  }
+
   get dimensions(): { width: number; height: number } { return { width: this.decoder.width, height: this.decoder.height }; }
   get currentFrame(): CinematicFrame | null { return this.picture; }
   private decodeFrame(): void {
@@ -75,6 +109,7 @@ export class OgvPlayback {
   }
   close(): void {
     if (this.closed) return;
+    this.closedAudioPosition = this.audio?.positionFrames ?? null;
     this.closed = true; this.state = "ended";
     try { this.audio?.close(); } finally { this.decoder.close(); }
   }

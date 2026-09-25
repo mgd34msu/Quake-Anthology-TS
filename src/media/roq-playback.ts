@@ -1,6 +1,8 @@
 // Ported from id Software's code/client/cl_cin.c, CIN_RunCinematic and RoQInterrupt.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
+import { SaveReader } from "../persistence/value.ts";
+import { readCinematicFrame } from "./types.ts";
 import { RoqDecoder } from "./roq.ts";
 import type { RoqDecoderScratch } from "./roq.ts";
 import { RoqStream } from "./roq-stream.ts";
@@ -90,7 +92,7 @@ export class RoqPlayback {
   private sourceSample = 0;
   private loopIndex = 0;
 
-  constructor(data: Uint8Array | RoqStream, options: RoqPlaybackOptions) {
+  constructor(data: Uint8Array | RoqStream, options: RoqPlaybackOptions, checkpoint?: unknown) {
     this.data = data instanceof RoqStream ? data : new Uint8Array(data);
     this.source = options.source ?? "<RoQ playback>";
     this.loop = options.loop ?? false;
@@ -106,6 +108,23 @@ export class RoqPlayback {
     this.decoder = new RoqDecoder(this.data, this.source, { endPolicy: "cinematic-lookahead", silent: this.silent, ...(this.scratch === undefined ? {} : { scratch: this.scratch }) });
     this.epoch = Math.trunc(clockTime(options.clock.sample())) >>> 0;
     this.lastTime = this.epoch;
+    if (checkpoint !== undefined) this.restoreCheckpoint(checkpoint);
+  }
+
+  captureCheckpoint() {
+    return { decoder: this.decoder.captureCheckpoint(), epoch: this.epoch, lastTime: this.lastTime,
+      state: this.state, frame: this.currentFrame, pointer: this.currentPointer,
+      decodedFrames: this.decodedFrames, sourceSample: this.sourceSample, loopIndex: this.loopIndex };
+  }
+  private restoreCheckpoint(value: unknown): void {
+    const r = new SaveReader(value, "roq-playback");
+    this.decoder.restoreCheckpoint(r.field("decoder").value);
+    this.epoch = r.field("epoch").integer(0); this.lastTime = r.field("lastTime").integer(0);
+    this.state = r.field("state").choice("playing", "held", "ended", "looped");
+    this.frame = readCinematicFrame(r.field("frame"));
+    this.pointer = r.field("pointer").nullable(p => ({ offset: p.field("offset").integer(0), byteLength: p.field("byteLength").integer(0) }));
+    this.decodedFrames = r.field("decodedFrames").integer(-1); this.sourceSample = r.field("sourceSample").integer(0);
+    this.loopIndex = r.field("loopIndex").integer(0);
   }
 
   /** RoQReset can initialize a retained file before CIN_Play has built its decoder. */

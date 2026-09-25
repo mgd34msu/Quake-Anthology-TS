@@ -1,5 +1,6 @@
 /* Quake II cl_cin.c, order-1 Huffman CIN decoding.
  * Copyright (C) 1997-2001 Id Software, Inc. GPL-2.0-or-later. */
+import { SaveReader } from "../persistence/value.ts";
 import { BinaryError, BinaryReader } from "../core/binary/index.ts";
 import { mediaBytes, readMedia, type MediaInput } from "./source.ts";
 
@@ -111,6 +112,20 @@ export class CinDecoder {
       } else throw new BinaryError(this.input.source, 8, "invalid CIN audio format");
       this.huffman = new CinHuffman(readMedia(this.input, 20, 65536), this.input.source);
     } catch (error: unknown) { this.input.close(); throw error; }
+  }
+
+  captureCheckpoint() {
+    return { width: this.width, height: this.height, inputLength: this.input.byteLength,
+      offset: this.offset, frameIndex: this.frameIndex, ended: this.ended, closed: this.closed, palette: this.colors.slice() };
+  }
+  restoreCheckpoint(value: unknown): void {
+    const r = new SaveReader(value, "cin-decoder");
+    r.field("width").literal(this.width); r.field("height").literal(this.height); r.field("inputLength").literal(this.input.byteLength);
+    const offset = r.field("offset").integer(20 + 65536), colors = r.field("palette").bytes();
+    if (offset > this.input.byteLength || colors.length !== this.colors.length) r.fail("invalid CIN cursor or palette");
+    this.frameIndex = r.field("frameIndex").integer(0); this.ended = r.field("ended").boolean();
+    this.offset = offset; this.colors.set(colors);
+    if (r.field("closed").boolean()) this.close();
   }
 
   get palette(): Uint8Array { return this.colors.slice(); }

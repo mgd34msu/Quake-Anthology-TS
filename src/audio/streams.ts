@@ -1,4 +1,5 @@
 // Source PCM streams share one device. Chunk boundaries do not reset resampling phase.
+import { SaveReader } from "../persistence/value.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,6 +112,34 @@ export class RawAudioStream {
     private end = 0;
     paused = false;
     constructor(readonly outputRate: number) { }
+    captureCheckpoint() {
+        return { outputRate: this.outputRate, inputRate: this.inputRate, channels: this.channels, origin: this.origin,
+            outputFrames: this.outputFrames, end: this.end, paused: this.paused,
+            segments: this.segments.map(segment => ({ begin: segment.begin, end: segment.end, samples: Array.from(segment.samples) })) };
+    }
+    static restoreCheckpoint(value: unknown, outputRate: number): RawAudioStream {
+        const r = new SaveReader(value, "raw-pcm"), rate = r.field("outputRate").integer(1);
+        const stream = new RawAudioStream(rate);
+        stream.inputRate = r.field("inputRate").integer(0); stream.channels = r.field("channels").choice(1, 2);
+        stream.origin = r.field("origin").finite(); stream.outputFrames = r.field("outputFrames").integer(0);
+        stream.end = r.field("end").integer(0); stream.paused = r.field("paused").boolean();
+        stream.segments = [...r.field("segments").list(s => {
+            const begin = s.field("begin").integer(0), end = s.field("end").integer(begin);
+            const samples = Int16Array.from(s.field("samples").list(item => {
+                const sample = item.integer(-32768); if (sample > 32767) item.fail("sample exceeds signed PCM"); return sample;
+            }));
+            if (samples.length !== (end - begin) * stream.channels || begin === end) s.fail("invalid PCM segment extent");
+            return { begin, end, samples };
+        })];
+        for (let index = 1; index < stream.segments.length; index++) {
+            if (stream.segments[index - 1]?.end !== stream.segments[index]?.begin) r.fail("discontinuous PCM segments");
+        }
+        const first = stream.segments[0], last = stream.segments.at(-1);
+        if (stream.origin < 0 || first !== undefined && stream.sourcePosition < first.begin
+            || last !== undefined && last.end !== stream.end || stream.inputRate === 0 && stream.segments.length !== 0) r.fail("invalid PCM cursor");
+        if (!Number.isSafeInteger(outputRate) || outputRate < 1) throw new RangeError("Invalid PCM output rate");
+        return rate === outputRate ? stream : stream.withOutputRate(outputRate);
+    }
     get initialized(): boolean { return this.inputRate !== 0; }
     get queuedSourceFrames(): number { return Math.max(0, this.end - this.sourcePosition); }
     get sourcePosition(): number { return Math.floor(this.origin + this.outputFrames * this.inputRate / this.outputRate); }

@@ -1,3 +1,5 @@
+import { RawAudioStream } from "../../src/audio/streams.ts";
+import { encodeCheckpointValue, decodeCheckpointValue } from "../../src/persistence/value.ts";
 import { SoftwareRenderer, CpuRenderTarget } from "../../src/render/cpu/index.ts";
 import { SceneImageRegistry } from "../../src/render/scene/resources.ts";
 import { expect, test } from "bun:test";
@@ -468,4 +470,57 @@ test.skipIf(process.env["QUAKE_MEDIA_NATIVE"] !== "1")("installed rerelease OGV 
     playback.pause(false); clock.time += 100; playback.tick(); expect(playback.timeline.elapsedMilliseconds).toBe(350);
     playback.skip(); expect(playback.status).toBe("ended");
   } finally { playback.close(); }
+});
+
+
+function compareContinuation(format: "cin" | "roq" | "ogv", bytes: Uint8Array, before: readonly number[], after: readonly number[]): void {
+  const source = cinematicBytes(format, bytes, `continuation.${format}`);
+  const make = (clock: { time: number; sample(): number }, checkpoint?: unknown) => {
+    let stream = new RawAudioStream(48000), submitted = 0;
+    const completed: CinematicEndReason[] = [];
+    const playback = new CinematicPlayback(source, { clock, target: { kind: "seat", seat: createIdentityOwner("saved-movie").seat(0) },
+      hold: true, onAudio: block => { submitted++; stream.queue(block); }, onAudioReset: () => { stream = new RawAudioStream(48000); },
+      onAudioPause: paused => { stream.paused = paused; }, onComplete: reason => { completed.push(reason); } }, checkpoint);
+    return { playback, completed, submitted: () => submitted, mix: (frames: number) => stream.mix(frames),
+      stream: () => stream.captureCheckpoint(), restoreStream: (saved: unknown) => { stream = RawAudioStream.restoreCheckpoint(saved, 48000); } };
+  };
+  const wall = { time: 0, sample(): number { return this.time; } }, uninterrupted = make(wall);
+  for (const time of before) { wall.time = time; uninterrupted.playback.tick(); uninterrupted.mix(137); }
+  uninterrupted.playback.pause(true);
+  const elapsed = uninterrupted.playback.playbackTimeMilliseconds;
+  const saved = decodeCheckpointValue(encodeCheckpointValue(uninterrupted.playback.captureCheckpoint()));
+  const pcm = decodeCheckpointValue(encodeCheckpointValue(uninterrupted.stream()));
+  const restoredWall = { time: 25000, sample(): number { return this.time; } }, resumed = make(restoredWall, saved);
+  try {
+    resumed.restoreStream(pcm);
+    expect(resumed.submitted()).toBe(0);
+    expect(resumed.playback.currentFrame).toEqual(uninterrupted.playback.currentFrame);
+    expect(resumed.playback.captureCheckpoint()).toEqual(uninterrupted.playback.captureCheckpoint());
+    expect(resumed.mix(17)).toEqual(uninterrupted.mix(17));
+    uninterrupted.playback.pause(false); resumed.playback.pause(false);
+    for (const delta of after) {
+      wall.time = elapsed + delta; restoredWall.time = 25000 + delta;
+      expect(resumed.playback.tick()).toEqual(uninterrupted.playback.tick());
+      expect(resumed.mix(131)).toEqual(uninterrupted.mix(131));
+    }
+    uninterrupted.playback.skip(); resumed.playback.skip();
+    expect(resumed.completed).toEqual(uninterrupted.completed);
+    const terminal = make({ time: 90000, sample() { return this.time; } }, decodeCheckpointValue(encodeCheckpointValue(resumed.playback.captureCheckpoint())));
+    try { terminal.playback.tick(); terminal.playback.skip(); expect(terminal.completed).toEqual([]); expect(terminal.submitted()).toBe(0); }
+    finally { terminal.playback.close(); }
+  } finally { uninterrupted.playback.close(); resumed.playback.close(); }
+}
+
+test("CIN checkpoint preserves prefetched frames, queued fractional PCM, paused clocks and completion latches", () => {
+  compareContinuation("cin", shortCin(), [0, 143, 215], [0, 30, 72, 144, 216, 1000]);
+});
+
+test.skipIf(!existsSync(`${corpus}/q3a/lrctf/pak00/video/idlogo.roq`))("original RoQ checkpoint preserves both frame buffers and retained codebooks across future frames", async () => {
+  const bytes = new Uint8Array(await Bun.file(`${corpus}/q3a/lrctf/pak00/video/idlogo.roq`).arrayBuffer());
+  compareContinuation("roq", bytes, [0, 34, 67, 100, 134], [0, 33, 67, 100, 134, 200, 400]);
+});
+
+test.skipIf(process.env["QUAKE_MEDIA_NATIVE"] !== "1")("original rerelease OGV checkpoint reconstructs its exact packet prefix with identical future pixels and PCM", async () => {
+  const bytes = new Uint8Array(await Bun.file(`${corpus}/q2/rerelease/baseq2/video/eou1_.ogv`).arrayBuffer());
+  compareContinuation("ogv", bytes, [0, 71, 149, 237], [0, 20, 60, 121, 201, 370]);
 });

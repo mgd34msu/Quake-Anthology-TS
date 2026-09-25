@@ -1,3 +1,5 @@
+import { UnifiedAudio } from "../../../src/audio/engine.ts";
+import { encodeCheckpointValue, decodeCheckpointValue } from "../../../src/persistence/value.ts";
 import { expect, test } from "bun:test";
 import { CampaignCinematic } from "../../../src/app/bootstrap/campaign-cinematic.ts";
 import { CinematicPlayback, cinematicBytes } from "../../../src/media/playback.ts";
@@ -203,4 +205,35 @@ test("CIN constructor audio waits for activation and a retired caption load cann
   current = true;
   const movie = await CampaignCinematic.prepare(request, { mounts: { open: async () => resource } }, { images: f.assets.assets.images }, { engine }, renderer, f.seat, () => current);
   expect(f.pcm).toHaveLength(0); movie.activate(); expect(f.pcm).toHaveLength(1); expect(takeovers).toBe(1); movie.close(1); f.movies.close();
+});
+
+
+test("guest movie checkpoint restores exact slots and owned PCM without replaying play or touching another consumer", async () => {
+  const f = fixture(), owner = createIdentityOwner("restored-movie"), axis: import("../../../src/contracts/math.ts").Axis = [
+    { x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }];
+  using audio = new UnifiedAudio({ sampleRate: 48000, milliseconds: () => 0, random: () => 0 });
+  const seat = owner.seat(0); audio.setListeners([{ seat, actor: owner.actor(1, 0), origin: { x: 0, y: 0, z: 0 }, axis, gain: 1, underwater: false }]);
+  let originalNow = 0, restoredNow = 9000;
+  const original = new ApplicationQ3Cinematics(f.assets, { engine: audio }, seat, () => originalNow);
+  const restored = new ApplicationQ3Cinematics(f.assets, { engine: audio }, seat, () => restoredNow);
+  const neighbor = new ApplicationQ3Cinematics(f.assets, { engine: audio }, seat, () => restoredNow);
+  try {
+    expect(await original.playGuest("test.roq", f.rect, 4)).toBe(0);
+    expect(original.play(await original.owner.prepare("test.roq"))?.handle.index).toBe(1);
+    expect(await original.playGuest("other.roq", f.rect, 4)).toBe(2);
+    original.stop(0); original.stop(1); original.run(2); originalNow = 34; original.run(2);
+    expect(audio.mix(1).some(sample => sample !== 0)).toBe(true);
+    original.setExtents(2, { x: 11, y: 22, width: 33, height: 44 });
+    const saved = decodeCheckpointValue(encodeCheckpointValue(original.captureCheckpoint()));
+    await restored.restoreCheckpoint(saved);
+    expect(restored.captureCheckpoint()).toEqual(original.captureCheckpoint());
+    original.close();
+    restored.drawGuest(2, f.draw); expect(f.draws.at(-1)?.rect).toEqual({ x: 11, y: 22, width: 33, height: 44 });
+    // The next free guest number is preserved, while the live PCM/material namespace is new.
+    expect(restored.play(await restored.owner.prepare("test.roq"))?.handle.index).toBe(0);
+    expect(await neighbor.playGuest("test.roq", f.rect, 4)).toBe(0); neighbor.run(0);
+    restoredNow += 34; restored.run(2); neighbor.run(0);
+    const other = neighbor.captureCheckpoint(); restored.close(); expect(neighbor.captureCheckpoint()).toEqual(other);
+    expect(neighbor.runGuest(0)).toBe(1);
+  } finally { original.close(); restored.close(); neighbor.close(); f.movies.close(); }
 });

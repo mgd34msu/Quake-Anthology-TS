@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { readResource } from "../../../persistence/recipe.ts";
 import type { Rect } from "../../../contracts/render.ts";
 import type { Draw2D } from "../../../text/draw2d.ts";
 import type { CinematicMixer } from "../../../media/audio.ts";
@@ -38,18 +40,24 @@ class MissingCinematicError extends Error {}
 export class ApplicationQ3Cinematics implements EngineUiCinematics {
   private readonly sources = new Map<string, { readonly source: CinematicSource; readonly resource: ResolvedResourceReference }>();
   private closed = false;
+  private pendingLoads = 0;
+  private restoring = false;
   private readonly systems = new Map<number, SystemCinematicHandle>();
   private readonly pendingSystems = new Map<number, object>();
   private readonly namespace = `q3-cinematic:${++nextConsumer}`;
-  private readonly movies = new Map<number, { readonly playback: CinematicPlayback; readonly image: CinematicImage; readonly picture: MaterialPicture; readonly path: string; rect: Rect }>();
+  private readonly movies = new Map<number, { readonly playback: CinematicPlayback; readonly image: CinematicImage; readonly picture: MaterialPicture; readonly path: string; readonly asset: UiCinematicAsset; readonly mode: Q3CinematicMode; rect: Rect }>();
   readonly owner = { prepare: (path: string) => this.prepare(path), stopSlot: (index: number) => this.stop(index) };
   constructor(readonly assets: CinematicAssets, readonly audio: { readonly engine: CinematicMixer }, readonly seat: SeatId, readonly now: () => number,
     private readonly system?: SystemCinematicHost) {}
-  private async prepare(path: string): Promise<UiCinematicAsset> {
+  private async prepare(path: string, restoring = false): Promise<UiCinematicAsset> {
+    if (this.restoring && !restoring) throw new Error("Cinematic restore has not completed");
     if (this.closed) throw new Error("UI cinematics are closed");
     if (!this.sources.has(path)) {
       const selected = path.includes("/") ? path : `video/${path}`, name = /\.[^/]+$/.test(selected) ? selected : `${selected}.roq`;
-      const resource = await this.assets.provider.mounts.open(name);
+      this.pendingLoads++;
+      let resource: Awaited<ReturnType<CinematicAssets["provider"]["mounts"]["open"]>>;
+      try { resource = await this.assets.provider.mounts.open(name); }
+      finally { this.pendingLoads--; }
       if (this.closed) throw new Error("UI cinematic loaded after close");
       if (resource === null || resource.bytes.length === 0) throw new MissingCinematicError(`Missing cinematic ${name}`);
       const extension = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
@@ -62,15 +70,20 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
     return this.playMode(asset, { loop: true, hold: false, silent: true, shader: false, rect });
   }
   private playMode(asset: UiCinematicAsset, mode: Q3CinematicMode) {
+    if (this.restoring) throw new Error("Cinematic restore has not completed");
     if (this.closed) throw new Error("UI cinematics are closed");
     const prepared = this.sources.get(asset.path); if (prepared === undefined) throw new Error(`Unprepared cinematic ${asset.path}`);
     let index = 0; while (this.movies.has(index) || this.systems.has(index) || this.pendingSystems.has(index)) index++;
     if (index >= 16) return undefined;
+    return this.createMovie(index, asset, mode);
+  }
+  private createMovie(index: number, asset: UiCinematicAsset, mode: Q3CinematicMode, checkpoint?: unknown) {
+    const prepared = this.sources.get(asset.path); if (prepared === undefined) throw new Error(`Unprepared cinematic ${asset.path}`);
     const dimensions = cinematicDimensions(prepared.source);
     const audio = cinematicAudio(this.audio.engine, `${this.namespace}:${index}`);
     const playback = new CinematicPlayback(prepared.source, { target: mode.shader ? { kind: "material", id: `${this.namespace}:${index}` } : { kind: "seat", seat: this.seat },
       clock: { sample: this.now }, loop: mode.loop, hold: mode.hold, silent: mode.silent,
-      onAudio: block => audio.onAudio(block, { kind: "seat", seat: this.seat }), onAudioReset: target => audio.onAudioReset(target), onAudioPause: (paused, target) => audio.onAudioPause(paused, target), onComplete: () => undefined, developerPrint: this.assets.print });
+      onAudio: block => audio.onAudio(block, { kind: "seat", seat: this.seat }), onAudioReset: target => audio.onAudioReset(target), onAudioPause: (paused, target) => audio.onAudioPause(paused, target), onComplete: () => undefined, developerPrint: this.assets.print }, checkpoint);
     try {
     const images = this.assets.assets.images;
     const image = new CinematicImage(images.allocate(dimensions.width, dimensions.height, { kind: "resource", resource: prepared.resource }),
@@ -87,11 +100,59 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
     const picture: MaterialPicture = { kind: "material", name, material: { order: 0, compiled: compileImplicitMaterial({
       kind: "picture", name, profile: DEFAULT_SHADER_PROFILE, baseImage: { kind: "loaded", tmu: 0, binding: { kind: "video", source } },
     }) } };
-    this.movies.set(index, { playback, image, picture, path: prepared.source.source, rect: { ...mode.rect } });
+    this.movies.set(index, { playback, image, picture, path: prepared.source.source, asset: { ...asset }, mode: { ...mode, rect: { ...mode.rect } }, rect: { ...mode.rect } });
     return { asset, handle: { index } };
     } catch (error) { playback.close(); throw error; }
   }
+  captureCheckpoint() {
+    if (this.closed || this.restoring || this.pendingLoads !== 0 || this.pendingSystems.size !== 0) throw new Error("Cinematic checkpoint requires an idle live owner");
+    if (this.systems.size !== 0) throw new Error("System cinematic checkpoint requires its attached client transition checkpoint");
+    const capture = this.audio.engine.captureStreamCheckpoint;
+    if (capture === undefined && this.movies.size !== 0) throw new Error("Cinematic mixer cannot checkpoint its owned PCM lanes");
+    return { version: 1, sources: [...this.sources].map(([path, source]) => ({ path, resource: source.resource })),
+      movies: [...this.movies].map(([index, movie]) => {
+        if (capture === undefined) throw new Error("Cinematic mixer cannot checkpoint its owned PCM lanes");
+        return { index, asset: movie.asset.path, mode: { ...movie.mode, rect: { ...movie.rect } },
+          playback: movie.playback.captureCheckpoint(), pcm: capture.call(this.audio.engine, `${this.namespace}:${index}`) };
+      }) };
+  }
+  async restoreCheckpoint(value: unknown): Promise<void> {
+    if (this.closed || this.restoring || this.movies.size !== 0 || this.sources.size !== 0 || this.systems.size !== 0
+      || this.pendingSystems.size !== 0 || this.pendingLoads !== 0) throw new Error("Cinematic restore requires an unpublished empty owner");
+    const r = new SaveReader(value, "q3-cinematics"); r.field("version").literal(1);
+    const sources = r.field("sources").list(s => ({ path: s.field("path").string(), resource: readResource(s.field("resource")) }));
+    const slots = new Set<number>(), paths = new Set<string>();
+    for (const source of sources) { if (paths.has(source.path)) r.fail("duplicate cinematic source"); paths.add(source.path); }
+    const movies = r.field("movies").list(m => {
+      const index = m.field("index").integer(0), asset = m.field("asset").string();
+      if (index >= 16 || slots.has(index) || !paths.has(asset)) m.fail("invalid cinematic slot or source"); slots.add(index);
+      const mode = m.field("mode"), rect = mode.field("rect");
+      return { index, asset, mode: { loop: mode.field("loop").boolean(), hold: mode.field("hold").boolean(),
+        silent: mode.field("silent").boolean(), shader: mode.field("shader").boolean(),
+        rect: { x: rect.field("x").finite(), y: rect.field("y").finite(), width: rect.field("width").finite(), height: rect.field("height").finite() } },
+        playback: m.field("playback").value, pcm: m.field("pcm").value };
+    });
+    const restore = this.audio.engine.restoreStreamCheckpoint;
+    if (restore === undefined && movies.length !== 0) throw new Error("Cinematic mixer cannot restore its owned PCM lanes");
+    this.restoring = true;
+    try {
+      for (const source of sources) {
+        await this.prepare(source.path, true);
+        if (this.sources.get(source.path)?.resource.id !== source.resource.id) r.fail(`cinematic resource changed: ${source.path}`);
+      }
+      if (this.closed) throw new Error("Cinematic restore completed after close");
+      for (const movie of movies) {
+        this.createMovie(movie.index, { path: movie.asset }, movie.mode, movie.playback);
+        if (restore === undefined) throw new Error("Cinematic mixer cannot restore its owned PCM lanes");
+        restore.call(this.audio.engine, { id: `${this.namespace}:${movie.index}`, gain: 1, audience: { kind: "seat", seat: this.seat } }, movie.pcm);
+      }
+    } catch (error) {
+      for (const index of this.movies.keys()) this.stop(index);
+      this.sources.clear(); throw error;
+    } finally { this.restoring = false; }
+  }
   async playGuest(path: string, rect: Rect, bits: number): Promise<number> {
+    if (this.restoring) throw new Error("Cinematic restore has not completed");
     if ((bits & 1) !== 0) {
       if (this.closed) throw new Error("UI cinematics are closed");
       if (this.system === undefined) throw new Error("System cinematic requires an attached client transition owner");

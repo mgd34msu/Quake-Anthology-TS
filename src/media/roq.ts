@@ -1,6 +1,7 @@
 // Ported from id Software's code/client/cl_cin.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
 
+import { SaveReader } from "../persistence/value.ts";
 import { BinaryError, BinaryReader } from "../core/binary/index.ts";
 import { RoqStream } from "./roq-stream.ts";
 import { SourceRoqAudio } from "./roq-audio.ts";
@@ -29,6 +30,16 @@ export class RoqDecoderScratch {
   readonly book4 = this.codebooks.book4;
   readonly book8 = this.codebooks.book8;
   private readonly frames = new Uint8Array(512 * 512 * 4 * 2);
+
+  captureCheckpoint() {
+    return { file: this.file.slice(), book2: this.book2.slice(), book4: this.book4.slice(), book8: this.book8.slice(), frames: this.frames.slice() };
+  }
+  restoreCheckpoint(value: unknown): void {
+    const r = new SaveReader(value, "roq-scratch");
+    const fields: readonly ("file" | "book2" | "book4" | "book8" | "frames")[] = ["file", "book2", "book4", "book8", "frames"];
+    for (const name of fields) if (r.field(name).bytes().length !== this[name].length) r.field(name).fail("scratch allocation length differs");
+    for (const name of fields) this[name].set(r.field(name).bytes());
+  }
 
   /** A new CIN_PlayCinematic clears cinematics_t, but the separate global codebooks survive. */
   clearMovieState(): void { this.file.fill(0); this.frames.fill(0); }
@@ -101,6 +112,24 @@ export class RoqDecoder {
     }
     const rate = reader.u16();
     this.rate = rate === 0 ? 30 : rate;
+  }
+
+  captureCheckpoint() {
+    return { rate: this.rate, width: this.width, height: this.height, frameIndex: this.frameIndex,
+      unknownChunk: this.unknownChunk, cinematicLookahead: this.cinematicLookahead, silent: this.silent,
+      scratch: this.scratch.captureCheckpoint(), stream: this.stream.captureCheckpoint() };
+  }
+  restoreCheckpoint(value: unknown): void {
+    const r = new SaveReader(value, "roq-decoder");
+    r.field("cinematicLookahead").literal(this.cinematicLookahead); r.field("silent").literal(this.silent);
+    const width = r.field("width").integer(0), height = r.field("height").integer(0);
+    if ((width === 0) !== (height === 0) || width % 8 !== 0 || height % 8 !== 0 || width * height > 512 * 512) r.fail("invalid frame dimensions");
+    this.rate = r.field("rate").integer(1); this.frameIndex = r.field("frameIndex").integer(-1);
+    this.unknownChunk = r.field("unknownChunk").choice("none", "interrupt", "run-tail");
+    this.scratch.restoreCheckpoint(r.field("scratch").value); this.stream.restoreCheckpoint(r.field("stream").value);
+    this.frameWidth = width; this.frameHeight = height;
+    this.firstBuffer = width === 0 ? new Uint8Array(0) : this.scratch.frame(width * height * 4, 0);
+    this.secondBuffer = width === 0 ? new Uint8Array(0) : this.scratch.frame(width * height * 4, 1);
   }
 
   get frameRate(): number { return this.rate; }

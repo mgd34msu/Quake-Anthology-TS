@@ -1,5 +1,6 @@
 // Ported from id Software's code/client/cl_cin.c: CIN_PlayCinematic, RoQInterrupt and RoQReset.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
+import { SaveReader } from "../persistence/value.ts";
 import type { MediaInput } from "./source.ts";
 import { BinaryError, BinaryReader } from "../core/binary/index.ts";
 
@@ -47,6 +48,38 @@ export class RoqStream {
   static fromBytes(data: Uint8Array, source: string, buffer: Uint8Array,
     endPolicy: "complete" | "cinematic-lookahead" = "complete"): RoqStream {
     return new RoqStream(source, data.length, { kind: "bytes", data }, buffer, endPolicy);
+  }
+
+  captureCheckpoint() {
+    if (this.pending !== null) throw new Error("Cannot checkpoint a pending RoQ chunk dispatch");
+    return { length: this.length, endPolicy: this.endPolicy, closed: this.file.kind === "closed", missing: this.file.kind === "missing",
+      position: this.position, played: this.played, header: this.header?.slice() ?? null,
+      nextHeader: this.nextHeader === null ? null : { ...this.nextHeader }, invalidLookahead: this.invalidLookahead,
+      retainedEof: this.retainedEof, resetHeader: this.resetHeader, inMemory: this.inMemory,
+      bufferedNext: this.bufferedNext, chunkOffset: this.chunkOffset, bufferOffset: this.bufferOffset,
+      bufferedLength: this.bufferedLength, buffer: this.buffer.slice() };
+  }
+  restoreCheckpoint(value: unknown): void {
+    if (this.pending !== null) throw new Error("Cannot restore a pending RoQ chunk dispatch");
+    const r = new SaveReader(value, "roq-stream");
+    r.field("length").literal(this.length); r.field("endPolicy").literal(this.endPolicy);
+    const buffer = r.field("buffer").bytes();
+    if (buffer.length !== this.buffer.length) r.fail("scratch buffer size differs");
+    const header = r.field("header").nullable(field => field.bytes().slice());
+    if (header !== null && header.length !== 8) r.fail("invalid retained header");
+    const nextHeader = r.field("nextHeader").nullable(field => ({ id: field.field("id").integer(0),
+      size: field.field("size").integer(0), flags: field.field("flags").integer(0) }));
+    const position = r.field("position").integer(0), bufferedLength = r.field("bufferedLength").integer(0);
+    if (position > this.length || bufferedLength > this.buffer.length) r.fail("stream cursor outside input");
+    const closed = r.field("closed").boolean(), missing = r.field("missing").boolean();
+    if (missing && this.file.kind !== "missing") r.fail("missing source is no longer missing");
+    this.played = r.field("played").integer(0); this.inMemory = r.field("inMemory").integer(0);
+    this.chunkOffset = r.field("chunkOffset").integer(0); this.bufferOffset = r.field("bufferOffset").integer(0);
+    this.invalidLookahead = r.field("invalidLookahead").boolean(); this.retainedEof = r.field("retainedEof").boolean();
+    this.resetHeader = r.field("resetHeader").boolean(); this.bufferedNext = r.field("bufferedNext").boolean();
+    this.position = position; this.bufferedLength = bufferedLength; this.header = header; this.nextHeader = nextHeader;
+    this.buffer.set(buffer);
+    if (closed) this.close();
   }
 
   initialize(): Uint8Array {

@@ -1,5 +1,6 @@
 /* Quake II SCR_PlayCinematic/SCR_RunCinematic/SCR_ReadNextFrame.
  * Copyright (C) 1997-2001 Id Software, Inc. GPL-2.0-or-later. */
+import { SaveReader } from "../persistence/value.ts";
 import { CinDecoder, cinRgba, type CinFrame } from "./cin.ts";
 import type { MediaInput } from "./source.ts";
 import type { CinematicAudio, CinematicFrame, MediaClock } from "./types.ts";
@@ -24,6 +25,26 @@ function milliseconds(clock: MediaClock): number {
   return Math.trunc(time);
 }
 
+function saveFrame(frame: CinFrame | null) {
+  return frame === null ? null : { ...frame, pixels: frame.pixels.slice(), palette: frame.palette.slice(),
+    audio: frame.audio === null ? null : { ...frame.audio, signed: frame.audio.samples instanceof Int16Array, samples: Array.from(frame.audio.samples) } };
+}
+function readFrame(reader: SaveReader, pixels: number): CinFrame | null {
+  return reader.nullable(r => {
+    const image = r.field("pixels").bytes().slice(), palette = r.field("palette").bytes().slice();
+    if (image.length !== pixels || palette.length !== 768) r.fail("CIN frame size differs");
+    return { kind: "frame", pixels: image, palette, index: r.field("index").integer(0), time: r.field("time").finite(),
+      audio: r.field("audio").nullable(a => {
+        const signed = a.field("signed").boolean(), channels = a.field("channels").choice(1, 2);
+        const samples = a.field("samples").list(s => { const sample = s.integer(signed ? -32768 : 0);
+          if (sample > (signed ? 32767 : 255)) s.fail("PCM sample outside range"); return sample; });
+        if (samples.length % channels !== 0) a.fail("partial PCM frame");
+        return { samples: signed ? Int16Array.from(samples) : Uint8Array.from(samples), channels,
+          sampleRate: a.field("sampleRate").integer(1), sourceSample: a.field("sourceSample").integer(0) };
+      }) };
+  });
+}
+
 export class CinPlayback {
   private readonly decoder: CinDecoder;
   private epoch: number;
@@ -32,13 +53,26 @@ export class CinPlayback {
   private state: CinPlaybackTick["status"] = "playing";
   private pass = 0;
 
-  constructor(input: Uint8Array | MediaInput, private readonly options: CinPlaybackOptions) {
+  constructor(input: Uint8Array | MediaInput, private readonly options: CinPlaybackOptions, checkpoint?: unknown) {
     this.decoder = new CinDecoder(input, options.source);
     try {
       this.epoch = milliseconds(options.clock);
-      this.picture = this.read();
-      if (this.picture === null) this.state = "ended";
+      if (checkpoint !== undefined) this.restoreCheckpoint(checkpoint);
+      else { this.picture = this.read(); if (this.picture === null) this.state = "ended"; }
     } catch (error: unknown) { this.decoder.close(); throw error; }
+  }
+
+  captureCheckpoint() {
+    return { decoder: this.decoder.captureCheckpoint(), epoch: this.epoch, picture: saveFrame(this.picture),
+      pending: saveFrame(this.pending), state: this.state, pass: this.pass };
+  }
+  private restoreCheckpoint(value: unknown): void {
+    const r = new SaveReader(value, "cin-playback");
+    this.decoder.restoreCheckpoint(r.field("decoder").value);
+    this.epoch = r.field("epoch").integer(0); this.pass = r.field("pass").integer(0);
+    this.state = r.field("state").choice("playing", "held", "ended", "looped");
+    this.picture = readFrame(r.field("picture"), this.decoder.width * this.decoder.height);
+    this.pending = readFrame(r.field("pending"), this.decoder.width * this.decoder.height);
   }
 
   get dimensions(): { readonly width: number; readonly height: number } {

@@ -346,6 +346,14 @@ export class UnifiedAudio {
             bus.target = target;
         bus.stream.queue(chunk);
     }
+    captureStreamCheckpoint(id: string): ReturnType<RawAudioStream["captureCheckpoint"]> | null {
+        this.check(); return this.streams.get(id)?.stream.captureCheckpoint() ?? null;
+    }
+    restoreStreamCheckpoint(target: AudioStreamTarget, value: unknown): void {
+        this.check();
+        if (this.streams.has(target.id)) throw new Error("PCM restore requires an unused stream lane");
+        if (value !== null) this.streams.set(target.id, { target, stream: RawAudioStream.restoreCheckpoint(value, this.sampleRate) });
+    }
     pauseStream(id: string, paused: boolean): void { const bus = this.streams.get(id); if (bus !== undefined)
         bus.stream.paused = paused; }
     stopStream(id: string): void { this.streams.delete(id); }
