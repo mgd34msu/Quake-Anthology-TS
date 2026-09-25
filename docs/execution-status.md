@@ -2,6 +2,8 @@
 
 ## Installed executable and recent fixes
 
+Checked native scalar memory access now reuses its admitted offset and uses exact numeric bounds for mappings wholly within the safe integer range. High addresses retain the BigInt path. The complete base1 sample measured 73.59 ms per native call and 81.02 ms per application step, down from 79.21/87.41 ms. Root existing memory/CPU/ABI checks passed (55 tests, 1385 assertions), with strict/policy clean. Native performance remains open. [Source and scope](../.artifacts/resume-20260925/native-scalar-lookup/frozen/HANDOFF.md).
+
 Native indirect-call validation now looks up bound callback targets directly instead of materializing the entire callback table. Original target membership, unbind/rebind and executable permission checks remain unchanged. Existing ABI/Windows checks pass (14 tests, 157 assertions), with strict/policy clean. The same full base1 sample measured 79.21 ms per native call and 87.41 ms per application step, versus 82.23/90.28 ms before. This source is newer than the installed executable; native performance remains open.
 
 Newer source keeps native integer memory operands as exact unsigned words instead of converting them through BigInt. Addresses and complete-range permission checks remain unchanged; writes still commit before observers run. The same full base1 sample measured 82.23 ms per native call and 90.28 ms per application step, compared with 84.59/92.56 ms previously. Root existing memory/CPU checks passed (46 tests, 1297 assertions), with strict compilation and scoped policy clean. This small measured gain does not close T10 performance. [Source and checks](../.artifacts/resume-20260925/native-integer-memory/frozen/HANDOFF.md).

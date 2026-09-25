@@ -41,10 +41,13 @@ interface Mapping extends GuestMapping {
   readonly bytes: Uint8Array;
   readonly view: DataView;
   readonly end: bigint;
+  readonly numericBase: number | null;
   active: boolean;
 }
-function mappedBytes(mapping: Omit<Mapping, "view" | "active" | "end">): Mapping {
-  return { ...mapping, view: new DataView(mapping.bytes.buffer, mapping.bytes.byteOffset, mapping.bytes.byteLength), end: mapping.base + BigInt(mapping.byteLength), active: true };
+function mappedBytes(mapping: Omit<Mapping, "view" | "active" | "end" | "numericBase">): Mapping {
+  const end = mapping.base + BigInt(mapping.byteLength);
+  return { ...mapping, view: new DataView(mapping.bytes.buffer, mapping.bytes.byteOffset, mapping.bytes.byteLength), end,
+    numericBase: mapping.base >= 0n && end <= 0x1fffffffffffffn ? Number(mapping.base) : null, active: true };
 }
 interface Chunk { readonly mapping: Mapping; readonly offset: number; readonly byteLength: number; }
 export interface SparseGuestMemoryOptions {
@@ -66,6 +69,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
   readonly #recentMappings = new Map<GuestAccess | null, Mapping>();
   readonly #workingSet: Mapping[] = [];
   #nextWorkingMapping = 0;
+  // Checked scalar callers capture this offset before any write observer can reenter.
+  #lookupOffset = 0;
   readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: (ranges: readonly GuestWrittenRange[]) => void }>();
 
   constructor(options: SparseGuestMemoryOptions) {
@@ -160,7 +165,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   copy(address: GuestAddress, byteLength: number): Uint8Array {
     const mapping = this.#singleMapping(address, byteLength, "read");
     if (mapping !== null) {
-      const offset = Number(address.byteOffset - mapping.base);
+      const offset = this.#lookupOffset;
       return mapping.bytes.slice(offset, offset + byteLength);
     }
     return this.#copyChunks(this.#chunks(address, byteLength, "read"), byteLength);
@@ -232,7 +237,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   write(address: GuestAddress, bytes: Uint8Array): undefined {
     const mapping = this.#singleMapping(address, bytes.byteLength, "write");
     if (mapping !== null) {
-      const offset = Number(address.byteOffset - mapping.base);
+      const offset = this.#lookupOffset;
       // TypedArray.set preserves the source when the backing ranges overlap.
       mapping.bytes.set(bytes, offset);
       return this.#writeObservers.size === 0 ? undefined : this.#notifyWrite([{ mapping, offset, byteLength: bytes.byteLength }]);
@@ -279,21 +284,21 @@ export class SparseGuestMemory implements MappedGuestMemory {
     return () => { this.#writeObservers.delete(observer); };
   }
 
-  readUint8(address: GuestAddress): number { const field = this.#readView(address, 1); return field.view.getUint8(field.offset); }
-  readInt8(address: GuestAddress): number { const field = this.#readView(address, 1); return field.view.getInt8(field.offset); }
-  readUint16(address: GuestAddress): number { const field = this.#readView(address, 2); return field.view.getUint16(field.offset, true); }
-  readInt16(address: GuestAddress): number { const field = this.#readView(address, 2); return field.view.getInt16(field.offset, true); }
-  readUint32(address: GuestAddress): number { const field = this.#readView(address, 4); return field.view.getUint32(field.offset, true); }
-  readInt32(address: GuestAddress): number { const field = this.#readView(address, 4); return field.view.getInt32(field.offset, true); }
-  readUint64(address: GuestAddress): bigint { const field = this.#readView(address, 8); return field.view.getBigUint64(field.offset, true); }
+  readUint8(address: GuestAddress): number { const view = this.#readView(address, 1), offset = this.#lookupOffset; return view.getUint8(offset); }
+  readInt8(address: GuestAddress): number { const view = this.#readView(address, 1), offset = this.#lookupOffset; return view.getInt8(offset); }
+  readUint16(address: GuestAddress): number { const view = this.#readView(address, 2), offset = this.#lookupOffset; return view.getUint16(offset, true); }
+  readInt16(address: GuestAddress): number { const view = this.#readView(address, 2), offset = this.#lookupOffset; return view.getInt16(offset, true); }
+  readUint32(address: GuestAddress): number { const view = this.#readView(address, 4), offset = this.#lookupOffset; return view.getUint32(offset, true); }
+  readInt32(address: GuestAddress): number { const view = this.#readView(address, 4), offset = this.#lookupOffset; return view.getInt32(offset, true); }
+  readUint64(address: GuestAddress): bigint { const view = this.#readView(address, 8), offset = this.#lookupOffset; return view.getBigUint64(offset, true); }
   readUint64Words(address: GuestAddress, target: { low: number; high: number }): void {
-    const field = this.#readView(address, 8);
-    const low = field.view.getUint32(field.offset, true), high = field.view.getUint32(field.offset + 4, true);
+    const view = this.#readView(address, 8), offset = this.#lookupOffset;
+    const low = view.getUint32(offset, true), high = view.getUint32(offset + 4, true);
     target.low = low; target.high = high;
   }
-  readInt64(address: GuestAddress): bigint { const field = this.#readView(address, 8); return field.view.getBigInt64(field.offset, true); }
-  readFloat32(address: GuestAddress): number { const field = this.#readView(address, 4); return field.view.getFloat32(field.offset, true); }
-  readFloat64(address: GuestAddress): number { const field = this.#readView(address, 8); return field.view.getFloat64(field.offset, true); }
+  readInt64(address: GuestAddress): bigint { const view = this.#readView(address, 8), offset = this.#lookupOffset; return view.getBigInt64(offset, true); }
+  readFloat32(address: GuestAddress): number { const view = this.#readView(address, 4), offset = this.#lookupOffset; return view.getFloat32(offset, true); }
+  readFloat64(address: GuestAddress): number { const view = this.#readView(address, 8), offset = this.#lookupOffset; return view.getFloat64(offset, true); }
   readPointer(address: GuestAddress): GuestAddress | null {
     return this.pointer(this.pointerBytes === 4 ? BigInt(this.readUint32(address)) : this.readUint64(address));
   }
@@ -383,7 +388,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     }
     return undefined;
   }
-  #insert(mapping: Omit<Mapping, "view" | "active" | "end">): undefined {
+  #insert(mapping: Omit<Mapping, "view" | "active" | "end" | "numericBase">): undefined {
     this.#mappingGeneration += 1;
     this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mappedBytes(mapping));
     return undefined;
@@ -496,19 +501,24 @@ export class SparseGuestMemory implements MappedGuestMemory {
     const recent = this.#recentMappings.get(access);
     // A contained range inherits the mapping's checked address-space bounds.
     if (address.addressSpace === this.addressSpace && Number.isSafeInteger(byteLength) && byteLength > 0) {
+      const raw = address.byteOffset, numeric = Number(raw), safe = Number.isSafeInteger(numeric);
       if (recent?.active === true) {
-        const offset = Number(address.byteOffset - recent.base);
+        const offset = safe && recent.numericBase !== null ? numeric - recent.numericBase
+          : raw >= recent.base && raw < recent.end ? Number(raw - recent.base) : -1;
         if (offset >= 0 && offset + byteLength <= recent.byteLength) {
-          if (!allows(recent.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
+          if (!allows(recent.permissions, access)) this.#fault("permission", raw, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
+          this.#lookupOffset = offset;
           return recent;
         }
       }
       for (const candidate of this.#workingSet) {
         if (candidate === recent || !candidate.active) continue;
-        const offset = Number(address.byteOffset - candidate.base);
+        const offset = safe && candidate.numericBase !== null ? numeric - candidate.numericBase
+          : raw >= candidate.base && raw < candidate.end ? Number(raw - candidate.base) : -1;
         if (offset < 0 || offset + byteLength > candidate.byteLength) continue;
-        if (!allows(candidate.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${candidate.label}' permits ${candidate.permissions}`);
+        if (!allows(candidate.permissions, access)) this.#fault("permission", raw, byteLength, access, `mapping '${candidate.label}' permits ${candidate.permissions}`);
         this.#recentMappings.set(access, candidate);
+        this.#lookupOffset = offset;
         return candidate;
       }
     }
@@ -518,18 +528,20 @@ export class SparseGuestMemory implements MappedGuestMemory {
     if (mapping === undefined || address.byteOffset < mapping.base || address.byteOffset + BigInt(byteLength) > mapping.end) return null;
     if (!allows(mapping.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${mapping.label}' permits ${mapping.permissions}`);
     this.#remember(access, mapping);
+    this.#lookupOffset = Number(address.byteOffset - mapping.base);
     return mapping;
   }
-  #readView(address: GuestAddress, byteLength: number): { readonly view: DataView; readonly offset: number } {
+  #readView(address: GuestAddress, byteLength: number): DataView {
     const mapping = this.#singleMapping(address, byteLength, "read");
-    if (mapping !== null) return { view: mapping.view, offset: Number(address.byteOffset - mapping.base) };
+    if (mapping !== null) return mapping.view;
     const bytes = this.#copyChunks(this.#chunks(address, byteLength, "read"), byteLength);
-    return { view: new DataView(bytes.buffer, bytes.byteOffset, byteLength), offset: 0 };
+    this.#lookupOffset = 0;
+    return new DataView(bytes.buffer, bytes.byteOffset, byteLength);
   }
   #writeScalar(address: GuestAddress, byteLength: number, write: (view: DataView, offset: number) => void): undefined {
     const mapping = this.#singleMapping(address, byteLength, "write");
     if (mapping !== null) {
-      const offset = Number(address.byteOffset - mapping.base);
+      const offset = this.#lookupOffset;
       write(mapping.view, offset);
       return this.#writeObservers.size === 0 ? undefined : this.#notifyWrite([{ mapping, offset, byteLength }]);
     }

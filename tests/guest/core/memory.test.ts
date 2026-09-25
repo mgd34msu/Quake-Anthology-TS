@@ -56,6 +56,11 @@ test("sparse high 64-bit addresses preserve pointer bytes and overlapping live v
   memory.writeUint32(boundary, 0x12345678);
   expect(memory.readUint8(memory.offset(boundary, 3n))).toBe(0x12);
   expect(() => memory.readUint8(memory.offset(boundary, 4n))).toThrow("unmapped");
+  const beyond = memory.map({ base: 0x20000000000010n, byteLength: 1, permissions: "read", bytes: new Uint8Array([41]) });
+  const neighbor = memory.map({ base: beyond.byteOffset + 2n, byteLength: 1, permissions: "read", bytes: new Uint8Array([43]) });
+  expect(memory.readUint8(beyond)).toBe(41); expect(memory.readUint8(neighbor)).toBe(43);
+  expect(() => memory.readUint8(memory.offset(beyond, 1n))).toThrow("unmapped");
+  expect(() => memory.copy(memory.offset(beyond, -1n), 1)).toThrow("unmapped");
 });
 
 test("checked accesses cross adjacent mappings and reject the entire write before a fault", () => {
