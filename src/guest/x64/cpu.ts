@@ -22,6 +22,7 @@ interface CachedInstruction {
   readonly decoded: X64DecodedInstruction;
   readonly plan: X64SemanticPlan | null;
   block: SemanticBlock | null;
+  unhookedRevision: symbol | null | undefined;
 }
 interface SemanticBlock {
   readonly revision: symbol | null;
@@ -71,9 +72,11 @@ export class X64Cpu implements GuestCpu {
         if (block === null && retained?.plan !== null && retained !== undefined && this.#blocksAllowed) {
           block = this.#block(retained, revision); blockIndex = 0;
         }
-        if (block === null && this.#isHostCall(address)) return { kind: "host-call", instructions, address };
-        // Entry observers can run nested guest calls and replace cached code.
-        if (block === null) retained = this.#instructions.get(start);
+        if (block === null && (retained === undefined || !this.#entryUnhooked(retained, revision))) {
+          if (this.#isHostCall(address)) return { kind: "host-call", instructions, address };
+          // Entry observers can run nested guest calls and replace cached code.
+          retained = this.#instructions.get(start);
+        }
         const decoded = this.state.instructionPointer === start && retained !== undefined && retained.decoded.unchanged() ? retained.decoded : null;
         if (decoded === null && block !== null) {
           const owner = block.instructions[0];
@@ -96,7 +99,7 @@ export class X64Cpu implements GuestCpu {
             const prepared = cursor.cache();
             if (this.#instructions.size >= 32768) this.#instructions.clear();
             if (prepared === null || cursor.start !== start) this.#instructions.delete(start);
-            else this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, block: null });
+            else this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, block: null, unhookedRevision: undefined });
           }
         }
         this.state.instructionPointer = flow.kind === "branch" ? flow.target : nextIP;
@@ -124,12 +127,19 @@ export class X64Cpu implements GuestCpu {
     return { kind: "budget", instructions: options.instructionBudget };
   }
 
+  #entryUnhooked(instruction: CachedInstruction, revision: symbol | null): boolean {
+    if (!this.#blocksAllowed) return false;
+    if (instruction.unhookedRevision === revision) return true;
+    if (this.#callbacks?.instructionUnhooked(instruction.start) === false) return false;
+    instruction.unhookedRevision = revision;
+    return true;
+  }
   #block(first: CachedInstruction, revision: symbol | null): SemanticBlock | null {
     if (first.block?.revision === revision) return first.block;
     const instructions: CachedInstruction[] = [];
     let current: CachedInstruction | undefined = first, complete = true;
     while (current !== undefined && current.plan !== null) {
-      if (this.#callbacks?.instructionUnhooked(current.start) === false) break;
+      if (!this.#entryUnhooked(current, revision)) break;
       instructions.push(current);
       if (current.plan.endsBlock || instructions.length === 16) break;
       current = this.#instructions.get(current.plan.nextIP);

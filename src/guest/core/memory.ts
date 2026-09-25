@@ -158,6 +158,11 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   copy(address: GuestAddress, byteLength: number): Uint8Array {
+    const mapping = this.#singleMapping(address, byteLength, "read");
+    if (mapping !== null) {
+      const offset = Number(address.byteOffset - mapping.base);
+      return mapping.bytes.slice(offset, offset + byteLength);
+    }
     return this.#copyChunks(this.#chunks(address, byteLength, "read"), byteLength);
   }
 
@@ -225,6 +230,13 @@ export class SparseGuestMemory implements MappedGuestMemory {
 
 
   write(address: GuestAddress, bytes: Uint8Array): undefined {
+    const mapping = this.#singleMapping(address, bytes.byteLength, "write");
+    if (mapping !== null) {
+      const offset = Number(address.byteOffset - mapping.base);
+      // TypedArray.set preserves the source when the backing ranges overlap.
+      mapping.bytes.set(bytes, offset);
+      return this.#writeObservers.size === 0 ? undefined : this.#notifyWrite([{ mapping, offset, byteLength: bytes.byteLength }]);
+    }
     const chunks = this.#chunks(address, bytes.byteLength, "write");
     // Source may itself alias guest memory. Take one snapshot before the first store.
     return this.#commitWrite(chunks, bytes.slice());

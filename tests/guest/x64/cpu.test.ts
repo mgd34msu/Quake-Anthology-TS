@@ -415,7 +415,9 @@ test("retained semantic blocks requalify registered entries before the next inst
   const unobserve = callbacks.observeEntry(pointer(f.memory, base + 5n), () => { entries++; f.state.registers.write("rax", 32, 10n); });
   expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(15n); expect(entries).toBe(1);
   unobserve(); expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n); expect(entries).toBe(1);
-  const remove = callbacks.bindEntry(pointer(f.memory, base + 5n), { id: "test:plan-hook", signature: { abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" }, parameters: [], result: "void", variadic: false }, invoke: () => ({ kind: "void" }) }, () => true);
+  let accepts = false;
+  const remove = callbacks.bindEntry(pointer(f.memory, base + 5n), { id: "test:plan-hook", signature: { abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" }, parameters: [], result: "void", variadic: false }, invoke: () => ({ kind: "void" }) }, () => accepts);
+  expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n); accepts = true;
   const stopped = run(); expect(stopped.kind).toBe("host-call"); expect(stopped.instructions).toBe(1); expect(f.state.registers.read("rax", 32)).toBe(1n);
   remove(); expect(run(2).kind).toBe("budget"); expect(f.state.registers.read("rax", 32)).toBe(3n); expect(f.state.instructionPointer).toBe(base + 8n);
   expect(cpu.run({ instructionBudget: 2, returnAddress: pointer(f.memory, returned) }).kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n);
@@ -423,4 +425,8 @@ test("retained semantic blocks requalify registered entries before the next inst
   const restoreEntry = callbacks.observeEntry(pointer(f.memory, base), () => { f.state.instructionPointer = redirected.byteOffset; });
   const redirectedStop = run(); expect(redirectedStop.kind).toBe("return"); expect(redirectedStop.instructions).toBe(3); expect(f.state.registers.read("rax", 32)).toBe(0n);
   restoreEntry(); expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n);
+  let returns = 0;
+  const restoreReturn = callbacks.observeEntry(pointer(f.memory, base + 11n), () => { returns++; });
+  expect(run().kind).toBe("return"); expect(returns).toBe(1);
+  restoreReturn(); expect(run().kind).toBe("return"); expect(returns).toBe(1);
 });

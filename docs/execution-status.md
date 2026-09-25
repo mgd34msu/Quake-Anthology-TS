@@ -2,6 +2,8 @@
 
 ## Installed executable and recent fixes
 
+Further native work removes intermediate copies for checked, contiguous memory operations and retains exact negative hook lookups across unchanged callback registrations. The same full base1 workload measured 97.61 ms per native frame (last-ten median), down from the preceding 108.26 ms. Overlapping writes, permissions, observers and source instruction execution remain intact. Native performance remains open. [Measurement and source identity](../.artifacts/resume-20260925/native-bulk-memory/RECEIPT.md).
+
 Newer source caches decoded native instruction operations and unhooked straight-line blocks. An isolated original retail base1 comparison with all 495 entities reduced the last ten native frame calls from a 120.31 ms median to 108.26 ms, about 10%. Live instruction bytes, callback changes, faults and nested execution remain checked. Root strict/policy and 48 existing checks with 400 assertions pass. Native performance remains open: this workload still exceeds its 25 ms interval. [Change and bounded measurements](../.artifacts/resume-20260925/native-semantic-blocks/frozen/HANDOFF.md).
 
 Installed executable `f670b7e9` includes authored player dimensions through selected movement, indirect original objective selectors, and invocation-local native decode cursors, alongside the earlier T12, live-catalog and source-match work. All 2880 archived Git blobs match the committed tree. Build/help and the existing compiled original Threewave GL movement/fire/armor/save-load-save/quit check passed; played/restored frames and original/canonical saved state were inspected. Previous `807e7c0b` is preserved locally. [Delivery receipt](../.artifacts/resume-20260925/delivery-f670b7e9/RUNTIME-RECEIPT.md).

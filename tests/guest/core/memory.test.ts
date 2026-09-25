@@ -75,6 +75,22 @@ test("checked accesses cross adjacent mappings and reject the entire write befor
   expect(() => memory.copy(start, 1)).toThrow("permits execute");
 });
 
+test("contiguous bulk writes preserve overlapping sources and notify after commit", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const base = memory.allocate({ byteLength: 8 });
+  const view = memory.borrow(base, 8), bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  bytes.set([0, 1, 2, 3, 4, 5, 6, 7]);
+  const detached = memory.copy(base, 8), notifications: number[][] = [];
+  const remove = memory.observeWrites(base, 8, () => { notifications.push([...memory.copy(base, 8)]); });
+  memory.write(memory.offset(base, 2n), bytes.subarray(0, 6));
+  expect([...bytes]).toEqual([0, 1, 0, 1, 2, 3, 4, 5]);
+  memory.write(base, bytes.subarray(2, 8));
+  expect([...bytes]).toEqual([0, 1, 2, 3, 4, 5, 4, 5]);
+  expect(notifications).toEqual([[0, 1, 0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5, 4, 5]]);
+  expect([...detached]).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  remove();
+});
+
 test("split protections and restored aliases retain the same private bytes", () => {
   const memory = new SparseGuestMemory({ module, pointerBytes: 4 });
   const original = memory.allocate({ byteLength: 64 });

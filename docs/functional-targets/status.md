@@ -36,7 +36,7 @@ These parts describe the remaining implementation; they do not replace the T01â€
 
 | Target | Remaining part | Completion behavior |
 |---|---|---|
-| T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 38 seconds. Cached instruction operations reduced repeated original frames from 120 to 108 ms in an isolated base1 comparison, still above their 25 ms interval. Further work must retain all entities, source behavior and original save callbacks. |
+| T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 38 seconds. Cached instruction operations reduced repeated original frames from 120 to 98 ms across the isolated base1 comparisons, still above their 25 ms interval. Further work must retain all entities, source behavior and original save callbacks. |
 
 Authored player body dimensions are integrated across selected Q1/QW/Q2/Q3 and qualified original native/QVM movement. Expansion and release use the selected collision owner; saves retain restoration state where original live bounds need it. Root combined strict/policy and 51 focused checks with 496 assertions pass, including actual original retail/Threewave calls. Unified peers require `qts:snapshot-v10`. This change is included in installed `f670b7e9`.
 
