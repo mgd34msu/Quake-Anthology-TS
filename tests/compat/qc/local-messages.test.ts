@@ -122,8 +122,8 @@ test.skipIf(!await Bun.file(originalPak).exists())('original NQ entity writer ca
 
 test('private QC message dialect requires matching artifact metadata and decodes prompt service bytes', () => {
   const digest = 'sha256:' + 'a'.repeat(64), encode = (value:unknown) => new TextEncoder().encode(JSON.stringify(value));
-  expect(readQuakeCCompatibility(null,digest)).toBe('known-retail');
-  const dialect = readQuakeCCompatibility(encode({version:1,artifactDigest:digest,messageDialect:'quake-1-re-ts-private'}),digest);
+  expect(readQuakeCCompatibility(null,digest).messageDialect).toBe('known-retail');
+  const dialect = readQuakeCCompatibility(encode({version:1,artifactDigest:digest,messageDialect:'quake-1-re-ts-private'}),digest).messageDialect;
   expect(dialect).toBe('quake-1-re-ts-private');
   expect(()=>readQuakeCCompatibility(encode({version:1,artifactDigest:'other',messageDialect:dialect}),digest)).toThrow();
   const protocol = new NetQuakeDecoder().protocol, bytes = new SizeBuf(1024);

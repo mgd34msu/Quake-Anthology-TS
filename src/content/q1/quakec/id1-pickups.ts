@@ -1,3 +1,4 @@
+import type { QcPickupScalar } from "../../../contracts/qc-pickup-callers.ts";
 import type { OwnedActor } from "../../../contracts/identity.ts";
 import type { OriginalPickupAdmission, OriginalPickupOffer, SourcePickupSelection, SourcePickupLifetime, PickupCargoEntry } from "../../../contracts/original-pickups.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
@@ -36,8 +37,9 @@ export class Id1PickupBinding {
   constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,
     private readonly admission: OriginalPickupAdmission, private readonly machine: () => QcMachine,
     private readonly primaryWeaponSelected: (actor: OwnedActor) => boolean = () => true,
-    private readonly ownsWeapon?: (actor: OwnedActor, item: ItemId) => boolean, private readonly policy?: () => QcPickupPolicy | null) {
-    this.stages = qcPickupStages(source.program);
+    private readonly ownsWeapon?: (actor: OwnedActor, item: ItemId) => boolean, private readonly policy?: () => QcPickupPolicy | null, declared: readonly QcPickupStage[] = []) {
+    const replacement = new Set(declared.map(stage => stage.functionIndex));
+    this.stages = [...qcPickupStages(source.program).filter(stage => !replacement.has(stage.functionIndex)), ...declared];
   }
   assertIdle(): void { if (this.active.length !== 0) throw new QcProgramError("Cannot save during an original pickup caller"); }
   observeStore(store: QcEntityStoreObservation): undefined {
@@ -72,6 +74,10 @@ export class Id1PickupBinding {
     const vm = this.machine();
     if (vm.program !== this.source.program || vm.entities !== this.source.entities) throw new QcProgramError("Original pickups belong to another machine");
     return vm;
+  }
+  private scalar(input: QcPickupScalar, slot: number): number {
+    const vm = this.vm();
+    return input.kind === "field" ? this.source.entities.at(slot).float(vm.fieldOffset(input.name)) : vm.globals.float(input.word);
   }
   private actor(reference: number): SourceActor | null {
     const slot = this.source.entities.slot(reference), actor = this.source.slots.at(slot);
@@ -117,8 +123,8 @@ export class Id1PickupBinding {
       const vm = this.vm(), pickup = this.actor(vm.globals.int(vm.globalOffset("self"))), recipient = this.actor(vm.globals.int(vm.globalOffset("other")));
       if (pickup === null || recipient === null) return execute.skip([0, 0, 0]);
       const words = this.source.entities.at(pickup.slot), declaration = stage.descriptor;
-      const value = declaration.kind === "cargo" ? null : declaration.kind === "string" ? vm.strings.get(words.int(vm.fieldOffset(declaration.field))) : words.float(vm.fieldOffset(declaration.field));
-      const descriptor = declaration.kind === "cargo" ? declaration.value : declaration.values.find(descriptor => descriptor.value === value);
+      const value = (declaration.kind === "cargo" || declaration.kind === "constant") ? null : declaration.kind === "string" ? vm.strings.get(words.int(vm.fieldOffset(declaration.field))) : words.float(vm.fieldOffset(declaration.field));
+      const descriptor = (declaration.kind === "cargo" || declaration.kind === "constant") ? declaration.value : declaration.values.find(descriptor => descriptor.value === value);
       if (descriptor === undefined) {
         if (this.active.some(frame => frame !== null && frame.pickup.actor === pickup.actor)) return execute.skip([0, 0, 0]);
         this.active.push(null);
@@ -139,7 +145,9 @@ export class Id1PickupBinding {
         }
       }
       const result = this.admission.runSource({ recipient: recipient.actor.id, pickup: pickup.actor.id, source: this.source.slots.options.provider,
-        item: descriptor.item, defaultResource: descriptor.resource, count: { kind: "default" }, dropped: declaration.kind === "cargo",
+        item: descriptor.item, defaultResource: descriptor.resource,
+        count: descriptor.count === undefined ? { kind: "default" } : { kind: "override", amount: this.scalar(descriptor.count, pickup.slot) },
+        dropped: declaration.kind === "cargo" || stage.dropped !== undefined && this.scalar(stage.dropped, pickup.slot) !== 0,
         ...(sourceEffect ? { grant: "source-effect" } : declaration.kind === "cargo" ? { cargo } : {}),
         time: { kind: "seconds", value: vm.globals.float(vm.globalOffset("time")) } }, (selection, lifetime) => {
         if (selection.kind === "stale") return execute.skip([0, 0, 0]);

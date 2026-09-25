@@ -72,3 +72,56 @@ for (const kind of ['netquake','quakeworld'] satisfies readonly ('netquake'|'qua
   }finally{actors.close();}
  }finally{archive.close();}
 });
+
+test('declared original item callers retain player gates, refusal, feedback, targets and respawn', async () => {
+ const archive=await openArchive('/home/buzzkill/Projects/qfiles/q1/id1/PAK0.PAK');
+ try {
+  const entry=archive.findEntries('progs.dat').at(-1);if(entry===undefined)throw Error('Missing id1');const program=loadQcProgram(await archive.readEntry(entry));
+  const {readQuakeCCompatibility}=await import('../../../src/compat/qc/compatibility.ts');
+  const {qcDeclaredPickupStages}=await import('../../../src/content/q1/quakec/pickup-callers.ts');
+  const region=(entry:number,exit:number,operation:import('../../../src/contracts/qc-pickup-callers.ts').QcPickupCallerDeclaration['regions'][number]['operation'])=>({entry,exit,operation,statements:program.statements.slice(entry,exit+1)});
+  const bytes=new TextEncoder().encode(JSON.stringify({version:1,artifactDigest:program.digest,pickupCallers:[
+   {function:'key_touch',descriptor:{kind:'string',field:'classname',values:[{value:'item_key1',item:'mod:key',resource:{kind:'inventory',item:'mod:charges'},count:{kind:'field',name:'aflag'}}]},
+    regions:[region(2709,2712,{kind:'decision',word:2281,accepted:0}),region(2734,2739,{kind:'grant'})]},
+   {function:'powerup_touch',descriptor:{kind:'constant',item:'mod:powerup',resource:{kind:'inventory',item:'mod:charges'}},
+    regions:[region(2945,2947,{kind:'admission'}),region(2987,2992,{kind:'grant'}),region(2994,3026,{kind:'grant'})]},
+  ]}));
+  const compatibility=readQuakeCCompatibility(bytes,program.digest),declared=qcDeclaredPickupStages(program,compatibility.pickupCallers);
+  expect(compatibility.messageDialect).toBe('known-retail');expect(declared).toHaveLength(2);
+  expect(()=>readQuakeCCompatibility(bytes,'changed-source')).toThrow();
+  const first=compatibility.pickupCallers[0];if(first===undefined)throw Error('Missing caller');
+  expect(()=>qcDeclaredPickupStages(program,[first,first])).toThrow('duplicate');
+  expect(()=>qcDeclaredPickupStages(program,[{...first,regions:first.regions.map((value,index)=>index===0?{...value,statements:[]}:value)}])).toThrow('instruction proof');
+  const entities=new QcEntityMemory(classicQcEntityLayout(program),4,3),actors=new SessionActorRegistry(createIdentityOwner('declared original pickup'));
+  try {
+   const slots=new SourceActorSlots(actors,{provider:'q1:world',capacity:4,lifetime:quakeEdictLifetime(1),storage:createQcSourceSlotStorage({program,entities},{freeOffsetBytes:0,freeTimeOffsetBytes:92}),now:()=>({kind:'seconds',value:10}),unlink:()=>undefined,exhausted:()=>{throw Error('No source slot');}});
+   slots.bindExisting(0,'q1:world');const player=slots.bindExisting(1,'q1:player'),pickup=slots.bindExisting(2,'mod:item');
+   const inventory=new SharedInventoryTable(actors),combat=new GameplayAuthority(actors,new ActorCallbackTable(actors),{impulse:()=>undefined,beforeReaction:()=>undefined,confirmed:()=>undefined});
+   inventory.create(player,[{item:'mod:charges',count:0,capacity:10}]);
+   const admission=new SharedOriginalPickupAdmission(actors,combat,inventory),feedback:string[]=[];let attempts=0,allowed=true,reenter=false;
+   const binding=new Id1PickupBinding({program,entities,actors,slots},admission,()=>vm,undefined,undefined,undefined,declared);
+   const host=new Map<QcHostBuiltinName,QcBuiltin>([['sprint',machine=>{feedback.push(machine.argString(1));if(reenter){reenter=false;machine.execute(program.functionNamed('key_touch').index);}return undefined;}],['sound',()=>undefined],['stuffcmd',()=>undefined]]);
+   const vm:QcMachine=new QcMachine({program,entities,numeric:createNumericOperations(Q1_DONOR_PROFILE),builtins:createQcBuiltins({kind:'netquake',host,random:new SourceRandom(1)}),serverActive:()=>true,
+    functionBoundary:binding.composeFunctions({functions:new Set(),run:(_call,execute)=>execute()}),inlineBoundary:binding.composeRegions({regions:[],run:(_region,execute)=>execute()}),observeCall:()=>binding.validate(),validateEntityAccess:()=>binding.validate(),observeEntityStore:store=>binding.observeStore(store)});
+   const unbind=inventory.bindPickup(player,{owner:'mod:counter',rules:[{id:'charges',offered:['mod:key','mod:powerup'],writes:[{kind:'inventory',item:'mod:charges',fields:'count'}],take:offer=>{
+    attempts++;expect(offer.pickup).toBe(pickup.id);expect(offer.count).toEqual(offer.item==='mod:key'?{kind:'override',amount:7}:{kind:'default'});
+    if(!allowed)return 'refused';inventory.configure(player,{item:'mod:charges',count:inventory.count(player.id,'mod:charges')+1,capacity:10});return 'accepted';
+   }}]});
+   const recipient=entities.at(1),item=entities.at(2),field=(name:string)=>vm.fieldOffset(name);
+   recipient.setInt(field('classname'),vm.strings.allocate('player'));recipient.setFloat(field('health'),100);recipient.setFloat(field('items'),131072);
+   item.setInt(field('classname'),vm.strings.allocate('item_key1'));item.setInt(field('netname'),vm.strings.allocate('authored item'));item.setInt(field('noise'),vm.strings.allocate('misc/medkey.wav'));item.setFloat(field('items'),131072);item.setFloat(field('aflag'),7);
+   vm.globals.setFloat(vm.globalOffset('time'),10);vm.globals.setInt(vm.globalOffset('self'),entities.reference(2));vm.globals.setInt(vm.globalOffset('other'),entities.reference(1));
+   const reset=()=>{feedback.length=0;item.setFloat(field('solid'),1);item.setInt(field('model'),vm.strings.allocate('progs/w_s_key.mdl'));};
+   const key=program.functionNamed('key_touch').index;
+   reset();recipient.setFloat(field('health'),0);vm.execute(key);expect(attempts).toBe(0);expect(feedback).toEqual([]);recipient.setFloat(field('health'),100);
+   allowed=false;vm.execute(key);expect(attempts).toBe(1);expect(feedback).toEqual([]);expect(item.float(field('solid'))).toBe(1);
+   allowed=true;reenter=true;vm.globals.setFloat(vm.globalOffset('coop'),1);vm.execute(key);expect(attempts).toBe(2);expect(inventory.count(player.id,'mod:charges')).toBe(1);expect(feedback.join('')).toBe('You got the authored item\n');expect(item.float(field('solid'))).toBe(1);
+   reset();vm.globals.setFloat(vm.globalOffset('coop'),0);vm.execute(key);expect(item.float(field('solid'))).toBe(0);expect(vm.profiling[program.functionNamed('SUB_UseTargets').index]).toBeGreaterThan(0);expect(recipient.float(field('items'))).toBe(131072);
+   reset();item.setInt(field('classname'),vm.strings.allocate('item_artifact_super_damage'));item.setFloat(field('items'),4194304);vm.globals.setFloat(vm.globalOffset('deathmatch'),1);
+   const powerup=program.functionNamed('powerup_touch').index;allowed=false;const before=attempts;vm.execute(powerup);expect(attempts).toBe(before+1);expect(feedback).toEqual([]);expect(item.float(field('nextthink'))).toBe(0);
+   allowed=true;vm.execute(powerup);expect(item.float(field('solid'))).toBe(0);expect(item.float(field('nextthink'))).toBe(70);expect(item.int(field('think'))).toBe(program.functionNamed('SUB_regen').index);expect(recipient.float(field('super_damage_finished'))).toBe(0);expect(recipient.float(field('items'))).toBe(131072);expect(inventory.count(player.id,'mod:charges')).toBe(3);expect(feedback.join('')).toBe('You got the authored item\n');
+   expect(()=>binding.assertIdle()).not.toThrow();unbind();reset();vm.execute(powerup);
+   expect(recipient.float(field('super_damage_finished'))).toBe(40);expect(inventory.count(player.id,'mod:charges')).toBe(3);
+  }finally{actors.close();}
+ }finally{archive.close();}
+});

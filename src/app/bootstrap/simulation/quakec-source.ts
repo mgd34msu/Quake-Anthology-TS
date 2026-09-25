@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from "node:util";
+import { qcDeclaredPickupStages } from "../../../content/q1/quakec/pickup-callers.ts";
+import type { QcPickupStage } from "../../../content/q1/quakec/pickup-stage.ts";
 import { qcEmptyArmor } from "../../../content/q1/quakec/armor-points.ts";
 import { QcBorrowedActors } from "../../../compat/qc/borrowed-actors.ts";
 import { QcActorState } from "../../../compat/qc/actor-state.ts";
@@ -94,6 +97,7 @@ function nativeWeapons(program: QcProgram): readonly NativeWeapon[] {
 }
 export interface PreparedQuakeCSource {
   readonly messageDialect?: RereleaseMessages;
+  readonly declaredPickups?: readonly QcPickupStage[];
   readonly execution: QuakeCExecution;
   readonly program: QcProgram;
   readonly resources: ReadonlyMap<string, { readonly resource: ResolvedResourceReference; readonly modelBounds: Bounds | null }>;
@@ -106,9 +110,10 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
   if (execution.api.kind !== program.api.kind || execution.api.programVersion !== program.api.programVersion || execution.api.systemCrc !== program.api.systemCrc)
     throw new Error("Shared QuakeC artifact API differs from the selected execution");
   const compatibility = await mounts.open("quakec-compatibility.json");
-  const messageDialect = readQuakeCCompatibility(compatibility?.bytes ?? null, program.digest);
+  const { messageDialect, pickupCallers } = readQuakeCCompatibility(compatibility?.bytes ?? null, program.digest);
+  const declaredPickups = qcDeclaredPickupStages(program, pickupCallers);
   if (program.api.kind === "q1-quakeworld" && messageDialect !== "known-retail") throw new Error("Private NetQuake messages cannot be selected for QuakeWorld");
-  return { execution, program, messageDialect, resources: await prepareQuakeCResources(program, resourceMounts, entityText) };
+  return { execution, program, messageDialect, declaredPickups, resources: await prepareQuakeCResources(program, resourceMounts, entityText) };
 }
 
 export async function prepareQuakeCResources(program: QcProgram, mounts: MountedContent, entityText = ""): Promise<PreparedQuakeCSource["resources"]> {
@@ -343,7 +348,7 @@ export class QuakeCSource {
       });
     this.damage = damage;
     const pickups = new Id1PickupBinding(this.worldHost.options, options.pickups, () => this.machine, actor => options.primaryWeaponSelected?.(actor.id) ?? true,
-      options.ownsWeapon === undefined ? undefined : (actor, item) => options.ownsWeapon?.(actor.id, item) ?? false, options.pickupPolicy);
+      options.ownsWeapon === undefined ? undefined : (actor, item) => options.ownsWeapon?.(actor.id, item) ?? false, options.pickupPolicy, prepared.declaredPickups);
     this.pickups = pickups;
     const weaponStage = qcWeaponStage(prepared.program);
     if (options.primaryWeaponSelected !== undefined && weaponStage === null) throw new Error("QC artifact has no qualified primary weapon stage");
@@ -435,7 +440,7 @@ export class QuakeCSource {
   }
   private checkpointHost(): QcExecutorHost {
     return { checkpoint: () => ({ state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
-      kind: this.kind, messageDialect: this.prepared.messageDialect ?? "known-retail", maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
+      kind: this.kind, messageDialect: this.prepared.messageDialect ?? "known-retail", pickupCallers: this.prepared.declaredPickups ?? [], maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
       changeLevelIssued: this.changeLevelIssued, spawning: this.spawning, activeClients: [...this.activeClients].map(savedQcActor),
       borrowedActors: this.borrowed.checkpoint(),
       pendingWeapons: [...this.pendingWeapons].map(([actor, pending]) => ({ actor: savedQcActor(actor), weapon: pending.weapon.item, following: pending.following })),
@@ -466,6 +471,8 @@ export class QuakeCSource {
     if (restore === undefined) return reader.fail("missing restore clients");
     const dialect = reader.field("messageDialect");
     if ((dialect.value === undefined ? "known-retail" : dialect.choice("known-retail", "quake-1-re-ts-private")) !== (this.prepared.messageDialect ?? "known-retail")) return dialect.fail("QuakeC message dialect changed");
+    const pickups = reader.field("pickupCallers");
+    if (!isDeepStrictEqual(pickups.value ?? [], this.prepared.declaredPickups ?? [])) return pickups.fail("QuakeC pickup caller declarations changed");
     reader.field("kind").literal(this.kind); reader.field("maxClients").literal(this.options.maxClients);
     reader.field("reservedClientSlots").literal(this.reservedClientSlots); reader.field("spawning").literal(false);
     this.spawning = false; this.currentTime = reader.field("currentTime").finite();

@@ -1,3 +1,4 @@
+import type { QcPickupScalar } from "../../../contracts/qc-pickup-callers.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import type { PickupResource } from "../../../contracts/original-pickups.ts";
 import type { QcInlineRegion } from "../../../compat/qc/machine.ts";
@@ -7,6 +8,7 @@ export interface QcPickupDescriptor {
   readonly value: string | number;
   readonly item: ItemId;
   readonly resource: PickupResource | null;
+  readonly count?: QcPickupScalar;
   readonly supply?: { readonly item: ItemId; readonly quantity: { readonly kind: "field"; readonly name: string } | { readonly kind: "global"; readonly word: number }; readonly leave?: number };
 }
 export interface QcPickupRegion {
@@ -19,7 +21,8 @@ export interface QcPickupRegion {
 }
 export interface QcPickupStage {
   readonly functionIndex: number;
-  readonly descriptor: { readonly field: string; readonly kind: "string" | "float"; readonly values: readonly QcPickupDescriptor[] }
+  readonly dropped?: QcPickupScalar;
+  readonly descriptor: { readonly kind: "constant"; readonly value: QcPickupDescriptor } | { readonly field: string; readonly kind: "string" | "float"; readonly values: readonly QcPickupDescriptor[] }
     | { readonly kind: "cargo"; readonly value: QcPickupDescriptor; readonly counters: readonly { readonly field: string; readonly item: ItemId }[];
         readonly weapons: readonly { readonly word: number; readonly item: ItemId }[] };
   readonly regions: readonly QcPickupRegion[];
