@@ -25,20 +25,22 @@ export function validateQcItems(program: QcProgram, declaration: ModCallbackDecl
   if (declaration.clients === undefined || items.definitions.length === 0) throw new Error("QC source items require canonical clients and definitions");
   const definitions = new Map(items.definitions.map(definition => [definition.item, definition]));
   if (definitions.size !== items.definitions.length || items.definitions.some(definition => definition.label.length === 0)) throw new Error("QC item definitions are empty or duplicated");
-  const field = (name: string, type: "float" | "string", input = false): void => {
-    if (program.fieldsByName.get(name)?.type !== type || !declaration.actorFields.some(field => field.field === name && (field.binding === "private" || input && field.binding === "client-input")))
+  const field = (name: string, type: "float" | "string", input = false): number => {
+    const definition = program.fieldsByName.get(name);
+    if (definition?.type !== type || !declaration.actorFields.some(field => field.field === name && (field.binding === "private" || input && field.binding === "client-input")))
       throw new Error(`QC item storage ${name} requires declared original ${type} storage`);
+    return definition.offset;
   };
-  const bound = new Set<ItemId>(), fields = new Set<string>();
+  const bound = new Set<ItemId>(), fields = new Map<number, "count" | "capacity">();
   const bind = (item: ItemId): void => { if (!definitions.has(item) || bound.has(item)) throw new Error(`QC item ${item} lacks distinct declared storage`); bound.add(item); };
   for (const storage of items.storage) {
-    field(storage.field, "float");
-    if (fields.has(storage.field)) throw new Error("QC item storage fields overlap"); fields.add(storage.field);
+    const countField = field(storage.field, "float");
+    if (fields.has(countField)) throw new Error("QC item storage fields overlap"); fields.set(countField, "count");
     if (storage.kind === "counter") {
       bind(storage.item);
       if (storage.capacity.kind === "field") {
-        field(storage.capacity.field, "float");
-        if (fields.has(storage.capacity.field)) throw new Error("QC item capacity overlaps source storage"); fields.add(storage.capacity.field);
+        const capacityField = field(storage.capacity.field, "float");
+        if (fields.get(capacityField) === "count") throw new Error("QC item capacity overlaps source storage"); fields.set(capacityField, "capacity");
       }
       else if (!Number.isFinite(storage.capacity.value) || storage.capacity.value < 0 || Math.fround(storage.capacity.value) !== storage.capacity.value) throw new Error("QC item capacity exceeds its source ABI");
     } else {

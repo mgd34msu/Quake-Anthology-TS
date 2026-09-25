@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
-import type { ModCallbackDeclaration } from "../../../src/contracts/mod-callbacks.ts";
+import type { ModCallbackDeclaration, ModQcItems } from "../../../src/contracts/mod-callbacks.ts";
 import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 import { prepareQuakeCMod } from "../../../src/app/bootstrap/simulation/quakec-mod.ts";
 import { SessionMods } from "../../../src/world/session/mods.ts";
@@ -9,6 +9,23 @@ import { ActorCallbackTable, SessionActorRegistry, SharedBodyTable, translatedBo
 import { GameplayAuthority, SharedInventoryTable } from "../../../src/world/gameplay/index.ts";
 
 const path = "/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper/progs.dat";
+test.skipIf(!await Bun.file(path).exists())("QC source items share capacity fields while count and capacity aliases remain invalid", async () => {
+  const { loadQcProgram } = await import("../../../src/compat/qc/program.ts");
+  const { validateQcItems } = await import("../../../src/compat/qc/mod-items.ts");
+  const program = loadQcProgram(await Bun.file(path).bytes());
+  const items: ModQcItems = { definitions: [{ kind: "counter", item: "test:shells", label: "Shells", admission: "add" },
+    { kind: "counter", item: "test:nails", label: "Nails", admission: "add" }], storage: [
+    { kind: "counter", item: "test:shells", field: "ammo_shells", capacity: { kind: "field", field: "max_health" } },
+    { kind: "counter", item: "test:nails", field: "ammo_nails", capacity: { kind: "field", field: "max_health" } },
+  ] };
+  const declaration: ModCallbackDeclaration = { version: 1, runtime: "quakec", program: { path: "progs.dat", digest: program.digest }, callbacks: [],
+    actorFields: ["ammo_shells", "ammo_nails", "max_health"].map(field => ({ field, binding: "private" })),
+    clients: { maximum: 1, admit: [], userinfo: [], disconnect: [] }, items };
+  expect(() => validateQcItems(program, declaration)).not.toThrow();
+  for (const overlap of ["ammo_shells", "max_health"]) expect(() => validateQcItems(program, { ...declaration,
+    items: { ...items, storage: items.storage.map((storage, index) => index === 1 ? { ...storage, field: overlap } : storage) } })).toThrow("overlap");
+});
+
 test.skipIf(!await Bun.file(path).exists())("original Copper healing executes through declared actor callbacks in isolated mod instances", async () => {
   const bytes = new Uint8Array(await Bun.file(path).arrayBuffer()), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));
   const actors = new SessionActorRegistry(createIdentityOwner("copper-mods")), callbacks = new ActorCallbackTable(actors);

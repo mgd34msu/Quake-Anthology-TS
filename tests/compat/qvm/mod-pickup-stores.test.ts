@@ -44,9 +44,11 @@ async function fixture(ownedItem = false) {
       : [{ binding: "inventory", offset: 0, encoding: "int32", item: "test:first" }, { binding: "inventory", offset: 4, encoding: "int32", item: "test:second" }, { binding: "inventory", offset: 8, encoding: "int32", item: "test:third" }] },
       { id: "player", address: 128, stride: 480, capacity: 1, fields: [{ binding: "private", offset: 0, byteLength: 480 }] }],
     clients: { maximum: 1, records: ["player"], playerStateRecord: "player", admit: [], userinfo: [], disconnect: [] }, initialize: [], callbacks: [],
-    ...(ownedItem ? { items: { definitions: [{ kind: "counter", item: "test:first", label: "Source ammo", admission: "replace-primary" }],
-      storage: [{ kind: "counter", item: "test:first", field: { record: "player", offset: 468 }, capacity: { kind: "field", field: { record: "player", offset: 472 } } }] } } : {}),
-    pickups: [{ id: "compound", offered: ["q1:pickup"], writes: ownedItem ? [{ kind: "inventory", item: "test:first", fields: "count-and-capacity" }]
+    ...(ownedItem ? { items: { definitions: [{ kind: "counter", item: "test:first", label: "Source ammo", admission: "replace-primary" },
+      { kind: "counter", item: "test:second", label: "Other source ammo", admission: "replace-primary" }],
+      storage: [{ kind: "counter", item: "test:first", field: { record: "player", offset: 468 }, capacity: { kind: "field", field: { record: "player", offset: 472 } } },
+        { kind: "counter", item: "test:second", field: { record: "player", offset: 476 }, capacity: { kind: "field", field: { record: "player", offset: 472 } } }] } } : {}),
+    pickups: [{ id: "compound", offered: ["q1:pickup"], writes: ownedItem ? [{ kind: "inventory", item: "test:first", fields: "count-and-capacity" }, { kind: "inventory", item: "test:second", fields: "capacity" }]
       : [{ kind: "inventory", item: "test:first", fields: "count" }, { kind: "inventory", item: "test:second", fields: "count" }], context: [],
       operation: { kind: "boolean-grant", grant: { entry: 3, arguments: [], globals: [], returns: "int32" } } }],
   };
@@ -58,12 +60,14 @@ async function fixture(ownedItem = false) {
     completed: () => completed, close: () => { source.close(); actors.close(); } };
 }
 
-test("QVM original pickups update admitted source item counts and mutable capacities", async () => {
+test("QVM original pickups update admitted counts and every item sharing the source capacity", async () => {
   const f = await fixture(true);
   try {
     f.source.module.memory.dataView(600, 4).setInt32(0, 100, true);
+    f.source.module.memory.dataView(604, 4).setInt32(0, 2, true);
     expect(f.take()).toBe("accepted");
     expect(f.inventory.entries(f.target.id).find(entry => entry.item === "test:first")).toMatchObject({ count: 10, capacity: 101 });
+    expect(f.inventory.entries(f.target.id).find(entry => entry.item === "test:second")).toMatchObject({ count: 2, capacity: 101 });
     expect(f.source.module.memory.dataView(596, 8).getInt32(0, true)).toBe(10);
     expect(f.source.module.memory.dataView(596, 8).getInt32(4, true)).toBe(101);
     expect(f.completed()).toBe(1);

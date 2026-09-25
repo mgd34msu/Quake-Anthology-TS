@@ -47,12 +47,14 @@ export function validateQvmModItems(items: Declaration, declaration: QvmModCallb
   if (declaration.clients === undefined || items.definitions.length === 0) throw new Error("QVM items require source client admission");
   const definitions = new Map(items.definitions.map(value => [value.item, value]));
   if (definitions.size !== items.definitions.length) throw new Error("Duplicate QVM source item definition");
-  const occupied = new Set<string>(), bound = new Set<ItemId>();
-  const field = (source: QvmItemField, exclusive = true): void => {
+  const occupied = new Map<string, "storage" | "capacity">(), bound = new Set<ItemId>();
+  const field = (source: QvmItemField, usage: "storage" | "capacity" | "view" = "storage"): void => {
     const record = declaration.actorRecords.find(value => value.id === source.record);
+    const previous = occupied.get(key(source));
     if (record === undefined || !declaration.clients?.records.includes(record.id) || !Number.isSafeInteger(source.offset)
-      || source.offset < 0 || source.offset % 4 !== 0 || source.offset + 4 > record.stride || exclusive && occupied.has(key(source))) throw new Error("Invalid QVM item source field");
-    if (exclusive) occupied.add(key(source));
+      || source.offset < 0 || source.offset % 4 !== 0 || source.offset + 4 > record.stride
+      || usage !== "view" && previous !== undefined && !(usage === "capacity" && previous === "capacity")) throw new Error("Invalid QVM item source field");
+    if (usage !== "view") occupied.set(key(source), usage);
     for (const value of record.fields) {
       const length = value.binding === "private" ? value.byteLength : ["origin", "velocity", "angles", "bounds-min", "bounds-max", "constant-vector"].includes(value.binding) ? 12 : 4;
       if (value.offset < source.offset + 4 && source.offset < value.offset + length && value.binding !== "private" && value.binding !== "constant")
@@ -61,10 +63,11 @@ export function validateQvmModItems(items: Declaration, declaration: QvmModCallb
   };
   const bind = (item: ItemId): void => { if (!definitions.has(item) || bound.has(item)) throw new Error("QVM item lacks distinct declared storage"); bound.add(item); };
   for (const storage of items.storage) {
-    for (const value of fields(storage)) field(value);
+    field(storage.field);
     if (storage.kind === "counter") {
       bind(storage.item);
       const capacity = storage.capacity;
+      if (capacity.kind === "field") field(capacity.field, "capacity");
       if (capacity.kind === "constant" && (!integer(capacity.value) || capacity.value < 0)) throw new Error("QVM item capacity exceeds its source ABI");
       if (capacity.kind === "source") {
         constant(image, capacity.instruction);
@@ -112,10 +115,10 @@ export function validateQvmModItems(items: Declaration, declaration: QvmModCallb
     if (image.instructions[entry]?.opcode !== QvmOpcode.OP_ENTER
       || inputs.length !== 1 || inputs[0]?.scope !== "movement-slice" || inputs[0].phase !== "after")
       throw new Error("QVM weapon input requires one declared original callback after authoritative movement");
-    field(stage.selection.field, false); field(items.weapons.input.clock, false);
-    field(stage.continuation.projection.viewHeight, false); field(stage.continuation.projection.ground, false);
+    field(stage.selection.field, "view"); field(items.weapons.input.clock, "view");
+    field(stage.continuation.projection.viewHeight, "view"); field(stage.continuation.projection.ground, "view");
     for (const value of [...stage.settled, ...stage.request.accepted, ...stage.continuation.when]) {
-      field(value.field, false);
+      field(value.field, "view");
       if (!integer(value.value) || value.mask !== null && (!Number.isInteger(value.mask) || value.mask < 0 || value.mask > 0x7fffffff)) throw new Error("Invalid QVM weapon source state predicate");
     }
     if (stage.selection.values.length !== weapons.length || new Set(stage.selection.values.map(value => value.item)).size !== weapons.length
