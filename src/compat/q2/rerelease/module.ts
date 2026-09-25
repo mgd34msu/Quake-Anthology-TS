@@ -24,6 +24,7 @@ export interface RereleaseImportCall {
   readonly arguments: readonly GuestCallValue[];
 }
 export interface RereleaseModuleOptions {
+  readonly imageBase?: GuestAddress;
   readonly worldProfile?: RereleasePrimaryWorldProfile;
   readonly runner: GuestCallRunner;
   readonly getGameApi: GuestAddress;

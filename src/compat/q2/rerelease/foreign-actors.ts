@@ -5,19 +5,22 @@ import type { ArmorState, AttackProvenance, DamageOutcome, DamageRequest, Q2Nati
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
 import { canonicalCauseFromNative } from "../../../content/q2/missionpacks/damage.ts";
-import { integer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
+import { integer, pointer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import type { SourceDamageResult, SourceArmorStage } from "../../../world/gameplay/authority.ts";
 import { isDeepStrictEqual } from "node:util";
 import { RereleaseSourceEdict } from "./source-state.ts";
 import { RereleaseSourceClient } from "./source-state.ts";
 import type { RereleaseWorldLocation } from "./world-profile.ts";
 import { guestInt, guestPointer, resultPointer } from "./module.ts";
-import { rereleaseDamageSignature, rereleasePowerArmorSignature, rereleaseFreeSignature, rereleaseModLayout, rereleaseSpawnSignature } from "./native-entries.ts";
+import { rereleaseFreeSignature, rereleaseModLayout, rereleaseSpawnSignature } from "./native-entries.ts";
 import type { RereleaseNativeEntries } from "./native-entries.ts";
 import type { RereleaseQ2GuestHost } from "./host.ts";
 import { RereleaseDeferredDamage } from "./deferred-damage.ts";
 import { RemovedNativeDamage, q2NativeArmorFlags, q2NativeDamageArguments } from "../native-damage.ts";
 import { captureAbiProcessorState, restoreAbiProcessorState } from "../../../guest/abi/runner.ts";
+import type { GuestCallSignature } from "../../../guest/core/contracts.ts";
+import { rereleaseAbi } from "./api.ts";
+import { nativeCombatSignature, readNativeCombatField, readNativeCombatArguments, lowerNativeCombatArguments } from "../native-combat-call.ts";
 
 export interface RereleaseForeignDamageServices {
   provenance(attacker: ActorId, inflictor: ActorId, target: ActorId): Omit<AttackProvenance, "attacker" | "inflictor" | "cause">;
@@ -30,6 +33,9 @@ export interface RereleaseProjectionSave { readonly slot: number; readonly actor
 export class RereleaseForeignActors {
   readonly #actors = new Map<ActorId, Projection>();
   readonly #slots = new Map<number, Projection>();
+  readonly #damageSignature: GuestCallSignature;
+  readonly #powerSignature: GuestCallSignature;
+  readonly #image: GuestAddress;
   readonly #removeEntry: () => void;
   readonly #removeContinuation: () => void;
   readonly #damageFrames: DamageFrame[] = [];
@@ -41,7 +47,10 @@ export class RereleaseForeignActors {
   #restoring: { readonly actors: ReadonlyMap<number, SavedActorId>; readonly domain: "checkpoint" | "current" } | null = null;
   #closed = false;
   constructor(readonly host: RereleaseQ2GuestHost, readonly entries: RereleaseNativeEntries, readonly services: RereleaseForeignDamageServices) {
-    const { module } = host, { callbacks, cpu } = module.options.runner.options;
+    const { module } = host, { callbacks, cpu } = module.options.runner.options, profile = module.requireWorldProfile();
+    this.#damageSignature = nativeCombatSignature(profile.calls.damage, "damage", rereleaseAbi);
+    this.#powerSignature = nativeCombatSignature(profile.calls.powerArmor, "power-armor", rereleaseAbi);
+    this.#image = module.memory.offset(entries.damage, -BigInt(profile.entries.damage));
     this.#removeContinuation = callbacks.observeEntry(entries.damage, () => {
       const frame = this.#damageFrames.at(-1);
       if (frame === undefined || frame.stack !== null) return;
@@ -52,9 +61,9 @@ export class RereleaseForeignActors {
       if (frame === undefined || frame.entered || frame.request.target !== actor) return null;
       frame.entered = true; return frame.request;
     }, () => this.#interceptNativeDamage());
-    this.#removeEntry = callbacks.bindEntry(entries.damage, { id: `${module.memory.module.id}:foreign-damage`, signature: rereleaseDamageSignature,
+    this.#removeEntry = callbacks.bindEntry(entries.damage, { id: `${module.memory.module.id}:foreign-damage`, signature: this.#damageSignature,
       invoke: (_context, args) => { this.#incoming(args); return { kind: "void" }; } }, () => {
-      const address = module.memory.pointer(cpu.state.registers.read("rcx", 64));
+      const address = pointer([readNativeCombatField(cpu, module.requireWorldProfile().calls.damage, this.#damageSignature, "target")], 0);
       if (address === null) return false;
       const entry = [...this.#slots.values()].find(candidate => candidate.view.address.byteOffset === address.byteOffset);
       if (entry === undefined || this.lookup(entry.view) === undefined) return this.#interceptNativeDamage();
@@ -83,7 +92,7 @@ export class RereleaseForeignActors {
     const { module } = this.host, { engine } = this.host.options;
     const cpu = module.options.runner.options.cpu;
     if (this.#damageFrames.at(-1)?.stack === cpu.state.registers.read("rsp", 64)) return false;
-    const address = module.memory.pointer(cpu.state.registers.read("rcx", 64));
+    const address = pointer([readNativeCombatField(cpu, module.requireWorldProfile().calls.damage, this.#damageSignature, "target")], 0);
     if (address === null) return false;
     const view = module.entities().fromPointer(address);
     if (this.#slots.has(view.slot)) return false;
@@ -112,8 +121,9 @@ export class RereleaseForeignActors {
     const stack = () => cpu.state.registers.read("rsp", 64);
     this.#armorHooks.push(callbacks.observeEntry(this.entries.powerArmor, () => { if (this.#powerBypass === "pending") this.#powerBypass = stack(); }));
     this.#armorHooks.push(callbacks.bindEntry(this.entries.powerArmor, {
-      id: `${memory.module.id}:powered-armor`, signature: rereleasePowerArmorSignature,
-      invoke: (_context, args) => {
+      id: `${memory.module.id}:powered-armor`, signature: this.#powerSignature,
+      invoke: (_context, sourceArgs) => {
+        const args = readNativeCombatArguments(module.requireWorldProfile().calls.powerArmor, "power-armor", sourceArgs, 8);
         const view = module.entities().fromPointer(requiredPointer(args, 0)), actor = this.host.actor(view), frame = this.#damageFrames.at(-1);
         const intercept = actor === null ? undefined : this.#armorBindings.get(actor)?.stages.powered;
         if (actor === null || intercept === undefined || frame === undefined || !frame.request.target.equals(actor.id))
@@ -121,7 +131,7 @@ export class RereleaseForeignActors {
         const original = (): number => {
           const previous = this.#powerBypass; this.#powerBypass = "pending";
           try {
-            const result = module.invoke(this.entries.powerArmor, rereleasePowerArmorSignature, args, view);
+            const result = module.invoke(this.entries.powerArmor, this.#powerSignature, sourceArgs, view);
             if (result.kind !== "int32") throw new Error("Native power stage returned a non-integer result"); return result.value;
           } finally { this.#powerBypass = previous; }
         };
@@ -133,10 +143,11 @@ export class RereleaseForeignActors {
       },
     }, () => {
       if (this.#powerBypass === stack()) return false;
-      const address = memory.pointer(cpu.state.registers.read("rcx", 64)); if (address === null) return false;
+      const address = pointer([readNativeCombatField(cpu, module.requireWorldProfile().calls.powerArmor, this.#powerSignature, "target")], 0);
+      if (address === null) return false;
       const actor = this.host.actor(module.entities().fromPointer(address)); return actor !== null && this.#armorBindings.get(actor)?.stages.powered !== undefined;
     }));
-    this.#armorHooks.push(module.options.runner.bindInlineRegion(this.entries.regularArmor.entry, this.entries.regularArmor.join, rereleaseDamageSignature.abi, continuation => {
+    this.#armorHooks.push(module.options.runner.bindInlineRegion(this.entries.regularArmor.entry, this.entries.regularArmor.join, rereleaseAbi, continuation => {
       const profile = module.requireWorldProfile().regularArmor, sourceStack = memory.pointer(stack());
       if (sourceStack === null) throw new Error("Native regular stage has no source stack");
       const read = (location: RereleaseWorldLocation): bigint => {
@@ -255,7 +266,8 @@ export class RereleaseForeignActors {
     const memory = this.host.module.memory;
     return { x: memory.readFloat32(address), y: memory.readFloat32(memory.offset(address, 4n)), z: memory.readFloat32(memory.offset(address, 8n)) };
   }
-  #incoming(args: readonly GuestCallValue[]): void {
+  #incoming(sourceArgs: readonly GuestCallValue[]): void {
+    const args = readNativeCombatArguments(this.host.module.requireWorldProfile().calls.damage, "damage", sourceArgs, 8);
     const target = this.#actor(requiredPointer(args, 0)), inflictor = this.#actor(requiredPointer(args, 1)), attacker = this.#actor(requiredPointer(args, 2));
     const mod = args[9];
     if (mod?.kind !== "aggregate" || mod.bytes.length !== 3) throw new Error("Native damage requires the API2023 mod_t ABI");
@@ -267,12 +279,11 @@ export class RereleaseForeignActors {
       direction: this.#vector(requiredPointer(args, 3)), point: this.#vector(requiredPointer(args, 4)), normal: this.#vector(requiredPointer(args, 5)),
       delivery: (damageFlags & 1) !== 0 ? "radius" : "direct", attack: { ...this.services.provenance(attacker, inflictor, target), attacker, inflictor,
         cause: { kind: "q2", meansOfDeath: canonical, damageFlags, native } } };
-    const targetOwner = this.host.options.engine.actors.resolveOwned(target);
-    if (this.#actors.has(target) || targetOwner !== null && this.#armorBindings.has(targetOwner)) this.host.options.engine.combat.apply(request);
-    else this.damageNative(request);
+    if (this.#actors.has(target)) this.host.options.engine.combat.apply(request);
+    else this.host.options.engine.combat.apply(request, effective => this.damageNative(effective, sourceArgs));
     const entry = this.#actors.get(target); if (entry !== undefined && !entry.releasing) this.#sync(entry);
   }
-  damageNative(input: DamageRequest): DamageOutcome {
+  damageNative(input: DamageRequest, sourceArgs?: readonly GuestCallValue[]): DamageOutcome {
     const { module } = this.host, { engine } = this.host.options, memory = module.memory;
     return engine.combat.runSourceDamage(input, (observer, request) => {
       const target = engine.actors.sourceOf(request.target);
@@ -323,12 +334,14 @@ export class RereleaseForeignActors {
           }));
         }
         const { callbacks, cpu } = module.options.runner.options;
-        for (const reaction of monster ? [] : ["pain", "death"]) {
+        for (const reaction of monster ? [] : ["pain", "death"] satisfies readonly ("pain" | "death")[]) {
           const address = memory.readPointer(source.at(reaction === "pain" ? "pain.value" : "die.value"));
           if (address === null) continue;
+          const call = module.requireWorldProfile().calls[reaction], signature = nativeCombatSignature(call, reaction, rereleaseAbi);
           removeEntries.push(callbacks.observeEntry(address, () => {
-            if (!current() || cpu.state.registers.read("rcx", 64) !== view.address.byteOffset) return;
-            state.result = { reaction: reaction === "pain" ? "pain" : "death", appliedDamage: Number(BigInt.asIntN(32, cpu.state.registers.read("r9", 64))) };
+            if (!current()) return;
+            if (pointer([readNativeCombatField(cpu, call, signature, "target")], 0)?.byteOffset !== view.address.byteOffset) return;
+            state.result = { reaction, appliedDamage: Number(integer([readNativeCombatField(cpu, call, signature, "amount")], 0)) };
             stopWrites(); observer.beforeReaction(state.result);
           }));
         }
@@ -339,9 +352,9 @@ export class RereleaseForeignActors {
           memory.writeFloat32(address, vector.x); memory.writeFloat32(memory.offset(address, 4n), vector.y); memory.writeFloat32(memory.offset(address, 8n), vector.z);
         });
         const savedProcessor = captureAbiProcessorState(cpu.state);
-        try { module.invoke(this.entries.damage, rereleaseDamageSignature, [guestPointer(view.address), guestPointer(inflictor), guestPointer(attacker),
+        try { module.invoke(this.entries.damage, this.#damageSignature, lowerNativeCombatArguments(module.requireWorldProfile().calls.damage, "damage", [guestPointer(view.address), guestPointer(inflictor), guestPointer(attacker),
           guestPointer(vectors), guestPointer(memory.offset(vectors, 12n)), guestPointer(memory.offset(vectors, 24n)), guestInt(Math.trunc(request.amount)), guestInt(Math.trunc(request.knockback)), guestInt(cause.damageFlags),
-          { kind: "aggregate", layout: rereleaseModLayout, bytes: new Uint8Array([native.id, native.friendlyFire ? 1 : 0, native.noPointLoss ? 1 : 0]) }], view); }
+          { kind: "aggregate", layout: rereleaseModLayout, bytes: new Uint8Array([native.id, native.friendlyFire ? 1 : 0, native.noPointLoss ? 1 : 0]) }], memory, this.#image, sourceArgs), view); }
         catch (error) {
           if (!(error instanceof RemovedNativeDamage) || error.request !== request) throw error;
           restoreAbiProcessorState(cpu.state, savedProcessor);

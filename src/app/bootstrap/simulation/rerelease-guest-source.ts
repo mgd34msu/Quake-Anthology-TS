@@ -69,7 +69,7 @@ export class RereleaseGuestSource {
             const nativeEntries = options.foreignDamage === undefined || worldProfile === null ? undefined : rereleaseEntries({ memory }, image.base, worldProfile);
             const { pickups, ...hostOptions } = options;
             host = new RereleaseQ2GuestHost({ ...hostOptions, ...(worldProfile === null ? {} : { worldProfile }),
-                ...(pickups === undefined ? {} : { pickups: { admission: pickups, imageBase: image.base, ...(prepared.primary === undefined ? {} : { profile: prepared.primary.profile.pickups }) } }),
+                imageBase: image.base, ...(pickups === undefined ? {} : { pickups: { admission: pickups, imageBase: image.base, ...(prepared.primary === undefined ? {} : { profile: prepared.primary.profile.pickups }) } }),
                 ...(nativeEntries === undefined ? {} : { nativeEntries }), runner, getGameApi: game, getCgameApi: cgame, services: options.services(memory) });
             source = new RereleaseGuestSource(host, runtime, memory, image, context, budget);
             runtime.initialize(image, { context, instructionBudget: budget });

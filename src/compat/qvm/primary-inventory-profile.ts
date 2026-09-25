@@ -1,7 +1,7 @@
 import type { SaveReader } from "../../persistence/value.ts";
 import type { QvmInventoryProfile } from "./game-inventory.ts";
 import { qvmPlayerStateBytes } from "./player-record.ts";
-import { QvmOpcode } from "./image.ts";
+import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import { qualifyQvmRegionEvaluation, type QvmRegionEvaluation } from "./regions.ts";
 
@@ -50,7 +50,7 @@ export function readQvmPrimaryInventoryProfile(reader: SaveReader, artifact: Qvm
     });
     if (!functions.includes(owner) || new Set(functions).size !== functions.length) capacity.fail("counter operation must include its entry and distinct helpers");
     const arguments_ = capacity.field("arguments").list(at => at.field("kind").value === "maximum-grant" ? { kind: at.field("kind").literal("maximum-grant") } : word(at));
-    if (arguments_.length > 10) capacity.fail("counter arguments exceed the public source invocation");
+    if (arguments_.length > QVM_MAX_PRIVATE_ARGUMENT_WORDS) capacity.fail("counter arguments exceed the private source invocation");
     const ammoOffset = reader.field("ammoOffset").integer(0);
     evaluate = (_memory, weapon, context) => context.module.evaluateCounter(arguments_.map(source => source.kind === "maximum-grant" ? 0x7fffffff : value(source, weapon, context)), owner,
       context.client + ammoOffset + weapon * 4, functions, stack);
@@ -60,7 +60,7 @@ export function readQvmPrimaryInventoryProfile(reader: SaveReader, artifact: Qvm
       inputs: source.field("inputs").list(at => at.integer(8)), result: source.field("result").integer(8) };
     qualifyQvmRegionEvaluation(artifact.image.instructions, owner, region, "read-only");
     const arguments_ = capacity.field("arguments").list(word), inputs = capacity.field("inputs").list(word);
-    if (arguments_.length > 10 || inputs.length !== region.inputs.length) capacity.fail("capacity arguments and live-ins differ from the original source frame");
+    if (arguments_.length > QVM_MAX_PRIVATE_ARGUMENT_WORDS || inputs.length !== region.inputs.length) capacity.fail("capacity arguments and live-ins differ from the original source frame");
     evaluate = (_memory, weapon, context) => context.module.evaluateRegion(arguments_.map(source => value(source, weapon, context)), owner, region,
       inputs.map(source => value(source, weapon, context)), stack);
   }

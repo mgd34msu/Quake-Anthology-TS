@@ -1,3 +1,4 @@
+import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { QvmItemField, QvmItemTest, QvmWeaponActor, QvmWeaponStage } from "../../contracts/qvm-mod-items.ts";
@@ -42,7 +43,7 @@ export function validateQvmWeaponDispatcher(stage: QvmWeaponDispatcherDefinition
   }
   functionEnd(image, stage.request.entry);
   if (stage.predicates.length === 0 || stage.settled.length === 0 || stage.request.accepted.length === 0
-    || !Number.isSafeInteger(stage.request.argument) || stage.request.argument < 0 || stage.request.argument > 9)
+    || !Number.isSafeInteger(stage.request.argument) || stage.request.argument < 0 || stage.request.argument >= QVM_MAX_PRIVATE_ARGUMENT_WORDS)
     throw new Error("QVM weapon stage lacks its original decisions or settlement state");
 }
 export function validateQvmWeaponStage(stage: QvmWeaponStage, image: QvmImage): void {

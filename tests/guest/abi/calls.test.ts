@@ -172,3 +172,49 @@ test("Win32 thiscall uses a hidden return buffer even for a four-byte POD record
   expect(cpu.state.registers.read("rax", 32)).toBe(BigInt(output)); expect(cpu.state.registers.read("rsp", 32)).toBe(sp + 8n);
   expect(adapter.returnValue(cpu, call)).toEqual(value);
 });
+
+
+import { lowerNativeCombatArguments, nativeCombatSignature, nativeRereleaseModLayout, readNativeCombatField, readNativeCombatArguments, stockNativeCombatCall, validateNativeCombatCall, type NativeCombatCall } from "../../../src/compat/q2/native-combat-call.ts";
+
+test("declared native combat calls preserve reordered fields and captured extras across the original ABI", () => {
+  for (const abi of [windows32, { ...windows32, call: "fastcall" }, windows64] satisfies readonly NativeCallAbi[]) {
+    const { cpu, memory, adapter } = fixture(abi), image = guestPointer(memory, 0x10000n), incomingPointer = guestPointer(memory, 0x1a000n);
+    memory.writePointer(memory.offset(image, 40n), guestPointer(memory, 0x1b000n));
+    const extra = record(abi.pointerBytes, 12, [{ name: "bytes", byteOffset: 0, storage: "uint8", count: 12 }], 4);
+    if (extra.kind !== "aggregate") throw new Error("Expected original aggregate");
+    const stock = stockNativeCombatCall("damage", abi), call: NativeCombatCall = { convention: abi.kind === "windows-i386" ? abi.call : "microsoft-x64", arguments: [
+      { kind: "value", layout: f64, bytes: new Array<number>(8).fill(0) }, ...stock.arguments.slice().reverse(),
+      { kind: "value", layout: extra, bytes: new Array<number>(12).fill(0) }, { kind: "address", address: { rva: 32, indirections: [8] } },
+    ] };
+    validateNativeCombatCall(call, "damage", abi);
+    if (abi.pointerBytes === 4) expect(() => validateNativeCombatCall({ ...call, convention: "thiscall" }, "damage", abi)).toThrow("this pointer");
+    const pointerValue: GuestCallValue = { kind: "pointer", value: guestPointer(memory, 0x18000n) };
+    const cause: GuestCallValue = abi.pointerBytes === 4 ? { kind: "int32", value: 8 } : { kind: "aggregate", layout: nativeRereleaseModLayout, bytes: new Uint8Array([8, 1, 1]) };
+    const semantic: GuestCallValue[] = [pointerValue, pointerValue, pointerValue, pointerValue, pointerValue, pointerValue,
+      { kind: "int32", value: 21 }, { kind: "int32", value: 17 }, { kind: "int32", value: 4 }, cause];
+    const source: GuestCallValue[] = [{ kind: "float64", value: -3.25 }, ...semantic.slice().reverse(),
+      { kind: "aggregate", layout: extra.layout, bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) }, { kind: "pointer", value: incomingPointer }];
+    const signature = nativeCombatSignature(call, "damage", abi);
+    const sp = enter(cpu, adapter, signature, source);
+    expect(readNativeCombatField(cpu, call, signature, "target")).toEqual(pointerValue);
+    const captured = adapter.arguments(cpu, signature);
+    if (abi.pointerBytes === 8) {
+      const location = planGuestCall(signature).arguments[11]?.locations[0];
+      if (location?.kind !== "stack") throw new Error("Expected aggregate pointer on source stack");
+      const slot = guestPointer(memory, sp + BigInt(location.stackOffset)), previous = memory.readPointer(slot);
+      memory.writePointer(slot, null);
+      expect(readNativeCombatField(cpu, call, signature, "target")).toEqual(pointerValue);
+      expect(() => adapter.arguments(cpu, signature)).toThrow("null guest address");
+      memory.writePointer(slot, previous);
+    }
+    expect(readNativeCombatArguments(call, "damage", captured, abi.pointerBytes)).toEqual(semantic);
+    const changed = semantic.map((value, index) => index === 6 ? { kind: "int32", value: 99 } satisfies GuestCallValue : value);
+    const resumed = lowerNativeCombatArguments(call, "damage", changed, memory, image, captured);
+    expect(resumed[0]).toEqual(source[0]); expect(resumed.at(-2)).toEqual(source.at(-2)); expect(resumed.at(-1)).toEqual(source.at(-1));
+    expect(readNativeCombatArguments(call, "damage", resumed, abi.pointerBytes)[6]).toEqual({ kind: "int32", value: 99 });
+    const initiated = lowerNativeCombatArguments(call, "damage", changed, memory, image);
+    expect(initiated[0]).toEqual({ kind: "float64", value: 0 });
+    expect(initiated.at(-1)).toEqual({ kind: "pointer", value: guestPointer(memory, 0x1b000n) });
+    expect(() => validateNativeCombatCall({ ...call, arguments: [...call.arguments, { kind: "field", field: "target" }] }, "damage", abi)).toThrow("exactly once");
+  }
+});

@@ -12,6 +12,9 @@ const HEADER_LENGTH = 32;
 const MAX_DATA_LENGTH = 0x40000000;
 const MAX_CODE_LENGTH = 0x1fffffff;
 
+// OP_ARG encodes a byte offset; aligned words occupy caller offsets 8 through 252.
+export const QVM_MAX_PRIVATE_ARGUMENT_WORDS = 62;
+
 export enum QvmOpcode {
   OP_UNDEF, OP_IGNORE, OP_BREAK,
   OP_ENTER, OP_LEAVE, OP_CALL, OP_PUSH, OP_POP,

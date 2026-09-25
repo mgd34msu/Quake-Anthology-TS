@@ -12,7 +12,7 @@ export interface QcDamageScale {
   readonly constants: readonly { readonly word: number; readonly bits: number }[];
   readonly call: ModSourceCall;
 }
-type Value = { readonly kind: "actor" } | { readonly kind: "scalar"; readonly constant?: number; readonly origins?: readonly number[] } | { readonly kind: "scaled"; readonly operations: number; readonly powersOfTwo: boolean };
+type Value = { readonly kind: "actor" } | { readonly kind: "scalar"; readonly constant?: number; readonly origins?: readonly number[] } | { readonly kind: "scaled"; readonly operations: number; readonly identity: boolean; readonly powersOfTwo: boolean };
 const scalar: Value = { kind: "scalar" };
 const words = (start: number, length = 1): number[] => Array.from({ length }, (_, index) => start + index);
 const binary = new Set([QcOpcode.AddF, QcOpcode.SubF, QcOpcode.MulF, QcOpcode.DivF, QcOpcode.EqF, QcOpcode.NeF,
@@ -38,7 +38,7 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     if (definition === undefined) return reject("missing declared context global");
     const value = global.value;
     if (value.kind === "input") context.set(definition.offset, value.name === "attacker" ? { kind: "actor" }
-      : value.name === "amount" ? { kind: "scaled", operations: 0, powersOfTwo: true } : value.name === "time" ? scalar : null);
+      : value.name === "amount" ? { kind: "scaled", operations: 0, identity: true, powersOfTwo: true } : value.name === "time" ? scalar : null);
     else if (value.kind === "float") context.set(definition.offset, { kind: "scalar", constant: Math.fround(value.value) });
     else for (const word of words(definition.offset, definition.type === "vector" ? 3 : 1)) context.set(word, scalar);
   }
@@ -67,10 +67,10 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     if (left.kind === "actor" && right.kind === "actor") return left;
     if (left.kind === "scalar" && right.kind === "scalar") return left.constant === right.constant ? { ...left,
       ...((left.origins?.length ?? 0) + (right.origins?.length ?? 0) === 0 ? {} : { origins: [...(left.origins ?? []), ...(right.origins ?? [])] }) } : scalar;
-    if (left.kind === "scaled" && right.kind === "scaled") return { kind: "scaled", operations: Math.max(left.operations, right.operations), powersOfTwo: left.powersOfTwo && right.powersOfTwo };
+    if (left.kind === "scaled" && right.kind === "scaled") return { kind: "scaled", operations: Math.max(left.operations, right.operations), identity: left.identity && right.identity, powersOfTwo: left.powersOfTwo && right.powersOfTwo };
     return reject("inconsistent source value");
   };
-  const initialValues = new Map<number, Value>([[damage, { kind: "scaled", operations: 0, powersOfTwo: true }]]);
+  const initialValues = new Map<number, Value>([[damage, { kind: "scaled", operations: 0, identity: true, powersOfTwo: true }]]);
   for (const location of layout.roles.attacker) if (location.kind === "argument") initialValues.set(location.frameWord, { kind: "actor" });
   const pending = new Map<number, Map<number, Value>>([[source.entry, initialValues]]);
   const edge = (from: number, to: number, values: ReadonlyMap<number, Value>): void => {
@@ -85,7 +85,9 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     const pc = Math.min(...pending.keys()), values = pending.get(pc); pending.delete(pc);
     if (values === undefined) return reject("missing source path");
     if (pc === source.exit) {
-      if (values.get(damage)?.kind !== "scaled") reject("join does not retain scaled damage");
+      const result = values.get(damage);
+      if (result?.kind !== "scaled") return reject("join does not retain scaled damage");
+      if (source.kind === "identity" && !result.identity) reject("identity region changes its original damage input");
       joined = true; continue;
     }
     const statement = program.statements[pc]; if (statement === undefined) return reject("missing source instruction");
@@ -129,12 +131,12 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
         if (power) for (const word of factor.origins ?? []) constants.add(word);
         const increasing = power && factor.constant !== undefined && (opcode === QcOpcode.DivF ? factor.constant <= 1 : factor.constant >= 1);
         if (scaled.operations > 0 && !(scaled.powersOfTwo && increasing)) reject("multiple rounded scales cannot be represented by one factor");
-        multiplied = true; write(c, { kind: "scaled", operations: scaled.operations + 1, powersOfTwo: scaled.powersOfTwo && increasing });
+        multiplied = true; write(c, { kind: "scaled", operations: scaled.operations + 1, identity: scaled.identity && factor.constant === 1, powersOfTwo: scaled.powersOfTwo && increasing });
       }
     } else return reject("region must contain only source reads and scalar frame operations");
     edge(pc, pc + 1, values);
   }
-  if (!joined || !multiplied) reject("region has no original multiplicative result");
+  if (!joined || source.kind !== "identity" && !multiplied) reject("region has no original multiplicative result");
   for (let pc = fn.firstStatement; pc < end; pc++) {
     if (pc >= source.entry && pc < source.exit) continue;
     const statement = program.statements[pc]; if (statement === undefined) continue;

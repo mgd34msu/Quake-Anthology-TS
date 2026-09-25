@@ -1,3 +1,4 @@
+import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { QvmAbiProfile } from "../../contracts/execution.ts";
@@ -73,7 +74,7 @@ export class QvmModInput {
     if (!Number.isSafeInteger(pointer.offset) || pointer.offset < 0
       || pointer.indirections.some(offset => !Number.isSafeInteger(offset) || offset < 0)) throw new Error("Invalid QVM input pointer path");
     if (pointer.kind === "argument") {
-      if (!Number.isSafeInteger(pointer.index) || pointer.index < 0 || pointer.index > 9) throw new Error("Invalid QVM input pointer argument");
+      if (!Number.isSafeInteger(pointer.index) || pointer.index < 0 || pointer.index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) throw new Error("Invalid QVM input pointer argument");
     } else this.operations.module.memory.dataView(pointer.address, 4);
   }
   private address(pointer: QvmModInputPointer, call: QvmFunctionCall): number {

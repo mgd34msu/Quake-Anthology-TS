@@ -2341,7 +2341,7 @@ export class SharedSimulation implements Simulation {
     if (prepared === undefined || !isDeepStrictEqual(prepared.selection, selection) || realTime === undefined)
       throw new Error("Selected QVM grapple requires its exact prepared source and host clock");
     const primary = this.source.kind === "q3-qvm" ? this.source.game : null, primaryArtifact = this.options.q3Guest?.prepared.artifact;
-    const primaryProfile = primaryArtifact === undefined ? null : q3GrappleProfile(primaryArtifact);
+    const primaryProfile = this.options.q3Guest?.prepared.primary.combat ?? null;
     const primaryCombat = primary === null || primaryArtifact === undefined || primaryProfile === null ? null : new QvmGameCombat(primary.game, primaryArtifact, primaryProfile);
     const game = await QvmGrappleSource.create({ artifact: prepared.artifact, profile: selection.profile, provider: selection.source.provider, mounts: prepared.mounts,
       actors: this.actors, bodies: this.bodies, scene: this.scene, context: { session: this.session, origin: { kind: "server-console" } },

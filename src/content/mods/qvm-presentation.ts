@@ -1,3 +1,4 @@
+import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "../../compat/qvm/image.ts";
 import type { QvmModPresentationDeclaration, QvmPresentationArgument, QvmPresentationCall, QvmPresentationProgram } from "../../contracts/qvm-mod-presentation.ts";
 import { SaveReader } from "../../persistence/value.ts";
 import { readDigest } from "../../persistence/shared.ts";
@@ -21,7 +22,7 @@ function argument(reader: SaveReader): QvmPresentationArgument {
 }
 function call(reader: SaveReader): QvmPresentationCall {
   const parameters = reader.field("arguments").list(argument);
-  if (parameters.length > 10) return reader.fail("Source presentation call exceeds QVM argument ABI");
+  if (parameters.length > QVM_MAX_PRIVATE_ARGUMENT_WORDS) return reader.fail("Source presentation call exceeds QVM argument ABI");
   return { entry: reader.field("entry").integer(0), arguments: parameters,
     ...(reader.field("when").value === undefined ? {} : { when: reader.field("when").choice("weapon-presented") }) };
 }

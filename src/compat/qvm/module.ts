@@ -169,13 +169,13 @@ export class QvmModule implements GuestExecutor {
   call(words: readonly number[], instructionIndex = 0): number {
     this.live();
     this.options.registration?.called();
-    const arguments_ = qvmArguments(words);
+    const arguments_ = instructionIndex === 0 || words.length <= 10 ? qvmArguments(words) : words;
     return this.currentEntry === null ? this.interpreter.invoke(arguments_, instructionIndex) : this.currentEntry.invoke(arguments_, instructionIndex);
   }
 
   evaluateRegion(words: readonly number[], instructionIndex: number, region: QvmRegionEvaluation, inputs: readonly number[], stack?: QvmEvaluationStack): number {
     this.live();
-    const arguments_ = qvmArguments(words), evaluation = { region, inputs, ...(stack === undefined ? {} : { stack }) };
+    const arguments_ = instructionIndex === 0 || words.length <= 10 ? qvmArguments(words) : words, evaluation = { region, inputs, ...(stack === undefined ? {} : { stack }) };
     return this.currentEntry === null ? this.interpreter.invoke(arguments_, instructionIndex, evaluation)
       : this.currentEntry.invoke(arguments_, instructionIndex, evaluation);
   }
@@ -189,7 +189,7 @@ export class QvmModule implements GuestExecutor {
   async callAsync(words: readonly number[], instructionIndex = 0, validate: () => void = () => {}): Promise<number> {
     this.live();
     this.options.registration?.called();
-    const arguments_ = qvmArguments(words);
+    const arguments_ = instructionIndex === 0 || words.length <= 10 ? qvmArguments(words) : words;
     const current = (): void => { this.live(); validate(); };
     current();
     const result = this.currentEntry === null

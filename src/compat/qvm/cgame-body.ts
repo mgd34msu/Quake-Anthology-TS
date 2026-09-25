@@ -1,5 +1,5 @@
 import type { QvmModule, QvmModuleOptions } from "./module.ts";
-import { QvmOpcode } from "./image.ts";
+import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { QvmMemory } from "./memory.ts";
 import type { QvmHostCall } from "./syscalls.ts";
 import { QVM_REF_ENTITY_BYTES, readQvmRefEntity } from "./render-record.ts";
@@ -43,7 +43,7 @@ export class QvmBodySubmissions {
       seen.add(declaration.entry);
       for (const argument of [declaration.actorArgument, ...(declaration.when === undefined ? [] : [declaration.when.argument]),
         ...(declaration.reference.kind === "argument" ? [declaration.reference.index] : [])])
-        if (!Number.isInteger(argument) || argument < 0 || argument >= 10) throw new Error("Cgame body argument is outside the source ABI");
+        if (!Number.isInteger(argument) || argument < 0 || argument >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) throw new Error("Cgame body argument is outside the source ABI");
       if (!Number.isSafeInteger(declaration.entityNumberOffset) || declaration.entityNumberOffset < 0 || declaration.entityNumberOffset % 4 !== 0)
         throw new Error("Cgame body entity number requires an aligned field offset");
       this.calls.set(declaration.entry, declaration.mesh === undefined ? new Map<number, QvmBodyPart>() : qualifyQvmBodyCalls(artifact.image, { player: { entry: declaration.entry, centityArgument: declaration.actorArgument }, mesh: declaration.mesh }));

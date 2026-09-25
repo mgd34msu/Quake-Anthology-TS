@@ -17,6 +17,8 @@ export function validateNativePrimary(profile: NativePrimaryProfile, pe: PeFile)
     if (!pe.sections.some(section => offset >= section.rva && offset + bytes <= section.rva + section.mappedSize
       && (execute ? section.permissions.includes("execute") : section.permissions !== "none"))) throw new Error("Native primary address has no matching image section");
   };
+  for (const call of Object.values(profile.world.calls)) for (const argument of call.arguments)
+    if (argument.kind === "address" && argument.address !== null) image(argument.address.rva + (argument.address.indirections[0] ?? 0), argument.address.indirections.length === 0 ? 1 : pe.abi.pointerBytes);
   const record = (name: string, offset: number, bytes: number): void => {
     if (name === "image") image(offset, bytes);
     else if (name === "entity") bound(offset, bytes, entityBytes);

@@ -115,6 +115,14 @@ export class X86AbiAdapter implements GuestAbiAdapter {
     return plan.arguments.map(argument => readArgument(cpu, argument));
   }
 
+  argument(cpu: GuestCpu, signature: GuestCallSignature, index: number): GuestCallValue {
+    this.#check(cpu, signature);
+    if (!Number.isSafeInteger(index) || index < 0) throw new RangeError("Guest argument index is outside its signature");
+    const argument = planGuestCall(signature).arguments[index];
+    if (argument === undefined) throw new RangeError("Guest argument index is outside its signature");
+    return readArgument(cpu, argument);
+  }
+
   returnValue(cpu: GuestCpu, signature: GuestCallSignature): GuestCallResult {
     this.#check(cpu, signature);
     const plan = planGuestCall(signature);

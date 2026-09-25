@@ -2,7 +2,7 @@ import type { SaveReader } from "../../persistence/value.ts";
 import type { QvmPickupGrant, QvmPickupProfile } from "./game-pickups.ts";
 import { qvmPlayerStateBytes } from "./player-record.ts";
 import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
-import { QvmOpcode } from "./image.ts";
+import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { parseQvmItemLayout } from "./item-catalog.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import { qualifyQvmRegion, qualifyQvmRegionEvaluation, type QvmRegionEvaluation } from "./regions.ts";
@@ -27,7 +27,7 @@ export function readQvmPrimaryPickupProfile(reader: SaveReader, artifact: QvmMod
     return index;
   });
   const functionCalls = (at: SaveReader) => { const target = entry(at.field("entry")); return { entry: target, calls: calls(at.field("calls"), target) }; };
-  const argument = (at: SaveReader): number => { const index = at.integer(0); if (index >= 10) at.fail("pickup argument is outside the source ABI"); return index; };
+  const argument = (at: SaveReader): number => { const index = at.integer(0); if (index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) at.fail("pickup argument is outside the source ABI"); return index; };
   const gateReader = reader.field("gate"), gate = { ...functionCalls(gateReader), itemArgument: argument(gateReader.field("itemArgument")), playerArgument: argument(gateReader.field("playerArgument")) };
   const evaluation = (at: SaveReader, owner: number): QvmRegionEvaluation => {
     const result = { entry: at.field("entry").integer(0), join: at.field("join").integer(0),

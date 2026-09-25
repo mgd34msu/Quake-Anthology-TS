@@ -1,3 +1,4 @@
+import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "../../compat/qvm/image.ts";
 import { readQvmModItems } from "./qvm-items.ts";
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
 import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue, QvmModProtection, QvmModProtectionScalar, QvmModProtectionSelection, QvmModInputOutput, QvmModInputPointer } from "../../contracts/qvm-mod-callbacks.ts";
@@ -88,7 +89,7 @@ function inputPointer(reader: SaveReader): QvmModInputPointer {
   const common = { indirections: reader.field("indirections").list(value => value.integer(0)), offset: reader.field("offset").integer(0) };
   if (reader.field("kind").choice("argument", "global") === "global") return { ...common, kind: "global", address: reader.field("address").integer(0) };
   const index = reader.field("index").integer(0);
-  if (index > 9) return reader.fail("Input pointer argument exceeds source call ABI");
+  if (index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) return reader.fail("Input pointer argument exceeds source call ABI");
   return { ...common, kind: "argument", index };
 }
 function inputOutput(reader: SaveReader): QvmModInputOutput {

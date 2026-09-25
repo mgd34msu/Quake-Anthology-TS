@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-import type { GuestAddress, GuestLayout, GuestValueLayout } from "../../../contracts/execution.ts";
+import type { GuestAddress, GuestValueLayout } from "../../../contracts/execution.ts";
 import type { RereleaseGuestModule } from "./module.ts";
 import { validateRereleasePrimaryWorldProfile, type RereleasePrimaryWorldProfile } from "./world-profile.ts";
-import { signature } from "./api.ts";
+import { nativeCombatSignature, stockNativeCombatCall } from "../native-combat-call.ts";
+import { rereleaseAbi, signature } from "./api.ts";
 
 const P: GuestValueLayout = { kind: "scalar", storage: "pointer" };
-const I: GuestValueLayout = { kind: "scalar", storage: "int32" };
-export const rereleaseModLayout: GuestLayout = { id: "q2-rerelease:mod_t", byteLength: 3, alignment: 1, pointerBytes: 8, byteOrder: "little-endian", fields: [
-  { name: "id", byteOffset: 0, storage: "uint8", count: 1 }, { name: "friendly_fire", byteOffset: 1, storage: "uint8", count: 1 }, { name: "no_point_loss", byteOffset: 2, storage: "uint8", count: 1 },
-] };
+export { nativeRereleaseModLayout as rereleaseModLayout } from "../native-combat-call.ts";
 export const rereleaseSpawnSignature = signature([], P);
 export const rereleaseFreeSignature = signature([P]);
 // Win64 passes the three-byte by-value mod_t indirectly; the shared ABI planner owns that rule.
-export const rereleaseDamageSignature = signature([P, P, P, P, P, P, I, I, I, { kind: "aggregate", layout: rereleaseModLayout }]);
-export const rereleasePowerArmorSignature = signature([P, P, P, I, I], I);
+export const rereleaseDamageSignature = nativeCombatSignature(stockNativeCombatCall("damage", rereleaseAbi), "damage", rereleaseAbi);
+export const rereleasePowerArmorSignature = nativeCombatSignature(stockNativeCombatCall("power-armor", rereleaseAbi), "power-armor", rereleaseAbi);
 export interface RereleaseNativeEntries { readonly spawn: GuestAddress; readonly free: GuestAddress; readonly damage: GuestAddress; readonly powerArmor: GuestAddress; readonly regularArmor: { readonly entry: GuestAddress; readonly join: GuestAddress }; readonly armorInfoTable: GuestAddress; readonly processPain: GuestAddress; readonly time: GuestAddress; }
 /** Resolve artifact-qualified source functions and data within the loaded module. */
 export function rereleaseEntries(module: Pick<RereleaseGuestModule, "memory">, imageBase: GuestAddress, profile: RereleasePrimaryWorldProfile): RereleaseNativeEntries {

@@ -14,7 +14,7 @@ import { dot3, vectorToAngles } from "../../core/math.ts";
 import { qvmAnglesToAxis } from "../../core/qvm-math.ts";
 import { float32ToBits } from "../../core/numeric.ts";
 import { QvmModule, type QvmModuleOptions } from "./module.ts";
-import { QvmOpcode } from "./image.ts";
+import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { qvmPlayerStateBytes, writeSourceQvmPlayerState } from "./player-record.ts";
 import { qvmEntityStateBytes } from "./entity-record.ts";
 import { QVM_GAME_STATE_BYTES, qvmSnapshotBytes, writeSourceQvmGameState, writeSourceQvmSnapshot, type QvmSourceSnapshot } from "./client-state-record.ts";
@@ -109,13 +109,13 @@ export function validateQvmModPresentation(options: Pick<QvmModPresentationOptio
     for (const entry of [player.entry, mesh.entry, declaration.eventCheck.entry]) if (artifact.image.instructions[entry]?.opcode !== QvmOpcode.OP_ENTER)
       throw new Error("Source mesh scope has no original function entry");
     for (const argument of [player.centityArgument, mesh.entityArgument, mesh.stateArgument, declaration.eventCheck.centityArgument])
-      if (!Number.isInteger(argument) || argument < 0 || argument > 9) throw new Error("Source mesh scope has an invalid argument");
+      if (!Number.isInteger(argument) || argument < 0 || argument >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) throw new Error("Source mesh scope has an invalid argument");
     if (mesh.shaderOffset !== 112) throw new Error("Source mesh shader field differs from the declared refEntity ABI");
     qualifyQvmBodyCalls(artifact.image, declaration.body);
     if (declaration.snapshots.length === 0) throw new Error("Source scene requires original snapshot processing");
   }
   const checkCall = (call: QvmPresentationCall, initializing: boolean): void => {
-    if (!Number.isInteger(call.entry) || artifact.image.instructions[call.entry]?.opcode !== QvmOpcode.OP_ENTER || call.arguments.length > 10)
+    if (!Number.isInteger(call.entry) || artifact.image.instructions[call.entry]?.opcode !== QvmOpcode.OP_ENTER || call.arguments.length > QVM_MAX_PRIVATE_ARGUMENT_WORDS)
       throw new Error("Source presentation call has no original function entry");
     for (const argument of call.arguments) {
       if (argument.kind === "address") range(argument.value, 1);

@@ -9,7 +9,7 @@ import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SessionActorRegistry, ActorCallbackTable, SourceActorSlots, quakeEdictLifetime } from "../../../src/world/actors/index.ts";
 import { Q1_DONOR_PROFILE, createNumericOperations } from "../../../src/core/numeric.ts";
 import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
-import type { DamageOutcome, DamageRequest } from "../../../src/contracts/gameplay.ts";
+import type { CombatState, DamageOutcome, DamageRequest } from "../../../src/contracts/gameplay.ts";
 import { Id1DamageBinding } from "../../../src/content/q1/quakec/id1-damage.ts";
 import { deriveNativeProgramBinding, id1ProgramBinding } from "../../../src/content/q1/quakec/id1-program.ts";
 
@@ -26,7 +26,7 @@ function changedProgram(program: QcProgram, statements: readonly QcStatement[]):
   return new QcProgram(program.source, program.api, statements, program.globals, program.fields, program.functions,
     program.strings, program.initialGlobals, program.entityFieldWords, program.checksum, createContentDigest("0".repeat(64)));
 }
-function run(program: QcProgram, observed: boolean, variant: "normal" | "death" | "empathy" | "wetsuit", mods?: (authority: GameplayAuthority) => void,
+function run(program: QcProgram, observed: boolean, variant: "normal" | "death" | "empathy" | "wetsuit", mods?: (authority: GameplayAuthority, actors: SessionActorRegistry) => void,
   scaling?: { readonly declaration: NonNullable<ModCallbackDeclaration["combat"]>; readonly quad: boolean; readonly strength: boolean;
     readonly resistance: boolean; readonly owner?: ProviderId },
   nativeCall?: { readonly amount?: number; readonly worldAttacker?: boolean; readonly extra?: { readonly index: number; readonly value: number } }) {
@@ -42,7 +42,7 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
     impulse: () => { throw new Error("Replayed source impulse"); }, beforeReaction: () => undefined,
     confirmed: outcome => { outcomes.push(outcome); return undefined; },
   });
-  mods?.(authority);
+  mods?.(authority, actors);
   const binding = new Id1DamageBinding({ program, entities, actors, slots }, authority, () => vm, call => {
     const request: DamageRequest = { target: call.target, amount: call.amount, knockback: 0,
       direction: { x: 0, y: 0, z: 0 }, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, delivery: "direct",
@@ -300,6 +300,23 @@ test("declared attacker scaling queries original rune and quad paths once while 
     expect(independentlyOwned.bytes).toEqual(native.bytes);
   }
   const scale = declaration.damageScale;
+  expect(() => qcDamageScale(program, declaration.damage, { ...scale, kind: "identity" })).toThrow("changes its original damage input");
+  const identityStatements = program.statements.map((statement, index) => index === 2960 || index === 2965
+    ? { opcode: QcOpcode.StoreF, a: statement.a, b: statement.c, c: 0 } : statement);
+  const identityProgram = changedProgram(program, identityStatements);
+  const identity = readQuakeCCompatibility(new TextEncoder().encode(JSON.stringify({ version: 1, artifactDigest: identityProgram.digest,
+    combat: { ...declaration, damageScale: { ...scale, kind: "identity", statements: identityStatements.slice(scale.entry, scale.exit + 1) } },
+  })), identityProgram.digest).combat;
+  if (identity?.damageScale === undefined) throw new Error("Missing explicit source identity contract");
+  const identityScale = identity.damageScale;
+  expect(identityScale.kind).toBe("identity");
+  validateQcModCombat(identityProgram, identity);
+  const unchanged = { declaration: identity, quad: true, strength: true, resistance: true };
+  const originalIdentity = run(identityProgram, false, "normal", undefined, unchanged);
+  const selectedIdentity = run(identityProgram, true, "normal", undefined, { ...unchanged, owner: "test:qc" });
+  expect(selectedIdentity.factor).toBe(1); expect(selectedIdentity.health).toBe(980);
+  expect(selectedIdentity.bytes).toEqual(originalIdentity.bytes);
+  expect(() => qcDamageScale(identityProgram, identity.damage, { ...identityScale, kind: "multiplier" })).toThrow("no original multiplicative result");
   expect(() => qcDamageScale(program, declaration.damage, { ...scale, exit: 2974, statements: program.statements.slice(2957, 2975) })).toThrow("target/inflictor");
   const statements = [...program.statements]; const multiply = statements[2960];
   if (multiply === undefined) throw new Error("Missing original multiply");
@@ -354,4 +371,37 @@ test("declared private QC damage ABI maps reordered arguments and scoped globals
   expect(outcome.decision.reaction).toBe("pain");
   expect(() => validateQcModCombat(program, { damage: { ...damage, arguments: damage.arguments.slice(0, 4) } })).toThrow("signature");
   expect(() => validateQcModCombat(program, { damage: { ...damage, globals: damage.globals.slice(1) } })).toThrow("missing attacker");
+});
+
+
+test("QC redirected damage uses the current target owner without replaying original source stores", async () => {
+  const program = await readProgram("id1/PAK0.PAK");
+  for (const mode of ["redirect", "rebind"]) {
+    let health = 100, calls = 0, transforms = 0;
+    const result = run(program, true, "normal", (authority, actors) => {
+      const foreign = actors.allocate("test:foreign", "test:target");
+      const binding = {
+        read: () => ({ health, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, mass: 200, canTakeDamage: true, invulnerable: false, team: null } satisfies CombatState),
+        writeHealth: () => { throw new Error("Replayed foreign health"); }, writeArmor: () => { throw new Error("Replayed foreign armor"); },
+        sourceDamage: (request: DamageRequest) => authority.apply(request, current => authority.runSourceDamage(current, (observer, effective) => {
+          calls++;
+          const before = health; health -= effective.amount;
+          observer.stored({ kind: "health", before, after: health });
+          return { appliedDamage: effective.amount, reaction: "none" };
+        })),
+      };
+      authority.bind(foreign, binding);
+      authority.damageOperation.register({ provider: "q2:mod", id: "redirect:damage", order: 0, kind: "transform", transform: request => {
+        transforms++;
+        if (mode === "redirect") return { ...request, target: foreign.id };
+        const target = actors.resolveOwned(request.target);
+        if (target === null) throw new Error("Missing original target");
+        authority.rebind(target, binding);
+        return request;
+      } });
+    });
+    expect(result.health).toBe(100); expect(result.attackerHealth).toBe(100);
+    expect(health).toBe(60); expect(calls).toBe(1); expect(transforms).toBe(1);
+    expect(result.outcomes).toHaveLength(1);
+  }
 });

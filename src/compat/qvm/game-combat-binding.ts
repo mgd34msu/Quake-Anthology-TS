@@ -7,7 +7,7 @@ import type { SharedBodyTable } from "../../world/actors/body.ts";
 import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../world/gameplay/authority.ts";
 import type { SessionActorRegistry } from "../../world/actors/registry.ts";
 import { attackDamageFlags } from "../../world/gameplay/armor.ts";
-import { QvmGameCombat, type QvmGameArmorDefinition, type QvmGameCombatDefinition, type QvmGameDamage } from "./game-combat.ts";
+import { QvmGameCombat, validateQvmCombatCall, validateQvmCombatPositions, type QvmReactionCall, type QvmGameArmorDefinition, type QvmGameCombatDefinition, type QvmGameDamage } from "./game-combat.ts";
 import type { QvmFunctionCall } from "./interpreter.ts";
 import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
 import { QvmOpcode } from "./image.ts";
@@ -17,9 +17,8 @@ import { isDeepStrictEqual } from "node:util";
 export interface QvmPrimaryCombatProfile extends QvmGameCombatDefinition {
   readonly fields: QvmGameCombatDefinition["fields"] & { readonly client: number };
   readonly armor: QvmGameArmorDefinition;
-  readonly reactions: { readonly flags: number; readonly pain: number; readonly die: number };
+  readonly reactions: { readonly flags: number; readonly pain: number; readonly die: number; readonly painCall: QvmReactionCall; readonly dieCall: QvmReactionCall };
   readonly grappleDamageMethod: number;
-  readonly damageCall: "q3-g-damage-8-check-armor-3";
   readonly state: {
     readonly healthStat: number;
     readonly team: { readonly persistentStat: number; readonly values: readonly { readonly value: number; readonly team: `${string}:${string}` }[] };
@@ -57,14 +56,15 @@ export class QvmCombatBindings {
   private closed = false;
   constructor(private readonly options: NativeCombatOptions) {
     this.source = new QvmGameCombat(options.game, options.artifact, options.definition);
-    for (const field of Object.values(options.definition.reactions)) if (!Number.isInteger(field) || field < 0 || field % 4 !== 0 || field + 4 > options.definition.entityStride)
+    for (const field of [options.definition.reactions.flags, options.definition.reactions.pain, options.definition.reactions.die]) if (!Number.isInteger(field) || field < 0 || field % 4 !== 0 || field + 4 > options.definition.entityStride)
       throw new Error("Source combat reaction field is outside its entity record");
     const { armor } = options.definition, image = options.artifact.image;
     if (image.instructions[armor.checkArmor]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Source CheckArmor declaration is not a function entry");
     const definition = options.definition, client = definition.fields.client;
     if (!Number.isInteger(client) || client % 4 !== 0 || client < qvmSharedEntityBytes(definition.abiProfile)
       || client + 4 > definition.entityStride) throw new Error("Source combat requires its declared Q3 client pointer");
-    if (definition.damageCall !== "q3-g-damage-8-check-armor-3") throw new Error("Source combat requires its declared eight-word damage and three-word armor ABI");
+    validateQvmCombatCall(armor.call, image.dataLength + image.literalLength + image.bssLength);
+    for (const call of [definition.reactions.painCall, definition.reactions.dieCall]) validateQvmCombatPositions(Object.values(call.roles), call.arguments);
     const stat = (index: number): void => {
       if (!Number.isInteger(index) || index < 0 || index >= 16) throw new Error("Source armor stat is outside the public player record");
     };
@@ -104,7 +104,7 @@ export class QvmCombatBindings {
         if (!Number.isInteger(condition.value) || condition.value < -0x80000000 || condition.value > 0x7fffffff) throw new Error("Source armor mode comparison requires a signed integer");
       }
     }
-    this.scopes = new QvmDamageScopes({ game: options.game, health: options.definition.fields.health, pointsStat: armor.pointsStat,
+    this.scopes = new QvmDamageScopes({ game: options.game, targetArgument: definition.damageCall.roles.target, health: options.definition.fields.health, pointsStat: armor.pointsStat,
       tierStat: armor.tiers?.stat ?? null, modeWords: armor.tiers?.whenAny.map(condition => condition.offset) ?? [],
       reactions: options.definition.reactions, armor: slot => this.armor(slot), live: actor => this.live(actor) });
     try {
@@ -251,30 +251,31 @@ export class QvmCombatBindings {
     return { x: view.getFloat32(0, true), y: view.getFloat32(4, true), z: view.getFloat32(8, true) };
   }
   private checkArmor(call: QvmFunctionCall): number {
-    const frame = this.scopes.current(call.words.getInt32(0, true));
+    const roles = this.options.definition.armor.call.roles, damage = this.options.definition.damageCall.roles;
+    const frame = this.scopes.current(call.words.getInt32(roles.target * 4, true));
     if (frame === null) return call.proceed();
     const power = this.protection.powered.get(frame.actor);
     if (power === undefined && !this.protection.regular.has(frame.actor)) return call.proceed();
     if (!this.live(frame.actor)) return this.scopes.cancel(frame, call);
-    const amount = call.words.getInt32(4, true), flags = call.words.getInt32(8, true), originating = attackDamageFlags(frame.request);
-    const geometry = () => ({ direction: this.vector(frame.call.words.getInt32(12, true)), point: this.vector(frame.call.words.getInt32(16, true)), normal: frame.request.normal });
+    const amount = call.words.getInt32(roles.amount * 4, true), flags = call.words.getInt32(roles.flags * 4, true), originating = attackDamageFlags(frame.request);
+    const geometry = () => ({ direction: this.vector(frame.call.words.getInt32(damage.direction * 4, true)), point: this.vector(frame.call.words.getInt32(damage.point * 4, true)), normal: frame.request.normal });
     const saved = power?.({ request: frame.request, amount, geometry: geometry(),
       // Q3 owns its live armor flag; foreign power-only flags have no Q3 argument encoding.
       flags: { stage: "power", noArmor: (flags & this.options.definition.damageFlags.noArmor) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: false, energy: originating.energy } }, () => 0) ?? 0;
     if (!this.live(frame.actor)) return this.scopes.cancel(frame, call);
     if (!Number.isFinite(saved) || saved < 0 || saved > Math.max(0, amount)) throw new Error("QVM powered armor savings exceed the current source damage");
     const powerSaved = Math.trunc(saved), remaining = amount - powerSaved;
-    call.words.setInt32(4, remaining, true);
+    call.words.setInt32(roles.amount * 4, remaining, true);
     try {
       const regular = this.protection.regular.get(frame.actor);
       const regularSaved = regular === undefined ? call.proceed() : regular({ request: frame.request, amount: remaining, geometry: geometry(),
-        flags: { stage: "regular", noArmor: (call.words.getInt32(8, true) & this.options.definition.damageFlags.noArmor) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: originating.noRegularArmor,
+        flags: { stage: "regular", noArmor: (call.words.getInt32(roles.flags * 4, true) & this.options.definition.damageFlags.noArmor) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: originating.noRegularArmor,
           energy: originating.energy, regularProtectionScale: originating.regularProtectionScale ?? 1 } }, () => call.proceed());
       if (!this.live(frame.actor)) return this.scopes.cancel(frame, call);
       if (!Number.isFinite(regularSaved) || regularSaved < 0 || regularSaved > Math.max(0, remaining)) throw new Error("QVM regular armor savings exceed the current source damage");
       return powerSaved + Math.trunc(regularSaved);
     }
-    finally { call.words.setInt32(4, amount, true); }
+    finally { call.words.setInt32(roles.amount * 4, amount, true); }
   }
   private sourceActor(pointer: number): OwnedActor | null {
     const source = this.options.source;
@@ -292,32 +293,37 @@ export class QvmCombatBindings {
     }
     const joined = this.options.source;
     if (joined === undefined) return call.proceed();
-    const target = this.sourceActor(call.words.getInt32(0, true));
+    const roles = this.options.definition.damageCall.roles;
+    const target = this.sourceActor(call.words.getInt32(roles.target * 4, true));
     if (target === null) return call.proceed();
-    const inflictor = this.sourceActor(call.words.getInt32(4, true))?.id ?? null;
-    const attacker = this.sourceActor(call.words.getInt32(8, true))?.id ?? null;
-    const flags = call.words.getInt32(24, true), amount = call.words.getInt32(20, true);
-    const request: DamageRequest = { target: target.id, amount, knockback: (flags & this.options.definition.damageFlags.noKnockback) !== 0 || call.words.getInt32(12, true) === 0 ? 0 : amount,
-      direction: this.vector(call.words.getInt32(12, true)), point: this.vector(call.words.getInt32(16, true)), normal: { x: 0, y: 0, z: 0 },
+    const inflictor = this.sourceActor(call.words.getInt32(roles.inflictor * 4, true))?.id ?? null;
+    const attacker = this.sourceActor(call.words.getInt32(roles.attacker * 4, true))?.id ?? null;
+    const flags = call.words.getInt32(roles.flags * 4, true), amount = call.words.getInt32(roles.amount * 4, true);
+    const request: DamageRequest = { target: target.id, amount, knockback: (flags & this.options.definition.damageFlags.noKnockback) !== 0 || call.words.getInt32(roles.direction * 4, true) === 0 ? 0 : amount,
+      direction: this.vector(call.words.getInt32(roles.direction * 4, true)), point: this.vector(call.words.getInt32(roles.point * 4, true)), normal: { x: 0, y: 0, z: 0 },
       delivery: (flags & this.options.definition.damageFlags.radius) !== 0 ? "radius" : "direct", attack: { ...joined.provenance(attacker, inflictor, target.id), attacker, inflictor,
-        cause: { kind: "q3", meansOfDeath: call.words.getInt32(28, true), damageFlags: this.canonicalFlags(flags) } } };
-    this.options.combat.runSourceDamage(request, (observer, effective) => {
+        cause: { kind: "q3", meansOfDeath: call.words.getInt32(roles.method * 4, true), damageFlags: this.canonicalFlags(flags) } } };
+    this.options.combat.apply(request, composed => this.options.combat.runSourceDamage(composed, (observer, effective) => {
       const actor = this.owned(effective.target), slot = this.options.slot(effective.target);
       if (actor === null || slot === null) return { appliedDamage: 0, reaction: "none" };
       if (isDeepStrictEqual(effective, request)) return this.scopes.run(call, actor, slot, effective, observer);
       let result: SourceDamageResult = { appliedDamage: 0, reaction: "none" };
       this.source.damage(this.lower(effective, slot, flags), words => {
-        const saved = Array.from({ length: 8 }, (_, index) => call.words.getInt32(index * 4, true));
+        const saved = Object.values(roles).map(index => ({ index, word: call.words.getInt32(index * 4, true) }));
         try {
-          words.forEach((word, index) => {
-            if (index === 3 && isDeepStrictEqual(effective.direction, request.direction) || index === 4 && isDeepStrictEqual(effective.point, request.point)) return;
+          for (const { index } of saved) {
+            if (index === roles.direction && isDeepStrictEqual(effective.direction, request.direction) || index === roles.point && isDeepStrictEqual(effective.point, request.point)
+              || index === roles.attacker && isDeepStrictEqual(effective.attack.attacker, request.attack.attacker)
+              || index === roles.inflictor && isDeepStrictEqual(effective.attack.inflictor, request.attack.inflictor)) continue;
+            const word = words[index];
+            if (word === undefined) throw new Error("Source damage role lost its declared argument");
             call.words.setInt32(index * 4, word, true);
-          });
+          }
           result = this.scopes.run(call, actor, slot, effective, observer);
-        } finally { saved.forEach((word, index) => call.words.setInt32(index * 4, word, true)); }
+        } finally { saved.forEach(({ word, index }) => call.words.setInt32(index * 4, word, true)); }
       });
       return result;
-    });
+    }));
     return 0;
   }
   private canonicalFlags(source: number): number {

@@ -60,6 +60,7 @@ export interface ModConsoleCommand {
 }
 
 export interface ModQcDamageScale {
+  readonly kind?: "multiplier" | "identity";
   readonly function: string;
   readonly entry: number;
   readonly exit: number;

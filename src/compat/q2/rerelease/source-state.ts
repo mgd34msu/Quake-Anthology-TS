@@ -12,7 +12,8 @@ import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts
 import type { CombatStateBinding, PowerArmorCellBinding } from "../../../world/gameplay/authority.ts";
 import { fieldOffset } from "./layouts.ts";
 import type { RereleaseClientProfile } from "./client-profile.ts";
-import { signature } from "./api.ts";
+import { signature, rereleaseAbi } from "./api.ts";
+import { nativeCombatSignature, lowerNativeCombatArguments, nativeRereleaseModLayout } from "../native-combat-call.ts";
 import { guestBool, guestInt, guestPointer } from "./module.ts";
 import type { RereleaseGuestModule } from "./module.ts";
 
@@ -122,17 +123,13 @@ export class RereleaseSourceEdict {
     const memory = this.module.memory;
     const present = (name: string): boolean => memory.readPointer(this.at(`${name}.value`)) !== null;
     const address = (actor: ActorId | null): GuestAddress | null => actor === null ? null : addresses.address(actor);
-    const withCause = (attack: AttackProvenance | null, invoke: (mod: GuestAddress) => void): undefined => {
+    const withCause = (attack: AttackProvenance | null, invoke: (mod: GuestCallValue) => void): undefined => {
       if (attack !== null && attack.cause.kind !== "q2") throw new Error("Native rerelease callback requires a classified Q2 damage cause");
       const cause = attack?.cause;
       const native = cause?.kind === "q2" && cause.native?.edition === "rerelease" ? cause.native
         : nativeCauseFromCanonical({ edition: "rerelease" }, cause?.kind === "q2" ? cause.meansOfDeath : 0);
       if (native === null || native.edition !== "rerelease") throw new Error("Damage cause has no rerelease mod_t representation");
-      const mod = memory.allocate({ byteLength: 3, label: "Q2 callback mod_t" });
-      try {
-        memory.writeUint8(mod, native.id); memory.writeUint8(memory.offset(mod, 1n), native.friendlyFire ? 1 : 0); memory.writeUint8(memory.offset(mod, 2n), native.noPointLoss ? 1 : 0);
-        invoke(mod);
-      } finally { memory.unmap(mod, 3); }
+      invoke({ kind: "aggregate", layout: nativeRereleaseModLayout, bytes: new Uint8Array([native.id, native.friendlyFire ? 1 : 0, native.noPointLoss ? 1 : 0]) });
       return undefined;
     };
     return {
@@ -154,7 +151,7 @@ export class RereleaseSourceEdict {
       pain: reaction => {
         if (!present("pain")) return undefined;
         const other = address(reaction.attacker);
-        return withCause(reaction.attack, mod => { this.call("pain", [guestPointer(other), { kind: "float32", value: reaction.kick }, guestInt(reaction.damage), guestPointer(mod)]); });
+        return withCause(reaction.attack, mod => { this.call("pain", [guestPointer(other), { kind: "float32", value: reaction.kick }, guestInt(reaction.damage), mod]); });
       },
       die: reaction => {
         if (!present("die")) return undefined;
@@ -163,7 +160,7 @@ export class RereleaseSourceEdict {
           const point = memory.allocate({ byteLength: 12, alignment: 4n, label: "Q2 callback damage point" });
           try {
             memory.writeFloat32(point, reaction.point.x); memory.writeFloat32(memory.offset(point, 4n), reaction.point.y); memory.writeFloat32(memory.offset(point, 8n), reaction.point.z);
-            this.call("die", [guestPointer(inflictor), guestPointer(attacker), guestInt(reaction.damage), guestPointer(point), guestPointer(mod)]);
+            this.call("die", [guestPointer(inflictor), guestPointer(attacker), guestInt(reaction.damage), guestPointer(point), mod]);
           } finally { memory.unmap(point, 12); }
         });
       },
@@ -174,10 +171,13 @@ export class RereleaseSourceEdict {
     const address = this.module.memory.readPointer(this.at(`${name}.value`));
     if (address === null) return { kind: "void" };
     const P = { kind: "scalar", storage: "pointer" } satisfies import("../../../contracts/execution.ts").GuestValueLayout;
-    const I = { kind: "scalar", storage: "int32" } satisfies import("../../../contracts/execution.ts").GuestValueLayout;
-    const F = { kind: "scalar", storage: "float32" } satisfies import("../../../contracts/execution.ts").GuestValueLayout;
     const B = { kind: "scalar", storage: "uint8" } satisfies import("../../../contracts/execution.ts").GuestValueLayout;
-    const parameters = name === "touch" ? [P, P, P, B] : name === "use" ? [P, P, P] : name === "pain" ? [P, P, F, I, P] : name === "die" ? [P, P, P, I, P, P] : [P];
+    if (name === "pain" || name === "die") {
+      const operation = name === "pain" ? "pain" : "death", call = this.module.requireWorldProfile().calls[operation];
+      return this.module.invoke(address, nativeCombatSignature(call, operation, rereleaseAbi),
+        lowerNativeCombatArguments(call, operation, [guestPointer(this.raw.address), ...arguments_], this.module.memory, this.module.options.imageBase ?? null), this.raw, other);
+    }
+    const parameters = name === "touch" ? [P, P, P, B] : name === "use" ? [P, P, P] : [P];
     return this.module.invoke(address, signature(parameters), [guestPointer(this.raw.address), ...arguments_], this.raw, other);
   }
 }

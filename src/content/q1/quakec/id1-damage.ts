@@ -105,7 +105,7 @@ export class Id1DamageBinding {
       if (!request.target.equals(captured.target) || Math.fround(request.amount) !== captured.amount || !sameReference(request.attack.attacker, captured.attacker, sourceCall.attacker)
         || !sameReference(request.attack.inflictor, captured.inflictor, sourceCall.inflictor)) throw new QcProgramError("id1 damage provenance changed source arguments");
       let executed = false;
-      const outcome = authority.runSourceDamage(request, (observer, effective) => {
+      const outcome = authority.apply(request, composed => authority.runSourceDamage(composed, (observer, effective) => {
         if (projection?.admit?.(effective) === false || !source.actors.isLive(effective.target)) return { appliedDamage: 0, reaction: "none" };
         if (authority.damageOperation.active && (!isDeepStrictEqual(
           { knockback: request.knockback, direction: request.direction, point: request.point, normal: request.normal, delivery: request.delivery,
@@ -138,7 +138,7 @@ export class Id1DamageBinding {
           return frame.result;
         }
         finally { this.active.pop(); }
-      });
+      }));
       projection?.completed?.(request, outcome);
       if (!executed) execute.skip([0, 0, 0]);
       return undefined;

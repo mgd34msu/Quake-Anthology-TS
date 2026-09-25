@@ -9,9 +9,9 @@ import type { Q2AttackCheckpoint } from "../../../content/q2/foundation/checkpoi
 import { canonicalCauseFromNative } from "../../../content/q2/missionpacks/damage.ts";
 import { captureRequest } from "../../../world/gameplay/authority.ts";
 import { X86AbiAdapter } from "../../../guest/abi/adapter.ts";
-import { integer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
+import { integer, pointer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import { rereleaseAbi } from "./api.ts";
-import { rereleaseDamageSignature } from "./native-entries.ts";
+import { nativeCombatSignature, readNativeCombatField, readNativeCombatArguments } from "../native-combat-call.ts";
 import { RereleaseSourceEdict } from "./source-state.ts";
 import type { RereleaseQ2GuestHost } from "./host.ts";
 import type { RereleaseForeignDamageServices } from "./foreign-actors.ts";
@@ -42,9 +42,11 @@ export class RereleaseDeferredDamage {
     readonly currentRequest: (actor: ActorId) => DamageRequest | null, readonly intercepted: () => boolean) {
     const { callbacks, cpu } = host.module.options.runner.options, adapter = new X86AbiAdapter(rereleaseAbi);
     const entries = host.options.nativeEntries; if (entries === undefined) throw new Error("Missing declared native entries");
+    const calls = host.module.requireWorldProfile().calls;
+    const damageSignature = nativeCombatSignature(calls.damage, "damage", rereleaseAbi), processSignature = nativeCombatSignature(calls.processPain, "deferred-reaction", rereleaseAbi);
     this.#removeEntry = callbacks.observeEntry(entries.damage, () => {
       if (intercepted()) return;
-      const args = adapter.arguments(cpu, rereleaseDamageSignature), stack = cpu.state.registers.read("rsp", 64);
+      const args = readNativeCombatArguments(calls.damage, "damage", adapter.arguments(cpu, damageSignature), 8), stack = cpu.state.registers.read("rsp", 64);
       while (this.#calls.length > 0 && (this.#calls.at(-1)?.stack ?? 0n) <= stack) this.#calls.pop();
       const view = host.module.entities().fromPointer(requiredPointer(args, 0));
       const source = new RereleaseSourceEdict(view, host.module);
@@ -55,7 +57,7 @@ export class RereleaseDeferredDamage {
       this.#calls.push({ stack, request: captureRequest(request) });
     });
     this.#removePain = callbacks.observeEntry(entries.processPain, () => {
-      const address = host.module.memory.pointer(cpu.state.registers.read("rcx", 64));
+      const address = pointer([readNativeCombatField(cpu, calls.processPain, processSignature, "target")], 0);
       if (address === null) return;
       const view = host.module.entities().fromPointer(address), actor = host.actor(view);
       const entry = actor === null ? undefined : this.#tracked.get(actor.id);

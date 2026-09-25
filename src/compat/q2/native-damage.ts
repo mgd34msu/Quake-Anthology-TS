@@ -1,7 +1,7 @@
 import type { DamageRequest } from "../../contracts/gameplay.ts";
 import type { ArmorDamageFlags } from "../../contracts/gameplay.ts";
 import { attackDamageFlags } from "../../world/gameplay/armor.ts";
-import { nativeCauseFromCanonical } from "../../content/q2/missionpacks/damage.ts";
+import { canonicalCauseFromNative, nativeCauseFromCanonical } from "../../content/q2/missionpacks/damage.ts";
 import type { Q2NativeCauseProfile } from "../../content/q2/missionpacks/damage.ts";
 
 export class RemovedNativeDamage extends Error {
@@ -19,7 +19,10 @@ export function q2NativeDamageArguments(request: DamageRequest, profile: Q2Nativ
   const cause = request.attack.cause, flags = attackDamageFlags(request);
   const damageFlags = cause.kind === "q2" ? cause.damageFlags : (request.delivery === "radius" ? 1 : 0)
     | (flags.noArmor ? 2 : 0) | (flags.energy ? 4 : 0) | (flags.noKnockback ? 8 : 0) | (flags.noProtection ? 32 : 0);
-  const native = cause.kind === "q2" ? nativeCauseFromCanonical(profile, cause.meansOfDeath) : null;
+  const captured = cause.kind === "q2" ? cause.native : undefined;
+  const sameSource = captured?.edition === profile.edition && (profile.edition !== "classic" || captured.edition === "classic" && captured.game === profile.game);
+  const native = cause.kind === "q2" ? sameSource && canonicalCauseFromNative(captured) === cause.meansOfDeath
+    ? captured : nativeCauseFromCanonical(profile, cause.meansOfDeath) : null;
   // MOD_UNKNOWN is the authored fallback for attacks absent from this module's obituary roster.
   return { damageFlags, native: native ?? nativeCauseFromCanonical(profile, 0) };
 }

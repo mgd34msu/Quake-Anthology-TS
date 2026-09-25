@@ -227,3 +227,45 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") 
     frames.mockRestore(); connects.mockRestore(); initializations.mockRestore(); saves.mockRestore(); reads.mockRestore();
   } finally { current?.world.discard(); await mounts.close(); rmSync(directory, { recursive: true, force: true }); }
 });
+
+import { xatrixCombatProfile } from "../../../../src/compat/q2/classic/combat-profile.ts";
+import { nativeCombatSignature } from "../../../../src/compat/q2/native-combat-call.ts";
+import { CLASSIC_Q2_ABI } from "../../../../src/compat/q2/classic/layout.ts";
+
+test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") || !existsSync(pak))("actual Xatrix declared combat calls retain original armor stores and pain observation", async () => {
+  const archive = await openArchive(pak), geometry = decodeQ2Map(await archive.readEntry(required(archive.findEntries("maps/base1.bsp")[0])), "base1"); await archive.close();
+  const identity = createMountIdentity("mount:test:native-damage", "q2:classic:xatrix:installed", 1);
+  using mounts = await openMountPlan({ id: "mount-plan:test:native-damage", mounts: [{ kind: "loose", identity, rootPath: "/home/buzzkill/Projects/qfiles/q2/xatrix" }], defaultOrder: [identity.id], prefixOrders: [] });
+  const artifact = required(await mounts.open("gamex86.dll"));
+  const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:classic-native", content: identity.content }, role: "server-game", api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
+  const running = await candidate(prepared, geometry);
+  try {
+    const origin = required(parseEntities(geometry.entities).find(entity => entity.get("classname") === "info_player_start")).get("origin") ?? "0 0 128";
+    await running.world.initLoading(async () => { await Bun.sleep(0); });
+    await running.world.spawnLoading("base1", `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${origin}" }`, async () => { await Bun.sleep(0); }, "");
+    expect(running.world.connect(1, "\\name\\Combat test\\skin\\male/grunt\\ip\\127.0.0.1").allowed).toBe(true); running.world.begin(1);
+    const source = running.world.source, host = source.host, memory = source.memory, actor = required(running.world.actor(1)), engine = host.options.services.engine;
+    running.cvars.set("skill", "1", true); host.cvars.refresh();
+    const view = host.edicts.at(1), client = required(memory.readPointer(memory.offset(view.address, 84n)));
+    memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, 3728n), 0);
+    memory.writeInt32(memory.offset(client, 744n), 50);
+    const vectors = memory.allocate({ byteLength: 36, alignment: 4n, label: "original combat comparison" });
+    try { host.invoke(memory.offset(source.imageBase, BigInt(xatrixCombatProfile.entries.damage)), nativeCombatSignature(xatrixCombatProfile.calls.damage, "damage", CLASSIC_Q2_ABI),
+      [view.address, view.address, view.address, vectors, memory.offset(vectors, 12n), memory.offset(vectors, 24n)].map<import("../../../../src/contracts/execution.ts").GuestCallValue>(value => ({ kind: "pointer", value }))
+        .concat([10, 0, 0, 8].map(value => ({ kind: "int32", value } satisfies import("../../../../src/contracts/execution.ts").GuestCallValue))), view); }
+    finally { memory.unmap(vectors, 36); }
+    const originalHealth = memory.readInt32(memory.offset(view.address, 480n)), originalArmor = memory.readInt32(memory.offset(client, 744n));
+    expect(originalHealth).toBeLessThan(100); expect(originalArmor).toBeLessThan(50);
+    memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, 744n), 50);
+    const vector = { x: 0, y: 0, z: 0 };
+    const outcome = engine.combat.apply({ target: actor, amount: 10, knockback: 0, direction: vector, point: vector, normal: vector, delivery: "direct",
+      attack: { sequence: 1, time: { kind: "milliseconds", value: 100 }, attacker: actor, inflictor: actor, weapon: "q2:weapon_rocketlauncher", weaponProvider: source.memory.module.id,
+        combatProvider: source.memory.module.id, inventoryProvider: source.memory.module.id, movementProvider: source.memory.module.id,
+        cause: { kind: "q2", meansOfDeath: 8, damageFlags: 0, native: { edition: "classic", game: "xatrix", value: 8 } } } });
+    expect(outcome.kind).toBe("committed");
+    if (outcome.kind !== "committed") throw new Error("Original damage did not commit");
+    expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(originalHealth);
+    expect(memory.readInt32(memory.offset(client, 744n))).toBe(originalArmor);
+    expect(outcome.decision.appliedDamage).toBe(100 - originalHealth); expect(outcome.decision.reaction).toBe("pain");
+  } finally { running.world.close(); running.actors.close(); }
+}, 120000);

@@ -1,3 +1,4 @@
+import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { resolveItemIcon } from "../../content/item-icon.ts";
 import { sourceItemActionNames } from "../../contracts/source-items.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
@@ -94,7 +95,7 @@ export function validateQvmModItems(items: Declaration, declaration: QvmModCallb
   if (items.weapons !== undefined) {
     const stage = items.weapons.stage; validateQvmWeaponStage(stage, image);
     const pointer = (source: QvmModInputPointer): void => {
-      if (source.kind === "argument" ? !Number.isInteger(source.index) || source.index < 0 || source.index > 9
+      if (source.kind === "argument" ? !Number.isInteger(source.index) || source.index < 0 || source.index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS
         : !Number.isInteger(source.address) || source.address < 0 || source.address % 4 !== 0 || source.address + 4 > image.initializedData.length + image.bssLength)
         throw new Error("QVM weapon pointer exceeds its original call ABI");
       for (const value of [...source.indirections, source.offset]) if (!Number.isSafeInteger(value) || value < 0 || value % 4 !== 0)

@@ -1,6 +1,9 @@
+import { stockNativeCombatCall, validateNativeCombatCall, type NativeCombatCall } from "../native-combat-call.ts";
+import { CLASSIC_Q2_ABI } from "./layout.ts";
 import type { ContentDigest } from "../../../contracts/content.ts";
 
 export interface ClassicCombatProfile {
+  readonly calls: { readonly pain: NativeCombatCall; readonly death: NativeCombatCall; readonly damage: NativeCombatCall; readonly regularArmor: NativeCombatCall; readonly powerArmor: NativeCombatCall };
   readonly digest: ContentDigest;
   readonly game: "base" | "xatrix" | "rogue" | "ctf";
   readonly entityBytes: number;
@@ -19,6 +22,7 @@ export interface ClassicCombatProfile {
 /** Original Xatrix DLL. g_local.h i686 layouts and each used entry/store verified against this PE.
  * ClientThink RVA32ad6 writes private v_angle0xe44 before separate public ps.viewangles stores. */
 export const xatrixCombatProfile: ClassicCombatProfile = {
+  calls: { pain: stockNativeCombatCall("pain", CLASSIC_Q2_ABI), death: stockNativeCombatCall("death", CLASSIC_Q2_ABI), damage: stockNativeCombatCall("damage"), regularArmor: stockNativeCombatCall("regular-armor"), powerArmor: stockNativeCombatCall("power-armor") },
   digest: "sha256:8187df3fd5b4d435d8227434d3351aad2b47e546236403e52adcd4d275810c45", game: "xatrix", entityBytes: 896,
   fields: { health: 480, damageable: 512, flags: 264, mass: 400, velocity: 376, pain: 452, die: 456 },
   client: { inventory: 740, inventoryCount: 256, maxGrenades: 1776, invincibleFrame: 3728, userinfo: 188, userinfoBytes: 512, viewAngles: 3652 },
@@ -30,6 +34,11 @@ export const xatrixCombatProfile: ClassicCombatProfile = {
 };
 
 export function validateClassicCombatProfile(profile: ClassicCombatProfile): void {
+  validateNativeCombatCall(profile.calls.pain, "pain", CLASSIC_Q2_ABI);
+  validateNativeCombatCall(profile.calls.death, "death", CLASSIC_Q2_ABI);
+  validateNativeCombatCall(profile.calls.damage, "damage", CLASSIC_Q2_ABI);
+  validateNativeCombatCall(profile.calls.regularArmor, "regular-armor", CLASSIC_Q2_ABI);
+  validateNativeCombatCall(profile.calls.powerArmor, "power-armor", CLASSIC_Q2_ABI);
   const scalar = (value: number, length = 4): void => {
     if (!Number.isSafeInteger(value) || value < 0 || value + length > 0x100000000) throw new Error("Classic combat source field exceeds its address range");
   };

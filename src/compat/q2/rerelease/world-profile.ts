@@ -1,3 +1,5 @@
+import { stockNativeCombatCall, validateNativeCombatCall, readNativeCombatCall, type NativeCombatCall } from "../native-combat-call.ts";
+import { rereleaseAbi } from "./api.ts";
 import type { ContentDigest } from "../../../contracts/content.ts";
 import type { GuestLayout } from "../../../contracts/execution.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
@@ -11,6 +13,7 @@ import { retailRereleaseClientProfile, type RereleaseClientProfile } from "./cli
 export type RereleaseWorldLocation = { readonly kind: "register"; readonly register: NativeModRegionRegister; readonly storage: "pointer" | "int32" | "uint32" }
   | { readonly kind: "stack"; readonly offset: number; readonly storage: "pointer" | "int32" | "uint32" };
 export interface RereleasePrimaryWorldProfile {
+  readonly calls: { readonly pain: NativeCombatCall; readonly death: NativeCombatCall; readonly processPain: NativeCombatCall; readonly damage: NativeCombatCall; readonly powerArmor: NativeCombatCall };
   readonly digest: ContentDigest;
   readonly edict: GuestLayout;
   readonly client: RereleaseClientProfile;
@@ -119,6 +122,7 @@ const ammoSlots: ReadonlyMap<string, number> = new Map([
 
 
 const retail: RereleasePrimaryWorldProfile = {
+  calls: { pain: stockNativeCombatCall("pain", rereleaseAbi), death: stockNativeCombatCall("death", rereleaseAbi), processPain: stockNativeCombatCall("deferred-reaction", rereleaseAbi), damage: stockNativeCombatCall("damage", rereleaseAbi), powerArmor: stockNativeCombatCall("power-armor", rereleaseAbi) },
   digest: "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd",
   edict: { ...privateEdictPrefixLayout, byteLength: 3688 }, client: retailRereleaseClientProfile,
   entries: { spawn: 0x964b0, free: 0x96600, damage: 0x5cae0, powerArmor: 0x5c100, processPain: 0x76e20, time: 0x241b28, regularArmor: { entry: 0x5d022, join: 0x5d154 } },
@@ -148,7 +152,9 @@ function location(reader: SaveReader): RereleaseWorldLocation {
 export function readRereleasePrimaryWorldProfile(reader: SaveReader, digest: ContentDigest): RereleasePrimaryWorldProfile {
   const client = reader.field("client"), entries = reader.field("entries"), regular = reader.field("regularArmor"), monster = reader.field("monster"), armor = reader.field("armor"), flags = reader.field("flags"), movement = reader.field("movement");
   const rva = (value: SaveReader): number => bounded(value, 1, 0xffffffff);
-  const profile: RereleasePrimaryWorldProfile = { digest, edict: readLayout(reader.field("edict")),
+  const calls = reader.field("calls");
+  const profile: RereleasePrimaryWorldProfile = { calls: { pain: readNativeCombatCall(calls.field("pain"), "pain", rereleaseAbi), death: readNativeCombatCall(calls.field("death"), "death", rereleaseAbi), processPain: readNativeCombatCall(calls.field("processPain"), "deferred-reaction", rereleaseAbi), damage: readNativeCombatCall(calls.field("damage"), "damage", rereleaseAbi),
+    powerArmor: readNativeCombatCall(calls.field("powerArmor"), "power-armor", rereleaseAbi) }, digest, edict: readLayout(reader.field("edict")),
     client: { authority: { kind: "artifact", digest }, layout: readLayout(client.field("layout")), inventoryCount: bounded(client.field("inventoryCount"), 1, 65536), ammoCount: bounded(client.field("ammoCount"), 1, 65536) },
     entries: { spawn: rva(entries.field("spawn")), free: rva(entries.field("free")), damage: rva(entries.field("damage")), powerArmor: rva(entries.field("powerArmor")), processPain: rva(entries.field("processPain")), time: rva(entries.field("time")), regularArmor: { entry: rva(entries.field("regularArmor").field("entry")), join: rva(entries.field("regularArmor").field("join")) } },
     regularArmor: { target: location(regular.field("target")), amount: location(regular.field("amount")), point: location(regular.field("point")), normal: location(regular.field("normal")), flags: location(regular.field("flags")), result: location(regular.field("result")),
@@ -165,6 +171,11 @@ export function readRereleasePrimaryWorldProfile(reader: SaveReader, digest: Con
 }
 
 export function validateRereleasePrimaryWorldProfile(profile: RereleasePrimaryWorldProfile, digest: ContentDigest): void {
+  validateNativeCombatCall(profile.calls.pain, "pain", rereleaseAbi);
+  validateNativeCombatCall(profile.calls.death, "death", rereleaseAbi);
+  validateNativeCombatCall(profile.calls.processPain, "deferred-reaction", rereleaseAbi);
+  validateNativeCombatCall(profile.calls.damage, "damage", rereleaseAbi);
+  validateNativeCombatCall(profile.calls.powerArmor, "power-armor", rereleaseAbi);
   if (profile.digest !== digest || profile.client.authority.kind !== "artifact" || profile.client.authority.digest !== digest) throw new Error("Rerelease source world profile belongs to another artifact");
   const range = (value: number, min: number, max: number): void => {
     if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error("Source world metadata is outside its declared range");

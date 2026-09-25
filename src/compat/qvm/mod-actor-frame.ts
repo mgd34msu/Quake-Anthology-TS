@@ -1,3 +1,4 @@
+import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import type { QvmModActorFrame as Declaration } from "../../contracts/qvm-mod-actor-frame.ts";
 import type { QvmModActorRecord } from "../../contracts/qvm-mod-callbacks.ts";
 import { QvmOpcode, type QvmImage } from "./image.ts";
@@ -42,7 +43,7 @@ export function validateQvmModActorFrame(definition: Declaration, image: QvmImag
       throw new Error("QVM actor frame filter differs from its original local entity/in-use predicate");
   }
   const clock = definition.clock, argument = definition.call.arguments[clock.argument], address = image.instructions[clock.store - 3], local = image.instructions[clock.store - 2];
-  if (!Number.isInteger(clock.argument) || clock.argument < 0 || clock.argument > 9 || argument?.kind !== "time" || argument.input !== "time"
+  if (!Number.isInteger(clock.argument) || clock.argument < 0 || clock.argument >= QVM_MAX_PRIVATE_ARGUMENT_WORDS || argument?.kind !== "time" || argument.input !== "time"
     || argument.units !== "milliseconds" || argument.encoding !== "int32" || !Number.isInteger(clock.address) || clock.address < 0 || clock.address % 4 !== 0
     || clock.address + 4 > image.initializedData.length + image.bssLength || clock.store <= entry || clock.store >= end
     || address?.opcode !== QvmOpcode.OP_CONST || address.operand !== clock.address || local?.opcode !== QvmOpcode.OP_LOCAL || local.operand !== enter.operand + 8 + clock.argument * 4

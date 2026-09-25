@@ -1,7 +1,7 @@
 import type { MountedContent } from "../../content/mounts/index.ts";
 import { q3EquipmentPresentationProfile, type QvmEquipmentPresentationProfile } from "../../content/q3/equipment/cgame-weapon-hud.ts";
 import type { QvmModuleOptions } from "./module.ts";
-import { QvmOpcode } from "./image.ts";
+import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { qualifyQvmRegion } from "./regions.ts";
 import { readQvmCompatibilityDeclaration } from "./compatibility.ts";
 import type { SaveReader } from "../../persistence/value.ts";
@@ -21,7 +21,7 @@ export async function readQvmEquipmentPresentation(artifact: QvmModuleOptions["a
       return value.fail("visibility decision is outside its original function");
     return pc;
   };
-  const argument = (value: SaveReader): number => { const index = value.integer(0); if (index > 9) return value.fail("source argument exceeds the public invocation extent"); return index; };
+  const argument = (value: SaveReader): number => { const index = value.integer(0); if (index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) return value.fail("source argument exceeds the private invocation extent"); return index; };
   const word = (value: SaveReader, bytes: number): number => { const offset = value.integer(0); if (offset % 4 !== 0 || offset + 4 > bytes) return value.fail("source word exceeds its record or is unaligned"); return offset; };
   const integer = (value: SaveReader): number => { const result = value.integer(-0x80000000); if (result > 0x7fffffff) return value.fail("expected original int32"); return result; };
   const view = reader.field("view"), viewEntry = entry(view.field("entry")), warning = reader.field("warning"), states = warning.field("states"), held = reader.field("held");

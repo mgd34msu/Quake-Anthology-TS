@@ -26,7 +26,7 @@ import { float32ToBits, nativeAtoi, Q3_BINARY32_PROFILE } from "../../core/numer
 import { createBoxModel, createCapsuleModel } from "../../world/collision/q3/model.ts";
 import { encodeCheckpointValue, decodeCheckpointValue, SaveReader } from "../../persistence/value.ts";
 import { readSavedActor, savedActorId } from "../../persistence/save-image.ts";
-import { QvmOpcode } from "./image.ts";
+import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { QvmModule, qvmApi } from "./module.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import { QvmGameExport, QvmGameImport } from "./abi.ts";
@@ -130,7 +130,7 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
     if (value.value.kind === "float" && (value.kind === "int32" || value.kind === "float32")) scalar(value.value.value, value.kind);
   };
   const checkCall = (call: QvmModSourceCall, available: ReadonlySet<ModCallbackInput>): void => {
-    if (artifact.image.instructions[call.entry]?.opcode !== QvmOpcode.OP_ENTER || call.arguments.length > 10) throw new Error("QVM mod callback requires a source function entry and at most ten argument words");
+    if (artifact.image.instructions[call.entry]?.opcode !== QvmOpcode.OP_ENTER || call.arguments.length > QVM_MAX_PRIVATE_ARGUMENT_WORDS) throw new Error("QVM mod callback requires a source function entry and bounded OP_ARG arguments");
     const globals = new Set<number>();
     for (const value of call.arguments) checkValue(value, available);
     for (const global of call.globals) {
@@ -157,7 +157,7 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
     const entity = declaration.entityRecord === null ? undefined : records.get(declaration.entityRecord);
     if (entity === undefined || entity.stride < qvmSharedEntityBytes(declaration.abiProfile)
       || lifecycle.inuse < qvmSharedEntityBytes(declaration.abiProfile) || lifecycle.inuse % 4 !== 0 || lifecycle.inuse + 4 > entity.stride
-      || !Number.isSafeInteger(lifecycle.eventEntityType) || lifecycle.eventEntityType < 0 || lifecycle.release.argument > 9 || lifecycle.allocate === lifecycle.release.entry
+      || !Number.isSafeInteger(lifecycle.eventEntityType) || lifecycle.eventEntityType < 0 || lifecycle.release.argument >= QVM_MAX_PRIVATE_ARGUMENT_WORDS || lifecycle.allocate === lifecycle.release.entry
       || artifact.image.instructions[lifecycle.allocate]?.opcode !== QvmOpcode.OP_ENTER
       || artifact.image.instructions[lifecycle.release.entry]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Invalid QVM source actor lifecycle");
     if (lifecycle.update !== null) checkCall(lifecycle.update, new Set(["self", "time", "elapsed"]));

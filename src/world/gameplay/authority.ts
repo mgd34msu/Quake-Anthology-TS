@@ -480,9 +480,18 @@ export class GameplayAuthority implements DamageAuthority {
     return undefined;
   }
 
-  apply(input: DamageRequest): DamageOutcome {
+  apply(input: DamageRequest, sourceDamage?: (request: DamageRequest) => DamageOutcome): DamageOutcome {
+    const target = sourceDamage === undefined ? null : this.actors.resolveOwned(input.target);
+    const binding = target === null ? null : this.binding(target), original = binding?.sourceDamage;
+    const canonical = (request: DamageRequest): DamageOutcome => {
+      if (sourceDamage !== undefined && target !== null && binding !== null) {
+        const current = this.actors.resolveOwned(request.target);
+        if (current === target && this.binding(current) === binding && binding.sourceDamage === original) return sourceDamage(request);
+      }
+      return this.applyCanonical(request);
+    };
     this.activeHits++;
-    try { return this.damageOperation.active ? this.composeDamage(input, request => this.applyCanonical(request)) : this.applyCanonical(input); }
+    try { return this.damageOperation.active && !this.dispatchedDamage.has(input) ? this.composeDamage(input, canonical) : canonical(input); }
     finally { this.activeHits--; }
   }
 

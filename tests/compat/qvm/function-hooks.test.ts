@@ -1,3 +1,4 @@
+import { float32ToBits } from "../../../src/core/numeric.ts";
 import { QvmGame } from "../../../src/compat/qvm/game.ts";
 import { QvmCombatBindings } from "../../../src/compat/qvm/game-combat-binding.ts";
 import { readQvmPrimaryCombat } from "../../../src/compat/qvm/primary-player-profile.ts";
@@ -695,43 +696,80 @@ test("source evaluations reject frames entering data and accept an explicitly de
 });
 
 
-test("declared primary combat maps private traits and preserves opaque source flags through damage continuation", () => {
+test("declared primary combat maps private traits and reordered extended calls without losing source arguments", () => {
   const operations: Operation[] = [[QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 16]];
+  const pain = operations.length;
+  operations.push([QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 1084], [QvmOpcode.OP_LOCAL, 28], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 16]);
+  const checkArmor = operations.length;
+  operations.push([QvmOpcode.OP_ENTER, 16]);
+  for (const [argument, address] of [[1, 1040], [3, 1044], [4, 1048], [0, 1072], [2, 1076], [5, 1080]]) {
+    if (argument === undefined || address === undefined) throw new Error("Missing authored argument probe");
+    operations.push([QvmOpcode.OP_CONST, address], [QvmOpcode.OP_LOCAL, 24 + argument * 4], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4]);
+  }
+  operations.push([QvmOpcode.OP_CONST, 2], [QvmOpcode.OP_LEAVE, 16]);
   const damage = operations.length;
-  operations.push([QvmOpcode.OP_ENTER, 32],
-    [QvmOpcode.OP_CONST, 1024], [QvmOpcode.OP_LOCAL, 64], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4],
-    [QvmOpcode.OP_LOCAL, 40], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 604], [QvmOpcode.OP_ADD],
-    [QvmOpcode.OP_LOCAL, 40], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 604], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LOAD4],
-    [QvmOpcode.OP_LOCAL, 60], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_SUB], [QvmOpcode.OP_STORE4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 32]);
+  operations.push([QvmOpcode.OP_ENTER, 48]);
+  for (const [argument, address] of [[3, 1024], [5, 1052], [8, 1056], [1, 1064], [4, 1068], [2, 1088], [6, 1092]]) {
+    if (argument === undefined || address === undefined) throw new Error("Missing authored argument probe");
+    operations.push([QvmOpcode.OP_CONST, address], [QvmOpcode.OP_LOCAL, 56 + argument * 4], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4]);
+  }
+  operations.push([QvmOpcode.OP_LOCAL, 32],
+    [QvmOpcode.OP_CONST, 55], [QvmOpcode.OP_ARG, 8],
+    [QvmOpcode.OP_LOCAL, 100], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 12],
+    [QvmOpcode.OP_CONST, float32ToBits(3.5) | 0], [QvmOpcode.OP_ARG, 16],
+    [QvmOpcode.OP_LOCAL, 84], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 20],
+    [QvmOpcode.OP_LOCAL, 68], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 24],
+    [QvmOpcode.OP_CONST, 1344], [QvmOpcode.OP_ARG, 28],
+    [QvmOpcode.OP_CONST, checkArmor], [QvmOpcode.OP_CALL], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, 1060], [QvmOpcode.OP_LOCAL, 12], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_LOCAL, 84], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 604], [QvmOpcode.OP_ADD],
+    [QvmOpcode.OP_LOCAL, 84], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 604], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LOAD4],
+    [QvmOpcode.OP_LOCAL, 100], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_LOCAL, 32], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_SUB],
+    [QvmOpcode.OP_SUB], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, 55], [QvmOpcode.OP_ARG, 8],
+    [QvmOpcode.OP_LOCAL, 100], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_LOCAL, 32], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_SUB], [QvmOpcode.OP_ARG, 12],
+    [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_ARG, 16], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_ARG, 20],
+    [QvmOpcode.OP_LOCAL, 84], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 24],
+    [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_ARG, 28], [QvmOpcode.OP_CONST, pain], [QvmOpcode.OP_CALL], [QvmOpcode.OP_POP],
+    [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 48]);
   const source = bytecode(operations, 131073);
   const identity = { id: "test:combat", artifactPath: "vm/qagame.qvm", revision: "test",
     digest: createContentDigest(new Bun.CryptoHasher("sha256").update(source).digest("hex")) } satisfies import("../../../src/contracts/execution.ts").ModuleIdentity;
   const artifact = resolveQvmArtifact({ module: identity, role: "qagame", bytes: source });
   if (artifact.kind !== "bytecode") throw new Error("Missing authored original combat bytecode");
   const declared = { entityStride: 1024, clientStride: 1024, fields: { inuse: 600, health: 604, takedamage: 608, parent: 612, client: 616 },
-    callbacks: { allocate: 0, free: 0, damage }, reactions: { flags: 620, pain: 624, die: 628 }, grappleDamageMethod: 23,
-    damageCall: "q3-g-damage-8-check-armor-3", state: { healthStat: 9, team: { persistentStat: 7, values: [{ value: 8, team: "shared:blue" }] },
+    callbacks: { allocate: 0, free: 0, damage }, reactions: { flags: 620, pain: 624, die: 628, painCall: { arguments: 6, roles: { target: 4, amount: 1 } }, dieCall: { arguments: 5, roles: { target: 0, amount: 3 } } }, grappleDamageMethod: 23,
+    damageCall: { roles: { target: 7, inflictor: 2, attacker: 6, direction: 1, point: 4, amount: 11, flags: 3, method: 0 },
+      extras: [{ index: 5, kind: "float32", value: 1.25 }, { index: 8, kind: "address", value: 1280 }, { index: 9, kind: "int32", value: 11 }, { index: 10, kind: "int32", value: 12 }] }, state: { healthStat: 9, team: { persistentStat: 7, values: [{ value: 8, team: "shared:blue" }] },
       flags: { notarget: 256, invulnerable: 512, noKnockback: 1024 }, mass: { kind: "entity", offset: 632, storage: "float32" } },
     damageFlags: { radius: 32, noArmor: 64, noKnockback: 128, noProtection: 256, noTeamProtection: 512 },
-    armor: { checkArmor: 0, pointsStat: 8, protection: Math.fround(0.66), tiers: null } };
+    armor: { checkArmor, call: { roles: { target: 3, amount: 1, flags: 4 }, extras: [{ index: 0, kind: "int32", value: 17 }, { index: 2, kind: "float32", value: 2.25 }, { index: 5, kind: "address", value: 1280 }] }, pointsStat: 8, protection: Math.fround(0.66), tiers: null } };
   const definition = readQvmPrimaryCombat(new SaveReader(declared), artifact);
   expect(definition.fields.client).toBe(616);
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, fields: { ...declared.fields, client: 512 } }), artifact)).toThrow("overlaps");
-  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: "other" }), artifact)).toThrow();
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, roles: { ...declared.damageCall.roles, target: 11 } } }), artifact)).toThrow("exactly once");
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, extras: [] } }), artifact)).toThrow("exactly once");
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, extras: [...declared.damageCall.extras, ...Array.from({ length: 55 }, () => ({ index: 0, kind: "int32", value: 0 }))] } }), artifact)).toThrow("OP_ARG");
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, armor: { ...declared.armor, call: { ...declared.armor.call, extras: declared.armor.call.extras.map(extra => extra.index === 0 ? { ...extra, value: 0.5 } : extra) } } }), artifact)).toThrow();
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, extras: declared.damageCall.extras.map(extra => extra.index === 5 ? { ...extra, value: 1e100 } : extra) } }), artifact)).toThrow("binary32");
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: { ...declared.damageCall, extras: declared.damageCall.extras.map(extra => extra.index === 8 ? { ...extra, value: 262144 } : extra) } }), artifact)).toThrow("artifact data");
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageFlags: { ...declared.damageFlags, radius: 64 } }), artifact)).toThrow("overlap");
   expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, state: { ...declared.state, team: { ...declared.state.team, values: [{ value: 8, team: "blue" }] } } }), artifact)).toThrow();
-  const game = new QvmGame({ artifact, host: rejectQvmSyscall }); game.data.setClientCount(1); game.data.locate(4096, 1, 1024, 8192, 1024);
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, reactions: { ...declared.reactions, painCall: { arguments: 3, roles: { target: 4, amount: 1 } } } }), artifact)).toThrow("original call");
+  const game = new QvmGame({ artifact, host: rejectQvmSyscall }); game.data.setClientCount(1); game.data.locate(4096, 3, 1024, 8192, 1024);
   const actors = new SessionActorRegistry(createIdentityOwner("declared-combat")), actor = actors.allocate(identity.id, "test:player");
+  const other = actors.allocate(identity.id, "test:target");
   const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
   const outcomes: DamageOutcome[] = [];
   const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined,
     confirmed: result => { outcomes.push(result); return undefined; } });
   const view = game.data.entityBytes(0); view.setInt32(600, 1, true); view.setInt32(604, 100, true); view.setInt32(608, 1, true); view.setFloat32(632, 275.5, true);
-  view.setInt32(620, 256 | 512 | 1024, true);
+  view.setInt32(620, 256 | 512 | 1024, true); view.setInt32(624, pain, true);
   const player = game.data.copyPlayerState(0), persistent = [...player.persistent], stats = [...player.stats]; persistent[7] = 8; persistent[3] = 2; stats[0] = 123;
   game.data.writePlayerState(0, { ...player, persistent, stats });
-  const binding = new QvmCombatBindings({ game, artifact, definition, bodies, combat, slot: id => id.equals(actor.id) ? 0 : null,
-    source: { actors, actor: slot => slot === 0 ? actor : null, provenance: () => ({ sequence: 1, time: { kind: "milliseconds", value: 0 }, weapon: null,
+  const binding = new QvmCombatBindings({ game, artifact, definition, bodies, combat, slot: id => id.equals(actor.id) ? 0 : id.equals(other.id) ? 1 : null,
+    source: { actors, actor: slot => slot === 0 ? actor : slot === 1 ? other : null, provenance: () => ({ sequence: 1, time: { kind: "milliseconds", value: 0 }, weapon: null,
       weaponProvider: identity.id, combatProvider: identity.id, inventoryProvider: identity.id, movementProvider: identity.id }) } });
   try {
     binding.admit(actor); expect(binding.notarget(actor.id)).toBe(true);
@@ -740,10 +778,64 @@ test("declared primary combat maps private traits and preserves opaque source fl
     expect(combat.read(actor.id)).toMatchObject({ invulnerable: false, noKnockback: false });
     combat.setHealth(actor, 75); expect(game.data.copyPlayerState(0).stats[9]).toBe(75); expect(game.data.copyPlayerState(0).stats[0]).toBe(123);
     combat.damageOperation.register({ provider: "test:mod", id: "test:half", kind: "transform", order: 0, transform: request => ({ ...request, amount: request.amount / 2 }) });
-    game.module.call([4096, 0, 0, 0, 0, 20, 64 | 8192, 0], damage);
-    expect(view.getInt32(604, true)).toBe(65); expect(game.module.memory.view(1024, 4).getInt32(0, true)).toBe(64 | 8192);
+    const powerInputs: number[] = [];
+    const removePower = combat.bindProtection(actor, { channel: "powered", owner: "test:power", rule: "test:absorb", admission: { kind: "claim" }, inventoryItems: [],
+      read: () => ({ kind: "shield", cells: 10 }), validateWrite: () => undefined, write: () => undefined,
+      absorb: input => { powerInputs.push(input.amount); return { saved: 3 }; } });
+    game.data.entityBytes(2).setInt32(600, 1, true);
+    const sourceWords = [23, 1296, 6144, 32 | 8192, 0, float32ToBits(9.5) | 0, 6144, 4096, 1328, 101, 102, 20];
+    game.module.call(sourceWords, damage);
+    expect(view.getInt32(604, true)).toBe(70); expect(game.module.memory.view(1024, 4).getInt32(0, true)).toBe(32 | 8192);
+    const word = (address: number) => game.module.memory.view(address, 4).getInt32(0, true);
+    expect([word(1052), word(1056), word(1064), word(1068)]).toEqual([float32ToBits(9.5) | 0, 1328, 1296, 0]);
+    expect([word(1088), word(1092)]).toEqual([6144, 6144]);
+    expect([word(1040), word(1044), word(1048), word(1060)]).toEqual([7, 4096, 32 | 8192, 10]);
+    expect([word(1072), word(1076), word(1080)]).toEqual([55, float32ToBits(3.5) | 0, 1344]);
+    expect(powerInputs).toEqual([10]);
     const result = outcomes.at(-1); if (result?.kind !== "committed") throw new Error("Original source damage did not commit");
-    expect(result.decision.request.attack.cause).toEqual({ kind: "q3", meansOfDeath: 0, damageFlags: 2 });
-    expect(result.decision.appliedDamage).toBe(10);
+    expect(result.decision.request.attack.cause).toEqual({ kind: "q3", meansOfDeath: 23, damageFlags: 1 });
+    expect(result.decision.appliedDamage).toBe(5); expect(result.decision.reaction).toBe("pain"); expect(word(1084)).toBe(5);
+    const independent = combat.apply({ ...result.decision.request, amount: 20 });
+    expect(independent.kind).toBe("committed"); expect(view.getInt32(604, true)).toBe(65);
+    expect([word(1052), word(1056)]).toEqual([float32ToBits(1.25) | 0, 1280]);
+    expect(word(1024)).toBe(32); expect(powerInputs).toEqual([10, 10]);
+    removePower();
+    const second = game.data.entityBytes(1); second.setInt32(600, 1, true); second.setInt32(604, 100, true); second.setInt32(608, 1, true); second.setInt32(624, pain, true);
+    binding.admit(other);
+    combat.damageOperation.register({ provider: "test:mod", id: "test:retarget", kind: "transform", order: 1, transform: request => ({ ...request, target: other.id }) });
+    game.module.call(sourceWords, damage);
+    expect(view.getInt32(604, true)).toBe(65); expect(second.getInt32(604, true)).toBe(92);
+    expect([word(1052), word(1056), word(1024)]).toEqual([float32ToBits(1.25) | 0, 1280, 32]);
   } finally { binding.close(); game.retire(); }
 });
+
+for (const semantics of ["interpreted", "compiled"] satisfies readonly import("../../../src/compat/qvm/interpreter.ts").QvmSemantics[]) {
+  test(`${semantics} private calls use the original OP_ARG extent while vmMain retains its public frame`, async () => {
+    const operations: Operation[] = [[QvmOpcode.OP_ENTER, 256]];
+    for (let index = 0; index < 62; index++) operations.push([QvmOpcode.OP_CONST, index + 1], [QvmOpcode.OP_ARG, 8 + index * 4]);
+    const target = operations.length + 3;
+    operations.push([QvmOpcode.OP_CONST, target], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 256],
+      [QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_LOCAL, 16], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_LOCAL, 260], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LEAVE, 8]);
+    const vm = new QvmInterpreter(parseQvm(bytecode(operations)), unexpectedTrap, undefined, null, semantics);
+    let observed = 0;
+    vm.observeFunction(target, call => { observed++; expect(call.argument(61)).toBe(62); expect(() => call.argument(62)).toThrow("outside source call"); return undefined; });
+    vm.bindFunction(target, call => {
+      expect(call.words.byteLength).toBe(248); expect(() => call.words.getInt32(248, true)).toThrow();
+      expect(call.invoke(Array.from({ length: 62 }, () => 2), target)).toBe(4);
+      expect(call.words.getInt32(61 * 4, true)).toBe(62);
+      return call.proceed();
+    });
+    expect(vm.invoke(qvmArguments([]))).toBe(63); expect(observed).toBe(1);
+    expect(await vm.invokeAsync(Array.from({ length: 62 }, (_, index) => index + 1), target)).toBe(63);
+    expect(() => vm.invoke(Array.from({ length: 63 }, () => 0), target)).toThrow("OP_ARG");
+    expect(() => vm.invoke(Array.from({ length: 11 }, () => 0))).toThrow("vmMain");
+    expect(() => qvmArguments(Array.from({ length: 11 }, () => 0))).toThrow("ten argument");
+    expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
+
+    const small = new QvmInterpreter(parseQvm(bytecode([[QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 5], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 16],
+      [QvmOpcode.OP_IGNORE], [QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_LEAVE, 8]])), unexpectedTrap, undefined, null, semantics);
+    small.observeFunction(5, call => { expect(() => call.argument(2)).toThrow("outside source call"); return undefined; });
+    small.bindFunction(5, call => { expect(call.words.byteLength).toBe(8); return call.proceed(); });
+    expect(small.invoke(qvmArguments([]))).toBe(1);
+  });
+}

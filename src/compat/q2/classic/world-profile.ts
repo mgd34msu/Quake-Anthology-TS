@@ -1,3 +1,5 @@
+import { readNativeCombatCall } from "../native-combat-call.ts";
+import { CLASSIC_Q2_ABI } from "./layout.ts";
 import type { ContentDigest } from "../../../contracts/content.ts";
 import type { ItemId } from "../../../contracts/gameplay.ts";
 import { SaveReader, namespaced } from "../../../persistence/value.ts";
@@ -21,7 +23,9 @@ export function classicPrimaryWorldProfile(digest: ContentDigest): ClassicPrimar
 export function readClassicPrimaryWorldProfile(reader: SaveReader, digest: ContentDigest): ClassicPrimaryWorldProfile {
   const fields = reader.field("fields"), client = reader.field("client"), entries = reader.field("entries"), globals = reader.field("globals"), items = reader.field("items"),
     itemFields = reader.field("itemFields"), armorInfo = reader.field("armorInfo"), flags = reader.field("flags"), teams = reader.field("teams"), armor = reader.field("armor"), table = reader.field("inventoryTable");
-  const profile: ClassicPrimaryWorldProfile = { digest, game: reader.field("game").choice("base", "xatrix", "rogue", "ctf"), entityBytes: reader.field("entityBytes").integer(1),
+  const calls = reader.field("calls");
+  const profile: ClassicPrimaryWorldProfile = { calls: { pain: readNativeCombatCall(calls.field("pain"), "pain", CLASSIC_Q2_ABI), death: readNativeCombatCall(calls.field("death"), "death", CLASSIC_Q2_ABI), damage: readNativeCombatCall(calls.field("damage"), "damage", CLASSIC_Q2_ABI),
+    regularArmor: readNativeCombatCall(calls.field("regularArmor"), "regular-armor", CLASSIC_Q2_ABI), powerArmor: readNativeCombatCall(calls.field("powerArmor"), "power-armor", CLASSIC_Q2_ABI) }, digest, game: reader.field("game").choice("base", "xatrix", "rogue", "ctf"), entityBytes: reader.field("entityBytes").integer(1),
     fields: { health: offset(fields.field("health")), damageable: offset(fields.field("damageable")), flags: offset(fields.field("flags")), mass: offset(fields.field("mass")), velocity: offset(fields.field("velocity")), pain: offset(fields.field("pain")), die: offset(fields.field("die")) },
     client: { inventory: offset(client.field("inventory")), inventoryCount: client.field("inventoryCount").integer(1), maxGrenades: offset(client.field("maxGrenades")), invincibleFrame: offset(client.field("invincibleFrame")), userinfo: offset(client.field("userinfo")), viewAngles: offset(client.field("viewAngles")), userinfoBytes: client.field("userinfoBytes").integer(1) },
     entries: { damage: offset(entries.field("damage")), powerArmor: offset(entries.field("powerArmor")), regularArmor: offset(entries.field("regularArmor")), spawn: offset(entries.field("spawn")), free: offset(entries.field("free")) },

@@ -2,6 +2,7 @@ import type { ArmorState, DamageRequest } from "../../contracts/gameplay.ts";
 import type { OwnedActor } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { SourceDamageObserver, SourceDamageResult } from "../../world/gameplay/authority.ts";
+import type { QvmReactionCall } from "./game-combat.ts";
 import type { QvmGame } from "./game.ts";
 import type { QvmCancellationScope, QvmFunctionCall } from "./interpreter.ts";
 import type { QvmCommittedWrite, QvmWriteRange } from "./memory.ts";
@@ -18,10 +19,11 @@ export interface QvmDamageFrame {
 interface ScopeOptions {
   readonly game: QvmGame;
   readonly health: number;
+  readonly targetArgument: number;
   readonly pointsStat: number;
   readonly tierStat: number | null;
   readonly modeWords: readonly number[];
-  readonly reactions: { readonly pain: number; readonly die: number };
+  readonly reactions: { readonly pain: number; readonly die: number; readonly painCall: QvmReactionCall; readonly dieCall: QvmReactionCall };
   armor(slot: number): ArmorState;
   live(actor: OwnedActor): boolean;
 }
@@ -52,7 +54,7 @@ export class QvmDamageScopes {
 
   run(call: QvmFunctionCall, actor: OwnedActor, slot: number, request: DamageRequest, observer: SourceDamageObserver): SourceDamageResult {
     const { game } = this.options, entity = game.data.entityBytes(slot);
-    const frame: QvmDamageFrame = { actor, request, call, pointer: call.words.getInt32(0, true), cancellation: call.cancellationScope(), cancelled: null, reacting: false };
+    const frame: QvmDamageFrame = { actor, request, call, pointer: call.words.getInt32(this.options.targetArgument * 4, true), cancellation: call.cancellationScope(), cancelled: null, reacting: false };
     const entityOffset = entity.byteOffset - game.module.memory.bytes.byteOffset;
     const healthRange = { byteOffset: entityOffset + this.options.health, byteLength: 4 };
     const client = slot < game.data.numClients ? game.data.clientBytes(slot) : null;
@@ -104,15 +106,16 @@ export class QvmDamageScopes {
       }));
       for (const reaction of ["pain", "death"] satisfies readonly ("pain" | "death")[]) {
         const offset = reaction === "pain" ? this.options.reactions.pain : this.options.reactions.die;
+        const roles = (reaction === "pain" ? this.options.reactions.painCall : this.options.reactions.dieCall).roles;
         let entry = 0, removeReaction: (() => void) | null = null;
         const refresh = (): undefined => {
           const next = entity.getInt32(offset, true);
           if (next === entry) return undefined;
           removeReaction?.(); removeReaction = null; entry = next;
           if (next !== 0) removeReaction = game.module.observeFunction({ kind: "qvm", module: game.module.profile.module, instructionIndex: next }, reactionCall => {
-            if (entity.getInt32(offset, true) !== next || !current() || reactionCall.argument(0) !== frame.pointer) return undefined;
+            if (entity.getInt32(offset, true) !== next || !current() || reactionCall.argument(roles.target) !== frame.pointer) return undefined;
             frame.reacting = true;
-            result = { reaction, appliedDamage: reactionCall.argument(reaction === "pain" ? 2 : 3) };
+            result = { reaction, appliedDamage: reactionCall.argument(roles.amount) };
             observer.beforeReaction(result);
             if (!this.options.live(actor)) this.cancel(frame, reactionCall);
             return undefined;

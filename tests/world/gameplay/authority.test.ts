@@ -661,3 +661,31 @@ test("source armor admission rejects unsupported power before changing a bound r
   expect(cells).toBe(40); expect(sourceWrites).toBe(0); expect(authority.read(target.id)).toEqual(source);
   actors.close();
 });
+
+
+test("captured source damage continuation stays with its exact actor binding through composition", () => {
+  const actors = new SessionActorRegistry(createIdentityOwner("source-call-continuation")), a = actors.allocate("q2:game", "q2:a"), b = actors.allocate("q2:game", "q2:b");
+  const authority = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined, confirmed: () => undefined });
+  authority.create(a, state()); authority.create(b, state());
+  const calls: string[] = [];
+  const run = (label: string, request: DamageRequest) => { calls.push(label); return authority.runSourceDamage(request, () => ({ appliedDamage: 0, reaction: "none" })); };
+  const source = { sourceDamage: (request: DamageRequest) => run("original", request), read: () => state(), writeHealth: () => undefined, writeArmor: () => undefined };
+  authority.rebind(a, source); authority.rebind(b, { ...source, sourceDamage: request => run("other", request) });
+  let mode: "same" | "nested" | "retarget" | "replace" | "mutate" | "retire" = "same";
+  authority.damageOperation.register({ provider: "test:mod", id: "test:source-transform", order: 0, kind: "transform", transform: input => {
+    if (input.attack.sequence === 99) return input;
+    if (mode === "nested") authority.apply(attack(a.id, b.id, 99));
+    if (mode === "replace") authority.rebind(a, { ...source, sourceDamage: request => run("replacement", request) });
+    if (mode === "mutate") source.sourceDamage = request => run("mutated", request);
+    if (mode === "retire") actors.release(a);
+    return { ...input, target: mode === "retarget" ? b.id : input.target, amount: input.amount * 2 };
+  } });
+  const apply = () => authority.apply(attack(a.id, b.id), request => { expect(request.amount).toBe(80); return run("captured", request); });
+  apply(); expect(calls.splice(0)).toEqual(["captured"]);
+  mode = "nested"; apply(); expect(calls.splice(0)).toEqual(["original", "captured"]);
+  mode = "retarget"; apply(); expect(calls.splice(0)).toEqual(["other"]);
+  mode = "mutate"; apply(); expect(calls.splice(0)).toEqual(["mutated"]);
+  mode = "replace"; apply(); expect(calls.splice(0)).toEqual(["replacement"]);
+  mode = "retire"; expect(apply().kind).toBe("stale-target"); expect(calls).toEqual([]);
+  actors.close();
+});

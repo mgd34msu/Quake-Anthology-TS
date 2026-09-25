@@ -1,13 +1,47 @@
+import { float32ToBits } from "../../core/numeric.ts";
 import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { BodyState } from "../../contracts/world.ts";
 import type { QvmGame } from "./game.ts";
 import type { QvmModuleOptions } from "./module.ts";
-import { QvmOpcode } from "./image.ts";
+import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
+
+export type QvmDamageRole = "target" | "inflictor" | "attacker" | "direction" | "point" | "amount" | "flags" | "method";
+export type QvmArmorRole = "target" | "amount" | "flags";
+export interface QvmCombatCall<Role extends string> {
+  readonly roles: Readonly<Record<Role, number>>;
+  readonly extras: readonly { readonly index: number; readonly kind: "int32" | "float32" | "address"; readonly value: number }[];
+}
+
+export interface QvmReactionCall {
+  readonly arguments: number;
+  readonly roles: { readonly target: number; readonly amount: number };
+}
+
+export function validateQvmCombatPositions(positions: readonly number[], words: number): void {
+  if (!Number.isInteger(words) || words < positions.length || words > QVM_MAX_PRIVATE_ARGUMENT_WORDS) throw new Error("Source combat call exceeds the QVM OP_ARG capacity or omits required arguments");
+  if (new Set(positions).size !== positions.length || positions.some(index => !Number.isInteger(index) || index < 0 || index >= words))
+    throw new Error("Source combat argument positions must cover each declared role exactly once within the original call");
+}
+
+/** Every source argument has one explicit owner; new calls can lower every word. */
+export function validateQvmCombatCall(call: QvmCombatCall<string>, dataBytes: number): void {
+  const positions = [...Object.values(call.roles), ...call.extras.map(extra => extra.index)];
+  validateQvmCombatPositions(positions, positions.length);
+  for (const extra of call.extras) {
+    if (extra.kind === "float32") {
+      if (!Number.isFinite(extra.value) || !Number.isFinite(Math.fround(extra.value))) throw new Error("Source combat extra requires a finite binary32 value");
+    } else if (extra.kind === "address") {
+      if (!Number.isInteger(extra.value) || extra.value < 0 || extra.value >= dataBytes) throw new Error("Source combat extra address is outside its artifact data");
+    } else if (!Number.isInteger(extra.value) || extra.value < -0x80000000 || extra.value > 0x7fffffff)
+      throw new Error("Source combat extra requires a signed integer word");
+  }
+}
 
 export interface QvmGameArmorDefinition {
   readonly checkArmor: number;
+  readonly call: QvmCombatCall<QvmArmorRole>;
   readonly pointsStat: number;
   readonly protection: number;
   readonly tiers: {
@@ -19,6 +53,7 @@ export interface QvmGameArmorDefinition {
 }
 
 export interface QvmGameCombatDefinition {
+  readonly damageCall: QvmCombatCall<QvmDamageRole>;
   readonly module: ModuleIdentity;
   readonly abiProfile: QvmAbiProfile;
   readonly entityStride: number;
@@ -40,6 +75,7 @@ export interface QvmGameDamage {
 /** Declared source fields and callbacks consume damage inside the owning executable. */
 export class QvmGameCombat {
   private readonly scratch: number;
+  private readonly arguments_: readonly number[];
   constructor(readonly game: QvmGame, artifact: QvmModuleOptions["artifact"], readonly definition: QvmGameCombatDefinition) {
     const expected = definition.module, actual = game.module.profile.module;
     if (expected.id !== actual.id || expected.digest !== actual.digest || expected.revision !== actual.revision || expected.artifactPath !== actual.artifactPath
@@ -51,6 +87,11 @@ export class QvmGameCombat {
     for (const entry of [callbacks.allocate, callbacks.free, callbacks.damage]) if (artifact.image.instructions[entry]?.opcode !== QvmOpcode.OP_ENTER)
       throw new Error("Source combat callback is not a function entry");
     const image = artifact.image;
+    const call = definition.damageCall;
+    validateQvmCombatCall(call, image.dataLength + image.literalLength + image.bssLength);
+    const words: number[] = Array.from({ length: Object.keys(call.roles).length + call.extras.length }, () => 0);
+    for (const extra of call.extras) words[extra.index] = extra.kind === "float32" ? float32ToBits(extra.value) | 0 : extra.value;
+    this.arguments_ = words;
     this.scratch = Math.ceil((image.dataLength + image.literalLength + image.bssLength) / 16) * 16;
     if (this.scratch + 24 > image.allocatedDataLength - 65536) throw new Error("Source combat requires scratch outside source data and stack");
   }
@@ -90,7 +131,11 @@ export class QvmGameCombat {
         entity.s.pos = { ...entity.s.pos, base: body.origin, delta: body.velocity };
         inflictor = temporary;
       }
-      invoke([this.pointer(hit.target), inflictor, attacker, this.scratch, this.scratch + 12, hit.amount, hit.flags, hit.method]);
+      const roles = this.definition.damageCall.roles, words = this.arguments_.slice();
+      words[roles.target] = this.pointer(hit.target); words[roles.inflictor] = inflictor; words[roles.attacker] = attacker;
+      words[roles.direction] = this.scratch; words[roles.point] = this.scratch + 12;
+      words[roles.amount] = hit.amount; words[roles.flags] = hit.flags; words[roles.method] = hit.method;
+      invoke(words);
     } finally {
       try { if (temporary !== null) this.game.module.call([temporary], this.definition.callbacks.free); }
       finally { memory.writeBytes(this.scratch, saved); }
