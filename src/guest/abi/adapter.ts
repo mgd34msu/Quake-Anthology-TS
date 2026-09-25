@@ -15,11 +15,19 @@ function stackPointer(cpu: GuestCpu): bigint { return cpu.state.registers.read("
 
 function readLocations(cpu: GuestCpu, locations: readonly AbiLocation[], size: number): Uint8Array {
   const output = new Uint8Array(size);
+  let view: DataView | undefined;
   for (const location of locations) {
     if (location.offset + location.bytes > size) throw new RangeError("ABI part exceeds its value");
     if (location.kind === "integer") {
       const value = cpu.state.registers.read(location.register, registerWidth(cpu));
-      for (let index = 0; index < location.bytes; index++) output[location.offset + index] = Number(value >> BigInt(index * 8) & 255n);
+      view ??= new DataView(output.buffer, output.byteOffset, output.byteLength);
+      switch (location.bytes) {
+        case 8: view.setBigUint64(location.offset, value, true); break;
+        case 4: view.setUint32(location.offset, Number(BigInt.asUintN(32, value)), true); break;
+        case 2: view.setUint16(location.offset, Number(BigInt.asUintN(16, value)), true); break;
+        case 1: view.setUint8(location.offset, Number(BigInt.asUintN(8, value))); break;
+        default: for (let index = 0; index < location.bytes; index++) output[location.offset + index] = Number(value >> BigInt(index * 8) & 255n);
+      }
     } else if (location.kind === "sse") {
       const start = location.register * 16;
       if (start + location.bytes > cpu.state.simd.xmm.length) throw new RangeError("ABI XMM register is unavailable");
@@ -29,12 +37,20 @@ function readLocations(cpu: GuestCpu, locations: readonly AbiLocation[], size: n
   return output;
 }
 function writeLocations(cpu: GuestCpu, locations: readonly AbiLocation[], bytes: Uint8Array): void {
+  let view: DataView | undefined;
   for (const location of locations) {
     const part = bytes.subarray(location.offset, location.offset + location.bytes);
     if (part.length !== location.bytes) throw new RangeError("ABI value is shorter than its assigned location");
     if (location.kind === "integer") {
+      view ??= new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       let raw = 0n;
-      for (const [index, byte] of part.entries()) raw |= BigInt(byte) << BigInt(index * 8);
+      switch (location.bytes) {
+        case 8: raw = view.getBigUint64(location.offset, true); break;
+        case 4: raw = BigInt(view.getUint32(location.offset, true)); break;
+        case 2: raw = BigInt(view.getUint16(location.offset, true)); break;
+        case 1: raw = BigInt(view.getUint8(location.offset)); break;
+        default: for (const [index, byte] of part.entries()) raw |= BigInt(byte) << BigInt(index * 8);
+      }
       cpu.state.registers.write(location.register, registerWidth(cpu), raw);
     } else if (location.kind === "sse") {
       const start = location.register * 16;

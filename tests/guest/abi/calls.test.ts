@@ -78,6 +78,38 @@ test("System V float aggregate returns use XMM0/XMM1 and preserve raw source byt
   expect(adapter.returnValue(cpu, call)).toEqual(value);
 });
 
+test("integer ABI parts preserve narrow, odd and split widths through custom registers", () => {
+  for (let size = 1; size <= 16; size++) {
+    const { cpu, adapter } = fixture(linux64), registers = cpu.state.registers;
+    const widths: number[] = [];
+    const custom: GuestCpu = { ...cpu, state: { ...cpu.state, registers: {
+      architecture: registers.architecture,
+      read(register, width, highByte) {
+        if (register === "rsp") return registers.read(register, width, highByte);
+        widths.push(width);
+        return registers.read(register, width, highByte) + (register === "rdx" || register === "rsi" ? -(1n << 96n) : 1n << 80n);
+      },
+      write(register, width, value, highByte) {
+        if (register !== "rsp") widths.push(width);
+        return registers.write(register, width, value, highByte);
+      },
+      checkpoint: destination => registers.checkpoint(destination),
+      restore: bytes => registers.restore(bytes),
+    } } };
+    const aggregate = record(8, size, [{ name: "bytes", byteOffset: 0, storage: "uint8", count: size }], 1);
+    if (aggregate.kind !== "aggregate") throw new Error("Expected aggregate fixture");
+    const storage = Uint8Array.from({ length: size + 4 }, (_, index) => (index * 37 + 0x81) & 255);
+    const value: GuestCallValue = { kind: "aggregate", layout: aggregate.layout, bytes: storage.subarray(2, size + 2) };
+    const call = signature(linux64, [aggregate], aggregate);
+    enter(custom, adapter, call, [value]);
+    expect(adapter.arguments(custom, call)).toEqual([value]);
+    adapter.leave(custom, call, value);
+    expect(adapter.returnValue(custom, call)).toEqual(value);
+    expect(widths.length).toBeGreaterThan(0);
+    expect(widths.every(width => width === 64)).toBe(true);
+  }
+});
+
 test("System V variadics set AL to the vector-register count while integer register allocation stays independent", () => {
   const { cpu, adapter } = fixture(linux64), call = signature(linux64, [i32], "void", true);
   enter(cpu, adapter, call, [{ kind: "int32", value: 9 }, { kind: "float32", value: 1.5 }, { kind: "uint64", value: 17n }, { kind: "float64", value: -2 }]);
