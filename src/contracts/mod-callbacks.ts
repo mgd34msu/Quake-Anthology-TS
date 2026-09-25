@@ -59,6 +59,14 @@ export interface ModConsoleCommand {
   readonly globals: readonly { readonly name: string; readonly value: ModConsoleValue }[];
 }
 
+export interface ModQcDamageScale {
+  readonly function: string;
+  readonly entry: number;
+  readonly exit: number;
+  readonly damage: number;
+  readonly statements: readonly { readonly opcode: number; readonly a: number; readonly b: number; readonly c: number }[];
+}
+
 export interface ModQcArmorStage {
   readonly function: string;
   readonly entry: number;
@@ -121,7 +129,7 @@ export interface ModCallbackDeclaration {
   /** Explicit console names and argument lowering into original compiled functions. */
   readonly commands?: readonly ModConsoleCommand[];
   /** Declared lowering of canonical damage into the artifact's verified T_Damage ABI. */
-  readonly combat?: { readonly damage: ModSourceCall; readonly armorStage?: ModQcArmorStage; readonly emptyArmor?: ModQcEmptyArmor };
+  readonly combat?: { readonly damage: ModSourceCall; readonly damageScale?: ModQcDamageScale; readonly armorStage?: ModQcArmorStage; readonly emptyArmor?: ModQcEmptyArmor };
   /** Independent protection executes original source armor over its private client storage. */
   readonly protection?: readonly ModQcProtection[];
   readonly pickups?: readonly ModPickupRule<ModSourceCall>[];

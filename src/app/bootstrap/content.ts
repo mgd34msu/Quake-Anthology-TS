@@ -13,7 +13,7 @@ import { basename, dirname, join } from "node:path";
 import { findContentPath } from "../../content/mounts/paths.ts";
 import { userProductDirectory } from "../../content/user-data.ts";
 import { defaultUserContentRoot } from "../../content/user-data.ts";
-import { prepareQuakeCSource, preparedQuakeCWeaponStage, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
+import { prepareQuakeCSource, preparedQuakeCWeaponStage, preparedQuakeCDamageScaling, type PreparedQuakeCSource } from "./simulation/quakec-source.ts";
 import { assertQ3GuestRecipe, prepareQ3Game } from "./simulation/q3/guest-artifact.ts";
 import type { PreparedQ3Game } from "./simulation/q3/guest-artifact.ts";
 import { resolveLaunchResource, prepareLaunchMountPlan } from "../../content/catalog/launch.ts";
@@ -493,8 +493,10 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       using sourceContent = mounts.borrowMountPlan(plan) ?? await openMountPlan(plan);
       prepared = await prepareQuakeCSource(execution, mounts, world.entities, sourceContent);
     } else if (presentationSource?.kind !== "unified" && execution?.kind === "quakec") prepared = await prepareQuakeCSource(execution, mounts, world.entities);
-    if (prepared !== null && recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content)
-      && preparedQuakeCWeaponStage(prepared) === null) throw new Error("Selected arsenal requires a qualified original QuakeC weapon stage");
+    if (prepared !== null && recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content)) {
+      if (preparedQuakeCWeaponStage(prepared) === null) throw new Error("Selected arsenal requires a qualified original QuakeC weapon stage");
+      if (!preparedQuakeCDamageScaling(prepared)) throw new Error("Selected arsenal requires a qualified original QuakeC damage scale");
+    }
     const q3Execution = recipe.execution.find(module => module.kind === "qvm" && module.role === "server-game");
     const q3Prepared = presentationSource?.kind !== "unified" && q3Execution?.kind === "qvm" && q3Execution.role === "server-game" ? await prepareQ3Game(q3Execution, mounts) : null;
     if (q3Prepared !== null && recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content)

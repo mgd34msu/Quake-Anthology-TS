@@ -115,6 +115,16 @@ function replacementSafe(program: QcProgram, source: ModQcArmorStage, end: numbe
   return safeFlow(program, source.exit, end, writes);
 }
 
+/** Scalar-region qualification uses the same opcode access contract as continuation analysis. */
+export function qcStatementAccess(statement: QcStatement): { readonly read: readonly number[]; readonly write: readonly number[] } {
+  return access(statement);
+}
+
+/** Check that skipping qualified private temporary writes cannot affect the source continuation. */
+export function qcRegionPrivateWritesAreDead(program: QcProgram, start: number, end: number, writes: ReadonlySet<number>): boolean {
+  return safeFlow(program, start, end, new Set(writes));
+}
+
 function standaloneSafe(program: QcProgram, source: ModQcArmorStage): boolean {
   const fn = program.functionNamed(source.function), parameters = fn.parameterSizes.reduce((count, size) => count + size, 0);
   const named = new Set(program.globals.flatMap(global => global.name === "" ? [] : words(global.offset, global.type === "vector" ? 3 : 1)));

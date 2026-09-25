@@ -110,6 +110,9 @@ export interface PreparedQuakeCSource {
   readonly resources: ReadonlyMap<string, { readonly resource: ResolvedResourceReference; readonly modelBounds: Bounds | null }>;
 }
 
+export function preparedQuakeCDamageScaling(prepared: PreparedQuakeCSource): boolean {
+  return prepared.combatDeclaration?.damageScale !== undefined || id1ProgramBinding(prepared.program).attribution === "pinned";
+}
 export function preparedQuakeCWeaponStage(prepared: PreparedQuakeCSource): QcWeaponStage | null {
   return prepared.weaponStage === undefined ? qcWeaponStage(prepared.program, prepared.weaponDeclaration) : prepared.weaponStage;
 }
@@ -358,7 +361,8 @@ export class QuakeCSource {
         actor: reference => { const slot = this.entities.slot(reference), actor = this.borrowed.actor(slot) ?? this.slots.at(slot); if (actor === null || !options.actors.isLive(actor.id)) throw new Error("QC damage references a free source actor"); return actor.id; },
         reference: actor => actor === null ? this.entities.reference(0) : this.reference(actor),
         completed: (request, outcome) => { const incoming = this.incomingDamage.at(-1); if (incoming?.request === request) incoming.outcome = outcome; return undefined; },
-      }, prepared.combatDeclaration?.armorStage);
+      }, prepared.combatDeclaration?.armorStage, prepared.combatDeclaration?.damageScale === undefined ? undefined
+        : { call: prepared.combatDeclaration.damage, scale: prepared.combatDeclaration.damageScale });
     this.damage = damage;
     const pickups = new Id1PickupBinding(this.worldHost.options, options.pickups, () => this.machine, actor => options.primaryWeaponSelected?.(actor.id) ?? true,
       options.ownsWeapon === undefined ? undefined : (actor, item) => options.ownsWeapon?.(actor.id, item) ?? false, options.pickupPolicy, prepared.declaredPickups);
@@ -919,7 +923,7 @@ export class QuakeCSource {
     const slot = this.sourceSlot(actor);
     if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC damage powerup client");
     const reference = this.entities.reference(slot);
-    return id1DamageMultiplier(this.machine, reference, reference);
+    return this.damage.damageMultiplier(actor, reference, this.currentTime) ?? id1DamageMultiplier(this.machine, reference, reference);
   }
   clientPowerupExpires(actor: ActorId, powerup: "quad" | "invulnerability" | "invisibility" | "suit"): number {
     const slot = this.sourceSlot(actor);

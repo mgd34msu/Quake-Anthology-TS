@@ -69,7 +69,7 @@ export interface Q3SelectedClientPose {
 
 export interface Q3SelectedSourceHost extends Pick<Q3RecordHost, "actors" | "bodies" | "combat" | "inventory" | "callbacks">,
   Pick<Q3WorldAdapterHost, "queries" | "collision" | "curves" | "playerCurveClip">,
-  Pick<Q3CombatBridgeHost, "combatProvider" | "inventoryProvider" | "movementProvider" | "armorContext" | "gameType" | "friendlyFire" | "knockback" | "intermissionQueued" | "checkHurtCarrier"> {
+  Pick<Q3CombatBridgeHost, "combatProvider" | "damagePowerupOwner" | "inventoryProvider" | "movementProvider" | "armorContext" | "gameType" | "friendlyFire" | "knockback" | "intermissionQueued" | "checkHurtCarrier"> {
   readonly provider: ProviderId;
   readonly product: "baseq3" | "missionpack";
   readonly equipment: { readonly kind: "source" } | { readonly kind: "primary" };
@@ -174,6 +174,7 @@ export class Q3SelectedSource {
       mapStartTime: host.now(), time: () => this.now(), print: host.print,
       link: entity => { this.world.link(entity); this.track(entity.actor); }, unlink: entity => this.world.unlink(entity.slot) });
     this.bridge = new Q3CombatBridge({ product: host.product, authority: host.combat, entities: this.pool, records: this.records, world: this.world,
+      ...(host.damagePowerupOwner === undefined ? {} : { damagePowerupOwner: host.damagePowerupOwner }),
       weaponProvider: host.provider, combatProvider: host.combatProvider, inventoryProvider: host.inventoryProvider, movementProvider: host.movementProvider,
       armorContext: host.armorContext, time: () => this.now(), intermissionQueued: host.intermissionQueued, gameType: host.gameType, friendlyFire: host.friendlyFire,
       knockback: host.knockback, debugDamage: null, checkHurtCarrier: host.checkHurtCarrier, checkObeliskAttack: host.checkObeliskAttack,

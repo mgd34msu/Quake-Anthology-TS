@@ -354,7 +354,7 @@ export class Q2EntityServices implements Q2GameServices {
   attack(inflictor: Q2Entity | ActorId, attacker: ActorId | null, meansOfDeath: number, flags: number, weapon: ItemId | null): AttackProvenance {
     return { sequence: this.sequence++, time: { kind: "seconds", value: this.host.now() }, attacker, inflictor: inflictor instanceof Q2Entity ? inflictor.actor.id : inflictor, weapon,
       weaponProvider: this.options.provider, combatProvider: this.options.combatProvider, inventoryProvider: this.options.inventoryProvider,
-      movementProvider: this.options.movementProvider, damagePowerupOwner: this.options.provider, cause: { kind: "q2", meansOfDeath, damageFlags: flags } };
+      movementProvider: this.options.movementProvider, damagePowerupOwner: this.options.damagePowerupOwner ?? this.options.provider, cause: { kind: "q2", meansOfDeath, damageFlags: flags } };
   }
 
   damage(target: ActorId, inflictor: Q2Entity | ActorId, attacker: ActorId | null, amount: number, knockback: number, direction: Vec3,

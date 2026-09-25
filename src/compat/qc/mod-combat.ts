@@ -10,6 +10,7 @@ import type { SourceDamageResult } from "../../world/gameplay/authority.ts";
 import { Id1DamageBinding } from "../../content/q1/quakec/id1-damage.ts";
 import type { Id1DamageCall } from "../../content/q1/quakec/id1-damage.ts";
 import { id1ProgramBinding } from "../../content/q1/quakec/id1-program.ts";
+import { qcDamageScale } from "../../content/q1/quakec/damage-scale.ts";
 import { qcArmorStage } from "../../content/q1/quakec/armor-stage.ts";
 import type { QcFunctionExecution, QcMachine } from "./machine.ts";
 import type { QcProgram } from "./program.ts";
@@ -18,6 +19,7 @@ type Declaration = NonNullable<ModCallbackDeclaration["combat"]>;
 export function validateQcModCombat(program: QcProgram, declaration: Declaration): void {
   if (declaration.emptyArmor !== undefined) qcEmptyArmor(program, declaration.emptyArmor);
   qcArmorStage(program, declaration.armorStage);
+  qcDamageScale(program, declaration.damage, declaration.damageScale);
   for (const name of ["health", "takedamage", "flags", "invincible_finished", "armorvalue", "armortype"])
     if (program.fieldsByName.get(name)?.type !== "float") throw new Error(`QC combat requires float field ${name}`);
   id1ProgramBinding(program, declaration.damage);
@@ -56,7 +58,7 @@ export class QcModCombat {
       call => this.request(call), { actor: reference => options.actor(reference), reference: actor => options.reference(actor),
         reaction: (request, result, execute) => this.reaction(request, result, execute), completed: (request, outcome) => {
           const incoming = this.incoming.at(-1); if (incoming?.request === request) incoming.outcome = outcome; return undefined;
-        } }, options.declaration.armorStage);
+        } }, options.declaration.armorStage, options.declaration.damageScale === undefined ? undefined : { call: options.declaration.damage, scale: options.declaration.damageScale });
   }
   private seconds(): number { const time = this.options.services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; }
   private field(name: string): number { return this.options.machine.fieldOffset(name); }

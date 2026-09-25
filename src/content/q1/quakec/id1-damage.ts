@@ -1,7 +1,7 @@
 import { id1ProgramBinding, type Id1ProgramBinding } from "./id1-program.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ActorId, OwnedActor } from "../../../contracts/identity.ts";
-import type { ModQcArmorStage } from "../../../contracts/mod-callbacks.ts";
+import type { ModQcArmorStage, ModQcDamageScale, ModSourceCall } from "../../../contracts/mod-callbacks.ts";
 import type { ArmorState, DamageOutcome, DamageRequest, ProtectionChannel } from "../../../contracts/gameplay.ts";
 import type { QcCallSite, QcEntityStoreObservation, QcFunctionBoundary, QcFunctionExecution, QcInlineBoundary, QcInlineContinuation, QcMachine } from "../../../compat/qc/machine.ts";
 import { QcWords } from "../../../compat/qc/memory.ts";
@@ -9,6 +9,7 @@ import { QcOpcode, QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
 import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../../world/gameplay/authority.ts";
 import { qcArmorStage, type QcArmorStage } from "./armor-stage.ts";
+import { qcDamageScale, evaluateQcDamageScale, type QcDamageScale } from "./damage-scale.ts";
 import { attackDamageFlags } from "../../../world/gameplay/armor.ts";
 
 export interface Id1DamageCall {
@@ -31,6 +32,7 @@ export interface Id1DamageProjection {
 export class Id1DamageBinding {
   readonly functionBoundary: QcFunctionBoundary;
   readonly inlineBoundary: QcInlineBoundary;
+  private readonly damageScale: QcDamageScale | null;
   private readonly armorStage: QcArmorStage | null;
   private readonly protection = { regular: new Map<OwnedActor, Parameters<SourceArmorStage["bind"]>[0]>(), powered: new Map<OwnedActor, Parameters<SourceArmorStage["bind"]>[0]>() };
   private readonly active: { readonly request: DamageRequest; readonly targetReference: number; readonly observer: SourceDamageObserver; readonly movementProvider: DamageRequest["attack"]["movementProvider"]; readonly cancel: QcFunctionExecution["cancel"]; readonly regularScale: number; result: SourceDamageResult; reactionDepth: number; healthWritten: boolean }[] = [];
@@ -44,12 +46,13 @@ export class Id1DamageBinding {
   private readonly die: number;
   constructor(private readonly source: Pick<QcWorldHostOptions, "program" | "entities" | "actors" | "slots">,
     authority: GameplayAuthority, private readonly machine: () => QcMachine,
-    resolveRequest: (call: Id1DamageCall) => DamageRequest, private readonly projection?: Id1DamageProjection, declaredArmor?: ModQcArmorStage) {
+    resolveRequest: (call: Id1DamageCall) => DamageRequest, private readonly projection?: Id1DamageProjection, declaredArmor?: ModQcArmorStage, declaredScale?: { readonly call: ModSourceCall; readonly scale: ModQcDamageScale }) {
     const { program } = source;
     this.binding = id1ProgramBinding(program);
     this.armorStage = qcArmorStage(program, declaredArmor);
+    this.damageScale = declaredScale === undefined ? null : qcDamageScale(program, declaredScale.call, declaredScale.scale);
     const qw = program.digest === "sha256:ff51cb5e77360d72b93487d89198dcf94629b92f8bae100fc6ea48a6c12a7830";
-    const quad = qw ? { functionIndex: 83, entry: 364, exit: 369, result: 875 }
+    const quad = this.damageScale !== null ? null : qw ? { functionIndex: 83, entry: 364, exit: 369, result: 875 }
       : program.digest === "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580" ? { functionIndex: 117, entry: 1426, exit: 1428, result: 1593 } : null;
     if (quad !== null) {
       const predicate: readonly (readonly [number, QcOpcode, number, number, number])[] = qw
@@ -61,7 +64,11 @@ export class Id1DamageBinding {
         if (actual?.opcode !== opcode || actual.a !== a || actual.b !== b || actual.c !== c) throw new QcProgramError("QC source Quad predicate differs from its original artifact");
       }
     }
-    this.inlineBoundary = { regions: [...(quad === null ? [] : [quad]), ...(this.armorStage === null ? [] : [this.armorStage.region])], run: (region, execute) => {
+    this.inlineBoundary = { regions: [...(this.damageScale === null ? [] : [this.damageScale.region]), ...(quad === null ? [] : [quad]), ...(this.armorStage === null ? [] : [this.armorStage.region])], run: (region, execute) => {
+      if (region.entry === this.damageScale?.region.entry) {
+        const frame = this.active.at(-1);
+        return frame?.request.attack.damagePowerupOwner === source.slots.options.provider ? execute.skipToJoin() : execute();
+      }
       if (region.entry !== quad?.entry) return this.runArmor(execute);
       const frame = this.active.at(-1);
       execute();
@@ -138,6 +145,9 @@ export class Id1DamageBinding {
       if (!executed) execute.skip([0, 0, 0]);
       return undefined;
     } };
+  }
+  damageMultiplier(actor: ActorId, reference: number, seconds: number): number | null {
+    return this.damageScale === null ? null : evaluateQcDamageScale(this.vm(), this.damageScale, actor, reference, seconds);
   }
   protectionStage(actor: OwnedActor, channel: ProtectionChannel): SourceArmorStage | null {
     if (this.armorStage === null || channel === "regular" && this.armorStage.region.replaceable !== true) return null;

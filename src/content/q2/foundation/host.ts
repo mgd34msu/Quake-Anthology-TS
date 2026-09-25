@@ -25,6 +25,7 @@ export interface Q2GameOptions {
   readonly deathmatchFlags: number;
   readonly maxClients: number;
   readonly provider: ProviderId;
+  readonly damagePowerupOwner?: ProviderId;
   readonly campaign: ProviderId;
   readonly combatProvider: ProviderId;
   readonly inventoryProvider: ProviderId;
