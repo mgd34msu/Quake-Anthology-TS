@@ -204,7 +204,7 @@ Several layout overlays can coexist in enabled order. A second HUD replacement o
 
 QuakeC camera messages capture the referenced actor generation when the original writer emits it. Slot reuse cannot retarget a view or listener; a view-to-self message releases control. Saves retain these identities. Older saves containing a retained or queued camera message without identity report an explicit migration error rather than guessing its target.
 
-Original Xatrix G_SetStats, its help layout and real source pictures are qualified in a Q1 world. Original id1 camera save/load and self-release are also qualified. Remote component HUD/camera transport, arbitrary QC HUD protocols and QVM component 2D output remain unfinished. Native playerstate view consumption exists, but full original ClientEndServerFrame camera behavior still requires qualification of its world and falling-damage ownership.
+Original Xatrix G_SetStats, its help layout and real source pictures are qualified in a Q1 world. Original id1 camera save/load and self-release are also qualified. Qualified Xatrix and q2eaks end-frame calls now supply native component camera offsets, kick, FOV, blends and visibility. Original prediction flags decide when the selected body or source camera controls position and angles. Only API2023 supplies rerelease damage blend. Local and remote consumers enforce source identity, generation and retirement; source no-world views retain model/effect submissions while suppressing BSP, world fog and shadows. Native HUD/configstring/layout transport and arbitrary QC HUD protocols remain unfinished; QVM component drawing and remote consumers use their original cgame path.
 
 ### Component console commands
 

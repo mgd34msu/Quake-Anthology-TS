@@ -77,6 +77,7 @@ export interface ApplicationQvmClientOptions {
   readonly now: () => number;
   readonly keyCatcher: () => number;
   readonly equipmentWeapon?: () => Q3EquipmentPresentation | null;
+  readonly viewWeaponVisible?: () => boolean;
   readonly heldWeaponActor?: (entity: number) => ActorId | null;
   readonly bodyCapture?: { active(): boolean; selected(entity: number): boolean; submit(entity: number, part: QvmBodyPart, source: RefModelEntity, base: boolean): boolean; };
   readonly bodyOverrides?: { active(): boolean; hidden(entity: number): boolean; };
@@ -210,6 +211,7 @@ export class ApplicationQvmClient {
       owner.equipmentProfile = q3EquipmentPresentationProfile(cgameOptions.artifact);
       const view = owner.equipmentProfile?.view;
       if (view !== undefined) owner.equipmentViewObserver = owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: view.entry }, call => {
+        if (owner.options.viewWeaponVisible?.() === false) return 0;
         call.branches([{ instructionIndex: view.decision, decide: originalTaken => {
           if (originalTaken) owner.equipmentViewVisible = true;
           return originalTaken;
@@ -303,6 +305,8 @@ export class ApplicationQvmClient {
     if ((hideBodies || captureBodies) && this.bodySubmissions === null) throw new Error('This cgame needs an artifact-matched cgame-presentation.json declaration for body replacements');
     if (captureBodies && this.bodySubmissions?.capturesPlayerMeshes !== true) throw new Error("This cgame needs artifact-matched player mesh call sites for component body materials");
     this.bodySubmissions?.enable(hideBodies || captureBodies);
+    if (this.options.viewWeaponVisible?.() === false && this.equipmentProfile === null)
+      throw new Error("Component camera control requires a qualified original view-weapon boundary");
     this.equipment = this.options.equipmentWeapon?.() ?? null;
     if (this.equipment !== null && this.equipmentProfile === null)
       throw new Error("Selected weapon presentation requires a qualified original cgame HUD boundary");

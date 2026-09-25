@@ -1,3 +1,7 @@
+import { sameModIdentity, modInstanceProvider } from "../../../contracts/mods.ts";
+import { samePresentationOwner } from "../../../contracts/presentation.ts";
+import type { ActiveModClientPresentation } from "../../../world/session/mod-client-presentation.ts";
+import type { UnifiedNativeCamera } from "./unified-types.ts";
 import { PresentationState } from "../presentation-state.ts";
 import { ModUserFiles } from "../../../world/session/mod-files.ts";
 import type { PresentationOwner } from "../../../contracts/presentation.ts";
@@ -50,6 +54,7 @@ export class UnifiedRemotePresentation {
   private readonly sourceSequences = new Map<number, number>();
   private mediaValue = new PresentationState(() => this.current?.output.snapshot.frame.time ?? {kind:"milliseconds",value:0}, actor => this.numberOf(actor));
   private components: UnifiedComponentConsumers | null = null;
+  private nativeCamera: { readonly active: ActiveModClientPresentation; publication: UnifiedNativeCamera } | null = null;
   get media(): PresentationState { return this.mediaValue; }
   private simulationEvents:SimulationEvent[]=[];
   private current:UnifiedPresentationFrame|null=null;
@@ -88,7 +93,7 @@ export class UnifiedRemotePresentation {
     if(this.closed)throw new Error('Unified replica is closed');
     let generation=this.generation;
     const retire=():void=>{if(this.closed)throw new Error('Unified replica is closed');
-      this.components?.close();this.components=null;generation=++this.generation;
+      this.components?.close();this.components=null;this.nativeCamera=null;generation=++this.generation;
       this.worldEpoch=offer.epoch;this.offeredDigest=offer.composition.digest;this.binding=null;};
     if(this.options.publishComponents===undefined)retire();else await this.options.publishComponents(retire);
     const content=await this.options.loadContent(offer,()=>this.assertCurrent(generation));this.assertCurrent(generation);
@@ -111,7 +116,33 @@ export class UnifiedRemotePresentation {
     if(this.options.publishComponents===undefined)await publish();else await this.options.publishComponents(publish);
   }
   modPresentationSources(){return this.components?.sources()??[];}
-  modClientPresentationSources(){return this.components?.clientSources()??[];}
+  modClientPresentationSources(): readonly ActiveModClientPresentation[] {
+    return [...(this.components?.clientSources() ?? []), ...(this.nativeCamera === null ? [] : [this.nativeCamera.active])];
+  }
+  private prepareNativeCamera(publication: UnifiedNativeCamera | undefined): () => void {
+    if (publication === undefined) return () => { this.nativeCamera = null; };
+    const prepared = this.world.content.preparedMods.find(candidate => sameModIdentity(candidate.identity, publication.identity));
+    if (prepared?.clientPresentation?.view !== true || modInstanceProvider(publication.identity.selection) !== publication.owner.provider)
+      throw new Error("Remote native camera differs from its locally qualified component");
+    const product = this.world.content.catalog.product(publication.identity.source.content);
+    if (product.expectation.family !== "q2" || product.expectation.edition !== publication.view.native.edition)
+      throw new Error("Remote native camera source edition differs");
+    const previous = this.nativeCamera;
+    if (previous !== null && samePresentationOwner(previous.active.owner, publication.owner) && previous.active.source.generation === publication.generation) {
+      if (!sameModIdentity(previous.active.identity, publication.identity)) throw new Error("Remote camera activation changed identity");
+      return () => { previous.publication = publication; };
+    }
+    const generation = this.generation;
+    const entry: { publication: UnifiedNativeCamera; active: ActiveModClientPresentation } = { publication, active: { owner: publication.owner, identity: publication.identity, source: {
+      generation: publication.generation,
+      assertCurrent: () => { this.assertCurrent(generation); if (this.nativeCamera !== entry) throw new Error("Remote native camera is retired"); },
+      frame: (actor: ActorId) => {
+        entry.active.source.assertCurrent();
+        return this.player?.actor.equals(actor) === true ? { kind: "native", hud: null, view: entry.publication.view } : null;
+      },
+    } } };
+    return () => { this.nativeCamera = entry; };
+  }
   async declare(epoch:number,keys:readonly UnifiedResourceKey[]):Promise<void>{
     if(epoch!==this.worldEpoch||this.closed)return;
     const generation=this.generation;
@@ -127,7 +158,9 @@ export class UnifiedRemotePresentation {
     const frame=this.current?.output.snapshot.frame.frame,simulation:SimulationEvent[]=[];if(frame===undefined)return simulation;
     while(this.pendingEvents[0]!==undefined&&this.pendingEvents[0].frame<=frame){
       const next=this.pendingEvents.shift();if(next===undefined)break;
-      for(const event of next.events)if(event.sequence>this.lastEventSequence){this.sourceSequences.set(event.sequence,this.mediaValue.receivePresentation(event));this.lastEventSequence=event.sequence;}
+      for(const event of next.events)if(event.sequence>this.lastEventSequence){
+        if(event.kind==="presentation-owner" && event.event.kind==="retired" && samePresentationOwner(this.nativeCamera?.active.owner,event.event.owner))this.nativeCamera=null;
+        this.sourceSequences.set(event.sequence,this.mediaValue.receivePresentation(event));this.lastEventSequence=event.sequence;}
       for(const event of next.simulation)if(event.sequence>this.lastSimulationSequence){const sourceSequence=event.payload.kind==='message'?event.payload.sourcePresentationSequence:undefined;
         const localSequence=sourceSequence===undefined?undefined:this.sourceSequences.get(sourceSequence);
         simulation.push(event.payload.kind==='message'&&localSequence!==undefined?{...event,payload:{...event.payload,sourcePresentationSequence:localSequence}}:event);this.lastSimulationSequence=event.sequence;}
@@ -145,9 +178,10 @@ export class UnifiedRemotePresentation {
     const expected=this.identity().actor(this.binding.actor.slot,this.binding.actor.generation);
     if(!frame.player.actor.equals(expected))throw new Error('Unified frame changed the admitted player');
     if(this.current!==null&&frame.output.snapshot.frame.frame<=this.current.output.snapshot.frame.frame)return frame.acknowledgedInput;
+    const publishCamera=this.prepareNativeCamera(frame.nativeCamera);
     if(this.components!==null&&!this.components.accept(frame.components??{revision:0,sources:[]},expected))return frame.acknowledgedInput;
     if(this.components===null&&(frame.components?.sources.length??0)!==0)throw new Error("Remote frame contains unadmitted components");
-    this.current={...frame,output:{...frame.output,events:[]}};this.correctPrediction(frame);this.releaseEvents();this.options.publish(this.current.output);return frame.acknowledgedInput;
+    this.current={...frame,output:{...frame.output,events:[]}};publishCamera();this.correctPrediction(frame);this.releaseEvents();this.options.publish(this.current.output);return frame.acknowledgedInput;
   }
   private clearPrediction():void {
     if(this.projection!==null)for(const actor of this.linked)this.scene.unlink(actor);
@@ -201,5 +235,5 @@ export class UnifiedRemotePresentation {
   drainPresentationEvents():readonly SimulationPresentationEvent[]{return this.mediaValue.takePresentation();}
   disconnected(reason:string):void{this.options.disconnected(reason);}
   print(text:string):void{this.options.print(text);}
-  close():void{this.components?.close();this.components=null;this.clearPrediction();this.contentEpoch=0;this.closed=true;this.generation++;this.current=null;this.pendingEvents.length=0;this.sourceSequences.clear();this.mediaValue.takePresentation();this.simulationEvents=[];this.resources.clear();this.actors.clear();this.clients.clear();}
+  close():void{this.components?.close();this.components=null;this.nativeCamera=null;this.clearPrediction();this.contentEpoch=0;this.closed=true;this.generation++;this.current=null;this.pendingEvents.length=0;this.sourceSequences.clear();this.mediaValue.takePresentation();this.simulationEvents=[];this.resources.clear();this.actors.clear();this.clients.clear();}
 }

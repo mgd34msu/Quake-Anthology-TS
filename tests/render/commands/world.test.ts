@@ -64,6 +64,13 @@ ordering/flash { cull none
     expect(flashBatches).toHaveLength(2);
     const legacyBatches: readonly DrawBatch[] = flashBatches.map(batch => ({ ...batch, state: { ...batch.state, depthWrite: true } }));
     const markGroup = compiledDrawGroup(mark, markBatches), flashGroup = compiledDrawGroup(flash, flashBatches);
+    const admitted = { ...input, source: createWorldSurfaceAdmission(createSourceSceneOrder(shaders.registrations.owner)) };
+    expect(scene.prepareWorldOperations(admitted).length).toBeGreaterThan(0);
+    expect(scene.prepareWorldOperations({ ...admitted, noWorldModel: true })).toEqual([]);
+    const noWorld = scene.prepareView({ ...input, noWorldModel: true, operations: [markGroup] });
+    expect(noWorld.visibility.surfaces).toEqual([]);
+    expect(drawBatches(noWorld.view.operations)).toEqual([...markBatches]);
+    expect(scene.prepareWorldOperations(admitted).length).toBeGreaterThan(0);
     const sourceView = createSourceSceneOrder(shaders.registrations.owner);
     const sourceOrder = { view: sourceView, entity: { kind: "world" }, surface: 0, fog: 0, dlight: 0 } satisfies Parameters<typeof sourceDrawGroup>[1];
     const sourceA = sourceDrawGroup(flash, sourceOrder, flashBatches);

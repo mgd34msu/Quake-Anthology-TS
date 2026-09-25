@@ -15,11 +15,11 @@ export function color(r: SaveReader): Vec4 { return { ...vector(r), w: r.field('
 export function axis(r: SaveReader): Axis { const values = r.list(vector); const [a,b,c] = values; if (values.length !== 3 || a === undefined || b === undefined || c === undefined) return r.fail('expected three axes'); return [a,b,c]; }
 function optional<T>(r: SaveReader, name: string, read: (r: SaveReader) => T): T | undefined { const value = r.field(name); return value.value === undefined ? undefined : read(value); }
 export function readPlayerView(r: SaveReader): PlayerView {
-  const blend = optional(r,'blend',color), kickAngles = optional(r,'kickAngles',vector), fieldOfView = optional(r,'fieldOfView',v=>v.finite());
+  const blend = optional(r,'blend',color), damageBlend = optional(r,'damageBlend',color), kickAngles = optional(r,'kickAngles',vector), fieldOfView = optional(r,'fieldOfView',v=>v.finite());
   const death = optional(r,'foreignCharacterDeath',v=>v.literal(true));
   const drift = optional(r,'pitchDrift',v=>({ grounded:v.field('grounded').boolean(), idealPitch:v.field('idealPitch').finite(), disabled:v.field('disabled').boolean() }));
   return { origin:vector(r.field('origin')),angles:vector(r.field('angles')),viewHeight:r.field('viewHeight').finite(),
-    ...(blend===undefined?{}:{blend}),...(kickAngles===undefined?{}:{kickAngles}),...(fieldOfView===undefined?{}:{fieldOfView}),
+    ...(blend===undefined?{}:{blend}),...(damageBlend===undefined?{}:{damageBlend}),...(kickAngles===undefined?{}:{kickAngles}),...(fieldOfView===undefined?{}:{fieldOfView}),
     ...(death===undefined?{}:{foreignCharacterDeath:death}),...(drift===undefined?{}:{pitchDrift:drift}) };
 }
 export function readPlayerUi(r: SaveReader): PlayerUi {
@@ -59,4 +59,12 @@ export function readCharacterView(r: SaveReader, identity: UnifiedIdentityDecode
 export function readWorldText(r: SaveReader): WorldText {
   const o=r.field('orientation'),kind=o.field('kind').choice('billboard','fixed'),distanceCullFactor=optional(r,'distanceCullFactor',v=>v.finite());
   return {content:readContentId(r.field('content')),text:r.field('text').string(),origin:vector(r.field('origin')),color:color(r.field('color')),cellSize:r.field('cellSize').finite(),orientation:kind==='billboard'?{kind}:{kind,angles:vector(o.field('angles'))},depthTest:r.field('depthTest').boolean(),font:r.field('font').choice('classic','selected'),...(distanceCullFactor===undefined?{}:{distanceCullFactor})};
+}
+
+export function readNativeCameraView(r: SaveReader): import("../../../world/session/mod-client-presentation.ts").NativeModCameraView {
+  const native = r.field("native"), edition = native.field("edition").choice("classic", "rerelease"), view = readPlayerView(r);
+  if (edition === "classic" && view.damageBlend !== undefined) return r.fail("Classic camera cannot publish rerelease damage blend");
+  return { ...view, native: { edition, movementOrigin: vector(native.field("movementOrigin")), renderFlags: native.field("renderFlags").integer(0),
+    positionPrediction: native.field("positionPrediction").boolean(), angularPrediction: native.field("angularPrediction").boolean(),
+    weaponVisible: native.field("weaponVisible").boolean() } };
 }

@@ -62,7 +62,7 @@ test('source grapple cable and looping sound retain client-owned actor identitie
 
 test('unified frame reconstructs mixed presentation identities and local resources without server paths',async()=>{
   const bytes=encodeUnifiedFrame(frame),text=new TextDecoder().decode(inflateRawSync(bytes));
-  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(6);
+  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(7);
   expect(text.includes('/server-private')).toBe(false);expect(text.includes('local-model')).toBe(false);
   const result=await decodeUnifiedFrame(bytes,context),snapshot=result.output.snapshot;
   expect(snapshot.session).toBe(client.session);expect(result.player.actor.equals(client.actor(4,2))).toBe(true);expect(result.player.actor.equals(id)).toBe(false);
@@ -98,4 +98,20 @@ test('unified frame preserves source armor projection without assigning an absor
   const payload = result.output.events[0]?.payload;
   if (payload?.kind !== 'damage' || payload.outcome.kind !== 'committed') throw new Error('Missing damage event');
   expect(payload.outcome.decision.mutations).toEqual(event.payload.outcome.decision.mutations);
+});
+
+
+test('unified native camera retains source identity, prediction policy and edition-specific blend',async()=>{
+  const nativeCamera: NonNullable<UnifiedPresentationFrame['nativeCamera']> = {
+    owner:{provider:'mod:q2-test%2Fcamera',generation:8}, generation:3,
+    identity:{selection:{product:'q2-test',id:'camera'},source:{provider:'q2:camera',content:'q2:rerelease:baseq2:1'},
+      declarationDigest:`sha256:${'0'.repeat(64)}`,modules:[],providers:[]},
+    view:{origin,angles:origin,viewHeight:12,kickAngles:origin,fieldOfView:95,blend:white,damageBlend:{x:1,y:0,z:0,w:0.5},
+      native:{edition:'rerelease',movementOrigin:origin,renderFlags:2,positionPrediction:false,angularPrediction:false,weaponVisible:false}},
+  };
+  const result=await decodeUnifiedFrame(encodeUnifiedFrame({...frame,nativeCamera,player:{...frame.player,view:nativeCamera.view}}),context);
+  expect(result.nativeCamera).toEqual(nativeCamera);
+  expect(result.player.view.damageBlend).toEqual(nativeCamera.view.damageBlend);
+  const wrong: typeof nativeCamera={...nativeCamera,view:{...nativeCamera.view,native:{...nativeCamera.view.native,edition:'classic'}}};
+  await expect(decodeUnifiedFrame(encodeUnifiedFrame({...frame,nativeCamera:wrong}),context)).rejects.toThrow('Classic camera');
 });

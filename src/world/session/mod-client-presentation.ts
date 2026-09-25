@@ -8,10 +8,20 @@ export interface ModClientPresentationAdmission {
   readonly hud: "none" | "overlay" | "replace";
   readonly view: boolean;
 }
+export interface NativeModCameraView extends PlayerView {
+  readonly native: {
+    readonly edition: "classic" | "rerelease";
+    readonly movementOrigin: PlayerView["origin"];
+    readonly renderFlags: number;
+    readonly positionPrediction: boolean;
+    readonly angularPrediction: boolean;
+    readonly weaponVisible: boolean;
+  };
+}
 export type ModClientPresentationFrame =
   | { readonly kind: "qvm"; readonly hud: { readonly mode: "overlay" | "replace-status" }; readonly view: null }
   | { readonly kind: "quakec"; readonly hud: { readonly health: number; readonly armor: number } | null; readonly view: PlayerView | null }
-  | { readonly kind: "native"; readonly hud: { readonly mode: "layout-overlay" | "replace-status"; readonly frame: NativeQ2HudFrame } | null; readonly view: PlayerView | null };
+  | { readonly kind: "native"; readonly hud: { readonly mode: "layout-overlay" | "replace-status"; readonly frame: NativeQ2HudFrame } | null; readonly view: NativeModCameraView | null };
 
 /** Module storage remains authoritative; the returned frame contains detached source values. */
 export interface ModClientPresentationSource {

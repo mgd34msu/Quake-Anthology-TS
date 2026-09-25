@@ -1,3 +1,4 @@
+import { resolveNativeModCamera } from "./simulation/native-mod-camera.ts";
 import { ComponentDrawings } from "./component-drawings.ts";
 import type { ComponentBody } from "./component-bodies.ts";
 import { Q1ServicePresentation } from "./q1-service-presentation.ts";
@@ -43,7 +44,7 @@ import type { ApplicationQ3Client } from "./q3-client.ts";
 import type { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
 import type { NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
 import { ApplicationQ2NativeHud } from "./q2-native-hud.ts";
-import type { ActiveModClientPresentation, ModClientPresentationFrame } from "../../world/session/mod-client-presentation.ts";
+import type { ActiveModClientPresentation, ModClientPresentationFrame, NativeModCameraView } from "../../world/session/mod-client-presentation.ts";
 import type { PresentationOwner } from "../../contracts/presentation.ts";
 import { samePresentationOwner } from "../../contracts/presentation.ts";
 
@@ -101,6 +102,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   private layoutCount: number;
   private nativeQ2Frame: NativeQ2HudFrame | null = null;
   private componentClients: readonly ComponentClientFrame[] = [];
+  private componentMovementOrigin: PlayerView["origin"] | null = null;
   private closed = false;
 
   constructor(readonly local: LocalInput, readonly assets: ApplicationAssets, private readonly native: NativeRenderer,
@@ -188,7 +190,20 @@ export class WorldSeatPresentation implements SeatPresentation {
     if (timing === undefined) throw new Error("Chase camera requires the selected numeric profile");
     return q1ChaseCamera(firstPerson, player.angles, chase, this.effects.queries, timing.numeric, this.local.player.actor);
   }
-  private componentView(): PlayerView | null { return this.componentClients.find(client => client.frame.view !== null)?.frame.view ?? null; }
+  private componentView(): PlayerView | null {
+    const frame = this.componentClients.find(client => client.frame.view !== null)?.frame;
+    if (frame === undefined || frame.view === null) return null;
+    return frame.kind === "native" ? resolveNativeModCamera(frame.view, this.componentMovementOrigin,
+      this.simulation.playerView(this.local.player.actor).angles) : frame.view;
+  }
+  private nativeView(): NativeModCameraView | null {
+    const frame = this.componentClients.find(client => client.frame.view !== null)?.frame;
+    return frame?.kind === "native" ? frame.view : null;
+  }
+  private componentWeaponVisible(): boolean {
+    const frame = this.componentClients.find(client => client.frame.view !== null)?.frame;
+    return frame?.kind !== "native" || frame.view === null || frame.view.native.weaponVisible;
+  }
   private clientCamera(view: PlayerView): SceneCamera {
     const viewport = this.viewport, x = view.fieldOfView ?? this.fieldOfView();
     const y = Math.atan(viewport.height / viewport.width * Math.tan(x * Math.PI / 360)) * 360 / Math.PI;
@@ -285,6 +300,7 @@ export class WorldSeatPresentation implements SeatPresentation {
 
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
+    this.componentMovementOrigin = snapshot.bodies.find(body => body.actor.equals(this.local.player.actor))?.body.origin ?? null;
     await this.prepareComponentClients();
     const bodies = [...this.componentEffects.values()].flatMap(owner => owner?.bodies?.() ?? []);
     const visiblePresentations = presentations.filter(presentation => presentation.renderOwner !== "source-client"
@@ -340,9 +356,9 @@ export class WorldSeatPresentation implements SeatPresentation {
       const size = this.viewSize();
       const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
       await q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations,
-        !this.componentClients.some(client => client.frame.hud !== null && (client.frame.kind === "quakec" || client.frame.hud.mode === "replace-status")), bodies);
-      const thirdPerson = (q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0;
-      const drawWeapon = q3Client.sharedEquipmentViewVisible ?? (q3Client.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0;
+        !this.componentClients.some(client => client.frame.hud !== null && (client.frame.kind === "quakec" || client.frame.hud.mode === "replace-status")), bodies, this.componentWeaponVisible(), this.nativeView() !== null);
+      const thirdPerson = this.nativeView() === null && (q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0;
+      const drawWeapon = this.componentWeaponVisible() && (q3Client.sharedEquipmentViewVisible ?? (q3Client.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0);
       const supplemental = visiblePresentations.filter(source => source.renderOwner !== "source-client").map(source => {
         const pose = source.viewWeapon ? null : q3Client.bodyPose(source.actor);
         return pose === null ? source : { ...source, origin: pose.origin, angles: pose.angles };
@@ -351,8 +367,8 @@ export class WorldSeatPresentation implements SeatPresentation {
       return;
     }
     await this.finale.prepare();
-    await this.scene.prepare(this.chaseSettings === null ? this.local.player.actor : null, snapshot, visiblePresentations, characters,
-      Math.atan(1 / this.camera().projection[0]) * 360 / Math.PI, [], true, bodies);
+    await this.scene.prepare(this.nativeView() !== null || this.chaseSettings === null ? this.local.player.actor : null, snapshot, visiblePresentations, characters,
+      Math.atan(1 / this.camera().projection[0]) * 360 / Math.PI, [], this.componentWeaponVisible(), bodies);
   }
 
   get splitScreen(): boolean { return this.layoutCount > 1; }
@@ -371,32 +387,34 @@ export class WorldSeatPresentation implements SeatPresentation {
       lights: frames.flatMap(frame => frame.lights), q3Lights: frames.flatMap(frame => frame.q3Lights).slice(0, 32) };
   }
   frame(snapshot: WorldSnapshot): RenderFrame {
-    const viewer = this.chaseSettings === null ? this.local.player.actor : null;
+    const viewer = this.nativeView() !== null || this.chaseSettings === null ? this.local.player.actor : null;
     const time = snapshot.frame.time, camera = this.camera(), source = this.q3Client === null ? createSourceSceneOrder(this.assets.materialRegistrations) : null,
       fog = this.q1Fog.active ? this.q1Fog.current(this.preparedTime) : undefined,
       effects = source === null ? null : this.effectFrame(camera, source, viewer, fog);
-    const playerView = this.effects.playerView(this.local.player.actor, camera);
+    const playerView = this.effects.playerView(this.local.player.actor, camera), nativeView = this.nativeView();
+    const noWorldModel = nativeView !== null && (nativeView.native.renderFlags & 2) !== 0;
+    const infrared = nativeView === null ? playerView.infrared : (nativeView.native.renderFlags & 4) !== 0;
     const style = (index: number, absent: number): number => this.scene.style(index, absent);
-    const input: WorldViewInput = { ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }), camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
+    const input: WorldViewInput = { noWorldModel, ...(source === null ? {} : { source: createWorldSurfaceAdmission(source) }), camera, target: { kind: "seat", seat: this.local.player.seat.id }, time,
       ...this.rerelease?.view(this.local.player.actor, this.preparedTime),
       ...this.q1Services.view(this.local.player.actor),
       ...(fog === undefined ? {} : { q1Fog: fog }),
-      clear: { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
+      clear: { depth: 1, color: noWorldModel ? { x: 0.3, y: 0.3, z: 0.3, w: 1 } : { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
       lights: effects?.lights ?? [], q3Lights: effects?.q3Lights ?? [],
       ...this.scene.styles() };
     const nativeFrame = this.q3Client?.frame((camera, source) => {
       const effects = this.effectFrame(camera, source, this.local.player.actor, fog);
-      const input: WorldViewInput = { camera, time, target: { kind: "seat", seat: this.local.player.seat.id },
+      const input: WorldViewInput = { noWorldModel, camera, time, target: { kind: "seat", seat: this.local.player.seat.id },
         source: createWorldSurfaceAdmission(source), lights: effects.lights, q3Lights: effects.q3Lights,
         ...(fog === undefined ? {} : { q1Fog: fog }) };
-      return { ...effects, operations: [...effects.operations, ...this.scene.supplemental(input, this.q3Client?.supplementalWeaponCamera(camera) ?? camera)] };
+      return { ...effects, operations: [...effects.operations, ...this.scene.supplemental(input, this.q3Client?.supplementalWeaponCamera(camera) ?? camera, infrared)] };
     }, camera => {
       const controlled = this.componentView();
       if (controlled !== null) return this.cameraOverride(this.clientCamera(controlled));
       if (this.q3Client?.options.kind === "qvm") return this.cameraOverride(cameraWithKick(camera, this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 }));
       const player = this.simulation.playerView(this.local.player.actor);
       return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));
-    }, { ...this.q1Services.view(this.local.player.actor), ...(fog === undefined ? {} : { q1Fog: fog }) });
+    }, { noWorldModel, ...this.q1Services.view(this.local.player.actor), ...(fog === undefined ? {} : { q1Fog: fog }) });
     this.frames.begin();
     const area = this.viewport;
     if (camera.viewport.x !== area.x || camera.viewport.y !== area.y || camera.viewport.width !== area.width || camera.viewport.height !== area.height)
@@ -405,7 +423,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     if (nativeFrame === undefined) {
       if (effects === null) throw new Error("Shared view lost its prepared effects");
       this.frames.world(this.scene.view(input, effects.operations,
-        this.effects.shadowSceneLights(camera, index => style(index, 12) / 12, viewer), playerView.infrared,
+        this.effects.shadowSceneLights(camera, index => style(index, 12) / 12, viewer), infrared,
         weaponViewCamera(camera, this.ui.weaponOcclusion({ binding: this.state.presentation, timeMilliseconds: this.preparedTime * 1000 }, !this.finale.active))));
     } else for (const command of nativeFrame.commands) {
       if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
@@ -428,11 +446,12 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (command.kind === "swap-buffers") throw new Error("Text cannot present a frame");
       this.frames.command(command);
     }, material), "pixels");
-    const sourceView = this.componentView() ?? this.simulation.playerView(this.local.player.actor);
+    const controlledView = this.componentView();
+    const sourceView = controlledView ?? this.simulation.playerView(this.local.player.actor);
     const blend = sourceView.blend ?? playerView.blend;
-    if (this.q3Client === null && blend !== null) draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height },
+    if ((controlledView !== null || this.q3Client === null) && blend !== null) draw.fillRect({ x: 0, y: 0, width: this.viewport.width, height: this.viewport.height },
       blend, { kind: "image", name: "white", image: this.assets.world.shaders.textures.white.image });
-    if (this.q3Client === null && sourceView.damageBlend !== undefined) {
+    if ((controlledView !== null || this.q3Client === null) && sourceView.damageBlend !== undefined) {
       const batches = prepareQ2DamageBlend(sourceView.damageBlend, camera.viewport, this.assets.world.shaders.textures.white.image);
       if (batches.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null, beforeView: [], operations: [{ kind: "draw", batches }] });
     }

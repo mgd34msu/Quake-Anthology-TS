@@ -1,3 +1,6 @@
+import { readModIdentity } from "../../../persistence/mods.ts";
+import { readComponentOwner } from "./unified-components.ts";
+import { readNativeCameraView } from "./unified-frame-values.ts";
 import { readComponentFrames, writeComponentFrames } from "./unified-components.ts";
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import type { ContentId, ContentDigest, ResolvedResourceReference } from '../../../contracts/content.ts';
@@ -66,7 +69,7 @@ function readStyle(r: SaveReader): SceneLightStyle { const kind=r.field('kind').
 /** Encode public presentation state only; server model bytes and filesystem provenance never enter the wire. */
 export function encodeUnifiedFrame(frame: UnifiedPresentationFrame): Uint8Array {
   const snapshot=frame.output.snapshot,scene=snapshot.scene;
-  const value = encodeCheckpointValue({schema:'qts-unified-frame',version:6,components:writeComponentFrames(frame.components ?? {revision:0,sources:[]}),epoch:frame.epoch,acknowledgedInput:frame.acknowledgedInput,prediction:encodeUnifiedPrediction(frame.prediction),
+  const value = encodeCheckpointValue({schema:'qts-unified-frame',version:7,...(frame.nativeCamera===undefined?{}:{nativeCamera:frame.nativeCamera}),components:writeComponentFrames(frame.components ?? {revision:0,sources:[]}),epoch:frame.epoch,acknowledgedInput:frame.acknowledgedInput,prediction:encodeUnifiedPrediction(frame.prediction),
     output:{snapshot:{frame:snapshot.frame,actors:snapshot.actors.map(a=>({id:wireActor(a.id),owner:a.owner,definition:a.definition})),
       bodies:snapshot.bodies.map(b=>({actor:wireActor(b.actor),body:{...b.body,ground:b.body.ground===null?null:wireActor(b.body.ground)}})),
       inventories:snapshot.inventories.map(i=>({actor:wireActor(i.actor),entries:i.entries})),
@@ -83,7 +86,7 @@ export function encodeUnifiedFrame(frame: UnifiedPresentationFrame): Uint8Array 
 export function readUnifiedFrame(bytes:Uint8Array) {
   if(bytes.length>4*1024*1024)throw new RangeError('Unified frame exceeds channel byte limit');
   const r=new SaveReader(decodeCheckpointValue(inflateRawSync(bytes,{maxOutputLength:32*1024*1024})),'unified-frame');
-  r.field('schema').literal('qts-unified-frame');r.field('version').choice(2,3,4,5,6);
+  r.field('schema').literal('qts-unified-frame');r.field('version').choice(2,3,4,5,6,7);
   return {epoch:r.field('epoch').integer(1),decode:(context:UnifiedFrameDecoder)=>decodeFrameValue(r,context)};
 }
 
@@ -98,7 +101,10 @@ async function decodeFrameValue(r:SaveReader,context:UnifiedFrameDecoder):Promis
   else {if(context.world===null)return w.fail('world is not locally loaded');matchResource(readKey(w),context.world.resource);}
   const entities=await Promise.all(scene.field('entities').list(e=>readEntity(e,context)));
   const player=r.field('player');
-  return {epoch:r.field('epoch').integer(0),...(r.field('components').value===undefined?{}:{components:readComponentFrames(r.field('components'),context)}),acknowledgedInput:r.field('acknowledgedInput').integer(-1),
+  const camera=r.field("nativeCamera");
+  const nativeCamera=camera.value===undefined?undefined:{owner:readComponentOwner(camera.field("owner")),identity:readModIdentity(camera.field("identity")),
+    generation:camera.field("generation").integer(0),view:readNativeCameraView(camera.field("view"))};
+  return {epoch:r.field('epoch').integer(0),...(nativeCamera===undefined?{}:{nativeCamera}),...(r.field('components').value===undefined?{}:{components:readComponentFrames(r.field('components'),context)}),acknowledgedInput:r.field('acknowledgedInput').integer(-1),
     prediction:decodeUnifiedPrediction(r.field('prediction').bytes(),context),
     output:{snapshot:{session:context.session,frame:readFrame(s.field('frame')),
       actors:s.field('actors').list(a=>({id:actor(a.field('id'),context),owner:namespaced(a.field('owner')),definition:namespaced(a.field('definition'))})),

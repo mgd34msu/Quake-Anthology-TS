@@ -5,8 +5,7 @@ import type { Q2ProtocolIdentity } from "../../../contracts/protocol.ts";
 import type { Q2PlayerState, Q2RereleasePlayerState } from "../../../contracts/protocol.ts";
 import type { NativeModClientPresentation } from "../../../contracts/mod-client-presentation.ts";
 import type { ModClientPresentationFrame } from "../../../world/session/mod-client-presentation.ts";
-import { classicGuestPlayerView } from "./classic-guest-player.ts";
-import { rereleaseGuestPlayerView } from "./rerelease-guest-player.ts";
+import { nativeModCamera } from "./native-mod-camera.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import { createQ2Fog, type Q2FogState } from "../../../content/q2/rerelease/types.ts";
 import { Q2ServerMessageReader } from "../../../network/q2/index.ts";
@@ -43,7 +42,7 @@ export interface NativeModPresentationSource {
   signature(slot: number): string;
   playerState(slot: number): Q2PlayerState | Q2RereleasePlayerState;
   clock(): { readonly serverFrame: number; readonly timeMilliseconds: number };
-  state(slot: number): { readonly active: boolean; readonly sound: number; readonly event: number; readonly origin: Vec3;
+  state(slot: number): { readonly active: boolean; readonly visible: boolean; readonly sound: number; readonly event: number; readonly origin: Vec3;
     readonly volume: number; readonly attenuation: number };
 }
 export interface NativeModPresentationCheckpoint {
@@ -103,7 +102,11 @@ export class NativeModPresentation {
         this.clientFrames.set(actor, { kind: "native", hud: this.admission.hud === "none" ? null : {
           mode: this.admission.hud, frame: { protocol: player.kind === "q2-classic" ? { kind: "q2-classic", version: 34 } : { kind: "q2-rerelease", version: 1038 },
             stats: player.stats, configstrings, layout: received?.layout ?? "", inventory: received?.inventory ?? [], playerNumber: slot - 1, ...this.source.clock() } },
-          view: this.admission.view === "none" ? null : player.kind === "q2-classic" ? classicGuestPlayerView(player) : rereleaseGuestPlayerView(player) });
+          view: this.admission.view === "none" ? null : nativeModCamera(player) });
+      }
+      if (!state.visible) {
+        const loop = this.loops.get(actor); if (loop !== undefined) this.stop(actor, loop);
+        this.entityEvents.delete(actor); continue;
       }
       const previous = this.entityEvents.get(actor);
       if (events && state.event !== 0 && previous !== state.event) {

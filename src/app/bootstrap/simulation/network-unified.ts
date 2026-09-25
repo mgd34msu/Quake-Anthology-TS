@@ -15,7 +15,7 @@ import type { EngineSession } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { UnifiedResourceKey } from '../network/unified-frame-codec.ts';
 import { unifiedResourceId } from '../network/unified-content.ts';
-import type { UnifiedPresentationFrame } from '../network/unified-types.ts';
+import type { UnifiedNativeCamera, UnifiedPresentationFrame } from '../network/unified-types.ts';
 import { Q3ClientAdmissionDenied } from './q3/runtime.ts';
 import type { SharedSimulation } from './runtime.ts';
 import type { SimulationPresentationEvent } from './types.ts';
@@ -215,7 +215,14 @@ export function createUnifiedApplicationServerHost(options: { readonly session: 
     frame(player, output, epoch, acknowledgedInput) {
       requirePlayer(player);
       const events = output.events.filter(event => permitted(player, event)).map((event): SimulationEvent => event.payload.kind === 'sound' ? { ...event, payload: { ...event.payload, resource: unifiedResourceId(resource(event.payload.resource)) } } : event);
-      return { epoch, acknowledgedInput, prediction: projectUnifiedPrediction(simulation, player.actor, acknowledgedInput), output: { snapshot: { ...output.snapshot, inventories: output.snapshot.inventories.filter(value => value.actor.equals(player.actor)) }, events },
+      let nativeCamera: UnifiedNativeCamera | undefined;
+      for (const source of simulation.modClientPresentationSources()) {
+        source.source.assertCurrent(); const frame = source.source.frame(player.actor);
+        if (frame?.kind !== "native" || frame.view === null) continue;
+        if (nativeCamera !== undefined) throw new Error("Multiple component camera owners");
+        nativeCamera = { owner: source.owner, identity: source.identity, generation: source.source.generation, view: frame.view };
+      }
+      return { epoch, acknowledgedInput, ...(nativeCamera === undefined ? {} : { nativeCamera }), prediction: projectUnifiedPrediction(simulation, player.actor, acknowledgedInput), output: { snapshot: { ...output.snapshot, inventories: output.snapshot.inventories.filter(value => value.actor.equals(player.actor)) }, events },
         models: simulation.presentations().filter(value => !value.viewWeapon || value.actor.equals(player.actor)), characters: simulation.characterViews(), worldText: simulation.worldText(),
         player: { actor: player.actor, view: simulation.playerView(player.actor), ui: simulation.playerUi(player.actor) } };
     },

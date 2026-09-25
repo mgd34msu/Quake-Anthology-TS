@@ -17,10 +17,18 @@ export interface UnifiedIdentityDecoder {
 
 import type { UnifiedComponentFrames } from "./unified-components.ts";
 
+export interface UnifiedNativeCamera {
+  readonly owner: import("../../../contracts/presentation.ts").PresentationOwner;
+  readonly identity: import("../../../contracts/mods.ts").ModIdentity;
+  readonly generation: number;
+  readonly view: import("../../../world/session/mod-client-presentation.ts").NativeModCameraView;
+}
+
 /** Public state projected for one authenticated player, after audience filtering. */
 export interface UnifiedPresentationFrame {
   readonly epoch: number;
   readonly components?: UnifiedComponentFrames;
+  readonly nativeCamera?: UnifiedNativeCamera;
   readonly acknowledgedInput: number;
   readonly prediction: UnifiedPredictionProjection;
   readonly output: SimulationOutput;

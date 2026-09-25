@@ -610,6 +610,9 @@ export class NativeModProvider implements NativeModProjection {
         const height = pose.viewHeight, crouch = pose.crouched, address = at(crouch.field), flags = this.scalarRead(address, crouch.field.encoding);
         this.scalarWrite(at(height), height.encoding === "float32" || height.encoding === "float64" ? view.viewOffset.z : Math.trunc(view.viewOffset.z), height.encoding);
         this.scalarWrite(address, view.crouched ? flags | crouch.mask : flags & ~crouch.mask, crouch.field.encoding);
+        const sourceSlot = this.slotOf(actor);
+        if (sourceSlot === null) throw new Error("Native pose lost its source entity");
+        this.host.projectPlayerView?.(sourceSlot, view.viewOffset.z);
       }
     }
     if (this.frames.length !== 0) { const observations = this.observe(); for (const frame of this.frames) frame.observations = observations; }

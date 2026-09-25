@@ -80,6 +80,7 @@ export function createWorldSurfaceAdmission(view: SourceSceneOrder): WorldSurfac
   return { view, submittedSurfaces: new Map<WorldScene, Set<number>>(), worldOperations: new Map<WorldScene, readonly SceneOperation[]>() };
 }
 export interface WorldViewInput extends WorldVisibilityOptions {
+  readonly noWorldModel?: boolean;
   readonly source?: WorldSurfaceAdmission;
   readonly camera: SceneCamera;
   readonly target: RenderView["target"];
@@ -453,7 +454,9 @@ export class WorldScene {
   }
 
   /** Admit world surfaces before preparing polygons and refentities in this view. */
-  prepareWorldOperations(input: WorldViewInput, visibility = visibleWorld(this.map, input.camera, input)): readonly SceneOperation[] {
+  prepareWorldOperations(input: WorldViewInput, visibility?: VisibleWorld): readonly SceneOperation[] {
+    if (input.noWorldModel === true) return [];
+    visibility ??= visibleWorld(this.map, input.camera, input);
     const cached = input.source?.worldOperations.get(this);
     if (cached !== undefined) return cached;
     const operations: SceneOperation[] = [];
@@ -486,7 +489,8 @@ export class WorldScene {
 
 
   prepareView(input: WorldViewInput): PreparedWorldView {
-    const visibility = visibleWorld(this.map, input.camera, input), operations: SceneOperation[] = [];
+    const visibility: VisibleWorld = input.noWorldModel === true ? { leaf: -1, leaves: [], surfaces: [], surfaceDlightMasks: new Map<number, number>() }
+      : visibleWorld(this.map, input.camera, input), operations: SceneOperation[] = [];
     const surfaces = visibility.surfaces.map(index => at(this.surfaces, index));
     operations.push(...this.prepareWorldOperations(input, visibility));
     for (const model of input.inlineModels ?? []) {
@@ -496,13 +500,13 @@ export class WorldScene {
       operations.push(...this.prepareModel(model.model, model.transform, childInput));
     }
     operations.push(...input.operations ?? []);
-    if (input.q2Fog !== undefined) operations.push({ kind: "q2-fog", camera: input.camera, fog: input.q2Fog, farDepth: 1 - 1e-6,
+    if (input.noWorldModel !== true && input.q2Fog !== undefined) operations.push({ kind: "q2-fog", camera: input.camera, fog: input.q2Fog, farDepth: 1 - 1e-6,
       skyDrawn: surfaces.some(surface => (this.remap(surface)?.material ?? surface.shader) !== null
         ? (this.remap(surface)?.material ?? surface.shader)?.finished.iterator.kind === "sky"
         : surface.kind === "legacy" && surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0) });
     return { visibility, imageOperations: this.shaders.textures.images.drainOperations(), view: { target: input.target, time: input.time,
       viewport: input.camera.viewport, clear: input.clear === undefined ? { color: null, depth: 1, stencil: false } : input.clear,
-      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: fogSceneOperations(finishSceneOperations(operations), input.q1Fog) } };
+      clipPlane: portalClipPlane(input.camera), beforeView: input.beforeView ?? [], operations: fogSceneOperations(finishSceneOperations(operations), input.noWorldModel === true ? undefined : input.q1Fog) } };
   }
 
   private surfaceOperations(surface: WorldSurface, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform, lighting?: { readonly mask: number; readonly lights: readonly DynamicLight[] }, order?: SourceSurfaceOrder): readonly SceneOperation[] {
@@ -711,6 +715,7 @@ export class WorldScene {
 
   /** Source Q3 allows a single portal child. Every split seat starts its own search. */
   prepareViews(input: WorldViewInput, portals: readonly PortalEntity[] = []): readonly PreparedWorldView[] {
+    if (input.noWorldModel === true) return [this.prepareView(input)];
     const result: PreparedWorldView[] = [];
     if (input.camera.clip.kind === "none" && portals.length !== 0) {
       const visible = visibleWorld(this.map, input.camera, input);

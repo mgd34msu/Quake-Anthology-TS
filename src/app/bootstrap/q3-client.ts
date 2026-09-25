@@ -145,6 +145,7 @@ export class ApplicationQ3Client {
   private readonly localSource: ApplicationQ3Source | null;
   private readonly product: Q3SourcePresentationState["product"];
   private supplementalViewWeapon = false;
+  private viewWeaponVisible = true;
   private readonly selectedHeldActors = new Map<number, ActorId>();
   private weaponSelection: number | null = null;
   private cvarOwner: CvarRegistry;
@@ -340,7 +341,7 @@ export class ApplicationQ3Client {
         keyCatcher: { get: () => this.keyCatcher, set: value => { this.keyCatcher = value; } }, clientState: o.clientState,
         lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
       const game = await ApplicationQvmClient.create({ ...(this.artifacts === undefined ? {} : { artifacts: this.artifacts }), seat, commandContext: this.commandContext(), services, media, session, connection: o.connection, queries: o.queries,
-        ...(o.equipmentWeapon === undefined ? {} : { equipmentWeapon: o.equipmentWeapon }),
+        ...(o.equipmentWeapon === undefined ? {} : { equipmentWeapon: o.equipmentWeapon }), viewWeaponVisible: () => this.viewWeaponVisible,
         heldWeaponActor: number => { const actor = source.actorAt(number); return !this.bodyHidden(number) && this.selectedHeldActors.get(actor.slot)?.equals(actor) ? actor : null; },
         bodyCapture: { active: () => this.selectedBodies.size !== 0, selected: number => this.bodySelected(number),
           submit: (number, part, source, base) => this.submitBody(number, part, source, base) },
@@ -385,7 +386,7 @@ export class ApplicationQ3Client {
       event: async (entity, position, render) => { this.eventCount++; if (o.hooks === undefined) await render(); else await o.hooks.event(entity, position, render); },
       predictItem: (entity, predict) => o.hooks === undefined ? predict() : o.hooks.predictItem(entity, predict),
       viewWeapon: (state, render) => {
-        if (this.supplementalViewWeapon) return;
+        if (!this.viewWeaponVisible || this.supplementalViewWeapon) return;
         if (o.hooks !== undefined) o.hooks.viewWeapon(state, render);
         else if (o.assets.content.recipe.weapons.some(weapon => weapon.provider.startsWith("q3:"))) render();
       },
@@ -454,8 +455,10 @@ export class ApplicationQ3Client {
     this.localSource.receiveEvents(events);
   }
   receive(state: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void { this.requireGame(); if (this.localSource === null) throw new Error("Remote Q3 cgame receives snapshots through its network connection"); this.localSource.receive(state, events, commands); }
-  async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = [], statusVisible = true, bodies: readonly ComponentBody[] = []): Promise<void> {
+  async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = [], statusVisible = true, bodies: readonly ComponentBody[] = [], viewWeaponVisible = true, cameraControlled = false): Promise<void> {
+    this.viewWeaponVisible = viewWeaponVisible;
     this.hiddenBodies.clear();
+    if (cameraControlled) { const actor = this.options.local.player.actor; this.hiddenBodies.set(actor.slot, actor); }
     this.selectedBodies.clear(); this.primaryBodies.length = 0;
     for (const body of bodies) this.selectedBodies.set(body.actor.slot, body.actor);
     this.selectedHeldActors.clear();
@@ -527,7 +530,7 @@ export class ApplicationQ3Client {
     return null;
   }
   frame(additionalEffects?: (camera: SceneCamera, source: SourceSceneOrder) => ApplicationEffectFrame, transformCamera?: (camera: SceneCamera) => SceneCamera,
-    environment: Pick<WorldViewInput, "q1Fog" | "sourceSky"> = {}): RenderFrame {
+    environment: Pick<WorldViewInput, "q1Fog" | "sourceSky" | "noWorldModel"> = {}): RenderFrame {
     this.requireBackend(); this.frames.begin();
     const seat = this.options.local.player.seat.id, world = this.options.assets.world, time = { kind: "milliseconds", value: this.source.time } satisfies WorldViewInput["time"];
     for (const submission of this.submissions) {
@@ -543,7 +546,7 @@ export class ApplicationQ3Client {
         q3Lights: scene.lights.map(light => ({ origin: light.origin, radius: light.radius, color: light.color, additive: light.additive })).slice(0, 32),
         renderText: scene.source.text, visibleAreas: new Set(Array.from({ length: scene.source.areaMask.length * 8 }, (_, area) => area)
           .filter(area => ((scene.source.areaMask[area >> 3] ?? 0) & (1 << (area & 7))) === 0)),
-        clear: (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? { depth: 1, color: null, stencil: false } : { depth: 1, color: { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
+        clear: (scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0 ? { depth: 1, color: null, stencil: false } : { depth: 1, color: environment.noWorldModel === true ? { x: 0.3, y: 0.3, z: 0.3, w: 1 } : { x: 0, y: 0, z: 0, w: 1 }, stencil: false },
         };
       if ((scene.source.renderFlags & RDF_NOWORLDMODEL) !== 0) {
         const source = createSourceSceneOrder(this.options.assets.materialRegistrations), selected = { ...input, source: createWorldSurfaceAdmission(source) };
@@ -558,10 +561,10 @@ export class ApplicationQ3Client {
           const combined: WorldViewInput = { ...view, source: createWorldSurfaceAdmission(source), ...(effects === undefined ? {} : { lights: effects.lights,
             q3Lights: [...view.q3Lights ?? [], ...effects.q3Lights].slice(0, 32) }) };
           world.prepareWorldOperations(combined);
-          this.frames.world(world.prepareView({ ...combined, operations: this.sceneRenderer.operations(scene, combined, firstEntity, { noWorldModel: false, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon }, effects?.operations) }));
+          this.frames.world(world.prepareView({ ...combined, operations: this.sceneRenderer.operations(scene, combined, firstEntity, { noWorldModel: view.noWorldModel === true, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon }, effects?.operations) }));
         };
         const worldInput = { ...input, ...environment };
-        const child = this.portal(scene, worldInput);
+        const child = worldInput.noWorldModel === true ? null : this.portal(scene, worldInput);
         if (child !== null) publish(child);
         publish(worldInput);
       }

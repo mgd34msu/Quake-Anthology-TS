@@ -307,7 +307,7 @@ export class ApplicationWorldScene {
     input = { ...input, source: input.source ?? createWorldSurfaceAdmission(createSourceSceneOrder(this.assets.materialRegistrations)), inlineModels: this.inlineModels, ...this.styles() };
     const skinningFrame: ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() };
 
-    if (shadowLights.length > 0) {
+    if (shadowLights.length > 0 && input.noWorldModel !== true) {
       const retainBody = shadowBodyFilter(shadowLights);
       const casters = [...this.groups.values()].flatMap(group => group.passes.filter(pass => (this.objects.get(pass)?.opacity ?? 1) === 1).flatMap(pass => group.renderer.prepareShadowCasters([pass.entity], pass.time === undefined ? input : { ...input, time: pass.time }, pass.options, skinningFrame, retainBody)));
       const shadows = this.assets.world.prepareShadows([...shadowLights, ...(input.lights ?? []).map(light => ({ origin: light.origin, radius: light.radius, color: light.color, additive: true,
@@ -320,11 +320,11 @@ export class ApplicationWorldScene {
     return this.assets.world.prepareView({ ...input, operations: [...operations.filter(polygon), ...modelOperations, ...operations.filter(operation => !polygon(operation))] });
   }
 
-  supplemental(input: WorldViewInput, weaponCamera: SceneCamera = input.camera): readonly SceneOperation[] {
+  supplemental(input: WorldViewInput, weaponCamera: SceneCamera = input.camera, infrared = false): readonly SceneOperation[] {
     const inline = this.inlineModels.flatMap(model => this.assets.world.prepareModel(model.model, model.transform,
       { ...input, ...(model.animationFrame === undefined ? {} : { animationFrame: model.animationFrame }),
         ...(model.alternateAnimation === undefined ? {} : { alternateAnimation: model.alternateAnimation }) }));
-    return [...inline, ...this.modelOperations(input, false, weaponCamera)];
+    return [...inline, ...this.modelOperations(input, infrared, weaponCamera)];
   }
 
   private modelOperations(input: WorldViewInput, infrared: boolean, weaponCamera: SceneCamera,
@@ -334,7 +334,7 @@ export class ApplicationWorldScene {
       if (pass.options(pass.entity).viewModel === true && input.camera.clip.kind === "portal") return [];
       const current = pass.time === undefined ? input : { ...input, time: pass.time };
       return group.renderer.prepare([pass.entity], pass.options(pass.entity).viewModel === true ? { ...current, camera: weaponCamera } : current,
-        entity => ({ ...pass.options(entity), infrared, planarShadow: this.planarShadows() }), skinningFrame);
+        entity => ({ ...pass.options(entity), infrared, noWorldModel: input.noWorldModel === true, planarShadow: input.noWorldModel !== true && this.planarShadows() }), skinningFrame);
     };
     for (const { group, pass } of this.ordered) {
       const object = this.objects.get(pass);
