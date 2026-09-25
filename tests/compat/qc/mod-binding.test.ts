@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { QcProgram, QcOpcode, loadQcProgram, QcEntityMemory, QcMachine, classicQcEntityLayout, createQcBuiltins, createQcSourceSlotStorage } from "../../../src/compat/qc/index.ts";
-import type { ModCallbackDeclaration } from "../../../src/contracts/mod-callbacks.ts";
+import type { ModCallbackDeclaration, ModSourceCall } from "../../../src/contracts/mod-callbacks.ts";
 import type { ProviderId } from "../../../src/contracts/identity.ts";
 import type { QcStatement } from "../../../src/compat/qc/program.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
@@ -28,7 +28,8 @@ function changedProgram(program: QcProgram, statements: readonly QcStatement[]):
 }
 function run(program: QcProgram, observed: boolean, variant: "normal" | "death" | "empathy" | "wetsuit", mods?: (authority: GameplayAuthority) => void,
   scaling?: { readonly declaration: NonNullable<ModCallbackDeclaration["combat"]>; readonly quad: boolean; readonly strength: boolean;
-    readonly resistance: boolean; readonly owner?: ProviderId }) {
+    readonly resistance: boolean; readonly owner?: ProviderId },
+  nativeCall?: { readonly amount?: number; readonly worldAttacker?: boolean; readonly extra?: { readonly index: number; readonly value: number } }) {
   const entities = new QcEntityMemory(classicQcEntityLayout(program), 8, 3);
   const actors = new SessionActorRegistry(createIdentityOwner(`mod-${observed}-${variant}`));
   const slots = new SourceActorSlots(actors, { provider: "test:qc", capacity: 8, lifetime: quakeEdictLifetime(1),
@@ -53,7 +54,13 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
     : { call: scaling.declaration.damage, scale: scaling.declaration.damageScale });
   const vm: QcMachine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
     builtins: createQcBuiltins({ kind: program.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake" }), serverActive: () => true,
-    ...(observed ? { inlineBoundary: binding.inlineBoundary, functionBoundary: binding.functionBoundary, observeCall: call => binding.observeCall(call), observeEntityStore: store => binding.observeEntityStore(store) } : {}),
+    ...(observed ? { inlineBoundary: binding.inlineBoundary, functionBoundary: nativeCall?.extra === undefined ? binding.functionBoundary : {
+      functions: binding.functionBoundary.functions, run: (call, execute) => binding.functionBoundary.run(call, Object.assign((prepare?: (machine: QcMachine) => undefined) => execute(machine => {
+        prepare?.(machine);
+        if (call.functionIndex === id1ProgramBinding(program).damage.index && nativeCall.extra !== undefined)
+          expect(machine.argFloat(nativeCall.extra.index)).toBe(nativeCall.extra.value);
+        return undefined;
+      }), { skip: execute.skip, cancel: execute.cancel })) }, observeCall: call => binding.observeCall(call), observeEntityStore: store => binding.observeEntityStore(store) } : {}),
   });
   const field = (name: string) => vm.fieldOffset(name);
   for (const [slot, actor] of [[1, attacker], [2, target]] satisfies readonly (readonly [number, typeof attacker])[]) {
@@ -89,11 +96,19 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
     }
   }
   vm.globals.setFloat(vm.globalOffset("time"), 3); vm.globals.setInt(vm.globalOffset("self"), entities.reference(2));
-  vm.globals.setInt(4, entities.reference(2)); vm.globals.setInt(7, entities.reference(1)); vm.globals.setInt(10, entities.reference(1));
-  vm.globals.setFloat(13, (variant === "death" ? 150 : 40) * (scaling?.owner === "test:qc" ? factor ?? 1 : 1));
+  const sourceCall = id1ProgramBinding(program).damage.call;
+  const values = { self: entities.reference(2), inflictor: entities.reference(1), attacker: entities.reference(nativeCall?.worldAttacker ? 0 : 1),
+    amount: (nativeCall?.amount ?? (variant === "death" ? 150 : 40)) * (scaling?.owner === "test:qc" ? factor ?? 1 : 1) };
   vm.globals.setFloat(16, 0);
-  vm.execute(program.functionNamed("T_Damage").index, program.functionNamed("T_Damage").parameterSizes.length);
-  return { factor, bytes: entities.bytes.slice(), outcomes, health: entities.at(2).float(field("health")), attackerHealth: entities.at(1).float(field("health")) };
+  for (const role of ["self", "inflictor", "attacker", "amount"] satisfies readonly (keyof typeof values)[])
+    for (const location of sourceCall.roles[role]) {
+      const word = location.kind === "argument" ? 4 + location.index * 3 : location.word;
+      if (role === "amount") vm.globals.setFloat(word, values[role]); else vm.globals.setInt(word, values[role]);
+    }
+  if (nativeCall?.extra !== undefined) vm.globals.setFloat(4 + nativeCall.extra.index * 3, nativeCall.extra.value);
+  vm.execute(sourceCall.functionIndex, sourceCall.parameters.length);
+  const attackerContext = sourceCall.roles.attacker.map(location => location.kind === "global" ? vm.globals.int(location.word) : null);
+  return { factor, attackerContext, sourceAttacker: entities.reference(1), bytes: entities.bytes.slice(), outcomes, health: entities.at(2).float(field("health")), attackerHealth: entities.at(1).float(field("health")) };
 }
 test("registered transforms change actual QC damage arguments after saved call staging", async () => {
   const program = await readProgram("id1/PAK0.PAK");
@@ -292,4 +307,51 @@ test("declared attacker scaling queries original rune and quad paths once while 
   const nonLinear = changedProgram(program, statements);
   expect(() => qcDamageScale(nonLinear, declaration.damage, { ...scale, statements: statements.slice(scale.entry, scale.exit + 1) })).toThrow("nonmultiplicative");
   expect(() => qcDamageScale(nonLinear, declaration.damage, scale)).toThrow("differ");
+});
+
+
+test("declared private QC damage ABI maps reordered arguments and scoped globals without rebuilding extra values", async () => {
+  const { validateQcModCombat } = await import("../../../src/compat/qc/mod-combat.ts");
+  const base = await readProgram("id1/PAK0.PAK"), original = base.functionNamed("T_Damage"), start = original.parameterStart;
+  const attackerGlobal = base.globalsByName.get("damage_attacker");
+  if (attackerGlobal === undefined) throw new Error("Missing original attacker context");
+  const end = base.functions.reduce((limit, fn) => fn.firstStatement > original.firstStatement ? Math.min(limit, fn.firstStatement) : limit, base.statements.length);
+  const remap = (word: number): number => word === start ? start + 1 : word === start + 1 ? start + 3 : word === start + 2 ? attackerGlobal.offset : word === start + 3 ? start : word;
+  const statements = base.statements.map((statement, index) => {
+    if (index < original.firstStatement || index >= end || statement.opcode === QcOpcode.Goto) return statement;
+    const { opcode, a, b, c } = statement;
+    if (opcode === QcOpcode.If || opcode === QcOpcode.IfNot || opcode === QcOpcode.Return || opcode === QcOpcode.Done || opcode >= QcOpcode.Call0 && opcode <= QcOpcode.Call8)
+      return { ...statement, a: remap(a) };
+    return { opcode, a: remap(a), b: remap(b), c: remap(c) };
+  });
+  const program = new QcProgram(base.source, base.api, statements, base.globals.map(global => {
+    if (global.name === "T_Damage") return { ...global, name: "PrivateDamage" };
+    if (global.offset === start || global.offset === start + 2) return { ...global, name: global.offset === start ? "private_amount" : "private_extra", type: "float", nativeType: 2 };
+    if (global.offset === start + 3) return { ...global, name: "private_inflictor", type: "entity", nativeType: 4 };
+    return global;
+  }), base.fields, base.functions.map(fn => fn.index === original.index ? { ...fn, name: "PrivateDamage", parameterSizes: [1, 1, 1, 1, 3] } : fn),
+    base.strings, base.initialGlobals, base.entityFieldWords, base.checksum, createContentDigest("1".repeat(64)));
+  const damage: ModSourceCall = { function: "PrivateDamage", arguments: [{ kind: "input", name: "amount" }, { kind: "input", name: "self" },
+    { kind: "float", value: 7 }, { kind: "input", name: "inflictor" }, { kind: "vector", value: { x: 11, y: 12, z: 13 } }],
+    globals: [{ name: "damage_attacker", value: { kind: "input", name: "attacker" } }, { name: "time", value: { kind: "input", name: "time" } }] };
+  expect(() => id1ProgramBinding(program)).toThrow("T_Damage");
+  validateQcModCombat(program, { damage });
+  const { qcDamageScale } = await import("../../../src/content/q1/quakec/damage-scale.ts");
+  expect(qcDamageScale(program, damage, { function: "PrivateDamage", entry: 1426, exit: 1431, damage: start,
+    statements: program.statements.slice(1426, 1432) })).not.toBeNull();
+  const extra = { index: 4, value: 99 };
+  const plain = run(program, false, "normal", undefined, undefined, { amount: 42, worldAttacker: true, extra });
+  const observed = run(program, true, "normal", authority => {
+    authority.damageOperation.register({ provider: "test:transform", id: "test:reorder", kind: "transform", order: 0,
+      transform: request => ({ ...request, amount: request.amount + 2, attack: { ...request.attack, attacker: null } }) });
+  }, undefined, { extra });
+  expect(observed.bytes).toEqual(plain.bytes);
+  expect(observed.attackerContext).toEqual([observed.sourceAttacker]);
+  expect(observed.outcomes).toHaveLength(1);
+  const outcome = observed.outcomes[0];
+  if (outcome?.kind !== "committed") throw new Error("Missing declared private damage outcome");
+  expect(outcome.decision.request.amount).toBe(42); expect(outcome.decision.request.attack.attacker).toBeNull();
+  expect(outcome.decision.reaction).toBe("pain");
+  expect(() => validateQcModCombat(program, { damage: { ...damage, arguments: damage.arguments.slice(0, 4) } })).toThrow("signature");
+  expect(() => validateQcModCombat(program, { damage: { ...damage, globals: damage.globals.slice(1) } })).toThrow("missing attacker");
 });

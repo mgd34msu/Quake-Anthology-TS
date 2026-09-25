@@ -3,6 +3,7 @@ import type { ModQcDamageScale, ModSourceCall, ModCallbackInput, ModRuntimeValue
 import type { QcMachine, QcInlineRegion } from "../../../compat/qc/machine.ts";
 import { QcOpcode, QcProgramError, signedQcBranch, type QcProgram } from "../../../compat/qc/program.ts";
 import { validateQcSourceCall, withQcSourceCall } from "../../../compat/qc/source-call.ts";
+import { qcDamageCallLayout } from "./damage-call.ts";
 import { qcRegionPrivateWritesAreDead, qcStatementAccess } from "./armor-stage.ts";
 
 export interface QcDamageScale {
@@ -22,15 +23,15 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
   if (source === undefined) return null;
   const reject = (reason: string): never => { throw new QcProgramError(`Unsupported QC damage scale: ${reason}`, program.source); };
   const fn = program.functionNamed(source.function), end = program.functions.reduce((limit, other) => other.firstStatement > fn.firstStatement ? Math.min(limit, other.firstStatement) : limit, program.statements.length);
-  if (source.function !== call.function || source.function !== "T_Damage" || fn.firstStatement <= 0 || fn.namedBuiltin
+  if (source.function !== call.function || fn.firstStatement <= 0 || fn.namedBuiltin
     || !Number.isInteger(source.entry) || !Number.isInteger(source.exit) || source.entry < fn.firstStatement || source.exit <= source.entry || source.exit >= end)
     reject("original damage region bounds");
-  const damage = fn.parameterStart + 3, attacker = fn.parameterStart + 2, parameterEnd = fn.parameterStart + fn.parameterSizes.reduce((sum, size) => sum + size, 0);
-  if (source.damage !== damage || fn.parameterSizes.length < 4 || fn.localWords < parameterEnd - fn.parameterStart || fn.parameterSizes.slice(0, 4).some(size => size !== 1) || program.globals.find(global => global.offset === damage)?.type !== "float")
-    reject("original damage parameter");
+  const layout = qcDamageCallLayout(program, call), amount = layout.roles.amount;
+  const location = amount[0];
+  if (amount.length !== 1 || location?.kind !== "argument") return reject("scale result requires one original float argument");
+  const damage = location.frameWord, parameterEnd = fn.parameterStart + fn.parameterSizes.reduce((sum, size) => sum + size, 0);
+  if (source.damage !== damage || fn.localWords < parameterEnd - fn.parameterStart) reject("original damage parameter");
   validateQcSourceCall(program, call, new Set(["self", "attacker", "inflictor", "amount", "time"]), "damage scale");
-  if (call.arguments[2]?.kind !== "input" || call.arguments[2].name !== "attacker"
-    || call.arguments[3]?.kind !== "input" || call.arguments[3].name !== "amount") reject("damage and attacker ABI inputs");
   const context = new Map<number, Value | null>();
   for (const global of call.globals) {
     const definition = program.globalsByName.get(global.name);
@@ -48,9 +49,10 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     if (access.read.some(word => amountInputs.has(word))) reject("damage-dependent policy precedes the scaling region");
     if (opcode >= QcOpcode.StorePF && opcode <= QcOpcode.StorePFn || opcode >= QcOpcode.Call0 && opcode <= QcOpcode.Call8 || opcode === QcOpcode.State)
       reject("source side effects precede the scale query");
-    for (const word of access.write) prefixWrites.add(word);
+    if (!(opcode >= QcOpcode.StoreF && opcode <= QcOpcode.StoreFn && statement.a === statement.b))
+      for (const word of access.write) prefixWrites.add(word);
   }
-  if (prefixWrites.has(damage) || prefixWrites.has(attacker)) reject("source changes scale arguments before the region");
+  if (prefixWrites.has(damage) || layout.roles.attacker.some(location => prefixWrites.has(location.kind === "argument" ? location.frameWord : location.word))) reject("source changes scale arguments before the region");
   if (source.statements.length !== source.exit - source.entry + 1) reject("incomplete original instructions");
   for (const [offset, expected] of source.statements.entries()) {
     const actual = program.statements[source.entry + offset];
@@ -68,7 +70,9 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     if (left.kind === "scaled" && right.kind === "scaled") return { kind: "scaled", operations: Math.max(left.operations, right.operations), powersOfTwo: left.powersOfTwo && right.powersOfTwo };
     return reject("inconsistent source value");
   };
-  const pending = new Map<number, Map<number, Value>>([[source.entry, new Map<number, Value>([[attacker, { kind: "actor" }], [damage, { kind: "scaled", operations: 0, powersOfTwo: true }]])]]);
+  const initialValues = new Map<number, Value>([[damage, { kind: "scaled", operations: 0, powersOfTwo: true }]]);
+  for (const location of layout.roles.attacker) if (location.kind === "argument") initialValues.set(location.frameWord, { kind: "actor" });
+  const pending = new Map<number, Map<number, Value>>([[source.entry, initialValues]]);
   const edge = (from: number, to: number, values: ReadonlyMap<number, Value>): void => {
     if (to <= from || to < source.entry || to > source.exit) reject("escaping or backward branch");
     const previous = pending.get(to);

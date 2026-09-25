@@ -1264,7 +1264,7 @@ export class QuakeCSource {
   }
   private applySourceDamage(request: DamageRequest): DamageOutcome {
     const damage = id1ProgramBinding(this.prepared.program).damage;
-    if (this.prepared.combatDeclaration === undefined && damage.kind === "calls" && damage.parameters.length !== 4) throw new Error("QC incoming damage requires its qualified four-argument source ABI");
+    if (damage.call.declaration === undefined && damage.call.parameters.length !== 4) throw new Error("QC incoming damage requires its qualified four-argument source ABI");
     const vm = this.machine;
     if (!Number.isFinite(Math.fround(request.amount))) throw new RangeError("Incoming QC damage must fit its source binary32 ABI");
     const target = this.reference(request.target), attacker = request.attack.attacker === null ? 0 : this.reference(request.attack.attacker),
@@ -1275,11 +1275,11 @@ export class QuakeCSource {
     this.incomingDamage.push(entry);
     try {
       vm.globals.setInt(self, inflictor); vm.globals.setInt(other, target); vm.globals.setFloat(time, this.currentTime);
-      const declaration = this.prepared.combatDeclaration;
+      const declaration = damage.call.declaration;
       if (declaration === undefined) {
         vm.globals.setInt(4, target); vm.globals.setInt(7, inflictor); vm.globals.setInt(10, attacker); vm.globals.setFloat(13, request.amount);
         vm.execute(damage.index, 4);
-      } else withQcSourceCall(vm, declaration.damage, qcDamageInputs(request, this.currentTime), actor => actor === null ? 0 : this.reference(actor), count => {
+      } else withQcSourceCall(vm, declaration, qcDamageInputs(request, this.currentTime), actor => actor === null ? 0 : this.reference(actor), count => {
         vm.execute(damage.index, count); return vm.globals.float(1);
       });
       if (entry.outcome === null) throw new Error("Incoming original QC damage did not complete its authority boundary");

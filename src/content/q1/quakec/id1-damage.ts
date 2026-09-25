@@ -10,6 +10,7 @@ import type { QcWorldHostOptions } from "../../../compat/qc/world-host.ts";
 import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../../world/gameplay/authority.ts";
 import { qcArmorStage, type QcArmorStage } from "./armor-stage.ts";
 import { qcDamageScale, evaluateQcDamageScale, type QcDamageScale } from "./damage-scale.ts";
+import { readQcDamageCall, projectQcDamageCall } from "./damage-call.ts";
 import { attackDamageFlags } from "../../../world/gameplay/armor.ts";
 
 export interface Id1DamageCall {
@@ -75,7 +76,7 @@ export class Id1DamageBinding {
       if (frame?.request.attack.damagePowerupOwner !== undefined && quad !== null) this.vm().globals.setFloat(quad.result, 0);
       return undefined;
     } };
-    const layout = this.binding.damage, damage = program.functionNamed("T_Damage");
+    const layout = this.binding.damage, damage = program.functionAt(layout.index);
     if (damage.index !== layout.index || damage.firstStatement !== layout.firstStatement || damage.parameterStart !== layout.parameterStart || damage.localWords !== layout.localWords
       || layout.kind === "sites" && (damage.parameterSizes.length !== 4 || damage.parameterSizes.some(size => size !== 1))) throw new QcProgramError("id1 damage function layout mismatch");
     for (const [index, opcode, a, b, c] of layout.kind === "sites" ? layout.statements : []) {
@@ -91,18 +92,18 @@ export class Id1DamageBinding {
     this.functionBoundary = { functions: new Set(layout.kind === "sites" && projection?.reaction === undefined ? [layout.index]
       : program.functions.filter(fn => fn.index > 0 && fn.firstStatement > 0 && !fn.namedBuiltin).map(fn => fn.index)), run: (call, execute) => {
       if (call.functionIndex !== layout.index) return this.observeNativeFunction(call, execute);
-      const vm = this.vm(), reference = vm.argInt(0);
+      const vm = this.vm(), sourceCall = readQcDamageCall(vm, layout.call), reference = sourceCall.self;
       const actor = (reference: number): ActorId => {
         if (projection !== undefined) return projection.actor(reference);
         const value = source.slots.at(source.entities.slot(reference));
         if (value === null || !source.actors.isLive(value.id)) throw new QcProgramError("id1 damage references a free source actor");
         return value.id;
       };
-      const captured = { call, target: actor(reference), inflictor: actor(vm.argInt(1)), attacker: actor(vm.argInt(2)), amount: vm.argFloat(3) };
+      const captured = { call, target: actor(reference), inflictor: actor(sourceCall.inflictor), attacker: actor(sourceCall.attacker), amount: sourceCall.amount };
       const request = resolveRequest(captured);
       const sameReference = (actor: ActorId | null, captured: ActorId, reference: number): boolean => actor === null ? reference === 0 : actor.equals(captured);
-      if (!request.target.equals(captured.target) || Math.fround(request.amount) !== captured.amount || !sameReference(request.attack.attacker, captured.attacker, vm.argInt(2))
-        || !sameReference(request.attack.inflictor, captured.inflictor, vm.argInt(1))) throw new QcProgramError("id1 damage provenance changed source arguments");
+      if (!request.target.equals(captured.target) || Math.fround(request.amount) !== captured.amount || !sameReference(request.attack.attacker, captured.attacker, sourceCall.attacker)
+        || !sameReference(request.attack.inflictor, captured.inflictor, sourceCall.inflictor)) throw new QcProgramError("id1 damage provenance changed source arguments");
       let executed = false;
       const outcome = authority.runSourceDamage(request, (observer, effective) => {
         if (projection?.admit?.(effective) === false || !source.actors.isLive(effective.target)) return { appliedDamage: 0, reaction: "none" };
@@ -111,7 +112,7 @@ export class Id1DamageBinding {
             attack: { ...request.attack, attacker: null, inflictor: null } },
           { knockback: effective.knockback, direction: effective.direction, point: effective.point, normal: effective.normal, delivery: effective.delivery,
             attack: { ...effective.attack, attacker: null, inflictor: null } })))
-          throw new QcProgramError("QuakeC T_Damage accepts actor and amount changes; independent damage metadata requires a replacement");
+          throw new QcProgramError("QuakeC damage call accepts actor and amount changes; independent damage metadata requires a replacement");
         if (!Number.isFinite(Math.fround(effective.amount))) throw new QcProgramError("QuakeC damage amount exceeds binary32 range");
         const referenceFor = (actor: ActorId | null): number => {
           if (projection !== undefined) return projection.reference(actor);
@@ -127,11 +128,8 @@ export class Id1DamageBinding {
         this.active.push(frame);
         try {
           executed = true;
-          execute(machine => {
-            machine.globals.setInt(4, targetReference); machine.globals.setInt(7, inflictorReference); machine.globals.setInt(10, attackerReference);
-            machine.globals.setFloat(13, effective.amount);
-            return undefined;
-          });
+          projectQcDamageCall(vm, layout.call, sourceCall,
+            { self: targetReference, inflictor: inflictorReference, attacker: attackerReference, amount: effective.amount }, execute);
           if (layout.kind === "calls" && frame.healthWritten && frame.result.reaction === "none"
             && source.actors.isLive(effective.target) && source.entities.fromReference(targetReference).float(this.health) <= 0) {
             frame.result = { ...frame.result, reaction: "death" };
