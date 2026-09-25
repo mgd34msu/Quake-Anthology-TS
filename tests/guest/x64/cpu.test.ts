@@ -376,3 +376,28 @@ test("instruction sequence preserves canonical, wrap and 15-byte fetch fault ord
     expect(() => new X64DecodeCursor(memory, state)).toThrow("Instruction exceeds 15 bytes");
   }
 });
+
+
+test("instruction cursors remain local when a committed store reenters the same CPU", () => {
+  const f = fixture([0x66, 0xc7, 0x03, 0x34, 0x12, 0xb8, 86, 0, 0, 0, 0xc3]);
+  const data = f.memory.map({ base: 0x50000n, byteLength: 2, permissions: "read-write" });
+  const nested = f.memory.map({ base: 0x70000n, byteLength: 6, permissions: "execute", bytes: new Uint8Array([0xb8, 37, 0, 0, 0, 0xc3]) });
+  let calls = 0;
+  const release = f.memory.observeWrites(data, 2, () => {
+    const ip = f.state.instructionPointer, registers = f.state.registers.checkpoint(), flags = f.state.flags.value;
+    try {
+      f.state.instructionPointer = nested.byteOffset;
+      expect(f.run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(37n); calls++;
+    } finally {
+      f.state.registers.restore(registers); f.state.flags.value = flags; f.state.instructionPointer = ip;
+    }
+  });
+  try {
+    for (let iteration = 0; iteration < 2; iteration++) {
+      f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack); f.state.registers.write("rbx", 64, data.byteOffset);
+      expect(f.run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(86n);
+      expect(f.memory.readUint16(data)).toBe(0x1234);
+    }
+    expect(calls).toBe(2);
+  } finally { release(); }
+});

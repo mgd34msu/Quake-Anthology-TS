@@ -36,6 +36,7 @@ export class X64Cpu implements GuestCpu {
     if (!Number.isSafeInteger(options.instructionBudget) || options.instructionBudget < 0) throw new RangeError("Instruction budget must be a nonnegative safe integer");
     if (options.returnAddress !== null && options.returnAddress.addressSpace !== this.memory.addressSpace) throw new RangeError("Return address belongs to another guest address space");
     let checkpoint: Uint8Array | undefined;
+    let retainedCursor: X64DecodeCursor | null = null;
     for (let instructions = 0; instructions < options.instructionBudget; instructions += 1) {
       const start = this.state.instructionPointer;
       const address = this.#evidenceAddress(start);
@@ -49,7 +50,9 @@ export class X64Cpu implements GuestCpu {
         if (this.#isHostCall(address)) return { kind: "host-call", instructions, address };
         const retained = this.#instructions.get(start);
         const decoded = retained !== undefined && retained.unchanged() ? retained : null;
-        cursor = new X64DecodeCursor(this.memory, this.state, decoded);
+        if (retainedCursor === null) retainedCursor = new X64DecodeCursor(this.memory, this.state, decoded);
+        else retainedCursor.reset(decoded);
+        cursor = retainedCursor;
         const flow = this.#execute(cursor);
         if (decoded === null) {
           const prepared = cursor.cache();

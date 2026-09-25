@@ -101,12 +101,13 @@ export function writeMemory(memory: MappedGuestMemory, address: GuestAddress, wi
 
 /** AMD APM volume 3 sections 1.2-1.7; memory addresses wait until all immediates are decoded. */
 export class X64DecodeCursor {
-  readonly start: bigint;
-  readonly #fetchNext: (() => number) | null;
-  readonly #records: DecodeRecords | null;
-  readonly #prefixLength: number;
+  #start = 0n;
+  #decoded: X64DecodedInstruction | null = null;
+  #fetchNext: (() => number) | null = null;
+  #records: DecodeRecords | null = null;
+  #prefixLength = 0;
   #position = 0;
-  readonly opcode: number;
+  #opcode = 0;
   rex: number | null = null;
   operandOverride = false;
   addressOverride = false;
@@ -114,22 +115,32 @@ export class X64DecodeCursor {
   repeat: "none" | "f2" | "f3" = "none";
   segment: "fs" | "gs" | null = null;
 
-  constructor(readonly memory: MappedGuestMemory, readonly state: GuestProcessorState, readonly decoded: X64DecodedInstruction | null = null) {
-    this.start = state.instructionPointer;
+  constructor(readonly memory: MappedGuestMemory, readonly state: GuestProcessorState, decoded: X64DecodedInstruction | null = null) {
+    this.reset(decoded);
+  }
+  get start(): bigint { return this.#start; }
+  get decoded(): X64DecodedInstruction | null { return this.#decoded; }
+  get opcode(): number { return this.#opcode; }
+  reset(decoded: X64DecodedInstruction | null): void {
+    this.#start = this.state.instructionPointer;
+    this.#decoded = decoded;
     this.#records = decoded === null ? { bytes: [], operands: [], immediates: [] } : null;
     if (decoded !== null) {
       this.#fetchNext = null;
       this.#prefixLength = this.#position = decoded.prefixLength;
-      this.opcode = decoded.opcode; this.rex = decoded.rex;
+      this.#opcode = decoded.opcode; this.rex = decoded.rex;
       this.operandOverride = decoded.operandOverride; this.addressOverride = decoded.addressOverride;
       this.lock = decoded.lock; this.repeat = decoded.repeat; this.segment = decoded.segment;
       return;
     }
+    this.#position = 0;
+    this.rex = null; this.operandOverride = false; this.addressOverride = false;
+    this.lock = false; this.repeat = "none"; this.segment = null;
     // The complete architectural instruction window stays canonical and cannot wrap.
     // Boundary instructions retain the per-byte address/fault path below.
     this.#fetchNext = (this.start > 0n && this.start <= 0x7ffffffffff1n)
       || (this.start >= 0xffff800000000000n && this.start <= 0xfffffffffffffff1n)
-      ? memory.fetchSequence(this.start) : null;
+      ? this.memory.fetchSequence(this.start) : null;
     while (true) {
       const byte = this.readByte();
       if (byte >= 0x40 && byte <= 0x4f) { this.rex = byte; continue; }
@@ -141,7 +152,7 @@ export class X64DecodeCursor {
       else if (byte === 0x64) this.segment = "fs";
       else if (byte === 0x65) this.segment = "gs";
       else if (byte === 0x2e || byte === 0x36 || byte === 0x3e || byte === 0x26) this.segment = null;
-      else { this.opcode = byte; break; }
+      else { this.#opcode = byte; break; }
       this.rex = null;
     }
     this.#prefixLength = this.#position;
