@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { q2LayoutOperations, q2NativeHudOperations, type NativeQ2HudFrame } from "../../../src/ui/hud/q2-native.ts";
+import { q2LayoutOperations, q2NativeHudOperations, type NativeQ2HudFrame, type NativeQ2HudArsenal } from "../../../src/ui/hud/q2-native.ts";
 
 // game/g_spawn.c single_statusbar, preserving each source stat and coordinate.
 const singleStatusbar = 'yb -24 xv 0 hnum xv 50 pic 0 if 2 xv 100 anum xv 150 pic 2 endif if 4 xv 200 rnum xv 250 pic 4 endif if 6 xv 296 pic 6 endif yb -50 if 7 xv 0 pic 7 xv 26 yb -42 stat_string 8 yb -50 endif if 9 xv 262 num 2 10 xv 296 pic 9 endif if 11 xv 148 pic 11 endif';
@@ -43,6 +43,22 @@ test("svc_inventory retains source item indices, selected-row scroll and exact u
 test("donor numeric flashing, suppression and malformed index boundaries", () => {
   const source = frame(), stats = [...source.stats]; stats[1] = 12; stats[3] = -1; stats[5] = 0; stats[15] = 1;
   const ops = q2LayoutOperations("hnum anum rnum", { ...source, stats }, 320, 240);
-  expect(ops.map(op => op.kind === "picture" ? op.name : op.text)).toEqual(["field_3", "anum_1", "anum_2"]);
+  expect(ops.map(op => op.kind === "picture" ? op.name : op.kind === "text" ? op.text : op.resource)).toEqual(["field_3", "anum_1", "anum_2"]);
   expect(() => q2LayoutOperations("pic 999", source, 320, 240)).toThrow("outside playerstate");
+});
+
+
+test("selected arsenal uses original ammo layout while retaining native health, armor and visibility", () => {
+  const source = frame(), stats = [...source.stats]; stats[2] = 0; stats[3] = 0;
+  const selected: NativeQ2HudArsenal = { ammo: 31, ammoIcon: { resource: "resource:foreign-ammo", aspect: 2 } };
+  const ops = q2NativeHudOperations({ ...source, stats }, 640, 480, undefined, undefined, selected);
+  expect(ops).toContainEqual({ kind: "picture", x: 278, y: 456, name: "num_3" });
+  expect(ops).toContainEqual({ kind: "picture", x: 294, y: 456, name: "num_1" });
+  expect(ops).toContainEqual({ kind: "arsenal-picture", x: 310, y: 456, resource: "resource:foreign-ammo", aspect: 2 });
+  expect(ops.filter(op => op.kind === "picture" && ["i_health", "i_combatarmor"].includes(op.name)))
+    .toEqual(q2NativeHudOperations(source, 640, 480).filter(op => op.kind === "picture" && ["i_health", "i_combatarmor"].includes(op.name)));
+  expect(q2NativeHudOperations(source, 640, 480, undefined, undefined, { ammo: null, ammoIcon: null }).some(op => op.kind === "arsenal-picture")).toBe(false);
+  expect(q2NativeHudOperations(source, 640, 480, undefined, "layout-overlay", selected)).toEqual([]);
+  expect(q2NativeHudOperations({ ...source, configstrings: new Map() }, 640, 480, undefined, undefined, selected)).toEqual([]);
+  expect(source.stats[3]).toBe(50);
 });

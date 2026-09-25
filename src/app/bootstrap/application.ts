@@ -2783,7 +2783,7 @@ export class Application {
         q3Cvars = guestTransition.cvars.variables.flatMap(variable => variable === null || variable.name === "mapname" || variable.name === "sv_mapname"
           ? [] : [{ name: variable.name, value: variable.latchedValue ?? variable.value }]);
       }
-      const retainedNative = nativeTravel === undefined ? undefined : previousSimulation.captureNativeQ2Travel(nativeTravel.newUnit, nativeTravel.spawnPoint);
+      const retainedNative = nativeTravel === undefined ? undefined : await previousSimulation.captureNativeQ2Travel(nativeTravel.newUnit, nativeTravel.spawnPoint, nextFrame);
       simulation = await loadSimulation({ ...(retainedNative === undefined ? {} : { nativeQ2Travel: retainedNative }), dedicated: options.dedicated, ...await Application.guestOptions(content, options, this.host, guestCommands, candidateGraph, nativeCommand), prepareRereleaseNavigation: simulation => createApplicationBotNavigation({ content, simulation }), ...(content.preparedQuakeC === null ? {} : { preparedQuakeC: content.preparedQuakeC }), ...(monsterNavigation === undefined ? {} : { monsterNavigation }), identity: this.identity, weaponBehaviors: content.preparedWeaponBehaviors, recipe: content.recipe, world: content.world, mounts: content.mounts,
         preparedMods: content.preparedMods, enabledMods: content.recipe.mods?.map(mod => mod.selection) ?? [], modCommands, ...(modTravel === undefined ? {} : { modTravel }),
         modFiles: new ModUserFiles(options.userContentRoot ?? defaultUserContentRoot()),

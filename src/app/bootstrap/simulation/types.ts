@@ -138,6 +138,7 @@ export interface PlayerUiItem {
   readonly warningCount: number;
 }
 export interface PlayerUi {
+  readonly selectedArsenal?: true;
   readonly powerups: readonly import("../../../contracts/gameplay.ts").ActivePowerupTimer[];
   readonly weaponStatus: WeaponHudStatus | null;
   readonly arsenalWarning: ArsenalAmmoWarning;

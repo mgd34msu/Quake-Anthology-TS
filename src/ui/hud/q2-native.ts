@@ -1,4 +1,5 @@
 import type { Q2ProtocolIdentity } from "../../contracts/protocol.ts";
+import type { ResourceId } from "../../contracts/content.ts";
 import { Tokenizer } from "../../core/common-parse.ts";
 import { gameAtoi } from "../../core/game-numeric.ts";
 import { q2ApplicationLayout } from "../../app/bootstrap/network/q2-layout.ts";
@@ -16,16 +17,24 @@ export interface NativeQ2HudFrame {
 }
 export type NativeQ2HudOperation =
   | { readonly kind: "picture"; readonly x: number; readonly y: number; readonly name: string }
+  | { readonly kind: "arsenal-picture"; readonly x: number; readonly y: number; readonly resource: ResourceId; readonly aspect: number }
   | { readonly kind: "text"; readonly x: number; readonly y: number; readonly text: string; readonly alternate: boolean };
 
+export interface NativeQ2HudArsenal {
+  readonly ammo: number | null;
+  readonly ammoIcon: { readonly resource: ResourceId; readonly aspect: number } | null;
+}
+
 /** Q2 client/cl_scrn.c SCR_ExecuteLayoutString and SCR_DrawField. */
-export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, width: number, height: number): readonly NativeQ2HudOperation[] {
+export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, width: number, height: number, arsenal?: NativeQ2HudArsenal): readonly NativeQ2HudOperation[] {
   const out: NativeQ2HudOperation[] = [], parser = new Tokenizer(source, "Q2 HUD layout"), config = q2ApplicationLayout(frame.protocol);
   let x = 0, y = 0;
   const next = (): string => parser.next()?.value ?? "";
   const integer = (): number => gameAtoi(next());
   const stat = (index: number): number => {
     if (index < 0 || index >= frame.stats.length) throw new RangeError(`Q2 HUD stat ${index} is outside playerstate`);
+    if (arsenal !== undefined && index === 2) return arsenal.ammo === null ? 0 : 1;
+    if (arsenal !== undefined && index === 3) return arsenal.ammo ?? -1;
     return frame.stats[index] ?? 0;
   };
   const picture = (name: string): void => { if (name !== "") out.push({ kind: "picture", x, y, name }); };
@@ -54,7 +63,12 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
       case "yb": y = height + integer(); break;
       case "yv": y = Math.trunc(height / 2) - 120 + integer(); break;
       case "pic": {
-        const image = stat(integer());
+        const index = integer();
+        if (index === 2 && arsenal !== undefined) {
+          if (arsenal.ammo !== null && arsenal.ammoIcon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.ammoIcon });
+          break;
+        }
+        const image = stat(index);
         if (image < 0 || image >= config.maxImages) throw new RangeError(`Q2 HUD image ${image} is outside configstrings`);
         picture(frame.configstrings.get(config.images + image) ?? ""); break;
       }
@@ -93,10 +107,10 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
 
 /** Q2 client/cl_inv.c: fixed authored background, selected-item scroll and source bindings. */
 export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, height: number,
-  binding: (command: string) => string = () => "", mode: "layout-overlay" | "replace-status" = "replace-status"): readonly NativeQ2HudOperation[] {
-  const out = mode === "layout-overlay" ? [] : [...q2LayoutOperations(frame.configstrings.get(5) ?? "", frame, width, height)];
+  binding: (command: string) => string = () => "", mode: "layout-overlay" | "replace-status" = "replace-status", arsenal?: NativeQ2HudArsenal): readonly NativeQ2HudOperation[] {
+  const out = mode === "layout-overlay" ? [] : [...q2LayoutOperations(frame.configstrings.get(5) ?? "", frame, width, height, arsenal)];
   const layouts = frame.stats[13] ?? 0;
-  if ((layouts & 1) !== 0) out.push(...q2LayoutOperations(frame.layout, frame, width, height));
+  if ((layouts & 1) !== 0) out.push(...q2LayoutOperations(frame.layout, frame, width, height, arsenal));
   if (mode === "layout-overlay") return out;
   if ((layouts & 2) === 0) return out;
   const config = q2ApplicationLayout(frame.protocol), selected = frame.stats[12] ?? 0;

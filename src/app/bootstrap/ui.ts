@@ -2,7 +2,7 @@ import { registerRankingAccountMenu } from "../../ui/settings/ranking-account.ts
 import type { RankingAccountActions } from "../../ui/settings/rankings.ts";
 import { readSeatLanguage } from "../../ui/settings/language.ts";
 import { ApplicationQ2NativeHud } from "./q2-native-hud.ts";
-import type { NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
+import type { NativeQ2HudFrame, NativeQ2HudArsenal } from "../../ui/hud/q2-native.ts";
 import { registerInventoryMenu } from "../../ui/library/inventory.ts";
 import { SeatSoundCaptions } from "./sound-captions.ts";
 import { BaseArenaMenus, type BaseArenaMenuService } from "./base-arena-menu.ts";
@@ -327,7 +327,7 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       const hud: CommonHudData = { ...base, ...sourceHud, captions: this.soundCaptions.active({ subtitles: true, soundCaptions: this.preferences.values.captions, speakers: true }), powerups: player.powerups, prompts: [...this.match.prompts, ...sourceHud.prompts,
         ...(player.armor.powered.kind !== "none" ? [{ action: `Power ${player.armor.powered.kind} ${player.armor.powered.cells}`, binding: "", icon: null }] : [])], ...this.weaponWheel.drawState(), visible: gameVisible && this.local.input.focus.kind === "game",
         crosshair: { ...base.crosshair, visible: crosshairVisible && !nativeCrosshair },
-        ...(player.weaponStatus === null || sourceStatus?.kind === "native" || this.guestUi ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
+        ...(player.weaponStatus === null || sourceStatus?.kind === "native" || this.guestUi || nativeStatus && player.selectedArsenal === true ? {} : { weapon: { status: player.weaponStatus, warning: showAggregateWarning ? player.arsenalWarning : "none",
           weaponIcon: this.weaponIcons.weapon, ammoIcon: this.weaponIcons.ammo,
           iconAspect: this.weaponAssets?.aspect(this.weaponIcons.weapon ?? this.weaponIcons.ammo) ?? 1, ammoAspect: this.weaponAssets?.aspect(this.weaponIcons.ammo) ?? 1,
           measureText: this.measureHudText, nativeStatus } }),
@@ -342,17 +342,26 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       { text: this.menuText, white: this.art.white, picture: resource => this.art.picture(resource), emit, material });
   }
 
+  private nativeQ2Arsenal(): NativeQ2HudArsenal | undefined {
+    const ui = this.simulation.playerUi(this.local.player.actor);
+    if (ui.selectedArsenal !== true) return undefined;
+    const icon = this.weaponIcons.ammo;
+    return { ammo: ui.ammo?.count ?? null,
+      ammoIcon: icon === null ? null : { resource: icon, aspect: this.weaponAssets?.aspect(icon) ?? 1 } };
+  }
+
   prepareNativeQ2Hud(frame: NativeQ2HudFrame, content: ContentId, assets: ApplicationAssets, context: UiDrawContext,
     component?: { readonly renderer: ApplicationQ2NativeHud; readonly mode: "layout-overlay" | "replace-status"; assertCurrent(): void }): Promise<void> {
     return (component?.renderer ?? this.nativeQ2Hud).prepare(content, assets, frame, context, this.preferences.values.hudScale * context.binding.hudScale,
-      component?.mode, component?.assertCurrent);
+      component?.mode, component?.assertCurrent, component === undefined ? this.nativeQ2Arsenal() : undefined);
   }
   drawNativeQ2Hud(frame: NativeQ2HudFrame, context: UiDrawContext, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
     material: (draw: MaterialTextDraw) => void, binding?: (command: string) => string,
     component?: { readonly renderer: ApplicationQ2NativeHud; readonly mode: "layout-overlay" | "replace-status" }): void {
     const renderer = component?.renderer ?? this.nativeQ2Hud;
-    renderUiCommands(context, renderer.commands(frame, context, this.preferences.values.hudScale * context.binding.hudScale, binding, component?.mode),
-      { text: this.text, white: this.art.white, picture: resource => renderer.picture(resource) ?? this.art.picture(resource), emit, material });
+    renderUiCommands(context, renderer.commands(frame, context, this.preferences.values.hudScale * context.binding.hudScale, binding, component?.mode,
+      component === undefined ? this.nativeQ2Arsenal() : undefined),
+      { text: this.text, white: this.art.white, picture: resource => renderer.picture(resource) ?? this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });
   }
 
   captionCommands(captions: readonly ActiveCaption[], context: UiDrawContext): readonly Exclude<RenderCommand, { readonly kind: "swap-buffers" }>[] {

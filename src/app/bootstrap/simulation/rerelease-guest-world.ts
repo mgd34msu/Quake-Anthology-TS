@@ -230,6 +230,9 @@ export class RereleaseGuestWorld {
     });
   }
   writeTravelLevel(): RereleaseSourceSave { return this.operation(() => { this.requireRunning(); return this.source.host.writeSave("level", true); }); }
+  writeTravelLevelLoading(nextFrame: () => Promise<void>): Promise<RereleaseSourceSave> {
+    return this.loading(() => { this.requireRunning(); return this.source.host.writeSaveLoading("level", true, nextFrame); });
+  }
   private restore(saved: RereleaseGuestSave, map: ClassicGuestMap, restoreServerState: () => void): void {
     if (this.#phase !== "initialized") throw new Error("Native import requires a fresh initialized candidate");
     this.source.host.readSave("game", saved.game, "checkpoint"); this.spawnMap(map); this.#phase = "initialized"; this.services.drainMessages();

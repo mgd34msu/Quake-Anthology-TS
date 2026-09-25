@@ -1,7 +1,7 @@
 import type { ContentId, ResourceId } from "../../contracts/content.ts";
 import type { UiDrawCommand, UiDrawContext } from "../../contracts/ui.ts";
 import type { PictureAsset } from "../../text/draw2d.ts";
-import { q2NativeHudOperations, type NativeQ2HudFrame } from "../../ui/hud/q2-native.ts";
+import { q2NativeHudOperations, type NativeQ2HudFrame, type NativeQ2HudArsenal } from "../../ui/hud/q2-native.ts";
 import type { ApplicationAssets } from "./assets.ts";
 
 /** Uses mounted Q2 pictures and conchars with the normal seat-clipped UiDrawCommand renderer. */
@@ -13,13 +13,13 @@ export class ApplicationQ2NativeHud {
   clear(): void { this.revision++; this.content = null; this.ids.clear(); this.pictures.clear(); }
   picture(id: ResourceId): PictureAsset | undefined { return this.pictures.get(id); }
   async prepare(content: ContentId, assets: ApplicationAssets, frame: NativeQ2HudFrame, context: UiDrawContext, scale = 1,
-    mode: "layout-overlay" | "replace-status" = "replace-status", assertCurrent: () => void = () => undefined): Promise<void> {
+    mode: "layout-overlay" | "replace-status" = "replace-status", assertCurrent: () => void = () => undefined, arsenal?: NativeQ2HudArsenal): Promise<void> {
     if (this.content !== content) { this.clear(); this.content = content; }
     const revision = this.revision;
     const current = (): void => { assertCurrent(); if (revision !== this.revision) throw new Error("Native HUD media is retired"); };
     current();
     const area = context.binding.safeArea;
-    const ops = q2NativeHudOperations(frame, area.width / scale, area.height / scale, undefined, mode);
+    const ops = q2NativeHudOperations(frame, area.width / scale, area.height / scale, undefined, mode, arsenal);
     const provider = await assets.provider(content);
     current();
     const numbers = ["num", "anum"].flatMap(prefix => [...Array.from({ length: 10 }, (_, digit) => `${prefix}_${digit}`), `${prefix}_minus`]);
@@ -36,11 +36,16 @@ export class ApplicationQ2NativeHud {
     }));
   }
   commands(frame: NativeQ2HudFrame, context: UiDrawContext, scale = 1, binding: (command: string) => string = () => "",
-    mode: "layout-overlay" | "replace-status" = "replace-status"): readonly UiDrawCommand[] {
+    mode: "layout-overlay" | "replace-status" = "replace-status", arsenal?: NativeQ2HudArsenal): readonly UiDrawCommand[] {
     const area = context.binding.safeArea, out: UiDrawCommand[] = [{ kind: "clip", rect: area }];
     const font = this.ids.get("conchars");
-    for (const op of q2NativeHudOperations(frame, area.width / scale, area.height / scale, binding, mode)) {
-      if (op.kind === "picture") {
+    for (const op of q2NativeHudOperations(frame, area.width / scale, area.height / scale, binding, mode, arsenal)) {
+      if (op.kind === "arsenal-picture") {
+        const width = 24 * Math.min(1, op.aspect), height = 24 / Math.max(1, op.aspect);
+        out.push({ kind: "image", resource: op.resource,
+          rect: { x: area.x + (op.x + (24 - width) / 2) * scale, y: area.y + (op.y + (24 - height) / 2) * scale, width: width * scale, height: height * scale },
+          texCoords: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color: { x: 1, y: 1, z: 1, w: 1 } });
+      } else if (op.kind === "picture") {
         const id = this.ids.get(op.name), picture = id === undefined ? undefined : this.pictures.get(id);
         if (id === undefined || picture?.kind !== "image") continue;
         out.push({ kind: "image", resource: id, rect: { x: area.x + op.x * scale, y: area.y + op.y * scale, width: picture.image.width * scale, height: picture.image.height * scale },

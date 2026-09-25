@@ -1,7 +1,7 @@
-import { inventoryGive } from "./inventory.ts";
-import type { InventoryEntry, InventoryTable, ItemId } from "../../contracts/gameplay.ts";
+import { inventoryGive, type SharedInventoryTable } from "./inventory.ts";
+import type { InventoryEntry, ItemId } from "../../contracts/gameplay.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
-import type { AmmoWeaponSelection, PickupAdmission, PickupAmmoGrant, PickupAmmoReceipt, PickupSelection, PickupSupplyOffer, PickupSupplyPreview, PickupSupplyProfile } from "../../contracts/pickups.ts";
+import type { AmmoWeaponSelection, SourcePickupQuantity, PickupAdmission, PickupAmmoGrant, PickupAmmoReceipt, PickupSelection, PickupSupplyOffer, PickupSupplyPreview, PickupSupplyProfile } from "../../contracts/pickups.ts";
 import type { PickupCargoEntry } from "../../contracts/original-pickups.ts";
 
 export type PickupGrantPlan =
@@ -38,8 +38,10 @@ export function previewPickupGrants(inventory: readonly InventoryEntry[], plan: 
     : ammo.filter(receipt => weapons.items.includes(receipt.item)) };
 }
 
+type PickupQuantityResolver = (entry: InventoryEntry) => number | SourcePickupQuantity;
+
 export interface SharedPickupAdmissionOptions {
-  readonly inventory: InventoryTable;
+  readonly inventory: Pick<SharedInventoryTable, "entries" | "count" | "consume" | "give" | "configure">;
   readonly profile: PickupSupplyProfile;
   ammoGranted(actor: OwnedActor, grants: readonly PickupAmmoReceipt[], autoSwitch: boolean): undefined;
   weaponGranted(actor: OwnedActor, weapons: readonly ItemId[], selection: PickupSelection): undefined;
@@ -85,40 +87,61 @@ export class SharedPickupAdmission implements PickupAdmission {
     return this.destinations("weapons", sourceWeapon).every(item => this.options.inventory.count(actor, item) > 0);
   }
 
-  private resolveAmmo(offers: readonly PickupAmmoGrant[]): readonly PickupAmmoGrant[] {
+  private resolveAmmo(offers: readonly PickupAmmoGrant[], sourceQuantity = false): readonly PickupAmmoGrant[] {
     return offers.flatMap(offer => {
-      if (!Number.isFinite(offer.amount) || offer.amount < 0) throw new RangeError("Pickup amount must be finite and nonnegative");
+      if (!Number.isFinite(offer.amount) || !sourceQuantity && offer.amount < 0) throw new RangeError("Pickup amount must be finite and nonnegative");
       return this.destinations("ammo", offer.item).map(item => ({ item, amount: offer.amount }));
     });
   }
 
-  private giveAmmo(actor: OwnedActor, grants: readonly PickupAmmoGrant[]): readonly PickupAmmoReceipt[] {
-    return grants.map(grant => ({ item: grant.item, before: this.options.inventory.count(actor.id, grant.item),
-      given: this.options.inventory.give(actor, grant.item, grant.amount) }));
+  private quantities(actor: ActorId, grants: readonly PickupAmmoGrant[], resolve?: PickupQuantityResolver) {
+    const exact = new Set<ItemId>(); let accepted: boolean | undefined;
+    const ammo = grants.map(grant => {
+      if (resolve === undefined) return grant;
+      const entry = this.options.inventory.entries(actor).find(entry => entry.item === grant.item);
+      if (entry === undefined) throw new Error("Source quantity requires an admitted destination pool");
+      const quantity = resolve(entry), amount = typeof quantity === "number" ? quantity : quantity.amount;
+      if (!Number.isFinite(amount) || typeof quantity === "number" && amount < 0) throw new RangeError("Original pickup quantity is invalid");
+      if (typeof quantity !== "number") { exact.add(grant.item); accepted = (accepted ?? false) || quantity.accepted; }
+      return { item: grant.item, amount };
+    });
+    return { ammo, exact, accepted };
   }
 
-  ammo(actor: OwnedActor, offer: PickupAmmoGrant, autoSwitch = true): boolean {
-    const grants = this.resolveAmmo([offer]);
-    this.requireEntries(actor.id, grants.map(grant => grant.item));
-    const receipt = this.giveAmmo(actor, grants);
-    if (!receipt.some(grant => grant.given > 0)) return false;
+  private giveAmmo(actor: OwnedActor, grants: readonly PickupAmmoGrant[], exact: ReadonlySet<ItemId> = new Set()): readonly PickupAmmoReceipt[] {
+    return grants.map(grant => {
+      const before = this.options.inventory.count(actor.id, grant.item);
+      if (!exact.has(grant.item)) return { item: grant.item, before, given: this.options.inventory.give(actor, grant.item, grant.amount) };
+      const entry = this.options.inventory.entries(actor.id).find(entry => entry.item === grant.item);
+      if (entry === undefined) throw new Error("Original pickup lost its admitted destination");
+      this.options.inventory.configure(actor, { ...entry, count: before + grant.amount });
+      return { item: grant.item, before, given: this.options.inventory.count(actor.id, grant.item) - before };
+    });
+  }
+
+  ammo(actor: OwnedActor, offer: PickupAmmoGrant, autoSwitch = true, quantity?: PickupQuantityResolver): boolean {
+    const grants = this.quantities(actor.id, this.resolveAmmo([offer], quantity !== undefined), quantity);
+    this.requireEntries(actor.id, grants.ammo.map(grant => grant.item));
+    const receipt = this.giveAmmo(actor, grants.ammo, grants.exact);
+    if (!(grants.accepted ?? receipt.some(grant => grant.given > 0))) return false;
     this.options.ammoGranted(actor, receipt, autoSwitch);
     return true;
   }
 
-  ammoWeapon(actor: OwnedActor, offer: PickupAmmoGrant & { readonly weapon: ItemId }, selection: AmmoWeaponSelection): boolean {
-    const weapons = this.destinations("weapons", offer.weapon), ammo = this.resolveAmmo([offer]);
-    this.requireEntries(actor.id, [...weapons, ...ammo.map(grant => grant.item)]);
-    const receipt = this.giveAmmo(actor, ammo);
-    if (!receipt.some(grant => grant.given > 0)) return false;
-    for (const weapon of weapons) if (!ammo.some(grant => grant.item === weapon)) this.options.inventory.give(actor, weapon, 1);
+  ammoWeapon(actor: OwnedActor, offer: PickupAmmoGrant & { readonly weapon: ItemId }, selection: AmmoWeaponSelection,
+    quantity?: PickupQuantityResolver): boolean {
+    const weapons = this.destinations("weapons", offer.weapon), grants = this.quantities(actor.id, this.resolveAmmo([offer], quantity !== undefined), quantity);
+    this.requireEntries(actor.id, [...weapons, ...grants.ammo.map(grant => grant.item)]);
+    const receipt = this.giveAmmo(actor, grants.ammo, grants.exact);
+    if (!(grants.accepted ?? receipt.some(grant => grant.given > 0))) return false;
+    for (const weapon of weapons) if (!grants.ammo.some(grant => grant.item === weapon)) this.options.inventory.give(actor, weapon, 1);
     const select = selection.when === "always" || receipt.some(grant => grant.before === 0 && grant.given > 0);
     this.options.weaponGranted(actor, weapons, select ? selection.mode : "never");
     return true;
   }
 
   weapon(actor: OwnedActor, offer: { readonly item: ItemId; readonly ammo: readonly PickupAmmoGrant[] }, selection: PickupSelection,
-    quantity?: (entry: InventoryEntry) => number): boolean {
+    quantity?: PickupQuantityResolver): boolean {
     return this.giveCargo(actor, [{ kind: "weapon", item: offer.item, count: 1 }, ...offer.ammo.map(entry => ({ kind: "counter", item: entry.item, count: entry.amount } satisfies PickupCargoEntry))], selection, quantity);
   }
 
@@ -134,21 +157,15 @@ export class SharedPickupAdmission implements PickupAdmission {
     return this.giveCargo(actor, cargo, selection);
   }
 
-  private giveCargo(actor: OwnedActor, cargo: readonly PickupCargoEntry[], selection: PickupSelection, quantity?: (entry: InventoryEntry) => number): boolean {
+  private giveCargo(actor: OwnedActor, cargo: readonly PickupCargoEntry[], selection: PickupSelection, quantity?: PickupQuantityResolver): boolean {
     if (new Set(cargo.map(row => row.item)).size !== cargo.length || cargo.some(row => !Number.isFinite(row.count) || row.kind === "weapon" && row.count !== 1))
       throw new Error("Invalid pickup cargo");
     const weapons = [...new Set(cargo.filter(row => row.kind === "weapon").flatMap(row => this.destinations("weapons", row.item)))];
-    const mappedAmmo = this.resolveAmmo(cargo.filter(row => row.kind === "counter").map(row => ({ item: row.item, amount: row.count })));
-    const entries = this.requireEntries(actor.id, [...weapons, ...mappedAmmo.map(grant => grant.item)]);
-    const ammo = quantity === undefined ? mappedAmmo : mappedAmmo.map(grant => {
-      const entry = entries.find(entry => entry.item === grant.item);
-      if (entry === undefined) throw new Error(`Pickup destination ${grant.item} was not admitted`);
-      const amount = quantity(entry);
-      if (!Number.isFinite(amount) || amount < 0) throw new RangeError("Original pickup quantity must be finite and nonnegative");
-      return { item: grant.item, amount };
-    });
+    const mappedAmmo = this.resolveAmmo(cargo.filter(row => row.kind === "counter").map(row => ({ item: row.item, amount: row.count })), quantity !== undefined);
+    this.requireEntries(actor.id, [...weapons, ...mappedAmmo.map(grant => grant.item)]);
+    const grants = this.quantities(actor.id, mappedAmmo, quantity);
     for (const weapon of weapons) this.options.inventory.give(actor, weapon, 1);
-    this.giveAmmo(actor, ammo);
+    this.giveAmmo(actor, grants.ammo, grants.exact);
     if (weapons.length !== 0) this.options.weaponGranted(actor, weapons, selection);
     return true;
   }
@@ -159,10 +176,20 @@ export type SelectedPickupWeapon = PickupWeapon & { readonly drop: "supply" | "n
 
 /** Resolve declared supply relationships before admitting players; never choose an ambiguous alias by ordering. */
 export function selectedWeaponSources(profile: PickupSupplyProfile, selected: readonly SelectedPickupWeapon[], original: readonly PickupWeapon[]): ReadonlyMap<ItemId, ItemId | null> {
-  const result = new Map<ItemId, ItemId | null>();
+  const result = new Map<ItemId, ItemId | null>(), owners = new Map<ItemId, ItemId>();
+  for (const row of profile.weaponOwners ?? []) {
+    if (owners.has(row.item) || !profile.weapons.some(mapping => mapping.source === row.source && mapping.destinations.includes(row.item)))
+      throw new Error(`Selected weapon ${row.item} has an invalid or duplicate original owner in ${profile.id}`);
+    owners.set(row.item, row.source);
+  }
   for (const weapon of selected) {
     if (weapon.drop === "none") { result.set(weapon.item, null); continue; }
     if (original.some(source => source.item === weapon.item)) { result.set(weapon.item, weapon.item); continue; }
+    const owner = owners.get(weapon.item);
+    if (owner !== undefined) {
+      if (!original.some(source => source.item === owner)) throw new Error(`Selected weapon ${weapon.item} names an unavailable original owner ${owner}`);
+      result.set(weapon.item, owner); continue;
+    }
     let candidates = original.filter(source => profile.weapons.some(row => row.source === source.item && row.destinations.includes(weapon.item)));
     if (candidates.length === 0 && weapon.ammo !== null) {
       const ammo = weapon.ammo;

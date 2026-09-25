@@ -247,6 +247,26 @@ export class ClassicQ2GuestHost {
     catch (error) { if (failure !== null) throw new AggregateError([failure.error, error], "Travel WriteLevel and reconciliation failed"); throw error; }
     if (failure !== null) throw failure.error;
   }
+  async writeTravelLevelLoading(filename: string, maxClients: number, nextFrame: () => Promise<void>): Promise<void> {
+    if (!this.#initialized || this.options.runner.depth !== 0 || this.#suppressReconcile) throw new Error("API 3 travel save requires an idle initialized module");
+    const clients = Array.from({ length: maxClients }, (_, index) => this.edicts.at(index + 1));
+    const inUse = clients.map(record => record.bytes.getInt32(88, true));
+    this.#suppressReconcile = true;
+    let failure: { readonly error: unknown } | null = null;
+    try {
+      for (const record of clients) record.bytes.setInt32(88, 0, true);
+      this.#pickups?.assertIdle();
+      const path = allocateClassicString(this.memory, filename);
+      try { await this.callLoading("WriteLevel", [{ kind: "pointer", value: path }], nextFrame, Math.min(Number.MAX_SAFE_INTEGER, this.options.instructionBudget * 10)); }
+      finally { this.memory.unmap(path, classicStringAllocationBytes(filename)); }
+    } catch (error) { failure = { error }; } finally {
+      for (const [index, record] of clients.entries()) record.bytes.setInt32(88, inUse[index] ?? 0, true);
+      this.#suppressReconcile = false;
+    }
+    try { this.edicts.reconcile(); }
+    catch (error) { if (failure !== null) throw new AggregateError([failure.error, error], "Travel WriteLevel and reconciliation failed"); throw error; }
+    if (failure !== null) throw failure.error;
+  }
   runFrame(): undefined { this.call("RunFrame"); return undefined; }
   clientConnect(slot: number, userinfo: string): { readonly allowed: boolean; readonly userinfo: string } {
     const buffer = this.memory.allocate({ byteLength: 516, label: "API 3 mutable userinfo" });

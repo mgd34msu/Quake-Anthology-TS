@@ -34,6 +34,7 @@ export interface NativeInputServices {
   frame(): FrameContext;
   onRelease(listener: (actor: ActorId) => undefined): () => void;
   retired(identity: ModClientIdentity): void;
+  originalCommand?(identity: ModClientIdentity, command: NativeCommand): NativeCommand;
   movement<T>(identity: ModClientIdentity, projection: NativeInputMotion, run: () => T): T;
 }
 type NativeInputSource = ({ readonly edition: "classic"; readonly host: ClassicQ2GuestHost }
@@ -144,7 +145,8 @@ export class NativeInputBinding {
       this.assertLive(scope);
       if (application !== null) {
         const effective = application.command;
-        if (effective.kind === "q2-classic" || effective.kind === "q2-rerelease") writeNativeUserCommand(commandView, effective);
+        if (effective.kind === "q2-classic" || effective.kind === "q2-rerelease")
+          writeNativeUserCommand(commandView, kind === "client-command" ? this.services.originalCommand?.(scope.identity, effective) ?? effective : effective);
         else throw new Error("Native input output changed command dialect");
       }
       const result = run();

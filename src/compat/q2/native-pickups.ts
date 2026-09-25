@@ -1,3 +1,4 @@
+import type { SourcePickupQuantity } from "../../contracts/pickups.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, RawEntityView } from "../../contracts/execution.ts";
 import type { ActorId } from "../../contracts/identity.ts";
@@ -21,7 +22,7 @@ export interface NativePickupSupply {
 }
 export interface NativePickupSupplyEvaluation {
   readonly offer: PickupSupplyOffer;
-  readonly quantity?: (count: number, capacity: number) => number;
+  readonly quantity?: (count: number, capacity: number) => SourcePickupQuantity;
 }
 /** Each region leaves the original stack, saved registers and map continuation intact. */
 export interface NativePickupProfile {
@@ -238,13 +239,13 @@ export class NativePrimaryPickups {
       return result;
     } finally { remove(); }
   }
-  private quantity(frame: PickupFrame, descriptor: GuestAddress, amount: number, count: number, capacity: number): number {
+  private quantity(frame: PickupFrame, descriptor: GuestAddress, amount: number, count: number, capacity: number): SourcePickupQuantity {
     this.requireCurrent(frame);
     if (this.frames.at(-1) !== frame || frame.supply === null) throw new Error("Native pickup quantity has expired");
     const { host } = this, { memory, runner } = host, ammo = this.profile.supply.ammo;
     const tag = memory.readInt32(memory.offset(descriptor, BigInt(ammo.tag))), capacityOffset = ammo.capacities[tag];
     if (capacityOffset === undefined) throw new Error("Native pickup ammo has no source capacity");
-    if (!Number.isInteger(count) || count < 0 || count > 0x7fffffff || !Number.isInteger(capacity) || capacity < 0
+    if (!Number.isInteger(count) || count < -0x80000000 || count > 0x7fffffff || !Number.isInteger(capacity) || capacity < 0
       || capacity > (ammo.capacityBytes === 2 ? 0x7fff : 0x7fffffff)) throw new Error("Selected pickup count or capacity exceeds its original ABI");
     const counter = this.counter(frame, descriptor), cap = memory.offset(this.client(frame), BigInt(capacityOffset));
     const previousCount = memory.readInt32(counter), previousCap = ammo.capacityBytes === 2 ? memory.readInt16(cap) : memory.readInt32(cap);
@@ -253,9 +254,17 @@ export class NativePrimaryPickups {
     try {
       memory.writeInt32(counter, count);
       if (ammo.capacityBytes === 2) memory.writeInt16(cap, capacity); else memory.writeInt32(cap, capacity);
-      try { host.invoke(this.at(ammo.entry), ammo.signature, [{ kind: "pointer", value: frame.recipient.address }, { kind: "pointer", value: descriptor }, { kind: "int32", value: amount }]); }
-      catch (error) { if (error !== stop) throw error; }
-      return memory.readInt32(counter) - count;
+      let accepted: boolean;
+      try {
+        const result = host.invoke(this.at(ammo.entry), ammo.signature, [{ kind: "pointer", value: frame.recipient.address }, { kind: "pointer", value: descriptor }, { kind: "int32", value: amount }]);
+        if (result.kind !== "int32" && result.kind !== "uint32") throw new Error("Original ammo grant returned a non-boolean ABI value");
+        accepted = result.value !== 0;
+      } catch (error) {
+        if (error !== stop) throw error;
+        // The qualified rerelease stop follows successful bookkeeping and precedes power-armor use.
+        accepted = true;
+      }
+      return { amount: memory.readInt32(counter) - count, accepted };
     } finally {
       remove(); restoreAbiProcessorState(runner.options.cpu.state, processor);
       memory.writeInt32(counter, previousCount);

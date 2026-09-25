@@ -177,6 +177,16 @@ export class ClassicOriginalSaveFiles {
     });
   }
 
+  async captureTravelLevelLoading(write: (levelPath: string) => Promise<void>): Promise<Uint8Array> {
+    return this.runLoading("capture-level", new Map<string, Uint8Array>(), async operation => {
+      await write(operation.level);
+      this.assertClosed(operation);
+      const level = operation.entries.get(operation.level);
+      if (level === undefined || level.bytes.length === 0) throw new Error("Native travel callback did not write a level file");
+      return level.bytes.slice();
+    });
+  }
+
   /** The retained source owns SpawnEntities/ReadLevel ordering and engine metadata restoration. */
   withTravelLevel<T>(bytes: Uint8Array, read: (levelPath: string) => T): T {
     if (bytes.length === 0) throw new Error("Native travel requires original level bytes");

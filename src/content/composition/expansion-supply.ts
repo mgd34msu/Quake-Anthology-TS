@@ -72,5 +72,7 @@ export function expansionSupply(profile: PickupSupplyProfile, expansions: readon
     return { source: row.source, destinations: [first, ...new Set([...rest, ...additional].filter(item => item !== first))] };
   });
   return { ...profile, id: `${profile.id}/${expansions.join("+")}`, ammo: extend(profile.ammo, ammo), weapons: extend(profile.weapons, weapons),
+    ...(profile.weaponOwners === undefined ? {} : { weaponOwners: [...profile.weaponOwners, ...expansions.flatMap(expansion => profile.weaponOwners?.flatMap(owner =>
+      (weapons[expansion].get(owner.item) ?? []).map(item => ({ item, source: owner.source }))) ?? [])] }),
     ...(profile.ammoOwners === undefined ? {} : { ammoOwners: [...profile.ammoOwners, ...expansions.flatMap(expansion => periodicAmmo[expansion])] }) };
 }

@@ -24,7 +24,8 @@ export function readPlayerView(r: SaveReader): PlayerView {
     ...(death===undefined?{}:{foreignCharacterDeath:death}),...(drift===undefined?{}:{pitchDrift:drift}) };
 }
 export function readPlayerUi(r: SaveReader): PlayerUi {
-  return { health:r.field('health').finite(), armor:readArmor(r.field('armor')), activeWeapon:r.field('activeWeapon').nullable(namespaced),
+  const selectedArsenal=optional(r,'selectedArsenal',v=>v.literal(true));
+  return { ...(selectedArsenal===undefined?{}:{selectedArsenal}), health:r.field('health').finite(), armor:readArmor(r.field('armor')), activeWeapon:r.field('activeWeapon').nullable(namespaced),
     ammo:r.field('ammo').nullable(v=>({item:namespaced(v.field('item')),count:v.field('count').finite()})),
     inventory:r.field('inventory').list(readInventoryEntry), arsenalWarning:r.field('arsenalWarning').choice('none','low','empty'),
     powerups:r.field('powerups').list(v=>({item:namespaced(v.field('item')),label:v.field('label').string(),remainingSeconds:v.field('remainingSeconds').finite()})),

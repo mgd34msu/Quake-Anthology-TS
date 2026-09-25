@@ -45,6 +45,7 @@ export interface PickupSupplyProfile {
   readonly weaponOwnership: "all-destinations";
   readonly ammo: readonly { readonly source: ItemId; readonly destinations: readonly [ItemId, ...ItemId[]] }[];
   /** Each selected ammo pool has an independent timer using an original source rule; rules may repeat, pickup aliases remain independent. */
+  readonly weaponOwners?: readonly { readonly item: ItemId; readonly source: ItemId }[];
   readonly ammoOwners?: readonly { readonly item: ItemId; readonly source: ItemId }[];
   readonly weapons: readonly { readonly source: ItemId; readonly destinations: readonly [ItemId, ...ItemId[]] }[];
 }
@@ -54,3 +55,6 @@ export interface PickupAmmoReceipt {
   readonly before: number;
   readonly given: number;
 }
+
+/** The original pickup function owns both the signed counter change and acceptance. */
+export interface SourcePickupQuantity { readonly amount: number; readonly accepted: boolean; }

@@ -117,6 +117,9 @@ export class ClassicGuestWorld {
   writeTravelLevel(path: string): void {
     this.operation(() => { this.requireRunning(); this.source.host.writeTravelLevel(path, this.services.options.maxClients); });
   }
+  writeTravelLevelLoading(path: string, nextFrame: () => Promise<void>): Promise<void> {
+    return this.operationLoading(() => { this.requireRunning(); return this.source.host.writeTravelLevelLoading(path, this.services.options.maxClients, nextFrame); });
+  }
   /** Irreversible ownership transfer after the caller has staged the destination map. */
   travel(map: ClassicGuestMap, binding: ClassicGuestMapServices, revisit?: ClassicGuestRevisit): ClassicGuestWorld {
     return this.operation(() => {

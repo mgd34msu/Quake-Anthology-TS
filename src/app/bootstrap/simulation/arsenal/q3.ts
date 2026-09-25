@@ -56,7 +56,7 @@ interface PlayerArsenal {
 
 export class Q3SelectedArsenal implements SelectedArsenal {
   catalog(): readonly SelectedPickupWeapon[] {
-    return Q3_WEAPON_ITEMS.filter(entry => this.options.product === "missionpack" || entry.weapon <= 10).map(weapon => ({ item: weapon.item, ammo: weapon.ammo, drop: "supply" }));
+    return Q3_WEAPON_ITEMS.filter(entry => this.options.product === "missionpack" || entry.weapon <= 10).map(weapon => ({ item: weapon.item, ammo: weapon.ammo, drop: weapon.item === "q3:weapon/gauntlet" || weapon.item === "q3:weapon/grapple" ? "none" : "supply" }));
   }
   readonly family = "q3";
   readonly provider: ProviderId;

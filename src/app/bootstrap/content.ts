@@ -1,3 +1,4 @@
+import { nativePrimaryWeaponProfile } from "../../compat/q2/native-primary-weapon-profile.ts";
 import { prepareNativeQ2Map } from "./simulation/native-q2-map.ts";
 import { prepareApplicationMods } from "./mod-selection.ts";
 import { prepareApplicationQvmGrapple, type PreparedQvmGrapple } from "./qvm-grapple-selection.ts";
@@ -447,7 +448,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       if (product.expectation.family !== "q2" || (module.api.kind === "q2-rerelease-game" ? product.expectation.edition !== "rerelease" : product.expectation.edition !== "classic") || recipe.execution.length !== 1
         || module.owner.provider !== recipe.map.entities.provider || module.owner.content !== recipe.map.entities.content
         || recipe.movement.provider !== "q2:movement" || recipe.character.definition.provider !== "q2:character" || recipe.enemies.kind !== "map-defined"
-        || recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content))
+        || recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content) && nativePrimaryWeaponProfile(module.artifact.digest) === null)
         throw new Error("Native Quake II requires edition-matching actors, movement, character and arsenal");
       continue;
     }
