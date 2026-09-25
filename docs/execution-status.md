@@ -1,8 +1,8 @@
 # Execution status
 
-Installed executable `c85e97aa` includes legacy QVM primary input/equipment, preservation of private player counters/buttons, private combat mappings and declared original QC attacker scaling. All 2856 archived Git blobs match the committed tree. Build/help and the existing compiled original Threewave GL movement/fire/armor/save-load-save/quit check passed; played/restored frames and original/canonical saved state were inspected. The previous `745543fb` executable is preserved locally. **21/23 targets accepted; T10/T12 remain open.** [Delivery receipt](../.artifacts/resume-20260925/delivery-c85e97aa/RUNTIME-RECEIPT.md).
+Installed executable `edcfada8` includes declared QC/QVM/native combat calls, private QVM argument capacity, shared item capacities, target-owner routing and native damage-hook lifecycle. Original native damage calls work independently of armor components; source disposal removes hooks. All 2858 archived Git blobs match the committed tree. Build/help and the existing compiled original Threewave GL movement/fire/armor/save-load-save/quit check passed; played/restored frames and original/canonical saved state were inspected. Previous `c85e97aa` is preserved locally. **21/23 targets accepted; T10/T12 remain open.** [Delivery receipt](../.artifacts/resume-20260925/delivery-edcfada8/RUNTIME-RECEIPT.md).
 
-Current source adds original QC/QVM/native combat call layouts, explicit QC identity regions, source-owned QVM pickup capacity writes, shared QC/QVM capacity fields and private QVM argument capacity. Redirected or rebound QC hits now use the current owner, with each registered transformation applied once. Combined production/changed-fixture strict and 41-file policy pass; affected QC, QVM and original native checks passed (48 tests, 645 assertions). These changes are newer than installed `c85e97aa`; T10/T12 remain open.
+The combined source passed production/changed-fixture strict compilation and scoped policy checks. Affected original QC, QVM and native calls passed 48 tests/645 assertions; the subsequent native hook lifecycle passed three existing checks/81 assertions. Active implementation extends original QC damage regions to exact amount transformations applied at hit time. This remains separate from broader mod composition and whole-target acceptance.
 
 Previous implementation and delivery checkpoints follow.
 
@@ -142,7 +142,7 @@ Installed `7bd9461` adds original QuakeC client frames and scheduled callbacks t
 
 ## Installed executable and recent fixes
 
-Current binary: `0dc86b613426927f41441886facb62e88cdad215`, tree `2e5a97724ad54ac63e8aef1330cf6b4b5f9602c0`, 131,692,672 bytes. SHA-256 `06680d04cc935ffe4c9f91e4edb2cbfabe7c421f6f7ff6115988f2f1af8fb85d`; manifest SHA-256 `da4642e6be436696612bd7281bf8098f805717261fa58d15e0f484063dc52fba`. All 2,782 tracked blobs match the committed archive; all 1,987 production TypeScript files match the strict-compiled candidate. Previous binary and manifest are preserved locally. Physical audio, full campaigns and whole-game FPS are not claimed.
+Current binary: `edcfada8987463e477c67828c975854cd4a54b9d`, tree `90392f9a33d2181efe9c02eda5aa213ea5591192`, 132,929,664 bytes. SHA-256 `7c732723b50000e74a8569bb9e32ad9e14ab75a1804b73903c000a7b82a1508a`; manifest SHA-256 `76f59d727e99e6e324a4110b2122b4e031f78a3c1631c44cfbf97ba6e2bea77b`. All 2,858 tracked blobs match the committed archive. The existing compiled GL movement/fire/armor/save-load-save/quit check passed; source/canonical saves and played/restored frames were inspected. Previous binary and manifest are preserved locally. Physical audio, full campaigns and whole-game FPS are not claimed. [Delivery receipt](../.artifacts/resume-20260925/delivery-edcfada8/RUNTIME-RECEIPT.md).
 
 Earlier source delivery checkpoints:
 
