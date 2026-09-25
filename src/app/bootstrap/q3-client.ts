@@ -465,7 +465,7 @@ export class ApplicationQ3Client {
     this.bodyPoses.clear();
     this.poseActors.clear();
     for (const model of presentations) {
-      if (model.renderOwner !== "source-client" && model.visible && model.viewWeapon) this.selectedHeldActors.set(model.actor.slot, model.actor);
+      if (model.renderOwner !== "source-client" && model.viewWeapon && (model.path !== "" || model.heldWeapon !== undefined)) this.selectedHeldActors.set(model.actor.slot, model.actor);
       if (model.replacesBody) this.hiddenBodies.set(model.actor.slot, model.actor);
       if (model.renderOwner !== "source-client" && model.visible && !model.viewWeapon) this.poseActors.set(model.actor.slot, model.actor);
     }

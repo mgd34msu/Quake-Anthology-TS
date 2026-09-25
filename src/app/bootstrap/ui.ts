@@ -1,3 +1,4 @@
+import { ApplicationRereleasePresentation } from "./rerelease-presentation.ts";
 import { registerRankingAccountMenu } from "../../ui/settings/ranking-account.ts";
 import type { RankingAccountActions } from "../../ui/settings/rankings.ts";
 import { readSeatLanguage } from "../../ui/settings/language.ts";
@@ -89,6 +90,10 @@ export class ApplicationSeatUi implements ApplicationInputUi {
   private readonly wheelIcons = new Map<ItemId, ResourceId>();
   private weaponAssets: ApplicationWeaponHudAssets | null = null;
   private weaponIcons: { readonly weapon: ResourceId | null; readonly ammo: ResourceId | null } = { weapon: null, ammo: null };
+  private nativeHudLocalizations: ApplicationRereleasePresentation | null = null;
+  private readonly nativeHudLocalizer: ((content: ContentId) => Promise<(text: string, args?: readonly string[]) => string>) | undefined;
+  private readonly nativeHudCvars: () => import("../../core/cvars/index.ts").CvarRegistry;
+  private readonly nativeHudSettings: () => import("../../ui/settings/index.ts").SettingCvars | null;
   private font: TextFontSelection;
   private typography: MenuTypography;
 
@@ -137,8 +142,11 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   constructor(readonly local: LocalInput, readonly art: NativeUiArt, input: ApplicationInput, mutateWindow: (operation: () => void) => void,
     private readonly simulation: Pick<SimulationPresentationAccess, "playerUi">, font: TextFontSelection, audio: ApplicationAudio, quit: () => undefined,
-    private readonly command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi, private readonly guestUi = false, teamArena?: TeamArenaResultService, options?: { readonly baseArena?: BaseArenaMenuService; readonly gameplay?: GameplaySettingsSource; readonly lobby?: { readonly returnToLobby: () => void }; readonly rankings?: { readonly current: () => RankingAccountActions | null; readonly takeMenuRequest: () => boolean }; readonly localize?: (content: ContentId, text: string, args?: readonly string[]) => Promise<string> }) {
+    private readonly command: (name: string, args: readonly string[]) => undefined, typography: MenuTypography, hostSettings?: HostServerSettingsUi, language?: SettingBinding, saves?: SavedGameMenuService, viewSetting?: SettingBinding, llm?: LlmSettingsUi, private readonly guestUi = false, teamArena?: TeamArenaResultService, options?: { readonly baseArena?: BaseArenaMenuService; readonly gameplay?: GameplaySettingsSource; readonly lobby?: { readonly returnToLobby: () => void }; readonly rankings?: { readonly current: () => RankingAccountActions | null; readonly takeMenuRequest: () => boolean }; readonly nativeHudLocalizer?: (content: ContentId) => Promise<(text: string, args?: readonly string[]) => string>; readonly localize?: (content: ContentId, text: string, args?: readonly string[]) => Promise<string> }) {
     const seat = local.player.seat.id;
+    this.nativeHudLocalizer = options?.nativeHudLocalizer;
+    this.nativeHudCvars = () => input.cvars;
+    this.nativeHudSettings = () => input.sharedSettings();
     const readLanguage = (): string => { const shared = input.sharedSettings(); return shared === null ? "english" : readSeatLanguage(shared, seat.index); };
     this.font = font; this.typography = typography;
     this.now = input.now;
@@ -350,15 +358,30 @@ export class ApplicationSeatUi implements ApplicationInputUi {
       ammoIcon: icon === null ? null : { resource: icon, aspect: this.weaponAssets?.aspect(icon) ?? 1 } };
   }
 
-  prepareNativeQ2Hud(frame: NativeQ2HudFrame, content: ContentId, assets: ApplicationAssets, context: UiDrawContext,
+  async prepareNativeQ2Hud(frame: NativeQ2HudFrame, content: ContentId, assets: ApplicationAssets, context: UiDrawContext,
     component?: { readonly renderer: ApplicationQ2NativeHud; readonly mode: "layout-overlay" | "replace-status"; assertCurrent(): void }): Promise<void> {
-    return (component?.renderer ?? this.nativeQ2Hud).prepare(content, assets, frame, context, this.preferences.values.hudScale * context.binding.hudScale,
-      component?.mode, component?.assertCurrent, component === undefined ? this.nativeQ2Arsenal() : undefined);
+    let environment: import("./q2-native-hud.ts").NativeQ2HudRendering | undefined;
+    if (frame.protocol.kind === "q2-rerelease" || frame.protocol.kind === "q2-kex" || frame.protocol.kind === "q2-kex-demo") {
+      const registry = this.nativeHudCvars();
+      const useFont = registry.find("scr_usekfont") ?? registry.register("scr_usekfont", "1", 0);
+      if (useFont === undefined) throw new Error("Could not register rerelease HUD font setting");
+      if (this.nativeHudLocalizer === undefined) this.nativeHudLocalizations ??= new ApplicationRereleasePresentation(assets, [{ seat: this.local.player.seat.id, actor: this.local.player.actor }], this.nativeHudSettings());
+      const localizer = this.nativeHudLocalizer?.(content) ?? this.nativeHudLocalizations?.sourceLocalizer(this.local.player.seat.id, content);
+      if (localizer === undefined) throw new Error("Rerelease HUD localization is not initialized");
+      const localize = await localizer;
+      component?.assertCurrent();
+      const font = this.hudFont, fontScale = 1.25;
+      environment = { font: this.art.skin.font, fontScale, useFont: useFont.integerValue !== 0, fontLineHeight: 8 * fontScale,
+        measure: text => { const measured = layoutText({ text, font, scale: fontScale, color: { x: 1, y: 1, z: 1, w: 1 } }); return { x: measured.width, y: measured.height }; }, localize };
+    }
+    await (component?.renderer ?? this.nativeQ2Hud).prepare(content, assets, frame, context, this.preferences.values.hudScale * context.binding.hudScale,
+      component?.mode, component?.assertCurrent, component === undefined ? this.nativeQ2Arsenal() : undefined, environment);
   }
   drawNativeQ2Hud(frame: NativeQ2HudFrame, context: UiDrawContext, emit: (command: Exclude<RenderCommand, { readonly kind: "swap-buffers" }>) => void,
     material: (draw: MaterialTextDraw) => void, binding?: (command: string) => string,
     component?: { readonly renderer: ApplicationQ2NativeHud; readonly mode: "layout-overlay" | "replace-status" }): void {
     const renderer = component?.renderer ?? this.nativeQ2Hud;
+    this.text.bind(this.art.skin.font, this.hudFont);
     renderUiCommands(context, renderer.commands(frame, context, this.preferences.values.hudScale * context.binding.hudScale, binding, component?.mode,
       component === undefined ? this.nativeQ2Arsenal() : undefined),
       { text: this.text, white: this.art.white, picture: resource => renderer.picture(resource) ?? this.weaponAssets?.picture(resource) ?? this.art.picture(resource), emit, material });

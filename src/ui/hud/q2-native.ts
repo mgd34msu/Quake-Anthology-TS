@@ -1,3 +1,5 @@
+import { q2RereleaseLayout, q2RereleaseInventory, type NativeQ2HudEnvironment } from "./q2-rerelease-layout.ts";
+export type { NativeQ2HudEnvironment } from "./q2-rerelease-layout.ts";
 import type { Q2ProtocolIdentity } from "../../contracts/protocol.ts";
 import type { ResourceId } from "../../contracts/content.ts";
 import { Tokenizer } from "../../core/common-parse.ts";
@@ -14,11 +16,15 @@ export interface NativeQ2HudFrame {
   readonly playerNumber: number;
   readonly serverFrame: number;
   readonly timeMilliseconds: number;
+  readonly frameTimeMilliseconds?: number;
 }
 export type NativeQ2HudOperation =
-  | { readonly kind: "picture"; readonly x: number; readonly y: number; readonly name: string }
+  | { readonly kind: "font-text"; readonly x: number; readonly y: number; readonly text: string; readonly alternate: boolean }
+  | { readonly kind: "sized-picture"; readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly name: string }
+  | { readonly kind: "fill"; readonly x: number; readonly y: number; readonly width: number; readonly height: number; readonly color: import("../../contracts/math.ts").Vec4 }
+  | { readonly kind: "picture"; readonly x: number; readonly y: number; readonly name: string; readonly anchor?: "before" }
   | { readonly kind: "arsenal-picture"; readonly x: number; readonly y: number; readonly resource: ResourceId; readonly aspect: number }
-  | { readonly kind: "text"; readonly x: number; readonly y: number; readonly text: string; readonly alternate: boolean };
+  | { readonly kind: "text"; readonly x: number; readonly y: number; readonly text: string; readonly alternate: boolean; readonly shadow?: boolean; readonly xor?: boolean };
 
 export interface NativeQ2HudArsenal {
   readonly ammo: number | null;
@@ -26,17 +32,16 @@ export interface NativeQ2HudArsenal {
 }
 
 /** Q2 client/cl_scrn.c SCR_ExecuteLayoutString and SCR_DrawField. */
-export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, width: number, height: number, arsenal?: NativeQ2HudArsenal): readonly NativeQ2HudOperation[] {
+export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, width: number, height: number, arsenal?: NativeQ2HudArsenal, environment?: NativeQ2HudEnvironment): readonly NativeQ2HudOperation[] {
+  if (frame.protocol.kind === "q2-rerelease" || frame.protocol.kind === "q2-kex" || frame.protocol.kind === "q2-kex-demo") {
+    if (environment === undefined) throw new Error("Rerelease HUD requires source localization and font services");
+    return q2RereleaseLayout(source, frame, width, height, environment, arsenal);
+  }
   const out: NativeQ2HudOperation[] = [], parser = new Tokenizer(source, "Q2 HUD layout"), config = q2ApplicationLayout(frame.protocol);
   let x = 0, y = 0;
   const next = (): string => parser.next()?.value ?? "";
   const integer = (): number => gameAtoi(next());
-  const stat = (index: number): number => {
-    if (index < 0 || index >= frame.stats.length) throw new RangeError(`Q2 HUD stat ${index} is outside playerstate`);
-    if (arsenal !== undefined && index === 2) return arsenal.ammo === null ? 0 : 1;
-    if (arsenal !== undefined && index === 3) return arsenal.ammo ?? -1;
-    return frame.stats[index] ?? 0;
-  };
+  const stat = (index: number): number => nativeQ2HudStat(frame, index, arsenal);
   const picture = (name: string): void => { if (name !== "") out.push({ kind: "picture", x, y, name }); };
   const text = (value: string, alternate = false, atX = x, atY = y): void => { out.push({ kind: "text", x: atX, y: atY, text: value, alternate }); };
   const number = (value: number, digits: number, alternate: boolean): void => {
@@ -107,12 +112,18 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
 
 /** Q2 client/cl_inv.c: fixed authored background, selected-item scroll and source bindings. */
 export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, height: number,
-  binding: (command: string) => string = () => "", mode: "layout-overlay" | "replace-status" = "replace-status", arsenal?: NativeQ2HudArsenal): readonly NativeQ2HudOperation[] {
-  const out = mode === "layout-overlay" ? [] : [...q2LayoutOperations(frame.configstrings.get(5) ?? "", frame, width, height, arsenal)];
+  binding: (command: string) => string = () => "", mode: "layout-overlay" | "replace-status" = "replace-status", arsenal?: NativeQ2HudArsenal, environment?: NativeQ2HudEnvironment): readonly NativeQ2HudOperation[] {
+  const rerelease = frame.protocol.kind === "q2-rerelease" || frame.protocol.kind === "q2-kex" || frame.protocol.kind === "q2-kex-demo";
+  if (rerelease && environment !== undefined && environment.table === undefined) environment = { ...environment, table: { rows: [], columns: [] } };
+  const out = mode === "layout-overlay" || rerelease && ((frame.stats[13] ?? 0) & 4) !== 0 ? [] : [...q2LayoutOperations(frame.configstrings.get(5) ?? "", frame, width, height, arsenal, environment)];
   const layouts = frame.stats[13] ?? 0;
-  if ((layouts & 1) !== 0) out.push(...q2LayoutOperations(frame.layout, frame, width, height, arsenal));
+  if ((layouts & 1) !== 0) out.push(...q2LayoutOperations(frame.layout, frame, width, height, arsenal, environment));
   if (mode === "layout-overlay") return out;
   if ((layouts & 2) === 0) return out;
+  if (rerelease) {
+    if (environment === undefined) throw new Error("Rerelease HUD requires source localization and font services");
+    return [...out, ...q2RereleaseInventory(frame, width, height, environment)];
+  }
   const config = q2ApplicationLayout(frame.protocol), selected = frame.stats[12] ?? 0;
   const items = frame.inventory.flatMap((count, index) => count === 0 ? [] : [index]);
   const selectedRow = selected >= 0 && selected < frame.inventory.length ? frame.inventory.slice(0, selected).filter(count => count !== 0).length : 0;
@@ -127,4 +138,11 @@ export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, he
     if (item === selected && (Math.trunc(frame.timeMilliseconds / 100) & 1) !== 0) out.push({ kind: "text", x: x + 16, y: py, text: "\x0f", alternate: false });
   }
   return out;
+}
+
+export function nativeQ2HudStat(frame: NativeQ2HudFrame, index: number, arsenal?: NativeQ2HudArsenal): number {
+  if (index < 0 || index >= frame.stats.length) throw new RangeError(`Q2 HUD stat ${index} is outside playerstate`);
+  if (arsenal !== undefined && index === 2) return arsenal.ammo === null ? 0 : 1;
+  if (arsenal !== undefined && index === 3) return arsenal.ammo ?? -1;
+  return frame.stats[index] ?? 0;
 }

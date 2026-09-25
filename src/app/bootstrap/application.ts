@@ -1867,7 +1867,8 @@ export class Application {
       for (const failure of await effects.preloadTransientResources()) this.host.print(`Optional effect preload skipped: ${failure.content}/${failure.path}: ${failure.error}\n`);
       return { client, effects, cvars, userinfo: cvars.infoString(CvarFlag.UserInfo), descriptor: { ownsEffects: true, frame: () => ({ protocol: world.edition === "classic" ? { kind: "q2-classic", version: 34 } : { kind: "q2-rerelease", version: 1038 }, stats: client.playerState.stats,
         configstrings: client.configstrings, layout: client.layout, inventory: client.inventory, playerNumber: client.sourceSlot - 1,
-        serverFrame: simulation.currentOutput().snapshot.frame.frame, timeMilliseconds: simulation.timeSeconds * 1000 }) } };
+        serverFrame: world.edition === "rerelease" ? world.services.serverFrame : simulation.currentOutput().snapshot.frame.frame, timeMilliseconds: simulation.timeSeconds * 1000,
+        frameTimeMilliseconds: world.edition === "classic" ? 100 : world.services.options.frameMilliseconds }) } };
     } catch (error) { try { effects.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Native seat effects preparation failed"); } throw error; }
   }
 
@@ -2263,6 +2264,7 @@ export class Application {
     return { ...(this.host.lobby === undefined ? {} : { lobby: { returnToLobby: () => {
       void this.returnToLobby().catch((error: unknown) => this.host.print(`Return to lobby failed: ${String(error)}\n`));
     } } }), ...(simulation.q3Source() === null ? {} : { rankings: { current: () => this.rankingAccountActions(seat), takeMenuRequest: () => this.takeRankingMenuRequest(seat) } }), ...(cvars === null ? {} : { gameplay: { cvars, weaponPickupPolicy, ...(client === undefined ? {} : { client }) } }), ...(baseArena === undefined ? {} : { baseArena }),
+      nativeHudLocalizer: (content: ContentId) => rerelease.sourceLocalizer(seat, content),
       localize: (content: ContentId, text: string, args?: readonly string[]) => rerelease.localizeMessage(seat, content, text, args) };
   }
 

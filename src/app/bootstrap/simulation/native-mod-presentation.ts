@@ -41,7 +41,7 @@ export interface NativeModPresentationSource {
   appearance(slot: number): NativeModAppearance;
   signature(slot: number): string;
   playerState(slot: number): Q2PlayerState | Q2RereleasePlayerState;
-  clock(): { readonly serverFrame: number; readonly timeMilliseconds: number };
+  clock(): { readonly serverFrame: number; readonly timeMilliseconds: number; readonly frameTimeMilliseconds?: number };
   state(slot: number): { readonly active: boolean; readonly visible: boolean; readonly sound: number; readonly event: number; readonly origin: Vec3;
     readonly volume: number; readonly attenuation: number };
 }

@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { unifiedModelPresentations } from '../../../src/app/bootstrap/simulation/network-unified.ts';
+import type { SimulationPresentation } from '../../../src/app/bootstrap/simulation/types.ts';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { createIdentityOwner } from '../../../src/contracts/identity.ts';
 import type { ResolvedResourceReference } from '../../../src/contracts/content.ts';
@@ -120,4 +122,30 @@ test('unified native camera retains source identity, prediction policy and editi
   expect(result.player.view.damageBlend).toEqual(nativeCamera.view.damageBlend);
   const wrong: typeof nativeCamera={...nativeCamera,view:{...nativeCamera.view,native:{...nativeCamera.view.native,edition:'classic'}}};
   await expect(decodeUnifiedFrame(encodeUnifiedFrame({...frame,nativeCamera:wrong}),context)).rejects.toThrow('Classic camera');
+});
+
+
+test('unified frames publish other actors held identity without first-person pose', async () => {
+  const original = frame.models[0]; if (original === undefined) throw new Error('Missing model fixture');
+  const other = server.actor(5, 3);
+  const own: SimulationPresentation = { ...original, viewWeapon: true };
+  const carrier: SimulationPresentation = { ...original, actor: other, nativeHeldWeapon: true };
+  const foreign: SimulationPresentation = { ...original, actor: other, viewWeapon: true, weaponItem: 'mod:custom',
+    heldWeapon: { kind: 'none' }, modelAnchor: { path: 'private/hands.md3', tag: 'tag_weapon', offset: origin, fovOffset: { above: 90, scale: -0.2 } },
+    modelAttachments: [{ path: 'private/attachment.md3', tag: 'tag_weapon' }], shaderBeam: { path: 'private/beam', end: origin, width: 1 },
+    q3Weapon: { timeMilliseconds: 1000, torsoAnimation: 7, lastFireMilliseconds: 995, firing: true, horizontalSpeed: 200, bobCycle: 35, weapon: 2 } };
+  const models = unifiedModelPresentations(id, [own, carrier, foreign, { ...foreign, actor: server.actor(6, 0), renderOwner: "source-client" }]);
+  expect(models[0]).toBe(own); expect(models[1]).toBe(carrier);
+  const result = await decodeUnifiedFrame(encodeUnifiedFrame({ ...frame, models }), context);
+  const held = result.models.find(source => source.viewWeapon && source.actor.equals(client.actor(5, 3)));
+  if (held === undefined) throw new Error('Foreign held metadata did not reach the remote actor');
+  expect(held.actor.equals(other)).toBe(false); expect(held.content).toBe(foreign.content);
+  expect(held.path).toBe(foreign.path); expect(held.weaponItem).toBe('mod:custom'); expect(held.heldWeapon).toEqual({ kind: 'none' });
+  expect(held.visible).toBe(false); expect(held.frame).toBe(0); expect(held.oldFrame).toBe(0); expect(held.skin).toBe(0);
+  expect(held.origin).toEqual({ x: 0, y: 0, z: 0 }); expect(held.angles).toEqual({ x: 0, y: 0, z: 0 });
+  expect(held.modelAnchor).toBeUndefined(); expect(held.modelAttachments).toBeUndefined(); expect(held.shaderBeam).toBeUndefined();
+  expect(held.indexedSkin).toBeUndefined(); expect(held.previousOrigin).toBeUndefined();
+  expect(held.q3Weapon).toEqual({ timeMilliseconds: 1000, torsoAnimation: 0, lastFireMilliseconds: 995, firing: true, horizontalSpeed: 0, bobCycle: 0, weapon: 2 });
+  expect(result.models[1]?.nativeHeldWeapon).toBe(true); expect(result.models[3]?.renderOwner).toBe('source-client');
+  expect(result.player.ui).toEqual(frame.player.ui); expect(result.player.view).toEqual(frame.player.view);
 });

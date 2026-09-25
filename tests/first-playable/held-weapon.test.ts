@@ -33,6 +33,7 @@ import type { HeldWeaponDeclaration } from "../../src/contracts/held-weapon.ts";
 import type { SimulationPresentation } from "../../src/app/bootstrap/simulation/types.ts";
 import { readModel, wireActor } from "../../src/app/bootstrap/network/unified-frame-values.ts";
 import { SaveReader } from "../../src/persistence/value.ts";
+import { unifiedModelPresentations } from "../../src/app/bootstrap/simulation/network-unified.ts";
 type Archive = Awaited<ReturnType<typeof openArchive>>;
 async function bytes(archive: Archive, path: string): Promise<Uint8Array> {
   const entry = archive.findEntries(path)[0]; if (entry === undefined) throw new Error(`Missing retail reference ${path}`);
@@ -210,6 +211,19 @@ test("authored mod held declarations resolve source assets and survive invisible
     expect(decoded.heldWeapon).toEqual(declaration); expect(decoded.nativeHeldWeapon).toBe(true); expect(decoded.weaponItem).toBe("mod:custom");
     expect(decoded.visible).toBe(false); expect(decoded.path).toBe("");
     expect((await resolver.frame(decoded, character))[0]?.entity.resource.id).toBe(pass.entity.resource.id);
+    const visibleSource = { ...source, visible: true, origin: { x: 11, y: 22, z: 33 }, angles: { x: 10, y: 20, z: 30 } };
+    expect(unifiedModelPresentations(source.actor, [visibleSource])[0]).toBe(visibleSource);
+    const publicSource = unifiedModelPresentations(identity.actor(1, 0), [visibleSource])[0];
+    if (publicSource === undefined) throw new Error("Other player's held identity was omitted");
+    const remoteIdentity = createIdentityOwner("remote-held");
+    const remoteSource = readModel(new SaveReader({ ...publicSource, actor: wireActor(publicSource.actor) }), { ...remoteIdentity, resourceId: id => id });
+    expect(remoteSource.actor.equals(remoteIdentity.actor(0, 0))).toBe(true);
+    expect(remoteSource.visible).toBe(false); expect(remoteSource.origin).toEqual({ x: 0, y: 0, z: 0 });
+    expect(remoteSource.angles).toEqual({ x: 0, y: 0, z: 0 });
+    const remotePass = (await resolver.frame(remoteSource, character))[0];
+    expect(remotePass?.entity.resource.id).toBe(pass.entity.resource.id);
+    expect(remotePass?.entity.actor?.equals(remoteSource.actor)).toBe(true);
+    expect(await mounts.open(source.path)).toBeNull();
     expect(await resolver.frame({ ...explicit, heldWeapon: { kind: "none" } }, character)).toEqual([]);
     await expect(resolver.frame({ ...source, path: "models/unknown.md2" }, character)).rejects.toThrow("no authored held model");
     await expect(resolver.frame({ ...explicit, heldWeapon: { kind: "model", model: { ...declaration.model, digest: digestBytes(new Uint8Array()) } } }, character)).rejects.toThrow("digest");

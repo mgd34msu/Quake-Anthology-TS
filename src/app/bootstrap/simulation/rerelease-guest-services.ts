@@ -54,6 +54,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   #combat: RereleaseCombatBindings | null = null;
   #loading = true;
   #frame = 0;
+  get serverFrame(): number { return this.#frame; }
   get options(): RereleaseGuestServicesOptions { return this.#options; }
   get memory(): MappedGuestMemory { if (this.#memory === null) throw new Error("API2023 services have no guest memory"); return this.#memory; }
   get host(): RereleaseQ2GuestHost { if (this.#host === null) throw new Error("API2023 services have no guest host"); return this.#host; }

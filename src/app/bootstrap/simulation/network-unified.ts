@@ -19,7 +19,7 @@ import { unifiedResourceId } from '../network/unified-content.ts';
 import type { UnifiedPresentationFrame } from '../network/unified-types.ts';
 import { Q3ClientAdmissionDenied } from './q3/runtime.ts';
 import type { SharedSimulation } from './runtime.ts';
-import type { SimulationPresentationEvent } from './types.ts';
+import type { SimulationPresentation, SimulationPresentationEvent } from './types.ts';
 
 export interface UnifiedApplicationPlayer { readonly client: ClientId; readonly actor: ActorId; readonly sourceEntity: number; }
 export interface UnifiedApplicationServerHost {
@@ -98,6 +98,22 @@ export function unifiedPresentationFor(actor: ActorId, client: ClientId, value: 
     case 'q2-weapon': return value.event.kind !== 'view-weapon' || own(value.event.actor);
     case 'q3-character': case 'music': case 'q1-level': case 'q1-session': case 'q1-sky': case 'q1-client': return true;
   }
+}
+
+/** Foreign view records carry held-model identity without exposing or loading a first-person model. */
+export function unifiedModelPresentations(viewer: ActorId, models: readonly SimulationPresentation[]): readonly SimulationPresentation[] {
+  return models.map(source => {
+    if (!source.viewWeapon || source.actor.equals(viewer)) return source;
+    const weapon = source.q3Weapon;
+    return { actor: source.actor, content: source.content, family: source.family, path: source.path,
+      frame: 0, oldFrame: 0, skin: 0, effects: 0, renderFlags: 0, origin: { x: 0, y: 0, z: 0 }, angles: { x: 0, y: 0, z: 0 },
+      scale: 1, visible: false, viewWeapon: true,
+      ...(source.renderOwner === undefined ? {} : { renderOwner: source.renderOwner }),
+      ...(source.weaponItem === undefined ? {} : { weaponItem: source.weaponItem }),
+      ...(source.heldWeapon === undefined ? {} : { heldWeapon: source.heldWeapon }),
+      ...(weapon === undefined ? {} : { q3Weapon: { weapon: weapon.weapon, timeMilliseconds: weapon.timeMilliseconds,
+        lastFireMilliseconds: weapon.lastFireMilliseconds, firing: weapon.firing, torsoAnimation: 0, horizontalSpeed: 0, bobCycle: 0 } }) };
+  });
 }
 
 export function createUnifiedApplicationServerHost(options: { readonly session: EngineSession; readonly simulation: SharedSimulation; readonly content: LoadedApplicationContent; print(text: string): void }): UnifiedApplicationServerHost {
@@ -225,7 +241,7 @@ export function createUnifiedApplicationServerHost(options: { readonly session: 
       requirePlayer(player);
       const events = output.events.filter(event => permitted(player, event)).map((event): SimulationEvent => event.payload.kind === 'sound' ? { ...event, payload: { ...event.payload, resource: unifiedResourceId(resource(event.payload.resource)) } } : event);
       return { epoch, acknowledgedInput, prediction: projectUnifiedPrediction(simulation, player.actor, acknowledgedInput), output: { snapshot: { ...output.snapshot, inventories: output.snapshot.inventories.filter(value => value.actor.equals(player.actor)) }, events },
-        models: simulation.presentations().filter(value => !value.viewWeapon || value.actor.equals(player.actor)), characters: simulation.characterViews(), worldText: simulation.worldText(),
+        models: unifiedModelPresentations(player.actor, simulation.presentations()), characters: simulation.characterViews(), worldText: simulation.worldText(),
         player: { actor: player.actor, view: simulation.playerView(player.actor), ui: simulation.playerUi(player.actor) } };
     },
     presentationEvents,

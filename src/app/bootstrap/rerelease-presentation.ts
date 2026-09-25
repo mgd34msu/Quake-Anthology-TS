@@ -95,6 +95,13 @@ export class ApplicationRereleasePresentation {
     return seat === undefined || ![...seat.hiddenItems].some(hidden => hidden.equals(item));
   }
 
+  async sourceLocalizer(id: SeatId, content: ContentId): Promise<(text: string, args?: readonly string[]) => string> {
+    const seat = this.seats.find(seat => seat.binding.seat.equals(id));
+    if (seat === undefined) throw new Error("Unknown localization seat");
+    const catalog = await this.catalog(seat, content);
+    return (text, args = []) => q2LocalizedText(catalog.localization, text, args);
+  }
+
   async localizeMessage(id: SeatId, content: ContentId, text: string, args: readonly string[] = []): Promise<string> {
     const seat = this.seats.find(seat => seat.binding.seat.equals(id));
     if (seat === undefined) throw new Error("Unknown localization seat");

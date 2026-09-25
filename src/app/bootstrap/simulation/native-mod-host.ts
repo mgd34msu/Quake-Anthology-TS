@@ -119,7 +119,7 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
     withCommand(command, run); return true;
   };
   let sourceTime: number | null = null, sourceFrame = 0;
-  const presentationClock = () => { const now = services.time(); return { serverFrame: sourceFrame, timeMilliseconds: (sourceTime ?? (now.kind === "seconds" ? now.value : now.value / 1000)) * 1000 }; };
+  const presentationClock = () => { const now = services.time(); return { serverFrame: sourceFrame, frameTimeMilliseconds: frameSeconds * 1000, timeMilliseconds: (sourceTime ?? (now.kind === "seconds" ? now.value : now.value / 1000)) * 1000 }; };
   const frameSeconds = declaration.sourceActors?.frameSeconds ?? (rerelease ? context.frameMilliseconds / 1000 : 0.1);
   const runtime: ActorHostRuntime = { numeric: timing.numeric, random: new SourceRandom(services.seed, rerelease ? "q2-rerelease" : "classic"),
     now: () => { const time = services.time(); return sourceTime ?? (time.kind === "seconds" ? time.value : time.value / 1000); },

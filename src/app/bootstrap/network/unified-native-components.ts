@@ -24,7 +24,7 @@ export interface UnifiedNativeFrame {
   readonly owner: PresentationOwner;
   readonly generation: number;
   readonly viewer: ActorId;
-  readonly hud: Pick<NativeQ2HudFrame, "stats" | "serverFrame" | "timeMilliseconds"> | null;
+  readonly hud: Pick<NativeQ2HudFrame, "stats" | "serverFrame" | "timeMilliseconds" | "frameTimeMilliseconds"> | null;
   readonly view: NativeModCameraView | null;
 }
 function sameNumbers(a: readonly number[], b: readonly number[]): boolean { return a.length === b.length && a.every((value, index) => value === b[index]); }
@@ -46,7 +46,8 @@ export function projectNativeComponents(previous: readonly UnifiedNativePublicat
         layout: hud.frame.layout, inventory: hud.frame.inventory, playerNumber: hud.frame.playerNumber } } };
   });
   const frames: UnifiedNativeFrame[] = sources.map(source => ({ owner: source.owner, generation: source.generation, viewer: source.viewer, view: source.frame.view,
-    hud: source.frame.hud === null ? null : { stats: source.frame.hud.frame.stats, serverFrame: source.frame.hud.frame.serverFrame, timeMilliseconds: source.frame.hud.frame.timeMilliseconds } }));
+    hud: source.frame.hud === null ? null : { stats: source.frame.hud.frame.stats, serverFrame: source.frame.hud.frame.serverFrame, timeMilliseconds: source.frame.hud.frame.timeMilliseconds,
+      ...(source.frame.hud.frame.frameTimeMilliseconds === undefined ? {} : { frameTimeMilliseconds: source.frame.hud.frame.frameTimeMilliseconds }) } }));
   return { changed, states, frames };
 }
 function integer(reader: SaveReader, minimum: number, maximum: number): number {
@@ -86,6 +87,9 @@ export function readNativeFrames(reader: SaveReader, identity: UnifiedIdentityDe
     viewer: actor(source.field("viewer"), identity), view: source.field("view").nullable(readNativeCameraView), hud: source.field("hud").nullable(hud => {
       const stats = hud.field("stats").list(value => integer(value, -32768, 32767));
       if (stats.length !== 32 && stats.length !== 64) return hud.fail("invalid source native stat count");
-      return { stats, serverFrame: integer(hud.field("serverFrame"), 0, 2147483647), timeMilliseconds: hud.field("timeMilliseconds").finite() };
+      const frameTimeMilliseconds = hud.field("frameTimeMilliseconds").value === undefined ? undefined : hud.field("frameTimeMilliseconds").finite();
+      if (frameTimeMilliseconds !== undefined && frameTimeMilliseconds <= 0) return hud.fail("native source frame interval must be positive");
+      return { stats, serverFrame: integer(hud.field("serverFrame"), 0, 2147483647), timeMilliseconds: hud.field("timeMilliseconds").finite(),
+        ...(frameTimeMilliseconds === undefined ? {} : { frameTimeMilliseconds }) };
     }) }));
 }
