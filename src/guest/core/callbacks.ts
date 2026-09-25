@@ -20,7 +20,11 @@ export class GuestCallbackTable {
   readonly #byId = new Map<CallbackId, CallbackEntry>();
   readonly #byAddress = new Map<bigint, CallbackEntry>();
   readonly #entryObservers = new Map<bigint, Set<() => void>>();
+  #entryRevision = Symbol("guest instruction entries");
   constructor(readonly memory: MappedGuestMemory) {}
+  get entryRevision(): symbol { return this.#entryRevision; }
+  instructionUnhooked(byteOffset: bigint): boolean { return !this.#byAddress.has(byteOffset) && !this.#entryObservers.has(byteOffset); }
+  #changedEntries(): void { this.#entryRevision = Symbol("guest instruction entries"); }
 
   /** Host-owned native entry hooks leave the guest instruction bytes untouched. */
   bindEntry(address: GuestAddress, callback: GuestHostCallback, accepts: () => boolean): () => void {
@@ -28,15 +32,19 @@ export class GuestCallbackTable {
     if (callback.signature.abi.pointerBytes !== this.memory.pointerBytes || this.#byAddress.has(address.byteOffset)) throw new Error("Invalid or occupied native callback entry");
     const entry: CallbackEntry = { id: callback.id, signature: callback.signature, address, byteOffset: address.byteOffset, callback, accepts };
     this.#byAddress.set(address.byteOffset, entry);
-    return () => { if (this.#byAddress.get(address.byteOffset) === entry) this.#byAddress.delete(address.byteOffset); };
+    this.#changedEntries();
+    return () => { if (this.#byAddress.get(address.byteOffset) === entry) { this.#byAddress.delete(address.byteOffset); this.#changedEntries(); } };
   }
 
   observeEntry(address: GuestAddress, before: () => void): () => void {
     this.memory.check(address, 1, "execute");
     let observers = this.#entryObservers.get(address.byteOffset);
     if (observers === undefined) { observers = new Set<() => void>(); this.#entryObservers.set(address.byteOffset, observers); }
-    const owned = observers; owned.add(before);
-    return () => { owned.delete(before); if (owned.size === 0 && this.#entryObservers.get(address.byteOffset) === owned) this.#entryObservers.delete(address.byteOffset); };
+    const owned = observers; owned.add(before); this.#changedEntries();
+    return () => {
+      if (owned.delete(before)) this.#changedEntries();
+      if (owned.size === 0 && this.#entryObservers.get(address.byteOffset) === owned) this.#entryObservers.delete(address.byteOffset);
+    };
   }
 
   /** Called once at instruction entry; ABI lookup must not notify observers again. */
@@ -58,7 +66,7 @@ export class GuestCallbackTable {
     if (previous !== undefined) {
       if (previous.callback !== null && previous.callback !== callback) throw new Error(`Callback ${callback.id} is already bound`);
       if (!sameSignature(previous.signature, callback.signature)) throw new Error(`Callback ${callback.id} changed ABI or signature`);
-      previous.callback = callback;
+      previous.callback = callback; this.#changedEntries();
       return previous.address;
     }
     // INT3 is a trap if the CPU misses the table dispatch. No native executable memory is allocated.
@@ -68,12 +76,13 @@ export class GuestCallbackTable {
     const entry: CallbackEntry = { id: callback.id, signature: callback.signature, address, byteOffset: address.byteOffset, callback };
     this.#byId.set(callback.id, entry);
     this.#byAddress.set(address.byteOffset, entry);
+    this.#changedEntries();
     return address;
   }
 
   unbind(id: CallbackId): undefined {
     const entry = this.#byId.get(id);
-    if (entry !== undefined) entry.callback = null;
+    if (entry !== undefined) { entry.callback = null; this.#changedEntries(); }
     return undefined;
   }
 

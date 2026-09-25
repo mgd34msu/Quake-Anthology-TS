@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { GuestAddress, ModuleIdentity } from "../../../src/contracts/execution.ts";
-import { createGuestProcessorState, SparseGuestMemory } from "../../../src/guest/core/index.ts";
+import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../src/guest/core/index.ts";
 import { mapPeImage, resolvePeExport } from "../../../src/guest/pe/index.ts";
 import { X64Cpu } from "../../../src/guest/x64/index.ts";
 import { canonicalAddress, X64ProcessorFault, X64DecodeCursor } from "../../../src/guest/x64/decoder.ts";
@@ -400,4 +400,27 @@ test("instruction cursors remain local when a committed store reenters the same 
     }
     expect(calls).toBe(2);
   } finally { release(); }
+});
+
+
+test("retained semantic blocks requalify registered entries before the next instruction", () => {
+  const f = fixture([0xb8, 1, 0, 0, 0, 0x83, 0xc0, 2, 0x83, 0xc0, 3, 0xc3]);
+  const callbacks = new GuestCallbackTable(f.memory), cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
+  const run = (budget = 100) => {
+    f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
+    return cpu.run({ instructionBudget: budget, returnAddress: pointer(f.memory, returned) });
+  };
+  for (let index = 0; index < 3; index++) { expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n); }
+  let entries = 0;
+  const unobserve = callbacks.observeEntry(pointer(f.memory, base + 5n), () => { entries++; f.state.registers.write("rax", 32, 10n); });
+  expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(15n); expect(entries).toBe(1);
+  unobserve(); expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n); expect(entries).toBe(1);
+  const remove = callbacks.bindEntry(pointer(f.memory, base + 5n), { id: "test:plan-hook", signature: { abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" }, parameters: [], result: "void", variadic: false }, invoke: () => ({ kind: "void" }) }, () => true);
+  const stopped = run(); expect(stopped.kind).toBe("host-call"); expect(stopped.instructions).toBe(1); expect(f.state.registers.read("rax", 32)).toBe(1n);
+  remove(); expect(run(2).kind).toBe("budget"); expect(f.state.registers.read("rax", 32)).toBe(3n); expect(f.state.instructionPointer).toBe(base + 8n);
+  expect(cpu.run({ instructionBudget: 2, returnAddress: pointer(f.memory, returned) }).kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n);
+  const redirected = f.memory.map({ base: 0x70000n, byteLength: 4, permissions: "read-execute", bytes: new Uint8Array([0x31, 0xc0, 0x90, 0xc3]) });
+  const restoreEntry = callbacks.observeEntry(pointer(f.memory, base), () => { f.state.instructionPointer = redirected.byteOffset; });
+  const redirectedStop = run(); expect(redirectedStop.kind).toBe("return"); expect(redirectedStop.instructions).toBe(3); expect(f.state.registers.read("rax", 32)).toBe(0n);
+  restoreEntry(); expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(6n);
 });

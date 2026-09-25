@@ -57,7 +57,7 @@ export class RereleaseGuestSource {
             const callbacks = new GuestCallbackTable(memory);
             const state = createGuestProcessorState({ architecture: 'x86-64', instructionPointer: 0n, stackPointer: stack.byteOffset + 1_048_576n,
                 flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
-            const cpu = new X64Cpu({ state, memory, isHostCall: address => callbacks.enter(address) });
+            const cpu = new X64Cpu({ state, memory, callbacks });
             const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: returned });
             const runtime = new WindowsGuestRuntime({ memory, callbacks, capabilities: options.clock }); runtime.attachRunner(runner);
             const game = resolvePeExport(image, { kind: 'name', name: 'GetGameAPI', version: null }, () => null).address;

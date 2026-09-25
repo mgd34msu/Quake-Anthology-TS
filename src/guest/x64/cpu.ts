@@ -7,15 +7,26 @@ import { alu, condition, resultFlags, shift, signedMultiply } from "../x86/arith
 import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
 import { canonicalAddress, guestAddress, readMemory, registerName, writeMemory, X64DecodeCursor, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
 import type { X64DecodedInstruction, X64Operand } from "./decoder.ts";
+import { executeX64Plan, makeX64Plan, x64Advance as advance, x64Lock } from "./plan.ts";
+import type { X64Flow as Flow, X64PlanOperation, X64SemanticPlan } from "./plan.ts";
+import type { GuestCallbackTable } from "../core/callbacks.ts";
 
 export interface X64CpuOptions {
   readonly state: GuestProcessorState;
   readonly memory: MappedGuestMemory;
   readonly isHostCall?: (address: GuestAddress) => boolean;
+  readonly callbacks?: GuestCallbackTable;
 }
-type Flow = { readonly kind: "advance" } | { readonly kind: "branch"; readonly target: bigint }
-  | { readonly kind: "halt" } | { readonly kind: "trap"; readonly vector: number };
-const advance: Flow = { kind: "advance" };
+interface CachedInstruction {
+  readonly start: bigint;
+  readonly decoded: X64DecodedInstruction;
+  readonly plan: X64SemanticPlan | null;
+  block: SemanticBlock | null;
+}
+interface SemanticBlock {
+  readonly revision: symbol | null;
+  readonly instructions: readonly CachedInstruction[];
+}
 const arithmetic: readonly AluOperation[] = ["add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"];
 const shifts: readonly ShiftOperation[] = ["rol", "ror", "rcl", "rcr", "shl", "shr", "shl", "sar"];
 
@@ -24,12 +35,18 @@ export class X64Cpu implements GuestCpu {
   readonly state: GuestProcessorState;
   readonly memory: MappedGuestMemory;
   readonly #isHostCall: (address: GuestAddress) => boolean;
-  readonly #instructions = new Map<bigint, X64DecodedInstruction>();
+  readonly #instructions = new Map<bigint, CachedInstruction>();
+  readonly #callbacks: GuestCallbackTable | null;
+  readonly #blocksAllowed: boolean;
   constructor(options: X64CpuOptions) {
     if (options.state.architecture !== "x86-64" || options.memory.pointerBytes !== 8) throw new RangeError("X64Cpu requires x86-64 processor state and 64-bit guest memory");
     this.state = options.state;
     this.memory = options.memory;
-    this.#isHostCall = options.isHostCall ?? (() => false);
+    if (options.callbacks !== undefined && (options.callbacks.memory !== options.memory || options.isHostCall !== undefined))
+      throw new RangeError("X64Cpu callback table must exclusively own this memory's instruction entries");
+    this.#callbacks = options.callbacks ?? null;
+    this.#blocksAllowed = options.isHostCall === undefined;
+    this.#isHostCall = options.isHostCall ?? (options.callbacks === undefined ? () => false : address => options.callbacks?.enter(address) === true);
   }
 
   run(options: { readonly instructionBudget: number; readonly returnAddress: GuestAddress | null }): GuestExecutionStop {
@@ -37,6 +54,7 @@ export class X64Cpu implements GuestCpu {
     if (options.returnAddress !== null && options.returnAddress.addressSpace !== this.memory.addressSpace) throw new RangeError("Return address belongs to another guest address space");
     let checkpoint: Uint8Array | undefined;
     let retainedCursor: X64DecodeCursor | null = null;
+    let block: SemanticBlock | null = null, blockIndex = 0;
     for (let instructions = 0; instructions < options.instructionBudget; instructions += 1) {
       const start = this.state.instructionPointer;
       const address = this.#evidenceAddress(start);
@@ -44,23 +62,48 @@ export class X64Cpu implements GuestCpu {
       const registers = this.state.registers.checkpoint(checkpoint);
       checkpoint = registers;
       const flags = this.state.flags.value;
-      let cursor: X64DecodeCursor | null = null;
+      let cursor: X64DecodeCursor | null = null, preparedInstruction: CachedInstruction | null = null;
       try {
         canonicalAddress(start);
-        if (this.#isHostCall(address)) return { kind: "host-call", instructions, address };
-        const retained = this.#instructions.get(start);
-        const decoded = retained !== undefined && retained.unchanged() ? retained : null;
-        if (retainedCursor === null) retainedCursor = new X64DecodeCursor(this.memory, this.state, decoded);
-        else retainedCursor.reset(decoded);
-        cursor = retainedCursor;
-        const flow = this.#execute(cursor);
-        if (decoded === null) {
-          const prepared = cursor.cache();
-          if (this.#instructions.size >= 32768) this.#instructions.clear();
-          if (prepared === null) this.#instructions.delete(start);
-          else this.#instructions.set(start, prepared);
+        const revision = this.#callbacks?.entryRevision ?? null;
+        if (block?.revision !== revision || block.instructions[blockIndex]?.start !== start) block = null;
+        let retained = block?.instructions[blockIndex] ?? this.#instructions.get(start);
+        if (block === null && retained?.plan !== null && retained !== undefined && this.#blocksAllowed) {
+          block = this.#block(retained, revision); blockIndex = 0;
         }
-        this.state.instructionPointer = flow.kind === "branch" ? flow.target : cursor.nextIP;
+        if (block === null && this.#isHostCall(address)) return { kind: "host-call", instructions, address };
+        // Entry observers can run nested guest calls and replace cached code.
+        if (block === null) retained = this.#instructions.get(start);
+        const decoded = this.state.instructionPointer === start && retained !== undefined && retained.decoded.unchanged() ? retained.decoded : null;
+        if (decoded === null && block !== null) {
+          const owner = block.instructions[0];
+          if (owner?.block === block) owner.block = null;
+          block = null;
+        }
+        let flow: Flow, nextIP: bigint;
+        if (decoded !== null && retained?.plan !== null && retained !== undefined && this.state.instructionPointer === start) {
+          preparedInstruction = retained;
+          flow = executeX64Plan(retained.plan, this.memory, this.state);
+          nextIP = retained.plan.nextIP;
+        } else {
+          block = null;
+          if (retainedCursor === null) retainedCursor = new X64DecodeCursor(this.memory, this.state, decoded);
+          else retainedCursor.reset(decoded);
+          cursor = retainedCursor;
+          flow = this.#execute(cursor);
+          nextIP = cursor.nextIP;
+          if (decoded === null) {
+            const prepared = cursor.cache();
+            if (this.#instructions.size >= 32768) this.#instructions.clear();
+            if (prepared === null || cursor.start !== start) this.#instructions.delete(start);
+            else this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, block: null });
+          }
+        }
+        this.state.instructionPointer = flow.kind === "branch" ? flow.target : nextIP;
+        if (block !== null) {
+          blockIndex++;
+          if (preparedInstruction?.plan?.endsBlock === true || blockIndex >= block.instructions.length) block = null;
+        }
         if (flow.kind === "halt") return { kind: "halt", instructions: instructions + 1, address };
         if (flow.kind === "trap") return { kind: "exception", instructions: instructions + 1, exception: { kind: "processor", vector: flow.vector, errorCode: null, instruction: address, detail: "Software breakpoint" } };
       } catch (error) {
@@ -72,13 +115,30 @@ export class X64Cpu implements GuestCpu {
           return { kind: "exception", instructions, exception: { kind: "memory", access, address: this.#evidenceAddress(error.address), byteLength: error.byteLength, detail: error.message } };
         }
         if (error instanceof X64ProcessorFault) return { kind: "exception", instructions, exception: { kind: "processor", vector: error.vector, errorCode: error.vector === 13 ? 0n : null, instruction: address, detail: error.message } };
-        if (error instanceof X64Unsupported) return { kind: "unsupported", instructions, instruction: { address, bytes: new Uint8Array(cursor?.bytes ?? []), mnemonic: `opcode ${cursor?.opcode.toString(16) ?? "unknown"}` }, detail: error.message };
+        if (error instanceof X64Unsupported) return { kind: "unsupported", instructions, instruction: { address, bytes: new Uint8Array(cursor?.bytes ?? preparedInstruction?.decoded.bytes ?? []), mnemonic: `opcode ${(cursor?.opcode ?? preparedInstruction?.decoded.opcode)?.toString(16) ?? "unknown"}` }, detail: error.message };
         throw error;
       }
     }
     const address = this.#evidenceAddress(this.state.instructionPointer);
     if (options.returnAddress?.byteOffset === address.byteOffset) return { kind: "return", instructions: options.instructionBudget, address };
     return { kind: "budget", instructions: options.instructionBudget };
+  }
+
+  #block(first: CachedInstruction, revision: symbol | null): SemanticBlock | null {
+    if (first.block?.revision === revision) return first.block;
+    const instructions: CachedInstruction[] = [];
+    let current: CachedInstruction | undefined = first, complete = true;
+    while (current !== undefined && current.plan !== null) {
+      if (this.#callbacks?.instructionUnhooked(current.start) === false) break;
+      instructions.push(current);
+      if (current.plan.endsBlock || instructions.length === 16) break;
+      current = this.#instructions.get(current.plan.nextIP);
+      if (current === undefined) complete = false;
+    }
+    if (instructions.length === 0) return null;
+    const block: SemanticBlock = { revision, instructions };
+    if (complete) first.block = block;
+    return block;
   }
 
   #evidenceAddress(byteOffset: bigint): GuestAddress { return { kind: "guest-address", addressSpace: this.memory.addressSpace, byteOffset }; }
@@ -95,16 +155,12 @@ export class X64Cpu implements GuestCpu {
   }
   #branch(target: bigint): Flow { return { kind: "branch", target: canonicalAddress(target) }; }
   #lock(cursor: X64DecodeCursor, destination: X64Operand | null, permitted: boolean): undefined {
-    if (cursor.lock && (!permitted || destination?.kind !== "memory")) throw new X64ProcessorFault(6, "LOCK requires a supported memory read-modify-write operand");
+    x64Lock(cursor.lock, destination, permitted);
     return undefined;
   }
-  #binary(cursor: X64DecodeCursor, operation: AluOperation, destination: X64Operand, right: bigint): undefined {
-    const writes = operation !== "cmp" && operation !== "test";
-    this.#lock(cursor, destination, writes);
-    if (writes) cursor.writable(destination);
-    const result = alu(operation, destination.width, cursor.read(destination), right, this.state.flags);
-    if (writes) cursor.write(destination, result);
-    return undefined;
+  #planned(cursor: X64DecodeCursor, operation: X64PlanOperation): Flow {
+    cursor.plan = makeX64Plan(operation, cursor.nextIP, cursor.lock);
+    return executeX64Plan(cursor.plan, this.memory, this.state);
   }
   #execute(cursor: X64DecodeCursor): Flow {
     const op = cursor.opcode;
@@ -118,16 +174,16 @@ export class X64Cpu implements GuestCpu {
         const decoded = cursor.decodeModRM(bits);
         const destination = form < 2 ? decoded.rm : decoded.reg;
         const source = form < 2 ? decoded.reg : decoded.rm;
-        this.#binary(cursor, operation, destination, cursor.read(source));
-      } else this.#binary(cursor, operation, cursor.register(0, bits), cursor.immediate(bits));
-      return advance;
+        return this.#planned(cursor, { kind: "alu", operation, destination, source });
+      }
+      return this.#planned(cursor, { kind: "alu", operation, destination: cursor.register(0, bits), source: cursor.immediate(bits) });
     }
     if (op >= 0x50 && op <= 0x57) { this.#lock(cursor, null, false); this.#push(this.state.registers.read(registerName(op - 0x50 + cursor.rexB), cursor.stackWidth), cursor.stackWidth); return advance; }
     if (op >= 0x58 && op <= 0x5f) { this.#lock(cursor, null, false); this.state.registers.write(registerName(op - 0x58 + cursor.rexB), cursor.stackWidth, this.#pop(cursor.stackWidth)); return advance; }
     if (op >= 0x70 && op <= 0x7f) {
       this.#lock(cursor, null, false);
       const displacement = cursor.readSigned(1);
-      return condition(op & 15, this.state.flags) ? this.#branch(cursor.nextIP + displacement) : advance;
+      return this.#planned(cursor, { kind: "branch", condition: op & 15, displacement });
     }
     if (op >= 0x90 && op <= 0x97) {
       this.#lock(cursor, null, false);
@@ -144,8 +200,7 @@ export class X64Cpu implements GuestCpu {
       this.#lock(cursor, null, false);
       const bits = op < 0xb8 ? 8 : width;
       const value = cursor.readUnsigned(bits / 8);
-      cursor.write(cursor.register((op & 7) + cursor.rexB, bits), value);
-      return advance;
+      return this.#planned(cursor, { kind: "move", destination: cursor.register((op & 7) + cursor.rexB, bits), source: value });
     }
     if (op >= 0xd8 && op <= 0xdf) { this.#numeric(cursor, null); return advance; }
     switch (op) {
@@ -175,13 +230,11 @@ export class X64Cpu implements GuestCpu {
         const operation = arithmetic[decoded.extension];
         if (operation === undefined) throw new X64ProcessorFault(6, "Invalid immediate operation");
         const immediate = op === 0x83 ? cursor.readSigned(1) : cursor.immediate(decoded.rm.width);
-        this.#binary(cursor, operation, decoded.rm, immediate);
-        return advance;
+        return this.#planned(cursor, { kind: "alu", operation, destination: decoded.rm, source: immediate });
       }
       case 0x84: case 0x85: {
         const decoded = cursor.decodeModRM(op === 0x84 ? 8 : width);
-        this.#binary(cursor, "test", decoded.rm, cursor.read(decoded.reg));
-        return advance;
+        return this.#planned(cursor, { kind: "alu", operation: "test", destination: decoded.rm, source: decoded.reg });
       }
       case 0x86: case 0x87: {
         const decoded = cursor.decodeModRM(op === 0x86 ? 8 : width);
@@ -195,15 +248,13 @@ export class X64Cpu implements GuestCpu {
       case 0x88: case 0x89: case 0x8a: case 0x8b: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM((op & 1) === 0 ? 8 : width);
-        cursor.write(op < 0x8a ? decoded.rm : decoded.reg, cursor.read(op < 0x8a ? decoded.reg : decoded.rm));
-        return advance;
+        return this.#planned(cursor, { kind: "move", destination: op < 0x8a ? decoded.rm : decoded.reg, source: op < 0x8a ? decoded.reg : decoded.rm });
       }
       case 0x8d: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM(width);
         if (decoded.rm.kind !== "memory") throw new X64ProcessorFault(6, "LEA requires a memory addressing form");
-        cursor.write(decoded.reg, cursor.effectiveOffset(decoded.rm));
-        return advance;
+        return this.#planned(cursor, { kind: "lea", destination: decoded.reg, source: decoded.rm });
       }
       case 0x8f: {
         this.#lock(cursor, null, false);
@@ -249,8 +300,7 @@ export class X64Cpu implements GuestCpu {
       case 0xa4: case 0xa5: case 0xa6: case 0xa7: case 0xaa: case 0xab: case 0xac: case 0xad: case 0xae: case 0xaf: return this.#string(cursor);
       case 0xa8: case 0xa9: {
         const bits = op === 0xa8 ? 8 : width;
-        this.#binary(cursor, "test", cursor.register(0, bits), cursor.immediate(bits));
-        return advance;
+        return this.#planned(cursor, { kind: "alu", operation: "test", destination: cursor.register(0, bits), source: cursor.immediate(bits) });
       }
       case 0xc0: case 0xc1: case 0xd0: case 0xd1: case 0xd2: case 0xd3: {
         const bits = (op & 1) === 0 ? 8 : width;
@@ -276,8 +326,7 @@ export class X64Cpu implements GuestCpu {
         const decoded = cursor.decodeModRM(op === 0xc6 ? 8 : width);
         if (decoded.extension !== 0) throw new X64Unsupported(`MOV/transactional group /${decoded.extension}`);
         const value = cursor.immediate(decoded.rm.width);
-        cursor.write(decoded.rm, value);
-        return advance;
+        return this.#planned(cursor, { kind: "move", destination: decoded.rm, source: value });
       }
       case 0xc9: {
         this.#lock(cursor, null, false);
@@ -302,8 +351,9 @@ export class X64Cpu implements GuestCpu {
       case 0xe8: case 0xe9: case 0xeb: {
         this.#lock(cursor, null, false);
         const displacement = cursor.readSigned(op === 0xeb ? 1 : 4);
+        if (op !== 0xe8) return this.#planned(cursor, { kind: "branch", condition: null, displacement });
         const flow = this.#branch(cursor.nextIP + displacement);
-        if (op === 0xe8) this.#push(cursor.nextIP, 64);
+        this.#push(cursor.nextIP, 64);
         return flow;
       }
       case 0xf4: this.#lock(cursor, null, false); throw new X64ProcessorFault(13, "HLT is privileged in the user-mode guest");
@@ -343,7 +393,7 @@ export class X64Cpu implements GuestCpu {
   #unary(cursor: X64DecodeCursor): Flow {
     const width = cursor.opcode === 0xf6 ? 8 : cursor.width;
     const decoded = cursor.decodeModRM(width);
-    if (decoded.extension === 0) { this.#binary(cursor, "test", decoded.rm, cursor.immediate(width)); return advance; }
+    if (decoded.extension === 0) return this.#planned(cursor, { kind: "alu", operation: "test", destination: decoded.rm, source: cursor.immediate(width) });
     if (decoded.extension === 2 || decoded.extension === 3) {
       this.#lock(cursor, decoded.rm, true);
       cursor.writable(decoded.rm);
@@ -420,7 +470,7 @@ export class X64Cpu implements GuestCpu {
     if (op >= 0x80 && op <= 0x8f) {
       this.#lock(cursor, null, false);
       const displacement = cursor.readSigned(4);
-      return condition(op & 15, this.state.flags) ? this.#branch(cursor.nextIP + displacement) : advance;
+      return this.#planned(cursor, { kind: "branch", condition: op & 15, displacement });
     }
     if (op >= 0x40 && op <= 0x4f) {
       this.#lock(cursor, null, false);

@@ -2,6 +2,7 @@
 import type { GuestAddress } from "../../contracts/execution.ts";
 import type { GuestIntegerWidth, GuestProcessorState, GuestRegister, MappedGuestMemory } from "../core/contracts.ts";
 import { GuestMemoryFault } from "../core/memory.ts";
+import type { X64SemanticPlan } from "./plan.ts";
 
 export class X64ProcessorFault extends Error {
   constructor(readonly vector: number, detail: string) { super(detail); this.name = "X64ProcessorFault"; }
@@ -108,6 +109,7 @@ export class X64DecodeCursor {
   #prefixLength = 0;
   #position = 0;
   #opcode = 0;
+  plan: X64SemanticPlan | null = null;
   rex: number | null = null;
   operandOverride = false;
   addressOverride = false;
@@ -123,6 +125,7 @@ export class X64DecodeCursor {
   get opcode(): number { return this.#opcode; }
   reset(decoded: X64DecodedInstruction | null): void {
     this.#start = this.state.instructionPointer;
+    this.plan = null;
     this.#decoded = decoded;
     this.#records = decoded === null ? { bytes: [], operands: [], immediates: [] } : null;
     if (decoded !== null) {
@@ -253,22 +256,42 @@ export class X64DecodeCursor {
     return { byte, extension, registerIndex, rmIndex, reg, rm: { kind: "memory", width, base, index, scale, displacement, ripRelative, addressBits: this.addressBits, segment: this.segment } };
   }
   effectiveOffset(operand: X64MemoryOperand, nextIP?: bigint): bigint {
-    const base = operand.ripRelative ? nextIP ?? this.nextIP : operand.base === null ? 0n : this.state.registers.read(operand.base, operand.addressBits);
-    const index = operand.index === null ? 0n : this.state.registers.read(operand.index, operand.addressBits) * operand.scale;
-    return BigInt.asUintN(operand.addressBits, base + index + operand.displacement);
+    return effectiveOperandOffset(this.state, operand, operand.ripRelative ? nextIP ?? this.nextIP : 0n);
   }
   address(operand: X64MemoryOperand, access: "read" | "write" = "read"): GuestAddress {
-    const segmentBase = operand.segment === null ? 0n : this.state.segments[operand.segment].base;
-    return guestAddress(this.memory, this.effectiveOffset(operand) + segmentBase, access);
+    return operandAddress(this.memory, this.state, operand, operand.ripRelative ? this.nextIP : 0n, access);
   }
   read(operand: X64Operand): bigint {
-    return operand.kind === "register" ? this.state.registers.read(operand.register, operand.width, operand.highByte) : readMemory(this.memory, this.address(operand), operand.width);
+    return readOperand(this.memory, this.state, operand, operand.kind === "memory" && operand.ripRelative ? this.nextIP : 0n);
   }
   write(operand: X64Operand, value: bigint): undefined {
-    return operand.kind === "register" ? this.state.registers.write(operand.register, operand.width, value, operand.highByte) : writeMemory(this.memory, this.address(operand, "write"), operand.width, value);
+    return writeOperand(this.memory, this.state, operand, operand.kind === "memory" && operand.ripRelative ? this.nextIP : 0n, value);
   }
   writable(operand: X64Operand): undefined {
-    if (operand.kind === "memory") this.memory.check(this.address(operand, "write"), operand.width / 8, "write");
-    return undefined;
+    return writableOperand(this.memory, this.state, operand, operand.kind === "memory" && operand.ripRelative ? this.nextIP : 0n);
   }
+
+}
+
+
+export function effectiveOperandOffset(state: GuestProcessorState, operand: X64MemoryOperand, nextIP: bigint): bigint {
+  const base = operand.ripRelative ? nextIP : operand.base === null ? 0n : state.registers.read(operand.base, operand.addressBits);
+  const index = operand.index === null ? 0n : state.registers.read(operand.index, operand.addressBits) * operand.scale;
+  return BigInt.asUintN(operand.addressBits, base + index + operand.displacement);
+}
+function operandAddress(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64MemoryOperand, nextIP: bigint, access: "read" | "write" = "read"): GuestAddress {
+  const segmentBase = operand.segment === null ? 0n : state.segments[operand.segment].base;
+  return guestAddress(memory, effectiveOperandOffset(state, operand, nextIP) + segmentBase, access);
+}
+export function readOperand(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64Operand, nextIP: bigint): bigint {
+  return operand.kind === "register" ? state.registers.read(operand.register, operand.width, operand.highByte)
+    : readMemory(memory, operandAddress(memory, state, operand, nextIP), operand.width);
+}
+export function writeOperand(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64Operand, nextIP: bigint, value: bigint): undefined {
+  return operand.kind === "register" ? state.registers.write(operand.register, operand.width, value, operand.highByte)
+    : writeMemory(memory, operandAddress(memory, state, operand, nextIP, "write"), operand.width, value);
+}
+export function writableOperand(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64Operand, nextIP: bigint): undefined {
+  if (operand.kind === "memory") memory.check(operandAddress(memory, state, operand, nextIP, "write"), operand.width / 8, "write");
+  return undefined;
 }
