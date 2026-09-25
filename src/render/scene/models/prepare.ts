@@ -24,7 +24,7 @@ function countFrames(model: DecodedModel): number {
   return model.kind === "brush-model" ? 1 : model.frames.length;
 }
 
-function repairFrames(entity: SceneEntity): { frame: number; previousFrame: number; backLerp: number; fallback: boolean } {
+export function repairFrames(entity: SceneEntity): { frame: number; previousFrame: number; backLerp: number; fallback: boolean } {
   if (entity.pose.kind === "skeleton") return { frame: 0, previousFrame: 0, backLerp: 0, fallback: false };
   let { frame, previousFrame, backLerp } = entity.pose;
   if (!Number.isInteger(frame) || !Number.isInteger(previousFrame) || !Number.isFinite(backLerp)) throw new RangeError("Invalid scene model pose");

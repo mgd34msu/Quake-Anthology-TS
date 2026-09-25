@@ -1,10 +1,13 @@
 import type { ProviderReference, ResolvedResourceReference } from "./content.ts";
 import type { InventoryEntry, ItemId } from "./gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "./identity.ts";
+import type { HeldWeaponDeclaration } from "./held-weapon.ts";
+
+export interface SourceWeaponItem { readonly kind: "weapon"; readonly ammo: ItemId | null; readonly held?: HeldWeaponDeclaration; }
 
 export type SourceItemDefinition = { readonly item: ItemId; readonly label: string; readonly source: ProviderReference } & (
   | { readonly kind: "counter" }
-  | { readonly kind: "weapon"; readonly ammo: ItemId | null }
+  | SourceWeaponItem
 );
 export interface SourceItemAdmission { readonly definition: SourceItemDefinition; readonly admission: "add" | "replace-primary"; }
 export interface SourceItemStore { readonly before: InventoryEntry; readonly after: InventoryEntry; }

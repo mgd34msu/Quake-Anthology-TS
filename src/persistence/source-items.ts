@@ -1,3 +1,4 @@
+import { readHeldWeaponDeclaration } from "../content/held-weapon.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ProviderCheckpoint, SaveImage, SavedActorId } from "../contracts/session.ts";
 import type { SourceItemAdmission, SourceItemDefinition } from "../contracts/source-items.ts";
@@ -32,10 +33,10 @@ function definition(reader: SaveReader): SourceItemDefinition {
   if (common.label.length === 0) return reader.fail("source item label is empty");
   switch (reader.field("kind").choice("counter", "weapon")) {
     case "counter": return { ...common, kind: "counter" };
-    case "weapon": return { ...common, kind: "weapon", ammo: reader.field("ammo").value === null ? null : namespaced(reader.field("ammo")) };
+    case "weapon": return { ...common, kind: "weapon", ...(reader.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(reader.field("held")) }), ammo: reader.field("ammo").value === null ? null : namespaced(reader.field("ammo")) };
   }
 }
-export function readSourceItems(save: SaveImage): readonly SourceItems[] {
+export function readSourceItems(save: Pick<SaveImage, "providers" | "inventories">): readonly SourceItems[] {
   const records = save.providers.filter(provider => provider.schema === schema), record = records[0];
   if (records.length > 1 || record !== undefined && (record.provider !== "world:gameplay" || record.version !== 1)) throw new SaveFormatError(schema, "unsupported or duplicate source item checkpoint");
   if (record === undefined) return [];

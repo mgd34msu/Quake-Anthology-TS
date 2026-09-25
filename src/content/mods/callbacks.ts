@@ -1,3 +1,4 @@
+import { readHeldWeaponDeclaration } from "../held-weapon.ts";
 import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage, ModQcProtection, ModQcInputOutput, ModQcItems } from "../../contracts/mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
@@ -95,7 +96,7 @@ function items(reader: SaveReader): ModQcItems {
   const weapons = reader.field("weapons");
   return { definitions: reader.field("definitions").list(entry => {
     const base = { item: namespaced(entry.field("item")), label: entry.field("label").string(), admission: entry.field("admission").choice("add", "replace-primary") };
-    return entry.field("kind").choice("counter", "weapon") === "counter" ? { ...base, kind: "counter" } : { ...base, kind: "weapon", ammo: entry.field("ammo").value === null ? null : namespaced(entry.field("ammo")) };
+    return entry.field("kind").choice("counter", "weapon") === "counter" ? { ...base, kind: "counter" } : { ...base, kind: "weapon", ...(entry.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(entry.field("held")) }), ammo: entry.field("ammo").value === null ? null : namespaced(entry.field("ammo")) };
   }), storage: reader.field("storage").list(entry => {
     const field = entry.field("field").string();
     if (entry.field("kind").choice("counter", "bits") === "bits") return { kind: "bits", field, privateMask: entry.field("privateMask").integer(0),

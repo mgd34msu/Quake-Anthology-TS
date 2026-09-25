@@ -1,6 +1,6 @@
 # Functional target status
 
-**21/23 targets remain accepted; T10 and T12 are open.** Current source integrates native component items, weapons and original camera output. Original Xatrix and q2eaks checks cover firing, selection, retirement and end-frame camera policy. Full native-primary selected arsenals, native HUD transport, held weapon admission and remaining artifact/composition coverage are still required. Installed executable remains `434a4d3e`. [Current delivery](../execution-status.md).
+**21/23 targets remain accepted; T10 and T12 are open.** Current source integrates native component items, weapons and original camera output. Original Xatrix and q2eaks checks cover firing, selection, retirement and end-frame camera policy. Full native-primary selected arsenals, native HUD transport, original inventory UI and remaining artifact/composition coverage are still required. Installed executable remains `434a4d3e`. [Current delivery](../execution-status.md).
 
 Earlier checkpoints below retain their status at the time.
 

@@ -1,3 +1,4 @@
+import { readHeldWeaponDeclaration } from "../../../content/held-weapon.ts";
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { Vec3, Vec4, Axis } from '../../../contracts/math.ts';
 import type { PlayerUi, PlayerView, SimulationPresentation } from '../simulation/types.ts';
@@ -34,6 +35,7 @@ export function readPlayerUi(r: SaveReader): PlayerUi {
     }) };
 }
 export function readModel(r: SaveReader, identity: UnifiedIdentityDecoder): SimulationPresentation {
+  const heldWeapon=optional(r,"heldWeapon",readHeldWeaponDeclaration),nativeHeldWeapon=optional(r,"nativeHeldWeapon",v=>v.literal(true)),weaponItem=optional(r,"weaponItem",namespaced);
   const flare=optional(r,'flare',v=>({image:v.field('image').string(),fadeStart:v.field('fadeStart').finite(),fadeEnd:v.field('fadeEnd').finite(),scale:v.field('scale').finite(),color:vector(v.field('color')),rimColor:v.field('rimColor').nullable(vector),lockAngle:v.field('lockAngle').boolean()}));
   const backLerp=optional(r,'backLerp',v=>v.finite()),skinPath=optional(r,'skinPath',v=>v.nullable(s=>s.string()));
   const indexedSkin=optional(r,'indexedSkin',v=>{const width=v.field('width').integer(1),height=v.field('height').integer(1),pixels=v.field('pixels').bytes();if(pixels.length!==width*height)return v.fail('indexed skin length differs');return {name:v.field('name').string(),width,height,pixels};});
@@ -48,7 +50,7 @@ export function readModel(r: SaveReader, identity: UnifiedIdentityDecoder): Simu
   const q3Weapon=optional(r,'q3Weapon',v=>({timeMilliseconds:v.field('timeMilliseconds').finite(),torsoAnimation:v.field('torsoAnimation').integer(),lastFireMilliseconds:v.field('lastFireMilliseconds').nullable(n=>n.finite()),firing:v.field('firing').boolean(),horizontalSpeed:v.field('horizontalSpeed').finite(),bobCycle:v.field('bobCycle').finite(),weapon:v.field('weapon').integer()}));
   return { actor:actor(r.field('actor'),identity),content:readContentId(r.field('content')),family:r.field('family').choice('q1','q2','q3'),path:r.field('path').string(),
     frame:r.field('frame').integer(),oldFrame:r.field('oldFrame').integer(),skin:r.field('skin').integer(),effects:r.field('effects').integer(),renderFlags:r.field('renderFlags').integer(),origin:vector(r.field('origin')),angles:vector(r.field('angles')),scale:r.field('scale').finite(),visible:r.field('visible').boolean(),viewWeapon:r.field('viewWeapon').boolean(),...(replacesBody===undefined?{}:{replacesBody}),...(renderOwner===undefined?{}:{renderOwner}),
-    ...(flare===undefined?{}:{flare}),...(backLerp===undefined?{}:{backLerp}),...(skinPath===undefined?{}:{skinPath}),...(indexedSkin===undefined?{}:{indexedSkin}),...(playerColors===undefined?{}:{playerColors}),...(previousOrigin===undefined?{}:{previousOrigin}),...(modelBeam===undefined?{}:{modelBeam}),...(shaderBeam===undefined?{}:{shaderBeam}),...(modelAttachments===undefined?{}:{modelAttachments}),...(modelAnchor===undefined?{}:{modelAnchor}),...(q3GrappleCable===undefined?{}:{q3GrappleCable}),...(alpha===undefined?{}:{alpha}),...(q3Weapon===undefined?{}:{q3Weapon}) };
+    ...(heldWeapon===undefined?{}:{heldWeapon}),...(nativeHeldWeapon===undefined?{}:{nativeHeldWeapon}),...(weaponItem===undefined?{}:{weaponItem}),...(flare===undefined?{}:{flare}),...(backLerp===undefined?{}:{backLerp}),...(skinPath===undefined?{}:{skinPath}),...(indexedSkin===undefined?{}:{indexedSkin}),...(playerColors===undefined?{}:{playerColors}),...(previousOrigin===undefined?{}:{previousOrigin}),...(modelBeam===undefined?{}:{modelBeam}),...(shaderBeam===undefined?{}:{shaderBeam}),...(modelAttachments===undefined?{}:{modelAttachments}),...(modelAnchor===undefined?{}:{modelAnchor}),...(q3GrappleCable===undefined?{}:{q3GrappleCable}),...(alpha===undefined?{}:{alpha}),...(q3Weapon===undefined?{}:{q3Weapon}) };
 }
 export function readCharacterView(r: SaveReader, identity: UnifiedIdentityDecoder): Q3CharacterView {
   const a=r.field('animation'),scale=optional(r,'scale',v=>v.finite()),opacity=optional(r,'opacity',v=>v.finite());

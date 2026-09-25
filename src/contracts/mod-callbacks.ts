@@ -1,3 +1,4 @@
+import type { SourceWeaponItem } from "./source-items.ts";
 import type { ContentDigest } from "./content.ts";
 import type { ActorId, ProviderId } from "./identity.ts";
 import type { ItemId } from "./gameplay.ts";
@@ -84,7 +85,7 @@ export type ModQcProtection = {
 
 export interface ModQcItems {
   readonly definitions: readonly ({ readonly item: ItemId; readonly label: string; readonly admission: "add" | "replace-primary" } & (
-    { readonly kind: "counter" } | { readonly kind: "weapon"; readonly ammo: ItemId | null }
+    { readonly kind: "counter" } | SourceWeaponItem
   ))[];
   readonly storage: readonly (
     { readonly kind: "counter"; readonly field: string; readonly item: ItemId; readonly capacity: { readonly kind: "constant"; readonly value: number } | { readonly kind: "field"; readonly field: string } }

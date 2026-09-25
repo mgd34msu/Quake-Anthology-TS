@@ -150,6 +150,8 @@ export interface PlayerUi {
 }
 
 export interface SimulationPresentation {
+  readonly heldWeapon?: import("../../../contracts/held-weapon.ts").HeldWeaponDeclaration;
+  readonly nativeHeldWeapon?: true;
   readonly weaponItem?: ItemId;
   readonly replacesBody?: true;
   readonly renderOwner?: "source-client";

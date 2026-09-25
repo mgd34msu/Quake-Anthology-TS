@@ -1,3 +1,4 @@
+import { readHeldWeaponDeclaration } from "../held-weapon.ts";
 import type { NativeModItems, NativeItemStorage, NativeItemTest } from "../../contracts/native-mod-items.ts";
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
 import type { NativeModActorField, NativeModAddress, NativeModEntry, NativeModDeclaration, NativeModSourceCall, NativeModValue, NativeModSourceActors, NativeModArmor, NativeModArmorField, NativeModArmorSelection, NativeModPowerArmorItem, NativeModRegularArmorItem, NativeModProtectionDefinition } from "../../contracts/native-mod-callbacks.ts";
@@ -145,7 +146,7 @@ function nativeItems(reader: SaveReader): NativeModItems {
   return { definitions: reader.field("definitions").list(value => {
     const common = { item: namespaced(value.field("item")), label: value.field("label").string(), admission: value.field("admission").choice("add", "replace-primary") };
     return value.field("kind").choice("counter", "weapon") === "counter" ? { ...common, kind: "counter" }
-      : { ...common, kind: "weapon", ammo: value.field("ammo").nullable(namespaced) };
+      : { ...common, kind: "weapon", ...(value.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(value.field("held")) }), ammo: value.field("ammo").nullable(namespaced) };
   }), storage: reader.field("storage").list((value): NativeItemStorage => {
     const field = armorField(value.field("field"));
     if (value.field("kind").choice("counter", "bits") === "bits") return { kind: "bits", field, privateMask: value.field("privateMask").integer(0), items: value.field("items").list(value => ({ item: namespaced(value.field("item")), mask: value.field("mask").integer(1) })) };

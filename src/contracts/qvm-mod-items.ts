@@ -1,3 +1,4 @@
+import type { SourceWeaponItem } from "./source-items.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { QvmModInputPointer, QvmModSourceCall } from "./qvm-mod-callbacks.ts";
 
@@ -43,7 +44,7 @@ export interface QvmWeaponStage {
 export interface QvmModItems {
   readonly definitions: readonly ({ readonly item: ItemId; readonly label: string; readonly admission: "add" | "replace-primary" } & (
     | { readonly kind: "counter" }
-    | { readonly kind: "weapon"; readonly ammo: ItemId | null }
+    | SourceWeaponItem
   ))[];
   readonly storage: readonly QvmItemStorage[];
   readonly weapons?: { readonly input: { readonly entry: number; readonly clock: QvmItemField }; readonly stage: QvmWeaponStage };

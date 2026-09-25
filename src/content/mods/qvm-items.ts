@@ -1,3 +1,4 @@
+import { readHeldWeaponDeclaration } from "../held-weapon.ts";
 import type { QvmItemCapacity, QvmItemField, QvmItemTest, QvmModItems, QvmWeaponActor } from "../../contracts/qvm-mod-items.ts";
 import type { QvmModInputPointer, QvmModSourceCall } from "../../contracts/qvm-mod-callbacks.ts";
 import { namespaced, type SaveReader } from "../../persistence/value.ts";
@@ -31,7 +32,7 @@ export function readQvmModItems(reader: SaveReader, readCall: (reader: SaveReade
   return { definitions: reader.field("definitions").list(value => {
     const common = { item: namespaced(value.field("item")), label: value.field("label").string(), admission: value.field("admission").choice("add", "replace-primary") };
     return value.field("kind").choice("counter", "weapon") === "counter" ? { ...common, kind: "counter" }
-      : { ...common, kind: "weapon", ammo: value.field("ammo").nullable(namespaced) };
+      : { ...common, kind: "weapon", ...(value.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(value.field("held")) }), ammo: value.field("ammo").nullable(namespaced) };
   }), storage: reader.field("storage").list(value => {
     const source = field(value.field("field"));
     return value.field("kind").choice("counter", "bits") === "counter"

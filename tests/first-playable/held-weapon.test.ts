@@ -15,7 +15,24 @@ import { Application } from "../../src/app/bootstrap/application.ts";
 import { parseApplicationCommand } from "../../src/app/bootstrap/options.ts";
 import { ForeignHeldWeapons } from "../../src/app/bootstrap/held-weapon.ts";
 import { encodePng } from "../../src/formats/images/png.ts";
-
+import type { SceneEntity } from "../../src/contracts/scene.ts";
+import { createMountIdentity } from "../../src/contracts/content.ts";
+import type { ArchiveMount, ResolvedResourceReference } from "../../src/contracts/content.ts";
+import { digestBytes, digestFile, MountedContent } from "../../src/content/mounts/index.ts";
+import { loadApplicationModel } from "../../src/app/bootstrap/model-loader.ts";
+import { q2WeaponAttachment } from "../../src/content/q2/foundation/weapon-attachments.ts";
+import { NativeHeldWeapons } from "../../src/app/bootstrap/native-held-weapon.ts";
+import { createModelGrip } from "../../src/render/scene/models/grip.ts";
+import { alignModelAttachment } from "../../src/render/scene/models/attachment.ts";
+import { composeModelTransform, modelWorldPoint } from "../../src/render/scene/models/transform.ts";
+import { DEFAULT_MODEL_REPLACEMENT_POLICY, replacementEntity } from "../../src/render/scene/models/replacements.ts";
+import { readModelAttachment } from "../../src/content/model-attachment.ts";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createIdentityOwner } from "../../src/contracts/identity.ts";
+import type { HeldWeaponDeclaration } from "../../src/contracts/held-weapon.ts";
+import type { SimulationPresentation } from "../../src/app/bootstrap/simulation/types.ts";
+import { readModel, wireActor } from "../../src/app/bootstrap/network/unified-frame-values.ts";
+import { SaveReader } from "../../src/persistence/value.ts";
 type Archive = Awaited<ReturnType<typeof openArchive>>;
 async function bytes(archive: Archive, path: string): Promise<Uint8Array> {
   const entry = archive.findEntries(path)[0]; if (entry === undefined) throw new Error(`Missing retail reference ${path}`);
@@ -107,3 +124,94 @@ for (const backend of ["cpu", "gl"]) test.skipIf(process.env["QUAKE_HELD_WEAPON_
     for (const model of ["sarge", "visor"]) await rm(join(root, model), { recursive: true, force: true });
   }
 }, 180000);
+
+
+const unitTransform = { origin: { x: 0, y: 0, z: 0 }, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], scale: { x: 1, y: 1, z: 1 } } satisfies SceneEntity["transform"];
+
+test("native held attachment follows original Classic and rerelease carriers, source interpolation, hiding and renderer LOD", async () => {
+  const archive = await openArchive("/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak");
+  const content = "q2:classic:baseq2:held-test", identity = createMountIdentity("mount:held:source", content, 0);
+  const mount = { kind: "loose", identity, rootPath: "/home/buzzkill/Projects/qfiles/q2/baseq2" } satisfies Extract<ResolvedResourceReference["provenance"], { kind: "loose" }>["mount"];
+  const classic = new MountedContent({ id: "mount-plan:held:classic", mounts: [mount], defaultOrder: [identity.id], prefixOrders: [] }, [{ kind: "loose", mount }]);
+  const retailMount: ArchiveMount = { kind: "archive", format: "pak", archivePath: "/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak",
+    archiveDigest: await digestFile("/home/buzzkill/Projects/qfiles/q2/rerelease/baseq2/pak0.pak"), identity: createMountIdentity("mount:held:retail", "q2:rerelease:baseq2:held-test", 0) };
+  const retail = new MountedContent({ id: "mount-plan:held:retail", mounts: [retailMount], defaultOrder: [retailMount.identity.id], prefixOrders: [] }, [{ kind: "archive", mount: retailMount, archive }]);
+  const entity = async (mounts: Pick<MountedContent, "open">, path: string): Promise<SceneEntity> => {
+    const opened = await mounts.open(path); if (opened === null) throw new Error(`Missing original carrier ${path}`);
+    const loaded = await loadApplicationModel({ family: "q2", mounts, textures: { load: async () => null } }, opened);
+    return { actor: null, ...loaded, transform: unitTransform, previousOrigin: unitTransform.origin,
+      pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 }, skin: 0, color: { x: 1, y: 1, z: 1, w: 1 },
+      opacity: 0.7, shaderTime: { kind: "seconds", value: 0 }, flags: { kind: "q2", bits: 1024 }, lightingOrigin: { x: 10, y: 20, z: 30 }, shadowPlane: 4, attachments: [] };
+  };
+  try {
+    for (const [mounts, path] of [[classic, "players/male/weapon.md2"], [retail, "players/male/w_blaster.md2"], [retail, "players/female/w_blaster.md2"]] satisfies readonly (readonly [Pick<MountedContent, "open">, string])[]) {
+      const reference = await entity(mounts, path), definition = q2WeaponAttachment(reference.resource.digest);
+      if (definition === null || definition.kind !== "mesh") throw new Error("Missing qualified carrier");
+      const sample = createModelGrip(reference, definition);
+      closePoint(sample(reference)?.origin ?? { x: Infinity, y: Infinity, z: Infinity }, definition.grip.origin);
+      const posed: SceneEntity = { ...reference, pose: { kind: "frame", frame: 42, previousFrame: 41, backLerp: 0.5 }, previousOrigin: { x: -8, y: 2, z: 0 } };
+      const grip = sample(posed); if (grip === null) throw new Error("Native running carrier is hidden");
+      expect(length3(sub3(grip.origin, definition.grip.origin))).toBeGreaterThan(1);
+      const noTranslation = sample({ ...posed, previousOrigin: unitTransform.origin }); if (noTranslation === null) throw new Error("Missing running pose");
+      closePoint(sub3(grip.origin, noTranslation.origin), { x: -4, y: 1, z: 0 });
+      const attach = await new NativeHeldWeapons({ modelPolicy: DEFAULT_MODEL_REPLACEMENT_POLICY, provider: async () => ({ mounts }) }).attachment(reference.resource.provenance.mount.identity.content, posed);
+      // The selected model stays in source-owned Q3 hand coordinates until the native attachment consumes it.
+      const child: SceneEntity = { ...reference, transform: alignModelAttachment(definition.grip, Q3_WEAPON_HAND_GRIP), pose: { kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 } };
+      const resolve = attach(child), far = resolve({ x: 3000, y: 0, z: 0 }, "view"); if (far === null) throw new Error("Running held weapon hidden");
+      closePoint(modelWorldPoint(far.transform, definition.grip.origin), grip.origin);
+      expect(far.flags).toEqual(posed.flags); expect(far.opacity).toBe(0.7); expect(far.resource).toBe(child.resource);
+      expect(far.previousOrigin).toEqual(far.transform.origin);
+      const enhanced = replacementEntity(posed), near = resolve(unitTransform.origin, "view"); if (near === null) throw new Error("Missing near held weapon");
+      if (mounts === classic) { expect(enhanced).toBeNull(); expect(near.transform).toEqual(far.transform); }
+      else {
+        if (enhanced === null) throw new Error("Missing original rerelease skeleton");
+        const joint = q2WeaponAttachment(enhanced.resource.digest); if (joint === null) throw new Error("Missing authored joint");
+        const expected = createModelGrip(enhanced, joint)(enhanced); if (expected === null) throw new Error("Missing animated native joint");
+        closePoint(modelWorldPoint(near.transform, definition.grip.origin), composeModelTransform(enhanced.transform, expected).origin);
+        expect(resolve({ x: 3000, y: 0, z: 0 }, "shadow")?.transform).toEqual(near.transform);
+      }
+      const external = readModelAttachment(new TextEncoder().encode(JSON.stringify({ version: 1, ...definition })));
+      expect(external).toEqual(definition);
+      expect(() => createModelGrip(reference, { ...external, digest: digestBytes(new Uint8Array()) })).toThrow("digest");
+    }
+    const hidden = await entity(retail, "players/male/w_grapple.md2"), definition = q2WeaponAttachment(hidden.resource.digest);
+    if (definition === null) throw new Error("Missing native grapple carrier");
+    expect(createModelGrip(hidden, definition)({ ...hidden, pose: { kind: "frame", frame: 112, previousFrame: 112, backLerp: 0 } })).toBeNull();
+  } finally { await classic.close(); await retail.close(); }
+});
+
+
+test("authored mod held declarations resolve source assets and survive invisible metadata transport without inferring a viewmodel", async () => {
+  const root = await mkdtemp(join(tmpdir(), "mod-held-")), identity = createIdentityOwner("mod-held");
+  const content = "q2:classic:custom:held", mount = { kind: "loose", identity: createMountIdentity("mount:held:mod", content, 0), rootPath: root } satisfies Extract<ResolvedResourceReference["provenance"], { kind: "loose" }>["mount"];
+  const mounts = new MountedContent({ id: "mount-plan:held:mod", mounts: [mount], defaultOrder: [mount.identity.id], prefixOrders: [] }, [{ kind: "loose", mount }]);
+  try {
+    await mkdir(join(root, "models"));
+    const bytes = new Uint8Array(await readFile("/home/buzzkill/Projects/qfiles/q2/baseq2/players/male/weapon.md2"));
+    await writeFile(join(root, "models/authored.md2"), bytes);
+    const attachment = q2WeaponAttachment(digestBytes(bytes)); if (attachment === null) throw new Error("Missing actual reference grip");
+    const declaration: HeldWeaponDeclaration = { kind: "model", model: { path: "models/authored.md2", digest: digestBytes(bytes), referenceFrame: 0, grip: attachment.grip } };
+    await writeFile(join(root, "models/view.md2.held.json"), JSON.stringify({ version: 1, ...declaration }));
+    const resolver = new ForeignHeldWeapons({ provider: async source => { expect(source).toBe(content); return { mounts }; }, model: async (source, path) => {
+      expect(source).toBe(content); const asset = await mounts.open(path); if (asset === null) throw new Error("Missing source model");
+      return loadApplicationModel({ family: "q2", mounts, textures: { load: async () => null } }, asset, { enhancedModels: false });
+    } });
+    const source: SimulationPresentation = { actor: identity.actor(0, 0), content, family: "q2", path: "models/view.md2", weaponItem: "mod:custom", frame: 9, oldFrame: 8,
+      skin: 0, effects: 0, renderFlags: 0, origin: unitTransform.origin, angles: unitTransform.origin, scale: 1, visible: false, viewWeapon: true };
+    const character = { origin: unitTransform.origin, color: { x: 1, y: 1, z: 1, w: 1 } };
+    expect(await mounts.open(source.path)).toBeNull();
+    const passes = await resolver.frame(source, character), pass = passes[0]; if (pass === undefined) throw new Error("Authored model was not admitted");
+    expect(pass.entity.resource.provenance.mount.identity.content).toBe(content);
+    expect(pass.entity.resource.requestedPath).toBe("models/authored.md2");
+    expect(pass.entity.pose).toEqual({ kind: "frame", frame: 0, previousFrame: 0, backLerp: 0 });
+    closePoint(modelWorldPoint(pass.entity.transform, declaration.model.grip.origin), Q3_WEAPON_HAND_GRIP.origin);
+    const explicit: SimulationPresentation = { ...source, path: "", heldWeapon: declaration, nativeHeldWeapon: true };
+    const decoded = readModel(new SaveReader({ ...explicit, actor: wireActor(explicit.actor) }), { ...identity, resourceId: id => id });
+    expect(decoded.heldWeapon).toEqual(declaration); expect(decoded.nativeHeldWeapon).toBe(true); expect(decoded.weaponItem).toBe("mod:custom");
+    expect(decoded.visible).toBe(false); expect(decoded.path).toBe("");
+    expect((await resolver.frame(decoded, character))[0]?.entity.resource.id).toBe(pass.entity.resource.id);
+    expect(await resolver.frame({ ...explicit, heldWeapon: { kind: "none" } }, character)).toEqual([]);
+    await expect(resolver.frame({ ...source, path: "models/unknown.md2" }, character)).rejects.toThrow("no authored held model");
+    await expect(resolver.frame({ ...explicit, heldWeapon: { kind: "model", model: { ...declaration.model, digest: digestBytes(new Uint8Array()) } } }, character)).rejects.toThrow("digest");
+  } finally { await mounts.close(); await rm(root, { recursive: true, force: true }); }
+});

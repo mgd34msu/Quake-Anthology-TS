@@ -1,17 +1,20 @@
+import type { HeldWeaponDeclaration } from "../../../src/contracts/held-weapon.ts";
+import { captureSourceItems, readSourceItems } from "../../../src/persistence/source-items.ts";
+import { savedActorId } from "../../../src/persistence/save-image.ts";
 import { expect, test } from "bun:test";
 import type { InventoryEntry } from "../../../src/contracts/gameplay.ts";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { SessionActorRegistry } from "../../../src/world/actors/index.ts";
 import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 
-function fixture() {
+function fixture(held?: HeldWeaponDeclaration) {
   const actors = new SessionActorRegistry(createIdentityOwner("source-items")), actor = actors.allocate("q2:world", "q2:player"), table = new SharedInventoryTable(actors);
   let primary: readonly InventoryEntry[] = [{ item: "q2:ammo_shells", count: 19, capacity: 100 }];
   table.bind(actor, { read: () => primary, write: entry => { primary = [entry]; return undefined; } });
   let entries: readonly InventoryEntry[] = [{ item: "q2:ammo_shells", count: 6, capacity: 50 }, { item: "mod:weapon/plasma", count: 1, capacity: 1 }], writes = 0;
   const lease = table.bindItems(actor, { owner: "mod:arsenal", items: [
     { admission: "replace-primary", definition: { item: "q2:ammo_shells", label: "Cells", kind: "counter", source: { provider: "mod:arsenal", content: "q1:classic:id1:installed" } } },
-    { admission: "add", definition: { item: "mod:weapon/plasma", label: "Plasma", kind: "weapon", ammo: "q2:ammo_shells", source: { provider: "mod:arsenal", content: "q1:classic:id1:installed" } } },
+    { admission: "add", definition: { item: "mod:weapon/plasma", label: "Plasma", kind: "weapon", ammo: "q2:ammo_shells", ...(held === undefined ? {} : { held }), source: { provider: "mod:arsenal", content: "q1:classic:id1:installed" } } },
   ], state: { read: () => entries, write: entry => { writes++; entries = entries.map(value => value.item === entry.item ? entry : value); return undefined; } } });
   return { actors, actor, table, lease, primary: () => primary, entries: () => entries, store: (value: readonly InventoryEntry[]) => { entries = value; }, writes: () => writes };
 }
@@ -46,4 +49,17 @@ test("invalid source receipts fail before any observer and retain committed byte
     expect(() => f.lease.stored([{ before: { item: "q2:ammo_shells", count: 0, capacity: 50 }, after: { item: "q2:ammo_shells", count: 7, capacity: 50 } }])).toThrow("differs");
     expect(observed).toBe(0); expect(f.table.count(f.actor.id, "q2:ammo_shells")).toBe(6); expect(f.writes()).toBe(0);
   } finally { f.actors.close(); }
+});
+
+test("source item checkpoint retains authored held metadata and explicit absence", () => {
+  for (const held of [{ kind: "none" }, { kind: "model", model: { path: "models/mod/held.md2", referenceFrame: 7,
+    grip: { origin: { x: 1, y: 2, z: 3 }, axis: [{ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 }], scale: { x: 2, y: 1, z: 1 } } } }] satisfies readonly HeldWeaponDeclaration[]) {
+    const f = fixture(held);
+    try {
+      const saved = readSourceItems({ providers: [captureSourceItems(f.actors, f.table)], inventories: [{ actor: savedActorId(f.actor.id), entries: f.table.entries(f.actor.id) }] });
+      const weapon = saved[0]?.groups[0]?.items.find(item => item.definition.item === "mod:weapon/plasma")?.definition;
+      if (weapon?.kind !== "weapon") throw new Error("Missing saved original weapon definition");
+      expect(weapon.held).toEqual(held); expect(weapon.source).toEqual({ provider: "mod:arsenal", content: "q1:classic:id1:installed" });
+    } finally { f.lease.close(); f.actors.close(); }
+  }
 });
