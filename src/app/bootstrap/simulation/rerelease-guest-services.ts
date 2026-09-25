@@ -113,7 +113,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
       throw new Error("API2023 movement state requires the current client actor");
     const motion = this.inputMotion.get(actor);
-    return motion === undefined ? (this.view(slot).playerState().movement.flags & 4) !== 0 : motion.grounded();
+    return motion === undefined ? (new RereleasePublicEdict(this.memory, record).playerMovementFlags() & 4) !== 0 : motion.grounded();
   }
   playerView(slot: number, actor: ActorId): ReturnType<NativeInputMotion["view"]> {
     const record = this.host.module.entities().atSlot(slot);
@@ -121,8 +121,8 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
       throw new Error("API2023 player view requires the current client actor");
     const motion = this.inputMotion.get(actor);
     if (motion !== undefined) return motion.view();
-    const state = this.view(slot).playerState();
-    return { viewOffset: { ...state.viewOffset, z: state.viewOffset.z + state.movement.viewHeight }, crouched: (state.movement.flags & 1) !== 0 };
+    const state = new RereleasePublicEdict(this.memory, record).playerView();
+    return { viewOffset: { ...state.viewOffset, z: state.viewOffset.z + state.viewHeight }, crouched: (state.movementFlags & 1) !== 0 };
   }
   setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
     const host = this.host, profile = host.module.requireWorldProfile().client, record = host.module.entities().atSlot(slot);
@@ -174,7 +174,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   private body(view: RereleasePublicEdict): BodyState {
     const actor = view.record.currentActor(), pending = actor === null ? undefined : this.#readPlayerVelocity?.(actor);
     const motion = actor === null ? undefined : this.inputMotion.get(actor)?.read();
-    const velocity = motion?.velocity ?? pending ?? (view.record.slot > 0 && view.record.slot <= this.options.maxClients && view.pointer("client") !== null ? view.playerState().movement.velocity : view.vector("sv.velocity"));
+    const velocity = motion?.velocity ?? pending ?? (view.record.slot > 0 && view.record.slot <= this.options.maxClients && view.pointer("client") !== null ? view.playerVelocity() : view.vector("sv.velocity"));
     return { origin: motion?.origin ?? view.vector("s.origin"), angles: view.vector("s.angles"), velocity, bounds: { min: view.vector("mins"), max: view.vector("maxs") }, ground: null };
   }
   private bindEntity(record: RawEntityView, actor: OwnedActor): RereleaseActorBindings {
@@ -215,7 +215,10 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     return { actor: actor?.id ?? null, active: view.byte("inuse") !== 0, serverFlags: view.uint("svflags"), areas: [view.int("areanum"), view.int("areanum2")], clusters: link === undefined ? [] : link.clusters, firstCluster: link?.firstCluster ?? 0, headnode: link?.headnode ?? 0, ownerSlot: owner === null ? null : this.host.module.entities().fromPointer(owner).slot };
   }
   modelAppearance(slot: number): ReturnType<RereleaseGuestServicesPort["modelAppearance"]> {
-    const state = this.entityState(slot);
+    const view = this.view(slot); this.memory.writeUint32(view.address("s.number"), slot);
+    return this.appearance(view.modelState());
+  }
+  private appearance(state: ReturnType<RereleasePublicEdict["modelState"]>): ReturnType<RereleaseGuestServicesPort["modelAppearance"]> {
     if (state.modelIndexes.every(index => index !== 255)) return { path: this.resource("model", state.modelIndexes[0]), skin: state.skin, skinPath: null, attachedModels: state.modelIndexes.slice(1).map(index => this.resource("model", index)) };
     const value = this.#strings.get(11582 + (state.skin & 255)) ?? "player\\male/grunt", appearance = value.slice(value.indexOf("\\") + 1), slash = appearance.indexOf("/");
     const model = slash < 0 ? "male" : appearance.slice(0, slash), skin = slash < 0 ? "grunt" : appearance.slice(slash + 1), weapons = ["weapon.md2"];
@@ -226,7 +229,9 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
   }
   publishEntities(): void {
     const table = this.host.module.entities();
-    for (let slot = 1; slot < table.count; slot++) { const view = this.view(slot), actor = this.host.actor(view.record); if (actor === null) continue; const state = this.entityState(slot), appearance = this.modelAppearance(slot);
+    for (let slot = 1; slot < table.count; slot++) { const view = new RereleasePublicEdict(this.memory, table.atSlot(slot)), actor = this.host.actor(view.record); if (actor === null) continue;
+      this.memory.writeUint32(view.address("s.number"), slot);
+      const state = view.state(), appearance = this.appearance(state);
       if (state.effects > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError("Shared model effect projection requires a lossless API2023 effect value");
       this.options.engine.emit({ kind: "visibility", actor: actor.id, visible: view.byte("inuse") !== 0 && (view.uint("svflags") & 1) === 0 });
       this.options.engine.emit({ kind: "model", actor: actor.id, path: appearance.path, attachedModels: appearance.attachedModels, frame: state.frame, oldFrame: state.oldFrame, scale: state.scale === 0 ? 1 : state.scale, alpha: state.alpha === 0 ? (state.renderEffects & 32) !== 0 ? 0.3 : 1 : state.alpha, skin: appearance.skin, effects: Number(state.effects), renderFlags: state.renderEffects });

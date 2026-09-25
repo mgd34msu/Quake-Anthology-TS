@@ -1,12 +1,13 @@
 import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../../src/contracts/content.ts";
-import type { GuestAddress, ModuleIdentity } from "../../../../src/contracts/execution.ts";
+import type { GuestAddress, GuestFieldLayout, GuestLayout, ModuleIdentity } from "../../../../src/contracts/execution.ts";
 import { CvarRegistry } from "../../../../src/core/cvars/index.ts";
 import { createNumericOperations, Q2_DONOR_PROFILE } from "../../../../src/core/numeric.ts";
 import { GuestCallRunner } from "../../../../src/guest/abi/index.ts";
 import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../../src/guest/core/index.ts";
 import { X64Cpu } from "../../../../src/guest/x64/index.ts";
 import { cgameExportLayout, edictLayout, fieldOffset, gameExportLayout, gameImportLayout, gameImports, guestInt, guestPointer, RereleaseQ2GuestHost } from "../../../../src/compat/q2/rerelease/index.ts";
+import { clientLayout } from "../../../../src/compat/q2/rerelease/layouts.ts";
 import { RereleasePublicEdict } from "../../../../src/compat/q2/rerelease/public-state.ts";
 import { RereleaseGuestServices } from "../../../../src/app/bootstrap/simulation/rerelease-guest-services.ts";
 import { readGuestString } from "../../../../src/compat/q2/rerelease/imports.ts";
@@ -35,7 +36,9 @@ test("API2023 services retain public records, ordered native messages and exact 
     navigation: { runtime: () => null, moveToPoint: () => 0, followActor: () => 0 },
     clipboard: { kind: "dedicated" }, localize: (key, args) => [key, ...args].join(":"), debugShapes: () => undefined, worldText: () => undefined,
   });
-  const adapter = services, host = new RereleaseQ2GuestHost({ ...adapter.hostOptions, services: adapter.bindMemory(memory), runner, getGameApi: getter, getCgameApi: cgetter }); adapter.bindHost(host); world.attach(host);
+  const adapter = services, { pickups, ...hostOptions } = adapter.hostOptions;
+  if (pickups !== undefined) throw new Error("Public API fixture has no private pickup profile");
+  const host = new RereleaseQ2GuestHost({ ...hostOptions, services: adapter.bindMemory(memory), runner, getGameApi: getter, getCgameApi: cgetter }); adapter.bindHost(host); world.attach(host);
   const invoke = (name: typeof gameImports[number]["name"], args: Parameters<RereleaseQ2GuestHost["module"]["invoke"]>[2]) => {
     const entry = gameImports.find(value => value.name === name); if (entry === undefined) throw new Error("Missing import signature");
     const address = memory.readPointer(memory.offset(host.module.gameImportAddress, BigInt(fieldOffset(gameImportLayout, name)))); if (address === null) throw new Error("Missing import address"); return host.module.invoke(address, entry.signature, args);
@@ -58,7 +61,38 @@ test("API2023 services retain public records, ordered native messages and exact 
     expect(adapter.modelAppearance(1).attachedModels).toEqual(["", "models/objects/laser/tris.md2", ""]);
     memory.writeInt32(view.address("s.modelindex3"), 0); memory.writeInt32(view.address("s.modelindex4"), attachment);
     expect(adapter.modelAppearance(1).attachedModels).toEqual(["", "", "models/objects/laser/tris.md2"]);
+    const previousState = view.state();
     memory.writeInt32(view.address("s.modelindex4"), 0);
+    memory.writeInt32(view.address("s.skinnum"), 7);
+    memory.writeUint64(view.address("s.effects"), 0x123456789abcdef0n);
+    memory.protect(edicts, edictLayout.byteLength * 3, "read");
+    try {
+      const state = view.state();
+      expect(state.modelIndexes).toEqual([0, 0, 0, 0]); expect(state.skin).toBe(7); expect(state.effects).toBe(0x123456789abcdef0n);
+      expect(view.modelState()).toEqual({ modelIndexes: state.modelIndexes, skin: state.skin });
+      expect(view.vector("s.origin")).toEqual(state.origin); expect(previousState.modelIndexes[3]).toBe(attachment);
+    } finally { memory.protect(edicts, edictLayout.byteLength * 3, "read-write"); }
+    memory.writeUint64(view.address("s.effects"), 0n);
+    const client = memory.allocate({ byteLength: clientLayout.byteLength }); memory.writePointer(view.address("client"), client);
+    const clientField = (name: string): GuestAddress => memory.offset(client, BigInt(fieldOffset(clientLayout, name)));
+    const velocity = clientField("ps.pmove.velocity"); memory.writeFloat32(velocity, 12); memory.writeFloat32(memory.offset(velocity, 4n), -3); memory.writeFloat32(memory.offset(velocity, 8n), 4);
+    memory.writeUint16(clientField("ps.pmove.pm_flags"), 5); memory.writeInt8(clientField("ps.pmove.viewheight"), -2);
+    const offset = clientField("ps.viewoffset"); memory.writeFloat32(offset, 1); memory.writeFloat32(memory.offset(offset, 4n), 2); memory.writeFloat32(memory.offset(offset, 8n), 3);
+    const player = view.playerState();
+    memory.protect(client, clientLayout.byteLength, "read");
+    try {
+      expect(view.playerVelocity()).toEqual(player.movement.velocity);
+      expect(view.playerMovementFlags()).toBe(player.movement.flags);
+      expect(view.playerView()).toEqual({ viewOffset: player.viewOffset, viewHeight: player.movement.viewHeight, movementFlags: player.movement.flags });
+      expect(adapter.playerGrounded(1, actor.id)).toBe(true); expect(adapter.playerView(1, actor.id)).toEqual({ viewOffset: { x: 1, y: 2, z: 1 }, crouched: true });
+      expect(world.engine.bodies.read(actor.id)?.velocity).toEqual(player.movement.velocity);
+    } finally { memory.protect(client, clientLayout.byteLength, "read-write"); }
+    memory.writeFloat32(velocity, 20); expect(view.playerVelocity().x).toBe(20); expect(player.movement.velocity.x).toBe(12);
+    memory.writePointer(view.address("client"), null);
+    expect(Object.isFrozen(edictLayout) && Object.isFrozen(edictLayout.fields) && edictLayout.fields.every(Object.isFrozen)).toBe(true);
+    const fields: GuestFieldLayout[] = [{ name: "value", byteOffset: 0, storage: "int32", count: 1 }];
+    const external: GuestLayout = { ...edictLayout, fields }; expect(fieldOffset(external, "value")).toBe(0);
+    fields[0] = { name: "value", byteOffset: 4, storage: "int32", count: 1 }; expect(fieldOffset(external, "value")).toBe(4);
     const info = string("\\name\\old\\name\\duplicate"); expect(invoke("Info_RemoveKey", [guestPointer(info), guestPointer(string("name"))])).toEqual({ kind: "uint32", value: 1 }); expect(readGuestString(memory, info)).toBe("");
     const longValue = "v".repeat(200); invoke("Info_SetValueForKey", [guestPointer(info), guestPointer(string("name")), guestPointer(string(longValue))]); expect(readGuestString(memory, info)).toBe(`\\name\\${longValue}`);
     host.reserveClient(1); adapter.completeSpawn(); adapter.setConfigstring(60, "2"); invoke("WriteByte", [guestInt(42)]); invoke("unicast", [guestPointer(view.record.address), { kind: "uint32", value: 1 }, { kind: "uint32", value: 7 }]);

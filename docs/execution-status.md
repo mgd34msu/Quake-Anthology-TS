@@ -2,6 +2,8 @@
 
 ## Installed executable and recent fixes
 
+Native entity publication now reads fresh field subsets and reuses each decoded state. Public reads retain read-only mapping support and exact source values. The same full base1 workload reduced the complete application-step median from 117.77 to 105.36 ms; the original native call itself stayed about 97 ms. Root strict/policy and the existing source-services check pass. [Implementation and scope](../.artifacts/resume-20260925/native-field-reads/frozen/HANDOFF.md).
+
 Further native work removes intermediate copies for checked, contiguous memory operations and retains exact negative hook lookups across unchanged callback registrations. The same full base1 workload measured 97.61 ms per native frame (last-ten median), down from the preceding 108.26 ms. Overlapping writes, permissions, observers and source instruction execution remain intact. Native performance remains open. [Measurement and source identity](../.artifacts/resume-20260925/native-bulk-memory/RECEIPT.md).
 
 Newer source caches decoded native instruction operations and unhooked straight-line blocks. An isolated original retail base1 comparison with all 495 entities reduced the last ten native frame calls from a 120.31 ms median to 108.26 ms, about 10%. Live instruction bytes, callback changes, faults and nested execution remain checked. Root strict/policy and 48 existing checks with 400 assertions pass. Native performance remains open: this workload still exceeds its 25 ms interval. [Change and bounded measurements](../.artifacts/resume-20260925/native-semantic-blocks/frozen/HANDOFF.md).

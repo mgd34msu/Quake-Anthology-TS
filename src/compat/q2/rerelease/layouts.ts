@@ -2,6 +2,8 @@
 // Source: quake2-rerelease-dll/rerelease/game.h. Windows x64 default packing.
 import type { GuestFieldLayout, GuestLayout, GuestStorage } from "../../../contracts/execution.ts";
 
+const fieldOffsets = new WeakMap<GuestLayout, ReadonlyMap<string, number>>();
+
 interface Member { readonly name: string; readonly type: GuestStorage | GuestLayout; readonly count: number; }
 function member(name: string, type: Member["type"], count = 1): Member { return { name, type, count }; }
 function size(type: GuestStorage): number {
@@ -26,12 +28,20 @@ function structure(name: string, members: readonly Member[]): GuestLayout {
     }
     cursor += width * field.count;
   }
-  return { id: `q2-rerelease-x64:${name}`, byteLength: Math.ceil(cursor / alignment) * alignment, alignment, pointerBytes: 8, byteOrder: "little-endian", fields };
+  const offsets = new Map<string, number>();
+  for (const field of fields) {
+    Object.freeze(field);
+    if (!offsets.has(field.name)) offsets.set(field.name, field.byteOffset);
+  }
+  const layout: GuestLayout = Object.freeze({ id: `q2-rerelease-x64:${name}`, byteLength: Math.ceil(cursor / alignment) * alignment, alignment, pointerBytes: 8, byteOrder: "little-endian", fields: Object.freeze(fields) });
+  fieldOffsets.set(layout, offsets);
+  return layout;
 }
 export function fieldOffset(layout: GuestLayout, name: string): number {
-  const field = layout.fields.find(value => value.name === name);
-  if (field === undefined) throw new Error(`Unknown ${layout.id} field ${name}`);
-  return field.byteOffset;
+  const offsets = fieldOffsets.get(layout);
+  const offset = offsets === undefined ? layout.fields.find(value => value.name === name)?.byteOffset : offsets.get(name);
+  if (offset === undefined) throw new Error(`Unknown ${layout.id} field ${name}`);
+  return offset;
 }
 const m = member;
 export const vec2Layout = structure("vec2_t", [m("xy", "float32", 2)]);
