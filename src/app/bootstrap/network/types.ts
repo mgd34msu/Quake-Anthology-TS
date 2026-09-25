@@ -73,6 +73,10 @@ export interface Q2ApplicationServerHost {
     rawMessages?(player: Q2ApplicationPlayer): readonly { readonly bytes: Uint8Array; readonly reliable: boolean }[];
     /** Game-import records for local source presentation, before native peer wire conversion. */
     sourceMessages?(player: Q2ApplicationPlayer): readonly { readonly bytes: Uint8Array; readonly reliable: boolean }[];
+    /** Collect a completed tick for local presentation while retaining the batch for final wire/demo publication. */
+    observeProgress?(): void;
+    /** Fresh local source records since the preceding completed-tick presentation. */
+    localMessages?(player: Q2ApplicationPlayer): readonly { readonly bytes: Uint8Array; readonly reliable: boolean }[];
     gameState(player: Q2ApplicationPlayer, protocol?: Q2ProtocolIdentity): Q2ApplicationGameState;
     frame(player: Q2ApplicationPlayer, output: SimulationOutput, protocol?: Q2ProtocolIdentity): Q2WireFrame;
     events(player: Q2ApplicationPlayer, output: SimulationOutput, events: readonly SimulationPresentationEvent[]): readonly Q2ApplicationServerEvent[];

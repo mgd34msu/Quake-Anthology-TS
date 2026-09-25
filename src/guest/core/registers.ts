@@ -22,6 +22,23 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
     this.#bytes = new Uint8Array(architecture === "i386" ? 64 : 128);
     this.#view = new DataView(this.#bytes.buffer);
   }
+  static createManaged(architecture: GuestArchitecture): IntegerRegisterFile {
+    const registers = new IntegerRegisterFile(architecture), view = registers.#view;
+    Object.defineProperties(view, {
+      getUint32: { value: view.getUint32 }, setUint8: { value: view.setUint8 },
+      setUint16: { value: view.setUint16 }, setUint32: { value: view.setUint32 },
+      getBigUint64: { value: view.getBigUint64 }, setBigUint64: { value: view.setBigUint64 },
+    });
+    Object.freeze(view);
+    Object.defineProperties(registers, {
+      integerView: { get: () => view }, read: { value: registers.read }, write: { value: registers.write },
+      checkpoint: { value: registers.checkpoint }, restore: { value: registers.restore },
+      attached: { value: registers.attached },
+    });
+    Object.freeze(registers);
+    return registers;
+  }
+  attached(): boolean { return this.#bytes.byteLength === (this.architecture === "i386" ? 64 : 128); }
   get integerView(): DataView { return this.#view; }
   read(register: GuestRegister, width: GuestIntegerWidth, highByte = false): bigint {
     const offset = this.#offset(register, width, highByte);
@@ -75,8 +92,21 @@ export class ProcessorFlags implements GuestFlags {
     this.#low = Number(this.#value & 0xffffffffn);
     this.#high = Number(this.#value >> 32n);
   }
-  get value(): bigint { return this.#value ??= (BigInt(this.#high) << 32n) | BigInt(this.#low); }
-  set value(value: bigint) {
+  static createManaged(value: bigint): ProcessorFlags {
+    const flags = new ProcessorFlags(value);
+    Object.defineProperties(flags, {
+      value: { get: () => flags.#read(), set: (next: bigint) => flags.#write(next) },
+      lowWord: { get: () => flags.#low }, highWord: { get: () => flags.#high },
+      restoreWords: { value: flags.restoreWords }, writeLowWord: { value: flags.writeLowWord },
+      get: { value: flags.get }, set: { value: flags.set },
+    });
+    Object.freeze(flags);
+    return flags;
+  }
+  get value(): bigint { return this.#read(); }
+  set value(value: bigint) { this.#write(value); }
+  #read(): bigint { return this.#value ??= (BigInt(this.#high) << 32n) | BigInt(this.#low); }
+  #write(value: bigint): void {
     this.#value = BigInt.asUintN(64, value);
     this.#low = Number(this.#value & 0xffffffffn);
     this.#high = Number(this.#value >> 32n);
@@ -105,7 +135,22 @@ export interface GuestProcessorInitialState {
 
 /** The loader/runtime supplies its selected initial environment; this does not execute instructions. */
 export function createGuestProcessorState(initial: GuestProcessorInitialState): GuestProcessorState {
-  const registers = new IntegerRegisterFile(initial.architecture);
+  return createState(initial, false);
+}
+interface ManagedProcessor {
+  readonly registers: IntegerRegisterFile;
+  readonly flags: ProcessorFlags;
+}
+const managedProcessors = new WeakMap<GuestProcessorState, ManagedProcessor>();
+/** An explicit loader-owned state has stable architectural bindings; bytes and register values remain live. */
+export function createManagedGuestProcessorState(initial: GuestProcessorInitialState): GuestProcessorState {
+  return createState(initial, true);
+}
+export function managedGuestProcessor(state: GuestProcessorState): ManagedProcessor | null {
+  return managedProcessors.get(state) ?? null;
+}
+function createState(initial: GuestProcessorInitialState, managed: boolean): GuestProcessorState {
+  const registers = managed ? IntegerRegisterFile.createManaged(initial.architecture) : new IntegerRegisterFile(initial.architecture);
   const width = initial.architecture === "i386" ? 32 : 64;
   const limit = 1n << BigInt(width);
   if (initial.instructionPointer < 0n || initial.instructionPointer >= limit || initial.stackPointer < 0n || initial.stackPointer >= limit) {
@@ -118,12 +163,30 @@ export function createGuestProcessorState(initial: GuestProcessorInitialState): 
   }
   const segment = (): GuestSegment => ({ selector: 0, base: 0n, limit: limit - 1n });
   registers.write("rsp", width, initial.stackPointer);
-  return {
+  const flags = managed ? ProcessorFlags.createManaged(initial.flags) : new ProcessorFlags(initial.flags);
+  const state: GuestProcessorState = {
     architecture: initial.architecture, registers, instructionPointer: initial.instructionPointer,
-    flags: new ProcessorFlags(initial.flags),
+    flags,
     segments: { cs: segment(), ds: segment(), es: segment(), ss: segment(), fs: segment(), gs: segment() },
     x87: { registers: new Uint8Array(80), controlWord: initial.x87ControlWord, statusWord: 0, tagWord: 0xffff,
       lastOpcode: 0, instructionPointer: 0n, dataPointer: 0n, instructionSelector: 0, dataSelector: 0 },
     simd: { xmm: new Uint8Array(initial.architecture === "i386" ? 128 : 256), mxcsr: initial.mxcsr, mxcsrMask: initial.mxcsrMask },
   };
+  if (managed) {
+    let instructionPointer = initial.instructionPointer;
+    Object.defineProperty(state, "instructionPointer", { configurable: false,
+      get: () => instructionPointer, set: (value: bigint) => { instructionPointer = value; } });
+    const segments = state.segments;
+    for (const value of [segments.cs, segments.ds, segments.es, segments.ss, segments.fs, segments.gs]) Object.seal(value);
+    Object.freeze(state.segments);
+    Object.defineProperty(state.x87, "registers", { writable: false, configurable: false });
+    Object.defineProperty(state.simd, "xmm", { writable: false, configurable: false });
+    Object.seal(state.x87); Object.seal(state.simd);
+    for (const key of ["architecture", "registers", "flags", "segments", "x87", "simd"]) {
+      Object.defineProperty(state, key, { writable: false, configurable: false });
+    }
+    Object.seal(state);
+    managedProcessors.set(state, Object.freeze({ registers, flags }));
+  }
+  return state;
 }

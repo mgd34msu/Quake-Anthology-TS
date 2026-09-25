@@ -69,6 +69,13 @@ export interface WorldSnapshot {
   readonly scene: SceneSnapshot;
 }
 
+/** Completed source ticks within one input batch. Events belong to this publication; the final output carries only its remaining events. */
+export interface SimulationProgress {
+  readonly output: SimulationOutput;
+  readonly elapsedMilliseconds: number;
+  readonly pendingMilliseconds: number;
+}
+
 export interface SimulationOutput {
   readonly snapshot: WorldSnapshot;
   readonly events: readonly SimulationEvent[];
@@ -141,7 +148,7 @@ export interface Simulation {
   readonly session: SessionId;
   readonly recipe: ExecutableRecipe;
   step(input: InputBatch): SimulationOutput;
-  stepAsync?(input: InputBatch): Promise<SimulationOutput>;
+  stepAsync?(input: InputBatch, progress?: (frame: SimulationProgress) => Promise<void>): Promise<SimulationOutput>;
   checkpoint(): SaveImage;
   close(): undefined;
 }

@@ -130,6 +130,36 @@ test("async simulation hooks finish before one session publication", async () =>
   } finally { published.mockRestore(); session.close(); }
 });
 
+test("completed source progress publishes snapshots while retaining batch events and step ownership", async () => {
+  const { session, simulation, output, input } = stepFixture();
+  const gate = Promise.withResolvers<void>();
+  const event: SimulationEvent = { sequence: 1, time: output.snapshot.frame.time, audience: { kind: "world" },
+    payload: { kind: "sound", resource: "resource:progress", actor: null, origin: { x: 0, y: 0, z: 0 }, channel: 0, volume: 1, attenuation: 1 } };
+  const finalEvent = { ...event, sequence: 2 };
+  const final = { snapshot: output.snapshot, events: [finalEvent] };
+  session.attachWorld(simulation({ stepAsync: async (batch, progress) => {
+    expect(batch).toBe(input);
+    await progress?.({ output: { snapshot: output.snapshot, events: [event] }, elapsedMilliseconds: 25, pendingMilliseconds: 25 });
+    return final;
+  } }));
+  const published = spyOn(session, "publish");
+  try {
+    const pending = session.stepAsync(input, async frame => {
+      expect(frame.pendingMilliseconds).toBe(25);
+      expect(session.snapshot).toBe(output.snapshot);
+      expect(() => session.step(input)).toThrow("already running");
+      expect(() => session.attachWorld(simulation())).toThrow("Cannot replace a world");
+      await gate.promise;
+    });
+    expect(published).toHaveBeenCalledTimes(1);
+    expect(published.mock.calls[0]?.[0].events).toEqual([event]);
+    gate.resolve();
+    expect(await pending).toEqual({ snapshot: output.snapshot, events: [event, finalEvent] });
+    expect(published.mock.calls.map(call => call[0].events)).toEqual([[event], [finalEvent]]);
+    expect(session.step(input)).toBe(output);
+  } finally { published.mockRestore(); session.close(); }
+});
+
 test("async session steps fall back to the synchronous source hook", async () => {
   const { session, simulation, output, input } = stepFixture();
   let calls = 0;

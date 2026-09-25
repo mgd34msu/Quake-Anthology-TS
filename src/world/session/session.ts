@@ -1,7 +1,7 @@
 // Session ownership separates Q3 connection/active state and Q1/Q2 disconnect/resource teardown.
 import type { ClientId, IdentityOwner, SeatId, SessionId } from "../../contracts/identity.ts";
 import type { RendererBackend, RenderFrame } from "../../contracts/render.ts";
-import type { InputBatch, SeatPresentation, Simulation, SimulationEvent, SimulationOutput, WorldSnapshot } from "../../contracts/session.ts";
+import type { InputBatch, SeatPresentation, Simulation, SimulationEvent, SimulationOutput, SimulationProgress, WorldSnapshot } from "../../contracts/session.ts";
 import { ProviderRuntimeState } from "./clocks.ts";
 import { ResourceScope } from "./resources.ts";
 import type { SessionResource } from "./resources.ts";
@@ -427,11 +427,20 @@ export class EngineSession implements SessionResource {
     finally { this.stepping = false; }
   }
 
-  async stepAsync(input: InputBatch): Promise<SimulationOutput> {
+  /** Seats receive each completed output once; the caller receives the complete batch for transport and recording. */
+  async stepAsync(input: InputBatch, progress?: (frame: SimulationProgress) => Promise<void>): Promise<SimulationOutput> {
     const world = this.beginStep();
     try {
-      const output = await (world.simulation.stepAsync?.(input) ?? world.simulation.step(input));
-      return this.completeStep(world, output);
+      const progressedEvents: SimulationEvent[] = [];
+      const completed = progress === undefined ? undefined : async (frame: SimulationProgress): Promise<void> => {
+        this.completeStep(world, frame.output);
+        progressedEvents.push(...frame.output.events);
+        await progress(frame);
+        if (this.isClosed || this.currentWorld !== world || world.isClosed) throw new Error("Simulation closed during its step");
+      };
+      const output = await (world.simulation.stepAsync?.(input, completed) ?? world.simulation.step(input));
+      this.completeStep(world, output);
+      return progressedEvents.length === 0 ? output : { snapshot: output.snapshot, events: [...progressedEvents, ...output.events] };
     } finally { this.stepping = false; }
   }
 

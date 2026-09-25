@@ -119,7 +119,7 @@ import type { CommandContext, CommandDialect } from "../../contracts/common.ts";
 import type { TransitionDecision } from "../../contracts/gameplay.ts";
 import type { Rect, SceneCamera } from "../../contracts/render.ts";
 import { createIdentityOwner } from "../../contracts/identity.ts";
-import type { SaveImage, SimulationOutput } from "../../contracts/session.ts";
+import type { ActorCommand, SaveImage, SimulationOutput, SimulationProgress } from "../../contracts/session.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
 import { openApplicationTransport } from "./network/transport.ts";
 import type { ApplicationNetworkAddress } from "./network/transport.ts";
@@ -407,6 +407,8 @@ export class Application {
   private ownedDemos: { readonly service: ClientDemoCommands; readonly release: () => void } | null = null;
   private elapsed = 0;
   private frames = 0;
+  private presentationFrames = 0;
+  private presentationMilliseconds: number | null = null;
   private sourceEvents: readonly SimulationPresentationEvent[] = [];
   private unhandledEffects: readonly UnhandledApplicationEffect[] = [];
   private readonly serverProfileStore = new ConfigStore(join(homedir(), ".local", "share", "quake-typescript", "settings"));
@@ -1983,7 +1985,7 @@ export class Application {
           if (sourceClient?.kind !== "qvm") this.simulation.setPlayerFieldOfView(local.player.actor, this.viewSettings.fieldOfView, restoring ? "restore" : "change");
           sourceClient?.client.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
         }
-        if (restoring && sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
+        if (restoring && sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.presentationFrames);
         const nativeSeat = await this.prepareNativeQ2Seat(local, assets, this.simulation, this.clientCvars.get(local.player.seat.id));
         if (nativeSeat !== null) nativeQ2.set(local.player.seat.id, nativeSeat);
         const ui = new ApplicationSeatUi(local, menuArt, inputOwner, operation => native.mutateWindow(operation), this.simulation, font, audioOwner, () => this.requestQuit(),
@@ -1996,12 +1998,12 @@ export class Application {
       this.graphical = { renderer, assets, input, audio, effects, art, presentations, q3, rerelease, nativeQ2,
         selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: this.simulation.scene,
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
-          clock: { now: () => this.elapsed, frameNumber: () => this.frames }, hardware: () => q3Hardware(native.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
+          clock: { now: () => this.presentationMilliseconds ?? this.elapsed, frameNumber: () => this.presentationFrames }, hardware: () => q3Hardware(native.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
         modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.push(request); }, renderer: native, queries: this.simulation.scene,
           presentationMedia: componentMediaControl(this.simulation.events, audio, assets),
           systemCinematics: (_source, presentation, scope) => this.systemCinematics(this.simulation, this.content, assets, audioOwner, native, presentation.local.player.seat.id, inputOwner, scope),
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
-          clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
+          clock: { now: () => this.presentationMilliseconds ?? this.elapsed, frameNumber: () => this.presentationFrames } }) };
       if (save !== undefined) {
         await this.restoreComponentClients(save, this.graphical, this.simulation);
         this.graphical.modPresentations.publishRestored();
@@ -2030,7 +2032,7 @@ export class Application {
       audio?.close(); effects?.close(); input?.close(); art?.close(); assets.close();
       if (client === null) { this.session.close(); if (renderer === null) rootImages.close(); else renderer.close(); }
       else {
-        try { client.renderer.execute({ owner, sequence: this.frames, commands: [] }); }
+        try { client.renderer.execute({ owner, sequence: this.presentationFrames, commands: [] }); }
         catch (cleanup) { throw new AggregateError([error, cleanup], "Graphical preparation and image retirement failed"); }
       }
       this.graphical = null;
@@ -2979,7 +2981,7 @@ export class Application {
             if (sourceClient?.kind !== "qvm") current.setPlayerFieldOfView(local.player.actor, this.viewSettings.fieldOfView, save === undefined ? "change" : "restore");
             sourceClient?.client.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
           }
-          if (sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.frames);
+          if (sourceClient?.kind === "qvm") await sourceClient.client.prepare(this.presentationFrames);
           const nativeSeat = await this.prepareNativeQ2Seat(local, worldAssets, current, nextClientCvars.get(local.player.seat.id));
           if (nativeSeat !== null) nextNativeQ2.set(local.player.seat.id, nativeSeat);
           const ui = new ApplicationSeatUi(local, menuArt, input, operation => previous.renderer.mutateWindow(operation), current, font, audio, () => this.requestQuit(),
@@ -2993,12 +2995,12 @@ export class Application {
         nextGraphical = { renderer: previous.renderer, input, audio, effects, art, assets, presentations, q3: q3Clients, rerelease, nativeQ2: nextNativeQ2,
           selectedQ3Presentations: new ApplicationSelectedQ3Presentations({ assets, audio, queries: current.scene,
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
-            clock: { now: () => this.elapsed, frameNumber: () => this.frames }, hardware: () => q3Hardware(previous.renderer.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
+            clock: { now: () => this.presentationMilliseconds ?? this.elapsed, frameNumber: () => this.presentationFrames }, hardware: () => q3Hardware(previous.renderer.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
           modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.push(request); }, renderer: previous.renderer, queries: current.scene,
             presentationMedia: componentMediaControl(current.events, audio, assets),
             systemCinematics: (_source, presentation, scope) => this.systemCinematics(current, content, worldAssets, audio, previous.renderer, presentation.local.player.seat.id, input, scope),
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
-            clock: { now: () => committed ? this.elapsed : destinationSourceMilliseconds, frameNumber: () => this.frames } }) };
+            clock: { now: () => committed ? this.presentationMilliseconds ?? this.elapsed : destinationSourceMilliseconds, frameNumber: () => this.presentationFrames } }) };
         if (save !== undefined) await this.restoreComponentClients(save, nextGraphical, nextSimulation);
       }
       const previousCapture = this.capture;
@@ -3039,7 +3041,7 @@ export class Application {
           await retire("art retirement", () => previous.art.close());
           await retire("asset retirement", () => previous.assets.close());
           await retire("input retirement", () => previous.input.close());
-          await retire("renderer resource retirement", () => previous.renderer.execute({ owner: previous.renderer.owner, sequence: this.frames,
+          await retire("renderer resource retirement", () => previous.renderer.execute({ owner: previous.renderer.owner, sequence: this.presentationFrames,
             commands: previous.assets.images.drainOperations().map(operation => ({ kind: "image-resource", operation })) }));
         }
         await retire("content retirement", () => previousContent.close());
@@ -3214,7 +3216,7 @@ export class Application {
       for (const client of savedClients?.added ?? []) await discard(() => client.close());
       await discard(() => art?.close());
       await discard(() => assets?.close());
-      if (previous !== null) await discard(() => previous.renderer.execute({ owner: previous.renderer.owner, sequence: this.frames, commands: [] }));
+      if (previous !== null) await discard(() => previous.renderer.execute({ owner: previous.renderer.owner, sequence: this.presentationFrames, commands: [] }));
       await discard(() => content.close());
       if (errors.length > 1) throw new AggregateError(errors, "World preparation failed");
       throw error;
@@ -3580,7 +3582,7 @@ export class Application {
     const current = (): boolean => !this.closed && !this.stopping && this.simulation === simulation && this.movieRequests.get(simulation) === request;
     const playback = await CampaignCinematic.prepare({ name: target.name, loop: false, hold: false, silent: false }, this.content,
       graphical.assets, graphical.audio, graphical.renderer, seat, current, this.screenCaptions(simulation, this.content, seat));
-    if (!current()) { playback.close(this.frames); throw new Error("Campaign cinematic belongs to a retired world request"); }
+    if (!current()) { playback.close(this.presentationFrames); throw new Error("Campaign cinematic belongs to a retired world request"); }
     const next = target.kind === "picture" && target.name.toLowerCase() === "victory.pcx" && this.options.mode === "coop"
       ? parseQ2Travel("*base1") : target.next;
     this.activateMovie(playback);
@@ -3593,7 +3595,7 @@ export class Application {
   private activateMovie(playback: CampaignCinematic): void {
     try { playback.activate(); }
     catch (error) {
-      try { playback.close(this.frames); }
+      try { playback.close(this.presentationFrames); }
       catch (cleanup) { throw new AggregateError([error, cleanup], "Cinematic activation and cleanup failed"); }
       throw error;
     }
@@ -3602,7 +3604,7 @@ export class Application {
   private reserveMovie(simulation: SharedSimulation): object {
     const request = {}; this.movieRequests.set(simulation, request);
     const previous = this.movies.get(simulation);
-    if (previous !== undefined) { this.movies.delete(simulation); previous.playback.close(this.frames); }
+    if (previous !== undefined) { this.movies.delete(simulation); previous.playback.close(this.presentationFrames); }
     return request;
   }
 
@@ -3651,8 +3653,8 @@ export class Application {
           if (request === null) throw new Error("Missing system cinematic request");
           playback = await CampaignCinematic.prepare(request, resources, assets, audio, renderer, seat, current, this.screenCaptions(simulation, resources, seat));
         } else playback = await CampaignCinematic.restore(saved.field("playback").value, resources, assets, audio, renderer, seat, current, this.screenCaptions(simulation, resources, seat));
-        if (!current()) { playback.close(this.frames); throw new Error("System cinematic belongs to a retired destination request"); }
-        if (saved !== undefined && this.movies.has(simulation)) { playback.close(this.frames); throw new Error("Saved component cinematics have competing fullscreen owners"); }
+        if (!current()) { playback.close(this.presentationFrames); throw new Error("System cinematic belongs to a retired destination request"); }
+        if (saved !== undefined && this.movies.has(simulation)) { playback.close(this.presentationFrames); throw new Error("Saved component cinematics have competing fullscreen owners"); }
         const movie: NonNullable<Application["campaignMovie"]> = { playback, request: ticket, current, complete: async (): Promise<void> => { complete(); },
           ...(component === undefined ? {} : { componentOwned: true }) };
         if (published && this.simulation === simulation) this.activateMovie(playback);
@@ -3665,9 +3667,9 @@ export class Application {
       return { get status() { return phase === "completed" ? "ended" : phase === "stopped" || !current() ? "stopped" : playback?.status ?? "stopped"; },
         skip: () => {
           if (phase !== "playing" || !current()) return;
-          playback?.skip(); playback?.close(this.frames);
+          playback?.skip(); playback?.close(this.presentationFrames);
           try { complete(); } finally { detach(); }
-        }, stop: () => { phase = "stopped"; detach(); playback?.close(this.frames); },
+        }, stop: () => { phase = "stopped"; detach(); playback?.close(this.presentationFrames); },
         ...(component === undefined ? {} : {
           captureCheckpoint: () => {
             const active = phase === "playing" && current();
@@ -4010,7 +4012,7 @@ export class Application {
         if (command.name === "cinematicpause" || command.name === "stopcinematic") {
           const movie = this.campaignMovie;
           if (movie === null) throw new Error("No cinematic is playing");
-          if (command.name === "stopcinematic") { movie.playback.close(this.frames); this.campaignMovie = null; }
+          if (command.name === "stopcinematic") { movie.playback.close(this.presentationFrames); this.campaignMovie = null; }
           else movie.playback.pause(movie.playback.status !== "paused");
           continue;
         }
@@ -4286,6 +4288,122 @@ export class Application {
     }
   }
 
+  private async presentOutput(output: SimulationOutput, context: {
+    readonly sourceEvents: readonly SimulationPresentationEvent[];
+    readonly roundEvents: readonly SimulationPresentationEvent[];
+    readonly localCommands: readonly ActorCommand[];
+    readonly frameMilliseconds: number;
+    readonly frameStartedAt: number;
+    readonly timeMilliseconds: number;
+  }): Promise<void> {
+    const { sourceEvents, roundEvents, localCommands, frameMilliseconds, frameStartedAt, timeMilliseconds } = context;
+    const presentationFrame = ++this.presentationFrames;
+    const previousTime = this.presentationMilliseconds;
+    this.presentationMilliseconds = timeMilliseconds;
+    try {
+      const graphical = this.graphical;
+      if (graphical !== null) {
+        if (this.sourceDialect().startsWith("q2")) this.debugGraph.addFrame(frameMilliseconds / 1000, this.debugGraphSettings());
+        this.simulation.beginPresentationFrame(presentationFrame);
+        const presentations = this.simulation.presentations(), characters = this.simulation.characterViews();
+        graphical.rerelease.receive(sourceEvents);
+        await graphical.rerelease.prepare();
+        const presentationEvents = [...roundEvents, ...sourceEvents.filter(event => event.kind !== "q2-composition" || event.event.kind !== "kick" && event.event.kind !== "grapple-prediction"), ...graphical.rerelease.drainPrints()];
+        const nativeQ3 = this.simulation.q3Source()?.sourceState();
+        for (const source of graphical.q3.values()) {
+          if (source.kind === "qvm") continue;
+          if (nativeQ3 === undefined) throw new Error("Cgame has no authoritative source state");
+          source.prediction.captureSource(nativeQ3);
+          source.client.receive(nativeQ3, sourceEvents.filter(event => event.recipient === undefined || event.recipient.equals(source.client.options.local.player.actor)), localCommands);
+        }
+        const selectedQ3 = this.simulation.selectedQ3SourceState();
+        const sharedPresentationEvents = presentationEvents.filter(event => selectedQ3 === null || event.content !== selectedQ3.content
+          || event.kind !== "q3-source" || event.event.kind !== "entity-event");
+        const effectEvents = graphical.q3.size === 0 ? sharedPresentationEvents : sharedPresentationEvents.filter(event =>
+          event.kind === "q3-source" ? event.event.kind === "sound" : event.kind !== "q3-character");
+        const commonEvents = effectEvents.filter(event => event.recipient === undefined);
+        const eventsFor = (actor: ActorId, events: readonly SimulationPresentationEvent[]) => events.filter(event => event.recipient === undefined || event.recipient.equals(actor));
+        const nativeEvents = new Map<SeatId, readonly SimulationPresentationEvent[]>();
+        const seatAudio: ApplicationAudioSeatEvents[] = [];
+        const unhandled: UnhandledApplicationEffect[] = [];
+        if (graphical.nativeQ2.size === 0) {
+          graphical.effects.receive(effectEvents);
+          await graphical.effects.prepare(output.snapshot, presentations, characters, this.simulation.weaponPresentationClock());
+          unhandled.push(...graphical.effects.drainUnhandled());
+          graphical.audio.receiveEffectSounds(graphical.effects.drainSounds());
+          const privateSounds = graphical.effects.drainRecipientSounds();
+          for (const presentation of graphical.presentations) {
+            const actor = presentation.local.player.actor;
+            const events = effectEvents.filter(event => event.recipient?.equals(actor));
+            const sounds = privateSounds.filter(batch => batch.recipient.equals(actor)).flatMap(batch => batch.sounds);
+            if (events.length !== 0 || sounds.length !== 0) seatAudio.push({ seat: presentation.local.player.seat.id,
+              snapshot: output.snapshot, events, music: presentation === graphical.presentations[0], effectSounds: sounds });
+          }
+        } else {
+          const host = this.recordingHost;
+          if (host?.kind !== "q2" || host.host.rawMessages === undefined) throw new Error("Native Q2 presentation lost its source message owner");
+          for (const presentation of graphical.presentations) {
+            const local = presentation.local, seat = local.player.seat.id, native = graphical.nativeQ2.get(seat);
+            if (native === undefined) throw new Error("Native Q2 presentation has no recipient state");
+            const player = host.host.carriedPlayer(local.player.seat.client.id);
+            for (const record of native.client.receive((host.host.localMessages?.(player) ?? host.host.sourceMessages?.(player) ?? host.host.rawMessages(player)), timeMilliseconds / 1000)) {
+              const event = record.event;
+              if (event.kind === "nop") continue;
+              if (event.kind === "print") local.console.print(event.text);
+              else if (event.kind === "disconnect") { local.console.print("Disconnected by the source game.\n"); this.requestQuit(); }
+              else if (event.kind === "localized-print") native.client.print(event.value.flags,
+                await graphical.rerelease.localizeMessage(seat, native.client.content, event.value.base, event.value.args), timeMilliseconds / 1000);
+              else if (event.kind === "command-text") graphical.input.enqueueClientCommand(event.text,
+                { session: this.session.session, origin: { kind: "script", name: "q2-game", caller: { kind: "local-seat", seat, client: local.player.seat.client.id } } });
+              else throw new Error(`Unsupported native Q2 local service ${event.kind}`);
+            }
+            const sourceEvents = native.client.takeEvents();
+            graphical.rerelease.receive(sourceEvents);
+            await graphical.rerelease.prepare();
+            const events = [...sourceEvents, ...graphical.rerelease.drainPrints()];
+            for (const event of events) await this.recordPlayerProgress(event);
+            nativeEvents.set(seat, events);
+            const privateEvents = effectEvents.filter(event => event.recipient?.equals(local.player.actor));
+            native.effects.receive([...eventsFor(local.player.actor, effectEvents), ...events]);
+            await native.effects.prepare(output.snapshot, presentations, characters, this.simulation.weaponPresentationClock());
+            unhandled.push(...native.effects.drainUnhandled());
+            seatAudio.push({ seat, snapshot: output.snapshot, events: [...privateEvents, ...events], music: false,
+              effectSounds: [...native.effects.drainSounds(), ...native.effects.drainRecipientSounds().flatMap(batch => batch.sounds)] });
+          }
+        }
+        this.unhandledEffects = unhandled;
+        for (const effect of this.unhandledEffects) {
+          const key = `${effect.source.content}:${effect.reason}`;
+          if (!this.reportedEffectGaps.has(key)) {
+            this.reportedEffectGaps.add(key);
+            this.host.print(`Unresolved ${effect.source.kind} effect: ${effect.reason}\n`);
+          }
+        }
+        await preparePresentationAudio(this.simulation.events, graphical.audio, commonEvents, seatAudio);
+        await preparePresentationShaders(this.simulation.events, graphical.assets);
+        for (const presentation of graphical.presentations) {
+          presentation.sourceEvents([...eventsFor(presentation.local.player.actor, presentationEvents), ...(nativeEvents.get(presentation.local.player.seat.id) ?? [])]);
+          if (this.tools === null) await presentation.prepare(output.snapshot, presentations, characters);
+          else await this.tools.measureAsync("presentation", () => presentation.prepare(output.snapshot, presentations, characters));
+        }
+        await graphical.modPresentations.prepare(graphical.presentations, this.simulation.modPresentationSources(), presentationEvents, presentationFrame);
+        await graphical.selectedQ3Presentations.prepare(graphical.presentations, selectedQ3, presentationEvents, presentationFrame);
+        for (const presentation of graphical.presentations) {
+          const render = () => presentation.local.player.seat.present(output.snapshot, graphical.renderer.backend);
+          if (this.tools === null) render(); else this.tools.timer.measure("render", render);
+        }
+        graphical.renderer.execute({ owner: graphical.assets.images.owner, sequence: presentationFrame, commands: [{ kind: "swap-buffers" }] });
+        const listeners = graphical.presentations.map(presentation => {
+          const camera = presentation.camera();
+          return { seat: presentation.local.player.seat.id, actor: presentation.local.player.actor, origin: camera.origin,
+            axis: camera.axis, gain: 1 / graphical.presentations.length, underwater: this.underwater(camera, presentation.local.player.actor) };
+        });
+        await graphical.audio.frame(output.snapshot, listeners, commonEvents.filter(event => !presentationAudioControl(event)), frameStartedAt,
+          seatAudio.map(batch => ({ ...batch, events: batch.events.filter(event => !presentationAudioControl(event)) })));
+      }
+    } finally { this.presentationMilliseconds = previousTime; }
+  }
+
   async step(elapsedMilliseconds: number): Promise<SimulationOutput> {
     if (this.closed) throw new Error("Application is closed");
     if (this.stepping) throw new Error("Application step is already in progress");
@@ -4317,7 +4435,7 @@ export class Application {
       if (movie !== null && !movie.current()) {
         const retired = movie; if (this.movies.get(this.simulation) === retired) this.movies.delete(this.simulation);
         if (this.movieRequests.get(this.simulation) === retired.request) this.movieRequests.delete(this.simulation);
-        retired.playback.close(this.frames); movie = null;
+        retired.playback.close(this.presentationFrames); movie = null;
       }
       if (movie !== null) {
         const retained = this.lastOutput?.simulation === this.simulation ? this.lastOutput : { simulation: this.simulation, output: this.simulation.currentOutput() };
@@ -4326,9 +4444,10 @@ export class Application {
           const consoleOpen = graphical?.input.locals.some(local => local.input.focus.kind === "console") ?? false;
           const menuOpen = graphical?.presentations.some(presentation => presentation.ui.pauseMenuOpen) ?? false;
           movie.playback.activate();
-          if (movie.playback.frame(elapsedMilliseconds, ++this.frames, consoleOpen, menuOpen)) {
+          this.frames++;
+          if (movie.playback.frame(elapsedMilliseconds, ++this.presentationFrames, consoleOpen, menuOpen)) {
             if (this.movies.get(retained.simulation) === movie) this.movies.delete(retained.simulation);
-            movie.playback.close(this.frames);
+            movie.playback.close(this.presentationFrames);
             if (movie.current() && this.simulation === retained.simulation) await movie.complete();
             if (this.movieRequests.get(retained.simulation) === movie.request) this.movieRequests.delete(retained.simulation);
           } else if (consoleOpen && graphical !== null) {
@@ -4337,12 +4456,12 @@ export class Application {
               await presentation.prepare(retained.output.snapshot, presentations, characters);
               presentation.local.player.seat.present(retained.output.snapshot, graphical.renderer.backend);
             }
-            graphical.renderer.execute({ owner: graphical.assets.images.owner, sequence: this.frames, commands: [{ kind: "swap-buffers" }] });
+            graphical.renderer.execute({ owner: graphical.assets.images.owner, sequence: this.presentationFrames, commands: [{ kind: "swap-buffers" }] });
           }
         } catch (error) {
           if (this.movies.get(retained.simulation) === movie) this.movies.delete(retained.simulation);
           if (this.movieRequests.get(retained.simulation) === movie.request) this.movieRequests.delete(retained.simulation);
-          try { movie.playback.close(this.frames); } catch (closeError) { this.host.print(`${String(closeError)}\n`); }
+          try { movie.playback.close(this.presentationFrames); } catch (closeError) { this.host.print(`${String(closeError)}\n`); }
           this.reportCampaignTravelError(error);
         }
         await this.commands();
@@ -4442,7 +4561,27 @@ export class Application {
           state.commands.append(fromQ3UserCommand(command.command));
         }
       }
-      const advanceSimulation = () => this.session.stepAsync({ elapsedMilliseconds: frameMilliseconds, commands: [...localCommands, ...remote] });
+      const progressedEvents: SimulationPresentationEvent[] = [], progressedRoundEvents: SimulationPresentationEvent[] = [];
+      let pendingBeforeFrameEvents = beforeFrameEvents, displayedMilliseconds = this.elapsed - frameMilliseconds, progressedEventCount = 0;
+      const progress = this.graphical === null || this.simulation.q2Native() === null ? undefined : async (frame: SimulationProgress): Promise<void> => {
+        progressedEventCount += frame.output.events.length;
+        this.pumpClientInput();
+        const host = this.recordingHost;
+        if (host?.kind !== "q2" || host.host.observeProgress === undefined || host.host.localMessages === undefined)
+          throw new Error("Native source progress lost its message publication owner");
+        host.host.observeProgress();
+        const events = this.simulation.drainPresentationEvents();
+        progressedEvents.push(...events);
+        const rounds = this.roundPresentationEvents.splice(0); progressedRoundEvents.push(...rounds);
+        const incoming = [...pendingBeforeFrameEvents, ...events]; pendingBeforeFrameEvents = [];
+        const timeMilliseconds = this.elapsed - frame.pendingMilliseconds;
+        await this.presentOutput(frame.output, { sourceEvents: incoming, roundEvents: rounds, localCommands: [],
+          frameMilliseconds: Math.max(0, timeMilliseconds - displayedMilliseconds), frameStartedAt: performance.now(), timeMilliseconds });
+        displayedMilliseconds = timeMilliseconds;
+        await new Promise<void>(resolve => { setTimeout(resolve, 0); });
+        this.pumpClientInput();
+      };
+      const advanceSimulation = () => this.session.stepAsync({ elapsedMilliseconds: frameMilliseconds, commands: [...localCommands, ...remote] }, progress);
       const output = paused ? retained !== null && retained.simulation === this.simulation ? { snapshot: retained.output.snapshot, events: [] } : this.simulation.currentOutput() : this.tools === null ? await advanceSimulation()
         : await this.tools.measureAsync("simulation", advanceSimulation);
       await this.retireRemovedLocalPlayers();
@@ -4454,7 +4593,7 @@ export class Application {
       this.frames++;
       const frameEvents = this.simulation.drainPresentationEvents();
       if (q1 !== null) this.appendQ1Commands(frameEvents);
-      this.sourceEvents = [...beforeFrameEvents, ...frameEvents];
+      this.sourceEvents = [...beforeFrameEvents, ...progressedEvents, ...frameEvents];
       if (!paused) this.bots?.receive(this.sourceEvents);
       if (this.closed) throw new Error("Application closed during step");
       if (!paused) await this.network?.server.publish(output, this.sourceEvents, performance.now());
@@ -4469,107 +4608,10 @@ export class Application {
           : { kind: "competitive", match: this.content.recipe.match.provider } satisfies Parameters<SharedTransitionCoordinator["resolve"]>[0];
         this.transitions.commit(this.transitions.resolve(mode, intents));
       }
-      const roundEvents = this.roundPresentationEvents.splice(0);
-      const graphical = this.graphical;
-      if (graphical !== null) {
-        if (this.sourceDialect().startsWith("q2")) this.debugGraph.addFrame(frameMilliseconds / 1000, this.debugGraphSettings());
-        this.simulation.beginPresentationFrame(this.frames);
-        const presentations = this.simulation.presentations(), characters = this.simulation.characterViews();
-        graphical.rerelease.receive(this.sourceEvents);
-        await graphical.rerelease.prepare();
-        const presentationEvents = [...roundEvents, ...this.sourceEvents.filter(event => event.kind !== "q2-composition" || event.event.kind !== "kick" && event.event.kind !== "grapple-prediction"), ...graphical.rerelease.drainPrints()];
-        const nativeQ3 = this.simulation.q3Source()?.sourceState();
-        for (const source of graphical.q3.values()) {
-          if (source.kind === "qvm") continue;
-          if (nativeQ3 === undefined) throw new Error("Cgame has no authoritative source state");
-          source.prediction.captureSource(nativeQ3);
-          source.client.receive(nativeQ3, this.sourceEvents.filter(event => event.recipient === undefined || event.recipient.equals(source.client.options.local.player.actor)), localCommands);
-        }
-        const selectedQ3 = this.simulation.selectedQ3SourceState();
-        const sharedPresentationEvents = presentationEvents.filter(event => selectedQ3 === null || event.content !== selectedQ3.content
-          || event.kind !== "q3-source" || event.event.kind !== "entity-event");
-        const effectEvents = graphical.q3.size === 0 ? sharedPresentationEvents : sharedPresentationEvents.filter(event =>
-          event.kind === "q3-source" ? event.event.kind === "sound" : event.kind !== "q3-character");
-        const commonEvents = effectEvents.filter(event => event.recipient === undefined);
-        const eventsFor = (actor: ActorId, events: readonly SimulationPresentationEvent[]) => events.filter(event => event.recipient === undefined || event.recipient.equals(actor));
-        const nativeEvents = new Map<SeatId, readonly SimulationPresentationEvent[]>();
-        const seatAudio: ApplicationAudioSeatEvents[] = [];
-        const unhandled: UnhandledApplicationEffect[] = [];
-        if (graphical.nativeQ2.size === 0) {
-          graphical.effects.receive(effectEvents);
-          await graphical.effects.prepare(output.snapshot, presentations, characters, this.simulation.weaponPresentationClock());
-          unhandled.push(...graphical.effects.drainUnhandled());
-          graphical.audio.receiveEffectSounds(graphical.effects.drainSounds());
-          const privateSounds = graphical.effects.drainRecipientSounds();
-          for (const presentation of graphical.presentations) {
-            const actor = presentation.local.player.actor;
-            const events = effectEvents.filter(event => event.recipient?.equals(actor));
-            const sounds = privateSounds.filter(batch => batch.recipient.equals(actor)).flatMap(batch => batch.sounds);
-            if (events.length !== 0 || sounds.length !== 0) seatAudio.push({ seat: presentation.local.player.seat.id,
-              snapshot: output.snapshot, events, music: presentation === graphical.presentations[0], effectSounds: sounds });
-          }
-        } else {
-          const host = this.recordingHost;
-          if (host?.kind !== "q2" || host.host.rawMessages === undefined) throw new Error("Native Q2 presentation lost its source message owner");
-          for (const presentation of graphical.presentations) {
-            const local = presentation.local, seat = local.player.seat.id, native = graphical.nativeQ2.get(seat);
-            if (native === undefined) throw new Error("Native Q2 presentation has no recipient state");
-            const player = host.host.carriedPlayer(local.player.seat.client.id);
-            for (const record of native.client.receive((host.host.sourceMessages?.(player) ?? host.host.rawMessages(player)), this.elapsed / 1000)) {
-              const event = record.event;
-              if (event.kind === "nop") continue;
-              if (event.kind === "print") local.console.print(event.text);
-              else if (event.kind === "disconnect") { local.console.print("Disconnected by the source game.\n"); this.requestQuit(); }
-              else if (event.kind === "localized-print") native.client.print(event.value.flags,
-                await graphical.rerelease.localizeMessage(seat, native.client.content, event.value.base, event.value.args), this.elapsed / 1000);
-              else if (event.kind === "command-text") graphical.input.enqueueClientCommand(event.text,
-                { session: this.session.session, origin: { kind: "script", name: "q2-game", caller: { kind: "local-seat", seat, client: local.player.seat.client.id } } });
-              else throw new Error(`Unsupported native Q2 local service ${event.kind}`);
-            }
-            const sourceEvents = native.client.takeEvents();
-            graphical.rerelease.receive(sourceEvents);
-            await graphical.rerelease.prepare();
-            const events = [...sourceEvents, ...graphical.rerelease.drainPrints()];
-            for (const event of events) await this.recordPlayerProgress(event);
-            nativeEvents.set(seat, events);
-            const privateEvents = effectEvents.filter(event => event.recipient?.equals(local.player.actor));
-            native.effects.receive([...eventsFor(local.player.actor, effectEvents), ...events]);
-            await native.effects.prepare(output.snapshot, presentations, characters, this.simulation.weaponPresentationClock());
-            unhandled.push(...native.effects.drainUnhandled());
-            seatAudio.push({ seat, snapshot: output.snapshot, events: [...privateEvents, ...events], music: false,
-              effectSounds: [...native.effects.drainSounds(), ...native.effects.drainRecipientSounds().flatMap(batch => batch.sounds)] });
-          }
-        }
-        this.unhandledEffects = unhandled;
-        for (const effect of this.unhandledEffects) {
-          const key = `${effect.source.content}:${effect.reason}`;
-          if (!this.reportedEffectGaps.has(key)) {
-            this.reportedEffectGaps.add(key);
-            this.host.print(`Unresolved ${effect.source.kind} effect: ${effect.reason}\n`);
-          }
-        }
-        await preparePresentationAudio(this.simulation.events, graphical.audio, commonEvents, seatAudio);
-        await preparePresentationShaders(this.simulation.events, graphical.assets);
-        for (const presentation of graphical.presentations) {
-          presentation.sourceEvents([...eventsFor(presentation.local.player.actor, presentationEvents), ...(nativeEvents.get(presentation.local.player.seat.id) ?? [])]);
-          if (this.tools === null) await presentation.prepare(output.snapshot, presentations, characters);
-          else await this.tools.measureAsync("presentation", () => presentation.prepare(output.snapshot, presentations, characters));
-        }
-        await graphical.modPresentations.prepare(graphical.presentations, this.simulation.modPresentationSources(), presentationEvents, this.frames);
-        await graphical.selectedQ3Presentations.prepare(graphical.presentations, selectedQ3, presentationEvents, this.frames);
-        for (const presentation of graphical.presentations) {
-          const render = () => presentation.local.player.seat.present(output.snapshot, graphical.renderer.backend);
-          if (this.tools === null) render(); else this.tools.timer.measure("render", render);
-        }
-        graphical.renderer.execute({ owner: graphical.assets.images.owner, sequence: this.frames, commands: [{ kind: "swap-buffers" }] });
-        const listeners = graphical.presentations.map(presentation => {
-          const camera = presentation.camera();
-          return { seat: presentation.local.player.seat.id, actor: presentation.local.player.actor, origin: camera.origin,
-            axis: camera.axis, gain: 1 / graphical.presentations.length, underwater: this.underwater(camera, presentation.local.player.actor) };
-        });
-        await graphical.audio.frame(output.snapshot, listeners, commonEvents.filter(event => !presentationAudioControl(event)), frameStartedAt,
-          seatAudio.map(batch => ({ ...batch, events: batch.events.filter(event => !presentationAudioControl(event)) })));
-      }
+      const finalRoundEvents = this.roundPresentationEvents.splice(0), roundEvents = [...progressedRoundEvents, ...finalRoundEvents];
+      const finalPresentation = progressedEventCount === 0 ? output : { snapshot: output.snapshot, events: output.events.slice(progressedEventCount) };
+      await this.presentOutput(finalPresentation, { sourceEvents: [...pendingBeforeFrameEvents, ...frameEvents], roundEvents: finalRoundEvents,
+        localCommands, frameMilliseconds: Math.max(0, this.elapsed - displayedMilliseconds), frameStartedAt, timeMilliseconds: this.elapsed });
       await this.capture?.drain();
       this.tools?.timer.stamp("frame end");
       if (captureTransitionPending) {
@@ -4660,7 +4702,7 @@ export class Application {
     if (this.ownership.kind === "borrowed" && this.ownership.client.source.current === this) {
       try { await this.ownership.client.capture.beforeWorldChange(); } catch (error) { errors.push(error); }
     }
-    for (const movie of this.movies.values()) { try { movie.playback.close(this.frames); } catch (error) { errors.push(error); } }
+    for (const movie of this.movies.values()) { try { movie.playback.close(this.presentationFrames); } catch (error) { errors.push(error); } }
     this.movies.clear();
     try { if (this.ownership.kind === "owned") await this.capture?.close(); } catch (error) { errors.push(error); }
     this.capture = null;
@@ -4695,7 +4737,7 @@ export class Application {
       () => this.session.world?.simulation === this.simulation ? this.session.closeWorld() : this.simulation.close(),
       () => graphical?.input.close(), () => graphical?.audio.close(), () => graphical?.effects.close(), () => this.dedicatedConsole?.close(),
       () => graphical?.art.close(), () => graphical?.assets.close(),
-      () => graphical?.renderer.execute({ owner: graphical.renderer.owner, sequence: this.frames, commands: [] })]) {
+      () => graphical?.renderer.execute({ owner: graphical.renderer.owner, sequence: this.presentationFrames, commands: [] })]) {
       try { await close(); } catch (error) { errors.push(error); }
     }
     for (const [client, connection] of this.sourceConnections) {

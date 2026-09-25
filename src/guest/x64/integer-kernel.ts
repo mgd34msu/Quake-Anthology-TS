@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestIntegerWidth, GuestProcessorState, GuestRegister, MappedGuestMemory } from '../core/contracts.ts';
 import { SparseGuestMemory } from '../core/memory.ts';
-import { IntegerRegisterFile, ProcessorFlags } from '../core/registers.ts';
+import { IntegerRegisterFile, managedGuestProcessor, ProcessorFlags } from '../core/registers.ts';
 import type { AluOperation } from '../x86/arithmetic.ts';
 import { canonicalAddress, operandAddress, writableOperand } from './decoder.ts';
 import type { X64MemoryOperand, X64Operand } from './decoder.ts';
@@ -39,6 +39,19 @@ type Operation =
   | { readonly kind: 'alu'; readonly operation: AluOperation; readonly destination: Operand; readonly source: Source }
   | { readonly kind: 'branch'; readonly condition: number | null; readonly target: bigint };
 export interface X64IntegerPlan { readonly operation: Operation; readonly original: X64SemanticPlan; }
+export interface X64IntegerStep { readonly start: bigint; readonly integer: X64IntegerPlan; }
+export type X64IntegerBlockResult =
+  | { readonly kind: 'complete' | 'return'; readonly instructions: number }
+  | { readonly kind: 'fault'; readonly instructions: number; readonly error: unknown };
+/** These instructions finish every possible faulting read/check before touching architectural state. */
+export function x64IntegerBlockSafe(plan: X64IntegerPlan): boolean {
+  const operation = plan.operation;
+  switch (operation.kind) {
+    case 'move': return operation.destination.kind === 'register';
+    case 'lea': case 'branch': return true;
+    case 'alu': return operation.destination.kind === 'register' || operation.operation === 'cmp' || operation.operation === 'test';
+  }
+}
 
 function operand(value: X64Operand): Operand {
   return value.kind === 'register'
@@ -83,11 +96,64 @@ export class X64IntegerKernel {
     private readonly state: GuestProcessorState, private readonly memory: SparseGuestMemory) {}
 
   static create(state: GuestProcessorState, memory: MappedGuestMemory): X64IntegerKernel | null {
+    const managed = managedGuestProcessor(state);
+    if (managed !== null && state.architecture === 'x86-64' && SparseGuestMemory.managed(memory)) {
+      return new X64IntegerKernel(managed.flags, managed.registers.integerView, state, memory);
+    }
     if (state.architecture !== 'x86-64' || !(state.registers instanceof IntegerRegisterFile) || state.registers.architecture !== 'x86-64'
       || !originalInstance(state.registers, IntegerRegisterFile.prototype, registerMembers)
       || !(state.flags instanceof ProcessorFlags) || !originalInstance(state.flags, ProcessorFlags.prototype, flagMembers)
       || !(memory instanceof SparseGuestMemory) || !originalInstance(memory, SparseGuestMemory.prototype, memoryMembers)) return null;
     return new X64IntegerKernel(state.flags, state.registers.integerView, state, memory);
+  }
+
+  /** The CPU admits pinned owners and live code once; no store or host callback can occur in this loop. */
+  executeBlock(steps: readonly X64IntegerStep[], budget: number, returned: bigint | null): X64IntegerBlockResult {
+    let instructions = 0, current = this.state.instructionPointer, next = current;
+    try {
+      for (const step of steps) {
+        if (instructions === budget) break;
+        current = step.start;
+        if (current === returned) {
+          this.state.instructionPointer = current;
+          return { kind: 'return', instructions };
+        }
+        const op = step.integer.operation, original = step.integer.original;
+        next = original.nextIP;
+        switch (op.kind) {
+          case 'move':
+            x64Lock(original.lock, null, false);
+            this.#read(op.source, original.nextIP);
+            this.#write(op.destination, original.nextIP);
+            break;
+          case 'lea':
+            x64Lock(original.lock, null, false);
+            this.#address(op.source);
+            this.#write(op.destination, original.nextIP);
+            break;
+          case 'alu': {
+            this.#read(op.source, original.nextIP);
+            const rightLow = this.#low, rightHigh = this.#high;
+            const writes = op.operation !== 'cmp' && op.operation !== 'test';
+            x64Lock(original.lock, op.destination.kind === 'memory' ? op.destination.source : null, writes);
+            this.#read(op.destination, original.nextIP);
+            this.#alu(op.operation, op.destination.width, rightLow, rightHigh);
+            if (writes) this.#write(op.destination, original.nextIP);
+            break;
+          }
+          case 'branch':
+            x64Lock(original.lock, null, false);
+            if (op.condition === null || this.#condition(op.condition)) next = canonicalAddress(op.target);
+            break;
+        }
+        instructions++;
+      }
+    } catch (error) {
+      this.state.instructionPointer = current;
+      return { kind: 'fault', instructions, error };
+    }
+    this.state.instructionPointer = next;
+    return { kind: 'complete', instructions };
   }
 
   execute(plan: X64IntegerPlan): X64Flow {

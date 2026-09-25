@@ -182,7 +182,7 @@ import { sameActor } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { ArsenalIntent } from "../../../contracts/gameplay.ts";
 import type { AnimationStepInput, AnimationStepResult, ArsenalState, MovementContinuation, MovementState, MovementTouchContact, WeaponStepInput, WeaponStepResult } from "../../../contracts/movement.ts";
-import type { ActorCommand, InputBatch, SaveImage, Simulation, SimulationOutput, WorldSnapshot } from "../../../contracts/session.ts";
+import type { ActorCommand, InputBatch, SaveImage, Simulation, SimulationOutput, SimulationProgress, WorldSnapshot } from "../../../contracts/session.ts";
 import type { ModSessionCheckpoint, ModTravelCheckpoint } from "../../../contracts/mods.ts";
 import { SessionMods } from "../../../world/session/mods.ts";
 import type { ModClientApplication, ModClientCommand, ModClientEvent, ModClientServices } from "../../../world/session/mod-clients.ts";
@@ -4274,8 +4274,14 @@ export class SharedSimulation implements Simulation {
     }
   }
 
-  async stepAsync(input: InputBatch): Promise<SimulationOutput> {
+  async stepAsync(input: InputBatch, progress?: (frame: SimulationProgress) => Promise<void>): Promise<SimulationOutput> {
     this.pendingSharedRestore?.assertComplete();
+    if (this.source.kind === "q2-native" && progress !== undefined) {
+      this.assertOpen();
+      this.assertBotRestoreReady();
+      if (this.stepping || this.checkpointInProgress) throw new Error("Simulation step is already running or a checkpoint is active");
+      return this.stepNativeQ2Async(input, progress);
+    }
     if (this.source.kind !== "q3-qvm") return this.step(input);
     this.assertOpen();
     if (this.stepping || this.checkpointInProgress) throw new Error("Simulation step is already running or a checkpoint is active");
@@ -5566,50 +5572,76 @@ export class SharedSimulation implements Simulation {
         return source.game.services.withInputMovement(identity.actor, projection, run);
       } });
   }
-  private stepNativeQ2(input: InputBatch): SimulationOutput {
+  private beginNativeQ2Step(input: InputBatch): void {
     if (this.source.kind !== "q2-native" || this.stepping) throw new Error("Native Quake II frame is unavailable");
     if (!Number.isFinite(input.elapsedMilliseconds) || input.elapsedMilliseconds < 0) throw new RangeError("Invalid host frame interval");
-    const source = this.source;
     this.stepping = true;
+  }
+  private stepNativeQ2(input: InputBatch): SimulationOutput {
+    this.beginNativeQ2Step(input);
     try {
-      for (const command of input.commands) {
-        const slot = this.nativeQ2Client(command.actor).slot + 1;
-        this.observeClientCommand(command);
-        this.requireEquipmentPlayer(command.actor);
-        this.grapple?.setJump(command.actor, command.command.kind === "q2-rerelease" ? (command.command.buttons & 8) !== 0 : "upMove" in command.command && command.command.upMove > 0);
-        const equipment = this.weaponSlots.get(command.actor);
-        if (this.grapple?.selection.binding === "slot") this.grapple.input(command.actor, equipment?.equipmentSelected() === true && (command.command.buttons & 1) !== 0);
-        if (this.grapple?.source.kind === "q3-qvm") this.grapple.source.game.pull(command.actor);
-        const gated = equipment?.primarySelected() === false ? { ...command, command: { ...command.command, buttons: command.command.buttons & ~1 } } : command;
-        const velocity = this.nativeEquipmentVelocity.get(command.actor), owner = this.actors.resolveOwned(command.actor);
-        const selected = this.selectedQ3Source?.ownsEquipment === true && this.equipmentPlayerAvailable(command.actor) ? this.selectedQ3Source : null;
-        const character = providerFamily(this.recipe.character.definition.provider);
-        const pose = selected === null || owner === null ? null : selected.fixedPose(owner,
-          playerPostures({ character, standingBounds: playerStandingBounds(character), viewHeight: character === "q3" ? 26 : 22 }));
-        const speedMultiplier = selected?.speedMultiplier(command.actor) ?? 1;
-        const movement = this.grapple === null && velocity === undefined && selected === null ? undefined
-          : { ...(velocity === undefined ? {} : { velocity }), gravityScale: this.grapple?.gravityScale(command.actor) ?? 1,
-            predictionSuppressed: (this.grapple?.prediction(command.actor) ?? false) || speedMultiplier !== 1 || pose !== null,
-            speedMultiplier, ...(pose === null ? {} : { pose }) };
-        const observingInput = this.modClientApplications.active;
-        if (observingInput) this.nativeEquipmentVelocity.delete(command.actor);
-        if (source.edition === "classic") source.game.think(slot, classicGuestLocalCommand(gated, source.game.playerState(slot)), movement);
-        else source.game.think(slot, rereleaseGuestLocalCommand(gated, source.game.playerState(slot)), movement);
-        if (!observingInput) this.nativeEquipmentVelocity.delete(command.actor);
-      }
-      this.hostMilliseconds += input.elapsedMilliseconds; this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
-      const frameMilliseconds = source.edition === "classic" ? 100 : source.game.services.options.frameMilliseconds;
-      while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + frameMilliseconds) {
-        this.sourceFrame = this.clock.advance(source.edition === "classic" ? { kind: "seconds", value: frameMilliseconds / 1000 } : { kind: "milliseconds", value: frameMilliseconds });
-        this.selectedMilliseconds += frameMilliseconds;
-        this.advanceQ1Punch(); this.beginNativeEquipmentFrame(); this.beginQvmSelectedFrame();
-        source.game.frame(frameMilliseconds);
-        if (this.handGrenades !== null) for (const actor of this.players()) this.stepHandGrenade(actor, this.equipmentPlayerAvailable(actor) ? "alive" : "dead");
-        this.runQvmSelectedActors(); this.sourceFrame = this.clock.enter("frame-exit");
-        this.modOwner?.advance(this.sourceFrame);
+      const frames = this.nativeQ2Frames(input);
+      while (!frames.next().done) { /* Synchronous callers consume the original complete batch. */ }
+      return { snapshot: this.snapshot(), events: this.events.take() };
+    } finally { this.stepping = false; }
+  }
+  private async stepNativeQ2Async(input: InputBatch, progress: (frame: SimulationProgress) => Promise<void>): Promise<SimulationOutput> {
+    this.beginNativeQ2Step(input);
+    try {
+      // Yield only between completed source ticks, after enough work to justify another presentation.
+      const presentationBudgetMilliseconds = 8;
+      let started = performance.now(), elapsedMilliseconds = 0;
+      for (const frameMilliseconds of this.nativeQ2Frames(input)) {
+        elapsedMilliseconds += frameMilliseconds;
+        if (this.sourceSchedulingMilliseconds < this.timeSeconds * 1000 + frameMilliseconds
+          || performance.now() - started < presentationBudgetMilliseconds) continue;
+        await progress({ output: { snapshot: this.snapshot(), events: this.events.take() }, elapsedMilliseconds,
+          pendingMilliseconds: this.sourceSchedulingMilliseconds - this.timeSeconds * 1000 });
+        started = performance.now(); elapsedMilliseconds = 0;
       }
       return { snapshot: this.snapshot(), events: this.events.take() };
     } finally { this.stepping = false; }
+  }
+  private *nativeQ2Frames(input: InputBatch): Generator<number, void, void> {
+    const source = this.source;
+    if (source.kind !== "q2-native") throw new Error("Native Quake II source is unavailable");
+    for (const command of input.commands) {
+      const slot = this.nativeQ2Client(command.actor).slot + 1;
+      this.observeClientCommand(command);
+      this.requireEquipmentPlayer(command.actor);
+      this.grapple?.setJump(command.actor, command.command.kind === "q2-rerelease" ? (command.command.buttons & 8) !== 0 : "upMove" in command.command && command.command.upMove > 0);
+      const equipment = this.weaponSlots.get(command.actor);
+      if (this.grapple?.selection.binding === "slot") this.grapple.input(command.actor, equipment?.equipmentSelected() === true && (command.command.buttons & 1) !== 0);
+      if (this.grapple?.source.kind === "q3-qvm") this.grapple.source.game.pull(command.actor);
+      const gated = equipment?.primarySelected() === false ? { ...command, command: { ...command.command, buttons: command.command.buttons & ~1 } } : command;
+      const velocity = this.nativeEquipmentVelocity.get(command.actor), owner = this.actors.resolveOwned(command.actor);
+      const selected = this.selectedQ3Source?.ownsEquipment === true && this.equipmentPlayerAvailable(command.actor) ? this.selectedQ3Source : null;
+      const character = providerFamily(this.recipe.character.definition.provider);
+      const pose = selected === null || owner === null ? null : selected.fixedPose(owner,
+        playerPostures({ character, standingBounds: playerStandingBounds(character), viewHeight: character === "q3" ? 26 : 22 }));
+      const speedMultiplier = selected?.speedMultiplier(command.actor) ?? 1;
+      const movement = this.grapple === null && velocity === undefined && selected === null ? undefined
+        : { ...(velocity === undefined ? {} : { velocity }), gravityScale: this.grapple?.gravityScale(command.actor) ?? 1,
+          predictionSuppressed: (this.grapple?.prediction(command.actor) ?? false) || speedMultiplier !== 1 || pose !== null,
+          speedMultiplier, ...(pose === null ? {} : { pose }) };
+      const observingInput = this.modClientApplications.active;
+      if (observingInput) this.nativeEquipmentVelocity.delete(command.actor);
+      if (source.edition === "classic") source.game.think(slot, classicGuestLocalCommand(gated, source.game.playerState(slot)), movement);
+      else source.game.think(slot, rereleaseGuestLocalCommand(gated, source.game.playerState(slot)), movement);
+      if (!observingInput) this.nativeEquipmentVelocity.delete(command.actor);
+    }
+    this.hostMilliseconds += input.elapsedMilliseconds; this.sourceSchedulingMilliseconds += input.elapsedMilliseconds;
+    const frameMilliseconds = source.edition === "classic" ? 100 : source.game.services.options.frameMilliseconds;
+    while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + frameMilliseconds) {
+      this.sourceFrame = this.clock.advance(source.edition === "classic" ? { kind: "seconds", value: frameMilliseconds / 1000 } : { kind: "milliseconds", value: frameMilliseconds });
+      this.selectedMilliseconds += frameMilliseconds;
+      this.advanceQ1Punch(); this.beginNativeEquipmentFrame(); this.beginQvmSelectedFrame();
+      source.game.frame(frameMilliseconds);
+      if (this.handGrenades !== null) for (const actor of this.players()) this.stepHandGrenade(actor, this.equipmentPlayerAvailable(actor) ? "alive" : "dead");
+      this.runQvmSelectedActors(); this.sourceFrame = this.clock.enter("frame-exit");
+      this.modOwner?.advance(this.sourceFrame);
+      yield frameMilliseconds;
+    }
   }
   q3Guest(): Q3QvmServerGame | null { return this.source.kind === "q3-qvm" ? this.source.game : null; }
   async shutdownQ3Guest(): Promise<void> { await this.q3Guest()?.shutdown(); }

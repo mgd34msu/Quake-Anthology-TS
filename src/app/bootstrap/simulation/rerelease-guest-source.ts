@@ -12,7 +12,7 @@ import { rereleaseEntries } from '../../../compat/q2/rerelease/native-entries.ts
 import { rereleasePrimaryWorldProfile } from "../../../compat/q2/rerelease/world-profile.ts";
 import { rereleaseAbi } from '../../../compat/q2/rerelease/api.ts';
 import { GuestCallRunner } from '../../../guest/abi/index.ts';
-import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from '../../../guest/core/index.ts';
+import { createManagedGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from '../../../guest/core/index.ts';
 import type { MappedGuestMemory } from '../../../guest/core/index.ts';
 import { mapPeImage, parsePe, resolvePeExport } from '../../../guest/pe/index.ts';
 import type { PeImage } from '../../../guest/pe/index.ts';
@@ -48,14 +48,14 @@ export class RereleaseGuestSource {
         readonly memory: SparseGuestMemory, private readonly image: PeImage, private readonly context: GuestCallContext, private readonly budget: number) {}
     static create(prepared: PreparedRereleaseGuest, options: RereleaseGuestSourceOptions): RereleaseGuestSource {
         const module: ModuleIdentity = nativeModuleIdentity(prepared);
-        const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+        const memory = SparseGuestMemory.createManaged({ module, pointerBytes: 8 });
         let source: RereleaseGuestSource | null = null, host: RereleaseQ2GuestHost | null = null;
         try {
             const image = mapPeImage({ bytes: prepared.bytes, memory, base: 0x280000000n });
             const stack = memory.allocate({ byteLength: 1_048_576, alignment: 16n, label: 'native game stack' });
             const returned = memory.allocate({ byteLength: 16, permissions: 'read-execute', label: 'native game return' });
-            const callbacks = new GuestCallbackTable(memory);
-            const state = createGuestProcessorState({ architecture: 'x86-64', instructionPointer: 0n, stackPointer: stack.byteOffset + 1_048_576n,
+            const callbacks = GuestCallbackTable.createManaged(memory);
+            const state = createManagedGuestProcessorState({ architecture: 'x86-64', instructionPointer: 0n, stackPointer: stack.byteOffset + 1_048_576n,
                 flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
             const cpu = new X64Cpu({ state, memory, callbacks });
             const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: returned });

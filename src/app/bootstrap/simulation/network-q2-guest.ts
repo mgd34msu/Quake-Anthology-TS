@@ -25,8 +25,10 @@ export async function createClassicQ2ApplicationServerHost(options: Q2Applicatio
     world.services.setConfigstring(31, String(blockChecksum(await options.content.mounts.read(options.content.recipe.map.geometry))));
     world.services.setConfigstring(30, String(maxClients));
     world.services.setConfigstring(29, cvars.variableString('sv_airaccelerate'));
-    let messages: readonly ClassicGuestMessage[] = [];
+    let messages: readonly ClassicGuestMessage[] = [], localMessages: readonly ClassicGuestMessage[] = [];
+    const progressedMessages: ClassicGuestMessage[] = [];
     const players = new Map<number, Q2ApplicationPlayer>();
+    const localRecipients = new Set<Q2ApplicationPlayer["client"]>();
     const requirePlayer = (player: Q2ApplicationPlayer): void => {
         const current = players.get(player.client.slot);
         if (current === undefined || !current.client.equals(player.client) || !current.actor.equals(player.actor)) throw new Error('Q2 guest network player is retired');
@@ -49,6 +51,17 @@ export async function createClassicQ2ApplicationServerHost(options: Q2Applicatio
         requirePlayer(player); const tokens = tokenizeCommand(text, 'q2-classic');
         if (tokens.argv.length !== 0) world.command(player.sourceEntity, tokens.argv, tokens.argsText);
     });
+    const playerMessages = (player: Q2ApplicationPlayer, incoming: readonly ClassicGuestMessage[]) => {
+            requirePlayer(player);
+            return incoming.filter(message => {
+                const audience = message.audience;
+                if (audience.kind === 'unicast') return audience.slot === player.sourceEntity;
+                if (audience.scope === 'all') return true;
+                const entity = world.entityState(player.sourceEntity);
+                const from = scene.pointLeaf(audience.origin), to = scene.pointLeaf(entity.origin);
+                return scene.areasConnected(scene.leafArea(from), scene.leafArea(to)) && scene.clusterVisible(scene.leafCluster(from), scene.leafCluster(to), audience.scope);
+            });
+    };
     return {
         ...(options.rejects === undefined ? {} : { rejects: options.rejects }),
         protocol: options.protocol, messageOptions: { maxConfigStrings: 2080, inventorySlots: 256 }, maxClients, downloads,
@@ -124,19 +137,16 @@ export async function createClassicQ2ApplicationServerHost(options: Q2Applicatio
         observe: () => {
             const air = cvars.variableString('sv_airaccelerate');
             if (world.configstrings().get(29) !== air) world.services.setConfigstring(29, air);
-            messages = world.rawMessages();
+            localRecipients.clear(); localMessages = world.rawMessages();
+            messages = [...progressedMessages, ...localMessages]; progressedMessages.length = 0;
         },
-        rawMessages: player => {
+        observeProgress: () => { localRecipients.clear(); localMessages = world.rawMessages(); progressedMessages.push(...localMessages); },
+        localMessages: player => {
             requirePlayer(player);
-            return messages.filter(message => {
-                const audience = message.audience;
-                if (audience.kind === 'unicast') return audience.slot === player.sourceEntity;
-                if (audience.scope === 'all') return true;
-                const entity = world.entityState(player.sourceEntity);
-                const from = scene.pointLeaf(audience.origin), to = scene.pointLeaf(entity.origin);
-                return scene.areasConnected(scene.leafArea(from), scene.leafArea(to)) && scene.clusterVisible(scene.leafCluster(from), scene.leafCluster(to), audience.scope);
-            });
+            if (localRecipients.has(player.client)) return [];
+            localRecipients.add(player.client); return playerMessages(player, localMessages);
         },
+        rawMessages: player => playerMessages(player, messages),
         events: () => [],
         input: (player, wire, sequence) => q2GameCallback(() => { requirePlayer(player); const command = toQ2Command(wire);
             simulation.observeClientCommand({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command });

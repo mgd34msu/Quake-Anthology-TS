@@ -31,7 +31,11 @@ export async function createRereleaseNativeQ2ApplicationServerHost(options: Q2Ap
     world.services.setConfigstring(layout.airAccelerate, cvars.variableString('sv_airaccelerate'));
     const transcode = createRereleaseNativeMessageTranscoder(protocol);
     let messages: readonly { readonly source: RereleaseGuestMessage; readonly wire: RereleaseGuestMessage }[] = [];
+    let localMessages: typeof messages = [];
+    const progressedMessages: { readonly source: RereleaseGuestMessage; readonly wire: RereleaseGuestMessage }[] = [];
+    const collectMessages = () => world.rawMessages().map(source => ({ source, wire: { ...source, bytes: transcode(source.bytes) } }));
     const players = new Map<number, Q2ApplicationPlayer>();
+    const localRecipients = new Set<Q2ApplicationPlayer["client"]>();
     const requirePlayer = (player: Q2ApplicationPlayer): void => {
         const current = players.get(player.client.slot);
         if (current === undefined || !current.client.equals(player.client) || !current.actor.equals(player.actor)) throw new Error('Q2 guest network player is retired');
@@ -54,9 +58,9 @@ export async function createRereleaseNativeQ2ApplicationServerHost(options: Q2Ap
         requirePlayer(player); const tokens = tokenizeCommand(text, 'q2-rerelease');
         if (tokens.argv.length !== 0) world.command(player.sourceEntity, tokens.argv, tokens.argsText);
     });
-    const playerMessages = (player: Q2ApplicationPlayer): typeof messages => {
+    const playerMessages = (player: Q2ApplicationPlayer, incoming = messages): typeof messages => {
             requirePlayer(player);
-            return messages.filter(({ source: message }) => {
+            return incoming.filter(({ source: message }) => {
                 const audience = message.audience;
                 if (audience.kind === 'unicast') return audience.slot === player.sourceEntity;
                 if (audience.scope === 'all') return true;
@@ -161,7 +165,14 @@ export async function createRereleaseNativeQ2ApplicationServerHost(options: Q2Ap
         observe: () => {
             const air = cvars.variableString('sv_airaccelerate');
             if (world.configstrings().get(layout.airAccelerate) !== air) world.services.setConfigstring(layout.airAccelerate, air);
-            messages = world.rawMessages().map(source => ({ source, wire: { ...source, bytes: transcode(source.bytes) } }));
+            localRecipients.clear(); localMessages = collectMessages();
+            messages = [...progressedMessages, ...localMessages]; progressedMessages.length = 0;
+        },
+        observeProgress: () => { localRecipients.clear(); localMessages = collectMessages(); progressedMessages.push(...localMessages); },
+        localMessages: player => {
+            requirePlayer(player);
+            if (localRecipients.has(player.client)) return [];
+            localRecipients.add(player.client); return playerMessages(player, localMessages).map(message => message.source);
         },
         rawMessages: player => playerMessages(player).map(message => message.wire),
         sourceMessages: player => playerMessages(player).map(message => message.source),

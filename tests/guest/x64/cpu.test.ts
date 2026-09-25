@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import type { GuestAddress, ModuleIdentity } from "../../../src/contracts/execution.ts";
-import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../src/guest/core/index.ts";
+import { createGuestProcessorState, createManagedGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from "../../../src/guest/core/index.ts";
 import { mapPeImage, resolvePeExport } from "../../../src/guest/pe/index.ts";
 import { X64Cpu } from "../../../src/guest/x64/index.ts";
 import { canonicalAddress, X64ProcessorFault, X64DecodeCursor } from "../../../src/guest/x64/decoder.ts";
@@ -31,12 +31,13 @@ function pointer(memory: SparseGuestMemory, value: bigint): GuestAddress {
   if (address === null) throw new Error("Nonnull fixture address required");
   return address;
 }
-function fixture(bytes: readonly number[], start = base) {
-  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+function fixture(bytes: readonly number[], start = base, managed = false) {
+  const memory = managed ? SparseGuestMemory.createManaged({ module, pointerBytes: 8 }) : new SparseGuestMemory({ module, pointerBytes: 8 });
   memory.map({ base: start, byteLength: bytes.length, permissions: "read-execute", bytes: new Uint8Array(bytes) });
   memory.map({ base: stack - 0x1000n, byteLength: 0x1008, permissions: "read-write" });
   memory.writeUint64(pointer(memory, stack), returned);
-  const state = createGuestProcessorState({ architecture: "x86-64", instructionPointer: start, stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
+  const createState = managed ? createManagedGuestProcessorState : createGuestProcessorState;
+  const state = createState({ architecture: "x86-64", instructionPointer: start, stackPointer: stack, flags: 2n, x87ControlWord: 0x37f, mxcsr: 0x1f80, mxcsrMask: 0xffff });
   const cpu = new X64Cpu({ state, memory });
   const run = (instructionBudget = 100) => cpu.run({ instructionBudget, returnAddress: pointer(memory, returned) });
   return { memory, state, cpu, run };
@@ -542,4 +543,94 @@ test('prepared integer kernels match source ALU flags and exact register halves'
     source.state.flags.value = flags; compiled.state.flags.value = flags;
     expect(kernel.execute(prepared)).toEqual(executeX64Plan(plan, source.memory, source.state));
   }
+});
+
+
+test("managed blocks preserve warm instruction budgets, live registers and precise read faults", () => {
+  // MOV EAX,7; ADD EAX,5; MOV ECX,[RBX]; ADC EAX,ECX; RET.
+  const bytes = [0xb8, 7, 0, 0, 0, 0x83, 0xc0, 5, 0x8b, 0x0b, 0x11, 0xc8, 0xc3];
+  const generic = fixture(bytes), managed = fixture(bytes, base, true);
+  for (const f of [generic, managed]) {
+    const data = f.memory.map({ base: 0x50000n, byteLength: 4, permissions: "read-write" });
+    f.memory.writeUint32(data, 30); f.state.registers.write("rbx", 64, data.byteOffset);
+    expect(f.run().kind).toBe("return");
+  }
+  for (const budget of [1, 2, 3, 4, 5]) {
+    for (const f of [generic, managed]) {
+      f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
+      f.state.flags.value = 0x1234567800000003n;
+    }
+    const expected = generic.run(budget), actual = managed.run(budget);
+    expect(actual.kind).toBe(expected.kind); expect(actual.instructions).toBe(expected.instructions);
+    expect(managed.state.instructionPointer).toBe(generic.state.instructionPointer);
+    expect(managed.state.registers.checkpoint()).toEqual(generic.state.registers.checkpoint());
+    expect(managed.state.flags.value).toBe(generic.state.flags.value);
+  }
+  for (const f of [generic, managed]) {
+    f.state.instructionPointer = base; f.state.registers.write("rbx", 64, 0n);
+    f.state.registers.write("rcx", 64, 123n); f.state.registers.write("rsp", 64, stack);
+    f.state.flags.value = 0x1234567800000003n;
+  }
+  const expected = generic.run(), actual = managed.run();
+  expect(actual.kind).toBe("exception"); expect(actual.instructions).toBe(2);
+  expect(expected.kind).toBe("exception"); expect(managed.state.instructionPointer).toBe(base + 8n);
+  expect(managed.state.registers.checkpoint()).toEqual(generic.state.registers.checkpoint());
+  expect(managed.state.flags.value).toBe(generic.state.flags.value);
+  expect(managed.state.registers.read("rax", 32)).toBe(12n);
+  expect(managed.state.registers.read("rcx", 32)).toBe(123n);
+});
+
+test("managed block boundaries observe committed stores, nested entry callbacks and executable aliases", () => {
+  // Two read-only instructions, then a store boundary, then two read-only instructions.
+  const f = fixture([0xb8, 1, 0, 0, 0, 0x83, 0xc0, 2, 0x89, 0x03, 0x83, 0xc0, 3, 0x83, 0xc0, 4, 0xc3], base, true);
+  const data = f.memory.map({ base: 0x50000n, byteLength: 4, permissions: "read-write" });
+  f.state.registers.write("rbx", 64, data.byteOffset);
+  const callbacks = GuestCallbackTable.createManaged(f.memory), cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
+  const run = () => cpu.run({ instructionBudget: 100, returnAddress: pointer(f.memory, returned) });
+  const reset = () => { f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack); };
+  expect(run().kind).toBe("return"); reset(); expect(run().kind).toBe("return");
+  const code = f.memory.mapAlias({ base: 0x60000n, byteLength: 17, permissions: "read-write", source: pointer(f.memory, base) });
+  const view = f.memory.borrow(code, 17);
+  let observed = 0;
+  const removeStore = f.memory.observeWrites(data, 4, () => {
+    observed++; expect(f.state.instructionPointer).toBe(base + 8n);
+    view.setUint8(12, 8);
+  });
+  reset(); expect(run().kind).toBe("return"); expect(observed).toBe(1); expect(f.state.registers.read("rax", 32)).toBe(15n);
+  removeStore();
+  let entries = 0;
+  const removeEntry = callbacks.observeEntry(pointer(f.memory, base + 13n), () => {
+    entries++;
+    const saved = f.state.registers.checkpoint(), flags = f.state.flags.value, ip = f.state.instructionPointer;
+    f.state.instructionPointer = base;
+    expect(cpu.run({ instructionBudget: 2, returnAddress: null }).kind).toBe("budget");
+    f.state.registers.restore(saved); f.state.flags.value = flags; f.state.instructionPointer = ip;
+    view.setUint8(15, 9);
+  });
+  reset(); expect(run().kind).toBe("return"); expect(entries).toBe(1); expect(f.state.registers.read("rax", 32)).toBe(20n);
+  removeEntry();
+  reset(); expect(run().kind).toBe("return"); expect(f.state.registers.read("rax", 32)).toBe(20n);
+  f.memory.protect(pointer(f.memory, base), 17, "read"); reset();
+  const fault = run(); expect(fault.kind).toBe("exception"); expect(fault.instructions).toBe(0);
+});
+
+test("managed ownership is explicit and a throwing store observer retains original rollback", () => {
+  const generic = fixture([0x90]);
+  Object.defineProperty(generic.state, "instructionPointer", { value: base + 1n, writable: true });
+  expect(generic.state.instructionPointer).toBe(base + 1n);
+  const f = fixture([0xb8, 1, 0, 0, 0, 0x83, 0xc0, 2, 0x89, 0x03, 0xc3], base, true);
+  expect(() => Object.defineProperty(f.state, "instructionPointer", { get: () => base })).toThrow();
+  expect(() => Object.defineProperty(f.state, "instructionPointer", { writable: false })).toThrow();
+  expect(() => Object.defineProperty(f.state.registers, "write", { value: () => undefined })).toThrow();
+  expect(() => Object.defineProperty(f.cpu, "state", { value: generic.state })).toThrow();
+  const data = f.memory.map({ base: 0x50000n, byteLength: 4, permissions: "read-write" });
+  f.state.registers.write("rbx", 64, data.byteOffset);
+  expect(f.run().kind).toBe("return");
+  f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
+  const problem = new Error("observer after committed write");
+  f.memory.observeWrites(data, 4, () => { f.state.registers.write("rax", 64, 999n); throw problem; });
+  expect(() => f.run()).toThrow(problem);
+  expect(f.state.instructionPointer).toBe(base + 8n);
+  expect(f.state.registers.read("rax", 64)).toBe(3n);
+  expect(f.memory.readUint32(data)).toBe(3);
 });

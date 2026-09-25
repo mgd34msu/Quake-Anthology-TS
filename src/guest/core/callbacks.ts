@@ -21,6 +21,28 @@ export class GuestCallbackTable {
   readonly #byAddress = new Map<bigint, CallbackEntry>();
   readonly #entryObservers = new Map<bigint, Set<() => void>>();
   #entryRevision = Symbol("guest instruction entries");
+  static readonly #managed = new WeakSet<GuestCallbackTable>();
+  static createManaged(memory: MappedGuestMemory): GuestCallbackTable {
+    const table = new GuestCallbackTable(memory);
+    Object.defineProperties(table, {
+      entryRevision: { get: () => table.#entryRevision },
+      instructionUnhooked: { value: table.instructionUnhooked },
+      bindEntry: { value: table.bindEntry },
+      observeEntry: { value: table.observeEntry },
+      enter: { value: table.enter },
+      bind: { value: table.bind },
+      unbind: { value: table.unbind },
+      address: { value: table.address },
+      hasBoundTrap: { value: table.hasBoundTrap },
+      resolve: { value: table.resolve },
+      invoke: { value: table.invoke },
+      checkpoint: { value: table.checkpoint },
+    });
+    Object.freeze(table);
+    GuestCallbackTable.#managed.add(table);
+    return table;
+  }
+  static managed(table: GuestCallbackTable): boolean { return GuestCallbackTable.#managed.has(table); }
   constructor(readonly memory: MappedGuestMemory) {}
   get entryRevision(): symbol { return this.#entryRevision; }
   instructionUnhooked(byteOffset: bigint): boolean { return !this.#byAddress.has(byteOffset) && !this.#entryObservers.has(byteOffset); }

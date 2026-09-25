@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress } from "../../contracts/execution.ts";
 import type { GuestCpu, GuestExecutionStop, GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
-import { GuestMemoryFault } from "../core/memory.ts";
+import { GuestMemoryFault, SparseGuestMemory } from "../core/memory.ts";
 import { prepareRawSse } from "../floating-point/raw-sse.ts";
 import { executeNumericInstruction } from "../floating-point/index.ts";
 import { alu, condition, resultFlags, shift, signedMultiply } from "../x86/arithmetic.ts";
@@ -10,9 +10,11 @@ import { canonicalAddress, guestAddress, readMemory, registerName, writeMemory, 
 import type { X64DecodedInstruction, X64Operand } from "./decoder.ts";
 import { executeX64Plan, makeX64Plan, x64Advance as advance, x64Lock } from "./plan.ts";
 import type { X64Flow as Flow, X64PlanOperation, X64SemanticPlan } from "./plan.ts";
-import { prepareX64IntegerPlan, X64IntegerKernel } from './integer-kernel.ts';
-import type { X64IntegerPlan } from './integer-kernel.ts';
-import type { GuestCallbackTable } from "../core/callbacks.ts";
+import { prepareX64IntegerPlan, x64IntegerBlockSafe, X64IntegerKernel } from './integer-kernel.ts';
+import type { X64IntegerPlan, X64IntegerStep } from './integer-kernel.ts';
+import { GuestCallbackTable } from "../core/callbacks.ts";
+import { managedGuestProcessor } from "../core/registers.ts";
+import type { IntegerRegisterFile } from "../core/registers.ts";
 
 export interface X64CpuOptions {
   readonly state: GuestProcessorState;
@@ -20,17 +22,25 @@ export interface X64CpuOptions {
   readonly isHostCall?: (address: GuestAddress) => boolean;
   readonly callbacks?: GuestCallbackTable;
 }
+interface RunOptions { readonly instructionBudget: number; readonly returnAddress: GuestAddress | null; }
 interface CachedInstruction {
   readonly start: bigint;
   readonly decoded: X64DecodedInstruction;
   readonly plan: X64SemanticPlan | null;
   readonly integer: X64IntegerPlan | null;
+  readonly managedEligible: boolean;
   block: SemanticBlock | null;
+  managedBlock: ManagedBlock | null;
   unhookedRevision: symbol | null | undefined;
 }
 interface SemanticBlock {
   readonly revision: symbol | null;
   readonly instructions: readonly CachedInstruction[];
+}
+interface ManagedBlock {
+  readonly revision: symbol | null;
+  readonly steps: readonly X64IntegerStep[];
+  readonly unchanged: () => boolean;
 }
 const arithmetic: readonly AluOperation[] = ["add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"];
 const shifts: readonly ShiftOperation[] = ["rol", "ror", "rcl", "rcr", "shl", "shr", "shl", "sar"];
@@ -43,6 +53,7 @@ export class X64Cpu implements GuestCpu {
   readonly #instructions = new Map<bigint, CachedInstruction>();
   readonly #callbacks: GuestCallbackTable | null;
   readonly #blocksAllowed: boolean;
+  readonly #managedMemory: SparseGuestMemory | null;
   constructor(options: X64CpuOptions) {
     if (options.state.architecture !== "x86-64" || options.memory.pointerBytes !== 8) throw new RangeError("X64Cpu requires x86-64 processor state and 64-bit guest memory");
     this.state = options.state;
@@ -50,14 +61,26 @@ export class X64Cpu implements GuestCpu {
     if (options.callbacks !== undefined && (options.callbacks.memory !== options.memory || options.isHostCall !== undefined))
       throw new RangeError("X64Cpu callback table must exclusively own this memory's instruction entries");
     this.#callbacks = options.callbacks ?? null;
+    this.#managedMemory = managedGuestProcessor(options.state) !== null && SparseGuestMemory.managed(options.memory)
+      && options.isHostCall === undefined && (options.callbacks === undefined || GuestCallbackTable.managed(options.callbacks)) ? options.memory : null;
+    if (this.#managedMemory !== null) {
+      Object.defineProperty(this, "state", { writable: false, configurable: false });
+      Object.defineProperty(this, "memory", { writable: false, configurable: false });
+    }
     this.#blocksAllowed = options.isHostCall === undefined;
     this.#isHostCall = options.isHostCall ?? (options.callbacks === undefined ? () => false : address => options.callbacks?.enter(address) === true);
   }
 
-  run(options: { readonly instructionBudget: number; readonly returnAddress: GuestAddress | null }): GuestExecutionStop {
+  run(options: RunOptions): GuestExecutionStop {
     if (!Number.isSafeInteger(options.instructionBudget) || options.instructionBudget < 0) throw new RangeError("Instruction budget must be a nonnegative safe integer");
     if (options.returnAddress !== null && options.returnAddress.addressSpace !== this.memory.addressSpace) throw new RangeError("Return address belongs to another guest address space");
     const kernel = X64IntegerKernel.create(this.state, this.memory);
+    const managed = this.#managedMemory === null ? null : managedGuestProcessor(this.state);
+    return managed !== null && kernel !== null && this.#managedMemory !== null
+      ? this.#runManaged(options, kernel, this.#managedMemory, managed.registers) : this.#runGeneric(options, kernel);
+  }
+
+  #runGeneric(options: RunOptions, kernel: X64IntegerKernel | null): GuestExecutionStop {
     let checkpoint: Uint8Array | undefined;
     let retainedCursor: X64DecodeCursor | null = null;
     let block: SemanticBlock | null = null, blockIndex = 0;
@@ -105,7 +128,12 @@ export class X64Cpu implements GuestCpu {
             const prepared = cursor.cache();
             if (this.#instructions.size >= 32768) this.#instructions.clear();
             if (prepared === null || cursor.start !== start) this.#instructions.delete(start);
-            else this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer: cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan), block: null, unhookedRevision: undefined });
+            else {
+              const integer = cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan);
+              this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer,
+                managedEligible: integer !== null && !integer.original.endsBlock && x64IntegerBlockSafe(integer),
+                block: null, managedBlock: null, unhookedRevision: undefined });
+            }
           }
         }
         this.state.instructionPointer = flow.kind === "branch" ? flow.target : nextIP;
@@ -132,6 +160,132 @@ export class X64Cpu implements GuestCpu {
     const address = this.#evidenceAddress(this.state.instructionPointer);
     if (options.returnAddress?.byteOffset === address.byteOffset) return { kind: "return", instructions: options.instructionBudget, address };
     return { kind: "budget", instructions: options.instructionBudget };
+  }
+
+  #runManaged(options: RunOptions, kernel: X64IntegerKernel, memory: SparseGuestMemory, bank: IntegerRegisterFile): GuestExecutionStop {
+    const state = this.state, flags = kernel.flags;
+    let checkpoint: Uint8Array | undefined;
+    let retainedCursor: X64DecodeCursor | null = null;
+    let block: SemanticBlock | null = null, blockIndex = 0;
+    for (let instructions = 0; instructions < options.instructionBudget; instructions += 1) {
+      const start = state.instructionPointer;
+      const address = this.#evidenceAddress(start);
+      if (options.returnAddress?.byteOffset === start) return { kind: "return", instructions, address };
+      const revision: symbol | null = this.#callbacks?.entryRevision ?? null;
+      if (block?.revision !== revision || block.instructions[blockIndex]?.start !== start) block = null;
+      let retained: CachedInstruction | undefined = block?.instructions[blockIndex] ?? this.#instructions.get(start);
+      const first = retained;
+      const prepared: ManagedBlock | null = first?.managedEligible !== true ? null : first.managedBlock?.revision === revision
+        ? first.managedBlock : this.#managedBlock(first, revision, memory);
+      if (prepared !== null && !prepared.unchanged()) {
+        if (first !== undefined) first.managedBlock = null;
+      } else if (prepared !== null && bank.attached()) {
+        const result = kernel.executeBlock(prepared.steps, options.instructionBudget - instructions, options.returnAddress?.byteOffset ?? null);
+        instructions += result.instructions;
+        block = null;
+        if (result.kind === "return") return { kind: "return", instructions, address: this.#evidenceAddress(state.instructionPointer) };
+        if (result.kind === "fault") {
+          const error = result.error;
+          if (error instanceof GuestMemoryFault) {
+            const access = error.access === "execute" || error.access === "write" ? error.access : "read";
+            return { kind: "exception", instructions, exception: { kind: "memory", access, address: this.#evidenceAddress(error.address), byteLength: error.byteLength, detail: error.message } };
+          }
+          if (error instanceof X64ProcessorFault) return { kind: "exception", instructions, exception: { kind: "processor", vector: error.vector, errorCode: error.vector === 13 ? 0n : null, instruction: this.#evidenceAddress(state.instructionPointer), detail: error.message } };
+          throw error;
+        }
+        instructions--;
+        continue;
+      }
+      const registers = bank.checkpoint(checkpoint);
+      checkpoint = registers;
+      const lowFlags = flags.lowWord, highFlags = flags.highWord;
+      let cursor: X64DecodeCursor | null = null, preparedInstruction: CachedInstruction | null = null;
+      try {
+        canonicalAddress(start);
+        if (block === null && retained?.plan !== null && retained !== undefined) {
+          block = this.#block(retained, revision); blockIndex = 0;
+        }
+        if (block === null && (retained === undefined || !this.#entryUnhooked(retained, revision))) {
+          if (this.#isHostCall(address)) return { kind: "host-call", instructions, address };
+          // Entry observers can run nested guest calls and replace cached code.
+          retained = this.#instructions.get(start);
+        }
+        const decoded = state.instructionPointer === start && retained !== undefined && retained.decoded.unchanged() ? retained.decoded : null;
+        if (decoded === null && block !== null) {
+          const owner = block.instructions[0];
+          if (owner?.block === block) owner.block = null;
+          block = null;
+        }
+        let flow: Flow, nextIP: bigint;
+        if (decoded !== null && retained?.plan !== null && retained !== undefined && state.instructionPointer === start) {
+          preparedInstruction = retained;
+          flow = retained.integer !== null ? kernel.execute(retained.integer) : executeX64Plan(retained.plan, memory, state);
+          nextIP = retained.plan.nextIP;
+        } else {
+          block = null;
+          if (retainedCursor === null) retainedCursor = new X64DecodeCursor(memory, state, decoded);
+          else retainedCursor.reset(decoded);
+          cursor = retainedCursor;
+          flow = this.#execute(cursor);
+          nextIP = cursor.nextIP;
+          if (decoded === null) {
+            const prepared = cursor.cache();
+            if (this.#instructions.size >= 32768) this.#instructions.clear();
+            if (prepared === null || cursor.start !== start) this.#instructions.delete(start);
+            else {
+              const integer = cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan);
+              this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer,
+                managedEligible: integer !== null && !integer.original.endsBlock && x64IntegerBlockSafe(integer),
+                block: null, managedBlock: null, unhookedRevision: undefined });
+            }
+          }
+        }
+        state.instructionPointer = flow.kind === "branch" ? flow.target : nextIP;
+        if (block !== null) {
+          blockIndex++;
+          if (preparedInstruction?.plan?.endsBlock === true || blockIndex >= block.instructions.length) block = null;
+        }
+        if (flow.kind === "halt") return { kind: "halt", instructions: instructions + 1, address };
+        if (flow.kind === "trap") return { kind: "exception", instructions: instructions + 1, exception: { kind: "processor", vector: flow.vector, errorCode: null, instruction: address, detail: "Software breakpoint" } };
+      } catch (error) {
+        bank.restore(registers);
+        flags.restoreWords(lowFlags, highFlags);
+        state.instructionPointer = start;
+        if (error instanceof GuestMemoryFault) {
+          const access = error.access === "execute" || error.access === "write" ? error.access : "read";
+          return { kind: "exception", instructions, exception: { kind: "memory", access, address: this.#evidenceAddress(error.address), byteLength: error.byteLength, detail: error.message } };
+        }
+        if (error instanceof X64ProcessorFault) return { kind: "exception", instructions, exception: { kind: "processor", vector: error.vector, errorCode: error.vector === 13 ? 0n : null, instruction: address, detail: error.message } };
+        if (error instanceof X64Unsupported) return { kind: "unsupported", instructions, instruction: { address, bytes: new Uint8Array(cursor?.bytes ?? preparedInstruction?.decoded.bytes ?? []), mnemonic: `opcode ${(cursor?.opcode ?? preparedInstruction?.decoded.opcode)?.toString(16) ?? "unknown"}` }, detail: error.message };
+        throw error;
+      }
+    }
+    const address = this.#evidenceAddress(state.instructionPointer);
+    if (options.returnAddress?.byteOffset === address.byteOffset) return { kind: "return", instructions: options.instructionBudget, address };
+    return { kind: "budget", instructions: options.instructionBudget };
+  }
+
+  #managedBlock(first: CachedInstruction, revision: symbol | null, memory: SparseGuestMemory): ManagedBlock | null {
+    if (first.managedBlock?.revision === revision) return first.managedBlock;
+    if (first.integer === null || first.integer.original.endsBlock || !x64IntegerBlockSafe(first.integer)) return null;
+    const second = this.#instructions.get(first.integer.original.nextIP);
+    if (second?.integer === null || second === undefined || !x64IntegerBlockSafe(second.integer)) return null;
+    const steps: X64IntegerStep[] = [], bytes: number[] = [];
+    let current: CachedInstruction | undefined = first, complete = true;
+    while (current?.integer !== null && current !== undefined && x64IntegerBlockSafe(current.integer)) {
+      if (!this.#entryUnhooked(current, revision)) break;
+      steps.push({ start: current.start, integer: current.integer });
+      bytes.push(...current.decoded.bytes);
+      if (current.integer.original.endsBlock || steps.length === 16) break;
+      current = this.#instructions.get(current.integer.original.nextIP);
+      if (current === undefined) complete = false;
+    }
+    if (steps.length < 2) return null;
+    const unchanged = memory.retainExecutableRange(first.start, bytes);
+    if (unchanged === null) return null;
+    const prepared: ManagedBlock = { revision, steps, unchanged };
+    if (complete) first.managedBlock = prepared;
+    return prepared;
   }
 
   #entryUnhooked(instruction: CachedInstruction, revision: symbol | null): boolean {

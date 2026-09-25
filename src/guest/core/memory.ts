@@ -73,6 +73,61 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #lookupOffset = 0;
   readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: (ranges: readonly GuestWrittenRange[]) => void }>();
 
+  static readonly #managed = new WeakSet<MappedGuestMemory>();
+  /** Managed memory pins its implementation while retaining ordinary mapping and observer semantics. */
+  static createManaged(options: SparseGuestMemoryOptions): SparseGuestMemory {
+    const memory = new SparseGuestMemory({ ...options, module: Object.freeze({ ...options.module }) });
+    Object.defineProperties(memory, {
+      pointer: { value: memory.pointer },
+      offset: { value: memory.offset },
+      map: { value: memory.map },
+      allocate: { value: memory.allocate },
+      mapAlias: { value: memory.mapAlias },
+      unmap: { value: memory.unmap },
+      protect: { value: memory.protect },
+      mappings: { value: memory.mappings },
+      check: { value: memory.check },
+      borrow: { value: memory.borrow },
+      copy: { value: memory.copy },
+      fetch: { value: memory.fetch },
+      fetchByte: { value: memory.fetchByte },
+      fetchSequence: { value: memory.fetchSequence },
+      retainExecutableBytes: { value: memory.retainExecutableBytes },
+      retainExecutableRange: { value: memory.retainExecutableRange },
+      write: { value: memory.write },
+      observeWrites: { value: memory.observeWrites },
+      readUint8: { value: memory.readUint8 },
+      readInt8: { value: memory.readInt8 },
+      readUint16: { value: memory.readUint16 },
+      readInt16: { value: memory.readInt16 },
+      readUint32: { value: memory.readUint32 },
+      readInt32: { value: memory.readInt32 },
+      readUint64: { value: memory.readUint64 },
+      readUint64Words: { value: memory.readUint64Words },
+      readInt64: { value: memory.readInt64 },
+      readFloat32: { value: memory.readFloat32 },
+      readFloat64: { value: memory.readFloat64 },
+      readPointer: { value: memory.readPointer },
+      writeUint8: { value: memory.writeUint8 },
+      writeInt8: { value: memory.writeInt8 },
+      writeUint16: { value: memory.writeUint16 },
+      writeInt16: { value: memory.writeInt16 },
+      writeUint32: { value: memory.writeUint32 },
+      writeInt32: { value: memory.writeInt32 },
+      writeUint64: { value: memory.writeUint64 },
+      writeUint64Words: { value: memory.writeUint64Words },
+      writeInt64: { value: memory.writeInt64 },
+      writeFloat32: { value: memory.writeFloat32 },
+      writeFloat64: { value: memory.writeFloat64 },
+      writePointer: { value: memory.writePointer },
+      checkpoint: { value: memory.checkpoint },
+    });
+    Object.freeze(memory);
+    SparseGuestMemory.#managed.add(memory);
+    return memory;
+  }
+  static managed(memory: MappedGuestMemory): memory is SparseGuestMemory { return SparseGuestMemory.#managed.has(memory); }
+
   constructor(options: SparseGuestMemoryOptions) {
     this.module = options.module;
     this.pointerBytes = options.pointerBytes;
@@ -220,6 +275,12 @@ export class SparseGuestMemory implements MappedGuestMemory {
 
   retainExecutableBytes(byteOffset: bigint, bytes: readonly number[]): (() => boolean) | null {
     if (bytes.length === 0 || bytes.length > 15) return null;
+    return this.retainExecutableRange(byteOffset, bytes);
+  }
+
+  /** A block has no external side effects until its next checked execution boundary. */
+  retainExecutableRange(byteOffset: bigint, bytes: readonly number[]): (() => boolean) | null {
+    if (bytes.length === 0) return null;
     const mapping = this.#mappings[this.#firstEndAfter(byteOffset)];
     if (mapping === undefined || byteOffset < mapping.base || !allows(mapping.permissions, "execute")) return null;
     const offset = Number(byteOffset - mapping.base);
