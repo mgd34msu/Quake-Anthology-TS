@@ -44,6 +44,11 @@ export interface X64ModRM {
 }
 interface DecodedOperand { readonly width: GuestIntegerWidth; readonly end: number; readonly value: X64ModRM }
 interface DecodedImmediate { readonly length: number; readonly value: bigint }
+interface DecodeRecords {
+  readonly bytes: number[];
+  readonly operands: (DecodedOperand | undefined)[];
+  readonly immediates: (DecodedImmediate | undefined)[];
+}
 export interface X64DecodedInstruction {
   readonly bytes: readonly number[];
   readonly prefixLength: number;
@@ -54,8 +59,8 @@ export interface X64DecodedInstruction {
   readonly lock: boolean;
   readonly repeat: "none" | "f2" | "f3";
   readonly segment: "fs" | "gs" | null;
-  readonly operands: ReadonlyMap<number, DecodedOperand>;
-  readonly immediates: ReadonlyMap<number, DecodedImmediate>;
+  readonly operands: readonly (DecodedOperand | undefined)[];
+  readonly immediates: readonly (DecodedImmediate | undefined)[];
   readonly unchanged: () => boolean;
 }
 
@@ -94,10 +99,8 @@ export function writeMemory(memory: MappedGuestMemory, address: GuestAddress, wi
 export class X64DecodeCursor {
   readonly start: bigint;
   readonly #fetchNext: (() => number) | null;
-  readonly #bytes: number[] = [];
+  readonly #records: DecodeRecords | null;
   readonly #prefixLength: number;
-  readonly #operands: Map<number, DecodedOperand> | null;
-  readonly #immediates: Map<number, DecodedImmediate> | null;
   #position = 0;
   readonly opcode: number;
   rex: number | null = null;
@@ -109,8 +112,7 @@ export class X64DecodeCursor {
 
   constructor(readonly memory: MappedGuestMemory, readonly state: GuestProcessorState, readonly decoded: X64DecodedInstruction | null = null) {
     this.start = state.instructionPointer;
-    this.#operands = decoded === null ? new Map<number, DecodedOperand>() : null;
-    this.#immediates = decoded === null ? new Map<number, DecodedImmediate>() : null;
+    this.#records = decoded === null ? { bytes: [], operands: [], immediates: [] } : null;
     if (decoded !== null) {
       this.#fetchNext = null;
       this.#prefixLength = this.#position = decoded.prefixLength;
@@ -140,14 +142,19 @@ export class X64DecodeCursor {
     }
     this.#prefixLength = this.#position;
   }
-  get bytes(): readonly number[] { return this.decoded === null ? this.#bytes : this.decoded.bytes.slice(0, this.#position); }
+  get bytes(): readonly number[] {
+    if (this.decoded !== null) return this.decoded.bytes.slice(0, this.#position);
+    if (this.#records === null) throw new Error("Instruction decoding has no byte storage");
+    return this.#records.bytes;
+  }
   cache(): X64DecodedInstruction | null {
     if (this.decoded !== null) return this.decoded;
-    const unchanged = this.memory.retainExecutableBytes(this.start, this.#bytes);
-    if (unchanged === null || this.#operands === null || this.#immediates === null) return null;
-    return { bytes: this.#bytes, prefixLength: this.#prefixLength, opcode: this.opcode, rex: this.rex, operandOverride: this.operandOverride,
+    if (this.#records === null) return null;
+    const unchanged = this.memory.retainExecutableBytes(this.start, this.#records.bytes);
+    if (unchanged === null) return null;
+    return { bytes: this.#records.bytes, prefixLength: this.#prefixLength, opcode: this.opcode, rex: this.rex, operandOverride: this.operandOverride,
       addressOverride: this.addressOverride, lock: this.lock, repeat: this.repeat, segment: this.segment,
-      operands: this.#operands, immediates: this.#immediates, unchanged };
+      operands: this.#records.operands, immediates: this.#records.immediates, unchanged };
   }
   get nextIP(): bigint { return BigInt.asUintN(64, this.start + BigInt(this.#position)); }
   get width(): 16 | 32 | 64 { return ((this.rex ?? 0) & 8) !== 0 ? 64 : this.operandOverride ? 16 : 32; }
@@ -167,14 +174,15 @@ export class X64DecodeCursor {
       return byte;
     }
     const byte = this.#fetchNext === null ? this.memory.fetchByte(canonicalAddress(this.nextIP)) : this.#fetchNext();
-    this.#bytes.push(byte); this.#position++;
+    if (this.#records === null) throw new Error("Instruction decoding has no byte storage");
+    this.#records.bytes.push(byte); this.#position++;
     return byte;
   }
   readUnsigned(byteLength: number): bigint {
-    const start = this.#position, saved = this.decoded?.immediates.get(start);
+    const start = this.#position, saved = this.decoded?.immediates[start];
     if (saved !== undefined && saved.length === byteLength) { this.#position += byteLength; return saved.value; }
     const value = this.#unsigned(byteLength);
-    this.#immediates?.set(start, { length: byteLength, value });
+    if (this.#records !== null) this.#records.immediates[start] = { length: byteLength, value };
     return value;
   }
   #unsigned(byteLength: number): bigint {
@@ -193,10 +201,10 @@ export class X64DecodeCursor {
     return { kind: "register", register: registerName(index), width, highByte: false };
   }
   decodeModRM(width: GuestIntegerWidth): X64ModRM {
-    const start = this.#position, saved = this.decoded?.operands.get(start);
+    const start = this.#position, saved = this.decoded?.operands[start];
     if (saved !== undefined && saved.width === width) { this.#position = saved.end; return saved.value; }
     const value = this.#modRM(width);
-    this.#operands?.set(start, { width, end: this.#position, value });
+    if (this.#records !== null) this.#records.operands[start] = { width, end: this.#position, value };
     return value;
   }
   #modRM(width: GuestIntegerWidth): X64ModRM {

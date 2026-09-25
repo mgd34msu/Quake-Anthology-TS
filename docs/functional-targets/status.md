@@ -67,7 +67,7 @@ These parts describe the remaining implementation; they do not replace the T01â€
 | Target | Remaining part | Completion behavior |
 |---|---|---|
 | T10 | Mod-controlled player view and movement | Declared eye height, stance and movement mode now reach selected movement, camera, weapon placement and prediction with owner lifetime handling. Arbitrary authored body dimensions still need integration through every selected collision and standing policy. |
-| T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 46 seconds; the earlier retained-map read took 51 seconds. Further execution work must retain all entities, source behavior and original save callbacks. |
+| T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 43 seconds; the earlier retained-map read took 51 seconds. Further execution work must retain all entities, source behavior and original save callbacks. |
 
 Shared component teams, scores and objective channels are integrated. Borrowed mutations update original source records/callbacks, retain refusal and actor lifetime, and feed campaign gates and bot goals. Root combined strict/policy and the original Copper workflow (31 assertions) pass. Artifact declarations remain required; no automatic private-layout discovery or primary game-mode replacement is claimed.
 
