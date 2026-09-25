@@ -42,6 +42,18 @@ export function writeBits(value: bigint, byteLength: number): Uint8Array {
   for (let index = 0; index < byteLength; index++) result[index] = Number((value >> BigInt(index * 8)) & 255n);
   return result;
 }
+/** Decode an IEEE binary32 word without rounding its stored significand. */
+export function decodeBinary32(bits: number): BinaryValue {
+  const sign: Sign = (bits >>> 31) === 0 ? 0 : 1;
+  const exponent = (bits >>> 23) & 255, fraction = bits & 0x7fffff;
+  if (exponent === 255) {
+    if (fraction === 0) return { kind: "infinity", sign };
+    return { kind: "nan", sign, payload: BigInt(fraction) << 40n, signaling: (fraction & 0x400000) === 0 };
+  }
+  return { kind: "finite", sign, coefficient: BigInt(exponent === 0 ? fraction : fraction | 0x800000),
+    exponent: (exponent === 0 ? 1 : exponent) - 150, denormal: exponent === 0 && fraction !== 0 };
+}
+
 export function decodeBinary(bits: bigint, width: BinaryWidth): BinaryValue {
   const fractionBits = width === 32 ? 23 : width === 64 ? 52 : 63;
   const storageBits = width === 80 ? 64 : fractionBits;

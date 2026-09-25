@@ -4,7 +4,7 @@ import type { NumericExecutionContext, NumericExecutionResult, NumericOperand } 
 import { NumericFault } from "./contracts.ts";
 import { executeRawSse, prepareRawSse } from "./raw-sse.ts";
 import {
-  arithmetic, compareBinary, convertBinary, decodeBinary, denormalOperand, encodeBinary, formatFor, fromInteger,
+  arithmetic, compareBinary, convertBinary, decodeBinary, decodeBinary32, denormalOperand, encodeBinary, formatFor, fromInteger,
   integerConversion, invalid, precision, readBits, rounding, squareRoot, underflow, writeBits, zero,
 } from "./binary.ts";
 import type { BinaryResult, BinaryValue } from "./binary.ts";
@@ -39,7 +39,9 @@ function signal(context: NumericExecutionContext, flags: number): void {
   if ((flags & ~(state.mxcsr >> 7) & 63) !== 0) throw new NumericFault(19, "Unmasked SIMD floating-point exception");
 }
 function sourceValue(context: NumericExecutionContext, bytes: Uint8Array, width: 32 | 64, offset: number): BinaryValue {
-  const value = decodeBinary(readBits(bytes.subarray(offset, offset + width / 8)), width);
+  const value = width === 32
+    ? decodeBinary32(((bytes[offset] ?? 0) | (bytes[offset + 1] ?? 0) << 8 | (bytes[offset + 2] ?? 0) << 16 | (bytes[offset + 3] ?? 0) << 24) >>> 0)
+    : decodeBinary(readBits(bytes.subarray(offset, offset + 8)), 64);
   return value.kind === "finite" && value.denormal && (context.state.simd.mxcsr & 64) !== 0 ? zero(value.sign) : value;
 }
 function finish(context: NumericExecutionContext, result: BinaryResult): BinaryResult {

@@ -5,7 +5,7 @@ import type { ModuleIdentity } from "../../../src/contracts/execution.ts";
 import { createGuestProcessorState, SparseGuestMemory } from "../../../src/guest/core/index.ts";
 import { executeNumericInstruction, readX87Register, writeX87Return, readX87Return } from "../../../src/guest/floating-point/index.ts";
 import type { NumericInstruction } from "../../../src/guest/floating-point/index.ts";
-import { arithmetic, binary32, binary64, binary80, decodeBinary, encodeBinary, fromInteger, readBits, squareRoot, writeBits } from "../../../src/guest/floating-point/binary.ts";
+import { arithmetic, binary32, binary64, binary80, decodeBinary, decodeBinary32, encodeBinary, fromInteger, readBits, squareRoot, writeBits } from "../../../src/guest/floating-point/binary.ts";
 
 const module: ModuleIdentity = { id: "test:floating-point", artifactPath: "authored-instruction-vectors", revision: "1", digest: createContentDigest("34".repeat(32)) };
 function fixture() {
@@ -212,4 +212,15 @@ test("binary32 arithmetic keeps exact subnormals and signs for cancellation", ()
   expect(sum.flags).toBe(2);
   const cancelled = arithmetic("subtract", fromInteger(1n), fromInteger(1n), binary80, "down");
   expect(encodeBinary(cancelled.value, 80)).toBe(1n << 79n);
+});
+
+
+test("binary32 word decoding matches exact significands, signs and NaN payloads", () => {
+  for (const bits of [0, 1, 0x007fffff, 0x00800000, 0x3f7fffff, 0x3f800000, 0x3f800001, 0x7f7fffff,
+    0x7f800000, 0x7f800001, 0x7fbfffff, 0x7fc00000, 0x7fc12345, 0x7fffffff]) {
+    for (const sign of [0, 0x80000000]) {
+      const word = (bits | sign) >>> 0;
+      expect(decodeBinary32(word)).toEqual(decodeBinary(BigInt(word), 32));
+    }
+  }
 });
