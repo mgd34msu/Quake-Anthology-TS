@@ -133,3 +133,49 @@ test("rerelease source inventory has nineteen localized rows and retains its own
   expect(ops).toContainEqual({ kind: "font-text", x: 402, y: 278, text: "23", alternate: true });
   expect(q2NativeHudOperations({ ...source, stats, inventory, configstrings }, 640, 480, undefined, "layout-overlay", undefined, env)).toEqual([]);
 });
+
+test("canonical inventory uses the same selected identity with each source layout and visibility", () => {
+  const inventory: NonNullable<NativeQ2HudArsenal["inventory"]> = { items: [
+    { item: "q3:weapon/shotgun", label: "Shotgun", count: 1 }, { item: "q3:ammo/shotgun", label: "Shells", count: 42 },
+    { item: "q2:key_blue_key", label: "Blue Key", count: 1 }], selected: "q3:weapon/shotgun" };
+  const arsenal: NativeQ2HudArsenal = { ammo: 42, ammoIcon: null, inventory };
+  for (const base of [frame(), rerelease()]) {
+    const stats = [...base.stats]; stats[13] = 2; stats[12] = 999;
+    const ops = q2NativeHudOperations({ ...base, stats, inventory: [99] }, 640, 480, command => command === "use Shotgun" ? "2" : "", undefined, arsenal, environment());
+    expect(ops.some(op => "text" in op && op.text.includes("Shotgun"))).toBe(true);
+    expect(ops.some(op => "text" in op && op.text.includes("Blue Key"))).toBe(true);
+    expect(ops.some(op => "text" in op && op.text.includes("42"))).toBe(true);
+    if (base.protocol.kind === "q2-classic") expect(ops).toContainEqual({ kind: "text", x: 216, y: 160, text: "     2   1 Shotgun", alternate: false });
+    else expect(ops).toContainEqual({ kind: "font-text", x: 230, y: 158, text: "Shotgun", alternate: true });
+    stats[13] = 0;
+    expect(q2NativeHudOperations({ ...base, stats }, 640, 480, undefined, undefined, arsenal, environment()).some(op => "text" in op && op.text.includes("Shotgun"))).toBe(false);
+  }
+});
+
+
+test("selected item HUD uses canonical art and rerelease name while preserving original visibility and expiry", () => {
+  const selected: NativeQ2HudArsenal = { ammo: null, ammoIcon: null,
+    selectedItem: { label: "$railgun", localizedLabel: "Railgun", icon: { resource: "resource:railgun-owner-icon", aspect: 1 } } };
+  for (const base of [frame(), rerelease()]) {
+    const stats = [...base.stats], configstrings = new Map(base.configstrings);
+    stats[6] = 9;
+    configstrings.set(base.protocol.kind === "q2-classic" ? 553 : 10311, "w_blaster");
+    const snapshot = { ...base, stats, configstrings };
+    const layout = "xl 100 yt 20 if 6 pic 6 endif";
+    expect(q2LayoutOperations(layout, snapshot, 320, 240, selected, environment()))
+      .toEqual([{ kind: "arsenal-picture", x: 100, y: 20, resource: "resource:railgun-owner-icon", aspect: 1 }]);
+    expect(q2LayoutOperations(layout, snapshot, 320, 240, { ...selected, selectedItem: { ...selected.selectedItem, label: "Axe", localizedLabel: "Axe", icon: null } }, environment())).toEqual([]);
+    expect(q2LayoutOperations(layout, snapshot, 320, 240, undefined, environment())).toEqual([{ kind: "picture", x: 100, y: 20, name: "w_blaster" }]);
+    stats[6] = 0;
+    expect(q2LayoutOperations(layout, snapshot, 320, 240, selected, environment())).toEqual([]);
+  }
+  const base = rerelease(), stats = [...base.stats]; stats[51] = 11327;
+  const snapshot = { ...base, stats, configstrings: new Map([[11327, "Blaster"]]) };
+  const layout = "xl 100 yt 20 if 51 loc_stat_rstring 51 endif";
+  expect(q2LayoutOperations(layout, snapshot, 320, 240, selected, environment()))
+    .toEqual([{ kind: "font-text", x: 58, y: 19, text: "Railgun", alternate: false }]);
+  expect(q2LayoutOperations("stat_string 51", snapshot, 320, 240, selected, environment()))
+    .toEqual([{ kind: "font-text", x: 0, y: -1, text: "$railgun", alternate: false }]);
+  stats[51] = 0;
+  expect(q2LayoutOperations(layout, snapshot, 320, 240, selected, environment())).toEqual([]);
+});

@@ -202,7 +202,9 @@ export class Q3SelectedArsenal implements SelectedArsenal {
       ammo: weapon?.ammo == null ? null : { item: weapon.ammo, count: this.options.inventory.count(actor, weapon.ammo) },
       items: Q3_WEAPON_ITEMS.filter(entry => this.options.product === "missionpack" || entry.weapon <= 10).map(entry => {
         const count = entry.ammo === null ? null : this.options.inventory.count(actor, entry.ammo);
-        return { id: entry.item, label: entry.item.slice("q3:weapon/".length), kind: "weapon", sourceOrdinal: entry.weapon,
+        const label = itemList(this.options.product).find(item => item.type === ItemType.IT_WEAPON && item.tag === entry.weapon)?.pickupName;
+        if (label == null) throw new Error("Selected Q3 weapon lacks its original item label");
+        return { id: entry.item, label, kind: "weapon", sourceOrdinal: entry.weapon,
           owned: this.options.inventory.count(actor, entry.item) > 0, hasAmmo: count === null || count > 0, count, warningCount: 0 };
       }) };
   }

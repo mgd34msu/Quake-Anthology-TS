@@ -1297,8 +1297,9 @@ export class Application {
       };
       if (this.sourceCommands === null) commands = new CommandBuffer(options);
       else { program = this.sourceCommands.prepareProgram(options); commands = program.commands; }
+      const worldCommands = ["changelevel", "gamemap", "save", "load"];
       const operatorNames = sourceAdministrationCommandNames(selected.dialect).filter(name =>
-        name !== "sv" && name !== "addlrconcmd" && name !== "dellrconcmd" && name !== "listlrconcmds"
+        !worldCommands.includes(name) && name !== "sv" && name !== "addlrconcmd" && name !== "dellrconcmd" && name !== "listlrconcmds"
         && !(selected.dialect === "q3" && name !== "heartbeat"));
       for (const name of operatorNames) register(commands, name, invocation => {
         if (name === "setmaster" && this.options.dedicated && (selected.dialect === "q2-classic" || selected.dialect === "q2-rerelease"))
@@ -1313,7 +1314,7 @@ export class Application {
         return queue(name, invocation.args, origin.kind === "local-seat" ? origin.seat : null, invocation.source);
       });
       register(commands, "modcmd", command => { this.modCommand(command, simulation); return undefined; });
-      for (const name of ["changelevel", "gamemap"]) register(commands, name, command => queue(name, command.args, null, command.source));
+      for (const name of worldCommands) register(commands, name, command => queue(name, command.args, null, command.source));
       return commands;
     };
     const register = (commands: CommandBuffer, name: string, handler: CommandHandler): void => {
@@ -1327,10 +1328,6 @@ export class Application {
     const prepared = (): PreparedSourceCommands => ({ commands: sourceCommands, program, q2Console, options,
       activate: commands => {
         const disposers = bindings.map(install => install(commands));
-        for (const name of ["save", "load"]) {
-          const handler: CommandHandler = invocation => queue(name, invocation.args, null, invocation.source);
-          if (commands.register(name, handler, saveCommandDocumentation(name))) disposers.push(() => { commands.unregister(name, handler); });
-        }
         return () => { for (const dispose of [...disposers].reverse()) dispose(); };
       } });
     const timeCvars = this.sourceCvars(simulation);
@@ -1361,7 +1358,7 @@ export class Application {
     if (nativeQ2 !== null) {
       const commands = create({ dialect: nativeQ2.edition === "classic" ? "q2-classic" : "q2-rerelease", cvars: nativeQ2.services.options.cvars,
         context: { session: this.session.session, origin: { kind: "server-console" } }, print: text => this.host.print(text) });
-      for (const name of ["quit", "map", "gamemap", "save", "load"]) register(commands, name, invocation => queue(name, invocation.args, null, invocation.source));
+      for (const name of ["quit", "map"]) register(commands, name, invocation => queue(name, invocation.args, null, invocation.source));
       register(commands, "sv", invocation => { if (["addip", "removeip", "listip", "writeip"].includes(invocation.args[0] ?? "")) return queue("sv", invocation.args, null, invocation.source); q2GameCallback(() => nativeQ2.serverCommand(invocation.argv, invocation.argsText)); return undefined; });
       sourceCommands = commands;
       bind(commands, owner => this.bindServerSettingCommand(owner, simulation));

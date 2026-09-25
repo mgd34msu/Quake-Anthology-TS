@@ -120,6 +120,7 @@ export class NativePrimaryCommands {
     }
     return result;
   }
+  sourceItem(item: ItemId): { readonly index: number; readonly address: GuestAddress } | null { return this.items.find(value => value.item === item) ?? null; }
   inventorySlots(): readonly { readonly item: ItemId; readonly index: number; readonly weapon: boolean; readonly ammunition: boolean }[] {
     return this.items.map(({ item, index, weapon, ammunition }) => ({ item, index, weapon, ammunition }));
   }

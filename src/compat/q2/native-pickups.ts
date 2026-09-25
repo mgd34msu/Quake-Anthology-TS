@@ -19,7 +19,7 @@ export interface NativePickupGrant {
     | { readonly kind: "weapon"; readonly ammoReturn: number; readonly settle: number; readonly autoswitch: { readonly entry: number; readonly join: number } };
 }
 export interface NativePickupSupply {
-  owns(actor: ActorId, item: ItemId): boolean;
+  owns(actor: ActorId, item: ItemId, pickup: ActorId): boolean;
 }
 export interface NativePickupSupplyEvaluation {
   readonly offer: PickupSupplyOffer;
@@ -340,7 +340,7 @@ export class NativePrimaryPickups {
         if (this.supplyOwner !== null) {
           const address = this.counter(frame, frame.descriptor);
           projected = { address, previous: memory.readInt32(address) };
-          memory.writeInt32(address, this.supplyOwner.owns(frame.offer.recipient, frame.offer.item) ? 1 : 0);
+          memory.writeInt32(address, this.supplyOwner.owns(frame.offer.recipient, frame.offer.item, frame.offer.pickup) ? 1 : 0);
         }
         remove.push(runner.bindInlineRegion(this.at(frame.grant.recipient.entry), this.at(frame.grant.recipient.join), this.profile.grantSignature.abi, continuation => {
           restore(); this.requireCurrent(frame); return continuation.skip();

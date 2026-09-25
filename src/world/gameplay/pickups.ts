@@ -120,7 +120,11 @@ export class SharedPickupAdmission implements PickupAdmission {
   }
 
   ammo(actor: OwnedActor, offer: PickupAmmoGrant, autoSwitch = true, quantity?: PickupQuantityResolver): boolean {
-    const grants = this.quantities(actor.id, this.resolveAmmo([offer], quantity !== undefined), quantity);
+    return this.grantAmmo(actor, this.resolveAmmo([offer], quantity !== undefined), autoSwitch, quantity);
+  }
+
+  private grantAmmo(actor: OwnedActor, ammo: readonly PickupAmmoGrant[], autoSwitch: boolean, quantity?: PickupQuantityResolver): boolean {
+    const grants = this.quantities(actor.id, ammo, quantity);
     this.requireEntries(actor.id, grants.ammo.map(grant => grant.item));
     const receipt = this.giveAmmo(actor, grants.ammo, grants.exact);
     if (!(grants.accepted ?? receipt.some(grant => grant.given > 0))) return false;
@@ -130,7 +134,12 @@ export class SharedPickupAdmission implements PickupAdmission {
 
   ammoWeapon(actor: OwnedActor, offer: PickupAmmoGrant & { readonly weapon: ItemId }, selection: AmmoWeaponSelection,
     quantity?: PickupQuantityResolver): boolean {
-    const weapons = this.destinations("weapons", offer.weapon), grants = this.quantities(actor.id, this.resolveAmmo([offer], quantity !== undefined), quantity);
+    return this.grantAmmoWeapon(actor, this.destinations("weapons", offer.weapon), this.resolveAmmo([offer], quantity !== undefined), selection, quantity);
+  }
+
+  private grantAmmoWeapon(actor: OwnedActor, weapons: readonly ItemId[], ammo: readonly PickupAmmoGrant[], selection: AmmoWeaponSelection,
+    quantity?: PickupQuantityResolver): boolean {
+    const grants = this.quantities(actor.id, ammo, quantity);
     this.requireEntries(actor.id, [...weapons, ...grants.ammo.map(grant => grant.item)]);
     const receipt = this.giveAmmo(actor, grants.ammo, grants.exact);
     if (!(grants.accepted ?? receipt.some(grant => grant.given > 0))) return false;
@@ -157,13 +166,25 @@ export class SharedPickupAdmission implements PickupAdmission {
     return this.giveCargo(actor, cargo, selection);
   }
 
+  /** A source drop retains the already selected item; it must not expand through source aliases again. */
+  canonical(actor: OwnedActor, offer: PickupSupplyOffer, selection: PickupSelection, quantity?: PickupQuantityResolver): boolean {
+    if (offer.kind === "ammo") return this.grantAmmo(actor, [offer.offer], true, quantity);
+    if (offer.kind === "ammoWeapon") return this.grantAmmoWeapon(actor, [offer.offer.weapon], [offer.offer], { mode: selection, when: "empty-ammo" }, quantity);
+    return this.giveResolvedCargo(actor, [offer.offer.item], offer.offer.ammo, selection, quantity);
+  }
+
   private giveCargo(actor: OwnedActor, cargo: readonly PickupCargoEntry[], selection: PickupSelection, quantity?: PickupQuantityResolver): boolean {
     if (new Set(cargo.map(row => row.item)).size !== cargo.length || cargo.some(row => !Number.isFinite(row.count) || row.kind === "weapon" && row.count !== 1))
       throw new Error("Invalid pickup cargo");
     const weapons = [...new Set(cargo.filter(row => row.kind === "weapon").flatMap(row => this.destinations("weapons", row.item)))];
     const mappedAmmo = this.resolveAmmo(cargo.filter(row => row.kind === "counter").map(row => ({ item: row.item, amount: row.count })), quantity !== undefined);
-    this.requireEntries(actor.id, [...weapons, ...mappedAmmo.map(grant => grant.item)]);
-    const grants = this.quantities(actor.id, mappedAmmo, quantity);
+    return this.giveResolvedCargo(actor, weapons, mappedAmmo, selection, quantity);
+  }
+
+  private giveResolvedCargo(actor: OwnedActor, weapons: readonly ItemId[], ammo: readonly PickupAmmoGrant[], selection: PickupSelection,
+    quantity?: PickupQuantityResolver): boolean {
+    this.requireEntries(actor.id, [...weapons, ...ammo.map(grant => grant.item)]);
+    const grants = this.quantities(actor.id, ammo, quantity);
     for (const weapon of weapons) this.options.inventory.give(actor, weapon, 1);
     this.giveAmmo(actor, grants.ammo, grants.exact);
     if (weapons.length !== 0) this.options.weaponGranted(actor, weapons, selection);

@@ -4,10 +4,12 @@ import type { WeaponReference } from "./weapon-slot.ts";
 import type { ClientId } from "../../../contracts/identity.ts";
 import type { ClassicOriginalSaveFiles, Q2ClassicVisitedLevel } from "../../../persistence/q2-classic-guest.ts";
 import type { ClassicGuestWorld } from "./classic-guest-world.ts";
+import type { DroppedPickupLevels } from "./dropped-pickups.ts";
 
 /** Transferred only after the application commits to retiring the current source world. */
 interface NativeQ2TravelClients {
-  readonly clients: readonly { readonly client: ClientId; readonly phase: "connected" | "active"; readonly handGrenades?: HandGrenadeTravel; readonly weaponSlot?: WeaponReference; readonly selectedArsenal?: SimulationTravel["players"][number]["selectedArsenal"] }[];
+  readonly droppedPickups?: DroppedPickupLevels;
+  readonly clients: readonly { readonly client: ClientId; readonly phase: "connected" | "active"; readonly handGrenades?: HandGrenadeTravel; readonly weaponSlot?: WeaponReference; readonly nativeInventorySelection?: import("../../../contracts/gameplay.ts").ItemId | null; readonly selectedArsenal?: SimulationTravel["players"][number]["selectedArsenal"] }[];
   readonly spawnPoint: string;
 }
 

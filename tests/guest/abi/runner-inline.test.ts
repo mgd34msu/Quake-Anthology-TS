@@ -44,6 +44,18 @@ for (const wide of [false, true]) {
     for (const continuation of retained) expect(() => continuation.skip()).toThrow("active source frame");
     remove(); remove(); expect(f.runner.invoke(f.request)).toEqual({ kind: "int32", value: 7 }); expect(entries).toBe(2);
   });
+  test(`${wide ? "x64" : "i386"} inline admission leaves nested original execution untouched`, () => {
+    const f = fixture(wide);
+    let entries = 0;
+    f.runner.bindInlineRegion(f.at(0x1005n), f.at(0x1008n), f.abi, continuation => {
+      entries++;
+      expect(f.runner.invoke(f.request)).toEqual({ kind: "int32", value: 7 });
+      return continuation.skip();
+    }, () => f.runner.depth === 1);
+    expect(f.runner.invoke(f.request)).toEqual({ kind: "int32", value: 5 });
+    expect(f.runner.invoke(f.request)).toEqual({ kind: "int32", value: 5 });
+    expect(entries).toBe(2); expect(f.runner.depth).toBe(0);
+  });
   test(`${wide ? "x64" : "i386"} inline failure is sticky and consumes the original instruction budget`, () => {
     const f = fixture(wide);
     const remove = f.runner.bindInlineRegion(f.at(0x1005n), f.at(0x1008n), f.abi, continuation => {

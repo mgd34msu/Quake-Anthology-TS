@@ -7,6 +7,23 @@ import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
 import { SharedPickupAdmission } from "../../../src/world/gameplay/pickups.ts";
 
+test("canonical dropped supply preserves one destination and original acceptance", () => {
+  const f = fixture();
+  f.inventory.configure(f.player, { item: "q3:ammo/machinegun", count: 40, capacity: 200 });
+  const supply = new SharedPickupAdmission({ inventory: f.inventory, profile: { id: "test:aliases", weaponOwnership: "all-destinations",
+    ammo: [{ source: "q1:ammo/shells", destinations: ["q3:ammo/shotgun", "q3:ammo/machinegun"] }],
+    weapons: [{ source: "q1:weapon/shotgun", destinations: ["q3:weapon/shotgun"] }] },
+    ammoGranted: () => undefined, weaponGranted: () => undefined });
+  const offer = { kind: "ammo", offer: { item: "q3:ammo/shotgun", amount: 7 } } satisfies import("../../../src/contracts/pickups.ts").PickupSupplyOffer;
+  expect(supply.canonical(f.player, offer, "better", () => ({ amount: 7, accepted: true }))).toBe(true);
+  expect(f.inventory.count(f.player.id, "q3:ammo/shotgun")).toBe(9);
+  expect(f.inventory.count(f.player.id, "q3:ammo/machinegun")).toBe(40);
+  expect(supply.canonical(f.player, offer, "better", () => ({ amount: 0, accepted: false }))).toBe(false);
+  expect(supply.canonical(f.player, { kind: "weapon", offer: { item: "q3:weapon/shotgun", ammo: [] } }, "better")).toBe(true);
+  expect(f.inventory.count(f.player.id, "q3:weapon/shotgun")).toBe(1);
+  f.actors.close();
+});
+
 function fixture() {
   const actors = new SessionActorRegistry(createIdentityOwner("pickup cargo"));
   const player = actors.allocate("q1:world", "q1:player"), pickup = actors.allocate("q1:world", "q1:item_backpack");

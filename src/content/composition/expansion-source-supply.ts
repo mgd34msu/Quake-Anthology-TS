@@ -27,5 +27,12 @@ export function expansionSourceSupply(profile: PickupSupplyProfile): PickupSuppl
       return mapping === undefined || rows.some(row => row.source === source) ? [] : [{ source, destinations: mapping.destinations }];
     }),
   ];
-  return { ...profile, id: `${profile.id}/expansion-sources`, ammo: extend(profile.ammo, ammoAliases), weapons: extend(profile.weapons, weaponAliases) };
+  const ammoOwners = [...profile.ammoOwners ?? []];
+  for (const item of new Set(profile.ammo.flatMap(row => row.destinations))) {
+    if (ammoOwners.some(owner => owner.item === item)) continue;
+    const sources = profile.ammo.filter(row => row.destinations.includes(item));
+    const source = sources.length === 1 ? sources[0]?.source : undefined;
+    if (source !== undefined) ammoOwners.push({ item, source });
+  }
+  return { ...profile, id: `${profile.id}/expansion-sources`, ammoOwners, ammo: extend(profile.ammo, ammoAliases), weapons: extend(profile.weapons, weaponAliases) };
 }

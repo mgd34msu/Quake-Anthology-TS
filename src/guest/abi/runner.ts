@@ -175,7 +175,7 @@ export class GuestCallRunner {
     }
   }
   /** The source adapter qualifies a fixed entry and join against its original artifact. */
-  bindInlineRegion(entry: GuestAddress, join: GuestAddress, abi: GuestCallSignature["abi"], intercept: (continuation: GuestInlineContinuation) => undefined): () => void {
+  bindInlineRegion(entry: GuestAddress, join: GuestAddress, abi: GuestCallSignature["abi"], intercept: (continuation: GuestInlineContinuation) => undefined, accepts: () => boolean = () => true): () => void {
     const { cpu, callbacks } = this.options;
     cpu.memory.check(entry, 1, "execute"); cpu.memory.check(join, 1, "execute");
     if (entry.byteOffset === join.byteOffset || this.#regions.has(entry.byteOffset)) throw new Error("Invalid or occupied inline region");
@@ -183,7 +183,7 @@ export class GuestCallRunner {
     const remove = callbacks.bindEntry(entry, { id: `inline:${entry.byteOffset}`, signature: { abi, parameters: [], result: "void", variadic: false },
       invoke: () => { throw new Error("Inline region cannot be invoked as an ABI callback"); } }, () => {
       const current = this.#active.at(-1), stack = cpu.state.registers.read("rsp", cpu.memory.pointerBytes === 4 ? 32 : 64);
-      return !region.executing.some(frame => frame.call === current && frame.stack === stack);
+      return accepts() && !region.executing.some(frame => frame.call === current && frame.stack === stack);
     });
     this.#regions.set(entry.byteOffset, region);
     return () => { if (this.#regions.get(entry.byteOffset) === region) { this.#regions.delete(entry.byteOffset); remove(); } };

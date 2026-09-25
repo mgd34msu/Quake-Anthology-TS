@@ -65,6 +65,10 @@ export function q2RereleaseLayout(source: string, frame: NativeQ2HudFrame, width
       case "pic": {
         const index = integer(); if (!draw) break;
         if (index === 2 && arsenal !== undefined) { if (arsenal.ammo !== null && arsenal.ammoIcon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.ammoIcon }); break; }
+        if (index === 6 && arsenal?.selectedItem !== undefined) {
+          if (stat(index) !== 0 && arsenal.selectedItem.icon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.selectedItem.icon });
+          break;
+        }
         const value = stat(index); if (value < 0 || value >= config.maxImages) throw new RangeError("Q2 HUD image is outside configstrings");
         picture(frame.configstrings.get(config.images + value) ?? ""); break;
       }
@@ -82,7 +86,8 @@ export function q2RereleaseLayout(source: string, frame: NativeQ2HudFrame, width
       }
       case "stat_string": case "loc_stat_string": case "loc_stat_rstring": case "loc_stat_cstring": case "loc_stat_cstring2": {
         const index = integer(); if (!draw) break;
-        const raw = configStat(index), value = command === "stat_string" ? raw : localized(frame, environment, raw);
+        const selected = index === 51 && stat(index) !== 0 ? arsenal?.selectedItem : undefined;
+        const raw = selected?.label ?? configStat(index), value = command === "stat_string" ? raw : selected?.localizedLabel ?? localized(frame, environment, raw);
         if (command.startsWith("loc_stat_cstring")) centered(value, command.endsWith("2"));
         else text(value, false, x - (command === "loc_stat_rstring" ? measure(value) : 0));
         break;
@@ -180,20 +185,23 @@ export function q2RereleaseLayout(source: string, frame: NativeQ2HudFrame, width
   return out;
 }
 
-export function q2RereleaseInventory(frame: NativeQ2HudFrame, width: number, height: number, environment: NativeQ2HudEnvironment): readonly NativeQ2HudOperation[] {
+export function q2RereleaseInventory(frame: NativeQ2HudFrame, width: number, height: number, environment: NativeQ2HudEnvironment, inventory?: import("../../compat/q2/native-primary-inventory.ts").NativeInventoryReadout): readonly NativeQ2HudOperation[] {
   const out: NativeQ2HudOperation[] = [], config = q2ApplicationLayout(frame.protocol), selected = frame.stats[12] ?? 0;
-  const items = frame.inventory.flatMap((count, index) => count === 0 ? [] : [index]);
-  const selectedRow = frame.inventory.slice(0, Math.max(0, selected)).filter(count => count !== 0).length;
+  const items = inventory?.items.map(row => ({ name: row.label, count: row.count, selected: row.item === inventory.selected }))
+    ?? frame.inventory.flatMap((count, index) => count === 0 ? [] : [{ name: frame.configstrings.get(config.items + index) ?? "", count, selected: index === selected }]);
+  const selectedRow = inventory === undefined
+    ? selected >= 0 && selected < frame.inventory.length ? frame.inventory.slice(0, selected).filter(count => count !== 0).length : 0
+    : Math.max(0, items.findIndex(row => row.selected));
   const top = Math.max(0, Math.min(items.length - 19, selectedRow - 9)), x = Math.trunc(width / 2) - 128, y = Math.trunc(height / 2) - 108;
   out.push({ kind: "picture", x, y: y + 8, name: "inventory" });
   for (const [row, item] of items.slice(top, top + 19).entries()) {
-    const name = localized(frame, environment, frame.configstrings.get(config.items + item) ?? ""), py = y + 27 + row * 8, alternate = item === selected;
+    const name = localized(frame, environment, item.name), py = y + 27 + row * 8, alternate = item.selected;
     if (alternate && ((frame.timeMilliseconds * 10) & 1) !== 0) out.push({ kind: "text", x: x + 14, y: py, text: "\x0f", alternate: false });
     if (environment.useFont) {
-      const count = String(frame.inventory[item] ?? 0), offset = (environment.fontLineHeight - 8) / 2;
+      const count = String(item.count), offset = (environment.fontLineHeight - 8) / 2;
       out.push({ kind: "font-text", x: x + 222 - environment.measure(count).x, y: py - offset, text: count, alternate },
         { kind: "font-text", x: x + 38, y: py - offset, text: name, alternate });
-    } else out.push({ kind: "text", x: x + 22, y: py, text: `${String(frame.inventory[item] ?? 0).padStart(3)} ${name}`, alternate, xor: true });
+    } else out.push({ kind: "text", x: x + 22, y: py, text: `${String(item.count).padStart(3)} ${name}`, alternate, xor: true });
   }
   return out;
 }

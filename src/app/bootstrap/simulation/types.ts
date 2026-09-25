@@ -139,6 +139,7 @@ export interface PlayerUiItem {
 }
 export interface PlayerUi {
   readonly selectedArsenal?: true;
+  readonly nativeInventory?: import("../../../compat/q2/native-primary-inventory.ts").NativeInventoryReadout;
   readonly powerups: readonly import("../../../contracts/gameplay.ts").ActivePowerupTimer[];
   readonly weaponStatus: WeaponHudStatus | null;
   readonly arsenalWarning: ArsenalAmmoWarning;

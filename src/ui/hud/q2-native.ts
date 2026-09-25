@@ -27,6 +27,8 @@ export type NativeQ2HudOperation =
   | { readonly kind: "text"; readonly x: number; readonly y: number; readonly text: string; readonly alternate: boolean; readonly shadow?: boolean; readonly xor?: boolean };
 
 export interface NativeQ2HudArsenal {
+  readonly selectedItem?: { readonly label: string; readonly localizedLabel: string; readonly icon: { readonly resource: ResourceId; readonly aspect: number } | null };
+  readonly inventory?: import("../../compat/q2/native-primary-inventory.ts").NativeInventoryReadout;
   readonly ammo: number | null;
   readonly ammoIcon: { readonly resource: ResourceId; readonly aspect: number } | null;
 }
@@ -71,6 +73,10 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
         const index = integer();
         if (index === 2 && arsenal !== undefined) {
           if (arsenal.ammo !== null && arsenal.ammoIcon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.ammoIcon });
+          break;
+        }
+        if (index === 6 && arsenal?.selectedItem !== undefined) {
+          if (stat(index) !== 0 && arsenal.selectedItem.icon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.selectedItem.icon });
           break;
         }
         const image = stat(index);
@@ -122,20 +128,23 @@ export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, he
   if ((layouts & 2) === 0) return out;
   if (rerelease) {
     if (environment === undefined) throw new Error("Rerelease HUD requires source localization and font services");
-    return [...out, ...q2RereleaseInventory(frame, width, height, environment)];
+    return [...out, ...q2RereleaseInventory(frame, width, height, environment, arsenal?.inventory)];
   }
   const config = q2ApplicationLayout(frame.protocol), selected = frame.stats[12] ?? 0;
-  const items = frame.inventory.flatMap((count, index) => count === 0 ? [] : [index]);
-  const selectedRow = selected >= 0 && selected < frame.inventory.length ? frame.inventory.slice(0, selected).filter(count => count !== 0).length : 0;
+  const items = arsenal?.inventory?.items.map(row => ({ name: row.label, count: row.count, selected: row.item === arsenal.inventory?.selected }))
+    ?? frame.inventory.flatMap((count, index) => count === 0 ? [] : [{ name: frame.configstrings.get(config.items + index) ?? "", count, selected: index === selected }]);
+  const selectedRow = arsenal?.inventory === undefined
+    ? selected >= 0 && selected < frame.inventory.length ? frame.inventory.slice(0, selected).filter(count => count !== 0).length : 0
+    : Math.max(0, items.findIndex(row => row.selected));
   const top = Math.max(0, Math.min(items.length - 17, selectedRow - 8));
   const x = Math.floor((width - 256) / 2), y = Math.floor((height - 240) / 2);
   out.push({ kind: "picture", x, y: y + 8, name: "inventory" },
     { kind: "text", x: x + 24, y: y + 24, text: "hotkey ### item", alternate: false },
     { kind: "text", x: x + 24, y: y + 32, text: "------ --- ----", alternate: false });
   for (const [row, item] of items.slice(top, top + 17).entries()) {
-    const name = frame.configstrings.get(config.items + item) ?? "", py = y + 40 + row * 8;
-    out.push({ kind: "text", x: x + 24, y: py, text: `${binding(`use ${name}`).padStart(6)} ${String(frame.inventory[item] ?? 0).padStart(3)} ${name}`, alternate: item !== selected });
-    if (item === selected && (Math.trunc(frame.timeMilliseconds / 100) & 1) !== 0) out.push({ kind: "text", x: x + 16, y: py, text: "\x0f", alternate: false });
+    const name = item.name, py = y + 40 + row * 8;
+    out.push({ kind: "text", x: x + 24, y: py, text: `${binding(`use ${name}`).padStart(6)} ${String(item.count).padStart(3)} ${name}`, alternate: !item.selected });
+    if (item.selected && (Math.trunc(frame.timeMilliseconds / 100) & 1) !== 0) out.push({ kind: "text", x: x + 16, y: py, text: "\x0f", alternate: false });
   }
   return out;
 }

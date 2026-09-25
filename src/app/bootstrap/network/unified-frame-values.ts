@@ -25,7 +25,12 @@ export function readPlayerView(r: SaveReader): PlayerView {
 }
 export function readPlayerUi(r: SaveReader): PlayerUi {
   const selectedArsenal=optional(r,'selectedArsenal',v=>v.literal(true));
-  return { ...(selectedArsenal===undefined?{}:{selectedArsenal}), health:r.field('health').finite(), armor:readArmor(r.field('armor')), activeWeapon:r.field('activeWeapon').nullable(namespaced),
+  const nativeInventory=optional(r,'nativeInventory',v=>{
+    const presentation=optional(v,'presentation',p=>({source:readProvider(p.field('source')),weapon:namespaced(p.field('weapon')),kind:p.field('kind').choice('weapon','ammunition')}));
+    return {items:v.field('items').list(row=>({item:namespaced(row.field('item')),label:row.field('label').string(),count:row.field('count').integer()})),
+      selected:v.field('selected').nullable(namespaced),...(presentation===undefined?{}:{presentation})};
+  });
+  return { ...(selectedArsenal===undefined?{}:{selectedArsenal}), ...(nativeInventory===undefined?{}:{nativeInventory}), health:r.field('health').finite(), armor:readArmor(r.field('armor')), activeWeapon:r.field('activeWeapon').nullable(namespaced),
     ammo:r.field('ammo').nullable(v=>({item:namespaced(v.field('item')),count:v.field('count').finite()})),
     inventory:r.field('inventory').list(readInventoryEntry), arsenalWarning:r.field('arsenalWarning').choice('none','low','empty'),
     powerups:r.field('powerups').list(v=>({item:namespaced(v.field('item')),label:v.field('label').string(),remainingSeconds:v.field('remainingSeconds').finite()})),
