@@ -88,6 +88,11 @@ export class GuestCallbackTable {
 
   address(id: CallbackId): GuestAddress | null { return this.#byId.get(id)?.address ?? null; }
 
+  hasBoundTrap(byteOffset: bigint): boolean {
+    const entry = this.#byAddress.get(byteOffset);
+    return entry !== undefined && entry.callback !== null && this.#byId.get(entry.id) === entry;
+  }
+
   resolve(address: GuestAddress): GuestHostCallback | null {
     this.memory.check(address, 1, "execute");
     const entry = this.#byAddress.get(address.byteOffset);

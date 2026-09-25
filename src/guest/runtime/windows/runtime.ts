@@ -238,7 +238,7 @@ export class WindowsGuestRuntime implements GuestImportResolver, WindowsServiceH
     patch(config.guardCheckSlot, this.#cfgCheck); patch(config.guardDispatchSlot, this.#cfgDispatch);
   }
   #validateCfg(target: bigint, context: GuestCallContext): void {
-    const valid = this.#cfgTargets.has(target) || this.options.callbacks.checkpoint().some(callback => callback.byteOffset === target && callback.binding === "bound");
+    const valid = this.#cfgTargets.has(target) || this.options.callbacks.hasBoundTrap(target);
     const address = this.memory.pointer(target);
     if (!valid || address === null) throw new UnsupportedWindowsImport("quake-runtime.dll", "control-flow-guard", context, `invalid indirect target 0x${target.toString(16)}`);
     this.memory.check(address, 1, "execute");

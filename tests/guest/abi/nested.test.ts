@@ -58,10 +58,15 @@ for (const abi of abis) test(`${abi.kind}: real CALL/RET instructions nest throu
     },
   };
   const callbackAddress = table.bind(callback);
+  expect(table.hasBoundTrap(callbackAddress.byteOffset)).toBe(true);
+  expect(table.hasBoundTrap(0x1000n)).toBe(false);
   memory.write(guestPointer(memory, 0x1000n), callBytes(abi, callbackAddress, 3));
   memory.write(guestPointer(memory, 0x1100n), callBytes(abi, callbackAddress, 1));
   memory.write(guestPointer(memory, 0x1800n), new Uint8Array([0xcc]));
   memory.protect(guestPointer(memory, 0x1000n), 4096, "read-execute");
+  const retireEntry = table.bindEntry(guestPointer(memory, 0x1800n), callback, () => true);
+  expect(table.hasBoundTrap(0x1800n)).toBe(false);
+  retireEntry();
   const cpu = cpuFor(abi, memory, state, callbackAddress);
   runner = new GuestCallRunner({ cpu, callbacks: table, returnAddress: guestPointer(memory, 0x1800n) });
   const result = runner.invoke({ target: guestPointer(memory, 0x1000n), signature: callback.signature, arguments: [{ kind: "int32", value: 41 }], context, instructionBudget: 100 });
@@ -72,8 +77,10 @@ for (const abi of abis) test(`${abi.kind}: real CALL/RET instructions nest throu
   state.registers.write("rax", 32, 999n); state.simd.xmm.fill(123); restoreAbiProcessorState(state, savedProcessor);
   expect(state.registers.read("rax", 32)).toBe(88n); expect(state.simd.xmm).toEqual(savedProcessor.simd.xmm);
   table.unbind(callback.id);
+  expect(table.hasBoundTrap(callbackAddress.byteOffset)).toBe(false);
   expect(() => runner?.invoke({ target: guestPointer(memory, 0x1000n), signature: callback.signature, arguments: [{ kind: "int32", value: 42 }], context, instructionBudget: 30 })).toThrow("unbound");
   expect(table.bind(callback)).toEqual(callbackAddress);
+  expect(table.hasBoundTrap(callbackAddress.byteOffset)).toBe(true);
 });
 
 test("a real processor exception preserves its guest frame rather than pretending the call returned", () => {
@@ -117,6 +124,7 @@ test("saved raw code and callback identities rebind into a restored address spac
   const restoredCallbackAddress = rebound.address(callback.id);
   if (restoredCallbackAddress === null) throw new Error("Saved callback identity was not rebound");
   expect(restoredCallbackAddress.byteOffset).toBe(oldCallbackAddress.byteOffset);
+  expect(rebound.hasBoundTrap(restoredCallbackAddress.byteOffset)).toBe(true);
   expect(restoredCallbackAddress.addressSpace).not.toBe(oldCallbackAddress.addressSpace);
   const state = stateFor(abi); restoreAbiProcessorState(state, savedProcessor);
   const cpu = cpuFor(abi, restored, state, restoredCallbackAddress);
