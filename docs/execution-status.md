@@ -2,6 +2,8 @@
 
 ## Installed executable and recent fixes
 
+Newer source keeps native integer memory operands as exact unsigned words instead of converting them through BigInt. Addresses and complete-range permission checks remain unchanged; writes still commit before observers run. The same full base1 sample measured 82.23 ms per native call and 90.28 ms per application step, compared with 84.59/92.56 ms previously. Root existing memory/CPU checks passed (46 tests, 1297 assertions), with strict compilation and scoped policy clean. This small measured gain does not close T10 performance. [Source and checks](../.artifacts/resume-20260925/native-integer-memory/frozen/HANDOFF.md).
+
 The native interpreter now executes prepared integer operations with exact pairs of 32-bit words, retaining checked memory access and the original path for custom processor implementations. The full base1 sample measured 84.59 ms per native call and 92.56 ms per application step, down from 93.98/102.17 ms. Register aliases, flags, nested calls and fault recovery passed combined existing checks. Native performance remains open. [Implementation and scope](../.artifacts/resume-20260925/native-integer-kernels/frozen/HANDOFF.md).
 
 Prepared native SIMD moves and bitwise operations now share exact byte operations between initial and cached execution. Floating-point arithmetic and MXCSR handling remain unchanged. The full base1 sample measured a 93.98 ms median native call, versus 97.34 ms before this change; it still exceeds the original 25 ms interval. [Source and bounded checks](../.artifacts/resume-20260925/native-raw-simd/frozen/HANDOFF.md).

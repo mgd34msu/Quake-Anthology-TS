@@ -3,7 +3,7 @@ import type { GuestIntegerWidth, GuestProcessorState, GuestRegister, MappedGuest
 import { SparseGuestMemory } from '../core/memory.ts';
 import { IntegerRegisterFile, ProcessorFlags } from '../core/registers.ts';
 import type { AluOperation } from '../x86/arithmetic.ts';
-import { canonicalAddress, readOperand, writableOperand, writeOperand } from './decoder.ts';
+import { canonicalAddress, operandAddress, writableOperand } from './decoder.ts';
 import type { X64MemoryOperand, X64Operand } from './decoder.ts';
 import { x64Advance, x64Lock } from './plan.ts';
 import type { X64Flow, X64SemanticPlan } from './plan.ts';
@@ -78,6 +78,7 @@ export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | n
 export class X64IntegerKernel {
   #low = 0;
   #high = 0;
+  readonly #memoryWords = { low: 0, high: 0 };
   private constructor(readonly flags: ProcessorFlags, private readonly words: DataView,
     private readonly state: GuestProcessorState, private readonly memory: SparseGuestMemory) {}
 
@@ -124,8 +125,15 @@ export class X64IntegerKernel {
   #read(value: Source, nextIP: bigint): void {
     if (value.kind === 'immediate') { this.#low = value.low; this.#high = value.high; return; }
     if (value.kind === 'memory') {
-      const bits = readOperand(this.memory, this.state, value.source, nextIP);
-      this.#low = Number(bits & 0xffffffffn); this.#high = Number(bits >> 32n);
+      const address = operandAddress(this.memory, this.state, value.source, nextIP);
+      if (value.width === 64) {
+        this.memory.readUint64Words(address, this.#memoryWords);
+        this.#low = this.#memoryWords.low; this.#high = this.#memoryWords.high;
+      } else {
+        this.#low = value.width === 8 ? this.memory.readUint8(address)
+          : value.width === 16 ? this.memory.readUint16(address) : this.memory.readUint32(address);
+        this.#high = 0;
+      }
       return;
     }
     const low = this.words.getUint32(value.offset, true);
@@ -135,8 +143,11 @@ export class X64IntegerKernel {
 
   #write(destination: Operand, nextIP: bigint): void {
     if (destination.kind === 'memory') {
-      const value = destination.width === 64 ? (BigInt(this.#high) << 32n) | BigInt(this.#low) : BigInt(this.#low);
-      writeOperand(this.memory, this.state, destination.source, nextIP, value);
+      const address = operandAddress(this.memory, this.state, destination.source, nextIP, 'write');
+      if (destination.width === 64) this.memory.writeUint64Words(address, this.#low, this.#high);
+      else if (destination.width === 32) this.memory.writeUint32(address, this.#low);
+      else if (destination.width === 16) this.memory.writeUint16(address, this.#low);
+      else this.memory.writeUint8(address, this.#low);
       return;
     }
     const offset = destination.offset;

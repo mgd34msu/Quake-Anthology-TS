@@ -286,6 +286,11 @@ export class SparseGuestMemory implements MappedGuestMemory {
   readUint32(address: GuestAddress): number { const field = this.#readView(address, 4); return field.view.getUint32(field.offset, true); }
   readInt32(address: GuestAddress): number { const field = this.#readView(address, 4); return field.view.getInt32(field.offset, true); }
   readUint64(address: GuestAddress): bigint { const field = this.#readView(address, 8); return field.view.getBigUint64(field.offset, true); }
+  readUint64Words(address: GuestAddress, target: { low: number; high: number }): void {
+    const field = this.#readView(address, 8);
+    const low = field.view.getUint32(field.offset, true), high = field.view.getUint32(field.offset + 4, true);
+    target.low = low; target.high = high;
+  }
   readInt64(address: GuestAddress): bigint { const field = this.#readView(address, 8); return field.view.getBigInt64(field.offset, true); }
   readFloat32(address: GuestAddress): number { const field = this.#readView(address, 4); return field.view.getFloat32(field.offset, true); }
   readFloat64(address: GuestAddress): number { const field = this.#readView(address, 8); return field.view.getFloat64(field.offset, true); }
@@ -299,6 +304,12 @@ export class SparseGuestMemory implements MappedGuestMemory {
   writeUint32(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 4, (view, offset) => view.setUint32(offset, value, true)); }
   writeInt32(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 4, (view, offset) => view.setInt32(offset, value, true)); }
   writeUint64(address: GuestAddress, value: bigint): undefined { return this.#writeScalar(address, 8, (view, offset) => view.setBigUint64(offset, value, true)); }
+  writeUint64Words(address: GuestAddress, low: number, high: number): undefined {
+    const lowWord = low >>> 0, highWord = high >>> 0;
+    return this.#writeScalar(address, 8, (view, offset) => {
+      view.setUint32(offset, lowWord, true); view.setUint32(offset + 4, highWord, true);
+    });
+  }
   writeInt64(address: GuestAddress, value: bigint): undefined { return this.#writeScalar(address, 8, (view, offset) => view.setBigInt64(offset, value, true)); }
   writeFloat32(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 4, (view, offset) => view.setFloat32(offset, value, true)); }
   writeFloat64(address: GuestAddress, value: number): undefined { return this.#writeScalar(address, 8, (view, offset) => view.setFloat64(offset, value, true)); }

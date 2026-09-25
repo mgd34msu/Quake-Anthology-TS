@@ -330,6 +330,7 @@ test("scalar stores preserve encoding and cross-mapping fault atomicity", () => 
     { width: 2, store: () => memory.writeInt16(base, -32769), encode: v => v.setInt16(0, -32769, true) },
     { width: 4, store: () => memory.writeUint32(base, -1), encode: v => v.setUint32(0, -1, true) },
     { width: 8, store: () => memory.writeUint64(base, -1n), encode: v => v.setBigUint64(0, -1n, true) },
+    { width: 8, store: () => memory.writeUint64Words(base, -1, 0x112345678), encode: v => v.setBigUint64(0, 0x12345678ffffffffn, true) },
     { width: 4, store: () => memory.writeFloat32(base, -0), encode: v => v.setFloat32(0, -0, true) },
     { width: 8, store: () => memory.writeFloat64(base, NaN), encode: v => v.setFloat64(0, NaN, true) },
     { width: 8, store: () => memory.writeFloat64(base, Infinity), encode: v => v.setFloat64(0, Infinity, true) },
@@ -337,11 +338,16 @@ test("scalar stores preserve encoding and cross-mapping fault atomicity", () => 
   for (const value of cases) {
     const expected = new Uint8Array(value.width); value.encode(new DataView(expected.buffer)); value.store();
     expect([...memory.copy(base, value.width)]).toEqual([...expected]);
+    if (value.width === 8) {
+      const words = { low: 0, high: 0 }; memory.readUint64Words(base, words);
+      expect((BigInt(words.high) << 32n) | BigInt(words.low)).toBe(new DataView(expected.buffer).getBigUint64(0, true));
+    }
   }
   const before = memory.copy(base, 16); let notifications = 0;
   const remove = memory.observeWrites(base, 16, () => { notifications++; });
   memory.protect(second, 12, "read");
   expect(() => memory.writeUint64(base, 42n)).toThrow(GuestMemoryFault);
+  expect(() => memory.writeUint64Words(base, 42, 43)).toThrow(GuestMemoryFault);
   expect([...memory.copy(base, 16)]).toEqual([...before]); expect(notifications).toBe(0);
   remove();
 });
@@ -390,4 +396,37 @@ test("direct scalar stores retain unaligned float bits and committed observer ag
   expect(errors).toEqual([first, second]);
   expect(observed).toEqual([0x123456789abcdef0n, 0x123456789abcdef0n]);
   expect(memory.readUint64(value)).toBe(0x123456789abcdef0n);
+});
+
+
+test("word pair scalars preserve high-address aliases, committed observers and retired mappings", () => {
+  const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
+  const base = memory.map({ base: 0xffff800000000001n, byteLength: 8, permissions: "read-write" });
+  const alias = memory.mapAlias({ base: 0x20001n, byteLength: 8, permissions: "read-write", source: base });
+  const words = { low: 0, high: 0 }, observed: bigint[] = [];
+  const failure = new Error("observer failure");
+  let nested = false;
+  const remove = memory.observeWrites(base, 8, () => {
+    memory.readUint64Words(alias, words);
+    observed.push((BigInt(words.high) << 32n) | BigInt(words.low));
+    if (!nested) { nested = true; memory.writeUint64Words(alias, 0x76543210, 0xfedcba98); }
+    else throw failure;
+  });
+  expect(() => memory.writeUint64Words(base, 0x89abcdef, 0x1234567)).toThrow(failure);
+  expect(observed).toEqual([0x123456789abcdefn, 0xfedcba9876543210n]);
+  expect(memory.readUint64(base)).toBe(0xfedcba9876543210n);
+  remove();
+  const restored = SparseGuestMemory.restore(module, memory.checkpoint());
+  expect(() => restored.readUint64Words(base, words)).toThrow("another execution owner");
+  restored.readUint64Words(at(restored, base.byteOffset), words);
+  expect(words).toEqual({ low: 0x76543210, high: 0xfedcba98 });
+  memory.protect(memory.offset(base, 4n), 4, "execute");
+  expect(() => memory.readUint64Words(base, words)).toThrow(GuestMemoryFault);
+  expect(words).toEqual({ low: 0x76543210, high: 0xfedcba98 });
+  memory.unmap(base, 8);
+  expect(() => memory.readUint64Words(base, words)).toThrow(GuestMemoryFault);
+  expect(() => memory.writeUint64Words(base, 0, 0)).toThrow(GuestMemoryFault);
+  memory.map({ base: base.byteOffset, byteLength: 8, permissions: "read-write" });
+  memory.readUint64Words(base, words); expect(words).toEqual({ low: 0, high: 0 });
+  memory.readUint64Words(alias, words); expect(words).toEqual({ low: 0x76543210, high: 0xfedcba98 });
 });
