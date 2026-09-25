@@ -483,3 +483,63 @@ test("prepared SIMD retains alignment, fault-before-write and live instruction b
   const missing = run(24n); expect(missing.kind).toBe("exception");
   expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array(16).fill(0xcd));
 });
+
+test('prepared integer kernels match source ALU flags and exact register halves', async () => {
+  const { X64IntegerKernel, prepareX64IntegerPlan } = await import('../../../src/guest/x64/integer-kernel.ts');
+  const { executeX64Plan, makeX64Plan } = await import('../../../src/guest/x64/plan.ts');
+  const { IntegerRegisterFile } = await import('../../../src/guest/core/registers.ts');
+  const operations: readonly import('../../../src/guest/x86/arithmetic.ts').AluOperation[] = ['add', 'adc', 'sub', 'sbb', 'cmp', 'and', 'test', 'or', 'xor'];
+  const widths: readonly import('../../../src/guest/core/contracts.ts').GuestIntegerWidth[] = [8, 16, 32, 64];
+  const source = fixture([0x90]), compiled = fixture([0x90]);
+  const kernel = X64IntegerKernel.create(compiled.state, compiled.memory);
+  if (kernel === null) throw new Error('Standard CPU must admit integer kernels');
+  expect(X64IntegerKernel.create({ ...compiled.state, registers: new IntegerRegisterFile('i386') }, compiled.memory)).toBeNull();
+  const customized = fixture([0x90]), originalRead = customized.state.registers.read.bind(customized.state.registers);
+  Object.defineProperty(customized.state.registers, 'read', { value: originalRead });
+  expect(X64IntegerKernel.create(customized.state, customized.memory)).toBeNull();
+  for (const width of widths) {
+    const sign = 1n << BigInt(width - 1), maximum = (1n << BigInt(width)) - 1n;
+    const edges: readonly (readonly [bigint, bigint])[] = [[maximum, 1n], [sign - 1n, 1n], [sign, maximum], [0n, 1n], [0x1234567887654321n, 0x8765432112345678n]];
+    for (const operation of operations) for (const [left, right] of edges)
+      for (const initialFlags of operation === 'adc' || operation === 'sbb' ? [0x98765432abcdefd6n, 0x98765432abcdefd7n] : [0x98765432abcdefd7n]) {
+      const plan = makeX64Plan({ kind: 'alu', operation,
+        destination: { kind: 'register', register: 'rax', width, highByte: width === 8 },
+        source: { kind: 'register', register: 'rbx', width, highByte: false } }, base + 1n, false);
+      const prepared = prepareX64IntegerPlan(plan);
+      if (prepared === null) throw new Error('Integer plan was not prepared');
+      for (const state of [source.state, compiled.state]) {
+        state.flags.value = initialFlags;
+        state.registers.write('rax', 64, 0xfedcba9876543210n);
+        state.registers.write('rax', width, left, width === 8);
+        state.registers.write('rbx', 64, right);
+      }
+      executeX64Plan(plan, source.memory, source.state); kernel.execute(prepared);
+      expect(compiled.state.registers.checkpoint()).toEqual(source.state.registers.checkpoint());
+      expect(compiled.state.flags.value).toBe(source.state.flags.value);
+    }
+  }
+  const addresses: readonly import('../../../src/guest/x64/decoder.ts').X64MemoryOperand[] = [
+    { kind: 'memory', width: 64, base: 'rax', index: 'rbx', scale: 8n, displacement: -17n, ripRelative: false, addressBits: 64, segment: 'fs' },
+    { kind: 'memory', width: 32, base: 'rax', index: 'rbx', scale: 4n, displacement: 0x80000000n, ripRelative: false, addressBits: 32, segment: null },
+    { kind: 'memory', width: 64, base: null, index: null, scale: 1n, displacement: -0x100000007n, ripRelative: true, addressBits: 64, segment: null },
+  ];
+  for (const address of addresses) {
+    const plan = makeX64Plan({ kind: 'lea', source: address,
+      destination: { kind: 'register', register: 'r8', width: address.width, highByte: false } }, base + 7n, false);
+    const prepared = prepareX64IntegerPlan(plan);
+    if (prepared === null) throw new Error('LEA was not prepared');
+    for (const state of [source.state, compiled.state]) {
+      state.registers.write('rax', 64, 0xffff800012345678n); state.registers.write('rbx', 64, 0xfffffffffffedcban);
+      state.segments.fs.base = 0x1234567890n;
+    }
+    executeX64Plan(plan, source.memory, source.state); kernel.execute(prepared);
+    expect(compiled.state.registers.checkpoint()).toEqual(source.state.registers.checkpoint());
+  }
+  for (let code = 0; code < 16; code++) for (const flags of [0n, 0x8d5n, 0x881n, 0x44n]) {
+    const plan = makeX64Plan({ kind: 'branch', condition: code, displacement: -3n }, base + 7n, false);
+    const prepared = prepareX64IntegerPlan(plan);
+    if (prepared === null) throw new Error('Branch was not prepared');
+    source.state.flags.value = flags; compiled.state.flags.value = flags;
+    expect(kernel.execute(prepared)).toEqual(executeX64Plan(plan, source.memory, source.state));
+  }
+});

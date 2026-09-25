@@ -8,10 +8,10 @@ const registerIndex: Readonly<Record<GuestRegister, number>> = {
   rax: 0, rcx: 1, rdx: 2, rbx: 3, rsp: 4, rbp: 5, rsi: 6, rdi: 7,
   r8: 8, r9: 9, r10: 10, r11: 11, r12: 12, r13: 13, r14: 14, r15: 15,
 };
-const flagMask: Readonly<Record<GuestFlag, bigint>> = {
-  carry: 0x1n, parity: 0x4n, "auxiliary-carry": 0x10n, zero: 0x40n, sign: 0x80n, trap: 0x100n,
-  interrupt: 0x200n, direction: 0x400n, overflow: 0x800n, resume: 0x10000n, "virtual-8086": 0x20000n,
-  "alignment-check": 0x40000n, "virtual-interrupt": 0x80000n, "virtual-interrupt-pending": 0x100000n, identification: 0x200000n,
+const flagMask: Readonly<Record<GuestFlag, number>> = {
+  carry: 0x1, parity: 0x4, "auxiliary-carry": 0x10, zero: 0x40, sign: 0x80, trap: 0x100,
+  interrupt: 0x200, direction: 0x400, overflow: 0x800, resume: 0x10000, "virtual-8086": 0x20000,
+  "alignment-check": 0x40000, "virtual-interrupt": 0x80000, "virtual-interrupt-pending": 0x100000, identification: 0x200000,
 };
 
 /** Physical 64-bit register slots, including the legacy low/high byte aliases. */
@@ -22,6 +22,7 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
     this.#bytes = new Uint8Array(architecture === "i386" ? 64 : 128);
     this.#view = new DataView(this.#bytes.buffer);
   }
+  get integerView(): DataView { return this.#view; }
   read(register: GuestRegister, width: GuestIntegerWidth, highByte = false): bigint {
     const offset = this.#offset(register, width, highByte);
     return BigInt.asUintN(width, this.#view.getBigUint64(offset, true) >> (highByte ? 8n : 0n));
@@ -66,14 +67,28 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
 
 /** Stores all flag bits; instruction and ABI owners apply their own writable-bit masks. */
 export class ProcessorFlags implements GuestFlags {
-  #value: bigint;
-  constructor(value: bigint) { this.#value = BigInt.asUintN(64, value); }
-  get value(): bigint { return this.#value; }
-  set value(value: bigint) { this.#value = BigInt.asUintN(64, value); }
-  get(flag: GuestFlag): boolean { return (this.#value & flagMask[flag]) !== 0n; }
+  #value: bigint | null;
+  #low: number;
+  #high: number;
+  constructor(value: bigint) {
+    this.#value = BigInt.asUintN(64, value);
+    this.#low = Number(this.#value & 0xffffffffn);
+    this.#high = Number(this.#value >> 32n);
+  }
+  get value(): bigint { return this.#value ??= (BigInt(this.#high) << 32n) | BigInt(this.#low); }
+  set value(value: bigint) {
+    this.#value = BigInt.asUintN(64, value);
+    this.#low = Number(this.#value & 0xffffffffn);
+    this.#high = Number(this.#value >> 32n);
+  }
+  get lowWord(): number { return this.#low; }
+  get highWord(): number { return this.#high; }
+  restoreWords(low: number, high: number): void { this.#low = low >>> 0; this.#high = high >>> 0; this.#value = null; }
+  writeLowWord(value: number): void { this.#low = value >>> 0; this.#value = null; }
+  get(flag: GuestFlag): boolean { return (this.#low & flagMask[flag]) !== 0; }
   set(flag: GuestFlag, value: boolean): undefined {
     const mask = flagMask[flag];
-    this.#value = value ? this.#value | mask : this.#value & ~mask;
+    this.writeLowWord(value ? this.#low | mask : this.#low & ~mask);
     return undefined;
   }
 }

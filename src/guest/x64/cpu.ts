@@ -10,6 +10,8 @@ import { canonicalAddress, guestAddress, readMemory, registerName, writeMemory, 
 import type { X64DecodedInstruction, X64Operand } from "./decoder.ts";
 import { executeX64Plan, makeX64Plan, x64Advance as advance, x64Lock } from "./plan.ts";
 import type { X64Flow as Flow, X64PlanOperation, X64SemanticPlan } from "./plan.ts";
+import { prepareX64IntegerPlan, X64IntegerKernel } from './integer-kernel.ts';
+import type { X64IntegerPlan } from './integer-kernel.ts';
 import type { GuestCallbackTable } from "../core/callbacks.ts";
 
 export interface X64CpuOptions {
@@ -22,6 +24,7 @@ interface CachedInstruction {
   readonly start: bigint;
   readonly decoded: X64DecodedInstruction;
   readonly plan: X64SemanticPlan | null;
+  readonly integer: X64IntegerPlan | null;
   block: SemanticBlock | null;
   unhookedRevision: symbol | null | undefined;
 }
@@ -54,6 +57,7 @@ export class X64Cpu implements GuestCpu {
   run(options: { readonly instructionBudget: number; readonly returnAddress: GuestAddress | null }): GuestExecutionStop {
     if (!Number.isSafeInteger(options.instructionBudget) || options.instructionBudget < 0) throw new RangeError("Instruction budget must be a nonnegative safe integer");
     if (options.returnAddress !== null && options.returnAddress.addressSpace !== this.memory.addressSpace) throw new RangeError("Return address belongs to another guest address space");
+    const kernel = X64IntegerKernel.create(this.state, this.memory);
     let checkpoint: Uint8Array | undefined;
     let retainedCursor: X64DecodeCursor | null = null;
     let block: SemanticBlock | null = null, blockIndex = 0;
@@ -63,7 +67,8 @@ export class X64Cpu implements GuestCpu {
       if (options.returnAddress?.byteOffset === start) return { kind: "return", instructions, address };
       const registers = this.state.registers.checkpoint(checkpoint);
       checkpoint = registers;
-      const flags = this.state.flags.value;
+      const flags = kernel === null ? this.state.flags.value : null;
+      const lowFlags = kernel?.flags.lowWord ?? 0, highFlags = kernel?.flags.highWord ?? 0;
       let cursor: X64DecodeCursor | null = null, preparedInstruction: CachedInstruction | null = null;
       try {
         canonicalAddress(start);
@@ -87,7 +92,7 @@ export class X64Cpu implements GuestCpu {
         let flow: Flow, nextIP: bigint;
         if (decoded !== null && retained?.plan !== null && retained !== undefined && this.state.instructionPointer === start) {
           preparedInstruction = retained;
-          flow = executeX64Plan(retained.plan, this.memory, this.state);
+          flow = kernel !== null && retained.integer !== null ? kernel.execute(retained.integer) : executeX64Plan(retained.plan, this.memory, this.state);
           nextIP = retained.plan.nextIP;
         } else {
           block = null;
@@ -100,7 +105,7 @@ export class X64Cpu implements GuestCpu {
             const prepared = cursor.cache();
             if (this.#instructions.size >= 32768) this.#instructions.clear();
             if (prepared === null || cursor.start !== start) this.#instructions.delete(start);
-            else this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, block: null, unhookedRevision: undefined });
+            else this.#instructions.set(start, { start, decoded: prepared, plan: cursor.plan, integer: cursor.plan === null ? null : prepareX64IntegerPlan(cursor.plan), block: null, unhookedRevision: undefined });
           }
         }
         this.state.instructionPointer = flow.kind === "branch" ? flow.target : nextIP;
@@ -112,7 +117,8 @@ export class X64Cpu implements GuestCpu {
         if (flow.kind === "trap") return { kind: "exception", instructions: instructions + 1, exception: { kind: "processor", vector: flow.vector, errorCode: null, instruction: address, detail: "Software breakpoint" } };
       } catch (error) {
         this.state.registers.restore(registers);
-        this.state.flags.value = flags;
+        if (kernel !== null) kernel.flags.restoreWords(lowFlags, highFlags);
+        else if (flags !== null) this.state.flags.value = flags;
         this.state.instructionPointer = start;
         if (error instanceof GuestMemoryFault) {
           const access = error.access === "execute" || error.access === "write" ? error.access : "read";

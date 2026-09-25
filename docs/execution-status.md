@@ -2,6 +2,8 @@
 
 ## Installed executable and recent fixes
 
+The native interpreter now executes prepared integer operations with exact pairs of 32-bit words, retaining checked memory access and the original path for custom processor implementations. The full base1 sample measured 84.59 ms per native call and 92.56 ms per application step, down from 93.98/102.17 ms. Register aliases, flags, nested calls and fault recovery passed combined existing checks. Native performance remains open. [Implementation and scope](../.artifacts/resume-20260925/native-integer-kernels/frozen/HANDOFF.md).
+
 Prepared native SIMD moves and bitwise operations now share exact byte operations between initial and cached execution. Floating-point arithmetic and MXCSR handling remain unchanged. The full base1 sample measured a 93.98 ms median native call, versus 97.34 ms before this change; it still exceeds the original 25 ms interval. [Source and bounded checks](../.artifacts/resume-20260925/native-raw-simd/frozen/HANDOFF.md).
 
 Native entity publication now reads fresh field subsets and reuses each decoded state. Public reads retain read-only mapping support and exact source values. The same full base1 workload reduced the complete application-step median from 117.77 to 105.36 ms; the original native call itself stayed about 97 ms. Root strict/policy and the existing source-services check pass. [Implementation and scope](../.artifacts/resume-20260925/native-field-reads/frozen/HANDOFF.md).
