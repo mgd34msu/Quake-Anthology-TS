@@ -15,6 +15,7 @@ export interface X64CpuOptions {
 }
 type Flow = { readonly kind: "advance" } | { readonly kind: "branch"; readonly target: bigint }
   | { readonly kind: "halt" } | { readonly kind: "trap"; readonly vector: number };
+const advance: Flow = { kind: "advance" };
 const arithmetic: readonly AluOperation[] = ["add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"];
 const shifts: readonly ShiftOperation[] = ["rol", "ror", "rcl", "rcr", "shl", "shr", "shl", "sar"];
 
@@ -116,14 +117,14 @@ export class X64Cpu implements GuestCpu {
         const source = form < 2 ? decoded.reg : decoded.rm;
         this.#binary(cursor, operation, destination, cursor.read(source));
       } else this.#binary(cursor, operation, cursor.register(0, bits), cursor.immediate(bits));
-      return { kind: "advance" };
+      return advance;
     }
-    if (op >= 0x50 && op <= 0x57) { this.#lock(cursor, null, false); this.#push(this.state.registers.read(registerName(op - 0x50 + cursor.rexB), cursor.stackWidth), cursor.stackWidth); return { kind: "advance" }; }
-    if (op >= 0x58 && op <= 0x5f) { this.#lock(cursor, null, false); this.state.registers.write(registerName(op - 0x58 + cursor.rexB), cursor.stackWidth, this.#pop(cursor.stackWidth)); return { kind: "advance" }; }
+    if (op >= 0x50 && op <= 0x57) { this.#lock(cursor, null, false); this.#push(this.state.registers.read(registerName(op - 0x50 + cursor.rexB), cursor.stackWidth), cursor.stackWidth); return advance; }
+    if (op >= 0x58 && op <= 0x5f) { this.#lock(cursor, null, false); this.state.registers.write(registerName(op - 0x58 + cursor.rexB), cursor.stackWidth, this.#pop(cursor.stackWidth)); return advance; }
     if (op >= 0x70 && op <= 0x7f) {
       this.#lock(cursor, null, false);
       const displacement = cursor.readSigned(1);
-      return condition(op & 15, this.state.flags) ? this.#branch(cursor.nextIP + displacement) : { kind: "advance" };
+      return condition(op & 15, this.state.flags) ? this.#branch(cursor.nextIP + displacement) : advance;
     }
     if (op >= 0x90 && op <= 0x97) {
       this.#lock(cursor, null, false);
@@ -134,16 +135,16 @@ export class X64Cpu implements GuestCpu {
         cursor.write(other, this.state.registers.read("rax", width));
         this.state.registers.write("rax", width, value);
       }
-      return { kind: "advance" };
+      return advance;
     }
     if (op >= 0xb0 && op <= 0xbf) {
       this.#lock(cursor, null, false);
       const bits = op < 0xb8 ? 8 : width;
       const value = cursor.readUnsigned(bits / 8);
       cursor.write(cursor.register((op & 7) + cursor.rexB, bits), value);
-      return { kind: "advance" };
+      return advance;
     }
-    if (op >= 0xd8 && op <= 0xdf) { this.#numeric(cursor, null); return { kind: "advance" }; }
+    if (op >= 0xd8 && op <= 0xdf) { this.#numeric(cursor, null); return advance; }
     switch (op) {
       case 0x0f: return this.#extended(cursor);
       case 0x63: {
@@ -151,20 +152,20 @@ export class X64Cpu implements GuestCpu {
         const decoded = cursor.decodeModRM(width === 16 ? 16 : 32);
         const value = BigInt.asIntN(decoded.rm.width, cursor.read(decoded.rm));
         cursor.write(cursor.register(decoded.registerIndex, width), value);
-        return { kind: "advance" };
+        return advance;
       }
       case 0x68: case 0x6a: {
         this.#lock(cursor, null, false);
         const value = cursor.readSigned(op === 0x6a ? 1 : cursor.stackWidth === 16 ? 2 : 4);
         this.#push(value, cursor.stackWidth);
-        return { kind: "advance" };
+        return advance;
       }
       case 0x69: case 0x6b: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM(width);
         const immediate = op === 0x6b ? cursor.readSigned(1) : cursor.immediate(width);
         cursor.write(decoded.reg, signedMultiply(width, cursor.read(decoded.rm), immediate, this.state.flags));
-        return { kind: "advance" };
+        return advance;
       }
       case 0x80: case 0x81: case 0x83: {
         const decoded = cursor.decodeModRM(op === 0x80 ? 8 : width);
@@ -172,12 +173,12 @@ export class X64Cpu implements GuestCpu {
         if (operation === undefined) throw new X64ProcessorFault(6, "Invalid immediate operation");
         const immediate = op === 0x83 ? cursor.readSigned(1) : cursor.immediate(decoded.rm.width);
         this.#binary(cursor, operation, decoded.rm, immediate);
-        return { kind: "advance" };
+        return advance;
       }
       case 0x84: case 0x85: {
         const decoded = cursor.decodeModRM(op === 0x84 ? 8 : width);
         this.#binary(cursor, "test", decoded.rm, cursor.read(decoded.reg));
-        return { kind: "advance" };
+        return advance;
       }
       case 0x86: case 0x87: {
         const decoded = cursor.decodeModRM(op === 0x86 ? 8 : width);
@@ -186,20 +187,20 @@ export class X64Cpu implements GuestCpu {
         const value = cursor.read(decoded.rm);
         cursor.write(decoded.rm, cursor.read(decoded.reg));
         cursor.write(decoded.reg, value);
-        return { kind: "advance" };
+        return advance;
       }
       case 0x88: case 0x89: case 0x8a: case 0x8b: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM((op & 1) === 0 ? 8 : width);
         cursor.write(op < 0x8a ? decoded.rm : decoded.reg, cursor.read(op < 0x8a ? decoded.reg : decoded.rm));
-        return { kind: "advance" };
+        return advance;
       }
       case 0x8d: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM(width);
         if (decoded.rm.kind !== "memory") throw new X64ProcessorFault(6, "LEA requires a memory addressing form");
         cursor.write(decoded.reg, cursor.effectiveOffset(decoded.rm));
-        return { kind: "advance" };
+        return advance;
       }
       case 0x8f: {
         this.#lock(cursor, null, false);
@@ -207,31 +208,31 @@ export class X64Cpu implements GuestCpu {
         if (decoded.extension !== 0) throw new X64Unsupported(`POP/XOP group /${decoded.extension}`);
         const value = this.#pop(cursor.stackWidth);
         cursor.write(decoded.rm, value);
-        return { kind: "advance" };
+        return advance;
       }
       case 0x98: {
         this.#lock(cursor, null, false);
         const sourceWidth = width === 64 ? 32 : width === 32 ? 16 : 8;
         this.state.registers.write("rax", width, BigInt.asIntN(sourceWidth, this.state.registers.read("rax", sourceWidth)));
-        return { kind: "advance" };
+        return advance;
       }
       case 0x99: {
         this.#lock(cursor, null, false);
         const value = BigInt.asIntN(width, this.state.registers.read("rax", width)) < 0n ? -1n : 0n;
         this.state.registers.write("rdx", width, value);
-        return { kind: "advance" };
+        return advance;
       }
-      case 0x9b: this.#numeric(cursor, null); return { kind: "advance" };
-      case 0x9c: this.#lock(cursor, null, false); this.#push(this.state.flags.value & ~0x30000n, cursor.stackWidth); return { kind: "advance" };
+      case 0x9b: this.#numeric(cursor, null); return advance;
+      case 0x9c: this.#lock(cursor, null, false); this.#push(this.state.flags.value & ~0x30000n, cursor.stackWidth); return advance;
       case 0x9d: {
         this.#lock(cursor, null, false);
         const value = this.#pop(cursor.stackWidth);
         const mask = cursor.stackWidth === 16 ? 0x4dd5n : 0x244dd5n;
         this.state.flags.value = (this.state.flags.value & ~mask & ~0x10000n) | (value & mask) | 2n;
-        return { kind: "advance" };
+        return advance;
       }
-      case 0x9e: this.#lock(cursor, null, false); this.state.flags.value = (this.state.flags.value & ~0xd5n) | (this.state.registers.read("rax", 8, true) & 0xd5n) | 2n; return { kind: "advance" };
-      case 0x9f: this.#lock(cursor, null, false); this.state.registers.write("rax", 8, (this.state.flags.value & 0xd5n) | 2n, true); return { kind: "advance" };
+      case 0x9e: this.#lock(cursor, null, false); this.state.flags.value = (this.state.flags.value & ~0xd5n) | (this.state.registers.read("rax", 8, true) & 0xd5n) | 2n; return advance;
+      case 0x9f: this.#lock(cursor, null, false); this.state.registers.write("rax", 8, (this.state.flags.value & 0xd5n) | 2n, true); return advance;
       case 0xa0: case 0xa1: case 0xa2: case 0xa3: {
         this.#lock(cursor, null, false);
         const bits = (op & 1) === 0 ? 8 : width;
@@ -240,13 +241,13 @@ export class X64Cpu implements GuestCpu {
         const address = guestAddress(this.memory, raw + segmentBase, op < 0xa2 ? "read" : "write");
         if (op < 0xa2) this.state.registers.write("rax", bits, readMemory(this.memory, address, bits));
         else writeMemory(this.memory, address, bits, this.state.registers.read("rax", bits));
-        return { kind: "advance" };
+        return advance;
       }
       case 0xa4: case 0xa5: case 0xa6: case 0xa7: case 0xaa: case 0xab: case 0xac: case 0xad: case 0xae: case 0xaf: return this.#string(cursor);
       case 0xa8: case 0xa9: {
         const bits = op === 0xa8 ? 8 : width;
         this.#binary(cursor, "test", cursor.register(0, bits), cursor.immediate(bits));
-        return { kind: "advance" };
+        return advance;
       }
       case 0xc0: case 0xc1: case 0xd0: case 0xd1: case 0xd2: case 0xd3: {
         const bits = (op & 1) === 0 ? 8 : width;
@@ -257,7 +258,7 @@ export class X64Cpu implements GuestCpu {
         if (operation === undefined) throw new X64ProcessorFault(6, "Invalid shift group");
         cursor.writable(decoded.rm);
         cursor.write(decoded.rm, shift(operation, bits, cursor.read(decoded.rm), count, this.state.flags));
-        return { kind: "advance" };
+        return advance;
       }
       case 0xc2: case 0xc3: {
         this.#lock(cursor, null, false);
@@ -273,13 +274,13 @@ export class X64Cpu implements GuestCpu {
         if (decoded.extension !== 0) throw new X64Unsupported(`MOV/transactional group /${decoded.extension}`);
         const value = cursor.immediate(decoded.rm.width);
         cursor.write(decoded.rm, value);
-        return { kind: "advance" };
+        return advance;
       }
       case 0xc9: {
         this.#lock(cursor, null, false);
         this.state.registers.write("rsp", 64, this.state.registers.read("rbp", 64));
         this.state.registers.write("rbp", cursor.stackWidth, this.#pop(cursor.stackWidth));
-        return { kind: "advance" };
+        return advance;
       }
       case 0xcc: this.#lock(cursor, null, false); return { kind: "trap", vector: 3 };
       case 0xcd: {
@@ -293,7 +294,7 @@ export class X64Cpu implements GuestCpu {
         let count = this.state.registers.read("rcx", cursor.addressBits);
         if (op !== 0xe3) { count = BigInt.asUintN(cursor.addressBits, count - 1n); this.state.registers.write("rcx", cursor.addressBits, count); }
         const taken = op === 0xe3 ? count === 0n : count !== 0n && (op === 0xe2 || this.state.flags.get("zero") === (op === 0xe1));
-        return taken ? this.#branch(cursor.nextIP + displacement) : { kind: "advance" };
+        return taken ? this.#branch(cursor.nextIP + displacement) : advance;
       }
       case 0xe8: case 0xe9: case 0xeb: {
         this.#lock(cursor, null, false);
@@ -303,12 +304,12 @@ export class X64Cpu implements GuestCpu {
         return flow;
       }
       case 0xf4: this.#lock(cursor, null, false); throw new X64ProcessorFault(13, "HLT is privileged in the user-mode guest");
-      case 0xf5: this.#lock(cursor, null, false); this.state.flags.set("carry", !this.state.flags.get("carry")); return { kind: "advance" };
+      case 0xf5: this.#lock(cursor, null, false); this.state.flags.set("carry", !this.state.flags.get("carry")); return advance;
       case 0xf6: case 0xf7: return this.#unary(cursor);
-      case 0xf8: this.#lock(cursor, null, false); this.state.flags.set("carry", false); return { kind: "advance" };
-      case 0xf9: this.#lock(cursor, null, false); this.state.flags.set("carry", true); return { kind: "advance" };
-      case 0xfc: this.#lock(cursor, null, false); this.state.flags.set("direction", false); return { kind: "advance" };
-      case 0xfd: this.#lock(cursor, null, false); this.state.flags.set("direction", true); return { kind: "advance" };
+      case 0xf8: this.#lock(cursor, null, false); this.state.flags.set("carry", false); return advance;
+      case 0xf9: this.#lock(cursor, null, false); this.state.flags.set("carry", true); return advance;
+      case 0xfc: this.#lock(cursor, null, false); this.state.flags.set("direction", false); return advance;
+      case 0xfd: this.#lock(cursor, null, false); this.state.flags.set("direction", true); return advance;
       case 0xfe: case 0xff: return this.#group5(cursor);
       default: throw new X64Unsupported(`Unsupported x86-64 opcode 0x${op.toString(16)}`);
     }
@@ -322,7 +323,7 @@ export class X64Cpu implements GuestCpu {
       const carry = this.state.flags.get("carry");
       cursor.write(decoded.rm, alu(decoded.extension === 0 ? "add" : "sub", decoded.rm.width, cursor.read(decoded.rm), 1n, this.state.flags));
       this.state.flags.set("carry", carry);
-      return { kind: "advance" };
+      return advance;
     }
     this.#lock(cursor, null, false);
     if (cursor.opcode === 0xfe) throw new X64ProcessorFault(6, "Invalid byte INC/DEC group");
@@ -332,20 +333,20 @@ export class X64Cpu implements GuestCpu {
       if (decoded.extension === 2) this.#push(cursor.nextIP, 64);
       return flow;
     }
-    if (decoded.extension === 6) { this.#push(cursor.read({ ...decoded.rm, width: cursor.stackWidth }), cursor.stackWidth); return { kind: "advance" }; }
+    if (decoded.extension === 6) { this.#push(cursor.read({ ...decoded.rm, width: cursor.stackWidth }), cursor.stackWidth); return advance; }
     throw new X64Unsupported(`Far or unsupported FF group /${decoded.extension}`);
   }
 
   #unary(cursor: X64DecodeCursor): Flow {
     const width = cursor.opcode === 0xf6 ? 8 : cursor.width;
     const decoded = cursor.decodeModRM(width);
-    if (decoded.extension === 0) { this.#binary(cursor, "test", decoded.rm, cursor.immediate(width)); return { kind: "advance" }; }
+    if (decoded.extension === 0) { this.#binary(cursor, "test", decoded.rm, cursor.immediate(width)); return advance; }
     if (decoded.extension === 2 || decoded.extension === 3) {
       this.#lock(cursor, decoded.rm, true);
       cursor.writable(decoded.rm);
       const value = cursor.read(decoded.rm);
       cursor.write(decoded.rm, decoded.extension === 2 ? ~value : alu("sub", width, 0n, value, this.state.flags));
-      return { kind: "advance" };
+      return advance;
     }
     this.#lock(cursor, null, false);
     if (decoded.extension === 1) throw new X64ProcessorFault(6, "Undefined F6/F7 group /1");
@@ -361,7 +362,7 @@ export class X64Cpu implements GuestCpu {
       const overflow = signed ? BigInt.asIntN(width, low) !== full : high !== 0n;
       this.state.flags.set("carry", overflow);
       this.state.flags.set("overflow", overflow);
-      return { kind: "advance" };
+      return advance;
     }
     const signed = decoded.extension === 7;
     const rawDividend = width === 8 ? this.state.registers.read("rax", 16) : (this.state.registers.read("rdx", width) << BigInt(width)) | this.state.registers.read("rax", width);
@@ -375,7 +376,7 @@ export class X64Cpu implements GuestCpu {
       this.state.registers.write("rax", 8, quotient);
       this.state.registers.write("rax", 8, remainder, true);
     } else { this.state.registers.write("rax", width, quotient); this.state.registers.write("rdx", width, remainder); }
-    return { kind: "advance" };
+    return advance;
   }
 
   #string(cursor: X64DecodeCursor): Flow {
@@ -384,7 +385,7 @@ export class X64Cpu implements GuestCpu {
     const width = (op & 1) === 0 ? 8 : cursor.width;
     const repeated = cursor.repeat !== "none";
     let count = this.state.registers.read("rcx", cursor.addressBits);
-    if (repeated && count === 0n) return { kind: "advance" };
+    if (repeated && count === 0n) return advance;
     const sourceOffset = this.state.registers.read("rsi", cursor.addressBits);
     const destinationOffset = this.state.registers.read("rdi", cursor.addressBits);
     const delta = BigInt(width / 8) * (this.state.flags.get("direction") ? -1n : 1n);
@@ -402,13 +403,13 @@ export class X64Cpu implements GuestCpu {
     else alu("cmp", width, this.state.registers.read("rax", width), readMemory(this.memory, guestAddress(this.memory, destinationOffset), width), this.state.flags);
     if (readsSource) this.state.registers.write("rsi", cursor.addressBits, sourceOffset + delta);
     if (usesDestination) this.state.registers.write("rdi", cursor.addressBits, destinationOffset + delta);
-    if (!repeated) return { kind: "advance" };
+    if (!repeated) return advance;
     count = BigInt.asUintN(cursor.addressBits, count - 1n);
     this.state.registers.write("rcx", cursor.addressBits, count);
     const compares = op === 0xa6 || op === 0xa7 || op === 0xae || op === 0xaf;
     const keepRepeating = count !== 0n && (!compares || this.state.flags.get("zero") === (cursor.repeat === "f3"));
     // Each repeated element consumes one budget unit and is restartable at its original RIP.
-    return keepRepeating ? { kind: "branch", target: cursor.start } : { kind: "advance" };
+    return keepRepeating ? { kind: "branch", target: cursor.start } : advance;
   }
 
   #extended(cursor: X64DecodeCursor): Flow {
@@ -416,7 +417,7 @@ export class X64Cpu implements GuestCpu {
     if (op >= 0x80 && op <= 0x8f) {
       this.#lock(cursor, null, false);
       const displacement = cursor.readSigned(4);
-      return condition(op & 15, this.state.flags) ? this.#branch(cursor.nextIP + displacement) : { kind: "advance" };
+      return condition(op & 15, this.state.flags) ? this.#branch(cursor.nextIP + displacement) : advance;
     }
     if (op >= 0x40 && op <= 0x4f) {
       this.#lock(cursor, null, false);
@@ -424,13 +425,13 @@ export class X64Cpu implements GuestCpu {
       const source = cursor.read(decoded.rm);
       if (condition(op & 15, this.state.flags)) cursor.write(decoded.reg, source);
       else if (cursor.width === 32) cursor.write(decoded.reg, cursor.read(decoded.reg));
-      return { kind: "advance" };
+      return advance;
     }
     if (op >= 0x90 && op <= 0x9f) {
       this.#lock(cursor, null, false);
       const decoded = cursor.decodeModRM(8);
       cursor.write(decoded.rm, condition(op & 15, this.state.flags) ? 1n : 0n);
-      return { kind: "advance" };
+      return advance;
     }
     if (op >= 0xc8 && op <= 0xcf) {
       this.#lock(cursor, null, false);
@@ -439,7 +440,7 @@ export class X64Cpu implements GuestCpu {
       let value = cursor.read(register), result = 0n;
       for (let byte = 0; byte < width / 8; byte += 1) { result = (result << 8n) | (value & 255n); value >>= 8n; }
       cursor.write(register, result);
-      return { kind: "advance" };
+      return advance;
     }
     switch (op) {
       case 0x0b: throw new X64ProcessorFault(6, "UD2 invalid opcode");
@@ -461,20 +462,20 @@ export class X64Cpu implements GuestCpu {
         else if (leaf === 0x80000001n) { ecx = 1n; edx = 0x20000000n; }
         this.state.registers.write("rax", 32, eax); this.state.registers.write("rbx", 32, ebx);
         this.state.registers.write("rcx", 32, ecx); this.state.registers.write("rdx", 32, edx);
-        return { kind: "advance" };
+        return advance;
       }
       case 0x1e: {
         this.#lock(cursor, null, false);
         const byte = cursor.readByte();
         if (cursor.repeat !== "f3" || byte !== 0xfa) throw new X64Unsupported("Unsupported 0F 1E encoding");
-        return { kind: "advance" };
+        return advance;
       }
-      case 0x1f: this.#lock(cursor, null, false); cursor.decodeModRM(cursor.width); return { kind: "advance" };
+      case 0x1f: this.#lock(cursor, null, false); cursor.decodeModRM(cursor.width); return advance;
       case 0xaf: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM(cursor.width);
         cursor.write(decoded.reg, signedMultiply(cursor.width, cursor.read(decoded.reg), cursor.read(decoded.rm), this.state.flags));
-        return { kind: "advance" };
+        return advance;
       }
       case 0xb6: case 0xb7: case 0xbe: case 0xbf: {
         this.#lock(cursor, null, false);
@@ -482,7 +483,7 @@ export class X64Cpu implements GuestCpu {
         const decoded = cursor.decodeModRM(sourceWidth);
         const source = cursor.read(decoded.rm);
         cursor.write(cursor.register(decoded.registerIndex, cursor.width), op >= 0xbe ? BigInt.asIntN(sourceWidth, source) : source);
-        return { kind: "advance" };
+        return advance;
       }
       case 0xb0: case 0xb1: {
         const decoded = cursor.decodeModRM(op === 0xb0 ? 8 : cursor.width);
@@ -493,7 +494,7 @@ export class X64Cpu implements GuestCpu {
         alu("cmp", decoded.rm.width, accumulator, destination, this.state.flags);
         if (accumulator === destination) cursor.write(decoded.rm, cursor.read(decoded.reg));
         else { cursor.write(decoded.rm, destination); this.state.registers.write("rax", decoded.rm.width, destination); }
-        return { kind: "advance" };
+        return advance;
       }
       case 0xc0: case 0xc1: {
         const decoded = cursor.decodeModRM(op === 0xc0 ? 8 : cursor.width);
@@ -505,7 +506,7 @@ export class X64Cpu implements GuestCpu {
         cursor.write(decoded.reg, destination);
         if (address === null) cursor.write(decoded.rm, sum);
         else writeMemory(this.memory, address, decoded.rm.width, sum);
-        return { kind: "advance" };
+        return advance;
       }
       case 0xbc: case 0xbd: {
         this.#lock(cursor, null, false);
@@ -519,14 +520,14 @@ export class X64Cpu implements GuestCpu {
           else { while (value > 1n) { value >>= 1n; index += 1; } }
           cursor.write(decoded.reg, BigInt(index));
         }
-        return { kind: "advance" };
+        return advance;
       }
       case 0xa3: case 0xab: case 0xb3: case 0xbb: case 0xba: return this.#bit(cursor, op);
       case 0xa4: case 0xa5: case 0xac: case 0xad: return this.#doubleShift(cursor, op);
       default:
         if ((op >= 0x10 && op <= 0x17) || (op >= 0x28 && op <= 0x2f) || (op >= 0x50 && op <= 0x7f) || op === 0xae || op === 0xc2 || (op >= 0xc4 && op <= 0xc6) || op >= 0xd0) {
           this.#numeric(cursor, op);
-          return { kind: "advance" };
+          return advance;
         }
         throw new X64Unsupported(`Unsupported x86-64 0F opcode 0x${op.toString(16)}`);
     }
@@ -548,14 +549,14 @@ export class X64Cpu implements GuestCpu {
     const value = cursor.read(operand), mask = 1n << BigInt(bit);
     this.state.flags.set("carry", (value & mask) !== 0n);
     if (operation !== 4) cursor.write(operand, operation === 5 ? value | mask : operation === 6 ? value & ~mask : value ^ mask);
-    return { kind: "advance" };
+    return advance;
   }
 
   #doubleShift(cursor: X64DecodeCursor, opcode: number): Flow {
     this.#lock(cursor, null, false);
     const decoded = cursor.decodeModRM(cursor.width);
     const count = ((opcode & 1) === 0 ? cursor.readByte() : Number(this.state.registers.read("rcx", 8))) & (cursor.width === 64 ? 63 : 31);
-    if (count === 0) { cursor.read(decoded.rm); return { kind: "advance" }; }
+    if (count === 0) { cursor.read(decoded.rm); return advance; }
     if (count > cursor.width) throw new X64Unsupported("Undefined SHLD/SHRD count exceeds operand width");
     cursor.writable(decoded.rm);
     const destination = cursor.read(decoded.rm), source = cursor.read(decoded.reg);
@@ -566,7 +567,7 @@ export class X64Cpu implements GuestCpu {
     this.state.flags.set("carry", carry);
     if (count === 1) this.state.flags.set("overflow", ((destination ^ result) & (1n << BigInt(cursor.width - 1))) !== 0n);
     cursor.write(decoded.rm, result);
-    return { kind: "advance" };
+    return advance;
   }
 
   #numeric(cursor: X64DecodeCursor, secondaryOpcode: number | null): undefined {

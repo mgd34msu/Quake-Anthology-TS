@@ -72,6 +72,10 @@ export function canonicalAddress(value: bigint): bigint {
 
 export function guestAddress(memory: MappedGuestMemory, raw: bigint, access: "read" | "write" | "execute" = "read"): GuestAddress {
   const value = canonicalAddress(raw);
+  if (value === 0n) throw new GuestMemoryFault("null-address", memory.module, value, 1, access, "null guest address");
+  // The CPU owns this transient operand; checked memory access retains mapping admission.
+  // Public memory.pointer()/offset() still publish frozen pointers.
+  if (memory.pointerBytes === 8) return { kind: "guest-address", addressSpace: memory.addressSpace, byteOffset: value };
   const address = memory.pointer(value);
   if (address === null) throw new GuestMemoryFault("null-address", memory.module, value, 1, access, "null guest address");
   return address;
@@ -237,8 +241,8 @@ export class X64DecodeCursor {
     else if (mode === 2) displacement = this.readSigned(4);
     return { byte, extension, registerIndex, rmIndex, reg, rm: { kind: "memory", width, base, index, scale, displacement, ripRelative, addressBits: this.addressBits, segment: this.segment } };
   }
-  effectiveOffset(operand: X64MemoryOperand, nextIP = this.nextIP): bigint {
-    const base = operand.ripRelative ? nextIP : operand.base === null ? 0n : this.state.registers.read(operand.base, operand.addressBits);
+  effectiveOffset(operand: X64MemoryOperand, nextIP?: bigint): bigint {
+    const base = operand.ripRelative ? nextIP ?? this.nextIP : operand.base === null ? 0n : this.state.registers.read(operand.base, operand.addressBits);
     const index = operand.index === null ? 0n : this.state.registers.read(operand.index, operand.addressBits) * operand.scale;
     return BigInt.asUintN(operand.addressBits, base + index + operand.displacement);
   }
