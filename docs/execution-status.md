@@ -1,5 +1,9 @@
 # Execution status
 
+Installed executable `55c82c88` contains the accepted component client save/cinematic/remote joins, engine command ownership, original shader handling and both Classic Q2 corrections. All 2,793 archived Git blobs match; build/help and compiled original Threewave GL movement, firing, armor, save/load and normal quit passed. The restored frame and source/canonical save values were inspected, and all owned processes exited. Previous `0bc6e85` is preserved. **21/23 targets remain accepted; T10 and T12 are open.** [Delivery receipt](../.artifacts/resume-20260924/delivery-55c82c8/RUNTIME-RECEIPT.md).
+
+The following entries record their source and installed-build status at the time.
+
 Newer source joins exact original component client checkpoints to Application saves and active fullscreen component movies. Unified remote viewers run their own original cgame from admitted source publications. Component configs retain their source cvars/files while engine binding/input commands reach the real input handler. Root's combined candidate passes full production strict, 46-file policy, 25 local checks with 207 assertions and the original-mod two-channel check with 41 assertions. A full foreground remote multiplayer playthrough remains unverified. Native component item adapters and remaining original-primary arsenal integration are still required. **21/23 targets remain accepted; T10/T12 stay open.** Installed executable remains `0bc6e85`. [Combined integration evidence](../.artifacts/resume-20260924/component-runtime-integration/EVIDENCE.md).
 
 Source commit `80ff26fe` also rejects Quake II's rerelease-only `target_poi` under the Classic entity provider, independently of selected movement or character. Both edition cases pass. This was an admission mismatch found during the Classic fidelity audit, not another observed visible feedback leak.

@@ -1,6 +1,6 @@
 # Functional target status
 
-**21/23 targets remain accepted; T10 and T12 are open.** Newer source joins original component clients to shared saves, fullscreen cinematic continuation and unified remote presentation. Engine command ownership preserves bindings/input in component configs. Root combined strict, policy, local save/cinematic checks and an original-mod two-viewer network check pass. Native component item adapters and remaining original-primary arsenal integration are still required. The installed `0bc6e85` executable includes the classic Q2 damage-marker correction; these newer joins are not yet installed. Source also rejects the rerelease-only `target_poi` under Classic. [Current delivery](../execution-status.md).
+**21/23 targets remain accepted; T10 and T12 are open.** Newer source joins original component clients to shared saves, fullscreen cinematic continuation and unified remote presentation. Engine command ownership preserves bindings/input in component configs. Root combined strict, policy, local save/cinematic checks and an original-mod two-viewer network check pass. Native component item adapters and remaining original-primary arsenal integration are still required. The installed `55c82c88` executable includes these joins, the classic Q2 damage-marker correction and Classic rejection of the rerelease-only `target_poi`. Its compiled original Threewave GL movement/fire/armor/save-load-save/quit check passed. [Current delivery](../execution-status.md).
 
 Earlier checkpoints below retain their status at the time.
 
