@@ -1,3 +1,5 @@
+import { resolveItemIcon } from "../../content/item-icon.ts";
+import { sourceItemActionNames } from "../../contracts/source-items.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { InventoryEntry, ItemId } from "../../contracts/gameplay.ts";
 import type { ModCallbackDeclaration, ModCallbackInput, ModQcItems, ModRuntimeValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
@@ -119,7 +121,7 @@ export class QcModItems {
   private readonly watched: readonly { readonly storage: ModQcItems["storage"][number]; readonly words: readonly number[] }[];
   constructor(private readonly definition: ModQcItems, private readonly provider: ProviderId,
     private readonly services: ModHostServices, private readonly media: QcModMedia, private readonly operations: Operations, program: QcProgram) {
-    this.admissions = definition.definitions.map(({ admission, ...item }) => ({ admission, definition: { ...item, source: { provider, content: media.content } } }));
+    this.admissions = definition.definitions.map(({ admission, actions, icon, ...item }) => ({ admission, definition: { ...item, source: { provider, content: media.content }, ...(icon === undefined ? {} : { icon: icon === null ? null : resolveItemIcon(icon, media.content) }), ...(actions === undefined ? {} : { actions: sourceItemActionNames(actions) }) } }));
     this.definitions = this.admissions.map(item => item.definition);
     this.offsets = new Map(program.fields.map(field => [field.name, field.offset]));
     this.watched = definition.storage.map(storage => ({ storage, words: [this.offset(storage.field), ...(storage.kind === "counter" && storage.capacity.kind === "field" ? [this.offset(storage.capacity.field)] : [])] }));
@@ -181,7 +183,11 @@ export class QcModItems {
     const owner = this.services.actors.resolveOwned(actor), client = this.services.clients?.forActor(actor);
     if (owner === null || client == null || this.services.clients?.actor(client)?.equals(actor) !== true) throw new Error("QC items require a live canonical client");
     const reference = this.operations.reference(actor);
-    const lease = this.services.inventory.bindItems(owner, { owner: this.provider, items: this.admissions, state: { read: () => this.read(actor), entry: item => this.entry(actor, item), write: entry => this.write(actor, entry),
+    const lease = this.services.inventory.bindItems(owner, { owner: this.provider, items: this.admissions, invoke: (item, action) => {
+      const current = this.entries.get(actor), call = this.definition.definitions.find(value => value.item === item)?.actions?.[action];
+      if (current === undefined || !this.current(current) || call === undefined) throw new Error("Source item action is no longer admitted");
+      this.invoke(actor, call);
+    }, state: { read: () => this.read(actor), entry: item => this.entry(actor, item), write: entry => this.write(actor, entry),
       mutableCapacity: item => this.definition.storage.some(storage => storage.kind === "counter" && storage.item === item && storage.capacity.kind === "field") } });
     const entry: Entry = { actor: owner, reference, lease, removeWeapon: () => undefined }; this.entries.set(actor, entry);
     try {

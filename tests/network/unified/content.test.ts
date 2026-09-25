@@ -42,6 +42,7 @@ test('malformed identities and noncanonical server mount paths reject before loc
   expect(() => readUnifiedComposition({ ...identity, digest: createContentDigest('f'.repeat(64)) })).toThrow();
   expect(() => readUnifiedComposition({ ...identity, composition: { ...identity.composition, recipe: recipe() } })).toThrow('noncanonical');
   expect(() => readUnifiedComposition({ ...identity, composition: { ...identity.composition, snapshotSchema: 'other:snapshot' } })).toThrow();
+  expect(() => readUnifiedComposition({ ...identity, composition: { ...identity.composition, snapshotSchema: 'qts:snapshot-v6' } })).toThrow();
   expect(() => unifiedResourceId({ content: recipe().map.geometryContent, path: '../escape', digest: createContentDigest('0'.repeat(64)), byteLength: 1 })).toThrow();
 });
 

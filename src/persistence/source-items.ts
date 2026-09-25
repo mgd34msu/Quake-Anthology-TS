@@ -1,3 +1,4 @@
+import { readSourceItemIcon } from "../content/item-icon.ts";
 import { readHeldWeaponDeclaration } from "../content/held-weapon.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ProviderCheckpoint, SaveImage, SavedActorId } from "../contracts/session.ts";
@@ -29,7 +30,10 @@ export function captureSourceItems(actors: SessionActorRegistry, inventory: Shar
   return { provider: "world:gameplay", schema, version: 1, bytes: encodeCheckpointValue(entries) };
 }
 function definition(reader: SaveReader): SourceItemDefinition {
-  const common = { item: namespaced(reader.field("item")), label: reader.field("label").string(), source: readProvider(reader.field("source")) };
+  const source = readProvider(reader.field("source"));
+  const common = { item: namespaced(reader.field("item")), label: reader.field("label").string(), source,
+    ...(reader.field("icon").value === undefined ? {} : { icon: reader.field("icon").nullable(value => readSourceItemIcon(value, source.content)) }), ...(reader.field("actions").value === undefined ? {} : { actions: reader.field("actions").list(value => value.choice("use", "drop")) }) };
+  if (common.actions !== undefined && (common.actions.length === 0 || new Set(common.actions).size !== common.actions.length)) return reader.fail("Source item actions are empty or duplicated");
   if (common.label.length === 0) return reader.fail("source item label is empty");
   switch (reader.field("kind").choice("counter", "weapon")) {
     case "counter": return { ...common, kind: "counter" };

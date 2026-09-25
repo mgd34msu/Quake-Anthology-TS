@@ -1,3 +1,5 @@
+import { readItemIconDeclaration } from "../item-icon.ts";
+import { readItemActions } from "./item-actions.ts";
 import { readHeldWeaponDeclaration } from "../held-weapon.ts";
 import type { NativeModItems, NativeItemStorage, NativeItemTest } from "../../contracts/native-mod-items.ts";
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
@@ -144,7 +146,7 @@ function nativeItems(reader: SaveReader): NativeModItems {
     ? { kind: "pointer", field: pointer(value.field("field")), value: value.field("value").nullable(address) }
     : { kind: "scalar", field: armorField(value.field("field")), mask: value.field("mask").nullable(value => value.integer(0)), comparison: value.field("comparison").choice("equals", "at-most"), value: value.field("value").number() };
   return { definitions: reader.field("definitions").list(value => {
-    const common = { item: namespaced(value.field("item")), label: value.field("label").string(), admission: value.field("admission").choice("add", "replace-primary") };
+    const common = { item: namespaced(value.field("item")), label: value.field("label").string(), ...(value.field("icon").value === undefined ? {} : { icon: value.field("icon").nullable(readItemIconDeclaration) }), admission: value.field("admission").choice("add", "replace-primary"), ...(value.field("actions").value === undefined ? {} : { actions: readItemActions(value.field("actions"), sourceCall) }) };
     return value.field("kind").choice("counter", "weapon") === "counter" ? { ...common, kind: "counter" }
       : { ...common, kind: "weapon", ...(value.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(value.field("held")) }), ammo: value.field("ammo").nullable(namespaced) };
   }), storage: reader.field("storage").list((value): NativeItemStorage => {

@@ -1,3 +1,6 @@
+import { sourceItemNamed } from "../../contracts/source-items.ts";
+import type { WeaponHudIcon } from "../../contracts/ui.ts";
+import { readClassicString } from "./classic/records.ts";
 import type { ContentDigest, ProviderReference } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallValue, GuestValueLayout, NativeAbi } from "../../contracts/execution.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
@@ -5,11 +8,10 @@ import type { ActorId } from "../../contracts/identity.ts";
 import { bindNativeModEntry, type NativeModEntryBinding } from "./native-mod-entries.ts";
 import type { NativePrimaryWeaponHost } from "./native-primary-weapons.ts";
 
-export interface NativeInventoryPresentation {
-  readonly source: ProviderReference;
-  readonly weapon: ItemId;
-  readonly kind: "weapon" | "ammunition";
-}
+export type NativeInventoryPresentation = { readonly source: ProviderReference } & (
+  | { readonly kind: "weapon" | "ammunition"; readonly weapon: ItemId }
+  | { readonly kind: "item"; readonly icon: WeaponHudIcon | null }
+);
 export interface NativeInventoryRow {
   readonly presentation?: NativeInventoryPresentation;
   readonly item: ItemId;
@@ -17,6 +19,7 @@ export interface NativeInventoryRow {
   readonly count: number;
   readonly sourceIndex: number;
   readonly selected: boolean;
+  readonly presenceOnly?: true;
 }
 export interface NativeInventoryReadout {
   readonly presentation?: NativeInventoryPresentation;
@@ -36,8 +39,9 @@ export interface NativePrimaryInventoryProfile {
   readonly previous: { readonly entry: number; readonly scan: number; readonly join: number };
   readonly validate: { readonly entry: number; readonly scan: { readonly entry: number; readonly join: number } | null };
   readonly use: { readonly entry: number; readonly call: number; readonly join: number };
+  readonly namedUse: { readonly entry: number; readonly lookupCall: number; readonly lookupReturn: number; readonly call: number; readonly join: number };
 }
-interface Frame { readonly actor: ActorId | null; readonly flags: number; }
+interface Frame { readonly actor: ActorId | null; readonly flags: number; readonly named: boolean; row: NativeInventoryRow | null; restore: (() => void) | null; }
 const pointer: GuestValueLayout = { kind: "scalar", storage: "pointer" };
 const integer: GuestValueLayout = { kind: "scalar", storage: "int32" };
 
@@ -51,22 +55,22 @@ export class NativePrimaryInventory {
   private readonly next: NativeModEntryBinding;
   private readonly previous: NativeModEntryBinding;
   constructor(private readonly host: NativePrimaryWeaponHost, private readonly profile: NativePrimaryInventoryProfile,
-    private readonly hooks: { rows(actor: ActorId): readonly NativeInventoryRow[] | null; use(actor: ActorId, item: ItemId): void }) {
+    private readonly hooks: { rows(actor: ActorId): readonly NativeInventoryRow[] | null; use(actor: ActorId, item: ItemId): void; descriptor(index: number): GuestAddress; itemAt(address: GuestAddress): ItemId | null; print(actor: ActorId, text: string): void }) {
     if (host.memory.module.digest !== profile.digest) throw new Error("Native inventory profile belongs to another artifact");
     const boundary = { memory: host.memory, entries: host.runner.options, invoke: host.invoke.bind(host) };
-    const bind = (entry: number, name: string, parameters: readonly GuestValueLayout[], validate = false): NativeModEntryBinding => {
+    const bind = (entry: number, name: string, parameters: readonly GuestValueLayout[], validate = false, named = false): NativeModEntryBinding => {
       const binding = bindNativeModEntry(boundary, this.at(entry), `${host.memory.module.id}:primary-inventory-${name}`,
         { abi: profile.abi, parameters, result: "void", variadic: false }, (values, original) => {
           const value = values[0], flags = values[1], actor = value?.kind === "pointer" && value.value !== null ? host.actor(host.record(value.value)) : null;
-          this.frames.push({ actor, flags: flags?.kind === "int32" ? flags.value : -1 });
+          const frame: Frame = { actor, flags: flags?.kind === "int32" ? flags.value : -1, named, row: null, restore: null }; this.frames.push(frame);
           try {
             if (!validate || actor === null || this.evaluating !== 0) return original(values);
             const rows = hooks.rows(actor), chosen = rows === null ? null : this.cursor(actor, rows);
             if (chosen?.selected !== true) return original(values);
             const client = this.client(actor), address = host.memory.offset(client, BigInt(profile.inventory + chosen.sourceIndex * 4)), count = host.memory.readInt32(address);
-            host.memory.writeInt32(address, chosen.count);
+            host.memory.writeInt32(address, this.sourceCount(chosen));
             try { return original(values); } finally { if (this.current(actor)) host.memory.writeInt32(address, count); }
-          } finally { this.frames.pop(); }
+          } finally { frame.restore?.(); this.frames.pop(); }
         });
       this.removals.push(binding.close); return binding;
     };
@@ -75,6 +79,30 @@ export class NativePrimaryInventory {
       this.previous = bind(profile.previous.entry, "previous", [pointer, integer]);
       bind(profile.validate.entry, "validate", [pointer], true);
       bind(profile.use.entry, "use", [pointer]);
+      bind(profile.namedUse.entry, "named-use", [pointer], false, true);
+      this.removals.push(host.runner.bindInlineRegion(this.at(profile.namedUse.lookupCall), this.at(profile.namedUse.lookupReturn), profile.abi, continuation => {
+        const frame = this.frames.at(-1), memory = host.memory, registers = host.runner.options.cpu.state.registers;
+        if (frame?.named !== true || frame.actor === null || !this.current(frame.actor)) return continuation.execute();
+        const stack = memory.pointer(registers.read("rsp", memory.pointerBytes === 4 ? 32 : 64));
+        const name = memory.pointerBytes === 4 ? stack === null ? null : memory.readPointer(stack) : memory.pointer(registers.read("rcx", 64));
+        if (name === null) throw new Error("Original item lookup has no name argument");
+        const text = readClassicString(memory, name).toLowerCase();
+        const result = continuation.execute();
+        const original = memory.pointer(registers.read("rax", memory.pointerBytes === 4 ? 32 : 64));
+        const choice = sourceItemNamed(hooks.rows(frame.actor) ?? [], text, original === null ? null : hooks.itemAt(original));
+        if (choice?.kind === "ambiguous") {
+          if (registers.read("rax", memory.pointerBytes === 4 ? 32 : 64) === 0n)
+            hooks.print(frame.actor, `Ambiguous item "${text}"; use ${choice.items.map(item => item.item).join(", ")}\n`);
+          return result;
+        }
+        const row = choice?.item;
+        if (row?.selected !== true) return result;
+        const actor = frame.actor, address = memory.offset(this.client(actor), BigInt(profile.inventory + row.sourceIndex * 4)), count = memory.readInt32(address);
+        frame.row = row; frame.restore = () => { frame.restore = null; if (this.current(actor)) memory.writeInt32(address, count); };
+        memory.writeInt32(address, this.sourceCount(row));
+        registers.write("rax", memory.pointerBytes === 4 ? 32 : 64, hooks.descriptor(row.sourceIndex).byteOffset);
+        return result;
+      }));
       const scans = [
         { entry: profile.next.scan, join: profile.next.join, direction: 1 },
         { entry: profile.previous.scan, join: profile.previous.join, direction: -1 },
@@ -90,15 +118,16 @@ export class NativePrimaryInventory {
         const actor = this.frames.at(-1)?.actor;
         return this.evaluating === 0 && actor != null && this.current(actor) && hooks.rows(actor) !== null;
       }));
-      this.removals.push(host.runner.bindInlineRegion(this.at(profile.use.call), this.at(profile.use.join), profile.abi, continuation => {
-        const actor = this.frames.at(-1)?.actor;
+      for (const use of [profile.use, profile.namedUse]) this.removals.push(host.runner.bindInlineRegion(this.at(use.call), this.at(use.join), profile.abi, continuation => {
+        const frame = this.frames.at(-1), actor = frame?.actor;
         if (actor == null || !this.current(actor)) return continuation.execute();
-        const rows = hooks.rows(actor), chosen = rows === null ? null : this.cursor(actor, rows);
+        const rows = hooks.rows(actor), chosen = frame?.named === true ? frame.row : rows === null ? null : this.cursor(actor, rows);
         if (chosen?.selected !== true) return continuation.execute();
-        hooks.use(actor, chosen.item); return continuation.skip();
+        frame?.restore?.(); hooks.use(actor, chosen.item); return continuation.skip();
       }));
     } catch (error) { this.close(); throw error; }
   }
+  private sourceCount(row: NativeInventoryRow): number { return row.presenceOnly ? row.count === 0 ? 0 : 1 : row.count; }
   private at(offset: number): GuestAddress { return this.host.memory.offset(this.host.image, BigInt(offset)); }
   private current(actor: ActorId): boolean { const record = this.closed ? null : this.host.recordFor(actor); return record !== null && this.host.actor(record)?.equals(actor) === true; }
   private client(actor: ActorId): GuestAddress {
@@ -111,6 +140,7 @@ export class NativePrimaryInventory {
     if (selected?.index === index) {
       const row = rows.find(row => row.item === selected.item);
       if (row !== undefined) return row;
+      this.selected.delete(actor); this.host.memory.writeInt32(this.host.memory.offset(this.client(actor), BigInt(this.profile.cursor)), this.profile.empty); return null;
     }
     this.selected.delete(actor); return rows.find(row => !row.selected && row.sourceIndex === index) ?? null;
   }
@@ -120,9 +150,9 @@ export class NativePrimaryInventory {
     for (let step = 1; step <= rows.length; step++) {
       const row = rows[(start + direction * step + rows.length) % rows.length];
       if (row === undefined) throw new Error("Native inventory traversal lost its row");
-      if (row.count === 0 || refused.get(row.sourceIndex)?.has(row.count) === true) continue;
+      if (row.count === 0 || refused.get(row.sourceIndex)?.has(this.sourceCount(row)) === true) continue;
       if (this.evaluate(actor, row, direction, flags)) { this.selected.set(actor, { item: row.item, index: row.sourceIndex }); return; }
-      const counts = refused.get(row.sourceIndex) ?? new Set<number>(); counts.add(row.count); refused.set(row.sourceIndex, counts);
+      const counts = refused.get(row.sourceIndex) ?? new Set<number>(); counts.add(this.sourceCount(row)); refused.set(row.sourceIndex, counts);
     }
     this.host.memory.writeInt32(this.host.memory.offset(this.client(actor), BigInt(this.profile.cursor)), this.profile.empty);
     this.selected.delete(actor);
@@ -137,7 +167,7 @@ export class NativePrimaryInventory {
     this.evaluating++;
     try {
       memory.write(inventory, new Uint8Array(savedInventory.length));
-      memory.writeInt32(memory.offset(inventory, BigInt(row.sourceIndex * 4)), row.count);
+      memory.writeInt32(memory.offset(inventory, BigInt(row.sourceIndex * 4)), this.sourceCount(row));
       memory.writeInt32(memory.offset(client, BigInt(this.profile.cursor)), 0);
       const values: GuestCallValue[] = [{ kind: "pointer", value: record.address }, { kind: "int32", value: flags }];
       if (direction > 0 && this.profile.next.menuArgument) values.push({ kind: "uint32", value: 0 });
@@ -154,7 +184,15 @@ export class NativePrimaryInventory {
   }
   read(actor: ActorId): NativeInventoryReadout | null {
     if (!this.current(actor)) return null;
-    const rows = this.hooks.rows(actor); if (rows === null) return null;
+    const rows = this.hooks.rows(actor);
+    if (rows === null) {
+      const tracked = this.selected.get(actor); this.selected.delete(actor);
+      if (tracked !== undefined) {
+        const cursor = this.host.memory.offset(this.client(actor), BigInt(this.profile.cursor));
+        if (this.host.memory.readInt32(cursor) === tracked.index) this.host.memory.writeInt32(cursor, this.profile.empty);
+      }
+      return null;
+    }
     const chosen = this.cursor(actor, rows);
     return { items: rows.filter(row => row.count !== 0).map(({ item, label, count }) => ({ item, label, count })), selected: chosen?.item ?? null, ...(chosen?.presentation === undefined ? {} : { presentation: chosen.presentation }) };
   }

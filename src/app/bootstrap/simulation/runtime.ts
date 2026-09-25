@@ -1,3 +1,4 @@
+import { sourceItemNamed } from "../../../contracts/source-items.ts";
 import { namespaced } from "../../../persistence/value.ts";
 import { NativePrimaryInventory, type NativeInventoryRow } from "../../../compat/q2/native-primary-inventory.ts";
 import { nativePrimaryInventoryProfile } from "../../../compat/q2/native-primary-inventory-profile.ts";
@@ -791,6 +792,7 @@ export class SharedSimulation implements Simulation {
       this.pendingSharedRestore?.assertComplete();
       this.pendingSharedRestore = null;
       this.bindNativeInput();
+      this.restoreNativeInventoryCursors();
     }
     } catch (error) {
       if (this.source.kind === "q3-qvm") {
@@ -870,6 +872,7 @@ export class SharedSimulation implements Simulation {
           operations: { damage: simulation.combat.damageOperation, actors: simulation.callbacks.operations, inventory: simulation.inventory.operations }, nextFrame }, modState, options.modTravel);
       }
       simulation.sourceItemsRestore?.finish(simulation.actors, simulation.inventory);
+      simulation.restoreNativeInventoryCursors();
       for (const slot of simulation.weaponSlots.values()) slot.validateRestore();
       simulation.events.finishOwnerRestore();
       simulation.pendingSharedRestore?.finish();
@@ -1378,7 +1381,7 @@ export class SharedSimulation implements Simulation {
     this.selectedQ3Source?.respawn(actor); this.selectedQ3Source?.admit(owner);
     if (carry === undefined) selected.admit(owner, maximum, this.teamGame());
     else this.restoreSelectedArsenalTravel(owner, maximum, carry);
-    this.nativePrimaryInventory?.restore(actor, retained?.nativeInventorySelection === undefined ? selected.ui(actor, this.weaponProvider).activeWeapon : retained.nativeInventorySelection);
+    if (!this.restoredNativeInventorySelections.has(actor)) this.nativePrimaryInventory?.restore(actor, selected.ui(actor, this.weaponProvider).activeWeapon);
     this.nativeWeaponTimes.set(actor, this.requireNativeWeapons().timeMilliseconds());
     this.bindSelectedOriginalPickups(owner); this.bindWeaponSlot(actor);
     this.handGrenades?.respawn(actor); this.grapple?.release(actor);
@@ -4744,6 +4747,9 @@ export class SharedSimulation implements Simulation {
   }
   private nativeDropProjection(actor: ActorId, item: ItemId): { readonly source: ItemId; readonly current: ItemId | null; readonly pending: ItemId | null } {
     const selected = this.selectedArsenal, supply = this.selectedOriginalSupply, sources = this.selectedOriginalWeapons;
+    const component = this.inventory.itemDefinitions(actor).find(definition => definition.item === item);
+    const owner = this.actors.resolveOwned(actor), equipment = owner === null ? undefined : this.selectedQ3Source?.inventory(owner).find(entry => entry.item === item);
+    if (component !== undefined || equipment !== undefined) return { source: component?.actions?.includes("drop") === true ? "q2:item_quad" : "q2:weapon_blaster", current: null, pending: null };
     if (selected?.has(actor) !== true || supply === null || sources === null) throw new Error("Selected drop has no admitted supply policy");
     const weapon = selected.catalog().find(weapon => weapon.item === item), sourceWeapon = sources.get(item);
     let source: ItemId;
@@ -4762,27 +4768,52 @@ export class SharedSimulation implements Simulation {
     return { source, current: project(active), pending: project(pending) };
   }
   private nativeInventoryRows(actor: ActorId): readonly NativeInventoryRow[] | null {
-    const selected = this.selectedArsenal, source = this.source, commands = this.nativePrimaryCommands;
-    if (source.kind !== "q2-native" || selected?.has(actor) !== true || commands === null) return null;
+    const source = this.source, commands = this.nativePrimaryCommands;
+    const selected = this.selectedArsenal?.has(actor) === true ? this.selectedArsenal : null;
+    const definitions = this.inventory.itemDefinitions(actor);
+    if (source.kind !== "q2-native" || commands === null || selected === null && definitions.length === 0) return null;
     const slots = commands.inventorySlots(), sourceLabels = source.game.configstrings(), labelBase = source.edition === "classic" ? 1056 : 11326;
-    const native = slots.filter(slot => !slot.weapon && !slot.ammunition).map(slot => ({ item: slot.item,
+    const native = slots.filter(slot => selected === null || !slot.weapon && !slot.ammunition).map(slot => ({ item: slot.item,
       label: sourceLabels.get(labelBase + slot.index) ?? "", count: this.inventory.count(actor, slot.item), sourceIndex: slot.index, selected: false }));
     const weaponPrototype = slots.find(slot => slot.item === "q2:weapon_blaster"), ammoPrototype = slots.find(slot => slot.item === "q2:ammo_shells");
     if (weaponPrototype === undefined || ammoPrototype === undefined) throw new Error("Original inventory lacks its declared weapon/ammo prototypes");
-    const ui = selected.ui(actor, this.weaponProvider), weapons = ui.items.filter(item => item.kind === "weapon").map(item => ({
+    const ui = selected?.ui(actor, this.weaponProvider), weapons = (ui?.items ?? []).filter(item => item.kind === "weapon").map(item => ({
       item: item.id, label: item.label, count: this.inventory.count(actor, item.id), sourceIndex: weaponPrototype.index, selected: true,
       presentation: { source: this.weaponProvider, kind: "weapon", weapon: item.id } satisfies NonNullable<NativeInventoryRow["presentation"]> }));
-    const ammunition = [...new Set(selected.catalog().flatMap(weapon => weapon.ammo === null ? [] : [weapon.ammo]))]
+    const ammunition = selected === null ? [] : [...new Set(selected.catalog().flatMap(weapon => weapon.ammo === null ? [] : [weapon.ammo]))]
       .filter(item => !weapons.some(weapon => weapon.item === item)).map((item): NativeInventoryRow => {
         const weapon = selected.catalog().find(weapon => weapon.ammo === item);
         if (weapon === undefined) throw new Error("Selected ammo has no authored weapon presentation");
         return { item, label: selectedAmmoLabel(selected.family, item), count: this.inventory.count(actor, item), sourceIndex: ammoPrototype.index, selected: true,
           presentation: { source: this.weaponProvider, kind: "ammunition", weapon: weapon.item } };
       });
-    const retainedAmmo = slots.filter(slot => slot.ammunition && !ammunition.some(row => row.item === slot.item)
+    const retainedAmmo = selected === null ? [] : slots.filter(slot => slot.ammunition && !ammunition.some(row => row.item === slot.item)
       && this.selectedOriginalSupply?.ammo.some(mapping => mapping.destinations.includes(slot.item))).map(slot => ({ item: slot.item,
-        label: sourceLabels.get(labelBase + slot.index) ?? "", count: this.inventory.count(actor, slot.item), sourceIndex: slot.index, selected: true }));
-    return [...weapons, ...ammunition, ...retainedAmmo, ...native];
+        label: sourceLabels.get(labelBase + slot.index) ?? "", count: this.inventory.count(actor, slot.item), sourceIndex: ammoPrototype.index, selected: true,
+        presentation: { source: this.recipe.map.entities, kind: "item", icon: slot.icon === "" ? null : { kind: "image", resource: {
+          content: this.recipe.map.entities.content, path: slot.icon.startsWith("/") || slot.icon.startsWith("\\") ? slot.icon.slice(1) : `pics/${slot.icon}.pcx`,
+        } } } satisfies NonNullable<NativeInventoryRow["presentation"]> }));
+    const usablePrototype = slots.find(slot => slot.item === "q2:item_quad"), passivePrototype = slots.find(slot => slot.item === "q2:key_data_cd");
+    if (usablePrototype === undefined || passivePrototype === undefined) throw new Error("Original inventory lacks usable and passive item prototypes");
+    const owner = this.actors.resolveOwned(actor);
+    const equipment: readonly NativeInventoryRow[] = owner === null ? [] : (this.selectedQ3Source?.inventory(owner) ?? []).map(item => ({
+      item: item.item, label: item.label, count: item.count, sourceIndex: item.usable ? usablePrototype.index : passivePrototype.index, selected: true,
+      presentation: { source: this.weaponProvider, kind: "item", icon: item.icon === null ? null : { kind: "shader", content: this.weaponProvider.content, name: item.icon } } }));
+    const components: readonly NativeInventoryRow[] = definitions.map(item => ({ item: item.item, label: item.label, count: this.inventory.count(actor, item.item),
+      sourceIndex: item.kind === "weapon" ? weaponPrototype.index : item.actions?.includes("use") ? usablePrototype.index
+        : definitions.some(weapon => weapon.kind === "weapon" && weapon.ammo === item.item) ? ammoPrototype.index : passivePrototype.index,
+      selected: true, presenceOnly: true, presentation: { source: item.source, kind: "item", icon: item.icon ?? null } }));
+    return [...new Map([...weapons, ...ammunition, ...retainedAmmo, ...native, ...equipment, ...components].map(row => [row.item, row])).values()];
+  }
+  private useSelectedInventoryItem(actor: ActorId, item: ItemId): void {
+    const definition = this.inventory.itemDefinitions(actor).find(value => value.item === item);
+    if (definition?.kind === "weapon" || this.selectedArsenal?.catalog().some(weapon => weapon.item === item)) {
+      this.requestWeapon(actor, { provider: definition?.source.provider ?? this.weaponProvider.provider, item }); return;
+    }
+    const action = this.inventory.itemAction(actor, item, "use");
+    if (action !== null) { action(); return; }
+    if (this.selectedArsenal?.family === "q3" && this.selectedArsenal.useItem(actor, item)) return;
+    throw new Error("Admitted selected inventory item has no use owner");
   }
   private nativePlayerUi(actor: ActorId): PlayerUi {
     if (this.source.kind === "q3-qvm") {
@@ -4801,8 +4832,9 @@ export class SharedSimulation implements Simulation {
       const original = source.edition === "classic"
         ? classicGuestPlayerUi(source.game.playerState(this.nativeQ2Client(actor).slot + 1), source.game.configstrings(), reference)
         : rereleaseGuestPlayerUi(source.game.playerState(this.nativeQ2Client(actor).slot + 1), source.game.configstrings(), reference);
-      if (this.selectedArsenal?.has(actor) !== true) return original;
       const nativeInventory = this.nativePrimaryInventory?.read(actor);
+      if (this.selectedArsenal?.has(actor) !== true) return nativeInventory == null ? original
+        : { ...original, nativeInventory, inventory: this.inventory.entries(actor) };
       return { ...original, selectedArsenal: true, ...(nativeInventory == null ? {} : { nativeInventory }),
         inventory: this.inventory.entries(actor), ...this.selectedArsenal.ui(actor, this.weaponProvider) };
     }
@@ -4943,6 +4975,7 @@ export class SharedSimulation implements Simulation {
     }
     const event: ModClientEvent = { kind, identity: { client, actor } };
     for (const listener of [...this.modClientListeners]) listener(event);
+    if (kind === "admitted" && this.actors.isLive(actor)) this.restoreNativeInventoryCursors(actor);
     if (kind === "disconnecting") { this.modClientAdmissions.delete(actor); this.modClientCommands.delete(actor); }
   }
   observeClientCommand(input: ActorCommand): void {
@@ -5228,6 +5261,8 @@ export class SharedSimulation implements Simulation {
     const id = this.source.game.actor(client.slot + 1), actor = id === null ? null : this.actors.resolveOwned(id);
     if (actor === null) throw new Error("Native ClientConnect did not reserve its source actor");
     this.source.clients.set(client, actor);
+    const selection = mode === "live" ? this.options.nativeQ2Travel?.clients.find(entry => entry.client.equals(client))?.nativeInventorySelection : undefined;
+    if (selection !== undefined) this.restoredNativeInventorySelections.set(actor.id, selection);
     if (mode === "live" && this.source.game.services.hasSourceInventory) this.bindEquipmentInventory(actor);
     return actor;
   }
@@ -5247,6 +5282,15 @@ export class SharedSimulation implements Simulation {
     return true;
   }
 
+  private restoreNativeInventoryCursors(actor?: ActorId): void {
+    for (const [owner, item] of this.restoredNativeInventorySelections) {
+      if (actor !== undefined && !owner.equals(actor)) continue;
+      if (this.nativePrimaryInventory === null) throw new Error("Saved native inventory cursor has no qualified owner");
+      this.nativePrimaryInventory.restore(owner, item);
+      this.restoredNativeInventorySelections.delete(owner);
+    }
+  }
+
   private bindNativeInput(): void {
     const source = this.source;
     if (source.kind !== "q2-native") return;
@@ -5259,9 +5303,11 @@ export class SharedSimulation implements Simulation {
       this.nativePrimaryWeapons = bindNativePrimaryWeapons(source.game, this.actors, profile, {
         selected: () => false, completed: (actor, reached) => this.nativeWeaponStep(actor, reached), spawned: actor => this.nativeClientSpawned(actor),
       });
+    }
+    const commandProfile = nativePrimaryCommandProfile(source.game.module.digest), inventoryProfile = nativePrimaryInventoryProfile(source.game.module.digest),
+      dropProfile = nativePrimaryDropProfile(source.game.module.digest);
+    if (commandProfile !== null && inventoryProfile !== null && dropProfile !== null) {
       this.nativePrimaryCommands?.close();
-      const commandProfile = nativePrimaryCommandProfile(source.game.module.digest), supply = this.selectedOriginalSupply;
-      if (commandProfile === null || supply === null) throw new Error("Native selected weapons require original inventory commands and supply");
       this.nativePrimaryCommands = new NativePrimaryCommands(nativePrimaryWeaponHost(source.game, this.actors), commandProfile, {
         give: (actor, category) => { if (this.selectedArsenal?.has(actor) === true) this.grantSelectedArsenal(actor, category); },
         giveItem: (actor, args) => this.selectedArsenal?.has(actor) === true && this.giveSelectedItem(actor, args),
@@ -5273,25 +5319,34 @@ export class SharedSimulation implements Simulation {
           return { item, ammo: ui.ammo?.count ?? 0 };
         },
       });
-      this.selectedOriginalWeapons = selectedWeaponSources(supply, this.selectedArsenal.catalog(), this.nativePrimaryCommands.weapons());
-      for (const item of new Set(this.selectedArsenal.catalog().flatMap(weapon => weapon.ammo === null ? [] : [weapon.ammo]))) this.nativeDropAmmoSource(item);
+      if (this.selectedArsenal !== null) {
+        const supply = this.selectedOriginalSupply;
+        if (supply === null) throw new Error("Native selected weapons require original supply");
+        this.selectedOriginalWeapons = selectedWeaponSources(supply, this.selectedArsenal.catalog(), this.nativePrimaryCommands.weapons());
+        for (const item of new Set(this.selectedArsenal.catalog().flatMap(weapon => weapon.ammo === null ? [] : [weapon.ammo]))) this.nativeDropAmmoSource(item);
+      }
       this.nativePrimaryInventory?.close();
-      const inventoryProfile = nativePrimaryInventoryProfile(source.game.module.digest);
-      if (inventoryProfile === null) throw new Error("Native selected inventory lacks original cursor policy");
       this.nativePrimaryInventory = new NativePrimaryInventory(nativePrimaryWeaponHost(source.game, this.actors), inventoryProfile, {
         rows: actor => this.nativeInventoryRows(actor),
-        use: (actor, item) => { this.requestWeapon(actor, { provider: this.inventory.itemOwner(actor, item) ?? this.weaponProvider.provider, item }); },
+        use: (actor, item) => this.useSelectedInventoryItem(actor, item),
+        print: (actor, text) => { this.events.message({ kind: "print", level: 2, text }, actor); },
+        itemAt: address => this.nativePrimaryCommands?.itemAt(address) ?? null,
+        descriptor: index => {
+          const item = this.nativePrimaryCommands?.inventorySlots().find(item => item.index === index), descriptor = item === undefined ? null : this.nativePrimaryCommands?.sourceItem(item.item);
+          if (descriptor == null) throw new Error("Original inventory descriptor is unavailable"); return descriptor.address;
+        },
       });
-      for (const [actor, item] of this.restoredNativeInventorySelections) this.nativePrimaryInventory.restore(actor, item);
       this.nativePrimaryDrop?.close();
-      const dropProfile = nativePrimaryDropProfile(source.game.module.digest);
-      if (dropProfile === null) throw new Error("Native selected inventory lacks original drop policy");
       this.nativePrimaryDrop = new NativePrimaryDrop(nativePrimaryWeaponHost(source.game, this.actors), dropProfile, this.nativePrimaryCommands, {
         rows: actor => this.nativeInventoryRows(actor), selected: actor => this.nativePrimaryInventory?.read(actor)?.selected ?? null,
         projection: (actor, item) => this.nativeDropProjection(actor, item),
         dropped: (actor, pickup, item, count) => this.nativeDropProtection(actor, "debit", () => this.nativeDroppedItem(actor, pickup, item, count)) === true,
         consume: (actor, execute) => { this.nativeDropProtection(actor, "consume", execute); },
+        action: (actor, item) => this.inventory.itemAction(actor, item, "drop"),
+        print: (actor, text) => { this.events.message({ kind: "print", level: 2, text }, actor); },
       });
+    } else if (this.selectedArsenal !== null) throw new Error("Native selected inventory requires qualified original command policies");
+    if (this.selectedArsenal !== null) {
       this.disposeNativePickupSupply?.();
       const admission = this.selectedSupply;
       if (admission === null) throw new Error("Native selected weapons have no supply mapping");
@@ -5710,15 +5765,44 @@ export class SharedSimulation implements Simulation {
   selectedWeaponCommand(actor: ActorId, name: string, args: readonly string[]): boolean {
     if (this.selectedArsenal === null || !["use", "weapon", "weapnext", "weapprev"].includes(name)) return false;
     const ui = this.playerUi(actor), owned = ui.items.filter(item => item.kind === "weapon" && item.owned);
-    const requested = args.join("").toLowerCase().replaceAll(" ", "");
-    const selected = name === "use" || name === "weapon" ? owned.find(item => item.id === requested || item.label.toLowerCase().replaceAll(" ", "") === requested)
+    if (this.source.kind === "q2-native" && name === "use") return false;
+    const choice = name === "use" || name === "weapon" ? sourceItemNamed(owned.map(item => ({ ...item, item: item.id })), args.join(" ")) : null;
+    if (choice?.kind === "ambiguous") {
+      this.events.message({ kind: "print", level: 2, text: `Ambiguous weapon; use ${choice.items.map(item => item.item).join(", ")}\n` }, actor); return true;
+    }
+    const selected = name === "use" || name === "weapon" ? choice?.item
       : owned[(owned.findIndex(item => item.id === ui.activeWeapon) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length];
     if (selected !== undefined) this.requestWeapon(actor, { provider: this.inventory.itemOwner(actor, selected.id) ?? this.weaponProvider.provider, item: selected.id });
     return selected !== undefined || name === "weapnext" || name === "weapprev";
   }
 
+  sourceItemCommand(actor: ActorId, name: string, args: readonly string[]): boolean {
+    if (this.source.kind === "q2-native" || name !== "use" && name !== "drop") return false;
+    const owner = this.actors.resolveOwned(actor), equipment = owner === null ? [] : this.selectedQ3Source?.inventory(owner) ?? [];
+    const definitions = this.inventory.itemDefinitions(actor);
+    if (definitions.length === 0 && equipment.length === 0) return false;
+    const primary = this.playerUi(actor).items.map(item => ({ item: item.id, label: item.label }));
+    const rows = [...new Map([...primary, ...equipment, ...definitions].map(item => [item.item, item])).values()];
+    const choice = sourceItemNamed(rows, args.join(" "));
+    if (choice?.kind === "ambiguous") {
+      this.events.message({ kind: "print", level: 2, text: `Ambiguous item; use ${choice.items.map(item => item.item).join(", ")}\n` }, actor); return true;
+    }
+    const item = choice?.item;
+    if (item === undefined) return false;
+    const action = this.inventory.itemAction(actor, item.item, name);
+    if (action !== null) { action(); return true; }
+    const definition = definitions.find(value => value.item === item.item);
+    if (definition?.kind === "weapon" && name === "use") {
+      this.requestWeapon(actor, { provider: definition.source.provider, item: definition.item }); return true;
+    }
+    if (name === "use" && this.selectedArsenal?.family === "q3" && this.selectedArsenal.useItem(actor, item.item)) return true;
+    if (definition === undefined && !equipment.some(value => value.item === item.item)) return false;
+    this.events.message({ kind: "print", level: 2, text: `${item.label} cannot be ${name === "use" ? "used" : "dropped"}.\n` }, actor);
+    return true;
+  }
+
   playerCommand(actor: ActorId, name: string, args: readonly string[]): undefined {
-    if (this.selectedWeaponCommand(actor, name, args)) return undefined;
+    if (this.sourceItemCommand(actor, name, args) || this.selectedWeaponCommand(actor, name, args)) return undefined;
     if (this.source.kind === "q2-native") { const game = this.source.game, slot = this.nativeQ2Client(actor).slot + 1; q2GameCallback(() => game.command(slot, [name, ...args], args.join(" "))); return undefined; }
     if (name === "giveall") return this.playerCommand(actor, "give", ["all"]);
     if (name === "suicide") return this.playerCommand(actor, "kill", args);
@@ -5794,8 +5878,13 @@ export class SharedSimulation implements Simulation {
       source.game.message(actor, `${name === "god" ? "godmode" : name} ${enabled ? "ON" : "OFF"}\n`, false); return undefined;
     }
     if (this.weaponSlots.has(actor) && (name === "weapnext" || name === "weapprev" || name === "use")) {
-      const ui = this.playerUi(actor), owned = ui.items.filter(item => item.kind === "weapon" && item.owned), requested = args.join("").toLowerCase().replaceAll(" ", "");
-      const selected = name === "use" ? owned.find(item => item.id === requested || item.id === `q1:weapon/${requested}` || item.label.toLowerCase().replaceAll(" ", "") === requested)
+      const ui = this.playerUi(actor), owned = ui.items.filter(item => item.kind === "weapon" && item.owned);
+      const rows = owned.map(item => ({ ...item, item: item.id }));
+      const choice = name === "use" ? sourceItemNamed(rows, args.join(" ")) ?? sourceItemNamed(rows, `q1:weapon/${args.join("")}`) : null;
+      if (choice?.kind === "ambiguous") {
+        this.events.message({ kind: "print", level: 2, text: `Ambiguous weapon; use ${choice.items.map(item => item.item).join(", ")}\n` }, actor); return undefined;
+      }
+      const selected = name === "use" ? choice?.item
         : owned[(owned.findIndex(item => item.id === ui.activeWeapon) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length];
       if (selected !== undefined) { const equipment = this.grapple?.weapon(); this.requestWeapon(actor, { provider: this.inventory.itemOwner(actor, selected.id) ?? (equipment?.item === selected.id ? equipment.provider : this.weaponProvider.provider), item: selected.id }); return undefined; }
       if (name !== "use") return undefined;
@@ -6347,9 +6436,9 @@ export class SharedSimulation implements Simulation {
     const inventorySelections = reader.field("nativeInventorySelections");
     if (inventorySelections.value !== undefined) inventorySelections.list(value => {
       const actor = owner(value.field("actor")).id, item = value.field("item").nullable(namespaced);
-      if (source.kind !== "q2-native" || this.selectedArsenal?.has(actor) !== true || this.restoredNativeInventorySelections.has(actor))
+      if (source.kind !== "q2-native" || !this.inventory.has(actor) || this.restoredNativeInventorySelections.has(actor))
         value.fail("Saved native inventory cursor has no unique selected owner");
-      this.restoredNativeInventorySelections.set(actor, item); this.nativePrimaryInventory?.restore(actor, item);
+      this.restoredNativeInventorySelections.set(actor, item);
     });
     const monsters = reader.field("selectedMonsters");
     if (this.selectedMonsters !== null) this.restoreSelectedMonsters(readSelectedMonstersCheckpoint(monsters));

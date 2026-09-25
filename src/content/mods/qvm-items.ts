@@ -1,3 +1,5 @@
+import { readItemIconDeclaration } from "../item-icon.ts";
+import { readItemActions } from "./item-actions.ts";
 import { readHeldWeaponDeclaration } from "../held-weapon.ts";
 import type { QvmItemCapacity, QvmItemField, QvmItemTest, QvmModItems, QvmWeaponActor } from "../../contracts/qvm-mod-items.ts";
 import type { QvmModInputPointer, QvmModSourceCall } from "../../contracts/qvm-mod-callbacks.ts";
@@ -30,7 +32,7 @@ function capacity(reader: SaveReader): QvmItemCapacity {
 export function readQvmModItems(reader: SaveReader, readCall: (reader: SaveReader) => QvmModSourceCall): QvmModItems {
   const weapons = reader.field("weapons");
   return { definitions: reader.field("definitions").list(value => {
-    const common = { item: namespaced(value.field("item")), label: value.field("label").string(), admission: value.field("admission").choice("add", "replace-primary") };
+    const common = { item: namespaced(value.field("item")), label: value.field("label").string(), ...(value.field("icon").value === undefined ? {} : { icon: value.field("icon").nullable(readItemIconDeclaration) }), admission: value.field("admission").choice("add", "replace-primary"), ...(value.field("actions").value === undefined ? {} : { actions: readItemActions(value.field("actions"), readCall) }) };
     return value.field("kind").choice("counter", "weapon") === "counter" ? { ...common, kind: "counter" }
       : { ...common, kind: "weapon", ...(value.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(value.field("held")) }), ammo: value.field("ammo").nullable(namespaced) };
   }), storage: reader.field("storage").list(value => {

@@ -162,6 +162,7 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
       || artifact.image.instructions[lifecycle.release.entry]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Invalid QVM source actor lifecycle");
     if (lifecycle.update !== null) checkCall(lifecycle.update, new Set(["self", "time", "elapsed"]));
   }
+  for (const item of declaration.items?.definitions ?? []) for (const call of [item.actions?.use, item.actions?.drop].filter(call => call !== undefined)) checkCall(call, new Set(["self", "time"]));
   for (const call of declaration.initialize) checkCall(call, new Set(["time"]));
   if (clients !== undefined) for (const call of [...clients.admit, ...clients.userinfo, ...clients.disconnect]) checkCall(call, new Set(["self", "time"]));
   for (const call of clients?.frame ?? []) checkCall(call, new Set(["self", "time", "elapsed"]));

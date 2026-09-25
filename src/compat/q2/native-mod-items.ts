@@ -1,3 +1,5 @@
+import { resolveItemIcon } from "../../content/item-icon.ts";
+import { sourceItemActionNames } from "../../contracts/source-items.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { GuestAddress, NativeAbi } from "../../contracts/execution.ts";
@@ -138,7 +140,7 @@ export class NativeModItems {
   private readonly requesting = new Set<ActorId>();
   constructor(private readonly definition: Definition, abi: NativeAbi, private readonly host: NativeModHost, private readonly services: ModHostServices,
     private readonly provider: ProviderId, private readonly content: ContentId, private readonly operations: Operations) {
-    this.admissions = definition.definitions.map(({ admission, ...item }) => ({ admission, definition: { ...item, source: { provider, content } } }));
+    this.admissions = definition.definitions.map(({ admission, actions, icon, ...item }) => ({ admission, definition: { ...item, source: { provider, content }, ...(icon === undefined ? {} : { icon: icon === null ? null : resolveItemIcon(icon, content) }), ...(actions === undefined ? {} : { actions: sourceItemActionNames(actions) }) } }));
     this.byItem = new Map(definition.storage.flatMap(storage => (storage.kind === "counter" ? [storage.item] : storage.items.map(value => value.item)).map(item => [item, storage] satisfies readonly [ItemId, NativeItemStorage])));
     this.stage = definition.weapons === undefined ? null : new NativeModWeaponStage(definition.weapons, abi, host, provider, {
       actor: (record, address) => { for (const entry of this.entries.values()) if (operations.live(entry.actor.id) && operations.pointer(entry.actor.id, record).byteOffset === address.byteOffset) {
@@ -215,7 +217,11 @@ export class NativeModItems {
     if (owner === null || !this.operations.live(actor)) throw new Error("Native items require the current admitted client");
     const addresses = new Map(this.definition.storage.flatMap(storage => fields(storage)).map(field => [field.record, this.operations.pointer(actor, field.record).byteOffset]));
     const previous = new Map(this.definition.storage.flatMap(storage => this.read(actor, storage)).map(value => [value.item, value]));
-    const lease = this.services.inventory.bindItems(owner, { owner: this.provider, items: this.admissions, state: {
+    const lease = this.services.inventory.bindItems(owner, { owner: this.provider, items: this.admissions, invoke: (item, action) => {
+      const current = this.entries.get(actor), call = this.definition.definitions.find(value => value.item === item)?.actions?.[action];
+      if (current === undefined || !this.current(current) || call === undefined) throw new Error("Source item action is no longer admitted");
+      this.operations.invoke(actor, call);
+    }, state: {
       read: () => this.definition.storage.flatMap(storage => this.read(actor, storage)),
       entry: item => { const storage = this.byItem.get(item); return storage === undefined ? undefined : this.read(actor, storage).find(value => value.item === item); },
       write: value => this.write(actor, value), mutableCapacity: item => { const storage = this.byItem.get(item); return storage?.kind === "counter" && storage.capacity.kind === "field"; },

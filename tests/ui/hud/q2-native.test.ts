@@ -50,14 +50,14 @@ test("donor numeric flashing, suppression and malformed index boundaries", () =>
 
 test("selected arsenal uses original ammo layout while retaining native health, armor and visibility", () => {
   const source = frame(), stats = [...source.stats]; stats[2] = 0; stats[3] = 0;
-  const selected: NativeQ2HudArsenal = { ammo: 31, ammoIcon: { resource: "resource:foreign-ammo", aspect: 2 } };
+  const selected: NativeQ2HudArsenal = { ammunition: { count: 31, icon: { resource: "resource:foreign-ammo", aspect: 2 } } };
   const ops = q2NativeHudOperations({ ...source, stats }, 640, 480, undefined, undefined, selected);
   expect(ops).toContainEqual({ kind: "picture", x: 278, y: 456, name: "num_3" });
   expect(ops).toContainEqual({ kind: "picture", x: 294, y: 456, name: "num_1" });
   expect(ops).toContainEqual({ kind: "arsenal-picture", x: 310, y: 456, resource: "resource:foreign-ammo", aspect: 2 });
   expect(ops.filter(op => op.kind === "picture" && ["i_health", "i_combatarmor"].includes(op.name)))
     .toEqual(q2NativeHudOperations(source, 640, 480).filter(op => op.kind === "picture" && ["i_health", "i_combatarmor"].includes(op.name)));
-  expect(q2NativeHudOperations(source, 640, 480, undefined, undefined, { ammo: null, ammoIcon: null }).some(op => op.kind === "arsenal-picture")).toBe(false);
+  expect(q2NativeHudOperations(source, 640, 480, undefined, undefined, { ammunition: { count: null, icon: null } }).some(op => op.kind === "arsenal-picture")).toBe(false);
   expect(q2NativeHudOperations(source, 640, 480, undefined, "layout-overlay", selected)).toEqual([]);
   expect(q2NativeHudOperations({ ...source, configstrings: new Map() }, 640, 480, undefined, undefined, selected)).toEqual([]);
   expect(source.stats[3]).toBe(50);
@@ -118,7 +118,7 @@ test("rerelease authored lives, packed health bars, localized names, story and H
   expect(ops).toContainEqual({ kind: "sized-picture", x: 10, y: 80, width: 198, height: 32, name: "/tags/eagle.pcx" });
   expect(ops).toContainEqual({ kind: "font-text", x: 130, y: 110, text: "First line", alternate: false });
   expect(ops.some(op => "text" in op && op.text === "status hidden")).toBe(false);
-  const arsenal: NativeQ2HudArsenal = { ammo: 31, ammoIcon: { resource: "resource:foreign-ammo", aspect: 2 } };
+  const arsenal: NativeQ2HudArsenal = { ammunition: { count: 31, icon: { resource: "resource:foreign-ammo", aspect: 2 } } };
   expect(q2LayoutOperations("if 2 anum pic 2 endif", source, 320, 240, arsenal, env)).toContainEqual({ kind: "arsenal-picture", x: 0, y: 0, resource: "resource:foreign-ammo", aspect: 2 });
 });
 
@@ -138,7 +138,7 @@ test("canonical inventory uses the same selected identity with each source layou
   const inventory: NonNullable<NativeQ2HudArsenal["inventory"]> = { items: [
     { item: "q3:weapon/shotgun", label: "Shotgun", count: 1 }, { item: "q3:ammo/shotgun", label: "Shells", count: 42 },
     { item: "q2:key_blue_key", label: "Blue Key", count: 1 }], selected: "q3:weapon/shotgun" };
-  const arsenal: NativeQ2HudArsenal = { ammo: 42, ammoIcon: null, inventory };
+  const arsenal: NativeQ2HudArsenal = { ammunition: { count: 42, icon: null }, inventory };
   for (const base of [frame(), rerelease()]) {
     const stats = [...base.stats]; stats[13] = 2; stats[12] = 999;
     const ops = q2NativeHudOperations({ ...base, stats, inventory: [99] }, 640, 480, command => command === "use Shotgun" ? "2" : "", undefined, arsenal, environment());
@@ -154,7 +154,7 @@ test("canonical inventory uses the same selected identity with each source layou
 
 
 test("selected item HUD uses canonical art and rerelease name while preserving original visibility and expiry", () => {
-  const selected: NativeQ2HudArsenal = { ammo: null, ammoIcon: null,
+  const selected: NativeQ2HudArsenal = { ammunition: { count: null, icon: null },
     selectedItem: { label: "$railgun", localizedLabel: "Railgun", icon: { resource: "resource:railgun-owner-icon", aspect: 1 } } };
   for (const base of [frame(), rerelease()]) {
     const stats = [...base.stats], configstrings = new Map(base.configstrings);
@@ -178,4 +178,19 @@ test("selected item HUD uses canonical art and rerelease name while preserving o
     .toEqual([{ kind: "font-text", x: 0, y: -1, text: "$railgun", alternate: false }]);
   stats[51] = 0;
   expect(q2LayoutOperations(layout, snapshot, 320, 240, selected, environment())).toEqual([]);
+});
+
+
+test("inventory-only metadata preserves native ammunition with either original HUD grammar", () => {
+  const inventory: NonNullable<NativeQ2HudArsenal["inventory"]> = { items: [{ item: "mod:teleporter", label: "Teleporter", count: 1 }], selected: "mod:teleporter" };
+  const arsenal: NativeQ2HudArsenal = { inventory, selectedItem: { label: "Teleporter", localizedLabel: "Teleporter", icon: null } };
+  for (const base of [frame(), rerelease()]) {
+    const stats = [...base.stats]; stats[2] = 2; stats[3] = 50;
+    const configstrings = new Map(base.configstrings); configstrings.set(base.protocol.kind === "q2-classic" ? 546 : 10304, "a_shells");
+    const snapshot = { ...base, stats, configstrings }, layout = "if 2 anum pic 2 endif";
+    expect(q2LayoutOperations(layout, snapshot, 320, 240, arsenal, environment()))
+      .toEqual(q2LayoutOperations(layout, snapshot, 320, 240, undefined, environment()));
+    expect(q2LayoutOperations(layout, snapshot, 320, 240, arsenal, environment()))
+      .toContainEqual({ kind: "picture", x: 0, y: 0, name: "a_shells" });
+  }
 });

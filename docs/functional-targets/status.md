@@ -1,6 +1,6 @@
 # Functional target status
 
-**21/23 targets remain accepted; T10 and T12 are open.** Current source includes qualified original native Q2 selected arsenals, original pickup/cheat/drop behavior, save/respawn/travel, source-positioned ammo HUD, mod held models and native component camera/HUD transport. Original inventory navigation, item use/drop and selected-item display now use the selected arsenal while retaining each edition's rules. Selected equipment ownership, general component item actions and wider artifact/composition coverage remain active. Rerelease return-map dropped cargo remains unverified. Installed executable is `ab3e3adf`. [Current delivery](../execution-status.md).
+**21/23 targets remain accepted; T10 and T12 are open.** Current source includes selected arsenals and equipment in qualified original QC/QVM/native worlds, source-owned inventory actions and item presentation, saved item selection, and component-only native inventories. Classic and rerelease rules remain separate. Active implementation is general QuakeC pickup-caller declarations and standalone native inline protection operations. Broader artifact/composition coverage and rerelease return-map dropped cargo remain unverified. Installed executable is `ab3e3adf`. [Current delivery](../execution-status.md).
 
 Earlier checkpoints below retain their status at the time.
 

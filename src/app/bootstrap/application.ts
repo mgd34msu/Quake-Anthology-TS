@@ -4127,6 +4127,8 @@ export class Application {
           else this.simulation.setHandGrenadeInput(actor, held);
           continue;
         }
+        if ((guest === null || command.seat !== null) && (command.name === "use" || command.name === "drop")
+          && this.simulation.sourceItemCommand(this.commandActor(command.seat), command.name, command.arguments_)) continue;
         if (guest !== null && command.seat !== null && ["use", "weapon", "weapnext", "weapprev"].includes(command.name)) {
           const actor = this.commandActor(command.seat);
           const selected = resolveWeaponSelection(command.name, command.arguments_, this.simulation.playerUi(actor).items);
@@ -4186,9 +4188,9 @@ export class Application {
           }
         }
         if (command.name === "use") {
-          const actor = this.commandActor(command.seat), requested = command.arguments_.join("").toLowerCase().replaceAll(" ", "");
-          const item = this.simulation.playerUi(actor).items.find(item => item.kind === "weapon" && item.owned
-            && (item.id === requested || item.label.toLowerCase().replaceAll(" ", "") === requested));
+          const actor = this.commandActor(command.seat), items = this.simulation.playerUi(actor).items;
+          const choice = resolveWeaponSelection(command.name, command.arguments_, items);
+          const item = items.find(item => item.kind === "weapon" && item.owned && item.id === choice?.item);
           const weapon = Q3_WEAPON_ITEMS.find(weapon => weapon.item === item?.id), player = this.simulation.movementPlayer(actor);
           if (weapon !== undefined && player?.arsenal.state.kind === "q3") {
             if (sourceClient !== undefined) { await sourceClient.client.command(["weapon", String(weapon.weapon)]); continue; }

@@ -1,3 +1,4 @@
+import { sourceItemNamed } from "../../contracts/source-items.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallValue, GuestValueLayout, NativeAbi } from "../../contracts/execution.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
@@ -19,6 +20,7 @@ export interface NativePrimaryDropProfile {
   readonly allocate: number;
   readonly free: number;
   readonly consumer: { readonly entry: number; readonly join: number } | null;
+  readonly callbacks: readonly { readonly entry: number; readonly join: number }[];
   readonly debits: readonly { readonly entry: number; readonly join: number }[];
 }
 export interface NativePrimaryDropHooks {
@@ -27,6 +29,8 @@ export interface NativePrimaryDropHooks {
   projection(actor: ActorId, item: ItemId): { readonly source: ItemId; readonly current: ItemId | null; readonly pending: ItemId | null };
   dropped(actor: ActorId, pickup: ActorId, item: ItemId, count: number): boolean;
   consume(actor: ActorId, execute: () => void): void;
+  action(actor: ActorId, item: ItemId): (() => void) | null;
+  print(actor: ActorId, text: string): void;
 }
 interface DropFrame {
   readonly actor: ActorId | null;
@@ -62,8 +66,14 @@ export class NativePrimaryDrop {
           const result = original(values), frame = this.frames.at(-1), name = values[0];
           if (frame?.kind !== "named" || frame.actor === null || name?.kind !== "pointer" || name.value === null || !this.current(frame.actor)) return result;
           const text = readClassicString(host.memory, name.value).toLowerCase(), rows = hooks.rows(frame.actor);
-          const row = rows?.find(row => row.selected && (row.item.toLowerCase() === text || row.label.toLowerCase() === text));
-          if (row === undefined) return result;
+          const choice = sourceItemNamed(rows ?? [], text, result.kind === "pointer" && result.value !== null ? commands.itemAt(result.value) : null);
+          if (choice?.kind === "ambiguous") {
+            if (result.kind === "pointer" && result.value === null)
+              hooks.print(frame.actor, `Ambiguous item "${text}"; use ${choice.items.map(item => item.item).join(", ")}\n`);
+            return result;
+          }
+          const row = choice?.item;
+          if (row?.selected !== true) return result;
           return { kind: "pointer", value: this.project(frame, row, false) };
         }, () => {
           const stack = host.memory.pointer(host.runner.options.cpu.state.registers.read("rsp", host.memory.pointerBytes === 4 ? 32 : 64));
@@ -81,6 +91,13 @@ export class NativePrimaryDrop {
             && result.kind === "pointer" && result.value !== null) frame.pickup = host.actor(host.record(result.value));
           return result;
         }).close);
+      for (const callback of profile.callbacks) this.removals.push(host.runner.bindInlineRegion(this.at(callback.entry), this.at(callback.join), profile.abi, continuation => {
+        const frame = this.frames.at(-1);
+        if (frame?.row == null || frame.actor === null || !this.current(frame.actor)) return continuation.execute();
+        const action = hooks.action(frame.actor, frame.row.item);
+        if (action === null) return continuation.execute();
+        frame.restore?.(); action(); return continuation.skip();
+      }));
       for (const debit of profile.debits) this.removals.push(host.runner.bindInlineRegion(this.at(debit.entry), this.at(debit.join), profile.abi, continuation => {
         const frame = this.frames.at(-1);
         if (frame?.counter == null || frame.row === null || frame.actor === null || !this.current(frame.actor)) return continuation.execute();
@@ -129,7 +146,7 @@ export class NativePrimaryDrop {
       if (this.current(actor)) for (const field of fields) memory.write(field.address, field.bytes);
     };
     try {
-      memory.writeInt32(counter, row.count);
+      memory.writeInt32(counter, row.presenceOnly ? row.count === 0 ? 0 : 1 : row.count);
       memory.writePointer(weapon, sourceWeapon(projection.current)); memory.writePointer(pending, sourceWeapon(projection.pending));
       if (cursor) memory.writeInt32(selection, descriptor.index);
       return descriptor.address;

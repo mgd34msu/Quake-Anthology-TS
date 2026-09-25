@@ -5,6 +5,7 @@ const classic: NativePrimaryDropProfile = {
   abi: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" },
   client: { pointer: 0x54, inventory: 0x2e4, cursor: 0x2e0, weapon: 0x704, pending: 0xddc },
   named: 0x3860, inventory: { entry: 0x3c80, admitted: 0x3c8b }, find: 0x9590, lookupReturn: 0x3872, allocate: 0xad00, free: 0x19140,
+  callbacks: [{ entry: 0x39dc, join: 0x39df }, { entry: 0x3cdc, join: 0x3cde }],
   consumer: null, debits: [{ entry: 0x36b57, join: 0x36b59 }, { entry: 0xa5ab, join: 0xa5ae }],
 };
 const retail: NativePrimaryDropProfile = {
@@ -12,6 +13,7 @@ const retail: NativePrimaryDropProfile = {
   abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" },
   client: { pointer: 0x78, inventory: 0xa80, cursor: 0xa70, weapon: 0xbe8, pending: 0x1898 },
   named: 0x58410, inventory: { entry: 0x58970, admitted: 0x58998 }, find: 0x660a0, lookupReturn: 0x58541, allocate: 0x680c0, free: 0x96600,
+  callbacks: [{ entry: 0x58601, join: 0x58607 }, { entry: 0x58a22, join: 0x58a28 }],
   consumer: { entry: 0x674a6, join: 0x674ab }, debits: [{ entry: 0xf0964, join: 0xf096b }, { entry: 0x6749f, join: 0x674a3 }],
 };
 export function nativePrimaryDropProfile(digest: ContentDigest): NativePrimaryDropProfile | null {

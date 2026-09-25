@@ -64,7 +64,7 @@ export function q2RereleaseLayout(source: string, frame: NativeQ2HudFrame, width
       case "yt": case "yb": case "yv": { const value = integer(); if (draw) y = value + (command === "yb" ? height : command === "yv" ? Math.trunc(height / 2) - 120 : 0); break; }
       case "pic": {
         const index = integer(); if (!draw) break;
-        if (index === 2 && arsenal !== undefined) { if (arsenal.ammo !== null && arsenal.ammoIcon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.ammoIcon }); break; }
+        if (index === 2 && arsenal?.ammunition !== undefined) { if (arsenal.ammunition.count !== null && arsenal.ammunition.icon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.ammunition.icon }); break; }
         if (index === 6 && arsenal?.selectedItem !== undefined) {
           if (stat(index) !== 0 && arsenal.selectedItem.icon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.selectedItem.icon });
           break;

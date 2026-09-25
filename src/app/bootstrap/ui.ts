@@ -354,12 +354,13 @@ export class ApplicationSeatUi implements ApplicationInputUi {
 
   private nativeQ2Arsenal(): NativeQ2HudArsenal | undefined {
     const ui = this.simulation.playerUi(this.local.player.actor);
-    if (ui.selectedArsenal !== true) return undefined;
+    if (ui.selectedArsenal !== true && ui.nativeInventory === undefined) return undefined;
     const icon = this.weaponIcons.ammo, prepared = this.nativeInventoryItem, selected = ui.nativeInventory;
     const selectedItem = prepared !== null && prepared.item === selected?.selected && prepared.source.content === selected.presentation?.source.content
       && prepared.source.provider === selected.presentation.source.provider ? prepared.value : undefined;
-    return { ammo: ui.ammo?.count ?? null, ...(selectedItem === undefined ? {} : { selectedItem }), ...(ui.nativeInventory === undefined ? {} : { inventory: ui.nativeInventory }),
-      ammoIcon: icon === null ? null : { resource: icon, aspect: this.weaponAssets?.aspect(icon) ?? 1 } };
+    return { ...(selectedItem === undefined ? {} : { selectedItem }), ...(ui.nativeInventory === undefined ? {} : { inventory: ui.nativeInventory }),
+      ...(ui.selectedArsenal !== true ? {} : { ammunition: { count: ui.ammo?.count ?? null,
+        icon: icon === null ? null : { resource: icon, aspect: this.weaponAssets?.aspect(icon) ?? 1 } } }) };
   }
 
   private async nativeSourceLocalizer(content: ContentId, assets: ApplicationAssets): Promise<(text: string, args?: readonly string[]) => string> {
@@ -375,8 +376,8 @@ export class ApplicationSeatUi implements ApplicationInputUi {
     const item = inventory.items.find(item => item.item === inventory.selected);
     if (item === undefined) return;
     const product = assets.content.catalog.product(presentation.source.content).expectation;
-    const icons = weaponHudIcons(presentation.source, product, presentation.weapon);
-    const icon = presentation.kind === "weapon" ? icons?.selectedWeapon ?? icons?.weapon : icons?.ammo;
+    const icons = presentation.kind === "item" ? null : weaponHudIcons(presentation.source, product, presentation.weapon);
+    const icon = presentation.kind === "item" ? presentation.icon : presentation.kind === "weapon" ? icons?.selectedWeapon ?? icons?.weapon : icons?.ammo;
     this.weaponAssets ??= new ApplicationWeaponHudAssets(assets);
     const resource = icon == null ? null : await this.weaponAssets.load(icon);
     const localizedLabel = product.edition === "rerelease" ? (await this.nativeSourceLocalizer(presentation.source.content, assets))(item.label) : item.label;

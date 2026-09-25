@@ -1,3 +1,5 @@
+import { resolveItemIcon } from "../../content/item-icon.ts";
+import { sourceItemActionNames } from "../../contracts/source-items.ts";
 import type { ActorId, OwnedActor, ProviderId } from "../../contracts/identity.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { InventoryEntry, ItemId } from "../../contracts/gameplay.ts";
@@ -133,7 +135,7 @@ export class QvmModItems {
   private readonly applied = new WeakSet<ModClientApplication>();
   constructor(private readonly definition: Declaration, private readonly module: QvmModule, private readonly image: QvmImage,
     private readonly services: ModHostServices, private readonly provider: ProviderId, private readonly content: ContentId, private readonly operations: Operations) {
-    this.admissions = definition.definitions.map(({ admission, ...item }) => ({ admission, definition: { ...item, source: { provider, content } } }));
+    this.admissions = definition.definitions.map(({ admission, actions, icon, ...item }) => ({ admission, definition: { ...item, source: { provider, content }, ...(icon === undefined ? {} : { icon: icon === null ? null : resolveItemIcon(icon, content) }), ...(actions === undefined ? {} : { actions: sourceItemActionNames(actions) }) } }));
     this.byItem = new Map(definition.storage.flatMap(storage => (storage.kind === "counter" ? [storage.item] : storage.items.map(value => value.item))
       .map(item => [item, storage] satisfies readonly [ItemId, QvmItemStorage])));
     this.weapons = definition.weapons === undefined ? null : new QvmModWeaponStage(definition.weapons.stage, definition.weapons.input.entry, { module, ...operations,
@@ -206,7 +208,11 @@ export class QvmModItems {
     const owner = this.services.actors.resolveOwned(actor);
     if (owner === null || !this.operations.live(actor)) throw new Error("QVM source items require the current admitted client");
     const addresses = new Map(this.definition.storage.flatMap(storage => fields(storage)).map(field => [field.record, this.operations.pointer(actor, field.record)]));
-    const lease = this.services.inventory.bindItems(owner, { owner: this.provider, items: this.admissions, state: {
+    const lease = this.services.inventory.bindItems(owner, { owner: this.provider, items: this.admissions, invoke: (item, action) => {
+      const current = this.entries.get(actor), call = this.definition.definitions.find(value => value.item === item)?.actions?.[action];
+      if (current === undefined || !this.current(current) || call === undefined) throw new Error("Source item action is no longer admitted");
+      this.operations.invoke(actor, call);
+    }, state: {
       read: () => this.definition.storage.flatMap(storage => this.read(actor, storage)),
       entry: item => { const storage = this.byItem.get(item); return storage === undefined ? undefined : this.read(actor, storage).find(value => value.item === item); },
       write: value => this.write(actor, value), mutableCapacity: item => { const storage = this.byItem.get(item); return storage?.kind === "counter" && storage.capacity.kind === "field"; },

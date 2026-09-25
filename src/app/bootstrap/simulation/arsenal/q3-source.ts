@@ -351,7 +351,7 @@ export class Q3SelectedSource {
     return { maxHealth: client.ps.stats.get(schema.maxHealth), persistentPowerupTag: schema.product === "baseq3" ? Powerup.PW_NONE : itemAt(this.host.product, client.ps.stats.get(schema.persistentPowerup)).tag,
       holdableItem, holdableTag: itemAt(this.host.product, holdableItem).tag };
   }
-  inventory(actor: OwnedActor): readonly { readonly item: ItemId; readonly label: string; readonly count: number; readonly usable: boolean }[] {
+  inventory(actor: OwnedActor): readonly { readonly item: ItemId; readonly label: string; readonly count: number; readonly usable: boolean; readonly icon: string | null }[] {
     if (!this.ownsEquipment) return [];
     const equipment = this.equipment(actor), items = itemList(this.host.product);
     return items.flatMap((item, index) => {
@@ -359,7 +359,7 @@ export class Q3SelectedSource {
       const persistent = item.type === ItemType.IT_PERSISTANT_POWERUP && item.tag === equipment.persistentPowerupTag;
       if ((!held && !persistent) || item.className === null || item.pickupName === null) return [];
       const id: ItemId = `q3:${item.className}`;
-      return [{ item: id, label: item.pickupName, count: 1, usable: held }];
+      return [{ item: id, label: item.pickupName, count: 1, usable: held, icon: item.icon }];
     });
   }
   firingDelay(actor: OwnedActor, milliseconds: number): number {

@@ -5,7 +5,7 @@ import type { OriginalPickupOffer, OriginalPickupResolution, OriginalPickupRule 
 import type { SessionActorRegistry } from "../actors/registry.ts";
 import { ModOperation } from "./mod-composition.ts";
 import { captureOriginalPickupRules, type CapturedOriginalPickupRule } from "./original-pickups.ts";
-import type { SourceItemAdmission, SourceItemDefinition, SourceItemLease } from "../../contracts/source-items.ts";
+import type { SourceItemAction, SourceItemAdmission, SourceItemDefinition, SourceItemLease } from "../../contracts/source-items.ts";
 import { isDeepStrictEqual } from "node:util";
 
 export interface InventoryStateBinding {
@@ -32,8 +32,8 @@ interface InventoryStore {
   readonly groups: Set<BoundItems>;
   readonly pickups: Map<ItemId, BoundInventoryPickups>;
 }
-interface BoundItems { readonly admissions: readonly SourceItemAdmission[]; readonly owner: ProviderId; readonly definitions: readonly SourceItemDefinition[]; readonly state: InventoryStateBinding; active: boolean; }
-export interface InventoryItemBinding { readonly owner: ProviderId; readonly items: readonly SourceItemAdmission[]; readonly state: InventoryStateBinding; }
+interface BoundItems { readonly admissions: readonly SourceItemAdmission[]; readonly owner: ProviderId; readonly definitions: readonly SourceItemDefinition[]; readonly state: InventoryStateBinding; readonly invoke?: (item: ItemId, action: SourceItemAction) => void; active: boolean; }
+export interface InventoryItemBinding { readonly owner: ProviderId; readonly items: readonly SourceItemAdmission[]; readonly state: InventoryStateBinding; readonly invoke?: (item: ItemId, action: SourceItemAction) => void; }
 
 function quantity(value: number): number {
   if (!Number.isFinite(value) || value < 0) throw new RangeError("Inventory quantity must be finite and nonnegative");
@@ -121,11 +121,14 @@ export class SharedInventoryTable implements InventoryTable {
       if (seen.has(definition.item) || definition.source.provider !== requested.owner || definition.label.length === 0
         || store.items.has(definition.item) || (admission === "add" ? primary.has(definition.item) : !primary.has(definition.item)))
         throw new Error(`Source item ${definition.item} conflicts with its current owner or admission`);
+      if (definition.actions !== undefined && (definition.actions.length === 0 || new Set(definition.actions).size !== definition.actions.length
+        || definition.actions.some(action => action !== "use" && action !== "drop") || requested.invoke === undefined)) throw new Error("Source item actions require distinct declared operations and their owner");
       seen.add(definition.item);
-      return Object.freeze({ ...definition, source: Object.freeze({ ...definition.source }) });
+      if (definition.kind === "weapon" && definition.actions?.includes("use")) throw new Error("Source weapons select through their weapon-slot owner, not a separate use action");
+      return Object.freeze({ ...definition, source: Object.freeze({ ...definition.source }), ...(definition.actions === undefined ? {} : { actions: Object.freeze([...definition.actions]) }) });
     });
     const admissions = Object.freeze(definitions.map((definition, index) => { const original = requested.items[index]; if (original === undefined) throw new Error("Missing admitted definition"); return Object.freeze({ definition, admission: original.admission }); }));
-    const group: BoundItems = { admissions, owner: requested.owner, definitions: Object.freeze(definitions), state: requested.state, active: true };
+    const group: BoundItems = { admissions, owner: requested.owner, definitions: Object.freeze(definitions), state: requested.state, ...(requested.invoke === undefined ? {} : { invoke: requested.invoke }), active: true };
     this.groupEntries(group);
     for (const item of seen) if (store.pickups.has(item)) throw new Error(`Source item ${item} already has a pickup delegate`);
     for (const item of seen) store.items.set(item, group);
@@ -161,6 +164,18 @@ export class SharedInventoryTable implements InventoryTable {
       return undefined;
     } };
     return lease;
+  }
+
+  itemAction(actor: ActorId, item: ItemId, action: SourceItemAction): (() => void) | null {
+    const owner = this.actors.resolveOwned(actor), store = owner === null ? undefined : this.stores.get(owner), group = store?.items.get(item);
+    if (group === undefined || !group.active || !group.definitions.find(value => value.item === item)?.actions?.includes(action)) return null;
+    const invoke = group.invoke;
+    if (invoke === undefined) throw new Error("Admitted source item action has no owner");
+    return () => {
+      if (owner === null || this.actors.resolveOwned(actor) !== owner || !group.active || this.stores.get(owner) !== store || store?.items.get(item) !== group)
+        throw new Error("Source item action belongs to a retired inventory owner");
+      invoke(item, action);
+    };
   }
 
   itemDefinitions(actor: ActorId): readonly SourceItemDefinition[] {

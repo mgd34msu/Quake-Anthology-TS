@@ -15,7 +15,7 @@ export interface NativePrimaryCommandProfile {
     readonly ammoGrants: readonly { readonly entry: number; readonly join: number; readonly descriptor: GuestRegister; readonly kind: "set" | "add" }[]; readonly argc: number; readonly argv: number };
   readonly drop: { readonly entry: number; readonly eligibility: { readonly entry: number; readonly join: number } };
   readonly client: { readonly pointer: number; readonly weapon: number; readonly ammoIndex: number | null; readonly inventory: number };
-  readonly items: { readonly table: number; readonly stride: number; readonly count: number; readonly classname: number; readonly flags: number;
+  readonly items: { readonly table: number; readonly stride: number; readonly count: number; readonly classname: number; readonly flags: number; readonly icon: number;
     readonly ammo: { readonly kind: "name"; readonly offset: number; readonly label: number } | { readonly kind: "index"; readonly offset: number } };
 }
 export interface NativePrimaryCommandHooks {
@@ -24,7 +24,7 @@ export interface NativePrimaryCommandHooks {
   giveAmmo(actor: ActorId, item: ItemId, change: { readonly kind: "set" | "add"; readonly amount: number }): void;
   drop(actor: ActorId): { readonly item: ItemId | null; readonly ammo: number } | null;
 }
-interface Item { readonly item: ItemId; readonly index: number; readonly address: GuestAddress; readonly weapon: boolean; readonly ammunition: boolean; readonly ammo: ItemId | null; }
+interface Item { readonly item: ItemId; readonly index: number; readonly address: GuestAddress; readonly weapon: boolean; readonly ammunition: boolean; readonly icon: string; readonly ammo: ItemId | null; }
 const pointer: GuestValueLayout = { kind: "scalar", storage: "pointer" };
 const integer: GuestValueLayout = { kind: "scalar", storage: "int32" };
 
@@ -98,7 +98,7 @@ export class NativePrimaryCommands {
     const source = Array.from({ length: table.count }, (_, index) => {
       const address = this.at(table.table + index * table.stride), classname = readClassicString(memory, memory.readPointer(memory.offset(address, BigInt(table.classname))));
       const item: ItemId | null = /^[a-z][a-z0-9_]*$/.test(classname) ? `q2:${classname}` : null;
-      return { item, index, address, ammunition: (memory.readUint32(memory.offset(address, BigInt(table.flags))) & 2) !== 0, weapon: (memory.readUint32(memory.offset(address, BigInt(table.flags))) & 1) !== 0,
+      return { item, index, address, icon: readClassicString(memory, memory.readPointer(memory.offset(address, BigInt(table.icon)))), ammunition: (memory.readUint32(memory.offset(address, BigInt(table.flags))) & 2) !== 0, weapon: (memory.readUint32(memory.offset(address, BigInt(table.flags))) & 1) !== 0,
         label: table.ammo.kind === "name" ? readClassicString(memory, memory.readPointer(memory.offset(address, BigInt(table.ammo.label)))) : "" };
     });
     const result: Item[] = [], names = new Set<ItemId>();
@@ -116,13 +116,16 @@ export class NativePrimaryCommands {
           if (index !== 0) { const found = source[index]; if (found?.item == null) throw new Error("Original weapon ammo index has no source item"); ammo = found.item; }
         }
       }
-      result.push({ item: value.item, index: value.index, address: value.address, weapon: value.weapon, ammunition: value.ammunition, ammo });
+      result.push({ item: value.item, index: value.index, address: value.address, weapon: value.weapon, ammunition: value.ammunition, icon: value.icon, ammo });
     }
     return result;
   }
   sourceItem(item: ItemId): { readonly index: number; readonly address: GuestAddress } | null { return this.items.find(value => value.item === item) ?? null; }
-  inventorySlots(): readonly { readonly item: ItemId; readonly index: number; readonly weapon: boolean; readonly ammunition: boolean }[] {
-    return this.items.map(({ item, index, weapon, ammunition }) => ({ item, index, weapon, ammunition }));
+  itemAt(address: GuestAddress): ItemId | null {
+    return this.items.find(value => value.address.addressSpace === address.addressSpace && value.address.byteOffset === address.byteOffset)?.item ?? null;
+  }
+  inventorySlots(): readonly { readonly item: ItemId; readonly index: number; readonly weapon: boolean; readonly ammunition: boolean; readonly icon: string }[] {
+    return this.items.map(({ item, index, weapon, ammunition, icon }) => ({ item, index, weapon, ammunition, icon }));
   }
   weapons(): readonly { readonly item: ItemId; readonly ammo: ItemId | null }[] { return this.items.filter(value => value.weapon).map(({ item, ammo }) => ({ item, ammo })); }
   withWeapon<Result>(actor: ActorId, item: ItemId | null, run: () => Result): Result {

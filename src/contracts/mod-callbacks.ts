@@ -1,4 +1,5 @@
-import type { SourceWeaponItem } from "./source-items.ts";
+import type { SourceItemIconDeclaration } from "./source-items.ts";
+import type { SourceItemActionCalls, SourceWeaponItem } from "./source-items.ts";
 import type { ContentDigest } from "./content.ts";
 import type { ActorId, ProviderId } from "./identity.ts";
 import type { ItemId } from "./gameplay.ts";
@@ -86,7 +87,7 @@ export type ModQcProtection = {
 );
 
 export interface ModQcItems {
-  readonly definitions: readonly ({ readonly item: ItemId; readonly label: string; readonly admission: "add" | "replace-primary" } & (
+  readonly definitions: readonly ({ readonly item: ItemId; readonly label: string; readonly icon?: SourceItemIconDeclaration | null; readonly admission: "add" | "replace-primary"; readonly actions?: SourceItemActionCalls<ModSourceCall> } & (
     { readonly kind: "counter" } | SourceWeaponItem
   ))[];
   readonly storage: readonly (

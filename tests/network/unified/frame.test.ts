@@ -39,7 +39,8 @@ const frame:UnifiedPresentationFrame={epoch:3,acknowledgedInput:9,prediction,out
   models:[{actor:id,content:'q2:classic:baseq2:1',family:'q2',path:'players/male/tris.md2',frame:1,oldFrame:0,backLerp:0.25,skin:0,indexedSkin:{name:'translated',width:2,height:1,pixels:new Uint8Array([7,8])},effects:1,renderFlags:0,origin,previousOrigin:origin,angles:origin,scale:1,visible:true,viewWeapon:false,alpha:0.5,q3Weapon:{timeMilliseconds:1000,torsoAnimation:1,lastFireMilliseconds:null,firing:false,horizontalSpeed:0,bobCycle:0,weapon:2}}],
   characters:[{actor:id,origin,angles:origin,velocity:origin,movementDirection:0,animation:{kind:'q3',legs:1,torso:2,legsTimerMilliseconds:100,torsoTimerMilliseconds:200},sourceFlags:0,powerups:4,team:'red',color:white,opacity:0.7}],
   worldText:[{content:'q1:registered:id1:1',text:'shared',origin,color:white,cellSize:8,orientation:{kind:'fixed',angles:origin},depthTest:true,font:'selected',distanceCullFactor:0.2}],
-  player:{actor:id,view:{origin,angles:origin,viewHeight:22,blend:white,kickAngles:origin,fieldOfView:110,pitchDrift:{grounded:true,idealPitch:5,disabled:false}},ui:{health:85,armor:{regular:{kind:'q3',points:25,protection:0.66},powered:{kind:'shield',cells:17}},activeWeapon:'q1:shotgun',ammo:{item:'q2:cells',count:17},inventory:[{item:'q2:cells',count:17,capacity:200}],powerups:[{item:'q3:quad',label:'Quad',remainingSeconds:10}],weaponStatus:{source:{provider:'q1:arsenal',content:'q1:registered:id1:1'},item:'q1:shotgun',label:'Shotgun',ammo:{kind:'finite',item:'q2:cells',count:17,hasAmmoToStart:true,low:false}},arsenalWarning:'none',items:[]}}};
+  player:{actor:id,view:{origin,angles:origin,viewHeight:22,blend:white,kickAngles:origin,fieldOfView:110,pitchDrift:{grounded:true,idealPitch:5,disabled:false}},ui:{nativeInventory:{items:[{item:'mod:canteen',label:'Canteen',count:1.5}],selected:'mod:canteen',
+    presentation:{source:{provider:'mod:items',content:'q1:registered:id1:1'},kind:'item',icon:{kind:'wad-picture',resource:{content:'q1:registered:id1:1',path:'gfx.wad'},lump:'canteen'}}},health:85,armor:{regular:{kind:'q3',points:25,protection:0.66},powered:{kind:'shield',cells:17}},activeWeapon:'q1:shotgun',ammo:{item:'q2:cells',count:17},inventory:[{item:'q2:cells',count:17,capacity:200}],powerups:[{item:'q3:quad',label:'Quad',remainingSeconds:10}],weaponStatus:{source:{provider:'q1:arsenal',content:'q1:registered:id1:1'},item:'q1:shotgun',label:'Shotgun',ammo:{kind:'finite',item:'q2:cells',count:17,hasAmmoToStart:true,low:false}},arsenalWarning:'none',items:[]}}};
 const context:UnifiedFrameDecoder={...client,resourceId:id=>id,world:null,resource:async()=>localResource,model:async()=>model};
 
 test('source grapple cable and looping sound retain client-owned actor identities',async()=>{
@@ -64,7 +65,7 @@ test('source grapple cable and looping sound retain client-owned actor identitie
 
 test('unified frame reconstructs mixed presentation identities and local resources without server paths',async()=>{
   const bytes=encodeUnifiedFrame(frame),text=new TextDecoder().decode(inflateRawSync(bytes));
-  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(8);
+  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(9);
   expect(text.includes('/server-private')).toBe(false);expect(text.includes('local-model')).toBe(false);
   const result=await decodeUnifiedFrame(bytes,context),snapshot=result.output.snapshot;
   expect(snapshot.session).toBe(client.session);expect(result.player.actor.equals(client.actor(4,2))).toBe(true);expect(result.player.actor.equals(id)).toBe(false);

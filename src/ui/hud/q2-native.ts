@@ -29,8 +29,7 @@ export type NativeQ2HudOperation =
 export interface NativeQ2HudArsenal {
   readonly selectedItem?: { readonly label: string; readonly localizedLabel: string; readonly icon: { readonly resource: ResourceId; readonly aspect: number } | null };
   readonly inventory?: import("../../compat/q2/native-primary-inventory.ts").NativeInventoryReadout;
-  readonly ammo: number | null;
-  readonly ammoIcon: { readonly resource: ResourceId; readonly aspect: number } | null;
+  readonly ammunition?: { readonly count: number | null; readonly icon: { readonly resource: ResourceId; readonly aspect: number } | null };
 }
 
 /** Q2 client/cl_scrn.c SCR_ExecuteLayoutString and SCR_DrawField. */
@@ -71,8 +70,8 @@ export function q2LayoutOperations(source: string, frame: NativeQ2HudFrame, widt
       case "yv": y = Math.trunc(height / 2) - 120 + integer(); break;
       case "pic": {
         const index = integer();
-        if (index === 2 && arsenal !== undefined) {
-          if (arsenal.ammo !== null && arsenal.ammoIcon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.ammoIcon });
+        if (index === 2 && arsenal?.ammunition !== undefined) {
+          if (arsenal.ammunition.count !== null && arsenal.ammunition.icon !== null) out.push({ kind: "arsenal-picture", x, y, ...arsenal.ammunition.icon });
           break;
         }
         if (index === 6 && arsenal?.selectedItem !== undefined) {
@@ -151,7 +150,7 @@ export function q2NativeHudOperations(frame: NativeQ2HudFrame, width: number, he
 
 export function nativeQ2HudStat(frame: NativeQ2HudFrame, index: number, arsenal?: NativeQ2HudArsenal): number {
   if (index < 0 || index >= frame.stats.length) throw new RangeError(`Q2 HUD stat ${index} is outside playerstate`);
-  if (arsenal !== undefined && index === 2) return arsenal.ammo === null ? 0 : 1;
-  if (arsenal !== undefined && index === 3) return arsenal.ammo ?? -1;
+  if (arsenal?.ammunition !== undefined && index === 2) return arsenal.ammunition.count === null ? 0 : 1;
+  if (arsenal?.ammunition !== undefined && index === 3) return arsenal.ammunition.count ?? -1;
   return frame.stats[index] ?? 0;
 }

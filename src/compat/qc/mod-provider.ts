@@ -86,6 +86,8 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
   validateQcItems(program, declaration);
   if (declaration.items?.weapons !== undefined) for (const call of [declaration.items.weapons.select.call, ...declaration.items.weapons.resume])
     validateCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "source weapon");
+  for (const item of declaration.items?.definitions ?? []) for (const call of [item.actions?.use, item.actions?.drop].filter(call => call !== undefined))
+    validateCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "source item action");
   for (const protection of declaration.protection ?? []) validateCall(program, protection.absorb.call, new Set<ModCallbackInput>(["self", "attacker", "inflictor", "amount", "knockback", "damage-flags", "regular-protection-scale", "direction", "point", "normal", "time"]), "protection");
   const pickupIds = new Set<string>(), pickupItems = new Set<string>();
   for (const pickup of declaration.pickups ?? []) {

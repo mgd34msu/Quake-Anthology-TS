@@ -1,4 +1,5 @@
-import type { SourceWeaponItem } from "./source-items.ts";
+import type { SourceItemIconDeclaration } from "./source-items.ts";
+import type { SourceItemActionCalls, SourceWeaponItem } from "./source-items.ts";
 import type { ItemId } from "./gameplay.ts";
 import type { NativeModAddress, NativeModArmorField, NativeModEntry, NativeModSourceCall } from "./native-mod-callbacks.ts";
 
@@ -22,7 +23,7 @@ export interface NativeWeaponStage {
     readonly values: readonly { readonly item: ItemId; readonly address: NativeModAddress; readonly request: NativeModSourceCall }[] };
 }
 export interface NativeModItems {
-  readonly definitions: readonly ({ readonly item: ItemId; readonly label: string; readonly admission: "add" | "replace-primary" } & (
+  readonly definitions: readonly ({ readonly item: ItemId; readonly label: string; readonly icon?: SourceItemIconDeclaration | null; readonly admission: "add" | "replace-primary"; readonly actions?: SourceItemActionCalls<NativeModSourceCall> } & (
     { readonly kind: "counter" } | SourceWeaponItem))[];
   readonly storage: readonly NativeItemStorage[];
   readonly weapons?: NativeWeaponStage;

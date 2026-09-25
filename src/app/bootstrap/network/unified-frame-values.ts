@@ -1,3 +1,4 @@
+import { readSourceItemIcon } from "../../../content/item-icon.ts";
 import { readHeldWeaponDeclaration } from "../../../content/held-weapon.ts";
 import type { ActorId } from '../../../contracts/identity.ts';
 import type { Vec3, Vec4, Axis } from '../../../contracts/math.ts';
@@ -26,8 +27,12 @@ export function readPlayerView(r: SaveReader): PlayerView {
 export function readPlayerUi(r: SaveReader): PlayerUi {
   const selectedArsenal=optional(r,'selectedArsenal',v=>v.literal(true));
   const nativeInventory=optional(r,'nativeInventory',v=>{
-    const presentation=optional(v,'presentation',p=>({source:readProvider(p.field('source')),weapon:namespaced(p.field('weapon')),kind:p.field('kind').choice('weapon','ammunition')}));
-    return {items:v.field('items').list(row=>({item:namespaced(row.field('item')),label:row.field('label').string(),count:row.field('count').integer()})),
+    const presentation=optional(v,'presentation',p=>{
+      const source=readProvider(p.field('source')),kind=p.field('kind').choice('weapon','ammunition','item');
+      return kind==='item'?{source,kind,icon:p.field('icon').nullable(value=>readSourceItemIcon(value,source.content))}
+        :{source,kind,weapon:namespaced(p.field('weapon'))};
+    });
+    return {items:v.field('items').list(row=>({item:namespaced(row.field('item')),label:row.field('label').string(),count:row.field('count').finite()})),
       selected:v.field('selected').nullable(namespaced),...(presentation===undefined?{}:{presentation})};
   });
   return { ...(selectedArsenal===undefined?{}:{selectedArsenal}), ...(nativeInventory===undefined?{}:{nativeInventory}), health:r.field('health').finite(), armor:readArmor(r.field('armor')), activeWeapon:r.field('activeWeapon').nullable(namespaced),

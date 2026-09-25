@@ -170,6 +170,7 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
       check(protection.absorb.call, available);
     } else checkValues((protection.absorb.globals ?? []).map(global => global.value), available);
   }
+  for (const item of declaration.items?.definitions ?? []) for (const call of [item.actions?.use, item.actions?.drop].filter(call => call !== undefined)) check(call, new Set(["self", "time"]));
   for (const value of declaration.items?.weapons?.selection.values ?? []) check(value.request, new Set(["self", "time"]));
   for (const call of declaration.initialize) check(call, new Set(["time"]));
   for (const call of [...declaration.project, ...declaration.release]) check(call, new Set(["self", "time"]));
@@ -886,7 +887,7 @@ export class NativeModProvider implements NativeModProjection {
     if (!restoring) this.owned?.validate();
     if (!restoring) { this.validateRecords(); for (const call of this.declaration.initialize) this.execute(call, this.inputs(), false); }
     const clients = this.declaration.clients;
-    for (const call of [...this.declaration.initialize, ...this.declaration.project, ...this.declaration.release, ...this.declaration.callbacks, ...(this.declaration.items?.weapons?.selection.values.map(value => value.request) ?? []),
+    for (const call of [...this.declaration.initialize, ...this.declaration.project, ...this.declaration.release, ...this.declaration.callbacks, ...(this.declaration.items?.weapons?.selection.values.map(value => value.request) ?? []), ...(this.declaration.items?.definitions.flatMap(item => [item.actions?.use, item.actions?.drop].filter(call => call !== undefined)) ?? []),
       ...(clients === undefined ? [] : [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command, ...(clients.frame ?? []), ...(clients.endFrame ?? []), ...(clients.input ?? []).flatMap(binding => binding.calls)])]) {
       const target = call.entry.kind === "game-export" ? this.gameEntry(call) : call.entry.kind === "export" ? this.host.entry(call.entry.name) : this.host.memory.offset(this.host.imageBase, BigInt(call.entry.rva)); this.host.memory.check(target, 1, "execute");
     }

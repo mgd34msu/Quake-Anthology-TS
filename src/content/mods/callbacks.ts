@@ -1,3 +1,5 @@
+import { readItemIconDeclaration } from "../item-icon.ts";
+import { readItemActions } from "./item-actions.ts";
 import { readHeldWeaponDeclaration } from "../held-weapon.ts";
 import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage, ModQcProtection, ModQcInputOutput, ModQcItems } from "../../contracts/mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
@@ -96,7 +98,7 @@ function items(reader: SaveReader): ModQcItems {
   const selection = (value: SaveReader) => ({ field: value.field("field").string(), values: value.field("values").list(entry => ({ value: entry.field("value").finite(), item: namespaced(entry.field("item")) })) });
   const weapons = reader.field("weapons");
   return { definitions: reader.field("definitions").list(entry => {
-    const base = { item: namespaced(entry.field("item")), label: entry.field("label").string(), admission: entry.field("admission").choice("add", "replace-primary") };
+    const base = { item: namespaced(entry.field("item")), label: entry.field("label").string(), ...(entry.field("icon").value === undefined ? {} : { icon: entry.field("icon").nullable(readItemIconDeclaration) }), admission: entry.field("admission").choice("add", "replace-primary"), ...(entry.field("actions").value === undefined ? {} : { actions: readItemActions(entry.field("actions"), sourceCall) }) };
     return entry.field("kind").choice("counter", "weapon") === "counter" ? { ...base, kind: "counter" } : { ...base, kind: "weapon", ...(entry.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(entry.field("held")) }), ammo: entry.field("ammo").value === null ? null : namespaced(entry.field("ammo")) };
   }), storage: reader.field("storage").list(entry => {
     const field = entry.field("field").string();
