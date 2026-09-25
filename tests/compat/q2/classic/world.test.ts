@@ -31,7 +31,7 @@ test("classic public command encoding preserves wire-width signed fields", () =>
   const bytes = classicGuestUserCommand({ ...command, angleShorts: [-32768, 32767, 65535], forwardMove: -20 });
   expect([...bytes]).toEqual([100, 0, 0, 128, 255, 127, 255, 255, 236, 255, 0, 0, 0, 0, 0, 128]);
 });
-async function candidate(prepared: PreparedClassicGuest, geometry: Q2WorldGeometry, savedCvars?: Uint8Array, reconstruction?: { actors: ReturnType<SessionActorRegistry["checkpoint"]>; sources: ReturnType<SessionActorRegistry["sourceCheckpoint"]> }, deathmatch = false, action: CandidateAction = { kind: "create" }) {
+async function candidate(prepared: PreparedClassicGuest, geometry: Q2WorldGeometry, savedCvars?: Uint8Array, reconstruction?: { actors: ReturnType<SessionActorRegistry["checkpoint"]>; sources: ReturnType<SessionActorRegistry["sourceCheckpoint"]> }, deathmatch = false, action: CandidateAction = { kind: "create" }, damageProvenance?: ClassicGuestServicesOptions["damageProvenance"]) {
   const identity = createIdentityOwner("classic-original-candidate");
   const actors = reconstruction === undefined ? new SessionActorRegistry(identity) : SessionActorRegistry.restore(identity, reconstruction.actors, reconstruction.sources);
   const callbacks = new ActorCallbackTable(actors), scene = createSceneQueries(geometry);
@@ -42,7 +42,7 @@ async function candidate(prepared: PreparedClassicGuest, geometry: Q2WorldGeomet
   if (action.kind === "create" && savedCvars === undefined) { cvars.register("ctf", deathmatch ? "1" : "0"); cvars.register("deathmatch", deathmatch ? "1" : "0"); cvars.register("coop", "0"); }
   else if (savedCvars !== undefined) cvars.restoreSaveState(decodeCheckpointValue(savedCvars));
   const portals = new Map<number, boolean>(), files = new ClassicOriginalSaveFiles(action.kind === "create" ? action.openFile : undefined), commands: string[] = [], prints: string[] = [];
-  const services: ClassicGuestServicesOptions = { numeric: createNumericOperations(Q2_DONOR_PROFILE), scene, cvars, maxClients: 1, mapPath: "maps/base1.bsp",
+  const services: ClassicGuestServicesOptions = { ...(damageProvenance === undefined ? {} : { damageProvenance }), numeric: createNumericOperations(Q2_DONOR_PROFILE), scene, cvars, maxClients: 1, mapPath: "maps/base1.bsp",
       admit: () => undefined, collision: (actor, value) => physics.setCollision(actor, value), print: text => { prints.push(text); },
       command: () => ({ arguments: [], args: "" }), addCommand: text => { commands.push(text); return undefined; }, debugGraph: (value, color) => { prints.push(`graph:${value}:${color}`); return undefined; },
       engine: { actors, callbacks, bodies: physics.bodies, combat, inventory, trace: request => physics.trace(request),
@@ -238,7 +238,9 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") 
   using mounts = await openMountPlan({ id: "mount-plan:test:native-damage", mounts: [{ kind: "loose", identity, rootPath: "/home/buzzkill/Projects/qfiles/q2/xatrix" }], defaultOrder: [identity.id], prefixOrders: [] });
   const artifact = required(await mounts.open("gamex86.dll"));
   const prepared = await prepareClassicGuest({ kind: "native", owner: { provider: "q2:classic-native", content: identity.content }, role: "server-game", api: { kind: "q2-classic-game", version: 3 }, profile: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" }, artifact: artifact.reference }, mounts);
-  const running = await candidate(prepared, geometry);
+  const running = await candidate(prepared, geometry, undefined, undefined, false, { kind: "create" }, () => ({ sequence: 1,
+    time: { kind: "milliseconds", value: 100 }, weapon: null, weaponProvider: prepared.execution.owner.provider,
+    combatProvider: prepared.execution.owner.provider, inventoryProvider: prepared.execution.owner.provider, movementProvider: prepared.execution.owner.provider }));
   try {
     const origin = required(parseEntities(geometry.entities).find(entity => entity.get("classname") === "info_player_start")).get("origin") ?? "0 0 128";
     await running.world.initLoading(async () => { await Bun.sleep(0); });
@@ -249,11 +251,14 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") 
     const view = host.edicts.at(1), client = required(memory.readPointer(memory.offset(view.address, 84n)));
     memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, 3728n), 0);
     memory.writeInt32(memory.offset(client, 744n), 50);
+    const nativeHit = (amount = 10): void => {
     const vectors = memory.allocate({ byteLength: 36, alignment: 4n, label: "original combat comparison" });
     try { host.invoke(memory.offset(source.imageBase, BigInt(xatrixCombatProfile.entries.damage)), nativeCombatSignature(xatrixCombatProfile.calls.damage, "damage", CLASSIC_Q2_ABI),
       [view.address, view.address, view.address, vectors, memory.offset(vectors, 12n), memory.offset(vectors, 24n)].map<import("../../../../src/contracts/execution.ts").GuestCallValue>(value => ({ kind: "pointer", value }))
-        .concat([10, 0, 0, 8].map(value => ({ kind: "int32", value } satisfies import("../../../../src/contracts/execution.ts").GuestCallValue))), view); }
+        .concat([amount, 0, 0, 8].map(value => ({ kind: "int32", value } satisfies import("../../../../src/contracts/execution.ts").GuestCallValue))), view); }
     finally { memory.unmap(vectors, 36); }
+    };
+    nativeHit();
     const originalHealth = memory.readInt32(memory.offset(view.address, 480n)), originalArmor = memory.readInt32(memory.offset(client, 744n));
     expect(originalHealth).toBeLessThan(100); expect(originalArmor).toBeLessThan(50);
     memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, 744n), 50);
@@ -267,5 +272,22 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") 
     expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(originalHealth);
     expect(memory.readInt32(memory.offset(client, 744n))).toBe(originalArmor);
     expect(outcome.decision.appliedDamage).toBe(100 - originalHealth); expect(outcome.decision.reaction).toBe("pain");
+    const reset = () => { memory.writeInt32(memory.offset(view.address, 480n), 100); memory.writeInt32(memory.offset(client, 744n), 50); };
+    reset(); nativeHit(20);
+    const doubledHealth = memory.readInt32(memory.offset(view.address, 480n)), doubledArmor = memory.readInt32(memory.offset(client, 744n));
+    let transformed = 0;
+    const enable = () => engine.combat.damageOperation.register({ provider: "test:damage-only", id: "test:double-damage", order: 0, kind: "transform", transform: request => {
+      transformed++; return { ...request, amount: request.amount * 2 };
+    } });
+    let remove = enable();
+    try {
+      reset(); nativeHit(); expect(transformed).toBe(1);
+      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(doubledHealth); expect(memory.readInt32(memory.offset(client, 744n))).toBe(doubledArmor);
+      remove(); reset(); nativeHit(); expect(transformed).toBe(1);
+      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(originalHealth); expect(memory.readInt32(memory.offset(client, 744n))).toBe(originalArmor);
+      remove = enable(); reset(); nativeHit(); expect(transformed).toBe(2);
+      expect(memory.readInt32(memory.offset(view.address, 480n))).toBe(doubledHealth); expect(memory.readInt32(memory.offset(client, 744n))).toBe(doubledArmor);
+    } finally { remove(); }
+
   } finally { running.world.close(); running.actors.close(); }
 }, 120000);

@@ -432,3 +432,5 @@ A QC primary whose declared source region leaves the damage input unchanged may 
 Native primary declarations include ordered damage, armor and reaction arguments plus their private calling convention. Additional values come from the original incoming call or declared defaults for an independently initiated call. Original Xatrix and retail rerelease calls retain their source formulas, callbacks, inline armor and lifetime ownership; other private signatures require artifact-bound metadata.
 
 Original QC, QVM and native incoming damage retains its captured continuation only while the same actor lifetime and combat binding still own the target. A redirected hit or replaced binding uses the current target owner. Incoming source reentry does not apply the same registered transformation twice.
+
+Original Classic native damage participates in enabled damage-only components without requiring an armor component. Disabling the component restores ordinary source execution; re-enabling it does not duplicate the hook. Its lifetime follows the source session through retained travel and final teardown.

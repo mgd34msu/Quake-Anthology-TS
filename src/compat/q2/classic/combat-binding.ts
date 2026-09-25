@@ -26,6 +26,8 @@ export class ClassicCombatBindings {
   private readonly frames: DamageFrame[] = [];
   private readonly armorBindings = new Map<OwnedActor, Partial<Record<ProtectionChannel, ArmorIntercept>>>();
   private readonly armorHooks: (() => void)[] = [];
+  private readonly damageHooks: (() => void)[] = [];
+  private closed = false;
   private armorBypass: { readonly channel: ProtectionChannel; stack: bigint | "pending" } | null = null;
   private readonly damageSignature: GuestCallSignature;
   private readonly regularSignature: GuestCallSignature;
@@ -41,7 +43,10 @@ export class ClassicCombatBindings {
     if (profile.digest !== host.memory.module.digest) throw new Error("Classic combat profile belongs to another original artifact");
     validateClassicCombatProfile(profile);
     for (const entry of Object.values(profile.entries)) host.memory.check(host.memory.offset(image, BigInt(entry)), 1, "execute");
-    return new ClassicCombatBindings(host, image, profile);
+    const binding = new ClassicCombatBindings(host, image, profile);
+    try { if (host.options.services.damageProvenance !== undefined) binding.installDamageHooks(); }
+    catch (error) { binding.close(); throw error; }
+    return binding;
   }
   private at(view: RawEntityView, offset: number): GuestAddress { return this.host.memory.offset(view.address, BigInt(offset)); }
   private entry(offset: number): GuestAddress { return this.host.memory.offset(this.image, BigInt(offset)); }
@@ -120,23 +125,37 @@ export class ClassicCombatBindings {
       };
     } };
   }
-  private installArmorHooks(): void {
-    const { host, profile, damageSignature } = this, { callbacks, cpu } = host.options.runner.options, memory = host.memory;
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const remove of this.damageHooks.splice(0)) remove();
+    for (const remove of this.armorHooks.splice(0)) remove();
+    this.armorBindings.clear();
+  }
+  private targetAtEntry(call: NativeCombatCall, signature: GuestCallSignature): OwnedActor | null {
+    const address = classicPointer([readNativeCombatField(this.host.options.runner.options.cpu, call, signature, "target")], 0);
+    return address === null ? null : this.host.edicts.observe(address);
+  }
+  private installDamageHooks(): void {
+    const { host, profile, damageSignature } = this, { callbacks, cpu } = host.options.runner.options;
     const stack = () => cpu.state.registers.read("rsp", 32);
-    const targetAtEntry = (call: NativeCombatCall, signature: GuestCallSignature): OwnedActor | null => {
-      const address = classicPointer([readNativeCombatField(cpu, call, signature, "target")], 0);
-      return address === null ? null : host.edicts.observe(address);
-    };
-    this.armorHooks.push(callbacks.observeEntry(this.entry(profile.entries.damage), () => {
+    this.damageHooks.push(callbacks.observeEntry(this.entry(profile.entries.damage), () => {
       const frame = this.frames.at(-1); if (frame !== undefined && frame.stack === null) frame.stack = stack();
     }));
-    this.armorHooks.push(callbacks.bindEntry(this.entry(profile.entries.damage), {
-      id: `${memory.module.id}:powered-damage`, signature: damageSignature,
+    this.damageHooks.push(callbacks.bindEntry(this.entry(profile.entries.damage), {
+      id: `${host.memory.module.id}:source-damage`, signature: damageSignature,
       invoke: (_context, args) => { this.incomingDamage(args); return { kind: "void" }; },
     }, () => {
-      if (this.frames.at(-1)?.stack === stack()) return false;
-      const actor = targetAtEntry(profile.calls.damage, damageSignature); return actor !== null && this.armorBindings.has(actor);
+      if (this.closed || this.frames.at(-1)?.stack === stack()) return false;
+      const composed = host.options.services.engine.combat.damageOperation.active;
+      if (!composed && this.armorBindings.size === 0) return false;
+      const actor = this.targetAtEntry(profile.calls.damage, damageSignature);
+      return actor !== null && (composed || this.armorBindings.has(actor));
     }));
+  }
+  private installArmorHooks(): void {
+    const { host, profile } = this, { callbacks, cpu } = host.options.runner.options, memory = host.memory;
+    const stack = () => cpu.state.registers.read("rsp", 32);
     for (const channel of ["regular", "powered"] satisfies readonly ProtectionChannel[]) {
       const entry = this.entry(channel === "regular" ? profile.entries.regularArmor : profile.entries.powerArmor);
       const signature = channel === "regular" ? this.regularSignature : this.powerSignature;
@@ -169,7 +188,7 @@ export class ClassicCombatBindings {
         },
       }, () => {
         if (this.armorBypass?.channel === channel && this.armorBypass.stack === stack()) return false;
-        const actor = targetAtEntry(sourceCall, signature); return actor !== null && this.armorBindings.get(actor)?.[channel] !== undefined;
+        const actor = this.targetAtEntry(sourceCall, signature); return actor !== null && this.armorBindings.get(actor)?.[channel] !== undefined;
       }));
     }
   }

@@ -115,6 +115,7 @@ export class ClassicGuestSource {
     if (this.host.options.runner.depth !== 0) throw new Error('Classic guest disposal requires a completed game call');
     this.phase = 'closed';
     const errors: unknown[] = [];
+    try { this.host.options.services.dispose?.(); } catch (error) { errors.push(error); }
     for (const actor of this.host.options.services.engine.actors.ownedBy(this.host.options.provider)) {
       try { this.host.options.services.engine.actors.release(actor); } catch (error) { errors.push(error); }
     }

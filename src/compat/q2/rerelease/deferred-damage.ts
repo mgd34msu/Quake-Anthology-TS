@@ -46,14 +46,16 @@ export class RereleaseDeferredDamage {
     const damageSignature = nativeCombatSignature(calls.damage, "damage", rereleaseAbi), processSignature = nativeCombatSignature(calls.processPain, "deferred-reaction", rereleaseAbi);
     this.#removeEntry = callbacks.observeEntry(entries.damage, () => {
       if (intercepted()) return;
-      const args = readNativeCombatArguments(calls.damage, "damage", adapter.arguments(cpu, damageSignature), 8), stack = cpu.state.registers.read("rsp", 64);
+      const address = pointer([readNativeCombatField(cpu, calls.damage, damageSignature, "target")], 0);
+      if (address === null) return;
+      const stack = cpu.state.registers.read("rsp", 64);
       while (this.#calls.length > 0 && (this.#calls.at(-1)?.stack ?? 0n) <= stack) this.#calls.pop();
-      const view = host.module.entities().fromPointer(requiredPointer(args, 0));
+      const view = host.module.entities().fromPointer(address);
       const source = new RereleaseSourceEdict(view, host.module);
       if ((host.module.memory.readUint32(source.at("shared.svflags")) & 4) === 0) return;
       const actor = host.actor(view); if (actor === null) return;
       this.track(view);
-      const request = currentRequest(actor.id) ?? this.#nativeRequest(actor.id, args);
+      const request = currentRequest(actor.id) ?? this.#nativeRequest(actor.id, readNativeCombatArguments(calls.damage, "damage", adapter.arguments(cpu, damageSignature), 8));
       this.#calls.push({ stack, request: captureRequest(request) });
     });
     this.#removePain = callbacks.observeEntry(entries.processPain, () => {

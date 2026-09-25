@@ -79,6 +79,7 @@ export class ClassicGuestServices {
     for (let model = 1; model < options.scene.geometry.models.length; model++) this.#configstrings.set(33 + model, `*${model}`);
     const owner = this;
     this.services = {
+      dispose: () => { this.#combat?.close(); this.#combat = null; return undefined; },
       ...(options.pickups === undefined ? {} : { get pickups() { const pickups = owner.options.pickups; if (pickups === undefined) throw new Error("Native pickup authority disappeared during travel"); return pickups; } }),
       ...(options.damageProvenance === undefined ? {} : { damageProvenance: (attacker, inflictor, target) => {
         const provenance = this.options.damageProvenance;

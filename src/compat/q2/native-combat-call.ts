@@ -54,7 +54,6 @@ export function nativeCombatSignature(call: NativeCombatCall, operation: NativeC
 export function validateNativeCombatCall(call: NativeCombatCall, operation: NativeCombatOperation, abi: NativeCallAbi): void {
   planGuestCall(nativeCombatSignature(call, operation, abi));
   const required = fields(operation, abi.pointerBytes), seen = new Set<NativeCombatField>();
-  if (call.arguments.length > 64) throw new Error("Native combat argument extent exceeds its declared boundary");
   for (const argument of call.arguments) {
     if (argument.kind === "field") {
       if (!required.includes(argument.field) || seen.has(argument.field)) throw new Error("Native combat fields must occur exactly once");
@@ -83,9 +82,15 @@ export function readNativeCombatCall(reader: SaveReader, operation: NativeCombat
   }) };
   validateNativeCombatCall(result, operation, abi); return result;
 }
+const fieldReaders = new WeakMap<GuestCallSignature, { readonly call: NativeCombatCall; readonly adapter: X86AbiAdapter; readonly indexes: ReadonlyMap<NativeCombatField, number> }>();
 export function readNativeCombatField(cpu: GuestCpu, call: NativeCombatCall, signature: GuestCallSignature, field: NativeCombatField): GuestCallValue {
-  const index = call.arguments.findIndex(argument => argument.kind === "field" && argument.field === field);
-  return new X86AbiAdapter(signature.abi).argument(cpu, signature, index);
+  let reader = fieldReaders.get(signature);
+  if (reader === undefined || reader.call !== call) {
+    const indexes = new Map<NativeCombatField, number>();
+    call.arguments.forEach((argument, index) => { if (argument.kind === "field") indexes.set(argument.field, index); });
+    reader = { call, adapter: new X86AbiAdapter(signature.abi), indexes }; fieldReaders.set(signature, reader);
+  }
+  return reader.adapter.argument(cpu, signature, reader.indexes.get(field) ?? -1);
 }
 /** Only the semantic slots are projected; extra values belong to the exact intercepted invocation. */
 export function readNativeCombatArguments(call: NativeCombatCall, operation: NativeCombatOperation, values: readonly GuestCallValue[], pointerBytes: 4 | 8): readonly GuestCallValue[] {

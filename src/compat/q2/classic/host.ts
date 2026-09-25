@@ -10,7 +10,7 @@ import type { CvarRegistry } from "../../../core/cvars/index.ts";
 import type { GuestCallRunner } from "../../../guest/abi/index.ts";
 import type { GuestCallSignature, GuestHostCallback, MappedGuestMemory } from "../../../guest/core/contracts.ts";
 import { ClassicQ2Cvars } from "./cvars.ts";
-import { CLASSIC_Q2_ABI, CLASSIC_Q2_EXPORTS, CLASSIC_Q2_IMPORTS, CLASSIC_Q2_IMPORT_BYTES, CLASSIC_Q2_TRACE_LAYOUT, classicSignature, q2Pointer } from "./layout.ts";
+import { CLASSIC_Q2_EXPORTS, CLASSIC_Q2_IMPORTS, CLASSIC_Q2_IMPORT_BYTES, CLASSIC_Q2_TRACE_LAYOUT, classicSignature, q2Pointer } from "./layout.ts";
 import { classicPrintf, classicPrintfLayouts } from "./printf.ts";
 import { ClassicQ2Edicts, allocateClassicString, classicStringAllocationBytes, readClassicString, readClassicVector, writeClassicString, writeClassicVector } from "./records.ts";
 import type { ClassicQ2ActorProjection } from "./records.ts";
@@ -24,6 +24,7 @@ export interface ClassicQ2WorldLink {
   readonly areas: readonly [number, number];
 }
 export interface ClassicQ2EngineServices {
+  readonly dispose?: () => undefined;
   readonly pickups?: OriginalPickupAdmission;
   readonly damageProvenance?: (attacker: ActorId, inflictor: ActorId, target: ActorId) => Omit<AttackProvenance, "attacker" | "inflictor" | "cause">;
   readonly projection?: ClassicQ2ActorProjection;
@@ -140,7 +141,7 @@ export class ClassicQ2GuestHost {
   }
   invoke(target: GuestAddress, signature: GuestCallSignature, arguments_: readonly GuestCallValue[], self: RawEntityView | null = null, instructionBudget = this.options.instructionBudget): GuestCallResult {
     const context: GuestCallContext = { module: this.memory.module,
-      callback: { kind: "native-guest", module: this.memory.module, address: target, abi: CLASSIC_Q2_ABI },
+      callback: { kind: "native-guest", module: this.memory.module, address: target, abi: signature.abi },
       parent: this.options.runner.currentContext, self, other: null };
     return this.options.runner.invoke({ target, signature, arguments: arguments_, context, instructionBudget });
   }
@@ -197,7 +198,7 @@ export class ClassicQ2GuestHost {
     if (target === null) throw new Error(`Null API 3 export ${name}`);
     this.cvars.refresh();
     const result = await this.options.runner.invokeLoading({ target, signature: entry.signature, arguments: arguments_,
-      context: { module: this.memory.module, callback: { kind: "native-guest", module: this.memory.module, address: target, abi: CLASSIC_Q2_ABI }, parent: null, self: null, other: null }, instructionBudget }, nextFrame);
+      context: { module: this.memory.module, callback: { kind: "native-guest", module: this.memory.module, address: target, abi: entry.signature.abi }, parent: null, self: null, other: null }, instructionBudget }, nextFrame);
     if (this.#initialized && !this.#suppressReconcile && name !== "Shutdown") this.edicts.reconcile();
     return result;
   }

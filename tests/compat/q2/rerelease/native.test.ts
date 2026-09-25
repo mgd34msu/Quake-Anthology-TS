@@ -1,3 +1,7 @@
+import { X86AbiAdapter } from "../../../../src/guest/abi/adapter.ts";
+import { captureAbiProcessorState, restoreAbiProcessorState } from "../../../../src/guest/abi/runner.ts";
+import { nativeCombatSignature, nativeRereleaseModLayout } from "../../../../src/compat/q2/native-combat-call.ts";
+import { rereleaseAbi } from "../../../../src/compat/q2/rerelease/api.ts";
 import { SaveReader } from "../../../../src/persistence/value.ts";
 import { readRereleasePrimaryWorldProfile, rereleasePrimaryWorldProfile } from "../../../../src/compat/q2/rerelease/world-profile.ts";
 import { builtinNativePrimary } from "../../../../src/compat/q2/native-primary.ts";
@@ -541,6 +545,19 @@ test.skipIf(!available)("retail projectile and native damage share foreign actor
   const bridge = host.foreignActors; if (bridge === null) throw new Error("Missing native foreign bridge");
   const playerView = guest.entities().atSlot(1), player = host.actor(playerView);
   if (player === null) throw new Error("Missing native shooter");
+  const entries = host.options.nativeEntries; if (entries === undefined) throw new Error("Missing original native entries");
+  const { cpu, callbacks } = guest.options.runner.options, savedCpu = captureAbiProcessorState(cpu.state);
+  try {
+    const signature = nativeCombatSignature(guest.requireWorldProfile().calls.damage, "damage", rereleaseAbi);
+    new X86AbiAdapter(rereleaseAbi).enter(cpu, entries.damage, signature, [guestPointer(null), guestPointer(null), guestPointer(null), guestPointer(null), guestPointer(null), guestPointer(null),
+      { kind: "int32", value: 1 }, { kind: "int32", value: 0 }, { kind: "int32", value: 0 }, { kind: "aggregate", layout: nativeRereleaseModLayout, bytes: new Uint8Array(3) }], entries.damage);
+    const modSlot = memory.pointer(cpu.state.registers.read("rsp", 64) + 80n); if (modSlot === null) throw new Error("Missing original mod_t stack slot");
+    memory.writePointer(modSlot, null);
+    expect(callbacks.enter(entries.damage)).toBe(false);
+    cpu.state.registers.write("rcx", 64, playerView.address.byteOffset);
+    expect(callbacks.enter(entries.damage)).toBe(false);
+  } finally { restoreAbiProcessorState(cpu.state, savedCpu); }
+
   // The minimal entity fixture omits base1's moving spawn platform. Hold the native shooter via its own cheat command.
   cvars.set("cheats", "1", true); core.refreshCvars(); commands = ["noclip"]; guest.callGame("ClientCommand", [guestPointer(playerView.address)]);
   for (let index = 0; index < 40; index++) {

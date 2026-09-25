@@ -57,6 +57,7 @@ function returnBuffer(cpu: GuestCpu, plan: AbiCallPlan): GuestAddress {
 }
 
 export class X86AbiAdapter implements GuestAbiAdapter {
+  readonly #argumentPlans = new WeakMap<GuestCallSignature, AbiCallPlan>();
   constructor(readonly abi: NativeCallAbi) {}
 
   #check(cpu: GuestCpu, signature: GuestCallSignature): void {
@@ -118,7 +119,9 @@ export class X86AbiAdapter implements GuestAbiAdapter {
   argument(cpu: GuestCpu, signature: GuestCallSignature, index: number): GuestCallValue {
     this.#check(cpu, signature);
     if (!Number.isSafeInteger(index) || index < 0) throw new RangeError("Guest argument index is outside its signature");
-    const argument = planGuestCall(signature).arguments[index];
+    let plan = this.#argumentPlans.get(signature);
+    if (plan === undefined) { plan = planGuestCall(signature); this.#argumentPlans.set(signature, plan); }
+    const argument = plan.arguments[index];
     if (argument === undefined) throw new RangeError("Guest argument index is outside its signature");
     return readArgument(cpu, argument);
   }
