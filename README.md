@@ -4,6 +4,8 @@ Quake Anthology brings Quake, Quake II, and Quake III gameplay into one engine a
 
 This is an unfinished engine project. Mixed configurations work, but complete interoperability, content coverage, rendering fidelity, and release qualification are still in progress. This repository is not a finished replacement for every original game or mod.
 
+Quake and Quake II **Classic** components must preserve their original gameplay, feedback, and presentation. Rerelease additions belong to the selected rerelease component; sharing engine code must not enable them in an all-classic setup. Mixed games retain each selected component's behavior. This is a fidelity requirement, not a claim that every path has already been verified.
+
 **Run on Linux**
 
 Install Bun 1.3.14 or newer and the native runtime libraries: SDL2, OpenGL, FreeType, and libvorbisfile. A compiled executable includes the Bun runtime; it still needs those native libraries and your game data.

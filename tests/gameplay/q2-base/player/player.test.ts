@@ -80,6 +80,18 @@ test("Q2 character feeds exact shield savings and sends one death to the selecte
   expect(game.inventory.count(game.actor.id, "q1:rockets")).toBe(7);
 });
 
+test("classic Q2 damage keeps original screen flash and pain sound without directional HUD indicators", () => {
+  const game = character();
+  game.movement.value = { ...game.movement.value, waterLevel: 0, waterType: 0 };
+  game.advance(1);
+  game.host.environmentDamage(game.actor, 10, 1, 0);
+  game.controller.endFrame();
+  expect(game.views.at(-1)?.flashes).toBe(1);
+  expect(game.views.at(-1)?.blend).toEqual({ x: 1, y: 0, z: 0, w: 0.2 });
+  expect(game.presentation.filter(event => event.kind === "sound").map(event => event.path)).toContain("*pain100_2.wav");
+  expect(game.presentation.some(event => event.kind === "damage-indicator")).toBe(false);
+});
+
 test("Q2 obituary records source means-of-death scoring including friendly fire", () => {
   const first = new Q2PlayerState(0, 0), second = new Q2PlayerState(1, 0); first.name = "A"; second.name = "B";
   expect(q2Obituary(first, null, 22, true, false)).toBe("A cratered.\n"); expect(first.score).toBe(-1);

@@ -25,7 +25,6 @@ export function q2DamageFeedback(context: Q2CharacterContext, painIndex: number)
   const flashes = (state.damageBlood !== 0 ? 1 : 0) | (state.damageArmor !== 0 && !state.god && powers.invulnerabilityUntil <= now ? 2 : 0);
   const total = state.damageBlood + state.damageArmor + state.damagePowerArmor;
   if (total === 0) return { flashes, painIndex };
-  game.host.emit({ kind: "damage-indicator", actor: entity.actor.id, origin: { ...state.damageFrom }, amount: total });
   let nextPain = painIndex;
   if (movement.animateQ2 && state.animationPriority < 3) {
     state.animationPriority = 3;
