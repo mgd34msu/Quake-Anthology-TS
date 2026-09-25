@@ -62,7 +62,7 @@ test('source grapple cable and looping sound retain client-owned actor identitie
 
 test('unified frame reconstructs mixed presentation identities and local resources without server paths',async()=>{
   const bytes=encodeUnifiedFrame(frame),text=new TextDecoder().decode(inflateRawSync(bytes));
-  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(7);
+  expect(new SaveReader(decodeCheckpointValue(inflateRawSync(bytes))).field('version').integer()).toBe(8);
   expect(text.includes('/server-private')).toBe(false);expect(text.includes('local-model')).toBe(false);
   const result=await decodeUnifiedFrame(bytes,context),snapshot=result.output.snapshot;
   expect(snapshot.session).toBe(client.session);expect(result.player.actor.equals(client.actor(4,2))).toBe(true);expect(result.player.actor.equals(id)).toBe(false);
@@ -111,6 +111,12 @@ test('unified native camera retains source identity, prediction policy and editi
   };
   const result=await decodeUnifiedFrame(encodeUnifiedFrame({...frame,nativeCamera,player:{...frame.player,view:nativeCamera.view}}),context);
   expect(result.nativeCamera).toEqual(nativeCamera);
+  const native={owner:nativeCamera.owner,generation:nativeCamera.generation,viewer:id,view:nativeCamera.view,hud:{stats:Array.from({length:64},(_,index)=>index===1?47:0),serverFrame:31,timeMilliseconds:775}};
+  const transported=await decodeUnifiedFrame(encodeUnifiedFrame({...frame,components:{revision:1,sources:[],native:[native]}}),context);
+  expect(transported.components?.native?.[0]?.hud).toEqual(native.hud);
+  expect(transported.components?.native?.[0]?.view).toEqual(native.view);
+  expect(transported.components?.native?.[0]?.viewer.equals(client.actor(4,2))).toBe(true);
+  await expect(decodeUnifiedFrame(encodeUnifiedFrame({...frame,components:{revision:1,sources:[],native:[{...native,hud:{...native.hud,stats:[1,2]}}]}}),context)).rejects.toThrow('stat count');
   expect(result.player.view.damageBlend).toEqual(nativeCamera.view.damageBlend);
   const wrong: typeof nativeCamera={...nativeCamera,view:{...nativeCamera.view,native:{...nativeCamera.view.native,edition:'classic'}}};
   await expect(decodeUnifiedFrame(encodeUnifiedFrame({...frame,nativeCamera:wrong}),context)).rejects.toThrow('Classic camera');

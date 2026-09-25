@@ -1,3 +1,4 @@
+import type { UnifiedNativePublication } from "../network/unified-native-components.ts";
 import type { PresentationOwner } from "../../../contracts/presentation.ts";
 import { samePresentationOwner } from "../../../contracts/presentation.ts";
 import type { UnifiedComponentPublication } from "../network/unified-components.ts";
@@ -15,7 +16,7 @@ import type { EngineSession } from '../../../world/session/session.ts';
 import type { LoadedApplicationContent } from '../content.ts';
 import type { UnifiedResourceKey } from '../network/unified-frame-codec.ts';
 import { unifiedResourceId } from '../network/unified-content.ts';
-import type { UnifiedNativeCamera, UnifiedPresentationFrame } from '../network/unified-types.ts';
+import type { UnifiedPresentationFrame } from '../network/unified-types.ts';
 import { Q3ClientAdmissionDenied } from './q3/runtime.ts';
 import type { SharedSimulation } from './runtime.ts';
 import type { SimulationPresentationEvent } from './types.ts';
@@ -30,6 +31,7 @@ export interface UnifiedApplicationServerHost {
   disconnect(player: UnifiedApplicationPlayer): void;
   userinfo(player: UnifiedApplicationPlayer, value: string): void;
   components?(player: UnifiedApplicationPlayer): readonly UnifiedComponentPublication[];
+  nativeComponents?(player: UnifiedApplicationPlayer): readonly UnifiedNativePublication[];
   componentCommand?(player: UnifiedApplicationPlayer, owner: PresentationOwner, generation: number, args: readonly string[]): boolean;
   command(player: UnifiedApplicationPlayer, name: string, args: readonly string[]): void;
   input(player: UnifiedApplicationPlayer, sequence: number, command: UserCommand, arsenal?: ArsenalIntent): ActorCommand;
@@ -190,6 +192,13 @@ export function createUnifiedApplicationServerHost(options: { readonly session: 
             options.content.world.leaves.length, options.print) } }];
       });
     },
+    nativeComponents(player) {
+      requirePlayer(player);
+      return simulation.modClientPresentationSources().flatMap(source => {
+        source.source.assertCurrent(); const frame = source.source.frame(player.actor);
+        return frame?.kind !== "native" ? [] : [{ owner: source.owner, identity: source.identity, generation: source.source.generation, viewer: player.actor, frame }];
+      });
+    },
     componentCommand(player, owner, generation, args) {
       requirePlayer(player);
       const source = simulation.modPresentationSources().find(source => samePresentationOwner(source.owner, owner) && source.source.generation === generation);
@@ -215,14 +224,7 @@ export function createUnifiedApplicationServerHost(options: { readonly session: 
     frame(player, output, epoch, acknowledgedInput) {
       requirePlayer(player);
       const events = output.events.filter(event => permitted(player, event)).map((event): SimulationEvent => event.payload.kind === 'sound' ? { ...event, payload: { ...event.payload, resource: unifiedResourceId(resource(event.payload.resource)) } } : event);
-      let nativeCamera: UnifiedNativeCamera | undefined;
-      for (const source of simulation.modClientPresentationSources()) {
-        source.source.assertCurrent(); const frame = source.source.frame(player.actor);
-        if (frame?.kind !== "native" || frame.view === null) continue;
-        if (nativeCamera !== undefined) throw new Error("Multiple component camera owners");
-        nativeCamera = { owner: source.owner, identity: source.identity, generation: source.source.generation, view: frame.view };
-      }
-      return { epoch, acknowledgedInput, ...(nativeCamera === undefined ? {} : { nativeCamera }), prediction: projectUnifiedPrediction(simulation, player.actor, acknowledgedInput), output: { snapshot: { ...output.snapshot, inventories: output.snapshot.inventories.filter(value => value.actor.equals(player.actor)) }, events },
+      return { epoch, acknowledgedInput, prediction: projectUnifiedPrediction(simulation, player.actor, acknowledgedInput), output: { snapshot: { ...output.snapshot, inventories: output.snapshot.inventories.filter(value => value.actor.equals(player.actor)) }, events },
         models: simulation.presentations().filter(value => !value.viewWeapon || value.actor.equals(player.actor)), characters: simulation.characterViews(), worldText: simulation.worldText(),
         player: { actor: player.actor, view: simulation.playerView(player.actor), ui: simulation.playerUi(player.actor) } };
     },

@@ -1,3 +1,4 @@
+import { readNativeFrames, readNativeStates, writeNativeFrames, writeNativeStates, type UnifiedNativeFrame, type UnifiedNativeState } from "./unified-native-components.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { PresentationOwner } from "../../../contracts/presentation.ts";
 import type { ModIdentity } from "../../../contracts/mods.ts";
@@ -42,8 +43,8 @@ export interface UnifiedComponentFrame {
   readonly bindings: QvmSceneContext["actors"];
   readonly scene: Omit<QvmSceneContext, "gameState" | "gameStateRevision" | "commands" | "actors" | "baseline"> | null;
 }
-export interface UnifiedComponentUpdate { readonly revision: number; readonly sources: readonly UnifiedComponentState[]; }
-export interface UnifiedComponentFrames { readonly revision: number; readonly sources: readonly UnifiedComponentFrame[]; }
+export interface UnifiedComponentUpdate { readonly revision: number; readonly sources: readonly UnifiedComponentState[]; readonly native?: readonly UnifiedNativeState[]; }
+export interface UnifiedComponentFrames { readonly revision: number; readonly sources: readonly UnifiedComponentFrame[]; readonly native?: readonly UnifiedNativeFrame[]; }
 
 function integer(reader: SaveReader, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
   const value = reader.integer(minimum);
@@ -74,7 +75,7 @@ function readCommands(reader: SaveReader): QvmSceneContext["commands"] {
   return commands;
 }
 export function writeComponentUpdate(update: UnifiedComponentUpdate) {
-  return { revision: update.revision, sources: update.sources.map(source => ({ ...source, gameState: source.gameState === null ? null : writeState(source.gameState) })) };
+  return { revision: update.revision, native: writeNativeStates(update.native ?? []), sources: update.sources.map(source => ({ ...source, gameState: source.gameState === null ? null : writeState(source.gameState) })) };
 }
 export function readComponentUpdate(reader: SaveReader): UnifiedComponentUpdate {
   const sources = reader.field("sources").list(source => ({ owner: readComponentOwner(source.field("owner")), identity: readModIdentity(source.field("identity")),
@@ -82,10 +83,12 @@ export function readComponentUpdate(reader: SaveReader): UnifiedComponentUpdate 
     runtime: source.field("runtime").choice("qvm-scene", "qvm-player-events"), gameStateRevision: integer(source.field("gameStateRevision"), 0),
     gameState: source.field("gameState").nullable(readState), commandBase: integer(source.field("commandBase"), 0, 2147483647), commands: readCommands(source.field("commands")) }));
   if (sources.length > 256 || new Set(sources.map(source => source.owner.provider)).size !== sources.length) return reader.fail("invalid component owner set");
-  return { revision: integer(reader.field("revision"), 1), sources };
+  const native = readNativeStates(reader.field("native"));
+  checkOwners(reader, [...sources, ...native]);
+  return { revision: integer(reader.field("revision"), 1), sources, native };
 }
 export function writeComponentFrames(frames: UnifiedComponentFrames) {
-  return { revision: frames.revision, sources: frames.sources.map(source => {
+  return { revision: frames.revision, native: writeNativeFrames(frames.native ?? []), sources: frames.sources.map(source => {
     const playerState = encodeRecord(qvmPlayerStateBytes(source.abi), value => writeSourceQvmPlayerState(value, source.snapshot.playerState, source.abi));
     return { ...source, viewer: wireActor(source.viewer), snapshot: { serverTime: source.snapshot.serverTime, playerState },
       bindings: source.bindings.map(binding => ({ ...binding, actor: wireActor(binding.actor) })),
@@ -110,5 +113,11 @@ export function readComponentFrames(reader: SaveReader, identity: UnifiedIdentit
       weaponPresented: source.field("weaponPresented").boolean(), bindings, scene };
   });
   if (sources.length > 256 || new Set(sources.map(source => source.owner.provider)).size !== sources.length) return reader.fail("invalid component frame owner set");
-  return { revision: integer(reader.field("revision"), 0), sources };
+  const native = readNativeFrames(reader.field("native"), identity);
+  checkOwners(reader, [...sources, ...native]);
+  return { revision: integer(reader.field("revision"), 0), sources, ...(reader.field("native").value === undefined ? {} : { native }) };
+}
+
+function checkOwners(reader: SaveReader, sources: readonly { readonly owner: PresentationOwner }[]): void {
+  if (sources.length > 256 || new Set(sources.map(source => source.owner.provider)).size !== sources.length) reader.fail("invalid component owner set");
 }

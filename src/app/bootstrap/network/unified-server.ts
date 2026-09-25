@@ -233,7 +233,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
         const frame = hostCall(() => this.host.frame(player, output, this.epoch, peer.lastConsumedInput));
         if (presentation.length > 0 || frame.output.events.length > 0) this.queue(peer, { kind: 'events', epoch: this.epoch, frame: output.snapshot.frame.frame,
           payload: encodeUnifiedPresentationEvents(presentation), simulation: encodeCheckpointValue(frame.output.events.map(writeUnifiedSimulationEvent)) });
-        const components = peer.components.project(hostCall(() => this.host.components?.(player) ?? []));
+        const components = peer.components.project(hostCall(() => this.host.components?.(player) ?? []), hostCall(() => this.host.nativeComponents?.(player) ?? []));
         if (components.update !== null) this.queue(peer, { kind: 'components', epoch: this.epoch, update: components.update });
         peer.channel.queueFrame(encodeUnifiedFrame({ ...frame, components: components.frame, output: { snapshot: frame.output.snapshot, events: [] } }), peer.requiredReliable);
         this.flush(peer, now);

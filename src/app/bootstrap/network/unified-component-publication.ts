@@ -1,3 +1,4 @@
+import { projectNativeComponents, type UnifiedNativePublication } from "./unified-native-components.ts";
 import { samePresentationOwner } from "../../../contracts/presentation.ts";
 import { sameModIdentity } from "../../../contracts/mods.ts";
 import type { ProviderId } from "../../../contracts/identity.ts";
@@ -6,9 +7,10 @@ import type { UnifiedComponentFrames, UnifiedComponentPublication, UnifiedCompon
 /** One authenticated recipient's reliable cursor, independent from volatile frame delivery. */
 export class UnifiedComponentPublisher {
   private revision = 0;
+  private native: readonly UnifiedNativePublication[] = [];
   private sources: readonly UnifiedComponentPublication[] = [];
   private readonly sequences = new Map<ProviderId, number>();
-  project(sources: readonly UnifiedComponentPublication[]): { readonly update: UnifiedComponentUpdate | null; readonly frame: UnifiedComponentFrames } {
+  project(sources: readonly UnifiedComponentPublication[], native: readonly UnifiedNativePublication[] = []): { readonly update: UnifiedComponentUpdate | null; readonly frame: UnifiedComponentFrames } {
     const previous = new Map(this.sources.map(source => [source.owner.provider, source]));
     let changed = sources.length !== this.sources.length || sources.some((source, index) => !samePresentationOwner(this.sources[index]?.owner, source.owner));
     const states: UnifiedComponentState[] = sources.map(source => {
@@ -30,9 +32,10 @@ export class UnifiedComponentPublisher {
         gameStateRevision: source.context.gameStateRevision, gameState: gameChanged ? source.context.gameState : null, commandBase: base, commands };
     });
     for (const id of this.sequences.keys()) if (!sources.some(source => source.owner.provider === id)) this.sequences.delete(id);
-    this.sources = sources;
-    const update = changed ? { revision: ++this.revision, sources: states } : null;
-    return { update, frame: { revision: this.revision, sources: sources.map(source => ({ owner: source.owner, generation: source.generation, abi: source.abi,
+    const projected = projectNativeComponents(this.native, native);
+    this.sources = sources; this.native = native;
+    const update = changed || projected.changed ? { revision: ++this.revision, sources: states, native: projected.states } : null;
+    return { update, frame: { revision: this.revision, native: projected.frames, sources: sources.map(source => ({ owner: source.owner, generation: source.generation, abi: source.abi,
       viewer: source.viewer, clientNumber: source.context.clientNumber ?? source.context.snapshot.playerState.clientNumber, gameStateRevision: source.context.gameStateRevision, snapshot: source.context.snapshot, weaponPresented: source.context.weaponPresented === true,
       bindings: source.bindings, scene: source.context.scene === undefined ? null : { revision: source.context.scene.revision, snapshot: source.context.scene.snapshot } })) } };
   }
