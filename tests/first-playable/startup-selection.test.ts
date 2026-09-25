@@ -439,6 +439,44 @@ test("exact movement products resolve catalog family and edition independently o
 });
 
 
+test("startup player defaults retain native programs and explicit classic selections", () => {
+  const products: CatalogProduct[] = expectedProducts.map(expectation => ({ expectation,
+    id: createContentId({ family: expectation.family, edition: expectation.edition, package: expectation.campaign, revision: "player-selection" }),
+    availability: { kind: "installed" }, archives: [], looseRoot: null, userContent: null, maps: [], diagnostics: [] }));
+  const q3 = products.find(product => product.expectation.id === "q3-baseq3");
+  if (q3 === undefined) throw new Error("Missing Q3 definition");
+  const guest = { ...q3, id: createContentId({ family: "q3", edition: "classic", package: "guest", revision: "player-selection" }),
+    expectation: { ...q3.expectation, id: "q3-classic-guest", campaign: "guest", baseProduct: "q3-baseq3", requiredPrograms: ["vm/qagame.qvm"] } };
+  products.push(guest);
+  const catalog = new InstalledCatalog("/unused-player-fixture", products, [], 1);
+  for (const id of ["q1-classic-id1", "q2-classic-baseq2", "q1-quakeworld", guest.expectation.id]) {
+    const product = catalog.require(id), family = product.expectation.family;
+    const command = parseApplicationCommand(["--game", id, "--movement", family, "--character", family, "--mode", "deathmatch"]);
+    if (command.kind !== "run") throw new Error("Expected launch");
+    const options = { ...command.options, dedicated: id === "q1-quakeworld" };
+    const preset = applicationPreset(catalog, options), menu = new StartupSelectionModel(catalog, options);
+    expect(menu.options.movementProduct).toBe(catalog.product(preset.movement.content).expectation.id);
+    for (const field of ["movement", "character"] satisfies readonly ("movement" | "character")[]) {
+      const row = menu.rows().find(row => row.id === field);
+      expect(row?.value).toBe(id);
+      expect(row?.choices.filter(choice => choice.id === id)).toHaveLength(1);
+      const base = family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3";
+      menu.select(field, base);
+      expect(menu.rows().find(row => row.id === field)?.value).toBe(base);
+      menu.select(field, id);
+      expect(menu.rows().find(row => row.id === field)?.value).toBe(id);
+    }
+    const explicit = new StartupSelectionModel(catalog, { ...options, movementProduct: "q2-classic-baseq2", character: "q2" });
+    expect(explicit.options.movementProduct).toBe("q2-classic-baseq2");
+    expect(explicit.rows().find(row => row.id === "character")?.value).toBe("q2-classic-baseq2");
+  }
+  const command = parseApplicationCommand(["--game", "q1-classic-id1"]);
+  if (command.kind !== "run") throw new Error("Expected launch");
+  const unavailable = new InstalledCatalog(catalog.corpusRoot, products.map(product => ({ ...product,
+    availability: { kind: "unresolved", reason: "Not installed" } })), [], 1);
+  expect(() => new StartupSelectionModel(unavailable, command.options)).not.toThrow();
+});
+
 test.skipIf(process.env["QTS_TEST_INSTALLED_WEAPON_BEHAVIORS"] !== "1" || !existsSync(corpus))("Mods menu exposes installed components across provider families and retains independent selections", async () => {
   const catalog = await discoverInstalledContent({ corpusRoot: corpus, userContentRoot: defaultUserContentRoot(), discoverMods: true });
   const command = parseApplicationCommand(["--content-root", corpus, "--game", "q2-classic-baseq2"]);

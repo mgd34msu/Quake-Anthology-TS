@@ -31,7 +31,7 @@ import { campaignMonsterSlots, defaultMonsterRoster, monsterSources } from "../.
 import { nativeProviderTiming } from "../../content/catalog/timing.ts";
 import { canonicalWeaponSource, supportsSelectedWeaponProduct } from "../../content/catalog/weapons.ts";
 import { loadTeamArenaCampaign, planTeamArenaSkirmish, type TeamArenaCampaign, type TeamArenaTeams } from "./team-arena-skirmish.ts";
-import { applicationPreset } from "./content.ts";
+import { applicationPlayerProducts, applicationPreset } from "./content.ts";
 import { CommonParseCursor, CommonParseState } from "../../core/common-parse.ts";
 import type { ApplicationOptions } from "./options.ts";
 import type { Q1ProtocolIdentity } from "../../contracts/protocol.ts";
@@ -64,7 +64,6 @@ function monsterProgramSuffix(program: string): string {
 function monsterSourceTitle(family: GameFamily, program: string, title: string | undefined): string {
   return program === "id1" || program === "baseq2" ? family === "q1" ? "Quake" : "Quake II" : title ?? program;
 }
-const baseProduct = (family: GameFamily): string => family === "q1" ? "q1-classic-id1" : family === "q2" ? "q2-classic-baseq2" : "q3-baseq3";
 function unavailable(product: CatalogProduct): string | null {
   const state = product.availability;
   return state.kind === "installed" ? null : state.kind === "unresolved" ? state.reason : `Missing: ${state.requirements.join(", ")}`;
@@ -202,9 +201,10 @@ export class StartupSelectionModel {
     const catalog = currentCatalog;
     this.display = { width: initial.width, height: initial.height, gamma: initial.gamma };
     const product = catalog.product(initial.product), campaign = product.expectation.campaign;
+    const playerProducts = applicationPlayerProducts(catalog, initial);
     const rules = initial.rules ?? (product.expectation.family === "q2" && product.expectation.edition === "classic" && (campaign === "ctf" || campaign === "lmctf") ? campaign : "standard");
     this.values = { product: initial.product, mapProduct: initial.mapProduct ?? initial.product, map: initial.map,
-      movement: initial.movementProduct === undefined ? baseProduct(initial.movement) : catalog.require(initial.movementProduct).expectation.id, character: baseProduct(initial.character), model: initial.characterModel,
+      movement: playerProducts.movement, character: playerProducts.character, model: initial.characterModel,
       doppler: "source", environment: "audio-content", weapons: "native", enemies: "native", grapple: "native", grappleStyle: "native", grenades: "native", mode: initial.mode, rules,
       skill: String(initial.skill), seats: String(initial.seats), renderer: initial.renderer };
     this.selectedModels.set(this.values.character, initial.characterModel);
@@ -558,14 +558,20 @@ export class StartupSelectionModel {
       || product.expectation.id === "q3-baseq3").map(productChoice);
   }
   rows(): readonly StartupSelectionRow[] {
+    const current = this.product("product"), currentLabel = productChoice(current).label;
+    const defaultsPlayer = applicationPlayerProducts(this.catalog, { product: this.values.product,
+      movement: current.expectation.family, character: current.expectation.family, network: this.initial.network });
     const movementChoices = [...this.baseChoices(), productChoice(this.catalog.product("q1-quakeworld"))];
-    if (!movementChoices.some(choice => choice.id === this.values.movement)) movementChoices.push(productChoice(this.product("movement")));
+    const characterChoices = [...this.baseChoices()];
+    for (const id of [defaultsPlayer.movement, this.values.movement])
+      if (!movementChoices.some(choice => choice.id === id)) movementChoices.push(productChoice(this.catalog.product(id)));
+    for (const id of [defaultsPlayer.character, this.values.character])
+      if (!characterChoices.some(choice => choice.id === id)) characterChoices.push(productChoice(this.catalog.product(id)));
     const roster = this.roster(), monsterSource = this.monsterSourceRow();
     const sourceLabel = monsterSource.choices.find(source => source.id === roster.source)?.label ?? "Authored campaign monsters";
     const customized = roster.default !== "native" || roster.byClassname.size > 0;
     const monsterValue = this.values.enemies === "custom" && roster.source !== "native" && !customized ? roster.source : this.values.enemies;
     const row = (id: StartupSelectionField, label: string, choices: readonly StartupSelectionChoice[], value = id === "enemies" ? monsterValue : this.values[id]): StartupSelectionRow => ({ id, label, value, choices });
-    const current = this.product("product"), currentLabel = productChoice(current).label;
     const provider: ProviderReference = { provider: `${current.expectation.family}:official`, content: current.id };
     const rules = this.values.rules === "ctf" || this.values.rules === "lmctf" ? this.catalog.product(`q2-classic-${this.values.rules}`) : current;
     const defaults = unavailable(current) !== null || unavailable(rules) !== null ? disabledEquipment()
@@ -585,7 +591,7 @@ export class StartupSelectionModel {
       row("mapProduct", "Map content", this.catalog.products.map(productChoice)),
       row("map", "Starting map", this.maps()),
       row("movement", "Movement", movementChoices),
-      row("character", "Character source", this.baseChoices()), row("model", "Character model", this.models()),
+      row("character", "Character source", characterChoices), row("model", "Character model", this.models()),
       row("weapons", "Weapons", [nativeWeapons, ...this.catalog.products.filter(product => supportsSelectedWeaponProduct(product.expectation)).map(productChoice)]),
       row("enemies", "Monsters", [nativeMonsters, choice("custom", this.values.enemies === "custom" ? `${sourceLabel} (custom)` : "Custom roster", current.expectation.family === "q3" ? "This map has no supported authored monster roster" : null), ...this.monsterSourceRow().choices.filter(source => source.id !== "native").map(source => ({ ...source, unavailable: current.expectation.family === "q3" ? "This map has no supported authored monster roster" : source.unavailable }))]),
       row("grapple", "Hook", [choice("disabled", "Off"), choice("slot", "Weapon slot", hookUnavailable), choice("offhand", "Offhand", hookUnavailable)], placement),
@@ -699,9 +705,11 @@ export class StartupSelectionModel {
     const movement: ProviderReference = { provider: `${movementProduct.expectation.family}:movement`, content: movementProduct.id };
     const character: ProviderReference = { provider: `${characterProduct.expectation.family}:character`, content: characterProduct.id };
     const movementTiming = nativeProviderTiming(movement, movementProduct.expectation.family, movementProduct.expectation.edition === "rerelease");
+    const characterTiming = nativeProviderTiming(character, characterProduct.expectation.family, characterProduct.expectation.edition === "rerelease");
     const timing = base.timing.map(profile => profile.provider === movement.provider
       ? movementProduct.expectation.edition === "quakeworld" ? { ...movementTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 255 } } satisfies ExecutableRecipe["timing"][number] : movementTiming
-      : profile.provider === character.provider ? nativeProviderTiming(character, characterProduct.expectation.family, characterProduct.expectation.edition === "rerelease") : profile);
+      : profile.provider === character.provider ? characterProduct.expectation.edition === "quakeworld"
+        ? { ...characterTiming, clock: { kind: "q1-quakeworld", maximumCommandMilliseconds: 50 } } satisfies ExecutableRecipe["timing"][number] : characterTiming : profile);
     const environment: ExecutableRecipe["presentation"]["environment"] = this.values.environment === "audio-content" || this.values.environment === "disabled"
       ? { kind: this.values.environment }
       : { kind: "selected", resource: { content: this.catalog.require(this.values.environment).id, path: "sound/default.environments" } };

@@ -169,6 +169,19 @@ export function resolveApplicationMovement(catalog: InstalledCatalog, options: A
   return { ...options, movement: product.expectation.family, movementProduct: product.expectation.id };
 }
 
+export function applicationPlayerProducts(catalog: InstalledCatalog,
+  options: Pick<ApplicationOptions, "product" | "movement" | "movementProduct" | "character" | "network">,
+  nativeSource?: boolean): { readonly movement: string; readonly character: string } {
+  const product = catalog.product(options.product), family = product.expectation.family;
+  const ownPlayer = nativeSource ?? (product.availability.kind === "installed" && (product.expectation.edition === "quakeworld" && options.network.kind !== "qw-client"
+    || family === "q3" && options.network.kind !== "q3-client" && !expectedProducts.some(builtin => builtin.id === sourceProgramProduct(catalog, product.id).expectation.id)));
+  return {
+    movement: options.movementProduct !== undefined ? catalog.require(options.movementProduct).expectation.id
+      : ownPlayer && options.movement === family ? product.expectation.id : baseProduct(options.movement),
+    character: ownPlayer && options.character === family ? product.expectation.id : baseProduct(options.character),
+  };
+}
+
 export function applicationPreset(catalog: InstalledCatalog, options: ApplicationOptions, nativeSources?: { readonly movement: ProviderReference; readonly character: ProviderReference }, presentationSource?: ApplicationContentSource): LaunchPreset {
   options = resolveApplicationMovement(catalog, options);
   const product = catalog.require(options.product), family = product.expectation.family;
@@ -211,8 +224,9 @@ function selectedApplicationPreset(catalog: InstalledCatalog, options: Applicati
   const programProduct = sourceProgramProduct(catalog, product.id);
   const equipmentSource = nativeProgram === undefined && q2GameLibrary === undefined && !q3Guest && !quakeworld
     ? { ...provider, content: programProduct.id } : provider;
-  const movement: ProviderReference = nativeSources?.movement ?? { provider: `${options.movement}:movement`, content: options.movementProduct !== undefined ? catalog.require(options.movementProduct).id : (quakeworld || q3Guest) && options.movement === family ? product.id : catalog.require(baseProduct(options.movement)).id };
-  const character: ProviderReference = nativeSources?.character ?? { provider: `${options.character}:character`, content: (quakeworld || q3Guest) && options.character === family ? product.id : catalog.require(baseProduct(options.character)).id };
+  const playerProducts = applicationPlayerProducts(catalog, options, quakeworld || q3Guest);
+  const movement: ProviderReference = nativeSources?.movement ?? { provider: `${options.movement}:movement`, content: catalog.require(playerProducts.movement).id };
+  const character: ProviderReference = nativeSources?.character ?? { provider: `${options.character}:character`, content: catalog.require(playerProducts.character).id };
   const appearance: ProviderReference = { provider: `${options.character}:model/${options.characterModel}`, content: character.content };
   const rerelease = product.expectation.edition === "rerelease";
   const timing = (reference: ProviderReference, source: GameFamily, edition: boolean, movementRole = false) => {

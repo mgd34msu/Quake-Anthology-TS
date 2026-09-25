@@ -145,6 +145,8 @@ Native Q3 mod inventories can use the module's original item table for weapon na
 
 In **Play a game → Custom game → World**, choose the game or mod for its rules and **Map content** for the installed product that supplies the map. The command-line equivalent is `--game PRODUCT --map-game MAP_PRODUCT --map MAP`. Omitting `--map-game` uses the selected game's maps.
 
+Current source preserves a native QuakeWorld or Q3 mod's movement and character defaults when opening the custom-game menu. Explicit component selections stay selected, and the native source remains available in the picker. Classic Q1 and Q2 defaults remain classic. This menu correction is newer than installed `0bc6e85`.
+
 Select a movement family with `--movement q1`, `q2`, or `q3`, or an exact installed product such as `--movement q2-rerelease-baseq2`. `--movement qw` selects `q1-quakeworld`, including its command timing. For example:
 
 ```sh
@@ -202,7 +204,7 @@ Declared QuakeC, QVM and native components can supply original pickup functions 
 Declared QVM components can now run their original client code for local player-event sounds and effects. Each viewing seat keeps separate mod client state; source models, shaders, lights and sounds join the selected world. Source frame routines control effect lifetimes, and retiring one mod leaves other mods' sound channels intact. Current source also supports declared original scene snapshots, HUD output, client commands, writable mod files and owned music cues. Component cinematic traps and remote component presentation remain unfinished. See [original component presentation](docs/mod-compatibility.md#original-qvm-component-sounds-and-effects). This change is installed in `8b80467`.
 
 
-Newer source applies original mod shader remaps using the mod's own images while retaining the destination map's lightmaps. Disabling a mod restores the surviving shader owner; restoring a save retains the accepted remap order. Pending loads cannot apply after their client or source retires. Local player removal also closes that player's presentation and input without redirecting another player's controls. These changes have focused original-mod checks; the installed `b980fa3` executable predates them.
+The installed `0bc6e85` executable applies original mod shader remaps using the mod's own images while retaining the destination map's lightmaps. Disabling a mod restores the surviving shader owner; restoring a save retains the accepted remap order. Pending loads cannot apply after their client or source retires. Local player removal also closes that player's presentation and input without redirecting another player's controls. The compiled build passed an original Threewave session covering movement, firing, armor and save/load. It also includes the classic Q2 damage-feedback correction described below.
 
 Cinematic continuation now has exact decoder, movie-handle and owned-audio checkpoints, checked against original RoQ and OGV playback. Full component cinematic saved-game support still requires the original client state and transition connections; it is not yet enabled.
 
