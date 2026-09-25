@@ -47,8 +47,9 @@ export function readQvmPrimaryPickupProfile(reader: SaveReader, artifact: QvmMod
       const frame = qualifyQvmRegion(instructions, source.entry, region.entry, region.join);
       if (region.quantity % 4 !== 0 || region.quantity + 4 > frame) op.fail("pickup quantity is outside the original local frame");
       const weapon = op.field("weapon");
-      operation = { kind, ...region, ...(weapon.value === undefined ? {} : { weapon: { bitsOffset: weapon.field("bitsOffset").integer(0),
-        ammoOffset: weapon.field("ammoOffset").integer(0), quantity: evaluation(weapon.field("quantity"), source.entry) } }) };
+      if (weapon.value !== undefined && weapon.field("storage").value !== undefined) weapon.field("storage").literal("inventory");
+      operation = { kind, ...region, ...(weapon.value === undefined ? {} : { weapon: { ...(weapon.field("storage").value === "inventory" ? { storage: weapon.field("storage").literal("inventory") }
+        : { bitsOffset: weapon.field("bitsOffset").integer(0), ammoOffset: weapon.field("ammoOffset").integer(0) }), quantity: evaluation(weapon.field("quantity"), source.entry) } }) };
     }
     const seen = new Set<number>();
     const branches = at.field("eligibility").field("branches").list(value => {

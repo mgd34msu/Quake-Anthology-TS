@@ -6,7 +6,7 @@ import type { QvmModuleOptions } from '../../../../compat/qvm/module.ts';
 import { q3GuestWeapons, type Q3GuestWeapon } from '../../../../content/q3/guest-items.ts';
 
 import { builtinQvmPrimaryProfile, readQvmPrimaryProfile, type QvmPrimaryProfile } from "../../../../compat/qvm/primary-profile.ts";
-import { parseQvmItemLayout } from "../../../../compat/qvm/item-catalog.ts";
+import { parseQvmItemLayout, type QvmItemLayout } from "../../../../compat/qvm/item-catalog.ts";
 
 export type Q3GameExecution = Extract<ExecutableRecipe['execution'][number], { readonly kind: 'qvm'; readonly role: 'server-game' }>;
 export interface PreparedQ3Game {
@@ -14,6 +14,7 @@ export interface PreparedQ3Game {
   readonly artifact: QvmModuleOptions['artifact'];
   readonly resource: ResolvedResourceReference;
   readonly weapons: readonly Q3GuestWeapon[];
+  readonly items?: QvmItemLayout;
   readonly primary: QvmPrimaryProfile;
 }
 
@@ -47,9 +48,9 @@ export async function prepareQ3Game(execution: Q3GameExecution, mounts: MountedC
   } });
   if (artifact.kind !== 'bytecode') throw new Error('Selected Q3 guest artifact did not resolve to bytecode');
   const items = declaration.primary === null ? undefined : parseQvmItemLayout(declaration.primary.field("items"));
-  const weapons = await q3GuestWeapons(artifact, mounts, items);
+  const weapons = await q3GuestWeapons(artifact, mounts, items, declaration.primary?.field("inventory").field("storage").value !== undefined);
   const primary = declaration.primary === null ? builtinQvmPrimaryProfile(artifact, weapons)
     : declaration.resource === null || items === undefined ? declaration.primary.fail("primary interface lost its declaration resource")
-    : readQvmPrimaryProfile(declaration.primary, artifact, weapons, items, declaration.resource);
-  return { execution, artifact, resource: reference, weapons, primary };
+    : readQvmPrimaryProfile(declaration.primary, artifact, items.source === "live" ? null : weapons, items, declaration.resource);
+  return { execution, artifact, resource: reference, weapons, primary, ...(items === undefined ? {} : { items }) };
 }

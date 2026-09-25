@@ -1,3 +1,4 @@
+import { validateQvmItemStorage, readQvmItemStorage, writeQvmItemStorage, type QvmItemStorageAccess } from "./item-storage.ts";
 import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { resolveItemIcon } from "../../content/item-icon.ts";
 import { sourceItemActionNames } from "../../contracts/source-items.ts";
@@ -6,7 +7,7 @@ import type { ContentId } from "../../contracts/content.ts";
 import type { InventoryEntry, ItemId } from "../../contracts/gameplay.ts";
 import type { SourceItemAdmission, SourceItemLease, SourceItemStore, SourceWeaponBinding, SourceWeaponRequest } from "../../contracts/source-items.ts";
 import { SourceItemRetired } from "../../contracts/source-items.ts";
-import type { QvmItemCapacity, QvmItemField, QvmItemStorage, QvmModItems as Declaration } from "../../contracts/qvm-mod-items.ts";
+import type { QvmItemField, QvmItemStorage, QvmModItems as Declaration } from "../../contracts/qvm-mod-items.ts";
 import type { QvmModCallbackDeclaration, QvmModInputPointer, QvmModSourceCall } from "../../contracts/qvm-mod-callbacks.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
 import type { ModClientApplication } from "../../world/session/mod-clients.ts";
@@ -39,16 +40,11 @@ function fields(storage: QvmItemStorage): readonly QvmItemField[] {
   return storage.kind === "counter" && storage.capacity.kind === "field" ? [storage.field, storage.capacity.field] : [storage.field];
 }
 function integer(value: number): boolean { return Number.isInteger(value) && value >= -2147483648 && value <= 2147483647; }
-function constant(image: QvmImage, instruction: number): number {
-  const value = image.instructions[instruction];
-  if (value?.opcode !== QvmOpcode.OP_CONST || value.operand < 0) throw new Error("QVM item capacity is not its declared original constant");
-  return value.operand;
-}
 export function validateQvmModItems(items: Declaration, declaration: QvmModCallbackDeclaration, image: QvmImage): void {
   if (declaration.clients === undefined || items.definitions.length === 0) throw new Error("QVM items require source client admission");
   const definitions = new Map(items.definitions.map(value => [value.item, value]));
   if (definitions.size !== items.definitions.length) throw new Error("Duplicate QVM source item definition");
-  const occupied = new Map<string, "storage" | "capacity">(), bound = new Set<ItemId>();
+  const occupied = new Map<string, "storage" | "capacity">();
   const field = (source: QvmItemField, usage: "storage" | "capacity" | "view" = "storage"): void => {
     const record = declaration.actorRecords.find(value => value.id === source.record);
     const previous = occupied.get(key(source));
@@ -62,34 +58,7 @@ export function validateQvmModItems(items: Declaration, declaration: QvmModCallb
         throw new Error("QVM item field overlaps another canonical source projection");
     }
   };
-  const bind = (item: ItemId): void => { if (!definitions.has(item) || bound.has(item)) throw new Error("QVM item lacks distinct declared storage"); bound.add(item); };
-  for (const storage of items.storage) {
-    field(storage.field);
-    if (storage.kind === "counter") {
-      bind(storage.item);
-      const capacity = storage.capacity;
-      if (capacity.kind === "field") field(capacity.field, "capacity");
-      if (capacity.kind === "constant" && (!integer(capacity.value) || capacity.value < 0)) throw new Error("QVM item capacity exceeds its source ABI");
-      if (capacity.kind === "source") {
-        constant(image, capacity.instruction);
-        for (const value of capacity.overrides) {
-          constant(image, value.instruction);
-          if (!integer(value.value) || !Number.isInteger(value.address) || value.address < 0 || value.address % 4 !== 0
-            || value.address + 4 > image.initializedData.length + image.bssLength) throw new Error("QVM capacity selector exceeds original source storage");
-        }
-      }
-    } else {
-      if (!Number.isInteger(storage.privateMask) || storage.privateMask < 0 || storage.privateMask > 0xffffffff || storage.items.length === 0) throw new Error("Invalid QVM private inventory mask");
-      let mask = storage.privateMask;
-      for (const value of storage.items) {
-        bind(value.item);
-        if (!Number.isInteger(value.mask) || value.mask < 1 || value.mask > 0x80000000 || (value.mask & (value.mask - 1)) !== 0 || (mask & value.mask) !== 0)
-          throw new Error("QVM packed item masks overlap");
-        mask |= value.mask;
-      }
-    }
-  }
-  if (bound.size !== definitions.size) throw new Error("QVM item definition has no source storage");
+  validateQvmItemStorage(items.storage, new Set(definitions.keys()), image, field);
   const weapons = items.definitions.filter(value => value.kind === "weapon");
   if (weapons.length === 0 ? items.weapons !== undefined : items.weapons === undefined) throw new Error("QVM weapon items require an original source consumer");
   if (items.weapons !== undefined) {
@@ -170,37 +139,17 @@ export class QvmModItems {
     }
     return new DataView(bytes.buffer, bytes.byteOffset, 4).getInt32(0, true);
   }
-  private capacity(actor: ActorId, capacity: QvmItemCapacity, previous?: QvmCommittedWrite): number {
-    if (capacity.kind === "constant") return capacity.value;
-    if (capacity.kind === "field") return this.scalar(this.address(actor, capacity.field), previous);
-    for (const value of capacity.overrides) {
-      const current = this.scalar(value.address, previous), matches = current === value.value;
-      if (value.comparison === "equals" ? matches : !matches) return constant(this.image, value.instruction);
-    }
-    return constant(this.image, capacity.instruction);
+  private access(actor: ActorId, previous?: QvmCommittedWrite): QvmItemStorageAccess {
+    return { read: field => this.scalar(this.address(actor, field), previous), global: address => this.scalar(address, previous),
+      write: (field, value) => this.module.memory.dataView(this.address(actor, field), 4).setInt32(0, value, true) };
   }
   private read(actor: ActorId, storage: QvmItemStorage, previous?: QvmCommittedWrite): readonly InventoryEntry[] {
-    const count = this.scalar(this.address(actor, storage.field), previous);
-    if (storage.kind === "counter") return [{ item: storage.item, count, capacity: this.capacity(actor, storage.capacity, previous), countPolicy: { kind: "source-counter", arithmetic: "int32" } }];
-    const mask = storage.items.reduce((mask, value) => mask | value.mask, storage.privateMask);
-    if ((count & ~mask) !== 0) throw new Error("Original QVM inventory contains undeclared bits");
-    return storage.items.map(value => ({ item: value.item, count: (count & value.mask) === 0 ? 0 : 1, capacity: 1 }));
+    return readQvmItemStorage(this.image, storage, this.access(actor, previous));
   }
   private write(actor: ActorId, entry: InventoryEntry): undefined {
     const current = this.entries.get(actor), storage = this.byItem.get(entry.item);
     if (current === undefined || !this.current(current) || storage === undefined) throw new Error("QVM item storage is no longer admitted");
-    const view = this.module.memory.dataView(this.address(actor, storage.field), 4);
-    if (storage.kind === "counter") {
-      if (!integer(entry.count) || !integer(entry.capacity) || entry.capacity < 0) throw new Error("QVM item exceeds its signed source representation");
-      if (storage.capacity.kind !== "field" && entry.capacity !== this.capacity(actor, storage.capacity)) throw new Error("QVM capacity is owned by its original source");
-      view.setInt32(0, entry.count, true);
-      if (storage.capacity.kind === "field") this.module.memory.dataView(this.address(actor, storage.capacity.field), 4).setInt32(0, entry.capacity, true);
-    } else {
-      const bit = storage.items.find(value => value.item === entry.item);
-      if (bit === undefined || entry.capacity !== 1 || entry.count !== 0 && entry.count !== 1) throw new Error("QVM packed ownership requires one admitted bit");
-      const previous = view.getInt32(0, true); view.setInt32(0, entry.count === 0 ? previous & ~bit.mask : previous | bit.mask, true);
-    }
-    return undefined;
+    return writeQvmItemStorage(this.image, storage, entry, this.access(actor));
   }
   private current(entry: Entry): boolean {
     if (this.entries.get(entry.actor.id) !== entry || this.services.actors.resolveOwned(entry.actor.id) !== entry.actor || !this.operations.live(entry.actor.id) || !entry.lease.current()) return false;

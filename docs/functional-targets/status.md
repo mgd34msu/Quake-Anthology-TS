@@ -68,8 +68,9 @@ These parts describe the remaining implementation; they do not replace the T01â€
 |---|---|---|
 | T10 | Mod-controlled player view and movement | A declared component can change normal player eye height, stance and movement mode through the selected movement/presentation owner. Ownership conflicts, disable, save and travel must preserve the correct player state. In progress. |
 | T10 | Teams, scores and objectives | Original component rules can read and update authoritative shared team membership, scoring and objective state, with explicit ownership and conflict handling. Displaying a private source scoreboard alone does not complete this. |
-| T10 | Runtime-generated primary QVM item catalogs | A primary mod whose item records are constructed by original initialization needs a live source-backed catalog declaration. The existing static primary catalog and independent component item declarations cover different cases. |
 | T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 49 seconds; the earlier retained-map read took 51 seconds. Further execution work must retain all entities, source behavior and original save callbacks. |
+
+Runtime-generated primary QVM item catalogs are integrated. Original initialization/restoration supplies live item records; inventory ownership, private counters, pickups, selection and HUD share that catalog. Source writes invalidate affected records, including moved tables and renamed items. Root strict/policy and nine existing checks (77 assertions) pass; the actual original Threewave Application check passes 29 assertions, including selected arsenal, pickups and save/restore.
 
 Private QVM component combat is integrated: declarations map original argument roles and extra words, damage flags, mass and team values. Transformed original calls preserve private arguments and exact target ownership; legacy stock declarations remain compatible. Combined strict/policy and 40 existing checks with 470 assertions pass.
 

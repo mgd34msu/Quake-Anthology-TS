@@ -51,7 +51,7 @@ export function readQvmPrimaryInput(reader: SaveReader, artifact: Artifact): Qvm
 }
 
 /** Declarations locate original branches and records; the existing source dispatcher executes them. */
-export function readQvmPrimaryWeapons(reader: SaveReader, artifact: Artifact, catalog: readonly { readonly weapon: number; readonly item: ItemId }[]): QvmPrimaryWeaponProfile {
+export function readQvmPrimaryWeapons(reader: SaveReader, artifact: Artifact, catalog: readonly { readonly weapon: number; readonly item: ItemId }[] | null): QvmPrimaryWeaponProfile {
   const common = layout(reader, artifact), dataBytes = artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength;
   const global = (value: SaveReader) => aligned(value, dataBytes), client = (value: SaveReader, bytes = 4) => aligned(value, common.clientStride, bytes);
   const entity = (value: SaveReader) => aligned(value, common.entityStride);
@@ -66,7 +66,7 @@ export function readQvmPrimaryWeapons(reader: SaveReader, artifact: Artifact, ca
   const profile: QvmPrimaryWeaponProfile = { ...common, clientPointer: entity(reader.field("clientPointer")), maxHealth: client(reader.field("maxHealth")), persistentMaxHealth: client(reader.field("persistentMaxHealth")),
     stage: { dispatcher: { entry: entry(dispatcher.field("entry"), artifact), actor: { record: actor.field("record").literal("client"), pointer: sourcePointer(actor.field("pointer"), dataBytes) } },
       predicates: stage.field("predicates").list(value => ({ instruction: value.field("instruction").integer(0), unselected: value.field("unselected").boolean() })),
-      settled: stage.field("settled").list(test), selection: { field: field(selection.field("field")), values: selection.field("values").list(value => ({ value: integer(value.field("value"), 1, 15), item: namespaced(value.field("item")) })) },
+      settled: stage.field("settled").list(test), selection: { field: field(selection.field("field")), values: selection.field("values").list(value => ({ value: integer(value.field("value"), 1, 0x7fffffff), item: namespaced(value.field("item")) })) },
       request: { entry: entry(request.field("entry"), artifact), argument: integer(request.field("argument"), 0, QVM_MAX_PRIVATE_ARGUMENT_WORDS - 1), accepted: request.field("accepted").list(test) } },
     equipmentMovement: { move: entry(movement.field("move"), artifact), slice: entry(movement.field("slice"), artifact), duck: entry(movement.field("duck"), artifact), movementGlobal: global(movement.field("movementGlobal")),
       locomotion: region(movement.field("locomotion")), mins: aligned(movement.field("mins"), artifact.image.allocatedDataLength, 12), maxs: aligned(movement.field("maxs"), artifact.image.allocatedDataLength, 12) },
@@ -77,11 +77,15 @@ export function readQvmPrimaryWeapons(reader: SaveReader, artifact: Artifact, ca
     damageFactor: { entry: entry(damage.field("entry"), artifact), result: global(damage.field("result")), stop: region(damage.field("stop")) },
     equipmentContexts, delay: evaluation(reader.field("delay")), delayPlayer: { movementGlobal: global(delay.field("movementGlobal")), playerOffset: aligned(delay.field("playerOffset"), artifact.image.allocatedDataLength) },
     teleport: { entry: entry(teleport.field("entry"), artifact), region: evaluation(teleport.field("region")), objectives: evaluation(teleport.field("objectives")), spawn: entry(teleport.field("spawn"), artifact), view: entry(teleport.field("view"), artifact) },
-    drop: { entry: entry(drop.field("entry"), artifact), argument: integer(drop.field("argument"), 0, QVM_MAX_PRIVATE_ARGUMENT_WORDS - 1), weapon: entity(drop.field("weapon")), ammo: client(drop.field("ammo"), 64), region: region(drop.field("region")) },
+    drop: { entry: entry(drop.field("entry"), artifact), argument: integer(drop.field("argument"), 0, QVM_MAX_PRIVATE_ARGUMENT_WORDS - 1), weapon: entity(drop.field("weapon")), ammo: drop.field("ammo").value === "inventory" ? drop.field("ammo").literal("inventory") : client(drop.field("ammo"), 64), region: region(drop.field("region")) },
     give: { entry: entry(give.field("entry"), artifact), argument: integer(give.field("argument"), 0, QVM_MAX_PRIVATE_ARGUMENT_WORDS - 1), weapons: give.field("weapons").integer(0), ammo: give.field("ammo").integer(0),
       named: { ...region(named), name: named.field("name").integer(0), item: named.field("item").integer(0) } } };
-  if (profile.stage.selection.values.length !== catalog.length || new Set(profile.stage.selection.values.map(value => value.value)).size !== catalog.length
-    || profile.stage.selection.values.some(value => !catalog.some(item => item.weapon === value.value && item.item === value.item))) return selection.fail("weapon selection differs from the original item catalog");
+  if (new Set(profile.stage.selection.values.map(value => value.value)).size !== profile.stage.selection.values.length
+    || new Set(profile.stage.selection.values.map(value => value.item)).size !== profile.stage.selection.values.length) return selection.fail("weapon selection repeats source values or identities");
+  if (catalog !== null && (profile.stage.selection.values.length !== catalog.length || new Set(profile.stage.selection.values.map(value => value.value)).size !== catalog.length
+    || profile.stage.selection.values.some(value => !catalog.some(item => item.weapon === value.value && item.item === value.item)))) return selection.fail("weapon selection differs from the original item catalog");
+  if (typeof profile.drop.ammo === "number" && profile.stage.selection.values.some(value => profile.drop.ammo !== "inventory" && profile.drop.ammo + value.value * 4 + 4 > common.clientStride))
+    return drop.fail("original drop ammo indexing exceeds its declared client record");
   validateQvmWeaponDispatcher(profile.stage, artifact.image);
   qualifyQvmRegion(artifact.image.instructions, profile.equipmentMovement.slice, profile.equipmentMovement.locomotion.entry, profile.equipmentMovement.locomotion.join);
   qualifyQvmRegion(artifact.image.instructions, profile.damageFactor.entry, profile.damageFactor.stop.entry, profile.damageFactor.stop.join);

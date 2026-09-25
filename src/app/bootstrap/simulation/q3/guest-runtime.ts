@@ -1,3 +1,4 @@
+import type { ArsenalState } from "../../../../contracts/movement.ts";
 import { Q3GuestBots, type Q3GuestBotOptions } from './guest-bots.ts';
 import { tokenizeCommand } from '../../../../core/commands/index.ts';
 import type { QvmCheckpoint } from '../../../../contracts/execution.ts';
@@ -56,6 +57,8 @@ export interface Q3GuestRuntimeOptions {
   assertCurrent(): void;
   beforeDisconnect?(actor: ActorId): void;
   beforeRetire?(): void;
+  sourceRestored?(): void;
+  arsenal?(actor: ActorId): ArsenalState;
   clientChanged?(kind: 'admitted' | 'userinfo', actor: ActorId): void;
   botCommand?(actor: ActorId, command: WireUserCommand): void;
 }
@@ -126,6 +129,8 @@ export class Q3QvmServerGame {
   private readonly reconnecting = new Map<number, Q3GuestMapClient>();
   private inputBinding: QvmInputBinding | null = null;
   private readonly inputRetirements = new Map<number, InputRetirement>();
+
+  playerArsenal(actor: ActorId): ArsenalState | null { this.current(); return this.options.arsenal?.(actor) ?? null; }
 
   bindInput(definition: QvmInputDefinition, services: QvmInputServices): void {
     this.inputBinding?.close();
@@ -275,6 +280,7 @@ export class Q3QvmServerGame {
     if (checkpoint.state.format !== 'q3:qagame-host' || checkpoint.callbacks.length !== 0 || checkpoint.random.length !== 0) {
       throw new Error('Unsupported Q3 guest host checkpoint format, callbacks or external random streams');
     }
+    this.options.sourceRestored?.();
     const reader = new SaveReader(decodeCheckpointValue(checkpoint.state.bytes), 'q3.guest.host');
     reader.field('version').literal(1); reader.field('maxClients').literal(this.options.maxClients);
     reader.field('entityText').literal(this.cursor.source);

@@ -44,7 +44,7 @@ Threewave 1.7's verified layout is built in. This equivalent declaration shows t
 }
 ```
 
-The current interface covers a static QVM item table and the standard public weapon/ammo records. Mods that replace those records or generate their catalogs dynamically need an additional source interface. Q3 sound effects also follow the original client's WAV policy: cue/sampler loop metadata does not control Q3 channel playback.
+This standalone declaration describes initialized tables with standard public weapon/ammo records. Runtime-generated tables and private inventory use the complete primary interface below. Q3 sound effects also follow the original client's WAV policy: cue/sampler loop metadata does not control Q3 channel playback.
 
 ## Original QVM primary player interfaces
 
@@ -52,14 +52,20 @@ A Q3 module can declare its original primary player interface in its matching `q
 
 | `primary` field | Original source interface |
 | --- | --- |
-| `items` | Initialized item table layout, using the `qvm-items.json` layout above. The selected catalog and pickup profile must identify the same table. |
+| `items` | Initialized or live item table layout, using the fields above. The selected catalog and pickup profile must identify the same table. |
 | `input` | Entity/client strides, the client pointer, original intermission values and the `clientThink`, `runClient`, `clientSpawn`, `move` and `slice` entries. |
 | `weapons` | Original weapon dispatch and selection, attack decisions, settled state, give/drop continuations, damage/cadence regions, torso animation, equipment movement and player/objective/spawn services. |
-| `inventory` | Original weapon bits and signed ammo words, with source-qualified capacity operands or a pure original capacity region. |
+| `inventory` | Original public weapon/ammo records, or declared private counters and packed bits. Capacities come from source operands, globals, fields or qualified original regions. |
 | `pickups` | Original touch, eligibility, grant, targets and free boundaries. Resource decisions delegate while other original admission and map continuation remain intact. |
 | `combat` | Original entity fields, allocate/free/damage entries, pain/death fields and armor interface. Original damage and absorption functions continue to execute. |
 
 `weapons.equipmentContexts` explicitly maps enabled equipment providers to original cadence items. An `item: null` entry declares that the qualified source rule is item-independent; otherwise the original selection is projected only for that query and then restored. Missing contexts or unavailable items reject admission. Offhand grenade preparation/recovery uses the original modifiers without shortening its fuse.
+
+A primary can set `items.source: "live"` to read the table built by its own `GAME_INIT` and subsequent source code. `address` and `count` may retain their numeric values, or declare `{ "global": byteOffset }` and `{ "global": byteOffset, "maximum": countLimit }`. These globals contain the current table pointer and count. The same layout belongs in `pickups.items`. The engine never runs an extra initialization to discover items. It caches the records until source writes change a table locator, record or referenced string. Restore reads the restored memory and reinstalls those observers before admitting players.
+
+`inventory.storage` uses the same counter/packed-bit declarations as component items. Fields name `record: "client"` or `"entity"` and a byte `offset`; counter capacities may be fixed, source-instruction-selected, or stored in a declared mutable field. Weapon IDs must agree with `weapons.stage.selection.values`; each live ammo ID must also have declared storage. Original known classnames retain their canonical item IDs, while other ammo identities are `q3:guest/<artifactDigest>/<classname>`. Weapon identities come from the explicit selection mapping. Tags above 15 require private storage; no public bit shift or 16-element ammo indexing represents them.
+
+Private storage also requires `weapons.drop.ammo: "inventory"` and `storage: "inventory"` on each `pickups.grants[].operation.weapon` descriptor. Original drop and pickup quantity routines still execute. Only their declared ownership/ammo words are temporarily projected, then restored without publishing those temporary values as grants. Committed original stores and accepted shared grants use the same actual source storage. Dynamic catalogs do not infer new selection routines, storage layouts or cross-game supply associations; those remain artifact-bound declarations.
 
 The field schemas are implemented in [primary-player-profile.ts](../src/compat/qvm/primary-player-profile.ts), [primary-inventory-profile.ts](../src/compat/qvm/primary-inventory-profile.ts) and [primary-pickup-profile.ts](../src/compat/qvm/primary-pickup-profile.ts). Instruction locations are decoded QVM instruction indices; memory offsets are byte offsets. Functions must be original `OP_ENTER` entries. Regions must stay within their owning function and satisfy the existing operand/local-state qualification. Shared records and movement entries must agree across interfaces. Armor fractions retain the exact original binary32 value.
 

@@ -1,7 +1,7 @@
 import { readItemIconDeclaration } from "../item-icon.ts";
 import { readItemActions } from "./item-actions.ts";
 import { readHeldWeaponDeclaration } from "../held-weapon.ts";
-import type { QvmItemCapacity, QvmItemField, QvmItemTest, QvmModItems, QvmWeaponActor } from "../../contracts/qvm-mod-items.ts";
+import type { QvmItemStorage, QvmItemCapacity, QvmItemField, QvmItemTest, QvmModItems, QvmWeaponActor } from "../../contracts/qvm-mod-items.ts";
 import type { QvmModInputPointer, QvmModSourceCall } from "../../contracts/qvm-mod-callbacks.ts";
 import { namespaced, type SaveReader } from "../../persistence/value.ts";
 
@@ -29,19 +29,20 @@ function capacity(reader: SaveReader): QvmItemCapacity {
     value: value.field("value").integer(), instruction: value.field("instruction").integer(0),
   })) };
 }
+export function readQvmItemStorage(value: SaveReader): QvmItemStorage {
+  const source = field(value.field("field"));
+  return value.field("kind").choice("counter", "bits") === "counter"
+    ? { kind: "counter", field: source, item: namespaced(value.field("item")), capacity: capacity(value.field("capacity")) }
+    : { kind: "bits", field: source, privateMask: value.field("privateMask").integer(0),
+      items: value.field("items").list(entry => ({ item: namespaced(entry.field("item")), mask: entry.field("mask").integer(1) })) };
+}
 export function readQvmModItems(reader: SaveReader, readCall: (reader: SaveReader) => QvmModSourceCall): QvmModItems {
   const weapons = reader.field("weapons");
   return { definitions: reader.field("definitions").list(value => {
     const common = { item: namespaced(value.field("item")), label: value.field("label").string(), ...(value.field("icon").value === undefined ? {} : { icon: value.field("icon").nullable(readItemIconDeclaration) }), admission: value.field("admission").choice("add", "replace-primary"), ...(value.field("actions").value === undefined ? {} : { actions: readItemActions(value.field("actions"), readCall) }) };
     return value.field("kind").choice("counter", "weapon") === "counter" ? { ...common, kind: "counter" }
       : { ...common, kind: "weapon", ...(value.field("held").value === undefined ? {} : { held: readHeldWeaponDeclaration(value.field("held")) }), ammo: value.field("ammo").nullable(namespaced) };
-  }), storage: reader.field("storage").list(value => {
-    const source = field(value.field("field"));
-    return value.field("kind").choice("counter", "bits") === "counter"
-      ? { kind: "counter", field: source, item: namespaced(value.field("item")), capacity: capacity(value.field("capacity")) }
-      : { kind: "bits", field: source, privateMask: value.field("privateMask").integer(0),
-        items: value.field("items").list(entry => ({ item: namespaced(entry.field("item")), mask: entry.field("mask").integer(1) })) };
-  }), ...(weapons.value === undefined ? {} : { weapons: { input: { entry: weapons.field("input").field("entry").integer(0), clock: field(weapons.field("input").field("clock")) }, stage: {
+  }), storage: reader.field("storage").list(readQvmItemStorage), ...(weapons.value === undefined ? {} : { weapons: { input: { entry: weapons.field("input").field("entry").integer(0), clock: field(weapons.field("input").field("clock")) }, stage: {
     dispatcher: { entry: weapons.field("stage").field("dispatcher").field("entry").integer(0), actor: actor(weapons.field("stage").field("dispatcher").field("actor")) },
     predicates: weapons.field("stage").field("predicates").list(value => ({ instruction: value.field("instruction").integer(0), unselected: value.field("unselected").boolean() })),
     settled: weapons.field("stage").field("settled").list(test),

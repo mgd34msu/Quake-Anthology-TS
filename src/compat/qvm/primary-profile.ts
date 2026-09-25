@@ -33,10 +33,10 @@ export function builtinQvmPrimaryProfile(artifact: QvmModuleOptions["artifact"],
 }
 
 /** An external primary is admitted as a complete original-source interface, never piecemeal. */
-export function readQvmPrimaryProfile(reader: SaveReader, artifact: QvmModuleOptions["artifact"], catalog: readonly Q3GuestWeapon[],
+export function readQvmPrimaryProfile(reader: SaveReader, artifact: QvmModuleOptions["artifact"], catalog: readonly Q3GuestWeapon[] | null,
   items: QvmItemLayout, declaration: ResolvedResourceReference): QvmPrimaryProfile {
   const input = readQvmPrimaryInput(reader.field("input"), artifact), weapons = readQvmPrimaryWeapons(reader.field("weapons"), artifact, catalog);
-  const inventory = readQvmPrimaryInventoryProfile(reader.field("inventory"), artifact), pickups = readQvmPrimaryPickupProfile(reader.field("pickups"), artifact);
+  const inventory = readQvmPrimaryInventoryProfile(reader.field("inventory"), artifact, weapons), pickups = readQvmPrimaryPickupProfile(reader.field("pickups"), artifact);
   const combat = readQvmPrimaryCombat(reader.field("combat"), artifact);
   if (input.entityStride !== weapons.entityStride || input.clientStride !== weapons.clientStride || input.clientPointer !== weapons.clientPointer
     || input.entityStride !== pickups.entityStride || input.clientStride !== pickups.clientStride || input.clientPointer !== pickups.fields.client
@@ -44,5 +44,11 @@ export function readQvmPrimaryProfile(reader: SaveReader, artifact: QvmModuleOpt
     || input.entries.move !== weapons.equipmentMovement.move || input.entries.slice !== weapons.equipmentMovement.slice)
     return reader.fail("primary interfaces disagree about their original player records or movement entries");
   if (!isDeepStrictEqual(items, pickups.items)) return reader.field("items").fail("primary catalog and pickup interfaces name different item tables");
+  if ("storage" in inventory) {
+    const stored = new Set(inventory.storage.flatMap(value => value.kind === "counter" ? [value.item] : value.items.map(item => item.item)));
+    if (weapons.stage.selection.values.some(value => !stored.has(value.item))) return reader.field("inventory").fail("original weapon selection lacks private inventory storage");
+    if (weapons.drop.ammo !== "inventory" || pickups.grants.some(grant => grant.operation.kind === "region" && grant.operation.weapon !== undefined && grant.operation.weapon.storage !== "inventory"))
+      return reader.field("inventory").fail("private inventory requires original pickup/drop projection through its declared storage");
+  } else if (weapons.stage.selection.values.some(value => value.value > 15)) return reader.field("inventory").fail("original weapon selection exceeds public inventory storage");
   return { declaration, input, weapons, inventory, pickups, combat };
 }

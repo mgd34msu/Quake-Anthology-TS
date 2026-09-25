@@ -1,16 +1,32 @@
+import { readQvmItemStorage } from "../../content/mods/qvm-items.ts";
+import { validateQvmItemStorage } from "./item-storage.ts";
+import type { ItemId } from "../../contracts/gameplay.ts";
 import type { SaveReader } from "../../persistence/value.ts";
-import type { QvmInventoryProfile } from "./game-inventory.ts";
+import type { QvmInventoryProfile, QvmPublicInventoryProfile } from "./game-inventory.ts";
 import { qvmPlayerStateBytes } from "./player-record.ts";
 import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import { qualifyQvmRegionEvaluation, type QvmRegionEvaluation } from "./regions.ts";
 
-type Context = Parameters<QvmInventoryProfile["capacity"]>[2];
+type Context = Parameters<QvmPublicInventoryProfile["capacity"]>[2];
 type SourceWord = { readonly kind: "constant"; readonly value: number } | { readonly kind: "weapon" | "client" | "entity" | "client-number" };
 
-export function readQvmPrimaryInventoryProfile(reader: SaveReader, artifact: QvmModuleOptions["artifact"]): QvmInventoryProfile {
+export function readQvmPrimaryInventoryProfile(reader: SaveReader, artifact: QvmModuleOptions["artifact"], records?: { readonly clientStride: number; readonly entityStride: number }): QvmInventoryProfile {
   const abiProfile = artifact.abiProfile ?? "q3-modern";
   if (artifact.role !== "qagame") reader.fail("primary inventory declarations require a qagame ABI");
+  if (reader.field("storage").value !== undefined) {
+    if (records === undefined) return reader.fail("private inventory requires its qualified primary source records");
+    const storage = reader.field("storage").list(readQvmItemStorage), items = new Set<ItemId>(), occupied = new Map<string, "storage" | "capacity">();
+    for (const value of storage) for (const item of value.kind === "counter" ? [value.item] : value.items.map(item => item.item)) items.add(item);
+    validateQvmItemStorage(storage, items, artifact.image, (field, usage = "storage") => {
+      const bytes = field.record === "client" ? records.clientStride : field.record === "entity" ? records.entityStride : 0;
+      const key = `${field.record}:${field.offset}`, previous = occupied.get(key);
+      if (!Number.isInteger(field.offset) || field.offset < 0 || field.offset % 4 !== 0 || field.offset + 4 > bytes
+        || previous !== undefined && !(previous === "capacity" && usage === "capacity")) return reader.fail("private inventory field is outside or overlaps its source record");
+      occupied.set(key, usage);
+    });
+    return { module: artifact.module, abiProfile, ...records, image: artifact.image, storage };
+  }
   const constant = (at: SaveReader): number => {
     const instruction = artifact.image.instructions[at.integer(0)];
     if (instruction?.opcode !== QvmOpcode.OP_CONST) return at.fail("capacity operand must be an original OP_CONST");
@@ -35,7 +51,7 @@ export function readQvmPrimaryInventoryProfile(reader: SaveReader, artifact: Qvm
   if (stack !== undefined && (kind !== "counter" && kind !== "region" || stack.start % 4 !== 0 || stack.end % 4 !== 0
     || stack.start < artifact.image.dataLength + artifact.image.literalLength || stack.start >= stack.end || stack.end > artifact.image.allocatedDataLength))
     stackReader.fail("capacity stack must declare an aligned original BSS reservation for a source query");
-  let evaluate: QvmInventoryProfile["capacity"];
+  let evaluate: QvmPublicInventoryProfile["capacity"];
   if (kind === "constant") {
     const limit = constant(capacity.field("instruction"));
     if (limit < 0) capacity.fail("source ammo capacity cannot be negative");

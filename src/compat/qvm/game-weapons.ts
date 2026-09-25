@@ -1,3 +1,4 @@
+import type { QvmInventoryWord } from "./game-inventory.ts";
 import { QvmEquipmentMovement, type QvmEquipmentMotion, type QvmEquipmentMovementProfile } from "./game-equipment-movement.ts";
 import { sourceEquipmentItem, type SourceEquipmentContext } from "../../contracts/source-items.ts";
 import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";
@@ -32,7 +33,7 @@ export interface QvmPrimaryWeaponProfile {
   readonly powerups: { readonly quad: number; readonly haste: number; readonly flight: number };
   readonly torsoAnimation: { readonly entry: number; readonly attack: number; readonly melee: number };
   readonly waterLevel: { readonly entityOffset: number; readonly movementOffset: number };
-  readonly drop: { readonly entry: number; readonly argument: number; readonly weapon: number; readonly ammo: number; readonly region: { readonly entry: number; readonly join: number } };
+  readonly drop: { readonly entry: number; readonly argument: number; readonly weapon: number; readonly ammo: number | "inventory"; readonly region: { readonly entry: number; readonly join: number } };
   readonly give: { readonly entry: number; readonly argument: number; readonly weapons: number; readonly ammo: number; readonly named: { readonly entry: number; readonly join: number; readonly name: number; readonly item: number } };
 }
 interface Services {
@@ -45,7 +46,7 @@ interface Services {
   completed(actor: ActorId, reachedAttackDecision: boolean): void;
   give(actor: ActorId, category: "weapons" | "ammo"): void;
   giveItem(actor: ActorId, name: string): boolean;
-  drop(actor: ActorId): { readonly weapon: number; readonly ammo: number } | null;
+  drop(actor: ActorId): { readonly weapon: number; readonly ammo: number; readonly ammoWords?: readonly QvmInventoryWord[] } | null;
 }
 
 /** The primary dispatcher borrows its actual located player, with original Pmove left in control. */
@@ -106,10 +107,11 @@ export class QvmPrimaryWeapons {
   private dropCall(call: QvmFunctionCall): QvmSystemCallResult {
     const profile = this.profile.drop, entity = call.words.getInt32(profile.argument * 4, true), actor = this.services.actor(this.game.data.numberFromPointer(entity));
     if (actor === null || !this.live(actor)) return call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
+    const view = (address: number): DataView => new DataView(call.memory.buffer, call.memory.byteOffset + address, 4);
     let saved: readonly { readonly address: number; readonly value: number }[] = [];
     const restore = (): undefined => {
       const previous = saved; saved = [];
-      if (this.live(actor)) for (const value of previous) call.guest.dataView(value.address, 4).setInt32(0, value.value, true);
+      if (this.live(actor)) for (const value of previous) view(value.address).setInt32(0, value.value, true);
       return undefined;
     };
     call.regions([{ ...profile.region, run: () => {
@@ -118,10 +120,11 @@ export class QvmPrimaryWeapons {
         if (projection.weapon !== 0 && !this.profile.stage.selection.values.some(value => value.value === projection.weapon)
           || !Number.isInteger(projection.ammo) || projection.ammo < -0x80000000 || projection.ammo > 0x7fffffff)
           throw new Error("Selected death drop has no original weapon or int32 ammo counter");
+        if (profile.ammo === "inventory" && projection.ammoWords === undefined) throw new Error("Original drop requires its declared inventory projection");
         const writes = [{ address: entity + profile.weapon, value: projection.weapon },
-          { address: this.pointer(actor) + profile.ammo + projection.weapon * 4, value: projection.ammo }];
-        saved = writes.map(value => ({ address: value.address, value: call.guest.dataView(value.address, 4).getInt32(0, true) }));
-        for (const value of writes) call.guest.dataView(value.address, 4).setInt32(0, value.value, true);
+          ...(profile.ammo === "inventory" ? projection.ammoWords ?? [] : [{ address: this.pointer(actor) + profile.ammo + projection.weapon * 4, value: projection.ammo }])];
+        saved = writes.map(value => ({ address: value.address, value: view(value.address).getInt32(0, true) }));
+        for (const value of writes) view(value.address).setInt32(0, value.value, true);
       }
       return "execute";
     }, completed: restore }]);

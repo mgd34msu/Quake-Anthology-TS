@@ -43,6 +43,7 @@ export function guestMovementProjection(guest: Q3QvmServerGame, player: Q3Applic
         movementFrame: ps.movementFrameCount };
     },
     get arsenal(): ArsenalState {
+      const original = guest.playerArsenal(player.actor); if (original !== null) return original;
       const ps = state();
       return { provider, activeWeapon: q3WeaponItem(ps.weapon)?.item ?? null,
         state: { kind: "q3", sourceWeapon: ps.weapon, state: ps.weaponState, timeMilliseconds: ps.weaponTimeMilliseconds },

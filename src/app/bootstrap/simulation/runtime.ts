@@ -1,3 +1,4 @@
+import { Q3GuestCatalog } from "../../../content/q3/guest-items.ts";
 import { sourceItemNamed } from "../../../contracts/source-items.ts";
 import { namespaced } from "../../../persistence/value.ts";
 import { NativePrimaryInventory, type NativeInventoryRow } from "../../../compat/q2/native-primary-inventory.ts";
@@ -102,7 +103,7 @@ import { QvmPrimaryWeapons } from "../../../compat/qvm/game-weapons.ts";
 import { sourceEquipmentItem } from "../../../contracts/source-items.ts";
 import { selectedWeaponSources } from "../../../world/gameplay/pickups.ts";
 import { QvmPrimaryPickups } from "../../../compat/qvm/game-pickups.ts";
-import { qvmInventoryBinding, type QvmInventoryProfile } from "../../../compat/qvm/game-inventory.ts";
+import { qvmInventoryBinding, qvmInventoryProjection, type QvmInventoryProfile } from "../../../compat/qvm/game-inventory.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 import { q3GrappleProfile } from "../../../content/q3/equipment/grapple-profiles.ts";
 import { SelectedMonsters } from "./monster-runtime.ts";
@@ -264,7 +265,7 @@ type SourceRuntime = { readonly kind: "loading" }
   | { readonly kind: "quakec"; readonly game: QuakeCSource }
   | { readonly kind: "q1"; readonly game: Q1Foundation; readonly composition: Q1SourceComposition; readonly cvars: CvarRegistry }
   | { readonly kind: "q3"; readonly game: Q3SourceRuntime }
-  | { readonly kind: "q3-qvm"; readonly game: Q3QvmServerGame; readonly combat: QvmCombatBindings | null; readonly inventory: QvmInventoryProfile | null; readonly weapons: QvmPrimaryWeapons | null; readonly pickups: QvmPrimaryPickups | null }
+  | { readonly kind: "q3-qvm"; readonly game: Q3QvmServerGame; readonly catalog: Q3GuestCatalog; readonly combat: QvmCombatBindings | null; readonly inventory: QvmInventoryProfile | null; readonly weapons: QvmPrimaryWeapons | null; readonly pickups: QvmPrimaryPickups | null }
   | { readonly kind: "q2-native"; readonly edition: "classic"; readonly game: ClassicGuestWorld; readonly files: ClassicOriginalSaveFiles; readonly visited: Map<string, Q2ClassicVisitedLevel>; readonly clients: Map<ClientId, OwnedActor> }
   | { readonly kind: "q2-native"; readonly edition: "rerelease"; readonly game: RereleaseGuestWorld; readonly visited: Map<string, Q2RereleaseVisitedLevel>; readonly clients: Map<ClientId, OwnedActor> }
   | ({ readonly kind: "q2"; readonly product: Q2ProductRuntime } & Pick<Q2ProductRuntime, "game" | "weapons" | "monsters" | "movers" | "items" | "players" | "baseEntities">);
@@ -737,11 +738,6 @@ export class SharedSimulation implements Simulation {
         }
         return undefined;
       });
-    }
-    if (this.source.kind === "q3-qvm" && this.selectedArsenal !== null) {
-      const profile = this.selectedOriginalSupply, prepared = this.options.q3Guest?.prepared;
-      if (profile === null || prepared === undefined) throw new Error("Selected original weapons lost their admitted supply");
-      this.selectedOriginalWeapons = selectedWeaponSources(profile, this.selectedArsenal.catalog(), prepared.weapons);
     }
     if (this.source.kind !== "q3-qvm" && this.source.kind !== "q2-native") { this.prepareSelectedMonsters(); options.monsterNavigation?.install(this, this.q1Movement); }
     if (saved !== undefined) {
@@ -2618,8 +2614,9 @@ export class SharedSimulation implements Simulation {
       let combatBindings: QvmCombatBindings | null = null;
       let pickupBindings: QvmPrimaryPickups | null = null;
       let primaryWeapons: QvmPrimaryWeapons | null = null;
+      let catalog: Q3GuestCatalog | null = null;
       const nativeInventory = guest.prepared.primary.inventory;
-      const game = new Q3QvmServerGame({ artifact: guest.prepared.artifact, state,
+      const game: Q3QvmServerGame = new Q3QvmServerGame({ artifact: guest.prepared.artifact, state,
         records: { actors: this.actors, bodies: this.bodies, scene: this.scene, provider: recipe.map.entities.provider,
           admit: actor => {
             combatBindings?.admit(actor);
@@ -2627,7 +2624,7 @@ export class SharedSimulation implements Simulation {
             if (nativeInventory !== null && slot !== null && slot < game.game.data.numClients) {
               const saved = this.options.restore?.inventories.find(entry => this.actors.resolveSaved(entry.actor) === actor);
               this.bindSourceInventory(actor, qvmInventoryBinding({ module: game.game.module, data: game.game.data,
-                profile: nativeInventory, weapons: guest.prepared.weapons, client: () => {
+                profile: nativeInventory, weapons: () => { if (catalog === null) throw new Error("QVM item catalog is not bound"); return catalog.weapons(); }, client: () => {
                   this.actors.assertOwned(actor);
                   const current = game.records.slot(actor.id);
                   if (current === null || game.records.isInputRetired(current)) throw new Error("QVM inventory owner is no longer admitted");
@@ -2639,7 +2636,14 @@ export class SharedSimulation implements Simulation {
         mounts: this.options.mounts, writable: guest.writable, common: guest.common,
         maxClients: this.options.maxClients, seed: this.options.seed, dedicated: this.options.dedicated === true, entityText: this.options.world.entities,
         now, assertCurrent: () => { this.assertOpen(); }, clientChanged: (kind, actor) => this.notifyClientEvent(kind, actor),
-        beforeRetire: () => { primaryWeapons?.close(); pickupBindings?.close(); combatBindings?.close(); },
+        beforeRetire: () => { primaryWeapons?.close(); pickupBindings?.close(); combatBindings?.close(); catalog?.close(); },
+        sourceRestored: () => { catalog?.reset(); },
+        ...(nativeInventory === null ? {} : { arsenal: (actor: ActorId): ArsenalState => {
+          if (catalog === null) throw new Error("QVM item catalog is not bound");
+          const state = game.records.player(game.records.requireSlot(actor));
+          return { provider: recipe.map.entities.provider, activeWeapon: primaryWeapons === null ? catalog.weapons().find(weapon => weapon.weapon === state.weapon)?.item ?? null : primaryWeapons.active(actor),
+            state: { kind: "q3", sourceWeapon: state.weapon, state: state.weaponState, timeMilliseconds: state.weaponTimeMilliseconds }, ammo: this.inventory.entries(actor) };
+        } }),
         botCommand: (actor, command) => this.observeClientCommand({ actor, source: { kind: "bot", provider: guest.prepared.artifact.module.id },
           sequence: (this.modClientCommands.get(actor)?.input.sequence ?? 0) + 1, command: { kind: "q3", serverTimeMilliseconds: command.serverTime,
             angleWords: command.angles, buttons: command.buttons, weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove } }),
@@ -2647,6 +2651,17 @@ export class SharedSimulation implements Simulation {
           this.notifyClientEvent("disconnecting", actor);
           if (this.actors.isLive(actor)) { this.grapple?.release(actor); this.stepHandGrenade(actor, "removing"); }
         } });
+      const sourceCatalog = new Q3GuestCatalog(guest.prepared.artifact, game.game.module, guest.prepared.items ?? guest.prepared.primary.pickups?.items,
+        guest.prepared.weapons, guest.prepared.primary.weapons?.stage.selection.values, nativeInventory);
+      catalog = sourceCatalog;
+      const projectInventory = (actor: ActorId, item: ItemId, count: number) => {
+        const owner = this.actors.resolveOwned(actor);
+        if (owner === null || nativeInventory === null) throw new Error("Original inventory projection has no current source owner");
+        return qvmInventoryProjection({ module: game.game.module, data: game.game.data, profile: nativeInventory, weapons: () => sourceCatalog.weapons(), client: () => {
+          this.actors.assertOwned(owner); const slot = game.records.requireSlot(actor);
+          if (game.records.isInputRetired(slot)) throw new Error("Original inventory projection client is retired"); return slot;
+        } }, item, count);
+      };
       const nativeCombat = guest.prepared.primary.combat;
       if (nativeCombat !== null) combatBindings = new QvmCombatBindings({ game: game.game, artifact: guest.prepared.artifact, definition: nativeCombat,
         bodies: this.bodies, combat: this.combat, slot: actor => game.records.slot(actor), source: {
@@ -2658,18 +2673,19 @@ export class SharedSimulation implements Simulation {
           afterFree: (pointer, call) => pickupBindings?.afterFree(pointer, call),
         } });
       const nativePickups = guest.prepared.primary.pickups;
-      if (nativePickups !== null) pickupBindings = new QvmPrimaryPickups({ game: game.game, artifact: guest.prepared.artifact, profile: nativePickups,
+      if (nativePickups !== null) pickupBindings = new QvmPrimaryPickups({ game: game.game, artifact: guest.prepared.artifact, profile: nativePickups, catalog: sourceCatalog,
         actor: slot => game.records.isInputRetired(slot) ? null : this.actors.atSource(recipe.map.entities.provider, slot),
         current: (actor, slot) => this.actors.resolveOwned(actor.id) === actor && game.records.slot(actor.id) === slot && !game.records.isInputRetired(slot),
         resolveItem: record => {
-          const weapon = guest.prepared.weapons.find(weapon => weapon.weapon === record.tag);
+          const weapon = sourceCatalog.weapons().find(weapon => weapon.weapon === record.tag);
           const item: ItemId = record.type === nativePickups.items.weaponType ? weapon?.item ?? `q3:${record.className}`
             : record.type === nativePickups.items.ammoType ? weapon?.ammo ?? `q3:${record.className}` : `q3:${record.className}`;
           return { item, resource: record.type === ItemType.IT_ARMOR ? { kind: "protection", channel: "regular" }
             : record.type === nativePickups.items.weaponType || record.type === nativePickups.items.ammoType ? { kind: "inventory", item } : null };
         },
-        supply: { ammo: record => guest.prepared.weapons.find(weapon => weapon.weapon === record.tag)?.ammo ?? null,
-          owns: (actor, item) => this.selectedSupply?.owns(actor.id, item) ?? this.inventory.count(actor.id, item) > 0 },
+        supply: { ammo: record => sourceCatalog.weapons().find(weapon => weapon.weapon === record.tag)?.ammo ?? null,
+          owns: (actor, item) => this.selectedSupply?.owns(actor.id, item) ?? this.inventory.count(actor.id, item) > 0,
+          project: (actor, item, count) => projectInventory(actor.id, item, count) },
         time: () => ({ kind: "milliseconds", value: now() }), runSource: (offer, execute) => this.originalPickups.runSource(offer, execute),
         lifetime: combatBindings === null ? { kind: "own-free-hook", retire: actor => {
           if (this.actors.resolveOwned(actor.id) === actor) this.actors.release(actor);
@@ -2696,12 +2712,14 @@ export class SharedSimulation implements Simulation {
         drop: actor => {
           const selected = this.selectedArsenal; if (selected === null || !selected.has(actor)) return null;
           const ui = selected.ui(actor, this.recipe.map.entities);
-          if (ui.activeWeapon === null) return { weapon: 0, ammo: 0 };
-          const item = this.selectedOriginalWeapons?.get(ui.activeWeapon);
-          if (item === null) return { weapon: 0, ammo: 0 };
-          const original = guest.prepared.weapons.find(weapon => weapon.item === item);
+          if (ui.activeWeapon === null) return { weapon: 0, ammo: 0, ammoWords: [] };
+          const supply = this.selectedOriginalSupply;
+          if (supply === null) throw new Error("Selected original weapons lost their admitted supply");
+          const item = selectedWeaponSources(supply, selected.catalog(), sourceCatalog.weapons()).get(ui.activeWeapon);
+          if (item === null) return { weapon: 0, ammo: 0, ammoWords: [] };
+          const original = sourceCatalog.weapons().find(weapon => weapon.item === item);
           if (original === undefined) throw new Error(`Selected death drop has no admitted source weapon for ${ui.activeWeapon}`);
-          return { weapon: original.weapon, ammo: ui.ammo?.count ?? 0 };
+          return { weapon: original.weapon, ammo: ui.ammo?.count ?? 0, ammoWords: original.ammo === null ? [] : projectInventory(actor, original.ammo, ui.ammo?.count ?? 0) };
         },
         completed: (actor, reached) => {
           const decision = this.qvmWeaponDecisions.at(-1);
@@ -2718,7 +2736,7 @@ export class SharedSimulation implements Simulation {
           return client;
         });
       }
-      return { kind: "q3-qvm", game, combat: combatBindings, inventory: nativeInventory, weapons: primaryWeapons, pickups: pickupBindings };
+      return { kind: "q3-qvm", game, catalog: sourceCatalog, combat: combatBindings, inventory: nativeInventory, weapons: primaryWeapons, pickups: pickupBindings };
     }
     if (this.options.preparedQuakeC !== undefined) {
       const checkpoint = this.options.restore === undefined ? null : simulationQuakeCCheckpoint(this.options.restore);
@@ -4850,7 +4868,8 @@ export class SharedSimulation implements Simulation {
       const player = this.source.game.players().find(player => player.actor.equals(actor));
       if (player === undefined) throw new Error("Actor has no Q3 guest client UI");
       const original = q3GuestPlayerUi(this.source.game.records.player(player.sourceEntity), this.recipe.map.entities, this.timeSeconds * 1000,
-        this.options.q3Guest?.prepared.weapons, this.options.q3Guest?.prepared.artifact.known?.product);
+        this.source.catalog.weapons(), this.options.q3Guest?.prepared.artifact.known?.product,
+        this.source.inventory === null ? undefined : this.inventory.entries(actor), this.source.weapons?.active(actor));
       const ui = this.selectedArsenal?.has(actor) === true ? { ...original, inventory: this.inventory.entries(actor), ...this.selectedArsenal.ui(actor, this.weaponProvider) } : original;
       if (this.source.combat === null) return ui;
       const combat = this.combat.read(actor);
@@ -5731,7 +5750,7 @@ export class SharedSimulation implements Simulation {
   private grantSelectedArsenal(actor: ActorId, category: "weapons" | "ammo"): boolean {
     const arsenal = this.selectedArsenal; if (arsenal === null) return false;
     const owner = this.actors.resolveOwned(actor); if (owner === null) throw new Error("Selected grant actor is retired");
-    const native = this.source.kind === "q3-qvm" ? new Set(this.options.q3Guest?.prepared.weapons.flatMap(weapon => weapon.ammo === null ? [weapon.item] : [weapon.item, weapon.ammo])) : null;
+    const native = this.source.kind === "q3-qvm" ? new Set(this.source.catalog.weapons().flatMap(weapon => weapon.ammo === null ? [weapon.item] : [weapon.item, weapon.ammo])) : null;
     const weapons = new Set(arsenal.ui(actor, this.recipe.map.entities).items.filter(item => item.kind === "weapon").map(item => item.id));
     for (const entry of arsenal.read(actor).ammo) if (!native?.has(entry.item) && (category === "weapons") === weapons.has(entry.item))
       this.inventory.configure(owner, { ...entry, count: category === "weapons" ? 1 : entry.capacity });

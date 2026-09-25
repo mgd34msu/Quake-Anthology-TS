@@ -1,3 +1,4 @@
+import type { QvmInventoryWord } from "./game-inventory.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";
 import type { OwnedActor } from "../../contracts/identity.ts";
@@ -23,7 +24,7 @@ export interface QvmPickupGrant {
   readonly operation:
     | { readonly kind: "return"; readonly acceptedReturn: number }
     | { readonly kind: "region"; readonly entry: number; readonly join: number; readonly quantity: number;
-      readonly weapon?: { readonly bitsOffset: number; readonly ammoOffset: number; readonly quantity: QvmRegionEvaluation } };
+      readonly weapon?: { readonly quantity: QvmRegionEvaluation } & ({ readonly storage: "inventory" } | { readonly storage?: undefined; readonly bitsOffset: number; readonly ammoOffset: number }) };
   eligible(context: QvmPickupEligibility): boolean | Promise<boolean>;
 }
 export interface QvmPickupProfile {
@@ -45,6 +46,7 @@ interface Options {
   readonly game: Pick<QvmGame, "module" | "data">;
   readonly artifact: QvmModuleOptions["artifact"];
   readonly profile: QvmPickupProfile;
+  readonly catalog?: { records(): readonly QvmCatalogRecord[] };
   actor(slot: number): OwnedActor | null;
   current(actor: OwnedActor, slot: number): boolean;
   resolveItem(record: QvmCatalogRecord): { readonly item: ItemId; readonly resource: PickupResource | null };
@@ -52,6 +54,7 @@ interface Options {
   readonly supply?: {
     ammo(record: QvmCatalogRecord): ItemId | null;
     owns(actor: OwnedActor, item: ItemId): boolean;
+    project?(actor: OwnedActor, item: ItemId, count: number): readonly QvmInventoryWord[];
   };
   /** The host keeps the item lock and captured ownership until the returned promise settles. */
   runSource(offer: OriginalPickupOffer, execute: (selection: SourcePickupSelection) => QvmSystemCallResult): QvmSystemCallResult;
@@ -82,7 +85,7 @@ function proceed(call: QvmFunctionCall): QvmSystemCallResult { return call.execu
 export class QvmPrimaryPickups {
   private readonly frames: Frame[] = [];
   private readonly removals: (() => void)[] = [];
-  private readonly items: readonly QvmCatalogRecord[];
+  private readonly items: readonly QvmCatalogRecord[] | null;
   private readonly returns = new Map<QvmPickupGrant, number>();
   private readonly returnPCs = new Map<number, number>();
   private closed = false;
@@ -123,7 +126,8 @@ export class QvmPrimaryPickups {
         this.returns.set(grant, value.operand);
       }
     }
-    this.items = readQvmItemRecords(artifact.image.initializedData, profile.items);
+    if (profile.items.source === "live" && options.catalog === undefined) throw new Error("Live original pickups require their source catalog owner");
+    this.items = options.catalog === undefined ? readQvmItemRecords(artifact.image.initializedData, profile.items) : null;
     const bind = (index: number, hook: (call: QvmFunctionCall) => QvmSystemCallResult): void => {
       this.removals.push(game.module.bindInvocation({ kind: "qvm", module, instructionIndex: index }, hook));
     };
@@ -173,7 +177,7 @@ export class QvmPrimaryPickups {
     const itemSlot = game.data.numberFromPointer(itemPointer), recipientSlot = game.data.numberFromPointer(recipientPointer), recipient = this.entity(recipientSlot);
     const playerPointer = recipient.getInt32(profile.fields.client, true);
     if (playerPointer === 0 || recipient.getInt32(profile.fields.health, true) < 1) return proceed(call);
-    const entity = this.entity(itemSlot), itemRecord = this.items.find(item => item.address === entity.getInt32(profile.fields.item, true));
+    const entity = this.entity(itemSlot), itemRecord = (this.options.catalog?.records() ?? this.items ?? []).find(item => item.address === entity.getInt32(profile.fields.item, true));
     if (itemRecord === undefined || itemRecord.index !== entity.getInt32(160, true)) throw new Error("Original pickup has an undeclared source item descriptor");
     const item = this.options.actor(itemSlot), actor = this.options.actor(recipientSlot);
     if (item === null || actor === null) throw new Error("Original pickup requires live canonical source actors");
@@ -217,18 +221,25 @@ export class QvmPrimaryPickups {
       throw new Error("Selected QVM supply requires its held original grant");
     return frame.supply;
   }
-  private quantity(frame: Frame, grant: QvmPickupGrant, region: QvmRegionEvaluation, ammoOffset: number, count: number): number {
+  private quantity(frame: Frame, grant: QvmPickupGrant, weapon: NonNullable<Extract<QvmPickupGrant["operation"], { readonly kind: "region" }>["weapon"]>, count: number): number {
     if (this.frames.at(-1) !== frame || frame.supply === null || !this.live(frame)) throw new Error("Original pickup quantity has expired");
     const word = Math.trunc(count);
     if (!Number.isFinite(count) || word < -0x80000000 || word > 0x7fffffff) throw new Error("Original QVM pickup counter exceeds its int32 ABI");
-    const address = frame.playerPointer + ammoOffset + frame.itemRecord.tag * 4;
+    const ammo = this.options.supply?.ammo(frame.itemRecord), project = this.options.supply?.project;
+    if (weapon.storage === "inventory" && project === undefined) throw new Error("Original pickup requires its declared inventory projection");
+    const writes = weapon.storage === "inventory" ? ammo == null ? [] : project?.(frame.recipient, ammo, word) ?? []
+      : [{ address: frame.playerPointer + weapon.ammoOffset + frame.itemRecord.tag * 4, value: word }];
+    const restore = this.project(writes), evaluation = { frame, region: weapon.quantity, entered: false }; this.evaluating.push(evaluation);
+    try { return this.options.game.module.call([frame.itemPointer, frame.recipientPointer], grant.entry); }
+    finally { restore(); this.evaluating.pop(); }
+  }
+  private project(writes: readonly QvmInventoryWord[]): () => void {
     const bytes = this.options.game.module.memory.bytes;
-    const source = new DataView(bytes.buffer, bytes.byteOffset + address, 4), previous = source.getInt32(0, true);
-    const evaluation = { frame, region, entered: false }; this.evaluating.push(evaluation);
-    try {
-      source.setInt32(0, word, true);
-      return this.options.game.module.call([frame.itemPointer, frame.recipientPointer], grant.entry);
-    } finally { source.setInt32(0, previous, true); this.evaluating.pop(); }
+    const fields = writes.map(value => ({ view: new DataView(bytes.buffer, bytes.byteOffset + value.address, 4), value: value.value }));
+    const before = fields.map(field => field.view.getInt32(0, true));
+    for (const field of fields) field.view.setInt32(0, field.value, true);
+    let active = true;
+    return () => { if (active) { active = false; fields.forEach((field, index) => { const value = before[index]; if (value === undefined) throw new Error("Original pickup projection lost its word"); field.view.setInt32(0, value, true); }); } };
   }
   private grant(call: QvmFunctionCall, grant: QvmPickupGrant): QvmSystemCallResult {
     const evaluation = this.evaluating.at(-1);
@@ -254,15 +265,18 @@ export class QvmPrimaryPickups {
       const result = this.returns.get(grant); if (result === undefined) throw new Error("Missing original pickup lifecycle return"); return result;
     }
     const supply = this.options.supply, weapon = operation.weapon;
-    const bytes = this.options.game.module.memory.bytes;
-    const bits = weapon === undefined || supply === undefined ? null : new DataView(bytes.buffer, bytes.byteOffset + frame.playerPointer + weapon.bitsOffset, 4);
-    const previous = bits?.getInt32(0, true);
-    let projected = bits !== null && previous !== undefined;
-    const restore = (): void => { if (projected && bits !== null && previous !== undefined) { projected = false; bits.setInt32(0, previous, true); } };
-    if (bits !== null && previous !== undefined && supply !== undefined) {
-      const mask = 1 << frame.itemRecord.tag;
-      bits.setInt32(0, supply.owns(frame.recipient, frame.offer.item) ? previous | mask : previous & ~mask, true);
+    let writes: readonly QvmInventoryWord[] = [];
+    if (weapon !== undefined && supply !== undefined) {
+      const owned = supply.owns(frame.recipient, frame.offer.item);
+      if (weapon.storage === "inventory") {
+        if (supply.project === undefined) throw new Error("Original pickup requires its declared inventory projection");
+        writes = supply.project(frame.recipient, frame.offer.item, Number(owned));
+      } else {
+        const address = frame.playerPointer + weapon.bitsOffset, before = this.options.game.module.memory.dataView(address, 4).getInt32(0, true), mask = 1 << frame.itemRecord.tag;
+        writes = [{ address, value: owned ? before | mask : before & ~mask }];
+      }
     }
+    const restore = this.project(writes);
     call.regions([{ entry: operation.entry, join: operation.join, run: control => {
       restore();
       if (!this.live(frame)) this.cancel(frame, control);
@@ -271,7 +285,7 @@ export class QvmPrimaryPickups {
         if (weapon === undefined && ammo === null) throw new Error("Original ammo pickup has no admitted source counter");
         frame.supply = { offer: weapon === undefined && ammo !== null ? { kind: "ammo", offer: { item: ammo, amount } }
           : { kind: "weapon", offer: { item: frame.offer.item, ammo: ammo === null ? [] : [{ item: ammo, amount }] } },
-          ...(weapon === undefined ? {} : { quantity: (count: number) => this.quantity(frame, grant, weapon.quantity, weapon.ammoOffset, count) }) };
+          ...(weapon === undefined ? {} : { quantity: (count: number) => this.quantity(frame, grant, weapon, count) }) };
       }
       try { take(); return "skip"; } finally { frame.supply = null; }
     } }]);
