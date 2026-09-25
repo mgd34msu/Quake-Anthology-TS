@@ -1,3 +1,5 @@
+import type { ModSourceCall } from "./mod-callbacks.ts";
+
 export interface QcWeaponStageDeclaration {
   readonly dispatcher: string;
   readonly continuations: readonly string[];
@@ -11,8 +13,8 @@ export interface QcWeaponStageDeclaration {
 }
 export interface QcPrimaryWeaponStageDeclaration extends QcWeaponStageDeclaration {
   readonly client: {
-    readonly spawn: string;
-    readonly selectSpawn: string;
-    readonly objectives: { readonly kind: "none" } | { readonly kind: "call"; readonly function: string };
+    readonly spawn: string | ModSourceCall;
+    readonly selectSpawn: string | ModSourceCall;
+    readonly objectives: { readonly kind: "none" } | { readonly kind: "call"; readonly function: string } | { readonly kind: "call"; readonly call: ModSourceCall };
   };
 }

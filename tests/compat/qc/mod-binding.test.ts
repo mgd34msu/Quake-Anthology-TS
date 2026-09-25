@@ -365,6 +365,46 @@ test("declared attacker scaling queries original rune and quad paths once while 
   expect(roundedSelected.transformed).toBe(Math.fround(Math.fround(Math.fround(0.3) / 3) * 2));
   expect(roundedSelected.transformed).not.toBe(Math.fround(Math.fround(0.3) * Math.fround(Math.fround(1 / 3) * 2)));
   expect(roundedSelected.bytes).toEqual(run(rounded, false, "normal", undefined, roundedOptions, { amount: 0.3 }).bytes);
+  const globalAmount = program.initialGlobals.byteLength / 4, initialGlobals = new Uint8Array(program.initialGlobals.byteLength + 12);
+  initialGlobals.set(program.initialGlobals);
+  const damageFunction = program.functionNamed("T_Damage");
+  const functionEnd = program.functions.reduce((end, fn) => fn.firstStatement > damageFunction.firstStatement ? Math.min(end, fn.firstStatement) : end, program.statements.length);
+  const remapAmount = (word: number): number => word === scale.damage ? globalAmount : word;
+  const globalStatements = nonLinear.statements.map((statement, pc) => {
+    if (pc < damageFunction.firstStatement || pc >= functionEnd || statement.opcode === QcOpcode.Goto) return statement;
+    if (statement.opcode === QcOpcode.If || statement.opcode === QcOpcode.IfNot || statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done
+      || statement.opcode >= QcOpcode.Call0 && statement.opcode <= QcOpcode.Call8) return { ...statement, a: remapAmount(statement.a) };
+    return { ...statement, a: remapAmount(statement.a), b: remapAmount(statement.b), c: remapAmount(statement.c) };
+  });
+  const globalProgram = new QcProgram(program.source, program.api, globalStatements, [...program.globals,
+    { name: "source_amount", offset: globalAmount, type: "float", nativeType: 2, save: false }], program.fields, program.functions,
+    program.strings, initialGlobals, program.entityFieldWords, program.checksum, createContentDigest("2".repeat(64)));
+  const globalDeclaration = { ...operation, damage: { ...operation.damage,
+    arguments: operation.damage.arguments.map(value => value.kind === "input" && value.name === "amount" ? { kind: "float", value: 77 } : value),
+    globals: [...operation.damage.globals, { name: "source_amount", value: { kind: "input", name: "amount" } }] },
+    damageScale: { ...operation.damageScale, damage: globalAmount, statements: globalStatements.slice(scale.entry, scale.exit + 1) } } satisfies NonNullable<ModCallbackDeclaration["combat"]>;
+  validateQcModCombat(globalProgram, globalDeclaration);
+  const globalOptions = { ...transformedOptions, declaration: globalDeclaration };
+  const globalSelected = run(globalProgram, true, "normal", undefined, { ...globalOptions, owner: "test:qc" });
+  expect(globalSelected.transformed).toBe(88); expect(globalSelected.health).toBe(956);
+  expect(globalSelected.bytes).toEqual(run(globalProgram, false, "normal", undefined, globalOptions).bytes);
+  const globalScale = qcDamageScale(globalProgram, globalDeclaration.damage, globalDeclaration.damageScale);
+  if (globalScale === null) throw new Error("Missing declared global amount operation");
+  const globalsMemory = new QcEntityMemory(classicQcEntityLayout(globalProgram), 3, 2);
+  const storedAmounts: number[] = [];
+  const faultMachine = new QcMachine({ program: globalProgram, entities: globalsMemory, numeric: createNumericOperations(Q1_DONOR_PROFILE),
+    builtins: createQcBuiltins({ kind: "quakeworld" }), serverActive: () => true, statementLimit: 7,
+    trace: machine => { if (machine.currentStatement === 2962) storedAmounts.push(machine.globals.float(globalAmount)); },
+    inlineBoundary: { regions: [globalScale.region], run: (_region, execute) => execute() } });
+  globalsMemory.at(1).setFloat(faultMachine.fieldOffset("super_damage_finished"), 10);
+  globalsMemory.at(1).setFloat(faultMachine.fieldOffset("player_flag"), 2);
+  faultMachine.globals.setInt(10, globalsMemory.reference(1)); faultMachine.globals.setFloat(faultMachine.globalOffset("time"), 3);
+  faultMachine.globals.setFloat(globalAmount, 40); const originalBits = faultMachine.globals.int(globalAmount);
+  faultMachine.traceEnabled = true;
+  expect(() => faultMachine.executeRegion(globalScale.region, 4)).toThrow("runaway loop error");
+  expect(storedAmounts).toEqual([44]);
+  expect(faultMachine.globals.int(globalAmount)).toBe(originalBits); expect(faultMachine.depth).toBe(0);
+
 
 });
 

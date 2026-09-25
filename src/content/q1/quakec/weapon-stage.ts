@@ -1,11 +1,15 @@
+import type { ActorId } from "../../../contracts/identity.ts";
+import type { ModCallbackInput, ModRuntimeValue, ModSourceCall } from "../../../contracts/mod-callbacks.ts";
+import { validateQcSourceCall, withQcSourceCall } from "../../../compat/qc/source-call.ts";
 import type { QcPrimaryWeaponStageDeclaration, QcWeaponStageDeclaration } from "../../../contracts/qc-weapon-stage.ts";
 import type { QcFunctionBoundary, QcInlineBoundary, QcInlineRegion, QcMachine } from "../../../compat/qc/machine.ts";
 import { QcOpcode, QcProgramError, signedQcBranch, type QcFunction, type QcProgram } from "../../../compat/qc/program.ts";
 
+export interface QcClientStageCall { readonly functionIndex: number; readonly call: ModSourceCall; }
 interface RepeatGate { readonly region: QcInlineRegion; readonly released: number; readonly value: number; }
 export interface QcWeaponStage {
   readonly dispatcher: number;
-  readonly client?: { readonly spawn: number; readonly selectSpawn: number; readonly objectives: { readonly kind: "none" } | { readonly kind: "call"; readonly functionIndex: number } };
+  readonly client?: { readonly spawn: QcClientStageCall; readonly selectSpawn: QcClientStageCall; readonly objectives: { readonly kind: "none" } | { readonly kind: "call"; readonly call: QcClientStageCall } };
   readonly continuations: ReadonlySet<number>;
   readonly repeats: readonly RepeatGate[];
 }
@@ -14,18 +18,20 @@ export interface QcWeaponStage {
 export function qcWeaponStage(program: QcProgram, declared?: QcPrimaryWeaponStageDeclaration): QcWeaponStage | null {
   if (declared !== undefined) {
     const stage = qcDeclaredWeaponStage(program, declared);
-    const source = (name: string, result: "void" | "entity"): number => {
-      const fn = program.functionNamed(name);
-      if (fn.firstStatement <= 0 || fn.namedBuiltin || fn.parameterSizes.length !== 0) throw new QcProgramError("QC client stage requires an original parameterless source function");
+    const source = (declaration: string | ModSourceCall, result: "void" | "entity"): QcClientStageCall => {
+      const call = typeof declaration === "string" ? { function: declaration, arguments: [], globals: [] } : declaration;
+      validateQcSourceCall(program, call, new Set<ModCallbackInput>(["self", "time"]), "client stage");
+      const name = call.function, fn = program.functionNamed(name);
+      if (fn.firstStatement <= 0 || fn.namedBuiltin) throw new QcProgramError("QC client stage requires an original source function");
       const end = program.functions.reduce((end, other) => other.firstStatement > fn.firstStatement ? Math.min(end, other.firstStatement) : end, program.statements.length);
       const returns = program.statements.slice(fn.firstStatement, end).filter(statement => (statement.opcode === QcOpcode.Return || statement.opcode === QcOpcode.Done) && statement.a !== 0);
       if (result === "void" ? returns.length !== 0 : returns.length === 0 || returns.some(statement => !program.globals.some(global => global.offset === statement.a && global.type === "entity")))
         throw new QcProgramError(`QC client stage ${name} does not return ${result}`);
-      return fn.index;
+      return Object.freeze({ functionIndex: fn.index, call });
     };
     const client = declared.client, objectives = client.objectives;
     return Object.freeze({ ...stage, client: Object.freeze({ spawn: source(client.spawn, "void"), selectSpawn: source(client.selectSpawn, "entity"),
-      objectives: objectives.kind === "none" ? Object.freeze({ kind: objectives.kind }) : Object.freeze({ kind: objectives.kind, functionIndex: source(objectives.function, "void") }) }) });
+      objectives: objectives.kind === "none" ? Object.freeze({ kind: objectives.kind }) : Object.freeze({ kind: objectives.kind, call: source("call" in objectives ? objectives.call : objectives.function, "void") }) }) });
   }
   const qw = program.digest === "sha256:ff51cb5e77360d72b93487d89198dcf94629b92f8bae100fc6ea48a6c12a7830";
   if (!qw && program.digest !== "sha256:f2619787f9aa0f057246eea1665b622b4691b5c5a800b1a46133d1fe8b771580") return null;
@@ -40,11 +46,11 @@ export function qcWeaponStage(program: QcProgram, declared?: QcPrimaryWeaponStag
     if (actual?.opcode !== opcode || actual.a !== a || actual.b !== b)
       throw new QcProgramError(`Original weapon stage statement ${index} differs from its qualified artifact`);
   };
-  const clientFunction = (name: string, index: number, first: number, parameters: number, locals: number): number => {
+  const clientFunction = (name: string, index: number, first: number, parameters: number, locals: number): QcClientStageCall => {
     const original = program.functionNamed(name);
     if (original.index !== index || original.firstStatement !== first || original.parameterStart !== parameters || original.localWords !== locals
       || original.parameterSizes.length !== 0 || original.namedBuiltin) throw new QcProgramError(`Unsupported original client stage ${name}`);
-    return index;
+    return { functionIndex: index, call: { function: name, arguments: [], globals: [] } };
   };
   if (qw) {
     const client = { spawn: clientFunction("PutClientInServer", 193, 5554, 3621, 2), selectSpawn: clientFunction("SelectSpawnPoint", 191, 5465, 3585, 9), objectives: { kind: "none" } } satisfies QcWeaponStage["client"];
@@ -106,6 +112,34 @@ export function qcWeaponStage(program: QcProgram, declared?: QcPrimaryWeaponStag
     return { region: { functionIndex, entry, exit: entry + 2, replaceable: true }, released: held + 1, value: 1 };
   });
   return { dispatcher, client, continuations, repeats };
+}
+
+/** Invoke the declared source ABI inside the original engine client context. */
+export function invokeQcClientStage(machine: QcMachine, stage: QcClientStageCall, actor: ActorId, time: number,
+  reference: (actor: ActorId | null) => number): number {
+  const globals = machine.globals, selfOffset = machine.globalOffset("self"), otherOffset = machine.globalOffset("other");
+  const self = globals.int(selfOffset), other = globals.int(otherOffset);
+  const inputs = new Map<ModCallbackInput, ModRuntimeValue>([["self", { kind: "actor", value: actor }], ["time", { kind: "float", value: time }]]);
+  try {
+    globals.setInt(selfOffset, reference(actor)); globals.setInt(otherOffset, reference(null));
+    globals.setFloat(machine.globalOffset("time"), time);
+    return withQcSourceCall(machine, stage.call, inputs, reference, count => {
+      machine.execute(stage.functionIndex, count);
+      return globals.int(1);
+    });
+  } finally { globals.setInt(selfOffset, self); globals.setInt(otherOffset, other); }
+}
+
+/** Original source callers may pass the client explicitly instead of using global self. */
+export function qcClientStageSelf(machine: QcMachine, stage: QcClientStageCall): number {
+  let client: number | undefined;
+  const admit = (reference: number): void => {
+    if (client !== undefined && client !== reference) throw new QcProgramError("QC client call has conflicting source self inputs");
+    client = reference;
+  };
+  stage.call.arguments.forEach((value, index) => { if (value.kind === "input" && value.name === "self") admit(machine.argInt(index)); });
+  for (const global of stage.call.globals) if (global.value.kind === "input" && global.value.name === "self") admit(machine.globals.int(machine.globalOffset(global.name)));
+  return client ?? machine.globals.int(machine.globalOffset("self"));
 }
 
 export function qcDeclaredWeaponStage(program: QcProgram, declared: QcWeaponStageDeclaration): QcWeaponStage {

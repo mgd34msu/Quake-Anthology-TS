@@ -1,3 +1,4 @@
+import { readModSourceCall } from "../../mods/source-call.ts";
 import type { QcPrimaryWeaponStageDeclaration, QcWeaponStageDeclaration } from "../../../contracts/qc-weapon-stage.ts";
 import type { SaveReader } from "../../../persistence/value.ts";
 
@@ -9,6 +10,10 @@ export function readQcWeaponStageDeclaration(reader: SaveReader): QcWeaponStageD
 }
 export function readQcPrimaryWeaponStage(reader: SaveReader): QcPrimaryWeaponStageDeclaration {
   const client = reader.field("client"), objectives = client.field("objectives"), kind = objectives.field("kind").choice("none", "call");
-  return Object.freeze({ ...readQcWeaponStageDeclaration(reader), client: Object.freeze({ spawn: client.field("spawn").string(), selectSpawn: client.field("selectSpawn").string(),
-    objectives: kind === "none" ? Object.freeze({ kind }) : Object.freeze({ kind, function: objectives.field("function").string() }) }) });
+  const call = (value: SaveReader) => typeof value.value === "string" ? value.string() : readModSourceCall(value);
+  if (kind === "call" && objectives.field("call").value !== undefined && objectives.field("function").value !== undefined)
+    return objectives.fail("client objectives must declare one original call");
+  return Object.freeze({ ...readQcWeaponStageDeclaration(reader), client: Object.freeze({ spawn: call(client.field("spawn")), selectSpawn: call(client.field("selectSpawn")),
+    objectives: kind === "none" ? Object.freeze({ kind }) : objectives.field("call").value === undefined ? Object.freeze({ kind, function: objectives.field("function").string() })
+      : Object.freeze({ kind, call: readModSourceCall(objectives.field("call")) }) }) });
 }

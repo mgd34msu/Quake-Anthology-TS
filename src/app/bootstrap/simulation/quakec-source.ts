@@ -54,7 +54,7 @@ import type { MountedContent } from "../../../content/mounts/index.ts";
 import type { Q2Motion } from "../../../content/q2/foundation/host.ts";
 import { Id1DamageBinding } from "../../../content/q1/quakec/id1-damage.ts";
 import { Id1PickupBinding } from "../../../content/q1/quakec/id1-pickups.ts";
-import { qcWeaponStage, QcWeaponStageBinding, type QcWeaponStage } from "../../../content/q1/quakec/weapon-stage.ts";
+import { qcWeaponStage, QcWeaponStageBinding, invokeQcClientStage, qcClientStageSelf, type QcClientStageCall, type QcWeaponStage } from "../../../content/q1/quakec/weapon-stage.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../contracts/original-pickups.ts";
 import type { Id1DamageCall } from "../../../content/q1/quakec/id1-damage.ts";
@@ -374,12 +374,12 @@ export class QuakeCSource {
       return actor === null || !this.activeClients.has(actor.id) || (options.primaryWeaponSelected?.(actor.id) ?? true);
     });
     const sourceFunctions = pickups.composeFunctions(this.projectiles.compose(this.attacks.compose(damage.functionBoundary)));
-    const spawned = options.clientSpawned, spawnFunction = weaponStage?.client?.spawn;
+    const spawned = options.clientSpawned, spawnCall = weaponStage?.client?.spawn, spawnFunction = spawnCall?.functionIndex;
     if (spawned !== undefined && spawnFunction === undefined) throw new Error("QC artifact has no qualified client spawn stage");
-    const functions = spawned === undefined || spawnFunction === undefined ? sourceFunctions : {
+    const functions = spawned === undefined || spawnCall === undefined || spawnFunction === undefined ? sourceFunctions : {
       functions: new Set([...sourceFunctions.functions, spawnFunction]), run: (call: import("../../../compat/qc/machine.ts").QcCallSite, execute: import("../../../compat/qc/machine.ts").QcFunctionExecution): undefined => {
         if (call.functionIndex !== spawnFunction) return sourceFunctions.run(call, execute);
-        const reference = this.machine.globals.int(this.machine.globalOffset("self")), actor = this.slots.at(this.entities.slot(reference));
+        const reference = qcClientStageSelf(this.machine, spawnCall), actor = this.slots.at(this.entities.slot(reference));
         if (sourceFunctions.functions.has(call.functionIndex)) sourceFunctions.run(call, execute); else execute();
         if (actor !== null && options.actors.resolveOwned(actor.id) === actor && this.activeClients.has(actor.id)) spawned(actor);
         return undefined;
@@ -860,7 +860,9 @@ export class QuakeCSource {
       this.spectatorCallback("SpectatorConnect", slot);
     } else {
       this.invoke(this.prepared.program.functionNamed("ClientConnect").index, slot, 0, this.currentTime);
-      this.invoke(this.prepared.program.functionNamed("PutClientInServer").index, slot, 0, this.currentTime);
+      const spawn = this.weaponStage?.stage.client?.spawn;
+      if (spawn === undefined) this.invoke(this.prepared.program.functionNamed("PutClientInServer").index, slot, 0, this.currentTime);
+      else this.invokeClientStage(spawn, actor.id);
     }
     if (replayLocalPresentation) for (const message of this.localMessages.presentation(actor.id)) this.receiveLocalMessages([message], {kind:"client",actor:actor.id,reliable:true});
     return actor;
@@ -947,14 +949,13 @@ export class QuakeCSource {
     if (!this.activeClients.has(actor) || slot === null) throw new Error("Missing QC equipment client");
     if (this.weaponStage?.stage.client === undefined) throw new Error("QC artifact has no qualified objective contract");
     const objectives = this.weaponStage.stage.client.objectives;
-    if (objectives.kind === "call") this.invoke(objectives.functionIndex, slot, 0, this.currentTime);
+    if (objectives.kind === "call") this.invokeClientStage(objectives.call, actor);
   }
   clientSpawnPoint(actor: ActorId): { readonly origin: Vec3; readonly angles: Vec3 } {
     const slot = this.sourceSlot(actor);
     if (slot === null || !this.activeClients.has(actor)) throw new Error("Missing QC equipment client");
     if (this.weaponStage?.stage.client === undefined) throw new Error("QC artifact has no qualified spawn selection");
-    this.invoke(this.weaponStage.stage.client.selectSpawn, slot, 0, this.currentTime);
-    const reference = this.machine.globals.int(1), spawn = this.slots.at(this.entities.slot(reference));
+    const reference = this.invokeClientStage(this.weaponStage.stage.client.selectSpawn, actor), spawn = this.slots.at(this.entities.slot(reference));
     if (spawn === null || !this.options.actors.isLive(spawn.id) || spawn.id.equals(this.worldActor.id)) throw new Error("Original QC source selected no spawn point");
     const words = this.entities.fromReference(reference);
     return { origin: words.vector(this.field("origin")), angles: words.vector(this.field("angles")) };
@@ -1324,6 +1325,13 @@ export class QuakeCSource {
         return undefined;
       } });
     return this.options.admit(actor, slot, this);
+  }
+  private invokeClientStage(call: QcClientStageCall, actor: ActorId): number {
+    const owner = this.options.actors.resolveOwned(actor);
+    if (owner === null || this.sourceSlot(actor) === null || !this.activeClients.has(actor)) throw new Error("Missing live QC client stage actor");
+    const result = invokeQcClientStage(this.machine, call, actor, this.currentTime, value => value === null ? this.entities.reference(0) : this.reference(value));
+    if (this.options.actors.resolveOwned(actor) !== owner || !this.activeClients.has(actor)) throw new Error("Original QC client stage retired its client");
+    return result;
   }
   private invoke(callback: number, slot: number, other: number, time: number): undefined {
     const globals = this.machine.globals, selfOffset = this.machine.globalOffset("self"), otherOffset = this.machine.globalOffset("other");

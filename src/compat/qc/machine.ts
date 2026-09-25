@@ -24,7 +24,7 @@ export interface QcFunctionExecution {
   skip(returnWords: readonly [number, number, number]): undefined;
   cancel(returnWords: readonly [number, number, number]): never;
 }
-export interface QcInlineRegion { readonly functionIndex: number; readonly entry: number; readonly exit: number; readonly replaceable?: true; readonly standalone?: { readonly saved: number }; }
+export interface QcInlineRegion { readonly functionIndex: number; readonly entry: number; readonly exit: number; readonly replaceable?: true; readonly standalone?: { readonly saved: number; readonly scope?: "frame" } | { readonly saved: number; readonly scope: "global" }; }
 export interface QcInlineContinuation {
   (): undefined;
   skipToJoin(): undefined;
@@ -113,7 +113,18 @@ export class QcMachine {
       if (fn.namedBuiltin || fn.firstStatement <= 0 || !Number.isInteger(region.entry) || !Number.isInteger(region.exit)
         || region.entry < fn.firstStatement || region.exit <= region.entry || region.exit >= end || this.inlineRegions.has(region.entry))
         throw new QcProgramError("invalid inline source region");
-      this.inlineRegions.set(region.entry, Object.freeze({ ...region }));
+      const standalone = region.standalone;
+      if (standalone !== undefined) {
+        const savedWord = standalone.saved;
+        if (!Number.isInteger(savedWord) || (standalone.scope === "global"
+          ? savedWord < 28 || savedWord * 4 + 4 > this.globals.bytes.length
+            || savedWord >= fn.parameterStart && savedWord < fn.parameterStart + fn.localWords
+            || !this.program.globals.some(global => global.offset === savedWord && global.type === "float")
+          : savedWord < fn.parameterStart || savedWord >= fn.parameterStart + fn.localWords))
+          throw new QcProgramError("invalid standalone inline result");
+      }
+      this.inlineRegions.set(region.entry, Object.freeze({ ...region,
+        ...(standalone === undefined ? {} : { standalone: Object.freeze({ ...standalone }) }) }));
     }
     this.statementLimit = options.statementLimit ?? 100000;
     this.stackLimit = options.stackLimit ?? 32;
@@ -233,8 +244,9 @@ export class QcMachine {
     if (admitted?.functionIndex !== region.functionIndex || admitted.exit !== region.exit || admitted.standalone === undefined)
       this.fail("standalone inline execution requires an admitted source region");
     const savedWord = admitted.standalone.saved;
-    if (argumentCount !== fn.parameterSizes.length || !Number.isInteger(savedWord)
-      || savedWord < fn.parameterStart || savedWord >= fn.parameterStart + fn.localWords) this.fail("invalid standalone inline frame");
+    const globalResult = admitted.standalone.scope === "global";
+    if (argumentCount !== fn.parameterSizes.length) this.fail("invalid standalone inline argument count");
+    const previousResult = globalResult ? this.globals.int(savedWord) : null;
     const depth = this.frames.length, previousArguments = this.argumentCount;
     this.argumentCount = argumentCount;
     this.enter(fn);
@@ -246,6 +258,7 @@ export class QcMachine {
       return this.globals.float(savedWord);
     } finally {
       while (this.frames.length > depth) this.leave();
+      if (previousResult !== null) this.globals.setInt(savedWord, previousResult);
       this.argumentCount = previousArguments;
     }
   }

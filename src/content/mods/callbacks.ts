@@ -1,22 +1,15 @@
+import { readModSourceCall as sourceCall, readModSourceValue as value } from "./source-call.ts";
 import { readQcWeaponStageDeclaration } from "../q1/quakec/weapon-stage-declaration.ts";
 import { readItemIconDeclaration } from "../item-icon.ts";
 import { readItemActions } from "./item-actions.ts";
 import { readHeldWeaponDeclaration } from "../held-weapon.ts";
-import type { ModActorField, ModCallback, ModCallbackDeclaration, ModCallbackValue, ModConsoleValue, ModSourceCall, ModQcArmorStage, ModQcProtection, ModQcInputOutput, ModQcItems } from "../../contracts/mod-callbacks.ts";
+import type { ModActorField, ModCallback, ModCallbackDeclaration, ModConsoleValue, ModQcArmorStage, ModQcProtection, ModQcInputOutput, ModQcItems } from "../../contracts/mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import { readModClientInput } from "./client-input.ts";
 import { readModPickupRule } from "./pickups.ts";
 
-function value(reader: SaveReader): ModCallbackValue {
-  switch (reader.field("kind").choice("input", "float", "string", "vector")) {
-    case "input": return { kind: "input", name: reader.field("name").choice("self", "other", "activator", "attacker", "inflictor", "amount", "damage-flags", "regular-protection-scale", "knockback", "point", "direction", "normal", "item", "time", "elapsed", "result", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move", "pickup-count", "pickup-has-count", "pickup-dropped") };
-    case "float": return { kind: "float", value: reader.field("value").number() };
-    case "string": return { kind: "string", value: reader.field("value").string() };
-    case "vector": return { kind: "vector", value: readVector(reader.field("value")) };
-  }
-}
 function field(reader: SaveReader): ModActorField {
   const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset", "userinfo", "client-input");
   if (binding === "client-input") return { field: name, binding, input: reader.field("input").choice("view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"), update: reader.field("update").choice("always", "nonzero"), ...(reader.field("scale").value === undefined ? {} : { scale: reader.field("scale").number() }) };
@@ -51,11 +44,6 @@ function callback(reader: SaveReader): ModCallback {
 export function readModCallbacks(bytes: Uint8Array): ModCallbackDeclaration {
   const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   return readQuakeCModDeclaration(new SaveReader(value));
-}
-
-function sourceCall(reader: SaveReader): ModSourceCall {
-  return { function: reader.field("function").string(), arguments: reader.field("arguments").list(value),
-    globals: reader.field("globals").list(entry => ({ name: entry.field("name").string(), value: value(entry.field("value")) })) };
 }
 
 function consoleValue(reader: SaveReader): ModConsoleValue {

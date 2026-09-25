@@ -29,8 +29,8 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
     reject("original damage region bounds");
   const layout = qcDamageCallLayout(program, call), amount = layout.roles.amount;
   const location = amount[0];
-  if (amount.length !== 1 || location?.kind !== "argument") return reject("scale result requires one original float argument");
-  const damage = location.frameWord, parameterEnd = fn.parameterStart + fn.parameterSizes.reduce((sum, size) => sum + size, 0);
+  if (amount.length !== 1 || location === undefined) return reject("scale result requires one original float input");
+  const damage = location.kind === "argument" ? location.frameWord : location.word, parameterEnd = fn.parameterStart + fn.parameterSizes.reduce((sum, size) => sum + size, 0);
   if (source.damage !== damage || fn.localWords < parameterEnd - fn.parameterStart) reject("original damage parameter");
   validateQcSourceCall(program, call, new Set(["self", "attacker", "inflictor", "amount", "time"]), "damage scale");
   const context = new Map<number, Value | null>();
@@ -156,7 +156,7 @@ export function qcDamageScale(program: QcProgram, call: ModSourceCall, source: M
   const privateWrites = new Set(scratch); privateWrites.delete(damage);
   if (!qcRegionPrivateWritesAreDead(program, source.exit, end, privateWrites)) reject("private scale outputs remain live after suppression");
   return Object.freeze({ kind: source.kind ?? "multiplier", call, scratch: Object.freeze([...scratch]), constants: Object.freeze([...constants].map(word => Object.freeze({ word, bits: initial.getInt32(word * 4, true) }))), region: Object.freeze({ functionIndex: fn.index, entry: source.entry, exit: source.exit,
-    replaceable: true, standalone: Object.freeze({ saved: damage }) }) });
+    replaceable: true, standalone: Object.freeze(location.kind === "argument" ? { saved: damage } : { saved: damage, scope: "global" }) }) });
 }
 
 /** Borrow only the qualified original frame and scratch words, restoring them before returning. */
