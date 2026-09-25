@@ -74,6 +74,8 @@ export interface MappedGuestMemory extends GuestMemory {
   fetchByte(byteOffset: bigint): number;
   /** Lazily execute successive live bytes; faults occur only when the byte is consumed. */
   fetchSequence(byteOffset: bigint): () => number;
+  /** Cache guard for decoded bytes. Retired mappings or any live byte change invalidate it. */
+  retainExecutableBytes(byteOffset: bigint, bytes: readonly number[]): (() => boolean) | null;
   checkpoint(): GuestMemorySnapshot;
 }
 

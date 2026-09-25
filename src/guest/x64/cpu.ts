@@ -6,7 +6,7 @@ import { executeNumericInstruction } from "../floating-point/index.ts";
 import { alu, condition, resultFlags, shift, signedMultiply } from "../x86/arithmetic.ts";
 import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
 import { canonicalAddress, guestAddress, readMemory, registerName, writeMemory, X64DecodeCursor, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
-import type { X64Operand } from "./decoder.ts";
+import type { X64DecodedInstruction, X64Operand } from "./decoder.ts";
 
 export interface X64CpuOptions {
   readonly state: GuestProcessorState;
@@ -23,6 +23,7 @@ export class X64Cpu implements GuestCpu {
   readonly state: GuestProcessorState;
   readonly memory: MappedGuestMemory;
   readonly #isHostCall: (address: GuestAddress) => boolean;
+  readonly #instructions = new Map<bigint, X64DecodedInstruction>();
   constructor(options: X64CpuOptions) {
     if (options.state.architecture !== "x86-64" || options.memory.pointerBytes !== 8) throw new RangeError("X64Cpu requires x86-64 processor state and 64-bit guest memory");
     this.state = options.state;
@@ -45,8 +46,16 @@ export class X64Cpu implements GuestCpu {
       try {
         canonicalAddress(start);
         if (this.#isHostCall(address)) return { kind: "host-call", instructions, address };
-        cursor = new X64DecodeCursor(this.memory, this.state);
+        const retained = this.#instructions.get(start);
+        const decoded = retained !== undefined && retained.unchanged() ? retained : null;
+        cursor = new X64DecodeCursor(this.memory, this.state, decoded);
         const flow = this.#execute(cursor);
+        if (decoded === null) {
+          const prepared = cursor.cache();
+          if (this.#instructions.size >= 32768) this.#instructions.clear();
+          if (prepared === null) this.#instructions.delete(start);
+          else this.#instructions.set(start, prepared);
+        }
         this.state.instructionPointer = flow.kind === "branch" ? flow.target : cursor.nextIP;
         if (flow.kind === "halt") return { kind: "halt", instructions: instructions + 1, address };
         if (flow.kind === "trap") return { kind: "exception", instructions: instructions + 1, exception: { kind: "processor", vector: flow.vector, errorCode: null, instruction: address, detail: "Software breakpoint" } };

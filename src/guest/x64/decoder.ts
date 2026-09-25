@@ -42,6 +42,22 @@ export interface X64ModRM {
   readonly reg: X64RegisterOperand;
   readonly rm: X64Operand;
 }
+interface DecodedOperand { readonly width: GuestIntegerWidth; readonly end: number; readonly value: X64ModRM }
+interface DecodedImmediate { readonly length: number; readonly value: bigint }
+export interface X64DecodedInstruction {
+  readonly bytes: readonly number[];
+  readonly prefixLength: number;
+  readonly opcode: number;
+  readonly rex: number | null;
+  readonly operandOverride: boolean;
+  readonly addressOverride: boolean;
+  readonly lock: boolean;
+  readonly repeat: "none" | "f2" | "f3";
+  readonly segment: "fs" | "gs" | null;
+  readonly operands: ReadonlyMap<number, DecodedOperand>;
+  readonly immediates: ReadonlyMap<number, DecodedImmediate>;
+  readonly unchanged: () => boolean;
+}
 
 export function canonicalAddress(value: bigint): bigint {
   const raw = BigInt.asUintN(64, value);
@@ -78,7 +94,11 @@ export function writeMemory(memory: MappedGuestMemory, address: GuestAddress, wi
 export class X64DecodeCursor {
   readonly start: bigint;
   readonly #fetchNext: (() => number) | null;
-  readonly bytes: number[] = [];
+  readonly #bytes: number[] = [];
+  readonly #prefixLength: number;
+  readonly #operands: Map<number, DecodedOperand> | null;
+  readonly #immediates: Map<number, DecodedImmediate> | null;
+  #position = 0;
   readonly opcode: number;
   rex: number | null = null;
   operandOverride = false;
@@ -87,8 +107,18 @@ export class X64DecodeCursor {
   repeat: "none" | "f2" | "f3" = "none";
   segment: "fs" | "gs" | null = null;
 
-  constructor(readonly memory: MappedGuestMemory, readonly state: GuestProcessorState) {
+  constructor(readonly memory: MappedGuestMemory, readonly state: GuestProcessorState, readonly decoded: X64DecodedInstruction | null = null) {
     this.start = state.instructionPointer;
+    this.#operands = decoded === null ? new Map<number, DecodedOperand>() : null;
+    this.#immediates = decoded === null ? new Map<number, DecodedImmediate>() : null;
+    if (decoded !== null) {
+      this.#fetchNext = null;
+      this.#prefixLength = this.#position = decoded.prefixLength;
+      this.opcode = decoded.opcode; this.rex = decoded.rex;
+      this.operandOverride = decoded.operandOverride; this.addressOverride = decoded.addressOverride;
+      this.lock = decoded.lock; this.repeat = decoded.repeat; this.segment = decoded.segment;
+      return;
+    }
     // The complete architectural instruction window stays canonical and cannot wrap.
     // Boundary instructions retain the per-byte address/fault path below.
     this.#fetchNext = (this.start > 0n && this.start <= 0x7ffffffffff1n)
@@ -108,8 +138,18 @@ export class X64DecodeCursor {
       else { this.opcode = byte; break; }
       this.rex = null;
     }
+    this.#prefixLength = this.#position;
   }
-  get nextIP(): bigint { return BigInt.asUintN(64, this.start + BigInt(this.bytes.length)); }
+  get bytes(): readonly number[] { return this.decoded === null ? this.#bytes : this.decoded.bytes.slice(0, this.#position); }
+  cache(): X64DecodedInstruction | null {
+    if (this.decoded !== null) return this.decoded;
+    const unchanged = this.memory.retainExecutableBytes(this.start, this.#bytes);
+    if (unchanged === null || this.#operands === null || this.#immediates === null) return null;
+    return { bytes: this.#bytes, prefixLength: this.#prefixLength, opcode: this.opcode, rex: this.rex, operandOverride: this.operandOverride,
+      addressOverride: this.addressOverride, lock: this.lock, repeat: this.repeat, segment: this.segment,
+      operands: this.#operands, immediates: this.#immediates, unchanged };
+  }
+  get nextIP(): bigint { return BigInt.asUintN(64, this.start + BigInt(this.#position)); }
   get width(): 16 | 32 | 64 { return ((this.rex ?? 0) & 8) !== 0 ? 64 : this.operandOverride ? 16 : 32; }
   get stackWidth(): 16 | 64 { return this.operandOverride ? 16 : 64; }
   get addressBits(): 32 | 64 { return this.addressOverride ? 32 : 64; }
@@ -119,12 +159,25 @@ export class X64DecodeCursor {
   get numericPrefix(): "none" | "66" | "f2" | "f3" { return this.repeat !== "none" ? this.repeat : this.operandOverride ? "66" : "none"; }
 
   readByte(): number {
-    if (this.bytes.length >= 15) throw new X64ProcessorFault(13, "Instruction exceeds 15 bytes");
+    if (this.#position >= 15) throw new X64ProcessorFault(13, "Instruction exceeds 15 bytes");
+    if (this.decoded !== null) {
+      const byte = this.decoded.bytes[this.#position];
+      if (byte === undefined) throw new Error("Decoded instruction byte is missing");
+      this.#position++;
+      return byte;
+    }
     const byte = this.#fetchNext === null ? this.memory.fetchByte(canonicalAddress(this.nextIP)) : this.#fetchNext();
-    this.bytes.push(byte);
+    this.#bytes.push(byte); this.#position++;
     return byte;
   }
   readUnsigned(byteLength: number): bigint {
+    const start = this.#position, saved = this.decoded?.immediates.get(start);
+    if (saved !== undefined && saved.length === byteLength) { this.#position += byteLength; return saved.value; }
+    const value = this.#unsigned(byteLength);
+    this.#immediates?.set(start, { length: byteLength, value });
+    return value;
+  }
+  #unsigned(byteLength: number): bigint {
     if (byteLength === 1) return BigInt(this.readByte());
     if (byteLength === 2) return BigInt(this.readByte() + this.readByte() * 0x100);
     if (byteLength === 4) return BigInt(this.readByte() + this.readByte() * 0x100
@@ -140,6 +193,13 @@ export class X64DecodeCursor {
     return { kind: "register", register: registerName(index), width, highByte: false };
   }
   decodeModRM(width: GuestIntegerWidth): X64ModRM {
+    const start = this.#position, saved = this.decoded?.operands.get(start);
+    if (saved !== undefined && saved.width === width) { this.#position = saved.end; return saved.value; }
+    const value = this.#modRM(width);
+    this.#operands?.set(start, { width, end: this.#position, value });
+    return value;
+  }
+  #modRM(width: GuestIntegerWidth): X64ModRM {
     const byte = this.readByte();
     const mode = byte >> 6;
     const extension = (byte >> 3) & 7;

@@ -40,9 +40,10 @@ function allows(permissions: GuestPermissions, access: GuestAccess): boolean {
 interface Mapping extends GuestMapping {
   readonly bytes: Uint8Array;
   readonly view: DataView;
+  active: boolean;
 }
-function mappedBytes(mapping: Omit<Mapping, "view">): Mapping {
-  return { ...mapping, view: new DataView(mapping.bytes.buffer, mapping.bytes.byteOffset, mapping.bytes.byteLength) };
+function mappedBytes(mapping: Omit<Mapping, "view" | "active">): Mapping {
+  return { ...mapping, view: new DataView(mapping.bytes.buffer, mapping.bytes.byteOffset, mapping.bytes.byteLength), active: true };
 }
 interface Chunk { readonly mapping: Mapping; readonly offset: number; readonly byteLength: number; }
 export interface SparseGuestMemoryOptions {
@@ -204,6 +205,21 @@ export class SparseGuestMemory implements MappedGuestMemory {
     };
   }
 
+  retainExecutableBytes(byteOffset: bigint, bytes: readonly number[]): (() => boolean) | null {
+    if (bytes.length === 0 || bytes.length > 15) return null;
+    const mapping = this.#mappings[this.#firstEndAfter(byteOffset)];
+    if (mapping === undefined || byteOffset < mapping.base || !allows(mapping.permissions, "execute")) return null;
+    const offset = Number(byteOffset - mapping.base);
+    if (offset + bytes.length > mapping.byteLength) return null;
+    const expected = bytes.slice();
+    const unchanged = (): boolean => {
+      if (!mapping.active) return false;
+      for (let index = 0; index < expected.length; index++) if (mapping.bytes[offset + index] !== expected[index]) return false;
+      return true;
+    };
+    return unchanged() ? unchanged : null;
+  }
+
 
   write(address: GuestAddress, bytes: Uint8Array): undefined {
     const chunks = this.#chunks(address, bytes.byteLength, "write");
@@ -341,7 +357,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     }
     return undefined;
   }
-  #insert(mapping: Omit<Mapping, "view">): undefined {
+  #insert(mapping: Omit<Mapping, "view" | "active">): undefined {
     this.#mappingGeneration += 1;
     this.#recentMappings.clear();
     this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mappedBytes(mapping));
@@ -423,6 +439,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const mapping = this.#mappings[last];
       if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
       if (mapping.base >= end) break;
+      mapping.active = false;
       const mappingEnd = mapping.base + BigInt(mapping.byteLength);
       const startOffset = Number((base > mapping.base ? base : mapping.base) - mapping.base);
       const endOffset = Number((end < mappingEnd ? end : mappingEnd) - mapping.base);

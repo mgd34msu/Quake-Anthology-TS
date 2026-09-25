@@ -42,6 +42,31 @@ function fixture(bytes: readonly number[], start = base) {
   return { memory, state, cpu, run };
 }
 
+test("decoded instructions observe live operands, writable aliases and mapping retirement", () => {
+  const f = fixture([0x8b, 0x43, 4, 0x83, 0xc0, 1, 0xc3]);
+  const data = f.memory.map({ base: 0x50000n, byteLength: 16, permissions: "read-write" });
+  f.memory.writeUint32(f.memory.offset(data, 4n), 10);
+  f.memory.writeUint32(f.memory.offset(data, 8n), 20);
+  const run = (offset: bigint) => {
+    f.state.instructionPointer = base;
+    f.state.registers.write("rsp", 64, stack);
+    f.state.registers.write("rbx", 64, data.byteOffset + offset);
+    expect(f.run().kind).toBe("return");
+    return f.state.registers.read("rax", 32);
+  };
+  expect(run(0n)).toBe(11n); expect(run(4n)).toBe(21n);
+  const code = pointer(f.memory, base);
+  const alias = f.memory.mapAlias({ base: 0x60000n, byteLength: 7, permissions: "read-write", source: code });
+  // Borrowed host writes bypass store observers; instruction bytes must still be checked.
+  f.memory.borrow(alias, 7).setUint8(5, 7);
+  expect(run(0n)).toBe(17n);
+  f.memory.protect(code, 7, "read"); f.state.instructionPointer = base;
+  expect(f.run().kind).toBe("exception");
+  f.memory.unmap(code, 7);
+  f.memory.map({ base, byteLength: 6, permissions: "execute", bytes: new Uint8Array([0xb8, 99, 0, 0, 0, 0xc3]) });
+  expect(run(0n)).toBe(99n);
+});
+
 test("immediate decoding retains unsigned widths and exact partial fault bytes", () => {
   for (const width of [1, 2, 4, 8]) {
     const { memory, state } = fixture([0x90, ...new Array<number>(width).fill(255)]);
