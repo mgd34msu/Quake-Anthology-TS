@@ -2,7 +2,7 @@
 
 **22/23 targets are accepted in source. T10 mod interoperability remains open.** Its remaining implementation is listed immediately below the target table. T12 is complete: selected arsenals, inventory actions, offhand source modifiers/cadence, and the original rerelease retained-map pickup lifetime are integrated. Classic and rerelease behavior remain separate.
 
-The installed executable is `f670b7e9`. Source acceptance does not establish exhaustive artifact compatibility, full campaign playthroughs, physical audio quality, native-peer coverage or acceptable whole-game performance. See the [current delivery](../execution-status.md#installed-executable-and-recent-fixes) for the exact installed changes and runtime evidence.
+The installed executable is `6357117f`. Source acceptance does not establish exhaustive artifact compatibility, full campaign playthroughs, physical audio quality, native-peer coverage or acceptable whole-game performance. See the [current delivery](../execution-status.md#installed-executable-and-recent-fixes) for the exact installed changes and runtime evidence.
 
 | Target | Function | Status | Accepted progress and remaining work |
 |---|---|---|---|
@@ -36,7 +36,7 @@ These parts describe the remaining implementation; they do not replace the T01â€
 
 | Target | Remaining part | Completion behavior |
 |---|---|---|
-| T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 38 seconds. Cached instruction operations reduced repeated original frames from 120 to 85 ms across the isolated base1 comparisons, still above their 25 ms interval. Further work must retain all entities, source behavior and original save callbacks. |
+| T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 38 seconds. Cached instruction operations reduced repeated original frames from 120 to 74 ms across the isolated base1 comparisons, still above their 25 ms interval. Further work must retain all entities, source behavior and original save callbacks. |
 
 Authored player body dimensions are integrated across selected Q1/QW/Q2/Q3 and qualified original native/QVM movement. Expansion and release use the selected collision owner; saves retain restoration state where original live bounds need it. Root combined strict/policy and 51 focused checks with 496 assertions pass, including actual original retail/Threewave calls. Unified peers require `qts:snapshot-v10`. This change is included in installed `f670b7e9`.
 
