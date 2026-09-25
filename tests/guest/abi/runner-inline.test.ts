@@ -24,9 +24,26 @@ function fixture(wide: boolean) {
   const runner = new GuestCallRunner({ cpu, callbacks, returnAddress: at(0x1800n) });
   const context: GuestCallContext = { module, callback: { kind: "native-guest", module, address: at(0x1000n), abi }, parent: null, self: null, other: null };
   const request = { target: at(0x1000n), signature: { abi, parameters: [], result: { kind: "scalar", storage: "int32" }, variadic: false }, arguments: [], context, instructionBudget: 30 } satisfies import("../../../src/guest/abi/runner.ts").GuestCallRequest;
-  return { runner, cpu, at, abi, request };
+  return { runner, cpu, at, abi, request, callbacks };
 }
 for (const wide of [false, true]) {
+  test(`${wide ? "x64" : "i386"} callback probes retain execute faults and observer ownership`, () => {
+    const f = fixture(wide);
+    let observed = 0;
+    const retire = f.callbacks.observeEntry(f.at(0x1000n), () => { observed++; });
+    f.cpu.state.instructionPointer = 0x1000n;
+    f.cpu.memory.protect(f.at(0x1000n), 4096, "read");
+    const hooked = f.cpu.run({ instructionBudget: 1, returnAddress: null });
+    expect(hooked.kind).toBe("exception"); expect(observed).toBe(0);
+    retire();
+    const ordinary = f.cpu.run({ instructionBudget: 1, returnAddress: null });
+    expect(ordinary).toEqual(hooked);
+    expect(f.cpu.state.instructionPointer).toBe(0x1000n);
+    expect(() => f.callbacks.enter(fixture(wide).at(0x1000n))).toThrow("another execution owner");
+    f.cpu.memory.protect(f.at(0x1000n), 4096, "read-execute");
+    expect(f.cpu.run({ instructionBudget: 1, returnAddress: null }).kind).toBe("budget");
+    expect(f.cpu.state.registers.read("rax", 32)).toBe(1n);
+  });
   test(`${wide ? "x64" : "i386"} inline execute/skip preserves nested frames and closes continuation`, () => {
     const f = fixture(wide), retained: GuestInlineContinuation[] = [];
     let entries = 0;

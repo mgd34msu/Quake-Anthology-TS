@@ -42,6 +42,12 @@ export class GuestCallbackTable {
   /** Called once at instruction entry; ABI lookup must not notify observers again. */
   enter(address: GuestAddress): boolean {
     const observers = this.#entryObservers.get(address.byteOffset);
+    // Ordinary instructions are checked by the CPU fetch, not the callback table.
+    if (observers === undefined && !this.#byAddress.has(address.byteOffset)) {
+      if (address.addressSpace !== this.memory.addressSpace) this.memory.check(address, 1, "execute");
+      return false;
+    }
+    this.memory.check(address, 1, "execute");
     if (observers !== undefined) for (const observer of [...observers]) if (observers.has(observer)) observer();
     return this.resolve(address) !== null;
   }

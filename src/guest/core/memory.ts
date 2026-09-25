@@ -162,11 +162,11 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   fetchByte(byteOffset: bigint): number {
-    this.#range(byteOffset, 1, "execute");
     const recent = this.#recentMappings.get("execute");
     let mapping: Mapping | undefined;
     if (recent !== undefined && byteOffset >= recent.mapping.base && byteOffset < recent.end) mapping = recent.mapping;
     else {
+      this.#range(byteOffset, 1, "execute");
       mapping = this.#mappings[this.#firstEndAfter(byteOffset)];
       if (mapping === undefined || byteOffset < mapping.base)
         this.#fault("unmapped", byteOffset, 1, "execute", "range includes unmapped bytes");
