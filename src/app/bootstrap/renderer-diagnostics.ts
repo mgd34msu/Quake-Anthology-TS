@@ -18,7 +18,7 @@ export function registerRendererDiagnostics(services: RendererDiagnosticServices
   const add = (name: string, summary: string, usage: string, run: (invocation: CommandInvocation) => void): void => {
     if (services.commands.exists(name)) throw new Error(`Renderer diagnostic command already registered: ${name}`);
     const handler = (invocation: CommandInvocation): undefined => { run(invocation); return undefined; };
-    if (!services.commands.register(name, handler, { summary, usage, examples: [] })) throw new Error(`Cannot register renderer diagnostic ${name}`);
+    if (!services.commands.registerEngine(name, handler, { summary, usage, examples: [] })) throw new Error(`Cannot register renderer diagnostic ${name}`);
     handlers.set(name, handler);
   };
   add("imagelist", "List actual resident renderer images.", "imagelist", invocation => {

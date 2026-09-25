@@ -43,6 +43,13 @@ export interface ScriptCompletion {
   readonly result: { readonly kind: "completed" } | { readonly kind: "missing" } | { readonly kind: "failed"; readonly error: unknown };
 }
 
+export interface CommandProducerServices {
+  cvars(source: CommandContext): CvarRegistry;
+  readScript(name: string, source: CommandContext): Promise<string | undefined>;
+  command(command: CommandInvocation): void;
+  engineCommand(name: string): boolean;
+}
+
 export interface CommandBufferOptions {
   readonly dialect: CommandDialect;
   readonly context: CommandContext;
@@ -64,7 +71,7 @@ export interface CommandBufferOptions {
   readonly builtins?: boolean;
 }
 
-interface RegisteredEntry { readonly name: string; readonly handler: CommandHandler | null; readonly documentation: CommandDocumentation | undefined; next: RegisteredEntry | undefined; }
+interface RegisteredEntry { readonly ownership: "world" | "engine"; readonly name: string; readonly handler: CommandHandler | null; readonly documentation: CommandDocumentation | undefined; next: RegisteredEntry | undefined; }
 interface AliasEntry { readonly name: string; readonly instance: symbol | undefined; value: string; textMode: CommandTextMode; dialect: CommandDialect; }
 interface TextChunk { readonly dialect: CommandDialect; readonly kind: "text"; readonly text: string; readonly source: CommandContext; readonly direct: boolean; readonly textMode: CommandTextMode; }
 type CommandChunk = TextChunk | { readonly kind: "completion"; readonly event: ScriptCompletion; readonly dialect: CommandDialect; readonly textMode: CommandTextMode };
@@ -140,6 +147,7 @@ export class CommandBuffer {
   private waitDialect: CommandDialect | undefined;
   private waitSource: CommandContext | undefined;
   private retiredProducers = new Set<symbol>();
+  private readonly producers = new Map<symbol, CommandProducerServices>();
   private retiredClients = new Set<ClientId>();
   private fallbackCvars: CvarRegistry | undefined;
   private readonly builtinHandlers = new Map<string, CommandHandler>();
@@ -318,6 +326,27 @@ export class CommandBuffer {
     if (this.waitSource !== undefined && retired(this.waitSource)) { this.waitFrames = 0; this.waitDialect = undefined; this.waitSource = undefined; }
     this.programRevision++;
   }
+  producerPending(instance: symbol): boolean {
+    const owns = (source: CommandContext | undefined): boolean => source?.producer?.instance === instance;
+    const pending = (chunks: readonly CommandChunk[]): boolean => chunks.some(chunk => owns(chunk.kind === "text" ? chunk.source : chunk.event.source));
+    if (owns(this.frame?.source) || owns(this.waitSource) || owns(this.scriptRead?.source) || pending(this.chunks) || pending(this.deferred)) return true;
+    for (let tail = this.preparationTail; tail !== undefined; tail = tail.preparationTail)
+      if (owns(tail.waitSource) || owns(tail.scriptRead?.source) || pending(tail.chunks) || pending(tail.deferred)) return true;
+    return false;
+  }
+  bindProducer(instance: symbol, services: CommandProducerServices): () => void {
+    if (this.producers.has(instance) || this.retiredProducers.has(instance)) throw new Error("Command producer is already bound or retired");
+    this.producers.set(instance, services);
+    return () => { if (this.producers.get(instance) === services) { this.producers.delete(instance); this.discardProducer(instance); } };
+  }
+  private producer(source: CommandContext): CommandProducerServices | undefined {
+    const instance = source.producer?.instance;
+    if (instance === undefined || source.producer?.kind !== "client-module") return undefined;
+    const services = this.producers.get(instance);
+    if (services === undefined) throw new Error("Component client command producer is not admitted");
+    services.cvars(source); return services;
+  }
+
   /** Release only this component instance, including suspended preparation and script work. */
   discardProducer(instance: symbol): void {
     this.retiredProducers.add(instance);
@@ -374,14 +403,15 @@ export class CommandBuffer {
   }
 
   private cvarOwner(name: string, source: CommandContext): CvarRegistry | undefined {
-    const owner = this.options.cvarRouting?.owner(name, source) ?? this.fallbackCvars;
+    const owner = this.producer(source)?.cvars(source) ?? this.options.cvarRouting?.owner(name, source) ?? this.fallbackCvars;
     if (owner !== undefined && owner.context.session !== source.session) {
       throw new RangeError("Command cvar owner belongs to another session");
     }
     return owner;
   }
   private visibleCvars(source: CommandContext): readonly CvarRegistry[] {
-    const registries = this.options.cvarRouting?.visible(source) ?? (this.fallbackCvars === undefined ? [] : [this.fallbackCvars]);
+    const producer = this.producer(source);
+    const registries = producer === undefined ? this.options.cvarRouting?.visible(source) ?? (this.fallbackCvars === undefined ? [] : [this.fallbackCvars]) : [producer.cvars(source)];
     for (const registry of registries) if (registry.context.session !== source.session) {
       throw new RangeError("Visible cvar owner belongs to another session");
     }
@@ -404,7 +434,7 @@ export class CommandBuffer {
       registry.archiveCommands(name => this.cvarOwner(name, context) === registry)));
   }
 
-  register(nameInput: string, handler: CommandHandler | null, documentation?: CommandDocumentation): boolean {
+  register(nameInput: string, handler: CommandHandler | null, documentation?: CommandDocumentation, ownership: "world" | "engine" = "world"): boolean {
     const name = sourceCommandText(nameInput);
     if (this.exists(name)) {
       if (handler !== null || this.executionDialect !== "q3") this.print(`Cmd_AddCommand: ${name} already defined\n`);
@@ -413,8 +443,11 @@ export class CommandBuffer {
     if (this.executionDialect !== "q3" && this.cvarOwner(name, this.frame?.source ?? this.context)?.variableString(name)) {
       this.print(`Cmd_AddCommand: ${name} already defined as a var\n`); return false;
     }
-    this.handlers = { name, handler, documentation, next: this.handlers };
+    this.handlers = { name, handler, documentation, ownership, next: this.handlers };
     return true;
+  }
+  registerEngine(name: string, handler: CommandHandler, documentation?: CommandDocumentation): boolean {
+    return this.register(name, handler, documentation, "engine");
   }
   registerFallbackName(name: string): boolean { return this.register(name, null); }
   exists(nameInput: string): boolean {
@@ -727,7 +760,9 @@ export class CommandBuffer {
       const builtin = this.builtinHandlers.get(asciiFold(name));
       let selected = this.handlers;
       while (selected !== undefined && asciiFold(selected.name) !== asciiFold(name)) selected = selected.next;
-      if ((builtin === undefined || selected?.handler !== builtin) && this.options.sourceCommand?.(command, selected !== undefined) === true) return 1;
+      const producer = this.producer(source);
+      if (producer !== undefined && selected !== undefined && selected.ownership !== "engine" && (builtin === undefined || selected.handler !== builtin) && !producer.engineCommand(name)) { producer.command(command); return 1; }
+      if (selected?.ownership !== "engine" && (builtin === undefined || selected?.handler !== builtin) && this.options.sourceCommand?.(command, selected !== undefined) === true) return 1;
       for (let entry = this.handlers; entry !== undefined; entry = entry.next) {
         if (asciiFold(entry.name) !== asciiFold(name)) continue;
         if (this.executionDialect === "q3") this.touch(entry);
@@ -758,6 +793,8 @@ export class CommandBuffer {
   }
   forwardToServer(command: CommandInvocation): undefined {
     command.assertActive();
+    const producer = this.producer(command.source);
+    if (producer !== undefined) { producer.command(command); return undefined; }
     return this.options.forwardToServer?.(command);
   }
 
@@ -772,6 +809,8 @@ export class CommandBuffer {
       else cvars.set(variable.name, value);
       return;
     }
+    const producer = this.producer(command.source);
+    if (producer !== undefined) { producer.command(command); return; }
     if (this.executionDialect === "q3") {
       if (this.options.clientGame?.(command) || this.options.serverGame?.(command) || this.options.ui?.(command)) return;
     }
@@ -803,7 +842,8 @@ export class CommandBuffer {
     if (this.scriptRead !== undefined) { this.insertFor(`${command.raw}\n`, command.source); return; }
     const requested = command.argv[1] ?? "";
     const filename = this.executionDialect === "q3" && !requested.slice(requested.lastIndexOf("/") + 1).includes(".") ? `${requested}.cfg` : requested;
-    const file = this.options.readScript?.(filename, command.source);
+    const producer = this.producer(command.source);
+    const file = producer === undefined ? this.options.readScript?.(filename, command.source) : producer.readScript(filename, command.source);
     if (file instanceof Promise) {
       let cancel = (): void => {};
       const settled = new Promise<void>(resolve => { cancel = resolve; });

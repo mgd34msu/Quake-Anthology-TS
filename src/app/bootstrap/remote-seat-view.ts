@@ -1,3 +1,5 @@
+import type { ApplicationModPresentationsOptions } from "./mod-presentations.ts";
+import { RemoteComponentView } from "./remote-components.ts";
 import { UnifiedRemotePresentation } from "./network/remote-unified.ts";
 import { loadQ3Character } from "../../content/q3/foundation/index.ts";
 import type { LoadedApplicationContent } from "./content.ts";
@@ -26,6 +28,7 @@ import { ApplicationSeatUi } from "./ui.ts";
 import type { ApplicationViewSettings } from "./view-settings.ts";
 
 export interface RemoteSeatViewOptions {
+  readonly systemCinematics: NonNullable<ApplicationModPresentationsOptions["systemCinematics"]>;
   readonly local: LocalInput;
   readonly controls: ApplicationInput;
   readonly source: RemoteSeatSource;
@@ -53,9 +56,17 @@ export interface RemoteSeatViewOptions {
 /** A channel's view and PVS effects borrow the retained frontend assets and output. */
 export class RemoteSeatView {
   private closed = false;
+  private readonly components: RemoteComponentView | null;
   private readonly reportedEffects = new Set<string>();
   private constructor(readonly presentation: WorldSeatPresentation, readonly effects: ApplicationEffects,
-    private readonly options: RemoteSeatViewOptions, readonly assets: ApplicationAssets, private readonly ownsAssets: boolean) {}
+    private readonly options: RemoteSeatViewOptions, readonly assets: ApplicationAssets, private readonly ownsAssets: boolean) {
+    const remote = options.source.remote;
+    this.components = remote instanceof UnifiedRemotePresentation ? new RemoteComponentView(remote, {
+      assets, audio: options.audio, input: options.controls, queries: remote.scene, renderer: options.renderer, systemCinematics: options.systemCinematics,
+      print: options.print, nextFrame: () => new Promise<void>(resolve => { setImmediate(() => { resolve(); }); }),
+      clock: { now: options.now, frameNumber: () => remote.output?.snapshot.frame.frame ?? 0 },
+    }) : null;
+  }
 
   static async prepare(options: RemoteSeatViewOptions): Promise<RemoteSeatView> {
     const { local, controls, source, audio, renderer } = options;
@@ -128,7 +139,7 @@ export class RemoteSeatView {
     seat.attachPresentation(this.presentation, () => this.presentation.close());
   }
 
-  async prepareFrame(output: SimulationOutput): Promise<ApplicationAudioSeatEvents> {
+  async prepareFrame(output: SimulationOutput, music = false): Promise<ApplicationAudioSeatEvents> {
     if (this.closed) throw new Error("Remote seat view is closed");
     const remote = this.options.source.remote, events = remote.drainPresentationEvents();
     if(remote instanceof UnifiedRemotePresentation)this.options.local.player.seat.receive(remote.drainSimulationEvents());
@@ -136,8 +147,10 @@ export class RemoteSeatView {
     this.effects.receive(events);
     if (!(remote instanceof Q3RemotePresentation)) await this.effects.prepare(output.snapshot, models, characters);
     for(const effect of this.effects.drainUnhandled()){const key=`${effect.source.content}:${effect.reason}`;if(!this.reportedEffects.has(key)){this.reportedEffects.add(key);this.options.print(`Player ${this.presentation.local.player.seat.id.index+1}: unresolved ${effect.source.kind} effect: ${effect.reason}\n`);}}
+    await this.components?.prepareMedia(events, music);
     this.presentation.sourceEvents(events);
     await this.presentation.prepare(output.snapshot, models, characters);
+    await this.components?.prepare(this.presentation, events, output.snapshot.frame.frame);
     return { seat: this.presentation.local.player.seat.id, snapshot: output.snapshot, events, scene: remote.scene, music: false,
       effectSounds: [...this.effects.drainSounds(), ...this.effects.drainRecipientSounds()
         .filter(batch => batch.recipient.equals(this.presentation.local.player.actor)).flatMap(batch => batch.sounds)] };
@@ -147,6 +160,7 @@ export class RemoteSeatView {
     if (this.closed) return;
     this.closed = true;
     const errors: unknown[] = [];
+    try { this.components?.close(); } catch (error) { errors.push(error); }
     try { await this.presentation.q3Client?.shutdown(); } catch (error) { errors.push(error); }
     const seat = this.presentation.local.player.seat;
     try { if (seat.presentation === this.presentation) seat.clearPresentation(); else this.presentation.close(); } catch (error) { errors.push(error); }

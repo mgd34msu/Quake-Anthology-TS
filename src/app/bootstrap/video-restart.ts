@@ -52,7 +52,7 @@ export class ApplicationVideoRestart {
       }
       this.request(kind, command.source); return undefined;
     };
-    if (!commands.register("vid_restart", handler, { summary: "Restart the client renderer while retaining the current game.",
+    if (!commands.registerEngine("vid_restart", handler, { summary: "Restart the client renderer while retaining the current game.",
       usage: "vid_restart [cpu|gl]", examples: ["vid_restart", "vid_restart cpu", "vid_restart gl"] }))
       throw new Error("Video restart command belongs to another owner");
     this.unregister = () => { commands.unregister("vid_restart", handler); };

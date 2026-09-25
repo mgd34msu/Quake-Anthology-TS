@@ -89,7 +89,7 @@ export function applyApplicationMods(recipe: ExecutableRecipe, choices: readonly
 }
 
 export async function prepareApplicationMods(catalog: InstalledCatalog, recipe: ExecutableRecipe,
-  forContent: (content: ContentId) => Promise<MountedContent>): Promise<readonly PreparedMod[]> {
+  forContent: (content: ContentId) => Promise<MountedContent>, purpose: "gameplay" | "presentation" = "gameplay"): Promise<readonly PreparedMod[]> {
   const prepared: PreparedMod[] = [], selections = recipe.mods ?? [];
   const dependencies = new Set(selections.map(selection => modSelectionKey(selection.selection)));
   const enabled = new Set([...dependencies, ...(recipe.weaponBehaviors ?? []).map(selection => modSelectionKey({
@@ -113,6 +113,7 @@ export async function prepareApplicationMods(catalog: InstalledCatalog, recipe: 
     const description: ModDescription = { ...current, purpose: "addition", availability: { kind: "available" },
       // Projectile components initialize before the general operation registrations.
       requires: current.requires.filter(dependency => dependencies.has(modSelectionKey(dependency))) };
+    if (purpose === "presentation" && (current.declaration.runtime !== "qvm" || current.declaration.presentation === undefined)) continue;
     switch (current.declaration.runtime) {
       case "quakec": prepared.push(await prepareMountedQuakeCMod({ description,
         declaration: current.declaration, declarationDigest: current.declarationDigest, mounts: mounted })); break;

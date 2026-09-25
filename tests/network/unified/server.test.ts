@@ -23,13 +23,14 @@ function recipe(): ExecutableRecipe {
     ordering: { kind: "native", traversal: "source-slot-order", clock: { kind: "q1-netquake", minimumFrameSeconds: 0.001, maximumFrameSeconds: 0.1, fixedFrameSeconds: null } } };
 }
 
-async function fixture(command: () => void = () => {}) {
+async function fixture(command: () => void = () => {}, componentCommand?: NonNullable<UnifiedApplicationServerHost["componentCommand"]>) {
   const hub = new LoopbackHub(), transport = hub.bind('server'), socket = hub.bind('client');
   const identity = createIdentityOwner('unified-server'), player = { client: identity.client(0, 0), actor: identity.actor(1, 0), sourceEntity: 1 };
   const selected = recipe(), composition = createUnifiedComposition(selected);
   let disconnected = 0;
   const host: UnifiedApplicationServerHost = { recipe: selected, maxClients: 2, mode: 'deathmatch',
     admit: () => ({ kind: 'accepted', player }), carriedPlayer: () => player, disconnect: () => { disconnected++; }, userinfo: () => {}, command,
+    ...(componentCommand === undefined ? {} : { componentCommand }),
     input: (_player, sequence, command, arsenal) => ({ actor: player.actor, source: { kind: 'remote-client', client: player.client }, sequence, command, ...(arsenal === undefined ? {} : { arsenal }) }),
     frame: () => { throw new Error('No frame requested in input boundary test'); }, resources: () => [], presentationEvents: (_player, events) => events, initialPresentation: () => [] };
   const server = new UnifiedServerNetwork({ transport, host, composition, print: () => {} });
@@ -88,5 +89,16 @@ test('NetQuake input bursts apply only the newest command for one server frame',
     const command = commands[0]?.command;
     if (command?.kind !== 'q1-netquake') throw new Error('Expected NetQuake command');
     expect(command.impulse).toBe(9); expect(command.viewAngles.y).toBe(9);
+  } finally { f.server.close(); f.hub.close(); }
+});
+
+
+test('retired component command admission rejects its peer without stopping the authoritative host', async () => {
+  const f = await fixture(undefined, () => false);
+  try {
+    f.channel.queueReliable(encodeUnifiedControl({ kind: 'component-command', epoch: 1, owner: { provider: 'mod:retired', generation: 1 }, generation: 0, args: ['score'] }));
+    for (const bytes of f.channel.flush(10)) f.socket.send(f.transport.address, bytes);
+    expect(await f.server.poll(10)).toEqual([]);
+    expect(f.disconnected()).toBe(1); expect(f.server.phase).toBe('active');
   } finally { f.server.close(); f.hub.close(); }
 });

@@ -1,3 +1,4 @@
+import { sameModIdentity } from "../../contracts/mods.ts";
 import type { PresentationOwner } from "../../contracts/presentation.ts";
 import type { ActiveModClientPresentation, ModClientPresentationAdmission, ModClientPresentationSource } from "./mod-client-presentation.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
@@ -144,16 +145,7 @@ export interface SessionModsOptions {
 function sameModule(left: ModuleIdentity, right: ModuleIdentity): boolean {
   return left.id === right.id && left.artifactPath === right.artifactPath && left.digest === right.digest && left.revision === right.revision;
 }
-function sameIdentity(left: ModIdentity, right: ModIdentity): boolean {
-  return modSelectionKey(left.selection) === modSelectionKey(right.selection)
-    && left.source.provider === right.source.provider && left.source.content === right.source.content
-    && left.declarationDigest === right.declarationDigest && left.modules.length === right.modules.length
-    && left.modules.every((module, index) => { const other = right.modules[index]; return other !== undefined && sameModule(module, other); })
-    && left.providers.length === right.providers.length && left.providers.every((provider, index) => {
-      const other = right.providers[index];
-      return other !== undefined && provider.provider === other.provider && provider.schema === other.schema && provider.version === other.version;
-    });
-}
+
 function retainIdentity(identity: ModIdentity): ModIdentity {
   return Object.freeze({ ...identity, selection: Object.freeze({ ...identity.selection }), source: Object.freeze({ ...identity.source }),
     modules: Object.freeze(identity.modules.map(module => Object.freeze({ ...module }))),
@@ -347,7 +339,7 @@ export class SessionMods implements SessionResource {
     if (saved.version !== 1 || saved.mods.length !== entries.length) throw new Error("Saved mod selection differs from the enabled mods");
     for (const [index, entry] of entries.entries()) {
       const checkpoint = saved.mods[index];
-      if (checkpoint === undefined || !sameIdentity(entry.identity, checkpoint.identity)) throw new Error(`Saved mod order or identity differs: ${modSelectionKey(entry.identity.selection)}`);
+      if (checkpoint === undefined || !sameModIdentity(entry.identity, checkpoint.identity)) throw new Error(`Saved mod order or identity differs: ${modSelectionKey(entry.identity.selection)}`);
       this.validateState(entry, checkpoint.state);
     }
   }
@@ -355,7 +347,7 @@ export class SessionMods implements SessionResource {
     if (travel.version !== 1 || travel.mods.length !== entries.length) throw new Error("Travel mod selection differs from the enabled mods");
     for (const [index, entry] of entries.entries()) {
       const checkpoint = travel.mods[index];
-      if (checkpoint === undefined || !sameIdentity(entry.identity, checkpoint.identity)) throw new Error(`Travel mod order or identity differs: ${modSelectionKey(entry.identity.selection)}`);
+      if (checkpoint === undefined || !sameModIdentity(entry.identity, checkpoint.identity)) throw new Error(`Travel mod order or identity differs: ${modSelectionKey(entry.identity.selection)}`);
       if ((checkpoint.state !== null) !== (entry.prepared.travel === "retain")) throw new Error("Mod travel state differs from its source lifecycle");
       if (checkpoint.state !== null) this.validateState(entry, checkpoint.state);
     }

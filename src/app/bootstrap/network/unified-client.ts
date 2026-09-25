@@ -1,3 +1,4 @@
+import type { PresentationOwner } from "../../../contracts/presentation.ts";
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { SimulationPresentationEvent } from '../simulation/types.ts';
 import type { WireSelection, CompositionIdentity } from '../../../network/common/session.ts';
@@ -69,6 +70,7 @@ export class UnifiedClientNetwork<TAddress extends NetworkAddress> implements Ap
             }else if(control.epoch===this.epoch){
               if(control.kind==='admitted')this.options.host.admitted(control);
               else if(control.kind==='resources'){await this.options.host.declare(control.epoch,control.resources);this.assertCurrent(generation);}
+              else if(control.kind==='components'){await this.options.host.receiveComponents(control.epoch,control.update);this.assertCurrent(generation);}
               else if(control.kind==='events')this.options.host.receiveEvents(control.epoch,control.frame,control.payload,control.simulation);
               else throw new Error('Unexpected unified server control');
             }
@@ -108,6 +110,7 @@ export class UnifiedClientNetwork<TAddress extends NetworkAddress> implements Ap
   }
   command(text:string):void {const parsed=tokenizeCommand(text,'q3');if(parsed===null||parsed.argv.length===0)return;const [name,...args]=parsed.argv;if(name!==undefined)this.playerCommand(name,args);}
   playerCommand(name:string,args:readonly string[]):void{if(this.state!=='active')return;this.sendControl({kind:'command',epoch:this.epoch,name,args});}
+  componentCommand(owner:PresentationOwner,generation:number,args:readonly string[]):void{if(this.state!=='active')throw new Error('Component command requires an active client');this.sendControl({kind:'component-command',epoch:this.epoch,owner,generation,args});}
   userinfo(value:string):void{if(this.epoch!==0)this.sendControl({kind:'userinfo',epoch:this.epoch,value});}
   publish(_output:SimulationOutput,_events:readonly SimulationPresentationEvent[],_now:number):void{throw new Error('Unified client cannot publish authoritative state');}
   close():void{

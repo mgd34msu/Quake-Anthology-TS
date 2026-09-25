@@ -1,3 +1,5 @@
+import { ModUserFiles } from "../../world/session/mod-files.ts";
+import { defaultUserContentRoot } from "../../content/user-data.ts";
 import { UnifiedRemotePresentation, type UnifiedRemoteOptions } from './network/remote-unified.ts';
 import { UnifiedClientNetwork } from './network/unified-client.ts';
 import { existsSync } from 'node:fs';
@@ -71,7 +73,7 @@ interface RemoteSeatSourceCommon {
   readonly hooks: RemoteSeatSourceHooks;
 }
 export type RemoteSeatSourceOptions = RemoteSeatSourceCommon & (
-  { readonly family: 'unified'; readonly unified: Pick<UnifiedRemoteOptions, 'loadContent' | 'model'> }
+  { readonly family: 'unified'; readonly unified: Pick<UnifiedRemoteOptions, 'loadContent' | 'model' | 'publishComponents'> }
   | { readonly family: 'q1' } | { readonly family: 'qw' }
   | { readonly family: 'q2'; readonly protocol: Q2ProtocolIdentity }
   | { readonly family: 'q3'; readonly authorization: Pick<Q3ClientAuthorization, 'request'> }
@@ -99,6 +101,8 @@ export class RemoteSeatSource {
     const qport = owner.qport;
     if (owner.family === 'unified') {
       const remote = new UnifiedRemotePresentation({identity,client:seat.client,seat:seat.id,nextGeneration,...owner.unified,
+        modFiles:new ModUserFiles(hooks.options().userContentRoot??defaultUserContentRoot()),
+        sendComponentCommand:(source,generation,args)=>{if(!(this.network instanceof UnifiedClientNetwork))throw new Error("Component has no unified channel");this.network.componentCommand(source,generation,args);},
         publish:output=>hooks.publish(output),sendCommand:(name,args)=>{if(this.network instanceof UnifiedClientNetwork)this.network.playerCommand(name,args);},
         disconnected:reason=>hooks.disconnected(reason),print:text=>hooks.print(text)});
       this.remote=remote;this.network=new UnifiedClientNetwork({transport,remote:address,host:remote,userinfo:()=>owner.cvars().infoString(CvarFlag.UserInfo)});

@@ -1,7 +1,7 @@
 import type { ComponentPresentationMediaRequest } from "../../contracts/presentation.ts";
 import type { ActiveModPresentation } from "../../world/session/mod-presentations.ts";
 import type { ApplicationAudio, ApplicationAudioSeatEvents } from "./audio.ts";
-import type { SimulationEvents } from "./simulation/events.ts";
+import type { PresentationState } from "./presentation-state.ts";
 import type { SimulationPresentationEvent } from "./simulation/types.ts";
 import type { ApplicationAssets } from "./assets.ts";
 
@@ -12,7 +12,7 @@ export function presentationAudioControl(source: SimulationPresentationEvent): b
 }
 
 /** Apply retained local requests in the same chronology as incoming source controls. */
-export async function preparePresentationAudio(events: SimulationEvents, audio: Pick<ApplicationAudio, "playComponentMedia" | "receive">,
+export async function preparePresentationAudio(events: PresentationState, audio: Pick<ApplicationAudio, "playComponentMedia" | "receive">,
   source: readonly SimulationPresentationEvent[] = [], seats: readonly ApplicationAudioSeatEvents[] = []): Promise<void> {
   const pending = events.pendingLocalMedia().filter(request => request.kind !== "local-media" || request.event.kind !== "shader-remap"), local = new Set(pending);
   const ordered = [...source.filter(presentationAudioControl), ...pending].sort((a, b) => a.sequence - b.sequence);
@@ -35,9 +35,9 @@ export async function preparePresentationAudio(events: SimulationEvents, audio: 
   for (const batch of seats) await audio.receive(batch.events.filter(presentationAudioControl), { kind: "seat", seat: batch.seat }, batch.music);
 }
 
-const shaderDeliveries = new WeakMap<SimulationEvents, Promise<void>>();
+const shaderDeliveries = new WeakMap<PresentationState, Promise<void>>();
 
-export async function preparePresentationShaders(events: SimulationEvents, assets: Pick<ApplicationAssets, "provider" | "world">): Promise<void> {
+export async function preparePresentationShaders(events: PresentationState, assets: Pick<ApplicationAssets, "provider" | "world">): Promise<void> {
   for (;;) { const pending = shaderDeliveries.get(events); if (pending === undefined) break; await pending; }
   const delivery = drainPresentationShaders(events, assets);
   shaderDeliveries.set(events, delivery);
@@ -45,7 +45,7 @@ export async function preparePresentationShaders(events: SimulationEvents, asset
   finally { if (shaderDeliveries.get(events) === delivery) shaderDeliveries.delete(events); }
 }
 
-async function drainPresentationShaders(events: SimulationEvents, assets: Pick<ApplicationAssets, "provider" | "world">): Promise<void> {
+async function drainPresentationShaders(events: PresentationState, assets: Pick<ApplicationAssets, "provider" | "world">): Promise<void> {
   for (;;) {
     const pending = events.pendingLocalMedia().find(request => request.kind === "local-media" && request.event.kind === "shader-remap");
     if (pending === undefined) return;
@@ -64,7 +64,7 @@ async function drainPresentationShaders(events: SimulationEvents, assets: Pick<A
   }
 }
 
-export function primaryShaderControl(events: SimulationEvents, assets: ApplicationAssets, sourceCurrent: () => boolean) {
+export function primaryShaderControl(events: PresentationState, assets: ApplicationAssets, sourceCurrent: () => boolean) {
   events.enableLocalMedia();
   return async (original: string, replacement: string, offset: string, initializing: boolean, consumerCurrent: () => boolean): Promise<void> => {
     const current = (): boolean => sourceCurrent() && consumerCurrent();
@@ -76,7 +76,7 @@ export function primaryShaderControl(events: SimulationEvents, assets: Applicati
   };
 }
 
-export function componentMediaControl(events: SimulationEvents, audio: ApplicationAudio, assets: ApplicationAssets) {
+export function componentMediaControl(events: PresentationState, audio: ApplicationAudio, assets: ApplicationAssets) {
   events.enableLocalMedia();
   return async (source: ActiveModPresentation, request: ComponentPresentationMediaRequest, initializing: boolean, current: () => boolean): Promise<void> => {
     if (!current()) throw new Error("Component media consumer is retired");

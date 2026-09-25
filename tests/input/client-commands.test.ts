@@ -166,9 +166,12 @@ test("component command claims preserve primary precedence and reject ambiguous 
   first.register("scores");second.register("scores");primary.register("scores");f.bindings.activate();
   f.send(0,"scores");expect(f.calls).toEqual(["0:scores"]);expect(received).toEqual([]);
   const context:CommandContext={...source,producer:{kind:"client-module",module:{id:"mod:first",artifactPath:"vm/cgame.qvm",digest:"sha256:abc",revision:"fixture"},instance:firstInstance}};
+  const variables=new CvarRegistry({dialect:"q3",context});
+  const release=f.commands.bindProducer(firstInstance,{cvars:()=>variables,readScript:async()=>undefined,
+    engineCommand:()=>false,command:command=>{f.bindings.dispatch(command);}});
   f.commands.append("scores\n",context);f.commands.execute();expect(received).toEqual(["first:scores"]);
   primary.close();expect(()=>f.send(0,"scores")).toThrow("Ambiguous component client command scores");
   second.close();f.send(0,"scores");expect(received.at(-1)).toBe("first:scores");
-  f.commands.append("scores\n",context);f.commands.discardProducer(firstInstance);first.close();f.commands.execute();
+  f.commands.append("scores\n",context);release();first.close();f.commands.execute();
   expect(received).toHaveLength(2);expect(f.commands.exists("scores")).toBe(false);
 });

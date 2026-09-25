@@ -33,6 +33,7 @@ export interface QvmSceneContext {
 }
 
 export interface QvmPresentationContext {
+  readonly clientNumber?: number;
   readonly gameState: SourceGameStateRecord;
   readonly gameStateRevision: number;
   readonly frameTimeMilliseconds: number;
@@ -360,7 +361,7 @@ export class QvmModPresentation {
       case "snapshot":
         if (declaration.runtime !== "qvm-player-events") throw new Error("Scene snapshots are supplied by original engine traps");
         return declaration.storage.snapshot.address;
-      case "client-number": return context.snapshot.playerState.clientNumber;
+      case "client-number": return context.clientNumber ?? context.snapshot.playerState.clientNumber;
       case "time": return context.timeMilliseconds ?? context.snapshot.serverTime;
       default: {
         if (event === undefined || declaration.runtime !== "qvm-player-events") throw new Error("Original call requires a source player event");

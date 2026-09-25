@@ -1,4 +1,4 @@
-import type { ModSessionCheckpoint, ResolvedGameplayMod } from "../contracts/mods.ts";
+import type { ModIdentity, ModSessionCheckpoint, ResolvedGameplayMod } from "../contracts/mods.ts";
 import { modSelectionKey, readModSelection } from "../contracts/mods.ts";
 import { readGameplayModDeclaration } from "../content/mods/declaration.ts";
 import { readGuest, readModule } from "./execution.ts";
@@ -28,8 +28,15 @@ export function readModSession(reader: SaveReader): ModSessionCheckpoint {
     if (identities.has(key)) return selection.fail("duplicate saved mod selection");
     identities.add(key);
     const provider = (value: SaveReader) => ({ provider: namespaced(value.field("provider")), schema: namespaced(value.field("schema")), version: value.field("version").integer(0) });
-    return { identity: { selection: selected, source: readProvider(identity.field("source")), declarationDigest: readDigest(identity.field("declarationDigest")),
-      modules: identity.field("modules").list(readModule), providers: identity.field("providers").list(provider) },
+    return { identity: readModIdentity(identity),
       state: { guests: state.field("guests").list(readGuest), providers: state.field("providers").list(value => ({ ...provider(value), bytes: value.field("bytes").bytes() })) } };
   }) };
+}
+
+export function readModIdentity(reader: SaveReader): ModIdentity {
+  const selection = reader.field("selection"), selected = { product: selection.field("product").string(), id: selection.field("id").string() };
+  try { modSelectionKey(selected); } catch { return selection.fail("invalid mod selection"); }
+  return { selection: selected, source: readProvider(reader.field("source")), declarationDigest: readDigest(reader.field("declarationDigest")),
+    modules: reader.field("modules").list(readModule), providers: reader.field("providers").list(value => ({
+      provider: namespaced(value.field("provider")), schema: namespaced(value.field("schema")), version: value.field("version").integer(0) })) };
 }

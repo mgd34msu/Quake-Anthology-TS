@@ -11,7 +11,7 @@ export function registerDiagnosticTools(services: DiagnosticToolServices): () =>
   const add = (name: string, run: (args: readonly string[]) => void): void => {
     if (services.commands.exists(name)) throw new Error(`Diagnostic command already registered: ${name}`);
     const handler: Parameters<CommandBuffer["register"]>[1] = invocation => { run(invocation.args); return undefined; };
-    services.commands.register(name, handler, { summary: "Inspect application profiler timings.", usage: name === "timers" ? "timers [on|off|reset|report|stamps]" : "timerstamp <label>", examples: [] }); handlers.set(name, handler);
+    services.commands.registerEngine(name, handler, { summary: "Inspect application profiler timings.", usage: name === "timers" ? "timers [on|off|reset|report|stamps]" : "timerstamp <label>", examples: [] }); handlers.set(name, handler);
   };
   add("timers", args => {
     const action = args[0] ?? "report";
@@ -47,7 +47,7 @@ export function registerRuntimeDiagnostics(services: RuntimeDiagnosticServices):
   const add = (name: string, summary: string, usage: string, run: (args: readonly string[]) => void): void => {
     if (services.commands.exists(name)) throw new Error(`Diagnostic command already registered: ${name}`);
     const handler: Parameters<CommandBuffer["register"]>[1] = invocation => { run(invocation.args); return undefined; };
-    services.commands.register(name, handler, { summary, usage, examples: [] }); handlers.set(name, handler);
+    services.commands.registerEngine(name, handler, { summary, usage, examples: [] }); handlers.set(name, handler);
   };
   add("meminfo", "Report the actual host process memory in bytes.", "meminfo", () => {
     const memory = process.memoryUsage();

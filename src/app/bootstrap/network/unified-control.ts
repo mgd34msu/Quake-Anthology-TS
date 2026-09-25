@@ -1,3 +1,5 @@
+import { readComponentOwner, readComponentUpdate, writeComponentUpdate, type UnifiedComponentUpdate } from "./unified-components.ts";
+import type { PresentationOwner } from "../../../contracts/presentation.ts";
 import type { ContentDigest } from '../../../contracts/content.ts';
 import type { ArsenalIntent } from '../../../contracts/gameplay.ts';
 import type { IntegerTriple, UserCommand } from '../../../contracts/protocol.ts';
@@ -15,6 +17,8 @@ export type UnifiedControl =
   | { readonly kind: 'admitted'; readonly epoch: number; readonly client: UnifiedActorReference; readonly actor: UnifiedActorReference; readonly sourceEntity: number }
   | { readonly kind: 'resources'; readonly epoch: number; readonly resources: readonly UnifiedResourceKey[] }
   | { readonly kind: 'events'; readonly epoch: number; readonly frame: number; readonly payload: Uint8Array; readonly simulation: Uint8Array }
+  | { readonly kind: 'components'; readonly epoch: number; readonly update: UnifiedComponentUpdate }
+  | { readonly kind: 'component-command'; readonly epoch: number; readonly owner: PresentationOwner; readonly generation: number; readonly args: readonly string[] }
   | { readonly kind: 'command'; readonly epoch: number; readonly name: string; readonly args: readonly string[] }
   | { readonly kind: 'userinfo'; readonly epoch: number; readonly value: string }
   | { readonly kind: 'disconnect'; readonly reason: string };
@@ -83,11 +87,11 @@ function reader(bytes: Uint8Array, schema: string, maximum: number): SaveReader 
 }
 
 export function encodeUnifiedControl(value: UnifiedControl): Uint8Array {
-  return encodeCheckpointValue({ schema: 'qts-control', version: 1, value });
+  return encodeCheckpointValue({ schema: 'qts-control', version: 1, value: value.kind === 'components' ? { ...value, update: writeComponentUpdate(value.update) } : value });
 }
 export function decodeUnifiedControl(bytes: Uint8Array): UnifiedControl {
   const r = reader(bytes, 'qts-control', 4 * 1024 * 1024);
-  const kind = r.field('kind').choice('offer', 'ready', 'admitted', 'resources', 'events', 'command', 'userinfo', 'disconnect');
+  const kind = r.field('kind').choice('offer', 'ready', 'admitted', 'resources', 'events', 'components', 'component-command', 'command', 'userinfo', 'disconnect');
   if (kind === 'disconnect') return { kind, reason: string(r.field('reason'), 1024) };
   const epoch = bounded(r.field('epoch'), 1, 4294967295);
   switch (kind) {
@@ -96,6 +100,12 @@ export function decodeUnifiedControl(bytes: Uint8Array): UnifiedControl {
     case 'admitted': return { kind, epoch, client: actor(r.field('client')), actor: actor(r.field('actor')), sourceEntity: r.field('sourceEntity').integer(0) };
     case 'resources': { const resources = r.field('resources').list(key); if (resources.length > 32768) return r.fail('too many resource declarations'); return { kind, epoch, resources }; }
     case 'events': return { kind, epoch, frame: r.field('frame').integer(0), payload: r.field('payload').bytes(), simulation: r.field('simulation').bytes() };
+    case 'components': return { kind, epoch, update: readComponentUpdate(r.field('update')) };
+    case 'component-command': {
+      const args = r.field('args').list(v => string(v));
+      if (args.length < 1 || args.length > 128) return r.fail('invalid component command');
+      return { kind, epoch, owner: readComponentOwner(r.field('owner')), generation: bounded(r.field('generation'), 0, Number.MAX_SAFE_INTEGER), args };
+    }
     case 'command': {
       const name = string(r.field('name'), 128), args = r.field('args').list(v => string(v));
       if (!/^[a-zA-Z_+][a-zA-Z0-9_+-]*$/.test(name) || args.length > 128) return r.fail('invalid command');

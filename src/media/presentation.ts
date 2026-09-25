@@ -1,3 +1,4 @@
+import { SaveReader } from "../persistence/value.ts";
 import { BinaryReader } from "../core/binary/index.ts";
 import type { SeatId } from "../contracts/identity.ts";
 import type { ImageResourceOperation, Rect, RenderCommand, RendererImage } from "../contracts/render.ts";
@@ -149,6 +150,10 @@ export class FullscreenCinematic {
     return { seat: this.seat, viewport, blank: !visible, commands, complete: () => { upload?.complete(); return undefined; } };
   }
 
+  captureCheckpoint() { return { focusPaused: this.focusPaused }; }
+  restoreCheckpoint(value: unknown): void {
+    this.focusPaused = new SaveReader(value, "fullscreen-cinematic").field("focusPaused").boolean();
+  }
   close(): ImageResourceOperation | null { const release = this.image.release(); this.playback.close(); return release; }
 }
 

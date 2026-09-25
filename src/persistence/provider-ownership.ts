@@ -9,6 +9,7 @@ export function saveProviderContract(schema: ProviderCheckpoint["schema"], sourc
     case "world:source-slots": return { provider: "world:actors", schema, version: 1 };
     case "world:source-items": case "world:primary-protection": return { provider: "world:gameplay", schema, version: 1 };
     case "session:campaign-unit": return CAMPAIGN_UNIT_CHECKPOINT;
+    case "app:component-clients": return { provider: "app:component-clients", schema, version: 1 };
     default:
       if (schema.startsWith("session:")) throw new Error(`Unsupported session checkpoint ${schema}`);
       return { provider: source, schema, version: schema === "world:simulation" ? 11 : 1 };

@@ -76,3 +76,14 @@ export function readModSelection(value: string): ModSelection {
   if (slash < 1 || modSelectionKey(selection) !== value) throw new Error("Mod selection must be PRODUCT/COMPONENT_ID");
   return selection;
 }
+
+export function sameModIdentity(left: ModIdentity, right: ModIdentity): boolean {
+  return modSelectionKey(left.selection) === modSelectionKey(right.selection)
+    && left.source.provider === right.source.provider && left.source.content === right.source.content
+    && left.declarationDigest === right.declarationDigest && left.modules.length === right.modules.length
+    && left.modules.every((module, index) => { const other = right.modules[index]; return other !== undefined && module.id === other.id && module.artifactPath === other.artifactPath && module.digest === other.digest && module.revision === other.revision; })
+    && left.providers.length === right.providers.length && left.providers.every((provider, index) => {
+      const other = right.providers[index];
+      return other !== undefined && provider.provider === other.provider && provider.schema === other.schema && provider.version === other.version;
+    });
+}

@@ -1,5 +1,5 @@
 import { presentationOwnerKey, samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
-import type { LocalPresentationMedia } from "./simulation/events.ts";
+import type { LocalPresentationMedia } from "./presentation-state.ts";
 import { mountedMusicTracks } from "./audio/playlist.ts";
 import { readMusicSettings, type MusicPreferences } from "./audio/playlist-settings.ts";
 import { geometryTransmission } from "../../audio/geometry.ts";

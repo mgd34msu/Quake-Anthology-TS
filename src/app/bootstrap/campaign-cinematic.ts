@@ -1,3 +1,7 @@
+import { RawAudioStream } from "../../audio/streams.ts";
+import { isDeepStrictEqual } from "node:util";
+import { SaveReader } from "../../persistence/value.ts";
+import { readResource } from "../../persistence/recipe.ts";
 import type { SeatId } from "../../contracts/identity.ts";
 import type { Rect, RenderCommand } from "../../contracts/render.ts";
 import type { SeatInputEvent } from "../../contracts/ui.ts";
@@ -29,9 +33,21 @@ export class CampaignCinematic {
   private state: "prepared" | "active" | "closed" = "prepared";
   private constructor(private readonly movie: FullscreenCinematic, private readonly renderer: CinematicRenderer,
     private readonly assets: Pick<ApplicationAssets, "images">, private readonly audio: CinematicOutput, private readonly clock: { milliseconds: number },
-    private readonly captions: ScreenCinematicCaptions | null, private readonly current: () => boolean, private readonly startAudio: () => void) {}
+    private readonly captions: ScreenCinematicCaptions | null, private readonly current: () => boolean, private readonly startAudio: () => void,
+    private readonly captureOwned: () => unknown) {}
   static async prepare(request: ScreenCinematicRequest, content: { readonly mounts: Pick<MountedContent, "open"> }, assets: Pick<ApplicationAssets, "images">,
     audio: CinematicOutput, renderer: CinematicRenderer, seat: SeatId, current: () => boolean, captions: ScreenCinematicCaptions | null = null): Promise<CampaignCinematic> {
+    return CampaignCinematic.prepareOwned(request, content, assets, audio, renderer, seat, current, captions);
+  }
+  static async restore(value: unknown, content: { readonly mounts: Pick<MountedContent, "open"> }, assets: Pick<ApplicationAssets, "images">,
+    audio: CinematicOutput, renderer: CinematicRenderer, seat: SeatId, current: () => boolean, captions: ScreenCinematicCaptions | null = null): Promise<CampaignCinematic> {
+    const r = new SaveReader(value, "campaign-cinematic"); r.field("version").literal(1);
+    const saved = r.field("request");
+    const request = { name: saved.field("name").string(), loop: saved.field("loop").boolean(), hold: saved.field("hold").boolean(), silent: saved.field("silent").boolean() };
+    return CampaignCinematic.prepareOwned(request, content, assets, audio, renderer, seat, current, captions, r);
+  }
+  private static async prepareOwned(request: ScreenCinematicRequest, content: { readonly mounts: Pick<MountedContent, "open"> }, assets: Pick<ApplicationAssets, "images">,
+    audio: CinematicOutput, renderer: CinematicRenderer, seat: SeatId, current: () => boolean, captions: ScreenCinematicCaptions | null, saved?: SaveReader): Promise<CampaignCinematic> {
     const assertCurrent = (): void => { if (!current()) throw new Error("Cinematic preparation belongs to a retired request"); };
     assertCurrent();
     const selected = /\.[^/]+$/.test(request.name) ? request.name : `${request.name}.roq`;
@@ -40,28 +56,52 @@ export class CampaignCinematic {
     let resource = await content.mounts.open(path); assertCurrent();
     if (resource === null && /\.cin$/i.test(path)) { path = path.replace(/\.cin$/i, ".ogv"); resource = await content.mounts.open(path); assertCurrent(); }
     if (resource === null) throw new Error(`Missing campaign cinematic: ${path}`);
+    if (saved !== undefined && !isDeepStrictEqual(readResource(saved.field("resource")), resource.reference))
+      saved.fail("cinematic resource changed");
     const extension = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
     if (extension !== "cin" && extension !== "roq" && extension !== "ogv" && extension !== "pcx") throw new Error(`Unsupported cinematic format: ${extension}`);
     const source = extension === "pcx" ? cinematicPcx(resource.bytes, path) : cinematicBytes(extension, resource.bytes, path);
     const dimensions = cinematicDimensions(source), lane = `campaign-cinematic:${++nextCinematic}`, stream = cinematicAudio(audio.engine, lane);
-    const clock = { milliseconds: 0 }, initialAudio: CinematicAudio[] = [];
+    const clock = { milliseconds: saved?.field("clock").finite() ?? 0 };
+    const initialAudio: CinematicAudio[] = saved === undefined ? [] : [...saved.field("initialAudio").list(readAudio)];
+    const audioStarted = saved?.field("audioStarted").boolean() ?? false;
+    const pendingPcm: unknown = saved === undefined ? null : saved.field("pcm").value;
+    if (pendingPcm !== null) RawAudioStream.restoreCheckpoint(pendingPcm, new SaveReader(pendingPcm, "campaign-cinematic.pcm").field("outputRate").integer(1));
+    if (clock.milliseconds < 0) throw new Error("Negative cinematic clock");
+    const restoreStream = audio.engine.restoreStreamCheckpoint;
+    if (saved !== undefined && restoreStream === undefined) throw new Error("Cinematic mixer cannot restore its owned PCM lane");
     let ready = false;
     const playback = new CinematicPlayback(source, { target: { kind: "seat", seat }, clock: { sample: () => clock.milliseconds },
       loop: request.loop, hold: request.hold, silent: request.silent,
       onAudio: block => { if (ready) stream.onAudio(block, { kind: "material", id: lane }); else initialAudio.push(block); },
       onAudioReset: target => { if (ready) stream.onAudioReset(target); },
-      onAudioPause: (paused, target) => { if (ready) stream.onAudioPause(paused, target); }, onComplete: () => undefined });
+      onAudioPause: (paused, target) => { if (ready) stream.onAudioPause(paused, target); }, onComplete: () => undefined }, saved?.field("playback").value);
     try {
       await captions?.prepare(path); assertCurrent();
       const image = assets.images.allocate(dimensions.width, dimensions.height, { kind: "resource", resource: resource.reference });
       const movie = new FullscreenCinematic(playback, image, (width, height, origin) => assets.images.allocate(width, height, origin));
+      if (saved !== undefined) movie.restoreCheckpoint(saved.field("fullscreen").value);
       return new CampaignCinematic(movie, renderer, assets, audio, clock, captions, current, () => {
-        audio.engine.stopAll(); ready = true;
+        if (!audioStarted) audio.engine.stopAll();
+        if (saved !== undefined) restoreStream?.call(audio.engine, { id: lane, gain: 1, audience: { kind: "world" } }, pendingPcm);
+        ready = true;
         for (const block of initialAudio) stream.onAudio(block, { kind: "material", id: lane });
         initialAudio.length = 0;
         if (playback.status === "paused") stream.onAudioPause(true, playback.target);
+      }, () => {
+        const capture = audio.engine.captureStreamCheckpoint;
+        if (capture === undefined) throw new Error("Cinematic mixer cannot checkpoint its owned PCM lane");
+        return { version: 1, request: { ...request }, resource: resource.reference, clock: clock.milliseconds,
+          audioStarted: ready || audioStarted,
+          playback: playback.captureCheckpoint(), fullscreen: movie.captureCheckpoint(),
+          initialAudio: initialAudio.map(block => ({ ...block, signed: block.samples instanceof Int16Array, samples: Array.from(block.samples) })),
+          pcm: ready ? capture.call(audio.engine, lane) : pendingPcm };
       });
     } catch (error) { playback.close(); throw error; }
+  }
+  captureCheckpoint(): unknown {
+    if (this.state === "closed" || !this.current()) throw new Error("Cinematic checkpoint belongs to a retired request");
+    return this.captureOwned();
   }
   activate(): void {
     if (this.state === "closed" || !this.current()) throw new Error("Cinematic activation belongs to a retired request");
@@ -101,4 +141,17 @@ export class CampaignCinematic {
     const operation = this.movie.close();
     if (operation !== null) this.renderer.execute({ owner: this.assets.images.owner, sequence, commands: [{ kind: "image-resource", operation }] });
   }
+}
+
+function readAudio(r: SaveReader): CinematicAudio {
+  const signed = r.field("signed").boolean(), channels = r.field("channels").choice(1, 2);
+  const samples = r.field("samples").list(sample => {
+    const value = sample.integer(signed ? -32768 : 0);
+    if (value > (signed ? 32767 : 255)) return sample.fail("PCM sample outside source width");
+    return value;
+  });
+  if (samples.length % channels !== 0) r.fail("PCM samples are not complete frames");
+  return { samples: signed ? Int16Array.from(samples) : Uint8Array.from(samples), channels,
+    sampleRate: r.field("sampleRate").integer(1), sourceSample: r.field("sourceSample").integer(0),
+    sourceTime: r.field("sourceTime").finite(), time: r.field("time").finite(), loop: r.field("loop").integer(0), resetStream: r.field("resetStream").boolean() };
 }

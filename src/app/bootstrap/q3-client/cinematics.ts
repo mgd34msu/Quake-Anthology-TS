@@ -19,8 +19,17 @@ import type { ScreenCinematicRequest } from "../campaign-cinematic.ts";
 import type { CinematicStatus } from "../../../media/types.ts";
 import { cinematicPcx } from "../../../media/still.ts";
 
-export interface SystemCinematicHandle { readonly status: CinematicStatus; skip(): void; stop(): void; }
-export interface SystemCinematicHost { open(request: ScreenCinematicRequest, current: () => boolean): Promise<SystemCinematicHandle>; }
+export interface SystemCinematicHandle {
+  readonly status: CinematicStatus;
+  skip(): void;
+  stop(): void;
+  captureCheckpoint?(): unknown;
+  publishRestored?(): void;
+}
+export interface SystemCinematicHost {
+  open(request: ScreenCinematicRequest, current: () => boolean): Promise<SystemCinematicHandle>;
+  restore?(value: unknown, current: () => boolean): Promise<SystemCinematicHandle>;
+}
 let nextConsumer = 0;
 
 interface Q3CinematicMode {
@@ -106,10 +115,14 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
   }
   captureCheckpoint() {
     if (this.closed || this.restoring || this.pendingLoads !== 0 || this.pendingSystems.size !== 0) throw new Error("Cinematic checkpoint requires an idle live owner");
-    if (this.systems.size !== 0) throw new Error("System cinematic checkpoint requires its attached client transition checkpoint");
+
     const capture = this.audio.engine.captureStreamCheckpoint;
     if (capture === undefined && this.movies.size !== 0) throw new Error("Cinematic mixer cannot checkpoint its owned PCM lanes");
-    return { version: 1, sources: [...this.sources].map(([path, source]) => ({ path, resource: source.resource })),
+    const systems = [...this.systems].map(([index, system]) => {
+      if (system.captureCheckpoint === undefined) throw new Error("System cinematic checkpoint requires its attached client transition checkpoint");
+      return { index, checkpoint: system.captureCheckpoint() };
+    });
+    return { version: 1, systems, sources: [...this.sources].map(([path, source]) => ({ path, resource: source.resource })),
       movies: [...this.movies].map(([index, movie]) => {
         if (capture === undefined) throw new Error("Cinematic mixer cannot checkpoint its owned PCM lanes");
         return { index, asset: movie.asset.path, mode: { ...movie.mode, rect: { ...movie.rect } },
@@ -132,6 +145,13 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
         rect: { x: rect.field("x").finite(), y: rect.field("y").finite(), width: rect.field("width").finite(), height: rect.field("height").finite() } },
         playback: m.field("playback").value, pcm: m.field("pcm").value };
     });
+    const systems = r.field("systems").value === undefined ? [] : r.field("systems").list(s => {
+      const index = s.field("index").integer(0);
+      if (index >= 16 || slots.has(index)) s.fail("duplicate or invalid system cinematic slot"); slots.add(index);
+      return { index, checkpoint: s.field("checkpoint").value };
+    });
+    const restoreSystem = this.system?.restore;
+    if (systems.length !== 0 && restoreSystem === undefined) throw new Error("System cinematic restore requires its attached client transition checkpoint");
     const restore = this.audio.engine.restoreStreamCheckpoint;
     if (restore === undefined && movies.length !== 0) throw new Error("Cinematic mixer cannot restore its owned PCM lanes");
     this.restoring = true;
@@ -141,15 +161,34 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
         if (this.sources.get(source.path)?.resource.id !== source.resource.id) r.fail(`cinematic resource changed: ${source.path}`);
       }
       if (this.closed) throw new Error("Cinematic restore completed after close");
+      for (const system of systems) {
+        if (restoreSystem === undefined) throw new Error("System cinematic restore requires its attached client transition checkpoint");
+        await this.createSystem(system.index, current => restoreSystem.call(this.system, system.checkpoint, current));
+        if (this.systems.get(system.index)?.publishRestored === undefined) throw new Error("Restored system cinematic has no publication owner");
+      }
       for (const movie of movies) {
         this.createMovie(movie.index, { path: movie.asset }, movie.mode, movie.playback);
         if (restore === undefined) throw new Error("Cinematic mixer cannot restore its owned PCM lanes");
         restore.call(this.audio.engine, { id: `${this.namespace}:${movie.index}`, gain: 1, audience: { kind: "seat", seat: this.seat } }, movie.pcm);
       }
     } catch (error) {
-      for (const index of this.movies.keys()) this.stop(index);
+      for (const index of [...this.movies.keys(), ...this.systems.keys()]) this.stop(index);
       this.sources.clear(); throw error;
     } finally { this.restoring = false; }
+  }
+  private async createSystem(index: number, open: (current: () => boolean) => Promise<SystemCinematicHandle>): Promise<void> {
+    const token = {}; this.pendingSystems.set(index, token);
+    let installed: SystemCinematicHandle | null = null;
+    const current = (): boolean => !this.closed && (this.pendingSystems.get(index) === token || installed !== null && this.systems.get(index) === installed);
+    try {
+      const movie = await open(current);
+      if (!current()) { movie.stop(); throw new Error("System cinematic loaded after close"); }
+      installed = movie; this.systems.set(index, movie);
+    } finally { if (this.pendingSystems.get(index) === token) this.pendingSystems.delete(index); }
+  }
+  publishRestored(): void {
+    if (this.closed || this.restoring) throw new Error("Cinematic owner cannot publish before restore completes");
+    for (const system of this.systems.values()) system.publishRestored?.();
   }
   async playGuest(path: string, rect: Rect, bits: number): Promise<number> {
     if (this.restoring) throw new Error("Cinematic restore has not completed");
@@ -158,14 +197,9 @@ export class ApplicationQ3Cinematics implements EngineUiCinematics {
       if (this.system === undefined) throw new Error("System cinematic requires an attached client transition owner");
       let index = 0; while (this.movies.has(index) || this.systems.has(index) || this.pendingSystems.has(index)) index++;
       if (index >= 16) throw new Error("CIN_HandleForVideo: none free");
-      const token = {}; this.pendingSystems.set(index, token);
-      let installed: SystemCinematicHandle | null = null;
-      const current = (): boolean => !this.closed && (this.pendingSystems.get(index) === token || installed !== null && this.systems.get(index) === installed);
-      try {
-        const movie = await this.system.open({ name: path, loop: (bits & 2) !== 0, hold: (bits & 4) !== 0, silent: (bits & 8) !== 0 }, current);
-        if (!current()) { movie.stop(); throw new Error("System cinematic loaded after close"); }
-        installed = movie; this.systems.set(index, movie); return index;
-      } finally { if (this.pendingSystems.get(index) === token) this.pendingSystems.delete(index); }
+      const host = this.system;
+      await this.createSystem(index, current => host.open({ name: path, loop: (bits & 2) !== 0, hold: (bits & 4) !== 0, silent: (bits & 8) !== 0 }, current));
+      return index;
     }
     let asset: UiCinematicAsset;
     try { asset = await this.prepare(path); }

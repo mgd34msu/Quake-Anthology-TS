@@ -45,7 +45,7 @@ export function consoleEntryHelp(entry: ConsoleDiscoveryEntry): readonly string[
 }
 export function registerDiscoveryCommands(commands: CommandBuffer, print: (text: string) => void): () => void {
   const names: string[] = [];
-  if (commands.register("find", invocation => {
+  if (commands.registerEngine("find", invocation => {
     const query = invocation.argv[1], pageText = invocation.argv[2] ?? "1", page = Number(pageText);
     if (query === undefined || invocation.argv.length > 3 || !/^[1-9][0-9]*$/.test(pageText) || !Number.isSafeInteger(page)) { print("Usage: find <text> [page]\nExample: find mouse\n"); return; }
     const entries = findConsoleEntries(commands, query, invocation.source), pages = Math.max(1, Math.ceil(entries.length / 30));
@@ -54,7 +54,7 @@ export function registerDiscoveryCommands(commands: CommandBuffer, print: (text:
     print(`${entries.length} match(es), page ${page}/${pages}. Use help <name> for details.\n`);
     if (page < pages) print(`Next page: find ${JSON.stringify(query)} ${page + 1}\n`);
   }, { summary: "Search command and setting names and descriptions.", usage: "find <text> [page]", examples: ["find r_", "find mouse"] })) names.push("find");
-  if (commands.register("help", invocation => {
+  if (commands.registerEngine("help", invocation => {
     const name = invocation.argv[1];
     if (name === undefined || invocation.argv.length !== 2) { print("Usage: help <name>\nUse find <text> to search commands and settings.\n"); return; }
     const entries = queryConsoleEntries(commands, invocation.source);

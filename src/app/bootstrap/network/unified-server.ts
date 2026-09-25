@@ -1,3 +1,4 @@
+import { UnifiedComponentPublisher } from "./unified-component-publication.ts";
 import { randomBytes } from 'node:crypto';
 import type { ActorCommand, SimulationOutput } from '../../../contracts/session.ts';
 import type { ClientId } from '../../../contracts/identity.ts';
@@ -38,6 +39,7 @@ interface Peer<TAddress> {
   lastConsumedInput: number;
   lastSubmittedInput: number;
   requiredReliable: number;
+  components: UnifiedComponentPublisher;
   closing: number | null;
 }
 export interface UnifiedServerOptions<TAddress extends NetworkAddress> {
@@ -70,6 +72,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
     return sequence;
   }
   private offer(peer: Peer<TAddress>): void {
+    peer.components = new UnifiedComponentPublisher();
     peer.ready = false; peer.resources.clear(); peer.lastQueuedInput = -1; peer.lastConsumedInput = -1; peer.lastSubmittedInput = -1;
     this.queue(peer, { kind: 'offer', epoch: this.epoch, composition: this.composition, mode: this.host.mode, maxClients: this.host.maxClients });
   }
@@ -116,7 +119,12 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
     }
     if (peer.player === null || !peer.ready) throw new Error('Client command arrived before world admission');
     const player = peer.player;
-    if (control.kind === 'command') hostCall(() => this.host.command(player, control.name, control.args));
+    if (control.kind === 'component-command') {
+      const receive = this.host.componentCommand;
+      if (receive === undefined) throw new Error('No component command receiver');
+      if (!hostCall(() => receive(player, control.owner, control.generation, control.args))) throw new Error("Component command source or recipient is not admitted");
+    }
+    else if (control.kind === 'command') hostCall(() => this.host.command(player, control.name, control.args));
     else if (control.kind === 'userinfo') hostCall(() => this.host.userinfo(player, control.value));
     else throw new Error('Client sent a server-only control message');
   }
@@ -169,7 +177,7 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
         if (pending === undefined || pending.token !== handshake.token || pending.nonce !== handshake.nonce || this.peers.size >= this.host.maxClients + 8) continue;
         this.pending.delete(key);
         const peer: Peer<TAddress> = { address: event.from, token: pending.token, nonce: pending.nonce,
-          channel: new UnifiedChannel(pending.token, { datagramBytes: Math.min(1200, this.options.transport.maxDatagramBytes ?? 1200) }), resources: new Set(), player: null, ready: false, lastReceived: now, lastQueuedInput: -1, lastConsumedInput: -1, lastSubmittedInput: -1, requiredReliable: 0, closing: null };
+          channel: new UnifiedChannel(pending.token, { datagramBytes: Math.min(1200, this.options.transport.maxDatagramBytes ?? 1200) }), resources: new Set(), player: null, ready: false, lastReceived: now, lastQueuedInput: -1, lastConsumedInput: -1, lastSubmittedInput: -1, requiredReliable: 0, components: new UnifiedComponentPublisher(), closing: null };
         this.peers.set(peer.token, peer); this.offer(peer);
       }
     }
@@ -225,7 +233,9 @@ export class UnifiedServerNetwork<TAddress extends NetworkAddress> implements Ap
         const frame = hostCall(() => this.host.frame(player, output, this.epoch, peer.lastConsumedInput));
         if (presentation.length > 0 || frame.output.events.length > 0) this.queue(peer, { kind: 'events', epoch: this.epoch, frame: output.snapshot.frame.frame,
           payload: encodeUnifiedPresentationEvents(presentation), simulation: encodeCheckpointValue(frame.output.events.map(writeUnifiedSimulationEvent)) });
-        peer.channel.queueFrame(encodeUnifiedFrame({ ...frame, output: { snapshot: frame.output.snapshot, events: [] } }), peer.requiredReliable);
+        const components = peer.components.project(hostCall(() => this.host.components?.(player) ?? []));
+        if (components.update !== null) this.queue(peer, { kind: 'components', epoch: this.epoch, update: components.update });
+        peer.channel.queueFrame(encodeUnifiedFrame({ ...frame, components: components.frame, output: { snapshot: frame.output.snapshot, events: [] } }), peer.requiredReliable);
         this.flush(peer, now);
       } catch (error) { if (error instanceof UnifiedHostFailure) throw error.cause; this.drop(peer, error instanceof Error ? error.message : String(error), now); }
     }

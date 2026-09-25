@@ -287,8 +287,8 @@ export async function openApplicationConfigurationContent(catalog: InstalledCata
 export class LoadedApplicationContent {
   private modOwners: readonly import("../../world/session/mods.ts").PreparedMod[] = [];
   get preparedMods(): readonly import("../../world/session/mods.ts").PreparedMod[] { return this.modOwners; }
-  async prepareMods(): Promise<void> {
-    this.modOwners = await prepareApplicationMods(this.catalog, this.recipe, id => this.forContent(id));
+  async prepareMods(purpose: "gameplay" | "presentation" = "gameplay"): Promise<void> {
+    this.modOwners = await prepareApplicationMods(this.catalog, this.recipe, id => this.forContent(id), purpose);
   }
   private grappleOwner: PreparedQvmGrapple | null = null;
   get preparedQvmGrapple(): PreparedQvmGrapple | null { return this.grappleOwner; }
@@ -502,7 +502,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
     const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? q2Execution.api.kind === "q2-rerelease-game" ? await prepareRereleaseGuest(q2Execution, mounts) : await prepareClassicGuest(q2Execution, mounts) : null;
     if (q2Prepared !== null) prepareNativeQ2Map(world, q2Prepared.execution.api.kind === "q2-rerelease-game" ? "rerelease" : "classic", options.mode);
     const loaded = new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product, mapSidecars.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    try { if (presentationSource === undefined) { await loaded.prepareWeaponBehaviors(); await loaded.prepareMods(); await loaded.prepareQvmGrapple(); } return loaded; }
+    try { if (presentationSource === undefined) { await loaded.prepareWeaponBehaviors(); await loaded.prepareMods(); await loaded.prepareQvmGrapple(); } else if (presentationSource.kind === "unified") await loaded.prepareMods("presentation"); return loaded; }
     catch (error) { await loaded.close(); throw error; }
   } catch (error) {
     mounts.close();

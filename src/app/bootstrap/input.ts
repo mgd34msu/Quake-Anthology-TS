@@ -622,17 +622,17 @@ export class ApplicationInput {
     return this.actions.execute(name, args, seat, source);
   }
 
-  private registerCommand(name: string, handler: Parameters<CommandBuffer["register"]>[1]): void {
+  private registerCommand(name: string, handler: Parameters<CommandBuffer["register"]>[1], ownership: "world" | "engine" = "world"): void {
     if (this.commands.exists(name)) return;
-    if (this.commands.register(name, handler)) this.unregister.push(() => { this.commands.unregister(name); });
+    if (this.commands.register(name, handler, undefined, ownership)) this.unregister.push(() => { this.commands.unregister(name); });
   }
 
   private activateCommands(preserveFocus = false): void {
     if (this.commandsActive) return;
     this.commandsActive = true;
     this.inputDevices.activate(this.router);
-    this.registerCommand("in_restart", () => { this.releaseForProfileChange(); this.inputDevices.restart(); this.router.restart(); });
-    this.registerCommand("midiinfo", () => { this.inputDevices.info(); return undefined; });
+    this.registerCommand("in_restart", () => { this.releaseForProfileChange(); this.inputDevices.restart(); this.router.restart(); }, "engine");
+    this.registerCommand("midiinfo", () => { this.inputDevices.info(); return undefined; }, "engine");
     if (this.startup !== undefined) this.unregister.push(this.startup.bindOutput((text, source) => this.print(text, source)));
     const locals = this.locals, actions = this.actions;
     const context = this.consoleCvars.context;

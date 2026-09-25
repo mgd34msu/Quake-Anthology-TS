@@ -1,3 +1,9 @@
+import type { ApplicationModPresentationsOptions } from "./mod-presentations.ts";
+import type { SystemCinematicHost } from "./q3-client/cinematics.ts";
+import type { MountedContent } from "../../content/mounts/index.ts";
+import { RemoteComponentView } from "./remote-components.ts";
+import { presentationAudioControl } from "./component-media.ts";
+import { ModUserFiles } from "../../world/session/mod-files.ts";
 import { q2ApplicationLayout } from "./network/q2-layout.ts";
 import { sourceCaptureFrame } from "./diagnostic-tools.ts";
 import { readSeatLanguage } from "../../ui/settings/language.ts";
@@ -201,6 +207,7 @@ type RemoteSource = { readonly kind: "live"; readonly network: LiveNetwork; read
 /** One native seat presents received server state; its session has no authoritative world. */
 export class RemoteApplication {
   get serverBrowser(): StartupServerBrowser { return this.browser.browser; }
+  private initialComponents: RemoteComponentView | null = null;
   private clientCommandOwner: RemoteCommandOwner | null;
   get clientCommands(): RemoteCommandOwner | null { return this.clientCommandOwner; }
   readonly viewSettings = new ApplicationViewSettings(value => {
@@ -319,6 +326,8 @@ export class RemoteApplication {
     const nextGeneration = (slot: number): number => nextActorGeneration(session.session, slot);
     if (launch.kind === "live" && launch.unified === true) {
       const remote = new UnifiedRemotePresentation({identity,client,seat:this.seatId,nextGeneration,
+        modFiles:new ModUserFiles(this.options.userContentRoot??defaultUserContentRoot()),
+        sendComponentCommand:(owner,generation,args)=>{if(!(this.network instanceof UnifiedClientNetwork))throw new Error("Component has no unified channel");this.network.componentCommand(owner,generation,args);},
         loadContent: async (offer, assertCurrent) => {
           const content = await loadUnifiedContent({...this.options,mode:offer.mode},offer.composition,this.mountedContent.catalog);
           try { assertCurrent(); } catch (error) { await content.close(); throw error; }
@@ -1329,34 +1338,15 @@ export class RemoteApplication {
         if (this.keyProfile === null) throw new Error("Q3 remote guest requires its published key profile");
         q3 = await ApplicationQ3Client.create({ keys: this.keyProfile, saveFontData: () => (controls.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, kind: "qvm", assertCurrent, source: remote.cgameSource, connection,
           commandBuffer: controls.guestCommands, guestCvars: controls.guestCvars(seat.id), guestInput: controls.guestInput(seat.id), cvars: controls.cvars,
-          systemCinematics: { open: async (request, consumerCurrent) => {
-            this.stopCinematic();
-            const ticket = this.cinematicRequest;
-            const current = (): boolean => consumerCurrent() && !this.closed && !this.closing && !this.stopping && generation === this.worldLoadGeneration && this.cinematicRequest === ticket;
-            const movie = await this.prepareCinematic(request, () => {
-              const owner = this.clientCommands;
-              if (owner === null) return;
+          systemCinematics: this.systemCinematicHost({ audio: frontend.audio.engine, mounts: this.mounts, seat: seat.id, cvars: controls.cvars,
+            current: () => !this.closed && !this.closing && !this.stopping && generation === this.worldLoadGeneration,
+            complete: () => { const owner = this.clientCommands; if (owner === null) return;
               const next = owner.cvars.variableString("nextmap"); owner.cvars.set("nextmap", "", true);
-              if (next !== "") owner.commands.append(`${next}\n`, context);
-            }, ticket, current, frontend.audio.engine);
-            if (!current()) { this.closeCinematic(movie); throw new Error("System cinematic belongs to a retired remote request"); }
-            if (published) this.activateCinematic(movie);
-            else { if (candidateCinematic !== null) this.closeCinematic(candidateCinematic); candidateCinematic = movie; }
-            return { get status() { return current() ? movie.movie.status : "stopped"; }, skip: () => {
-              if (!current()) return;
-              movie.movie.skip();
-              if (this.cinematic === movie) this.completeCinematic(movie);
-              else {
-                if (candidateCinematic === movie) candidateCinematic = null;
-                if (this.cinematicRequest === ticket) this.cinematicRequest++;
-                this.closeCinematic(movie);
-              }
-            }, stop: () => {
-              if (this.cinematic === movie) this.stopCinematic();
-              else if (candidateCinematic === movie) { candidateCinematic = null; this.closeCinematic(movie); }
-              else this.closeCinematic(movie);
-            } };
-          } },
+              if (next !== "") owner.commands.append(`${next}\n`, context); },
+            publish: movie => { if (published) this.activateCinematic(movie);
+              else { if (candidateCinematic !== null) this.closeCinematic(candidateCinematic); candidateCinematic = movie; } },
+            unpublish: movie => { if (candidateCinematic === movie) candidateCinematic = null; },
+          }),
           renderer: this.renderer, browser: this.q3Browser, commandRegistration: controls.clientCommandRegistration(seat.id),
           clientState: () => ({ phase: this.networkPhase === "active" ? 8 : this.networkPhase === "loading" ? 6 : 5,
             connectPacketCount: this.network instanceof Q3ClientNetwork ? this.network.connectPacketCount : 0, clientNumber: connection.clientNumber,
@@ -1401,7 +1391,17 @@ export class RemoteApplication {
         if (q3 !== null && this.viewSettings.override !== null) q3.cvars.set("cg_fov", String(this.viewSettings.fieldOfView));
         frontend.audio.bindHaptics(controls); frontend.audio.bindVolumeCvars(this.imageSettings.cvars);
         frontend.audio.bindOutputCvars(this.imageSettings.cvars);
-        seat.attachPresentation(presentation, () => presentation.close());
+        this.initialComponents?.close(); this.initialComponents = null;
+        const components = remote instanceof UnifiedRemotePresentation ? new RemoteComponentView(remote, {
+          assets: frontend.assets, audio: frontend.audio, input: controls, queries: remote.scene, renderer: this.renderer,
+          systemCinematics: this.componentCinematics(frontend.audio),
+          print: text => this.print(text), nextFrame: this.host.loading?.nextFrame ?? (() => new Promise<void>(resolve => { setImmediate(() => { resolve(); }); })),
+          clock: { now: () => performance.now(), frameNumber: () => this.frames },
+        }) : null;
+        this.initialComponents = components;
+        seat.attachPresentation(presentation, () => {
+          components?.close(); if (this.initialComponents === components) this.initialComponents = null; presentation.close();
+        });
         if (borrowed !== null) {
           controls.publishClientPlatform(borrowed, "retain");
           publishAudio?.(); borrowed.output.current = frontend.audio.engine;
@@ -1444,6 +1444,37 @@ export class RemoteApplication {
     }
   }
 
+  private componentCinematics(audio: ApplicationAudio): NonNullable<ApplicationModPresentationsOptions["systemCinematics"]> {
+    const generation = this.worldLoadGeneration;
+    return (_source, presentation, scope) => this.systemCinematicHost({ audio: audio.engine, mounts: scope.mounts,
+      seat: presentation.local.player.seat.id, cvars: scope.cvars,
+      current: () => !this.closed && !this.closing && !this.stopping && this.worldLoadGeneration === generation,
+      complete: () => { const next = scope.cvars.variableString("nextmap"); scope.cvars.set("nextmap", "", true); if (next !== "") scope.append(`${next}\n`); },
+      publish: movie => this.activateCinematic(movie),
+    });
+  }
+
+  private systemCinematicHost(owner: { readonly audio: UnifiedAudio; readonly mounts: MountedContent; readonly seat: SeatId; readonly cvars: CvarRegistry;
+    current(): boolean; complete(): void; publish(movie: RemoteCinematic): void; unpublish?(movie: RemoteCinematic): void }): SystemCinematicHost {
+    return { open: async (request, consumerCurrent) => {
+      this.stopCinematic();
+      const ticket = this.cinematicRequest;
+      const current = (): boolean => owner.current() && consumerCurrent() && this.cinematicRequest === ticket;
+      const movie = await this.prepareCinematic(request, owner.complete, ticket, current, owner.audio, owner);
+      if (!current()) { this.closeCinematic(movie); throw new Error("System cinematic belongs to a retired remote request"); }
+      owner.publish(movie);
+      return { get status() { return current() ? movie.movie.status : "stopped"; }, skip: () => {
+        if (!current()) return;
+        movie.movie.skip();
+        if (this.cinematic === movie) this.completeCinematic(movie);
+        else { owner.unpublish?.(movie); if (this.cinematicRequest === ticket) this.cinematicRequest++; this.closeCinematic(movie); }
+      }, stop: () => {
+        if (this.cinematic === movie) this.stopCinematic();
+        else { owner.unpublish?.(movie); this.closeCinematic(movie); }
+      } };
+    } };
+  }
+
   private async startCinematic(request: ScreenCinematicRequest, ended: () => void): Promise<void> {
     this.stopCinematic();
     const ticket = this.cinematicRequest, generation = this.worldLoadGeneration;
@@ -1467,7 +1498,7 @@ export class RemoteApplication {
     }
   }
 
-  private async prepareCinematic(request: ScreenCinematicRequest, ended: () => void, ticket: number, current: () => boolean, candidateAudio?: UnifiedAudio): Promise<RemoteCinematic> {
+  private async prepareCinematic(request: ScreenCinematicRequest, ended: () => void, ticket: number, current: () => boolean, candidateAudio?: UnifiedAudio, source?: { readonly mounts: MountedContent; readonly seat: SeatId; readonly cvars: CvarRegistry }): Promise<RemoteCinematic> {
     const images = this.renderer.images.fork();
     let ownedAudio: UnifiedAudio | null = null;
     try {
@@ -1478,14 +1509,16 @@ export class RemoteApplication {
       }
       const engine = retained ?? ownedAudio;
       if (engine === null) throw new Error("Cinematic has no audio output owner");
-      const preferences = new SeatUiPreferences(this.seatId, this.imageSettings.cvars);
-      const mounts = this.mounts, captions = new SeatMediaCaptions(this.seatId, async path => (await mounts.open(path))?.bytes ?? null, null, "subtitle", {
-        read: () => readSeatLanguage(this.imageSettings.cvars, this.seatId.index), failed: error => this.print(`Caption language reload failed: ${String(error)}\n`) });
+      const seat = source?.seat ?? this.seatId, cvars = source?.cvars ?? this.imageSettings.cvars;
+      const preferences = new SeatUiPreferences(seat, cvars);
+      const mounts = source?.mounts ?? this.mounts, captions = new SeatMediaCaptions(seat, async path => (await mounts.open(path))?.bytes ?? null, null, "subtitle", {
+        read: () => readSeatLanguage(cvars, seat.index), failed: error => this.print(`Caption language reload failed: ${String(error)}\n`) });
       const movie = await CampaignCinematic.prepare(request,
-        { mounts }, { images }, { engine }, this.renderer, this.seatId, current, {
-          prepare: source => captions.prepare(source, readSeatLanguage(this.imageSettings.cvars, this.seatId.index)),
+        { mounts }, { images }, { engine }, this.renderer, seat, current, {
+          prepare: source => captions.prepare(source, readSeatLanguage(cvars, seat.index)),
           commands: (timeline, viewport) => {
-            const presentation = this.presentation;
+            const presentation = this.presentation?.local.player.seat.id.equals(seat) === true ? this.presentation
+              : this.remoteSeats.find(peer => peer.seat.id.equals(seat))?.view?.presentation ?? null;
             if (presentation === null) {
               if (this.ownership.kind !== "borrowed") return [];
               const enabled = preferences.values.captions;
@@ -1955,6 +1988,7 @@ export class RemoteApplication {
             recording: () => this.ownership.kind === "borrowed" ? this.ownership.client.recording.path !== null : this.ownedRecording?.path !== null && this.ownedRecording !== null,
           } };
         const source = network.kind === "unified-client" ? new RemoteSeatSource({...common,family:"unified",unified:{
+          publishComponents:operation=>current().pump.enqueue(operation),
           loadContent:(offer,assertCurrent)=>current().pump.enqueue(async()=>{
             const peer=current();assertCurrent();
             if(peer===this.primaryPeer){
@@ -2007,7 +2041,7 @@ export class RemoteApplication {
     const q3 = connection === undefined ? null : this.q3Browser !== null && this.keyProfile !== null
       ? {connection,browser:this.q3Browser,keys:this.keyProfile} : (()=>{throw new Error("Q3 remote seat has no guest services");})();
     const view = await RemoteSeatView.prepare({ local,controls,source:peer.source,cvars,assets:frontend.assets,content,art:frontend.art,font:frontend.font,audio:frontend.audio,
-      renderer:this.renderer,images:this.imageSettings,view:this.viewSettings,options:this.options,q3,
+      renderer:this.renderer,images:this.imageSettings,view:this.viewSettings,options:this.options,q3,systemCinematics:this.componentCinematics(frontend.audio),
       viewport:()=>this.seatViewport(peer.seat.id),count:()=>controls.locals.length,index:()=>controls.locals.indexOf(local),now:()=>performance.now(),assertCurrent,
       quit:()=>this.requestQuit(),execute:(name,args)=>this.queueCommand(name,args,peer.seat.id),print:text=>this.print(text) });
     try { assertCurrent(); view.publish(controls.locals.indexOf(local),controls.locals.length); peer.view=view;
@@ -2199,10 +2233,14 @@ export class RemoteApplication {
         const key = `${effect.source.content}:${effect.reason}`;
         if (!this.reportedEffectGaps.has(key)) { this.reportedEffectGaps.add(key); this.print(`Unresolved ${effect.source.kind} effect: ${effect.reason}\n`); }
       }
-      const primaryBatch = this.primaryPeer?.view === null || this.primaryPeer === null ? null : await this.primaryPeer.view.prepareFrame(output);
+      const primaryBatch = this.primaryPeer?.view === null || this.primaryPeer === null ? null : await this.primaryPeer.view.prepareFrame(output, true);
       const audioBatches: ApplicationAudioSeatEvents[] = [primaryBatch === null ? {seat:this.seatId,snapshot:output.snapshot,events:this.sourceEvents,music:true,scene:this.remote.scene,effectSounds:[...frontend.effects.drainSounds(), ...frontend.effects.drainRecipientSounds()
         .filter(batch => batch.recipient.equals(presentation.local.player.actor)).flatMap(batch => batch.sounds)]} : { ...primaryBatch, music: true }];
-      if (primaryBatch === null) { presentation.sourceEvents(this.sourceEvents); await presentation.prepare(output.snapshot, models, characters); }
+      if (primaryBatch === null) {
+        await this.initialComponents?.prepareMedia(this.sourceEvents, true);
+        presentation.sourceEvents(this.sourceEvents); await presentation.prepare(output.snapshot, models, characters);
+        await this.initialComponents?.prepare(presentation, this.sourceEvents, this.frames);
+      }
       else this.sourceEvents = primaryBatch.events;
       presentation.local.player.seat.present(output.snapshot, this.renderer.backend);
       const camera = presentation.camera();
@@ -2221,7 +2259,11 @@ export class RemoteApplication {
       }
       this.renderer.execute({ owner: this.renderer.owner, sequence: this.frames, commands: [{ kind: "swap-buffers" }] });
       await this.capture?.drain();
-      await frontend.audio.frame(output.snapshot,listeners,[],now,audioBatches);
+      await frontend.audio.frame(output.snapshot,listeners,[],now,audioBatches.map(batch => {
+        const unified = batch.seat.equals(this.seatId) ? this.remote instanceof UnifiedRemotePresentation
+          : this.remoteSeats.some(peer => peer.seat.id.equals(batch.seat) && peer.source.remote instanceof UnifiedRemotePresentation);
+        return unified ? { ...batch, events: batch.events.filter(event => !presentationAudioControl(event)) } : batch;
+      }));
       await this.sourceSessionActions(audioBatches);
       return output;
     } catch (error) { await this.capture?.beforeWorldChange(); throw error; }
@@ -2309,6 +2351,7 @@ export class RemoteApplication {
     try { this.clearSourcePresentation(); } catch (error) { errors.push(error); }
     try { this.disconnectSource(); } catch (error) { errors.push(error); }
     this.closed = true; this.stopping = true; this.worldLoadGeneration++; this.clientInputs = [];
+    try { this.initialComponents?.close(); this.initialComponents = null; } catch (error) { errors.push(error); }
     const frontend = this.frontend; this.frontend = null;
     for (const close of [() => this.remoteContent?.mounts.close(), () => this.qwDownloads?.close(), () => this.q3Downloads?.close(), () => { if (this.source.kind === "live") this.source.network.close(); else if (this.source.kind === "gtv") this.source.watch.close(); else this.source.playback.close(); }, () => { if (this.source.kind === "live") this.source.transport.close(); }, () => this.controls?.close(), () => frontend?.audio.close(),
       () => frontend?.effects.close(), () => frontend?.art.close(), () => frontend?.assets.close()]) {

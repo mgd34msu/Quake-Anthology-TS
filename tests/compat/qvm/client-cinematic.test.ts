@@ -237,3 +237,35 @@ test("guest movie checkpoint restores exact slots and owned PCM without replayin
     expect(neighbor.runGuest(0)).toBe(1);
   } finally { original.close(); restored.close(); neighbor.close(); f.movies.close(); }
 });
+
+
+test("fullscreen continuation restores focused pause, queued PCM and first unpublished frame without a second takeover", async () => {
+  const f = fixture();
+  using firstAudio = new UnifiedAudio({ sampleRate: 48000, milliseconds: () => 0, random: () => 0 });
+  using secondAudio = new UnifiedAudio({ sampleRate: 48000, milliseconds: () => 0, random: () => 0 });
+  let firstTakeovers = 0, secondTakeovers = 0;
+  const audio = (engine: UnifiedAudio, takeover: () => void) => ({ engine: {
+    queueStream: engine.queueStream.bind(engine), stopStream: engine.stopStream.bind(engine), pauseStream: engine.pauseStream.bind(engine),
+    captureStreamCheckpoint: engine.captureStreamCheckpoint.bind(engine), restoreStreamCheckpoint: engine.restoreStreamCheckpoint.bind(engine),
+    stopAll: () => { takeover(); engine.stopAll(); }, pump: () => 0,
+  } });
+  const renderer = { window: { drawableSize: { width: 8, height: 8 } }, execute: () => undefined };
+  const resources = { mounts: { open: async () => opened() } }, assets = { images: f.assets.assets.images };
+  const original = await CampaignCinematic.prepare({ name: "test.roq", loop: true, hold: false, silent: false }, resources,
+    assets, audio(firstAudio, () => { firstTakeovers++; }), renderer, f.seat, () => true);
+  let restored: CampaignCinematic | null = null;
+  try {
+    original.activate(); original.frame(0, 1); firstAudio.mix(1); original.frame(1, 2, true);
+    expect(original.status).toBe("paused");
+    const checkpoint = decodeCheckpointValue(encodeCheckpointValue(original.captureCheckpoint()));
+    restored = await CampaignCinematic.restore(checkpoint, resources, assets, audio(secondAudio, () => { secondTakeovers++; }), renderer, f.seat, () => true);
+    expect(firstTakeovers).toBe(1); expect(secondTakeovers).toBe(0); expect(restored.status).toBe("paused");
+    expect(secondAudio.mix(1)).toEqual(new Int16Array(2));
+    restored.activate(); expect(secondTakeovers).toBe(0);
+    for (let frame = 3; frame < 9; frame++) {
+      expect(restored.frame(34, frame)).toBe(original.frame(34, frame));
+      expect(restored.captureCheckpoint()).toEqual(original.captureCheckpoint());
+      expect(secondAudio.mix(1)).toEqual(firstAudio.mix(1));
+    }
+  } finally { restored?.close(10); original.close(10); f.movies.close(); }
+});

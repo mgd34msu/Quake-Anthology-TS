@@ -96,7 +96,7 @@ export function registerBindingCommands(commands: CommandBuffer, lookup: (seat: 
     return origin.kind === "local-seat" ? lookup(origin.seat)
       : origin.kind === "local-console" || origin.kind === "server-console" ? consoleBindings : null;
   };
-  const add = (name: string, handler: (invocation: CommandInvocation) => undefined, documentation?: Parameters<CommandBuffer["register"]>[2]): void => { if (commands.register(name, handler, documentation)) registered.push(name); };
+  const add = (name: string, handler: (invocation: CommandInvocation) => undefined, documentation?: Parameters<CommandBuffer["register"]>[2]): void => { if (commands.registerEngine(name, handler, documentation)) registered.push(name); };
   add("bind", invocation => {
     const seat = local(invocation), name = invocation.argv[1];
     if (seat === null || name === undefined) { print("bind <key> [command]\n"); return; }
@@ -151,7 +151,7 @@ export function registerWheelCommands(commands: CommandBuffer,
   for (const [name, mode] of wheelCommands) {
     for (const down of [true, false]) {
       const command = `${down ? "+" : "-"}${name}`;
-      if (commands.register(command, invocation => {
+      if (commands.registerEngine(command, invocation => {
         let origin = invocation.source.origin;
         while (origin.kind === "script") origin = origin.caller;
         if (origin.kind === "local-seat") wheel(origin.seat, mode, down);

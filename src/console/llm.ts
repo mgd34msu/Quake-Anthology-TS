@@ -11,7 +11,7 @@ export function registerLlmCommands(commands: CommandBuffer, print: (text: strin
   const registered: string[] = [];
   const pending = new Map<string, AbortController>();
   let disposed = false;
-  if (commands.register("llm_cancel", invocation => {
+  if (commands.registerEngine("llm_cancel", invocation => {
     const source = invocation.source, origin = source.origin;
     if (!invocation.direct || origin.kind !== "local-seat" && origin.kind !== "local-console") {
       print("LLM commands require direct input from a local player console. Scripts, modules, and servers cannot start requests.\n", source); return;
@@ -26,7 +26,7 @@ export function registerLlmCommands(commands: CommandBuffer, print: (text: strin
     { name: "llm_ask", usage: "llm_ask <question>", summary: "Ask the configured LLM and print its answer in this console.", examples: ['llm_ask "How do I change brightness?"'] },
     { name: "llm_exec", usage: "llm_exec <request>", summary: "Ask the configured LLM for console commands, validate the whole batch, then print and execute it in your context.", examples: ['llm_exec "Set brightness to the default"'] },
   ]) {
-    if (commands.register(definition.name, invocation => {
+    if (commands.registerEngine(definition.name, invocation => {
       const source = invocation.source, origin = source.origin, prompt = invocation.args.join(" ").trim();
       if (!invocation.direct || origin.kind !== "local-seat" && origin.kind !== "local-console") {
         print("LLM commands require direct input from a local player console. Scripts, modules, and servers cannot start requests.\n", source); return;

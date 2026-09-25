@@ -235,7 +235,7 @@ export function registerInputCommands(commands: CommandBuffer, lookup: (seat: Se
   const names: string[] = [];
   for (const [name, action] of actionCommands) for (const down of [true, false]) {
     const commandName = `${down ? "+" : "-"}${name}`;
-    if (commands.register(commandName, invocation => {
+    if (commands.registerEngine(commandName, invocation => {
       if (name === "scores" && clientScores?.(invocation)) return;
       let origin = invocation.source.origin;
       while (origin.kind === "script") origin = origin.caller;

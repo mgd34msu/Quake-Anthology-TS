@@ -578,12 +578,14 @@ export class QvmModProvider {
       this.current();
       if (this.frames.length !== 0) throw new Error("Cannot read presentation during an original source call");
       if (this.clientBindings?.live(viewer) !== true || !this.clientBindings.admitted(viewer)) return null;
+      const clientNumber = this.clientBindings.slot(viewer);
+      if (clientNumber === null) throw new Error("Presentation viewer has no admitted source client slot");
       if (this.declaration.presentation?.runtime === "qvm-scene") {
         const state = this.scenePublication(), player = state.clients.find(row => row.actor.equals(viewer));
         if (player === undefined) return null;
-        return { weaponPresented: this.services.weapons?.presented(viewer, this.artifact.module.id) === true, gameState: state.gameState, gameStateRevision: state.gameStateRevision, snapshot: { serverTime: state.serverTime, playerState: player.state } };
+        return { clientNumber: player.slot, weaponPresented: this.services.weapons?.presented(viewer, this.artifact.module.id) === true, gameState: state.gameState, gameStateRevision: state.gameStateRevision, snapshot: { serverTime: state.serverTime, playerState: player.state } };
       }
-      return { weaponPresented: this.services.weapons?.presented(viewer, this.artifact.module.id) === true, gameState: this.gameState(), gameStateRevision: this.presentationRevision,
+      return { clientNumber, weaponPresented: this.services.weapons?.presented(viewer, this.artifact.module.id) === true, gameState: this.gameState(), gameStateRevision: this.presentationRevision,
         snapshot: { serverTime: Math.trunc(seconds(this.services) * 1000),
           playerState: readSourceQvmPlayerState(this.view(this.playerAddress(viewer), qvmPlayerStateBytes(this.declaration.abiProfile)), this.declaration.abiProfile) } };
     },

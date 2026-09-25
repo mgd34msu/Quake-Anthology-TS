@@ -1,3 +1,7 @@
+import type { PresentationOwner } from "../../../contracts/presentation.ts";
+import { samePresentationOwner } from "../../../contracts/presentation.ts";
+import type { UnifiedComponentPublication } from "../network/unified-components.ts";
+import { selectComponentScene } from "../component-scene.ts";
 import { projectUnifiedPrediction } from '../network/unified-prediction.ts';
 import type { ExecutableRecipe, ResolvedResourceReference, ResourceId } from '../../../contracts/content.ts';
 import type { ArsenalIntent } from '../../../contracts/gameplay.ts';
@@ -25,6 +29,8 @@ export interface UnifiedApplicationServerHost {
   carriedPlayer(client: ClientId): UnifiedApplicationPlayer;
   disconnect(player: UnifiedApplicationPlayer): void;
   userinfo(player: UnifiedApplicationPlayer, value: string): void;
+  components?(player: UnifiedApplicationPlayer): readonly UnifiedComponentPublication[];
+  componentCommand?(player: UnifiedApplicationPlayer, owner: PresentationOwner, generation: number, args: readonly string[]): boolean;
   command(player: UnifiedApplicationPlayer, name: string, args: readonly string[]): void;
   input(player: UnifiedApplicationPlayer, sequence: number, command: UserCommand, arsenal?: ArsenalIntent): ActorCommand;
   frame(player: UnifiedApplicationPlayer, output: SimulationOutput, epoch: number, acknowledgedInput: number): UnifiedPresentationFrame;
@@ -170,6 +176,28 @@ export function createUnifiedApplicationServerHost(options: { readonly session: 
       if (failures.length !== 0) throw new AggregateError(failures, 'Unified player disconnect failed');
     },
     userinfo(player, value) { requirePlayer(player); update(player, info(value, userinfos.get(player.client.slot)?.get('ip') ?? '')); },
+    components(player) {
+      requirePlayer(player);
+      return simulation.modPresentationSources().flatMap(source => {
+        source.source.assertCurrent();
+        const context = source.source.context(player.actor);
+        if (context === null) return [];
+        const scene = source.prepared.declaration.runtime === "qvm-scene" ? source.source.scene?.().current : undefined;
+        if (source.prepared.declaration.runtime === "qvm-scene" && scene === undefined) throw new Error("Component scene publication is unavailable");
+        return [{ owner: source.owner, identity: source.identity, generation: source.source.generation, abi: source.source.abiProfile,
+          runtime: source.prepared.declaration.runtime, viewer: player.actor, bindings: source.source.bindings(),
+          context: scene === undefined ? context : { ...context, scene: selectComponentScene(scene, player.actor, simulation.scene,
+            options.content.world.leaves.length, options.print) } }];
+      });
+    },
+    componentCommand(player, owner, generation, args) {
+      requirePlayer(player);
+      const source = simulation.modPresentationSources().find(source => samePresentationOwner(source.owner, owner) && source.source.generation === generation);
+      if (source === undefined || !source.source.live(player.actor) || source.source.context(player.actor) === null) return false;
+      source.source.assertCurrent();
+      if (source.source.clientCommand === undefined) return false;
+      source.source.clientCommand(player.actor, args); return true;
+    },
     command(player, name, args) {
       requirePlayer(player);
       if (q1 !== null && name === 'name') { const values = new Map(q1.composition.clients.require(player.actor).userinfo); values.set('name', (args[0] ?? 'unconnected').slice(0, 15)); update(player, values); return; }

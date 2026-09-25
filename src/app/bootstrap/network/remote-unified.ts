@@ -1,3 +1,8 @@
+import { PresentationState } from "../presentation-state.ts";
+import { ModUserFiles } from "../../../world/session/mod-files.ts";
+import type { PresentationOwner } from "../../../contracts/presentation.ts";
+import type { UnifiedComponentUpdate } from "./unified-components.ts";
+import { UnifiedComponentConsumers } from "./unified-component-consumer.ts";
 import type { ActorId, ClientId, IdentityOwner, SeatId } from '../../../contracts/identity.ts';
 import type { ContentId, ResolvedResourceReference, ResourceId } from '../../../contracts/content.ts';
 import type { DecodedModel } from '../../../contracts/scene.ts';
@@ -26,7 +31,10 @@ export interface UnifiedRemoteOptions {
   loadContent(offer: Extract<UnifiedControl,{kind:'offer'}>, assertCurrent:()=>void): Promise<LoadedApplicationContent>;
   model(key: UnifiedResourceKey, brushModel: number|null): Promise<DecodedModel>;
   publish(output: SimulationOutput): void;
+  publishComponents?(operation: () => void | Promise<void>): Promise<void>;
   sendCommand(name:string,args:readonly string[]): void;
+  readonly modFiles?: ModUserFiles;
+  sendComponentCommand?(owner:PresentationOwner,generation:number,args:readonly string[]): void;
   disconnected(reason:string): void;
   print(text:string): void;
 }
@@ -39,7 +47,10 @@ export class UnifiedRemotePresentation {
   private readonly clients = new Map<string,ClientId>();
   private readonly resources = new Map<ResourceId,ResolvedResourceReference>();
   private readonly pendingEvents: {frame:number;events:readonly SimulationPresentationEvent[];simulation:readonly SimulationEvent[]}[]=[];
-  private events: SimulationPresentationEvent[]=[];
+  private readonly sourceSequences = new Map<number, number>();
+  private mediaValue = new PresentationState(() => this.current?.output.snapshot.frame.time ?? {kind:"milliseconds",value:0}, actor => this.numberOf(actor));
+  private components: UnifiedComponentConsumers | null = null;
+  get media(): PresentationState { return this.mediaValue; }
   private simulationEvents:SimulationEvent[]=[];
   private current:UnifiedPresentationFrame|null=null;
   private binding:Extract<UnifiedControl,{kind:'admitted'}>|null=null;
@@ -75,11 +86,32 @@ export class UnifiedRemotePresentation {
   }
   async offer(offer:Extract<UnifiedControl,{kind:'offer'}>):Promise<void>{
     if(this.closed)throw new Error('Unified replica is closed');
-    const generation=++this.generation;this.worldEpoch=offer.epoch;this.offeredDigest=offer.composition.digest;this.binding=null;
+    let generation=this.generation;
+    const retire=():void=>{if(this.closed)throw new Error('Unified replica is closed');
+      this.components?.close();this.components=null;generation=++this.generation;
+      this.worldEpoch=offer.epoch;this.offeredDigest=offer.composition.digest;this.binding=null;};
+    if(this.options.publishComponents===undefined)retire();else await this.options.publishComponents(retire);
     const content=await this.options.loadContent(offer,()=>this.assertCurrent(generation));this.assertCurrent(generation);
-    this.clearPrediction();this.world.content=content;this.contentEpoch=offer.epoch;this.current=null;this.actors.clear();this.clients.clear();this.resources.clear();this.events=[];this.simulationEvents=[];this.pendingEvents.length=0;this.lastEventSequence=-1;this.lastSimulationSequence=-1;
+    this.clearPrediction();this.world.content=content;this.contentEpoch=offer.epoch;this.current=null;this.actors.clear();this.clients.clear();this.resources.clear();this.sourceSequences.clear();this.mediaValue=new PresentationState(() => this.current?.output.snapshot.frame.time ?? {kind:"milliseconds",value:0}, actor => this.numberOf(actor));this.simulationEvents=[];this.pendingEvents.length=0;this.lastEventSequence=-1;this.lastSimulationSequence=-1;
+    const files=this.options.modFiles;
+    if(content.preparedMods.some(mod=>mod.presentation!==undefined)){
+      if(files===undefined)throw new Error("Remote component presentation requires client-owned writable storage");
+      this.components=new UnifiedComponentConsumers({content,events:this.mediaValue,files,
+        assertCurrent:()=>this.assertCurrent(generation),viewer:()=>this.player?.actor??null,
+        command:(owner,sourceGeneration,args)=>{if(this.options.sendComponentCommand===undefined)throw new Error("Remote component command channel is unavailable");this.options.sendComponentCommand(owner,sourceGeneration,args);}});
+    }
   }
   admitted(binding:Extract<UnifiedControl,{kind:'admitted'}>):void {if(binding.epoch!==this.worldEpoch)return;this.binding=binding;this.identity().actor(binding.actor.slot,binding.actor.generation);}
+  async receiveComponents(epoch:number,update:UnifiedComponentUpdate):Promise<void>{
+    const publish=async():Promise<void>=>{
+      if(epoch!==this.worldEpoch||this.closed)return;
+      if(this.components===null){if(update.sources.length!==0)throw new Error("Server activated an unqualified remote component");return;}
+      await this.components.update(update);
+    };
+    if(this.options.publishComponents===undefined)await publish();else await this.options.publishComponents(publish);
+  }
+  modPresentationSources(){return this.components?.sources()??[];}
+  modClientPresentationSources(){return this.components?.clientSources()??[];}
   async declare(epoch:number,keys:readonly UnifiedResourceKey[]):Promise<void>{
     if(epoch!==this.worldEpoch||this.closed)return;
     const generation=this.generation;
@@ -95,9 +127,12 @@ export class UnifiedRemotePresentation {
     const frame=this.current?.output.snapshot.frame.frame,simulation:SimulationEvent[]=[];if(frame===undefined)return simulation;
     while(this.pendingEvents[0]!==undefined&&this.pendingEvents[0].frame<=frame){
       const next=this.pendingEvents.shift();if(next===undefined)break;
-      for(const event of next.events)if(event.sequence>this.lastEventSequence){this.events.push(event);this.lastEventSequence=event.sequence;}
-      for(const event of next.simulation)if(event.sequence>this.lastSimulationSequence){simulation.push(event);this.lastSimulationSequence=event.sequence;}
+      for(const event of next.events)if(event.sequence>this.lastEventSequence){this.sourceSequences.set(event.sequence,this.mediaValue.receivePresentation(event));this.lastEventSequence=event.sequence;}
+      for(const event of next.simulation)if(event.sequence>this.lastSimulationSequence){const sourceSequence=event.payload.kind==='message'?event.payload.sourcePresentationSequence:undefined;
+        const localSequence=sourceSequence===undefined?undefined:this.sourceSequences.get(sourceSequence);
+        simulation.push(event.payload.kind==='message'&&localSequence!==undefined?{...event,payload:{...event.payload,sourcePresentationSequence:localSequence}}:event);this.lastSimulationSequence=event.sequence;}
     }
+    if(this.sourceSequences.size>4096)for(const sequence of this.sourceSequences.keys())if(sequence<this.lastEventSequence-2048)this.sourceSequences.delete(sequence);
     this.simulationEvents.push(...simulation);return simulation;
   }
   async receiveFrame(bytes:Uint8Array):Promise<number|null>{
@@ -110,6 +145,8 @@ export class UnifiedRemotePresentation {
     const expected=this.identity().actor(this.binding.actor.slot,this.binding.actor.generation);
     if(!frame.player.actor.equals(expected))throw new Error('Unified frame changed the admitted player');
     if(this.current!==null&&frame.output.snapshot.frame.frame<=this.current.output.snapshot.frame.frame)return frame.acknowledgedInput;
+    if(this.components!==null&&!this.components.accept(frame.components??{revision:0,sources:[]},expected))return frame.acknowledgedInput;
+    if(this.components===null&&(frame.components?.sources.length??0)!==0)throw new Error("Remote frame contains unadmitted components");
     this.current={...frame,output:{...frame.output,events:[]}};this.correctPrediction(frame);this.releaseEvents();this.options.publish(this.current.output);return frame.acknowledgedInput;
   }
   private clearPrediction():void {
@@ -161,8 +198,8 @@ export class UnifiedRemotePresentation {
   playerCommand(actor:ActorId,name:string,args:readonly string[]):undefined {if(this.player===null||!this.player.actor.equals(actor))throw new Error('Unified command belongs to another player');this.options.sendCommand(name,args);return undefined;}
   registerResource(_content:ContentId,_path:string,resource:ResolvedResourceReference):undefined {this.resources.set(unifiedResourceId(resource),resource);return undefined;}
   drainSimulationEvents():readonly SimulationEvent[]{const events=this.simulationEvents;this.simulationEvents=[];return events;}
-  drainPresentationEvents():readonly SimulationPresentationEvent[]{const events=this.events;this.events=[];return events;}
+  drainPresentationEvents():readonly SimulationPresentationEvent[]{return this.mediaValue.takePresentation();}
   disconnected(reason:string):void{this.options.disconnected(reason);}
   print(text:string):void{this.options.print(text);}
-  close():void{this.clearPrediction();this.contentEpoch=0;this.closed=true;this.generation++;this.current=null;this.pendingEvents.length=0;this.events=[];this.simulationEvents=[];this.resources.clear();this.actors.clear();this.clients.clear();}
+  close():void{this.components?.close();this.components=null;this.clearPrediction();this.contentEpoch=0;this.closed=true;this.generation++;this.current=null;this.pendingEvents.length=0;this.sourceSequences.clear();this.mediaValue.takePresentation();this.simulationEvents=[];this.resources.clear();this.actors.clear();this.clients.clear();}
 }

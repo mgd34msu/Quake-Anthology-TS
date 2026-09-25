@@ -30,7 +30,7 @@ export function registerConsoleCommands(services: ConsoleCommandServices): () =>
     return origin.kind === "local-seat" ? origin.seat : null;
   };
   const add = (name: string, handler: (invocation: CommandInvocation) => undefined, documentation?: Parameters<CommandBuffer["register"]>[2]): void => {
-    if (!services.commands.exists(name) && services.commands.register(name, handler, documentation)) names.push(name);
+    if (!services.commands.exists(name) && services.commands.registerEngine(name, handler, documentation)) names.push(name);
   };
   add("toggleconsole", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.toggle(); });
   add("clear", invocation => { const id = seat(invocation); if (id !== null) services.console(id)?.buffer.clear(); }, { summary: "Clear the invoking seat's console output.", usage: "clear", examples: ["clear"] });

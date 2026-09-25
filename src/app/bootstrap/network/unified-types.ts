@@ -15,9 +15,12 @@ export interface UnifiedIdentityDecoder {
   resourceId(id: ResourceId): ResourceId;
 }
 
+import type { UnifiedComponentFrames } from "./unified-components.ts";
+
 /** Public state projected for one authenticated player, after audience filtering. */
 export interface UnifiedPresentationFrame {
   readonly epoch: number;
+  readonly components?: UnifiedComponentFrames;
   readonly acknowledgedInput: number;
   readonly prediction: UnifiedPredictionProjection;
   readonly output: SimulationOutput;
