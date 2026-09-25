@@ -1,3 +1,4 @@
+import { readModCallbacks } from "../../../src/content/mods/callbacks.ts";
 import { ModMatchState } from "../../../src/world/session/mod-match.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
@@ -40,13 +41,20 @@ test.skipIf(!await Bun.file(path).exists())("original Copper combat owns health 
     actorFields.push(field.name === "team" ? { field: field.name, binding: "team", values: [{ value: 0, team: null }, { value: 1, team: "q2:1" }] }
       : field.name === "frags" ? { field: field.name, binding: "score" } : { field: field.name, binding: "private" });
   }
+  const fields = [[], ["owner"]].map((indirections, index) => ({
+    id: index === 0 ? "test:direct-field" : "test:linked-field", role: "owned", campaignGate: false, botGoal: false,
+    state: { storage: { kind: "entity-field", global: "lastspawn", indirections, field: "count" }, values: [{ value: 0, stage: "zero", complete: false }, { value: 1, stage: "one", complete: false }, { value: 2, stage: "two", complete: true }] },
+    carrier: { kind: "entity-field", global: "lastspawn", indirections, field: "enemy" },
+    target: { kind: "entity-field", global: "lastspawn", indirections, field: "owner" }, change: null,
+  } satisfies NonNullable<ModCallbackDeclaration["objectives"]>[number]));
   const declaration: ModCallbackDeclaration = { version: 1, runtime: "quakec", program: { path: "progs.dat", digest: program.digest }, actorFields, callbacks: [],
     objectives: [{ id: "test:monsters", role: "owned", campaignGate: true, botGoal: false,
       state: { storage: "killed_monsters", values: [{ value: 0, stage: "alive", complete: false }, { value: 1, stage: "done", complete: true }, { value: 2, stage: "twice", complete: true }] },
-      carrier: null, target: null, change: { function: "killed_monster", arguments: [], globals: [] } }],
+      carrier: null, target: null, change: { function: "killed_monster", arguments: [], globals: [] } }, ...fields],
     combat: { damage: { function: "T_Damage", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" },
       { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }, { kind: "float", value: 0 }],
       globals: [{ name: "time", value: { kind: "input", name: "time" } }] } } };
+  expect(readModCallbacks(new TextEncoder().encode(JSON.stringify(declaration))).objectives).toEqual(declaration.objectives);
   const random = new SourceRandom(17);
   const source = new QcModProvider(program, { id: "mod:copper-combat", artifactPath: "progs.dat", digest: program.digest, revision: "test" }, declaration,
     { actors, callbacks, match, bodies: physics.bodies, combat, inventory: new SharedInventoryTable(actors), seed: 17, time: () => ({ kind: "seconds", value: 3 }),
@@ -63,7 +71,8 @@ test.skipIf(!await Bun.file(path).exists())("original Copper combat owns health 
   const objective = declaration.objectives?.[0]; if (objective === undefined) throw new Error("Missing source objective");
   const borrowed = new QcModProvider(program, { id: "mod:copper-borrower", artifactPath: "progs.dat", digest: program.digest, revision: "test" },
     { version: 1, runtime: "quakec", program: declaration.program, actorFields: actorFields.map(entry => entry.field === "state" ? { field: entry.field, binding: "score" } : entry.field === "count" ? { field: entry.field, binding: "constant", value: { kind: "float", value: 100 } } : entry.field === "spawnflags" ? { field: entry.field, binding: "constant", value: { kind: "float", value: 1 } } : { field: entry.field, binding: "private" }), callbacks: [],
-      objectives: [{ id: objective.id, state: objective.state, carrier: null, target: null, role: "borrowed", writable: true }] }, source.services, source.random, source.media);
+      objectives: [{ id: objective.id, state: objective.state, carrier: null, target: null, role: "borrowed", writable: true },
+        ...fields.map(value => ({ id: value.id, state: value.state, carrier: value.carrier, target: value.target, role: "borrowed", writable: false } satisfies NonNullable<ModCallbackDeclaration["objectives"]>[number]))] }, source.services, source.random, source.media);
   try {
     source.activateMatch(); borrowed.activateMatch();
     expect(match.gates()).toEqual([{ objective: "test:monsters", satisfied: false }]);
@@ -103,7 +112,26 @@ test.skipIf(!await Bun.file(path).exists())("original Copper combat owns health 
     const first = combat.apply(request(10));
     expect(first.kind).toBe("committed"); expect(combat.read(target.id)?.health).toBe(60); expect(outcomes).toHaveLength(1);
     expect(pain).toBe(1); expect(transformed).toBe(1); expect(sounds).toContain("knight/khurt.wav");
+    for (let index = 0; index < 2; index++) source.invoke({ function: "bubble_spawn", arguments: [{ kind: "vector", value: origin }], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>());
+    const [firstNode, secondNode] = actors.ownedBy("mod:copper-combat").filter(actor => !actor.id.equals(target.id));
+    if (firstNode === undefined || secondNode === undefined) throw new Error("Original source nodes missing");
+    const firstSlot = actors.sourceOf(firstNode.id)?.slot, secondSlot = actors.sourceOf(secondNode.id)?.slot;
+    if (firstSlot === undefined || secondSlot === undefined) throw new Error("Original node references missing");
+    const firstRef = source.machine.entities.reference(firstSlot), secondRef = source.machine.entities.reference(secondSlot);
+    const firstWords = source.machine.entities.at(firstSlot), secondWords = source.machine.entities.at(secondSlot), root = source.machine.globalOffset("lastspawn");
+    source.machine.globals.setInt(root, firstRef);
+    firstWords.setFloat(field("count"), 1); secondWords.setFloat(field("count"), 2);
+    firstWords.setInt(field("owner"), secondRef); secondWords.setInt(field("owner"), firstRef);
+    for (const node of [firstWords, secondWords]) node.setInt(field("enemy"), source.machine.entities.reference(slot.slot));
+    expect(match.objective("test:direct-field")).toEqual({ stage: "one", complete: false, carrier: target.id, target: secondNode.id });
+    expect(match.objective("test:linked-field")).toEqual({ stage: "two", complete: true, carrier: target.id, target: firstNode.id });
+    borrowed.invoke({ function: "bubble_spawn", arguments: [{ kind: "vector", value: origin }], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>());
+    const borrowerNode = actors.ownedBy("mod:copper-borrower")[0], borrowerSlot = borrowerNode === undefined ? undefined : actors.sourceOf(borrowerNode.id)?.slot;
+    if (borrowerSlot === undefined) throw new Error("Original borrower node missing");
+    borrowed.machine.globals.setInt(borrowed.machine.globalOffset("lastspawn"), borrowed.machine.entities.reference(borrowerSlot));
     const saved = source.checkpoint();
+    source.machine.globals.setInt(root, secondRef);
+    expect(match.objective("test:direct-field")?.stage).toBe("two"); expect(match.objective("test:linked-field")?.stage).toBe("one");
     combat.apply(request(70));
     expect(combat.read(target.id)?.health).toBe(-12); expect(outcomes).toHaveLength(2); expect(death).toBe(1); expect(transformed).toBe(2);
     expect(sounds).toContain("knight/kdeath.wav");
@@ -112,12 +140,18 @@ test.skipIf(!await Bun.file(path).exists())("original Copper combat owns health 
     expect(match.objective("test:monsters")?.stage).toBe("twice"); expect(kills).toEqual([1, 2, 1]);
     expect(borrowed.machine.globals.float(borrowed.machine.globalOffset("killed_monsters"))).toBe(2);
     expect(source.machine.globals.float(source.machine.globalOffset("killed_monsters"))).toBe(2);
+    const borrowedWords = borrowed.machine.entities.at(borrowerSlot), borrowedLinked = borrowedWords.int(borrowed.machine.fieldOffset("owner"));
+    expect(borrowedWords.float(borrowed.machine.fieldOffset("count"))).toBe(2);
+    expect(borrowed.machine.entities.fromReference(borrowedLinked).float(borrowed.machine.fieldOffset("count"))).toBe(1);
     source.restore(saved); expect(combat.read(target.id)?.health).toBe(60); expect(match.gates()).toEqual([{ objective: "test:monsters", satisfied: false }]);
+    expect(match.objective("test:direct-field")?.stage).toBe("one"); expect(match.objective("test:linked-field")?.stage).toBe("two");
+    source.machine.globals.setInt(root, source.machine.entities.count * source.machine.entities.layout.strideBytes);
+    expect(() => match.objective("test:direct-field")).toThrow(); source.machine.globals.setInt(root, firstRef);
     words.setInt(field("use"), program.functionNamed("SUB_RemoveSoon").index);
     callbacks.use(target, world.id, world.id);
     source.advance({ frame: 1, time: { kind: "seconds", value: 3.2 }, elapsed: { kind: "seconds", value: 0.1 }, phase: "frame-exit" });
     expect(actors.isLive(target.id)).toBe(false); expect(combat.read(target.id)).toBeNull();
   } finally { source.close(); expect(match.objective("test:monsters")).toBeNull();
-    expect(() => borrowed.invoke({ function: "killed_monster", arguments: [], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>())).toThrow("requires its enabled source owner");
+    expect(() => borrowed.invoke({ function: "killed_monster", arguments: [], globals: [] }, new Map<ModCallbackInput, ModRuntimeValue>())).toThrow();
     borrowed.close(); match.close(); actors.close(); await content.close(); }
 }, 30000);

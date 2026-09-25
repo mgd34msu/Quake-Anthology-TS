@@ -10,6 +10,9 @@ import type { Vec3 } from "./math.ts";
 import type { ModPickupRule } from "./original-pickups.ts";
 import type { QcModClientPresentation } from "./mod-client-presentation.ts";
 
+/** A QC entity selector follows original entity fields; reference zero keeps QC world semantics. */
+export type QcModObjectiveStorage = string | { readonly kind: "entity-field"; readonly global: string; readonly indirections: readonly string[]; readonly field: string };
+
 export interface ModQcEmptyArmor { readonly item: "q1:item_armor1" | "q1:item_armor2" | "q1:item_armorInv"; readonly absorption: number; }
 
 export type ModClientInput = "view-angles" | "attack" | "jump" | "impulse" | "forward-move" | "side-move" | "up-move";
@@ -117,7 +120,7 @@ export interface ModQcItems {
 }
 
 export interface ModCallbackDeclaration {
-  readonly objectives?: readonly SourceObjectiveDeclaration<string, string, ModSourceCall>[];
+  readonly objectives?: readonly SourceObjectiveDeclaration<QcModObjectiveStorage, QcModObjectiveStorage, ModSourceCall>[];
   readonly clientPresentation?: QcModClientPresentation;
   readonly version: 1;
   readonly runtime: "quakec";

@@ -105,7 +105,7 @@ export type QvmModProtection = QvmModProtectionCall & (
       readonly selection: QvmModProtectionSelection<"none" | "screen" | "shield"> } }
 );
 export interface QvmModCallbackDeclaration {
-  readonly objectives?: readonly SourceObjectiveDeclaration<{ readonly address: number; readonly encoding: QvmModScalar }, number, QvmModSourceCall>[];
+  readonly objectives?: readonly SourceObjectiveDeclaration<{ readonly address: QvmModObjectiveAddress; readonly encoding: QvmModScalar }, QvmModObjectiveAddress, QvmModSourceCall>[];
   readonly version: 1;
   readonly runtime: "qvm";
   readonly program: { readonly path: string; readonly digest: ContentDigest };
@@ -126,6 +126,8 @@ export interface QvmModCallbackDeclaration {
 }
 
 /** Source client rows are reserved separately from ordinary actor projections. */
+export type QvmModObjectiveAddress = number | Extract<QvmModInputPointer, { readonly kind: "global" }>;
+
 export interface QvmModClients {
   readonly outputs?: readonly ModClientOutputDeclaration<QvmModProtectionScalar, { readonly record: string; readonly offset: number }>[];
   readonly maximum: number;

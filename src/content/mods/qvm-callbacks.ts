@@ -125,6 +125,13 @@ function inputPointer(reader: SaveReader): QvmModInputPointer {
   if (index >= QVM_MAX_PRIVATE_ARGUMENT_WORDS) return reader.fail("Input pointer argument exceeds source call ABI");
   return { ...common, kind: "argument", index };
 }
+function objectiveAddress(reader: SaveReader): import("../../contracts/qvm-mod-callbacks.ts").QvmModObjectiveAddress {
+  if (typeof reader.value === "number") return reader.integer(0);
+  const pointer = inputPointer(reader);
+  if (pointer.kind !== "global") return reader.fail("Persistent objective storage requires a source global pointer");
+  return pointer;
+}
+
 function inputOutput(reader: SaveReader): QvmModInputOutput {
   const kind = reader.field("kind").choice("field", "handler", "command");
   if (kind === "field") {
@@ -179,7 +186,7 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
     ...(reader.field("items").value === undefined ? {} : { items: readQvmModItems(reader.field("items"), sourceCall) }),
     ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(rule => ({ ...readModPickupRule(rule, sourceCall),
       context: rule.field("context").list(field => ({ record: field.field("record").string(), offset: field.field("offset").integer(0), value: argument(field.field("value")) })) })) }),
-    ...(reader.field("objectives").value === undefined ? {} : { objectives: readSourceObjectives(reader.field("objectives"), value => ({ address: value.field("address").integer(0), encoding: value.field("encoding").choice("int32", "float32") }), value => value.integer(0), sourceCall) }),
+    ...(reader.field("objectives").value === undefined ? {} : { objectives: readSourceObjectives(reader.field("objectives"), value => ({ address: objectiveAddress(value.field("address")), encoding: value.field("encoding").choice("int32", "float32") }), objectiveAddress, sourceCall) }),
     actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(), address: record.field("address").integer(1),
       stride: record.field("stride").integer(4), capacity: record.field("capacity").integer(1), fields: record.field("fields").list(field) })),
     initialize: reader.field("initialize").list(sourceCall), callbacks: reader.field("callbacks").list(reader => ({ ...binding(reader), ...sourceCall(reader) })) };

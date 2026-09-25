@@ -1,3 +1,5 @@
+import { QvmMemory } from "../../../src/compat/qvm/memory.ts";
+import { resolveQvmObjectiveAddress } from "../../../src/compat/qvm/mod-objectives.ts";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -99,4 +101,32 @@ test("mounted preparation resolves cgame from the same component mounts and reje
     await writeFile(join(root, presentation.cgame.path), executable(2));
     await expect(prepareMountedQvmMod(options)).rejects.toThrow("presentation differs from its resolved artifact");
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("objective source selectors qualify and follow persistent QVM pointer fields", () => {
+  const address = { kind: "global", address: 8, indirections: [4], offset: 12 } satisfies import("../../../src/contracts/qvm-mod-callbacks.ts").QvmModObjectiveAddress;
+  const value = { ...declaration, objectives: [{ id: "test:pointer-objective", role: "owned", campaignGate: false, botGoal: false,
+    state: { storage: { address, encoding: "int32" }, values: [{ value: 7, stage: "ready", complete: false }] },
+    carrier: { ...address, offset: 16 }, target: 64, change: null }] } satisfies QvmModCallbackDeclaration;
+  const parsed = readQvmModCallbacks(new TextEncoder().encode(JSON.stringify(value)));
+  expect(parsed.objectives).toEqual(value.objectives);
+  expect(() => prepareQvmMod({ description, declaration: parsed, declarationDigest, program })).not.toThrow();
+  const memory = new QvmMemory(new Uint8Array(131072));
+  const write = (address: number, value: number) => memory.dataView(address, 4).setInt32(0, value, true);
+  write(8, 128); write(132, 256); write(268, 7);
+  expect(resolveQvmObjectiveAddress(memory, 131072, 64, () => {})).toBe(64);
+  expect(resolveQvmObjectiveAddress(memory, 131072, address, () => {})).toBe(268);
+  memory.dataView(resolveQvmObjectiveAddress(memory, 131072, address, () => {}), 4).setInt32(0, 9, true);
+  expect(memory.dataView(268, 4).getInt32(0, true)).toBe(9);
+  const saved = memory.bytes.slice(); write(8, 512); write(516, 768);
+  expect(resolveQvmObjectiveAddress(memory, 131072, address, () => {})).toBe(780);
+  memory.writeBytes(0, saved);
+  expect(resolveQvmObjectiveAddress(memory, 131072, address, () => {})).toBe(268);
+  let dereferences = 0;
+  expect(() => resolveQvmObjectiveAddress(memory, 131072, address, () => { if (++dereferences === 2) throw new Error("owner retired"); })).toThrow("owner retired");
+  write(132, 0); expect(() => resolveQvmObjectiveAddress(memory, 131072, address, () => {})).toThrow("null source pointer");
+  write(132, 131072); expect(() => resolveQvmObjectiveAddress(memory, 131072, address, () => {})).toThrow("exceeds original QVM data");
+  expect(() => readQvmModCallbacks(new TextEncoder().encode(JSON.stringify({ ...value, objectives: [{ ...value.objectives[0], carrier: { kind: "argument", index: 0, indirections: [], offset: 0 } }] })))).toThrow("source global pointer");
+  memory.close();
 });

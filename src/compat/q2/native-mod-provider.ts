@@ -331,14 +331,15 @@ export class NativeModProvider implements NativeModProjection {
   constructor(readonly declaration: NativeModDeclaration, readonly services: ModHostServices, readonly instance: ProviderId,
     readonly map: string, private readonly assertCurrent: () => void) {
     this.objectives = new ModSourceObjectives(instance, declaration.objectives ?? [], services.match, {
+      location: declaration => [declaration.state.storage.address, declaration.carrier, declaration.target].map(address => address === null ? "none" : this.objectiveAddress(address).byteOffset).join("|"),
       current: () => !this.closed && !this.closing && !this.restoring,
-      readScalar: storage => this.scalarRead(this.resolve(storage.address), storage.encoding),
-      writeScalar: (storage, value) => this.scalarWrite(this.resolve(storage.address), value, storage.encoding),
-      readActor: storage => { const pointer = this.host.memory.readPointer(this.resolve(storage)); if (pointer === null) return null;
+      readScalar: storage => this.scalarRead(this.objectiveAddress(storage.address), storage.encoding),
+      writeScalar: (storage, value) => this.scalarWrite(this.objectiveAddress(storage.address), value, storage.encoding),
+      readActor: storage => { const pointer = this.host.memory.readPointer(this.objectiveAddress(storage)); if (pointer === null) return null;
         const table = this.host.entities(), delta = pointer.byteOffset - table.base.byteOffset;
         if (delta < 0n || delta % BigInt(table.stride) !== 0n || delta / BigInt(table.stride) >= BigInt(table.count)) throw new Error("Native objective pointer is outside the source actor table");
         const actor = this.actorAt(Number(delta / BigInt(table.stride))); if (actor === null) throw new Error("Native objective references an absent actor"); return actor; },
-      writeActor: (storage, actor) => this.host.memory.writePointer(this.resolve(storage), actor === null ? null : this.address(actor)),
+      writeActor: (storage, actor) => { const pointer = actor === null ? null : this.address(actor); this.host.memory.writePointer(this.objectiveAddress(storage), pointer); },
       invoke: (call, inputs) => { this.execute(call, inputs, true); }, seconds: () => { const time = services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; },
     });
     validateNativeModDeclaration(declaration); for (const record of declaration.actorRecords) this.records.set(record.id, record);
@@ -523,10 +524,14 @@ export class NativeModProvider implements NativeModProjection {
       return result;
     } finally { for (const close of remove.reverse()) close(); }
   }
-  private resolve(value: NativeModAddress): GuestAddress {
+  private objectiveAddress(value: NativeModAddress): GuestAddress {
+    return this.resolve(value, () => { this.current(); if (this.closing || this.restoring) throw new Error("Native objective source is unavailable"); });
+  }
+  private resolve(value: NativeModAddress, current?: () => void): GuestAddress {
+    current?.();
     const memory = this.host.memory; let address = memory.offset(this.host.imageBase, BigInt(value.rva));
-    for (const offset of value.indirections) { const pointer = memory.readPointer(address); if (pointer === null) throw new Error("Native mod layout follows a null source pointer"); address = memory.offset(pointer, BigInt(offset)); }
-    return address;
+    for (const offset of value.indirections) { current?.(); const pointer = memory.readPointer(address); if (pointer === null) throw new Error("Native mod layout follows a null source pointer"); address = memory.offset(pointer, BigInt(offset)); }
+    current?.(); return address;
   }
   private base(record: NativeModActorRecord): GuestAddress {
     const memory = this.host.memory;

@@ -12,6 +12,11 @@ import { normalizeResourcePath } from "../mounts/paths.ts";
 import { readModClientInput } from "./client-input.ts";
 import { readModPickupRule } from "./pickups.ts";
 
+function objectiveStorage(reader: SaveReader): import("../../contracts/mod-callbacks.ts").QcModObjectiveStorage {
+  if (typeof reader.value === "string") return reader.string();
+  return { kind: reader.field("kind").literal("entity-field"), global: reader.field("global").string(), indirections: reader.field("indirections").list(value => value.string()), field: reader.field("field").string() };
+}
+
 function field(reader: SaveReader): ModActorField {
   const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset", "userinfo", "client-input", "team", "score");
   if (binding === "team") return { field: name, binding, values: readSourceTeamValues(reader.field("values")) };
@@ -66,7 +71,7 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
   const combat = reader.field("combat"), initialize = reader.field("initialize"), frame = reader.field("frame"), cvars = reader.field("cvars"), commands = reader.field("commands");
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("quakec"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
-    ...(reader.field("objectives").value === undefined ? {} : { objectives: readSourceObjectives(reader.field("objectives"), value => value.string(), value => value.string(), sourceCall) }),
+    ...(reader.field("objectives").value === undefined ? {} : { objectives: readSourceObjectives(reader.field("objectives"), objectiveStorage, objectiveStorage, sourceCall) }),
     actorFields: reader.field("actorFields").list(field), callbacks: reader.field("callbacks").list(callback),
     ...(reader.field("clientPresentation").value === undefined ? {} : { clientPresentation: {
       hud: reader.field("clientPresentation").field("hud").choice("none", "replace-vitals"),

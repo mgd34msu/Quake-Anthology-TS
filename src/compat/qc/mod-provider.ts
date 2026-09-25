@@ -1,4 +1,6 @@
 import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
+import { resolveQcObjectiveStorage, validateQcObjectiveStorage } from "./mod-objectives.ts";
+import type { QcModObjectiveStorage } from "../../contracts/mod-callbacks.ts";
 import { ModSourceObjectives } from "../../world/session/mod-objectives.ts";
 import { originalTeam, sourceTeam, type SourceMatchPlayer, readSourceMatchField, writeSourceMatchField, validateSourceMatchField } from "../../contracts/source-match.ts";
 import { validateQcSourceCall as validateCall, withQcSourceCall, writeQcSourceValue } from "./source-call.ts";
@@ -156,8 +158,8 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
       validateCall(program, call, new Set<ModCallbackInput>(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"]), "client input");
   }
   for (const objective of declaration.objectives ?? []) {
-    if (program.globalsByName.get(objective.state.storage)?.type !== "float") throw new Error("Objective state requires an original float global");
-    for (const name of [objective.carrier, objective.target]) if (name !== null && program.globalsByName.get(name)?.type !== "entity") throw new Error("Objective actor requires an original entity global");
+    validateQcObjectiveStorage(program, objective.state.storage, "float");
+    for (const storage of [objective.carrier, objective.target]) if (storage !== null) validateQcObjectiveStorage(program, storage, "entity");
     if (objective.role === "owned" && objective.change !== null) validateCall(program, objective.change, new Set<ModCallbackInput>(["self", "other", "activator", "amount", "time"]), "objective change");
   }
   const callbacks = new Set<string>();
@@ -221,7 +223,7 @@ export class QcModProvider {
   private readonly pickupScopes: { readonly actor: ActorId; readonly execution: OriginalPickupExecution; readonly depth: number }[] = [];
   private loading = false;
   private initialized = false;
-  private readonly objectives: ModSourceObjectives<string, string, ModSourceCall>;
+  private readonly objectives: ModSourceObjectives<QcModObjectiveStorage, QcModObjectiveStorage, ModSourceCall>;
   private releaseMatch: (() => void) | null = null;
   private closed = false;
   private presentationGeneration = 0;
@@ -231,10 +233,16 @@ export class QcModProvider {
     readonly services: ModHostServices, readonly random: QcModRandom, readonly media?: QcModMedia) {
     validateQcMod(program, declaration);
     this.objectives = new ModSourceObjectives(module.id, declaration.objectives ?? [], services.match, {
-      current: () => !this.closed, readScalar: name => this.machine.globals.float(this.machine.globalOffset(name)),
-      writeScalar: (name, value) => { this.machine.globals.setFloat(this.machine.globalOffset(name), value); },
-      readActor: name => { const reference = this.machine.globals.int(this.machine.globalOffset(name)); return reference === 0 ? null : this.actor(reference); },
-      writeActor: (name, value) => { this.machine.globals.setInt(this.machine.globalOffset(name), this.reference(value)); },
+      location: declaration => [declaration.state.storage, declaration.carrier, declaration.target].map(storage => {
+        if (storage === null) return "none";
+        const { offset, reference } = this.objectiveStorage(storage);
+        if (reference === null) return `global:${offset}`;
+        const actor = this.actor(reference); return `entity:${actor.slot}:${actor.generation}:${reference}:${offset}`;
+      }).join("|"),
+      current: () => !this.closed, readScalar: storage => { const { words, offset } = this.objectiveStorage(storage); return words.float(offset); },
+      writeScalar: (storage, value) => { const { words, offset } = this.objectiveStorage(storage); words.setFloat(offset, value); },
+      readActor: storage => { const { words, offset } = this.objectiveStorage(storage), reference = words.int(offset); return reference === 0 ? null : this.actor(reference); },
+      writeActor: (storage, value) => { const reference = this.reference(value), { words, offset } = this.objectiveStorage(storage); words.setInt(offset, reference); },
       invoke: (call, inputs) => { this.invoke(call, inputs); }, seconds: () => { const time = services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; },
     });
     this.fields = declaration.actorFields.map(entry => {
@@ -551,6 +559,12 @@ export class QcModProvider {
     if (resource === undefined) return null;
     const value = { index: [...this.precached.keys()].filter(key => key.startsWith(`${kind}:`)).length + 1, resource: resource.resource };
     this.precached.set(key, value); return value;
+  }
+  private objectiveStorage(storage: QcModObjectiveStorage) {
+    return resolveQcObjectiveStorage(this.machine, storage, reference => {
+      if (this.closed) throw new Error("QuakeC objective source is closed");
+      if (reference !== undefined) this.actor(reference);
+    });
   }
   private actor(reference: number): ActorId {
     if (reference === 0) {

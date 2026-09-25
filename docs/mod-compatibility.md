@@ -467,4 +467,14 @@ Primary QVM/native bundles may declare `match: { score, teams }`: `score` is the
 
 Named `objectives` channels either own original state or borrow an enabled owner's state. Each entry declares its `id`, source state storage and value/stage/completion mapping, plus nullable carrier and target references. An owner declares an original `change` call and whether the channel supplies a `campaignGate` or `botGoal`; a borrower declares whether it is `writable`. Borrowed changes invoke the owning callback and then read the accepted result. Conflicting owners are rejected. Disabling an owner removes its channels; save/load retains original source memory and restores borrowed projections.
 
+Objective storage can follow original records. QuakeC accepts a global name or
+`{kind: "entity-field", global, indirections, field}`. The global and intermediate
+fields hold original entity references; the final field holds a float state or
+entity reference. QVM accepts an absolute address or its global-pointer selector
+`{kind: "global", address, indirections, offset}`. Every pointer and final word
+must be aligned and inside original data. Native objectives use the existing
+image-relative address and indirection declaration. Readers and writers resolve
+the same live storage; pointer changes and restoration refresh borrowed
+projections before accepting mutations. Resolving storage does not create actors.
+
 These declarations connect source state and callbacks. They do not automatically identify private objective layouts or replace a primary game mode. Those interfaces need the selected artifact's actual declaration.

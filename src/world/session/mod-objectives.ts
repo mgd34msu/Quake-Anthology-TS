@@ -4,6 +4,7 @@ import type { SourceMatchServices, SourceObjectiveDeclaration, SourceObjectiveSt
 
 interface Storage<Scalar, Reference, Call> {
   current(): boolean;
+  location(declaration: SourceObjectiveDeclaration<Scalar, Reference, Call>): string;
   readScalar(storage: Scalar): number;
   writeScalar(storage: Scalar, value: number): void;
   readActor(storage: Reference): ActorId | null;
@@ -18,7 +19,7 @@ function equal(left: SourceObjectiveState, right: SourceObjectiveState): boolean
 /** Borrowed words project the original owner; only that owner's callback changes an objective. */
 export class ModSourceObjectives<Scalar, Reference, Call> {
   private readonly removals: (() => void)[] = [];
-  private readonly projected = new Map<string, SourceObjectiveState>();
+  private readonly projected = new Map<string, { readonly state: SourceObjectiveState; readonly location: string }>();
   private busy = false;
   private active = false;
   private closed = false;
@@ -47,7 +48,7 @@ export class ModSourceObjectives<Scalar, Reference, Call> {
     this.storage.writeScalar(declaration.state.storage, original.value);
     if (declaration.carrier !== null) this.storage.writeActor(declaration.carrier, value.carrier);
     if (declaration.target !== null) this.storage.writeActor(declaration.target, value.target);
-    this.projected.set(declaration.id, value);
+    this.projected.set(declaration.id, { state: value, location: this.storage.location(declaration) });
   }
   activate(): void {
     if (this.active) return;
@@ -87,7 +88,12 @@ export class ModSourceObjectives<Scalar, Reference, Call> {
     try {
       for (const declaration of this.declarations) if (declaration.role === "borrowed") {
         const before = this.projected.get(declaration.id); if (before === undefined) continue;
-        const value = this.read(declaration); if (equal(before, value)) continue;
+        if (before.location !== this.storage.location(declaration)) {
+          const current = this.match?.objective(declaration.id);
+          if (current == null) throw new Error(`Borrowed objective ${declaration.id} requires its enabled source owner`);
+          this.write(declaration, current); continue;
+        }
+        const value = this.read(declaration); if (equal(before.state, value)) continue;
         if (!declaration.writable) throw new Error(`Original source wrote read-only objective ${declaration.id}`);
         const accepted = this.match?.changeObjective(declaration.id, value);
         if (this.closed || !this.storage.current()) return;

@@ -1,5 +1,7 @@
 import type { QvmModProtectionScalar } from "../../contracts/qvm-mod-callbacks.ts";
 import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
+import { resolveQvmObjectiveAddress, validateQvmObjectiveAddress } from "./mod-objectives.ts";
+import type { QvmModObjectiveAddress } from "../../contracts/qvm-mod-callbacks.ts";
 import { ModSourceObjectives } from "../../world/session/mod-objectives.ts";
 import { originalTeam, sourceTeam, sourceScore, type SourceMatchPlayer, readSourceMatchField, writeSourceMatchField, validateSourceMatchField } from "../../contracts/source-match.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
@@ -176,8 +178,7 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
     if (lifecycle.update !== null) checkCall(lifecycle.update, new Set(["self", "time", "elapsed"]));
   }
   for (const objective of declaration.objectives ?? []) {
-    const addresses = [objective.state.storage.address, ...[objective.carrier, objective.target].filter((value): value is number => value !== null)];
-    for (const address of addresses) { range(address, 4); if (address % 4 !== 0) throw new Error("Objective source storage must be aligned"); }
+    for (const address of [objective.state.storage.address, objective.carrier, objective.target]) if (address !== null) validateQvmObjectiveAddress(sourceEnd, address);
     if (objective.role === "owned" && objective.change !== null) checkCall(objective.change, new Set(["self", "other", "activator", "amount", "time"]));
   }
   for (const item of declaration.items?.definitions ?? []) for (const call of [item.actions?.use, item.actions?.drop].filter(call => call !== undefined)) checkCall(call, new Set(["self", "time"]));
@@ -324,20 +325,22 @@ export class QvmModProvider {
   private nextSlot = 0;
   private readonly clientOutputs: SourceModClientOutputs<QvmModProtectionScalar, { readonly record: string; readonly offset: number }>;
   private closed = false;
-  private readonly objectives: ModSourceObjectives<{ readonly address: number; readonly encoding: QvmModScalar }, number, QvmModSourceCall>;
+  private readonly objectives: ModSourceObjectives<{ readonly address: QvmModObjectiveAddress; readonly encoding: QvmModScalar }, QvmModObjectiveAddress, QvmModSourceCall>;
   private releaseMatch: (() => void) | null = null;
   constructor(readonly artifact: Artifact, readonly declaration: QvmModCallbackDeclaration, readonly services: ModHostServices,
     private readonly assertCurrent: () => void, private readonly content: ContentId, private readonly mounts?: MountedContent,
     private readonly writable: UserFileStore | null = null) {
     validateQvmMod(artifact, declaration);
     this.objectives = new ModSourceObjectives(artifact.module.id, declaration.objectives ?? [], services.match, {
+      location: declaration => [declaration.state.storage.address, declaration.carrier, declaration.target].map(address => address === null ? "none" : this.objectiveAddress(address)).join("|"),
       current: () => !this.closed,
-      readScalar: storage => { const word = this.view(storage.address, 4); return storage.encoding === "float32" ? word.getFloat32(0, true) : word.getInt32(0, true); },
-      writeScalar: (storage, value) => { this.view(storage.address, 4).setInt32(0, scalar(value, storage.encoding), true); },
-      readActor: address => { const pointer = this.view(address, 4).getInt32(0, true); if (pointer === 0) return null;
+      readScalar: storage => { const word = this.objectiveWord(storage.address); return storage.encoding === "float32" ? word.getFloat32(0, true) : word.getInt32(0, true); },
+      writeScalar: (storage, value) => { this.objectiveWord(storage.address).setInt32(0, scalar(value, storage.encoding), true); },
+      readActor: address => { const pointer = this.objectiveWord(address).getInt32(0, true); if (pointer === 0) return null;
         const actor = this.actorAt(this.pointerSlot(pointer)); if (actor === null || !services.actors.isLive(actor)) throw new Error("QVM objective references an absent source actor"); return actor; },
       writeActor: (address, actor) => { if (actor !== null && declaration.entityRecord === null) throw new Error("QVM objective requires its declared entity record");
-        this.view(address, 4).setInt32(0, actor === null || declaration.entityRecord === null ? 0 : this.pointer(actor, declaration.entityRecord), true); },
+        const pointer = actor === null || declaration.entityRecord === null ? 0 : this.pointer(actor, declaration.entityRecord);
+        this.objectiveWord(address).setInt32(0, pointer, true); },
       invoke: (call, inputs) => { this.invoke(call, inputs); }, seconds: () => seconds(services),
     });
     if (declaration.clients !== undefined && services.clients === undefined) throw new Error("QVM source clients require destination client identity services");
@@ -641,6 +644,11 @@ export class QvmModProvider {
     assertCurrent: () => this.current(),
     };
   }
+  private objectiveAddress(address: QvmModObjectiveAddress): number {
+    const image = this.artifact.image, end = image.dataLength + image.literalLength + image.bssLength;
+    return resolveQvmObjectiveAddress(this.module.memory, end, address, () => this.current());
+  }
+  private objectiveWord(address: QvmModObjectiveAddress): DataView { return this.view(this.objectiveAddress(address), 4); }
   private view(address: number, size: number): DataView { return this.module.memory.dataView(address, size); }
   private vector(address: number): Vec3 { const view = this.view(address, 12); return { x: view.getFloat32(0, true), y: view.getFloat32(4, true), z: view.getFloat32(8, true) }; }
   private writeVector(address: number, value: Vec3): void { const view = this.view(address, 12); [value.x, value.y, value.z].forEach((value, index) => view.setInt32(index * 4, scalar(value, "float32"), true)); }
