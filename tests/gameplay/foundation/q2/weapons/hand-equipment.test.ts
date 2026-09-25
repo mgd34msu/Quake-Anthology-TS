@@ -9,7 +9,7 @@ import { GameplayAuthority, SharedInventoryTable, createQ2CombatPolicy, nativeVi
 import { Q2EntityServices } from "../../../../../src/content/q2/foundation/entity-services.ts";
 import type { Q2Edition, Q2FoundationHost, Q2PresentationEvent, Q2TraceRequest } from "../../../../../src/content/q2/foundation/host.ts";
 import { Q2Weapons, Q2WeaponState } from "../../../../../src/content/q2/foundation/weapons/index.ts";
-import type { Q2WeaponEvent, Q2WeaponInput } from "../../../../../src/content/q2/foundation/weapons/index.ts";
+import type { Q2WeaponEvent, Q2WeaponInput, Q2WeaponHooks } from "../../../../../src/content/q2/foundation/weapons/index.ts";
 
 import { Q2HandGrenadeEquipment, HAND_GRENADE_AMMO } from "../../../../../src/content/q2/equipment/hand-grenades.ts";
 import type { HandGrenadeEquipmentInput } from "../../../../../src/content/q2/equipment/hand-grenades.ts";
@@ -33,7 +33,7 @@ const input: Q2WeaponInput = {
   haste: false, noStackDouble: false, instantSwitch: false, quickSwitch: true, infiniteAmmo: false, playersCollide: true, gravity: 800, weaponThunk: false,
 };
 
-function fixture(edition: Q2Edition, frameSeconds = 0.1) {
+function fixture(edition: Q2Edition, frameSeconds = 0.1, modifiers: Pick<Q2WeaponHooks, "quadMultiplier" | "sourceDamageMultiplier" | "firingInterval"> = {}) {
   let now = 0;
   const randomCalls: number[] = [];
   const reaction = { death: (): undefined => undefined };
@@ -76,7 +76,7 @@ function fixture(edition: Q2Edition, frameSeconds = 0.1) {
   };
   const game = new Q2EntityServices(host, { edition, mapName: "weapon-check", skill: 1, mode: "singleplayer", deathmatchFlags: 0, maxClients: 1,
     provider: "q2:game", campaign: "q2:campaign", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement" }, []);
-  const weapons = new Q2Weapons({ emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
+  const weapons = new Q2Weapons({ ...modifiers, emit: event => { events.push(event); return undefined; }, noise: () => undefined, dodge: () => undefined,
     lagCompensation: { kind: "current-world" }, ammoChanged: () => undefined, canTarget: () => true });
   const equipment = new Q2HandGrenadeEquipment(game, weapons);
   equipment.configure(player.id, loadout);
@@ -237,4 +237,59 @@ test("native hand grenade and offhand reserve the same last unit before cooking 
     expect([...f.game.entities.values()].filter(entity => entity.classname === "hgrenade")).toHaveLength(1);
     expect(f.inventory.count(f.player.id, HAND_GRENADE_AMMO)).toBe(0);
   }
+});
+
+
+test("offhand grenade reuses primary damage hooks only at emission and keeps independent stacking", () => {
+  for (const noStackDouble of [false, true]) {
+    let calls = 0;
+    const f = fixture("classic", 0.1, { quadMultiplier: () => 3, sourceDamageMultiplier: actor => {
+      expect(actor).toBe(f.player.id); calls++; return 2;
+    } });
+    f.step(0, { pressed: true });
+    for (let frame = 1; frame <= 11; frame++) f.step(frame / 10);
+    expect(calls).toBe(0);
+    const powers = { quadUntil: 10, doubleUntil: 10, noStackDouble };
+    f.step(1.2, { ...powers, held: false, released: true });
+    expect(calls).toBe(0);
+    f.step(1.3, { ...powers, held: false });
+    const grenade = [...f.game.entities.values()].find(entity => entity.classname === "hgrenade");
+    expect(grenade?.damage).toBe(125 * 3 * 2 * (noStackDouble ? 1 : 2));
+    expect(calls).toBe(1);
+    f.step(1.4, { held: false });
+    expect(calls).toBe(1);
+    f.actors.close();
+  }
+});
+
+test("complete source multiplier is independent of Quad timers and cannot emit after owner retirement", () => {
+  for (const retire of [false, true]) {
+    let calls = 0;
+    const f = fixture("rerelease", 0.1, { sourceDamageMultiplier: actor => {
+      expect(actor).toBe(f.player.id); calls++;
+      if (retire) f.actors.release(f.player);
+      return 6;
+    } });
+    f.step(0, { pressed: true });
+    for (let frame = 1; frame <= 11; frame++) f.step(frame / 10);
+    expect(calls).toBe(0);
+    f.step(1.2, { held: false, released: true });
+    expect(calls).toBe(1);
+    const grenade = [...f.game.entities.values()].find(entity => entity.classname === "hand_grenade");
+    if (retire) { expect(grenade).toBeUndefined(); expect(f.equipment.state(f.player.id)).toBeNull(); }
+    else expect(grenade?.damage).toBe(750);
+    f.actors.close();
+  }
+});
+
+
+test("cadence source retirement cannot republish an equipment action", () => {
+  let calls = 0;
+  const f = fixture("classic", 0.1, { firingInterval: actor => {
+    expect(actor).toBe(f.player.id); calls++; f.actors.release(f.player); return 0.05;
+  } });
+  f.step(0); expect(calls).toBe(0);
+  f.step(0, { pressed: true }); expect(calls).toBe(1);
+  expect(f.equipment.state(f.player.id)).toBeNull(); expect(f.game.entities.size).toBe(0);
+  f.actors.close();
 });

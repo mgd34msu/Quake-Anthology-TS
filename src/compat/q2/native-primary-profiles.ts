@@ -17,7 +17,9 @@ export function readNativePrimaryWeapons(reader: SaveReader, digest: ContentDige
   const argument = dispatcher.field("argument").integer(0), arguments_ = dispatcher.field("arguments").integer(1);
   if (argument >= arguments_) dispatcher.fail("dispatcher actor argument is outside its call");
   const milliseconds = time.field("milliseconds").finite(); if (milliseconds <= 0) time.fail("clock scale must be positive");
-  return { digest, abi, dispatcher: { entry: { kind: "rva", rva: offset(dispatcher.field("entry").field("rva")) }, record: dispatcher.field("record").literal("entity"), argument, arguments: arguments_ },
+  const equipmentContexts = reader.field("equipmentContexts").list(value => ({ provider: namespaced(value.field("provider")), item: value.field("item").nullable(namespaced) }));
+  if (new Set(equipmentContexts.map(context => context.provider)).size !== equipmentContexts.length) reader.field("equipmentContexts").fail("duplicate equipment source context");
+  return { digest, abi, equipmentContexts, dispatcher: { entry: { kind: "rva", rva: offset(dispatcher.field("entry").field("rva")) }, record: dispatcher.field("record").literal("entity"), argument, arguments: arguments_ },
     decisions: reader.field("decisions").list(value => ({ ...region(value), fields: value.field("fields").list(value => ({ field: field(value.field("field")), clearMask: value.field("clearMask").integer(1) })) })),
     spawn: { entry: offset(spawn.field("entry")), accepted: spawn.field("accepted").list(test) }, active: reader.field("active").list(test),
     committedInput: reader.field("committedInput").list(value => value.list(test)), continuations: reader.field("continuations").list(value => value.list(test)),

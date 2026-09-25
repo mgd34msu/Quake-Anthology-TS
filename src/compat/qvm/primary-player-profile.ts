@@ -60,6 +60,8 @@ export function readQvmPrimaryWeapons(reader: SaveReader, artifact: Artifact, ca
     comparison: value.field("comparison").choice("equals", "at-most"), value: integer(value.field("value"), -0x80000000, 0x7fffffff) });
   const stage = reader.field("stage"), dispatcher = stage.field("dispatcher"), selection = stage.field("selection"), request = stage.field("request"), actor = dispatcher.field("actor");
   const movement = reader.field("equipmentMovement"), availability = reader.field("availability"), powers = reader.field("powerups"), torso = reader.field("torsoAnimation");
+  const equipmentContexts = reader.field("equipmentContexts").list(value => ({ provider: namespaced(value.field("provider")), item: value.field("item").nullable(namespaced) }));
+  if (new Set(equipmentContexts.map(context => context.provider)).size !== equipmentContexts.length) reader.field("equipmentContexts").fail("duplicate equipment source context");
   const damage = reader.field("damageFactor"), delay = reader.field("delayPlayer"), water = reader.field("waterLevel"), teleport = reader.field("teleport"), drop = reader.field("drop"), give = reader.field("give"), named = give.field("named");
   const profile: QvmPrimaryWeaponProfile = { ...common, clientPointer: entity(reader.field("clientPointer")), maxHealth: client(reader.field("maxHealth")), persistentMaxHealth: client(reader.field("persistentMaxHealth")),
     stage: { dispatcher: { entry: entry(dispatcher.field("entry"), artifact), actor: { record: actor.field("record").literal("client"), pointer: sourcePointer(actor.field("pointer"), dataBytes) } },
@@ -73,7 +75,7 @@ export function readQvmPrimaryWeapons(reader: SaveReader, artifact: Artifact, ca
     torsoAnimation: { entry: entry(torso.field("entry"), artifact), attack: torso.field("attack").integer(0), melee: torso.field("melee").integer(0) },
     waterLevel: { entityOffset: entity(water.field("entityOffset")), movementOffset: aligned(water.field("movementOffset"), artifact.image.allocatedDataLength) },
     damageFactor: { entry: entry(damage.field("entry"), artifact), result: global(damage.field("result")), stop: region(damage.field("stop")) },
-    delay: evaluation(reader.field("delay")), delayPlayer: { movementGlobal: global(delay.field("movementGlobal")), playerOffset: aligned(delay.field("playerOffset"), artifact.image.allocatedDataLength) },
+    equipmentContexts, delay: evaluation(reader.field("delay")), delayPlayer: { movementGlobal: global(delay.field("movementGlobal")), playerOffset: aligned(delay.field("playerOffset"), artifact.image.allocatedDataLength) },
     teleport: { entry: entry(teleport.field("entry"), artifact), region: evaluation(teleport.field("region")), objectives: evaluation(teleport.field("objectives")), spawn: entry(teleport.field("spawn"), artifact), view: entry(teleport.field("view"), artifact) },
     drop: { entry: entry(drop.field("entry"), artifact), argument: integer(drop.field("argument"), 0, QVM_MAX_PRIVATE_ARGUMENT_WORDS - 1), weapon: entity(drop.field("weapon")), ammo: client(drop.field("ammo"), 64), region: region(drop.field("region")) },
     give: { entry: entry(give.field("entry"), artifact), argument: integer(give.field("argument"), 0, QVM_MAX_PRIVATE_ARGUMENT_WORDS - 1), weapons: give.field("weapons").integer(0), ammo: give.field("ammo").integer(0),

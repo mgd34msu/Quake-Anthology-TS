@@ -1,6 +1,7 @@
 import { QvmEquipmentMovement, type QvmEquipmentMotion, type QvmEquipmentMovementProfile } from "./game-equipment-movement.ts";
+import { sourceEquipmentItem, type SourceEquipmentContext } from "../../contracts/source-items.ts";
 import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";
-import type { ActorId } from "../../contracts/identity.ts";
+import type { ActorId, ProviderId } from "../../contracts/identity.ts";
 import type { Vec3 } from "../../contracts/math.ts";
 import type { ItemId } from "../../contracts/gameplay.ts";
 import type { QvmWeaponActor } from "../../contracts/qvm-mod-items.ts";
@@ -21,6 +22,7 @@ export interface QvmPrimaryWeaponProfile {
   readonly clientPointer: number;
   readonly stage: QvmWeaponDispatcherDefinition;
   readonly damageFactor: { readonly entry: number; readonly result: number; readonly stop: { readonly entry: number; readonly join: number } };
+  readonly equipmentContexts: readonly SourceEquipmentContext[];
   readonly delay: QvmRegionEvaluation;
   readonly delayPlayer: { readonly movementGlobal: number; readonly playerOffset: number };
   readonly teleport: { readonly entry: number; readonly region: QvmRegionEvaluation; readonly objectives: QvmRegionEvaluation; readonly spawn: number; readonly view: number };
@@ -238,6 +240,23 @@ export class QvmPrimaryWeapons {
       if (result === null || !Number.isFinite(result) || result < 0) throw new Error("Original QVM damage factor did not produce a finite result");
       return result;
     } finally { view.setInt32(0, previous, true); }
+  }
+  equipmentContext(provider: ProviderId): ItemId | null {
+    const item = sourceEquipmentItem(this.profile.equipmentContexts, provider);
+    if (item !== null && this.profile.stage.selection.field.record !== "client")
+      throw new Error(`Equipment ${provider} requires an original client selection field`);
+    if (item !== null && !this.profile.stage.selection.values.some(value => value.item === item))
+      throw new Error(`Equipment ${provider} names an unavailable original cadence item ${item}`);
+    return item;
+  }
+  equipmentDelay(actor: ActorId, provider: ProviderId, milliseconds: number): number {
+    const item = this.equipmentContext(provider);
+    if (item === null) return this.weaponDelay(actor, milliseconds);
+    const selection = this.profile.stage.selection, value = selection.values.find(value => value.item === item);
+    if (value === undefined || selection.field.record !== "client") throw new Error("Equipment cadence has no original client selection field");
+    const pointer = this.pointer(actor), view = this.game.module.memory.dataView(pointer + selection.field.offset, 4), previous = view.getInt32(0, true);
+    try { view.setInt32(0, value.value, true); return this.weaponDelay(actor, milliseconds); }
+    finally { if (this.live(actor) && this.pointer(actor) === pointer) view.setInt32(0, previous, true); }
   }
   weaponDelay(actor: ActorId, milliseconds: number): number {
     if (!Number.isInteger(milliseconds) || milliseconds < 0 || milliseconds > 0x7fffffff) throw new Error("Original QVM weapon delay requires its int32 input");

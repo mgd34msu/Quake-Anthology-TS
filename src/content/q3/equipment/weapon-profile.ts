@@ -16,6 +16,7 @@ export function q3PrimaryWeaponProfile(artifact: QvmModuleOptions["artifact"], w
     drop: { entry: 158347, argument: 0, weapon: 192, ammo: 376, region: { entry: 158571, join: 158674 } },
     give: { entry: 139391, argument: 0, weapons: 139524, ammo: 139574, named: { entry: 139936, join: 139947, name: 24, item: 36 } },
     damageFactor: { entry: 217003, result: 1616724, stop: { entry: 217081, join: 217113 } },
+    equipmentContexts: [{ provider: "q2:equipment/hand-grenades", item: null }],
     delay: { entry: 34318, join: 34350, inputs: [12], result: 12 },
     delayPlayer: { movementGlobal: 1091860, playerOffset: 0 },
     teleport: { entry: 118339, region: { entry: 118552, join: 118726, inputs: [], result: null },

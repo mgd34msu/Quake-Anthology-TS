@@ -9,10 +9,10 @@ const throwInput: HandActionInput["throw"] = {
   project: (_angles, offset) => ({ start: offset, direction: { x: 1, y: 0, z: 0 } }),
 };
 
-function fixture(edition: HandActionInput["edition"]) {
+function fixture(edition: HandActionInput["edition"], firingInterval: (seconds: number) => number = seconds => seconds) {
   let state: HandAction = { kind: "idle" }, ammo = 1, committed = 0;
   const emitted: HandProjectileSpec[] = [], sounds: string[] = [];
-  const host: HandActionHost = {
+  const host: HandActionHost = { firingInterval,
     reserve: () => { if (ammo === 0) return false; ammo--; return true; },
     consume: () => { committed++; return undefined; }, refund: () => { ammo++; return undefined; },
     emit: spec => { emitted.push(spec); return undefined; }, sound: event => { sounds.push(event); return undefined; },
@@ -261,4 +261,30 @@ test("a restored preparation deadline catches up without resetting its fuse or r
   expect(emitted[0]?.fuse).toBeCloseTo(3.05);
   expect(consumed).toBe(1);
   expect(sounds).toEqual(["cock", "cook-start", "cook-stop"]);
+});
+
+
+test("source cadence changes action deadlines while the cooking fuse retains real source time", () => {
+  for (const edition of ["classic", "rerelease"] satisfies readonly HandActionInput["edition"][]) {
+    const intervals: number[] = [];
+    const f = fixture(edition, seconds => { intervals.push(seconds); return seconds / 2; });
+    f.step(0);
+    expect(intervals).toEqual([]);
+    f.step(0, { pressed: true });
+    for (let frame = 1; frame <= 11; frame++) f.step(frame / 20);
+    const cooking = f.state(); if (cooking.kind !== "cooking") throw new Error("Missing accelerated cooking phase");
+    expect(cooking.expiresAt).toBeCloseTo((edition === "classic" ? 0.55 : 0.5) + 3.2);
+    const calls = intervals.length;
+    f.step(1); expect(intervals.length).toBe(calls); expect(f.emitted).toHaveLength(0);
+    f.step(1, { held: false, released: true });
+    if (edition === "classic") { expect(f.emitted).toHaveLength(0); f.step(1.05, { held: false }); }
+    expect(f.emitted).toHaveLength(1);
+    const release = edition === "classic" ? 1.05 : 1;
+    expect(f.emitted[0]?.fuse).toBeCloseTo(cooking.expiresAt - release);
+    const recovering = f.state(); if (recovering.kind !== "recovering") throw new Error("Missing recovery");
+    expect(recovering.readyAt).toBeCloseTo(release + 0.5);
+    expect(intervals.filter(seconds => seconds === 1)).toHaveLength(1);
+    expect(intervals.every(seconds => seconds === 0.1 || seconds === 1)).toBe(true);
+    f.step(recovering.readyAt, { held: false }); expect(f.state().kind).toBe("idle");
+  }
 });

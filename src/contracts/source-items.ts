@@ -4,6 +4,15 @@ import type { InventoryEntry, ItemId } from "./gameplay.ts";
 import type { ActorId, OwnedActor, ProviderId } from "./identity.ts";
 import type { HeldWeaponDeclaration } from "./held-weapon.ts";
 
+export interface SourceEquipmentContext { readonly provider: ProviderId; readonly item: ItemId | null; }
+
+export function sourceEquipmentItem(contexts: readonly SourceEquipmentContext[], provider: ProviderId): ItemId | null {
+  const matches = contexts.filter(context => context.provider === provider), context = matches[0];
+  if (context === undefined) throw new Error(`Equipment ${provider} has no declared original cadence context`);
+  if (matches.length !== 1) throw new Error(`Equipment ${provider} has duplicate original cadence contexts`);
+  return context.item;
+}
+
 export type SourceItemAction = "use" | "drop";
 export interface SourceItemActionCalls<Call> { readonly use?: Call; readonly drop?: Call; }
 export function sourceItemActionNames<Call>(calls: SourceItemActionCalls<Call>): readonly SourceItemAction[] {

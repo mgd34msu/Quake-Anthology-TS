@@ -6,6 +6,7 @@ import type { HandAction, HandActionHost, HandActionInput } from "../foundation/
 import type { HandProjectileSpec } from "../foundation/weapons/hand-grenade.ts";
 import type { Q2Ballistics } from "../foundation/weapons/ballistics.ts";
 import type { Q2WeaponInput } from "../foundation/weapons/types.ts";
+import { q2WeaponDamageMultiplier } from "../foundation/weapons/damage.ts";
 
 export const HAND_GRENADE_AMMO = "q2:ammo_grenades";
 
@@ -90,8 +91,8 @@ export class Q2HandGrenadeEquipment {
     if (owner === null || input.lifecycle === "removed") { this.states.delete(actor); return undefined; }
     const now = this.game.host.now(), config = current.config, effects: HandEffect[] = [];
     const lifecycle = input.lifecycle === "alive" && (this.game.host.combat.read(actor)?.health ?? 0) <= 0 ? "dead" : input.lifecycle;
-    const quad = input.quadUntil > now;
     const host: HandActionHost = {
+      firingInterval: seconds => this.ballistics.hooks.firingInterval?.(actor, seconds) ?? seconds,
       reserve: () => {
         if (config.infiniteAmmo) return true;
         if (!this.game.host.inventory.consume(owner, HAND_GRENADE_AMMO, 1)) return false;
@@ -113,7 +114,8 @@ export class Q2HandGrenadeEquipment {
       const action = stepHandAction(current.action, { now, edition: this.game.options.edition, enabled: config.enabled,
         pressed: input.pressed, held: input.held, released: input.released, lifecycle, haste: input.haste, quadFire: input.quadFireUntil > now,
         throw: { angles: input.angles, gravity: input.gravity, project: input.project,
-          damageMultiplier: (quad ? 4 : 1) * (input.doubleUntil > now && !(quad && input.noStackDouble) ? 2 : 1) } }, host);
+          damageMultiplier: 1 } }, host);
+      if (this.states.get(actor) !== current || !this.game.host.actors.isLive(actor)) return undefined;
       const next: HandGrenadeEquipmentState = { config, action };
       this.states.set(actor, next);
       // Immediate explosions can synchronously kill or remove their owner. Publish the
@@ -122,7 +124,12 @@ export class Q2HandGrenadeEquipment {
         if (this.states.get(actor) !== next || !this.game.host.actors.isLive(actor)) break;
         switch (effect.kind) {
           case "ammo": this.ballistics.hooks.ammoChanged(actor, HAND_GRENADE_AMMO); break;
-          case "emit": this.ballistics.fireHandGrenade(actor, this.game, { ...effect.spec, timer: effect.spec.fuse, playersCollide: input.playersCollide }); break;
+          case "emit": {
+            const damage = effect.spec.damage * q2WeaponDamageMultiplier(actor, input, now, this.ballistics.hooks);
+            if (this.states.get(actor) !== next || !this.game.host.actors.isLive(actor)) break;
+            this.ballistics.fireHandGrenade(actor, this.game, { ...effect.spec, damage, timer: effect.spec.fuse, playersCollide: input.playersCollide });
+            break;
+          }
           case "sound": {
             const body = this.game.host.bodies.read(actor);
             if (body === null) throw new Error("Hand grenade owner lost its shared body before removal");

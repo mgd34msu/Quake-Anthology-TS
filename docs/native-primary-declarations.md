@@ -53,6 +53,13 @@ ABI and must match it. Source tests can inspect scalar or pointer fields in the
 `entity`, `client` or `image` record. Fields, item tables and executable addresses
 are checked before the DLL's `Init` executes.
 
+`weapons.equipmentContexts` maps each enabled equipment provider to its original
+cadence item. For example, `{"provider":"q2:equipment/hand-grenades","item":"q2:ammo_grenades"}`
+uses the DLL's authored grenade descriptor while evaluating its original timing.
+Use `item: null` only when the qualified source timing rule is item-independent.
+Missing contexts or absent items reject admission. Preparation/recovery modifiers
+do not change the grenade fuse.
+
 Inventory prototypes identify real source item descriptors. Original scanners
 and callbacks still decide whether an action is allowed. Prototypes do not create
 new weapon types or replace source refusal, attack timing, buffered shots or

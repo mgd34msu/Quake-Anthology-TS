@@ -7,6 +7,7 @@ import type { Vec3 } from "../../../../contracts/math.ts";
 import { add, scale, zero } from "../fields.ts";
 import type { Q2GameServices } from "../host.ts";
 import { Q2Ballistics } from "./ballistics.ts";
+import { q2WeaponDamageMultiplier } from "./damage.ts";
 import { Q2_BASE_WEAPONS } from "./definitions.ts";
 import { calculateHandThrow, handFuseDeadline, handRecoverySeconds } from "./hand-grenade.ts";
 import { angleVectors } from "./vectors.ts";
@@ -399,8 +400,7 @@ export class Q2Weapons extends Q2Ballistics {
   }
 
   multiplier(context: Q2WeaponContext): number {
-    const quad = context.input.quadUntil > context.now;
-    return (quad ? this.hooks.quadMultiplier?.(context.self.actor.id) ?? 4 : 1) * (context.input.doubleUntil > context.now && !(quad && context.input.noStackDouble) ? 2 : 1) * (this.hooks.sourceDamageMultiplier?.(context.self.actor.id) ?? 1);
+    return q2WeaponDamageMultiplier(context.self.actor.id, context.input, context.now, this.hooks);
   }
 
   powerupSound(context: Q2WeaponContext): undefined {

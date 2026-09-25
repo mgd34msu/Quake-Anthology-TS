@@ -40,6 +40,9 @@ for (const arsenal of arsenals) test.skipIf(!existsSync(resolve(corpus, "q2/base
     for (let index = 0; index < 8; index++) step();
     const mainWeapon = simulation.playerUi(actor).activeWeapon;
     expect(mainWeapon).not.toBeNull();
+    const sourcePlayer = source.game.player(actor);
+    if (sourcePlayer === null) throw new Error("Missing original Q1 powerup owner");
+    sourcePlayer.powerups.set("quad", source.game.time + 30);
     const ammo = simulation.inventory.count(actor, "q2:ammo_grenades");
     simulation.setHandGrenadeInput(actor, true); step();
     expect(simulation.handGrenadeState(actor)?.action.kind).toBe("preparing");
@@ -56,7 +59,7 @@ for (const arsenal of arsenals) test.skipIf(!existsSync(resolve(corpus, "q2/base
     const grenade = launches[0];
     if (grenade === undefined) throw new Error("Offhand source grenade missing");
     expect(grenade.entity.owner?.equals(actor)).toBe(true);
-    expect(grenade.entity.damage).toBe(125);
+    expect(grenade.entity.damage).toBe(500);
     const zombie = [...source.game.entities.values()].find(entity => entity.classname === "monster_zombie" && entity.damageable);
     if (zombie === undefined) throw new Error("Authored e1m3 zombie missing");
     const body = source.game.body(zombie);

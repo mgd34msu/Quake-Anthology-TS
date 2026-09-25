@@ -99,6 +99,7 @@ import { QvmGrappleSource, type QvmGrappleTarget } from "./qvm-grapple-source.ts
 import { QvmGameCombat } from "../../../compat/qvm/game-combat.ts";
 import { QvmCombatBindings } from "../../../compat/qvm/game-combat-binding.ts";
 import { QvmPrimaryWeapons } from "../../../compat/qvm/game-weapons.ts";
+import { sourceEquipmentItem } from "../../../contracts/source-items.ts";
 import { selectedWeaponSources } from "../../../world/gameplay/pickups.ts";
 import { QvmPrimaryPickups } from "../../../compat/qvm/game-pickups.ts";
 import { qvmInventoryBinding, type QvmInventoryProfile } from "../../../compat/qvm/game-inventory.ts";
@@ -1588,7 +1589,7 @@ export class SharedSimulation implements Simulation {
   private prepareSelectedOriginalPickups(profile: PickupSupplyProfile): void {
     this.selectedOriginalSupply = profile;
     if (this.source.kind === "q2-native" && this.selectedSupply !== null) {
-      const source = this.source, admission = this.selectedSupply;
+      const source = this.source.game.source.host, admission = this.selectedSupply;
       this.selectedOriginalPickups = [...new Map([...profile.ammo, ...profile.weapons].map(mapping => [mapping.source, mapping])).values()].map(mapping => {
         const destinations = profile.ammo.some(entry => entry === mapping) ? mapping.destinations
           : [...mapping.destinations, ...profile.ammo.flatMap(entry => entry.destinations)];
@@ -1599,7 +1600,7 @@ export class SharedSimulation implements Simulation {
           take: (offer, execution) => {
             const actor = this.actors.resolveOwned(offer.recipient);
             if (actor === null || !execution.current()) return "refused";
-            const original = source.game.source.host.pickupSupply(offer), quantity = original.quantity;
+            const original = source.pickupSupply(offer), quantity = original.quantity;
             const resolve = quantity === undefined ? undefined : (entry: InventoryEntry) => quantity(entry.count, entry.capacity);
             const cargo = this.droppedPickups.get(offer.pickup);
             if (cargo !== undefined) {
@@ -1803,6 +1804,19 @@ export class SharedSimulation implements Simulation {
     return delay === milliseconds ? seconds : delay / 1000;
   }
 
+  private q2SourceDamageHooks(): Pick<import("../../../content/q2/foundation/weapons/types.ts").Q2WeaponHooks, "quadMultiplier" | "sourceDamageMultiplier"> {
+    return {
+      quadMultiplier: () => this.source.kind === "quakec" ? 1 : this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
+      sourceDamageMultiplier: actor => {
+        if (this.source.kind === "quakec") return 1;
+        if (this.source.kind === "q2-native") return this.requireNativeWeapons().damageFactor(actor);
+        if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(actor);
+        const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
+        return client == null ? 1 : q3WeaponDamageFactor(client, 1, client.ps.product);
+      },
+    };
+  }
+
   private createSelectedQ2Arsenal(): Q2SelectedArsenal {
     const product = this.weaponProvider.content.split(":")[2];
     if (product !== "baseq2" && product !== "xatrix" && product !== "rogue" && product !== "mg2") throw new Error("Selected Q2 arsenal has an unsupported source program");
@@ -1832,14 +1846,7 @@ export class SharedSimulation implements Simulation {
       if (this.source.kind === "q2") this.source.monsters.reportNoise(actor, origin, secondary);
       for (const source of this.monsterSources.values()) if (source.kind === "q2") source.monsters.reportNoise(actor, origin, secondary);
       return undefined;
-    }, dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace), quadMultiplier: () => this.source.kind === "quakec" ? 1 : this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
-      sourceDamageMultiplier: actor => {
-        if (this.source.kind === "quakec") return 1;
-        if (this.source.kind === "q2-native") return this.requireNativeWeapons().damageFactor(actor);
-        if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(actor);
-        const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
-        return client == null ? 1 : q3WeaponDamageFactor(client, 1, client.ps.product);
-      },
+    }, dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace), ...this.q2SourceDamageHooks(),
       firingInterval: (actor, seconds) => this.selectedWeaponDelay(actor, seconds),
       lagCompensation: { kind: "current-world" },
       ammoChanged: actor => this.events.message({ kind: "q2-inventory", counts: this.inventory.entries(actor).map(entry => entry.count) }, actor),
@@ -2117,7 +2124,8 @@ export class SharedSimulation implements Simulation {
       const available = this.equipmentPlayerAvailable(actor);
       if (available && this.nativeEquipmentAlive.get(actor) === false) { this.handGrenades?.respawn(actor); grapple?.release(actor); this.admitGrapple(actor); }
       this.nativeEquipmentAlive.set(actor, available);
-      this.stepHandGrenade(actor, available ? "alive" : "dead"); grapple?.step(actor, available);
+      if (this.source.kind !== "q2-native") this.stepHandGrenade(actor, available ? "alive" : "dead");
+      grapple?.step(actor, available);
     }
     const visited = new Set<OwnedActor>();
     for (const actor of orderedActorTurns(this.actors, actor => this.sourcePosition(actor.id), visited)) {
@@ -2403,9 +2411,20 @@ export class SharedSimulation implements Simulation {
     }
   }
 
+  private handGrenadeInterval(actor: ActorId, provider: ProviderId, seconds: number): number {
+    if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().equipmentDelay(actor, provider, Math.round(seconds * 1000)) / 1000;
+    if (this.source.kind === "q2-native") {
+      const profile = this.nativePrimary(), commands = this.nativePrimaryCommands;
+      if (profile === null || commands === null) throw new Error("Offhand equipment lost its original cadence owner");
+      return commands.withWeapon(actor, sourceEquipmentItem(profile.weapons.equipmentContexts, provider), () => this.requireNativeWeapons().weaponDelay(actor, seconds * 1000) / 1000);
+    }
+    return this.selectedWeaponDelay(actor, seconds);
+  }
+
   private createHandGrenades(): HandGrenadeRuntime | null {
     const selection = this.recipe.equipment.handGrenades;
     if (selection.kind === "disabled") return null;
+    if (this.source.kind === "q3-qvm") this.requireQvmWeapons().equipmentContext(selection.source.provider);
     const timing = providerTiming(this.recipe, selection.source.provider);
     const world = providerTiming(this.recipe, this.recipe.map.entities.provider);
     this.equipmentFrame = providerFrame({ ...this.sourceFrame, elapsed: { kind: "seconds", value: 0 } }, world.clock, timing.clock);
@@ -2418,7 +2437,7 @@ export class SharedSimulation implements Simulation {
       ...(this.source.kind === "quakec" ? { sourceDamageModifier: this.qcDamageModifier() } : {}),
       provider: selection.source.provider, campaign: this.recipe.campaign.kind === "campaign" ? this.recipe.campaign.mission.provider : this.recipe.map.entities.provider,
       combatProvider: this.recipe.combat.provider, inventoryProvider: this.recipe.inventory.provider, movementProvider: this.recipe.movement.provider }, []);
-    const ballistics = new Q2Ballistics({ emit: event => this.events.emit(selection.source.content, { kind: "q2-weapon", event }, this.equipmentFrame.time),
+    const ballistics = new Q2Ballistics({ ...this.q2SourceDamageHooks(), firingInterval: (actor, seconds) => this.handGrenadeInterval(actor, selection.source.provider, seconds), emit: event => this.events.emit(selection.source.content, { kind: "q2-weapon", event }, this.equipmentFrame.time),
       noise: (actor, origin, secondary) => this.source.kind === "q2" ? this.source.monsters.reportNoise(actor, origin, secondary) : undefined,
       dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace),
       lagCompensation: { kind: "current-world" },
@@ -2432,8 +2451,9 @@ export class SharedSimulation implements Simulation {
     if (equipment === null) return undefined;
     const input = this.equipmentWeaponInput(actor), view = this.playerView(actor);
     return equipment.step(actor, { angles: view.angles, gravity: this.physics.gravity * (this.player(actor)?.gravityMultiplier ?? 1),
-      quadUntil: providerFamily(this.recipe.combat.provider) === "q1" ? 0 : input.quadUntil,
-      doubleUntil: input.doubleUntil, quadFireUntil: input.quadFireUntil, haste: input.haste,
+      quadUntil: this.source.kind === "q2-native" || this.source.kind === "q3-qvm" || this.source.kind === "quakec" ? 0 : input.quadUntil,
+      doubleUntil: input.doubleUntil, quadFireUntil: this.source.kind === "q2-native" || this.source.kind === "q3-qvm" ? 0 : input.quadFireUntil,
+      haste: this.source.kind === "q2-native" || this.source.kind === "q3-qvm" || this.source.kind === "q3" ? false : input.haste,
       noStackDouble: input.noStackDouble, playersCollide: input.playersCollide, lifecycle,
       project: (angles, offset) => projectQ2Actor(actor, equipment.controller.game,
         { hand: input.hand, viewHeight: view.viewHeight, playersCollide: input.playersCollide }, angles, offset) }, this.equipmentPlayerAvailable(actor) && !input.spectator);
@@ -5306,12 +5326,13 @@ export class SharedSimulation implements Simulation {
     if (source.kind !== "q2-native") return;
     const retainedDrops = this.options.nativeQ2Travel?.droppedPickups;
     if (retainedDrops !== undefined) this.droppedPickups.revisit(retainedDrops, this.recipe.map.geometry.requestedPath);
-    if (this.selectedArsenal !== null) {
+    if (this.selectedArsenal !== null || this.handGrenades !== null) {
       this.nativePrimaryWeapons?.close();
       const profile = this.nativePrimary()?.weapons ?? null;
       if (profile === null) throw new Error("Native primary weapon source is unqualified");
       this.nativePrimaryWeapons = bindNativePrimaryWeapons(source.game, this.actors, profile, {
-        selected: () => false, completed: (actor, reached) => this.nativeWeaponStep(actor, reached), spawned: actor => this.nativeClientSpawned(actor),
+        selected: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
+        completed: (actor, reached) => this.nativeWeaponStep(actor, reached), spawned: actor => this.nativeClientSpawned(actor),
       });
     }
     const profile = this.nativePrimary(), commandProfile = profile?.commands ?? null, inventoryProfile = profile?.inventory ?? null, dropProfile = profile?.drop ?? null;
@@ -5330,6 +5351,12 @@ export class SharedSimulation implements Simulation {
       });
       for (const item of Object.values(inventoryProfile.prototypes)) if (this.nativePrimaryCommands.sourceItem(item) === null)
         throw new Error(`Native inventory prototype ${item} is absent from its declared original item table`);
+      if (this.handGrenades !== null) {
+        if (profile === null) throw new Error("Offhand equipment has no qualified original cadence profile");
+        const provider = this.handGrenades.selection.source.provider, item = sourceEquipmentItem(profile.weapons.equipmentContexts, provider);
+        if (item !== null && !this.nativePrimaryCommands.weapons().some(weapon => weapon.item === item))
+          throw new Error(`Equipment ${provider} names an unavailable original cadence item ${item}`);
+      }
       if (this.selectedArsenal !== null) {
         const supply = this.selectedOriginalSupply;
         if (supply === null) throw new Error("Native selected weapons require original supply");
@@ -5423,7 +5450,9 @@ export class SharedSimulation implements Simulation {
         this.sourceFrame = this.clock.advance(source.edition === "classic" ? { kind: "seconds", value: frameMilliseconds / 1000 } : { kind: "milliseconds", value: frameMilliseconds });
         this.selectedMilliseconds += frameMilliseconds;
         this.advanceQ1Punch(); this.beginNativeEquipmentFrame(); this.beginQvmSelectedFrame();
-        source.game.frame(frameMilliseconds); this.runQvmSelectedActors(); this.sourceFrame = this.clock.enter("frame-exit");
+        source.game.frame(frameMilliseconds);
+        if (this.handGrenades !== null) for (const actor of this.players()) this.stepHandGrenade(actor, this.equipmentPlayerAvailable(actor) ? "alive" : "dead");
+        this.runQvmSelectedActors(); this.sourceFrame = this.clock.enter("frame-exit");
         this.modOwner?.advance(this.sourceFrame);
       }
       return { snapshot: this.snapshot(), events: this.events.take() };

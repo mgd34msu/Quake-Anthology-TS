@@ -8,6 +8,7 @@ const classicLatched: NativeItemField = { record: "client", offset: 0xdd4, encod
 const retailButtons: NativeItemField = { record: "client", offset: 0x1860, encoding: "uint8" };
 const retailLatched: NativeItemField = { record: "client", offset: 0x1862, encoding: "uint8" };
 const xatrix: NativePrimaryWeaponProfile = {
+  equipmentContexts: [{ provider: "q2:equipment/hand-grenades", item: "q2:ammo_grenades" }],
   digest: xatrixCombatProfile.digest,
   abi: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" },
   dispatcher: { entry: { kind: "rva", rva: 0x36710 }, record: "entity", argument: 0, arguments: 1 },
@@ -40,6 +41,7 @@ const xatrix: NativePrimaryWeaponProfile = {
   damage: { kind: "source-flag", address: 0x6b690, encoding: "int32", factors: [1, 4], region: { entry: 0x36748, join: 0x3676f } },
 };
 const retail: NativePrimaryWeaponProfile = {
+  equipmentContexts: [{ provider: "q2:equipment/hand-grenades", item: "q2:ammo_grenades" }],
   digest: "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd", abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" },
   dispatcher: { entry: { kind: "rva", rva: 0xf05d0 }, record: "entity", argument: 0, arguments: 1 },
   decisions: [

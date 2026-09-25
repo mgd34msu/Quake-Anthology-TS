@@ -22,6 +22,7 @@ export interface HandActionInput extends HandGrenadeTempo {
 }
 
 export interface HandActionHost {
+  firingInterval?(seconds: number): number;
   /** Atomically debit one shared grenade, or reserve an explicitly infinite allowance.
    * The reservation belongs to this action until consume or refund. */
   reserve(): boolean;
@@ -38,18 +39,24 @@ function emit(state: { readonly expiresAt: number }, input: HandActionInput, hos
   host.consume();
   host.emit(calculateHandThrow({ ...input.throw, edition: input.edition, now: input.now,
     alive: input.lifecycle === "alive" || input.lifecycle === "removing", fuseDeadline: input.lifecycle === "dead" && input.edition === "classic" ? input.now : state.expiresAt, held }));
-  return { kind: "recovering", readyAt: handDeadline(input.now, handRecoverySeconds(input), input.edition), requireRelease: held && input.held };
+  return { kind: "recovering", readyAt: handDeadline(input.now, firingInterval(host, handRecoverySeconds(input)), input.edition), requireRelease: held && input.held };
 }
 
-function handFrameDeadline(input: HandActionInput, from = input.now): number {
+function firingInterval(host: HandActionHost, seconds: number): number {
+  const result = host.firingInterval?.(seconds) ?? seconds;
+  if (!Number.isFinite(result) || result < 0) throw new Error("Original hand grenade cadence must produce a finite nonnegative interval");
+  return result;
+}
+
+function handFrameDeadline(input: HandActionInput, host: HandActionHost, from = input.now): number {
   // Source frames land on the simulation clock. Round frame deadlines to milliseconds
   // so binary64 0.2 + 0.1 does not skip the classic turn at 0.3.
-  return (Math.round(from * 1000) + Math.round(handFrameSeconds(input) * 1000)) / 1000;
+  return (Math.round(from * 1000) + Math.round(firingInterval(host, handFrameSeconds(input)) * 1000)) / 1000;
 }
 
 function release(state: { readonly expiresAt: number }, input: HandActionInput, host: HandActionHost, releasedAt: number): HandAction {
   if (input.edition === "rerelease") return emit(state, input, host, false);
-  const throwAt = handFrameDeadline(input, releasedAt);
+  const throwAt = handFrameDeadline(input, host, releasedAt);
   return input.now < throwAt ? { kind: "releasing", expiresAt: state.expiresAt, throwAt } : emit(state, input, host, false);
 }
 
@@ -76,13 +83,13 @@ export function stepHandAction(state: HandAction, input: HandActionInput, host: 
     case "idle":
       if (!input.pressed || !host.reserve()) return state;
       return { kind: "preparing", frame: input.edition === "classic" ? 1 : 2,
-        nextAt: handFrameDeadline(input), releaseQueued: input.released || !input.held };
+        nextAt: handFrameDeadline(input, host), releaseQueued: input.released || !input.held };
     case "preparing": {
       let frame = state.frame, nextAt = state.nextAt;
       while (input.now >= nextAt && frame < 11) {
         if (frame === 5) host.sound("cock");
         frame++;
-        nextAt = handFrameDeadline(input, nextAt);
+        nextAt = handFrameDeadline(input, host, nextAt);
       }
       if (input.now < nextAt) return { kind: "preparing", frame, nextAt,
         releaseQueued: state.releaseQueued || input.released || !input.held };

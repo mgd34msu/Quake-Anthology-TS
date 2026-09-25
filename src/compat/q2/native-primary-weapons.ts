@@ -1,3 +1,4 @@
+import type { SourceEquipmentContext } from "../../contracts/source-items.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, NativeAbi, RawEntityView } from "../../contracts/execution.ts";
 import type { ActorId } from "../../contracts/identity.ts";
@@ -24,6 +25,7 @@ export interface NativePrimaryWeaponProfile {
   readonly client: { readonly byteLength: number; readonly viewAngles: number; readonly buttons: NativeItemField; readonly latchedButtons: NativeItemField };
   readonly attackAnimation: { readonly entry: number; readonly skip: readonly { readonly entry: number; readonly join: number }[] };
   readonly animation: { readonly frame: NativeItemField; readonly end: NativeItemField; readonly priority: NativeItemField; readonly duck: NativeItemField; readonly run: NativeItemField };
+  readonly equipmentContexts: readonly SourceEquipmentContext[];
   readonly delay: { readonly flag: NativeItemField; readonly region: { readonly entry: number; readonly join: number }; readonly evaluate:
     { readonly kind: "source-flag"; readonly factors: readonly number[] }
     | { readonly kind: "source-animation"; readonly entry: number; readonly baselineMilliseconds: number;
