@@ -99,6 +99,8 @@ locations, `llm_ask`, `llm_exec`, and command validation.
 
 - [Documentation index](docs/README.md)
 - [Functional targets and acceptance status](docs/functional-targets/status.md)
+- [Remaining work](docs/remaining-work.md)
+- [Gameplay tick and optimization targets](docs/tick-execution.md)
 - [Installed executable and runtime evidence](docs/execution-status.md#installed-executable-and-recent-fixes)
 - [Architecture contracts](docs/contracts.md)
 - [Performance and fidelity](docs/functional-targets/performance.md)
