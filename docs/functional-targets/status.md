@@ -2,7 +2,7 @@
 
 **22/23 targets are accepted in source. T10 mod interoperability remains open.** Its remaining implementation is listed immediately below the target table. T12 is complete: selected arsenals, inventory actions, offhand source modifiers/cadence, and the original rerelease retained-map pickup lifetime are integrated. Classic and rerelease behavior remain separate.
 
-The installed executable is `6357117f`. Source acceptance does not establish exhaustive artifact compatibility, full campaign playthroughs, physical audio quality, native-peer coverage or acceptable whole-game performance. See the [current delivery](../execution-status.md#installed-executable-and-recent-fixes) for the exact installed changes and runtime evidence.
+The installed executable is `07e24a54`. Source acceptance does not establish exhaustive artifact compatibility, full campaign playthroughs, physical audio quality, native-peer coverage or acceptable whole-game performance. See the [current delivery](../execution-status.md#installed-executable-and-recent-fixes) for the exact installed changes and runtime evidence.
 
 | Target | Function | Status | Accepted progress and remaining work |
 |---|---|---|---|
