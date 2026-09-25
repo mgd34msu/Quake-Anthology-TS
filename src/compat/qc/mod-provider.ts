@@ -1,4 +1,6 @@
 import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
+import { ModSourceObjectives } from "../../world/session/mod-objectives.ts";
+import { originalTeam, sourceTeam, type SourceMatchPlayer, readSourceMatchField, writeSourceMatchField, validateSourceMatchField } from "../../contracts/source-match.ts";
 import { validateQcSourceCall as validateCall, withQcSourceCall, writeQcSourceValue } from "./source-call.ts";
 import type { ModClientPresentationSource, ModClientPresentationFrame } from "../../world/session/mod-client-presentation.ts";
 import { quakeCLocalView } from "../../app/bootstrap/simulation/quakec-local-messages.ts";
@@ -96,10 +98,12 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
     for (const call of pickup.operation.kind === "boolean-grant" ? [pickup.operation.grant] : [pickup.operation.gate, pickup.operation.grant])
       validateCall(program, call, new Set<ModCallbackInput>(["self", "other", "item", "time", "pickup-count", "pickup-has-count", "pickup-dropped"]), "pickup");
   }
+  for (const binding of ["team", "score"]) if (declaration.actorFields.filter(field => field.binding === binding).length > 1) throw new Error(`Duplicate original ${binding} authority field`);
   const fields = new Set<number>();
   const think = declaration.actorFields.filter(field => field.binding === "think"), nextthink = declaration.actorFields.filter(field => field.binding === "nextthink");
   if (think.length !== nextthink.length || think.length > 1) throw new Error("Mod source scheduling requires one think and one nextthink binding together");
   for (const entry of declaration.actorFields) {
+    if (entry.binding === "team" || entry.binding === "score") validateSourceMatchField(entry);
     if (entry.binding === "client-input" && (declaration.clients?.input === undefined || declaration.clients.input.length === 0
       || entry.update === "nonzero" && entry.input === "view-angles")) throw new Error("Mod client input fields require declared applications and scalar nonzero updates");
     if (entry.binding === "client-flags" && entry.privateMask !== undefined
@@ -112,7 +116,7 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
     const type = entry.binding === "private" ? field.type : entry.binding === "constant" ? entry.value.kind
       : entry.binding === "client-input" ? entry.input === "view-angles" ? "vector" : "float"
       : entry.binding === "classname" || entry.binding === "userinfo" ? "string" : entry.binding === "think" ? "function"
-      : entry.binding === "health" || entry.binding === "inventory" || entry.binding === "nextthink" || entry.binding === "client-flags" ? "float" : "vector";
+      : entry.binding === "team" || entry.binding === "score" || entry.binding === "health" || entry.binding === "inventory" || entry.binding === "nextthink" || entry.binding === "client-flags" ? "float" : "vector";
     if (field.type !== type) throw new Error(`Mod actor field ${entry.field} requires ${type}, found ${field.type}`);
     for (let word = field.offset; word < field.offset + (type === "vector" ? 3 : 1); word++) {
       if (fields.has(word)) throw new Error(`Overlapping mod actor field ${entry.field}`);
@@ -150,6 +154,11 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
     }
     for (const binding of declaration.clients.input ?? []) for (const call of binding.calls)
       validateCall(program, call, new Set<ModCallbackInput>(["self", "time", "elapsed", "view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"]), "client input");
+  }
+  for (const objective of declaration.objectives ?? []) {
+    if (program.globalsByName.get(objective.state.storage)?.type !== "float") throw new Error("Objective state requires an original float global");
+    for (const name of [objective.carrier, objective.target]) if (name !== null && program.globalsByName.get(name)?.type !== "entity") throw new Error("Objective actor requires an original entity global");
+    if (objective.role === "owned" && objective.change !== null) validateCall(program, objective.change, new Set<ModCallbackInput>(["self", "other", "activator", "amount", "time"]), "objective change");
   }
   const callbacks = new Set<string>();
   const commands = new Set<string>();
@@ -212,6 +221,8 @@ export class QcModProvider {
   private readonly pickupScopes: { readonly actor: ActorId; readonly execution: OriginalPickupExecution; readonly depth: number }[] = [];
   private loading = false;
   private initialized = false;
+  private readonly objectives: ModSourceObjectives<string, string, ModSourceCall>;
+  private releaseMatch: (() => void) | null = null;
   private closed = false;
   private presentationGeneration = 0;
   private clientSource: ModClientPresentationSource | null = null;
@@ -219,6 +230,13 @@ export class QcModProvider {
   constructor(readonly program: QcProgram, readonly module: ModuleIdentity, readonly declaration: ModCallbackDeclaration,
     readonly services: ModHostServices, readonly random: QcModRandom, readonly media?: QcModMedia) {
     validateQcMod(program, declaration);
+    this.objectives = new ModSourceObjectives(module.id, declaration.objectives ?? [], services.match, {
+      current: () => !this.closed, readScalar: name => this.machine.globals.float(this.machine.globalOffset(name)),
+      writeScalar: (name, value) => { this.machine.globals.setFloat(this.machine.globalOffset(name), value); },
+      readActor: name => { const reference = this.machine.globals.int(this.machine.globalOffset(name)); return reference === 0 ? null : this.actor(reference); },
+      writeActor: (name, value) => { this.machine.globals.setInt(this.machine.globalOffset(name), this.reference(value)); },
+      invoke: (call, inputs) => { this.invoke(call, inputs); }, seconds: () => { const time = services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; },
+    });
     this.fields = declaration.actorFields.map(entry => {
       const field = program.fieldsByName.get(entry.field);
       if (field === undefined) throw new Error(`Missing validated actor field ${entry.field}`);
@@ -354,7 +372,7 @@ export class QcModProvider {
           }, { skip: execute.skip, cancel: execute.cancel });
           return this.combat === null ? wrapped() : this.combat.damage.functionBoundary.run(call, wrapped);
         },
-      }, inlineBoundary: this.items?.weapons?.composeRegions(armorRegions) ?? armorRegions, observeCall: call => { this.input.observeCall(call); return this.combat?.damage.observeCall(call); }, observeEntityStore: store => {
+      }, inlineBoundary: this.items?.weapons?.composeRegions(armorRegions) ?? armorRegions, observeCall: call => { this.objectives.flush(); this.objectives.refresh(); this.input.observeCall(call); return this.combat?.damage.observeCall(call); }, observeEntityStore: store => {
         this.validatePickupStore(store); this.protection?.observe(store);
         const pickup = this.pickupScopes.at(-1);
         this.items?.observe(store, pickup?.actor.equals(this.actor(store.reference)) === true && pickup.depth === this.depth ? pickup.execution : undefined);
@@ -514,7 +532,7 @@ export class QcModProvider {
             || [...this.actorsBySlot].some(([slot, actor]) => slot <= (declaration.clients?.maximum ?? 0) && !projected.some(entry => entry.slot === slot && entry.actor.equals(actor))))
             throw new Error("Saved QuakeC client projection differs from its reserved slot");
         } else if (clients.value !== undefined && clients.value !== null) throw new Error("Saved QuakeC clients require the declared lifecycle service");
-        this.ownedActors.restored();
+        this.ownedActors.restored(); this.objectives.restored();
         for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) { this.clientOutputs.publish(client.actor); this.items?.admit(client.actor); this.pickups?.admit(client.actor); this.protection?.activate(client.actor); } }
         this.clients?.start();
         return undefined;
@@ -613,6 +631,7 @@ export class QcModProvider {
           words.setFloat(field.offset, canonical | (Math.trunc(words.float(field.offset)) & (declared.privateMask ?? 0))); break;
         }
         case "view-offset": { if (this.outputFieldOwned(actor, field.declaration.field)) break; words.setVector(field.offset, this.environment.client(actor)?.viewOffset ?? { x: 0, y: 0, z: 0 }); break; }
+        case "team": case "score": { words.setFloat(field.offset, readSourceMatchField(this.services.match, actor, declared)); break; }
         case "health": {
           words.setFloat(field.offset, this.services.combat.read(actor)?.health ?? 0); break;
         }
@@ -708,6 +727,11 @@ export class QcModProvider {
         case "think": case "nextthink":
           if (this.machine.entities.slot(store.reference) > (this.declaration.clients?.maximum ?? 0)) this.ownedActors.schedule(actor);
           break;
+        case "team": case "score": {
+          writeSourceMatchField(this.services.match, actor.id, declared, words.float(field.offset));
+          if (this.services.actors.isLive(actor.id)) words.setFloat(field.offset, readSourceMatchField(this.services.match, actor.id, declared));
+          break;
+        }
         case "health":
           if (this.services.combat.read(actor.id) === null) throw new Error("Mod health store requires a combat actor");
           this.services.combat.setHealth(actor, words.float(field.offset)); break;
@@ -744,6 +768,7 @@ export class QcModProvider {
   invoke(call: ModSourceCall, inputs: QcModInputs, region?: QcArmorStage): number {
     if (this.closed) throw new Error("Gameplay mod is closed");
     if (this.depth >= 64) throw new Error("Gameplay mod callback recursion exceeded 64 calls");
+    this.objectives.flush(); this.objectives.refresh();
     this.depth++;
     try {
       return withQcSourceCall(this.machine, call, inputs, actor => this.reference(actor), count => {
@@ -755,8 +780,7 @@ export class QcModProvider {
         return result;
       });
     } finally {
-      this.depth--;
-      this.drainRetiredProjections();
+      try { this.objectives.flush(); } finally { this.depth--; this.drainRetiredProjections(); }
     }
   }
   private invokeOwned(index: number, actor: ActorId, other: ActorId | null, time: FrameContext["time"]): void {
@@ -852,6 +876,23 @@ export class QcModProvider {
     return result;
   }
   checkpoint(): QuakeCCheckpoint { this.protection?.assertIdle(); if (this.depth !== 0 || this.input.active) throw new Error("Mod checkpoint requires an idle callback boundary"); return captureQcCheckpoint(this.machine, this.module, this.hostState); }
+  activateMatch(): void {
+    this.objectives.activate();
+    if (this.releaseMatch !== null || !this.fields.some(field => field.declaration.binding === "team" || field.declaration.binding === "score")) return;
+    const match = this.services.match; if (match === undefined) throw new Error("Declared match fields require destination match services");
+    this.releaseMatch = match.bindSource(this.module.id, actor => this.matchPlayer(actor));
+  }
+  private matchPlayer(actor: ActorId): SourceMatchPlayer | null {
+    const owned = this.services.actors.resolveOwned(actor), slot = this.services.actors.sourceOf(actor);
+    if (this.closed || owned?.owner !== this.module.id || slot?.provider !== this.module.id) return null;
+    const team = this.fields.find(field => field.declaration.binding === "team"), score = this.fields.find(field => field.declaration.binding === "score");
+    const current = () => { if (this.closed || this.services.actors.resolveOwned(actor) !== owned || this.services.actors.sourceOf(actor)?.slot !== slot.slot) throw new Error("QuakeC match actor was retired"); return this.machine.entities.at(slot.slot); };
+    return { owner: this.module.id,
+      team: () => team?.declaration.binding === "team" ? sourceTeam(team.declaration.values, current().float(team.offset)) : null,
+      score: () => { if (score === undefined) throw new Error("QuakeC match actor has no score field"); return current().float(score.offset); },
+      setTeam: value => { if (team?.declaration.binding !== "team") throw new Error("QuakeC match actor has no team field"); current().setFloat(team.offset, originalTeam(team.declaration.values, value)); },
+      setScore: value => { if (score === undefined || !Number.isFinite(value)) throw new Error("QuakeC match actor has no finite score field"); current().setFloat(score.offset, value); } };
+  }
   initialize(): undefined {
     if (this.initialized || this.depth !== 0) throw new Error("Mod source initialization must run once at an idle boundary");
     this.loading = true;
@@ -884,6 +925,7 @@ export class QcModProvider {
     return restoreQcCheckpoint(this.machine, this.module, this.hostState, saved);
   }
   close(): undefined {
+    this.objectives.close(); this.releaseMatch?.(); this.releaseMatch = null;
     if (this.closed) return undefined;
     this.closed = true;
     const errors: unknown[] = [];

@@ -7,7 +7,7 @@ import { THREEWAVE_GRAPPLE_DIGEST } from "./threewave-grapple-profile.ts";
 export function q3PrimaryWeaponProfile(artifact: QvmModuleOptions["artifact"], weapons: readonly Q3GuestWeapon[]): QvmPrimaryWeaponProfile | null {
   if (artifact.module.digest !== THREEWAVE_GRAPPLE_DIGEST) return null;
   const field = (offset: number) => ({ record: "client", offset });
-  return { module: artifact.module, abiProfile: "q3-modern", entityStride: 876, clientStride: 944, clientPointer: 516, maxHealth: 220, persistentMaxHealth: 548,
+  return { match: { score: 248, teams: [{ source: "q3:1", team: "team:red", arguments: ["team", "red"] }, { source: "q3:2", team: "team:blue", arguments: ["team", "blue"] }, { source: null, team: null, arguments: ["team", "free"] }] }, module: artifact.module, abiProfile: "q3-modern", entityStride: 876, clientStride: 944, clientPointer: 516, maxHealth: 220, persistentMaxHealth: 548,
     equipmentMovement: { move: 35535, slice: 34707, duck: 32561, movementGlobal: 1091860, locomotion: { entry: 35397, join: 35503 }, mins: 180, maxs: 192 },
     availability: { movementType: 4, excluded: [1, 2, 4, 7, 8], health: 184, team: 260, spectatorTeam: 3, flags: 12, respawnFlag: 512 },
     powerups: { quad: 312, haste: 320, flight: 332 },

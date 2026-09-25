@@ -1,5 +1,7 @@
 import type { QvmModProtectionScalar } from "../../contracts/qvm-mod-callbacks.ts";
 import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
+import { ModSourceObjectives } from "../../world/session/mod-objectives.ts";
+import { originalTeam, sourceTeam, sourceScore, type SourceMatchPlayer, readSourceMatchField, writeSourceMatchField, validateSourceMatchField } from "../../contracts/source-match.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
 import { captureModScenePublication, readModScenePublication, capturePresentationGameState, readPresentationGameState } from "./mod-presentation-checkpoint.ts";
 import { QvmModActorFrame, qvmActorBootstrap, validateQvmModActorFrame } from "./mod-actor-frame.ts";
@@ -54,7 +56,7 @@ import { Q3GuestWorld } from "../../app/bootstrap/simulation/q3/guest-world.ts";
 
 type Artifact = QvmModuleOptions["artifact"];
 type Inputs = ReadonlyMap<ModCallbackInput, ModRuntimeValue>;
-type SharedField = Extract<QvmModActorField, { readonly binding: "health" | "inventory" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }>;
+type SharedField = Extract<QvmModActorField, { readonly binding: "team" | "score" | "health" | "inventory" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }>;
 interface Observation { readonly actor: ActorId; readonly address: number; readonly field: SharedField; readonly bytes: Uint8Array; }
 interface Frame { observations: readonly Observation[]; readonly pending: (() => void)[]; cursor: number; }
 function fieldSize(field: QvmModActorField): number {
@@ -62,7 +64,7 @@ function fieldSize(field: QvmModActorField): number {
     : ["origin", "velocity", "angles", "bounds-min", "bounds-max", "constant-vector"].includes(field.binding) ? 12 : 4;
 }
 function shared(field: QvmModActorField): field is SharedField {
-  return field.binding === "health" || field.binding === "inventory" || field.binding === "origin" || field.binding === "velocity"
+  return field.binding === "team" || field.binding === "score" || field.binding === "health" || field.binding === "inventory" || field.binding === "origin" || field.binding === "velocity"
     || field.binding === "angles" || field.binding === "bounds-min" || field.binding === "bounds-max";
 }
 function scalar(value: number, encoding: QvmModScalar): number {
@@ -95,6 +97,7 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
     records.set(record.id, record);
     const occupied = new Set<number>();
     for (const field of record.fields) {
+      if (field.binding === "team" || field.binding === "score") validateSourceMatchField(field);
       const size = fieldSize(field);
       if (!Number.isSafeInteger(field.offset) || field.offset < 0 || field.offset % 4 !== 0 || size < 1 || field.offset + size > record.stride)
         throw new Error("QVM mod actor field exceeds its source record");
@@ -171,6 +174,11 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
       || artifact.image.instructions[lifecycle.allocate]?.opcode !== QvmOpcode.OP_ENTER
       || artifact.image.instructions[lifecycle.release.entry]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Invalid QVM source actor lifecycle");
     if (lifecycle.update !== null) checkCall(lifecycle.update, new Set(["self", "time", "elapsed"]));
+  }
+  for (const objective of declaration.objectives ?? []) {
+    const addresses = [objective.state.storage.address, ...[objective.carrier, objective.target].filter((value): value is number => value !== null)];
+    for (const address of addresses) { range(address, 4); if (address % 4 !== 0) throw new Error("Objective source storage must be aligned"); }
+    if (objective.role === "owned" && objective.change !== null) checkCall(objective.change, new Set(["self", "other", "activator", "amount", "time"]));
   }
   for (const item of declaration.items?.definitions ?? []) for (const call of [item.actions?.use, item.actions?.drop].filter(call => call !== undefined)) checkCall(call, new Set(["self", "time"]));
   for (const call of declaration.initialize) checkCall(call, new Set(["time"]));
@@ -316,10 +324,22 @@ export class QvmModProvider {
   private nextSlot = 0;
   private readonly clientOutputs: SourceModClientOutputs<QvmModProtectionScalar, { readonly record: string; readonly offset: number }>;
   private closed = false;
+  private readonly objectives: ModSourceObjectives<{ readonly address: number; readonly encoding: QvmModScalar }, number, QvmModSourceCall>;
+  private releaseMatch: (() => void) | null = null;
   constructor(readonly artifact: Artifact, readonly declaration: QvmModCallbackDeclaration, readonly services: ModHostServices,
     private readonly assertCurrent: () => void, private readonly content: ContentId, private readonly mounts?: MountedContent,
     private readonly writable: UserFileStore | null = null) {
     validateQvmMod(artifact, declaration);
+    this.objectives = new ModSourceObjectives(artifact.module.id, declaration.objectives ?? [], services.match, {
+      current: () => !this.closed,
+      readScalar: storage => { const word = this.view(storage.address, 4); return storage.encoding === "float32" ? word.getFloat32(0, true) : word.getInt32(0, true); },
+      writeScalar: (storage, value) => { this.view(storage.address, 4).setInt32(0, scalar(value, storage.encoding), true); },
+      readActor: address => { const pointer = this.view(address, 4).getInt32(0, true); if (pointer === 0) return null;
+        const actor = this.actorAt(this.pointerSlot(pointer)); if (actor === null || !services.actors.isLive(actor)) throw new Error("QVM objective references an absent source actor"); return actor; },
+      writeActor: (address, actor) => { if (actor !== null && declaration.entityRecord === null) throw new Error("QVM objective requires its declared entity record");
+        this.view(address, 4).setInt32(0, actor === null || declaration.entityRecord === null ? 0 : this.pointer(actor, declaration.entityRecord), true); },
+      invoke: (call, inputs) => { this.invoke(call, inputs); }, seconds: () => seconds(services),
+    });
     if (declaration.clients !== undefined && services.clients === undefined) throw new Error("QVM source clients require destination client identity services");
     if (declaration.sourceActors !== undefined && services.engine?.physics === undefined) throw new Error("QVM source actors require destination collision services");
     this.records = new Map(declaration.actorRecords.map(record => [record.id, record]));
@@ -717,12 +737,15 @@ export class QvmModProvider {
     for (const actor of this.projections.keys()) if (this.services.actors.isLive(actor) && this.clientOutputs.has(actor) && this.clientBindings?.admitted(actor) === true) this.clientOutputs.publish(actor);
   }
   private refresh(): void {
+    this.objectives.refresh();
     this.projectionWrites++;
     try {
     for (const [actor, slot] of this.projections) if (!this.owned.has(actor) && !this.retiredProjections.has(actor)) for (const record of this.actorRecords(actor)) for (const field of record.fields) {
       const address = record.address + slot * record.stride + field.offset;
       if (!shared(field)) continue;
-      if (field.binding === "health") {
+      if (field.binding === "team" || field.binding === "score") {
+        this.view(address, 4).setInt32(0, scalar(readSourceMatchField(this.services.match, actor, field), field.encoding), true);
+      } else if (field.binding === "health") {
         const state = this.services.combat.read(actor);
         this.view(address, 4).setInt32(0, scalar(state?.health ?? 0, field.encoding), true);
       } else if (field.binding === "inventory") {
@@ -758,7 +781,18 @@ export class QvmModProvider {
         const owner = this.services.actors.resolveOwned(actor); if (owner === null) throw new Error("QVM mod wrote an expired actor");
         commit(owner);
       }); };
-      if (field.binding === "health" || field.binding === "inventory") {
+      if (field.binding === "team" || field.binding === "score") {
+        const value = field.encoding === "int32" ? this.view(address, 4).getInt32(0, true) : this.view(address, 4).getFloat32(0, true);
+        scalar(value, field.encoding);
+        apply(() => {
+          writeSourceMatchField(this.services.match, actor, field, value);
+          if (!this.retiredProjections.has(actor) && this.services.actors.isLive(actor)) {
+            this.projectionWrites++;
+            try { this.view(address, 4).setInt32(0, scalar(readSourceMatchField(this.services.match, actor, field), field.encoding), true); }
+            finally { this.projectionWrites--; }
+          }
+        });
+      } else if (field.binding === "health" || field.binding === "inventory") {
         const value = field.encoding === "int32" ? this.view(address, 4).getInt32(0, true) : this.view(address, 4).getFloat32(0, true);
         scalar(value, field.encoding);
         if (field.binding === "health") apply(owner => { this.services.combat.setHealth(owner, value); });
@@ -789,6 +823,7 @@ export class QvmModProvider {
     }
   }
   private flush(): void {
+    this.objectives.flush();
     this.captureWrites();
     const frame = this.frames.at(-1); if (frame === undefined) return;
     while (frame.cursor < frame.pending.length) { const commit = frame.pending[frame.cursor++]; if (commit === undefined) throw new Error("QVM source commit disappeared"); commit(); }
@@ -950,7 +985,22 @@ export class QvmModProvider {
     this.rememberDefaults(); this.clientBindings?.start(); this.publish();
   }
   reserveProtection(): void { for (const protection of this.protection) protection.reserve(); }
-  activateProtection(): void { for (const protection of this.protection) protection.activate(); this.pickups.activate(); }
+  private matchPlayer(actor: ActorId): SourceMatchPlayer | null {
+    const owned = this.owned.get(actor), slot = this.projections.get(actor), record = this.declaration.entityRecord === null ? undefined : this.records.get(this.declaration.entityRecord);
+    if (this.closed || owned === undefined || slot === undefined || record === undefined) return null;
+    const team = record.fields.find(field => field.binding === "team"), score = record.fields.find(field => field.binding === "score");
+    const current = (): number => { if (this.closed || this.owned.get(actor) !== owned || !this.services.actors.isLive(actor)) throw new Error("QVM match actor was retired"); return record.address + slot * record.stride; };
+    const read = (field: Extract<QvmModActorField, { binding: "team" | "score" }>): number => { const view = this.view(current() + field.offset, 4); return field.encoding === "float32" ? view.getFloat32(0, true) : view.getInt32(0, true); };
+    const write = (field: Extract<QvmModActorField, { binding: "team" | "score" }>, value: number): void => { const view = this.view(current() + field.offset, 4); if (field.encoding === "float32") view.setFloat32(0, value, true); else view.setInt32(0, sourceScore(value), true); };
+    return { owner: this.artifact.module.id, team: () => team?.binding === "team" ? sourceTeam(team.values, read(team)) : null,
+      score: () => { if (score?.binding !== "score") throw new Error("QVM match actor has no score field"); return read(score); },
+      setTeam: value => { if (team?.binding !== "team") throw new Error("QVM match actor has no team field"); write(team, originalTeam(team.values, value)); },
+      setScore: value => { if (score?.binding !== "score") throw new Error("QVM match actor has no score field"); write(score, value); } };
+  }
+  activateProtection(): void { this.objectives.activate(); if (this.releaseMatch === null && this.declaration.actorRecords.some(record => record.fields.some(field => field.binding === "team" || field.binding === "score"))) {
+    const match = this.services.match; if (match === undefined) throw new Error("Declared match fields require destination match services");
+    this.releaseMatch = match.bindSource(this.artifact.module.id, actor => this.matchPlayer(actor));
+  } for (const protection of this.protection) protection.activate(); this.pickups.activate(); }
   private entityRecord(): QvmModActorRecord {
     const record = this.declaration.entityRecord === null ? undefined : this.records.get(this.declaration.entityRecord);
     if (record === undefined || record.stride < qvmSharedEntityBytes(this.declaration.abiProfile)) throw new Error("QVM engine service requires its declared sharedEntity_t array");
@@ -1270,7 +1320,7 @@ export class QvmModProvider {
     this.reserveProtection();
     this.playerEvents?.close();
     this.clientOutputs.clear();
-    this.module.restore(checkpoint);
+    this.module.restore(checkpoint); this.objectives.restored();
     if (this.declaration.presentation?.runtime === "qvm-scene") this.sceneBaseline = this.scenePublication();
     this.clientBindings?.start();
     for (const entry of this.clientBindings?.players() ?? []) { if (entry.admitted) this.clientOutputs.publish(entry.actor); this.items?.admit(entry.actor); }
@@ -1279,6 +1329,7 @@ export class QvmModProvider {
     return undefined;
   }
   close(): undefined {
+    this.objectives.close(); this.releaseMatch?.(); this.releaseMatch = null;
     if (this.closed) return undefined;
     const errors: unknown[] = [];
     try { this.pickups.close(); } catch (error) { errors.push(error); }

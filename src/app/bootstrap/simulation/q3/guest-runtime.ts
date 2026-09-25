@@ -486,6 +486,11 @@ export class Q3QvmServerGame {
       this.options.clientChanged?.('userinfo', player.actor);
     } finally { this.finishExternalOperation(); }
   }
+  commandImmediate(player: Q3ApplicationPlayer, argv: readonly string[]): void {
+    this.externalOperations++;
+    try { this.running(); this.entry(player); this.game.clientCommand(player.sourceEntity, argv); this.current(); }
+    finally { this.finishExternalOperation(); }
+  }
   async command(player: Q3ApplicationPlayer, argv: readonly string[]): Promise<void> {
     this.externalOperations++;
     try {

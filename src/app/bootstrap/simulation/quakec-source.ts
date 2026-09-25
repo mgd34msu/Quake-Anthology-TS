@@ -8,6 +8,7 @@ import type { QcPickupStage } from "../../../content/q1/quakec/pickup-stage.ts";
 import { qcEmptyArmor } from "../../../content/q1/quakec/armor-points.ts";
 import { QcBorrowedActors } from "../../../compat/qc/borrowed-actors.ts";
 import { QcActorState } from "../../../compat/qc/actor-state.ts";
+import type { SourceTeamAlias } from "../../../contracts/source-match.ts";
 import { readQuakeCCompatibility } from "../../../compat/qc/compatibility.ts";
 import type { RereleaseMessages } from "../../../network/q1/profile.ts";
 import { QuakeCLocalMessages, quakeCLocalView, presentQuakeCLocalMessage } from "./quakec-local-messages.ts";
@@ -100,6 +101,7 @@ function nativeWeapons(program: QcProgram): readonly NativeWeapon[] {
     { item: weaponItem("hipnotic:proximity"), label: q1WeaponDisplayName("hipnotic:proximity"), bit: 65536, impulse: 6, via: 16 }];
 }
 export interface PreparedQuakeCSource {
+  readonly teams?: readonly SourceTeamAlias[];
   readonly combatDeclaration?: NonNullable<ModCallbackDeclaration["combat"]>;
   readonly messageDialect?: RereleaseMessages;
   readonly weaponDeclaration?: QcPrimaryWeaponStageDeclaration;
@@ -123,12 +125,12 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
   if (execution.api.kind !== program.api.kind || execution.api.programVersion !== program.api.programVersion || execution.api.systemCrc !== program.api.systemCrc)
     throw new Error("Shared QuakeC artifact API differs from the selected execution");
   const compatibility = await mounts.open("quakec-compatibility.json");
-  const { messageDialect, pickupCallers, weaponStage: weaponDeclaration, combat: combatDeclaration } = readQuakeCCompatibility(compatibility?.bytes ?? null, program.digest);
+  const { teams, messageDialect, pickupCallers, weaponStage: weaponDeclaration, combat: combatDeclaration } = readQuakeCCompatibility(compatibility?.bytes ?? null, program.digest);
   if (combatDeclaration !== undefined) validateQcModCombat(program, combatDeclaration);
   else id1ProgramBinding(program);
   const declaredPickups = qcDeclaredPickupStages(program, pickupCallers), weaponStage = qcWeaponStage(program, weaponDeclaration);
   if (program.api.kind === "q1-quakeworld" && messageDialect !== "known-retail") throw new Error("Private NetQuake messages cannot be selected for QuakeWorld");
-  return { execution, program, messageDialect, declaredPickups, weaponStage, ...(combatDeclaration === undefined ? {} : { combatDeclaration }), ...(weaponDeclaration === undefined ? {} : { weaponDeclaration }), resources: await prepareQuakeCResources(program, resourceMounts, entityText) };
+  return { execution, program, ...(teams === undefined ? {} : { teams }), messageDialect, declaredPickups, weaponStage, ...(combatDeclaration === undefined ? {} : { combatDeclaration }), ...(weaponDeclaration === undefined ? {} : { weaponDeclaration }), resources: await prepareQuakeCResources(program, resourceMounts, entityText) };
 }
 
 export async function prepareQuakeCResources(program: QcProgram, mounts: MountedContent, entityText = ""): Promise<PreparedQuakeCSource["resources"]> {
@@ -457,7 +459,7 @@ export class QuakeCSource {
   }
   private checkpointHost(): QcExecutorHost {
     return { checkpoint: () => ({ state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
-      kind: this.kind, messageDialect: this.prepared.messageDialect ?? "known-retail", pickupCallers: this.prepared.declaredPickups ?? [], weaponStage: this.prepared.weaponDeclaration ?? null, combat: this.prepared.combatDeclaration ?? null, maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
+      kind: this.kind, teams: this.prepared.teams ?? [], messageDialect: this.prepared.messageDialect ?? "known-retail", pickupCallers: this.prepared.declaredPickups ?? [], weaponStage: this.prepared.weaponDeclaration ?? null, combat: this.prepared.combatDeclaration ?? null, maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
       changeLevelIssued: this.changeLevelIssued, spawning: this.spawning, activeClients: [...this.activeClients].map(savedQcActor),
       borrowedActors: this.borrowed.checkpoint(),
       pendingWeapons: [...this.pendingWeapons].map(([actor, pending]) => ({ actor: savedQcActor(actor), weapon: pending.weapon.item, following: pending.following })),
@@ -488,6 +490,8 @@ export class QuakeCSource {
     if (restore === undefined) return reader.fail("missing restore clients");
     const dialect = reader.field("messageDialect");
     if ((dialect.value === undefined ? "known-retail" : dialect.choice("known-retail", "quake-1-re-ts-private")) !== (this.prepared.messageDialect ?? "known-retail")) return dialect.fail("QuakeC message dialect changed");
+    const teams = reader.field("teams");
+    if (!isDeepStrictEqual(teams.value ?? [], this.prepared.teams ?? [])) return teams.fail("QuakeC team declarations changed");
     const combat = reader.field("combat");
     if (!isDeepStrictEqual(combat.value ?? null, this.prepared.combatDeclaration ?? null)) return combat.fail("QuakeC combat declaration changed");
     const weaponStage = reader.field("weaponStage");
@@ -605,6 +609,33 @@ export class QuakeCSource {
   get timeSeconds(): number { return this.currentTime; }
   get loading(): boolean { return this.spawning; }
   get kind(): "netquake" | "quakeworld" { return id1ProgramBinding(this.prepared.program).kind; }
+  matchTeam(actor: ActorId): string | null {
+    if (this.kind === "quakeworld") {
+      const slot = this.sourceSlot(actor), value = slot === null ? undefined : this.userInfo.get(slot)?.get("team");
+      return value === undefined || value === "" ? null : value;
+    }
+    const value = this.entities.fromReference(this.reference(actor)).float(this.field("team"));
+    return value > 0 ? String(value) : null;
+  }
+  setMatchTeam(actor: ActorId, team: string | null): void {
+    const slot = this.sourceSlot(actor), client = slot === null ? undefined : this.clientIdentities.get(slot);
+    if (slot === null || client === undefined || !this.activeClients.has(actor)) throw new Error("Original team command requires an admitted client");
+    const info = new Map(this.clientInfo(client));
+    if (this.kind === "quakeworld") {
+      if (team !== null && /[\\"\n\r]/.test(team)) throw new Error("Original QW team userinfo is invalid");
+      if (team === null) info.delete("team"); else info.set("team", team);
+    } else {
+      const value = team === null ? NaN : Number(team);
+      if (!Number.isInteger(value) || value < 1 || value > 14) throw new Error("Team has no original Quake color command");
+      info.set("bottomcolor", String(value - 1)); this.entities.at(slot).setFloat(this.field("team"), value);
+    }
+    this.setClientInfo(client, info);
+  }
+  matchScore(actor: ActorId): number { return this.entities.fromReference(this.reference(actor)).float(this.field("frags")); }
+  setMatchScore(actor: ActorId, score: number): void {
+    if (!Number.isFinite(score)) throw new Error("QuakeC score must be finite");
+    this.entities.fromReference(this.reference(actor)).setFloat(this.field("frags"), score);
+  }
   deathType(actor: ActorId): string {
     const field = this.prepared.program.fieldsByName.get("deathtype");
     return field === undefined ? "" : this.machine.strings.get(this.entities.fromReference(this.reference(actor)).int(field.offset));
@@ -1297,7 +1328,7 @@ export class QuakeCSource {
       sourceDamage: request => this.applySourceDamage(request),
       protection: { regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) }, powered: { owner: null, ...(poweredStage === null ? {} : { stage: poweredStage }) } },
       read: () => ({ health: words.float(this.field("health")), armor: this.armor(slot), mass: 200,
-        canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) >= this.currentTime, team: null }),
+        canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) >= this.currentTime, team: this.matchTeam(actor.id) }),
       writeHealth: health => { words.setFloat(this.field("health"), health); return undefined; },
       validateArmor: armor => {
         if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q1") throw new Error("Cannot store foreign armor in native id1 fields");

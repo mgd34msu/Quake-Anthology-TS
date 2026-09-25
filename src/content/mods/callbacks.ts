@@ -1,4 +1,5 @@
 import { readClientOutputDeclarations } from "./client-outputs.ts";
+import { readSourceTeamValues, readSourceObjectives } from "./match.ts";
 import { readModSourceCall as sourceCall, readModSourceValue as value } from "./source-call.ts";
 import { readQcWeaponStageDeclaration } from "../q1/quakec/weapon-stage-declaration.ts";
 import { readItemIconDeclaration } from "../item-icon.ts";
@@ -12,7 +13,9 @@ import { readModClientInput } from "./client-input.ts";
 import { readModPickupRule } from "./pickups.ts";
 
 function field(reader: SaveReader): ModActorField {
-  const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset", "userinfo", "client-input");
+  const name = reader.field("field").string(), binding = reader.field("binding").choice("health", "origin", "velocity", "angles", "bounds-min", "bounds-max", "think", "nextthink", "inventory", "constant", "private", "classname", "client-flags", "view-offset", "userinfo", "client-input", "team", "score");
+  if (binding === "team") return { field: name, binding, values: readSourceTeamValues(reader.field("values")) };
+  if (binding === "score") return { field: name, binding };
   if (binding === "client-input") return { field: name, binding, input: reader.field("input").choice("view-angles", "attack", "jump", "impulse", "forward-move", "side-move", "up-move"), update: reader.field("update").choice("always", "nonzero"), ...(reader.field("scale").value === undefined ? {} : { scale: reader.field("scale").number() }) };
   if (binding === "client-flags") return { field: name, binding,
     ...(reader.field("grounded").value === undefined ? {} : { grounded: reader.field("grounded").literal(true) }),
@@ -63,6 +66,7 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
   const combat = reader.field("combat"), initialize = reader.field("initialize"), frame = reader.field("frame"), cvars = reader.field("cvars"), commands = reader.field("commands");
   return { version: reader.field("version").literal(1), runtime: reader.field("runtime").literal("quakec"),
     program: { path: normalizeResourcePath(program.field("path").string()), digest: readDigest(program.field("digest")) },
+    ...(reader.field("objectives").value === undefined ? {} : { objectives: readSourceObjectives(reader.field("objectives"), value => value.string(), value => value.string(), sourceCall) }),
     actorFields: reader.field("actorFields").list(field), callbacks: reader.field("callbacks").list(callback),
     ...(reader.field("clientPresentation").value === undefined ? {} : { clientPresentation: {
       hud: reader.field("clientPresentation").field("hud").choice("none", "replace-vitals"),

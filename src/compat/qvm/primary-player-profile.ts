@@ -1,3 +1,4 @@
+import { readSourcePrimaryMatch } from "../../content/mods/match.ts";
 import type { QvmPrimaryWeaponProfile } from "./game-weapons.ts";
 import type { QvmInputDefinition } from "./game-input.ts";
 import { validateQvmCombatCall, validateQvmCombatPositions, type QvmCombatCall, type QvmReactionCall } from "./game-combat.ts";
@@ -65,7 +66,7 @@ export function readQvmPrimaryWeapons(reader: SaveReader, artifact: Artifact, ca
   const equipmentContexts = reader.field("equipmentContexts").list(value => ({ provider: namespaced(value.field("provider")), item: value.field("item").nullable(namespaced) }));
   if (new Set(equipmentContexts.map(context => context.provider)).size !== equipmentContexts.length) reader.field("equipmentContexts").fail("duplicate equipment source context");
   const damage = reader.field("damageFactor"), delay = reader.field("delayPlayer"), water = reader.field("waterLevel"), teleport = reader.field("teleport"), drop = reader.field("drop"), give = reader.field("give"), named = give.field("named");
-  const profile: QvmPrimaryWeaponProfile = { ...common, clientPointer: entity(reader.field("clientPointer")), maxHealth: client(reader.field("maxHealth")), persistentMaxHealth: client(reader.field("persistentMaxHealth")),
+  const profile: QvmPrimaryWeaponProfile = { ...common, ...(reader.field("match").value === undefined ? {} : { match: readSourcePrimaryMatch(reader.field("match"), common.clientStride) }), clientPointer: entity(reader.field("clientPointer")), maxHealth: client(reader.field("maxHealth")), persistentMaxHealth: client(reader.field("persistentMaxHealth")),
     stage: { dispatcher: { entry: entry(dispatcher.field("entry"), artifact), actor: { record: actor.field("record").literal("client"), pointer: sourcePointer(actor.field("pointer"), dataBytes) } },
       predicates: stage.field("predicates").list(value => ({ instruction: value.field("instruction").integer(0), unselected: value.field("unselected").boolean() })),
       settled: stage.field("settled").list(test), selection: { field: field(selection.field("field")), values: selection.field("values").list(value => ({ value: integer(value.field("value"), 1, 0x7fffffff), item: namespaced(value.field("item")) })) },

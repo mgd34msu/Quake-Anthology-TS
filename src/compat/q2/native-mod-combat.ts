@@ -137,7 +137,7 @@ export class NativeModCombat {
       const flags = () => BigInt(scalar(combat.flags));
       this.services.combat.rebind(actor, { sourceDamage: request => this.apply(request), read: () => ({ health: scalar(combat.health), mass: scalar(combat.mass),
         armor: this.armor.read(slot), canTakeDamage: scalar(combat.takedamage) !== 0, invulnerable: (flags() & BigInt(combat.flags.invulnerable)) !== 0n,
-        noKnockback: (flags() & BigInt(combat.flags.noKnockback)) !== 0n, team: null }),
+        noKnockback: (flags() & BigInt(combat.flags.noKnockback)) !== 0n, team: this.services.match?.player(actor.id)?.team() ?? null }),
         writeHealth: value => { scalar(combat.health, value); return undefined; },
         normalizeLegacyArmor: armor => this.armor.normalizeLegacyArmor(slot, armor), writeArmor: armor => this.armor.write(slot, armor) });
     }

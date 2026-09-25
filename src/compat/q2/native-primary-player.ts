@@ -1,3 +1,4 @@
+import { sourceScore, type SourcePrimaryMatch } from "../../contracts/source-match.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { GuestAddress, GuestCallValue } from "../../contracts/execution.ts";
@@ -9,6 +10,7 @@ import { signature } from "./rerelease/api.ts";
 
 export interface NativePrimaryPlayerProfile {
   readonly digest: ContentDigest;
+  readonly match?: SourcePrimaryMatch;
   readonly spawn: number;
   readonly objectives: { readonly kind: "none" } | { readonly kind: "entry"; readonly entry: number };
   readonly commandAngles: number;
@@ -19,6 +21,7 @@ export interface NativePrimaryPlayerProfile {
 /** Source spawn selection and private client pose; the caller owns the equipment's teleport effect. */
 export class NativePrimaryPlayer {
   constructor(private readonly host: NativePrimaryWeaponHost, private readonly weapon: NativePrimaryWeaponProfile, readonly profile: NativePrimaryPlayerProfile) {
+    if (profile.match !== undefined && (!Number.isSafeInteger(profile.match.score) || profile.match.score < 0 || profile.match.score % 4 !== 0 || profile.match.score + 4 > weapon.client.byteLength)) throw new Error("Native score exceeds the declared client record");
     if (host.memory.module.digest !== profile.digest || profile.digest !== weapon.digest) throw new Error("Native player service belongs to another executable");
   }
   private current(actor: ActorId): { readonly entity: GuestAddress; readonly client: GuestAddress } {
@@ -28,6 +31,14 @@ export class NativePrimaryPlayer {
     if (client === null) throw new Error("Native player service has no source client");
     this.host.memory.check(client, this.weapon.client.byteLength, "read");
     return { entity: record.address, client };
+  }
+  score(actor: ActorId): number {
+    const match = this.profile.match; if (match === undefined) throw new Error("Original native score storage has no declaration");
+    return this.host.memory.readInt32(this.host.memory.offset(this.current(actor).client, BigInt(match.score)));
+  }
+  setScore(actor: ActorId, score: number): void {
+    const match = this.profile.match; if (match === undefined) throw new Error("Original native score storage has no declaration");
+    this.host.memory.writeInt32(this.host.memory.offset(this.current(actor).client, BigInt(match.score)), sourceScore(score));
   }
   maxHealth(actor: ActorId): number {
     const { entity } = this.current(actor); return this.host.memory.readInt32(this.host.memory.offset(entity, BigInt(this.weapon.entity.maxHealth.offset)));

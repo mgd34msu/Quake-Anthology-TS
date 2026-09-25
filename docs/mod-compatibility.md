@@ -458,3 +458,13 @@ Original QC, QVM and native incoming damage retains its captured continuation on
 Original Classic native damage participates in enabled damage-only components without requiring an armor component. Disabling the component restores ordinary source execution; re-enabling it does not duplicate the hook. Its lifetime follows the source session through retained travel and final teardown.
 
 Native component `DebugGraph` samples use the existing graph controls (`debuggraph`, `graphheight`, `graphscale`, `graphshift`) in any destination world. Each component uses its own mounted palette and graph history. Disabling or refreshing its presentation owner clears that graph; simultaneous component graphs occupy separate rows. Unified peers negotiate `qts:snapshot-v8` for these source-owned samples.
+
+## Shared teams, scores and objectives
+
+Component actor fields can declare `binding: "score"` or `binding: "team"` with explicit source-value/team-identity mappings. Borrowed fields read the owning game's actual record. Score writes update that record; player team changes run its original command and retain refusal or reassignment. Original component-owned actors keep their own records. QuakeC scores remain source floats; QVM and native counters use their declared storage.
+
+Primary QVM/native bundles may declare `match: { score, teams }`: `score` is the original client-record offset, and each team entry supplies `source`, `team`, and original command `arguments`. Artifact-bound QuakeC metadata can declare `teams: [{ source, team }]`; QuakeWorld uses its original team userinfo, while NetQuake uses original color/team state. Unknown identities stay distinct. Do not infer cross-game membership from matching numbers or names.
+
+Named `objectives` channels either own original state or borrow an enabled owner's state. Each entry declares its `id`, source state storage and value/stage/completion mapping, plus nullable carrier and target references. An owner declares an original `change` call and whether the channel supplies a `campaignGate` or `botGoal`; a borrower declares whether it is `writable`. Borrowed changes invoke the owning callback and then read the accepted result. Conflicting owners are rejected. Disabling an owner removes its channels; save/load retains original source memory and restores borrowed projections.
+
+These declarations connect source state and callbacks. They do not automatically identify private objective layouts or replace a primary game mode. Those interfaces need the selected artifact's actual declaration.

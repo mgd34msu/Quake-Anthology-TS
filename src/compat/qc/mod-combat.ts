@@ -79,7 +79,7 @@ export class QcModCombat {
     const emptyRegularArmor = qcEmptyArmor(this.options.program, this.options.declaration.emptyArmor);
     const state = { ...(emptyRegularArmor === undefined ? {} : { emptyRegularArmor }), sourceDamage: (request: DamageRequest) => this.apply(request), protection: { regular: { owner: actor.owner, ...(regularStage === null ? {} : { stage: regularStage }) }, powered: { owner: null, ...(poweredStage === null ? {} : { stage: poweredStage }) } },
       read: () => ({ health: words.float(this.field("health")), armor: this.damage.readArmor(words), mass: 200,
-        canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) > this.seconds(), team: null }),
+        canTakeDamage: words.float(this.field("takedamage")) !== 0, invulnerable: words.float(this.field("invincible_finished")) > this.seconds(), team: services.match?.player(actor.id)?.team() ?? null }),
       validateArmor: (armor: ArmorState): undefined => {
         if (armor.powered.kind !== "none" || armor.regular.kind !== "none" && armor.regular.kind !== "q1") throw new Error("Cannot store foreign armor in source QC fields");
         return undefined;

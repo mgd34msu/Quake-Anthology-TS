@@ -36,15 +36,18 @@ export function rereleaseBotObjectives(simulation: SharedSimulation, knowledge: 
         return skin === settings.team1Skin ? 1 : skin === settings.team2Skin ? 2 : 0;
       }
       const team = simulation.combat.read(actor)?.team;
-      return team === "red" || team === "1" ? 1 : team === "blue" || team === "2" ? 2 : 0;
+      return team === "team:red" || team === "red" || team === "1" ? 1 : team === "team:blue" || team === "blue" || team === "2" ? 2 : 0;
     },
     carrying: actor => {
+      if (simulation.sourceObjectives().some(objective => objective.state.carrier?.equals(actor))) return true;
       if (q1?.composition.ctf !== null && q1?.composition.ctf !== undefined) return q1.composition.ctf.carried(actor) !== null;
       if (match instanceof Q2Lmctf && q2 !== null) return match.flags.carried(actor, q2.game) !== null;
       if (match instanceof Q2Ctf) return simulation.inventory.count(actor, "q2:item_flag_team1") > 0 || simulation.inventory.count(actor, "q2:item_flag_team2") > 0;
       return match instanceof Q2Tag && match.ownerActor()?.equals(actor) === true;
     },
     goal: actor => {
+      const objective = simulation.sourceObjectives().find(value => value.botGoal && !value.state.complete && value.state.target !== null && !value.state.target.equals(actor));
+      if (objective?.state.target != null) return simulation.bodies.read(objective.state.target)?.origin ?? null;
       if (simulation.options.mode !== "deathmatch") return q2?.product.rerelease?.entities.poi?.origin ?? null;
       const target = match instanceof Q2Tag ? match.ownerActor() : match instanceof Q2DeathBall ? match.ballActor() : null;
       return target === null || target.equals(actor) ? null : simulation.bodies.read(target)?.origin ?? null;

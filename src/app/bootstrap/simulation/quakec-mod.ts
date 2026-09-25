@@ -57,6 +57,7 @@ export function prepareQuakeCMod(options: PrepareQuakeCModOptions): PreparedMod 
         ...(options.readScript === undefined ? {} : { readScript: options.readScript }) }, context.resources));
       if (context.restoring !== true) source.initialize();
       return {
+        activate() { source.activateMatch(); return undefined; },
         register(registrations) {
           return registerModCallbacks(declaration.callbacks, registrations, () => services.time(), (callback, inputs) => {
             context.assertCurrent(); return source.invoke(callback, inputs);

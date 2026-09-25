@@ -68,6 +68,8 @@ export interface CombatStateBinding {
 }
 
 export interface GameplayHooks {
+  /** Explicit source team identities share membership without altering source records. */
+  team?(actor: ActorId, original: string | null): string | null;
   /** Selected equipment protection applies after mod composition, before source damage. */
   damageAllowed?(request: DamageRequest): boolean;
   /** Applies at the source mutation site, including the selected movement provider's arithmetic. */
@@ -617,7 +619,7 @@ export class GameplayAuthority implements DamageAuthority {
     const cells = this.powerArmorCells.get(actor);
     const powered = power !== null ? power.read() : cells === undefined || state.armor.powered.kind === "none"
       ? state.armor.powered : { ...state.armor.powered, cells: cells.read() };
-    return copyCombat({ ...state, armor: { regular: regular?.read() ?? state.armor.regular, powered } });
+    return copyCombat({ ...state, ...(this.hooks.team === undefined ? {} : { team: this.hooks.team(actor.id, state.team) }), armor: { regular: regular?.read() ?? state.armor.regular, powered } });
   }
 
   private writeArmor(actor: OwnedActor, binding: CombatStateBinding, armor: ArmorState): undefined {

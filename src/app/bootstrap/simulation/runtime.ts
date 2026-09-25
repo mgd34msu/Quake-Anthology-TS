@@ -1,5 +1,7 @@
 import { Q3GuestCatalog } from "../../../content/q3/guest-items.ts";
 import { ModClientOutputs } from "../../../world/session/mod-client-outputs.ts";
+import { ModMatchState } from "../../../world/session/mod-match.ts";
+import { sourceTeamCommand, sourceScore, type SourceMatchPlayer } from "../../../contracts/source-match.ts";
 import { sourceItemNamed } from "../../../contracts/source-items.ts";
 import { namespaced } from "../../../persistence/value.ts";
 import { NativePrimaryInventory, type NativeInventoryRow } from "../../../compat/q2/native-primary-inventory.ts";
@@ -27,7 +29,7 @@ import { setInfoValue } from "../../../core/cvars/info.ts";
 import { Q2Ctf } from "../../../content/q2/multiplayer/ctf/index.ts";
 import { Q3SelectedSource, type Q3SelectedClientEffects } from "./arsenal/q3-source.ts";
 import { ConfigStringRegistry } from "../../../content/q3/base/game/utilities.ts";
-import { Team, GameType, statSchema } from "../../../content/q3/base/shared/definitions.ts";
+import { Team, GameType, PersistentIndex, statSchema } from "../../../content/q3/base/shared/definitions.ts";
 import { dropQ3TeleportObjectives } from "../../../content/q3/team-arena/client-events.ts";
 import { dropFlag as dropQ1CtfFlag } from "../../../content/q1/addons/ctf/flags.ts";
 import { rereleasePathToGoal } from "../../../bots/navigation/rerelease-path.ts";
@@ -391,6 +393,7 @@ export class SharedSimulation implements Simulation {
   private readonly modClientDrops: { readonly client: ClientId; readonly actor: ActorId; readonly reason: string; readonly content: ContentId }[] = [];
   private readonly modClientOutputs = new ModClientOutputs(actor => this.actors.isLive(actor) && this.playerClient(actor) !== null);
   readonly modClients: ModClientServices;
+  private readonly sourceMatch: ModMatchState;
   private createModClients(): ModClientServices { return {
     maximum: this.options.maxClients,
     claimOutputs: (owner, channels) => {
@@ -563,6 +566,7 @@ export class SharedSimulation implements Simulation {
     this.random = new SourceRandom(options.seed, timing.clock.kind === "q2-rerelease" ? "q2-rerelease" : "classic");
     this.actors = saved === undefined ? new SessionActorRegistry(options.identity)
       : SessionActorRegistry.restore(options.identity, saved.actors, readSourceActorsCheckpoint(simulationProviderCheckpoint(saved, "world:source-slots")));
+    this.sourceMatch = new ModMatchState(this.actors, actor => this.primaryMatchPlayer(actor));
     this.droppedPickups = new SourcePickupCargo(this.actors, this.recipe.map.entities.provider);
     this.q1Punch = new Q1PlayerPunch(this.actors, actor => this.q1PunchOwner(actor));
     this.callbacks = new ActorCallbackTable(this.actors);
@@ -623,6 +627,7 @@ export class SharedSimulation implements Simulation {
     this.inventory = new SharedInventoryTable(this.actors);
     this.events = new SimulationEvents(this.physics.bodies, () => this.sourceFrame.time, actor => this.player(actor)?.client ?? null, actor => this.actors.sourceOf(actor)?.slot ?? null, { content: this.recipe.map.entities.content, acceptedContents: new Set(this.recipe.mounts.mounts.map(mount => mount.identity.content)), entities: options.world.kind === "q1-bsp" ? options.world.entities : "", alive: actor => this.actors.resolveOwned(actor) !== null });
     this.combat = new GameplayAuthority(this.actors, this.callbacks, {
+      team: (actor, original) => this.canonicalTeam(actor, original),
       damageAllowed: request => this.selectedQ3Source?.blocksDamage(request) !== true,
       impulse: (actor, impulse, movement) => {
         const body = this.physics.bodies.read(actor.id);
@@ -858,7 +863,7 @@ export class SharedSimulation implements Simulation {
       if (options.preparedMods !== undefined || enabled.length !== 0 || modState !== undefined || options.modTravel !== undefined) {
         const native = simulation.nativeModContext();
         simulation.modOwner = await SessionMods.open({ presentation: simulation.events, prepared: options.preparedMods ?? [], enabled,
-          services: { clients: simulation.modClients, weapons: {
+          services: { clients: simulation.modClients, match: simulation.sourceMatch, weapons: {
             bind: (actor, binding) => {
               simulation.actors.assertOwned(actor);
               if (simulation.source.kind === "quakec" && preparedQuakeCWeaponStage(simulation.source.game.prepared) === null) throw new Error("Primary QC weapon handoff lacks a qualified source boundary");
@@ -1538,7 +1543,7 @@ export class SharedSimulation implements Simulation {
         const team = this.combat.read(actor)?.team?.toLowerCase();
         return { angles: player.viewAngles, viewHeight: player.viewHeight, maxHealth: this.source.kind === "q2" ? this.source.game.entity(actor)?.maxHealth ?? 100
           : this.source.kind === "q2-native" ? this.selectedNativePlayer().maxHealth(actor) : this.source.kind === "q3-qvm" ? this.requireQvmWeapons().maxHealth(actor) : q3?.ps.stats.get(statSchema(q3.ps.product).maxHealth) ?? q1?.maxHealth ?? qc?.maxHealth ?? 100,
-          team: q3?.sess.sessionTeam ?? (team === "red" || team === "5" || team === "q3:1" || team === "q2:1" ? Team.TEAM_RED : team === "blue" || team === "14" || team === "q3:2" || team === "q2:2" ? Team.TEAM_BLUE : Team.TEAM_FREE),
+          team: q3?.sess.sessionTeam ?? (team === "team:red" || team === "red" || team === "5" || team === "q3:1" || team === "q2:1" ? Team.TEAM_RED : team === "team:blue" || team === "blue" || team === "14" || team === "q3:2" || team === "q2:2" ? Team.TEAM_BLUE : Team.TEAM_FREE),
           quadUntil: this.source.kind === "q3-qvm" ? this.requireQvmWeapons().powerupUntil(actor, "quad") : q3?.ps.powerups.get(Powerup.PW_QUAD) ?? Math.trunc((q1?.powerups.get("quad") ?? q2?.quadUntil ?? qc?.quadUntil ?? 0) * 1000),
           hasteUntil: this.source.kind === "q3-qvm" ? this.requireQvmWeapons().powerupUntil(actor, "haste") : q3?.ps.powerups.get(Powerup.PW_HASTE) ?? 0 };
       },
@@ -2430,7 +2435,7 @@ export class SharedSimulation implements Simulation {
         if (player === null) return [{ actor, body, health: nativeCombat?.health ?? combat?.health ?? 0, kind: "actor", mover: this.grappleAnchor(actor) === "brush" }];
         const team = combat?.team?.toLowerCase();
         return [{ actor, body: { ...body, angles: player.viewAngles }, health: combat?.health ?? 0, kind: "player", viewHeight: player.viewHeight,
-          userinfo: this.sourcePlayerUserinfo(actor) ?? "\\name\\Player\\ip\\localhost\\model\\sarge/default\\handicap\\100", team: team === "red" || team === "blue" ? team : "free" }];
+          userinfo: this.sourcePlayerUserinfo(actor) ?? "\\name\\Player\\ip\\localhost\\model\\sarge/default\\handicap\\100", team: team === "team:red" ? "red" : team === "team:blue" ? "blue" : team === "red" || team === "blue" ? team : "free" }];
       }) });
     this.grapple = new GrappleRuntime(selection, { kind: "q3-qvm", game, core: game.core }, new SourceRandom(this.options.seed, "classic"), this.grappleSlotHost());
     const saved = this.pendingQvmGrappleRestore; this.pendingQvmGrappleRestore = null;
@@ -2526,7 +2531,7 @@ export class SharedSimulation implements Simulation {
         const userinfo = this.sourcePlayerUserinfo(actor) ?? "", info = q2Userinfo(userinfo);
         const spectator = info.get("spectator") === "1" || info.get("team") === "spectator" || info.get("team") === "s";
         const sourceTeam = combat?.team?.toLowerCase();
-        const team = spectator ? "spectator" : !teamMode ? "free" : sourceTeam === "red" ? "red" : sourceTeam === "blue" ? "blue" : null;
+        const team = spectator ? "spectator" : !teamMode ? "free" : sourceTeam === "red" || sourceTeam === "team:red" ? "red" : sourceTeam === "blue" || sourceTeam === "team:blue" ? "blue" : null;
         if (team === null) throw new Error(`QVM weapon component cannot represent source team ${combat?.team ?? "unassigned"}`);
         return [{ ...target, kind: "player", userinfo, team }];
       }) });
@@ -5093,6 +5098,81 @@ export class SharedSimulation implements Simulation {
         angleWords: [(command.angleWords[0] + x) & 65535, (command.angleWords[1] + y) & 65535, (command.angleWords[2] + z) & 65535] } });
     } else throw new Error("Component input has no matching source movement state");
   }
+  private canonicalTeam(actor: ActorId, original: string | null): string | null {
+    const source = this.source; if (this.playerClient(actor) === null) return original;
+    if (this.options.mode === "coop") return "team:coop";
+    if (source.kind === "q2-native" || source.kind === "q3-qvm") {
+      const profile = source.kind === "q2-native" ? this.nativePrimary()?.player.match : source.weapons?.match;
+      const mapping = profile?.teams.find(value => value.source === original); return mapping === undefined ? original : mapping.team;
+    }
+    if (source.kind === "quakec") {
+      const mapping = source.game.prepared.teams?.find(value => value.source === original); return mapping === undefined ? original : mapping.team;
+    }
+    if (source.kind === "q1" && source.composition.clients.program === "ctf") return original === "red" ? "team:red" : original === "blue" ? "team:blue" : original;
+    if (source.kind === "q2" && (source.product.match.source instanceof Q2Ctf || source.product.match.source instanceof Q2Lmctf))
+      return original === "RED" ? "team:red" : original === "BLUE" ? "team:blue" : original;
+    if (source.kind === "q3") return original === "q3-team:1" ? "team:red" : original === "q3-team:2" ? "team:blue" : original;
+    return original;
+  }
+  private primaryMatchPlayer(actor: ActorId): SourceMatchPlayer | null {
+    const source = this.source, owned = this.actors.resolveOwned(actor), client = this.playerClient(actor);
+    if (owned === null || client === null || source.kind === "loading") return null;
+    if (source.kind === "q2-native" && this.nativePrimary()?.player.match === undefined
+      || source.kind === "q3-qvm" && source.weapons?.match == null) return null;
+    const current = (): void => {
+      if (this.closed || this.source !== source || this.actors.resolveOwned(actor) !== owned || this.playerClient(actor)?.equals(client) !== true)
+        throw new Error("Original match player was retired");
+    };
+    const team = (): string | null => { current(); return this.combat.read(actor)?.team ?? null; };
+    return { owner: owned.owner, team, score: () => {
+      current();
+      if (source.kind === "q1") return source.composition.clients.require(actor).frags;
+      if (source.kind === "quakec") return source.game.matchScore(actor);
+      if (source.kind === "q2-native") return this.selectedNativePlayer().score(actor);
+      if (source.kind === "q3-qvm") return this.requireQvmWeapons().score(actor);
+      if (source.kind === "q2") { const state = source.players.states.get(actor); if (state === undefined) throw new Error("Original Q2 score has no player"); return source.product.match.source instanceof Q2Lmctf ? source.product.match.source.states.get(actor)?.statistics.get("score") ?? 0 : state.score; }
+      const native = source.game.records.nativeByActor(actor)?.client; if (native == null) throw new Error("Original Q3 score has no player");
+      return native.ps.persistant.get(PersistentIndex.PERS_SCORE);
+    }, setScore: value => {
+      current();
+      if (source.kind === "q1") { if (!Number.isFinite(value)) throw new Error("Quake score must be finite"); const client = source.composition.clients.require(actor); client.frags = Math.fround(value); source.composition.clients.publish(client); }
+      else if (source.kind === "quakec") source.game.setMatchScore(actor, value);
+      else if (source.kind === "q2-native") this.selectedNativePlayer().setScore(actor, value);
+      else if (source.kind === "q3-qvm") this.requireQvmWeapons().setScore(actor, value);
+      else if (source.kind === "q2") { const state = source.players.states.get(actor); if (state === undefined) throw new Error("Original Q2 score has no player"); state.score = sourceScore(value); if (source.product.match.source instanceof Q2Lmctf) source.product.match.source.states.get(actor)?.statistics.set("score", state.score); }
+      else { const native = source.game.records.nativeByActor(actor)?.client; if (native == null) throw new Error("Original Q3 score has no player"); native.ps.persistant.set(PersistentIndex.PERS_SCORE, sourceScore(value)); }
+      current();
+    }, setTeam: requested => {
+      current(); if (team() === requested) return;
+      if (source.kind === "q2-native") {
+        const profile = this.nativePrimary()?.player.match; if (profile === undefined) throw new Error("Original native team commands have no declaration");
+        const args = sourceTeamCommand(profile, requested), name = args[0]; if (name === undefined) throw new Error("Original team command is empty");
+        q2GameCallback(() => source.game.command(client.slot + 1, args, args.slice(1).join(" ")));
+      } else if (source.kind === "q3-qvm") {
+        const profile = source.weapons?.match, player = source.game.players().find(value => value.actor.equals(actor));
+        if (profile == null || player === undefined) throw new Error("Original QVM team commands have no declaration");
+        source.game.commandImmediate(player, sourceTeamCommand(profile, requested));
+      } else if (source.kind === "quakec") {
+        const mapping = source.game.prepared.teams?.find(value => value.team === requested);
+        source.game.setMatchTeam(actor, mapping === undefined ? requested : mapping.source); this.notifyClientEvent("userinfo", actor);
+      } else if (source.kind === "q3") {
+        const values = [{ team: "team:red", argument: "red" }, { team: "team:blue", argument: "blue" }, { team: null, argument: "free" }];
+        const command = values.find(value => value.team === requested); if (command === undefined) throw new Error("Team has no original Q3 command");
+        source.game.playerCommand(actor, "team", [command.argument]);
+      } else if (source.kind === "q1") {
+        const entry = source.composition.clients.require(actor), value = source.composition.clients.program === "ctf"
+          ? requested === "team:red" ? 5 : requested === "team:blue" ? 14 : NaN : requested === null ? NaN : Number(requested);
+        if (!Number.isInteger(value) || value < 1 || value > 14) throw new Error("Team has no original Quake color command");
+        source.composition.clients.colors(actor, entry.shirt, value - 1);
+      } else if (source.kind === "q2" && (source.product.match.source instanceof Q2Ctf || source.product.match.source instanceof Q2Lmctf)) {
+        const entity = source.game.entity(actor), argument = requested === "team:red" ? "red" : requested === "team:blue" ? "blue" : null;
+        if (entity === null || argument === null) throw new Error("Team has no original Q2 team command");
+        source.product.match.source.command(entity, source.game, "team", [argument]);
+      } else throw new Error("This original source has no declared team-change command");
+      current();
+    } };
+  }
+
   private storePlayerUserinfo(actor: ActorId, userinfo: string): void {
     const client = this.playerClient(actor), source = this.source;
     if (client === null) throw new Error("Component userinfo has no admitted client");
@@ -6116,7 +6196,12 @@ export class SharedSimulation implements Simulation {
 
   pendingMatchMap(): string | null { return this.source.kind === "q2" && this.source.product.match.source instanceof Q2Lmctf ? this.source.product.match.source.match.pendingMap?.map ?? null : null; }
 
-  takeTransitions(): readonly TransitionIntent[] { return this.transitions.splice(0); }
+  sourceObjectives() { return this.sourceMatch.objectives(); }
+  takeTransitions(): readonly TransitionIntent[] {
+    const gates = this.sourceMatch.gates();
+    return this.transitions.splice(0).map(intent => intent.kind === "campaign-level" || intent.kind === "campaign-complete"
+      ? { ...intent, gates: [...intent.gates, ...gates] } : intent);
+  }
   takeLevelChange() { const change = this.levelChange; this.levelChange = null; return change; }
   private assertBotRestoreReady(): void {
     if (this.options.restore?.providers.some(record => record.schema === "world:bots") && this.botServices.configuration === null)
@@ -6660,6 +6745,7 @@ export class SharedSimulation implements Simulation {
     if (guest !== null && !guest.isRetired) throw new Error("Q3 guest shutdown must be awaited before closing its shared world");
     const errors: unknown[] = [];
     try { this.modOwner?.close(); } catch (error) { errors.push(error); }
+    this.sourceMatch.close();
     try { if (this.grapple?.source.kind === "q3-qvm") this.grapple.source.game.close(); } catch (error) { errors.push(error); }
     try { this.weaponBehavior.close(); } catch (error) { errors.push(error); }
     for (const close of [() => this.nativePrimaryDrop?.close(), () => this.nativePrimaryInventory?.close(), () => this.disposeNativePickupSupply?.(), () => this.nativePrimaryCommands?.close(), () => this.nativePrimaryWeapons?.close()]) { try { close(); } catch (error) { errors.push(error); } }

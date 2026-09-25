@@ -60,6 +60,7 @@ export function validateNativePrimary(profile: NativePrimaryProfile, pe: PeFile)
   for (const value of [...weapons.spawn.accepted, ...weapons.active, ...weapons.committedInput.flat(), ...weapons.continuations.flat()]) test(value);
   if (weapons.entity.maxHealth.record !== "entity" || weapons.entity.maxHealth.encoding !== "int32") throw new Error("Native source max health requires its declared int32 entity field");
   for (const offset of [weapons.client.viewAngles, player.commandAngles]) bound(offset, 12, clientBytes);
+  if (player.match !== undefined) { bound(player.match.score, 4, clientBytes); if (player.match.score % 4 !== 0) throw new Error("Native score field requires int32 alignment"); }
   if (player.forward !== null) bound(player.forward, 12, clientBytes);
   bound(player.velocity, 12, entityBytes);
   if (inventory.client !== (profile.edition === "classic" ? 84 : 120)) throw new Error("Native client pointer differs from the selected public game API");

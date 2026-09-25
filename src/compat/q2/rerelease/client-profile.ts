@@ -28,6 +28,9 @@ export const retailRereleaseClientProfile: RereleaseClientProfile = {
   inventoryCount: 84, ammoCount: 12,
   layout: { id: "q2-rerelease-retail:observed-client-fields", byteLength: 7344, alignment: 8, pointerBytes: 8, byteOrder: "little-endian", fields: [
     ...clientLayout.fields.map(field => ({ ...field, name: `shared.${field.name}` })),
+    // Retail G_SetStats RVAe3c08 and scoreboard RVAe13f7 read resp.score; PutClientInServer RVAda977 reads ctf_team.
+    { name: "resp.score", byteOffset: 0x17c8, storage: "int32", count: 1 },
+    { name: "resp.ctf_team", byteOffset: 0x17dc, storage: "int32", count: 1 },
     { name: "pers.selected_item", byteOffset: 2672, storage: "int32", count: 1 },
     { name: "pers.inventory", byteOffset: 2688, storage: "int32", count: 84 },
     { name: "pers.max_ammo", byteOffset: 3024, storage: "int16", count: 12 },

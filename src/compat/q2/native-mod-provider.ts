@@ -1,5 +1,7 @@
 import type { NativeModArmorField } from "../../contracts/native-mod-callbacks.ts";
 import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
+import { ModSourceObjectives } from "../../world/session/mod-objectives.ts";
+import { originalTeam, sourceTeam, type SourceMatchPlayer, readSourceMatchField, writeSourceMatchField, validateSourceMatchField } from "../../contracts/source-match.ts";
 import { NativeModInvocations, type NativeModInvocationResult } from "./native-mod-invocations.ts";
 import { planGuestCall } from "../../guest/abi/classify.ts";
 import type { NativeModProtectionRegion } from "../../contracts/native-mod-region.ts";
@@ -38,13 +40,13 @@ import { X86AbiAdapter } from "../../guest/abi/adapter.ts";
 import { allocateClassicString, classicStringAllocationBytes, readClassicString, writeClassicString, readClassicVector, writeClassicVector } from "./classic/records.ts";
 
 type Inputs = ReadonlyMap<ModCallbackInput, ModRuntimeValue>;
-type SharedField = Extract<NativeModActorField, { readonly binding: "health" | "inventory" | "inventory-capacity" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }>;
+type SharedField = Extract<NativeModActorField, { readonly binding: "team" | "score" | "health" | "inventory" | "inventory-capacity" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }>;
 interface Observation { readonly actor: ActorId; readonly address: GuestAddress; readonly field: SharedField; readonly bytes: Uint8Array; }
 interface Invocation { observations: readonly Observation[]; readonly pending: (() => void)[]; cursor: number; }
 interface InventoryChanges { count?: number; capacity?: number; }
 interface InputScope { readonly application: ModClientApplication; readonly values: Inputs; }
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
-function shared(field: NativeModActorField): field is SharedField { return field.binding === "health" || field.binding === "inventory" || field.binding === "inventory-capacity" || field.binding === "origin" || field.binding === "velocity" || field.binding === "angles" || field.binding === "bounds-min" || field.binding === "bounds-max"; }
+function shared(field: NativeModActorField): field is SharedField { return field.binding === "team" || field.binding === "score" || field.binding === "health" || field.binding === "inventory" || field.binding === "inventory-capacity" || field.binding === "origin" || field.binding === "velocity" || field.binding === "angles" || field.binding === "bounds-min" || field.binding === "bounds-max"; }
 function scalarSize(kind: NativeModScalar): number { return storageBytes(kind, 4); }
 function size(field: NativeModActorField, pointerBytes: number): number { return field.binding === "private" ? field.byteLength : field.binding === "record" || field.binding === "address" ? pointerBytes : "encoding" in field ? scalarSize(field.encoding) : 12; }
 function scalar(value: number, kind: NativeModScalar): GuestCallValue {
@@ -85,6 +87,7 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
       || !Number.isSafeInteger(record.capacity) || record.capacity < 1 || record.capacity > 65536 || !Number.isSafeInteger(record.firstSlot) || record.firstSlot < 0) throw new Error("Invalid native mod actor record");
     records.set(record.id, record); const occupied = new Set<number>();
     for (const field of record.fields) {
+      if (field.binding === "team" || field.binding === "score") validateSourceMatchField(field);
       const length = size(field, declaration.target.abi.pointerBytes);
       if (!Number.isSafeInteger(field.offset) || field.offset < 0 || !Number.isSafeInteger(length) || length < 1 || field.offset + length > record.stride) throw new Error("Native mod field exceeds its source record");
       for (let byte = field.offset; byte < field.offset + length; byte++) { if (occupied.has(byte)) throw new Error("Overlapping native mod fields"); occupied.add(byte); }
@@ -155,6 +158,11 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
         || regions.slice(0, index).some(other => region.entry === other.entry)) throw new Error("Invalid or repeated native source exclusion");
     }
   };
+  for (const objective of declaration.objectives ?? []) {
+    for (const address of [objective.state.storage.address, objective.carrier, objective.target]) if (address !== null)
+      checkValues([{ kind: "address", value: address }], new Set());
+    if (objective.role === "owned" && objective.change !== null) check(objective.change, new Set(["self", "other", "activator", "amount", "time"]));
+  }
   for (const pickup of declaration.pickups ?? []) {
     const available = new Set<ModCallbackInput>(["self", "other", "item", "time", "pickup-count", "pickup-has-count", "pickup-dropped"]);
     check(pickup.operation.grant, available);
@@ -315,11 +323,24 @@ export class NativeModProvider implements NativeModProjection {
   private invocations: NativeModInvocations | null = null;
   private pendingHostClose = false;
   private ready = false;
+  private readonly objectives: ModSourceObjectives<{ readonly address: NativeModAddress; readonly encoding: NativeModScalar }, NativeModAddress, NativeModSourceCall>;
+  private releaseMatch: (() => void) | null = null;
   private lifecycle = false;
   private restoring = false;
   private readonly restoreLinks = new Map<number, { readonly address: GuestAddress; readonly invoke: () => GuestCallResult }>();
   constructor(readonly declaration: NativeModDeclaration, readonly services: ModHostServices, readonly instance: ProviderId,
     readonly map: string, private readonly assertCurrent: () => void) {
+    this.objectives = new ModSourceObjectives(instance, declaration.objectives ?? [], services.match, {
+      current: () => !this.closed && !this.closing && !this.restoring,
+      readScalar: storage => this.scalarRead(this.resolve(storage.address), storage.encoding),
+      writeScalar: (storage, value) => this.scalarWrite(this.resolve(storage.address), value, storage.encoding),
+      readActor: storage => { const pointer = this.host.memory.readPointer(this.resolve(storage)); if (pointer === null) return null;
+        const table = this.host.entities(), delta = pointer.byteOffset - table.base.byteOffset;
+        if (delta < 0n || delta % BigInt(table.stride) !== 0n || delta / BigInt(table.stride) >= BigInt(table.count)) throw new Error("Native objective pointer is outside the source actor table");
+        const actor = this.actorAt(Number(delta / BigInt(table.stride))); if (actor === null) throw new Error("Native objective references an absent actor"); return actor; },
+      writeActor: (storage, actor) => this.host.memory.writePointer(this.resolve(storage), actor === null ? null : this.address(actor)),
+      invoke: (call, inputs) => { this.execute(call, inputs, true); }, seconds: () => { const time = services.time(); return time.kind === "seconds" ? time.value : time.value / 1000; },
+    });
     validateNativeModDeclaration(declaration); for (const record of declaration.actorRecords) this.records.set(record.id, record);
     this.clientOutputs = new SourceModClientOutputs(instance, declaration.clients?.outputs ?? [], services.clients?.claimOutputs, {
       scalar: (actor, field) => this.scalarRead(this.clientOutputAddress(actor, field), field.encoding),
@@ -344,7 +365,21 @@ export class NativeModProvider implements NativeModProjection {
     this.unsubscribe = services.actors.onRelease(actor => { this.clientOutputs.release(actor.id); this.items?.release(actor.id); this.pickups.release(actor.id); this.protection?.release(actor.id); if (this.projections.has(actor.id)) { this.pendingReleases.add(actor.id); this.host_?.presentation.release(actor.id); } return undefined; });
   }
   reserveProtection(): void { this.current(); this.protection?.reserve(); }
-  activateProtection(): void { this.current(); this.protection?.activate(); this.pickups.activate(); }
+  private matchPlayer(actor: ActorId): SourceMatchPlayer | null {
+    const owned = this.services.actors.resolveOwned(actor), slot = this.owned?.slotOf(actor), record = this.declaration.entityRecord === null ? undefined : this.records.get(this.declaration.entityRecord);
+    if (this.closed || this.closing || owned?.owner !== this.instance || slot == null || record === undefined) return null;
+    const team = record.fields.find(field => field.binding === "team"), score = record.fields.find(field => field.binding === "score");
+    const current = (offset: number): GuestAddress => { this.current(); if (this.services.actors.resolveOwned(actor) !== owned || this.owned?.slotOf(actor) !== slot) throw new Error("Native match actor was retired"); return this.host.memory.offset(this.host.entity(slot).address, BigInt(offset)); };
+    return { owner: this.instance, team: () => team?.binding === "team" ? sourceTeam(team.values, this.scalarRead(current(team.offset), team.encoding)) : null,
+      score: () => { if (score?.binding !== "score") throw new Error("Native match actor has no score field"); return this.scalarRead(current(score.offset), score.encoding); },
+      setTeam: value => { if (team?.binding !== "team") throw new Error("Native match actor has no team field"); this.scalarWrite(current(team.offset), originalTeam(team.values, value), team.encoding); },
+      setScore: value => { if (score?.binding !== "score") throw new Error("Native match actor has no score field"); this.scalarWrite(current(score.offset), value, score.encoding); } };
+  }
+  activateProtection(): void { this.current(); this.objectives.activate();
+    if (this.releaseMatch === null && this.declaration.actorRecords.some(record => record.fields.some(field => field.binding === "team" || field.binding === "score"))) {
+      const match = this.services.match; if (match === undefined) throw new Error("Declared match fields require destination match services");
+      this.releaseMatch = match.bindSource(this.instance, actor => this.matchPlayer(actor));
+    } this.protection?.activate(); this.pickups.activate(); }
   attach(host: NativeModHost): void { if (this.host_ !== null) throw new Error("Native mod already attached"); this.host_ = host;
     this.stages = new NativeModClientStages(host);
     if (this.declaration.protection?.some(protection => protection.absorb.abi === "source-region")) this.invocations = new NativeModInvocations(host.entries.cpu.state);
@@ -629,6 +664,7 @@ export class NativeModProvider implements NativeModProjection {
     for (const actor of this.projections.keys()) if (this.services.actors.isLive(actor) && this.clientOutputs.has(actor) && this.clients?.admitted(actor) === true) this.clientOutputs.publish(actor);
   }
   private refresh(): void {
+    this.objectives.refresh();
     this.projectionWrites++;
     try {
     const memory = this.host.memory;
@@ -637,7 +673,8 @@ export class NativeModProvider implements NativeModProjection {
       const inventory = this.services.inventory.entries(actor);
       for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field)) {
         const address = memory.offset(this.recordAddress(record, slot), BigInt(field.offset));
-        if (field.binding === "health") this.scalarWrite(address, this.services.combat.read(actor)?.health ?? 0, field.encoding);
+        if (field.binding === "team" || field.binding === "score") this.scalarWrite(address, readSourceMatchField(this.services.match, actor, field), field.encoding);
+        else if (field.binding === "health") this.scalarWrite(address, this.services.combat.read(actor)?.health ?? 0, field.encoding);
         else if (field.binding === "inventory" || field.binding === "inventory-capacity") {
           const entry = inventory.find(entry => entry.item === field.item);
           this.scalarWrite(address, entry === undefined ? 0 : field.binding === "inventory" ? entry.count : entry.capacity, field.encoding);
@@ -668,6 +705,7 @@ export class NativeModProvider implements NativeModProjection {
     return values;
   }
   private flush(inventoryCommit?: NativeProtectionInventoryCommit): void {
+    this.objectives.flush();
     const frame = this.frames.at(-1); if (frame === undefined) return;
     const memory = this.host.memory, changed = frame.observations.filter(entry => !isDeepStrictEqual(entry.bytes, memory.copy(entry.address, entry.bytes.length)));
     this.validatePickupWrites(changed);
@@ -686,7 +724,16 @@ export class NativeModProvider implements NativeModProjection {
       commit(owner);
     }); };
     for (const { actor, address, field } of changed) {
-      if (field.binding === "health") { const value = this.scalarRead(address, field.encoding); queue(actor, owner => { this.services.combat.setHealth(owner, value); }); }
+      if (field.binding === "team" || field.binding === "score") {
+        const value = this.scalarRead(address, field.encoding); queue(actor, () => {
+          writeSourceMatchField(this.services.match, actor, field, value);
+          if (this.services.actors.isLive(actor) && this.projections.has(actor)) {
+            this.projectionWrites++;
+            try { this.scalarWrite(address, readSourceMatchField(this.services.match, actor, field), field.encoding); }
+            finally { this.projectionWrites--; }
+          }
+        });
+      } else if (field.binding === "health") { const value = this.scalarRead(address, field.encoding); queue(actor, owner => { this.services.combat.setHealth(owner, value); }); }
       else if (field.binding === "inventory" || field.binding === "inventory-capacity") {
         const changes = inventoryChanges.get(actor)?.get(field.item); if (changes === undefined) throw new Error("Native inventory changes lost their source observation");
         if (committedInventory.has(changes)) continue;
@@ -956,7 +1003,7 @@ export class NativeModProvider implements NativeModProjection {
     if (!restoring) this.owned?.validate();
     if (!restoring) { this.validateRecords(); for (const call of this.declaration.initialize) this.execute(call, this.inputs(), false); }
     const clients = this.declaration.clients;
-    for (const call of [...this.declaration.initialize, ...this.declaration.project, ...this.declaration.release, ...this.declaration.callbacks, ...(this.declaration.items?.weapons?.selection.values.map(value => value.request) ?? []), ...(this.declaration.items?.definitions.flatMap(item => [item.actions?.use, item.actions?.drop].filter(call => call !== undefined)) ?? []),
+    for (const call of [...this.declaration.initialize, ...this.declaration.project, ...this.declaration.release, ...this.declaration.callbacks, ...(this.declaration.objectives?.flatMap(value => value.role === "owned" && value.change !== null ? [value.change] : []) ?? []), ...(this.declaration.items?.weapons?.selection.values.map(value => value.request) ?? []), ...(this.declaration.items?.definitions.flatMap(item => [item.actions?.use, item.actions?.drop].filter(call => call !== undefined)) ?? []),
       ...(clients === undefined ? [] : [...clients.admit, ...clients.userinfo, ...clients.disconnect, ...clients.command, ...(clients.frame ?? []), ...(clients.endFrame ?? []), ...(clients.input ?? []).flatMap(binding => binding.calls)])]) {
       const target = call.entry.kind === "game-export" ? this.gameEntry(call) : call.entry.kind === "export" ? this.host.entry(call.entry.name) : this.host.memory.offset(this.host.imageBase, BigInt(call.entry.rva)); this.host.memory.check(target, 1, "execute");
     }
@@ -1001,6 +1048,7 @@ export class NativeModProvider implements NativeModProjection {
       }
       this.publish(false); }
     finally { this.lifecycle = false; this.restoring = false; this.restoreLinks.clear(); this.owned?.suspend(false); }
+    this.objectives.restored();
     for (const client of clients) if (client.admitted) { this.clientOutputs.publish(client.actor); this.items?.admit(client.actor); }
     if (this.items !== null && saved.items !== null) this.items.restore(saved.items);
     this.clients?.start();
@@ -1010,6 +1058,7 @@ export class NativeModProvider implements NativeModProjection {
     this.pendingHostClose = false; this.host_?.close();
   }
   close(): undefined {
+    this.objectives.close(); this.releaseMatch?.(); this.releaseMatch = null;
     if (this.closed || this.closing) return undefined; this.closing = true;
     const errors: unknown[] = [];
     this.clientOutputs.close();

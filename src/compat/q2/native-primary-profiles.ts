@@ -1,3 +1,4 @@
+import { readSourcePrimaryMatch } from "../../content/mods/match.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { NativeAbi } from "../../contracts/execution.ts";
 import { namespaced } from "../../persistence/value.ts";
@@ -38,7 +39,7 @@ export function readNativePrimaryWeapons(reader: SaveReader, digest: ContentDige
 }
 export function readNativePrimaryPlayer(reader: SaveReader, digest: ContentDigest): NativePrimaryPlayerProfile {
   const objectives = reader.field("objectives");
-  return { digest, spawn: offset(reader.field("spawn")), objectives: objectives.field("kind").choice("none", "entry") === "none" ? { kind: "none" } : { kind: "entry", entry: offset(objectives.field("entry")) },
+  return { digest, ...(reader.field("match").value === undefined ? {} : { match: readSourcePrimaryMatch(reader.field("match"), 0xffffffff) }), spawn: offset(reader.field("spawn")), objectives: objectives.field("kind").choice("none", "entry") === "none" ? { kind: "none" } : { kind: "entry", entry: offset(objectives.field("entry")) },
     commandAngles: offset(reader.field("commandAngles")), velocity: offset(reader.field("velocity")), forward: reader.field("forward").nullable(offset) };
 }
 export function readNativePrimaryCommands(reader: SaveReader, digest: ContentDigest, abi: NativeAbi): NativePrimaryCommandProfile {

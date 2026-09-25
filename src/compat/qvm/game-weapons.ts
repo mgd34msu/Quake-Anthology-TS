@@ -1,4 +1,5 @@
 import type { QvmInventoryWord } from "./game-inventory.ts";
+import { sourceScore, type SourcePrimaryMatch } from "../../contracts/source-match.ts";
 import { QvmEquipmentMovement, type QvmEquipmentMotion, type QvmEquipmentMovementProfile } from "./game-equipment-movement.ts";
 import { sourceEquipmentItem, type SourceEquipmentContext } from "../../contracts/source-items.ts";
 import type { ModuleIdentity, QvmAbiProfile } from "../../contracts/execution.ts";
@@ -16,6 +17,7 @@ import { QvmOpcode } from "./image.ts";
 
 export interface QvmPrimaryWeaponProfile {
   readonly module: ModuleIdentity;
+  readonly match?: SourcePrimaryMatch;
   readonly abiProfile: QvmAbiProfile;
   readonly equipmentMovement: QvmEquipmentMovementProfile;
   readonly entityStride: number;
@@ -64,6 +66,7 @@ export class QvmPrimaryWeapons {
       || identity.artifactPath !== profile.module.artifactPath || artifact.module.digest !== identity.digest
       || game.module.abiProfile !== profile.abiProfile) throw new Error("Primary QVM weapon profile belongs to another executable");
     if (artifact.image.instructions[profile.torsoAnimation.entry]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Primary QVM torso animation entry is not an original function");
+    if (profile.match !== undefined && (!Number.isSafeInteger(profile.match.score) || profile.match.score < 0 || profile.match.score % 4 !== 0 || profile.match.score + 4 > profile.clientStride)) throw new Error("Original QVM score exceeds its declared client record");
     validateQvmWeaponDispatcher(profile.stage, artifact.image);
     qualifyQvmRegion(artifact.image.instructions, profile.damageFactor.entry, profile.damageFactor.stop.entry, profile.damageFactor.stop.join);
     qualifyQvmRegionEvaluation(artifact.image.instructions, profile.stage.dispatcher.entry, profile.delay);
@@ -100,6 +103,15 @@ export class QvmPrimaryWeapons {
         this.removals.push(game.module.bindInvocation({ kind: "qvm", module: identity, instructionIndex: entry }, call => this.evaluateCall(kind, call)));
       }
     } catch (error) { this.close(); throw error; }
+  }
+  get match(): SourcePrimaryMatch | null { return this.profile.match ?? null; }
+  score(actor: ActorId): number {
+    const match = this.profile.match; if (match === undefined) throw new Error("Original QVM score storage has no declaration");
+    return this.game.module.memory.dataView(this.pointer(actor) + match.score, 4).getInt32(0, true);
+  }
+  setScore(actor: ActorId, score: number): void {
+    const match = this.profile.match; if (match === undefined) throw new Error("Original QVM score storage has no declaration");
+    this.game.module.memory.dataView(this.pointer(actor) + match.score, 4).setInt32(0, sourceScore(score), true);
   }
   equipmentMovement(call: QvmFunctionCall, kind: "client-command" | "movement-slice", run: () => QvmSystemCallResult): QvmSystemCallResult {
     return this.equipment === null ? run() : this.equipment.movement(call, kind, run);

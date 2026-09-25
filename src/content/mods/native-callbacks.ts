@@ -1,4 +1,5 @@
 import { readClientOutputDeclarations } from "./client-outputs.ts";
+import { readSourceTeamValues, readSourceObjectives } from "./match.ts";
 import { readItemIconDeclaration } from "../item-icon.ts";
 import { readItemActions } from "./item-actions.ts";
 import type { NativeModRegionLocation } from "../../contracts/native-mod-region.ts";
@@ -59,9 +60,11 @@ function binding(reader: SaveReader): ModCallbackBinding {
   }
 }
 function field(reader: SaveReader): NativeModActorField {
-  const offset = reader.field("offset").integer(0), binding = reader.field("binding").choice("health", "inventory", "inventory-capacity", "origin", "velocity", "angles", "bounds-min", "bounds-max", "record", "constant", "constant-vector", "private", "address");
+  const offset = reader.field("offset").integer(0), binding = reader.field("binding").choice("health", "inventory", "inventory-capacity", "origin", "velocity", "angles", "bounds-min", "bounds-max", "record", "constant", "constant-vector", "private", "address", "team", "score");
   switch (binding) {
     case "address": return { offset, binding, value: reader.field("value").nullable(address) };
+    case "team": return { offset, binding, encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64"), values: readSourceTeamValues(reader.field("values")) };
+    case "score": return { offset, binding, encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") };
     case "health": return { offset, binding, encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") };
     case "inventory": case "inventory-capacity": return { offset, binding, encoding: reader.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64"), item: namespaced(reader.field("item")) };
     case "record": return { offset, binding, record: reader.field("record").string() };
@@ -224,6 +227,7 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
     } }),
     cvars: reader.field("cvars").list(value => ({ name: value.field("name").string(), value: value.field("value").string() })),
     spawnEntities: reader.field("spawnEntities").nullable(value => value.string()), entityRecord: reader.field("entityRecord").nullable(value => value.string()),
+    ...(reader.field("objectives").value === undefined ? {} : { objectives: readSourceObjectives(reader.field("objectives"), value => ({ address: address(value.field("address")), encoding: value.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") }), address, sourceCall) }),
     actorRecords: reader.field("actorRecords").list(record => ({ id: record.field("id").string(),
       base: (() => { const kind = record.field("base").field("kind").choice("entities", "clients", "address"); return kind === "address" ? { kind, ...address(record.field("base")) } : { kind }; })(),
       stride: record.field("stride").integer(4), firstSlot: record.field("firstSlot").integer(0), capacity: record.field("capacity").integer(1), fields: record.field("fields").list(field) })),

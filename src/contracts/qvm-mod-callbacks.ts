@@ -1,5 +1,6 @@
 import type { QvmCombatCall, QvmCombatMass, QvmCombatTeam, QvmDamageFlags, QvmDamageRole } from "./qvm-combat.ts";
 import type { ModClientOutputDeclaration } from "./mod-client-outputs.ts";
+import type { SourceObjectiveDeclaration, SourceMatchField } from "./source-match.ts";
 import type { QvmModActorFrame } from "./qvm-mod-actor-frame.ts";
 import type { QvmModItems } from "./qvm-mod-items.ts";
 import type { ContentDigest } from "./content.ts";
@@ -31,6 +32,7 @@ export interface QvmModPickup extends ModPickupRule<QvmModSourceCall> {
 }
 export type QvmModCallback = ModCallbackBinding & QvmModSourceCall;
 export type QvmModActorField = { readonly offset: number; readonly access?: "read-only" | "read-write" } & (
+  | (SourceMatchField & { readonly encoding: QvmModScalar })
   | { readonly binding: "health"; readonly encoding: QvmModScalar }
   | { readonly binding: "inventory"; readonly encoding: QvmModScalar; readonly item: ItemId }
   | { readonly binding: "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" }
@@ -103,6 +105,7 @@ export type QvmModProtection = QvmModProtectionCall & (
       readonly selection: QvmModProtectionSelection<"none" | "screen" | "shield"> } }
 );
 export interface QvmModCallbackDeclaration {
+  readonly objectives?: readonly SourceObjectiveDeclaration<{ readonly address: number; readonly encoding: QvmModScalar }, number, QvmModSourceCall>[];
   readonly version: 1;
   readonly runtime: "qvm";
   readonly program: { readonly path: string; readonly digest: ContentDigest };

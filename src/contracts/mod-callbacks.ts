@@ -1,4 +1,5 @@
 import type { ModClientOutputDeclaration } from "./mod-client-outputs.ts";
+import type { SourceObjectiveDeclaration, SourceMatchField } from "./source-match.ts";
 import type { QcWeaponStageDeclaration } from "./qc-weapon-stage.ts";
 import type { SourceItemIconDeclaration } from "./source-items.ts";
 import type { SourceItemActionCalls, SourceWeaponItem } from "./source-items.ts";
@@ -20,6 +21,7 @@ export type ModCallbackInput = ModClientInput | "self" | "other" | "activator" |
 export type ModCallbackValue = { readonly kind: "input"; readonly name: ModCallbackInput }
   | { readonly kind: "float"; readonly value: number } | { readonly kind: "string"; readonly value: string } | { readonly kind: "vector"; readonly value: Vec3 };
 export type ModActorField = { readonly field: string } & (
+  | SourceMatchField
   | { readonly binding: "health" | "origin" | "velocity" | "angles" | "bounds-min" | "bounds-max" | "think" | "nextthink" | "private" | "classname" | "view-offset" }
   | { readonly binding: "client-flags"; readonly grounded?: true; readonly privateMask?: number }
   | { readonly binding: "client-input"; readonly input: ModClientInput; readonly update: "always" | "nonzero"; readonly scale?: number }
@@ -115,6 +117,7 @@ export interface ModQcItems {
 }
 
 export interface ModCallbackDeclaration {
+  readonly objectives?: readonly SourceObjectiveDeclaration<string, string, ModSourceCall>[];
   readonly clientPresentation?: QcModClientPresentation;
   readonly version: 1;
   readonly runtime: "quakec";

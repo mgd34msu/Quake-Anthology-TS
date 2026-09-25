@@ -1,4 +1,5 @@
 import type { ModClientOutputDeclaration } from "./mod-client-outputs.ts";
+import type { SourceObjectiveDeclaration, SourceMatchField } from "./source-match.ts";
 import type { NativeModProtectionRegion } from "./native-mod-region.ts";
 import type { NativeModItems } from "./native-mod-items.ts";
 import type { ContentDigest } from "./content.ts";
@@ -66,8 +67,9 @@ export interface NativeModClients {
   readonly inputFields?: readonly NativeModClientInputField[];
   readonly pose?: { readonly viewHeight: NativeModArmorField; readonly crouched: { readonly field: NativeModArmorField; readonly mask: number } };
 }
-export type NativeModActorField = Exclude<QvmModActorField, { readonly binding: "health" | "inventory" | "constant" }>
+export type NativeModActorField = Exclude<QvmModActorField, { readonly binding: "health" | "inventory" | "constant" | "team" | "score" }>
   | { readonly offset: number; readonly binding: "address"; readonly value: NativeModAddress | null }
+  | ({ readonly offset: number; readonly encoding: NativeModScalar } & SourceMatchField)
   | { readonly offset: number; readonly binding: "health"; readonly encoding: NativeModScalar }
   | { readonly offset: number; readonly binding: "inventory"; readonly encoding: NativeModScalar; readonly item: ItemId }
   | { readonly offset: number; readonly binding: "inventory-capacity"; readonly encoding: NativeModScalar; readonly item: ItemId }
@@ -167,6 +169,7 @@ export interface NativeModCombat {
   readonly deferred?: NativeModDeferredDamage;
 }
 export interface NativeModDeclaration {
+  readonly objectives?: readonly SourceObjectiveDeclaration<{ readonly address: NativeModAddress; readonly encoding: NativeModScalar }, NativeModAddress, NativeModSourceCall>[];
   readonly clientPresentation?: NativeModClientPresentation;
   readonly version: 1;
   readonly runtime: "native";

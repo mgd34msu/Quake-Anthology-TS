@@ -149,7 +149,8 @@ export class QvmModActors {
     return { health: this.word(pointer + definition.health), canTakeDamage: this.word(pointer + definition.takedamage) !== 0,
       armor: this.armor(pointer), mass: definition.abi === "q3-g-damage" ? 200 : definition.mass.kind === "constant" ? definition.mass.value
         : definition.mass.storage === "int32" ? this.word(pointer + definition.mass.offset) : this.options.module.memory.view(pointer + definition.mass.offset, 4).getFloat32(0, true), invulnerable: (flags & definition.godmode) !== 0, noKnockback: (flags & definition.noKnockback) !== 0,
-      team: definition.abi === "q3-g-damage" ? team === 1 || team === 2 ? `q3:${team}` : null : definition.teams.find(value => value.value === team)?.team ?? null };
+      team: this.options.declaration.actorRecords.find(record => record.id === this.options.declaration.entityRecord)?.fields.some(field => field.binding === "team") === true
+        ? this.options.services.match?.player(actor)?.team() ?? null : definition.abi === "q3-g-damage" ? team === 1 || team === 2 ? `q3:${team}` : null : definition.teams.find(value => value.value === team)?.team ?? null };
   }
   admit(actor: OwnedActor): void {
     const { services, declaration } = this.options, definition = declaration.combat;

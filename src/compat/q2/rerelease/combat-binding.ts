@@ -74,7 +74,8 @@ export class RereleaseCombatBindings {
     },
       normalizeLegacyArmor: legacy => normalizeLegacyPowerOnlyArmor(legacy, armor(), "q2:none"), ...source.combat({ armor, writeArmor, traits: () => {
       const value = client(), flags = memory.readUint64(source.at("flags"));
-      const team = value === null ? 0 : publicState.playerState().teamId;
+      const teamField = world.client.layout.fields.find(field => field.name === "resp.ctf_team");
+      const team = value === null ? 0 : teamField === undefined ? publicState.playerState().teamId : memory.readInt32(value.at("resp.ctf_team"));
       const invincibleUntil = value !== null ? value.invincibleUntilMilliseconds()
         : (publicState.uint("svflags") & 4) !== 0 ? memory.readInt64(memory.offset(view.address, BigInt(world.monster.invincibleTime))) : 0n;
       return { invulnerable: (flags & BigInt(world.flags.godmode)) !== 0n || invincibleUntil > memory.readInt64(damage.entries.time),

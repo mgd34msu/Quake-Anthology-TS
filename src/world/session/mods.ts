@@ -1,3 +1,4 @@
+import type { SourceMatchServices } from "../../contracts/source-match.ts";
 import { sameModIdentity } from "../../contracts/mods.ts";
 import type { PresentationOwner } from "../../contracts/presentation.ts";
 import type { ActiveModClientPresentation, ModClientPresentationAdmission, ModClientPresentationSource } from "./mod-client-presentation.ts";
@@ -69,6 +70,7 @@ export interface ModInitialization {
   assertCurrent(): void;
 }
 export interface ModHostServices {
+  readonly match?: SourceMatchServices;
   readonly weapons?: SourceWeaponServices;
   readonly clients?: ModClientServices;
   readonly commands?: Pick<ModCommands, "bind">;
