@@ -27,9 +27,13 @@ export function validateQvmModPickups(declaration: QvmModCallbackDeclaration): v
     for (const resource of rule.writes) {
       if (resource.kind === "protection") {
         if (!declaration.protection?.some(protection => protection.channel === resource.channel)) throw new Error("QVM pickup has no protection owner");
-      } else if (resource.fields !== "capacity" && !declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory" && field.item === resource.item)))
-        throw new Error("QVM pickup has no declared inventory storage");
-      if (resource.kind === "inventory" && resource.fields !== "count") throw new Error("QVM pickup has no declared mutable capacity storage");
+      } else {
+        const projected = resource.fields === "count" && declaration.actorRecords.some(record => record.fields.some(field => field.binding === "inventory" && field.item === resource.item));
+        const owned = declaration.items?.storage.some(storage => storage.kind === "bits"
+          ? resource.fields === "count" && storage.items.some(item => item.item === resource.item)
+          : storage.item === resource.item && (resource.fields === "count" || storage.capacity.kind === "field"));
+        if (!projected && !owned) throw new Error("QVM pickup has no declared inventory storage for its requested count/capacity writes");
+      }
     }
     if (rule.operation.kind === "boolean-grant" && rule.operation.grant.returns === "void"
       || rule.operation.kind === "gate-then-grant" && (rule.operation.gate.returns === "void"

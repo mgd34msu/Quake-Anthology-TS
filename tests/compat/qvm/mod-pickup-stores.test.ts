@@ -14,11 +14,12 @@ import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
 import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 import { SharedOriginalPickupAdmission } from "../../../src/world/gameplay/original-pickups.ts";
 
-async function fixture() {
+async function fixture(ownedItem = false) {
+  const first = ownedItem ? 596 : 64, second = ownedItem ? 600 : 68;
   const instructions: readonly (readonly [QvmOpcode, number?])[] = [
     [QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 8],
-    [QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_CONST, 64], [QvmOpcode.OP_CONST, 10], [QvmOpcode.OP_STORE4],
-    [QvmOpcode.OP_CONST, 68], [QvmOpcode.OP_CONST, 68], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_ADD], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_CONST, first], [QvmOpcode.OP_CONST, 10], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_CONST, second], [QvmOpcode.OP_CONST, second], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_ADD], [QvmOpcode.OP_STORE4],
     [QvmOpcode.OP_CONST, 1], [QvmOpcode.OP_LEAVE, 8],
     [QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_CONST, 72], [QvmOpcode.OP_CONST, 77], [QvmOpcode.OP_STORE4],
     [QvmOpcode.OP_CONST, 68], [QvmOpcode.OP_CONST, 40], [QvmOpcode.OP_STORE4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 8],
@@ -39,10 +40,14 @@ async function fixture() {
       userinfo: () => "", setUserinfo: () => {}, command: () => null, drop: () => {}, subscribe: () => () => undefined, subscribeApplication: () => () => undefined,
     } };
   const declaration: QvmModCallbackDeclaration = { version: 1, runtime: "qvm", program: { path: module.artifactPath, digest: module.digest }, abiProfile: "q3-modern", entityRecord: "entity",
-    actorRecords: [{ id: "entity", address: 64, stride: 12, capacity: 2, fields: [{ binding: "inventory", offset: 0, encoding: "int32", item: "test:first" }, { binding: "inventory", offset: 4, encoding: "int32", item: "test:second" }, { binding: "inventory", offset: 8, encoding: "int32", item: "test:third" }] },
-      { id: "player", address: 128, stride: 468, capacity: 1, fields: [{ binding: "private", offset: 0, byteLength: 468 }] }],
+    actorRecords: [{ id: "entity", address: 64, stride: 12, capacity: 2, fields: ownedItem ? [{ binding: "private", offset: 0, byteLength: 12 }]
+      : [{ binding: "inventory", offset: 0, encoding: "int32", item: "test:first" }, { binding: "inventory", offset: 4, encoding: "int32", item: "test:second" }, { binding: "inventory", offset: 8, encoding: "int32", item: "test:third" }] },
+      { id: "player", address: 128, stride: 480, capacity: 1, fields: [{ binding: "private", offset: 0, byteLength: 480 }] }],
     clients: { maximum: 1, records: ["player"], playerStateRecord: "player", admit: [], userinfo: [], disconnect: [] }, initialize: [], callbacks: [],
-    pickups: [{ id: "compound", offered: ["q1:pickup"], writes: [{ kind: "inventory", item: "test:first", fields: "count" }, { kind: "inventory", item: "test:second", fields: "count" }], context: [],
+    ...(ownedItem ? { items: { definitions: [{ kind: "counter", item: "test:first", label: "Source ammo", admission: "replace-primary" }],
+      storage: [{ kind: "counter", item: "test:first", field: { record: "player", offset: 468 }, capacity: { kind: "field", field: { record: "player", offset: 472 } } }] } } : {}),
+    pickups: [{ id: "compound", offered: ["q1:pickup"], writes: ownedItem ? [{ kind: "inventory", item: "test:first", fields: "count-and-capacity" }]
+      : [{ kind: "inventory", item: "test:first", fields: "count" }, { kind: "inventory", item: "test:second", fields: "count" }], context: [],
       operation: { kind: "boolean-grant", grant: { entry: 3, arguments: [], globals: [], returns: "int32" } } }],
   };
   const source = new QvmModProvider(artifact, declaration, services, () => {}, "q3:classic:compound:test");
@@ -52,6 +57,18 @@ async function fixture() {
     count: { kind: "default" }, dropped: false, time: services.time() }, { original: () => { throw new Error("Unexpected fallback"); }, complete: () => { completed++; } }),
     completed: () => completed, close: () => { source.close(); actors.close(); } };
 }
+
+test("QVM original pickups update admitted source item counts and mutable capacities", async () => {
+  const f = await fixture(true);
+  try {
+    f.source.module.memory.dataView(600, 4).setInt32(0, 100, true);
+    expect(f.take()).toBe("accepted");
+    expect(f.inventory.entries(f.target.id).find(entry => entry.item === "test:first")).toMatchObject({ count: 10, capacity: 101 });
+    expect(f.source.module.memory.dataView(596, 8).getInt32(0, true)).toBe(10);
+    expect(f.source.module.memory.dataView(596, 8).getInt32(4, true)).toBe(101);
+    expect(f.completed()).toBe(1);
+  } finally { f.close(); }
+});
 
 test("QVM pickup committed observers update a later source operand before original code reads it", async () => {
   const f = await fixture();
