@@ -154,7 +154,7 @@ export class QvmGameData {
   }
 
   writePlayerState(number: number, state: Q3PlayerState): void {
-    writeQvmPlayerState(this.view(this.clientOffset(number), qvmPlayerStateBytes(this.abiProfile)), state, this.abiProfile);
+    writeQvmPlayerState(this.view(this.clientOffset(number), qvmPlayerStateBytes(this.abiProfile)), state, this.abiProfile, "preserve-private");
   }
 
   playerPing(number: number): number {

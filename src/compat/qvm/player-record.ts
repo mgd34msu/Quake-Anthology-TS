@@ -95,13 +95,15 @@ export function readSourceQvmPlayerState(view: DataView, profile: QvmAbiProfile)
   };
 }
 
-/** Writes exactly playerState_t, preserving surrounding VM memory. */
-export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profile: QvmAbiProfile = "q3-modern"): void {
+/** Writes playerState_t; borrowed records retain source-only persistent slots. */
+export function writeQvmPlayerState(view: DataView, state: Q3PlayerState, profile: QvmAbiProfile = "q3-modern",
+  persistentWrite: "initialize" | "preserve-private" = "initialize"): void {
   checkRecord(view, profile);
   for (const slots of [state.stats, state.persistent, state.powerups, state.ammo]) {
     if (slots.length !== 16) throw new RangeError("QVM player-state arrays require 16 slots");
   }
-  const persistent = profile === "q3-modern" ? [...state.persistent] : Array<number>(16).fill(0);
+  const persistent = profile === "q3-modern" ? [...state.persistent]
+    : persistentWrite === "preserve-private" ? readSlots(view, 248) : Array<number>(16).fill(0);
   if (profile !== "q3-modern") {
     for (const index of [0, 1, 2, 3, 4, 8, 9, 10]) persistent[index] = state.persistent[index] ?? 0;
     persistent[7] = state.persistent[6] ?? 0; persistent[11] = state.persistent[13] ?? 0;
