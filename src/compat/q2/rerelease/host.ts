@@ -1,3 +1,4 @@
+import { withRereleasePrimaryProtection } from "./pickup-protection.ts";
 import { RereleaseDebugShapeImports } from "./debug-shapes.ts";
 import type { RereleaseDebugShapesEvent } from "./debug-shapes.ts";
 import { RereleaseWorldTextImports } from "./world-text.ts";
@@ -126,6 +127,7 @@ export class RereleaseQ2GuestHost {
       invoke: (target, signature, values) => this.module.invoke(target, signature, values), record: address => this.module.entities().fromPointer(address),
       current: record => this.#retiredInputClients.has(record.slot) ? null : this.options.engine.actors.atSource(this.module.memory.module.id, record.slot)?.id ?? null,
       admission: () => { const pickups = this.options.pickups; if (pickups === undefined) throw new Error("API2023 primary pickup authority disappeared"); return pickups.admission; },
+      withProtection: (recipient, channel, current, operation, committed) => withRereleasePrimaryProtection(this, recipient, channel, current, operation, committed),
     }, options.pickups.imageBase, profile);
   }
   bindPickupSupply(owner: NativePickupSupply): () => undefined {

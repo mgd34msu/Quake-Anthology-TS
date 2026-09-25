@@ -2,9 +2,9 @@ import type { SourcePickupQuantity } from "../../contracts/pickups.ts";
 import type { ContentDigest } from "../../contracts/content.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue, RawEntityView } from "../../contracts/execution.ts";
 import type { ActorId } from "../../contracts/identity.ts";
-import type { ItemId } from "../../contracts/gameplay.ts";
+import type { ItemId, ProtectionChannel } from "../../contracts/gameplay.ts";
 import type { PickupSupplyOffer } from "../../contracts/pickups.ts";
-import type { OriginalPickupAdmission, OriginalPickupOffer, SourcePickupSelection } from "../../contracts/original-pickups.ts";
+import type { OriginalPickupAdmission, OriginalPickupOffer, OriginalPickupOutcome, SourcePickupSelection } from "../../contracts/original-pickups.ts";
 import type { GuestCallSignature, GuestRegister, MappedGuestMemory } from "../../guest/core/contracts.ts";
 import { captureAbiProcessorState, restoreAbiProcessorState, type GuestCallRunner } from "../../guest/abi/runner.ts";
 import { bindNativeModEntry } from "./native-mod-entries.ts";
@@ -13,6 +13,7 @@ export interface NativePickupGrant {
   readonly entry: number;
   readonly recipient: { readonly entry: number; readonly join: number };
   readonly resource: "regular" | "inventory";
+  readonly consumers?: readonly { readonly entry: number; readonly signature: GuestCallSignature; readonly protection: ProtectionChannel }[];
   readonly supply?:
     | { readonly kind: "ammo"; readonly entry: number; readonly amount: GuestRegister }
     | { readonly kind: "weapon"; readonly ammoReturn: number; readonly settle: number; readonly autoswitch: { readonly entry: number; readonly join: number } };
@@ -49,6 +50,7 @@ export interface NativePickupHost {
   record(address: GuestAddress): RawEntityView;
   current(record: RawEntityView): ActorId | null;
   admission(): OriginalPickupAdmission;
+  withProtection?<T>(recipient: RawEntityView, channel: ProtectionChannel, current: () => void, operation: (consume: (execute: () => void) => void) => T, committed?: () => boolean): T;
 }
 interface PickupFrame {
   readonly pickup: RawEntityView;
@@ -60,6 +62,7 @@ interface PickupFrame {
   readonly cancelled: object;
   invalid: boolean;
   called: boolean;
+  projections: number;
   supply: NativePickupSupplyEvaluation | null;
 }
 const voidResult: GuestCallResult = { kind: "void" };
@@ -76,6 +79,7 @@ export class NativePrimaryPickups {
   private closed = false;
   private supplyOwner: NativePickupSupply | null = null;
   constructor(private readonly host: NativePickupHost, private readonly image: GuestAddress, private readonly profile: NativePickupProfile) {
+    if (profile.grants.some(grant => grant.consumers?.length) && host.withProtection === undefined) throw new Error("Native pickup consumer has no protection owner binding");
     if (host.memory.module.digest !== profile.digest) throw new Error("Native pickup profile does not identify this artifact");
     const entries = { memory: host.memory, entries: host.runner.options, invoke: host.invoke.bind(host) };
     try {
@@ -180,7 +184,7 @@ export class NativePrimaryPickups {
       ? { kind: "seconds", value: memory.readFloat32(this.at(profile.time.address)) } satisfies OriginalPickupOffer["time"]
       : { kind: "milliseconds", value: Number(memory.readInt64(this.at(profile.time.address))) } satisfies OriginalPickupOffer["time"];
     if (!Number.isFinite(time.value) || !Number.isSafeInteger(Math.trunc(time.value))) throw new Error("Native pickup clock cannot be represented");
-    return { pickup, recipient, descriptor, grant, cancelled: {}, invalid: false, called: false, supply: null, offer: {
+    return { pickup, recipient, descriptor, grant, cancelled: {}, invalid: false, called: false, projections: 0, supply: null, offer: {
       recipient: recipientActor, pickup: pickupActor, source: memory.module.id, item,
       defaultResource: grant.resource === "regular" ? { kind: "protection", channel: "regular" } : { kind: "inventory", item },
       count: count === 0 ? { kind: "default" } : { kind: "override", amount: count },
@@ -226,7 +230,7 @@ export class NativePrimaryPickups {
     if (frame.selection.kind === "blocked") return refused;
     if (frame.selection.kind !== "replacement") throw new Error("Native pickup replacement has no resource owner");
     if (frame.grant.supply !== undefined) return this.grantSupply(frame, values, original);
-    const decision = frame.selection.grant(); this.requireCurrent(frame);
+    const decision = this.grantResources(frame); this.requireCurrent(frame);
     if (decision === "stale") throw frame.cancelled;
     if (decision === "refused") return refused;
     let skipped = false;
@@ -238,6 +242,27 @@ export class NativePrimaryPickups {
       if (!skipped || (result.kind !== "int32" && result.kind !== "uint32") || result.value === 0) throw new Error("Original pickup map continuation did not accept its settled grant");
       return result;
     } finally { remove(); }
+  }
+  private grantResources(frame: PickupFrame, consume: () => boolean = () => true): OriginalPickupOutcome {
+    const consumers = frame.grant.consumers ?? [], calls: (() => void)[] = [];
+    const scope = (index: number): OriginalPickupOutcome => {
+      const consumer = consumers[index];
+      if (consumer === undefined) {
+        if (frame.selection.kind !== "replacement") throw new Error("Native pickup resource owner changed");
+        const decision = frame.selection.grant(); this.requireCurrent(frame);
+        if (decision === "accepted" && consume()) for (const call of calls) { call(); this.requireCurrent(frame); }
+        return decision;
+      }
+      const protect = this.host.withProtection;
+      if (protect === undefined) throw new Error("Native pickup protection binding disappeared");
+      return protect(frame.recipient, consumer.protection, () => this.requireCurrent(frame), publish => {
+        calls.push(() => publish(() => {
+          this.host.invoke(this.at(consumer.entry), consumer.signature, [{ kind: "pointer", value: frame.recipient.address }]);
+        }));
+        try { return scope(index + 1); } finally { calls.pop(); }
+      }, () => frame.projections === 0);
+    };
+    return scope(0);
   }
   private quantity(frame: PickupFrame, descriptor: GuestAddress, amount: number, count: number, capacity: number): SourcePickupQuantity {
     this.requireCurrent(frame);
@@ -251,6 +276,7 @@ export class NativePrimaryPickups {
     const previousCount = memory.readInt32(counter), previousCap = ammo.capacityBytes === 2 ? memory.readInt16(cap) : memory.readInt32(cap);
     const processor = captureAbiProcessorState(runner.options.cpu.state), stop = {};
     const remove = ammo.stop === null ? () => {} : runner.options.callbacks.observeEntry(this.at(ammo.stop), () => { throw stop; });
+    frame.projections++;
     try {
       memory.writeInt32(counter, count);
       if (ammo.capacityBytes === 2) memory.writeInt16(cap, capacity); else memory.writeInt32(cap, capacity);
@@ -266,9 +292,11 @@ export class NativePrimaryPickups {
       }
       return { amount: memory.readInt32(counter) - count, accepted };
     } finally {
-      remove(); restoreAbiProcessorState(runner.options.cpu.state, processor);
-      memory.writeInt32(counter, previousCount);
-      if (ammo.capacityBytes === 2) memory.writeInt16(cap, previousCap); else memory.writeInt32(cap, previousCap);
+      try {
+        remove(); restoreAbiProcessorState(runner.options.cpu.state, processor);
+        memory.writeInt32(counter, previousCount);
+        if (ammo.capacityBytes === 2) memory.writeInt16(cap, previousCap); else memory.writeInt32(cap, previousCap);
+      } finally { frame.projections--; }
     }
   }
   private grantSupply(frame: PickupFrame, values: readonly GuestCallValue[], original: (values: readonly GuestCallValue[]) => GuestCallResult): GuestCallResult {
@@ -283,16 +311,21 @@ export class NativePrimaryPickups {
       if (settled) return;
       restore(); this.requireCurrent(frame); settled = true;
       const sourceAmmo = ammo, item = sourceAmmo === null ? null : this.itemName(sourceAmmo.descriptor);
+      let acceptedAmmo = false;
       const offer: PickupSupplyOffer = operation.kind === "weapon"
         ? { kind: "weapon", offer: { item: frame.offer.item, ammo: sourceAmmo === null || item === null ? [] : [{ item, amount: sourceAmmo.amount }] } }
         : { kind: "ammo", offer: { item: frame.offer.item, amount: sourceAmmo?.amount ?? 0 } };
       const flags = memory.readUint32(memory.offset(frame.descriptor, BigInt(this.profile.supply.flags)));
       frame.supply = { offer: operation.kind === "ammo" && offer.kind === "ammo" && (flags & this.profile.supply.weaponFlag) !== 0
         ? { kind: "ammoWeapon", offer: { ...offer.offer, weapon: frame.offer.item } } : offer,
-        ...(sourceAmmo === null ? {} : { quantity: (count: number, capacity: number) => this.quantity(frame, sourceAmmo.descriptor, sourceAmmo.amount, count, capacity) }) };
+        ...(sourceAmmo === null ? {} : { quantity: (count: number, capacity: number) => {
+          const result = this.quantity(frame, sourceAmmo.descriptor, sourceAmmo.amount, count, capacity);
+          acceptedAmmo ||= result.accepted;
+          return result;
+        } }) };
       try {
         if (frame.selection.kind !== "replacement") throw new Error("Native supply owner changed during its source call");
-        const decision = frame.selection.grant(); this.requireCurrent(frame);
+        const decision = this.grantResources(frame, () => acceptedAmmo); this.requireCurrent(frame);
         if (decision === "stale") throw frame.cancelled;
         if (decision === "refused") throw declined;
       } finally { frame.supply = null; }

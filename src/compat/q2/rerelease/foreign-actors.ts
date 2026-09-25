@@ -22,6 +22,7 @@ import { captureAbiProcessorState, restoreAbiProcessorState } from "../../../gue
 export interface RereleaseForeignDamageServices {
   provenance(attacker: ActorId, inflictor: ActorId, target: ActorId): Omit<AttackProvenance, "attacker" | "inflictor" | "cause">;
 }
+interface DamageFrame { readonly request: DamageRequest; entered: boolean; stack: bigint | null; observing: boolean; }
 interface Projection { readonly actor: OwnedActor; readonly view: RawEntityView; readonly generation: number; releasing: boolean; syncing: boolean; }
 export interface RereleaseProjectionSave { readonly slot: number; readonly actor: SavedActorId; }
 
@@ -31,7 +32,8 @@ export class RereleaseForeignActors {
   readonly #slots = new Map<number, Projection>();
   readonly #removeEntry: () => void;
   readonly #removeContinuation: () => void;
-  readonly #damageFrames: { readonly request: DamageRequest; entered: boolean; stack: bigint | null }[] = [];
+  readonly #damageFrames: DamageFrame[] = [];
+  readonly #inventoryPublications: { readonly frame: DamageFrame | undefined; readonly actor: ActorId; readonly committed: () => boolean }[] = [];
   readonly #armorBindings = new Map<OwnedActor, { readonly stages: Partial<Record<ProtectionChannel, Parameters<SourceArmorStage["bind"]>[0]>>; readonly armor: () => ArmorState }>();
   readonly #armorHooks: (() => void)[] = [];
   #powerBypass: bigint | "pending" | null = null;
@@ -60,6 +62,22 @@ export class RereleaseForeignActors {
       return !entry.releasing && host.options.engine.actors.isLive(entry.actor.id)
         && module.memory.readUint8(source.at("shared.inuse")) !== 0;
     });
+  }
+  withInventoryPublication<T>(actor: ActorId, committed: () => boolean, operation: () => T): T {
+    this.#inventoryPublications.push({ frame: this.#damageFrames.at(-1), actor, committed });
+    try { return operation(); } finally { this.#inventoryPublications.pop(); }
+  }
+  #publishesInventory(frame: DamageFrame): boolean {
+    if (this.#damageFrames.at(-1) !== frame) return true;
+    for (let index = this.#inventoryPublications.length - 1; index >= 0; index--) {
+      const scope = this.#inventoryPublications[index];
+      if (scope?.frame === frame && scope.actor.equals(frame.request.target)) return scope.committed();
+    }
+    return true;
+  }
+  observingDamage(actor: ActorId): boolean {
+    const frame = this.#damageFrames.at(-1);
+    return frame?.observing === true && frame.request.target.equals(actor);
   }
   #interceptNativeDamage(): boolean {
     const { module } = this.host, { engine } = this.host.options;
@@ -247,7 +265,7 @@ export class RereleaseForeignActors {
       const monster = (memory.readUint32(source.at("shared.svflags")) & 4) !== 0;
       this.deferred.track(view);
       const attacker = this.host.addressForActor(request.attack.attacker ?? engine.worldActor()), inflictor = this.host.addressForActor(request.attack.inflictor ?? engine.worldActor());
-      const frame: { readonly request: DamageRequest; entered: boolean; stack: bigint | null } = { request, entered: false, stack: null };
+      const frame: DamageFrame = { request, entered: false, stack: null, observing: false };
       const state: { result: SourceDamageResult | null } = { result: null };
       const targetOwner = engine.actors.resolveOwned(request.target), power = targetOwner === null ? undefined : this.#armorBindings.get(targetOwner);
       const readArmor = power?.armor ?? (() => engine.combat.read(request.target)?.armor);
@@ -256,9 +274,10 @@ export class RereleaseForeignActors {
       this.#damageFrames.push(frame);
       const removeWrites: (() => void)[] = [], removeEntries: (() => void)[] = [];
       let vectors: GuestAddress | null = null;
-      const stopWrites = (): void => { for (const remove of removeWrites.splice(0)) remove(); };
+      const stopWrites = (): void => { frame.observing = false; for (const remove of removeWrites.splice(0)) remove(); };
       const current = (): boolean => this.#damageFrames.at(-1) === frame && state.result === null;
       try {
+        frame.observing = true;
         removeWrites.push(memory.observeWrites(source.at("health"), 4, () => {
           const after = source.health, before = health; health = after;
           if (!current() || after === before) return;
@@ -273,6 +292,7 @@ export class RereleaseForeignActors {
         if (source.client !== null) {
           const client = new RereleaseSourceClient(source.client, module, retailRereleaseClientProfile);
           removeWrites.push(memory.observeWrites(client.at("pers.inventory"), retailRereleaseClientProfile.inventoryCount * 4, () => {
+            if (!this.#publishesInventory(frame)) return;
             const after = readArmor();
             const before = armor; armor = after;
             if (!current()) return;
