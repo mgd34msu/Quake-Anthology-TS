@@ -1,3 +1,5 @@
+import type { NativeModArmorField } from "../../contracts/native-mod-callbacks.ts";
+import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
 import { NativeModInvocations, type NativeModInvocationResult } from "./native-mod-invocations.ts";
 import { planGuestCall } from "../../guest/abi/classify.ts";
 import type { NativeModProtectionRegion } from "../../contracts/native-mod-region.ts";
@@ -94,6 +96,16 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
   }
   if (declaration.entityRecord !== null && records.get(declaration.entityRecord)?.base.kind !== "entities") throw new Error("Native engine entity record must use the source public edict table");
   const clients = declaration.clients;
+  const outputField = (field: { readonly record: string; readonly offset: number }, length: number): void => {
+    const record = records.get(field.record);
+    if (clients === undefined || record === undefined || !clients.records.includes(record.id) && record.id !== declaration.entityRecord
+      || !Number.isInteger(field.offset) || field.offset < 0
+      || !record.fields.some(value => value.binding === "private" && value.offset <= field.offset && field.offset + length <= value.offset + value.byteLength)
+      || (clients.inputFields ?? []).some(value => value.record === field.record && value.offset < field.offset + length && field.offset < value.offset + (value.value.kind === "vector" ? 12 : scalarSize(value.value.kind === "time" ? value.value.encoding : value.value.kind)))
+      || (clients.pose === undefined ? [] : [clients.pose.viewHeight, clients.pose.crouched.field]).some(value => value.record === field.record && value.offset < field.offset + length && field.offset < value.offset + scalarSize(value.encoding)))
+      throw new Error("Native client output requires exclusive private client storage");
+  };
+  validateModClientOutputs(clients?.outputs ?? [], { scalar: field => outputField(field, scalarSize(field.encoding)), vector: field => outputField(field, 12) });
   if (declaration.clientPresentation !== undefined && (clients === undefined || owned === undefined || (clients.endFrame?.length ?? 0) === 0))
     throw new Error("Native client presentation requires declared original end-frame calls");
   const protections = declaration.protection ?? [];
@@ -295,6 +307,7 @@ export class NativeModProvider implements NativeModProjection {
   private readonly appearanceActors = new Set<ActorId>();
   private readonly pendingReleases = new Set<ActorId>();
   private readonly unsubscribe: () => undefined;
+  private readonly clientOutputs: SourceModClientOutputs<NativeModArmorField, { readonly record: string; readonly offset: number }>;
   private closed = false;
   private closing = false;
   private sourceCalls = 0;
@@ -308,6 +321,10 @@ export class NativeModProvider implements NativeModProjection {
   constructor(readonly declaration: NativeModDeclaration, readonly services: ModHostServices, readonly instance: ProviderId,
     readonly map: string, private readonly assertCurrent: () => void) {
     validateNativeModDeclaration(declaration); for (const record of declaration.actorRecords) this.records.set(record.id, record);
+    this.clientOutputs = new SourceModClientOutputs(instance, declaration.clients?.outputs ?? [], services.clients?.claimOutputs, {
+      scalar: (actor, field) => this.scalarRead(this.clientOutputAddress(actor, field), field.encoding),
+      vector: (actor, field) => readClassicVector(this.host.memory, this.clientOutputAddress(actor, field)),
+    });
     this.nonclientRecords = declaration.actorRecords.filter(record => !declaration.clients?.records.includes(record.id));
     this.pickups = new NativeModPickups(declaration.pickups ?? [], services, instance, {
       current: () => this.current(), eligible: actor => this.clients?.admitted(actor) === true,
@@ -324,7 +341,7 @@ export class NativeModProvider implements NativeModProjection {
       scalar: (base, field, value) => { const address = this.host.memory.offset(base, BigInt(field.offset)); if (value !== undefined) this.scalarWrite(address, value, field.encoding); return this.scalarRead(address, field.encoding); },
       transfer: invoke => this.transfer(invoke), flush: fuel => this.flush(fuel), invoke: (call, inputs, region, authority) => this.execute(call, inputs, false, region, authority),
     });
-    this.unsubscribe = services.actors.onRelease(actor => { this.items?.release(actor.id); this.pickups.release(actor.id); this.protection?.release(actor.id); if (this.projections.has(actor.id)) { this.pendingReleases.add(actor.id); this.host_?.presentation.release(actor.id); } return undefined; });
+    this.unsubscribe = services.actors.onRelease(actor => { this.clientOutputs.release(actor.id); this.items?.release(actor.id); this.pickups.release(actor.id); this.protection?.release(actor.id); if (this.projections.has(actor.id)) { this.pendingReleases.add(actor.id); this.host_?.presentation.release(actor.id); } return undefined; });
   }
   reserveProtection(): void { this.current(); this.protection?.reserve(); }
   activateProtection(): void { this.current(); this.protection?.activate(); this.pickups.activate(); }
@@ -344,7 +361,8 @@ export class NativeModProvider implements NativeModProjection {
       const services = this.services.clients;
       if (services === undefined) throw new Error("Native component clients require destination client services");
       this.clients = new NativeModClientsBinding({ services, declaration: this.declaration.clients, content: host.content,
-        project: actor => { this.protection?.reserveActor(actor); this.address(actor); }, admitted: actor => { this.items?.admit(actor); this.protection?.bindActor(actor); this.pickups.bindActor(actor); }, release: actor => {
+        project: actor => { this.protection?.reserveActor(actor); this.address(actor); }, admitted: actor => { this.clientOutputs.publish(actor); this.items?.admit(actor); this.protection?.bindActor(actor); this.pickups.bindActor(actor); }, release: actor => {
+          this.clientOutputs.release(actor);
           this.items?.release(actor);
           this.pickups.release(actor);
           this.protection?.release(actor);
@@ -600,6 +618,15 @@ export class NativeModProvider implements NativeModProjection {
         : field.binding === "inventory" && this.services.combat.protectionInventoryItems(owner, write.channel).includes(field.item));
       if (!permitted) throw new Error(`Original pickup changed undeclared ${field.binding} ${field.item}`);
     }
+  }
+  private clientOutputAddress(actor: ActorId, field: { readonly record: string; readonly offset: number }): GuestAddress {
+    const record = this.records.get(field.record), slot = this.projections.get(actor);
+    if (record === undefined || slot === undefined) throw new Error("Native client output lost its source projection");
+    return this.host.memory.offset(this.recordAddress(record, slot), BigInt(field.offset));
+  }
+  private publishClientOutputs(): void {
+    if (!this.clientOutputs.enabled) return;
+    for (const actor of this.projections.keys()) if (this.services.actors.isLive(actor) && this.clientOutputs.has(actor) && this.clients?.admitted(actor) === true) this.clientOutputs.publish(actor);
   }
   private refresh(): void {
     this.projectionWrites++;
@@ -873,7 +900,7 @@ export class NativeModProvider implements NativeModProjection {
     for (const actor of this.projections.keys()) { const slot = this.slotOf(actor); if (slot !== null && this.services.actors.isLive(actor)) result.push({ actor, slot }); }
     return result;
   }
-  private publish(events = true): void { if (!this.closing) this.host.presentation.publish(this.entries(), events); }
+  private publish(events = true): void { if (!this.closing) { this.publishClientOutputs(); this.host.presentation.publish(this.entries(), events); } }
   presentations(): readonly SimulationPresentation[] { return (this.owned?.entries() ?? []).flatMap(({ actor, slot }) => this.host.presentation.appearance(actor, slot)); }
   advance(frame: FrameContext): undefined { this.current(); this.releasePending(); this.owned?.advance(frame); if (this.closed) return undefined; this.publish(); if (this.owned === null) { for (const entry of this.entries()) this.host.clearEntityEvent(entry.slot); this.host.presentation.beginFrame(); } return undefined; }
   importBoundary(name: string, values: readonly GuestCallValue[], invoke: () => GuestCallResult): GuestCallResult {
@@ -962,6 +989,7 @@ export class NativeModProvider implements NativeModProjection {
     for (const entry of actors) this.validateInventoryCapacity(entry.actor, clientActors.has(entry.actor));
     for (const entry of saved.presentation.fog) { const actor = this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current"); if (!this.services.actors.isLive(actor)) throw new Error("Saved native presentation player is unavailable"); }
     const ownedActors = saved.owned === null ? [] : this.owned?.validateSaved(saved.owned) ?? [];
+    this.clientOutputs.clear();
     this.items?.clear(); this.pickups.close(); this.protection?.prepareRestore();
     this.lifecycle = true; this.restoring = true; this.restoreLinks.clear(); this.owned?.suspend(true);
     try { this.clients?.restore(clients); this.appearanceActors.clear(); for (const entry of actors) if (entry.appearance) this.appearanceActors.add(entry.actor); this.projections.clear(); for (const entry of actors) this.projections.set(entry.actor, entry.slot); this.pendingReleases.clear(); await this.host.restore(saved.source);
@@ -973,7 +1001,7 @@ export class NativeModProvider implements NativeModProjection {
       }
       this.publish(false); }
     finally { this.lifecycle = false; this.restoring = false; this.restoreLinks.clear(); this.owned?.suspend(false); }
-    for (const client of clients) if (client.admitted) this.items?.admit(client.actor);
+    for (const client of clients) if (client.admitted) { this.clientOutputs.publish(client.actor); this.items?.admit(client.actor); }
     if (this.items !== null && saved.items !== null) this.items.restore(saved.items);
     this.clients?.start();
   }
@@ -984,6 +1012,7 @@ export class NativeModProvider implements NativeModProjection {
   close(): undefined {
     if (this.closed || this.closing) return undefined; this.closing = true;
     const errors: unknown[] = [];
+    this.clientOutputs.close();
     try { this.items?.close(); } catch (error) { errors.push(error); }
     try { this.pickups.close(); } catch (error) { errors.push(error); }
     try { this.protection?.close(); } catch (error) { errors.push(error); }

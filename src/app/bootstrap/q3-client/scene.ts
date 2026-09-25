@@ -1,3 +1,4 @@
+import type { Vec3 } from "../../../contracts/math.ts";
 import { CommonError } from "../../../core/common-error.ts";
 import type { RenderState } from "../../../contracts/render.ts";
 import { q3ProceduralFog } from "../../../content/q3/presentation/scene.ts";
@@ -11,10 +12,11 @@ import { createViewProjector } from "../../../render/scene/view.ts";
 import type { WorldViewInput } from "../../../render/scene/world.ts";
 import type { ProviderSceneAssets } from "../assets.ts";
 import type { ApplicationQ3Assets } from "./assets.ts";
-import { q3WeaponCamera } from "./view.ts";
+import { q3WeaponCamera, offsetQ3ViewEntity, offsetQ3ViewReference } from "./view.ts";
 import { currentRemap } from "../../../render/scene/material-registrations.ts";
 
 export interface Q3SceneRenderOptions {
+  readonly viewOffset?: Vec3;
   readonly noWorldModel: boolean;
   readonly splitScreen: boolean;
   readonly supplementalViewWeapon: boolean;
@@ -63,7 +65,8 @@ export class ApplicationQ3SceneRenderer {
     operations.push(...additions.filter(polygon));
     const models = new Map(scene.models.map(model => [model.entityIndex, model]));
     const project = createViewProjector(input.camera), white = this.media.provider.textures.white.image;
-    for (const [index, entity] of scene.admission.entities.entries()) {
+    for (const [index, original] of scene.admission.entities.entries()) {
+      const entity = !noWorldModel && (original.renderFlags & 4) !== 0 ? offsetQ3ViewReference(original, options.viewOffset) : original;
       const entityOrder = { kind: "refentity", index: firstEntity + index } satisfies import("../../../render/scene/submissions.ts").SourceEntityOrder;
       if (options.supplementalViewWeapon && !noWorldModel && (entity.renderFlags & 4) !== 0) continue;
       if (input.camera.clip.kind === "portal" && (entity.renderFlags & 4) !== 0) continue;
@@ -80,13 +83,14 @@ export class ApplicationQ3SceneRenderer {
         const model = models.get(index);
         if (model === undefined) throw new Error("Admitted Q3 model lost its prepared descriptor");
         const selected = (entity.renderFlags & 4) !== 0 ? weaponInput : input;
+        const rendered = (entity.renderFlags & 4) !== 0 && !noWorldModel ? offsetQ3ViewEntity(model.entity, options.viewOffset) : model.entity;
         if (model.entity.model.kind === "brush-model") {
-          operations.push(...world.prepareModel(model.entity.model.model, { origin: entity.origin, axis: entity.axis },
+          operations.push(...world.prepareModel(model.entity.model.model, { origin: rendered.transform.origin, axis: entity.axis },
             { ...selected, animationFrame: entity.frame, materialContext: { ...selected.materialContext, entityRGBA: entity.shaderRGBA } }, entityOrder));
         } else {
           const provider = this.media.modelProviders.get(entity.model);
           if (provider === undefined) throw new Error("Cgame model lost its selected asset provider");
-          operations.push(...this.renderer(provider).prepare([model.entity], selected,
+          operations.push(...this.renderer(provider).prepare([rendered], selected,
             () => ({ ...model.options, noWorldModel, shaderTexCoord: entity.shaderTexCoord, source: { view: source.view, entity: entityOrder } })));
         }
         continue;

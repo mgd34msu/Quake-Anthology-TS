@@ -1,3 +1,5 @@
+import type { ModClientMovementOutputs } from "../../contracts/mod-client-outputs.ts";
+import { clientStanceCommand } from "../../movement/client-outputs.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { FrameContext } from "../../contracts/time.ts";
@@ -15,11 +17,13 @@ export interface QvmInputDefinition {
   readonly clientStride: number;
   readonly clientPointer: number;
   readonly intermission: readonly number[];
+  readonly movementModes?: { readonly normal: number; readonly noclip: number; readonly freeze: number };
   readonly entries: { readonly clientThink: number; readonly runClient: number; readonly clientSpawn: number;
     readonly move: number; readonly slice: number };
 }
 export interface QvmInputServices {
   readonly applications: ModClientApplications;
+  clientOutputs?(actor: ActorId): ModClientMovementOutputs | null;
   identity(slot: number): ModClientIdentity | null;
   live(identity: ModClientIdentity): boolean;
   accepted(actor: ActorId): ModClientCommand | null;
@@ -140,11 +144,16 @@ export class QvmInputBinding {
     const milliseconds = kind === "client-command" ? Math.max(0, Math.min(1000, remaining)) : Math.max(1, Math.min(200, remaining));
     const previous = this.current;
     let application: ModClientApplication | null = null, failed = true, finished = false;
+    let projectedType: { readonly before: number; readonly value: number } | null = null;
     const finish = (): void => {
       if (finished) return;
       finished = true;
       try { this.services.applications.finish(application, failed); }
       finally {
+        if (projectedType !== null && this.services.live(scope.identity)) {
+          const type = game.module.memory.view(this.clientPointer(scope.slot) + 4, 4);
+          if (type.getInt32(0, true) === projectedType.value) type.setInt32(0, projectedType.before, true);
+        }
         this.current = previous;
         const index = this.commandFrames.lastIndexOf(commandFrame);
         if (index !== -1) this.commandFrames.splice(index, 1);
@@ -152,8 +161,15 @@ export class QvmInputBinding {
       }
     };
     const applyOutput = (): void => {
-      const effective = application?.command;
-      if (effective === undefined || effective === input) return;
+      const output = kind === "movement-slice" ? this.services.clientOutputs?.(scope.identity.actor) : null;
+      if (output?.mode !== undefined) {
+        const modes = definition.movementModes;
+        if (modes === undefined) throw new Error("Original QVM movement modes require their exact source declaration");
+        const type = game.module.memory.view(this.clientPointer(scope.slot) + 4, 4), value = modes[output.mode];
+        projectedType = { before: type.getInt32(0, true), value }; type.setInt32(0, value, true);
+      }
+      const effective = clientStanceCommand(application?.command ?? input, output?.stance);
+      if (effective === input) return;
       if (effective.kind !== "q3") throw new Error("QVM input output changed the source command dialect");
       writeQvmUserCommand(game.module.memory.view(address, QVM_USER_COMMAND_BYTES), {
         serverTime: effective.serverTimeMilliseconds, angles: effective.angleWords, buttons: effective.buttons, weapon: effective.weapon,

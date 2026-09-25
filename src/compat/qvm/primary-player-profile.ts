@@ -45,7 +45,9 @@ function sourcePointer(reader: SaveReader, dataBytes: number): QvmModInputPointe
 
 export function readQvmPrimaryInput(reader: SaveReader, artifact: Artifact): QvmInputDefinition {
   const common = layout(reader, artifact), entries = reader.field("entries");
-  return { ...common, clientPointer: aligned(reader.field("clientPointer"), common.entityStride), intermission: reader.field("intermission").list(value => value.integer()),
+  const modes = reader.field("movementModes");
+  return { ...common, ...(modes.value === undefined ? {} : { movementModes: { normal: modes.field("normal").integer(), noclip: modes.field("noclip").integer(), freeze: modes.field("freeze").integer() } }),
+    clientPointer: aligned(reader.field("clientPointer"), common.entityStride), intermission: reader.field("intermission").list(value => value.integer()),
     entries: { clientThink: entry(entries.field("clientThink"), artifact), runClient: entry(entries.field("runClient"), artifact), clientSpawn: entry(entries.field("clientSpawn"), artifact),
       move: entry(entries.field("move"), artifact), slice: entry(entries.field("slice"), artifact) } };
 }

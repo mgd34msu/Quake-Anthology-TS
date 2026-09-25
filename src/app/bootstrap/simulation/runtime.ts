@@ -1,4 +1,5 @@
 import { Q3GuestCatalog } from "../../../content/q3/guest-items.ts";
+import { ModClientOutputs } from "../../../world/session/mod-client-outputs.ts";
 import { sourceItemNamed } from "../../../contracts/source-items.ts";
 import { namespaced } from "../../../persistence/value.ts";
 import { NativePrimaryInventory, type NativeInventoryRow } from "../../../compat/q2/native-primary-inventory.ts";
@@ -388,9 +389,19 @@ export class SharedSimulation implements Simulation {
   private readonly modClientApplications = new ModClientApplications(identity => this.actors.isLive(identity.actor)
     && this.options.identity.owns(identity.client) && this.playerClient(identity.actor)?.equals(identity.client) === true);
   private readonly modClientDrops: { readonly client: ClientId; readonly actor: ActorId; readonly reason: string; readonly content: ContentId }[] = [];
+  private readonly modClientOutputs = new ModClientOutputs(actor => this.actors.isLive(actor) && this.playerClient(actor) !== null);
   readonly modClients: ModClientServices;
   private createModClients(): ModClientServices { return {
     maximum: this.options.maxClients,
+    claimOutputs: (owner, channels) => {
+      const movement = this.options.recipe.timing.find(value => value.provider === this.options.recipe.movement.provider)?.clock.kind;
+      if (channels.includes("stance") && (movement === "q1-netquake" || movement === "q1-quakeworld" && this.source.kind === "quakec" && this.source.game.kind === "quakeworld"))
+        throw new Error("Selected original Quake movement has no crouch-request interface; authored collision changes require an explicit source boundary");
+      if (channels.includes("movement-mode") && this.source.kind === "q3-qvm" && this.options.q3Guest?.prepared.primary.input?.movementModes === undefined)
+        throw new Error("Original QVM movement modes require an artifact-qualified input declaration");
+      const lease = this.modClientOutputs.claim(owner, channels), stop = this.modClientApplications.subscribe(() => undefined);
+      return { publish: (actor, outputs) => lease.publish(actor, outputs), release: actor => lease.release(actor), close: () => { lease.close(); stop(); } };
+    },
     clients: () => this.players().flatMap(actor => { const client = this.playerClient(actor); return client === null || this.bodies.read(actor) === null ? [] : [{ client, actor }]; }),
     forActor: actor => this.actors.isLive(actor) ? this.playerClient(actor) : null,
     actor: client => this.options.identity.owns(client) ? this.players().find(actor => this.actors.isLive(actor) && this.playerClient(actor)?.equals(client)) ?? null : null,
@@ -410,7 +421,16 @@ export class SharedSimulation implements Simulation {
       return state.kind === "q1-netquake" ? (state.flags & 512) !== 0 : state.ground.kind !== "none";
     },
     playerView: client => {
-      const actor = this.requireModClient(client), source = this.source;
+      const actor = this.requireModClient(client), original = this.sourceClientView(actor), output = this.activeClientOutputs(actor);
+      return output?.viewOffset !== undefined && (output.stance !== false || !original.crouched)
+        ? { ...original, viewOffset: output.viewOffset } : original;
+    },
+    drop: (client, reason, content) => { const actor = this.requireModClient(client); this.modClientDrops.push({ client, actor, reason, content }); },
+    subscribe: listener => { this.modClientListeners.add(listener); return () => { this.modClientListeners.delete(listener); return undefined; }; },
+    subscribeApplication: listener => this.modClientApplications.subscribe(listener),
+  }; }
+  private sourceClientView(actor: ActorId): { readonly viewOffset: Vec3; readonly crouched: boolean } {
+      const source = this.source;
       if (source.kind === "q2-native") return source.game.services.playerView(this.nativeQ2Client(actor).slot + 1, actor);
       if (source.kind === "q3-qvm") {
         const slot = source.game.records.slot(actor);
@@ -418,15 +438,29 @@ export class SharedSimulation implements Simulation {
         const state = source.game.records.player(slot);
         return { viewOffset: { x: 0, y: 0, z: state.viewHeight }, crouched: (state.movementFlags & 1) !== 0 };
       }
-      const player = this.requirePlayer(actor), state = player.readState(), view = this.playerView(actor), body = this.bodies.read(actor);
+      const player = this.requirePlayer(actor), state = player.readState(), view = this.sourcePlayerView(actor), body = this.bodies.read(actor);
       if (view === null || body === null) throw new Error("Client view requires a live movement owner");
       return { viewOffset: { x: view.origin.x - body.origin.x, y: view.origin.y - body.origin.y, z: view.origin.z + (state.kind === "q3" || state.kind === "q2-rerelease" ? state.viewHeight : view.viewHeight) - body.origin.z },
-        crouched: state.kind === "q3" ? (state.movementFlags & 1) !== 0 : state.kind === "q2-classic" || state.kind === "q2-rerelease" ? (state.flags & 1) !== 0 : false };
-    },
-    drop: (client, reason, content) => { const actor = this.requireModClient(client); this.modClientDrops.push({ client, actor, reason, content }); },
-    subscribe: listener => { this.modClientListeners.add(listener); return () => { this.modClientListeners.delete(listener); return undefined; }; },
-    subscribeApplication: listener => this.modClientApplications.subscribe(listener),
-  }; }
+        crouched: state.kind === "q3" ? (state.movementFlags & 1) !== 0 : state.kind === "q2-classic" || state.kind === "q2-rerelease" ? (state.flags & 1) !== 0 : state.kind === "q1-quakeworld" && body.bounds.max.z < player.standingBounds.max.z };
+  }
+  private activeClientOutputs(actor: ActorId) {
+    const output = this.modClientOutputs.read(actor);
+    if (output === null || (this.combat.read(actor)?.health ?? 0) <= 0) return null;
+    const source = this.source;
+    if (source.kind === "q3-qvm") {
+      const slot = source.game.records.slot(actor), input = this.options.q3Guest?.prepared.primary.input;
+      if (slot === null || input?.intermission.includes(source.game.records.player(slot).movementType)) return null;
+    } else if (source.kind === "q2-native") {
+      const mode = source.game.playerState(this.nativeQ2Client(actor).slot + 1).movement.type;
+      if (mode === (source.edition === "classic" ? 4 : 6)) return null;
+    } else {
+      const player = this.player(actor);
+      if (player?.intermission || player?.cutscene !== null && player?.cutscene !== undefined) return null;
+      if (source.kind === "quakec" && (source.game.localClientIntermission(actor) === true || source.game.localClientView(actor) !== null)) return null;
+      if (source.kind === "q2" && source.players.states.get(actor)?.chaseTarget != null) return null;
+    }
+    return output;
+  }
   private stepping = false;
   private checkpointInProgress = false;
   private sourceRoundSettlement:
@@ -634,7 +668,7 @@ export class SharedSimulation implements Simulation {
       executionProvider: actor => this.executionProvider(actor),
       resolve: (_provider, callback) => callback === "world:think" ? (actor, frame) => { this.callbacks.think(actor, frame); return undefined; } : null });
     this.actors.onRelease(actor => {
-      this.modClientApplications.release(actor.id);
+      this.modClientApplications.release(actor.id); this.modClientOutputs.release(actor.id);
       this.modClientCommands.delete(actor.id); this.modClientAdmissions.delete(actor.id);
       this.events.retire(actor.id);
       this.actorExecutions.delete(actor.id);
@@ -678,6 +712,7 @@ export class SharedSimulation implements Simulation {
       const definition = this.options.q3Guest?.prepared.primary.input ?? null;
       if (definition !== null) game.bindInput(definition, {
         applications: this.modClientApplications,
+        clientOutputs: actor => this.activeClientOutputs(actor),
         identity: slot => {
           const player = game.players().find(player => player.sourceEntity === slot);
           return player === undefined ? null : { client: player.client, actor: player.actor };
@@ -3285,6 +3320,7 @@ export class SharedSimulation implements Simulation {
         this.q2Characters.get(actor)?.afterClientThink(); this.q1Characters.get(actor)?.postMove(); return undefined; },
     } : undefined;
     const player = new MovementPlayer(actor, client, this.recipe, {
+      clientOutputs: () => this.activeClientOutputs(actor.id),
       inputApplications: this.modClientApplications, acceptedInput: () => this.modClientCommands.get(actor.id) ?? null,
       ...(netQuake === undefined ? {} : { netQuake }),
       ...(source.kind !== "quakec" || !mixedQc ? {} : { sourceClient: {
@@ -5137,7 +5173,14 @@ export class SharedSimulation implements Simulation {
     if (this.sourcePlayerUserinfo(actor) !== previousUserinfo) this.notifyClientEvent("userinfo", actor);
   }
   playerView(actor: ActorId): PlayerView {
-    const view = this.sourcePlayerView(actor);
+    let view = this.sourcePlayerView(actor);
+    const output = this.activeClientOutputs(actor), body = output?.viewOffset === undefined ? null : this.bodies.read(actor);
+    if (output?.viewOffset !== undefined && body !== null && (output.stance !== false || !this.sourceClientView(actor).crouched)) {
+      const origin = add(body.origin, { ...output.viewOffset, z: 0 });
+      const delta = { x: origin.x - view.origin.x, y: origin.y - view.origin.y, z: origin.z + output.viewOffset.z - view.origin.z - view.viewHeight };
+      view = { ...view, origin, viewHeight: output.viewOffset.z,
+        clientViewOffsetDelta: delta };
+    }
     return { ...view, kickAngles: add(view.kickAngles ?? zero, this.q1Punch.read(actor)) };
   }
   private sourcePlayerView(actor: ActorId): PlayerView {
@@ -5416,6 +5459,7 @@ export class SharedSimulation implements Simulation {
       }
     }
     source.game.bindInput({ applications: this.modClientApplications, numeric: source.game.services.options.numeric,
+      clientOutputs: actor => this.activeClientOutputs(actor),
       identity: slot => {
         const actor = source.game.actor(slot), client = actor === null ? null : this.playerClient(actor);
         return actor === null || client === null ? null : { client, actor };
@@ -6621,7 +6665,7 @@ export class SharedSimulation implements Simulation {
     for (const close of [() => this.nativePrimaryDrop?.close(), () => this.nativePrimaryInventory?.close(), () => this.disposeNativePickupSupply?.(), () => this.nativePrimaryCommands?.close(), () => this.nativePrimaryWeapons?.close()]) { try { close(); } catch (error) { errors.push(error); } }
     try { this.q2Native()?.close(); } catch (error) { errors.push(error); }
     this.closed = true;
-    this.modClientApplications.close();
+    this.modClientApplications.close(); this.modClientOutputs.close();
     this.modClientListeners.clear(); this.modClientAdmissions.clear(); this.modClientCommands.clear(); this.modClientDrops.length = 0;
     this.debugLineStore.clear(); this.debugLineSnapshot = []; this.worldTextStore.clear(); this.worldTextSnapshot = [];
     for (const close of [() => this.selectedAmmoTimers?.close(), () => this.selectedQ3Source?.close(), () => this.actors.close(), () => this.q3Source()?.close(), () => this.disposeSourceCombat?.(), () => this.scheduler.close()]) {

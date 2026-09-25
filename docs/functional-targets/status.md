@@ -66,7 +66,7 @@ These parts describe the remaining implementation; they do not replace the T01â€
 
 | Target | Remaining part | Completion behavior |
 |---|---|---|
-| T10 | Mod-controlled player view and movement | A declared component can change normal player eye height, stance and movement mode through the selected movement/presentation owner. Ownership conflicts, disable, save and travel must preserve the correct player state. In progress. |
+| T10 | Mod-controlled player view and movement | Declared eye height, stance and movement mode now reach selected movement, camera, weapon placement and prediction with owner lifetime handling. Arbitrary authored body dimensions still need integration through every selected collision and standing policy. |
 | T10 | Teams, scores and objectives | Original component rules can read and update authoritative shared team membership, scoring and objective state, with explicit ownership and conflict handling. Displaying a private source scoreboard alone does not complete this. |
 | T10 | Native execution performance | Original rerelease saving still runs tens of millions of interpreted instructions. Shared CPU improvements reduced a measured level write from 62 to 49 seconds; the earlier retained-map read took 51 seconds. Further execution work must retain all entities, source behavior and original save callbacks. |
 

@@ -1,3 +1,4 @@
+import { ModClientOutputs } from "../../../src/world/session/mod-client-outputs.ts";
 import { expect, test } from "bun:test";
 import { openArchive } from "../../../src/content/archive/index.ts";
 import { loadQcProgram } from "../../../src/compat/qc/program.ts";
@@ -35,10 +36,12 @@ test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own 
   combat.create(player, { health: 100, mass: 200, canTakeDamage: true, invulnerable: false, armor: { regular: { kind: "none" }, powered: { kind: "none" } }, team: null });
   const applications = new ModClientApplications(identity => actors.isLive(identity.actor));
   const inventory = new SharedInventoryTable(actors); inventory.create(player, [{ item: "q1:ammo/shells", count: 10, capacity: 100 }]);
-  const clients: ModClientServices = { maximum: 1, clients: () => [{ actor: player.id, client }], actor: () => player.id, forActor: () => client,
+  const outputs = new ModClientOutputs(actor => actors.isLive(actor));
+  const clients: ModClientServices = { maximum: 1, claimOutputs: (owner, channels) => outputs.claim(owner, channels), clients: () => [{ actor: player.id, client }], actor: () => player.id, forActor: () => client,
     userinfo: () => "", setUserinfo: () => undefined, command: () => null, drop: () => undefined,
     grounded: () => bodies.read(player.id)?.ground !== null, subscribe: () => () => undefined, subscribeApplication: listener => applications.subscribe(listener) };
   const declared: ModActorField[] = [
+    { field: "view_ofs", binding: "view-offset" },
     { field: "health", binding: "health" }, { field: "velocity", binding: "velocity" }, { field: "origin", binding: "origin" },
     { field: "flags", binding: "client-flags", grounded: true, privateMask: 16 | 2048 | 4096 },
     { field: "button0", binding: "client-input", input: "attack", update: "always" },
@@ -57,7 +60,7 @@ test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own 
     for (let i = 0; i < (field.type === "vector" ? 3 : 1); i++) used.add(field.offset + i);
   }
   const declaration: ModCallbackDeclaration = { version: 1, runtime: "quakec", program: { path: "progs.dat", digest: program.digest }, actorFields: declared, callbacks: [],
-    clients: { maximum: 1, admit: [], disconnect: [], userinfo: [],
+    clients: { maximum: 1, outputs: [{ kind: "view-offset", field: "view_ofs" }], admit: [], disconnect: [], userinfo: [],
       frame: [{ function: "PlayerPostThink", arguments: [], globals: [{ name: "self", value: { kind: "input", name: "self" } }, { name: "time", value: { kind: "input", name: "time" } }, { name: "frametime", value: { kind: "input", name: "elapsed" } }] }],
       input: [{ phase: "before", scope: "client-command",
       calls: [{ function: "PlayerPreThink", arguments: [], globals: [{ name: "self", value: { kind: "input", name: "self" } }, { name: "time", value: { kind: "input", name: "time" } }, { name: "frametime", value: { kind: "input", name: "elapsed" } }] }],
@@ -104,9 +107,10 @@ test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own 
     expect(words.float(field("attack_finished"))).toBe(4.5); expect(inventory.count(player.id, "q1:ammo/shells")).toBe(9);
     expect(words.float(field("weaponframe"))).toBe(1);
     advance(4.1); expect(words.float(field("weaponframe"))).toBe(2);
+    expect(outputs.read(player.id)?.viewOffset).toEqual({ x: 0, y: 0, z: 22 });
     const checkpoint = source.checkpoint();
     advance(4.2); const uninterrupted = words.float(field("weaponframe"));
-    source.restore(checkpoint); advance(4.2);
+    source.restore(checkpoint); expect(outputs.read(player.id)?.viewOffset).toEqual({ x: 0, y: 0, z: 22 }); advance(4.2);
     expect(words.float(field("weaponframe"))).toBe(uninterrupted);
     advance(4.4); expect(inventory.count(player.id, "q1:ammo/shells")).toBe(9);
     advance(4.5); expect(inventory.count(player.id, "q1:ammo/shells")).toBe(8); expect(words.float(field("attack_finished"))).toBe(5);
@@ -114,5 +118,10 @@ test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own 
     expect(applicationsSeen).toBe(delivered); expect(held.impulse).toBe(2);
     apply({ ...held, buttons: 0, impulse: 0 }); advance(5);
     expect(inventory.count(player.id, "q1:ammo/shells")).toBe(8); unsubscribe();
+    source.invoke({ function: "ThrowHead", arguments: [{ kind: "string", value: "progs/h_player.mdl" }, { kind: "float", value: -50 }],
+      globals: [{ name: "self", value: { kind: "input", name: "self" } }] }, new Map([["self", { kind: "actor", value: player.id }]]));
+    expect(words.vector(field("view_ofs"))).toEqual({ x: 0, y: 0, z: 8 });
+    expect(outputs.read(player.id)?.viewOffset).toEqual(words.vector(field("view_ofs")));
+    source.close(); expect(outputs.read(player.id)).toBeNull();
   } finally { source.close(); applications.close(); actors.close(); await content.close(); }
 });

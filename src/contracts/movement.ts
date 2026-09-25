@@ -1,3 +1,4 @@
+import type { ModClientMovementOutputs } from "./mod-client-outputs.ts";
 /* Movement state and command fields derive from Q1 sv_user.c/QW pmove.h,
  * Q2 q_shared.h and rerelease game.h, and Q3 bg_pmove.c/playerState_t.
  * Copyright (C) 1996-2005 Id Software, Inc. GPL-2.0-or-later. */
@@ -136,6 +137,7 @@ export interface FixedMovementPose {
   readonly viewHeight: number;
 }
 export interface MovementEnvironment {
+  readonly clientOutputs?: ModClientMovementOutputs;
   readonly speedMultiplier?: number;
   readonly pose?: FixedMovementPose;
   readonly health: number;

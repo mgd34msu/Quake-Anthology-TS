@@ -95,6 +95,9 @@ test("saved Q2 Space/Ctrl controls jump and crouch Q3 character bounds with QW m
   expect(locomotion).toEqual(["crouch"]);
   const predicted = shared.move({ ...current, command: ctrl, execution: "prediction" }, services);
   expect(predicted).toEqual(crouched);
+  const authored = shared.move({ ...current, environment: { ...current.environment, clientOutputs: { stance: true } } }, services);
+  if (authored.status !== "active") throw new Error("Player removed");
+  expect(authored.bounds).toEqual(crouched.bounds); expect(authored.viewHeight).toBe(12);
   const standing = shared.move({ ...current, state: crouched.state, shape: { kind: "box", bounds: crouched.bounds } }, services);
   if (standing.status !== "active") throw new Error("Player removed");
   expect(standing.bounds).toEqual(Q3_SOURCE_STANDING_BOUNDS); expect(standing.viewHeight).toBe(26);
@@ -110,7 +113,7 @@ test("saved Q2 Space/Ctrl controls jump and crouch Q3 character bounds with QW m
   if (lowCeiling === null) throw new Error("base1 has no overhead stance clearance witness");
   const underCeiling = { ...current, state: { ...current.state, origin: lowCeiling },
     shape: { kind: "box", bounds: crouched.bounds }, command: { ...current.command, milliseconds: 0 } } satisfies QwMovementInput;
-  const blocked = shared.move(underCeiling, services);
+  const blocked = shared.move({ ...underCeiling, environment: { ...underCeiling.environment, clientOutputs: { stance: false } } }, services);
   if (blocked.status !== "active") throw new Error("Player removed");
   expect(blocked.bounds).toEqual(Q3_SOURCE_POSTURES.crouched.bounds); expect(blocked.viewHeight).toBe(12);
   expect(shared.move({ ...underCeiling, execution: "prediction" }, services)).toEqual(blocked);

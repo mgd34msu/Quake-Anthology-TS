@@ -1,3 +1,4 @@
+import { ModClientOutputs, readModClientOutputs, validateModClientOutputs } from "../../../src/world/session/mod-client-outputs.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { ModClientApplications } from "../../../src/world/session/mod-client-applications.ts";
@@ -170,4 +171,23 @@ test("finite output must remain representable in the destination movement ABI", 
   const command = { kind: "q2-rerelease", milliseconds: 33, angles: { x: 0, y: 0, z: 0 }, forwardMove: 20, sideMove: 0, buttons: 0, serverFrame: 19 } satisfies import("../../../src/contracts/protocol.ts").UserCommand;
   expect(() => f.applications.begin({ ...f.input, command })).toThrow("exceeds destination command ABI");
   expect(command.forwardMove).toBe(20); expect(f.applications.checkpoint()).toBe(1);
+});
+
+
+test("source client output channels reject conflicts and retire actor publications", () => {
+  const ids = createIdentityOwner("client-output-leases"), actor = ids.actor(1, 0), replacement = ids.actor(1, 1);
+  let current = actor;
+  const outputs = new ModClientOutputs(id => id.equals(current));
+  const lease = outputs.claim("mod:camera", ["view-offset"]);
+  expect(() => outputs.claim("mod:other", ["view-offset"])).toThrow("mod:camera");
+  const values = readModClientOutputs([{ kind: "view-offset", height: "height" }, { kind: "movement-mode", field: "mode", mask: 7, values: [{ value: 2, mode: "noclip" }] }],
+    { scalar: field => field === "height" ? 14 : 10, vector: () => ({ x: 0, y: 0, z: 0 }) });
+  expect(values).toEqual([{ kind: "view-offset", value: { x: 0, y: 0, z: 14 } }, { kind: "movement-mode", value: "noclip" }]);
+  const view = values[0]; if (view === undefined) throw new Error("Missing output");
+  lease.publish(actor, [view]); expect(outputs.read(actor)?.viewOffset?.z).toBe(14);
+  expect(() => validateModClientOutputs([{ kind: "view-offset", field: "offset" }, { kind: "view-offset", height: "height" }], { scalar: () => {}, vector: () => {} })).toThrow("Duplicate");
+  outputs.release(actor); current = replacement; expect(outputs.read(replacement)).toBeNull();
+  expect(() => lease.publish(actor, [view])).toThrow("current client");
+  lease.publish(replacement, [view]); lease.close(); expect(outputs.read(replacement)).toBeNull();
+  const next = outputs.claim("mod:other", ["view-offset"]); next.close(); outputs.close();
 });

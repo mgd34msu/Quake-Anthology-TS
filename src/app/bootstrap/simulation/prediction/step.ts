@@ -1,3 +1,5 @@
+import { createSharedQuakeWorldMovement } from "../shared-quakeworld-movement.ts";
+import { playerPostures } from "../player-movement.ts";
 import { relativeMovementCommand } from "../q3-commands.ts";
 import type { MovementInput, MovementResult, MovementServices, MovementState, Q1MovementInput, WeaponStepInput, WeaponStepResult } from "../../../../contracts/movement.ts";
 import type { FrameContext } from "../../../../contracts/time.ts";
@@ -82,7 +84,10 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
   if (profile.kind === "q1-netquake" && state.kind === "q1-netquake" && command.kind === "q1-netquake") {
     result = createQ1MovementProvider(profile.id, q1Options).move({ ...base, kind: state.kind, state, profile, command }, services);
   } else if (profile.kind === "q1-quakeworld" && state.kind === "q1-quakeworld" && command.kind === "q1-quakeworld") {
-    result = createQwMovementProvider(profile.id, q1Options).move({ ...base, kind: state.kind, state, profile, command }, services);
+    const provider = environment.clientOutputs?.stance === undefined ? createQwMovementProvider(profile.id, q1Options)
+      : createSharedQuakeWorldMovement(profile.id, q1Options, configuration.standingBounds,
+        playerPostures({ character: source.animation.state.kind, standingBounds: configuration.standingBounds, viewHeight: configuration.standingViewHeight }));
+    result = provider.move({ ...base, shape: environment.clientOutputs?.stance === undefined ? shape : { kind: "box", bounds: source.bounds }, kind: state.kind, state, profile, command }, services);
   } else if (profile.kind === "q2-classic" && state.kind === "q2-classic" && command.kind === "q2-classic") {
     result = createQ2ClassicMovementProvider(profile.id).move({ ...base, kind: state.kind, state,
       profile: { ...profile, snapInitial: false }, command }, services);

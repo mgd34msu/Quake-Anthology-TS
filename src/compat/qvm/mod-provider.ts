@@ -1,3 +1,5 @@
+import type { QvmModProtectionScalar } from "../../contracts/qvm-mod-callbacks.ts";
+import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
 import type { SavedActorId } from "../../contracts/session.ts";
 import { captureModScenePublication, readModScenePublication, capturePresentationGameState, readPresentationGameState } from "./mod-presentation-checkpoint.ts";
 import { QvmModActorFrame, qvmActorBootstrap, validateQvmModActorFrame } from "./mod-actor-frame.ts";
@@ -109,6 +111,14 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
   }
   if (declaration.entityRecord !== null && !records.has(declaration.entityRecord)) throw new Error("Unknown QVM engine entity record");
   const clients = declaration.clients;
+  const outputField = (field: { readonly record: string; readonly offset: number }, length: number): void => {
+    const record = records.get(field.record);
+    if (clients === undefined || record === undefined || !clients.records.includes(record.id) && record.id !== declaration.entityRecord
+      || !Number.isInteger(field.offset) || field.offset < 0 || field.offset % 4 !== 0
+      || !record.fields.some(value => value.binding === "private" && value.offset <= field.offset && field.offset + length <= value.offset + value.byteLength))
+      throw new Error("QVM client output requires declared private client storage");
+  };
+  validateModClientOutputs(clients?.outputs ?? [], { scalar: field => outputField(field, 4), vector: field => outputField(field, 12) });
   if (clients !== undefined) {
     const state = records.get(clients.playerStateRecord), entity = declaration.entityRecord === null ? undefined : records.get(declaration.entityRecord);
     if (!Number.isSafeInteger(clients.maximum) || clients.maximum < 1 || clients.maximum > 64 || entity === undefined
@@ -304,6 +314,7 @@ export class QvmModProvider {
   private readonly scratchStart: number;
   private scratch: number;
   private nextSlot = 0;
+  private readonly clientOutputs: SourceModClientOutputs<QvmModProtectionScalar, { readonly record: string; readonly offset: number }>;
   private closed = false;
   constructor(readonly artifact: Artifact, readonly declaration: QvmModCallbackDeclaration, readonly services: ModHostServices,
     private readonly assertCurrent: () => void, private readonly content: ContentId, private readonly mounts?: MountedContent,
@@ -312,6 +323,10 @@ export class QvmModProvider {
     if (declaration.clients !== undefined && services.clients === undefined) throw new Error("QVM source clients require destination client identity services");
     if (declaration.sourceActors !== undefined && services.engine?.physics === undefined) throw new Error("QVM source actors require destination collision services");
     this.records = new Map(declaration.actorRecords.map(record => [record.id, record]));
+    this.clientOutputs = new SourceModClientOutputs(artifact.module.id, declaration.clients?.outputs ?? [], services.clients?.claimOutputs, {
+      scalar: (actor, field) => { const value = this.view(this.clientOutputAddress(actor, field), 4); return field.encoding === "int32" ? value.getInt32(0, true) : value.getFloat32(0, true); },
+      vector: (actor, field) => this.vector(this.clientOutputAddress(actor, field)),
+    });
     this.scratchStart = Math.ceil((artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength) / 16) * 16;
     this.scratch = this.scratchStart;
     this.cvars = this.newCvars();
@@ -422,7 +437,7 @@ export class QvmModProvider {
         const entity = declaration.entityRecord; if (entity === null) throw new Error("Missing QVM client entity record"); this.pointer(actor, entity);
         this.playerEvents?.track(actor, this.playerAddress(actor));
       },
-      admitted: actor => { this.items?.admit(actor); for (const protection of this.protection) protection.bindActor(actor); this.pickups.bindActor(actor); },
+      admitted: actor => { this.clientOutputs.publish(actor); this.items?.admit(actor); for (const protection of this.protection) protection.bindActor(actor); this.pickups.bindActor(actor); },
       release: actor => this.releaseProjection(actor),
       reservedSlots: () => this.projections.values(),
       openInput: application => { const closeInput = this.input.open(application), closeItems = this.items?.open(application);
@@ -488,7 +503,7 @@ export class QvmModProvider {
     this.rememberDefaults();
     this.unsubscribe = services.actors.onRelease(actor => {
       this.sceneDirty = true;
-      this.playerEvents?.release(actor.id);
+      this.playerEvents?.release(actor.id); this.clientOutputs.release(actor.id);
       this.pickups.release(actor.id);
       this.items?.release(actor.id);
       for (const protection of this.protection) protection.release(actor.id);
@@ -650,6 +665,7 @@ export class QvmModProvider {
     return this.pointer(actor, record);
   }
   private releaseProjection(actor: ActorId): void {
+    this.clientOutputs.release(actor);
     this.playerEvents?.release(actor);
     this.pickups.release(actor);
     for (const protection of this.protection) protection.release(actor);
@@ -690,6 +706,15 @@ export class QvmModProvider {
         ? write.item === field.item && write.fields !== "capacity" : this.services.combat.protectionInventoryItems(owner, write.channel).includes(field.item)))
         throw new Error("Original pickup changed an undeclared resource");
     }
+  }
+  private clientOutputAddress(actor: ActorId, field: { readonly record: string; readonly offset: number }): number {
+    const record = this.records.get(field.record), slot = this.projections.get(actor);
+    if (record === undefined || slot === undefined) throw new Error("QVM client output lost its source projection");
+    return record.address + slot * record.stride + field.offset;
+  }
+  private publishClientOutputs(): void {
+    if (!this.clientOutputs.enabled) return;
+    for (const actor of this.projections.keys()) if (this.services.actors.isLive(actor) && this.clientOutputs.has(actor) && this.clientBindings?.admitted(actor) === true) this.clientOutputs.publish(actor);
   }
   private refresh(): void {
     this.projectionWrites++;
@@ -837,7 +862,7 @@ export class QvmModProvider {
             this.current();
             if (!succeeded && pickup?.frame === frame) { frame.pending.length = 0; frame.cursor = 0; }
             else this.flush();
-            if (succeeded) this.playerEvents?.publish(); else this.playerEvents?.discard();
+            if (succeeded) { this.publishClientOutputs(); this.playerEvents?.publish(); } else this.playerEvents?.discard();
           }
         } catch (error) { if (!this.closed) this.playerEvents?.discard(); throw error; }
         finally {
@@ -1244,10 +1269,11 @@ export class QvmModProvider {
     for (const protection of this.protection) protection.close();
     this.reserveProtection();
     this.playerEvents?.close();
+    this.clientOutputs.clear();
     this.module.restore(checkpoint);
     if (this.declaration.presentation?.runtime === "qvm-scene") this.sceneBaseline = this.scenePublication();
     this.clientBindings?.start();
-    for (const entry of this.clientBindings?.players() ?? []) this.items?.admit(entry.actor);
+    for (const entry of this.clientBindings?.players() ?? []) { if (entry.admitted) this.clientOutputs.publish(entry.actor); this.items?.admit(entry.actor); }
     if (this.items !== null) { if (this.savedItems === undefined) throw new Error("Saved QVM items lack their source request checkpoint"); this.items.restore(this.savedItems); }
     if (active) this.activateProtection();
     return undefined;
@@ -1259,6 +1285,7 @@ export class QvmModProvider {
     try { this.actorFrame?.close(); } catch (error) { errors.push(error); }
     try { this.items?.close(); } catch (error) { errors.push(error); }
     for (const protection of this.protection) try { protection.close(); } catch (error) { errors.push(error); }
+    this.clientOutputs.close();
     this.closed = true; this.playerEvents?.close();
     for (const actor of [...this.owned.values()]) if (this.services.actors.isLive(actor.id)) {
       try { this.services.actors.release(actor); } catch (error) { errors.push(error); }

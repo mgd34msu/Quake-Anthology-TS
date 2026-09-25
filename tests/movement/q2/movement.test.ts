@@ -319,3 +319,32 @@ for (const edition of ["classic", "rerelease"]) test.skipIf(!installed)(`Q2 ${ed
   expect(position.x).toBeLessThanOrEqual(wallOrigin.x - 8 - base.shape.bounds.max.x + 0.2);
   expect(current.state.type).toBe(0);
 });
+
+
+test.skipIf(!installed)("authored stance and freeze use both original Q2 Pmove policies and release cleanly", async () => {
+  const map = await level(), scene = createSceneQueries(map.world);
+  const services: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
+    weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+  const providers = [createQ2ClassicMovementProvider("q2:classic"), createQ2RereleaseMovementProvider("q2:rerelease", new Q2RereleaseMovementContext())];
+  for (const provider of providers) {
+    if (provider.kind === "q2-classic") {
+      const original = classic(map.origin), input = { ...original, state: { ...original.state, flags: 4 } }, crouched = provider.move({ ...input, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
+      if (crouched.status !== "active") throw new Error("Unexpected removal");
+      expect(crouched.bounds.max.z).toBe(4); expect(crouched.viewHeight).toBe(-2);
+      const frozen = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { mode: "freeze" } } }, services);
+      if (frozen.status !== "active") throw new Error("Unexpected removal");
+      expect(frozen.state.originEighths).toEqual(input.state.originEighths); expect(frozen.state.type).toBe(0);
+      const resumed = provider.move({ ...input, state: frozen.state, command: { ...input.command, forwardMove: 200 } }, services);
+      if (resumed.status !== "active") throw new Error("Unexpected removal"); expect(resumed.state.originEighths).not.toEqual(frozen.state.originEighths);
+    } else {
+      const original = rerelease(map.origin), input = { ...original, state: { ...original.state, flags: 4 } }, crouched = provider.move({ ...input, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
+      if (crouched.status !== "active") throw new Error("Unexpected removal");
+      expect(crouched.bounds.max.z).toBe(4); expect(crouched.viewHeight).toBeLessThan(22);
+      const frozen = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { mode: "freeze" } } }, services);
+      if (frozen.status !== "active") throw new Error("Unexpected removal");
+      expect(frozen.state.origin).toEqual(input.state.origin); expect(frozen.state.type).toBe(0);
+      const resumed = provider.move({ ...input, state: frozen.state, command: { ...input.command, forwardMove: 200 } }, services);
+      if (resumed.status !== "active") throw new Error("Unexpected removal"); expect(resumed.state.origin).not.toEqual(frozen.state.origin);
+    }
+  }
+});

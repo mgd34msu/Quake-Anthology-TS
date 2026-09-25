@@ -20,6 +20,11 @@ export interface UnifiedPredictionProjection extends Omit<MovementPredictionSnap
   readonly standingViewHeight: number;
   readonly collisions: readonly SpatialActor[];
 }
+function readClientOutputs(r: SaveReader): import('../../../contracts/mod-client-outputs.ts').ModClientMovementOutputs {
+  return { ...(r.field('viewOffset').value === undefined ? {} : { viewOffset: readVector(r.field('viewOffset')) }),
+    ...(r.field('mode').value === undefined ? {} : { mode: r.field('mode').choice('normal','noclip','freeze') }),
+    ...(r.field('stance').value === undefined ? {} : { stance: r.field('stance').boolean() }) };
+}
 function readBounds(r: SaveReader): Bounds { return { min: readVector(r.field('min')), max: readVector(r.field('max')) }; }
 function triple(r: SaveReader): readonly [number,number,number] {
   const values=r.list(v=>v.finite()), [x,y,z]=values;
@@ -107,7 +112,7 @@ export function decodeUnifiedPrediction(bytes: Uint8Array, identity: UnifiedIden
     arsenal:readArsenal(r.field('arsenal')),animation:readActorAnimation(r.field('animation')),
     standingBounds:readBounds(r.field('standingBounds')),standingViewHeight:r.field('standingViewHeight').finite(),
     bounds:readBounds(r.field('bounds')),viewAngles:readVector(r.field('viewAngles')),viewHeight:r.field('viewHeight').finite(),viewOffset:readVector(r.field('viewOffset')),
-    environment:{health:e.field('health').finite(),flight:e.field('flight').boolean(),haste:e.field('haste').boolean(),invulnerable:e.field('invulnerable').boolean(),gravityMultiplier:e.field('gravityMultiplier').finite()},
+    environment:{health:e.field('health').finite(),flight:e.field('flight').boolean(),haste:e.field('haste').boolean(),invulnerable:e.field('invulnerable').boolean(),gravityMultiplier:e.field('gravityMultiplier').finite(), ...(e.field('clientOutputs').value === undefined ? {} : { clientOutputs: readClientOutputs(e.field('clientOutputs')) })},
     contact:r.field('contact').nullable(c=>({ground:readHit(c.field('ground'),identity),waterLevel:c.field('waterLevel').integer(),waterType:c.field('waterType').integer()})),
     collisions:r.field('collisions').list(c=>readCollision(c,identity))};
 }

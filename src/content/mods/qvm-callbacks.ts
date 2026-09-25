@@ -1,3 +1,4 @@
+import { readClientOutputDeclarations } from "./client-outputs.ts";
 import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "../../compat/qvm/image.ts";
 import { readQvmModItems } from "./qvm-items.ts";
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
@@ -148,6 +149,9 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
     ...(reader.field("presentation").value === undefined ? {} : { presentation: readQvmModPresentationDeclaration(reader.field("presentation")) }),
     spawnEntities: reader.field("spawnEntities").value === undefined ? null : reader.field("spawnEntities").nullable(value => value.string()),
     ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1),
+      ...(clients.field("outputs").value === undefined ? {} : { outputs: readClientOutputDeclarations(clients.field("outputs"),
+        value => ({ record: value.field("record").string(), offset: value.field("offset").integer(0), encoding: value.field("encoding").choice("int32", "float32") }),
+        value => ({ record: value.field("record").string(), offset: value.field("offset").integer(0) })) }),
       records: clients.field("records").list(value => value.string()), playerStateRecord: clients.field("playerStateRecord").string(), admit: clients.field("admit").list(sourceCall),
       userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
       ...(clients.field("frame").value === undefined ? {} : { frame: clients.field("frame").list(sourceCall) }),

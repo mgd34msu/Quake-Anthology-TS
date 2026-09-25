@@ -1,3 +1,6 @@
+import type { ModClientOutputChannel } from "../../contracts/mod-client-outputs.ts";
+import type { ProviderId } from "../../contracts/identity.ts";
+import type { ModClientOutputLease } from "./mod-client-outputs.ts";
 import type { ActorId, ClientId } from "../../contracts/identity.ts";
 import type { ContentId } from "../../contracts/content.ts";
 import type { ActorCommand } from "../../contracts/session.ts";
@@ -46,6 +49,7 @@ export type ModClientApplicationEvent =
 /** Current destination clients; source adapters own their separate private client numbering. */
 export interface ModClientServices {
   readonly maximum: number;
+  claimOutputs?(owner: ProviderId, channels: readonly ModClientOutputChannel[]): ModClientOutputLease;
   clients(): readonly ModClientIdentity[];
   forActor(actor: ActorId): ClientId | null;
   actor(client: ClientId): ActorId | null;

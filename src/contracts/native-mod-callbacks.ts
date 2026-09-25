@@ -1,3 +1,4 @@
+import type { ModClientOutputDeclaration } from "./mod-client-outputs.ts";
 import type { NativeModProtectionRegion } from "./native-mod-region.ts";
 import type { NativeModItems } from "./native-mod-items.ts";
 import type { ContentDigest } from "./content.ts";
@@ -49,6 +50,7 @@ export type NativeModInputOutput = { readonly kind: "field"; readonly record: st
   | { readonly kind: "handler"; readonly entry: NativeModEntry; readonly arguments: readonly NativeModValue[]; readonly inputs: readonly Exclude<ModClientInput, "view-angles">[] };
 /** Private client arrays belong to the pinned module, separately from canonical client identities. */
 export interface NativeModClients {
+  readonly outputs?: readonly ModClientOutputDeclaration<NativeModArmorField, { readonly record: string; readonly offset: number }>[];
   readonly maximum: number;
   readonly records: readonly string[];
   readonly admit: readonly NativeModAdmissionCall[];

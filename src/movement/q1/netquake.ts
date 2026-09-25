@@ -1,3 +1,4 @@
+import { clientMovementMode, clientMovementType } from "../client-outputs.ts";
 import { sweepBody } from "../swept-body.ts";
 import { q1WaterTransition } from "./water-transition.ts";
 /* Ported from WinQuake/sv_user.c, sv_phys.c and rerelease donor extensions.
@@ -27,14 +28,20 @@ class NetQuakeMove {
     this.state = { ...input.state };
     if (input.environment.flight && input.environment.health > 0 && this.state.moveType === Q1_MOVE_WALK) this.state.moveType = Q1_MOVE_FLY;
     this.context = new MovementContext(input, services, options);
+    this.applyClientMode();
     // The shared frame owner already applies host minimum/maximum/fixed frame rules.
     this.frameSeconds = seconds(input.frame.elapsed);
     this.timeSeconds = seconds(input.frame.time);
     if (!Number.isFinite(this.frameSeconds) || this.frameSeconds < 0) throw new RangeError("Invalid NetQuake frame interval");
   }
+  private applyClientMode(): void {
+    const mode = clientMovementMode(this.input.environment.clientOutputs, this.input.environment.health);
+    if (mode !== undefined) { this.context.projectClientMode(); this.state.moveType = clientMovementType(this.input.kind, mode); }
+  }
   private setState(state: MovementState): void {
     if (state.kind !== "q1-netquake") throw new Error("NetQuake callback changed the movement provider during a frame");
     Object.assign(this.state, state);
+    this.applyClientMode();
     if (this.input.environment.flight && this.input.environment.health > 0 && this.state.moveType === Q1_MOVE_WALK) this.state.moveType = Q1_MOVE_FLY;
   }
   private link(touchTriggers: boolean): void { this.setState(this.context.link(this.state, touchTriggers)); }
@@ -322,7 +329,9 @@ class NetQuakeMove {
     const c = this.context;
     this.state.viewAngles = c.math.vec(this.input.command.viewAngles.x, this.input.command.viewAngles.y, this.input.command.viewAngles.z);
     this.clientThink();
-    return this.state;
+    const state = this.context.sourceState(this.state);
+    if (state.kind !== "q1-netquake") throw new Error("NetQuake output changed movement dialect");
+    return state;
   }
   physics(): Q1MovementResult { return this.physicsStep(); }
   private physicsStep(): Q1MovementResult {

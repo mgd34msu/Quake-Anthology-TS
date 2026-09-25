@@ -1,3 +1,4 @@
+import { clientMovementMode, clientMovementType, clientStanceCommand } from "../client-outputs.ts";
 import { sweepBody } from "../swept-body.ts";
 /* Ported from QuakeWorld/client/pmove.c and server/sv_user.c.
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
@@ -42,6 +43,8 @@ class QuakeWorldMove {
   private setState(state: MovementState): void {
     if (state.kind !== "q1-quakeworld") throw new Error("QuakeWorld callback changed the movement provider during a command");
     this.state = { ...state };
+    const mode = clientMovementMode(this.input.environment.clientOutputs, this.input.environment.health);
+    if (mode !== undefined) { this.context.projectClientMode(); this.state.spectator = clientMovementType(this.input.kind, mode); }
   }
   private record(trace: TraceResult): void {
     this.context.contacts.push({ trace, target: trace.hit, substep: this.context.substep });
@@ -256,10 +259,15 @@ class QuakeWorldMove {
     this.setState(c.lifecycle(this.state, "beforePhysics", { ...this.input, command,
       frame: { ...this.input.frame, elapsed: { kind: "milliseconds", value: command.milliseconds } } }));
     if (c.removed) return;
+    const effective = clientStanceCommand(command, this.input.environment.clientOutputs?.stance);
+    if (effective.kind !== "q1-quakeworld") throw new Error("Client stance changed movement dialect");
+    command = effective; this.command = command;
     // CL_PredictUsercmd seeds pmove.angles before PlayerMove computes its axes.
     if (this.input.execution === "prediction") this.state.angles = c.math.vec(command.angles.x, command.angles.y, command.angles.z);
     const axes = c.math.angles(this.state.angles);
     this.forward = axes.forward; this.right = axes.right;
+    const mode = clientMovementMode(this.input.environment.clientOutputs, this.input.environment.health);
+    if (mode === "freeze") { this.state.velocity = ZERO; return; }
     if (this.state.spectator !== 0) { this.spectatorMove(); return; }
     const contactStart = c.contacts.length;
     if (this.input.environment.pose === undefined) this.nudge();

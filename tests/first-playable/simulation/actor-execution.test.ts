@@ -1,6 +1,7 @@
 import { Q1_DONOR_PROFILE } from "../../../src/core/numeric.ts";
 import { Application } from "../../../src/app/bootstrap/application.ts";
-import { cameraWithKick } from "../../../src/app/bootstrap/presentation.ts";
+import { offsetQ3ViewReference } from "../../../src/app/bootstrap/q3-client/view.ts";
+import { cameraWithKick, cameraWithClientOffset } from "../../../src/app/bootstrap/presentation.ts";
 import { anglesToAxis } from "../../../src/core/math.ts";
 import { perspectiveProjection } from "../../../src/render/scene/view.ts";
 import { q1Creatures } from "../../../src/content/q1/base/creatures.ts";
@@ -976,3 +977,19 @@ try {
 } finally { await app.close(); }
 
 }, 45000);
+
+
+test("authoritative client offset translates final camera and original first-person references once", () => {
+  const camera: Parameters<typeof cameraWithKick>[0] = { origin: { x: 10, y: 20, z: 30 }, axis: anglesToAxis({ x: 0, y: 45, z: 0 }),
+    viewport: { x: 0, y: 0, width: 640, height: 400 }, projection: perspectiveProjection(90, 64, 16384), clip: { kind: "none" } };
+  const view = { origin: { x: 0, y: 0, z: 0 }, angles: { x: 0, y: 0, z: 0 }, viewHeight: 22, clientViewOffsetDelta: { x: 2, y: 3, z: -8 } };
+  const translated = cameraWithClientOffset(camera, view);
+  expect(translated.origin).toEqual({ x: 12, y: 23, z: 22 }); expect(translated.axis).toBe(camera.axis);
+  expect(cameraWithClientOffset(camera, { origin: view.origin, angles: view.angles, viewHeight: 22 })).toBe(camera);
+  const entity = { kind: "sprite", origin: { x: 14, y: 20, z: 30 }, radius: 2, rotation: 0, renderFlags: 4,
+    customShader: null, shaderRGBA: { x: 255, y: 255, z: 255, w: 255 }, shaderTexCoord: { x: 0, y: 0 }, shaderTime: 0 } satisfies Parameters<typeof offsetQ3ViewReference>[0];
+  const moved = offsetQ3ViewReference(entity, view.clientViewOffsetDelta);
+  if (moved.kind !== "sprite") throw new Error("Reference kind changed");
+  expect(moved.origin).toEqual({ x: 16, y: 23, z: 22 }); expect(entity.origin.z).toBe(30);
+  expect(moved.origin.x - translated.origin.x).toBe(entity.origin.x - camera.origin.x);
+});

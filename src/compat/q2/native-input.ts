@@ -1,3 +1,5 @@
+import type { ModClientMovementOutputs } from "../../contracts/mod-client-outputs.ts";
+import { clientMovementType, clientStanceCommand } from "../../movement/client-outputs.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue } from "../../contracts/execution.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -28,6 +30,7 @@ export interface NativeInputMotion {
 export interface NativeInputServices {
   readonly applications: ModClientApplications;
   readonly numeric: NumericOperations;
+  clientOutputs?(actor: ActorId): ModClientMovementOutputs | null;
   identity(slot: number): ModClientIdentity | null;
   live(identity: ModClientIdentity): boolean;
   accepted(actor: ActorId): ModClientCommand | null;
@@ -124,6 +127,7 @@ export class NativeInputBinding {
     const parent = previous?.identity.actor.equals(scope.identity.actor) === true ? previous : null;
     const frame = this.services.frame();
     let application: ModClientApplication | null = null, failed = true;
+    let projectedType: { readonly before: number; readonly value: number } | null = null;
     try {
       application = this.services.applications.begin({ identity: scope.identity, scope: kind, command,
         angleSpace: "source-relative", absoluteAim: this.aim(command, state), accepted: this.services.accepted(scope.identity.actor),
@@ -140,10 +144,15 @@ export class NativeInputBinding {
       this.current = application;
       this.assertLive(scope);
       if (application !== null) {
-        const effective = application.command;
+        const effective = clientStanceCommand(application.command, kind === "movement-slice" ? this.services.clientOutputs?.(scope.identity.actor)?.stance : undefined);
         if (effective.kind === "q2-classic" || effective.kind === "q2-rerelease")
           writeNativeUserCommand(commandView, kind === "client-command" ? this.services.originalCommand?.(scope.identity, effective) ?? effective : effective);
         else throw new Error("Native input output changed command dialect");
+      }
+      const output = kind === "movement-slice" ? this.services.clientOutputs?.(scope.identity.actor) : null;
+      if (output?.mode !== undefined) {
+        const before = state.getInt32(0, true), value = clientMovementType(command.kind, output.mode);
+        projectedType = { before, value }; state.setInt32(0, value, true);
       }
       const result = run();
       failed = false;
@@ -153,7 +162,10 @@ export class NativeInputBinding {
       return result;
     } finally {
       try { this.services.applications.finish(application, failed); }
-      finally { this.current = previous; }
+      finally {
+        if (projectedType !== null && this.services.live(scope.identity) && state.getInt32(0, true) === projectedType.value) state.setInt32(0, projectedType.before, true);
+        this.current = previous;
+      }
     }
   }
   private aim(command: NativeCommand, state: DataView): Vec3 {

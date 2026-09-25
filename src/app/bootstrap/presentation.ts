@@ -75,6 +75,12 @@ export function cameraWithKick(camera: SceneCamera, kick: Vec3): SceneCamera {
   return { ...camera, axis: [rotate(local[0]), rotate(local[1]), rotate(local[2])] };
 }
 
+export function cameraWithClientOffset(camera: SceneCamera, player: PlayerView): SceneCamera {
+  const delta = player.clientViewOffsetDelta;
+  return delta === undefined || camera.clip.kind !== "none" ? camera : { ...camera,
+    origin: { x: camera.origin.x + delta.x, y: camera.origin.y + delta.y, z: camera.origin.z + delta.z } };
+}
+
 export function cameraWithCharacterDeath(camera: SceneCamera, player: PlayerView): SceneCamera {
   return player.foreignCharacterDeath === true && camera.clip.kind === "none" ? { ...camera,
     origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles) } : camera;
@@ -175,11 +181,14 @@ export class WorldSeatPresentation implements SeatPresentation {
   private sourceCamera(): SceneCamera {
     const controlled = this.componentView();
     if (controlled !== null) return this.clientCamera(controlled);
-    if (this.q3Client?.options.kind === "qvm") return cameraWithKick(this.q3Client.camera(), this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 });
+    if (this.q3Client?.options.kind === "qvm") {
+      const player = this.simulation.playerView(this.local.player.actor);
+      return cameraWithKick(cameraWithClientOffset(this.q3Client.camera(), player), player.kickAngles ?? { x: 0, y: 0, z: 0 });
+    }
     const player = this.simulation.playerView(this.local.player.actor), size = this.viewSize();
     const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
-    if (this.q3Client !== null) return this.applyViewSize(cameraWithKick((this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? this.q3Client.camera()
-      : cameraWithCharacterDeath(this.q3Client.camera(), player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
+    if (this.q3Client !== null) return this.applyViewSize(cameraWithKick((this.q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? cameraWithClientOffset(this.q3Client.camera(), player)
+      : cameraWithCharacterDeath(cameraWithClientOffset(this.q3Client.camera(), player), player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
     const fovX = player.fieldOfView ?? this.fieldOfView(), fovY = Math.atan(viewport.height / viewport.width * Math.tan(fovX * Math.PI / 360)) * 360 / Math.PI;
     const camera: SceneCamera = { origin: { ...player.origin, z: player.origin.z + player.viewHeight }, axis: anglesToAxis(player.angles), viewport,
       projection: perspectiveProjection(fovX, fovY, 16384), clip: { kind: "none" } };
@@ -416,10 +425,13 @@ export class WorldSeatPresentation implements SeatPresentation {
     }, camera => {
       const controlled = this.componentView();
       if (controlled !== null) return this.cameraOverride(this.clientCamera(controlled));
-      if (this.q3Client?.options.kind === "qvm") return this.cameraOverride(cameraWithKick(camera, this.simulation.playerView(this.local.player.actor).kickAngles ?? { x: 0, y: 0, z: 0 }));
+      if (this.q3Client?.options.kind === "qvm") {
+        const player = this.simulation.playerView(this.local.player.actor);
+        return this.cameraOverride(cameraWithKick(cameraWithClientOffset(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 }));
+      }
       const player = this.simulation.playerView(this.local.player.actor);
-      return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? camera : cameraWithCharacterDeath(camera, player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));
-    }, { noWorldModel, ...this.q1Services.view(this.local.player.actor), ...(fog === undefined ? {} : { q1Fog: fog }) });
+      return this.cameraOverride(this.applyViewSize(cameraWithKick((this.q3Client?.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0 ? cameraWithClientOffset(camera, player) : cameraWithCharacterDeath(cameraWithClientOffset(camera, player), player), player.kickAngles ?? { x: 0, y: 0, z: 0 })));
+    }, { noWorldModel, ...this.q1Services.view(this.local.player.actor), ...(fog === undefined ? {} : { q1Fog: fog }) }, this.componentView() === null ? this.simulation.playerView(this.local.player.actor).clientViewOffsetDelta : undefined);
     this.frames.begin();
     const area = this.viewport;
     if (camera.viewport.x !== area.x || camera.viewport.y !== area.y || camera.viewport.width !== area.width || camera.viewport.height !== area.height)

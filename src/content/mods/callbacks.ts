@@ -1,3 +1,4 @@
+import { readClientOutputDeclarations } from "./client-outputs.ts";
 import { readModSourceCall as sourceCall, readModSourceValue as value } from "./source-call.ts";
 import { readQcWeaponStageDeclaration } from "../q1/quakec/weapon-stage-declaration.ts";
 import { readItemIconDeclaration } from "../item-icon.ts";
@@ -66,7 +67,8 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     ...(reader.field("clientPresentation").value === undefined ? {} : { clientPresentation: {
       hud: reader.field("clientPresentation").field("hud").choice("none", "replace-vitals"),
       view: reader.field("clientPresentation").field("view").choice("none", "set-view") } }),
-    ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1), admit: clients.field("admit").list(sourceCall),
+    ...(clients.value === undefined ? {} : { clients: { maximum: clients.field("maximum").integer(1),
+      ...(clients.field("outputs").value === undefined ? {} : { outputs: readClientOutputDeclarations(clients.field("outputs"), value => value.string(), value => value.string()) }), admit: clients.field("admit").list(sourceCall),
       userinfo: clients.field("userinfo").list(sourceCall), disconnect: clients.field("disconnect").list(sourceCall),
       ...(clients.field("frame").value === undefined ? {} : { frame: clients.field("frame").list(sourceCall) }),
       ...(clients.field("input").value === undefined ? {} : { input: readModClientInput(clients.field("input"), sourceCall, inputOutput) }) } }),

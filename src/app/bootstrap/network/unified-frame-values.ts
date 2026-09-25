@@ -18,11 +18,11 @@ export function axis(r: SaveReader): Axis { const values = r.list(vector); const
 function optional<T>(r: SaveReader, name: string, read: (r: SaveReader) => T): T | undefined { const value = r.field(name); return value.value === undefined ? undefined : read(value); }
 export function readPlayerView(r: SaveReader): PlayerView {
   const blend = optional(r,'blend',color), damageBlend = optional(r,'damageBlend',color), kickAngles = optional(r,'kickAngles',vector), fieldOfView = optional(r,'fieldOfView',v=>v.finite());
-  const death = optional(r,'foreignCharacterDeath',v=>v.literal(true));
+  const death = optional(r,'foreignCharacterDeath',v=>v.literal(true)), clientViewOffsetDelta = optional(r,'clientViewOffsetDelta',vector);
   const drift = optional(r,'pitchDrift',v=>({ grounded:v.field('grounded').boolean(), idealPitch:v.field('idealPitch').finite(), disabled:v.field('disabled').boolean() }));
   return { origin:vector(r.field('origin')),angles:vector(r.field('angles')),viewHeight:r.field('viewHeight').finite(),
     ...(blend===undefined?{}:{blend}),...(damageBlend===undefined?{}:{damageBlend}),...(kickAngles===undefined?{}:{kickAngles}),...(fieldOfView===undefined?{}:{fieldOfView}),
-    ...(death===undefined?{}:{foreignCharacterDeath:death}),...(drift===undefined?{}:{pitchDrift:drift}) };
+    ...(clientViewOffsetDelta===undefined?{}:{clientViewOffsetDelta}),...(death===undefined?{}:{foreignCharacterDeath:death}),...(drift===undefined?{}:{pitchDrift:drift}) };
 }
 export function readPlayerUi(r: SaveReader): PlayerUi {
   const selectedArsenal=optional(r,'selectedArsenal',v=>v.literal(true));

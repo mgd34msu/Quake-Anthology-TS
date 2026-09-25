@@ -530,7 +530,7 @@ export class ApplicationQ3Client {
     return null;
   }
   frame(additionalEffects?: (camera: SceneCamera, source: SourceSceneOrder) => ApplicationEffectFrame, transformCamera?: (camera: SceneCamera) => SceneCamera,
-    environment: Pick<WorldViewInput, "q1Fog" | "sourceSky" | "noWorldModel"> = {}): RenderFrame {
+    environment: Pick<WorldViewInput, "q1Fog" | "sourceSky" | "noWorldModel"> = {}, viewOffset?: Vec3): RenderFrame {
     this.requireBackend(); this.frames.begin();
     const seat = this.options.local.player.seat.id, world = this.options.assets.world, time = { kind: "milliseconds", value: this.source.time } satisfies WorldViewInput["time"];
     for (const submission of this.submissions) {
@@ -561,7 +561,7 @@ export class ApplicationQ3Client {
           const combined: WorldViewInput = { ...view, source: createWorldSurfaceAdmission(source), ...(effects === undefined ? {} : { lights: effects.lights,
             q3Lights: [...view.q3Lights ?? [], ...effects.q3Lights].slice(0, 32) }) };
           world.prepareWorldOperations(combined);
-          this.frames.world(world.prepareView({ ...combined, operations: this.sceneRenderer.operations(scene, combined, firstEntity, { noWorldModel: view.noWorldModel === true, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon }, effects?.operations) }));
+          this.frames.world(world.prepareView({ ...combined, operations: this.sceneRenderer.operations(scene, combined, firstEntity, { noWorldModel: view.noWorldModel === true, splitScreen: this.options.splitScreen === true, supplementalViewWeapon: this.supplementalViewWeapon, ...(viewOffset === undefined ? {} : { viewOffset }) }, effects?.operations) }));
         };
         const worldInput = { ...input, ...environment };
         const child = worldInput.noWorldModel === true ? null : this.portal(scene, worldInput);

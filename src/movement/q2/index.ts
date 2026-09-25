@@ -1,3 +1,4 @@
+import { clientMovementMode, clientMovementType, clientStanceCommand } from "../client-outputs.ts";
 /* Quake II ClientThink/Pmove and rerelease game/cgame integration.
  * Copyright id Software / ZeniMax. GPL-2.0-or-later. */
 import { sameActor, type ProviderId } from "../../contracts/identity.ts";
@@ -114,12 +115,16 @@ export function moveQ2Classic(input: Q2MovementInput, services: MovementServices
 }
 
 function moveQ2ClassicPhysics(input: Q2MovementInput, services: MovementServices): Q2MovementResult {
+  const output = input.environment.clientOutputs, mode = clientMovementMode(output, input.environment.health);
+  const command = clientStanceCommand(input.command, output?.stance);
+  if (command.kind !== "q2-classic") throw new Error("Client output changed movement dialect");
+  input = { ...input, command };
   commandDuration(input.command.milliseconds);
   const { vec3 } = createMovementMath(services.numeric);
   const scene = traceAdapter(input, services);
   const pose = input.environment.pose, body = pose?.bounds ?? bodyBounds(input.shape);
   const pm: ClassicPmove = {
-    s: { pm_type: pose === undefined ? input.state.type : PmTypeT.PM_FREEZE, origin: [...input.state.originEighths], velocity: pose === undefined ? [...input.state.velocityEighths] : [0, 0, 0], pm_flags: input.state.flags,
+    s: { pm_type: pose === undefined ? mode === undefined ? input.state.type : clientMovementType(input.kind, mode) : PmTypeT.PM_FREEZE, origin: [...input.state.originEighths], velocity: pose === undefined ? [...input.state.velocityEighths] : [0, 0, 0], pm_flags: input.state.flags,
       pm_time: input.state.timeEightMilliseconds, gravity: input.state.gravity, delta_angles: [...input.state.deltaAngleShorts] },
     cmd: { msec: input.command.milliseconds, angles: [...input.command.angleShorts], forwardmove: input.command.forwardMove, sidemove: input.command.sideMove,
       upmove: input.command.upMove, buttons: input.command.buttons, impulse: input.command.impulse, lightlevel: input.command.lightLevel },
@@ -130,7 +135,7 @@ function moveQ2ClassicPhysics(input: Q2MovementInput, services: MovementServices
   pmoveClassic(pm, services.numeric, input.profile.airAccelerate, input.profile.strafejumpHack ?? false, input.environment.flight && input.environment.health > 0, input.environment.speedMultiplier ?? 1);
   if (pose !== undefined) { pm.s.pm_type = input.state.type; pm.viewheight = pose.viewHeight;
     pm.s.pm_flags = pose.crouched ? pm.s.pm_flags | PMF_DUCKED : pm.s.pm_flags & ~PMF_DUCKED; }
-  const state: Q2MovementState = { kind: "q2-classic", type: pm.s.pm_type, originEighths: [...pm.s.origin], velocityEighths: [...pm.s.velocity],
+  const state: Q2MovementState = { kind: "q2-classic", type: mode === undefined ? pm.s.pm_type : input.state.type, originEighths: [...pm.s.origin], velocityEighths: [...pm.s.velocity],
     flags: pm.s.pm_flags, timeEightMilliseconds: pm.s.pm_time, gravity: pm.s.gravity, deltaAngleShorts: [...pm.s.delta_angles] };
   const contacts = movementContacts(pm.touchtraces.slice(0, pm.numtouch));
   const effects: OrderedMovementEffect[] = [];
@@ -158,12 +163,16 @@ export function moveQ2Rerelease(input: Q2RereleaseMovementInput, services: Movem
 }
 
 function moveQ2RereleasePhysics(input: Q2RereleaseMovementInput, services: MovementServices, context: Q2RereleaseMovementContext): Q2RereleaseMovementResult {
+  const output = input.environment.clientOutputs, mode = clientMovementMode(output, input.environment.health);
+  const command = clientStanceCommand(input.command, output?.stance);
+  if (command.kind !== "q2-rerelease") throw new Error("Client output changed movement dialect");
+  input = { ...input, command };
   commandDuration(input.command.milliseconds);
   const { vec3 } = createMovementMath(services.numeric);
   const scene = traceAdapter(input, services);
   const pose = input.environment.pose, body = pose?.bounds ?? bodyBounds(input.shape);
   const pm: KexPmoveT = {
-    s: { pm_type: pose === undefined ? input.state.type : KexPmTypeT.PM_FREEZE, origin: sourceVector(input.state.origin), velocity: sourceVector(pose === undefined ? input.state.velocity : zero), pm_flags: input.state.flags,
+    s: { pm_type: pose === undefined ? mode === undefined ? input.state.type : clientMovementType(input.kind, mode) : KexPmTypeT.PM_FREEZE, origin: sourceVector(input.state.origin), velocity: sourceVector(pose === undefined ? input.state.velocity : zero), pm_flags: input.state.flags,
       pm_time: input.state.timeMilliseconds, gravity: input.state.gravity, delta_angles: sourceVector(input.state.deltaAngles), viewheight: input.state.viewHeight },
     cmd: { msec: input.command.milliseconds, angles: sourceVector(input.command.angles), forwardmove: input.command.forwardMove, sidemove: input.command.sideMove,
       buttons: input.command.buttons, server_frame: input.command.serverFrame }, snapinitial: input.snapInitial,
@@ -178,7 +187,7 @@ function moveQ2RereleasePhysics(input: Q2RereleaseMovementInput, services: Movem
     pm.s.pm_flags = pose.crouched ? pm.s.pm_flags | PmflagsT.PMF_DUCKED : pm.s.pm_flags & ~PmflagsT.PMF_DUCKED; }
   const presentation: Q2RereleaseMovementPresentation = { screenBlend: { x: pm.screen_blend[0], y: pm.screen_blend[1], z: pm.screen_blend[2], w: pm.screen_blend[3] },
     renderFlags: pm.rdflags, jumpSound: pm.jump_sound, stepClip: pm.step_clip, impactDelta: pm.impact_delta };
-  const state: Q2RereleaseMovementState = { kind: "q2-rerelease", type: pm.s.pm_type, origin: vector(pm.s.origin), velocity: vector(pm.s.velocity),
+  const state: Q2RereleaseMovementState = { kind: "q2-rerelease", type: mode === undefined ? pm.s.pm_type : input.state.type, origin: vector(pm.s.origin), velocity: vector(pm.s.velocity),
     flags: pm.s.pm_flags, timeMilliseconds: pm.s.pm_time, gravity: pm.s.gravity, deltaAngles: vector(pm.s.delta_angles), viewHeight: pm.s.viewheight };
   const contacts = movementContacts(pm.touch.traces.slice(0, pm.touch.num));
   const effects: OrderedMovementEffect[] = [];

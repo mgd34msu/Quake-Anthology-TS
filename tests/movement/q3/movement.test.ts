@@ -99,6 +99,15 @@ test.skipIf(!existsSync(archivePath))("retail q3dm1 movement uses shared collisi
     expect(crouch.viewHeight).toBe(12);
     expect(crouch.state.commandTimeMilliseconds).toBe(198);
     expect(crouch.state.predictableEventSequence).toBeGreaterThan(0);
+    const authored = provider.move({ ...input, command: { ...input.command, upMove: 0 }, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
+    if (authored.status !== "active") throw new Error("Player removed");
+    expect(authored.bounds).toEqual(crouch.bounds); expect(authored.viewHeight).toBe(crouch.viewHeight);
+    let output: import("../../../src/contracts/mod-client-outputs.ts").ModClientMovementOutputs = { mode: "freeze" };
+    const frozen = provider.move({ ...input, environment: { ...input.environment, get clientOutputs() { return output; } } }, { ...services,
+      inputApplication: { begin: (command, _frame, state) => ({ kind: "continue", command, state }), end: state => { output = {}; return { kind: "continue", state }; } } });
+    if (frozen.status !== "active") throw new Error("Player removed");
+    expect(frozen.state.movementType).toBe(input.state.movementType);
+
   } finally { archive.close(); }
 });
 

@@ -50,12 +50,24 @@ export class MovementContext {
   readonly math: MovementMath;
   readonly contacts: MovementContact[] = [];
   readonly effects: OrderedMovementEffect[] = [];
-  readonly viewHeight: number;
+  get viewHeight(): number { return this.input.environment.pose?.viewHeight ?? this.options.viewHeight ?? 22; }
+  private sourceMode: number;
+  private modeProjected = false;
+  projectClientMode(): void { this.modeProjected = true; }
   removed = false;
   substep = 0;
   constructor(readonly input: Q1PlayerInput, readonly services: MovementServices, readonly options: Q1MovementOptions) {
+    this.sourceMode = input.state.kind === "q1-netquake" ? input.state.moveType : input.state.spectator;
     this.math = new MovementMath(services.numeric);
-    this.viewHeight = input.environment.pose?.viewHeight ?? options.viewHeight ?? 22;
+  }
+  sourceState(state: MovementState): MovementState {
+    if (!this.modeProjected) return state;
+    return state.kind === "q1-netquake" ? { ...state, moveType: this.sourceMode } : state.kind === "q1-quakeworld" ? { ...state, spectator: this.sourceMode } : state;
+  }
+  private resumed(state: MovementState): MovementState {
+    if (state.kind === "q1-netquake") this.sourceMode = state.moveType;
+    else if (state.kind === "q1-quakeworld") this.sourceMode = state.spectator;
+    return state;
   }
   speed(value: number): number {
     const multiplier = this.input.environment.speedMultiplier ?? 1;
@@ -87,23 +99,23 @@ export class MovementContext {
     this.effect({ kind: "touch", target: trace.hit, substep: this.substep });
     const continuation = this.services.touch({ self: this.input.actor, other: trace.hit,
       plane: trace.contact.kind === "plane" ? trace.contact.plane : null,
-      surface: trace.kind === "q2" && trace.surface !== null ? { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value } : null }, state);
+      surface: trace.kind === "q2" && trace.surface !== null ? { name: trace.surface.name, nativeFlags: trace.surface.flags, nativeValue: trace.surface.value } : null }, this.sourceState(state));
     if (continuation.kind === "actor-removed") { this.removed = true; return state; }
-    return continuation.state;
+    return this.resumed(continuation.state);
   }
   link(state: MovementState, touchTriggers: boolean): MovementState {
     if (this.removed || this.options.hooks === undefined) return state;
-    const continuation = this.options.hooks.link(this.input.actor, state, touchTriggers);
+    const continuation = this.options.hooks.link(this.input.actor, this.sourceState(state), touchTriggers);
     if (continuation.kind === "actor-removed") { this.removed = true; return state; }
-    return continuation.state;
+    return this.resumed(continuation.state);
   }
   lifecycle(state: MovementState, phase: "beforePhysics" | "think" | "afterPhysics", input = this.input): MovementState {
     if (this.removed || this.options.hooks === undefined) return state;
     const hook = this.options.hooks[phase];
     if (hook === undefined) return state;
-    const continuation = hook(input, state);
+    const continuation = hook(input, this.sourceState(state));
     if (continuation.kind === "actor-removed") { this.removed = true; return state; }
-    return continuation.state;
+    return this.resumed(continuation.state);
   }
   isBsp(hit: TraceHit): boolean { return hit.kind === "world" || (this.options.hooks?.isBsp(hit) ?? false); }
 }

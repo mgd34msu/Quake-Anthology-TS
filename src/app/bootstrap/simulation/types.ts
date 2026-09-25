@@ -125,7 +125,7 @@ export interface SimulationTravel {
 }
 
 export interface PlayerAdmission { readonly actor: ActorId; readonly viewHeight: number; }
-export interface PlayerView { readonly blend?: Vec4; readonly damageBlend?: Vec4; readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true;
+export interface PlayerView { readonly clientViewOffsetDelta?: Vec3; readonly blend?: Vec4; readonly damageBlend?: Vec4; readonly origin: Vec3; readonly angles: Vec3; readonly viewHeight: number; readonly kickAngles?: Vec3; readonly fieldOfView?: number; readonly foreignCharacterDeath?: true;
   readonly pitchDrift?: { readonly grounded: boolean; readonly idealPitch: number; readonly disabled: boolean }; }
 export interface PlayerUiItem {
   readonly id: ItemId;

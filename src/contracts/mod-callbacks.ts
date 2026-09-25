@@ -1,3 +1,4 @@
+import type { ModClientOutputDeclaration } from "./mod-client-outputs.ts";
 import type { QcWeaponStageDeclaration } from "./qc-weapon-stage.ts";
 import type { SourceItemIconDeclaration } from "./source-items.ts";
 import type { SourceItemActionCalls, SourceWeaponItem } from "./source-items.ts";
@@ -120,7 +121,7 @@ export interface ModCallbackDeclaration {
   readonly program: { readonly path: string; readonly digest: ContentDigest };
   readonly actorFields: readonly ModActorField[];
   readonly callbacks: readonly ModCallback[];
-  readonly clients?: { readonly maximum: number; readonly admit: readonly ModSourceCall[];
+  readonly clients?: { readonly outputs?: readonly ModClientOutputDeclaration<string, string>[]; readonly maximum: number; readonly admit: readonly ModSourceCall[];
     readonly userinfo: readonly ModSourceCall[]; readonly disconnect: readonly ModSourceCall[];
     readonly frame?: readonly ModSourceCall[];
     readonly input?: readonly ModClientInputBinding<ModSourceCall, ModQcInputOutput>[] };

@@ -1,3 +1,4 @@
+import { clientMovementMode, clientMovementType, clientStanceCommand } from "../client-outputs.ts";
 import type { ProviderId } from "../../contracts/identity.ts";
 import type { Bounds } from "../../contracts/math.ts";
 import type { MovementEffect, MovementProvider, OrderedMovementEffect, Q3MovementInput,
@@ -30,10 +31,12 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
   if (input.profile.numeric.arithmetic.kind !== "binary32" || services.numeric.profile.arithmetic.kind !== "binary32") {
     throw new TypeError("The Q3 movement implementation requires binary32 operations");
   }
-  const source = input.state, multiplier = input.environment.speedMultiplier ?? 1;
+  const outputMode = () => clientMovementMode(input.environment.clientOutputs, input.environment.health);
+  const source = input.state, multiplier = input.environment.speedMultiplier ?? 1, initialMode = outputMode();
+  let modeProjected = initialMode !== undefined;
   const movementSpeed = (speed: number): number => multiplier === 1 ? speed : Math.trunc(Math.fround(Math.fround(speed) * Math.fround(multiplier))) | 0;
   const motion: Q3Motion = {
-    commandTime: source.commandTimeMilliseconds, pmType: source.movementType, bobCycle: source.bobCycle,
+    commandTime: source.commandTimeMilliseconds, pmType: initialMode === undefined ? source.movementType : clientMovementType(input.kind, initialMode), bobCycle: source.bobCycle,
     pmFlags: source.movementFlags, pmTime: source.movementTimeMilliseconds, origin: source.origin,
     velocity: source.velocity, gravity: Math.trunc(source.gravity * input.environment.gravityMultiplier),
     speed: movementSpeed(source.speed), deltaAngles: { x: source.deltaAngleWords[0], y: source.deltaAngleWords[1], z: source.deltaAngleWords[2] },
@@ -58,7 +61,7 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
   let applicationOpen = false, removed = false;
   let sourceState = source;
   const movementState = (): Q3MovementState => ({ ...sourceState,
-    commandTimeMilliseconds: motion.commandTime, movementType: motion.pmType,
+    commandTimeMilliseconds: motion.commandTime, movementType: modeProjected ? sourceState.movementType : motion.pmType,
     bobCycle: motion.bobCycle, movementFlags: motion.pmFlags, movementTimeMilliseconds: motion.pmTime,
     origin: motion.origin, velocity: motion.velocity,
     deltaAngleWords: [motion.deltaAngles.x, motion.deltaAngles.y, motion.deltaAngles.z],
@@ -68,7 +71,8 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
   const resume = (state: MovementState): void => {
     if (state.kind !== "q3") throw new Error("Input callback changed Quake III movement family");
     sourceState = state;
-    motion.commandTime = state.commandTimeMilliseconds; motion.pmType = state.movementType;
+    const mode = outputMode(); modeProjected = mode !== undefined;
+    motion.commandTime = state.commandTimeMilliseconds; motion.pmType = mode === undefined ? state.movementType : clientMovementType(input.kind, mode);
     motion.bobCycle = state.bobCycle; motion.pmFlags = state.movementFlags; motion.pmTime = state.movementTimeMilliseconds;
     motion.origin = state.origin; motion.velocity = state.velocity; motion.ground = state.ground;
     motion.deltaAngles = { x: state.deltaAngleWords[0], y: state.deltaAngleWords[1], z: state.deltaAngleWords[2] };
@@ -117,6 +121,12 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
         Object.assign(activeCommand, q3Command(before.command));
         resume(before.state);
       }
+      const effective = clientStanceCommand({ ...input.command, serverTimeMilliseconds: command.serverTime,
+        angleWords: [command.angles.x, command.angles.y, command.angles.z], buttons: command.buttons,
+        weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove }, input.environment.clientOutputs?.stance);
+      if (effective.kind !== "q3") throw new Error("Client stance changed movement dialect");
+      Object.assign(activeCommand, q3Command(effective));
+      const mode = outputMode(); if (mode !== undefined) { modeProjected = true; motion.pmType = clientMovementType(input.kind, mode); }
       return true;
     },
     ...(application === undefined ? {} : { endStep() {

@@ -5,7 +5,9 @@ import type { MovementContext } from "./common.ts";
 
 export function finishMovement(context: MovementContext, state: Q1MovementState | QwMovementState, viewAngles: Vec3,
   ground: TraceHit, waterLevel: number, waterType: number): Q1MovementResult | QwMovementResult {
-  const input = context.input;
+  const input = context.input, source = context.sourceState(state);
+  if (source.kind !== "q1-netquake" && source.kind !== "q1-quakeworld") throw new Error("Source client output changed movement dialect");
+  state = source;
   const weapon = context.services.weaponStep({ actor: input.actor, command: input.command, frame: input.frame,
     arsenal: input.arsenal, animation: input.animation, environment: input.environment, gauntletHit: false }, state);
   for (const effect of weapon.effects) context.effect(effect);

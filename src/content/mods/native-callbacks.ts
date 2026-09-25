@@ -1,3 +1,4 @@
+import { readClientOutputDeclarations } from "./client-outputs.ts";
 import { readItemIconDeclaration } from "../item-icon.ts";
 import { readItemActions } from "./item-actions.ts";
 import type { NativeModRegionLocation } from "../../contracts/native-mod-region.ts";
@@ -209,6 +210,9 @@ export function readNativeModDeclaration(reader: SaveReader): NativeModDeclarati
       ...(reader.field("clients").field("input").value === undefined ? {} : { input: readModClientInput(reader.field("clients").field("input"), sourceCall, inputOutput) }),
       ...(reader.field("clients").field("frame").value === undefined ? {} : { frame: reader.field("clients").field("frame").list(sourceCall) }),
       ...(reader.field("clients").field("endFrame").value === undefined ? {} : { endFrame: reader.field("clients").field("endFrame").list(sourceCall) }),
+      ...(reader.field("clients").field("outputs").value === undefined ? {} : { outputs: readClientOutputDeclarations(reader.field("clients").field("outputs"),
+        value => ({ record: value.field("record").string(), offset: value.field("offset").integer(0), encoding: value.field("encoding").choice("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64") }),
+        value => ({ record: value.field("record").string(), offset: value.field("offset").integer(0) })) }),
       ...(reader.field("clients").field("pose").value === undefined ? {} : { pose: {
         viewHeight: armorField(reader.field("clients").field("pose").field("viewHeight")),
         crouched: { field: armorField(reader.field("clients").field("pose").field("crouched").field("field")), mask: reader.field("clients").field("pose").field("crouched").field("mask").integer(1) } } }),

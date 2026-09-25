@@ -1,4 +1,5 @@
 import type { QvmCombatCall, QvmCombatMass, QvmCombatTeam, QvmDamageFlags, QvmDamageRole } from "./qvm-combat.ts";
+import type { ModClientOutputDeclaration } from "./mod-client-outputs.ts";
 import type { QvmModActorFrame } from "./qvm-mod-actor-frame.ts";
 import type { QvmModItems } from "./qvm-mod-items.ts";
 import type { ContentDigest } from "./content.ts";
@@ -123,6 +124,7 @@ export interface QvmModCallbackDeclaration {
 
 /** Source client rows are reserved separately from ordinary actor projections. */
 export interface QvmModClients {
+  readonly outputs?: readonly ModClientOutputDeclaration<QvmModProtectionScalar, { readonly record: string; readonly offset: number }>[];
   readonly maximum: number;
   readonly records: readonly string[];
   readonly playerStateRecord: string;

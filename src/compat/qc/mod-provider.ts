@@ -1,3 +1,4 @@
+import { SourceModClientOutputs, validateModClientOutputs } from "../../world/session/mod-client-outputs.ts";
 import { validateQcSourceCall as validateCall, withQcSourceCall, writeQcSourceValue } from "./source-call.ts";
 import type { ModClientPresentationSource, ModClientPresentationFrame } from "../../world/session/mod-client-presentation.ts";
 import { quakeCLocalView } from "../../app/bootstrap/simulation/quakec-local-messages.ts";
@@ -60,6 +61,18 @@ export interface QcModMedia {
 interface FieldBinding { readonly declaration: ModActorField; readonly offset: number; readonly words: 1 | 3; }
 export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclaration): void {
   if (program.digest !== declaration.program.digest) throw new Error("Gameplay mod program differs from its declared artifact digest");
+  const outputField = (name: string, vector: boolean): void => {
+    const field = program.fieldsByName.get(name), binding = declaration.actorFields.find(value => value.field === name);
+    if (field === undefined || field.type !== (vector ? "vector" : "float") || binding === undefined
+      || binding.binding !== "private" && !(vector && binding.binding === "view-offset") && !(!vector && binding.binding === "client-flags"))
+      throw new Error("QC client outputs require declared private fields or the explicit view-offset field");
+  };
+  validateModClientOutputs(declaration.clients?.outputs ?? [], { scalar: field => outputField(field, false), vector: field => outputField(field, true) });
+  for (const output of declaration.clients?.outputs ?? []) {
+    const field = "height" in output ? output.height : output.field, binding = declaration.actorFields.find(value => value.field === field);
+    if (binding?.binding === "client-flags" && (output.kind === "view-offset" || output.mask === undefined || (output.mask & ~(binding.privateMask ?? 0)) !== 0))
+      throw new Error("QC client flag outputs must name an explicit mask of source-private bits");
+  }
   qcProtectionRegions(program, declaration);
   validateQcItems(program, declaration);
   if (declaration.items?.weapons !== undefined) for (const call of [declaration.items.weapons.select.call, ...declaration.items.weapons.resume])
@@ -179,6 +192,7 @@ export class QcModProvider {
   private readonly actorsBySlot = new Map<number, ActorId>();
   private readonly hostState: QcExecutorHost;
   private readonly ownedActors: QcModActors;
+  private readonly clientOutputs: SourceModClientOutputs<string, string>;
   private readonly clients: QcModClientBindings | null;
   private readonly input: QcModInput;
   private readonly retiredProjections = new Set<ActorId>();
@@ -356,9 +370,13 @@ export class QcModProvider {
       },
     });
     this.input = new QcModInput(this.machine, this.fields.flatMap(field => field.declaration.binding === "client-input" ? [{ ...field, declaration: field.declaration }] : []), actor => this.reference(actor), actor => services.actors.isLive(actor));
+    this.clientOutputs = new SourceModClientOutputs(module.id, declaration.clients?.outputs ?? [], services.clients?.claimOutputs, {
+      scalar: (actor, field) => this.machine.entities.fromReference(this.reference(actor)).float(this.machine.fieldOffset(field)),
+      vector: (actor, field) => this.machine.entities.fromReference(this.reference(actor)).vector(this.machine.fieldOffset(field)),
+    });
     this.clients = declaration.clients === undefined || services.clients === undefined ? null : new QcModClientBindings({ services: services.clients, declaration: declaration.clients,
       ...(declaration.actorFields.some(field => field.binding === "think") ? { think: (actor: ActorId, frame: FrameContext, live: () => boolean) => this.runClientThink(actor, frame, live) } : {}),
-      reserve: actor => this.protection?.reserve(actor), admitted: actor => { this.items?.admit(actor); this.pickups?.admit(actor); this.protection?.activate(actor); },
+      reserve: actor => this.protection?.reserve(actor), admitted: actor => { this.clientOutputs.publish(actor); this.items?.admit(actor); this.pickups?.admit(actor); this.protection?.activate(actor); },
       project: actor => { this.reference(actor); }, release: actor => { this.releaseClientBindings(actor); return this.releaseClientProjection(actor); }, invoke: (call, actor, frame) => {
         const previous = this.frame, now = frame?.time ?? services.time();
         if (frame !== undefined) this.frame = frame;
@@ -487,6 +505,7 @@ export class QcModProvider {
         if (this.environment.visibility === null ? visibility.value !== null : visibility.value === null) throw new Error("Saved mod client visibility differs");
         this.environment.visibility?.restore(visibility.value);
         this.initialized = savedHost.field("initialized").boolean();
+        this.clientOutputs.clear();
         const clients = savedHost.field("clients");
         if (this.clients !== null) {
           this.clients.restore(clients.list(entry => ({ actor: resolve(readSavedActor(entry.field("actor"))), slot: entry.field("slot").integer(1), admitted: entry.field("admitted").boolean() })));
@@ -496,7 +515,7 @@ export class QcModProvider {
             throw new Error("Saved QuakeC client projection differs from its reserved slot");
         } else if (clients.value !== undefined && clients.value !== null) throw new Error("Saved QuakeC clients require the declared lifecycle service");
         this.ownedActors.restored();
-        for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) { this.items?.admit(client.actor); this.pickups?.admit(client.actor); this.protection?.activate(client.actor); } }
+        for (const client of this.clients?.checkpoint() ?? []) { this.protection?.reserve(client.actor); if (client.admitted) { this.clientOutputs.publish(client.actor); this.items?.admit(client.actor); this.pickups?.admit(client.actor); this.protection?.activate(client.actor); } }
         this.clients?.start();
         return undefined;
       },
@@ -547,11 +566,13 @@ export class QcModProvider {
     return "released";
   }
   private releaseClientBindings(actor: ActorId): void {
+    this.clientOutputs.release(actor);
     const errors: unknown[] = [];
     for (const release of [() => this.pickups?.release(actor), () => this.items?.release(actor), () => this.protection?.release(actor)]) try { release(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "QC client binding release failed");
   }
   private closeClientBindings(): void {
+    this.clientOutputs.close();
     const errors: unknown[] = [];
     for (const close of [() => this.pickups?.close(), () => this.items?.close(), () => this.protection?.close()]) try { close(); } catch (error) { errors.push(error); }
     if (errors.length !== 0) throw new AggregateError(errors, "QC client binding close failed");
@@ -591,7 +612,7 @@ export class QcModProvider {
           }
           words.setFloat(field.offset, canonical | (Math.trunc(words.float(field.offset)) & (declared.privateMask ?? 0))); break;
         }
-        case "view-offset": { words.setVector(field.offset, this.environment.client(actor)?.viewOffset ?? { x: 0, y: 0, z: 0 }); break; }
+        case "view-offset": { if (this.outputFieldOwned(actor, field.declaration.field)) break; words.setVector(field.offset, this.environment.client(actor)?.viewOffset ?? { x: 0, y: 0, z: 0 }); break; }
         case "health": {
           words.setFloat(field.offset, this.services.combat.read(actor)?.health ?? 0); break;
         }
@@ -606,6 +627,14 @@ export class QcModProvider {
         }
       }
     }
+  }
+  private outputFieldOwned(actor: ActorId, field: string): boolean {
+    return this.clients?.admitted(actor) === true && this.declaration.clients?.outputs?.some(output => output.kind === "view-offset" && "field" in output && output.field === field) === true;
+  }
+  private publishClientOutputs(): void {
+    if (!this.clientOutputs.enabled) return;
+    if (this.closed) return;
+    for (const entry of this.clients?.checkpoint() ?? []) if (entry.admitted && this.clientOutputs.has(entry.actor) && this.services.actors.isLive(entry.actor)) this.clientOutputs.publish(entry.actor);
   }
   private pickupScope() { const scope = this.pickupScopes.at(-1); return scope?.depth === this.depth ? scope : undefined; }
   private validatePickupStore(store: QcEntityStoreObservation): void {
@@ -672,7 +701,10 @@ export class QcModProvider {
           }
           break;
         }
-        case "classname": case "view-offset": throw new Error(`Mod ${declared.binding} store requires its canonical owner`);
+        case "view-offset": if (this.declaration.clients?.outputs?.some(output => output.kind === "view-offset" && "field" in output && output.field === declared.field) === true
+          && this.clients?.slot(actor.id) != null) break;
+          throw new Error("Mod view-offset store requires its declared client output owner");
+        case "classname": throw new Error(`Mod ${declared.binding} store requires its canonical owner`);
         case "think": case "nextthink":
           if (this.machine.entities.slot(store.reference) > (this.declaration.clients?.maximum ?? 0)) this.ownedActors.schedule(actor);
           break;
@@ -718,6 +750,7 @@ export class QcModProvider {
         let result: number;
         if (region === undefined) { this.machine.execute(this.program.functionNamed(call.function).index, count); result = this.machine.globals.float(1); }
         else result = this.machine.executeRegion(region.region, count);
+        this.publishClientOutputs();
         if (this.depth === 1) this.messages?.messages.flush();
         return result;
       });

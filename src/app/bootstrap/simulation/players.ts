@@ -1,3 +1,4 @@
+import type { ModClientMovementOutputs } from "../../../contracts/mod-client-outputs.ts";
 import type { QuakeCClientMovement } from "./quakec-client-adapter.ts";
 import { movementJumped } from "./player-jump.ts";
 import { prepareNetQuake, physicsNetQuake } from "../../../movement/q1/netquake.ts";
@@ -38,6 +39,7 @@ export interface NetQuakeClientBinding {
 }
 
 export interface PlayerMovementHost {
+  clientOutputs?(): ModClientMovementOutputs | null;
   readonly inputApplications?: ModClientApplications;
   acceptedInput?(): ModClientCommand | null;
   readonly sourceClient?: {
@@ -121,7 +123,7 @@ export class MovementPlayer {
   get predictionEnvironment(): MovementInput["environment"] {
     const combat = this.host.combat.read(this.actor.id);
     if (combat === null) throw new Error("Prediction player has no combat state");
-    return playerMovementEnvironment(this, combat);
+    return { ...playerMovementEnvironment(this, combat), ...this.fixedEnvironment() };
   }
   get q2MovementConfig(): { readonly airAccelerate: number; readonly n64Physics: boolean } | null { return this.host.q2MovementConfig?.() ?? null; }
   readonly character: GameFamily;
@@ -249,7 +251,7 @@ export class MovementPlayer {
     }
   }
 
-  private fixedEnvironment(): Pick<MovementInput["environment"], "pose"> {
+  private fixedEnvironment(): Pick<MovementInput["environment"], "pose" | "clientOutputs"> {
     const pose = this.host.fixedPose?.(this.actor);
     if (pose == null && this.fixedPoseActive) {
       this.bounds = this.profile.kind === "q1-quakeworld" ? playerCrouchedBounds(this) : this.standingBounds;
@@ -263,7 +265,8 @@ export class MovementPlayer {
       if (body !== null) this.host.bodies.write(this.actor, { ...body, bounds: pose.bounds });
     }
     this.fixedPoseActive = pose != null;
-    return pose == null ? {} : { pose };
+    const host = this.host;
+    return { ...(pose == null ? {} : { pose }), get clientOutputs() { return host.clientOutputs?.() ?? {}; } };
   }
 
   setSourceViewRoll(roll: number): void {
@@ -355,7 +358,7 @@ export class MovementPlayer {
     const command = effective ?? this.netQuakeCommand ?? { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: this.viewAngles,
       forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
     return { kind: "q1-netquake", actor: this.actor, commandSequence: this.lastSequence, frame, shape: { kind: "box", bounds: this.bounds },
-      environment: { ...playerMovementEnvironment(this, combat), ...fixed }, arsenal: this.arsenal, animation: this.animation, execution: "authoritative", state, profile, command };
+      environment: { ...playerMovementEnvironment(this, combat), ...fixed, get clientOutputs() { return fixed.clientOutputs ?? {}; } }, arsenal: this.arsenal, animation: this.animation, execution: "authoritative", state, profile, command };
   }
   private netQuakeOptions(): Q1MovementOptions {
     const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id), binding = this.host.netQuake;
@@ -503,7 +506,7 @@ export class MovementPlayer {
     if (combat === null) throw new Error("Player has no combat state");
     const fixed = this.fixedEnvironment();
     const base = { actor: this.actor, commandSequence: input.sequence, frame, shape: { kind: "box", bounds: this.profile.kind === "q1-quakeworld" && this.host.quakeWorld === undefined ? this.bounds : this.standingBounds },
-      environment: { ...playerMovementEnvironment(this, combat), ...fixed },
+      environment: { ...playerMovementEnvironment(this, combat), ...fixed, get clientOutputs() { return fixed.clientOutputs ?? {}; } },
       arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
     const state = this.state, priorGround = this.ground, selectedProfile = selectedMovementProfile(this), command = input.command;
     const profile = selectedProfile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(selectedProfile) ?? selectedProfile : selectedProfile;
