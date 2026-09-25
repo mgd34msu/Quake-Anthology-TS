@@ -5,12 +5,13 @@ import type { ActorId } from "../../../contracts/identity.ts";
 import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { Q2RereleaseUserCommand } from "../../../contracts/protocol.ts";
 import type { GuestCallRunner } from "../../../guest/abi/runner.ts";
-import { X86AbiAdapter } from "../../../guest/abi/adapter.ts";
 import { requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import type { GuestCallSignature } from "../../../guest/core/contracts.ts";
 import { cgameExports, cgameExportLayout, cgameImportLayout, cgameImports, gameExports, gameExportLayout, gameImportLayout, gameImports, getApiSignature, rereleaseAbi } from "./api.ts";
 import type { CgameExportName, CgameImportName, GameExportName, GameImportName } from "./api.ts";
 import { edictLayout, fieldOffset, pmoveLayout, rectangleLayout, usercmdLayout } from "./layouts.ts";
+import { bindNativeModEntry, type NativeModEntryBinding } from "../native-mod-entries.ts";
+import { prepareRereleaseEquipmentMovement, withRereleaseEquipmentMovement } from "./equipment-movement.ts";
 import { writeRereleaseUserCommand } from "./player-state.ts";
 
 export type RereleaseImportName = GameImportName | CgameImportName;
@@ -52,6 +53,9 @@ export class RereleaseGuestModule {
   readonly cgameImportAddress: GuestAddress;
   #game: GuestAddress | null = null;
   #cgame: GuestAddress | null = null;
+  #movement: { readonly address: GuestAddress; readonly binding: NativeModEntryBinding } | null = null;
+  #inputMovement: { readonly boundary: (address: GuestAddress, run: () => undefined) => undefined; readonly active: () => boolean } | null = null;
+  readonly #equipment: { readonly client: RawEntityView; readonly value: EquipmentMovement; applied: boolean }[] = [];
   constructor(readonly options: RereleaseModuleOptions) {
     this.memory = options.runner.options.cpu.memory;
     if (this.memory.pointerBytes !== 8) throw new TypeError("Rerelease Windows ABI requires 64-bit guest memory");
@@ -147,32 +151,49 @@ export class RereleaseGuestModule {
     } finally { this.memory.unmap(info, 2048); this.memory.unmap(social, nativeAllocationBytes(socialBytes.length + 1)); }
   }
   clientBegin(slot: number): void { const client = this.entities().atSlot(slot); this.callGame("ClientBegin", [guestPointer(client.address)], client); }
+  bindInputMovement(boundary: (address: GuestAddress, run: () => undefined) => undefined, active: () => boolean): () => undefined {
+    if (this.#inputMovement !== null) throw new Error("Native Pmove already has an input owner");
+    const owner = { boundary, active }; this.#inputMovement = owner;
+    try { this.#bindMovement(); } catch (error) { this.#inputMovement = null; throw error; }
+    return () => { if (this.#inputMovement === owner) this.#inputMovement = null; this.#releaseMovement(); return undefined; };
+  }
+  #releaseMovement(): void {
+    if (this.#inputMovement !== null || this.#equipment.length !== 0) return;
+    this.#movement?.binding.close(); this.#movement = null;
+  }
+  #bindMovement(): void {
+    const entry = gameExports.find(value => value.name === "Pmove");
+    if (entry === undefined) throw new Error("API2023 has no Pmove signature");
+    const address = this.#function(this.bindGame(), gameExportLayout, "Pmove");
+    if (this.#movement?.address.byteOffset === address.byteOffset) return;
+    this.#movement?.binding.close(); this.#movement = null;
+    const binding = bindNativeModEntry({ memory: this.memory, entries: this.options.runner.options, invoke: this.invoke.bind(this) },
+      address, `${this.memory.module.id}:Pmove`, entry.signature, (values, original) => {
+        const movement = requiredPointer(values, 0), scope = this.#equipment.at(-1);
+        const player = this.memory.readPointer(this.memory.offset(movement, BigInt(fieldOffset(pmoveLayout, "player"))));
+        const equipment = scope !== undefined && player?.byteOffset === scope.client.address.byteOffset ? scope : null;
+        if (equipment !== null && !equipment.applied) {
+          prepareRereleaseEquipmentMovement(this, movement, equipment.value); equipment.applied = true;
+        }
+        const run = (): undefined => {
+          const execute = (): undefined => { const result = original(values); if (result.kind !== "void") throw new Error("Pmove returned a non-void result"); return undefined; };
+          return withRereleaseEquipmentMovement(this, movement, equipment?.value, execute);
+        };
+        this.#inputMovement?.active() === true ? this.#inputMovement.boundary(movement, run) : run();
+        return { kind: "void" };
+      }, () => this.#inputMovement?.active() === true || this.#equipment.length !== 0);
+    this.#movement = { address, binding };
+  }
   clientThink(slot: number, command: Q2RereleaseUserCommand, equipment?: EquipmentMovement): void {
     const client = this.entities().atSlot(slot), address = this.memory.allocate({ byteLength: usercmdLayout.byteLength, alignment: 4n, label: "Q2 client command" });
-    let remove: (() => void) | undefined;
+    if (equipment !== undefined) this.#equipment.push({ client, value: equipment, applied: false });
     try {
-      if (equipment !== undefined) {
-        const entry = gameExports.find(value => value.name === "Pmove");
-        if (entry === undefined) throw new Error("API2023 has no Pmove signature");
-        const { cpu, callbacks } = this.options.runner.options, abi = new X86AbiAdapter(entry.signature.abi);
-        let applied = false;
-        remove = callbacks.observeEntry(this.#function(this.bindGame(), gameExportLayout, "Pmove"), () => {
-          if (applied) return;
-          const movement = requiredPointer(abi.arguments(cpu, entry.signature), 0);
-          const player = this.memory.readPointer(this.memory.offset(movement, BigInt(fieldOffset(pmoveLayout, "player"))));
-          if (player?.byteOffset !== client.address.byteOffset) return;
-          if (equipment.velocity !== undefined) {
-            const at = this.memory.offset(movement, BigInt(fieldOffset(pmoveLayout, "s.velocity"))), velocity = equipment.velocity;
-            this.memory.writeFloat32(at, velocity.x); this.memory.writeFloat32(this.memory.offset(at, 4n), velocity.y); this.memory.writeFloat32(this.memory.offset(at, 8n), velocity.z);
-          }
-          const state = this.memory.borrow(movement, pmoveLayout.byteLength), gravity = fieldOffset(pmoveLayout, "s.gravity"), flags = fieldOffset(pmoveLayout, "s.pm_flags");
-          state.setInt16(gravity, Math.trunc(state.getInt16(gravity, true) * equipment.gravityScale), true);
-          state.setUint16(flags, equipment.predictionSuppressed ? state.getUint16(flags, true) | 64 : state.getUint16(flags, true) & ~64, true);
-          applied = true;
-        });
-      }
+      if (equipment !== undefined || this.#inputMovement !== null) this.#bindMovement();
       writeRereleaseUserCommand(this.memory.borrow(address, usercmdLayout.byteLength), command); this.callGame("ClientThink", [guestPointer(client.address), guestPointer(address)], client);
-    } finally { remove?.(); this.memory.unmap(address, usercmdLayout.byteLength); }
+    } finally {
+      if (equipment !== undefined) this.#equipment.pop();
+      this.#releaseMovement(); this.memory.unmap(address, usercmdLayout.byteLength);
+    }
   }
   clientDisconnect(slot: number): void { const client = this.entities().atSlot(slot); this.callGame("ClientDisconnect", [guestPointer(client.address)], client); }
   spawnEntities(map: string, entities: string, spawnpoint: string): void {

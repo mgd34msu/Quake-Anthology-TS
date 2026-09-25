@@ -162,7 +162,7 @@ import { readQ2WeaponsCheckpoint } from "../../../persistence/q2-weapons.ts";
 import { Q2SelectedArsenal, projectQ2Arsenal } from "./arsenal/q2.ts";
 import { Q3_Q2_SUPPLY_PROFILE, q3Q2SupplyLoadout } from "../../../content/composition/q3-q2-supply.ts";
 import { Q3SelectedArsenal, readQ3SelectedArsenalCheckpoint } from "./arsenal/q3.ts";
-import { playerMovementEnvironment, playerPostures } from "./player-movement.ts";
+import { playerMovementEnvironment, playerPostures, playerStandingBounds } from "./player-movement.ts";
 import { resolveQ3ArsenalControls } from "./arsenal-intent.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ContentId, ExecutableRecipe, MonsterDefinitionReference, ProviderReference, ResolvedResourceReference } from "../../../contracts/content.ts";
@@ -5157,8 +5157,16 @@ export class SharedSimulation implements Simulation {
         if (this.grapple?.selection.binding === "slot") this.grapple.input(command.actor, equipment?.equipmentSelected() === true && (command.command.buttons & 1) !== 0);
         if (this.grapple?.source.kind === "q3-qvm") this.grapple.source.game.pull(command.actor);
         const gated = equipment?.primarySelected() === false ? { ...command, command: { ...command.command, buttons: command.command.buttons & ~1 } } : command;
-        const velocity = this.nativeEquipmentVelocity.get(command.actor), movement = this.grapple === null && velocity === undefined ? undefined
-          : { ...(velocity === undefined ? {} : { velocity }), gravityScale: this.grapple?.gravityScale(command.actor) ?? 1, predictionSuppressed: this.grapple?.prediction(command.actor) ?? false };
+        const velocity = this.nativeEquipmentVelocity.get(command.actor), owner = this.actors.resolveOwned(command.actor);
+        const selected = this.selectedQ3Source?.ownsEquipment === true && this.equipmentPlayerAvailable(command.actor) ? this.selectedQ3Source : null;
+        const character = providerFamily(this.recipe.character.definition.provider);
+        const pose = selected === null || owner === null ? null : selected.fixedPose(owner,
+          playerPostures({ character, standingBounds: playerStandingBounds(character), viewHeight: character === "q3" ? 26 : 22 }));
+        const speedMultiplier = selected?.speedMultiplier(command.actor) ?? 1;
+        const movement = this.grapple === null && velocity === undefined && selected === null ? undefined
+          : { ...(velocity === undefined ? {} : { velocity }), gravityScale: this.grapple?.gravityScale(command.actor) ?? 1,
+            predictionSuppressed: (this.grapple?.prediction(command.actor) ?? false) || speedMultiplier !== 1 || pose !== null,
+            speedMultiplier, ...(pose === null ? {} : { pose }) };
         const observingInput = this.modClientApplications.active;
         if (observingInput) this.nativeEquipmentVelocity.delete(command.actor);
         if (source.edition === "classic") source.game.think(slot, classicGuestLocalCommand(gated, source.game.playerState(slot)), movement);

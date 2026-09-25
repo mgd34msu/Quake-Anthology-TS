@@ -16,6 +16,8 @@ export type MovementCommand = UserCommand;
 
 /** Shared equipment contributes movement at the original player's Pmove boundary. */
 export interface EquipmentMovement {
+  readonly speedMultiplier?: number;
+  readonly pose?: FixedMovementPose;
   readonly velocity?: Vec3;
   readonly gravityScale: number;
   readonly predictionSuppressed: boolean;

@@ -90,6 +90,18 @@ test.skipIf(!existsSync("/home/buzzkill/Projects/qfiles/q2/xatrix/gamex86.dll") 
     expect(body().velocity.z).toBeLessThan(1);
     running.world.think(1, idle);
     expect(body().velocity.z).toBeLessThan(0);
+    const owner = running.actors.resolveOwned(actor); if (owner === null) throw new Error("Missing movement owner");
+    const speed = (multiplier: number): number => {
+      running.physics.bodies.write(owner, { ...before, velocity: body().velocity }); running.physics.bodies.link(owner);
+      running.world.think(1, { ...idle, forwardMove: 400 }, { velocity: { x: 0, y: 0, z: 0 }, gravityScale: 1, predictionSuppressed: true, speedMultiplier: multiplier });
+      return Math.hypot(body().velocity.x, body().velocity.y);
+    };
+    const ordinary = speed(1), enhanced = speed(1.5); expect(enhanced).toBeGreaterThan(ordinary); expect(speed(1)).toBe(ordinary);
+    const pose = { kind: "fixed", crouched: true, bounds: { min: { x: -42, y: -42, z: -42 }, max: { x: 42, y: 42, z: 42 } }, viewHeight: 26 } satisfies import("../../../../src/contracts/movement.ts").FixedMovementPose;
+    const frozenOrigin = body().origin;
+    running.world.think(1, { ...idle, forwardMove: 400 }, { velocity: { x: 100, y: 0, z: 0 }, gravityScale: 1, predictionSuppressed: true, pose });
+    expect(body().origin).toEqual(frozenOrigin); expect(body().velocity).toEqual({ x: 0, y: 0, z: 0 }); expect(body().bounds).toEqual(pose.bounds);
+    speed(1); expect(body().bounds).not.toEqual(pose.bounds);
   } finally { running.world.close(); }
 });
 for (const fixture of [{ name: "ctf", deathmatch: true }, { name: "xatrix", deathmatch: false }]) {

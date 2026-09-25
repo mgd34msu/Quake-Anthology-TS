@@ -86,13 +86,9 @@ export class NativeInputBinding {
       if (source.edition === "classic") this.removals.push(source.host.bindInputMovement((address, run) => {
         this.movement(address, () => { run(); return { kind: "void" }; }); return undefined;
       }));
-      else {
-        const move = entry("Pmove");
-        const movement = bindNativeModEntry(entryHost, move.address, `${memory.module.id}:input.Pmove`, move.signature,
-          (values, original) => this.movement(requiredPointer(values, 0), () => original(values)),
-          () => services.applications.active && this.commands.length !== 0);
-        this.removals.push(movement.close);
-      }
+      else this.removals.push(source.host.bindInputMovement((address, run) => {
+        this.movement(address, () => { run(); return { kind: "void" }; }); return undefined;
+      }, () => services.applications.active && this.commands.length !== 0));
     } catch (error) { this.close(); throw error; }
   }
   private assertLive(scope: CommandScope): void {

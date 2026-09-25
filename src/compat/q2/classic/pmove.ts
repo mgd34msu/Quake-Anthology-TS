@@ -5,6 +5,7 @@ import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { NumericOperations } from "../../../contracts/numeric.ts";
 import type { BspPlane, TraceResult } from "../../../contracts/scene.ts";
 import { pmoveClassic, Q2_PLAYER_BOUNDS } from "../../../movement/q2/index.ts";
+import { PmTypeT, PMF_DUCKED } from "../../../movement/q2/types.ts";
 import type { ClassicPmove, MovementEntity, TraceT, Vec3 } from "../../../movement/q2/types.ts";
 import { CLASSIC_Q2_PMOVE_BYTES, classicSignature, q2Int, q2Pointer, q2Trace } from "./layout.ts";
 import type { ClassicQ2GuestHost } from "./host.ts";
@@ -113,7 +114,14 @@ function runMovement(address: GuestAddress, host: ClassicQ2GuestHost, options: C
     },
   };
   try {
-    pmoveClassic(pm, options.numeric, options.airAccelerate ?? 0);
+    const pose = options.equipment?.pose, type = pm.s.pm_type;
+    if (pose !== undefined) { pm.s.pm_type = PmTypeT.PM_FREEZE; pm.s.velocity = [0, 0, 0]; }
+    pmoveClassic(pm, options.numeric, options.airAccelerate ?? 0, false, false, options.equipment?.speedMultiplier ?? 1);
+    if (pose !== undefined) {
+      pm.s.pm_type = type; pm.viewheight = pose.viewHeight;
+      pm.mins = [pose.bounds.min.x, pose.bounds.min.y, pose.bounds.min.z]; pm.maxs = [pose.bounds.max.x, pose.bounds.max.y, pose.bounds.max.z];
+      pm.s.pm_flags = pose.crouched ? pm.s.pm_flags | PMF_DUCKED : pm.s.pm_flags & ~PMF_DUCKED;
+    }
     commit();
   } finally { memory.unmap(scratch, 48); }
   return undefined;

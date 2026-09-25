@@ -165,7 +165,8 @@ test.skipIf(!available)("production guest lifecycle unwinds attach and Init fail
   const { source, prepared, services, host, world, releaseListeners, memory } = await nativeFixture();
   expect(releaseListeners.active).toBe(1);
   const failed: { memory: import("../../../../src/guest/core/index.ts").MappedGuestMemory | null } = { memory: null };
-  expect(() => RereleaseGuestSource.create(prepared, { ...host.options,
+  const { pickups, ...hostOptions } = host.options;
+  expect(() => RereleaseGuestSource.create(prepared, { ...hostOptions, ...(pickups === undefined ? {} : { pickups: pickups.admission }),
     services: value => { failed.memory = value; return services(value); }, instructionBudget: 1,
     clock: { nowMilliseconds: () => 0, performanceCounter: () => 0n, performanceFrequency: 1000n } })).toThrow();
   expect(failed.memory?.mappings()).toEqual([]); expect(releaseListeners.active).toBe(1);
@@ -225,6 +226,8 @@ test.skipIf(!available)("retail external player velocity enters source Pmove and
     return value;
   };
   const command = { kind: "q2-rerelease", milliseconds: 25, buttons: 0, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, serverFrame: 123 } satisfies Parameters<typeof host.clientThink>[1];
+  let boundaries = 0;
+  const releaseBoundary = guest.bindInputMovement((_address, run) => { boundaries++; return run(); }, () => true);
   const before = body();
   host.clientThink(1, command, { velocity: { x: 0, y: 0, z: 600 }, gravityScale: 1, predictionSuppressed: false });
   expect(body().origin.z).toBeGreaterThan(before.origin.z);
@@ -239,6 +242,22 @@ test.skipIf(!available)("retail external player velocity enters source Pmove and
   expect(body().velocity.z).toBeLessThan(1);
   host.clientThink(1, command);
   expect(body().velocity.z).toBeLessThan(0);
+  const speed = (multiplier: number): number => {
+    world.engine.bodies.write(actor, before); world.engine.bodies.link(actor);
+    host.clientThink(1, { ...command, forwardMove: 400 }, { velocity: { x: 0, y: 0, z: 0 }, gravityScale: 1, predictionSuppressed: true, speedMultiplier: multiplier });
+    return Math.hypot(body().velocity.x, body().velocity.y);
+  };
+  const ordinary = speed(1), enhanced = speed(1.5), restored = speed(1);
+  expect(enhanced).toBeGreaterThan(ordinary); expect(restored).toBe(ordinary);
+  const pose = { kind: "fixed", crouched: true, bounds: { min: { x: -42, y: -42, z: -42 }, max: { x: 42, y: 42, z: 42 } }, viewHeight: 26 } satisfies import("../../../../src/contracts/movement.ts").FixedMovementPose;
+  const origin = body().origin;
+  host.clientThink(1, { ...command, forwardMove: 400 }, { velocity: { x: 100, y: 0, z: 0 }, gravityScale: 1, predictionSuppressed: true, pose });
+  expect(body().origin).toEqual(origin); expect(body().velocity).toEqual({ x: 0, y: 0, z: 0 }); expect(body().bounds).toEqual(pose.bounds);
+  const client = guest.memory.readPointer(guest.memory.offset(guest.entities().atSlot(1).address, BigInt(fieldOffset(edictLayout, "client"))));
+  if (client === null) throw new Error("Missing original client");
+  expect(readRereleasePlayerState(guest.memory, client).movement.viewHeight).toBe(26);
+  expect(boundaries).toBeGreaterThan(0); releaseBoundary();
+  speed(1); expect(body().bounds).not.toEqual(pose.bounds);
 });
 
 test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame use shared BSP, body and inventory authorities", async () => {
