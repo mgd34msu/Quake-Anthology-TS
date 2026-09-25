@@ -160,7 +160,7 @@ export class ApplicationModPresentations {
               target: { kind: "seat", seat: presentation.local.player.seat.id }, lights, q3Lights, ...(q1Fog === undefined ? {} : { q1Fog }) };
             return { q3Admissions: [scene.admission], operations: consumer.renderer.operations(scene, input, firstEntity,
               { noWorldModel: false, splitScreen: presentation.splitScreen, supplementalViewWeapon: false }), lights, q3Lights };
-          }, { owner: source.owner, draw: (frames, camera) => {
+          }, { owner: source.owner, bodies: () => consumer.owns(source, presentation.local.player.actor) ? consumer.bodies : [], draw: (frames, camera) => {
             if (!consumer.owns(source, presentation.local.player.actor)) return;
             drawQ3Overlay({ submissions: consumer.hud, renderer: consumer.renderer, assets: this.options.assets, frames, camera,
               viewport: presentation.viewport, seat: presentation.local.player.seat.id, time: entry.time });

@@ -1,3 +1,7 @@
+import type { ComponentBody, PreparedPrimaryBody } from "./component-bodies.ts";
+import type { QvmBodyPart } from "../../contracts/qvm-mod-presentation.ts";
+import { copyRefEntity, type RefModelEntity } from "../../content/q3/presentation/ref-entity.ts";
+import { prepareQ3Model } from "../../content/q3/presentation/scene.ts";
 import type { ApplicationKeyProfile } from "./keys.ts";
 import { SharedCvarMirror } from "../../core/cvars/mirror.ts";
 import { CollisionMapSettings, collisionMapCvarDefinitions } from "../../world/collision/q3/settings.ts";
@@ -174,6 +178,9 @@ export class ApplicationQ3Client {
   private readonly bodyPoses = new Map<ActorId, { readonly origin: Vec3; readonly angles: Vec3 }>();
   private readonly poseActors = new Map<number, ActorId>();
   private readonly hiddenBodies = new Map<number, ActorId>();
+  private readonly selectedBodies = new Map<number, ActorId>();
+  private readonly primaryBodies: PreparedPrimaryBody[] = [];
+  get sharedBodies(): readonly PreparedPrimaryBody[] { return this.primaryBodies; }
   private constructor(readonly options: ApplicationQ3ClientOptions, readonly media: ApplicationQ3Assets, private readonly artifacts?: QvmPresentationArtifacts) {
     this.round = options.kind === "remote" || options.kind === "qvm" ? null : { ...options, actor: options.local.player.actor };
     this.product = (options.kind === "remote" || options.kind === "qvm") ? "baseq3" : options.initial.product;
@@ -335,6 +342,8 @@ export class ApplicationQ3Client {
       const game = await ApplicationQvmClient.create({ ...(this.artifacts === undefined ? {} : { artifacts: this.artifacts }), seat, commandContext: this.commandContext(), services, media, session, connection: o.connection, queries: o.queries,
         ...(o.equipmentWeapon === undefined ? {} : { equipmentWeapon: o.equipmentWeapon }),
         heldWeaponActor: number => { const actor = source.actorAt(number); return !this.bodyHidden(number) && this.selectedHeldActors.get(actor.slot)?.equals(actor) ? actor : null; },
+        bodyCapture: { active: () => this.selectedBodies.size !== 0, selected: number => this.bodySelected(number),
+          submit: (number, part, source, base) => this.submitBody(number, part, source, base) },
         bodyOverrides: { active: () => this.hiddenBodies.size !== 0, hidden: number => this.bodyHidden(number) },
         commands: o.commandBuffer, cvars: o.guestCvars, browser: o.browser, keys: o.keys, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
         removeCommand: name => { this.commandNames.delete(name); o.commandRegistration.remove(name); },
@@ -361,6 +370,7 @@ export class ApplicationQ3Client {
       memoryRemaining: () => Math.min(0x7fffffff, freemem()), updateLoadingScreen: paint => paint(),
       lightForPoint: point => this.light(point),
       bodyHidden: number => this.bodyHidden(number),
+      bodySubmission: (number, part, source, base) => this.submitBody(number, part, source, base),
       weaponSelection: weapon => { this.weaponSelection = weapon; },
       bodyPose: entity => {
         if (this.poseActors.size === 0) return;
@@ -421,14 +431,33 @@ export class ApplicationQ3Client {
     const actor = this.source.actorAt(number);
     return this.hiddenBodies.get(actor.slot)?.equals(actor) ?? false;
   }
+  private bodySelected(number: number): boolean {
+    if (this.selectedBodies.size === 0 || this.bodyHidden(number)) return false;
+    const actor = this.source.actorAt(number);
+    return this.selectedBodies.get(actor.slot)?.equals(actor) === true;
+  }
+  private submitBody(number: number, part: QvmBodyPart, source: RefModelEntity, base: boolean): boolean {
+    if (!this.bodySelected(number)) return false;
+    const ref = copyRefEntity(source);
+    if (ref.kind !== "model") throw new Error("Source body changed reference kind");
+    const actor = this.source.actorAt(number), prepared = prepareQ3Model(ref, actor);
+    if (prepared === null) return false;
+    const content = this.media.modelContents.get(source.model);
+    if (content === undefined) throw new Error("Source body lost its registered geometry owner");
+    this.primaryBodies.push({ actor, part, content, entity: prepared.entity, base,
+      options: { ...prepared.options, shaderTexCoord: ref.shaderTexCoord }, shaderContent: this.media.content, time: this.source.time });
+    return true;
+  }
   receiveEvents(events: readonly SimulationPresentationEvent[]): void {
     this.options.assertCurrent?.(); this.requireGame();
     if (this.localSource === null) throw new Error("Remote Q3 cgame receives events through its network connection");
     this.localSource.receiveEvents(events);
   }
   receive(state: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void { this.requireGame(); if (this.localSource === null) throw new Error("Remote Q3 cgame receives snapshots through its network connection"); this.localSource.receive(state, events, commands); }
-  async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = [], statusVisible = true): Promise<void> {
+  async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = [], statusVisible = true, bodies: readonly ComponentBody[] = []): Promise<void> {
     this.hiddenBodies.clear();
+    this.selectedBodies.clear(); this.primaryBodies.length = 0;
+    for (const body of bodies) this.selectedBodies.set(body.actor.slot, body.actor);
     this.selectedHeldActors.clear();
     this.bodyPoses.clear();
     this.poseActors.clear();
@@ -546,6 +575,6 @@ export class ApplicationQ3Client {
     this.timeMirror?.close(); this.timeMirror = null;
     this.backend?.game.close(); this.audioOperations.push({ kind: "clear-loops", killAll: true });
     this.options.audio.receiveCgameFrame({ content: this.media.content, seat: this.options.local.player.seat.id, operations: this.audioOperations.splice(0) });
-    this.closed = true; this.cinematics?.close(); this.media.close(); this.bodyPoses.clear(); this.poseActors.clear(); this.sceneRenderer.close(); this.submissions.length = 0;
+    this.closed = true; this.cinematics?.close(); this.media.close(); this.bodyPoses.clear(); this.poseActors.clear(); this.selectedBodies.clear(); this.primaryBodies.length = 0; this.sceneRenderer.close(); this.submissions.length = 0;
   }
 }

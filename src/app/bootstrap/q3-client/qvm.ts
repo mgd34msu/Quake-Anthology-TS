@@ -1,3 +1,5 @@
+import type { QvmBodyPart } from "../../../contracts/qvm-mod-presentation.ts";
+import type { RefModelEntity } from "../../../content/q3/presentation/ref-entity.ts";
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ContentId } from "../../../contracts/content.ts";
 import type { SceneEntity } from "../../../contracts/scene.ts";
@@ -76,6 +78,7 @@ export interface ApplicationQvmClientOptions {
   readonly keyCatcher: () => number;
   readonly equipmentWeapon?: () => Q3EquipmentPresentation | null;
   readonly heldWeaponActor?: (entity: number) => ActorId | null;
+  readonly bodyCapture?: { active(): boolean; selected(entity: number): boolean; submit(entity: number, part: QvmBodyPart, source: RefModelEntity, base: boolean): boolean; };
   readonly bodyOverrides?: { active(): boolean; hidden(entity: number): boolean; };
   removeCommand(name: string): void;
   scalar(call: QvmHostCall, owner: ApplicationQvmClient): QvmHostResult | null;
@@ -266,7 +269,16 @@ export class ApplicationQvmClient {
       }
       const bodies = await readCgameBodyProfile(cgameOptions.artifact, options.media.provider.mounts);
       owner.assertCurrent();
-      if (bodies !== null) owner.bodySubmissions = new QvmBodySubmissions(owner.cgame.module, cgameOptions.artifact, bodies, entity => options.bodyOverrides?.hidden(entity) ?? false);
+      if (bodies !== null) owner.bodySubmissions = new QvmBodySubmissions(owner.cgame.module, cgameOptions.artifact, bodies, entity => options.bodyOverrides?.hidden(entity) ?? false, {
+        selected: entity => options.bodyCapture?.selected(entity) === true,
+        submit: (entity, part, source, base) => {
+          const resources = options.services.resources;
+          return options.bodyCapture?.submit(entity, part, { ...source,
+            customShader: typeof source.customShader === "number" ? resources.shaderForHandle(source.customShader) : source.customShader,
+            model: typeof source.model === "number" ? resources.modelForHandle(source.model) : source.model,
+            customSkin: typeof source.customSkin === "number" ? resources.skinForHandle(source.customSkin) : source.customSkin }, base) === true;
+        },
+      });
       await owner.cgame.init(options.session.serverMessageSequence, options.session.lastExecutedServerCommand, options.session.clientNumber);
       owner.assertCurrent(); return owner;
     } catch (error) {
@@ -287,9 +299,10 @@ export class ApplicationQvmClient {
   async draw(time: number, demoPlayback: boolean): Promise<void> {
     this.assertCurrent();
     if (!this.ready || this.cgame === null) throw new Error('QVM cgame has not initialized');
-    const hideBodies = this.options.bodyOverrides?.active() ?? false;
-    if (hideBodies && this.bodySubmissions === null) throw new Error('This cgame needs an artifact-matched cgame-presentation.json declaration for body replacements');
-    this.bodySubmissions?.enable(hideBodies);
+    const hideBodies = this.options.bodyOverrides?.active() ?? false, captureBodies = this.options.bodyCapture?.active() ?? false;
+    if ((hideBodies || captureBodies) && this.bodySubmissions === null) throw new Error('This cgame needs an artifact-matched cgame-presentation.json declaration for body replacements');
+    if (captureBodies && this.bodySubmissions?.capturesPlayerMeshes !== true) throw new Error("This cgame needs artifact-matched player mesh call sites for component body materials");
+    this.bodySubmissions?.enable(hideBodies || captureBodies);
     this.equipment = this.options.equipmentWeapon?.() ?? null;
     if (this.equipment !== null && this.equipmentProfile === null)
       throw new Error("Selected weapon presentation requires a qualified original cgame HUD boundary");

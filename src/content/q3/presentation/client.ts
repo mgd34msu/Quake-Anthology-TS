@@ -1,3 +1,4 @@
+import type { QvmBodyPart } from "../../../contracts/qvm-mod-presentation.ts";
 import type { WeaponHudReader } from "./player-state.ts";
 // Composition of source cgame runtimes over one unified client/seat. GPL-2.0-or-later.
 import type { Axis } from "../../../contracts/math.ts";
@@ -91,6 +92,7 @@ export interface Q3ClientSound {
 export interface Q3ClientPresentationOptions {
   readonly weaponSelection?: (weapon: number) => void;
   readonly bodyHidden?: (entity: number) => boolean;
+  readonly bodySubmission?: (entity: number, part: QvmBodyPart, source: RefModelEntity, base: boolean) => boolean;
   readonly bodyPose?: (entity: ClientEntity) => void;
   readonly weaponHud?: WeaponHudReader;
   readonly session: Q3PresentationSession; readonly commandContext: CommandContext;
@@ -308,6 +310,7 @@ async function createQ3Presentation(input: Q3ClientPresentationOptions | Q3Scene
     });
     const players = new PlayerPresenter({ state, media: media.players, clients, collision, effects, random, marks,
       ...(options.bodyHidden === undefined ? {} : { bodyHidden: options.bodyHidden }),
+      ...(primary?.bodySubmission === undefined ? {} : { bodySubmission: primary.bodySubmission }),
       ...(session.product === "baseq3" ? { product: "baseq3" } satisfies { product: "baseq3" }
         : { product: "missionpack", missionMedia: media.missionPlayers } satisfies { product: "missionpack"; missionMedia: typeof media.missionPlayers }),
       trace: (start, end, bounds, skip, mask) => prediction.trace(start, end, bounds, skip, mask),

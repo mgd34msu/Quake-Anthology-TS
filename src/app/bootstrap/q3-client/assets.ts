@@ -37,6 +37,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
   private readonly retained = new Map<string, OpenedResource>();
   private readonly sounds = new Map<string, SoundAsset>();
   private readonly names = new Set<string>();
+  readonly modelContents = new Map<SceneModel, ContentId>();
   readonly modelProviders = new Map<SceneModel, ProviderSceneAssets>();
   readonly bank: Q3PresentationSoundBank;
   readonly fonts: RendererFontRegistry;
@@ -127,7 +128,7 @@ export class ApplicationQ3Assets implements SoundAssetReader {
           if (bounds === undefined) throw new Error(`Missing inline model bounds ${path}`);
           model = { kind: "inline", path, index: asset.model.model, geometry: asset.model.world, resource: asset.resource, bounds };
         } else model = { kind: "model", path, model: asset.model, resource: asset.resource };
-        this.modelProviders.set(model, provider); return model;
+        this.modelProviders.set(model, provider); this.modelContents.set(model, content); return model;
       }),
       skin: async path => { const provider = await this.assets.provider(contentFor(path)), opened = await provider.mounts.open(path);
         return opened === null ? null : { path, surfaces: parseSkin(new TextDecoder().decode(opened.bytes)) }; },
@@ -140,5 +141,5 @@ export class ApplicationQ3Assets implements SoundAssetReader {
       },
     };
   }
-  close(): void { this.closed = true; this.fonts.close(); this.fontReader.close(); this.retained.clear(); this.sounds.clear(); this.modelProviders.clear(); }
+  close(): void { this.closed = true; this.fonts.close(); this.fontReader.close(); this.retained.clear(); this.sounds.clear(); this.modelProviders.clear(); this.modelContents.clear(); }
 }

@@ -1,5 +1,7 @@
 # Execution status
 
+Newer source transfers original component body materials to selected geometry and connects original Xatrix/retail Q2 pickup supply. Source ownership tests and per-pool ammo limits run through the original DLL; temporary source counters are restored before selected grants and map effects. Root combined production strict and five-file pickup policy are clean; both native source checks pass 24 assertions, and the combined original Threewave body witness passes 9 checks / 138 assertions. Body policy passed on its 18 production files. The complete native-primary arsenal join and native component item/camera work remain active. Installed executable stays `434a4d3e`; **21/23 targets remain accepted, T10/T12 open**. [Pickup/body evidence](../.artifacts/resume-20260925/native-primary-pickups/EVIDENCE.md).
+
 Installed executable `434a4d3e` includes selected arsenals in the qualified original Threewave game and native component world drawings. All 2,799 archived Git blobs match; build/help and compiled original Threewave GL movement, firing, armor, save/load and normal quit passed. The restored frame and decoded original/canonical save values were inspected; all owned processes exited. Prior `55c82c88` is preserved. **21/23 targets remain accepted; T10/T12 stay open.** [Delivery receipt](../.artifacts/resume-20260925/delivery-434a4d3/RUNTIME-RECEIPT.md).
 
 The following entries record their source and installed-build status at the time.

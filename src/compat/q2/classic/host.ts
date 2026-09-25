@@ -14,8 +14,8 @@ import { CLASSIC_Q2_ABI, CLASSIC_Q2_EXPORTS, CLASSIC_Q2_IMPORTS, CLASSIC_Q2_IMPO
 import { classicPrintf, classicPrintfLayouts } from "./printf.ts";
 import { ClassicQ2Edicts, allocateClassicString, classicStringAllocationBytes, readClassicString, readClassicVector, writeClassicString, writeClassicVector } from "./records.ts";
 import type { ClassicQ2ActorProjection } from "./records.ts";
-import type { OriginalPickupAdmission } from "../../../contracts/original-pickups.ts";
-import { NativePrimaryPickups } from "../native-pickups.ts";
+import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../contracts/original-pickups.ts";
+import { NativePrimaryPickups, type NativePickupSupply, type NativePickupSupplyEvaluation } from "../native-pickups.ts";
 import { classicPickupProfile } from "./pickup-profile.ts";
 
 export interface ClassicQ2WorldLink {
@@ -86,6 +86,14 @@ export class ClassicQ2GuestHost {
   #initialized = false;
   #suppressReconcile = false;
   #pickups: NativePrimaryPickups | null = null;
+  bindPickupSupply(owner: NativePickupSupply): () => undefined {
+    if (this.#pickups === null) throw new Error("This original game has no admitted pickup supply interface");
+    return this.#pickups.bindSupply(owner);
+  }
+  pickupSupply(offer: OriginalPickupOffer): NativePickupSupplyEvaluation {
+    if (this.#pickups === null) throw new Error("This original game has no admitted pickup supply interface");
+    return this.#pickups.supply(offer);
+  }
   bindPickups(image: GuestAddress): void {
     if (this.#pickups !== null) throw new Error("API3 primary pickups already bound");
     const profile = classicPickupProfile(this.memory.module.digest);

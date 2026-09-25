@@ -1,3 +1,6 @@
+import { bodyBaseVisible, bodyMaterials, type ComponentBody, type PreparedPrimaryBody } from "./component-bodies.ts";
+import type { QvmBodyPart } from "../../contracts/qvm-mod-presentation.ts";
+import type { SourceTime } from "../../contracts/time.ts";
 import type { QvmHeldWeapon } from "./q3-client/qvm.ts";
 import { attachSceneEntity, modelAttachmentTag } from "../../render/scene/models/transform.ts";
 import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
@@ -31,6 +34,7 @@ import { railGeometry } from "../../render/scene/particles/primitives.ts";
 import { prepareMaterialBatches } from "../../materials/evaluate.ts";
 
 interface ModelPass {
+  readonly time?: SourceTime;
   readonly entity: SceneEntity;
   readonly options: (entity: SceneEntity) => ModelSourceOptions;
 }
@@ -87,7 +91,7 @@ export class ApplicationWorldScene {
     return pattern === undefined || pattern.length === 0 ? absent : pattern.charCodeAt(Math.trunc(this.preparedTime * 10) % pattern.length) - 97;
   }
 
-  async prepare(viewer: ActorId | null, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[], fieldOfView = 90, heldWeapons: readonly QvmHeldWeapon[] = [], viewWeaponVisible = true): Promise<void> {
+  async prepare(viewer: ActorId | null, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[], fieldOfView = 90, heldWeapons: readonly QvmHeldWeapon[] = [], viewWeaponVisible = true, bodies: readonly ComponentBody[] = [], primaryBodies: readonly PreparedPrimaryBody[] = []): Promise<void> {
     this.objects.clear();
     this.ordered.length = 0;
     this.flares = [];
@@ -97,7 +101,7 @@ export class ApplicationWorldScene {
     for (const group of this.groups.values()) group.passes.length = 0;
     const inlineModels: NonNullable<WorldViewInput["inlineModels"]>[number][] = [];
     const brushModels: BrushPresentation[] = [];
-    const append = async (content: ContentId, entity: SceneEntity, options?: (entity: SceneEntity) => ModelSourceOptions, object?: PresentationObject, shaderContent?: ContentId): Promise<void> => {
+    const append = async (content: ContentId, entity: SceneEntity, options?: (entity: SceneEntity) => ModelSourceOptions, object?: PresentationObject, shaderContent?: ContentId, time?: SourceTime): Promise<void> => {
       const key = `${content}/${shaderContent ?? content}`;
       let group = this.groups.get(key);
       if (group === undefined) {
@@ -105,11 +109,36 @@ export class ApplicationWorldScene {
         group = { renderer: new SceneModelRenderer(shaderContent === undefined ? provider : { family: "q3", palette: provider.palette, textures: provider.textures, shaders: (await this.assets.provider(shaderContent)).shaders }, this.assets.world), passes: [] };
         this.groups.set(key, group);
       }
-      const pass: ModelPass = { entity, options: options ?? (() => ({})) };
+      const pass: ModelPass = { entity, options: options ?? (() => ({})), ...(time === undefined ? {} : { time }) };
       group.passes.push(pass);
       this.ordered.push({ group, pass });
       const logical = object ?? { opacity: entity.opacity ?? 1, passes: [] };
       logical.passes.push({ group, pass }); this.objects.set(pass, logical);
+    };
+    const posed = new Map<string, { readonly part: QvmBodyPart; readonly content: ContentId; readonly entity: SceneEntity; readonly options: (entity: SceneEntity) => ModelSourceOptions }>();
+    const affected = (actor: ActorId | null): actor is ActorId => actor !== null && bodies.some(body => body.actor.equals(actor));
+    const retain = (part: QvmBodyPart, content: ContentId, entity: SceneEntity, options: (entity: SceneEntity) => ModelSourceOptions): void => {
+      if (entity.actor === null) return;
+      const key = `${entity.actor.slot}/${entity.actor.generation}/${part}/${entity.resource.id}`;
+      if (!posed.has(key)) posed.set(key, { part, content, entity, options });
+    };
+    const appendBody = async (content: ContentId, entity: SceneEntity, options: (entity: SceneEntity) => ModelSourceOptions,
+      base: boolean, object?: PresentationObject): Promise<void> => {
+      if (!affected(entity.actor)) { await append(content, entity, options, object); return; }
+      const actor = entity.actor, assets = this.characterAssets;
+      const part: QvmBodyPart = entity.resource.id === assets?.lower.resource.id ? "lower"
+        : entity.resource.id === assets?.upper.resource.id ? "upper" : entity.resource.id === assets?.head.resource.id ? "head" : "body";
+      const body = { ...entity, attachments: [] };
+      retain(part, content, body, options);
+      if (!base || bodyBaseVisible(bodies, actor, part)) await append(content, body, options, object);
+      for (const attachment of entity.attachments) {
+        const tag = modelAttachmentTag(entity, attachment.tag);
+        if (tag === null) continue;
+        const child = attachSceneEntity(entity, attachment.entity, tag);
+        if (assets !== null && [assets.lower, assets.upper, assets.head].some(part => part.resource.id === child.resource.id))
+          await appendBody(content, child, options, base, object);
+        else await append(content, child, options, object);
+      }
     };
     for (const original of presentations) {
       let source = original;
@@ -185,10 +214,12 @@ export class ApplicationWorldScene {
           transform: { ...entity.transform, origin: sub3(cableStart, scale3(direction, (index + 1) * cable.segmentLength)), axis } });
         continue;
       }
-      await append(source.content, { ...entity, attachments }, () => ({ viewModel: source.viewWeapon, ...(source.modelBeam === undefined ? {} : { modelBeam: source.modelBeam }),
+      const options = (): ModelSourceOptions => ({ viewModel: source.viewWeapon, ...(source.modelBeam === undefined ? {} : { modelBeam: source.modelBeam }),
         ...(source.indexedSkin === undefined ? {} : { indexedSkin: source.indexedSkin }),
         ...(source.playerColors === undefined ? {} : { playerColors: source.playerColors }),
-        player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null }));
+        player: source.family === "q2" && source.path.startsWith("players/"), customShader: source.skinPath ?? null });
+      if (source.viewWeapon) await append(source.content, { ...entity, attachments }, options);
+      else await appendBody(source.content, { ...entity, attachments }, options, true);
     }
     if (this.characterAssets !== null) for (const character of characters) {
       const key = `${character.actor.slot}:${character.actor.generation}`;
@@ -212,7 +243,11 @@ export class ApplicationWorldScene {
         frameMilliseconds: Math.max(0, Math.trunc(this.preparedTime * 1000) - Math.trunc(this.previousTime * 1000)), shaderTime: { kind: "seconds", value: 0 },
         swingSpeed: 0.3, noPlayerAnimations: false, personalModel: viewer?.equals(character.actor) ?? false, shadowPlane: null, weapon });
       const object: PresentationObject = { opacity: character.opacity ?? 1, passes: [] };
-      for (const pass of passes) await append(pass.content ?? this.assets.content.recipe.character.appearance.content, pass.entity, pass.options, object);
+      for (const pass of passes) {
+        const content = pass.content ?? this.assets.content.recipe.character.appearance.content;
+        if (pass.entity.resource.id === this.characterAssets.lower.resource.id) await appendBody(content, pass.entity, pass.options, pass.shader === null, object);
+        else await append(content, pass.entity, pass.options, object);
+      }
     }
     for (const held of heldWeapons) {
       const equipped = presentations.find(source => source.viewWeapon && source.visible && source.actor.equals(held.parent.actor));
@@ -239,6 +274,23 @@ export class ApplicationWorldScene {
         }
       }
     }
+    for (const source of primaryBodies) {
+      retain(source.part, source.content, source.entity, () => source.options);
+      if (!source.base || bodyBaseVisible(bodies, source.actor, source.part)) await append(source.content, source.entity, () => source.options, undefined, source.shaderContent, { kind: "milliseconds", value: source.time });
+    }
+    for (const model of posed.values()) {
+      const actor = model.entity.actor;
+      if (actor === null) continue;
+      for (const body of bodies) if (body.actor.equals(actor)) for (const pass of bodyMaterials(body, model.part)) {
+        const c = pass.shaderRGBA;
+        const entity: SceneEntity = { ...model.entity, color: { x: c.x / 255, y: c.y / 255, z: c.z / 255, w: c.w / 255 },
+          flags: { kind: "q3", bits: pass.renderFlags }, shaderTime: { kind: "seconds", value: pass.shaderTime },
+          lightingOrigin: pass.lightingOrigin, shadowPlane: pass.shadowPlane };
+        await append(model.content, entity, current => ({ ...model.options(current), customShader: pass.customShader?.name ?? null,
+          customSkin: pass.customSkin?.surfaces ?? null, shaderTexCoord: pass.shaderTexCoord, nonNormalizedAxes: pass.nonNormalizedAxes }), undefined, body.content,
+          { kind: "milliseconds", value: body.time });
+      }
+    }
     this.inlineModels = inlineModels;
     this.brushModels = brushModels;
     for (const group of this.groups.values()) for (const pass of group.passes) await group.renderer.preload([pass.entity], pass.options);
@@ -257,7 +309,7 @@ export class ApplicationWorldScene {
 
     if (shadowLights.length > 0) {
       const retainBody = shadowBodyFilter(shadowLights);
-      const casters = [...this.groups.values()].flatMap(group => group.passes.filter(pass => (this.objects.get(pass)?.opacity ?? 1) === 1).flatMap(pass => group.renderer.prepareShadowCasters([pass.entity], input, pass.options, skinningFrame, retainBody)));
+      const casters = [...this.groups.values()].flatMap(group => group.passes.filter(pass => (this.objects.get(pass)?.opacity ?? 1) === 1).flatMap(pass => group.renderer.prepareShadowCasters([pass.entity], pass.time === undefined ? input : { ...input, time: pass.time }, pass.options, skinningFrame, retainBody)));
       const shadows = this.assets.world.prepareShadows([...shadowLights, ...(input.lights ?? []).map(light => ({ origin: light.origin, radius: light.radius, color: light.color, additive: true,
         profile: { kind: "q2", scale: 1, cone: null, shadow: { kind: "none" } } } satisfies import("../../contracts/scene.ts").SceneLight))], input, casters);
       input = { ...input, q2FragmentLighting: shadows.lighting, beforeView: shadows.operations };
@@ -278,9 +330,12 @@ export class ApplicationWorldScene {
   private modelOperations(input: WorldViewInput, infrared: boolean, weaponCamera: SceneCamera,
     skinningFrame: ModelSkinningFrame = { meshes: new WeakMap(), poses: new WeakMap() }): readonly SceneOperation[] {
     const modelOperations: SceneOperation[] = [], emitted = new Set<PresentationObject>();
-    const prepare = (group: ModelGroup, pass: ModelPass) => pass.options(pass.entity).viewModel === true && input.camera.clip.kind === "portal" ? [] : group.renderer.prepare([pass.entity],
-      pass.options(pass.entity).viewModel === true ? { ...input, camera: weaponCamera } : input,
-      current => ({ ...pass.options(current), infrared, planarShadow: this.planarShadows() }), skinningFrame);
+    const prepare = (group: ModelGroup, pass: ModelPass) => {
+      if (pass.options(pass.entity).viewModel === true && input.camera.clip.kind === "portal") return [];
+      const current = pass.time === undefined ? input : { ...input, time: pass.time };
+      return group.renderer.prepare([pass.entity], pass.options(pass.entity).viewModel === true ? { ...current, camera: weaponCamera } : current,
+        entity => ({ ...pass.options(entity), infrared, planarShadow: this.planarShadows() }), skinningFrame);
+    };
     for (const { group, pass } of this.ordered) {
       const object = this.objects.get(pass);
       if (object === undefined || object.opacity === 1) { modelOperations.push(...prepare(group, pass)); continue; }

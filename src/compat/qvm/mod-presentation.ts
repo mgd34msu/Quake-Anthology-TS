@@ -21,6 +21,17 @@ import { QVM_GAME_STATE_BYTES, qvmSnapshotBytes, writeSourceQvmGameState, writeS
 import { QvmCgameImport, QvmCgameExport } from "./abi.ts";
 import type { QvmHostCall, QvmHostResult } from "./syscalls.ts";
 import type { QvmFunctionCall } from "./interpreter.ts";
+import { qualifyQvmBodyCalls } from "./body-scope.ts";
+import { readQvmRefEntity, QVM_REF_ENTITY_BYTES } from "./render-record.ts";
+import type { SourceRefEntityRecord } from "../../content/q3/presentation/ref-entity.ts";
+import type { QvmBodyPart } from "../../contracts/qvm-mod-presentation.ts";
+
+export interface QvmBodyMesh {
+  readonly part: QvmBodyPart;
+  base: boolean;
+  readonly passes: Extract<SourceRefEntityRecord, { readonly kind: "model" }>[];
+}
+export interface QvmBodyPresentation { readonly actor: ActorId; readonly parts: readonly QvmBodyMesh[]; }
 
 export interface QvmSceneContext {
   readonly revision: number;
@@ -100,6 +111,7 @@ export function validateQvmModPresentation(options: Pick<QvmModPresentationOptio
     for (const argument of [player.centityArgument, mesh.entityArgument, mesh.stateArgument, declaration.eventCheck.centityArgument])
       if (!Number.isInteger(argument) || argument < 0 || argument > 9) throw new Error("Source mesh scope has an invalid argument");
     if (mesh.shaderOffset !== 112) throw new Error("Source mesh shader field differs from the declared refEntity ABI");
+    qualifyQvmBodyCalls(artifact.image, declaration.body);
     if (declaration.snapshots.length === 0) throw new Error("Source scene requires original snapshot processing");
   }
   const checkCall = (call: QvmPresentationCall, initializing: boolean): void => {
@@ -143,8 +155,10 @@ export class QvmModPresentation {
   private readonly sceneActors = new Map<number, QvmSceneContext["actors"][number]>();
   private restoringScene = false;
   private currentGameState: SourceGameStateRecord | null = null;
-  private playerScope: { readonly actor: ActorId; readonly state: number } | null = null;
-  private meshScope: { readonly player: NonNullable<QvmModPresentation["playerScope"]>; readonly pointer: number; readonly shader: number } | null = null;
+  private bodyFrame: QvmBodyPresentation[] = [];
+  get bodies(): readonly QvmBodyPresentation[] { this.current(); return this.bodyFrame; }
+  private playerScope: { readonly actor: ActorId; readonly state: number; readonly parts: QvmBodyMesh[]; readonly pending: Map<number, QvmBodyMesh> } | null = null;
+  private meshScope: { readonly player: NonNullable<QvmModPresentation["playerScope"]>; readonly pointer: number; readonly shader: number; readonly output: QvmBodyMesh } | null = null;
   constructor(private readonly options: QvmModPresentationOptions) {
     validateQvmModPresentation(options);
     this.module = new QvmModule({ artifact: options.artifact, host: call => { this.current(this.activeEvent); return this.sceneSyscall(call) ?? options.host(call); },
@@ -214,19 +228,29 @@ export class QvmModPresentation {
     try { return await call.proceedAsync(); } finally { leave(); }
   }
   private bindBody(declaration: QvmScenePresentation): void {
+    const calls = qualifyQvmBodyCalls(this.options.artifact.image, declaration.body);
     const bind = (entry: number, hook: (call: QvmFunctionCall) => Promise<number>) => this.removals.push(this.module.bindInvocation({ kind: "qvm",
       module: this.module.profile.module, instructionIndex: entry }, hook));
     bind(declaration.body.player.entry, call => this.scoped(call, () => {
       const previous = this.playerScope, pointer = call.words.getInt32(declaration.body.player.centityArgument * 4, true) + declaration.storage.centities.state;
       const number = call.guest.view(pointer, 4).getInt32(0, true), row = this.sceneActors.get(number);
+      const pending = new Map<number, QvmBodyMesh>([...calls].map(([site, part]) => [site, { part, base: false, passes: [] }]));
       this.playerScope = row !== undefined && !row.owned && this.options.actor(number)?.equals(row.actor) === true && this.options.live(row.actor)
-        ? { actor: row.actor, state: pointer } : null;
-      return () => { this.playerScope = previous; };
+        ? { actor: row.actor, state: pointer, parts: [...pending.values()], pending } : null;
+      const player = this.playerScope;
+      return () => { if (player !== null && this.options.live(player.actor)) this.bodyFrame.push({ actor: player.actor, parts: player.parts }); this.playerScope = previous; };
     }));
     bind(declaration.body.mesh.entry, call => this.scoped(call, () => {
       const previous = this.meshScope, player = this.playerScope, mesh = declaration.body.mesh;
       const pointer = call.words.getInt32(mesh.entityArgument * 4, true), state = call.words.getInt32(mesh.stateArgument * 4, true);
-      this.meshScope = player !== null && state === player.state ? { player, pointer, shader: call.guest.view(pointer + mesh.shaderOffset, 4).getInt32(0, true) } : null;
+      const part = call.callerInstruction === null ? undefined : calls.get(call.callerInstruction);
+      let output: QvmBodyMesh | null = null;
+      if (player !== null && state === player.state && part !== undefined && call.callerInstruction !== null) {
+        output = player.pending.get(call.callerInstruction) ?? null;
+        if (output === null) { output = { part, base: false, passes: [] }; player.parts.push(output); }
+        else player.pending.delete(call.callerInstruction);
+      }
+      this.meshScope = player !== null && output !== null ? { player, pointer, shader: call.guest.view(pointer + mesh.shaderOffset, 4).getInt32(0, true), output } : null;
       return () => { this.meshScope = previous; };
     }));
     bind(declaration.eventCheck.entry, call => {
@@ -250,7 +274,12 @@ export class QvmModPresentation {
       const mesh = this.meshScope;
       if (mesh !== null && mesh.player === this.playerScope && this.options.live(mesh.player.actor)
         && this.options.actor(guest.view(mesh.player.state, 4).getInt32(0, true))?.equals(mesh.player.actor) === true
-        && words.getInt32(4, true) === mesh.pointer && guest.view(mesh.pointer + this.options.declaration.body.mesh.shaderOffset, 4).getInt32(0, true) === mesh.shader) return 0;
+        && words.getInt32(4, true) === mesh.pointer) {
+        const source = readQvmRefEntity(guest.view(mesh.pointer, QVM_REF_ENTITY_BYTES));
+        if (source.kind !== "model") return null;
+        if (source.customShader === mesh.shader) mesh.output.base = true; else mesh.output.passes.push(source);
+        return 0;
+      }
       return null;
     }
     if (call.code === QvmCgameImport.CG_GETCURRENTSNAPSHOTNUMBER) {
@@ -460,7 +489,7 @@ export class QvmModPresentation {
     if (this.busy || this.phase !== "initialized") throw new Error("Source presentation frame requires an idle initialized owner");
     if (!Number.isSafeInteger(frameSequence) || frameSequence < 0) throw new Error("Invalid source presentation frame sequence");
     if (frameSequence <= this.frame) return;
-    this.frame = frameSequence; this.busy = true;
+    this.frame = frameSequence; this.busy = true; this.bodyFrame = [];
     try {
       const context = this.context(); await this.refresh(context);
       if (this.options.declaration.runtime === "qvm-scene") {
@@ -498,5 +527,5 @@ export class QvmModPresentation {
   release(actor: ActorId): void { for (const [slot, player] of this.players) if (player.equals(actor)) this.players.delete(slot); }
   close(): void { if (this.phase === "closed") return; this.phase = "closed";
     for (const remove of this.removals) remove(); this.removals.length = 0;
-    this.players.clear(); this.sceneActors.clear(); this.snapshots.clear(); this.commands.clear(); this.defaults = null; this.currentGameState = null; this.module.retire(); }
+    this.bodyFrame = []; this.players.clear(); this.sceneActors.clear(); this.snapshots.clear(); this.commands.clear(); this.defaults = null; this.currentGameState = null; this.module.retire(); }
 }

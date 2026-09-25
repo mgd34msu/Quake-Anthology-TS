@@ -65,6 +65,20 @@ export interface PresentedModel {
   /** Source material fields, including entityTranslate coordinates, stay available to stage evaluation. */
   readonly source: RefModelEntity;
 }
+/** Converts the already-authored source pose; it does not advance any animation. */
+export function prepareQ3Model(entity: RefModelEntity, actor: ActorId | null, entityIndex = 0): PresentedModel | null {
+  const model = entity.model;
+  if (model.kind === "default") return null;
+  return { entityIndex, entity: {
+          actor: actor, resource: model.resource, model: model.kind === "inline" ? { kind: "brush-model", world: model.geometry, model: model.index } : model.model,
+          transform: { origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, previousOrigin: entity.oldOrigin,
+          pose: { kind: "frame", frame: entity.frame, previousFrame: entity.oldFrame, backLerp: entity.backLerp }, skin: entity.skinNum,
+          color: { x: entity.shaderRGBA.x / 255, y: entity.shaderRGBA.y / 255, z: entity.shaderRGBA.z / 255, w: entity.shaderRGBA.w / 255 },
+          shaderTime: { kind: "seconds", value: entity.shaderTime }, flags: { kind: "q3", bits: entity.renderFlags },
+          lightingOrigin: entity.lightingOrigin, shadowPlane: entity.shadowPlane, attachments: [],
+        }, source: entity, options: { customShader: entity.customShader?.name ?? null, customSkin: entity.customSkin?.surfaces ?? null, nonNormalizedAxes: entity.nonNormalizedAxes } };
+}
+
 export interface PresentedGeometry {
   readonly admission: Q3GeometryAdmission;
   readonly shader: SceneShader | null;
@@ -121,14 +135,8 @@ export class Q3SceneRecorder {
       if (entity.kind === "model") {
         const model = entity.model;
         if (model.kind === "default") { specialEntities.push({ entityIndex, source: entity }); continue; }
-        models.push({ entityIndex, entity: {
-          actor: this.target.actor(entity), resource: model.resource, model: model.kind === "inline" ? { kind: "brush-model", world: model.geometry, model: model.index } : model.model,
-          transform: { origin: entity.origin, axis: entity.axis, scale: { x: 1, y: 1, z: 1 } }, previousOrigin: entity.oldOrigin,
-          pose: { kind: "frame", frame: entity.frame, previousFrame: entity.oldFrame, backLerp: entity.backLerp }, skin: entity.skinNum,
-          color: { x: entity.shaderRGBA.x / 255, y: entity.shaderRGBA.y / 255, z: entity.shaderRGBA.z / 255, w: entity.shaderRGBA.w / 255 },
-          shaderTime: { kind: "seconds", value: entity.shaderTime }, flags: { kind: "q3", bits: entity.renderFlags },
-          lightingOrigin: entity.lightingOrigin, shadowPlane: entity.shadowPlane, attachments: [],
-        }, source: entity, options: { customShader: entity.customShader?.name ?? null, customSkin: entity.customSkin?.surfaces ?? null, nonNormalizedAxes: entity.nonNormalizedAxes } });
+        const prepared = prepareQ3Model(entity, this.target.actor(entity), entityIndex);
+        if (prepared !== null) models.push(prepared);
         continue;
       }
       effects.push({ admission: { kind: "refentity", index: entityIndex }, shader: entity.customShader, source: entity });

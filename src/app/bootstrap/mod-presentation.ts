@@ -43,6 +43,7 @@ import { ApplicationQ3SceneRenderer } from "./q3-client/scene.ts";
 import { createApplicationQ3Services } from "./q3-client/services.ts";
 import type { ApplicationQ3ServiceOptions, ApplicationQ3Services } from "./q3-client/services.ts";
 import type { Q3SourcePlayerEvent } from "./simulation/q3/types.ts";
+import type { ComponentBody } from "./component-bodies.ts";
 
 export interface ApplicationModPresentationOptions {
   readonly assets: ApplicationAssets;
@@ -80,6 +81,8 @@ export class ApplicationModPresentation {
   private pendingHud: Q3OverlaySubmission[] = [];
   private hudColor = { x: 1, y: 1, z: 1, w: 1 };
   private capturedHud: readonly Q3OverlaySubmission[] = [];
+  private capturedBodies: readonly ComponentBody[] = [];
+  get bodies(): readonly ComponentBody[] { this.assertCurrent(); return this.capturedBodies; }
   get hud(): readonly Q3OverlaySubmission[] { this.assertCurrent(); return this.capturedHud; }
   private published = true;
   private operations = 0;
@@ -371,6 +374,14 @@ export class ApplicationModPresentation {
       const context = this.context(), time = context.timeMilliseconds ?? context.snapshot.serverTime;
       await this.core.advance(sequence);
       this.assertCurrent();
+      const bodies: readonly ComponentBody[] = this.core.bodies.map(body => ({ actor: body.actor, owner: this.options.source.owner,
+        content: this.options.source.identity.source.content, time,
+        parts: body.parts.map(part => ({ part: part.part, base: part.base, passes: part.passes.map(pass => ({
+          customShader: typeof pass.customShader === "number" ? this.services.resources.shaderForHandle(pass.customShader) : pass.customShader,
+          customSkin: typeof pass.customSkin === "number" ? this.services.resources.skinForHandle(pass.customSkin) : pass.customSkin,
+          shaderRGBA: pass.shaderRGBA, shaderTexCoord: pass.shaderTexCoord, shaderTime: pass.shaderTime, renderFlags: pass.renderFlags,
+          lightingOrigin: pass.lightingOrigin, shadowPlane: pass.shadowPlane, nonNormalizedAxes: pass.nonNormalizedAxes,
+        })) })) }));
       const scene = this.services.scene.capture();
       this.services.scene.clearScene();
       if (this.options.source.prepared.declaration.hud !== undefined) await this.core.drawHud(sequence);
@@ -379,7 +390,7 @@ export class ApplicationModPresentation {
       this.services.scene.clearScene();
       await this.renderer.preload([scene, ...hud.flatMap(submission => submission.kind === "scene" ? [submission.scene] : [])]);
       this.assertCurrent(); this.flushAudio();
-      this.previousFrameTime = time; this.frameSequence = sequence; this.captured = scene; this.capturedHud = hud;
+      this.previousFrameTime = time; this.frameSequence = sequence; this.captured = scene; this.capturedHud = hud; this.capturedBodies = bodies;
       return scene;
     } catch (error) {
       try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation frame and cleanup failed"); }
@@ -388,7 +399,7 @@ export class ApplicationModPresentation {
   }
   close(): void {
     if (this.closed) return;
-    this.closed = true; this.audioOperations.length = 0; this.pendingHud = []; this.capturedHud = [];
+    this.closed = true; this.audioOperations.length = 0; this.pendingHud = []; this.capturedHud = []; this.capturedBodies = [];
     const failures: unknown[] = [];
     for (const cleanup of [() => this.core?.close(), () => this.files?.closeAll(), () => this.scripts?.closeAll(), () => this.globals.clear(),
       () => this.servicesValue?.cinematics.close(), () => this.rendererValue?.close(), () => this.mediaValue?.bank.bank.clear(), () => this.mediaValue?.close(),

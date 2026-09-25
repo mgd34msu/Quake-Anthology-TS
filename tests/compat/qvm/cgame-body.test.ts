@@ -47,6 +47,7 @@ test("body scopes retain nested effect submissions and unwind after an asynchron
   try {
     await vm.callAsync([]); expect(submitted).toHaveLength(2);
     const effect = submitted[1];
+    if (effect === undefined) throw new Error("Missing original nested effect");
     submitted.length = 0; bodies.enable(true); await vm.callAsync([]);
     expect(submitted).toEqual([effect]);
     fail = true; await expect(vm.callAsync([])).rejects.toThrow("Renderer unavailable");

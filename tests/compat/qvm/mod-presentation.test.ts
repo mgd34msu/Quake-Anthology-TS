@@ -167,7 +167,7 @@ test("raw original player/configstring writers preserve legacy private values wh
   expect(memory.dataView(80, 4).getInt32(0, true)).toBe(0); expect(memory.dataView(48, 4).getInt32(0, true)).toBe(1);
 });
 
-test("scene snapshots advance once while scoped foreign meshes retain overlays and source-owned submissions", async () => {
+test("scene snapshots retain component body passes separately from outside and source-owned submissions", async () => {
   const code = new BinaryWriter(256), operations: (readonly [QvmOpcode, number?])[] = [];
   const add = (opcode: QvmOpcode, operand?: number) => operations.push(operand === undefined ? [opcode] : [opcode, operand]);
   const enter = () => { const entry = operations.length; add(QvmOpcode.OP_ENTER, 32); return entry; };
@@ -216,7 +216,9 @@ test("scene snapshots advance once while scoped foreign meshes retain overlays a
     } });
   try {
     await owner.initialize(); await owner.advance(1); time = 1050; await owner.advance(2); await owner.advance(2);
-    expect(publications).toBe(1); expect(frames).toBe(2); expect(shaders).toEqual([7, 0, 7, 7, 0, 7]);
+    expect(publications).toBe(1); expect(frames).toBe(2); expect(shaders).toEqual([0, 7, 0, 7]);
+    expect(owner.bodies).toHaveLength(1);
+    expect(owner.bodies[0]?.parts.map(part => ({ base: part.base, shaders: part.passes.map(pass => pass.customShader) }))).toEqual([{ base: true, shaders: [7] }]);
     expect(owner.module.memory.dataView(78004, 4).getInt32(0, true)).toBe(1050);
     owner.module.memory.dataView(76500, 4).setInt32(0, 99, true); actor = ids.actor(4, 2); revision++; owned = true;
     shaders.length = 0; await owner.advance(3);

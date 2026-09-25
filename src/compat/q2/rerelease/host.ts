@@ -29,8 +29,8 @@ import { RereleaseForeignActors } from "./foreign-actors.ts";
 import type { RereleaseForeignDamageServices, RereleaseProjectionSave } from "./foreign-actors.ts";
 import type { RereleaseDeferredDamageSave } from "./deferred-damage.ts";
 import type { RereleaseNativeEntries } from "./native-entries.ts";
-import type { OriginalPickupAdmission } from "../../../contracts/original-pickups.ts";
-import { NativePrimaryPickups } from "../native-pickups.ts";
+import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../contracts/original-pickups.ts";
+import { NativePrimaryPickups, type NativePickupSupply, type NativePickupSupplyEvaluation } from "../native-pickups.ts";
 import { rereleasePickupProfile } from "./pickup-profile.ts";
 
 export interface RereleaseActorBindings {
@@ -127,6 +127,14 @@ export class RereleaseQ2GuestHost {
       current: record => this.#retiredInputClients.has(record.slot) ? null : this.options.engine.actors.atSource(this.module.memory.module.id, record.slot)?.id ?? null,
       admission: () => { const pickups = this.options.pickups; if (pickups === undefined) throw new Error("API2023 primary pickup authority disappeared"); return pickups.admission; },
     }, options.pickups.imageBase, profile);
+  }
+  bindPickupSupply(owner: NativePickupSupply): () => undefined {
+    if (this.#pickups === null) throw new Error("This original game has no admitted pickup supply interface");
+    return this.#pickups.bindSupply(owner);
+  }
+  pickupSupply(offer: OriginalPickupOffer): NativePickupSupplyEvaluation {
+    if (this.#pickups === null) throw new Error("This original game has no admitted pickup supply interface");
+    return this.#pickups.supply(offer);
   }
   #at(view: RawEntityView, name: string): GuestAddress { return this.module.memory.offset(view.address, BigInt(fieldOffset(edictLayout, name))); }
   #vector(address: GuestAddress): Vec3 {

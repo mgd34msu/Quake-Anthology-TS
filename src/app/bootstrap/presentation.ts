@@ -1,4 +1,5 @@
 import { ComponentDrawings } from "./component-drawings.ts";
+import type { ComponentBody } from "./component-bodies.ts";
 import { Q1ServicePresentation } from "./q1-service-presentation.ts";
 import { prepareQ2DamageBlend } from "./q2-damage-blend.ts";
 import { Q1MapFog } from "./q1-fog.ts";
@@ -79,7 +80,7 @@ export function cameraWithCharacterDeath(camera: SceneCamera, player: PlayerView
 }
 
 export class WorldSeatPresentation implements SeatPresentation {
-  private readonly componentEffects = new Map<ComponentEffectFrame, { readonly owner: PresentationOwner; draw(frames: SceneFrameBuilder, camera: SceneCamera): void } | undefined>();
+  private readonly componentEffects = new Map<ComponentEffectFrame, { readonly owner: PresentationOwner; bodies?(): readonly ComponentBody[]; draw(frames: SceneFrameBuilder, camera: SceneCamera): void } | undefined>();
   private readonly q1Messages: Q1MessageLocalization;
   private readonly pendingMessages: { readonly text: string; readonly sourcePresentationSequence: number | undefined }[] = [];
   private readonly pendingQ1Messages: Extract<SimulationPresentationEvent, { readonly kind: "q1" }>[] = [];
@@ -285,6 +286,7 @@ export class WorldSeatPresentation implements SeatPresentation {
   async prepare(snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[]): Promise<void> {
     this.preparedTime = snapshot.frame.time.kind === "seconds" ? snapshot.frame.time.value : snapshot.frame.time.value / 1000;
     await this.prepareComponentClients();
+    const bodies = [...this.componentEffects.values()].flatMap(owner => owner?.bodies?.() ?? []);
     const visiblePresentations = presentations.filter(presentation => presentation.renderOwner !== "source-client"
       && this.rerelease?.itemVisible(this.local.player.actor, presentation.actor) !== false);
     const q1Messages = this.pendingQ1Messages.splice(0);
@@ -338,23 +340,23 @@ export class WorldSeatPresentation implements SeatPresentation {
       const size = this.viewSize();
       const viewport = size === null ? this.viewport : q1ViewRectangle(this.viewport, size.size, this.finale.active, size.overlayStatus);
       await q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations,
-        !this.componentClients.some(client => client.frame.hud !== null && (client.frame.kind === "quakec" || client.frame.hud.mode === "replace-status")));
+        !this.componentClients.some(client => client.frame.hud !== null && (client.frame.kind === "quakec" || client.frame.hud.mode === "replace-status")), bodies);
       const thirdPerson = (q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0;
       const drawWeapon = q3Client.sharedEquipmentViewVisible ?? (q3Client.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0;
       const supplemental = visiblePresentations.filter(source => source.renderOwner !== "source-client").map(source => {
         const pose = source.viewWeapon ? null : q3Client.bodyPose(source.actor);
         return pose === null ? source : { ...source, origin: pose.origin, angles: pose.angles };
       });
-      await this.scene.prepare(thirdPerson ? null : this.local.player.actor, snapshot, supplemental, [], q3Client.cvars.get("cg_fov")?.integerValue ?? 90, q3Client.sharedHeldWeapons, drawWeapon);
+      await this.scene.prepare(thirdPerson ? null : this.local.player.actor, snapshot, supplemental, [], q3Client.cvars.get("cg_fov")?.integerValue ?? 90, q3Client.sharedHeldWeapons, drawWeapon, bodies, q3Client.sharedBodies);
       return;
     }
     await this.finale.prepare();
     await this.scene.prepare(this.chaseSettings === null ? this.local.player.actor : null, snapshot, visiblePresentations, characters,
-      Math.atan(1 / this.camera().projection[0]) * 360 / Math.PI);
+      Math.atan(1 / this.camera().projection[0]) * 360 / Math.PI, [], true, bodies);
   }
 
   get splitScreen(): boolean { return this.layoutCount > 1; }
-  bindComponentEffects(frame: ComponentEffectFrame, overlay?: { readonly owner: PresentationOwner; draw(frames: SceneFrameBuilder, camera: SceneCamera): void }): () => void {
+  bindComponentEffects(frame: ComponentEffectFrame, overlay?: { readonly owner: PresentationOwner; bodies?(): readonly ComponentBody[]; draw(frames: SceneFrameBuilder, camera: SceneCamera): void }): () => void {
     this.componentEffects.set(frame, overlay);
     return () => { this.componentEffects.delete(frame); };
   }

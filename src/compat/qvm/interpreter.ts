@@ -54,6 +54,8 @@ export interface QvmRegionBinding {
 
 export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> {
   readonly instructionIndex: number;
+  /** Exact original CALL instruction; null for an invocation entered directly by the host. */
+  readonly callerInstruction: number | null;
   readonly execution: "synchronous" | "asynchronous";
   /** Live source argument words, starting at the caller's first OP_ARG slot. */
   readonly words: DataView;
@@ -470,6 +472,16 @@ export class QvmInterpreter {
     if (pc === undefined) throw new Error(`${this.source}: invalid QVM instruction index ${index}`);
     return pc;
   }
+  private sourceInstruction(pc: number): number {
+    let low = 0, high = this.instructionPointers.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >>> 1, candidate = this.instructionPointers[middle];
+      if (candidate === undefined) break;
+      if (candidate === pc) return middle;
+      if (candidate < pc) low = middle + 1; else high = middle - 1;
+    }
+    throw new Error(`${this.source}: caller PC is not an original instruction`);
+  }
 
   private codeWord(pc: number): number {
     const word = this.code[pc];
@@ -630,7 +642,7 @@ export class QvmInterpreter {
     this.range(sp + 8, 0);
     const words = this.addressSpace.dataView(sp + 8, this.memory.byteLength - sp - 8);
     const proceed = (): QvmSystemCallResult => this.hostCall(frame, scope => {
-      const call: QvmFunctionCall = { instructionIndex, execution: frame.asynchronous ? "asynchronous" : "synchronous", memory: this.memory, guest: this.addressSpace,
+      const call: QvmFunctionCall = { instructionIndex, callerInstruction: returnPC < 0 ? null : this.sourceInstruction(returnPC - 1), execution: frame.asynchronous ? "asynchronous" : "synchronous", memory: this.memory, guest: this.addressSpace,
         words,
         invoke: scope.invoke, invokeAsync: scope.invokeAsync, cancelFunction: scope.cancelFunction,
         effect: perform => scope.control(() => {

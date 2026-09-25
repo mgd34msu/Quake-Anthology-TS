@@ -57,7 +57,8 @@ export function readQvmModPresentationDeclaration(reader: SaveReader): QvmModPre
       eventCheck: { entry: eventCheck.field("entry").integer(0), centityArgument: eventCheck.field("centityArgument").integer(0) },
       body: { player: { entry: player.field("entry").integer(0), centityArgument: player.field("centityArgument").integer(0) },
         mesh: { entry: mesh.field("entry").integer(0), entityArgument: mesh.field("entityArgument").integer(0),
-          stateArgument: mesh.field("stateArgument").integer(0), shaderOffset: mesh.field("shaderOffset").integer(0) } } };
+          stateArgument: mesh.field("stateArgument").integer(0), shaderOffset: mesh.field("shaderOffset").integer(0),
+          ...(mesh.field("parts").value === undefined ? {} : { parts: mesh.field("parts").list(row => ({ call: row.field("call").integer(0), part: row.field("part").choice("body", "lower", "upper", "head") })) }) } } };
   }
   return { ...base, runtime,
     storage: { gameState: storage.field("gameState").integer(0), playerState: storage.field("playerState").integer(0),

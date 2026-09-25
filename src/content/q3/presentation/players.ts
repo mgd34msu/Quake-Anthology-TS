@@ -1,3 +1,4 @@
+import type { QvmBodyPart } from "../../../contracts/qvm-mod-presentation.ts";
 import { q3CustomSoundFallback } from "./character-resources.ts";
 // Player media and presentation from id Software's code/cgame/cg_players.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -105,6 +106,7 @@ export interface PlayerPresentationSettings {
 export interface PlayerPolyVertex extends RefPolyVertex { color: Vec4 }
 interface PlayerServices {
   readonly bodyHidden?: (entity: number) => boolean;
+  readonly bodySubmission?: (entity: number, part: QvmBodyPart, source: RefModelEntity, base: boolean) => boolean;
   readonly state: ClientGameState;
   readonly media: PlayerMedia;
   readonly clients: Pick<ClientInfoStore, "clientInfo">;
@@ -161,14 +163,17 @@ export class PlayerPresenter {
     Object.assign(entity.player.torso, createLerpFrame(), { yawAngle: entity.rawAngles.y, yawing: false, pitchAngle: entity.rawAngles.x, pitching: false });
     if (this.host.settings().debugPosition) this.host.print(gameFormat("%i ResetPlayerEntity yaw=%i\n", [entity.currentState.number, float32ToBits(entity.player.torso.yawAngle) | 0]));
   }
-  addRefEntityWithPowerups(entity: RefModelEntity, state: EntityState, team: Team): void {
+  addRefEntityWithPowerups(entity: RefModelEntity, state: EntityState, team: Team, part?: QvmBodyPart): void {
     if (this.host.bodyHidden?.(state.number) === true) return;
-    const media = this.host.media;
-    if (powered(state, Powerup.PW_INVIS)) { entity.customShader = media.invisShader; this.host.addEntity(entity); return; }
-    this.host.addEntity(entity);
-    if (powered(state, Powerup.PW_QUAD)) { entity.customShader = team === Team.TEAM_RED ? media.redQuadShader : media.quadShader; this.host.addEntity(entity); }
-    if (powered(state, Powerup.PW_REGEN) && Math.trunc(this.time / 100) % 10 === 1) { entity.customShader = media.regenShader; this.host.addEntity(entity); }
-    if (powered(state, Powerup.PW_BATTLESUIT)) { entity.customShader = media.battleSuitShader; this.host.addEntity(entity); }
+    const media = this.host.media, initialShader = entity.customShader;
+    const submit = () => {
+      if (part === undefined || this.host.bodySubmission?.(state.number, part, entity, entity.customShader === initialShader) !== true) this.host.addEntity(entity);
+    };
+    if (powered(state, Powerup.PW_INVIS)) { entity.customShader = media.invisShader; submit(); return; }
+    submit();
+    if (powered(state, Powerup.PW_QUAD)) { entity.customShader = team === Team.TEAM_RED ? media.redQuadShader : media.quadShader; submit(); }
+    if (powered(state, Powerup.PW_REGEN) && Math.trunc(this.time / 100) % 10 === 1) { entity.customShader = media.regenShader; submit(); }
+    if (powered(state, Powerup.PW_BATTLESUIT)) { entity.customShader = media.battleSuitShader; submit(); }
   }
   lightVerts(normal: Vec3, vertices: readonly [PlayerPolyVertex, ...PlayerPolyVertex[]]): boolean {
     const light = this.host.lightForPoint(vertices[0].position), incoming = dot3(normal, light.lightDir);
@@ -419,16 +424,16 @@ export class PlayerPresenter {
     if (this.host.product === "missionpack" && options.gameType === GameType.GT_HARVESTER) this.tokens(entity, ci, renderFlags, this.host.missionMedia);
     legs.model = ci.legsModel; legs.customSkin = ci.legsSkin; legs.origin = { ...entity.lerpOrigin };
     legs.lightingOrigin = { ...entity.lerpOrigin }; legs.shadowPlane = shadow.plane; legs.renderFlags = renderFlags; legs.oldOrigin = { ...legs.origin };
-    this.addRefEntityWithPowerups(legs, entity.currentState, ci.team);
+    this.addRefEntityWithPowerups(legs, entity.currentState, ci.team, "lower");
     if (legs.model.kind === "default" || ci.torsoModel.kind === "default") return;
     torso.model = ci.torsoModel; torso.customSkin = ci.torsoSkin; torso.lightingOrigin = { ...entity.lerpOrigin };
     positionRotatedEntityOnTag(torso, legs, ci.legsModel, "tag_torso"); torso.shadowPlane = shadow.plane; torso.renderFlags = renderFlags;
-    this.addRefEntityWithPowerups(torso, entity.currentState, ci.team);
+    this.addRefEntityWithPowerups(torso, entity.currentState, ci.team, "upper");
     if (this.host.product === "missionpack") this.missionPowerups(entity, ci, torso, this.host.missionMedia);
     if (ci.headModel.kind === "default") return;
     head.model = ci.headModel; head.customSkin = ci.headSkin; head.lightingOrigin = { ...entity.lerpOrigin };
     positionRotatedEntityOnTag(head, torso, ci.torsoModel, "tag_head"); head.shadowPlane = shadow.plane; head.renderFlags = renderFlags;
-    this.addRefEntityWithPowerups(head, entity.currentState, ci.team);
+    this.addRefEntityWithPowerups(head, entity.currentState, ci.team, "head");
     if (bodyVisible && this.host.product === "missionpack") { this.breath(entity, head, options, this.host.missionMedia); this.dust(entity, options, this.host.missionMedia); }
     this.host.addPlayerWeapon(torso, null, entity, ci.team);
     this.powerups(entity, torso, ci, options);
