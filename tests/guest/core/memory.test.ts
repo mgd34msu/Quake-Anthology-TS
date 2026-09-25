@@ -52,6 +52,10 @@ test("sparse high 64-bit addresses preserve pointer bytes and overlapping live v
   memory.writePointer(destination, null);
   expect(memory.readPointer(destination)).toBeNull();
   expect(memory.mappings().reduce((sum, entry) => sum + entry.byteLength, 0)).toBe(64);
+  const boundary = memory.map({ base: 0x1ffffffffffffen, byteLength: 4, permissions: "read-write" });
+  memory.writeUint32(boundary, 0x12345678);
+  expect(memory.readUint8(memory.offset(boundary, 3n))).toBe(0x12);
+  expect(() => memory.readUint8(memory.offset(boundary, 4n))).toThrow("unmapped");
 });
 
 test("checked accesses cross adjacent mappings and reject the entire write before a fault", () => {
@@ -249,6 +253,17 @@ test("mapping locality preserves live code, protection splits, holes and remappe
   expect(memory.copy(memory.offset(base, 15n), 2)).toEqual(new Uint8Array([0, 9]));
   const foreign = new SparseGuestMemory({ module, pointerBytes: 8 });
   expect(() => memory.fetch(at(foreign, middle.byteOffset), 1)).toThrow(GuestMemoryFault);
+  const distant = memory.map({ base: 0xffff800000100000n, byteLength: 8, permissions: "read-write" });
+  memory.writeUint8(distant, 17); memory.readUint8(middle); memory.readUint8(base);
+  expect(memory.readUint8(distant)).toBe(17); expect(memory.readUint8(middle)).toBe(9);
+  memory.protect(distant, 8, "execute"); memory.readUint8(base);
+  expect(() => memory.readUint8(distant)).toThrow("permits execute");
+  expect(() => memory.writeUint8(distant, 23)).toThrow("permits execute");
+  memory.unmap(distant, 8); memory.readUint8(middle);
+  expect(() => memory.readUint8(distant)).toThrow("unmapped");
+  memory.map({ base: distant.byteOffset, byteLength: 8, permissions: "read-write", bytes: new Uint8Array([31]) });
+  expect(memory.readUint8(distant)).toBe(31);
+  expect(() => memory.readUint8(at(foreign, middle.byteOffset))).toThrow("another execution owner");
 });
 
 test("first-fit hints revisit coalesced holes and preserve alignment after range edits", () => {

@@ -40,10 +40,11 @@ function allows(permissions: GuestPermissions, access: GuestAccess): boolean {
 interface Mapping extends GuestMapping {
   readonly bytes: Uint8Array;
   readonly view: DataView;
+  readonly end: bigint;
   active: boolean;
 }
-function mappedBytes(mapping: Omit<Mapping, "view" | "active">): Mapping {
-  return { ...mapping, view: new DataView(mapping.bytes.buffer, mapping.bytes.byteOffset, mapping.bytes.byteLength), active: true };
+function mappedBytes(mapping: Omit<Mapping, "view" | "active" | "end">): Mapping {
+  return { ...mapping, view: new DataView(mapping.bytes.buffer, mapping.bytes.byteOffset, mapping.bytes.byteLength), end: mapping.base + BigInt(mapping.byteLength), active: true };
 }
 interface Chunk { readonly mapping: Mapping; readonly offset: number; readonly byteLength: number; }
 export interface SparseGuestMemoryOptions {
@@ -62,7 +63,9 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #mappings: Mapping[] = [];
   #mappingGeneration = 0;
   readonly #allocationHints = new Map<bigint, { readonly base: bigint; readonly byteLength: number }>();
-  readonly #recentMappings = new Map<GuestAccess | null, { readonly mapping: Mapping; readonly end: bigint }>();
+  readonly #recentMappings = new Map<GuestAccess | null, Mapping>();
+  readonly #workingSet: Mapping[] = [];
+  #nextWorkingMapping = 0;
   readonly #writeObservers = new Set<{ readonly chunks: readonly Chunk[]; readonly notify: (ranges: readonly GuestWrittenRange[]) => void }>();
 
   constructor(options: SparseGuestMemoryOptions) {
@@ -111,7 +114,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const mapping = this.#mappings[index];
       if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
       if (base + length <= mapping.base) break;
-      const end = mapping.base + BigInt(mapping.byteLength);
+      const end = mapping.end;
       if (base < end) base = (end + alignment - 1n) & -alignment;
     }
     const result = this.map({ base, byteLength: options.byteLength, permissions: options.permissions ?? "read-write", label: options.label ?? "allocation" });
@@ -165,13 +168,13 @@ export class SparseGuestMemory implements MappedGuestMemory {
   fetchByte(byteOffset: bigint): number {
     const recent = this.#recentMappings.get("execute");
     let mapping: Mapping | undefined;
-    if (recent !== undefined && byteOffset >= recent.mapping.base && byteOffset < recent.end) mapping = recent.mapping;
+    if (recent?.active === true && byteOffset >= recent.base && byteOffset < recent.end) mapping = recent;
     else {
       this.#range(byteOffset, 1, "execute");
       mapping = this.#mappings[this.#firstEndAfter(byteOffset)];
       if (mapping === undefined || byteOffset < mapping.base)
         this.#fault("unmapped", byteOffset, 1, "execute", "range includes unmapped bytes");
-      this.#recentMappings.set("execute", { mapping, end: mapping.base + BigInt(mapping.byteLength) });
+      this.#remember("execute", mapping);
     }
     if (!allows(mapping.permissions, "execute"))
       this.#fault("permission", byteOffset, 1, "execute", `mapping '${mapping.label}' permits ${mapping.permissions}`);
@@ -190,7 +193,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       if (generation !== this.#mappingGeneration || mapping === undefined || offset >= mapping.byteLength) {
         const address = byteOffset + BigInt(consumed);
         const byte = this.fetchByte(address);
-        mapping = this.#recentMappings.get("execute")?.mapping;
+        mapping = this.#recentMappings.get("execute");
         if (mapping === undefined) throw new Error("Guest execute mapping is missing");
         offset = Number(address - mapping.base) + 1;
         generation = this.#mappingGeneration;
@@ -357,9 +360,8 @@ export class SparseGuestMemory implements MappedGuestMemory {
     }
     return undefined;
   }
-  #insert(mapping: Omit<Mapping, "view" | "active">): undefined {
+  #insert(mapping: Omit<Mapping, "view" | "active" | "end">): undefined {
     this.#mappingGeneration += 1;
-    this.#recentMappings.clear();
     this.#mappings.splice(this.#firstEndAfter(mapping.base), 0, mappedBytes(mapping));
     return undefined;
   }
@@ -369,7 +371,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const middle = Math.floor((low + high) / 2);
       const mapping = this.#mappings[middle];
       if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
-      if (mapping.base + BigInt(mapping.byteLength) <= address) low = middle + 1;
+      if (mapping.end <= address) low = middle + 1;
       else high = middle;
     }
     return low;
@@ -377,9 +379,9 @@ export class SparseGuestMemory implements MappedGuestMemory {
   #chunks(address: GuestAddress, byteLength: number, access: GuestAccess | null): Chunk[] {
     this.#owned(address, byteLength, access ?? "map");
     const recent = this.#recentMappings.get(access);
-    if (byteLength > 0 && recent !== undefined && address.byteOffset >= recent.mapping.base && address.byteOffset + BigInt(byteLength) <= recent.end) {
-      if (access !== null && !allows(recent.mapping.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.mapping.label}' permits ${recent.mapping.permissions}`);
-      return [{ mapping: recent.mapping, offset: Number(address.byteOffset - recent.mapping.base), byteLength }];
+    if (byteLength > 0 && recent?.active === true && address.byteOffset >= recent.base && address.byteOffset + BigInt(byteLength) <= recent.end) {
+      if (access !== null && !allows(recent.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
+      return [{ mapping: recent, offset: Number(address.byteOffset - recent.base), byteLength }];
     }
     const chunks: Chunk[] = [];
     let cursor = address.byteOffset;
@@ -391,14 +393,14 @@ export class SparseGuestMemory implements MappedGuestMemory {
       const mapping = this.#mappings[index];
       if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
       if (remaining === 0) break;
-      const end = mapping.base + BigInt(mapping.byteLength);
+      const end = mapping.end;
       if (cursor >= end) continue;
       if (cursor < mapping.base) break;
       if (access !== null && !allows(mapping.permissions, access)) this.#fault("permission", cursor, remaining, access, `mapping '${mapping.label}' permits ${mapping.permissions}`);
       const offset = Number(cursor - mapping.base);
       const length = Math.min(remaining, mapping.byteLength - offset);
       chunks.push({ mapping, offset, byteLength: length });
-      this.#recentMappings.set(access, { mapping, end });
+      this.#remember(access, mapping);
       remaining -= length;
       cursor += BigInt(length);
     }
@@ -440,7 +442,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       if (mapping === undefined) throw new Error("Guest mapping index is inconsistent");
       if (mapping.base >= end) break;
       mapping.active = false;
-      const mappingEnd = mapping.base + BigInt(mapping.byteLength);
+      const mappingEnd = mapping.end;
       const startOffset = Number((base > mapping.base ? base : mapping.base) - mapping.base);
       const endOffset = Number((end < mappingEnd ? end : mappingEnd) - mapping.base);
       if (startOffset > 0) next.push(mappedBytes({ ...mapping, byteLength: startOffset, bytes: mapping.bytes.subarray(0, startOffset) }));
@@ -458,27 +460,41 @@ export class SparseGuestMemory implements MappedGuestMemory {
         this.#allocationHints.set(alignment, { ...hint, base: lowerBound });
     }
     this.#mappingGeneration += 1;
-    this.#recentMappings.clear();
     if (next.length <= 3) this.#mappings.splice(first, last - first, ...next);
     else this.#mappings = this.#mappings.slice(0, first).concat(next, this.#mappings.slice(last));
     return undefined;
   }
+  #remember(access: GuestAccess | null, mapping: Mapping): void {
+    this.#recentMappings.set(access, mapping);
+    this.#workingSet[this.#nextWorkingMapping] = mapping;
+    this.#nextWorkingMapping = (this.#nextWorkingMapping + 1) & 7;
+  }
   #singleMapping(address: GuestAddress, byteLength: number, access: GuestAccess): Mapping | null {
     const recent = this.#recentMappings.get(access);
     // A contained range inherits the mapping's checked address-space bounds.
-    if (recent !== undefined && address.addressSpace === this.addressSpace && Number.isSafeInteger(byteLength) && byteLength > 0) {
-      const offset = Number(address.byteOffset - recent.mapping.base);
-      if (offset >= 0 && offset + byteLength <= recent.mapping.byteLength) {
-        if (!allows(recent.mapping.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.mapping.label}' permits ${recent.mapping.permissions}`);
-        return recent.mapping;
+    if (address.addressSpace === this.addressSpace && Number.isSafeInteger(byteLength) && byteLength > 0) {
+      if (recent?.active === true) {
+        const offset = Number(address.byteOffset - recent.base);
+        if (offset >= 0 && offset + byteLength <= recent.byteLength) {
+          if (!allows(recent.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
+          return recent;
+        }
+      }
+      for (const candidate of this.#workingSet) {
+        if (candidate === recent || !candidate.active) continue;
+        const offset = Number(address.byteOffset - candidate.base);
+        if (offset < 0 || offset + byteLength > candidate.byteLength) continue;
+        if (!allows(candidate.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${candidate.label}' permits ${candidate.permissions}`);
+        this.#recentMappings.set(access, candidate);
+        return candidate;
       }
     }
     this.#owned(address, byteLength, access);
     if (byteLength === 0) return null;
     const mapping = this.#mappings[this.#firstEndAfter(address.byteOffset)];
-    if (mapping === undefined || address.byteOffset < mapping.base || address.byteOffset + BigInt(byteLength) > mapping.base + BigInt(mapping.byteLength)) return null;
+    if (mapping === undefined || address.byteOffset < mapping.base || address.byteOffset + BigInt(byteLength) > mapping.end) return null;
     if (!allows(mapping.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${mapping.label}' permits ${mapping.permissions}`);
-    this.#recentMappings.set(access, { mapping, end: mapping.base + BigInt(mapping.byteLength) });
+    this.#remember(access, mapping);
     return mapping;
   }
   #readView(address: GuestAddress, byteLength: number): { readonly view: DataView; readonly offset: number } {
