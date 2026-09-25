@@ -7,6 +7,7 @@ import type { ModClientApplication } from "../../world/session/mod-clients.ts";
 import type { QvmCancellationScope, QvmFunctionCall, QvmSystemCallResult } from "./interpreter.ts";
 import type { QvmModule } from "./module.ts";
 import { QvmOpcode, type QvmImage } from "./image.ts";
+import type { QvmRegionEvaluation } from "./regions.ts";
 
 interface Operations {
   readonly module: QvmModule;
@@ -29,7 +30,8 @@ function functionEnd(image: QvmImage, entry: number): number {
   while (end < image.instructions.length && image.instructions[end]?.opcode !== QvmOpcode.OP_ENTER) end++;
   return end;
 }
-export function validateQvmWeaponStage(stage: QvmWeaponStage, image: QvmImage): void {
+export type QvmWeaponDispatcherDefinition = Pick<QvmWeaponStage, "dispatcher" | "predicates" | "settled" | "selection" | "request">;
+export function validateQvmWeaponDispatcher(stage: QvmWeaponDispatcherDefinition, image: QvmImage): void {
   const end = functionEnd(image, stage.dispatcher.entry), seen = new Set<number>();
   for (const predicate of stage.predicates) {
     const instruction = image.instructions[predicate.instruction];
@@ -42,6 +44,9 @@ export function validateQvmWeaponStage(stage: QvmWeaponStage, image: QvmImage): 
   if (stage.predicates.length === 0 || stage.settled.length === 0 || stage.request.accepted.length === 0
     || !Number.isSafeInteger(stage.request.argument) || stage.request.argument < 0 || stage.request.argument > 9)
     throw new Error("QVM weapon stage lacks its original decisions or settlement state");
+}
+export function validateQvmWeaponStage(stage: QvmWeaponStage, image: QvmImage): void {
+  validateQvmWeaponDispatcher(stage, image);
   const continuation = stage.continuation, limit = functionEnd(image, continuation.entry), branch = image.instructions[continuation.instruction];
   if (continuation.when.length === 0) throw new Error("QVM weapon continuation lacks its source mode conditions");
   const decisions = new Set([continuation.instruction]);
@@ -77,13 +82,103 @@ export function validateQvmWeaponStage(stage: QvmWeaponStage, image: QvmImage): 
   if (!continuation.calls.some(value => value.call.entry === stage.dispatcher.entry)) throw new Error("QVM continuation omits its original weapon dispatcher");
 }
 
+
+export interface QvmWeaponDispatcherOperations {
+  readonly module: QvmModule;
+  actor(source: QvmWeaponActor, call: QvmFunctionCall): ActorId | null;
+  pointer(actor: ActorId, record: string): number;
+  live(actor: ActorId): boolean;
+  selected(actor: ActorId): boolean;
+  cancellation(actor: ActorId, call: QvmFunctionCall): QvmCancellationScope;
+  attempted(actor: ActorId, value: number): void;
+  accepted(actor: ActorId, value: number): void;
+  completed(actor: ActorId, reachedAttackDecision: boolean): void;
+}
+
+/** Invocation-owned weapon decisions shared by original primary and component callers. */
+export class QvmWeaponDispatcher {
+  private readonly removals: (() => void)[] = [];
+  private readonly dispatchers: { readonly actor: ActorId; readonly call: QvmFunctionCall }[] = [];
+  private readonly evaluations: { readonly actor: ActorId; readonly region: QvmRegionEvaluation; readonly inputs: readonly number[]; entered: boolean }[] = [];
+  constructor(private readonly definition: QvmWeaponDispatcherDefinition, private readonly operations: QvmWeaponDispatcherOperations) {
+    const bind = (entry: number, hook: (call: QvmFunctionCall) => QvmSystemCallResult): void => {
+      this.removals.push(operations.module.bindInvocation({ kind: "qvm", module: operations.module.profile.module, instructionIndex: entry }, hook));
+    };
+    try {
+      bind(definition.dispatcher.entry, call => this.dispatch(call));
+      bind(definition.request.entry, call => this.request(call));
+    } catch (error) { this.close(); throw error; }
+  }
+  private scalar(actor: ActorId, field: QvmItemField): number {
+    return this.operations.module.memory.dataView(this.operations.pointer(actor, field.record) + field.offset, 4).getInt32(0, true);
+  }
+  private test(actor: ActorId, test: QvmItemTest): boolean {
+    const scalar = this.scalar(actor, test.field), value = test.mask === null ? scalar : scalar & test.mask;
+    return test.comparison === "equals" ? value === test.value : value <= test.value;
+  }
+  settled(actor: ActorId): boolean { return this.operations.live(actor) && this.definition.settled.every(test => this.test(actor, test)); }
+  active(actor: ActorId): ItemId | null {
+    const selected = this.scalar(actor, this.definition.selection.field);
+    if (selected === 0) return null;
+    const value = this.definition.selection.values.find(value => value.value === selected);
+    if (value === undefined) throw new Error("Original QVM selected an undeclared source weapon");
+    return value.item;
+  }
+  private dispatch(call: QvmFunctionCall): QvmSystemCallResult {
+    const actor = this.operations.actor(this.definition.dispatcher.actor, call);
+    const evaluation = this.evaluations.at(-1);
+    if (evaluation !== undefined && !evaluation.entered) {
+      evaluation.entered = true;
+      if (actor === null || !actor.equals(evaluation.actor) || !this.operations.live(actor)) throw new Error("QVM weapon evaluation lost its original source actor");
+      return call.evaluateRegion(evaluation.region, evaluation.inputs);
+    }
+    if (actor === null) return proceed(call);
+    const cancellation = this.operations.cancellation(actor, call);
+    let reachedAttackDecision = false;
+    const scope = { actor, call }; this.dispatchers.push(scope);
+    const remove = (): void => { const index = this.dispatchers.lastIndexOf(scope); if (index !== -1) this.dispatchers.splice(index, 1); };
+    call.branches(this.definition.predicates.map(predicate => ({ instructionIndex: predicate.instruction, decide: (original, control) => {
+      if (!this.operations.live(actor)) control.cancelFunction(cancellation);
+      reachedAttackDecision = true;
+      return this.operations.selected(actor) ? original : predicate.unselected;
+    } })));
+    try {
+      const result = finish(proceed(call), value => { if (this.operations.live(actor)) this.operations.completed(actor, reachedAttackDecision); return value; });
+      if (typeof result !== "number") return result.finally(remove);
+      remove(); return result;
+    } catch (error) { remove(); throw error; }
+  }
+  private request(call: QvmFunctionCall): QvmSystemCallResult {
+    const scope = this.dispatchers.at(-1);
+    if (scope === undefined || !this.operations.live(scope.actor)) return proceed(call);
+    const accepted = this.definition.request.accepted.every(test => this.test(scope.actor, test));
+    const requested = call.words.getInt32(this.definition.request.argument * 4, true);
+    if (!accepted) this.operations.attempted(scope.actor, requested);
+    return finish(proceed(call), value => {
+      if (!accepted && this.operations.live(scope.actor) && this.definition.request.accepted.every(test => this.test(scope.actor, test))) this.operations.accepted(scope.actor, requested);
+      return value;
+    });
+  }
+  matches(actor: ActorId, tests: readonly QvmItemTest[]): boolean { return tests.every(test => this.test(actor, test)); }
+  evaluate(actor: ActorId, region: QvmRegionEvaluation, inputs: readonly number[]): number {
+    if (!this.operations.live(actor)) throw new Error("QVM weapon evaluation requires its current source actor");
+    const evaluation = { actor, region, inputs, entered: false }; this.evaluations.push(evaluation);
+    try { return this.operations.module.call([], this.definition.dispatcher.entry); }
+    finally { this.evaluations.pop(); }
+  }
+  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); this.dispatchers.length = 0; }
+}
+
 /** Original source setup and weapon code share the live caller's pmove and exact applied input. */
 export class QvmModWeaponStage {
   private readonly applications: ModClientApplication[] = [];
+  private readonly dispatcher: QvmWeaponDispatcher;
   private readonly removals: (() => void)[] = [];
-  private readonly dispatchers: { readonly actor: ActorId; readonly call: QvmFunctionCall }[] = [];
   private readonly inputs: { readonly actor: ActorId; cancellation: QvmCancellationScope | null; entered: boolean }[] = [];
   constructor(private readonly definition: QvmWeaponStage, inputEntry: number, private readonly operations: Operations) {
+    this.dispatcher = new QvmWeaponDispatcher(definition, { ...operations,
+      actor: (source, call) => this.actor(source, call), cancellation: (actor, call) => this.cancellation(actor, call),
+    });
     const bind = (entry: number, hook: (call: QvmFunctionCall) => QvmSystemCallResult): void => {
       this.removals.push(operations.module.bindInvocation({ kind: "qvm", module: operations.module.profile.module, instructionIndex: entry }, hook));
     };
@@ -96,8 +191,6 @@ export class QvmModWeaponStage {
         return finish(proceed(call), value => { if (!this.operations.live(input.actor)) call.cancelFunction(input.cancellation ?? call.cancellationScope()); return value; });
       });
       bind(definition.continuation.entry, call => this.continue(call));
-      bind(definition.dispatcher.entry, call => this.dispatch(call));
-      bind(definition.request.entry, call => this.request(call));
     } catch (error) { this.close(); throw error; }
   }
   private address(pointer: QvmModInputPointer, call: QvmFunctionCall): number {
@@ -130,21 +223,8 @@ export class QvmModWeaponStage {
     }
     return call.cancellationScope();
   }
-  private scalar(actor: ActorId, field: QvmItemField): number {
-    return this.operations.module.memory.dataView(this.operations.pointer(actor, field.record) + field.offset, 4).getInt32(0, true);
-  }
-  private test(actor: ActorId, test: QvmItemTest): boolean {
-    const scalar = this.scalar(actor, test.field), value = test.mask === null ? scalar : scalar & test.mask;
-    return test.comparison === "equals" ? value === test.value : value <= test.value;
-  }
-  settled(actor: ActorId): boolean { return this.operations.live(actor) && this.definition.settled.every(test => this.test(actor, test)); }
-  active(actor: ActorId): ItemId | null {
-    const selected = this.scalar(actor, this.definition.selection.field);
-    if (selected === 0) return null;
-    const value = this.definition.selection.values.find(value => value.value === selected);
-    if (value === undefined) throw new Error("Original QVM selected an undeclared source weapon");
-    return value.item;
-  }
+  settled(actor: ActorId): boolean { return this.dispatcher.settled(actor); }
+  active(actor: ActorId): ItemId | null { return this.dispatcher.active(actor); }
   private continue(call: QvmFunctionCall): QvmSystemCallResult {
     const actor = this.actor(this.definition.continuation.actor, call);
     if (actor === null) return proceed(call);
@@ -155,7 +235,7 @@ export class QvmModWeaponStage {
       return this.operations.selected(actor) ? original : predicate.unselected;
     } })), { instructionIndex: this.definition.continuation.instruction, decide: (original, control) => {
       if (!this.operations.live(actor)) control.cancelFunction(cancellation);
-      if (original !== this.definition.continuation.originalTaken || !this.definition.continuation.when.every(test => this.test(actor, test))) return original;
+      if (original !== this.definition.continuation.originalTaken || !this.dispatcher.matches(actor, this.definition.continuation.when)) return original;
       continued = true; return !original;
     } }]);
     return finish(proceed(call), result => {
@@ -176,32 +256,5 @@ export class QvmModWeaponStage {
       return result;
     });
   }
-  private dispatch(call: QvmFunctionCall): QvmSystemCallResult {
-    const actor = this.actor(this.definition.dispatcher.actor, call);
-    if (actor === null) return proceed(call);
-    const cancellation = this.cancellation(actor, call);
-    const scope = { actor, call }; this.dispatchers.push(scope);
-    const remove = (): void => { const index = this.dispatchers.lastIndexOf(scope); if (index !== -1) this.dispatchers.splice(index, 1); };
-    call.branches(this.definition.predicates.map(predicate => ({ instructionIndex: predicate.instruction, decide: (original, control) => {
-      if (!this.operations.live(actor)) control.cancelFunction(cancellation);
-      return this.operations.selected(actor) ? original : predicate.unselected;
-    } })));
-    try {
-      const result = finish(proceed(call), value => { if (this.operations.live(actor)) this.operations.completed(actor); return value; });
-      if (typeof result !== "number") return result.finally(remove);
-      remove(); return result;
-    } catch (error) { remove(); throw error; }
-  }
-  private request(call: QvmFunctionCall): QvmSystemCallResult {
-    const scope = this.dispatchers.at(-1);
-    if (scope === undefined || !this.operations.live(scope.actor)) return proceed(call);
-    const accepted = this.definition.request.accepted.every(test => this.test(scope.actor, test));
-    const requested = call.words.getInt32(this.definition.request.argument * 4, true);
-    if (!accepted) this.operations.attempted(scope.actor, requested);
-    return finish(proceed(call), value => {
-      if (!accepted && this.operations.live(scope.actor) && this.definition.request.accepted.every(test => this.test(scope.actor, test))) this.operations.accepted(scope.actor, requested);
-      return value;
-    });
-  }
-  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); this.applications.length = 0; this.dispatchers.length = 0; }
+  close(): void { for (const remove of this.removals.splice(0).reverse()) remove(); this.applications.length = 0; this.dispatcher.close(); }
 }

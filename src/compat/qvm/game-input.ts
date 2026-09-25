@@ -24,6 +24,7 @@ export interface QvmInputServices {
   live(identity: ModClientIdentity): boolean;
   accepted(actor: ActorId): ModClientCommand | null;
   frame(): FrameContext;
+  spawned?(identity: ModClientIdentity): void;
   onRelease(listener: (actor: ActorId) => undefined): () => void;
 }
 export interface QvmInputSource {
@@ -56,11 +57,22 @@ export class QvmInputBinding {
     };
     try {
       bind(definition.entries.clientSpawn, call => {
-        if (!services.applications.active) return proceed(call);
+        if (!services.applications.active && services.spawned === undefined) return proceed(call);
         const slot = game.data.numberFromPointer(call.words.getInt32(0, true));
         this.spawning.push(slot);
-        try { return completed(proceed(call), () => { this.spawning.pop(); }); }
-        catch (error) { this.spawning.pop(); throw error; }
+        const finish = (result: number): number => {
+          call.effect(() => {
+            const identity = services.identity(slot);
+            if (identity !== null && services.live(identity)) services.spawned?.(identity);
+            return undefined;
+          });
+          return result;
+        };
+        try {
+          const result = proceed(call);
+          if (typeof result !== "number") return result.then(finish).finally(() => { this.spawning.pop(); });
+          const value = finish(result); this.spawning.pop(); return value;
+        } catch (error) { this.spawning.pop(); throw error; }
       });
       bind(definition.entries.clientThink, call => this.envelope(call, call.words.getInt32(0, true)));
       bind(definition.entries.runClient, call => this.envelope(call, game.data.numberFromPointer(call.words.getInt32(0, true))));
@@ -164,14 +176,14 @@ export class QvmInputBinding {
         await this.checkLive(call, scope);
         applyOutput();
         const result = await call.proceedAsync(); failed = false;
-        this.services.applications.finish(application); application = null;
+        call.effect(() => { this.services.applications.finish(application); application = null; return undefined; });
         await this.checkLive(call, scope); return result;
       })().finally(finish);
       const before = this.checkLive(call, scope);
       if (typeof before !== "number") throw new Error("Synchronous QVM input cannot await disconnect");
       applyOutput();
       const result = call.proceed(); failed = false;
-      this.services.applications.finish(application); application = null;
+      call.effect(() => { this.services.applications.finish(application); application = null; return undefined; });
       const after = this.checkLive(call, scope);
       if (typeof after !== "number") throw new Error("Synchronous QVM input cannot await disconnect");
       finish(); return result;

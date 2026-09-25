@@ -1,39 +1,15 @@
 import { expect, test } from "bun:test";
-import { q3PresentationSnapshot } from "../../src/app/bootstrap/q3-client/equipment.ts";
-import type { Snapshot } from "../../src/network/q3/server-message.ts";
+import { q3EquipmentCommand } from "../../src/app/bootstrap/q3-client/equipment.ts";
 import { PlayerStateRecord } from "../../src/network/q3/state/player.ts";
-import { EntityState } from "../../src/network/q3/state/entity.ts";
 import { ClientGameState } from "../../src/content/q3/presentation/state.ts";
 import { ClientWeaponSelection } from "../../src/content/q3/presentation/weapons.ts";
 import { retailSnapshot } from "../../src/content/q3/presentation/retail-snapshot.ts";
 
-test("shared hook HUD detaches native weapon presentation without changing source weapon ownership", () => {
-  const player = new PlayerStateRecord<number, number, number>("baseq3", 0, 2, 3);
-  player.stats.set(2, 1 << 2); player.ammo.set(2, 87); player.weaponTime = 99;
-  const snapshot: Snapshot = { messageNumber: 1, serverTime: 50, deltaNumber: -1, flags: 0, serverCommandNumber: 0,
-    parseEntitiesNumber: 0, playerState: player, entities: [], areaMask: new Uint8Array(32) };
-  for (const primaryWeapon of [2, 3]) {
-    const projected = q3PresentationSnapshot(snapshot, { primaryWeapon });
-    expect(projected.playerState.weapon).toBe(0);
-    expect(projected.playerState.ammo.get(0)).toBe(-1);
-    expect(projected.playerState.stats.get(2)).toBe(1 << 2);
-    expect(projected.playerState.weaponTime).toBe(0);
-    expect(player.weapon).toBe(2); expect(player.ammo.get(2)).toBe(87);
-    expect(player.ammo.get(0)).toBe(0); expect(player.stats.get(2)).toBe(1 << 2);
-  }
-  expect(q3PresentationSnapshot(snapshot, null)).toBe(snapshot);
-});
-
-test("body overrides leave source snapshot flags, collision and weapon state untouched", () => {
-  const player = new PlayerStateRecord<number, number, number>("baseq3", 0, 5, 0); player.clientNum = 1;
-  const entity = new EntityState(); entity.number = 1; entity.eFlags = 2; entity.solid = 123;
-  const snapshot: Snapshot = { messageNumber: 1, serverTime: 50, deltaNumber: -1, flags: 0, serverCommandNumber: 0,
-    parseEntitiesNumber: 0, playerState: player, entities: [entity], areaMask: new Uint8Array(32) };
-  const projected = q3PresentationSnapshot(snapshot, null);
-  expect(projected).toBe(snapshot);
-  expect(projected.entities[0]?.eFlags).toBe(2); expect(projected.entities[0]?.solid).toBe(123);
-  expect(projected.playerState.eFlags).toBe(0); expect(projected.playerState.weapon).toBe(5);
-  expect(entity.eFlags).toBe(2); expect(player.eFlags).toBe(0);
+test("selected arsenal retains the source predicted weapon and movement while taking attack input", () => {
+  const command = { serverTime: 50, angles: [10, 20, 30] satisfies [number, number, number], buttons: 9, weapon: 7, forwardmove: 100, rightmove: -25, upmove: 127 };
+  expect(q3EquipmentCommand(command, null)).toBe(command);
+  expect(q3EquipmentCommand(command, { primaryWeapon: 2, warning: "none" })).toEqual({ ...command, weapon: 2, buttons: 8 });
+  expect(command.buttons).toBe(9); expect(command.weapon).toBe(7);
 });
 
 test("accepted source weapon commands publish same-weapon intent without admitting unowned weapons", () => {

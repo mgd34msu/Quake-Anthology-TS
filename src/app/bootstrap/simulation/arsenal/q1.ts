@@ -1,3 +1,4 @@
+import type { SelectedPickupWeapon } from "../../../../world/gameplay/pickups.ts";
 import { q1WeaponStatus, q1WeaponDisplayName } from "./weapon-status.ts";
 import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { ArsenalIntent, InventoryEntry, ItemId } from "../../../../contracts/gameplay.ts";
@@ -169,6 +170,10 @@ export class Q1SelectedArsenal implements SelectedArsenal {
   view(actor: ActorId): { readonly path: string; readonly frame: number } {
     const player = this.require(actor);
     return { path: this.options.game.weaponModel(player.weapon, player), frame: player.weaponFrame };
+  }
+
+  catalog(): readonly SelectedPickupWeapon[] {
+    return this.weapons.map(weapon => ({ item: this.game.weaponItem(weapon), ammo: this.game.weaponAmmo(weapon), drop: weapon === "rogue:grapple" || weapon === "ctf:grapple" ? "none" : "supply" }));
   }
 
   private require(actor: ActorId): Q1PlayerState {

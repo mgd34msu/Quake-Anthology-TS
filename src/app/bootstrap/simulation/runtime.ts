@@ -84,6 +84,9 @@ import { GrappleRuntime } from "./grapple-runtime.ts";
 import { QvmGrappleSource, type QvmGrappleTarget } from "./qvm-grapple-source.ts";
 import { QvmGameCombat } from "../../../compat/qvm/game-combat.ts";
 import { QvmCombatBindings } from "../../../compat/qvm/game-combat-binding.ts";
+import { QvmPrimaryWeapons } from "../../../compat/qvm/game-weapons.ts";
+import { selectedWeaponSources } from "../../../world/gameplay/pickups.ts";
+import { q3PrimaryWeaponProfile } from "../../../content/q3/equipment/weapon-profile.ts";
 import { QvmPrimaryPickups } from "../../../compat/qvm/game-pickups.ts";
 import { qvmInventoryBinding, type QvmInventoryProfile } from "../../../compat/qvm/game-inventory.ts";
 import { q3NativeInventoryProfile } from "../../../content/q3/equipment/inventory-profile.ts";
@@ -169,7 +172,7 @@ import type { AnimationStepInput, AnimationStepResult, ArsenalState, MovementCon
 import type { ActorCommand, InputBatch, SaveImage, Simulation, SimulationOutput, WorldSnapshot } from "../../../contracts/session.ts";
 import type { ModSessionCheckpoint, ModTravelCheckpoint } from "../../../contracts/mods.ts";
 import { SessionMods } from "../../../world/session/mods.ts";
-import type { ModClientCommand, ModClientEvent, ModClientServices } from "../../../world/session/mod-clients.ts";
+import type { ModClientApplication, ModClientCommand, ModClientEvent, ModClientServices } from "../../../world/session/mod-clients.ts";
 import { ModClientApplications } from "../../../world/session/mod-client-applications.ts";
 import { captureModClientCommand, readModClientCommands } from "./mod-client-checkpoint.ts";
 import type { NativeModHostContext } from "./native-mod-host.ts";
@@ -253,7 +256,7 @@ type SourceRuntime = { readonly kind: "loading" }
   | { readonly kind: "quakec"; readonly game: QuakeCSource }
   | { readonly kind: "q1"; readonly game: Q1Foundation; readonly composition: Q1SourceComposition; readonly cvars: CvarRegistry }
   | { readonly kind: "q3"; readonly game: Q3SourceRuntime }
-  | { readonly kind: "q3-qvm"; readonly game: Q3QvmServerGame; readonly combat: QvmCombatBindings | null; readonly inventory: QvmInventoryProfile | null }
+  | { readonly kind: "q3-qvm"; readonly game: Q3QvmServerGame; readonly combat: QvmCombatBindings | null; readonly inventory: QvmInventoryProfile | null; readonly weapons: QvmPrimaryWeapons | null; readonly pickups: QvmPrimaryPickups | null }
   | { readonly kind: "q2-native"; readonly edition: "classic"; readonly game: ClassicGuestWorld; readonly files: ClassicOriginalSaveFiles; readonly visited: Map<string, Q2ClassicVisitedLevel>; readonly clients: Map<ClientId, OwnedActor> }
   | { readonly kind: "q2-native"; readonly edition: "rerelease"; readonly game: RereleaseGuestWorld; readonly visited: Map<string, Q2RereleaseVisitedLevel>; readonly clients: Map<ClientId, OwnedActor> }
   | ({ readonly kind: "q2"; readonly product: Q2ProductRuntime } & Pick<Q2ProductRuntime, "game" | "weapons" | "monsters" | "movers" | "items" | "players" | "baseEntities">);
@@ -321,6 +324,8 @@ export class SharedSimulation implements Simulation {
   private selectedWeaponSource: SelectedWeaponSource | null = null;
   private readonly primaryCommandBlocks = new Set<ActorId>();
   private selectedSupply: SharedPickupAdmission | null = null;
+  private selectedOriginalSupply: PickupSupplyProfile | null = null;
+  private selectedOriginalWeapons: ReadonlyMap<ItemId, ItemId | null> | null = null;
   private selectedPickupPolicy: import("../../../content/q1/quakec/id1-pickups.ts").QcPickupPolicy | null = null;
   private selectedOriginalPickups: readonly import("../../../contracts/original-pickups.ts").OriginalPickupRule[] = [];
   private readonly q3Arsenals = new Map<OwnedActor, Q3ArsenalRuntimeState>();
@@ -357,6 +362,9 @@ export class SharedSimulation implements Simulation {
   private readonly modClientListeners = new Set<(event: ModClientEvent) => undefined>();
   private readonly modClientAdmissions = new Set<ActorId>();
   private readonly modClientCommands = new Map<ActorId, ModClientCommand>();
+  private currentQvmArsenalApplication: ModClientApplication | null = null;
+  private readonly qvmWeaponDecisions: { readonly application: ModClientApplication; reached: boolean }[] = [];
+  private readonly selectedPickupBindings = new Map<ActorId, () => undefined>();
   private readonly modClientApplications = new ModClientApplications(identity => this.actors.isLive(identity.actor)
     && this.options.identity.owns(identity.client) && this.playerClient(identity.actor)?.equals(identity.client) === true);
   private readonly modClientDrops: { readonly client: ClientId; readonly actor: ActorId; readonly reason: string; readonly content: ContentId }[] = [];
@@ -611,6 +619,7 @@ export class SharedSimulation implements Simulation {
       this.actorExecutions.delete(actor.id);
       this.monsterMissions.delete(actor.id);
       this.nativeEquipmentPlayers.delete(actor.id); this.nativeEquipmentAlive.delete(actor.id); this.nativeEquipmentVelocity.delete(actor.id); this.nativeWeaponRequests.delete(actor.id);
+      this.selectedPickupBindings.get(actor.id)?.(); this.selectedPickupBindings.delete(actor.id);
       this.selectedArsenal?.remove(actor.id);
       this.scheduler.cancel(actor); this.weaponSlots.delete(actor.id); this.playerStates.delete(actor); this.characters.delete(actor); this.characterStarts.delete(actor); this.q3Arsenals.delete(actor); this.q3Commands.delete(actor); this.q1Characters.delete(actor); this.q2Views.delete(actor.id); this.q2Characters.delete(actor); this.characterTicks.delete(actor); this.entryCarry.delete(actor); this.detachedModels.delete(actor); this.sourceModels.delete(actor.id); this.viewModels.delete(actor.id); this.lastAttack.delete(actor);
       return undefined;
@@ -656,23 +665,44 @@ export class SharedSimulation implements Simulation {
         live: identity => this.actors.isLive(identity.actor) && this.playerClient(identity.actor)?.equals(identity.client) === true,
         accepted: actor => this.modClientCommands.get(actor) ?? null,
         frame: () => this.sourceFrame,
+        spawned: identity => this.qvmClientSpawned(identity.actor),
         onRelease: listener => this.actors.onRelease(actor => listener(actor.id)),
       });
     }
-    if (this.source.kind === "q3-qvm" && (this.recipe.equipment.grapple.kind === "enabled" && this.recipe.equipment.grapple.mechanic !== "q3-qvm" || this.recipe.equipment.handGrenades.kind === "enabled")) {
+    if (this.source.kind === "q3-qvm" && (this.weaponProvider.content !== this.recipe.map.entities.content || this.weaponProvider.provider !== this.recipe.map.entities.provider || this.recipe.equipment.grapple.kind === "enabled" && this.recipe.equipment.grapple.mechanic !== "q3-qvm" || this.recipe.equipment.handGrenades.kind === "enabled")) {
       const world = this.actors.atSource(this.recipe.map.entities.provider, 1022) ?? this.actors.allocateAtSource(this.recipe.map.entities.provider, 1022, "q3:worldspawn");
       this.bodies.create(world, { origin: zero, angles: zero, velocity: zero, bounds: { min: zero, max: zero }, ground: null });
     }
     this.handGrenades = this.createHandGrenades();
     this.grapple = this.createGrapple();
-    if (this.source.kind !== "q3-qvm" && this.source.kind !== "q2-native" && (this.weaponProvider.content !== this.recipe.map.entities.content || providerFamily(this.weaponProvider.provider) !== (this.source.kind === "quakec" ? "q1" : this.source.kind))) {
+    if (this.source.kind !== "q2-native" && (this.weaponProvider.content !== this.recipe.map.entities.content || providerFamily(this.weaponProvider.provider) !== (this.source.kind === "quakec" ? "q1" : this.source.kind === "q3-qvm" ? "q3" : this.source.kind))) {
       if (providerFamily(this.weaponProvider.provider) === "q1") {
         this.selectedArsenal = this.createSelectedQ1Arsenal();
-      } else if (providerFamily(this.weaponProvider.provider) === "q2" && (this.source.kind === "q1" || this.source.kind === "quakec" || this.source.kind === "q2" || this.source.kind === "q3")) {
+      } else if (providerFamily(this.weaponProvider.provider) === "q2" && (this.source.kind === "q1" || this.source.kind === "quakec" || this.source.kind === "q2" || this.source.kind === "q3" || this.source.kind === "q3-qvm")) {
         this.selectedArsenal = this.createSelectedQ2Arsenal();
       } else if (providerFamily(this.weaponProvider.provider) === "q3") {
         this.selectedArsenal = this.createSelectedQ3Arsenal();
       } else throw new Error("Selected foreign arsenal is not implemented for this provider");
+    }
+    if (this.source.kind === "q3-qvm" && this.selectedArsenal !== null) {
+      if (this.source.weapons === null || this.source.inventory === null || this.source.combat === null || this.source.pickups === null)
+        throw new Error("Selected QVM arsenal requires a complete qualified source profile");
+      this.modClientApplications.subscribe(event => {
+        if (event.application.scope !== "movement-slice") return undefined;
+        if (event.phase === "before") this.qvmWeaponDecisions.push({ application: event.application, reached: false });
+        else {
+          const decision = this.qvmWeaponDecisions.at(-1);
+          if (decision?.application !== event.application) throw new Error("Original weapon decision lost its input invocation");
+          try { if (event.outcome === "completed") this.qvmWeaponStep(event.application, decision.reached); }
+          finally { this.qvmWeaponDecisions.pop(); }
+        }
+        return undefined;
+      });
+    }
+    if (this.source.kind === "q3-qvm" && this.selectedArsenal !== null) {
+      const profile = this.selectedOriginalSupply, prepared = this.options.q3Guest?.prepared;
+      if (profile === null || prepared === undefined) throw new Error("Selected original weapons lost their admitted supply");
+      this.selectedOriginalWeapons = selectedWeaponSources(profile, this.selectedArsenal.catalog(), prepared.weapons);
     }
     if (this.source.kind !== "q3-qvm" && this.source.kind !== "q2-native") { this.prepareSelectedMonsters(); options.monsterNavigation?.install(this, this.q1Movement); }
     if (saved !== undefined) {
@@ -1147,7 +1177,7 @@ export class SharedSimulation implements Simulation {
     return new SharedPickupAdmission({ inventory: this.inventory, profile,
       ammoGranted: (actor, grants, autoSwitch) => {
         if (selected !== null) {
-          selected.pickupAmmo(actor, grants, autoSwitch); this.requirePlayer(actor.id).arsenal = selected.read(actor.id);
+          selected.pickupAmmo(actor, grants, autoSwitch); this.refreshArsenalCache(actor.id);
         } else if (this.source.kind === "q1") {
           const game = this.source.game, player = game.player(actor.id);
           if (player === null) throw new Error("Q1 pickup recipient has no admitted player");
@@ -1157,7 +1187,7 @@ export class SharedSimulation implements Simulation {
         return undefined;
       }, weaponGranted: (actor, weapons, selection) => {
         if (selected !== null) {
-          selected.pickupWeapons(actor, weapons, selection); this.requirePlayer(actor.id).arsenal = selected.read(actor.id);
+          selected.pickupWeapons(actor, weapons, selection); this.refreshArsenalCache(actor.id);
         } else if (this.source.kind === "q1") {
           const game = this.source.game, player = game.player(actor.id);
           if (player === null) throw new Error("Q1 pickup recipient has no admitted player");
@@ -1256,6 +1286,64 @@ export class SharedSimulation implements Simulation {
     return providerFrame(this.sourceFrame, providerTiming(this.recipe, this.recipe.map.entities.provider).clock, providerTiming(this.recipe, this.weaponProvider.provider).clock);
   }
 
+  private requireQvmWeapons(): QvmPrimaryWeapons {
+    if (this.source.kind !== "q3-qvm" || this.source.weapons === null) throw new Error("Original QVM weapon services have no qualified owner");
+    return this.source.weapons;
+  }
+  private refreshArsenalCache(actor: ActorId): void {
+    const player = this.player(actor);
+    if (player !== null && this.selectedArsenal !== null) player.arsenal = this.selectedArsenal.read(actor);
+  }
+  private arsenalObservation(actor: ActorId) {
+    const player = this.player(actor);
+    if (player !== null) return { actor: player.actor, viewAngles: player.viewAngles, viewHeight: player.viewHeight, waterLevel: player.waterLevel };
+    if (this.source.kind !== "q3-qvm") return null;
+    const owner = this.actors.resolveOwned(actor), slot = this.source.game.records.slot(actor);
+    if (owner === null || slot === null || this.playerClient(actor) === null) return null;
+    const state = this.source.game.records.player(slot);
+    return { actor: owner, viewAngles: state.viewAngles, viewHeight: state.viewHeight, waterLevel: this.requireQvmWeapons().waterLevel(actor) };
+  }
+  private qvmQ2WeaponInput(actor: ActorId) {
+    const input = this.equipmentWeaponInput(actor), application = this.currentQvmArsenalApplication;
+    const buttons = application?.identity.actor.equals(actor) ? application.command.buttons
+      : this.selectedArsenal?.family === "q2" && this.selectedArsenal.has(actor) ? this.selectedArsenal.captureTurn(actor).buttons : 0;
+    return { ...input, attack: this.requireQvmWeapons().available(actor, true) && (application === null || this.qvmWeaponDecisions.at(-1)?.reached === true) && (buttons & 1) !== 0 && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
+      quadUntil: 0, haste: false };
+  }
+  private qvmClientSpawned(actor: ActorId): void {
+    const selected = this.selectedArsenal;
+    if (this.source.kind !== "q3-qvm" || selected === null) return;
+    const owner = this.actors.resolveOwned(actor); if (owner === null) return;
+    if (selected.has(actor)) selected.remove(actor);
+    selected.admit(owner, this.requireQvmWeapons().maxHealth(actor), this.teamGame());
+    this.selectedQ3Source?.respawn(actor); this.selectedQ3Source?.admit(owner);
+    this.bindSelectedOriginalPickups(owner); this.bindWeaponSlot(actor);
+    this.handGrenades?.respawn(actor); this.grapple?.release(actor);
+  }
+  private qvmWeaponStep(application: ModClientApplication, reachedAttackDecision: boolean): void {
+    if (this.source.kind !== "q3-qvm" || this.selectedArsenal === null) return;
+    const actor = this.actors.resolveOwned(application.identity.actor); if (actor === null) return;
+    if (!this.selectedArsenal.has(actor.id)) this.qvmClientSpawned(actor.id);
+    if (!this.requireQvmWeapons().available(actor.id, true)) return;
+    const state = this.source.game.records.player(this.source.game.records.requireSlot(actor.id)), previous = this.currentQvmArsenalApplication;
+    this.currentQvmArsenalApplication = application;
+    try {
+      const arsenal = this.selectedArsenal.read(actor.id), active = (this.weaponSlots.get(actor.id)?.primarySelected() ?? true) && reachedAttackDecision;
+      const command = { ...application.command, buttons: active ? application.command.buttons : application.command.buttons & ~1 };
+      this.selectedQ3Source?.command(actor, (command.buttons & 1) !== 0, active, (state.stats[0] ?? 0) > 0);
+      const animation: WeaponStepInput["animation"] = { provider: this.recipe.character.definition.provider, state: { kind: "q3", legs: state.legsAnimation,
+        torso: state.torsoAnimation, legsTimerMilliseconds: state.legsTimerMilliseconds, torsoTimerMilliseconds: state.torsoTimerMilliseconds } };
+      const frame = this.selectedArsenal.family === "q1" ? { ...this.selectedQ1Frame(), elapsed: application.frame.elapsed }
+        : this.selectedWeaponSource?.kind === "q2" ? { ...this.selectedWeaponSource.frame, elapsed: application.frame.elapsed }
+        : { ...application.frame, time: { kind: "milliseconds", value: this.selectedMilliseconds } satisfies SourceTime };
+      this.selectedArsenal.step({ actor, command, frame, arsenal, animation,
+        environment: { health: state.stats[0] ?? 0, flight: false, haste: false, invulnerable: false, gravityMultiplier: 1 },
+        gauntletHit: active && arsenal.state.kind === "q3" && arsenal.state.sourceWeapon === 1 && (command.buttons & 1) !== 0 && (state.stats[0] ?? 0) > 0
+          ? this.selectedQ3Source?.gauntletHit(actor) ?? false : false }, application.arsenal ?? undefined);
+      this.weaponSlots.get(actor.id)?.reconcile();
+    } finally { this.currentQvmArsenalApplication = previous; }
+  }
+
   private createSelectedQ3Arsenal(): Q3SelectedArsenal {
     const product = this.weaponProvider.content.includes(":missionpack:") ? "missionpack" : "baseq3";
     const timing = providerTiming(this.recipe, this.weaponProvider.provider).clock;
@@ -1277,14 +1365,16 @@ export class SharedSimulation implements Simulation {
         serverHighCharacters: true, print: text => { this.events.message({ kind: "print", level: 2, text }); } });
     }
     strings.set(0, serverInfo);
-    const primaryEquipment = this.source.kind === "q3" && this.source.game.options.product === "missionpack";
+    const primaryEquipment = this.source.kind === "q3-qvm" || this.source.kind === "q3" && this.source.game.options.product === "missionpack";
     const equipment: import("./arsenal/q3-source.ts").Q3SelectedSourceHost["equipment"] = primaryEquipment ? { kind: "primary",
       damageFactor: actor => {
+        if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(actor);
         if (this.source.kind !== "q3") throw new Error("Primary Q3 equipment lost its source");
         const client = this.source.game.records.nativeByActor(actor)?.client;
         if (client == null) throw new Error("Primary Q3 equipment lost its client");
         return q3WeaponDamageFactor(client, this.source.game.quadDamageFactor(), client.ps.product);
       }, firingDelay: (actor, milliseconds) => {
+        if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().weaponDelay(actor, milliseconds);
         if (this.source.kind !== "q3") throw new Error("Primary Q3 equipment lost its source");
         const client = this.source.game.records.nativeByActor(actor)?.client;
         if (client == null) throw new Error("Primary Q3 equipment lost its client");
@@ -1295,17 +1385,17 @@ export class SharedSimulation implements Simulation {
       configstrings: config.store, userinfo: actor => this.sourcePlayerUserinfo(actor) ?? "", maxClients: this.options.maxClients, seed: this.options.seed, now: () => this.selectedQ3Time,
       worldActor: () => { const actor = this.worldActor(), owner = actor === null ? null : this.actors.resolveOwned(actor); if (owner === null) throw new Error("Selected Q3 source has no map world"); return owner; },
       player: actor => {
-        const player = this.player(actor); if (player === null) return null;
+        const player = this.arsenalObservation(actor); if (player === null) return null;
         const q1 = this.source.kind === "q1" ? this.source.game.player(actor) : null;
         const qc = this.source.kind === "quakec" ? this.source.game.clientEquipment(actor) : null;
         const q2 = this.source.kind === "q2" ? this.source.items.playerPowerups(actor) : null;
         const q3 = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
         const team = this.combat.read(actor)?.team?.toLowerCase();
         return { angles: player.viewAngles, viewHeight: player.viewHeight, maxHealth: this.source.kind === "q2" ? this.source.game.entity(actor)?.maxHealth ?? 100
-          : q3?.ps.stats.get(statSchema(q3.ps.product).maxHealth) ?? q1?.maxHealth ?? qc?.maxHealth ?? 100,
+          : this.source.kind === "q3-qvm" ? this.requireQvmWeapons().maxHealth(actor) : q3?.ps.stats.get(statSchema(q3.ps.product).maxHealth) ?? q1?.maxHealth ?? qc?.maxHealth ?? 100,
           team: q3?.sess.sessionTeam ?? (team === "red" || team === "5" ? Team.TEAM_RED : team === "blue" || team === "14" ? Team.TEAM_BLUE : Team.TEAM_FREE),
-          quadUntil: q3?.ps.powerups.get(Powerup.PW_QUAD) ?? Math.trunc((q1?.powerups.get("quad") ?? q2?.quadUntil ?? qc?.quadUntil ?? 0) * 1000),
-          hasteUntil: q3?.ps.powerups.get(Powerup.PW_HASTE) ?? 0 };
+          quadUntil: this.source.kind === "q3-qvm" ? this.requireQvmWeapons().powerupUntil(actor, "quad") : q3?.ps.powerups.get(Powerup.PW_QUAD) ?? Math.trunc((q1?.powerups.get("quad") ?? q2?.quadUntil ?? qc?.quadUntil ?? 0) * 1000),
+          hasteUntil: this.source.kind === "q3-qvm" ? this.requireQvmWeapons().powerupUntil(actor, "haste") : q3?.ps.powerups.get(Powerup.PW_HASTE) ?? 0 };
       },
       combatProvider: this.recipe.combat.provider, inventoryProvider: this.recipe.inventory.provider, movementProvider: this.recipe.movement.provider,
       armorContext: request => this.victimArmorContext(request),
@@ -1342,19 +1432,30 @@ export class SharedSimulation implements Simulation {
       },
     });
     this.selectedQ3Source = source;
-    const base = this.source.kind === "q1" || this.source.kind === "quakec" ? Q1_Q3_SUPPLY_PROFILE : this.source.kind === "q2" ? Q2_Q3_SUPPLY_PROFILE : null;
+    const identity: PickupSupplyProfile = { id: "composition:q3-base-q3-supply", weaponOwnership: "all-destinations",
+      ammoOwners: Q3_WEAPON_ITEMS.filter(weapon => weapon.weapon <= 10).flatMap(weapon => weapon.ammo === null ? [] : [{ item: weapon.ammo, source: weapon.ammo }]),
+      ammo: [...new Set(Q3_WEAPON_ITEMS.filter(weapon => weapon.weapon <= 10).flatMap(weapon => weapon.ammo === null ? [] : [weapon.ammo]))].map(item => ({ source: item, destinations: [item] })),
+      weapons: Q3_WEAPON_ITEMS.filter(weapon => weapon.weapon <= 10).map(weapon => ({ source: weapon.item, destinations: [weapon.item] })) };
+    const base = this.source.kind === "q1" || this.source.kind === "quakec" ? Q1_Q3_SUPPLY_PROFILE : this.source.kind === "q2" ? Q2_Q3_SUPPLY_PROFILE : this.source.kind === "q3-qvm" ? identity : null;
     const profile = base === null ? null : expansionSourceSupply(product === "missionpack" ? expansionSupply(base, ["q3-missionpack"]) : base);
     const supply = profile === null ? undefined : { profile: profile.id,
       loadout: this.source.kind === "q1" || this.source.kind === "quakec" ? q1Q3SupplyLoadout(this.weaponProvider.provider, product) : q3SpawnLoadout(this.weaponProvider.provider, product, false),
-      replacedItems: this.source.kind === "quakec" ? [] : [...replacedSupplyItems(profile), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])] };
+      replacedItems: this.source.kind === "quakec" || this.source.kind === "q3-qvm" ? [] : [...replacedSupplyItems(profile), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])] };
     const selected = new Q3SelectedArsenal({ provider: this.weaponProvider.provider, product, inventory: this.inventory,
+      ...(this.source.kind !== "q3-qvm" ? {} : { loadout: (actor: OwnedActor, defaults: ArsenalState): ArsenalState => {
+        if (this.source.kind !== "q3-qvm" || defaults.state.kind !== "q3") throw new Error("Selected source loadout lost its QVM player");
+        const player = this.source.game.records.player(this.source.game.records.requireSlot(actor.id)), inventory = this.inventory.entries(actor.id);
+        const active = q3WeaponItem(player.weapon)?.item ?? null;
+        return { ...defaults, activeWeapon: active, state: { ...defaults.state, sourceWeapon: player.weapon },
+          ammo: defaults.ammo.map(entry => inventory.find(current => current.item === entry.item) ?? { ...entry, count: 0 }) };
+      } }),
       ...(supply === undefined ? {} : { supply }),
       ...(equipment.kind === "primary" ? { firingDelay: (actor: OwnedActor, milliseconds: number) => equipment.firingDelay(actor.id, milliseconds) } : {}),
       equipment: { ownsHoldables: source.ownsEquipment, read: actor => source.equipment(actor), consume: (actor, item) => source.consume(actor, item), restore: (actor, state) => source.restoreEquipment(actor, state), advance: (actor, milliseconds) => source.advanceMovement(actor, milliseconds), endCommand: (actor, milliseconds) => source.endCommand(actor, milliseconds) },
       fire: (actor, weapon, input) => {
         source.fire(actor, weapon, input);
         if (!this.actors.isLive(actor.id)) return undefined;
-        if (this.requirePlayer(actor.id).character === "q2") this.weaponCharacterAnimation(actor.id, "attack", weapon === 1, this.weaponProvider.content, false);
+        if (this.source.kind === "q3-qvm" || this.player(actor.id)?.character === "q2") this.weaponCharacterAnimation(actor.id, "attack", weapon === 1, this.weaponProvider.content, false);
         if (this.source.kind === "q1") this.source.composition.fired(actor.id, q3WeaponItem(weapon)?.item ?? null);
         const body = this.bodies.read(actor.id); if (this.source.kind === "q2" && body !== null) this.source.weapons.playerNoiseForActor(actor.id, this.source.game, body.origin, "weapon");
         return undefined;
@@ -1362,8 +1463,8 @@ export class SharedSimulation implements Simulation {
     if (profile !== null) {
       this.bindSelectedAmmo(profile);
     this.selectedSupply = new SharedPickupAdmission({ inventory: this.inventory, profile,
-        ammoGranted: (actor, grants, autoSwitch) => { selected.pickupAmmo(actor, grants, autoSwitch && (this.source.kind !== "q1" || this.source.game.player(actor.id)?.autoSwitch !== "never")); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; },
-        weaponGranted: (actor, weapons, selection) => { selected.pickupWeapons(actor, weapons, selection); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; } });
+        ammoGranted: (actor, grants, autoSwitch) => { selected.pickupAmmo(actor, grants, autoSwitch && (this.source.kind !== "q1" || this.source.game.player(actor.id)?.autoSwitch !== "never")); this.refreshArsenalCache(actor.id); return undefined; },
+        weaponGranted: (actor, weapons, selection) => { selected.pickupWeapons(actor, weapons, selection); this.refreshArsenalCache(actor.id); return undefined; } });
       if (this.source.kind === "q1") this.source.game.pickupAdmission = this.selectedSupply;
       else if (this.source.kind === "q2") this.source.items.setPickupAdmission(this.selectedSupply);
       this.prepareSelectedOriginalPickups(profile);
@@ -1372,6 +1473,26 @@ export class SharedSimulation implements Simulation {
   }
 
   private prepareSelectedOriginalPickups(profile: PickupSupplyProfile): void {
+    this.selectedOriginalSupply = profile;
+    if (this.source.kind === "q3-qvm" && this.selectedSupply !== null) {
+      const source = this.source, admission = this.selectedSupply;
+      this.selectedOriginalPickups = [...profile.ammo, ...profile.weapons].map(mapping => {
+        const ammo = profile.ammo.some(entry => entry === mapping), destinations = ammo ? mapping.destinations : [...mapping.destinations, ...profile.ammo.flatMap(entry => entry.destinations)];
+        const [first, ...rest] = [...new Set(destinations)];
+        if (first === undefined) throw new Error("Selected original pickup has no destination");
+        return { id: `selected:${mapping.source}`, offered: [mapping.source],
+          writes: [{ kind: "inventory", item: first, fields: "count" }, ...rest.map(item => ({ kind: "inventory", item, fields: "count" } satisfies import("../../../contracts/original-pickups.ts").PickupWrite))],
+          take: (offer, execution) => {
+            const actor = this.actors.resolveOwned(offer.recipient);
+            if (actor === null || !execution.current() || source.pickups === null) return "refused";
+            const original = source.pickups.supply(offer);
+            if (original.offer.kind === "ammo") return admission.ammo(actor, original.offer.offer) ? "accepted" : "refused";
+            if (original.offer.kind !== "weapon") throw new Error("Original QVM pickup has no static supply grant");
+            const quantity = original.quantity;
+            return admission.weapon(actor, original.offer.offer, "better", quantity === undefined ? undefined : entry => quantity(entry.count)) ? "accepted" : "refused";
+          } };
+      });
+    }
     if (this.source.kind === "quakec" && this.selectedSupply !== null) {
       const source = this.source.game, admission = this.selectedSupply;
       this.selectedPickupPolicy = {
@@ -1416,7 +1537,9 @@ export class SharedSimulation implements Simulation {
   }
 
   private bindSelectedOriginalPickups(actor: OwnedActor): void {
-    if (this.selectedOriginalPickups.length !== 0) this.inventory.bindPickup(actor, { owner: this.weaponProvider.provider, rules: this.selectedOriginalPickups });
+    this.selectedPickupBindings.get(actor.id)?.(); this.selectedPickupBindings.delete(actor.id);
+    if (this.selectedOriginalPickups.length !== 0) this.selectedPickupBindings.set(actor.id,
+      this.inventory.bindPickup(actor, { owner: this.weaponProvider.provider, rules: this.selectedOriginalPickups }));
   }
 
   private selectedQ3Spawn(actor: OwnedActor): { readonly origin: Vec3; readonly angles: Vec3 } {
@@ -1495,6 +1618,7 @@ export class SharedSimulation implements Simulation {
   }
 
   private selectedWeaponDelay(actor: ActorId, seconds: number): number {
+    if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().weaponDelay(actor, Math.trunc(seconds * 1000)) / 1000;
     const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
     if (client == null) return seconds;
     const schema = statSchema(client.ps.product), persistent = schema.product === "missionpack" ? itemAt(client.ps.product, client.ps.stats.get(schema.persistentPowerup)).tag : 0;
@@ -1537,6 +1661,7 @@ export class SharedSimulation implements Simulation {
       return undefined;
     }, dodge: (actor, attacker, eta, trace) => this.q2MonsterDodge(actor, attacker, eta, trace), quadMultiplier: actor => this.source.kind === "quakec" ? this.source.game.clientDamagePowerupFactor(actor) : this.source.kind === "q3" ? this.source.game.quadDamageFactor() : 4,
       sourceDamageMultiplier: actor => {
+        if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(actor);
         const client = this.source.kind === "q3" ? this.source.game.records.nativeByActor(actor)?.client : null;
         return client == null ? 1 : q3WeaponDamageFactor(client, 1, client.ps.product);
       },
@@ -1560,13 +1685,14 @@ export class SharedSimulation implements Simulation {
       weapons: Q2_BASE_WEAPONS.map(weapon => ({ source: weapon.item, destinations: [weapon.item] })) };
     const supply = expansionSourceSupply(expansionSupply(this.source.kind === "q1" || this.source.kind === "quakec" ? Q1_Q2_SUPPLY_PROFILE : this.source.kind === "q2" ? identity : Q3_Q2_SUPPLY_PROFILE,
       edition === "rerelease" ? ["q2-xatrix", "q2-rogue"] : product === "xatrix" ? ["q2-xatrix"] : product === "rogue" ? ["q2-rogue"] : []));
-    const selected = new Q2SelectedArsenal({ game, weapons, inventoryDefinitions: missionWeapons.inventoryDefinitions, pickupOrder: missionWeapons.pickupOrder, replacedItems: this.source.kind === "quakec" ? [] : replacedSupplyItems(supply),
+    const selected = new Q2SelectedArsenal({ game, weapons, inventoryDefinitions: missionWeapons.inventoryDefinitions, pickupOrder: missionWeapons.pickupOrder, replacedItems: this.source.kind === "quakec" || this.source.kind === "q3-qvm" ? [] : replacedSupplyItems(supply),
       ...(this.source.kind === "q2" ? {} : { loadout: this.source.kind === "q1" || this.source.kind === "quakec" ? q1Q2SupplyLoadout() : q3Q2SupplyLoadout() }),
-      observe: actor => { const player = this.requirePlayer(actor); return { owner: { actor: player.actor, viewHeight: player.viewHeight }, input: this.q2WeaponInput(player) }; } });
+      observe: actor => { const player = this.arsenalObservation(actor); if (player === null) throw new Error("Selected Q2 arsenal lost its player");
+        return { owner: { actor: player.actor, viewHeight: player.viewHeight }, input: this.source.kind === "q3-qvm" ? this.qvmQ2WeaponInput(actor) : this.q2WeaponInput(this.requirePlayer(actor)) }; } });
     this.bindSelectedAmmo(supply);
     this.selectedSupply = new SharedPickupAdmission({ inventory: this.inventory, profile: supply,
-      ammoGranted: (actor, grants, autoSwitch) => { selected.pickupAmmo(actor, grants, autoSwitch); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; },
-      weaponGranted: (actor, granted, selection) => { selected.pickupWeapons(actor, granted, selection); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; } });
+      ammoGranted: (actor, grants, autoSwitch) => { selected.pickupAmmo(actor, grants, autoSwitch); this.refreshArsenalCache(actor.id); return undefined; },
+      weaponGranted: (actor, granted, selection) => { selected.pickupWeapons(actor, granted, selection); this.refreshArsenalCache(actor.id); return undefined; } });
     if (this.source.kind === "q1") this.source.game.pickupAdmission = this.selectedSupply;
     else if (this.source.kind === "q2") this.source.items.setPickupAdmission(this.selectedSupply);
     this.prepareSelectedOriginalPickups(supply);
@@ -1597,10 +1723,11 @@ export class SharedSimulation implements Simulation {
       return 0;
     };
     const game = new Q1EntityServices({ ...host, powerupExpires,
-      ...(this.source.kind === "q3" || this.source.kind === "quakec" ? { sourceDamagePowerupOwner: this.recipe.map.entities.provider } : {}),
+      ...(this.source.kind === "q3" || this.source.kind === "q3-qvm" || this.source.kind === "quakec" ? { sourceDamagePowerupOwner: this.recipe.map.entities.provider } : {}),
       weaponVolume: actor => (this.q2ItemWeaponSource()?.weapons.silencerShots(actor) ?? 0) > 0 ? 0.2 : 1,
       weaponImpact: (actor, origin) => this.source.kind === "q2" ? this.source.weapons.playerNoiseForActor(actor, this.source.game, origin, "impact") : undefined,
       sourceDamageMultiplier: attacker => {
+        if (this.source.kind === "q3-qvm") return this.requireQvmWeapons().damageFactor(attacker);
         if (this.source.kind === "quakec") return this.source.game.clientDamagePowerupFactor(attacker);
         if (this.source.kind === "q3") {
           const client = this.source.game.records.nativeByActor(attacker)?.client;
@@ -1616,12 +1743,12 @@ export class SharedSimulation implements Simulation {
     const missionWeapons = registerSelectedQ1MissionWeapons(game, product, {
       emit: event => this.emitQ1Addon(this.weaponProvider.content, event, this.selectedQ1Frame().time),
       isMonster: actor => { const execution = this.actorExecutions.get(actor); return execution?.kind === "quakec" ? execution.source.weaponTarget(actor)?.monster === true : execution?.kind === "q1" ? (execution.entity.movementFlags & 32) !== 0 : execution?.kind === "q2" && (execution.entity.serverFlags & 4) !== 0; },
-      cvar: name => this.source.kind === "q1" ? this.source.cvars.variableValue(name) : this.source.kind === "quakec" ? this.source.game.cvars.variableValue(name) : this.source.kind === "q3" ? this.source.game.host.cvars.variableValue(name) : this.q2ServerRegistry?.variableValue(name) ?? 0,
-      setCvar: (name, value) => { const registry = this.source.kind === "q1" ? this.source.cvars : this.source.kind === "quakec" ? this.source.game.cvars : this.source.kind === "q3" ? this.source.game.host.cvars : this.q2ServerRegistry;
+      cvar: name => this.source.kind === "q1" ? this.source.cvars.variableValue(name) : this.source.kind === "quakec" ? this.source.game.cvars.variableValue(name) : this.source.kind === "q3" ? this.source.game.host.cvars.variableValue(name) : this.source.kind === "q3-qvm" ? this.source.game.state.cvars.variableValue(name) : this.q2ServerRegistry?.variableValue(name) ?? 0,
+      setCvar: (name, value) => { const registry = this.source.kind === "q1" ? this.source.cvars : this.source.kind === "quakec" ? this.source.game.cvars : this.source.kind === "q3" ? this.source.game.host.cvars : this.source.kind === "q3-qvm" ? this.source.game.state.cvars : this.q2ServerRegistry;
         if (registry === null) throw new Error("Selected Q1 weapons require the shared server settings registry");
         registry.set(name, value, true); return undefined; },
     });
-    if (this.source.kind === "q3") game.registerWeaponRules({ id: "composition:q3-cadence",
+    if (this.source.kind === "q3" || this.source.kind === "q3-qvm") game.registerWeaponRules({ id: "composition:q3-cadence",
       attackDelay: (_game, player, delay) => this.selectedWeaponDelay(player.actor.id, delay),
       frameDelay: (_game, player, delay) => this.selectedWeaponDelay(player.actor.id, delay) });
     if (product === "mg3") this.q1CharacterAdjuncts.add(game);
@@ -1644,19 +1771,19 @@ export class SharedSimulation implements Simulation {
         if (weapon === undefined) throw new Error("Original QC weapon has no selected Q1 definition");
         return { weapon, maxHealth: source.clientEquipment(actor).maxHealth };
       } } : {}),
-      fired: (actor, weapon) => {
+      fired: (actor, weapon, animation) => {
         this.weaponCharacterAnimation(actor, "attack", weapon === "axe" || weapon === "hipnotic:mjolnir", this.weaponProvider.content, false);
         if (this.source.kind === "q1") this.source.composition.fired(actor, game.weaponItem(weapon));
-        const player = this.requirePlayer(actor), body = this.bodies.read(actor);
+        const player = this.player(actor), body = this.bodies.read(actor);
         if (this.source.kind === "q2" && body !== null) this.source.weapons.playerNoiseForActor(actor, this.source.game, body.origin, "weapon");
-        return player.animation;
+        return player?.animation ?? animation;
       },
-      replacedItems: [...(this.source.kind === "q1" || this.source.kind === "quakec" ? [] : replacedSupplyItems(profile)), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])],
-      observe: actor => { const player = this.requirePlayer(actor); return { viewAngles: player.viewAngles, waterLevel: player.waterLevel }; } });
+      replacedItems: [...(this.source.kind === "q1" || this.source.kind === "quakec" || this.source.kind === "q3-qvm" ? [] : replacedSupplyItems(profile)), ...(this.source.kind === "q2" ? ["q2:weapon_blaster"] satisfies readonly ItemId[] : [])],
+      observe: actor => { const player = this.arsenalObservation(actor); if (player === null) throw new Error("Selected Q1 arsenal lost its player"); return { viewAngles: player.viewAngles, waterLevel: player.waterLevel }; } });
     this.bindSelectedAmmo(profile);
     this.selectedSupply = new SharedPickupAdmission({ inventory: this.inventory, profile,
-      ammoGranted: (actor, grants, autoSwitch) => { selected.pickupAmmo(actor, grants, autoSwitch); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; },
-      weaponGranted: (actor, weapons, selection) => { selected.pickupWeapons(actor, weapons, selection); this.requirePlayer(actor.id).arsenal = selected.read(actor.id); return undefined; } });
+      ammoGranted: (actor, grants, autoSwitch) => { selected.pickupAmmo(actor, grants, autoSwitch); this.refreshArsenalCache(actor.id); return undefined; },
+      weaponGranted: (actor, weapons, selection) => { selected.pickupWeapons(actor, weapons, selection); this.refreshArsenalCache(actor.id); return undefined; } });
     if (this.source.kind === "q2") this.source.items.setPickupAdmission(this.selectedSupply);
     if (this.source.kind === "q1") this.source.game.pickupAdmission = this.selectedSupply;
     this.prepareSelectedOriginalPickups(profile);
@@ -1786,7 +1913,7 @@ export class SharedSimulation implements Simulation {
     if (this.source.kind === "q3-qvm") {
       const player = this.source.game.players().find(entry => entry.actor.equals(actor)); if (player === undefined) return false;
       const state = this.source.game.records.player(player.sourceEntity);
-      return (state.stats[0] ?? 0) > 0 && state.movementType !== MoveType.PM_SPECTATOR && state.movementType !== MoveType.PM_INTERMISSION && state.movementType !== MoveType.PM_SPINTERMISSION;
+      return this.source.weapons?.available(actor) ?? ((state.stats[0] ?? 0) > 0 && state.movementType !== MoveType.PM_SPECTATOR && state.movementType !== MoveType.PM_INTERMISSION && state.movementType !== MoveType.PM_SPINTERMISSION);
     }
     if (this.source.kind === "q2-native") return this.playerClient(actor) !== null && this.nativePlayerUi(actor).health > 0;
     const player = this.player(actor); return player !== null && !player.intermission && player.cutscene === null && (this.combat.read(actor)?.health ?? 0) > 0;
@@ -1845,6 +1972,7 @@ export class SharedSimulation implements Simulation {
 
   private primaryHandoff(actor: ActorId): PrimaryWeaponHandoff {
     const source = this.source;
+    if (this.selectedArsenal !== null) return this.selectedArsenal.handoff(actor);
     if (source.kind === "q3-qvm" || source.kind === "q2-native") {
       let holstered = false;
       const accepts = (item: import("../../../contracts/gameplay.ts").ItemId) => { const ui = this.nativePlayerUi(actor); return ui.activeWeapon === item || ui.items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned); };
@@ -1865,7 +1993,6 @@ export class SharedSimulation implements Simulation {
         resume: item => { holstered = false; return item === null || select(item); } };
     }
     const player = this.requirePlayer(actor);
-    if (this.selectedArsenal !== null) return this.selectedArsenal.handoff(actor);
     if (source.kind === "quakec") return { kind: "immediate", provider: this.weaponProvider.provider,
       accepts: item => this.primaryUi(actor).items.some(entry => entry.id === item && entry.kind === "weapon" && entry.owned),
       select: item => source.game.requestClientWeapon(actor, item),
@@ -1954,6 +2081,10 @@ export class SharedSimulation implements Simulation {
   }
 
   private weaponCharacterAnimation(actor: ActorId, priority: "attack" | "reverse", melee: boolean, content: ContentId, resetTime: boolean): undefined {
+    if (this.source.kind === "q3-qvm") {
+      if (priority === "attack") this.requireQvmWeapons().attackAnimation(actor, melee);
+      return undefined;
+    }
     const player = this.player(actor);
     if (player === null) return undefined;
     if (player.animation.state.kind === "q3") {
@@ -2284,6 +2415,7 @@ export class SharedSimulation implements Simulation {
       this.initializeServerSettings(state.cvars);
       let combatBindings: QvmCombatBindings | null = null;
       let pickupBindings: QvmPrimaryPickups | null = null;
+      let primaryWeapons: QvmPrimaryWeapons | null = null;
       const nativeInventory = q3NativeInventoryProfile(guest.prepared.artifact);
       const game = new Q3QvmServerGame({ artifact: guest.prepared.artifact, state,
         records: { actors: this.actors, bodies: this.bodies, scene: this.scene, provider: recipe.map.entities.provider,
@@ -2305,7 +2437,7 @@ export class SharedSimulation implements Simulation {
         mounts: this.options.mounts, writable: guest.writable, common: guest.common,
         maxClients: this.options.maxClients, seed: this.options.seed, dedicated: this.options.dedicated === true, entityText: this.options.world.entities,
         now, assertCurrent: () => { this.assertOpen(); }, clientChanged: (kind, actor) => this.notifyClientEvent(kind, actor),
-        beforeRetire: () => { pickupBindings?.close(); combatBindings?.close(); },
+        beforeRetire: () => { primaryWeapons?.close(); pickupBindings?.close(); combatBindings?.close(); },
         botCommand: (actor, command) => this.observeClientCommand({ actor, source: { kind: "bot", provider: guest.prepared.artifact.module.id },
           sequence: (this.modClientCommands.get(actor)?.input.sequence ?? 0) + 1, command: { kind: "q3", serverTimeMilliseconds: command.serverTime,
             angleWords: command.angles, buttons: command.buttons, weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove } }),
@@ -2334,10 +2466,36 @@ export class SharedSimulation implements Simulation {
           return { item, resource: record.type === ItemType.IT_ARMOR ? { kind: "protection", channel: "regular" }
             : record.type === nativePickups.items.weaponType || record.type === nativePickups.items.ammoType ? { kind: "inventory", item } : null };
         },
+        supply: { ammo: record => guest.prepared.weapons.find(weapon => weapon.weapon === record.tag)?.ammo ?? null,
+          owns: (actor, item) => this.selectedSupply?.owns(actor.id, item) ?? this.inventory.count(actor.id, item) > 0 },
         time: () => ({ kind: "milliseconds", value: now() }), runSource: (offer, execute) => this.originalPickups.runSource(offer, execute),
         lifetime: combatBindings === null ? { kind: "own-free-hook", retire: actor => {
           if (this.actors.resolveOwned(actor.id) === actor) this.actors.release(actor);
         } } : { kind: "shared-free-hook" },
+      });
+      const primaryProfile = q3PrimaryWeaponProfile(guest.prepared.artifact, guest.prepared.weapons);
+      if (primaryProfile !== null) primaryWeapons = new QvmPrimaryWeapons(game.game, guest.prepared.artifact, primaryProfile, {
+        actor: slot => game.records.reference(slot), slot: actor => game.records.slot(actor),
+        selected: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
+        attempted: (actor, weapon) => { if (this.nativeWeaponRequests.get(actor) !== weapon) this.nativeWeaponRequests.delete(actor); },
+        accepted: (actor, weapon) => this.nativeWeaponRequests.set(actor, weapon),
+        give: (actor, category) => { this.grantSelectedArsenal(actor, category); },
+        giveItem: (actor, name) => this.giveSelectedItem(actor, [name]),
+        drop: actor => {
+          const selected = this.selectedArsenal; if (selected === null || !selected.has(actor)) return null;
+          const ui = selected.ui(actor, this.recipe.map.entities);
+          if (ui.activeWeapon === null) return { weapon: 0, ammo: 0 };
+          const item = this.selectedOriginalWeapons?.get(ui.activeWeapon);
+          if (item === null) return { weapon: 0, ammo: 0 };
+          const original = guest.prepared.weapons.find(weapon => weapon.item === item);
+          if (original === undefined) throw new Error(`Selected death drop has no admitted source weapon for ${ui.activeWeapon}`);
+          return { weapon: original.weapon, ammo: ui.ammo?.count ?? 0 };
+        },
+        completed: (actor, reached) => {
+          const decision = this.qvmWeaponDecisions.at(-1);
+          if (decision?.application.identity.actor.equals(actor)) decision.reached = reached;
+          this.weaponSlots.get(actor)?.reconcile();
+        },
       });
       if (this.options.restore !== undefined) {
         const checkpoint = simulationQvmCheckpoint(this.options.restore);
@@ -2348,7 +2506,7 @@ export class SharedSimulation implements Simulation {
           return client;
         });
       }
-      return { kind: "q3-qvm", game, combat: combatBindings, inventory: nativeInventory };
+      return { kind: "q3-qvm", game, combat: combatBindings, inventory: nativeInventory, weapons: primaryWeapons, pickups: pickupBindings };
     }
     if (this.options.preparedQuakeC !== undefined) {
       const checkpoint = this.options.restore === undefined ? null : simulationQuakeCCheckpoint(this.options.restore);
@@ -3658,7 +3816,7 @@ export class SharedSimulation implements Simulation {
       }
       const character = this.characters.get(actor);
       if (character !== undefined) return character.jump();
-      if (this.requirePlayer(actor.id).character === "q2") return this.events.emit(this.recipe.character.definition.content,
+      if (this.player(actor.id)?.character === "q2") return this.events.emit(this.recipe.character.definition.content,
         { kind: "q2", event: { kind: "sound", actor: actor.id, origin: this.requirePlayer(actor.id).view().origin, path: "*jump1.wav", channel: 2,
           volume: 1, attenuation: 1, reliable: false, loop: "once" } });
     }
@@ -3787,6 +3945,47 @@ export class SharedSimulation implements Simulation {
     }
   }
 
+  private beginQvmSelectedFrame(): void {
+    if (this.selectedArsenal?.family === "q1") {
+      const frame = this.selectedQ1Frame(); this.selectedArsenal.game.beginFrame(seconds(frame.time), seconds(frame.elapsed));
+      if (this.selectedWeaponSource?.kind === "q1") this.selectedWeaponSource.missionWeapons.frame(seconds(frame.elapsed));
+      this.selectedArsenal.frame(seconds(frame.time));
+    }
+  }
+  private runQvmSelectedActors(): void {
+    const q2 = this.selectedWeaponSource?.kind === "q2" ? this.selectedWeaponSource : null;
+    const q3 = this.selectedQ3Source === null ? null : providerTiming(this.recipe, this.weaponProvider.provider).clock;
+    if (q3 !== null && q3.kind !== "q3") throw new Error("Selected Q3 source lost its clock");
+    const deadlines = new Set<number>();
+    if (q2 !== null) for (let due = q2.nextMilliseconds; due <= this.timeSeconds * 1000; due += q2.intervalMilliseconds) deadlines.add(due);
+    if (q3 !== null) for (let due = this.selectedQ3Next; due <= this.timeSeconds * 1000; due += q3.serverFrameMilliseconds) deadlines.add(due);
+    if (this.selectedArsenal?.family === "q1") deadlines.add(this.timeSeconds * 1000);
+    for (const due of [...deadlines].sort((a, b) => a-b)) {
+      const runQ2 = q2 !== null && due === q2.nextMilliseconds, runQ3 = q3 !== null && due === this.selectedQ3Next, previousQ3 = this.selectedQ3Time;
+      if (runQ2 && q2 !== null) { const milliseconds = q2.frame.time.kind === "milliseconds";
+        q2.frame = { frame: q2.frame.frame + 1, phase: "frame-entry", time: { kind: q2.frame.time.kind, value: milliseconds ? due : due / 1000 },
+          elapsed: { kind: q2.frame.elapsed.kind, value: milliseconds ? q2.intervalMilliseconds : q2.intervalMilliseconds / 1000 } };
+        q2.nextMilliseconds = due + q2.intervalMilliseconds; q2.mapMilliseconds = due;
+        if (this.selectedArsenal?.family === "q2") for (const actor of this.players()) if (this.selectedArsenal.has(actor)) this.selectedArsenal.frame(actor);
+      }
+      if (runQ3 && q3 !== null) { this.selectedQ3Time = due; this.selectedQ3Next = due + q3.serverFrameMilliseconds; this.selectedQ3Source?.synchronize(); }
+      const visited = new Set<OwnedActor>();
+      for (const actor of orderedActorTurns(this.actors, actor => this.sourcePosition(actor.id), visited)) {
+        const execution = this.actorExecutions.get(actor.id);
+        if (execution?.kind === "q3-source") { if (runQ3) execution.step(previousQ3, due); }
+        else if (execution?.kind === "q2" && runQ2 && execution.services === q2?.game)
+          executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler, frame: q2.frame,
+            timeSeconds: seconds(q2.frame.time), elapsed: seconds(q2.frame.elapsed), visited });
+        else if (execution?.kind === "q1" && this.selectedArsenal?.family === "q1" && execution.services === this.selectedArsenal.game && this.playerClient(actor.id) === null) {
+          const frame = this.selectedQ1Frame(); executeActor(execution, { actors: this.actors, bodies: this.bodies, physics: this.physics, scheduler: this.scheduler, frame,
+            timeSeconds: seconds(frame.time), elapsed: seconds(frame.elapsed), visited });
+        }
+        this.physics.commitAttachments();
+      }
+      for (const slot of this.weaponSlots.values()) slot.reconcile();
+    }
+  }
+
   async stepAsync(input: InputBatch): Promise<SimulationOutput> {
     this.pendingSharedRestore?.assertComplete();
     if (this.source.kind !== "q3-qvm") return this.step(input);
@@ -3796,7 +3995,7 @@ export class SharedSimulation implements Simulation {
     const guest = this.source.game;
     const seen = new Set<ActorId>();
     const commands = input.commands.map(command => {
-      if (command.source.kind !== "local-seat" || command.command.kind !== "q3" || command.arsenal !== undefined
+      if (command.source.kind !== "local-seat" || command.command.kind !== "q3" || command.arsenal !== undefined && this.selectedArsenal === null
         || !this.options.identity.owns(command.source.seat) || !this.options.identity.owns(command.source.client))
         throw new Error("Q3 guest local input requires an owned seat and native Q3 command");
       const player = guest.player(command.source.client);
@@ -3809,13 +4008,15 @@ export class SharedSimulation implements Simulation {
       const slot = this.weaponSlots.get(player.actor);
       if (this.grapple?.selection.binding === "slot") this.grapple.input(player.actor, slot?.equipmentSelected() === true && (command.command.buttons & 1) !== 0);
       const native = fromQ3UserCommand(command.command), requested = this.nativeWeaponRequests.get(player.actor);
-      return { player, command: { ...native, buttons: slot?.primarySelected() === false ? native.buttons & ~1 : native.buttons, ...(requested === undefined ? {} : { weapon: requested }) } };
+      return { player, command: { ...native, buttons: this.selectedArsenal === null && slot?.primarySelected() === false ? native.buttons & ~1 : native.buttons, ...(requested === undefined ? {} : { weapon: requested }) } };
     });
     const profile = providerTiming(this.recipe, this.recipe.map.entities.provider).clock;
     if (profile.kind !== "q3") throw new Error("Q3 guest lost its native frame clock");
     this.stepping = true;
     try {
       this.hostMilliseconds += input.elapsedMilliseconds;
+      this.selectedMilliseconds += input.elapsedMilliseconds;
+      this.selectedQ3Source?.synchronize();
       for (const entry of commands) {
         if (this.grapple?.source.kind === "q3-qvm") this.grapple.source.game.pull(entry.player.actor);
         const scale = this.grapple?.gravityScale(entry.player.actor) ?? 1;
@@ -3836,7 +4037,9 @@ export class SharedSimulation implements Simulation {
       while (this.sourceSchedulingMilliseconds >= this.timeSeconds * 1000 + profile.serverFrameMilliseconds) {
         this.sourceFrame = this.clock.advance({ kind: "milliseconds", value: profile.serverFrameMilliseconds });
         this.advanceQ1Punch(); this.beginNativeEquipmentFrame();
+        this.beginQvmSelectedFrame();
         await this.source.game.runFrame(Math.trunc(this.timeSeconds * 1000));
+        this.runQvmSelectedActors();
         this.assertOpen();
         this.sourceFrame = this.clock.enter("frame-exit");
         this.modOwner?.advance(this.sourceFrame);
@@ -4326,8 +4529,9 @@ export class SharedSimulation implements Simulation {
     if (this.source.kind === "q3-qvm") {
       const player = this.source.game.players().find(player => player.actor.equals(actor));
       if (player === undefined) throw new Error("Actor has no Q3 guest client UI");
-      const ui = q3GuestPlayerUi(this.source.game.records.player(player.sourceEntity), this.weaponProvider, this.timeSeconds * 1000,
+      const original = q3GuestPlayerUi(this.source.game.records.player(player.sourceEntity), this.recipe.map.entities, this.timeSeconds * 1000,
         this.options.q3Guest?.prepared.weapons, this.options.q3Guest?.prepared.artifact.known?.product);
+      const ui = this.selectedArsenal?.has(actor) === true ? { ...original, inventory: this.inventory.entries(actor), ...this.selectedArsenal.ui(actor, this.weaponProvider) } : original;
       if (this.source.combat === null) return ui;
       const combat = this.combat.read(actor);
       if (combat === null) throw new Error("Qualified Q3 guest client has no combat binding");
@@ -5042,19 +5246,20 @@ export class SharedSimulation implements Simulation {
       const model = this.selectedArsenal?.view(actor); return model == null ? [] : [[actor, model] satisfies [ActorId, { readonly path: string; readonly frame: number }]];
     }));
     for (const [actor, model] of weaponModels) {
-      const player = this.player(actor); if (player === null || player.intermission || player.cutscene !== null) continue;
+      const player = this.player(actor);
+      if (player === null ? this.source.kind !== "q3-qvm" || this.playerClient(actor) === null : player.intermission || player.cutscene !== null) continue;
       const q2 = providerFamily(this.weaponProvider.provider) === "q2" ? this.viewModels.get(actor)?.q2 : undefined;
-      const nativeView = this.source.kind === "q2" && player.character === "q2" ? this.q2Views.get(actor) : undefined;
-      const view = nativeView === undefined ? player.view() : this.playerView(actor), sourceView = q2 === undefined ? undefined : nativeView;
+      const nativeView = this.source.kind === "q2" && player?.character === "q2" ? this.q2Views.get(actor) : undefined;
+      const view = nativeView === undefined && player !== null ? player.view() : this.playerView(actor), sourceView = q2 === undefined ? undefined : nativeView;
       const selected = this.selectedArsenal, arsenal = selected?.read(actor), body = this.bodies.read(actor);
       const q3Weapon = selected?.family !== "q3" || arsenal?.state.kind !== "q3" || body === null ? {} : { q3Weapon: {
         ...selected.viewState(actor), timeMilliseconds: Math.trunc(this.selectedMilliseconds), weapon: arsenal.state.sourceWeapon,
-        firing: (player.buttons & 1) !== 0 && (this.combat.read(actor)?.health ?? 0) > 0,
-        horizontalSpeed: Math.hypot(body.velocity.x, body.velocity.y), bobCycle: player.state.kind === "q3" ? player.state.bobCycle : 0 } };
-      result.push({ actor, ...q3Weapon, content: this.weaponProvider.content, family: providerFamily(this.weaponProvider.provider), path: model.path, frame: model.frame, oldFrame: model.frame,
+        firing: ((player?.buttons ?? this.modClientCommands.get(actor)?.input.command.buttons ?? 0) & 1) !== 0 && (this.combat.read(actor)?.health ?? 0) > 0,
+        horizontalSpeed: Math.hypot(body.velocity.x, body.velocity.y), bobCycle: player?.state.kind === "q3" ? player.state.bobCycle : this.source.kind === "q3-qvm" ? this.source.game.records.player(this.source.game.records.requireSlot(actor)).bobCycle : 0 } };
+      result.push({ actor, ...q3Weapon, ...(arsenal?.activeWeapon == null ? {} : { weaponItem: arsenal.activeWeapon }), content: this.weaponProvider.content, family: providerFamily(this.weaponProvider.provider), path: model.path, frame: model.frame, oldFrame: model.frame,
         skin: q2?.skin ?? 0, effects: 0, renderFlags: providerFamily(this.weaponProvider.provider) === "q2" ? 1 | 4 | 16 : 0,
         origin: add(add(view.origin, { x: 0, y: 0, z: view.viewHeight }), sourceView?.gunOffset ?? q2?.kickOrigin ?? zero), angles: add(view.angles, sourceView?.gunAngles ?? q2?.kickAngles ?? zero),
-        scale: 1, visible: (this.combat.read(actor)?.health ?? 0) > 0, viewWeapon: true });
+        scale: 1, visible: this.source.kind === "q3-qvm" || (this.combat.read(actor)?.health ?? 0) > 0, viewWeapon: true });
     }
     return result;
   }
@@ -5074,17 +5279,20 @@ export class SharedSimulation implements Simulation {
 
   private grantSelectedArsenal(actor: ActorId, category: "weapons" | "ammo"): boolean {
     const arsenal = this.selectedArsenal; if (arsenal === null) return false;
-    const player = this.requirePlayer(actor), weapons = new Set(arsenal.ui(actor, this.recipe.map.entities).items.filter(item => item.kind === "weapon").map(item => item.id));
-    for (const entry of arsenal.read(actor).ammo) if ((category === "weapons") === weapons.has(entry.item))
-      this.inventory.configure(player.actor, { ...entry, count: category === "weapons" ? 1 : entry.capacity });
-    player.arsenal = arsenal.read(actor); return true;
+    const owner = this.actors.resolveOwned(actor); if (owner === null) throw new Error("Selected grant actor is retired");
+    const native = this.source.kind === "q3-qvm" ? new Set(this.options.q3Guest?.prepared.weapons.flatMap(weapon => weapon.ammo === null ? [weapon.item] : [weapon.item, weapon.ammo])) : null;
+    const weapons = new Set(arsenal.ui(actor, this.recipe.map.entities).items.filter(item => item.kind === "weapon").map(item => item.id));
+    for (const entry of arsenal.read(actor).ammo) if (!native?.has(entry.item) && (category === "weapons") === weapons.has(entry.item))
+      this.inventory.configure(owner, { ...entry, count: category === "weapons" ? 1 : entry.capacity });
+    this.refreshArsenalCache(actor); return true;
   }
 
   private giveSelectedItem(actor: ActorId, args: readonly string[]): boolean {
     const arsenal = this.selectedArsenal; if (arsenal === null) return false;
+    const owner = this.actors.resolveOwned(actor); if (owner === null) throw new Error("Selected grant actor is retired");
     const last = args.at(-1), quantity = last !== undefined && /^-?\d+$/.test(last) ? Number(last) : null;
     const requested = (quantity === null ? args : args.slice(0, -1)).join(" ").toLowerCase();
-    if (this.selectedQ3Source?.giveHoldable(this.requirePlayer(actor).actor, requested) === true) return true;
+    if (this.selectedQ3Source?.giveHoldable(owner, requested) === true) return true;
     const normalize = (value: string) => value.toLowerCase().replaceAll(" ", "").replaceAll("_", "");
     const entries = arsenal.read(actor).ammo, ui = arsenal.ui(actor, this.recipe.map.entities);
     const named = ui.items.find(item => normalize(item.id) === normalize(requested) || normalize(item.label) === normalize(requested));
@@ -5107,25 +5315,40 @@ export class SharedSimulation implements Simulation {
         const target = this.inventory.entries(actor).find(entry => entry.item === item);
         if (target === undefined) throw new Error(`Selected grant destination is unavailable: ${item}`);
         const count = weapon === undefined ? quantity ?? (sourceItem?.kind === "ammo" ? target.count + sourceItem.quantity : target.capacity) : 1;
-        this.inventory.configure(this.requirePlayer(actor).actor, { ...target, count: Math.max(0, count), capacity: Math.max(target.capacity, count) });
+        this.inventory.configure(owner, { ...target, count: Math.max(0, count), capacity: Math.max(target.capacity, count) });
       }
       if (weapon !== undefined && this.source.kind === "q2") {
         const definition = this.source.weapons.registeredDefinitions().find(item => item.item === requested);
         const sourceAmmo = definition?.ammo == null ? null : this.source.items.lookup(definition.ammo);
         const mappedAmmo = sourceAmmo === null ? undefined : profile?.ammo.find(item => item.source === sourceAmmo.id);
         if (mappedAmmo !== undefined && sourceAmmo !== null) for (const item of mappedAmmo.destinations)
-          this.inventory.give(this.requirePlayer(actor).actor, item, (this.source.game.options.deathmatchFlags & 8192) !== 0 ? 1000 : sourceAmmo.quantity);
-        arsenal.pickupWeapons(this.requirePlayer(actor).actor, destinations, "better");
+          this.inventory.give(owner, item, (this.source.game.options.deathmatchFlags & 8192) !== 0 ? 1000 : sourceAmmo.quantity);
+        arsenal.pickupWeapons(owner, destinations, "better");
       }
-      this.requirePlayer(actor).arsenal = arsenal.read(actor);
+      this.refreshArsenalCache(actor);
       return true;
     }
     const weapon = ui.items.some(item => item.id === entry.item && item.kind === "weapon"), count = weapon ? 1 : quantity ?? entry.capacity;
-    this.inventory.configure(this.requirePlayer(actor).actor, { ...entry, count: Math.max(0, count), capacity: Math.max(entry.capacity, count) });
-    this.requirePlayer(actor).arsenal = arsenal.read(actor); return true;
+    this.inventory.configure(owner, { ...entry, count: Math.max(0, count), capacity: Math.max(entry.capacity, count) });
+    this.refreshArsenalCache(actor); return true;
+  }
+
+  arsenalState(actor: ActorId): ArsenalState | null {
+    return this.selectedArsenal?.has(actor) === true ? this.selectedArsenal.read(actor) : this.player(actor)?.arsenal ?? null;
+  }
+
+  selectedWeaponCommand(actor: ActorId, name: string, args: readonly string[]): boolean {
+    if (this.selectedArsenal === null || !["use", "weapon", "weapnext", "weapprev"].includes(name)) return false;
+    const ui = this.playerUi(actor), owned = ui.items.filter(item => item.kind === "weapon" && item.owned);
+    const requested = args.join("").toLowerCase().replaceAll(" ", "");
+    const selected = name === "use" || name === "weapon" ? owned.find(item => item.id === requested || item.label.toLowerCase().replaceAll(" ", "") === requested)
+      : owned[(owned.findIndex(item => item.id === ui.activeWeapon) + (name === "weapnext" ? 1 : owned.length - 1)) % owned.length];
+    if (selected !== undefined) this.requestWeapon(actor, { provider: this.inventory.itemOwner(actor, selected.id) ?? this.weaponProvider.provider, item: selected.id });
+    return selected !== undefined || name === "weapnext" || name === "weapprev";
   }
 
   playerCommand(actor: ActorId, name: string, args: readonly string[]): undefined {
+    if (this.selectedWeaponCommand(actor, name, args)) return undefined;
     if (this.source.kind === "q2-native") { const game = this.source.game, slot = this.nativeQ2Client(actor).slot + 1; q2GameCallback(() => game.command(slot, [name, ...args], args.join(" "))); return undefined; }
     if (name === "giveall") return this.playerCommand(actor, "give", ["all"]);
     if (name === "suicide") return this.playerCommand(actor, "kill", args);
@@ -5613,11 +5836,14 @@ export class SharedSimulation implements Simulation {
       }), true);
     }
     const selectedSource = reader.field("selectedWeaponSource"), weaponSource = this.selectedWeaponSource;
-    const hydrateSelectedQ1 = source.kind !== "quakec" || weaponSource?.kind !== "q1" ? undefined : () => {
+    const hydrateSelectedQ1 = source.kind !== "quakec" && source.kind !== "q3-qvm" || weaponSource?.kind !== "q1" ? undefined : () => {
       selectedSource.field("kind").literal("q1");
       if (providerFamily(this.recipe.character.definition.provider) === "q1") this.q1CharacterSource();
       weaponSource.game.restore(readQ1FoundationCheckpoint(selectedSource.field("entities")), { scheduleThinks: false });
-      for (const player of weaponSource.game.players.values()) source.game.setClientMaxHealth(player.actor.id, player.maxHealth);
+      for (const player of weaponSource.game.players.values()) {
+        if (source.kind === "quakec") source.game.setClientMaxHealth(player.actor.id, player.maxHealth);
+        else this.requireQvmWeapons().setMaxHealth(player.actor.id, player.maxHealth);
+      }
       return undefined;
     };
     const sharedSave = { ...save, inventories: this.sourceItemsRestore?.effective(inventories) ?? inventories, combat: legacyQvmCombat === null ? save.combat : save.combat.map(entry => {
@@ -5777,7 +6003,7 @@ export class SharedSimulation implements Simulation {
       }, this.deathAnimations);
       character.restore(checkpoint); this.characters.set(actor, character);
     });
-    for (const player of this.playerStates.values()) this.bindSelectedOriginalPickups(player.actor);
+    for (const actor of this.players()) { const owner = this.actors.resolveOwned(actor); if (owner !== null) this.bindSelectedOriginalPickups(owner); }
     const death = reader.field("deathAnimations"); this.deathAnimations.restore({ version: death.field("version").literal(1), index: death.field("index").integer(0) });
     reader.field("characterTicks").list(value => this.characterTicks.set(owner(value.field("actor")), value.field("time").number()));
     reader.field("entryCarry").list(value => this.entryCarry.set(owner(value.field("actor")), readQ1Travel(value.field("state"))));

@@ -150,6 +150,7 @@ export interface PlayerUi {
 }
 
 export interface SimulationPresentation {
+  readonly weaponItem?: ItemId;
   readonly replacesBody?: true;
   readonly renderOwner?: "source-client";
   readonly flare?: SceneFlare;

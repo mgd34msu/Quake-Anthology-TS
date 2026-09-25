@@ -18,7 +18,7 @@ import type { Q3PresentationSession } from "../../content/q3/presentation/client
 import type { SnapshotSource } from "../../content/q3/presentation/snapshots.ts";
 import type { CommandSource } from "../../content/q3/presentation/prediction.ts";
 import type { Snapshot } from "../../network/q3/server-message.ts";
-import { MoveType, PersistentIndex, Team, statSchema } from "../../content/q3/base/shared/definitions.ts";
+import { MoveType, PersistentIndex, Team } from "../../content/q3/base/shared/definitions.ts";
 import { weaponViewCamera } from "./weapon-view.ts";
 import type { WeaponHudReader } from "../../content/q3/presentation/player-state.ts";
 import type { ActorCommand } from "../../contracts/session.ts";
@@ -141,6 +141,7 @@ export class ApplicationQ3Client {
   private readonly localSource: ApplicationQ3Source | null;
   private readonly product: Q3SourcePresentationState["product"];
   private supplementalViewWeapon = false;
+  private readonly selectedHeldActors = new Map<number, ActorId>();
   private weaponSelection: number | null = null;
   private cvarOwner: CvarRegistry;
   get cvars(): CvarRegistry { return this.cvarOwner; }
@@ -333,6 +334,7 @@ export class ApplicationQ3Client {
         lightForPoint: point => this.light(point), assertCurrent: session.assertCurrent });
       const game = await ApplicationQvmClient.create({ ...(this.artifacts === undefined ? {} : { artifacts: this.artifacts }), seat, commandContext: this.commandContext(), services, media, session, connection: o.connection, queries: o.queries,
         ...(o.equipmentWeapon === undefined ? {} : { equipmentWeapon: o.equipmentWeapon }),
+        heldWeaponActor: number => { const actor = source.actorAt(number); return !this.bodyHidden(number) && this.selectedHeldActors.get(actor.slot)?.equals(actor) ? actor : null; },
         bodyOverrides: { active: () => this.hiddenBodies.size !== 0, hidden: number => this.bodyHidden(number) },
         commands: o.commandBuffer, cvars: o.guestCvars, browser: o.browser, keys: o.keys, map: o.assets.content.recipe.map.geometry.requestedPath, now: o.now, keyCatcher: () => this.keyCatcher,
         removeCommand: name => { this.commandNames.delete(name); o.commandRegistration.remove(name); },
@@ -394,16 +396,14 @@ export class ApplicationQ3Client {
     return equipment === null ? this.selection : { ...this.selection, weapon: equipment.primaryWeapon };
   }
   get presentedEvents(): number { return this.eventCount; }
+  get sharedHeldWeapons(): readonly import("./q3-client/qvm.ts").QvmHeldWeapon[] { const backend = this.requireBackend(); return backend.kind === "qvm" ? backend.game.sharedHeldWeapons : []; }
+  get sharedEquipmentViewVisible(): boolean | null {
+    const backend = this.requireBackend();
+    return backend.kind === "qvm" ? backend.game.sharedEquipmentViewVisible : null;
+  }
   weaponHudView(): { readonly visible: boolean; readonly aggregateWarning: boolean } {
     const backend = this.requireBackend();
-    if (backend.kind === "qvm") {
-      if (!backend.game.sharedEquipmentHud) return { visible: false, aggregateWarning: false };
-      const ps = this.source.read(this.source.current().number)?.playerState;
-      return { visible: ps !== undefined && ps.stats.get(statSchema(ps.product).health) > 0
-        && ps.pmType !== MoveType.PM_INTERMISSION && ps.persistant.get(PersistentIndex.PERS_TEAM) !== Team.TEAM_SPECTATOR
-        && (this.cvars.get("cg_draw2D")?.integerValue ?? 1) !== 0 && (this.cvars.get("cg_drawStatus")?.integerValue ?? 1) !== 0,
-        aggregateWarning: false };
-    }
+    if (backend.kind === "qvm") return { visible: backend.game.sharedEquipmentHud, aggregateWarning: false };
     const state = this.requireGame().state, ps = state.snap?.playerState;
     return { visible: ps !== undefined && !state.levelShot && !state.showScores && ps.health > 0
       && ps.pmType !== MoveType.PM_INTERMISSION && ps.persistant.get(PersistentIndex.PERS_TEAM) !== Team.TEAM_SPECTATOR
@@ -429,9 +429,11 @@ export class ApplicationQ3Client {
   receive(state: Q3SourcePresentationState, events: readonly SimulationPresentationEvent[], commands: readonly ActorCommand[]): void { this.requireGame(); if (this.localSource === null) throw new Error("Remote Q3 cgame receives snapshots through its network connection"); this.localSource.receive(state, events, commands); }
   async prepare(frameNumber: number, viewport = this.options.viewport(), presentations: readonly SimulationPresentation[] = [], statusVisible = true): Promise<void> {
     this.hiddenBodies.clear();
+    this.selectedHeldActors.clear();
     this.bodyPoses.clear();
     this.poseActors.clear();
     for (const model of presentations) {
+      if (model.renderOwner !== "source-client" && model.visible && model.viewWeapon) this.selectedHeldActors.set(model.actor.slot, model.actor);
       if (model.replacesBody) this.hiddenBodies.set(model.actor.slot, model.actor);
       if (model.renderOwner !== "source-client" && model.visible && !model.viewWeapon) this.poseActors.set(model.actor.slot, model.actor);
     }

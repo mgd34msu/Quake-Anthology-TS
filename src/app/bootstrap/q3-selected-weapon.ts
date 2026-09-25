@@ -45,7 +45,7 @@ export class SelectedQ3WeaponPresenter {
     this.models.set(key, pending); return pending;
   }
 
-  async world(source: SimulationPresentation, character: Q3CharacterView, personalModel: boolean): Promise<readonly Q3CharacterPass[]> {
+  async world(source: SimulationPresentation, character: Pick<Q3CharacterView, "origin" | "powerups">, personalModel: boolean): Promise<readonly Q3CharacterPass[]> {
     const view = source.q3Weapon;
     if (view === undefined || !source.visible || source.path === "") return [];
     const stem = source.path.replace(/\.[^.]+$/, "");

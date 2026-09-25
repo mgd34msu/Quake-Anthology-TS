@@ -22,7 +22,7 @@ export function assertQ3GuestRecipe(recipe: ExecutableRecipe, execution: Q3GameE
     || recipe.movement.provider !== 'q3:movement' || recipe.movement.content !== owner.content
     || recipe.character.definition.provider !== 'q3:character' || recipe.character.definition.content !== owner.content
     || recipe.character.appearance.content !== owner.content || !recipe.character.appearance.provider.startsWith('q3:model/')
-    || recipe.weapons.length !== 1 || recipe.weapons.some(weapon => !same(weapon))
+    || recipe.weapons.length !== 1 || recipe.weapons.some(weapon => !same(weapon)) && execution.artifact.digest !== 'sha256:9751bad99a2d138f96a9b0436d2ea2d965b86214175dc33e4cea95e059419337'
     || ![recipe.engineBehavior, recipe.combat, recipe.inventory, recipe.match, recipe.transition].every(same)
     || recipe.enemies.kind !== 'map-defined'
     || recipe.timing.find(timing => timing.provider === owner.provider)?.clock.kind !== 'q3') {

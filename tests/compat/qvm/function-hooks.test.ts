@@ -3,6 +3,7 @@ import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
 import { QvmInterpreter, QvmModule, QvmOpcode, parseQvm, parseQvmRestart, qvmArguments, rejectQvmSyscall, resolveQvmArtifact } from "../../../src/compat/qvm/index.ts";
 import type { QvmCancellationScope, QvmFunctionCall, QvmFunctionHook } from "../../../src/compat/qvm/index.ts";
+import type { QvmRegionControl } from "../../../src/compat/qvm/interpreter.ts";
 
 type Operation = readonly [QvmOpcode, number?];
 function bytecode(operations: readonly Operation[]): Uint8Array {
@@ -20,6 +21,114 @@ function bytecode(operations: readonly Operation[]): Uint8Array {
   return output.finish();
 }
 function unexpectedTrap(): never { throw new Error("Unexpected syscall"); }
+
+const regionSource = bytecode([
+  [QvmOpcode.OP_ENTER, 32], [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_CONST, 7], [QvmOpcode.OP_STORE4],
+  [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 3], [QvmOpcode.OP_ADD], [QvmOpcode.OP_STORE4],
+  [QvmOpcode.OP_LOCAL, 24], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_LEAVE, 32],
+]);
+for (const semantics of ["interpreted", "compiled"] satisfies readonly import("../../../src/compat/qvm/interpreter.ts").QvmSemantics[]) {
+  test(`${semantics} original regions retain frame locals and isolate nested execution and skip`, async () => {
+    for (const asynchronous of [false, true]) {
+      const vm = new QvmInterpreter(parseQvm(regionSource), unexpectedTrap, undefined, null, semantics);
+      let depth = 0, completions = 0;
+      const controls: QvmRegionControl[] = [];
+      vm.bindInvocation(0, call => {
+        const outer = depth++ === 0;
+        call.regions([{ entry: 4, join: 10, run: control => {
+          controls.push(control); expect(control.localWord(24)).toBe(7);
+          if (outer) {
+            expect(control.invoke(qvmArguments([]))).toBe(10);
+            expect(control.localWord(24)).toBe(7);
+            return "skip";
+          }
+          return "execute";
+        }, completed: control => { completions++; expect(control.localWord(24)).toBe(10); } }]);
+        const result = call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
+        if (typeof result !== "number") return result.finally(() => { depth--; });
+        depth--; return result;
+      });
+      expect(asynchronous ? await vm.invokeAsync(qvmArguments([])) : vm.invoke(qvmArguments([]))).toBe(7);
+      expect(completions).toBe(1); expect(controls).toHaveLength(2);
+      for (const control of controls) expect(() => control.localWord(24)).toThrow();
+      expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
+    }
+  });
+}
+
+test("original regions reject incompatible operands and keep caught scope failures sticky", () => {
+  for (const [entry, join] of [[6, 10], [4, 9], [4, 13], [0, 10]]) {
+    const vm = new QvmInterpreter(parseQvm(regionSource), unexpectedTrap);
+    vm.bindInvocation(0, call => {
+      if (entry === undefined || join === undefined) throw new Error("Missing region boundary");
+      call.regions([{ entry, join, run: () => "skip" }]); return call.proceed();
+    });
+    expect(() => vm.invoke(qvmArguments([]))).toThrow("QVM region");
+    expect(vm.stackPointer).toBe(vm.memory.length);
+  }
+  const vm = new QvmInterpreter(parseQvm(regionSource), unexpectedTrap);
+  vm.bindInvocation(0, call => {
+    call.regions([{ entry: 4, join: 10, run: control => {
+      try { control.localWord(32); } catch { /* The invalid access remains a failed source scope. */ }
+      return "execute";
+    } }]); return call.proceed();
+  });
+  expect(() => vm.invoke(qvmArguments([]))).toThrow("local is outside");
+  expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
+});
+
+test("original region cancellation preserves the caller and skips its source continuation", () => {
+  const vm = new QvmInterpreter(parseQvm(regionSource), unexpectedTrap);
+  let completed = false;
+  vm.bindInvocation(0, call => {
+    const cancellation = call.cancellationScope();
+    call.regions([{ entry: 4, join: 10, run: control => control.cancelFunction(cancellation), completed: () => { completed = true; } }]);
+    return call.proceed();
+  });
+  expect(vm.invoke(qvmArguments([]))).toBe(0); expect(completed).toBe(false);
+  expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
+});
+
+test("standalone original region consumes only explicit live-ins and preserves caller stack", () => {
+  const vm = new QvmInterpreter(parseQvm(regionSource), unexpectedTrap);
+  const remove = vm.bindInvocation(0, call => call.evaluateRegion({ entry: 4, join: 10, inputs: [24], result: 24 }, [19]));
+  expect(vm.invoke(qvmArguments([]))).toBe(22); expect(vm.stackPointer).toBe(vm.memory.length);
+  remove();
+  vm.bindInvocation(0, call => call.evaluateRegion({ entry: 4, join: 10, inputs: [], result: 24 }, []));
+  expect(() => vm.invoke(qvmArguments([]))).toThrow("undeclared source local 24");
+  expect(vm.stackPointer).toBe(vm.memory.length); expect(vm.isActive).toBe(false);
+});
+
+test("invocation effects restore current module reentry after await and expire with their call", async () => {
+  const identity = { id: "test:effects", artifactPath: "vm/qagame.qvm", revision: "test",
+    digest: createContentDigest(new Bun.CryptoHasher("sha256").update(regionSource).digest("hex")) } satisfies import("../../../src/contracts/execution.ts").ModuleIdentity;
+  const artifact = resolveQvmArtifact({ module: identity, role: "qagame", bytes: regionSource });
+  if (artifact.kind !== "bytecode") throw new Error("Missing bytecode");
+  const module = new QvmModule({ artifact, host: rejectQvmSyscall });
+  const retained: QvmFunctionCall[] = [];
+  let depth = 0;
+  module.bindInvocation({ kind: "qvm", module: identity, instructionIndex: 0 }, call => {
+    retained.push(call);
+    if (depth !== 0) return call.proceed();
+    return (async () => {
+      const result = await call.proceedAsync();
+      call.effect(() => {
+        depth++;
+        try { expect(module.call([])).toBe(10); }
+        finally { depth--; }
+        return undefined;
+      });
+      return result;
+    })();
+  });
+  try {
+    expect(await module.callAsync([])).toBe(10);
+    expect(retained).toHaveLength(2);
+    for (const call of retained) expect(() => call.effect(() => undefined)).toThrow("active syscall or function hook");
+    expect(module.interpreter.isActive).toBe(false);
+    expect(module.interpreter.stackPointer).toBe(module.memory.bytes.length);
+  } finally { module.retire(); }
+});
 
 test("live callback resolver sees assignments immediately and preserves explicit hooks, observers and direct entries", () => {
   const bytes = bytecode([

@@ -1,3 +1,5 @@
+import type { QvmHeldWeapon } from "./q3-client/qvm.ts";
+import { attachSceneEntity, modelAttachmentTag } from "../../render/scene/models/transform.ts";
 import { samePresentationOwner, type PresentationOwner } from "../../contracts/presentation.ts";
 import { createWorldSurfaceAdmission } from "../../render/scene/world.ts";
 import { createSourceSceneOrder, sceneModelBatches, sequenceDrawGroup, type SceneOperation } from "../../render/scene/submissions.ts";
@@ -55,7 +57,7 @@ export function seatModelVisible(viewer: ActorId | null, source: Pick<Simulation
 }
 
 export class ApplicationWorldScene {
-  private readonly groups = new Map<ContentId, ModelGroup>();
+  private readonly groups = new Map<string, ModelGroup>();
   private readonly ordered: { readonly group: ModelGroup; readonly pass: ModelPass }[] = [];
   private readonly objects = new Map<ModelPass, PresentationObject>();
   private readonly characters = new Map<string, Q3CharacterPresenter>();
@@ -85,7 +87,7 @@ export class ApplicationWorldScene {
     return pattern === undefined || pattern.length === 0 ? absent : pattern.charCodeAt(Math.trunc(this.preparedTime * 10) % pattern.length) - 97;
   }
 
-  async prepare(viewer: ActorId | null, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[], fieldOfView = 90): Promise<void> {
+  async prepare(viewer: ActorId | null, snapshot: WorldSnapshot, presentations: readonly SimulationPresentation[], characters: readonly Q3CharacterView[], fieldOfView = 90, heldWeapons: readonly QvmHeldWeapon[] = [], viewWeaponVisible = true): Promise<void> {
     this.objects.clear();
     this.ordered.length = 0;
     this.flares = [];
@@ -95,11 +97,13 @@ export class ApplicationWorldScene {
     for (const group of this.groups.values()) group.passes.length = 0;
     const inlineModels: NonNullable<WorldViewInput["inlineModels"]>[number][] = [];
     const brushModels: BrushPresentation[] = [];
-    const append = async (content: ContentId, entity: SceneEntity, options?: (entity: SceneEntity) => ModelSourceOptions, object?: PresentationObject): Promise<void> => {
-      let group = this.groups.get(content);
+    const append = async (content: ContentId, entity: SceneEntity, options?: (entity: SceneEntity) => ModelSourceOptions, object?: PresentationObject, shaderContent?: ContentId): Promise<void> => {
+      const key = `${content}/${shaderContent ?? content}`;
+      let group = this.groups.get(key);
       if (group === undefined) {
-        group = { renderer: new SceneModelRenderer(await this.assets.provider(content), this.assets.world), passes: [] };
-        this.groups.set(content, group);
+        const provider = await this.assets.provider(content);
+        group = { renderer: new SceneModelRenderer(shaderContent === undefined ? provider : { family: "q3", palette: provider.palette, textures: provider.textures, shaders: (await this.assets.provider(shaderContent)).shaders }, this.assets.world), passes: [] };
+        this.groups.set(key, group);
       }
       const pass: ModelPass = { entity, options: options ?? (() => ({})) };
       group.passes.push(pass);
@@ -109,7 +113,7 @@ export class ApplicationWorldScene {
     };
     for (const original of presentations) {
       let source = original;
-      if (!source.visible) continue;
+      if (!source.visible || source.viewWeapon && !viewWeaponVisible && viewer?.equals(source.actor)) continue;
       if (source.shaderBeam !== undefined) {
         const provider = await this.assets.provider(source.content), beam = source.shaderBeam;
         this.shaderBeams.push({ material: await provider.shaders.register(beam.path), origin: source.origin, end: beam.end, width: beam.width });
@@ -209,6 +213,31 @@ export class ApplicationWorldScene {
         swingSpeed: 0.3, noPlayerAnimations: false, personalModel: viewer?.equals(character.actor) ?? false, shadowPlane: null, weapon });
       const object: PresentationObject = { opacity: character.opacity ?? 1, passes: [] };
       for (const pass of passes) await append(pass.content ?? this.assets.content.recipe.character.appearance.content, pass.entity, pass.options, object);
+    }
+    for (const held of heldWeapons) {
+      const equipped = presentations.find(source => source.viewWeapon && source.visible && source.actor.equals(held.parent.actor));
+      if (equipped === undefined) continue;
+      const tag = modelAttachmentTag(held.parent, "tag_weapon");
+      if (tag === null) throw new Error("Original source torso has no weapon attachment");
+      let passes: readonly import("../../content/q3/foundation/presentation.ts").Q3CharacterPass[];
+      if (equipped.q3Weapon !== undefined) {
+        const key = `${equipped.content}/${equipped.actor.slot}/${equipped.actor.generation}`;
+        let selected = this.selectedWeapons.get(key);
+        if (selected === undefined) { selected = new SelectedQ3WeaponPresenter(this.assets, this.characterAssets?.animation ?? null); this.selectedWeapons.set(key, selected); }
+        passes = await selected.world(equipped, { origin: held.parent.lightingOrigin, powerups: 0 }, false);
+      } else passes = await this.foreignWeapons.frame(equipped, { origin: held.parent.lightingOrigin, color: { x: 1, y: 1, z: 1, w: 1 } });
+      if (passes.length === 0) throw new Error(`Selected weapon ${equipped.path} has no source held model`);
+      for (const [index, pass] of passes.entries()) {
+        const attach = (entity: SceneEntity): SceneEntity => ({ ...attachSceneEntity(held.parent, entity, tag), flags: held.parent.flags,
+          lightingOrigin: held.parent.lightingOrigin, shadowPlane: held.parent.shadowPlane });
+        if (index !== 0) { await append(pass.content ?? equipped.content, attach(pass.entity), pass.options); continue; }
+        for (const sourcePass of held.passes) {
+          const shader = sourcePass.shader;
+          const entity: SceneEntity = { ...attach(pass.entity), color: shader === null ? pass.entity.color : { x: sourcePass.color.x / 255, y: sourcePass.color.y / 255, z: sourcePass.color.z / 255, w: sourcePass.color.w / 255 },
+            shaderTime: { kind: "seconds", value: sourcePass.shaderTime } };
+          await append(pass.content ?? equipped.content, entity, value => ({ ...pass.options(value), customShader: shader }), undefined, shader === null ? undefined : held.content);
+        }
+      }
     }
     this.inlineModels = inlineModels;
     this.brushModels = brushModels;

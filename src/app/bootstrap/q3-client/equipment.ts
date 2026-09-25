@@ -1,19 +1,12 @@
-import { WeaponState } from "../../../content/q3/base/shared/definitions.ts";
-import type { Snapshot } from "../../../network/q3/server-message.ts";
-import { PlayerStateRecord } from "../../../network/q3/state/player.ts";
+import type { ArsenalAmmoWarning } from "../../../contracts/ui.ts";
+import type { WireUserCommand } from "../../../network/q3/message.ts";
 
 export interface Q3EquipmentPresentation {
   readonly primaryWeapon: number;
+  readonly warning: ArsenalAmmoWarning;
 }
 
-/** Copies presentation state for cgame; source gameplay and prediction collision stay intact. */
-export function q3PresentationSnapshot(snapshot: Snapshot, equipment: Q3EquipmentPresentation | null): Snapshot {
-  if (equipment === null) return snapshot;
-  const source = snapshot.playerState, player = new PlayerStateRecord(source.product, source.pmType, source.weapon, source.weaponState);
-  player.copyFrom(source);
-  if (equipment !== null) {
-    player.weapon = 0; player.weaponState = WeaponState.WEAPON_READY; player.weaponTime = 0;
-    player.ammo.set(0, -1);
-  }
-  return { ...snapshot, playerState: player };
+/** Keep the original predicted held weapon while the selected arsenal owns attack input. */
+export function q3EquipmentCommand(command: WireUserCommand, equipment: Q3EquipmentPresentation | null): WireUserCommand {
+  return equipment === null ? command : { ...command, weapon: equipment.primaryWeapon, buttons: command.buttons & ~1 };
 }

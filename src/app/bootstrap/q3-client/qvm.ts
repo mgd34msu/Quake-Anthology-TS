@@ -1,3 +1,10 @@
+import type { ActorId } from "../../../contracts/identity.ts";
+import type { ContentId } from "../../../contracts/content.ts";
+import type { SceneEntity } from "../../../contracts/scene.ts";
+import type { Vec4 } from "../../../contracts/math.ts";
+import { QvmOpcode } from "../../../compat/qvm/image.ts";
+import { QvmCgameImport } from "../../../compat/qvm/abi.ts";
+import { QVM_REF_ENTITY_BYTES, readQvmRefEntity } from "../../../compat/qvm/render-record.ts";
 import { SharedQvmClientClipModels } from './guest-collision.ts';
 import type { QvmClientClipModels } from '../../../compat/qvm/client-collision-syscalls.ts';
 import type { ApplicationKeyProfile } from "../keys.ts";
@@ -36,11 +43,18 @@ import type { ApplicationQ3Assets } from './assets.ts';
 import type { ApplicationQ3Services } from './services.ts';
 import type { SharedSceneQueries } from '../../../world/collision/index.ts';
 import { UserFileStore } from '../../../platform/files/writable.ts';
-import { q3PresentationSnapshot, type Q3EquipmentPresentation } from './equipment.ts';
-import { q3EquipmentHudSelector } from '../../../content/q3/equipment/cgame-weapon-hud.ts';
+import { q3EquipmentCommand, type Q3EquipmentPresentation } from './equipment.ts';
+import { q3EquipmentPresentationProfile } from '../../../content/q3/equipment/cgame-weapon-hud.ts';
 import { QvmBodySubmissions } from '../../../compat/qvm/cgame-body.ts';
 import { readCgameBodyProfile } from '../../../content/q3/presentation/cgame-body-profile.ts';
 import { CgameStatusView } from './status.ts';
+
+export interface QvmHeldWeapon {
+  readonly content: ContentId;
+  readonly parent: SceneEntity & { readonly actor: ActorId };
+  readonly passes: { readonly shader: string | null; readonly color: Vec4; readonly shaderTime: number }[];
+}
+interface HeldWeaponInvocation { readonly frame: number; readonly end: number; readonly gun: number; readonly held: QvmHeldWeapon; }
 
 export type QvmPresentationArtifacts = Readonly<Record<"ui" | "cgame", QvmModuleOptions["artifact"]>>;
 
@@ -61,6 +75,7 @@ export interface ApplicationQvmClientOptions {
   readonly now: () => number;
   readonly keyCatcher: () => number;
   readonly equipmentWeapon?: () => Q3EquipmentPresentation | null;
+  readonly heldWeaponActor?: (entity: number) => ActorId | null;
   readonly bodyOverrides?: { active(): boolean; hidden(entity: number): boolean; };
   removeCommand(name: string): void;
   scalar(call: QvmHostCall, owner: ApplicationQvmClient): QvmHostResult | null;
@@ -89,11 +104,19 @@ export class ApplicationQvmClient {
   private bodySubmissions: QvmBodySubmissions | null = null;
   private ui: QvmUi | null = null;
   private equipment: Q3EquipmentPresentation | null = null;
-  private equipmentSelectorIndex: number | null = null;
+  private equipmentProfile: ReturnType<typeof q3EquipmentPresentationProfile> = null;
+  private readonly equipmentStatusObservers: (() => void)[] = [];
+  private equipmentHeldObserver: (() => void) | null = null;
+  private readonly heldInvocations: HeldWeaponInvocation[] = [];
+  private readonly heldWeapons: QvmHeldWeapon[] = [];
+  get sharedHeldWeapons(): readonly QvmHeldWeapon[] { return this.heldWeapons; }
+  private equipmentViewObserver: (() => void) | null = null;
+  private equipmentViewVisible = false;
   private equipmentSelector: (() => void) | null = null;
   private equipmentHudRequested = false;
   private readonly status: CgameStatusView;
   get sharedEquipmentHud(): boolean { return this.equipmentHudRequested; }
+  get sharedEquipmentViewVisible(): boolean | null { return this.equipmentProfile === null ? null : this.equipmentViewVisible; }
 
   private constructor(readonly options: ApplicationQvmClientOptions) {
     this.status = new CgameStatusView(options.cvars, () => options.session.statusVisible?.() !== false);
@@ -116,6 +139,17 @@ export class ApplicationQvmClient {
   }
   private host(call: QvmHostCall): QvmHostResult {
     this.assertCurrent();
+    if (call.kind === "engine" && call.role === "cgame" && call.code === QvmCgameImport.CG_R_ADDREFENTITYTOSCENE) {
+      const invocation = this.heldInvocations.at(-1), pointer = call.words.getInt32(4, true);
+      if (invocation !== undefined && pointer >= invocation.frame && pointer + QVM_REF_ENTITY_BYTES <= invocation.end) {
+        if (pointer === invocation.gun) {
+          const ref = readQvmRefEntity(call.guest.view(pointer, QVM_REF_ENTITY_BYTES));
+          const shader = typeof ref.customShader === "number" ? this.options.services.resources.shaderForHandle(ref.customShader) : ref.customShader;
+          invocation.held.passes.push({ shader: shader?.name ?? null, color: ref.shaderRGBA, shaderTime: ref.shaderTime });
+        }
+        return 0;
+      }
+    }
     if (this.bodySubmissions?.suppress(call)) return 0;
     if (call.role !== 'cgame' && call.role !== 'ui') return rejectQvmSyscall(call);
     if (call.role === 'cgame') { const result = this.status.syscall(call.words, call.guest); if (result !== null) return result; }
@@ -131,8 +165,8 @@ export class ApplicationQvmClient {
       ?? qvmClientRenderSyscall(call, o.services.resources, o.services.draw)
       ?? qvmClientAudioSyscall(call, { role: call.role, sound: o.services.sound, print: session.print })
       ?? qvmClientStateSyscall(call, { connection: o.connection, snapshots: {
-        current: () => session.snapshots.current(), read: number => { const snapshot = session.snapshots.read(number); return snapshot === null ? null : q3PresentationSnapshot(snapshot, this.equipment); },
-      }, userCommand: number => { const command = o.connection.commands.read(number); return command === null || this.equipment === null ? command : { ...command, weapon: 0, buttons: command.buttons & ~1 }; }, snapshotPing: number => o.connection.snapshotPing(number),
+        current: () => session.snapshots.current(), read: number => session.snapshots.read(number),
+      }, userCommand: number => { const command = o.connection.commands.read(number); return command === null ? null : q3EquipmentCommand(command, this.equipment); }, snapshotPing: number => o.connection.snapshotPing(number),
         getServerCommand: async number => { const argv = await o.connection.getServerCommand(number); this.assertCurrent(); if (argv !== null) this.arguments = legacyClientCommand(argv, call.abiProfile ?? "q3-modern"); return argv; },
         setUserCommandValue: session.setUserCommandValue })
       ?? qvmClientCollisionSyscall(call, { models: () => this.collisionModels, loadMap: name => { if (name !== o.map) throw new Error(`Cgame requested a different collision map: ${name}`); this.assertCurrent(); } })
@@ -170,7 +204,66 @@ export class ApplicationQvmClient {
         assertCurrentOperation: () => owner.assertCurrent(), current: () => ({ generation: options.connection.generation, serverMessageNumber: options.connection.serverMessageSequence, dropped: null }),
         beginLoading: () => { owner.ready = false; return undefined; }, prime: () => { owner.ready = true; return undefined; },
       });
-      owner.equipmentSelectorIndex = q3EquipmentHudSelector(cgameOptions.artifact);
+      owner.equipmentProfile = q3EquipmentPresentationProfile(cgameOptions.artifact);
+      const view = owner.equipmentProfile?.view;
+      if (view !== undefined) owner.equipmentViewObserver = owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: view.entry }, call => {
+        call.branches([{ instructionIndex: view.decision, decide: originalTaken => {
+          if (originalTaken) owner.equipmentViewVisible = true;
+          return originalTaken;
+        } }]);
+        return call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
+      });
+      const status = owner.equipmentProfile?.status;
+      if (status?.kind === "regions") for (const entry of status.entries) {
+        owner.equipmentStatusObservers.push(owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: entry.entry }, call => {
+          if (owner.equipment !== null) {
+            call.branches([{ instructionIndex: entry.decision, decide: originalTaken => { if (originalTaken) owner.equipmentHudRequested = true; return originalTaken; } }]);
+            call.regions(entry.ammo.map(region => ({ ...region, run: () => "skip" })));
+          }
+          return call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
+        }));
+      } else if (status?.kind === "functions") for (const entry of status.entries) {
+        owner.equipmentStatusObservers.push(owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: entry }, call => {
+          if (owner.equipment === null) return call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
+          owner.equipmentHudRequested = true; return 0;
+        }));
+      }
+      const warning = owner.equipmentProfile?.warning;
+      if (warning !== undefined) owner.equipmentStatusObservers.push(owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: warning.entry }, call => {
+        if (owner.equipment === null) return call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
+        const state = call.guest.view(warning.state, 4), original = state.getInt32(0, true);
+        state.setInt32(0, owner.equipment.warning === "empty" ? 2 : owner.equipment.warning === "low" ? 1 : 0, true);
+        if (call.execution === "asynchronous") return (async () => { try { return await call.proceedAsync(); } finally { state.setInt32(0, original, true); } })();
+        try { return call.proceed(); } finally { state.setInt32(0, original, true); }
+      }));
+      const held = owner.equipmentProfile?.held;
+      if (held !== undefined && cgameOptions.artifact.kind === "bytecode") {
+        const enter = cgameOptions.artifact.image.instructions[held.entry];
+        if (enter?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Original held-weapon entry is invalid");
+        owner.equipmentHeldObserver = owner.cgame.module.bindInvocation({ kind: "qvm", module: cgameOptions.artifact.module, instructionIndex: held.entry }, call => {
+          const proceed = () => call.execution === "asynchronous" ? call.proceedAsync() : call.proceed();
+          if (call.words.getInt32(4, true) !== 0) return proceed();
+          const number = call.guest.view(call.words.getInt32(8, true), 4).getInt32(0, true);
+          const actor = options.heldWeaponActor?.(number) ?? null;
+          if (actor === null) return proceed();
+          const ref = readQvmRefEntity(call.guest.view(call.words.getInt32(0, true), QVM_REF_ENTITY_BYTES));
+          if (ref.kind !== "model") throw new Error("Original weapon parent is not a model");
+          const model = typeof ref.model === "number" ? options.services.resources.modelForHandle(ref.model) : ref.model;
+          if (model.kind !== "model") throw new Error("Original weapon parent has no decoded model");
+          const parent: SceneEntity & { readonly actor: ActorId } = { actor, resource: model.resource, model: model.model,
+            transform: { origin: ref.origin, axis: ref.axis, scale: { x: 1, y: 1, z: 1 } }, previousOrigin: ref.oldOrigin,
+            pose: { kind: "frame", frame: ref.frame, previousFrame: ref.oldFrame, backLerp: ref.backLerp },
+            color: { x: 1, y: 1, z: 1, w: 1 }, skin: ref.skinNum, shaderTime: { kind: "seconds", value: ref.shaderTime },
+            lightingOrigin: ref.lightingOrigin, shadowPlane: ref.shadowPlane, flags: { kind: "q3", bits: ref.renderFlags }, attachments: [] };
+          const end = call.words.byteOffset - call.memory.byteOffset - 8, frame = end - enter.operand;
+          const invocation: HeldWeaponInvocation = { frame, end, gun: frame + held.gun, held: { content: options.media.content, parent, passes: [] } };
+          owner.heldInvocations.push(invocation);
+          const finish = () => { if (owner.heldInvocations.pop() !== invocation) throw new Error("Original weapon attachment scopes unwound out of order"); };
+          const complete = (value: number): number => { if (invocation.held.passes.length !== 0) owner.heldWeapons.push(invocation.held); return value; };
+          if (call.execution === "asynchronous") return (async () => { try { return complete(await call.proceedAsync()); } finally { finish(); } })();
+          try { return complete(call.proceed()); } finally { finish(); }
+        });
+      }
       const bodies = await readCgameBodyProfile(cgameOptions.artifact, options.media.provider.mounts);
       owner.assertCurrent();
       if (bodies !== null) owner.bodySubmissions = new QvmBodySubmissions(owner.cgame.module, cgameOptions.artifact, bodies, entity => options.bodyOverrides?.hidden(entity) ?? false);
@@ -197,12 +290,14 @@ export class ApplicationQvmClient {
     const hideBodies = this.options.bodyOverrides?.active() ?? false;
     if (hideBodies && this.bodySubmissions === null) throw new Error('This cgame needs an artifact-matched cgame-presentation.json declaration for body replacements');
     this.bodySubmissions?.enable(hideBodies);
-    this.equipment = this.equipmentSelectorIndex === null ? null : this.options.equipmentWeapon?.() ?? null;
-    if (this.equipment !== null && this.equipmentSelectorIndex !== null && this.equipmentSelector === null)
-      this.equipmentSelector = this.cgame.module.bindFunction({ kind: "qvm", module: this.cgame.module.profile.module, instructionIndex: this.equipmentSelectorIndex },
-        () => { this.equipmentHudRequested = true; return 0; });
+    this.equipment = this.options.equipmentWeapon?.() ?? null;
+    if (this.equipment !== null && this.equipmentProfile === null)
+      throw new Error("Selected weapon presentation requires a qualified original cgame HUD boundary");
+    if (this.equipment !== null && this.equipmentProfile !== null && this.equipmentSelector === null)
+      this.equipmentSelector = this.cgame.module.bindFunction({ kind: "qvm", module: this.cgame.module.profile.module, instructionIndex: this.equipmentProfile.hud },
+        () => 0);
     else if (this.equipment === null) { this.equipmentSelector?.(); this.equipmentSelector = null; }
-    this.equipmentHudRequested = false;
+    this.equipmentHudRequested = false; this.equipmentViewVisible = false; this.heldWeapons.length = 0;
     await this.cgame.drawActiveFrame(time, 'center', demoPlayback);
     if ((this.options.keyCatcher() & 2) !== 0) await this.ui?.refresh(Math.trunc(this.options.now()));
   }
@@ -224,7 +319,7 @@ export class ApplicationQvmClient {
     if (this.retired) return;
     this.retired = true; this.ready = false;
     const failures: unknown[] = [];
-    for (const cleanup of [() => { this.bodySubmissions?.close(); this.bodySubmissions = null; this.equipmentSelector?.(); this.equipmentSelector = null; this.equipment = null; }, () => this.cgame?.retire(), () => this.ui?.retire(),
+    for (const cleanup of [() => { this.bodySubmissions?.close(); this.bodySubmissions = null; this.equipmentSelector?.(); this.equipmentSelector = null; this.equipmentViewObserver?.(); this.equipmentViewObserver = null; this.equipmentHeldObserver?.(); this.equipmentHeldObserver = null; for (const remove of this.equipmentStatusObservers.splice(0)) remove(); this.heldWeapons.length = 0; this.equipmentViewVisible = false; this.equipment = null; }, () => this.cgame?.retire(), () => this.ui?.retire(),
       () => this.files.cgame.closeAll(), () => this.files.ui.closeAll(),
       () => this.scripts.cgame.closeAll(), () => this.scripts.ui.closeAll(), () => this.globals.clear()]) {
       try { cleanup(); } catch (error) { failures.push(error); }

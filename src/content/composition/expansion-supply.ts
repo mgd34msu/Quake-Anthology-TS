@@ -37,7 +37,11 @@ const periodicAmmo: Readonly<Record<ExpansionSupply, NonNullable<PickupSupplyPro
     { item: "q2:ammo_tesla", source: "q3:ammo/proxlauncher" },
     { item: "q2:ammo_disruptor", source: "q3:ammo/bfg" },
   ],
-  "q3-missionpack": [],
+  "q3-missionpack": [
+    { item: "q3:ammo/nailgun", source: "q3:ammo/machinegun" },
+    { item: "q3:ammo/chaingun", source: "q3:ammo/machinegun" },
+    { item: "q3:ammo/proxlauncher", source: "q3:ammo/grenadelauncher" },
+  ],
 };
 const weapons: Readonly<Record<ExpansionSupply, Expansion>> = {
   "q1-rogue": new Map([

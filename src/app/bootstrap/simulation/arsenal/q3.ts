@@ -1,3 +1,4 @@
+import type { SelectedPickupWeapon } from "../../../../world/gameplay/pickups.ts";
 import { q3WeaponStatus, q3ArsenalWarning } from "./weapon-status.ts";
 import type { ProviderReference } from "../../../../contracts/content.ts";
 import type { ArsenalIntent, ItemId } from "../../../../contracts/gameplay.ts";
@@ -24,6 +25,7 @@ export interface Q3SelectedArsenalOptions {
   readonly inventory: SharedInventoryTable;
   readonly supply?: { readonly profile: ItemId; readonly loadout: ArsenalState; readonly replacedItems: readonly ItemId[] };
   firingDelay?(actor: OwnedActor, milliseconds: number): number;
+  loadout?(actor: OwnedActor, defaults: ArsenalState): ArsenalState;
   readonly equipment?: {
     readonly ownsHoldables?: boolean;
     read(actor: OwnedActor): Pick<Q3ArsenalRuntimeState, "maxHealth" | "persistentPowerupTag" | "holdableItem" | "holdableTag">;
@@ -53,6 +55,9 @@ interface PlayerArsenal {
 }
 
 export class Q3SelectedArsenal implements SelectedArsenal {
+  catalog(): readonly SelectedPickupWeapon[] {
+    return Q3_WEAPON_ITEMS.filter(entry => this.options.product === "missionpack" || entry.weapon <= 10).map(weapon => ({ item: weapon.item, ammo: weapon.ammo, drop: "supply" }));
+  }
   readonly family = "q3";
   readonly provider: ProviderId;
   private readonly inventoryItems: ReadonlySet<ItemId>;
@@ -74,7 +79,8 @@ export class Q3SelectedArsenal implements SelectedArsenal {
 
   admit(actor: OwnedActor, maxHealth: number, teamDeathmatch = false): ArsenalState {
     if (this.players.has(actor.id)) throw new Error("Selected Q3 arsenal already admitted");
-    const arsenal = this.options.supply?.loadout ?? q3SpawnLoadout(this.provider, this.options.product, teamDeathmatch);
+    const defaults = this.options.supply?.loadout ?? q3SpawnLoadout(this.provider, this.options.product, teamDeathmatch);
+    const arsenal = this.options.loadout?.(actor, defaults) ?? defaults;
     if (arsenal.provider !== this.provider || arsenal.state.kind !== "q3") throw new Error("Selected Q3 starter belongs to a different arsenal");
     this.clearReplacedItems(actor);
     for (const entry of arsenal.ammo) this.options.inventory.configure(actor, entry);

@@ -1,3 +1,4 @@
+import type { SelectedPickupWeapon } from "../../../../world/gameplay/pickups.ts";
 import { q2BaseWeaponDisplayName } from "../../../../content/q2/foundation/items.ts";
 import { q2MissionWeaponDisplayName } from "../../../../content/q2/missionpacks/items.ts";
 import { q2WeaponStatus } from "./weapon-status.ts";
@@ -44,6 +45,7 @@ export class Q2SelectedArsenal implements SelectedArsenal {
   private readonly definitions: readonly Q2WeaponDefinition[];
   private readonly pickupOrder: readonly ItemId[];
   private readonly turns = new Map<ActorId, Q2SelectedWeaponTurnState>();
+  catalog(): readonly SelectedPickupWeapon[] { return this.definitions.map(weapon => ({ item: weapon.item, ammo: weapon.ammo, drop: "supply" })); }
   readonly family = "q2";
   readonly provider: ProviderId;
   constructor(private readonly options: Q2SelectedArsenalOptions) {

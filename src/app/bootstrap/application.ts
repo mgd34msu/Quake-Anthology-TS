@@ -2496,11 +2496,15 @@ export class Application {
       const client = await ApplicationQ3Client.create({ saveFontData: () => (input.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, kind: "qvm", keys, localServer: true, source: state.source, connection: state, cvars,
         equipmentWeapon: () => {
           const grapple = simulation.recipe.equipment.grapple;
+          if (simulation.arsenalState(local.player.actor) !== null) {
+            const player = guest.player(local.player.seat.client.id);
+            return player === null ? null : { primaryWeapon: guest.records.player(player.sourceEntity).weapon, warning: simulation.playerUi(local.player.actor).arsenalWarning };
+          }
           if (equipmentProfile === null || grapple.kind !== "enabled" || grapple.binding !== "slot") return null;
           const selected = simulation.weaponSlot(local.player.actor).active;
           if (selected?.provider !== grapple.source.provider || selected.item !== "q3:weapon_grapplinghook") return null;
           const player = guest.player(local.player.seat.client.id);
-          return player === null ? null : { primaryWeapon: guest.records.player(player.sourceEntity).weapon };
+          return player === null ? null : { primaryWeapon: guest.records.player(player.sourceEntity).weapon, warning: simulation.playerUi(local.player.actor).arsenalWarning };
         },
         systemCinematics: this.systemCinematics(simulation, assets.content, assets, audio, renderer, local.player.seat.id, input),
         remapShader: primaryShaderControl(simulation.events, assets, () => simulation.q3Guest() === guest && !guest.isRetired
@@ -4113,6 +4117,22 @@ export class Application {
           }
           continue;
         }
+        if (["+grapple", "-grapple", "+grenade", "-grenade"].includes(command.name)) {
+          if (command.seat === null) throw new Error("Offhand commands require an invoking local seat");
+          const actor = this.commandActor(command.seat), held = command.name.startsWith("+");
+          const equipment = this.simulation.recipe.equipment;
+          const available = command.name.endsWith("grapple") ? equipment.grapple.kind === "enabled" && equipment.grapple.binding === "offhand"
+            : equipment.handGrenades.kind === "enabled";
+          if (!available) { if (held) throw new Error("No selected offhand action is available"); continue; }
+          if (command.name.endsWith("grapple")) this.simulation.setGrappleInput(actor, held);
+          else this.simulation.setHandGrenadeInput(actor, held);
+          continue;
+        }
+        if (guest !== null && command.seat !== null && ["use", "weapon", "weapnext", "weapprev"].includes(command.name)) {
+          const actor = this.commandActor(command.seat);
+          const selected = resolveWeaponSelection(command.name, command.arguments_, this.simulation.playerUi(actor).items);
+          if (this.simulation.selectedWeaponCommand(actor, selected === null ? command.name : "use", selected === null ? command.arguments_ : [selected.item])) continue;
+        }
         if (guest !== null && command.seat !== null && (command.target === "client" || command.name !== "save" && command.name !== "load")) {
           const source = this.graphical?.q3.get(command.seat);
           if (source?.kind !== "qvm") throw new Error("Guest command has no local client");
@@ -4145,17 +4165,6 @@ export class Application {
             for (const player of guest.players()) if (target === "all" || target === String(player.sourceEntity))
               await this.network?.server.disconnectClient(player.client, "was kicked");
           } else if (!await q3GameCallback(() => guest.consoleCommand([command.name, ...command.arguments_]))) print(`Unknown game command: ${command.name}\n`);
-          continue;
-        }
-        if (["+grapple", "-grapple", "+grenade", "-grenade"].includes(command.name)) {
-          if (command.seat === null) throw new Error("Offhand commands require an invoking local seat");
-          const actor = this.commandActor(command.seat), held = command.name.startsWith("+");
-          const equipment = this.simulation.recipe.equipment;
-          const available = command.name.endsWith("grapple") ? equipment.grapple.kind === "enabled" && equipment.grapple.binding === "offhand"
-            : equipment.handGrenades.kind === "enabled";
-          if (!available) { if (held) throw new Error("No selected offhand action is available"); continue; }
-          if (command.name.endsWith("grapple")) this.simulation.setGrappleInput(actor, held);
-          else this.simulation.setHandGrenadeInput(actor, held);
           continue;
         }
         if (command.name === "use" || command.name === "weapon") {
@@ -4408,20 +4417,20 @@ export class Application {
         native.userinfo = userinfo;
       }
       for (const local of this.graphical?.input.locals ?? []) {
-        const player = this.simulation.movementPlayer(local.player.actor);
-        if (player?.arsenal.state.kind === "q3") this.graphical?.input.bindArsenalProvider(local.player.seat.id, player.arsenal.provider);
+        const arsenal = this.simulation.arsenalState(local.player.actor);
+        if (arsenal !== null) this.graphical?.input.bindArsenalProvider(local.player.seat.id, arsenal.provider);
       }
       for (const [seat, source] of this.graphical?.q3 ?? []) {
         const selection = source.client.userCommandSelection;
         this.graphical?.input.setQ3CommandSelection(seat, selection);
-        const player = this.simulation.movementPlayer(source.client.options.local.player.actor);
+        const actor = source.client.options.local.player.actor, arsenal = this.simulation.arsenalState(actor);
         const explicitWeapon = source.client.consumeWeaponSelection();
-        const slot = player === null ? null : this.simulation.weaponSlot(player.actor.id);
-        const supplemental = slot !== null && [slot.active, slot.pending].some(weapon => weapon !== null && weapon.provider !== player?.arsenal.provider);
-        const selectedSource = player !== null && player.arsenal.provider !== this.simulation.recipe.map.entities.provider;
+        const slot = arsenal === null ? null : this.simulation.weaponSlot(actor);
+        const supplemental = slot !== null && [slot.active, slot.pending].some(weapon => weapon !== null && weapon.provider !== arsenal?.provider);
+        const selectedSource = arsenal !== null && (this.simulation.q3Guest() !== null || arsenal.provider !== this.simulation.recipe.map.entities.provider);
         const weapon = supplemental || selectedSource ? explicitWeapon : selection.weapon;
-        this.graphical?.input.setArsenalSelection(seat, player?.arsenal.state.kind === "q3"
-          ? { provider: player.arsenal.provider, weapon: weapon === null ? null : q3WeaponItem(weapon)?.item ?? null } : null);
+        this.graphical?.input.setArsenalSelection(seat, arsenal === null ? null
+          : { provider: arsenal.provider, weapon: arsenal.state.kind === "q3" && weapon !== null ? q3WeaponItem(weapon)?.item ?? null : null });
       }
       if (paused && this.graphical !== null) for (const local of this.graphical.input.locals) local.input.sample(this.graphical.input.now(), elapsedMilliseconds);
       const localCommands = paused ? [] : this.graphical?.input.build(frameMilliseconds, this.elapsed, this.frames, elapsedMilliseconds) ?? [];

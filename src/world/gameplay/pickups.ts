@@ -117,8 +117,9 @@ export class SharedPickupAdmission implements PickupAdmission {
     return true;
   }
 
-  weapon(actor: OwnedActor, offer: { readonly item: ItemId; readonly ammo: readonly PickupAmmoGrant[] }, selection: PickupSelection): boolean {
-    return this.cargo(actor, [{ kind: "weapon", item: offer.item, count: 1 }, ...offer.ammo.map(entry => ({ kind: "counter", item: entry.item, count: entry.amount } satisfies PickupCargoEntry))], selection);
+  weapon(actor: OwnedActor, offer: { readonly item: ItemId; readonly ammo: readonly PickupAmmoGrant[] }, selection: PickupSelection,
+    quantity?: (entry: InventoryEntry) => number): boolean {
+    return this.giveCargo(actor, [{ kind: "weapon", item: offer.item, count: 1 }, ...offer.ammo.map(entry => ({ kind: "counter", item: entry.item, count: entry.amount } satisfies PickupCargoEntry))], selection, quantity);
   }
 
   /** A reached source selection branch can select an already granted weapon without granting it again. */
@@ -130,14 +131,51 @@ export class SharedPickupAdmission implements PickupAdmission {
   }
 
   cargo(actor: OwnedActor, cargo: readonly PickupCargoEntry[], selection: PickupSelection): boolean {
+    return this.giveCargo(actor, cargo, selection);
+  }
+
+  private giveCargo(actor: OwnedActor, cargo: readonly PickupCargoEntry[], selection: PickupSelection, quantity?: (entry: InventoryEntry) => number): boolean {
     if (new Set(cargo.map(row => row.item)).size !== cargo.length || cargo.some(row => !Number.isFinite(row.count) || row.kind === "weapon" && row.count !== 1))
       throw new Error("Invalid pickup cargo");
     const weapons = [...new Set(cargo.filter(row => row.kind === "weapon").flatMap(row => this.destinations("weapons", row.item)))];
-    const ammo = this.resolveAmmo(cargo.filter(row => row.kind === "counter").map(row => ({ item: row.item, amount: row.count })));
-    this.requireEntries(actor.id, [...weapons, ...ammo.map(grant => grant.item)]);
+    const mappedAmmo = this.resolveAmmo(cargo.filter(row => row.kind === "counter").map(row => ({ item: row.item, amount: row.count })));
+    const entries = this.requireEntries(actor.id, [...weapons, ...mappedAmmo.map(grant => grant.item)]);
+    const ammo = quantity === undefined ? mappedAmmo : mappedAmmo.map(grant => {
+      const entry = entries.find(entry => entry.item === grant.item);
+      if (entry === undefined) throw new Error(`Pickup destination ${grant.item} was not admitted`);
+      const amount = quantity(entry);
+      if (!Number.isFinite(amount) || amount < 0) throw new RangeError("Original pickup quantity must be finite and nonnegative");
+      return { item: grant.item, amount };
+    });
     for (const weapon of weapons) this.options.inventory.give(actor, weapon, 1);
     this.giveAmmo(actor, ammo);
     if (weapons.length !== 0) this.options.weaponGranted(actor, weapons, selection);
     return true;
   }
+}
+
+type PickupWeapon = { readonly item: ItemId; readonly ammo: ItemId | null };
+export type SelectedPickupWeapon = PickupWeapon & { readonly drop: "supply" | "none" };
+
+/** Resolve declared supply relationships before admitting players; never choose an ambiguous alias by ordering. */
+export function selectedWeaponSources(profile: PickupSupplyProfile, selected: readonly SelectedPickupWeapon[], original: readonly PickupWeapon[]): ReadonlyMap<ItemId, ItemId | null> {
+  const result = new Map<ItemId, ItemId | null>();
+  for (const weapon of selected) {
+    if (weapon.drop === "none") { result.set(weapon.item, null); continue; }
+    if (original.some(source => source.item === weapon.item)) { result.set(weapon.item, weapon.item); continue; }
+    let candidates = original.filter(source => profile.weapons.some(row => row.source === source.item && row.destinations.includes(weapon.item)));
+    if (candidates.length === 0 && weapon.ammo !== null) {
+      const ammo = weapon.ammo;
+      candidates = original.filter(source => profile.ammo.some(row => row.source === source.ammo && row.destinations.includes(ammo)));
+    }
+    if (candidates.length > 1 && weapon.ammo !== null) {
+      const ammo = weapon.ammo, owner = profile.ammoOwners?.find(row => row.item === ammo)?.source;
+      const canonical = original.filter(source => source.ammo === owner && profile.ammo.some(row => row.source === owner && row.destinations.includes(ammo)));
+      if (canonical.length === 1) candidates = canonical;
+    }
+    const source = candidates.length === 1 ? candidates[0] : undefined;
+    if (source === undefined) throw new Error(`Selected weapon ${weapon.item} has ${candidates.length === 0 ? "no" : "ambiguous"} original drop mapping in ${profile.id}${candidates.length === 0 ? "" : `: ${candidates.map(item => item.item).join(", ")}`}`);
+    result.set(weapon.item, source.item);
+  }
+  return result;
 }

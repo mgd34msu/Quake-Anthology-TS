@@ -1,3 +1,4 @@
+import { ComponentDrawings } from "./component-drawings.ts";
 import { Q1ServicePresentation } from "./q1-service-presentation.ts";
 import { prepareQ2DamageBlend } from "./q2-damage-blend.ts";
 import { Q1MapFog } from "./q1-fog.ts";
@@ -88,6 +89,9 @@ export class WorldSeatPresentation implements SeatPresentation {
   private readonly finale: SourceFinale;
   private preparedTime = 0;
   private worldText: readonly WorldText[] = [];
+  private readonly componentDrawings = new ComponentDrawings();
+  private componentDrawingFrame = 0;
+  private componentLines: readonly import("../../debug/shapes.ts").DebugLine[] = [];
   private readonly worldFonts = new Map<ContentId, Awaited<ReturnType<typeof loadMenuFont>>>();
   private readonly scene: ApplicationWorldScene;
   private readonly q1Fog: Q1MapFog;
@@ -245,6 +249,7 @@ export class WorldSeatPresentation implements SeatPresentation {
       for (const client of this.componentClients) if (samePresentationOwner(client.source.owner, event.event.owner)) client.hud.clear();
       this.componentClients = this.componentClients.filter(client => !samePresentationOwner(client.source.owner, event.event.owner));
     }
+    this.componentDrawings.receive(events);
     this.q1Fog.receive(events);
     this.q1Services.receive(events);
     for (const source of events) if (source.kind === "q1" && source.event.kind === "message" && source.event.player.equals(this.local.player.actor)) this.pendingQ1Messages.push(source);
@@ -315,7 +320,9 @@ export class WorldSeatPresentation implements SeatPresentation {
     }
     await this.q1Services.prepare(this.assets);
     await this.ui.prepare(this.assets);
-    this.worldText = this.simulation.worldText();
+    const drawings = this.componentDrawings.snapshot(this.preparedTime, ++this.componentDrawingFrame);
+    this.componentLines = drawings.lines;
+    this.worldText = [...this.simulation.worldText(), ...drawings.text];
     for (const text of this.worldText) if (!this.worldFonts.has(text.content)) {
       const provider = await this.assets.provider(text.content);
       this.worldFonts.set(text.content, await loadMenuFont({ catalog: this.assets.content.catalog, mounts: provider.mounts, family: provider.family,
@@ -333,12 +340,12 @@ export class WorldSeatPresentation implements SeatPresentation {
       await q3Client.prepare(snapshot.frame.frame, viewport, visiblePresentations,
         !this.componentClients.some(client => client.frame.hud !== null && (client.frame.kind === "quakec" || client.frame.hud.mode === "replace-status")));
       const thirdPerson = (q3Client.cvars.get("cg_thirdPerson")?.integerValue ?? 0) !== 0;
-      const drawWeapon = (q3Client.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0;
-      const supplemental = visiblePresentations.filter(source => source.renderOwner !== "source-client" && (!source.viewWeapon || drawWeapon)).map(source => {
+      const drawWeapon = q3Client.sharedEquipmentViewVisible ?? (q3Client.cvars.get("cg_drawGun")?.integerValue ?? 1) !== 0;
+      const supplemental = visiblePresentations.filter(source => source.renderOwner !== "source-client").map(source => {
         const pose = source.viewWeapon ? null : q3Client.bodyPose(source.actor);
         return pose === null ? source : { ...source, origin: pose.origin, angles: pose.angles };
       });
-      await this.scene.prepare(thirdPerson ? null : this.local.player.actor, snapshot, supplemental, [], q3Client.cvars.get("cg_fov")?.integerValue ?? 90);
+      await this.scene.prepare(thirdPerson ? null : this.local.player.actor, snapshot, supplemental, [], q3Client.cvars.get("cg_fov")?.integerValue ?? 90, q3Client.sharedHeldWeapons, drawWeapon);
       return;
     }
     await this.finale.prepare();
@@ -402,8 +409,8 @@ export class WorldSeatPresentation implements SeatPresentation {
       if (command.kind === "swap-buffers") throw new Error("Cgame cannot present the shared framebuffer");
       this.frames.command(command);
     }
-    const debugLines = this.debugShapes?.lines();
-    if (debugLines !== undefined && debugLines.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null,
+    const debugLines = [...(this.debugShapes?.lines() ?? []), ...this.componentLines];
+    if (debugLines.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null,
       beforeView: [], operations: [{ kind: "draw", batches: prepareDebugShapes(debugLines, camera, this.assets.world.shaders.textures.white.image, this.debugShapes?.lineWidth()) }] });
     if (this.worldText.length > 0) this.frames.view({ target: input.target, time, viewport: camera.viewport, clear: null, clipPlane: null,
       beforeView: [], operations: [{ kind: "draw", batches: prepareWorldText(this.worldText, camera, text => {
@@ -477,6 +484,7 @@ export class WorldSeatPresentation implements SeatPresentation {
     const close = (dispose: () => void): void => { try { dispose(); } catch (error) { errors.push(error); } };
     for (const font of this.worldFonts.values()) close(() => font.close());
     this.worldFonts.clear(); this.worldText = []; this.nativeQ2Frame = null;
+    this.componentDrawings.clear(); this.componentLines = [];
     close(() => this.q3Client?.close());
     close(() => this.ui.close());
     close(() => this.scene.close());

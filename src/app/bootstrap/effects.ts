@@ -261,7 +261,8 @@ export class ApplicationEffects {
     if (this.time !== null && now < this.time) throw new Error("Effect time rewound without replacing its world owner");
     const elapsed = this.time === null ? 0 : now - this.time;
     this.styles = snapshot.scene.lightStyles;
-    this.poses = [...characters, ...presentations.filter(pose => !pose.viewWeapon)];
+    this.poses = [...characters, ...presentations.filter(pose => !pose.viewWeapon),
+      ...snapshot.bodies.map(({ actor, body }) => ({ actor, origin: body.origin, angles: body.angles }))];
     for (const group of this.groups.values()) { group.models = []; group.beams = []; }
     const pending = this.pending; this.pending = [];
     for (const source of pending) await this.event(source);

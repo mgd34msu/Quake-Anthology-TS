@@ -168,9 +168,12 @@ export function createNativeModHost(options: NativeModHostOptions): NativeModHos
           await source.host.saveLoading("ReadLevel", level, options.nextFrame); });
       }, close() { source.close(); return undefined; } };
   }
+  const output = services.engine;
+  if (output === undefined) throw new Error("Native component presentation requires destination engine services");
   const adapter = new RereleaseGuestServices({ ...shared, engine: context.engine(options.source, runtime), frameMilliseconds: frameSeconds * 1000,
     localize: options.localize, clipboard: { kind: "dedicated" }, navigation: context.navigation,
-    debugShapes: () => unavailable("debug shape presentation"), worldText: () => unavailable("world text presentation"),
+    debugShapes: event => { output.events.emit(options.source.content, { kind: "q2-rerelease", event: { kind: "debug-shapes", ...event } }, { kind: "seconds", value: runtime.now() }); },
+    worldText: event => { output.events.emit(options.source.content, { kind: "q2-rerelease", event: { kind: "world-text", ...event } }, { kind: "seconds", value: runtime.now() }); },
     semanticBindings: { project: record => options.projection.project(record), foreignAddress: actor => options.projection.address(actor),
       bind: () => unavailable("owned actor") } });
   const source = RereleaseGuestSource.create(prepared, { ...adapter.hostOptions, clock: context.clock, services: memory => adapter.bindMemory(memory),
