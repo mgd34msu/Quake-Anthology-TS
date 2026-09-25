@@ -13,6 +13,15 @@ export const QVM_GAME_STATE_BYTES = 20100;
 export const QVM_SNAPSHOT_BYTES = 53772;
 export function qvmSnapshotBytes(profile: QvmAbiProfile): number { return profile === "q3-modern" ? QVM_SNAPSHOT_BYTES : 52724; }
 export const QVM_USER_COMMAND_BYTES = 24;
+interface QvmUserCommandLayout {
+  readonly buttons: { readonly offset: number; readonly bytes: 1 | 4 };
+  readonly angles: number; readonly weapon: number; readonly forward: number; readonly right: number; readonly up: number;
+}
+const modernCommand: QvmUserCommandLayout = { buttons: { offset: 16, bytes: 4 }, angles: 4, weapon: 20, forward: 21, right: 22, up: 23 };
+const legacyCommand: QvmUserCommandLayout = { buttons: { offset: 4, bytes: 1 }, angles: 8, weapon: 5, forward: 20, right: 21, up: 22 };
+export function qvmUserCommandLayout(profile: QvmAbiProfile): QvmUserCommandLayout {
+  return profile === "q3-modern" ? modernCommand : legacyCommand;
+}
 
 export interface QvmSourceSnapshot {
   readonly number: number;
@@ -91,28 +100,22 @@ export function writeQvmSnapshot(memory: QvmMemory, view: DataView, snapshot: Sn
   view.setInt32(qvmSnapshotBytes(profile) - 4, snapshot.serverCommandNumber, true);
 }
 
-export function writeQvmUserCommand(view: DataView, command: WireUserCommand, profile: QvmAbiProfile = "q3-modern"): void {
+export function writeQvmUserCommand(view: DataView, command: WireUserCommand, profile: QvmAbiProfile = "q3-modern", mode: "encode" | "update" = "encode"): void {
   requireBytes(view, QVM_USER_COMMAND_BYTES);
+  const layout = qvmUserCommandLayout(profile);
   view.setInt32(0, command.serverTime, true);
-  if (profile !== "q3-modern") {
-    view.setUint8(4, (command.buttons & 31) | ((command.buttons & 2048) !== 0 ? 128 : 0)); view.setUint8(5, command.weapon);
-    command.angles.forEach((angle, index) => view.setInt32(8 + index * 4, angle, true));
-    view.setInt8(20, command.forwardmove); view.setInt8(21, command.rightmove); view.setInt8(22, command.upmove);
-    return;
-  }
-  command.angles.forEach((angle, index) => view.setInt32(4 + index * 4, angle, true));
-  view.setInt32(16, command.buttons, true); view.setUint8(20, command.weapon);
-  view.setInt8(21, command.forwardmove); view.setInt8(22, command.rightmove); view.setInt8(23, command.upmove);
+  if (layout.buttons.bytes === 1) view.setUint8(layout.buttons.offset, (mode === "update" ? view.getUint8(layout.buttons.offset) & 96 : 0)
+    | (command.buttons & 31) | ((command.buttons & 2048) !== 0 ? 128 : 0));
+  else view.setInt32(layout.buttons.offset, command.buttons, true);
+  command.angles.forEach((angle, index) => view.setInt32(layout.angles + index * 4, angle, true));
+  view.setUint8(layout.weapon, command.weapon);
+  view.setInt8(layout.forward, command.forwardmove); view.setInt8(layout.right, command.rightmove); view.setInt8(layout.up, command.upmove);
 }
 
 export function readQvmUserCommand(view: DataView, profile: QvmAbiProfile = "q3-modern"): WireUserCommand {
   requireBytes(view, QVM_USER_COMMAND_BYTES);
-  if (profile !== "q3-modern") {
-    const buttons = view.getUint8(4);
-    return { serverTime: view.getInt32(0, true), angles: [view.getInt32(8, true), view.getInt32(12, true), view.getInt32(16, true)],
-      buttons: (buttons & 31) | ((buttons & 128) === 0 ? 0 : 2048), weapon: view.getUint8(5),
-      forwardmove: view.getInt8(20), rightmove: view.getInt8(21), upmove: view.getInt8(22) };
-  }
-  return { serverTime: view.getInt32(0, true), angles: [view.getInt32(4, true), view.getInt32(8, true), view.getInt32(12, true)],
-    buttons: view.getInt32(16, true), weapon: view.getUint8(20), forwardmove: view.getInt8(21), rightmove: view.getInt8(22), upmove: view.getInt8(23) };
+  const layout = qvmUserCommandLayout(profile), buttons = layout.buttons.bytes === 1 ? view.getUint8(layout.buttons.offset) : view.getInt32(layout.buttons.offset, true);
+  return { serverTime: view.getInt32(0, true), angles: [view.getInt32(layout.angles, true), view.getInt32(layout.angles + 4, true), view.getInt32(layout.angles + 8, true)],
+    buttons: layout.buttons.bytes === 1 ? (buttons & 31) | ((buttons & 128) === 0 ? 0 : 2048) : buttons, weapon: view.getUint8(layout.weapon),
+    forwardmove: view.getInt8(layout.forward), rightmove: view.getInt8(layout.right), upmove: view.getInt8(layout.up) };
 }

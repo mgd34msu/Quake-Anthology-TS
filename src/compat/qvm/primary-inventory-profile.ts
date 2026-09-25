@@ -1,5 +1,6 @@
 import type { SaveReader } from "../../persistence/value.ts";
 import type { QvmInventoryProfile } from "./game-inventory.ts";
+import { qvmPlayerStateBytes } from "./player-record.ts";
 import { QvmOpcode } from "./image.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import { qualifyQvmRegionEvaluation, type QvmRegionEvaluation } from "./regions.ts";
@@ -9,7 +10,7 @@ type SourceWord = { readonly kind: "constant"; readonly value: number } | { read
 
 export function readQvmPrimaryInventoryProfile(reader: SaveReader, artifact: QvmModuleOptions["artifact"]): QvmInventoryProfile {
   const abiProfile = artifact.abiProfile ?? "q3-modern";
-  if (artifact.role !== "qagame" || abiProfile !== "q3-modern") reader.fail("primary inventory declarations require a modern qagame ABI");
+  if (artifact.role !== "qagame") reader.fail("primary inventory declarations require a qagame ABI");
   const constant = (at: SaveReader): number => {
     const instruction = artifact.image.instructions[at.integer(0)];
     if (instruction?.opcode !== QvmOpcode.OP_CONST) return at.fail("capacity operand must be an original OP_CONST");
@@ -65,7 +66,7 @@ export function readQvmPrimaryInventoryProfile(reader: SaveReader, artifact: Qvm
   }
   const offset = (name: string): number => {
     const at = reader.field(name), result = at.integer(0);
-    if (result % 4 !== 0) at.fail("inventory field must be aligned");
+    if (result % 4 !== 0 || result + (name === "ammoOffset" ? 64 : 4) > qvmPlayerStateBytes(abiProfile)) at.fail("inventory field exceeds its aligned public player record");
     return result;
   };
   return { module: artifact.module, abiProfile, weaponsOffset: offset("weaponsOffset"), ammoOffset: offset("ammoOffset"), capacity: evaluate };

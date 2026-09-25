@@ -1,5 +1,7 @@
 import type { SaveReader } from "../../persistence/value.ts";
 import type { QvmPickupGrant, QvmPickupProfile } from "./game-pickups.ts";
+import { qvmPlayerStateBytes } from "./player-record.ts";
+import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
 import { QvmOpcode } from "./image.ts";
 import { parseQvmItemLayout } from "./item-catalog.ts";
 import type { QvmModuleOptions } from "./module.ts";
@@ -7,7 +9,7 @@ import { qualifyQvmRegion, qualifyQvmRegionEvaluation, type QvmRegionEvaluation 
 
 export function readQvmPrimaryPickupProfile(reader: SaveReader, artifact: QvmModuleOptions["artifact"]): QvmPickupProfile {
   const abiProfile = artifact.abiProfile ?? "q3-modern";
-  if (artifact.role !== "qagame" || abiProfile !== "q3-modern") reader.fail("primary pickup declarations require a modern qagame ABI");
+  if (artifact.role !== "qagame") reader.fail("primary pickup declarations require a qagame ABI");
   const instructions = artifact.image.instructions;
   const entry = (at: SaveReader): number => {
     const value = at.integer(0);
@@ -63,7 +65,8 @@ export function readQvmPrimaryPickupProfile(reader: SaveReader, artifact: QvmMod
       return typeof result === "number" ? result !== 0 : result.then(value => value !== 0);
     } };
   });
-  const entityStride = reader.field("entityStride").integer(4), clientStride = reader.field("clientStride").integer(4), fields = reader.field("fields");
+  const entityStride = reader.field("entityStride").integer(qvmSharedEntityBytes(abiProfile)), clientStride = reader.field("clientStride").integer(qvmPlayerStateBytes(abiProfile)), fields = reader.field("fields");
+  if (entityStride % 4 !== 0 || clientStride % 4 !== 0) return reader.fail("source record strides must be aligned");
   const field = (name: string): number => {
     const value = fields.field(name).integer(0); if (value % 4 !== 0 || value + 4 > entityStride) fields.field(name).fail("pickup field is outside its aligned entity record"); return value;
   };

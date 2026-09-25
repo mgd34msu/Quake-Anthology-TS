@@ -4,6 +4,7 @@ import type { QvmGame } from "./game.ts";
 import type { QvmFunctionCall, QvmSystemCallResult } from "./interpreter.ts";
 import type { QvmModuleOptions } from "./module.ts";
 import { QvmOpcode } from "./image.ts";
+import { qvmUserCommandLayout } from "./client-state-record.ts";
 import { qualifyQvmRegion } from "./regions.ts";
 
 export interface QvmEquipmentMovementProfile {
@@ -69,7 +70,8 @@ export class QvmEquipmentMovement {
     if (frame != null && frame.pose !== null && this.services.live(frame.actor)) call.regions([{ ...this.profile.locomotion, run: () => {
       if (this.current(call) !== frame) return "execute";
       const command = call.guest.dataView(frame.movement + 4, 24);
-      command.setInt8(21, 0); command.setInt8(22, 0); command.setInt8(23, 0);
+      const layout = qvmUserCommandLayout(this.game.module.abiProfile);
+      command.setInt8(layout.forward, 0); command.setInt8(layout.right, 0); command.setInt8(layout.up, 0);
       const velocity = call.guest.dataView(frame.player + 32, 12);
       velocity.setFloat32(0, 0, true); velocity.setFloat32(4, 0, true); velocity.setFloat32(8, 0, true);
       return "skip";
@@ -80,16 +82,18 @@ export class QvmEquipmentMovement {
     const frame = this.frames.at(-1);
     if (frame == null || !frame.actor.equals(actor) || !this.services.live(frame.actor) || !frame.ownsHoldableInput
       || call.guest.dataView(this.profile.movementGlobal, 4).getInt32(0, true) !== frame.movement) return undefined;
-    const word = call.guest.dataView(frame.movement + 20, 4), previous = word.getInt32(0, true), projected = previous & ~4;
-    word.setInt32(0, projected, true);
-    return () => { if (this.services.live(frame.actor) && word.getInt32(0, true) === projected) word.setInt32(0, previous, true); };
+    const layout = qvmUserCommandLayout(this.game.module.abiProfile), word = call.guest.dataView(frame.movement + 4 + layout.buttons.offset, layout.buttons.bytes);
+    const read = (): number => layout.buttons.bytes === 1 ? word.getUint8(0) : word.getInt32(0, true);
+    const write = (value: number): void => { if (layout.buttons.bytes === 1) word.setUint8(0, value); else word.setInt32(0, value, true); };
+    const previous = read(), projected = previous & ~4; write(projected);
+    return () => { if (this.services.live(frame.actor) && read() === projected) write(previous); };
   }
   private duck(call: QvmFunctionCall): QvmSystemCallResult {
     const frame = this.current(call), pose = frame?.pose;
     if (frame === null || pose == null) return proceed(call);
     const flags = call.guest.dataView(frame.player + 12, 4);
     flags.setInt32(0, pose.crouched ? flags.getInt32(0, true) | 1 : flags.getInt32(0, true) & ~1, true);
-    call.guest.dataView(frame.player + 168, 4).setInt32(0, pose.viewHeight, true);
+    call.guest.dataView(frame.player + 164, 4).setInt32(0, pose.viewHeight, true);
     for (const [offset, value] of [[this.profile.mins, pose.bounds.min], [this.profile.maxs, pose.bounds.max]] satisfies readonly (readonly [number, FixedMovementPose["bounds"]["min"]])[]) {
       const view = call.guest.dataView(frame.movement + offset, 12);
       view.setFloat32(0, value.x, true); view.setFloat32(4, value.y, true); view.setFloat32(8, value.z, true);

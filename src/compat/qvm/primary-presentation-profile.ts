@@ -10,8 +10,8 @@ import { QVM_REF_ENTITY_BYTES } from "./render-record.ts";
 export async function readQvmEquipmentPresentation(artifact: QvmModuleOptions["artifact"], mounts: Pick<MountedContent, "open">): Promise<QvmEquipmentPresentationProfile | null> {
   const declaration = await readQvmCompatibilityDeclaration(mounts, artifact.module, "cgame"), reader = declaration.equipmentPresentation;
   if (reader === null) return q3EquipmentPresentationProfile(artifact);
-  if (artifact.role !== "cgame" || declaration.profile !== artifact.abiProfile || artifact.abiProfile !== "q3-modern")
-    return reader.fail("equipment presentation requires the declared modern cgame ABI");
+  if (artifact.role !== "cgame" || declaration.profile !== (artifact.abiProfile ?? "q3-modern"))
+    return reader.fail("equipment presentation requires the declared cgame ABI");
   const instructions = artifact.image.instructions;
   const entry = (value: SaveReader): number => { const pc = value.integer(0); if (instructions[pc]?.opcode !== QvmOpcode.OP_ENTER) return value.fail("not an original function entry"); return pc; };
   const decision = (value: SaveReader, owner: number): number => {

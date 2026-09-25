@@ -52,7 +52,6 @@ export class QvmInputBinding {
   private current: ModClientApplication | null = null;
   constructor(private readonly source: QvmInputSource, private readonly services: QvmInputServices) {
     const { game, definition } = source;
-    if (game.module.abiProfile !== "q3-modern") throw new Error("QVM input requires its declared modern public player ABI");
     const bind = (entry: number, hook: (call: QvmFunctionCall) => QvmSystemCallResult): void => {
       this.removals.push(game.module.bindFunction({ kind: "qvm", module: definition.module, instructionIndex: entry }, hook));
     };
@@ -130,7 +129,7 @@ export class QvmInputBinding {
   private apply(call: QvmFunctionCall, scope: ClientScope, movement: number, kind: ModClientApplication["scope"]): QvmSystemCallResult {
     const { game, definition } = this.source, state = game.data.copyPlayerState(scope.slot);
     const address = movement + 4;
-    const command = readQvmUserCommand(game.module.memory.view(address, QVM_USER_COMMAND_BYTES));
+    const command = readQvmUserCommand(game.module.memory.view(address, QVM_USER_COMMAND_BYTES), game.module.abiProfile);
     const input: UserCommand = { kind: "q3", serverTimeMilliseconds: command.serverTime, angleWords: command.angles, buttons: command.buttons,
       weapon: command.weapon, forwardMove: command.forwardmove, rightMove: command.rightmove, upMove: command.upmove };
     const overlapping = this.commandFrames.some(frame => frame.address === address && frame.scope !== scope);
@@ -159,7 +158,7 @@ export class QvmInputBinding {
       writeQvmUserCommand(game.module.memory.view(address, QVM_USER_COMMAND_BYTES), {
         serverTime: effective.serverTimeMilliseconds, angles: effective.angleWords, buttons: effective.buttons, weapon: effective.weapon,
         forwardmove: effective.forwardMove, rightmove: effective.rightMove, upmove: effective.upMove,
-      });
+      }, game.module.abiProfile, "update");
     };
     try {
       const aim = q3ViewAngles({ x: command.angles[0], y: command.angles[1], z: command.angles[2] },

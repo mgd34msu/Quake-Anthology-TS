@@ -48,7 +48,7 @@ The current interface covers a static QVM item table and the standard public wea
 
 ## Original QVM primary player interfaces
 
-A modern Q3 module can declare its original primary player interface in its matching `qvm-compatibility.json` module entry. This enables selected arsenals without adding a mod name or binary digest to the engine. The entry still requires `role: "qagame"`, the exact `artifactPath` and `artifactDigest`, and `profile: "q3-modern"`. Its `primary` record is complete: missing interfaces do not inherit parts of a built-in profile.
+A Q3 module can declare its original primary player interface in its matching `qvm-compatibility.json` module entry. This enables selected arsenals without adding a mod name or binary digest to the engine. The entry still requires `role: "qagame"`, the exact `artifactPath` and `artifactDigest`, and its matching `profile: "q3-modern"` or `profile: "q3-1.16n-base"`. Its `primary` record is complete: missing interfaces do not inherit parts of a built-in profile.
 
 | `primary` field | Original source interface |
 | --- | --- |
@@ -69,7 +69,9 @@ Capacity queries use only the unused allocated tail after the QVM data, literals
 
 A matching `role: "cgame"` entry can declare `equipmentPresentation`. It describes the original weapon selector (`hud`), warning entry/state and source warning values, ammo status functions or regions, final view-weapon visibility decision and branch direction, and the original held-weapon parent/actor arguments and local `refEntity`. See [primary-presentation-profile.ts](../src/compat/qvm/primary-presentation-profile.ts). The original cgame still decides status visibility, camera policy, body animation and attachment pose. Source health/armor rendering is retained. A cgame without these qualified boundaries cannot present a selected arsenal.
 
-An external primary's compatibility-document digest is retained in saves. Loading rejects changed or removed interfaces, including changed client presentation declarations in that document. Built-in profiles retain their existing save compatibility. This interface covers the modern public Q3 records and the declared original call conventions; it does not qualify undocumented private record formats, arbitrary bytecode regions or a new weapon's cross-game supply semantics automatically.
+An external primary's compatibility-document digest is retained in saves. Loading rejects changed or removed interfaces, including changed client presentation declarations in that document. Built-in profiles retain their existing save compatibility. This interface covers modern and declared 1.16n public Q3 records and the declared original call conventions; it does not qualify undocumented private record formats, arbitrary bytecode regions or a new weapon's cross-game supply semantics automatically.
+
+Legacy input uses its original byte-button command layout. Shared updates preserve private button bits and persistent player counters; health, armor and team mappings address the declared original slots. Original InstaGib movement and equipment execution have been checked. A matching early cgame rendering run remains unverified.
 
 Native Q2 primary modules use [native-compatibility.json](native-primary-declarations.md) for their complete weapon, player, inventory, pickup and private world interfaces. Classic and rerelease layouts are declared separately and retain their original game rules.
 

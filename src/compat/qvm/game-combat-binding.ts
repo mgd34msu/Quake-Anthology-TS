@@ -62,8 +62,8 @@ export class QvmCombatBindings {
     const { armor } = options.definition, image = options.artifact.image;
     if (image.instructions[armor.checkArmor]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Source CheckArmor declaration is not a function entry");
     const definition = options.definition, client = definition.fields.client;
-    if (definition.abiProfile !== "q3-modern" || !Number.isInteger(client) || client % 4 !== 0 || client < qvmSharedEntityBytes(definition.abiProfile)
-      || client + 4 > definition.entityStride) throw new Error("Source combat requires its declared modern Q3 client pointer");
+    if (!Number.isInteger(client) || client % 4 !== 0 || client < qvmSharedEntityBytes(definition.abiProfile)
+      || client + 4 > definition.entityStride) throw new Error("Source combat requires its declared Q3 client pointer");
     if (definition.damageCall !== "q3-g-damage-8-check-armor-3") throw new Error("Source combat requires its declared eight-word damage and three-word armor ABI");
     const stat = (index: number): void => {
       if (!Number.isInteger(index) || index < 0 || index >= 16) throw new Error("Source armor stat is outside the public player record");
@@ -195,7 +195,7 @@ export class QvmCombatBindings {
     const view = (): DataView => game.data.entityBytes(slot);
     const read = () => {
       const state = this.source.state(slot), flags = view().getInt32(definition.reactions.flags, true);
-      const team = slot < game.data.numClients ? game.data.copyPlayerState(slot).persistent[definition.state.team.persistentStat] : undefined;
+      const team = slot < game.data.numClients ? game.data.publicPlayerBytes(slot).getInt32(248 + definition.state.team.persistentStat * 4, true) : undefined;
       const declared = definition.state.mass, mass = declared.kind === "constant" ? declared.value
         : declared.storage === "float32" ? view().getFloat32(declared.offset, true) : view().getInt32(declared.offset, true);
       if (!Number.isFinite(mass) || mass < 0) throw new Error("Source mass is not representable by shared combat");
@@ -214,13 +214,13 @@ export class QvmCombatBindings {
       },
       writeHealth: (health: number): undefined => {
         view().setInt32(definition.fields.health, health, true);
-        if (slot < game.data.numClients) { const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[definition.state.healthStat] = health; game.data.writePlayerState(slot, { ...state, stats }); }
+        if (slot < game.data.numClients) game.data.publicPlayerBytes(slot).setInt32(184 + definition.state.healthStat * 4, health, true);
         return undefined;
       }, writeArmor: (armor: ArmorState): undefined => {
         const write = this.armorWrite(slot, armor); if (write === null) return undefined;
-        const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[definition.armor.pointsStat] = write.points;
-        if (write.tier !== null) stats[write.tier.stat] = write.tier.value;
-        game.data.writePlayerState(slot, { ...state, stats }); return undefined;
+        const state = game.data.publicPlayerBytes(slot); state.setInt32(184 + definition.armor.pointsStat * 4, write.points, true);
+        if (write.tier !== null) state.setInt32(184 + write.tier.stat * 4, write.tier.value, true);
+        return undefined;
       } };
     if (combat.read(actor.id) === null) combat.bind(actor, binding); else combat.rebind(actor, binding);
     return undefined;

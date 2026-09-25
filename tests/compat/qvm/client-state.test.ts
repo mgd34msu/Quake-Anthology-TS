@@ -1,3 +1,4 @@
+import { readQvmUserCommand, writeQvmUserCommand } from "../../../src/compat/qvm/client-state-record.ts";
 import { expect, test } from "bun:test";
 import { createIdentityOwner } from "../../../src/contracts/identity.ts";
 import { HistorySnapshotSource } from "../../../src/content/q3/presentation/snapshots.ts";
@@ -95,4 +96,21 @@ test("QVM server command trap awaits its owner before reporting argv availabilit
   expect(order).toEqual([]);
   const result = qvmClientStateSyscall(f.call(QvmCgameImport.CG_GETSERVERCOMMAND, [7]), services);
   expect(order).toEqual(["start 7"]); expect(await result).toBe(1); expect(order).toEqual(["start 7", "install argv"]);
+});
+
+
+test("updating a legacy borrowed command preserves private buttons and padding", () => {
+  const bytes = new Uint8Array(24).fill(0x6b), view = new DataView(bytes.buffer);
+  const command = { serverTime: 300, angles: [21, -34, 55] satisfies [number, number, number], buttons: 2053,
+    weapon: 7, forwardmove: -90, rightmove: 31, upmove: 22 };
+  writeQvmUserCommand(view, command, "q3-1.16n-base");
+  expect(view.getUint8(4)).toBe(133);
+  view.setUint8(4, 229);
+  const original = readQvmUserCommand(view, "q3-1.16n-base");
+  writeQvmUserCommand(view, { ...original, buttons: original.buttons & ~1, forwardmove: 0 }, "q3-1.16n-base", "update");
+  expect(readQvmUserCommand(view, "q3-1.16n-base")).toEqual({ ...command, buttons: 2052, forwardmove: 0 });
+  expect(view.getUint8(4)).toBe(228);
+  expect([view.getUint8(6), view.getUint8(7), view.getUint8(23)]).toEqual([0x6b, 0x6b, 0x6b]);
+  writeQvmUserCommand(view, command, "q3-1.16n-base");
+  expect(view.getUint8(4)).toBe(133);
 });

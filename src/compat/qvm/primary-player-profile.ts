@@ -24,11 +24,12 @@ function entry(reader: SaveReader, artifact: Artifact): number {
   const value = reader.integer(0); if (artifact.image.instructions[value]?.opcode !== QvmOpcode.OP_ENTER) return reader.fail("not an original function entry"); return value;
 }
 function layout(reader: SaveReader, artifact: Artifact) {
-  if (artifact.role !== "qagame" || artifact.abiProfile !== "q3-modern") return reader.fail("primary player services require their modern Q3 public ABI");
-  const entityStride = integer(reader.field("entityStride"), qvmSharedEntityBytes(artifact.abiProfile), artifact.image.allocatedDataLength);
-  const clientStride = integer(reader.field("clientStride"), qvmPlayerStateBytes(artifact.abiProfile), artifact.image.allocatedDataLength);
+  if (artifact.role !== "qagame") return reader.fail("primary player services require a qagame ABI");
+  const abiProfile = artifact.abiProfile ?? "q3-modern";
+  const entityStride = integer(reader.field("entityStride"), qvmSharedEntityBytes(abiProfile), artifact.image.allocatedDataLength);
+  const clientStride = integer(reader.field("clientStride"), qvmPlayerStateBytes(abiProfile), artifact.image.allocatedDataLength);
   if (entityStride % 4 !== 0 || clientStride % 4 !== 0) return reader.fail("source record strides must be aligned");
-  return { module: artifact.module, abiProfile: artifact.abiProfile, entityStride, clientStride };
+  return { module: artifact.module, abiProfile, entityStride, clientStride };
 }
 function region(reader: SaveReader) { return { entry: reader.field("entry").integer(0), join: reader.field("join").integer(0) }; }
 function evaluation(reader: SaveReader): QvmRegionEvaluation {
