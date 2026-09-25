@@ -1,8 +1,9 @@
+import type { MovementBodyShape } from "../../movement/body-shape.ts";
 import type { ModClientMovementOutputs } from "../../contracts/mod-client-outputs.ts";
 import { clientMovementType, clientStanceCommand } from "../../movement/client-outputs.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { GuestAddress, GuestCallResult, GuestCallValue } from "../../contracts/execution.ts";
-import type { Vec3 } from "../../contracts/math.ts";
+import type { Bounds, Vec3 } from "../../contracts/math.ts";
 import type { NumericOperations } from "../../contracts/numeric.ts";
 import type { Q2UserCommand, Q2RereleaseUserCommand } from "../../contracts/protocol.ts";
 import type { FrameContext } from "../../contracts/time.ts";
@@ -29,6 +30,7 @@ export interface NativeInputMotion {
 }
 export interface NativeInputServices {
   readonly applications: ModClientApplications;
+  bodyBounds?(actor: ActorId): Bounds | null;
   readonly numeric: NumericOperations;
   clientOutputs?(actor: ActorId): ModClientMovementOutputs | null;
   identity(slot: number): ModClientIdentity | null;
@@ -79,7 +81,7 @@ export class NativeInputBinding {
     };
     const think = entry("ClientThink");
     const command = bindNativeModEntry(entryHost, think.address, `${memory.module.id}:input.ClientThink`, think.signature,
-      (values, original) => this.command(values, original), () => services.applications.active);
+      (values, original) => this.command(values, original), () => services.applications.active || services.bodyBounds !== undefined);
     this.removals.push(command.close);
     try {
       this.removals.push(services.onRelease(actor => {
@@ -87,11 +89,11 @@ export class NativeInputBinding {
         return undefined;
       }));
       if (source.edition === "classic") this.removals.push(source.host.bindInputMovement((address, run) => {
-        this.movement(address, () => { run(); return { kind: "void" }; }); return undefined;
+        this.movement(address, body => { run(body); return { kind: "void" }; }); return undefined;
       }));
       else this.removals.push(source.host.bindInputMovement((address, run) => {
-        this.movement(address, () => { run(); return { kind: "void" }; }); return undefined;
-      }, () => services.applications.active && this.commands.length !== 0));
+        this.movement(address, body => { run(body); return { kind: "void" }; }); return undefined;
+      }, () => (services.applications.active || services.bodyBounds !== undefined) && this.commands.length !== 0));
     } catch (error) { this.close(); throw error; }
   }
   private assertLive(scope: CommandScope): void {
@@ -106,6 +108,7 @@ export class NativeInputBinding {
     const saved = captureAbiProcessorState(cpu.state);
     this.commands.push(scope);
     try {
+      if (!services.applications.active) { this.assertLive(scope); const result = original(values); this.assertLive(scope); return result; }
       const address = requiredPointer(values, 1), memory = source.host.memory;
       const commandView = memory.borrow(address, source.edition === "classic" ? 16 : usercmdLayout.byteLength);
       const command = source.edition === "classic" ? readClassicUserCommand(commandView) : readRereleaseUserCommand(commandView);
@@ -176,15 +179,16 @@ export class NativeInputBinding {
       [state.getFloat32(36, true), state.getFloat32(40, true), state.getFloat32(44, true)], state.getUint16(28, true), this.services.numeric);
     return { x: result[0], y: result[1], z: result[2] };
   }
-  private movement(address: GuestAddress, run: () => GuestCallResult): GuestCallResult {
+  private movement(address: GuestAddress, run: (body?: MovementBodyShape) => GuestCallResult): GuestCallResult {
     const scope = this.commands.at(-1);
-    if (scope === undefined || !this.services.applications.active) return run();
+    if (scope === undefined) return run();
     this.assertLive(scope);
     const { source } = this, memory = source.host.memory;
     if (source.edition === "rerelease") {
       const player = memory.readPointer(memory.offset(address, BigInt(fieldOffset(pmoveLayout, "player"))));
       if (player?.byteOffset !== source.host.entities().atSlot(scope.slot).address.byteOffset) return run();
     }
+    if (!this.services.applications.active) return this.runBody(scope, run);
     const classic = source.edition === "classic", view = memory.borrow(address, classic ? CLASSIC_Q2_PMOVE_BYTES : pmoveLayout.byteLength);
     const commandOffset = classic ? 28 : fieldOffset(pmoveLayout, "cmd.msec");
     const cmd = new DataView(view.buffer, view.byteOffset + commandOffset, classic ? 16 : usercmdLayout.byteLength);
@@ -214,7 +218,16 @@ export class NativeInputBinding {
       },
       write: value => { store(4, value.origin); store(classic ? 10 : 16, value.velocity); return undefined; } };
     return this.services.movement(scope.identity, projection, () => this.apply(scope, "movement-slice", command, view, cmd,
-      () => { const result = run(); moved = true; return result; }));
+      () => {
+        const result = this.runBody(scope, run); moved = true; return result;
+      }));
+  }
+  private runBody(scope: CommandScope, run: (body?: MovementBodyShape) => GuestCallResult): GuestCallResult {
+    this.assertLive(scope);
+    const requested = this.services.clientOutputs?.(scope.identity.actor)?.bodyBounds, current = this.services.bodyBounds?.(scope.identity.actor);
+    if (requested !== undefined && current == null) throw new Error("Native body shape lost its current actor bounds");
+    const body = current == null ? undefined : { current, ...(requested === undefined ? {} : { requested }), currentActor: () => this.assertLive(scope) };
+    const result = run(body); this.assertLive(scope); return result;
   }
   close(): undefined { for (const remove of this.removals.splice(0).reverse()) remove(); return undefined; }
 }

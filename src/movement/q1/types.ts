@@ -31,6 +31,7 @@ export const Q1_STEP_HEIGHT = 18;
 export interface Q1MovementHooks {
   qwState?(waterLevel: number, waterType: number): undefined;
   shape?(): TraceShape;
+  bodyShape?(bounds: Bounds): void;
   link(actor: OwnedActor, state: MovementState, touchTriggers: boolean): MovementContinuation;
   isBsp(hit: TraceHit): boolean;
   /** PlayerPreThink runs after SV_ClientThink and before SV_Physics_Client. */

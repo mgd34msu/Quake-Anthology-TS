@@ -23,7 +23,8 @@ export interface UnifiedPredictionProjection extends Omit<MovementPredictionSnap
 function readClientOutputs(r: SaveReader): import('../../../contracts/mod-client-outputs.ts').ModClientMovementOutputs {
   return { ...(r.field('viewOffset').value === undefined ? {} : { viewOffset: readVector(r.field('viewOffset')) }),
     ...(r.field('mode').value === undefined ? {} : { mode: r.field('mode').choice('normal','noclip','freeze') }),
-    ...(r.field('stance').value === undefined ? {} : { stance: r.field('stance').boolean() }) };
+    ...(r.field('stance').value === undefined ? {} : { stance: r.field('stance').boolean() }),
+    ...(r.field('bodyBounds').value === undefined ? {} : { bodyBounds: readBounds(r.field('bodyBounds')) }) };
 }
 function readBounds(r: SaveReader): Bounds { return { min: readVector(r.field('min')), max: readVector(r.field('max')) }; }
 function triple(r: SaveReader): readonly [number,number,number] {

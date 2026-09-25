@@ -1,3 +1,4 @@
+import { movementBounds } from "../body-shape.ts";
 import { sweepQ2Body } from "./swept.ts";
 /* Quake II movement, id Software / ZeniMax. GPL-2.0-or-later.
  * Ported from quake-2-re-ts and checked against the original pmove sources. */
@@ -454,6 +455,7 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
         }
     }
     function PM_CheckDuck(): void {
+        const previousDuck = pm.s.pm_flags & PMF_DUCKED;
         pm.mins[0] = numericOps.store(pm.characterBounds.min.x);
         pm.mins[1] = numericOps.store(pm.characterBounds.min.y);
         pm.maxs[0] = numericOps.store(pm.characterBounds.max.x);
@@ -474,7 +476,9 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
         else {
             if (pm.s.pm_flags & PMF_DUCKED) {
                 pm.maxs[2] = numericOps.store(characterHeight(pm.characterBounds, 32, numericOps));
-                const trace = pm.trace(pml.origin, pm.mins, pm.maxs, pml.origin);
+                const requested = pm.bodyBounds;
+                const trace = pm.trace(pml.origin, requested === undefined ? pm.mins : [requested.min.x, requested.min.y, requested.min.z],
+                    requested === undefined ? pm.maxs : [requested.max.x, requested.max.y, requested.max.z], pml.origin);
                 if (!trace.allsolid)
                     pm.s.pm_flags &= ~PMF_DUCKED;
             }
@@ -487,6 +491,16 @@ export function pmoveClassic(pm: ClassicPmove, numericOps: NumericOperations, ai
             pm.maxs[2] = numericOps.store(characterHeight(pm.characterBounds, 32, numericOps));
             pm.viewheight = characterHeight(pm.characterBounds, 22, numericOps);
         }
+        const requested = pm.bodyBounds ?? { min: { x: pm.mins[0], y: pm.mins[1], z: pm.mins[2] }, max: { x: pm.maxs[0], y: pm.maxs[1], z: pm.maxs[2] } };
+        const bounds = movementBounds(pm.previousBounds ?? requested, requested, bounds => {
+            const trace = pm.trace(pml.origin, [bounds.min.x, bounds.min.y, bounds.min.z], [bounds.max.x, bounds.max.y, bounds.max.z], pml.origin);
+            return !trace.allsolid;
+        });
+        if (bounds !== requested) {
+            pm.s.pm_flags = (pm.s.pm_flags & ~PMF_DUCKED) | previousDuck;
+            pm.viewheight = characterHeight(pm.characterBounds, previousDuck ? -2 : 22, numericOps);
+        }
+        pm.mins = [bounds.min.x, bounds.min.y, bounds.min.z]; pm.maxs = [bounds.max.x, bounds.max.y, bounds.max.z];
     }
     function PM_DeadMove(): void {
         if (!pm.groundentity)

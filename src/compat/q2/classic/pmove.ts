@@ -1,3 +1,4 @@
+import type { MovementBodyShape } from "../../../movement/body-shape.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress } from "../../../contracts/execution.ts";
 import type { Bounds } from "../../../contracts/math.ts";
@@ -24,10 +25,10 @@ export function runClassicGuestPmove(address: GuestAddress, host: ClassicQ2Guest
     for (const [index, value] of [options.equipment.velocity.x, options.equipment.velocity.y, options.equipment.velocity.z].entries())
       view.setInt16(10 + index * 2, options.numeric.toInt32(options.numeric.multiply(value, 8)), true);
   }
-  return host.applyInputMovement(address, () => runMovement(address, host, options));
+  return host.applyInputMovement(address, body => runMovement(address, host, options, body));
 }
 
-function runMovement(address: GuestAddress, host: ClassicQ2GuestHost, options: ClassicGuestPmoveOptions): undefined {
+function runMovement(address: GuestAddress, host: ClassicQ2GuestHost, options: ClassicGuestPmoveOptions, body?: MovementBodyShape): undefined {
   const memory = host.memory, view = memory.borrow(address, CLASSIC_Q2_PMOVE_BYTES);
   const scratch = memory.allocate({ byteLength: 48, label: "API 3 nested Pmove vectors" });
   const canonical = new Map<bigint, MovementEntity>();
@@ -82,12 +83,13 @@ function runMovement(address: GuestAddress, host: ClassicQ2GuestHost, options: C
     snapinitial: view.getInt32(44, true) !== 0, numtouch: 0, touchents: [], touchtraces: [], viewangles: vector(180, "float"), viewheight: view.getFloat32(192, true),
     mins: vector(196, "float"), maxs: vector(208, "float"), groundentity: null, watertype: view.getInt32(224, true), waterlevel: view.getInt32(228, true),
     characterBounds: options.characterBounds ?? Q2_PLAYER_BOUNDS,
+    ...(body === undefined ? {} : { previousBounds: body.current, ...(body.requested === undefined ? {} : { bodyBounds: body.requested }) }),
     trace: (start, mins, maxs, end) => {
-      commit();
+      body?.currentActor(); commit();
       const target = memory.readPointer(memory.offset(address, 232n)); if (target === null) throw new Error("Source cleared Pmove trace callback");
       const result = host.invoke(target, classicSignature([q2Pointer, q2Pointer, q2Pointer, q2Pointer], q2Trace),
         [start, mins, maxs, end].map((value, index) => ({ kind: "pointer", value: prepareVector(index, value) })));
-      reload();
+      reload(); body?.currentActor();
       if (result.kind !== "aggregate" || result.bytes.length !== 56) throw new Error("API 3 Pmove trace returned an invalid trace_t");
       const data = new DataView(result.bytes.buffer, result.bytes.byteOffset, result.bytes.byteLength);
       const hit = entity(memory.pointer(BigInt(data.getUint32(52, true))));
@@ -105,10 +107,10 @@ function runMovement(address: GuestAddress, host: ClassicQ2GuestHost, options: C
       return trace;
     },
     pointcontents: point => {
-      commit();
+      body?.currentActor(); commit();
       const target = memory.readPointer(memory.offset(address, 236n)); if (target === null) throw new Error("Source cleared Pmove contents callback");
       const result = host.invoke(target, classicSignature([q2Pointer], q2Int), [{ kind: "pointer", value: prepareVector(0, point) }]);
-      reload();
+      reload(); body?.currentActor();
       if (result.kind !== "int32") throw new Error("API 3 Pmove pointcontents did not return int");
       return result.value;
     },

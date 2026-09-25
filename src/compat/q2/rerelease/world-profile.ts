@@ -27,7 +27,7 @@ export interface RereleasePrimaryWorldProfile {
   readonly armor: { readonly table: number; readonly stride: number; readonly normal: number; readonly energy: number; readonly regular: readonly ItemId[]; readonly empty: ItemId;
     readonly screen: ItemId; readonly shield: ItemId; readonly cells: ItemId; readonly cellsIndex: number };
   readonly flags: { readonly godmode: number; readonly notarget: number; readonly noKnockback: number; readonly powerArmor: number };
-  readonly movement: { readonly gameApi: number; readonly pmove: number; readonly speedLoads: readonly { readonly next: number; readonly register: number }[] };
+  readonly movement: { readonly body?: { readonly dimensions: number; readonly trace: number; readonly movementGlobal: number }; readonly gameApi: number; readonly pmove: number; readonly speedLoads: readonly { readonly next: number; readonly register: number }[] };
 }
 // g_items.cpp itemlist classnames; disabled beta disintegrator is not an item.
 const classnames: readonly string[] = [
@@ -137,7 +137,7 @@ const retail: RereleasePrimaryWorldProfile = {
   armor: { table: 0x1953a8, stride: 192, normal: 8, energy: 12, regular: ["q2:item_armor_jacket", "q2:item_armor_combat", "q2:item_armor_body"], empty: "q2:item_armor_body",
     screen: "q2:item_power_screen", shield: "q2:item_power_shield", cells: "q2:ammo_cells", cellsIndex: 30 },
   flags: { godmode: 16, notarget: 32, noKnockback: 2048, powerArmor: 4096 },
-  movement: { gameApi: 0x6bcd0, pmove: 0xea560, speedLoads: [{ next: 0xe8293, register: 0 }, { next: 0xe889c, register: 1 }, { next: 0xe88ce, register: 0 }, { next: 0xe8b15, register: 1 }, { next: 0xe8b1f, register: 1 }, { next: 0xe9e3e, register: 10 }] },
+  movement: { body: { dimensions: 0xe9ff0, trace: 0xe71a0, movementGlobal: 0x23c9c8 }, gameApi: 0x6bcd0, pmove: 0xea560, speedLoads: [{ next: 0xe8293, register: 0 }, { next: 0xe889c, register: 1 }, { next: 0xe88ce, register: 0 }, { next: 0xe8b15, register: 1 }, { next: 0xe8b1f, register: 1 }, { next: 0xe9e3e, register: 10 }] },
 };
 export function rereleasePrimaryWorldProfile(digest: ContentDigest): RereleasePrimaryWorldProfile | null { return digest === retail.digest ? retail : null; }
 
@@ -165,7 +165,7 @@ export function readRereleasePrimaryWorldProfile(reader: SaveReader, digest: Con
         capacity: capacity.field("kind").choice("ammo", "fixed") === "ammo" ? { kind: "ammo", sourceIndex: capacity.field("sourceIndex").integer(0) } : { kind: "fixed", count: bounded(capacity.field("count"), 0, 0x7fffffff) } }; }),
     armor: { table: rva(armor.field("table")), stride: bounded(armor.field("stride"), 8, 65536), normal: armor.field("normal").integer(0), energy: armor.field("energy").integer(0), regular: armor.field("regular").list(namespaced), empty: namespaced(armor.field("empty")), screen: namespaced(armor.field("screen")), shield: namespaced(armor.field("shield")), cells: namespaced(armor.field("cells")), cellsIndex: armor.field("cellsIndex").integer(0) },
     flags: { godmode: flags.field("godmode").integer(1), notarget: flags.field("notarget").integer(1), noKnockback: flags.field("noKnockback").integer(1), powerArmor: flags.field("powerArmor").integer(1) },
-    movement: { gameApi: rva(movement.field("gameApi")), pmove: rva(movement.field("pmove")), speedLoads: movement.field("speedLoads").list(value => ({ next: rva(value.field("next")), register: bounded(value.field("register"), 0, 15) })) },
+    movement: { ...(movement.field("body").value === undefined ? {} : { body: { dimensions: rva(movement.field("body").field("dimensions")), trace: rva(movement.field("body").field("trace")), movementGlobal: rva(movement.field("body").field("movementGlobal")) } }), gameApi: rva(movement.field("gameApi")), pmove: rva(movement.field("pmove")), speedLoads: movement.field("speedLoads").list(value => ({ next: rva(value.field("next")), register: bounded(value.field("register"), 0, 15) })) },
   };
   validateRereleasePrimaryWorldProfile(profile, digest); return profile;
 }
@@ -186,6 +186,7 @@ export function validateRereleasePrimaryWorldProfile(profile: RereleasePrimaryWo
   range(profile.armor.stride, 8, 65536); range(profile.armor.normal, 0, 65532); range(profile.armor.energy, 0, 65532);
   range(profile.armor.cellsIndex, 0, profile.client.inventoryCount - 1);
   for (const value of Object.values(profile.flags)) range(value, 1, Number.MAX_SAFE_INTEGER);
+  if (profile.movement.body !== undefined) for (const address of Object.values(profile.movement.body)) range(address, 1, 0xffffffff);
   const loads = new Set<number>();
   for (const load of profile.movement.speedLoads) {
     range(load.next, 1, 0xffffffff); range(load.register, 0, 15);

@@ -117,6 +117,17 @@ test("saved Q2 Space/Ctrl controls jump and crouch Q3 character bounds with QW m
   if (blocked.status !== "active") throw new Error("Player removed");
   expect(blocked.bounds).toEqual(Q3_SOURCE_POSTURES.crouched.bounds); expect(blocked.viewHeight).toBe(12);
   expect(shared.move({ ...underCeiling, execution: "prediction" }, services)).toEqual(blocked);
+  const bodyBounds = { min: { x: -7, y: -9, z: -20 }, max: { x: 8, y: 10, z: 12 } };
+  const impossible = { min: { x: -10000, y: -10000, z: -10000 }, max: { x: 10000, y: 10000, z: 10000 } };
+  for (const selected of [shared, native]) {
+    const body = selected.move({ ...current, environment: { ...current.environment, clientOutputs: { bodyBounds } } }, services);
+    if (body.status !== "active") throw new Error("Player removed");
+    expect(body.bounds).toEqual(bodyBounds);
+    const blockedBody = selected.move({ ...current, state: body.state, currentBounds: body.bounds, shape: { kind: "box", bounds: body.bounds },
+      environment: { ...current.environment, clientOutputs: { bodyBounds: impossible } } }, services);
+    if (blockedBody.status !== "active") throw new Error("Player removed");
+    expect(blockedBody.bounds).toEqual(bodyBounds);
+  }
   const nativeDown = native.move({ ...current, command: ctrl }, services);
   if (nativeDown.status !== "active") throw new Error("Player removed");
   expect(nativeDown.bounds).toEqual(Q3_SOURCE_STANDING_BOUNDS); expect(nativeDown.viewHeight).toBe(26);

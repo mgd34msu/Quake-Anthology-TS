@@ -1,3 +1,4 @@
+import type { MovementBodyShape } from "../../../movement/body-shape.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestValueLayout, RawEntityView } from "../../../contracts/execution.ts";
@@ -106,13 +107,13 @@ export class ClassicQ2GuestHost {
       admission: () => { const pickups = this.options.services.pickups; if (pickups === undefined) throw new Error("API3 primary pickup authority disappeared"); return pickups; },
     }, image, profile);
   }
-  private inputMovement: ((address: GuestAddress, run: () => undefined) => undefined) | null = null;
-  bindInputMovement(boundary: (address: GuestAddress, run: () => undefined) => undefined): () => undefined {
+  private inputMovement: ((address: GuestAddress, run: (body?: MovementBodyShape) => undefined) => undefined) | null = null;
+  bindInputMovement(boundary: (address: GuestAddress, run: (body?: MovementBodyShape) => undefined) => undefined): () => undefined {
     if (this.inputMovement !== null) throw new Error("API3 movement already has an input owner");
     this.inputMovement = boundary;
     return () => { if (this.inputMovement === boundary) this.inputMovement = null; return undefined; };
   }
-  applyInputMovement(address: GuestAddress, run: () => undefined): undefined {
+  applyInputMovement(address: GuestAddress, run: (body?: MovementBodyShape) => undefined): undefined {
     return this.inputMovement === null ? run() : this.inputMovement(address, run);
   }
   constructor(readonly options: ClassicQ2GuestHostOptions) {

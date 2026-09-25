@@ -27,6 +27,8 @@ export interface ClassicPmove {
   watertype: number; waterlevel: number; trace: PmTraceFn; pointcontents(point: Vec3): number;
   /** Selected character dimensions, independent of movement family. */
   characterBounds: Bounds;
+  readonly bodyBounds?: Bounds;
+  readonly previousBounds?: Bounds;
 }
 export interface KexTouchListT { num: number; traces: TraceT[]; }
 export interface KexPmoveT {
@@ -40,6 +42,8 @@ export interface KexPmoveT {
   pointcontents(point: Vec3): number;
   viewoffset: Vec3; screen_blend: Vec4; rdflags: number; jump_sound: boolean; step_clip: boolean; impact_delta: number;
   characterBounds: Bounds;
+  readonly bodyBounds?: Bounds;
+  readonly previousBounds?: Bounds;
 }
 export interface PmConfigT { airaccel: number; n64_physics: boolean; }
 export const PM_CONFIG_DEFAULT: PmConfigT = { airaccel: 0, n64_physics: false };

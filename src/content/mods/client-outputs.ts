@@ -3,7 +3,8 @@ import type { SaveReader } from "../../persistence/value.ts";
 
 export function readClientOutputDeclarations<S, V>(reader: SaveReader, scalar: (reader: SaveReader) => S, vector: (reader: SaveReader) => V): readonly ModClientOutputDeclaration<S, V>[] {
   return reader.list(entry => {
-    const kind = entry.field("kind").choice("view-offset", "movement-mode", "stance");
+    const kind = entry.field("kind").choice("view-offset", "movement-mode", "stance", "body-shape");
+    if (kind === "body-shape") return { kind, min: vector(entry.field("min")), max: vector(entry.field("max")) };
     if (kind === "view-offset") {
       if (entry.field("height").value === undefined) return { kind, field: vector(entry.field("field")) };
       if (entry.field("field").value !== undefined) return entry.fail("view offset must declare a vector or a scalar height, not both");

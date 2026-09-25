@@ -152,6 +152,8 @@ interface MovementInputFields {
   readonly frame: FrameContext;
   /** Bounds come from the chosen character's collision body. */
   readonly shape: TraceShape;
+  /** Last accepted local hull, before any current source shape request. */
+  readonly currentBounds?: Bounds;
   readonly environment: MovementEnvironment;
   readonly arsenal: ArsenalState;
   readonly animation: ActorAnimationState;

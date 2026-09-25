@@ -68,11 +68,16 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
   const outputField = (name: string, vector: boolean): void => {
     const field = program.fieldsByName.get(name), binding = declaration.actorFields.find(value => value.field === name);
     if (field === undefined || field.type !== (vector ? "vector" : "float") || binding === undefined
-      || binding.binding !== "private" && !(vector && binding.binding === "view-offset") && !(!vector && binding.binding === "client-flags"))
+      || binding.binding !== "private" && !(vector && ["view-offset", "bounds-min", "bounds-max"].includes(binding.binding)) && !(!vector && binding.binding === "client-flags"))
       throw new Error("QC client outputs require declared private fields or the explicit view-offset field");
   };
   validateModClientOutputs(declaration.clients?.outputs ?? [], { scalar: field => outputField(field, false), vector: field => outputField(field, true) });
   for (const output of declaration.clients?.outputs ?? []) {
+    if (output.kind === "body-shape") {
+      if (declaration.actorFields.find(value => value.field === output.min)?.binding !== "bounds-min"
+        || declaration.actorFields.find(value => value.field === output.max)?.binding !== "bounds-max") throw new Error("Client body shape must name its declared source mins/maxs");
+      continue;
+    }
     const field = "height" in output ? output.height : output.field, binding = declaration.actorFields.find(value => value.field === field);
     if (binding?.binding === "client-flags" && (output.kind === "view-offset" || output.mask === undefined || (output.mask & ~(binding.privateMask ?? 0)) !== 0))
       throw new Error("QC client flag outputs must name an explicit mask of source-private bits");
@@ -589,6 +594,13 @@ export class QcModProvider {
     else this.machine.entities.at(slot).bytes.fill(0);
     this.projections.set(current, slot); this.actorsBySlot.set(slot, current);
     for (const field of this.fields) if (field.declaration.binding === "constant") writeQcSourceValue(this.machine, this.machine.entities.at(slot), field.offset, field.declaration.value, actor => this.reference(actor));
+    if (clientSlot !== null) {
+      const body = this.services.bodies.read(current), words = this.machine.entities.at(slot);
+      if (body !== null) for (const field of this.fields) {
+        if (field.declaration.binding === "bounds-min") words.setVector(field.offset, body.bounds.min);
+        else if (field.declaration.binding === "bounds-max") words.setVector(field.offset, body.bounds.max);
+      }
+    }
     return this.machine.entities.reference(slot);
   }
   private releaseClientProjection(actor: ActorId): "released" | "deferred" {
@@ -654,6 +666,7 @@ export class QcModProvider {
           words.setFloat(field.offset, entry?.count ?? 0); break;
         }
         case "origin": case "angles": case "velocity": case "bounds-min": case "bounds-max": {
+          if (this.outputFieldOwned(actor, field.declaration.field)) break;
           const body = this.services.bodies.read(actor);
           words.setVector(field.offset, body === null ? { x: 0, y: 0, z: 0 }
             : declared.binding === "bounds-min" ? body.bounds.min : declared.binding === "bounds-max" ? body.bounds.max : body[declared.binding]); break;
@@ -662,7 +675,7 @@ export class QcModProvider {
     }
   }
   private outputFieldOwned(actor: ActorId, field: string): boolean {
-    return this.clients?.admitted(actor) === true && this.declaration.clients?.outputs?.some(output => output.kind === "view-offset" && "field" in output && output.field === field) === true;
+    return this.clients?.admitted(actor) === true && this.declaration.clients?.outputs?.some(output => output.kind === "body-shape" ? output.min === field || output.max === field : output.kind === "view-offset" && "field" in output && output.field === field) === true;
   }
   private publishClientOutputs(): void {
     if (!this.clientOutputs.enabled) return;
@@ -760,6 +773,7 @@ export class QcModProvider {
           this.services.bodies.write(actor, { ...body, [declared.binding]: words.vector(field.offset) }); break;
         }
         case "bounds-min": case "bounds-max": {
+          if (this.outputFieldOwned(actor.id, declared.field)) break;
           const body = this.services.bodies.read(actor.id); if (body === null) throw new Error("Mod bounds store requires a physical actor");
           this.services.bodies.write(actor, { ...body, bounds: { ...body.bounds, [declared.binding === "bounds-min" ? "min" : "max"]: words.vector(field.offset) } }); break;
         }

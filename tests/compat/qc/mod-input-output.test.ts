@@ -42,6 +42,7 @@ test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own 
     grounded: () => bodies.read(player.id)?.ground !== null, subscribe: () => () => undefined, subscribeApplication: listener => applications.subscribe(listener) };
   const declared: ModActorField[] = [
     { field: "view_ofs", binding: "view-offset" },
+    { field: "mins", binding: "bounds-min" }, { field: "maxs", binding: "bounds-max" },
     { field: "health", binding: "health" }, { field: "velocity", binding: "velocity" }, { field: "origin", binding: "origin" },
     { field: "flags", binding: "client-flags", grounded: true, privateMask: 16 | 2048 | 4096 },
     { field: "button0", binding: "client-input", input: "attack", update: "always" },
@@ -60,7 +61,7 @@ test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own 
     for (let i = 0; i < (field.type === "vector" ? 3 : 1); i++) used.add(field.offset + i);
   }
   const declaration: ModCallbackDeclaration = { version: 1, runtime: "quakec", program: { path: "progs.dat", digest: program.digest }, actorFields: declared, callbacks: [],
-    clients: { maximum: 1, outputs: [{ kind: "view-offset", field: "view_ofs" }], admit: [], disconnect: [], userinfo: [],
+    clients: { maximum: 1, outputs: [{ kind: "view-offset", field: "view_ofs" }, { kind: "body-shape", min: "mins", max: "maxs" }], admit: [], disconnect: [], userinfo: [],
       frame: [{ function: "PlayerPostThink", arguments: [], globals: [{ name: "self", value: { kind: "input", name: "self" } }, { name: "time", value: { kind: "input", name: "time" } }, { name: "frametime", value: { kind: "input", name: "elapsed" } }] }],
       input: [{ phase: "before", scope: "client-command",
       calls: [{ function: "PlayerPreThink", arguments: [], globals: [{ name: "self", value: { kind: "input", name: "self" } }, { name: "time", value: { kind: "input", name: "time" } }, { name: "frametime", value: { kind: "input", name: "elapsed" } }] }],
@@ -118,10 +119,16 @@ test.skipIf(!await Bun.file(path).exists())("original Hipnotic player calls own 
     expect(applicationsSeen).toBe(delivered); expect(held.impulse).toBe(2);
     apply({ ...held, buttons: 0, impulse: 0 }); advance(5);
     expect(inventory.count(player.id, "q1:ammo/shells")).toBe(8); unsubscribe();
+    const originalBody = bodies.read(player.id)?.bounds;
     source.invoke({ function: "ThrowHead", arguments: [{ kind: "string", value: "progs/h_player.mdl" }, { kind: "float", value: -50 }],
       globals: [{ name: "self", value: { kind: "input", name: "self" } }] }, new Map([["self", { kind: "actor", value: player.id }]]));
     expect(words.vector(field("view_ofs"))).toEqual({ x: 0, y: 0, z: 8 });
     expect(outputs.read(player.id)?.viewOffset).toEqual(words.vector(field("view_ofs")));
+    const sourceBounds = { min: words.vector(field("mins")), max: words.vector(field("maxs")) };
+    expect(outputs.read(player.id)?.bodyBounds).toEqual(sourceBounds);
+    expect(bodies.read(player.id)?.bounds).toEqual(originalBody);
+    const bodyCheckpoint = source.checkpoint(); source.restore(bodyCheckpoint);
+    expect(outputs.read(player.id)?.bodyBounds).toEqual(sourceBounds);
     source.close(); expect(outputs.read(player.id)).toBeNull();
   } finally { source.close(); applications.close(); actors.close(); await content.close(); }
 });

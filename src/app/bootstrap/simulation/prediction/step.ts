@@ -71,7 +71,7 @@ export function predictMovementCommand(configuration: MovementProbeOptions, snap
       ? stepQ3CharacterAnimation(input, runtime?.product ?? "baseq3", source.environment.health <= 0, runtime?.eventSequence ?? 0)
       : { animation: input.animation, effects: [] } };
   const base = { actor: configuration.actor, commandSequence: entry.sequence, frame,
-    shape, environment,
+    shape, currentBounds: source.bounds, environment,
     arsenal: source.arsenal, animation: source.animation, execution: "prediction" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
   const state = source.state;
   const q1Options = { viewHeight: configuration.standingViewHeight, hooks: {

@@ -1,3 +1,4 @@
+import { movementBounds } from "../body-shape.ts";
 import { sweepQ2Body } from "./swept.ts";
 /* Copyright (c) ZeniMax Media Inc.
  * Licensed under the GNU General Public License 2.0.
@@ -722,6 +723,8 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
                 pml.origin[2] = numericOps.store(numericOps.add(element(pml.origin, 2), numericOps.multiply(element(pml.velocity, 2), pml.frametime)));
             }
         }
+        let acceptedBodyBounds = pm.previousBounds;
+        let acceptedDuck = pm.s.pm_flags & PmflagsT.PMF_DUCKED, acceptedHeight = pm.s.viewheight;
         function PM_SetDimensions(): void {
             pm.mins[0] = numericOps.store(pm.characterBounds.min.x);
             pm.mins[1] = numericOps.store(pm.characterBounds.min.y);
@@ -742,6 +745,15 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
                 pm.maxs[2] = numericOps.store(characterHeight(pm.characterBounds, 32, numericOps));
                 pm.s.viewheight = characterHeight(pm.characterBounds, 22, numericOps);
             }
+            const requested = pm.bodyBounds ?? { min: { x: pm.mins[0], y: pm.mins[1], z: pm.mins[2] }, max: { x: pm.maxs[0], y: pm.maxs[1], z: pm.maxs[2] } };
+            const bounds = movementBounds(acceptedBodyBounds ?? requested, requested, bounds => {
+                const trace = PM_Trace(pml.origin, [bounds.min.x, bounds.min.y, bounds.min.z], [bounds.max.x, bounds.max.y, bounds.max.z], pml.origin);
+                return !trace.allsolid;
+            });
+            if (bounds !== requested) { pm.s.pm_flags = (pm.s.pm_flags & ~PmflagsT.PMF_DUCKED) | acceptedDuck; pm.s.viewheight = acceptedHeight; }
+            acceptedDuck = pm.s.pm_flags & PmflagsT.PMF_DUCKED; acceptedHeight = pm.s.viewheight;
+            acceptedBodyBounds = bounds;
+            pm.mins = [bounds.min.x, bounds.min.y, bounds.min.z]; pm.maxs = [bounds.max.x, bounds.max.y, bounds.max.z];
         }
         function PM_AboveWater(): boolean {
             const below = vec3(element(pml.origin, 0), element(pml.origin, 1), numericOps.subtract(element(pml.origin, 2), 8));
@@ -766,8 +778,9 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
                 !(pm.s.pm_flags & PmflagsT.PMF_ON_LADDER) &&
                 !config.n64_physics) {
                 if (!(pm.s.pm_flags & PmflagsT.PMF_DUCKED)) {
-                    const check_maxs = vec3(element(pm.maxs, 0), element(pm.maxs, 1), characterHeight(pm.characterBounds, 4, numericOps));
-                    const trace = PM_Trace(pml.origin, pm.mins, check_maxs, pml.origin);
+                    const check_maxs = pm.bodyBounds === undefined ? vec3(element(pm.maxs, 0), element(pm.maxs, 1), characterHeight(pm.characterBounds, 4, numericOps)) : vec3(pm.bodyBounds.max.x, pm.bodyBounds.max.y, pm.bodyBounds.max.z);
+                    const check_mins = pm.bodyBounds === undefined ? pm.mins : vec3(pm.bodyBounds.min.x, pm.bodyBounds.min.y, pm.bodyBounds.min.z);
+                    const trace = PM_Trace(pml.origin, check_mins, check_maxs, pml.origin);
                     if (!trace.allsolid) {
                         pm.s.pm_flags |= PmflagsT.PMF_DUCKED;
                         flags_changed = true;
@@ -776,8 +789,9 @@ export function createRereleaseMovement(numericOps: NumericOperations, context: 
             }
             else {
                 if (pm.s.pm_flags & PmflagsT.PMF_DUCKED) {
-                    const check_maxs = vec3(element(pm.maxs, 0), element(pm.maxs, 1), pm.characterBounds.max.z);
-                    const trace = PM_Trace(pml.origin, pm.mins, check_maxs, pml.origin);
+                    const check_maxs = pm.bodyBounds === undefined ? vec3(element(pm.maxs, 0), element(pm.maxs, 1), pm.characterBounds.max.z) : vec3(pm.bodyBounds.max.x, pm.bodyBounds.max.y, pm.bodyBounds.max.z);
+                    const check_mins = pm.bodyBounds === undefined ? pm.mins : vec3(pm.bodyBounds.min.x, pm.bodyBounds.min.y, pm.bodyBounds.min.z);
+                    const trace = PM_Trace(pml.origin, check_mins, check_maxs, pml.origin);
                     if (!trace.allsolid) {
                         pm.s.pm_flags &= ~PmflagsT.PMF_DUCKED;
                         flags_changed = true;

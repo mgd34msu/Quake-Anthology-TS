@@ -1,3 +1,4 @@
+import { movementBounds } from "../body-shape.ts";
 /* Movement kernels derived from Quake sv_phys.c, sv_user.c and QW pmove.c.
  * Copyright (C) 1996-1997 Id Software, Inc. GPL-2.0-or-later. */
 import type { AngleVectors, Bounds, Vec3 } from "../../contracts/math.ts";
@@ -52,6 +53,7 @@ export class MovementContext {
   readonly effects: OrderedMovementEffect[] = [];
   get viewHeight(): number { return this.input.environment.pose?.viewHeight ?? this.options.viewHeight ?? 22; }
   private sourceMode: number;
+  private ownedBounds: Bounds | null = null;
   private modeProjected = false;
   projectClientMode(): void { this.modeProjected = true; }
   removed = false;
@@ -73,7 +75,23 @@ export class MovementContext {
     const multiplier = this.input.environment.speedMultiplier ?? 1;
     return multiplier === 1 ? value : this.math.n.multiply(value, multiplier);
   }
-  get shape(): TraceShape { return this.input.environment.pose === undefined ? this.options.hooks?.shape?.() ?? this.input.shape : { kind: "box", bounds: this.input.environment.pose.bounds }; }
+  get shape(): TraceShape {
+    if (this.input.environment.pose !== undefined) return { kind: "box", bounds: this.input.environment.pose.bounds };
+    const source = this.options.hooks?.shape?.() ?? this.input.shape;
+    return this.ownedBounds === null || source.kind === "point" ? source : { kind: source.kind, bounds: this.ownedBounds };
+  }
+  updateBodyShape(state: MovementState): void {
+    const requested = this.input.environment.clientOutputs?.bodyBounds;
+    if (requested === undefined || this.input.environment.pose !== undefined) { this.ownedBounds = null; return; }
+    const source = this.options.hooks?.shape?.() ?? this.input.shape;
+    if (source.kind === "point") throw new Error("A player body output requires a selected collision hull");
+    this.ownedBounds = movementBounds(this.ownedBounds ?? this.input.currentBounds ?? source.bounds, requested, bounds => {
+      const origin = state.kind === "q2-classic" ? { x: state.originEighths[0] / 8, y: state.originEighths[1] / 8, z: state.originEighths[2] / 8 } : state.origin;
+      const trace = this.trace(origin, origin, { kind: source.kind, bounds });
+      return !trace.startSolid && !trace.allSolid;
+    });
+    this.options.hooks?.bodyShape?.(this.ownedBounds);
+  }
   get bounds(): Bounds { return shapeBounds(this.shape); }
   trace(start: Vec3, end: Vec3, shape = this.shape, move: "normal" | "no-monsters" | "missile" = "normal"): TraceResult {
     return this.services.scene.trace({ start, end, shape, target: { kind: "world" },
@@ -110,12 +128,14 @@ export class MovementContext {
     return this.resumed(continuation.state);
   }
   lifecycle(state: MovementState, phase: "beforePhysics" | "think" | "afterPhysics", input = this.input): MovementState {
-    if (this.removed || this.options.hooks === undefined) return state;
-    const hook = this.options.hooks[phase];
-    if (hook === undefined) return state;
+    if (this.removed) return state;
+    const hook = this.options.hooks?.[phase];
+    if (hook === undefined) { if (phase === "beforePhysics") this.updateBodyShape(state); return state; }
     const continuation = hook(input, this.sourceState(state));
     if (continuation.kind === "actor-removed") { this.removed = true; return state; }
-    return this.resumed(continuation.state);
+    const result = this.resumed(continuation.state);
+    if (phase === "beforePhysics") this.updateBodyShape(result);
+    return result;
   }
   isBsp(hit: TraceHit): boolean { return hit.kind === "world" || (this.options.hooks?.isBsp(hit) ?? false); }
 }

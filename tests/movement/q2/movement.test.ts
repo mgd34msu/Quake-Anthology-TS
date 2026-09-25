@@ -348,3 +348,26 @@ test.skipIf(!installed)("authored stance and freeze use both original Q2 Pmove p
     }
   }
 });
+
+
+test.skipIf(!installed)("authored body bounds survive selected Q2 steps and blocked expansion", async () => {
+  const { world, origin } = await level(), scene = createSceneQueries(world);
+  const services: MovementServices = { scene, numeric, touch: (_contact, state) => ({ kind: "continue", state }),
+    weaponStep: () => { throw new Error("Unexpected weapon step"); }, animationStep: () => { throw new Error("Unexpected animation step"); } };
+  const small = { min: { x: -7, y: -9, z: -20 }, max: { x: 8, y: 10, z: 12 } };
+  const blocked = { min: { x: -10000, y: -10000, z: -10000 }, max: { x: 10000, y: 10000, z: 10000 } };
+  const input = classic(origin), provider = createQ2ClassicMovementProvider("q2:movement");
+  const moved = provider.move({ ...input, command: { ...input.command, forwardMove: 200 }, environment: { ...input.environment, clientOutputs: { bodyBounds: small } } }, services);
+  if (moved.status !== "active") throw new Error("Player removed");
+  expect(moved.bounds).toEqual(small); expect(moved.state).not.toEqual(input.state);
+  const held = provider.move({ ...input, state: moved.state, currentBounds: moved.bounds, environment: { ...input.environment, clientOutputs: { bodyBounds: blocked } } }, services);
+  if (held.status !== "active") throw new Error("Player removed");
+  expect(held.bounds).toEqual(small);
+  const rr = rerelease(origin), rrProvider = createQ2RereleaseMovementProvider("q2:movement", new Q2RereleaseMovementContext());
+  const rrMoved = rrProvider.move({ ...rr, command: { ...rr.command, forwardMove: 200 }, environment: { ...rr.environment, clientOutputs: { bodyBounds: small } } }, services);
+  if (rrMoved.status !== "active") throw new Error("Player removed");
+  expect(rrMoved.bounds).toEqual(small); expect(rrMoved.state).not.toEqual(rr.state);
+  const rrHeld = rrProvider.move({ ...rr, state: rrMoved.state, currentBounds: rrMoved.bounds, environment: { ...rr.environment, clientOutputs: { bodyBounds: blocked } } }, services);
+  if (rrHeld.status !== "active") throw new Error("Player removed");
+  expect(rrHeld.bounds).toEqual(small);
+});

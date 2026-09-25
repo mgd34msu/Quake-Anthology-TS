@@ -402,6 +402,11 @@ export class SharedSimulation implements Simulation {
         throw new Error("Selected original Quake movement has no crouch-request interface; authored collision changes require an explicit source boundary");
       if (channels.includes("movement-mode") && this.source.kind === "q3-qvm" && this.options.q3Guest?.prepared.primary.input?.movementModes === undefined)
         throw new Error("Original QVM movement modes require an artifact-qualified input declaration");
+      if (channels.includes("body-shape") && this.source.kind === "q3-qvm" && this.options.q3Guest?.prepared.primary.weapons?.equipmentMovement.bodyTrace === undefined)
+        throw new Error("Selected original QVM movement has no admitted body trace interface");
+      if (channels.includes("body-shape") && this.source.kind === "q2-native" && this.source.edition === "rerelease"
+        && this.source.game.source.host.module.requireWorldProfile().movement.body === undefined)
+        throw new Error("Selected original rerelease movement has no admitted body trace interface");
       const lease = this.modClientOutputs.claim(owner, channels), stop = this.modClientApplications.subscribe(() => undefined);
       return { publish: (actor, outputs) => lease.publish(actor, outputs), release: actor => lease.release(actor), close: () => { lease.close(); stop(); } };
     },
@@ -2737,12 +2742,16 @@ export class SharedSimulation implements Simulation {
         selected: actor => this.selectedArsenal === null && (this.weaponSlots.get(actor)?.primarySelected() ?? true),
         equipmentMovement: actor => {
           const source = this.selectedQ3Source, owner = this.actors.resolveOwned(actor);
-          if (source?.ownsEquipment !== true || owner === null || this.selectedArsenal?.has(actor) !== true || primaryWeapons?.available(actor) !== true) return null;
+          if (owner === null) return null;
+          const current = this.bodies.read(actor)?.bounds, requested = this.activeClientOutputs(actor)?.bodyBounds;
+          const body = current === undefined ? {} : { body: { current, ...(requested === undefined ? {} : { requested }), currentActor: () => this.actors.assertOwned(owner) } };
+          if (source?.ownsEquipment !== true || this.selectedArsenal?.has(actor) !== true || primaryWeapons?.available(actor) !== true)
+            return { speedMultiplier: 1, pose: null, ownsHoldableInput: false, ...body };
           const state = game.records.player(game.records.requireSlot(actor));
           const postures = playerPostures({ character: providerFamily(this.recipe.character.definition.provider),
             standingBounds: playerStandingBounds(providerFamily(this.recipe.character.definition.provider)), viewHeight: state.viewHeight });
           const pose = source.fixedPose(owner, postures);
-          return { speedMultiplier: source.speedMultiplier(actor) / (primaryWeapons.powerupUntil(actor, "haste") === 0 ? 1 : 1.3), pose,
+          return { ...body, speedMultiplier: source.speedMultiplier(actor) / (primaryWeapons.powerupUntil(actor, "haste") === 0 ? 1 : 1.3), pose,
             ownsHoldableInput: this.selectedArsenal instanceof Q3SelectedArsenal && this.selectedArsenal.ownsHoldableInput(actor) };
         },
         attempted: (actor, weapon) => { if (this.nativeWeaponRequests.get(actor) !== weapon) this.nativeWeaponRequests.delete(actor); },
@@ -3423,7 +3432,7 @@ export class SharedSimulation implements Simulation {
     const player = this.requirePlayer(entity.actor.id), product = this.source.game.options.product;
     player.arsenal = q3SpawnLoadout(this.weaponProvider.provider, product, this.source.game.gameType === 3);
     this.q3Arsenals.set(player.actor, q3SpawnArsenalRuntime(product, 100));
-    player.bounds = player.standingBounds; player.viewHeight = player.character === "q3" ? 26 : 22;
+    player.bounds = player.standingBounds; player.bodyShapeBase = null; player.viewHeight = player.character === "q3" ? 26 : 22;
     const body = { origin: pose.origin, angles: pose.angles, velocity: zero, bounds: player.standingBounds, ground: null };
     if (player.character === "q3") {
       let character = this.characters.get(player.actor);
@@ -3832,7 +3841,7 @@ export class SharedSimulation implements Simulation {
   private placeQ1Player(player: MovementPlayer, start: import("../../../content/q1/foundation/entity.ts").Q1Actor, travel: Q1TravelState): undefined {
     if (this.source.kind !== "q1") throw new Error("Q1 placement before source entry");
     const body = this.bodies.read(player.actor.id), spot = this.source.game.body(start); if (body === null) throw new Error("Respawn player body missing");
-    this.bodies.write(player.actor, { ...body, bounds: player.standingBounds }); player.bounds = player.standingBounds; player.viewHeight = player.character === "q3" ? 26 : 22;
+    this.bodies.write(player.actor, { ...body, bounds: player.standingBounds }); player.bounds = player.standingBounds; player.bodyShapeBase = null; player.viewHeight = player.character === "q3" ? 26 : 22;
     this.source.composition.admitTravel(player.actor, travel);
     if (this.selectedArsenal !== null) { this.selectedArsenal.remove(player.actor.id); player.arsenal = this.selectedArsenal.admit(player.actor, 100, false); }
     this.combat.setTraits(player.actor, { canTakeDamage: true, invulnerable: false });
@@ -3982,7 +3991,7 @@ export class SharedSimulation implements Simulation {
       return undefined;
     }
     player.viewAngles = change.angles;
-    if (change.kind === "spawn") { player.setFlight(false); player.cutscene = null; player.bounds = player.standingBounds; player.viewHeight = player.character === "q3" ? 26 : 22; }
+    if (change.kind === "spawn") { player.setFlight(false); player.cutscene = null; player.bounds = player.standingBounds; player.bodyShapeBase = null; player.viewHeight = player.character === "q3" ? 26 : 22; }
     player.intermission = change.kind === "freeze";
     if (change.kind === "freeze") this.combat.setTraits(player.actor, { canTakeDamage: false });
     const velocity = change.kind === "freeze" ? zero : change.velocity;
@@ -4006,7 +4015,7 @@ export class SharedSimulation implements Simulation {
       const current = this.bodies.read(actor);
       if (current === null) throw new Error("Respawning character has no body");
       character.spawn({ body: { ...current, bounds: player.standingBounds }, combat: q3InitialCombat("100", null), inventory: this.inventory.entries(actor) });
-      player.bounds = player.standingBounds; player.viewHeight = 26; player.animation = character.animation;
+      player.bounds = player.standingBounds; player.bodyShapeBase = null; player.viewHeight = 26; player.animation = character.animation;
     }
     if (link) this.bodies.link(player.actor);
     this.events.emit(this.recipe.map.entities.content, { kind: "view-reset", reason: change.kind, actor, angles: change.angles });
@@ -5539,6 +5548,7 @@ export class SharedSimulation implements Simulation {
       }
     }
     source.game.bindInput({ applications: this.modClientApplications, numeric: source.game.services.options.numeric,
+      bodyBounds: actor => this.bodies.read(actor)?.bounds ?? null,
       clientOutputs: actor => this.activeClientOutputs(actor),
       identity: slot => {
         const actor = source.game.actor(slot), client = actor === null ? null : this.playerClient(actor);

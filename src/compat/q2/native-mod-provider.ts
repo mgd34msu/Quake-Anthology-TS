@@ -103,12 +103,18 @@ export function validateNativeModDeclaration(declaration: NativeModDeclaration):
     const record = records.get(field.record);
     if (clients === undefined || record === undefined || !clients.records.includes(record.id) && record.id !== declaration.entityRecord
       || !Number.isInteger(field.offset) || field.offset < 0
-      || !record.fields.some(value => value.binding === "private" && value.offset <= field.offset && field.offset + length <= value.offset + value.byteLength)
+      || !record.fields.some(value => (value.binding === "private" && value.offset <= field.offset && field.offset + length <= value.offset + value.byteLength
+        || length === 12 && (value.binding === "bounds-min" || value.binding === "bounds-max") && value.offset === field.offset))
       || (clients.inputFields ?? []).some(value => value.record === field.record && value.offset < field.offset + length && field.offset < value.offset + (value.value.kind === "vector" ? 12 : scalarSize(value.value.kind === "time" ? value.value.encoding : value.value.kind)))
       || (clients.pose === undefined ? [] : [clients.pose.viewHeight, clients.pose.crouched.field]).some(value => value.record === field.record && value.offset < field.offset + length && field.offset < value.offset + scalarSize(value.encoding)))
       throw new Error("Native client output requires exclusive private client storage");
   };
   validateModClientOutputs(clients?.outputs ?? [], { scalar: field => outputField(field, scalarSize(field.encoding)), vector: field => outputField(field, 12) });
+  for (const output of clients?.outputs ?? []) if (output.kind === "body-shape") {
+    for (const [field, binding] of [[output.min, "bounds-min"], [output.max, "bounds-max"]] satisfies readonly (readonly [{ readonly record: string; readonly offset: number }, string])[])
+      if (!records.get(field.record)?.fields.some(value => value.binding === binding && value.offset === field.offset))
+        throw new Error("Client body shape must name its writable source mins/maxs");
+  }
   if (declaration.clientPresentation !== undefined && (clients === undefined || owned === undefined || (clients.endFrame?.length ?? 0) === 0))
     throw new Error("Native client presentation requires declared original end-frame calls");
   const protections = declaration.protection ?? [];
@@ -592,6 +598,10 @@ export class NativeModProvider implements NativeModProjection {
       else if (field.binding === "address") memory.writePointer(address, field.value === null ? null : this.resolve(field.value));
       else if (field.binding === "constant-vector" && constants) writeClassicVector(memory, address, field.value);
       else if (field.binding === "record") memory.writePointer(address, this.pointer(actor, field.record));
+      else if (constants && (field.binding === "bounds-min" || field.binding === "bounds-max")) {
+        const body = this.services.bodies.read(actor);
+        if (body !== null) writeClassicVector(memory, address, field.binding === "bounds-min" ? body.bounds.min : body.bounds.max);
+      }
     }
   }
   slotOf(actor: ActorId): number | null {
@@ -664,6 +674,10 @@ export class NativeModProvider implements NativeModProjection {
     if (record === undefined || slot === undefined) throw new Error("Native client output lost its source projection");
     return this.host.memory.offset(this.recordAddress(record, slot), BigInt(field.offset));
   }
+  private bodyOutputField(actor: ActorId, record: string, field: { readonly offset: number }): boolean {
+    return this.clients?.slot(actor) != null && this.declaration.clients?.outputs?.some(output => output.kind === "body-shape"
+      && (output.min.record === record && output.min.offset === field.offset || output.max.record === record && output.max.offset === field.offset)) === true;
+  }
   private publishClientOutputs(): void {
     if (!this.clientOutputs.enabled) return;
     for (const actor of this.projections.keys()) if (this.services.actors.isLive(actor) && this.clientOutputs.has(actor) && this.clients?.admitted(actor) === true) this.clientOutputs.publish(actor);
@@ -677,6 +691,7 @@ export class NativeModProvider implements NativeModProjection {
       this.validateInventoryCapacity(actor);
       const inventory = this.services.inventory.entries(actor);
       for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field)) {
+        if (this.bodyOutputField(actor, record.id, field)) continue;
         const address = memory.offset(this.recordAddress(record, slot), BigInt(field.offset));
         if (field.binding === "team" || field.binding === "score") this.scalarWrite(address, readSourceMatchField(this.services.match, actor, field), field.encoding);
         else if (field.binding === "health") this.scalarWrite(address, this.services.combat.read(actor)?.health ?? 0, field.encoding);
@@ -704,7 +719,7 @@ export class NativeModProvider implements NativeModProjection {
   }
   private observe(): readonly Observation[] {
     const values: Observation[] = [], memory = this.host.memory;
-    for (const [actor, slot] of this.projections) for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field)) {
+    for (const [actor, slot] of this.projections) for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field) && !this.bodyOutputField(actor, record.id, field)) {
       const address = memory.offset(this.recordAddress(record, slot), BigInt(field.offset)); values.push({ actor, address, field, bytes: memory.copy(address, size(field, memory.pointerBytes)) });
     }
     return values;

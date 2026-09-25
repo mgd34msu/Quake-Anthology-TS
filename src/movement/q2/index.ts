@@ -129,7 +129,8 @@ function moveQ2ClassicPhysics(input: Q2MovementInput, services: MovementServices
     cmd: { msec: input.command.milliseconds, angles: [...input.command.angleShorts], forwardmove: input.command.forwardMove, sidemove: input.command.sideMove,
       upmove: input.command.upMove, buttons: input.command.buttons, impulse: input.command.impulse, lightlevel: input.command.lightLevel },
     snapinitial: input.profile.snapInitial, numtouch: 0, touchents: [], touchtraces: [], viewangles: vec3(), viewheight: 0,
-    mins: sourceVector(body.min), maxs: sourceVector(body.max), groundentity: null, watertype: 0, waterlevel: 0, characterBounds: body,
+    mins: sourceVector(body.min), maxs: sourceVector(body.max), groundentity: null, watertype: 0, waterlevel: 0, characterBounds: body, previousBounds: input.currentBounds ?? body,
+    ...(pose !== undefined || output?.bodyBounds === undefined ? {} : { bodyBounds: output.bodyBounds }),
     trace: (start, mins, maxs, end) => scene.trace(start, mins, maxs, end, MASK_CLASSIC_PLAYERSOLID), pointcontents: scene.pointcontents,
   };
   pmoveClassic(pm, services.numeric, input.profile.airAccelerate, input.profile.strafejumpHack ?? false, input.environment.flight && input.environment.health > 0, input.environment.speedMultiplier ?? 1);
@@ -176,7 +177,8 @@ function moveQ2RereleasePhysics(input: Q2RereleaseMovementInput, services: Movem
       pm_time: input.state.timeMilliseconds, gravity: input.state.gravity, delta_angles: sourceVector(input.state.deltaAngles), viewheight: input.state.viewHeight },
     cmd: { msec: input.command.milliseconds, angles: sourceVector(input.command.angles), forwardmove: input.command.forwardMove, sidemove: input.command.sideMove,
       buttons: input.command.buttons, server_frame: input.command.serverFrame }, snapinitial: input.snapInitial,
-    touch: { num: 0, traces: [] }, viewangles: vec3(), mins: sourceVector(body.min), maxs: sourceVector(body.max), characterBounds: body,
+    touch: { num: 0, traces: [] }, viewangles: vec3(), mins: sourceVector(body.min), maxs: sourceVector(body.max), characterBounds: body, previousBounds: input.currentBounds ?? body,
+    ...(pose !== undefined || output?.bodyBounds === undefined ? {} : { bodyBounds: output.bodyBounds }),
     groundentity: null, groundplane: plane(), watertype: 0, waterlevel: 0, player: { kind: "actor", actor: input.actor.id },
     trace: (start, mins, maxs, end, _pass, mask) => scene.trace(start, mins, maxs, end, mask),
     clip: (start, mins, maxs, end, mask) => scene.trace(start, mins, maxs, end, mask, true), pointcontents: scene.pointcontents,

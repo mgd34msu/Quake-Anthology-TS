@@ -103,7 +103,8 @@ function move(input: Q3MovementInput, services: MovementServices, options: Q3Mov
       return contents.contents;
     },
     ...(input.environment.pose === undefined ? {} : { pose: input.environment.pose }),
-    standingBounds: standing, postures: options.postures(input),
+    standingBounds: standing, ...(input.currentBounds === undefined ? {} : { currentBounds: input.currentBounds }),
+    get bodyBounds() { return input.environment.clientOutputs?.bodyBounds; }, postures: options.postures(input),
     traceMask: selectedPolicy.contentsMask, fixedMsec: input.profile.fixedMilliseconds, noFootsteps: input.profile.noFootsteps,
     ...(options.diagnostics === undefined ? {} : { diagnostics: options.diagnostics }),
     beginStep(_state, activeCommand, msec, index) {

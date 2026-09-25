@@ -143,6 +143,8 @@ export class MovementPlayer {
   intermission = false;
   cutscene: { readonly origin: Vec3; readonly angles: Vec3; readonly viewOffset: Vec3 } | null = null;
   fixedPoseActive = false;
+  /** NetQuake/QW gamecode reads its live bounds rather than resetting a standard Pmove hull. */
+  bodyShapeBase: Bounds | null = null;
   gravityMultiplier = 1;
   flight = false;
   worldGravity = 800;
@@ -251,6 +253,22 @@ export class MovementPlayer {
     }
   }
 
+  private clientMovementOutputs(): ModClientMovementOutputs {
+    const outputs = this.host.clientOutputs?.() ?? {};
+    if (this.profile.kind !== "q1-netquake" && !(this.profile.kind === "q1-quakeworld" && this.host.quakeWorld !== undefined)) return outputs;
+    if (outputs.bodyBounds !== undefined) { this.bodyShapeBase ??= this.bounds; return outputs; }
+    const base = this.bodyShapeBase;
+    if (base === null) return outputs;
+    const current = this.bounds;
+    if (current.min.x === base.min.x && current.min.y === base.min.y && current.min.z === base.min.z
+      && current.max.x === base.max.x && current.max.y === base.max.y && current.max.z === base.max.z) this.bodyShapeBase = null;
+    return { ...outputs, bodyBounds: base };
+  }
+  private acceptBodyShape(bounds: Bounds): void {
+    this.bounds = bounds;
+    const body = this.host.bodies.read(this.actor.id);
+    if (body !== null) this.host.bodies.write(this.actor, { ...body, bounds });
+  }
   private fixedEnvironment(): Pick<MovementInput["environment"], "pose" | "clientOutputs"> {
     const pose = this.host.fixedPose?.(this.actor);
     if (pose == null && this.fixedPoseActive) {
@@ -265,8 +283,8 @@ export class MovementPlayer {
       if (body !== null) this.host.bodies.write(this.actor, { ...body, bounds: pose.bounds });
     }
     this.fixedPoseActive = pose != null;
-    const host = this.host;
-    return { ...(pose == null ? {} : { pose }), get clientOutputs() { return host.clientOutputs?.() ?? {}; } };
+    const player = this;
+    return { ...(pose == null ? {} : { pose }), get clientOutputs() { return player.clientMovementOutputs(); } };
   }
 
   setSourceViewRoll(roll: number): void {
@@ -357,13 +375,14 @@ export class MovementPlayer {
     if (effective !== undefined && effective.kind !== "q1-netquake") throw new Error("Input output changed NetQuake command dialect");
     const command = effective ?? this.netQuakeCommand ?? { kind: "q1-netquake", acknowledgedServerTimeSeconds: 0, viewAngles: this.viewAngles,
       forwardMove: 0, sideMove: 0, upMove: 0, buttons: 0, impulse: 0 };
-    return { kind: "q1-netquake", actor: this.actor, commandSequence: this.lastSequence, frame, shape: { kind: "box", bounds: this.bounds },
+    return { kind: "q1-netquake", actor: this.actor, commandSequence: this.lastSequence, frame, currentBounds: this.bounds, shape: { kind: "box", bounds: this.bounds },
       environment: { ...playerMovementEnvironment(this, combat), ...fixed, get clientOutputs() { return fixed.clientOutputs ?? {}; } }, arsenal: this.arsenal, animation: this.animation, execution: "authoritative", state, profile, command };
   }
   private netQuakeOptions(): Q1MovementOptions {
     const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id), binding = this.host.netQuake;
     return { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight,
       ...(binding === undefined ? {} : { jumpAuthority: binding.jumpAuthority }), hooks: {
+        bodyShape: bounds => this.acceptBodyShape(bounds),
         ...(binding === undefined ? {} : { shape: () => {
           const body = this.host.bodies.read(this.actor.id);
           if (body === null) throw new Error("NetQuake client lost its authoritative body");
@@ -505,13 +524,14 @@ export class MovementPlayer {
     const combat = this.host.combat.read(this.actor.id);
     if (combat === null) throw new Error("Player has no combat state");
     const fixed = this.fixedEnvironment();
-    const base = { actor: this.actor, commandSequence: input.sequence, frame, shape: { kind: "box", bounds: this.profile.kind === "q1-quakeworld" && this.host.quakeWorld === undefined ? this.bounds : this.standingBounds },
+    const base = { actor: this.actor, commandSequence: input.sequence, frame, currentBounds: this.bounds, shape: { kind: "box", bounds: this.profile.kind === "q1-quakeworld" && this.host.quakeWorld === undefined ? this.bounds : this.standingBounds },
       environment: { ...playerMovementEnvironment(this, combat), ...fixed, get clientOutputs() { return fixed.clientOutputs ?? {}; } },
       arsenal: this.arsenal, animation: this.animation, execution: "authoritative" } satisfies Omit<Q1MovementInput, "kind" | "command" | "state" | "profile">;
     const state = this.state, priorGround = this.ground, selectedProfile = selectedMovementProfile(this), command = input.command;
     const profile = selectedProfile.kind === "q1-quakeworld" ? this.host.quakeWorld?.profile(selectedProfile) ?? selectedProfile : selectedProfile;
     const sourcePunchAngles = this.host.sourcePunch?.(this.actor.id);
     const q1Options = { ...(sourcePunchAngles == null ? {} : { sourcePunchAngles }), viewHeight: this.viewHeight, hooks: {
+      bodyShape: (bounds: Bounds) => this.acceptBodyShape(bounds),
       playerAction: (actor: OwnedActor, action: "jump" | "swim") => { if (action !== "jump" || sourceMovement?.sourceJump !== true) this.host.jump(actor, action); return undefined; },
       link: (_actor: OwnedActor, next: MovementState, triggers: boolean) => this.commit(next, true, triggers),
       isBsp: (hit: TraceHit) => hit.kind === "world" || hit.kind === "actor" && this.host.isBrush(hit.actor),

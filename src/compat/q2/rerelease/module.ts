@@ -1,3 +1,5 @@
+import type { MovementBodyShape } from "../../../movement/body-shape.ts";
+import { withRereleaseBodyShape } from "./body-shape.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { allocateNativeMemory, nativeAllocationBytes } from "../../../guest/runtime/common/memory.ts";
 import type { GuestAddress, GuestCallContext, GuestCallResult, GuestCallValue, GuestLayout, RawEntityTable, RawEntityView } from "../../../contracts/execution.ts";
@@ -59,7 +61,7 @@ export class RereleaseGuestModule {
   #game: GuestAddress | null = null;
   #cgame: GuestAddress | null = null;
   #movement: { readonly address: GuestAddress; readonly binding: NativeModEntryBinding } | null = null;
-  #inputMovement: { readonly boundary: (address: GuestAddress, run: () => undefined) => undefined; readonly active: () => boolean } | null = null;
+  #inputMovement: { readonly boundary: (address: GuestAddress, run: (body?: MovementBodyShape) => undefined) => undefined; readonly active: () => boolean } | null = null;
   readonly #equipment: { readonly client: RawEntityView; readonly value: EquipmentMovement; applied: boolean }[] = [];
   constructor(readonly options: RereleaseModuleOptions) {
     this.memory = options.runner.options.cpu.memory;
@@ -162,7 +164,7 @@ export class RereleaseGuestModule {
     } finally { this.memory.unmap(info, 2048); this.memory.unmap(social, nativeAllocationBytes(socialBytes.length + 1)); }
   }
   clientBegin(slot: number): void { const client = this.entities().atSlot(slot); this.callGame("ClientBegin", [guestPointer(client.address)], client); }
-  bindInputMovement(boundary: (address: GuestAddress, run: () => undefined) => undefined, active: () => boolean): () => undefined {
+  bindInputMovement(boundary: (address: GuestAddress, run: (body?: MovementBodyShape) => undefined) => undefined, active: () => boolean): () => undefined {
     if (this.#inputMovement !== null) throw new Error("Native Pmove already has an input owner");
     const owner = { boundary, active }; this.#inputMovement = owner;
     try { this.#bindMovement(); } catch (error) { this.#inputMovement = null; throw error; }
@@ -186,9 +188,9 @@ export class RereleaseGuestModule {
         if (equipment !== null && !equipment.applied) {
           prepareRereleaseEquipmentMovement(this, movement, equipment.value); equipment.applied = true;
         }
-        const run = (): undefined => {
+        const run = (body?: MovementBodyShape): undefined => {
           const execute = (): undefined => { const result = original(values); if (result.kind !== "void") throw new Error("Pmove returned a non-void result"); return undefined; };
-          return withRereleaseEquipmentMovement(this, movement, equipment?.value, execute);
+          return withRereleaseEquipmentMovement(this, movement, equipment?.value, () => withRereleaseBodyShape(this, movement, equipment?.value.pose === undefined ? body : undefined, execute));
         };
         this.#inputMovement?.active() === true ? this.#inputMovement.boundary(movement, run) : run();
         return { kind: "void" };

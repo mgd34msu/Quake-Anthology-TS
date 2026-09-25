@@ -58,6 +58,8 @@ export interface Q3MotionOptions {
   readonly trace: Q3MovementTraceFunction;
   readonly pointContents: (point: Vec3, passActor: ActorId) => number;
   readonly standingBounds: Bounds;
+  readonly currentBounds?: Bounds;
+  readonly bodyBounds?: Bounds | undefined;
   readonly postures: Q3Postures;
   readonly traceMask: number;
   readonly fixedMsec: number | null;

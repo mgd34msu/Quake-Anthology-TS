@@ -1,3 +1,4 @@
+import { movementBounds } from "../body-shape.ts";
 import { q3InvulnerabilityPose } from "./postures.ts";
 // Ported from id Software's code/game/bg_pmove.c.
 // Copyright (C) 1999-2005 Id Software, Inc. GPL-2.0-or-later.
@@ -60,6 +61,7 @@ class MoveStep implements SlideMoveContext {
 
   constructor(readonly state: Q3Motion, readonly cmd: Q3Command,
     readonly options: Q3MotionOptions) {
+    this.bounds = options.currentBounds ?? options.standingBounds;
     this.msec = Math.max(1, Math.min(200, cmd.serverTime - state.commandTime));
     this.frameTime = Math.fround(this.msec * Math.fround(0.001));
     this.previousOrigin = state.origin;
@@ -347,6 +349,7 @@ class MoveStep implements SlideMoveContext {
   private checkDuck(): void {
     const ps = this.state;
     const standingBounds = this.options.standingBounds;
+    const previousBounds = this.bounds, previousDuck = ps.pmFlags & F.DUCKED;
     const postures = this.options.postures;
     if (ps.invulnerable || this.options.pose !== undefined) {
       const pose = this.options.pose ?? q3InvulnerabilityPose((ps.pmFlags & F.INVULEXPAND) !== 0, postures);
@@ -363,11 +366,18 @@ class MoveStep implements SlideMoveContext {
     }
     if (this.cmd.upmove < 0) ps.pmFlags |= F.DUCKED;
     else if (ps.pmFlags & F.DUCKED) {
-      this.bounds = standingBounds;
+      this.bounds = this.options.bodyBounds ?? standingBounds;
       if (!this.test(ps.origin, ps.origin).allSolid) ps.pmFlags &= ~F.DUCKED;
     }
     this.bounds = ps.pmFlags & F.DUCKED ? postures.crouched.bounds : standingBounds;
     ps.viewheight = ps.pmFlags & F.DUCKED ? postures.crouched.viewHeight : postures.standingViewHeight;
+    const requested = this.options.bodyBounds ?? this.bounds;
+    const accepted = movementBounds(previousBounds, requested, bounds => {
+      const trace = this.options.trace(ps.origin, ps.origin, bounds, ps.actor, this.mask);
+      return !trace.allSolid;
+    });
+    this.bounds = accepted;
+    if (accepted !== requested) { ps.pmFlags = (ps.pmFlags & ~F.DUCKED) | previousDuck; ps.viewheight = previousDuck ? postures.crouched.viewHeight : postures.standingViewHeight; }
   }
   private footsteps(): void {
     const ps = this.state;
@@ -479,6 +489,7 @@ export function movePlayer(state: Q3Motion, command: Q3Command, options: Q3Motio
     cmd.serverTime = state.commandTime + Math.min(finalTime - state.commandTime, fixed);
     if (options.beginStep(state, cmd, Math.max(1, Math.min(200, cmd.serverTime - state.commandTime)), substep++) === false) break;
     const step = new MoveStep(state, cmd, options);
+    if (substep > 1) step.bounds = result.bounds;
     step.run();
     result = { contacts: step.contacts, bounds: step.bounds,
       waterlevel: step.waterlevel, watertype: step.watertype, xyspeed: step.xyspeed };

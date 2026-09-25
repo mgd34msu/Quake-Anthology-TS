@@ -1,3 +1,6 @@
+import { NativeInputBinding } from "../../../../src/compat/q2/native-input.ts";
+import { ModClientApplications } from "../../../../src/world/session/mod-client-applications.ts";
+import { createNumericOperations } from "../../../../src/core/numeric.ts";
 import { X86AbiAdapter } from "../../../../src/guest/abi/adapter.ts";
 import { captureAbiProcessorState, restoreAbiProcessorState } from "../../../../src/guest/abi/runner.ts";
 import { nativeCombatSignature, nativeRereleaseModLayout } from "../../../../src/compat/q2/native-combat-call.ts";
@@ -248,7 +251,11 @@ test.skipIf(!available)("retail external player velocity enters source Pmove and
   };
   const command = { kind: "q2-rerelease", milliseconds: 25, buttons: 0, angles: { x: 0, y: 0, z: 0 }, forwardMove: 0, sideMove: 0, serverFrame: 123 } satisfies Parameters<typeof host.clientThink>[1];
   let boundaries = 0;
-  const releaseBoundary = guest.bindInputMovement((_address, run) => { boundaries++; return run(); }, () => true);
+  let requestedBody: import("../../../../src/contracts/math.ts").Bounds | undefined;
+  const releaseBoundary = guest.bindInputMovement((_address, run) => { boundaries++; return run({ current: body().bounds,
+    ...(requestedBody === undefined ? {} : { requested: requestedBody }), currentActor: () => {
+      if (host.actor(guest.entities().atSlot(1))?.id !== actor.id) throw new Error("Original body owner changed");
+    } }); }, () => true);
   const before = body();
   host.clientThink(1, command, { velocity: { x: 0, y: 0, z: 600 }, gravityScale: 1, predictionSuppressed: false });
   expect(body().origin.z).toBeGreaterThan(before.origin.z);
@@ -270,6 +277,16 @@ test.skipIf(!available)("retail external player velocity enters source Pmove and
   };
   const ordinary = speed(1), enhanced = speed(1.5), restored = speed(1);
   expect(enhanced).toBeGreaterThan(ordinary); expect(restored).toBe(ordinary);
+  requestedBody = { min: { x: -7, y: -9, z: -20 }, max: { x: 8, y: 10, z: 12 } };
+  world.engine.bodies.write(actor, before); world.engine.bodies.link(actor);
+  host.clientThink(1, { ...command, forwardMove: 400 });
+  expect(body().bounds).toEqual(requestedBody); expect(body().origin.x).not.toBe(before.origin.x);
+  const acceptedBounds = body().bounds;
+  requestedBody = { min: { x: -10000, y: -10000, z: -10000 }, max: { x: 10000, y: 10000, z: 10000 } };
+  host.clientThink(1, command); expect(body().bounds).toEqual(acceptedBounds);
+  requestedBody = undefined;
+  world.engine.bodies.write(actor, before); world.engine.bodies.link(actor);
+  host.clientThink(1, command); expect(body().bounds).toEqual(before.bounds);
   const pose = { kind: "fixed", crouched: true, bounds: { min: { x: -42, y: -42, z: -42 }, max: { x: 42, y: 42, z: 42 } }, viewHeight: 26 } satisfies import("../../../../src/contracts/movement.ts").FixedMovementPose;
   const origin = body().origin;
   host.clientThink(1, { ...command, forwardMove: 400 }, { velocity: { x: 100, y: 0, z: 0 }, gravityScale: 1, predictionSuppressed: true, pose });
@@ -279,6 +296,22 @@ test.skipIf(!available)("retail external player velocity enters source Pmove and
   expect(readRereleasePlayerState(guest.memory, client).movement.viewHeight).toBe(26);
   expect(boundaries).toBeGreaterThan(0); releaseBoundary();
   speed(1); expect(body().bounds).not.toEqual(pose.bounds);
+  const applications = new ModClientApplications(() => true), clientIdentity = { actor: actor.id, client: createIdentityOwner("native-body-release").client(0, 0) };
+  const bridge = new NativeInputBinding({ edition: "rerelease", host: guest, retire: () => { throw new Error("Unexpected retirement"); } }, {
+    applications, bodyBounds: () => body().bounds, clientOutputs: () => requestedBody === undefined ? null : { bodyBounds: requestedBody },
+    identity: slot => slot === 1 ? clientIdentity : null, live: identity => identity.actor.equals(actor.id), accepted: () => null,
+    frame: () => ({ frame: 0, time: { kind: "milliseconds", value: 0 }, elapsed: { kind: "milliseconds", value: 25 }, phase: "client-command" }),
+    onRelease: () => () => undefined, retired: () => undefined, movement: (_identity, _projection, run) => run(),
+    numeric: createNumericOperations({ id: "q2-rerelease:source-f32", arithmetic: { kind: "binary32", round: "each-operation" }, scalarStorage: "binary32", floatToInt: "checked-c-truncation", integerOverflow: "wrap32" }),
+  });
+  try {
+    expect(applications.active).toBe(false);
+    requestedBody = { min: { x: -7, y: -9, z: -20 }, max: { x: 8, y: 10, z: 12 } };
+    world.engine.bodies.write(actor, before); world.engine.bodies.link(actor);
+    host.clientThink(1, command); expect(body().bounds).toEqual(requestedBody);
+    requestedBody = undefined;
+    host.clientThink(1, command); expect(body().bounds).toEqual(before.bounds);
+  } finally { bridge.close(); applications.close(); }
 });
 
 test.skipIf(!available)("retail PreInit through ClientThink and active RunFrame use shared BSP, body and inventory authorities", async () => {

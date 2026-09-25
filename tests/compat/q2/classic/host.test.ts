@@ -147,6 +147,12 @@ test("Pmove reenters source trace and contents callbacks synchronously on the sa
   expect(state.registers.read("rsp", 32)).toBe(stackBefore);
   expect(view.getInt16(8, true)).toBeLessThan(640); expect(view.getInt16(4, true)).toBeGreaterThan(0);
   expect(memory.readPointer(memory.offset(pm, 232n))).toEqual(trace);
+  const release = host.bindInputMovement((_address, run) => run({ current: { min: { x: -16, y: -16, z: -24 }, max: { x: 16, y: 16, z: 32 } },
+    requested: { min: { x: -7, y: -9, z: -20 }, max: { x: 8, y: 10, z: 12 } }, currentActor: () => undefined }));
+  try {
+    expect(host.invoke(caller, classicSignature([]), []).kind).toBe("void");
+    expect([196, 200, 204, 208, 212, 216].map(at => view.getFloat32(at, true))).toEqual([-7, -9, -20, 8, 10, 12]);
+  } finally { release(); }
 });
 
 

@@ -7,7 +7,7 @@ import type { ResolvedQvmArtifact } from "./artifacts.ts";
 import type { QvmAllocationProfile } from "./allocation.ts";
 import { QvmGuestMemory } from "./guest-memory.ts";
 import { QvmInterpreter } from "./interpreter.ts";
-import type { QvmArguments, QvmEvaluationStack, QvmCancellationScope, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall } from "./interpreter.ts";
+import type { QvmArguments, QvmEvaluationStack, QvmCancellationScope, QvmFunctionHook, QvmFunctionObserver, QvmFunctionResolver, QvmSyscall, QvmFunctionCall, QvmSystemCall, QvmSystemCallResult } from "./interpreter.ts";
 import { parseQvmRestart } from "./image.ts";
 import type { QvmMemory } from "./memory.ts";
 import type { QvmRegionEvaluation } from "./regions.ts";
@@ -64,6 +64,7 @@ export class QvmModule implements GuestExecutor {
   private currentEntry: Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> | null = null;
   private currentCommandArguments: readonly string[] | null = null;
   private retired = false;
+  private readonly sourceSystemCall: QvmSystemCall;
 
   cancelFunction(scope: QvmCancellationScope): never {
     if (this.currentEntry === null) throw new Error("QVM cancellation requires the current source invocation");
@@ -74,6 +75,7 @@ export class QvmModule implements GuestExecutor {
     const artifact = options.artifact;
     this.executionProfile = { kind: "qvm", module: artifact.module, api: qvmApi(artifact.role, this.abiProfile), magic: 0x12721444, numeric: qvmNumericProfile };
     const systemCall = createQvmSystemCall(artifact.role, options.host, () => this.currentCommandArguments, this.abiProfile);
+    this.sourceSystemCall = systemCall;
     this.interpreter = new QvmInterpreter(artifact.image, call => {
       const previous = this.currentEntry;
       this.currentEntry = call;
@@ -171,6 +173,26 @@ export class QvmModule implements GuestExecutor {
     this.options.registration?.called();
     const arguments_ = instructionIndex === 0 || words.length <= 10 ? qvmArguments(words) : words;
     return this.currentEntry === null ? this.interpreter.invoke(arguments_, instructionIndex) : this.currentEntry.invoke(arguments_, instructionIndex);
+  }
+
+  /** The original OP_CALL convention permits both source functions and negative syscall pointers. */
+  invokeSourceCallback(call: QvmFunctionCall, pointer: number, args: readonly number[]): QvmSystemCallResult {
+    this.live();
+    if (!Number.isInteger(pointer) || pointer < -0x80000000 || pointer > 0x7fffffff
+      || args.some(value => !Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff)) throw new Error("Invalid original QVM callback words");
+    if (pointer >= 0) return call.execution === "synchronous" ? call.invoke(args, pointer) : call.invokeAsync(args, pointer);
+    const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
+    words.setInt32(0, -1 - pointer, true); args.forEach((value, index) => words.setInt32((index + 1) * 4, value, true));
+    let result: QvmSystemCallResult = 0;
+    call.effect(() => {
+      this.live();
+      const previous = this.currentEntry, syscall: QvmSyscall = { words, memory: call.memory, guest: call.guest,
+        invoke: call.invoke, invokeAsync: call.invokeAsync, cancelFunction: call.cancelFunction };
+      this.currentEntry = syscall;
+      try { result = this.sourceSystemCall(syscall); } finally { this.currentEntry = previous; }
+      return undefined;
+    });
+    return result;
   }
 
   evaluateRegion(words: readonly number[], instructionIndex: number, region: QvmRegionEvaluation, inputs: readonly number[], stack?: QvmEvaluationStack): number {

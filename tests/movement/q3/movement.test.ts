@@ -102,6 +102,16 @@ test.skipIf(!existsSync(archivePath))("retail q3dm1 movement uses shared collisi
     const authored = provider.move({ ...input, command: { ...input.command, upMove: 0 }, environment: { ...input.environment, clientOutputs: { stance: true } } }, services);
     if (authored.status !== "active") throw new Error("Player removed");
     expect(authored.bounds).toEqual(crouch.bounds); expect(authored.viewHeight).toBe(crouch.viewHeight);
+    const bodyBounds = { min: { x: -7, y: -9, z: -20 }, max: { x: 8, y: 10, z: 12 } };
+    const body = provider.move({ ...input, shape: { kind: "capsule", bounds: input.shape.kind === "point" ? Q3_SOURCE_STANDING_BOUNDS : input.shape.bounds },
+      environment: { ...input.environment, clientOutputs: { bodyBounds } } }, services);
+    if (body.status !== "active") throw new Error("Player removed");
+    expect(body.bounds).toEqual(bodyBounds);
+    const blockedBody = provider.move({ ...input, state: body.state, currentBounds: body.bounds,
+      command: { ...input.command, serverTimeMilliseconds: 264 },
+      environment: { ...input.environment, clientOutputs: { bodyBounds: { min: { x: -10000, y: -10000, z: -10000 }, max: { x: 10000, y: 10000, z: 10000 } } } } }, services);
+    if (blockedBody.status !== "active") throw new Error("Player removed");
+    expect(blockedBody.bounds).toEqual(bodyBounds);
     let output: import("../../../src/contracts/mod-client-outputs.ts").ModClientMovementOutputs = { mode: "freeze" };
     const frozen = provider.move({ ...input, environment: { ...input.environment, get clientOutputs() { return output; } } }, { ...services,
       inputApplication: { begin: (command, _frame, state) => ({ kind: "continue", command, state }), end: state => { output = {}; return { kind: "continue", state }; } } });

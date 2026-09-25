@@ -120,10 +120,16 @@ export function validateQvmMod(artifact: Artifact, declaration: QvmModCallbackDe
     const record = records.get(field.record);
     if (clients === undefined || record === undefined || !clients.records.includes(record.id) && record.id !== declaration.entityRecord
       || !Number.isInteger(field.offset) || field.offset < 0 || field.offset % 4 !== 0
-      || !record.fields.some(value => value.binding === "private" && value.offset <= field.offset && field.offset + length <= value.offset + value.byteLength))
+      || !record.fields.some(value => (value.binding === "private" && value.offset <= field.offset && field.offset + length <= value.offset + value.byteLength
+        || length === 12 && (value.binding === "bounds-min" || value.binding === "bounds-max") && value.offset === field.offset)))
       throw new Error("QVM client output requires declared private client storage");
   };
   validateModClientOutputs(clients?.outputs ?? [], { scalar: field => outputField(field, 4), vector: field => outputField(field, 12) });
+  for (const output of clients?.outputs ?? []) if (output.kind === "body-shape") {
+    for (const [field, binding] of [[output.min, "bounds-min"], [output.max, "bounds-max"]] satisfies readonly (readonly [{ readonly record: string; readonly offset: number }, string])[])
+      if (!records.get(field.record)?.fields.some(value => value.binding === binding && value.offset === field.offset && value.access !== "read-only"))
+        throw new Error("Client body shape must name its writable source mins/maxs");
+  }
   if (clients !== undefined) {
     const state = records.get(clients.playerStateRecord), entity = declaration.entityRecord === null ? undefined : records.get(declaration.entityRecord);
     if (!Number.isSafeInteger(clients.maximum) || clients.maximum < 1 || clients.maximum > 64 || entity === undefined
@@ -740,6 +746,10 @@ export class QvmModProvider {
     if (record === undefined || slot === undefined) throw new Error("QVM client output lost its source projection");
     return record.address + slot * record.stride + field.offset;
   }
+  private bodyOutputField(actor: ActorId, record: string, field: { readonly offset: number }): boolean {
+    return this.clientBindings?.admitted(actor) === true && this.declaration.clients?.outputs?.some(output => output.kind === "body-shape"
+      && (output.min.record === record && output.min.offset === field.offset || output.max.record === record && output.max.offset === field.offset)) === true;
+  }
   private publishClientOutputs(): void {
     if (!this.clientOutputs.enabled) return;
     for (const actor of this.projections.keys()) if (this.services.actors.isLive(actor) && this.clientOutputs.has(actor) && this.clientBindings?.admitted(actor) === true) this.clientOutputs.publish(actor);
@@ -751,6 +761,7 @@ export class QvmModProvider {
     for (const [actor, slot] of this.projections) if (!this.owned.has(actor) && !this.retiredProjections.has(actor)) for (const record of this.actorRecords(actor)) for (const field of record.fields) {
       const address = record.address + slot * record.stride + field.offset;
       if (!shared(field)) continue;
+      if (this.bodyOutputField(actor, record.id, field)) continue;
       if (field.binding === "team" || field.binding === "score") {
         this.view(address, 4).setInt32(0, scalar(readSourceMatchField(this.services.match, actor, field), field.encoding), true);
       } else if (field.binding === "health") {
@@ -769,7 +780,7 @@ export class QvmModProvider {
   }
   private observe(): readonly Observation[] {
     const result: Observation[] = [];
-    for (const [actor, slot] of this.projections) if (!this.owned.has(actor) && !this.retiredProjections.has(actor)) for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field) && field.access !== "read-only") {
+    for (const [actor, slot] of this.projections) if (!this.owned.has(actor) && !this.retiredProjections.has(actor)) for (const record of this.actorRecords(actor)) for (const field of record.fields) if (shared(field) && field.access !== "read-only" && !this.bodyOutputField(actor, record.id, field)) {
       const address = record.address + slot * record.stride + field.offset;
       result.push({ actor, address, field, bytes: this.module.memory.bytes.slice(address, address + fieldSize(field)) });
     }
