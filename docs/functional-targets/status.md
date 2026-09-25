@@ -1,8 +1,10 @@
 # Functional target status
 
-Installed executable `0dc86b6` includes the accepted source changes through original mod client services and QuakeWorld arsenals. Build/help, exact archived source identity, and compiled original Threewave GL movement, firing, armor, save/load and normal quit passed. The restored frame and original/canonical save state were inspected. **21/23 targets are accepted; T10 and T12 remain active.** Shader remapping, component cinematic and remote presentation, player retirement, and original QVM/native primary selected arsenals remain unfinished. [Delivery](../execution-status.md#installed-executable-and-recent-fixes).
+Installed executable `b980fa3` fixes the unintended classic Q2 damage marker. Classic pain, screen flash and view feedback are retained; the rerelease indicator remains separate. Strict source checks and 43 focused tests pass. **21/23 targets remain accepted; T10 and T12 are open.** [Current delivery](../execution-status.md).
 
 Earlier checkpoints below retain their status at the time.
+
+Installed executable `0dc86b6` includes the accepted source changes through original mod client services and QuakeWorld arsenals. Build/help, exact archived source identity, and compiled original Threewave GL movement, firing, armor, save/load and normal quit passed. The restored frame and original/canonical save state were inspected. **21/23 targets are accepted; T10 and T12 remain active.** Shader remapping, component cinematic and remote presentation, player retirement, and original QVM/native primary selected arsenals remain unfinished. [Delivery](../execution-status.md#installed-executable-and-recent-fixes).
 
 Combined source now integrates original QVM HUD/initialization, source command and writable-file routing, retained local music, safe cinematic activation/retirement, and selected arsenals in original QuakeWorld. The exact candidate over `fcb848d` passes all-production strict compilation, 28 combined checks with 212 assertions, and the actual cinematic Application check with six assertions. Original QW command/fire/pickup/travel has separate frozen evidence. T10/T12 remain open, 21/23 accepted; installed executable remains `67f2cfd`. [Combined evidence](../../.artifacts/resume-20260923/client-services-integration/EVIDENCE.md).
 
@@ -66,10 +68,10 @@ These parts describe the remaining implementation; they do not replace the T01â€
 |---|---|---|
 | T10 | Player and weapon services | Original mod player/weapon behavior continues across supported destination games, beyond the input and held-fire paths already connected. |
 | T10 | Original-primary pickup callers | Remaining original QuakeC pickup kinds/artifacts and native Q2 worlds retain their map lifecycle while using selected original grants; qualified QVM and classic id1 armor/ammo callers are implemented. |
-| T10 | New foreign items | Shared item ownership, selection and saved state plus the QuakeC weapon/ammo adapter are implemented. QVM/native component adapters and other source item behaviors remain unfinished. |
-| T10 | Complete component presentation | Native/QC local HUD and camera ownership are integrated. QVM 2D/HUD, remote transport, full native view qualification, remaining effects, music and cinematic services still need source consumers with correct ownership and lifetime. |
+| T10 | New foreign items | Shared item ownership, selection and saved state plus qualified QuakeC/QVM weapon and ammo adapters are implemented. Native component weapon adapters and remaining source item behaviors are unfinished. |
+| T10 | Complete component presentation | Native/QC local HUD/camera and qualified original QVM HUD, commands, writable files and retained music are integrated. Retained shader remapping and local client retirement are integrated in newer source. Exact cinematic/client continuation, remote transport and remaining source presentation services still need completion. |
 | T10 | Remaining world services and composition | Authored rules/objectives and remaining source services cooperate across enabled mods, saves and travel, with explicit conflict handling. |
-| T12 | Selected arsenals on original QuakeC worlds | Qualified original id1 supports selected Q1/Q2/Q3 and their admitted expansions, including pickups, saves, travel and respawn. QuakeWorld and additional QC artifacts still require their original source qualification. |
+| T12 | Selected arsenals on original QuakeC worlds | Qualified original id1 supports selected Q1/Q2/Q3 and admitted expansions, including pickups, saves, travel and respawn. Qualified QuakeWorld command/fire/pickup/travel is also integrated. Additional QC artifacts still require source qualification; public QuakeWorld saves retain their documented limitation. |
 | T12 | Selected arsenals on original QVM worlds | Original QVM input/world logic retains its ownership while selected weapons, effects, supply and saves work. |
 | T12 | Selected arsenals on original native Q2 worlds | Classic/rerelease DLL callbacks retain world behavior while selected weapons own their attack, supply and saved state. |
 

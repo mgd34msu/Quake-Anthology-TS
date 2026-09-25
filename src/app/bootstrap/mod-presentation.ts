@@ -53,7 +53,7 @@ export interface ApplicationModPresentationOptions {
   readonly clock: ApplicationQ3ServiceOptions["clock"];
   readonly output: Omit<ApplicationQ3ServiceOptions["output"], "audio">;
   readonly commands?: Extract<QvmCommonServices, { readonly role: "cgame" }>["commands"];
-  presentationMedia?(request: ComponentPresentationMediaRequest, initializing: boolean): Promise<void>;
+  presentationMedia?(request: ComponentPresentationMediaRequest, initializing: boolean, current: () => boolean): Promise<void>;
   print(text: string): void;
   viewOrigin(): Vec3;
   viewAxis?(): Axis;
@@ -221,9 +221,16 @@ export class ApplicationModPresentation {
         const path = (offset: number): string => { const pointer = call.words.getInt32(offset, true); return pointer === 0 ? "" : call.guest.readString(pointer); };
         const request: ComponentPresentationMediaRequest = call.code === QvmCgameImport.CG_S_STOPBACKGROUNDTRACK
           ? { kind: "music-stop" } : { kind: "music", intro: path(4), loop: path(8) };
-        return deliver(request, this.initializing).then(() => { this.assertCurrent(); return 0; });
+        return deliver(request, this.initializing, () => this.owns(this.options.source, this.options.viewer)).then(() => { this.assertCurrent(); return 0; });
       }
-      case QvmCgameImport.CG_R_REMAP_SHADER:
+      case QvmCgameImport.CG_R_REMAP_SHADER: {
+        const deliver = this.options.presentationMedia;
+        if (deliver === undefined) return rejectQvmSyscall(call);
+        const read = (offset: number): string => call.guest.readString(call.words.getInt32(offset, true));
+        const offset = Number.parseFloat(read(12));
+        return deliver({ kind: "shader-remap", original: read(4), replacement: read(8), timeOffset: Number.isNaN(offset) ? 0 : offset }, this.initializing, () => this.owns(this.options.source, this.options.viewer))
+          .then(() => { this.assertCurrent(); return 0; });
+      }
       case QvmCgameImport.CG_CIN_PLAYCINEMATIC:
       case QvmCgameImport.CG_CIN_STOPCINEMATIC:
       case QvmCgameImport.CG_CIN_RUNCINEMATIC:

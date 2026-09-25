@@ -1,4 +1,5 @@
-import type { RegisteredSceneMaterial, ShaderWorldIdentity } from "./material-registrations.ts";
+import { currentRemap } from "./material-registrations.ts";
+import type { SceneMaterialRemap, RegisteredSceneMaterial, ShaderWorldIdentity, ShaderRemapResult } from "./material-registrations.ts";
 import { compiledDrawGroup, createSourceSceneOrder, sourceDrawGroup, sequenceDrawGroup, finishSceneOperations } from "./submissions.ts";
 import type { SceneOperation, SourceEntityOrder, SourceSceneOrder, SourceSurfaceOrder } from "./submissions.ts";
 /* Unified world preparation uses Q1/Q2 brush surfaces and Q3 tr_bsp/tr_world.
@@ -26,6 +27,8 @@ import { createPatchGrid, preparePatchGrids, selectPatchLod } from "./patch-lod.
 import type { PatchGrid } from "./patch-lod.ts";
 import { rgbaImage } from "./resources.ts";
 import { SceneShaderRegistry } from "./shaders.ts";
+import type { SceneShaderBinding } from "./shaders.ts";
+import { normalizeShaderName, stripShaderExtension } from "../../materials/material.ts";
 import type { SceneTexture } from "./textures.ts";
 import { boundsInFrustum, cameraFrustum, createViewProjector, farClip, portalClipPlane, worldPoint, localPoint, modelScale, worldVector } from "./view.ts";
 import type { ModelTransform } from "./view.ts";
@@ -41,7 +44,11 @@ import { shadowMaterialGeometry } from "./shadow-geometry.ts";
 import { q2SkySides } from "./q2-sky.ts";
 import type { Q2SkyView } from "./q2-sky.ts";
 
+function materialName(name: string): string { return normalizeShaderName(stripShaderExtension(name)); }
+
 interface SurfaceBase {
+  readonly shaderName: string;
+  readonly baseTexture: SceneTexture | null;
   readonly index: number;
   readonly bounds: Bounds;
   readonly plane: Plane | null;
@@ -138,7 +145,12 @@ export class WorldScene {
   private readonly owned: RendererImage[] = [];
   private q2Sky: readonly RendererImage[] = [];
   private fullbrightByTexture = new Map<RendererImage, RendererImage | null>();
-  private readonly remapped = new Map<RegisteredSceneMaterial, { readonly shader: RegisteredSceneMaterial; readonly timeOffset: number }>();
+  private readonly rawRemaps = new Map<number, SceneMaterialRemap>();
+  private closed = false;
+  private imageGeneration = 0;
+  private preparedGeneration: number | null = null;
+  private preparedMaterialRevision: number | null = null;
+  private shadowMaterialRevision = -1;
   private readonly staticLightStyles = new Map<WorldSurface, readonly number[]>();
   private staticShadowWorld: { readonly surfaces: readonly WorldSurface[]; readonly first: number; readonly count: number; readonly world: StaticShadowWorld } | null = null;
 
@@ -203,7 +215,7 @@ export class WorldScene {
         const material = shaders.sourceWorldMaterial(await shaders.register(shader.name, { kind: "world", world: materialWorld,
           lightmap: lightmaps[lightmapIndex] ?? null, lightmapIndex, baseTexture: null }));
         const actual = grid?.mesh ?? geometry;
-        surfaces.push({ kind: "q3", index, bounds: geometryBounds(actual.vertices), plane, geometry: actual, shader: material, lightmap: lightmaps[lightmapIndex] ?? null,
+        surfaces.push({ kind: "q3", shaderName: shader.name, baseTexture: null, index, bounds: geometryBounds(actual.vertices), plane, geometry: actual, shader: material, lightmap: lightmaps[lightmapIndex] ?? null,
           grid, fog: surface.fog < 0 ? null : fogs[surface.fog] ?? null, fogIndex: surface.fog, flare: surface.kind === "flare",
           skip: surface.kind === "patch" && (shader.surfaceFlags & 0x80) !== 0 });
       }
@@ -264,7 +276,7 @@ export class WorldScene {
         }
         const shaderName = `textures/${name}`;
         const shader = shaders.hasAuthored(shaderName) ? await shaders.register(shaderName, { kind: "world", world: materialWorld, lightmap: lightmap?.image ?? null, lightmapIndex: lightmap === null ? -1 : index, baseTexture: texture }) : null;
-        surfaces.push({ kind: "legacy", shader, index, bounds: geometryBounds(prepared.geometry.vertices), plane: prepared.plane, geometry: prepared.geometry,
+        surfaces.push({ kind: "legacy", shaderName, baseTexture: texture, shader, index, bounds: geometryBounds(prepared.geometry.vertices), plane: prepared.plane, geometry: prepared.geometry,
           material, fullbright: texture.fullbright, lightmap, q1Sky });
       }
     }
@@ -277,6 +289,7 @@ export class WorldScene {
       for (const suffix of SKY_FACE_SUFFIXES) sides.push((await shaders.textures.load(`env/${options.q2SkyName}${suffix}`, { family: "q2", usage: "sky", wrap: "clamp", mipmap: false }) ?? shaders.textures.missing).image);
       result.q2Sky = sides;
     }
+    if (!shaders.preparingReplacement) await shaders.registrations.owner.bindWorld(result);
     return result;
     } catch (error) {
       if (result !== null) result.close();
@@ -355,7 +368,7 @@ export class WorldScene {
       }
       return clipped && this.localBoxCulled(surface.bounds, input.camera, model);
     }
-    const shader = this.remapped.get(surface.shader)?.shader ?? surface.shader;
+    const shader = this.remap(surface)?.material ?? surface.shader;
     if (source.kind !== "planar" || surface.plane === null || shader.material.cull === "none") return false;
     const viewer = dot3(context.localViewOrigin, surface.plane.normal), distance = surface.plane.distance;
     return shader.material.cull === "front" ? viewer < Math.fround(distance - 8) : viewer > Math.fround(distance + 8);
@@ -398,6 +411,8 @@ export class WorldScene {
 
   /** Prepare once before color/model submission; beforeView executes atlas work first. */
   prepareShadows(lights: readonly SceneLight[], input: WorldViewInput, casters: readonly ShadowCaster[] = [], options: ShadowAtlasOptions = {}): PreparedShadows {
+    const revision = this.shaders.registrations.owner.materialRevision;
+    if (revision !== this.shadowMaterialRevision) { this.staticShadowWorld = null; this.shadowMaterialRevision = revision; }
     const source = this.map.models[0], range = source === undefined ? { first: 0, count: this.surfaces.length } : "surfaces" in source ? source.surfaces : source.faces;
     let world: readonly ShadowMesh[] | StaticShadowWorld = [];
     if (options.enabled !== false && lights.some(light => light.profile.kind === "q2" && light.radius > 0 && (light.profile.cone !== null || light.profile.shadow.kind === "cast"))) {
@@ -409,7 +424,7 @@ export class WorldScene {
         let staticWorld = true;
         for (let index = range.first; index < range.first + range.count; index++) {
           const surface = at(this.surfaces, index);
-          const shader = surface.shader === null ? null : this.remapped.get(surface.shader)?.shader ?? surface.shader;
+          const shader = this.remap(surface)?.material ?? surface.shader;
           if (shader !== null && shader.registered.definition.deforms.length !== 0) staticWorld = false;
           const geometry = this.shadowGeometry(surface, context, false);
           if (geometry !== null) meshes.push(shadowMesh(geometry));
@@ -423,10 +438,12 @@ export class WorldScene {
   }
 
   private shadowGeometry(surface: WorldSurface, context: MaterialDrawContext, entity: boolean): MaterialGeometry | null {
-    if (surface.shader !== null) {
+    if (surface.shader !== null || this.rawRemaps.has(surface.index)) {
       if (surface.kind === "q3" && surface.flare) return null;
-      const remap = this.remapped.get(surface.shader);
-      return shadowMaterialGeometry(remap?.shader ?? surface.shader, surface.geometry, { ...context, timeOffset: remap?.timeOffset ?? 0 });
+      const remap = this.remap(surface);
+      const shader = remap?.material ?? surface.shader;
+      if (shader === null) throw new Error("Remapped shadow material is absent");
+      return shadowMaterialGeometry(shader, surface.geometry, { ...context, timeOffset: remap?.timeOffset ?? 0 });
     }
     if (surface.kind !== "legacy") throw new Error("Compiled surface lost its shader");
     const material = surface.material;
@@ -444,7 +461,8 @@ export class WorldScene {
     const worldRange = worldModel === undefined ? { first: 0, count: this.surfaces.length } : "surfaces" in worldModel ? worldModel.surfaces : worldModel.faces;
     const surfaces = visibility.surfaces.map(index => at(this.surfaces, index)).filter(surface => this.map.kind === "q3-bsp" || surface.index >= worldRange.first && surface.index < worldRange.first + worldRange.count);
     const order = (surface: WorldSurface): number => {
-      if (surface.shader !== null) return (this.remapped.get(surface.shader)?.shader ?? surface.shader).finished.sort;
+      const shader = this.remap(surface)?.material ?? surface.shader;
+      if (shader !== null) return shader.finished.sort;
       if (surface.kind !== "legacy") throw new Error("Compiled surface lost its shader");
       return surface.q1Sky !== null || surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0 ? 2 : surface.material.alpha < 1 ? 9 : 3;
     };
@@ -479,8 +497,8 @@ export class WorldScene {
     }
     operations.push(...input.operations ?? []);
     if (input.q2Fog !== undefined) operations.push({ kind: "q2-fog", camera: input.camera, fog: input.q2Fog, farDepth: 1 - 1e-6,
-      skyDrawn: surfaces.some(surface => surface.shader !== null
-        ? (this.remapped.get(surface.shader)?.shader ?? surface.shader).finished.iterator.kind === "sky"
+      skyDrawn: surfaces.some(surface => (this.remap(surface)?.material ?? surface.shader) !== null
+        ? (this.remap(surface)?.material ?? surface.shader)?.finished.iterator.kind === "sky"
         : surface.kind === "legacy" && surface.material.kind === "q2" && (surface.material.surfaceFlags & 4) !== 0) });
     return { visibility, imageOperations: this.shaders.textures.images.drainOperations(), view: { target: input.target, time: input.time,
       viewport: input.camera.viewport, clear: input.clear === undefined ? { color: null, depth: 1, stencil: false } : input.clear,
@@ -490,7 +508,7 @@ export class WorldScene {
   private surfaceOperations(surface: WorldSurface, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform, lighting?: { readonly mask: number; readonly lights: readonly DynamicLight[] }, order?: SourceSurfaceOrder): readonly SceneOperation[] {
     if (surface.kind === "q3") return this.shaderOperations(surface, surface.shader, input, context, model, lighting, order);
     const material = surface.material;
-    if (surface.shader === null) {
+    if (surface.shader === null && !this.rawRemaps.has(surface.index)) {
       if (material.kind === "q2" && (material.surfaceFlags & 128) !== 0 && (material.surfaceFlags & 4) === 0) return [];
       if (surface.plane !== null && dot3(context.localViewOrigin, surface.plane.normal) - surface.plane.distance < -0.01) return [];
       if (surface.q1Sky !== null && input.sourceSky !== undefined) return [{ kind: "scene-group", order: { kind: "sequence", phase: "sky" }, operations: this.q2SkyOperations(surface.geometry, input, context) }];
@@ -528,7 +546,8 @@ export class WorldScene {
         this.shaders.textures.images.require(lightmap.direct);
       }
     }
-    if (surface.shader !== null) return this.shaderOperations(surface, surface.shader, input, context, model, lighting, order);
+    const selectedShader = surface.shader ?? this.rawRemaps.get(surface.index)?.material;
+    if (selectedShader !== undefined && selectedShader !== null) return this.shaderOperations(surface, selectedShader, input, context, model, lighting, order);
     const fragmentLighting = input.q2FragmentLighting;
     const rotateNormal = (normal: Vec3): Vec3 => normalize3(model === undefined ? normal : worldVector(normal, model));
     const batches = prepareLegacyMaterialBatches(material, surface.geometry, { time: context.time, entityRGBA: context.entityRGBA, animationFrame: input.animationFrame ?? Math.trunc(context.time * 2),
@@ -544,7 +563,7 @@ export class WorldScene {
   }
 
   private shaderOperations(surface: WorldSurface, sourceShader: RegisteredSceneMaterial, input: WorldViewInput, context: MaterialDrawContext, model?: ModelTransform, lighting?: { readonly mask: number; readonly lights: readonly DynamicLight[] }, order?: SourceSurfaceOrder): readonly SceneOperation[] {
-    const remap = this.remapped.get(sourceShader), shader = remap?.shader ?? sourceShader;
+    const remap = this.remap(surface), shader = remap?.material ?? sourceShader;
     const grid = surface.kind === "q3" ? surface.grid : null, fog = surface.kind === "q3" ? surface.fog : null;
     if (surface.kind === "q3" && (surface.flare || surface.skip)) {
       const operations = surface.flare ? input.prepareFlare?.(surface, context) ?? [] : [];
@@ -574,7 +593,7 @@ export class WorldScene {
       dynamicLightBatches, ...(lightmapLighting === undefined ? {} : { lightmapLighting }) };
     if (shader.finished.iterator.kind === "sky") return [{ kind: "scene-group",
       order: order === undefined ? { kind: "compiled", material: shader } : sourceDrawGroup(sourceShader, order, []).order,
-      operations: this.skyOperations(shader, geometry, input, drawContext) }];
+      operations: this.skyOperations(shader, geometry, input, drawContext, remap?.source ?? this.shaders) }];
     const batches = prepareMaterialBatches(shader, geometry, drawContext);
     const group = order === undefined ? (batches: readonly DrawBatch[]) => compiledDrawGroup(shader, batches)
       : (batches: readonly DrawBatch[]) => sourceDrawGroup(sourceShader, order, batches);
@@ -590,10 +609,10 @@ export class WorldScene {
         depthTest: "less-equal", depthWrite: true, alphaTest: "none", cull: "none", depthRange: [0, 1], polygonOffset: null } }));
   }
 
-  private skyOperations(shader: CompiledMaterial, geometry: MaterialGeometry, input: WorldViewInput, context: MaterialDrawContext): readonly RenderOperation[] {
+  private skyOperations(shader: CompiledMaterial, geometry: MaterialGeometry, input: WorldViewInput, context: MaterialDrawContext, source = this.shaders): readonly RenderOperation[] {
     if (input.sourceSky !== undefined) return this.q2SkyOperations(geometry, input, context);
-    this.shaders.sky.clip([geometry], input.camera.origin);
-    const built = this.shaders.sky.build(input.camera.origin, Math.max(2048, farClip(input.camera.origin, this.bounds)));
+    source.sky.clip([geometry], input.camera.origin);
+    const built = source.sky.build(input.camera.origin, Math.max(2048, farClip(input.camera.origin, this.bounds)));
     const operations: RenderOperation[] = [{ kind: "depth-range", range: [1, 1] }];
     const outer = shader.registered.sky?.outer;
     if (outer !== undefined && outer !== null) for (const face of built.box) {
@@ -613,20 +632,44 @@ export class WorldScene {
     return [{ kind: "depth-range", range: [1, 1] }, ...q2SkySides(geometry, input.camera.origin, sky, seconds, context.project), { kind: "depth-range", range: context.depthRange }];
   }
 
-  close(): void { this.staticShadowWorld = null; this.staticLightStyles.clear(); this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
+  private remap(surface: WorldSurface): SceneMaterialRemap | null { return surface.shader === null ? this.rawRemaps.get(surface.index) ?? null : currentRemap(surface.shader); }
+
+  private releaseImages(): void { this.staticShadowWorld = null; this.staticLightStyles.clear(); this.shadowScene.close(); for (const image of this.owned) this.shaders.textures.images.release(image); this.owned.length = 0; }
+  close(): void { if (this.closed) return; this.closed = true; this.imageGeneration++; this.shaders.registrations.owner.releaseWorld(this); this.releaseImages(); }
 
   /** Replace only renderer data; BSP identity and source light/style owners remain live. */
-  async prepareImages(shaders: SceneShaderRegistry): Promise<WorldScene> {
-    const replacement = await WorldScene.load(this.map, shaders, this.options);
+  async prepareImages(shaders: SceneShaderRegistry, sourceFor: (source: SceneShaderRegistry) => SceneShaderRegistry = source => {
+    if (source !== this.shaders) throw new Error("Foreign remap image source was not supplied");
+    return shaders;
+  }): Promise<WorldScene> {
+    const generation = this.imageGeneration, revision = this.shaders.registrations.owner.materialRevision, replacement = await WorldScene.load(this.map, shaders, this.options);
+    replacement.preparedGeneration = generation;
+    replacement.preparedMaterialRevision = revision;
     try {
-      for (const [material, remap] of this.remapped)
-        await replacement.remapShader(material.material.name, remap.shader.material.name, remap.timeOffset);
+      const names = new Set([...this.rawRemaps.keys()].map(index => at(this.surfaces, index).shaderName));
+      for (const name of names) {
+        const selected = this.shaders.registrations.owner.remapDefinition(name);
+        if (selected === null) continue;
+        const surfaces = replacement.surfaces.filter(surface => surface.shader === null && materialName(surface.shaderName) === materialName(name));
+        const source = sourceFor(selected.source), prepared = await source.prepareRemapMaterials(selected.replacement, surfaces.map(surface => replacement.remapBinding(surface)));
+        if (!prepared.accepted) { prepared.discard(); throw new Error("Current surface remap could not be rebuilt from its source images"); }
+        prepared.commit();
+        for (const [index, surface] of surfaces.entries()) {
+          const material = prepared.materials[index]; if (material === undefined) throw new Error("Refreshed surface remap is absent");
+          replacement.rawRemaps.set(surface.index, { material, source: selected.source, timeOffset: selected.timeOffset });
+        }
+      }
+      this.validateImages(replacement);
       return replacement;
     } catch (error) { replacement.close(); throw error; }
   }
 
+  validateImages(replacement: WorldScene): void {
+    if (this.closed || replacement.preparedGeneration !== this.imageGeneration || replacement.preparedMaterialRevision !== this.shaders.registrations.owner.materialRevision) throw new Error("World images or remaps changed during replacement");
+  }
+
   commitImages(replacement: WorldScene): void {
-    this.close();
+    this.validateImages(replacement); this.releaseImages(); this.imageGeneration++;
     this.surfaces = replacement.surfaces.map(surface => surface.shader === null ? surface : { ...surface, shader: this.shaders.registrations.owner.retained(surface.shader.registration) });
     this.fogSelections = replacement.fogSelections;
     this.fogImage = replacement.fogImage; this.dlightImage = replacement.dlightImage;
@@ -634,19 +677,36 @@ export class WorldScene {
     this.q2Sky = replacement.q2Sky;
     this.fullbrightByTexture = replacement.fullbrightByTexture;
     this.owned.push(...replacement.owned); replacement.owned.length = 0;
-    this.remapped.clear();
-    for (const [material, remap] of replacement.remapped) this.remapped.set(this.shaders.registrations.owner.retained(material.registration),
-      { ...remap, shader: this.shaders.registrations.owner.retained(remap.shader.registration) });
+    this.rawRemaps.clear();
+    for (const [index, remap] of replacement.rawRemaps) this.rawRemaps.set(index, { ...remap, material: this.shaders.registrations.owner.retained(remap.material.registration) });
   }
 
-  async remapShader(original: string, replacement: string, timeOffset = 0): Promise<void> {
-    this.shaders.remap(original, replacement, timeOffset);
-    for (const surface of this.surfaces) {
-      if (surface.shader === null || surface.shader.material.name.toLowerCase() !== original.toLowerCase()) continue;
-      if (original.toLowerCase() === replacement.toLowerCase()) this.remapped.delete(surface.shader);
-      else this.remapped.set(surface.shader, { shader: await this.shaders.register(replacement, { kind: "world", world: this.materialWorld, lightmap: surface.kind === "q3" ? surface.lightmap : surface.lightmap?.image ?? null, lightmapIndex: surface.shader.finished.lightmapIndex, baseTexture: null }), timeOffset });
-      this.staticShadowWorld = null;
+  private remapBinding(surface: WorldSurface): SceneShaderBinding {
+    const lightmap = surface.kind === "q3" ? surface.lightmap : surface.lightmap?.image ?? null;
+    return { kind: "world", world: this.materialWorld, lightmap, lightmapIndex: surface.shader?.finished.lightmapIndex ?? (lightmap === null ? -1 : surface.index), baseTexture: surface.baseTexture };
+  }
+
+  rawRemapBindings(name: string): readonly { readonly surface: number; readonly binding: SceneShaderBinding }[] {
+    const key = materialName(name);
+    return this.surfaces.filter(surface => surface.shader === null && materialName(surface.shaderName) === key)
+      .map(surface => ({ surface: surface.index, binding: this.remapBinding(surface) }));
+  }
+
+  publishRawRemap(name: string, materials: readonly RegisteredSceneMaterial[], source: SceneShaderRegistry, timeOffset: number): void {
+    const bindings = this.rawRemapBindings(name);
+    for (const value of bindings) this.rawRemaps.delete(value.surface);
+    for (const [index, material] of materials.entries()) {
+      const value = bindings[index]; if (value === undefined) throw new Error("Prepared remap lost its surface");
+      this.rawRemaps.set(value.surface, { material, timeOffset, source });
     }
+    this.staticShadowWorld = null;
+  }
+
+  async remapShader(original: string, replacement: string, timeOffset = 0,
+    options: { readonly source: SceneShaderRegistry; readonly current: () => boolean } = { source: this.shaders, current: () => true }): Promise<ShaderRemapResult> {
+    const generation = this.imageGeneration;
+    return this.shaders.registrations.owner.remap({ original, replacement, timeOffset, source: options.source,
+      current: () => !this.closed && generation === this.imageGeneration && options.current() });
   }
 
   /** Source Q3 allows a single portal child. Every split seat starts its own search. */
@@ -656,7 +716,7 @@ export class WorldScene {
       const visible = visibleWorld(this.map, input.camera, input);
       for (const index of visible.surfaces) {
         const surface = at(this.surfaces, index);
-        const shader = surface.shader === null ? null : this.remapped.get(surface.shader)?.shader ?? surface.shader;
+        const shader = this.remap(surface)?.material ?? surface.shader;
         if (shader === null || shader.finished.sort !== 1 || surface.plane === null) continue;
         const milliseconds = input.time.kind === "seconds" ? input.time.value * 1000 : input.time.value;
         const child = portalCamera(surface.plane, portals, input.camera, milliseconds);

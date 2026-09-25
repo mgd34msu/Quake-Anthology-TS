@@ -5,7 +5,8 @@ export interface PresentationOwner { readonly provider: ProviderId; readonly gen
 
 export type ComponentPresentationMediaRequest =
   | { readonly kind: "music"; readonly intro: string; readonly loop: string }
-  | { readonly kind: "music-stop" };
+  | { readonly kind: "music-stop" }
+  | { readonly kind: "shader-remap"; readonly original: string; readonly replacement: string; readonly timeOffset: number };
 
 export function presentationOwnerKey(owner: PresentationOwner | undefined): string {
   return owner === undefined ? "primary" : JSON.stringify([owner.provider, owner.generation]);

@@ -1,9 +1,23 @@
 import type { ContentId } from "../../contracts/content.ts";
 import type { DecodedWorld } from "../../contracts/scene.ts";
 import type { CompiledMaterial } from "../../materials/compile.ts";
+import type { SceneShaderBinding, SceneShaderRegistry } from "./shaders.ts";
+import type { WorldScene } from "./world.ts";
+import { normalizeShaderName, stripShaderExtension } from "../../materials/material.ts";
+
+export interface SceneMaterialRemap { readonly material: RegisteredSceneMaterial; readonly timeOffset: number; readonly source: SceneShaderRegistry; }
+export type ShaderRemapResult = "committed" | "unchanged" | "stale";
+interface BoundSceneMaterial { readonly material: RegisteredSceneMaterial; readonly source: SceneShaderRegistry; readonly binding: SceneShaderBinding; }
+interface EffectiveRemap { readonly replacement: string; readonly source: SceneShaderRegistry; readonly timeOffset: number; readonly materials: Map<ShaderRegistration, SceneMaterialRemap>; }
+function shaderName(name: string): string { return normalizeShaderName(stripShaderExtension(name)); }
+
+export function currentRemap(material: CompiledMaterial): SceneMaterialRemap | null {
+  return material instanceof MaterialHandle ? material.registration.provider.owner.currentRemap(material) : null;
+}
 
 class Registration {
-  constructor(private readonly scope: ProviderShaderRegistrations) {}
+  readonly name: string;
+  constructor(private readonly scope: ProviderShaderRegistrations, name: string) { this.name = shaderName(name); }
   get provider(): ProviderShaderRegistrations { return this.scope; }
 }
 class WorldIdentity {
@@ -35,6 +49,124 @@ export class SceneMaterialRegistrations {
   private readonly worlds = new WeakMap<DecodedWorld, ShaderWorldIdentity>();
   private worldOrdinal = 0;
   private readonly admitted = new Map<ShaderRegistration, MaterialHandle | null>();
+  private readonly bindings = new Map<ShaderRegistration, BoundSceneMaterial>();
+  private readonly remaps = new Map<string, EffectiveRemap>();
+  private readonly remapRequests = new Map<string, object>();
+  private readonly scenes = new Set<WorldScene>();
+  private bindingRevision = 0;
+  private remapRevision = 0;
+  get materialRevision(): number { return this.remapRevision; }
+
+  currentRemap(material: RegisteredSceneMaterial): SceneMaterialRemap | null {
+    if (this.remaps.size === 0) return null;
+    return this.remaps.get(material.registration.name)?.materials.get(material.registration) ?? null;
+  }
+  remapDefinition(name: string): Pick<EffectiveRemap, "replacement" | "source" | "timeOffset"> | null { return this.remaps.get(shaderName(name)) ?? null; }
+  async bindWorld(world: WorldScene): Promise<void> {
+    this.scenes.add(world); this.bindingRevision++;
+    for (const name of this.remaps.keys()) for (;;) {
+      const selected = this.remaps.get(name), bindings = world.rawRemapBindings(name);
+      if (selected === undefined || bindings.length === 0) break;
+      const prepared = await selected.source.prepareRemapMaterials(selected.replacement, bindings.map(value => value.binding));
+      if (!this.scenes.has(world)) { prepared.discard(); return; }
+      if (this.remaps.get(name) !== selected || !prepared.current()) { prepared.discard(); continue; }
+      if (!prepared.accepted) { prepared.discard(); break; }
+      prepared.commit();
+      world.publishRawRemap(name, prepared.materials.map(material => this.retained(material.registration)), selected.source, selected.timeOffset);
+      break;
+    }
+  }
+  releaseWorld(world: WorldScene): void { if (this.scenes.delete(world)) this.bindingRevision++; }
+  async bindMaterial(source: SceneShaderRegistry, material: RegisteredSceneMaterial, binding: SceneShaderBinding): Promise<void> {
+    const previous = this.bindings.get(material.registration);
+    if (previous?.material === material && previous.binding === binding && previous.source === source) return;
+    this.bindings.set(material.registration, { source, material, binding }); this.bindingRevision++;
+    const key = shaderName(material.material.name);
+    for (;;) {
+      const selected = this.remaps.get(key);
+      if (selected === undefined || selected.materials.has(material.registration)) return;
+      const prepared = await selected.source.prepareRemapMaterials(selected.replacement, [binding]);
+      if (this.remaps.get(key) !== selected || !prepared.current()) { prepared.discard(); continue; }
+      if (!prepared.accepted) { prepared.discard(); return; }
+      const replacement = prepared.materials[0];
+      if (replacement === undefined) { prepared.discard(); throw new Error("Shader remap lost its registered binding"); }
+      prepared.commit();
+      selected.materials.set(material.registration, { material: this.retained(replacement.registration), timeOffset: selected.timeOffset, source: selected.source });
+      return;
+    }
+  }
+
+  async remap(request: { readonly original: string; readonly replacement: string; readonly timeOffset: number; readonly source: SceneShaderRegistry;
+    readonly current: () => boolean }): Promise<ShaderRemapResult> {
+    if (request.source.registrations.owner !== this) throw new Error("Shader remap source belongs to another scene");
+    if (!request.current()) return "stale";
+    const key = shaderName(request.original), token = {}; this.remapRequests.set(key, token);
+    const current = (): boolean => this.remapRequests.get(key) === token && request.current();
+    if (!current()) return "stale";
+    if (key === shaderName(request.replacement)) {
+      this.remaps.delete(key); this.remapRevision++;
+      for (const world of this.scenes) world.publishRawRemap(key, [], request.source, 0);
+      return "committed";
+    }
+    for (;;) {
+      const revision = this.bindingRevision;
+      const originals = [...this.bindings.values()].filter(value => shaderName(value.material.material.name) === key);
+      const worlds = [...this.scenes].map(world => ({ world, bindings: world.rawRemapBindings(key) }));
+      const bindings = [...originals.map(value => value.binding), ...worlds.flatMap(value => value.bindings.map(binding => binding.binding))];
+      const prepared = await request.source.prepareRemapMaterials(request.replacement, bindings.length === 0 ? [{ kind: "unlit", lightmapIndex: -1, mipmap: true }] : bindings);
+      if (!current() || !prepared.current()) { prepared.discard(); return "stale"; }
+      if (!prepared.accepted) { prepared.discard(); return "unchanged"; }
+      if (revision !== this.bindingRevision) { prepared.discard(); continue; }
+      const materials = new Map<ShaderRegistration, SceneMaterialRemap>();
+      for (const [index, original] of originals.entries()) {
+        const material = prepared.materials[index];
+        if (material === undefined) { prepared.discard(); throw new Error("Shader remap lost a prepared binding"); }
+        materials.set(original.material.registration, { material, timeOffset: request.timeOffset, source: request.source });
+      }
+      prepared.commit();
+      for (const [registration, remap] of materials) materials.set(registration, { ...remap, material: this.retained(remap.material.registration) });
+      this.remaps.set(key, { replacement: request.replacement, source: request.source, timeOffset: request.timeOffset, materials }); this.remapRevision++;
+      let offset = originals.length;
+      for (const { world, bindings } of worlds) {
+        world.publishRawRemap(key, prepared.materials.slice(offset, offset + bindings.length).map(material => this.retained(material.registration)), request.source, request.timeOffset);
+        offset += bindings.length;
+      }
+      return "committed";
+    }
+  }
+
+  async prepareRemapRefresh(sources: ReadonlyMap<SceneShaderRegistry, SceneShaderRegistry>): Promise<{ validate(): void; commit(): void }> {
+    const revision = this.remapRevision, bindingRevision = this.bindingRevision, bindings = [...sources.values()].flatMap(source => source.materialBindings());
+    const replacements = new Map<string, EffectiveRemap>();
+    for (const [name, selected] of this.remaps) {
+      const source = sources.get(selected.source);
+      if (source === undefined) throw new Error("Remap image source was not prepared");
+      const originals = bindings.filter(value => shaderName(value.material.material.name) === name);
+      const prepared = await source.prepareRemapMaterials(selected.replacement, originals.map(value => value.binding));
+      if (!prepared.accepted) { prepared.discard(); throw new Error("Current remap could not be rebuilt from its source images"); }
+      const materials = new Map<ShaderRegistration, SceneMaterialRemap>();
+      for (const [index, original] of originals.entries()) {
+        const material = prepared.materials[index];
+        if (material === undefined) { prepared.discard(); throw new Error("Refreshed remap lost a binding"); }
+        materials.set(original.material.registration, { material, source: selected.source, timeOffset: selected.timeOffset });
+      }
+      prepared.commit(); replacements.set(name, { ...selected, materials });
+    }
+    const validate = (): void => { if (revision !== this.remapRevision || bindingRevision !== this.bindingRevision) throw new Error("Shader remap bindings changed during image preparation"); };
+    return { validate, commit: () => {
+      validate();
+      this.bindings.clear();
+      for (const [source, replacement] of sources) for (const value of replacement.materialBindings())
+        this.bindings.set(value.material.registration, { ...value, source, material: this.retained(value.material.registration) });
+      this.bindingRevision++;
+      this.remaps.clear();
+      for (const [name, selected] of replacements) {
+        for (const [registration, remap] of selected.materials) selected.materials.set(registration, { ...remap, material: this.retained(remap.material.registration) });
+        this.remaps.set(name, selected);
+      }
+      this.remapRevision++;
+    } };
+  }
 
   provider(content: ContentId): ProviderShaderRegistrations {
     let provider = this.providers.get(content);
@@ -91,7 +223,7 @@ export class ProviderShaderRegistrations {
     const cacheKey = this.key(key);
     let registration = this.registrations.get(cacheKey);
     if (registration === undefined) {
-      registration = new Registration(this); this.registrations.set(cacheKey, registration); this.owner.admit(registration);
+      registration = new Registration(this, key.name); this.registrations.set(cacheKey, registration); this.owner.admit(registration);
     }
     return registration;
   }
@@ -123,7 +255,7 @@ export class ShaderReplacementStage {
     this.requirePreparing();
     const cacheKey = this.provider.key(key), previous = this.entries.get(cacheKey);
     if (previous !== undefined) return previous.registration;
-    const registration = this.provider.find(key) ?? new Registration(this.provider);
+    const registration = this.provider.find(key) ?? new Registration(this.provider, key.name);
     this.entries.set(cacheKey, { key, registration, material: null }); return registration;
   }
   publish(registration: ShaderRegistration, compiled: CompiledMaterial): RegisteredSceneMaterial {

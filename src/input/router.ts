@@ -25,6 +25,7 @@ export interface InputRouterOptions {
 /** Borrows platform event ownership. The caller can feed a shared event loop or use pump(). */
 export class InputRouter {
   private readonly routes: InputSeatRoute[];
+  private controllerSeats: (SeatInput | null)[];
   private keyboard: SeatInput | null = null;
   private sourceJoystick: number | null = null;
   private sourceJoystickSeat: SeatId | null = null;
@@ -46,6 +47,7 @@ export class InputRouter {
     this.platformActive = options.deferPlatform !== true;
     for (const [index, route] of options.seats.entries()) if (options.seats.slice(0, index).some(previous => previous.input.seat.equals(route.input.seat))) throw new Error("Duplicate input seat");
     this.routes = [...options.seats];
+    this.controllerSeats = this.routes.map(route => route.input);
     this.setKeyboardSeat(options.keyboardSeat);
     if (this.platformActive) options.controllers?.setAssignments(this.routes.map(route => route.controller));
   }
@@ -56,6 +58,32 @@ export class InputRouter {
     this.routes.splice(0, this.routes.length, ...routes);
     this.sourceJoystick = null; this.sourceJoystickSeat = null;
     this.setKeyboardSeat(keyboard); this.restart(); this.updateCapture();
+  }
+  /** Remove client owners without rebinding their held devices to another player. */
+  retainSeats(seats: readonly SeatId[], keyboard: SeatId | null): void {
+    if (seats.some((seat, index) => seats.slice(0, index).some(previous => previous.equals(seat)) || this.seat(seat) === null))
+      throw new Error("Retained input seats must be distinct current owners");
+    if (keyboard !== null && !seats.some(seat => seat.equals(keyboard))) throw new Error("Keyboard seat is not retained");
+    const retained = (input: SeatInput): boolean => seats.some(seat => input.seat.equals(seat));
+    for (const route of this.routes) if (!retained(route.input)) {
+      route.input.release(this.options.now()); route.input.gamepad.cancelGyroCalibration();
+    }
+    this.finishGyroCalibration();
+    this.routes.splice(0, this.routes.length, ...this.routes.filter(route => retained(route.input)));
+    // SDL assignment slots stay stable until an explicit routing change or restart.
+    this.controllerSeats = this.controllerSeats.map(input => input !== null && retained(input) ? input : null);
+    for (const [instance, input] of this.deviceSeats) if (!retained(input)) {
+      this.deviceSeats.delete(instance);
+      if (this.sourceJoystick === instance) { this.sourceJoystick = null; this.sourceJoystickSeat = null; }
+    }
+    if (this.sourceJoystickSeat !== null && !seats.some(seat => this.sourceJoystickSeat?.equals(seat) === true)) {
+      this.sourceJoystick = null; this.sourceJoystickSeat = null;
+    }
+    if (this.keyboard !== null && !retained(this.keyboard)) {
+      this.keyboard = null; this.keyboardKeys.clear();
+    }
+    if (this.keyboard !== (keyboard === null ? null : this.seat(keyboard))) this.setKeyboardSeat(keyboard);
+    this.updateCapture();
   }
   keyboardSeat(): SeatId | null { return this.keyboard?.seat ?? null; }
   controllerSelection(id: SeatId): ControllerSelection { const route = this.routes.find(value => value.input.seat.equals(id)); if (route === undefined) throw new Error("Unknown input seat"); return route.controller; }
@@ -185,8 +213,8 @@ export class InputRouter {
         this.finishGyroCalibration();
         this.deviceSeats.delete(event.previous);
       }
-      const seat = this.routes[event.slot]?.input;
-      if (event.instance !== null && seat !== undefined) {
+      const seat = this.controllerSeats[event.slot];
+      if (event.instance !== null && seat != null) {
         seat.gamepad.resetGyroCalibration();
         seat.remapControllerBindings(event.instance); this.deviceSeats.set(event.instance, seat);
         if (seat.gamepad.tuning.gyro.enabled) {
@@ -234,6 +262,7 @@ export class InputRouter {
     if (this.platformActive) for (const route of this.routes) { route.input.release(this.options.now()); route.input.gamepad.resetGyroCalibration(); }
     this.finishGyroCalibration();
     this.deviceSeats.clear(); this.keyboardKeys.clear();
+    this.controllerSeats = this.routes.map(route => route.input);
     if (this.platformActive) this.options.controllers?.setAssignments(this.routes.map(route => route.controller));
     const assignments = this.options.controllers?.assignments ?? [];
     for (const [slot, instance] of assignments.entries()) {

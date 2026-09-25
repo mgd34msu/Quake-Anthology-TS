@@ -487,3 +487,46 @@ test("connection publication defers old-channel cleanup without clearing active 
   expect(next.connection.isClosed).toBe(true); expect(fresh.kind).toBe("demo"); expect(activeClosed).toBe(1);
   session.close(); expect(fresh.isClosed).toBe(true); expect(retired).toBe(1);
 });
+
+test("retiring the first client preserves survivor controls and device routes without inheriting queued commands", () => {
+  const session = new EngineSession(createIdentityOwner("retired-first-local"), { kind: "local" });
+  const first = session.createClient(0), second = session.createClient(1);
+  const firstSeat = session.createSeat(0, first), secondSeat = session.createSeat(1, second);
+  const local = (seat: typeof firstSeat): CommandContext => ({ session: session.session,
+    origin: { kind: "local-seat", seat: seat.id, client: seat.client.id } });
+  const firstContext = local(firstSeat), secondContext = local(secondSeat), calls: string[] = [];
+  const commands = new CommandBuffer({ dialect: "q3", context: firstContext });
+  commands.register("mark", command => { calls.push(command.args[0] ?? ""); return undefined; });
+  const inputs = [firstSeat, secondSeat].map(seat => {
+    const input = new SeatInput({ seat: seat.id, dialect: "q3", context: local(seat), commands, uiEvent: () => false });
+    input.bind({ input: { kind: "key", code: 119 }, target: { kind: "action", action: "forward" } });
+    input.bind({ input: { kind: "controller-button", device: 22, button: 0 }, target: { kind: "action", action: "attack" } });
+    return input;
+  });
+  const removed = inputs[0], retained = inputs[1]; if (removed === undefined || retained === undefined) throw new Error("Missing inputs");
+  const router = new InputRouter({ seats: inputs.map(input => ({ input, controller: { kind: "automatic" } })), keyboardSeat: firstSeat.id,
+    controllers: null, now: () => 10, ticks: () => 10, subframe: false, unhandled: () => {} });
+  const release = spyOn(removed, "release");
+  try {
+    router.handleController({ kind: "assignment", timestamp: 1, slot: 1, previous: null, instance: 22 });
+    for (const input of inputs) input.input({ kind: "key", seat: input.seat, code: 119, down: true, repeat: false, timeMilliseconds: 2 });
+    router.handleController({ kind: "button", timestamp: 2, slot: 1, instance: 22, button: 0, down: true });
+    commands.append("wait;mark retired\n", firstContext); commands.execute();
+    commands.append("mark survivor\n", secondContext);
+    router.retainSeats([secondSeat.id], secondSeat.id); commands.discardClient(first.id); session.closeClient(first.id);
+    commands.execute();
+    expect(calls).toEqual(["survivor"]); expect(release).toHaveBeenCalledTimes(1);
+    expect(firstSeat.isClosed).toBe(true); expect(secondSeat.isClosed).toBe(false);
+    expect(removed.button("forward").active).toBe(false); expect(retained.button("forward").active).toBe(true);
+    expect(retained.button("attack").active).toBe(true); expect(router.keyboardSeat()).toEqual(secondSeat.id);
+    expect(router.controllerFor(secondSeat.id)).toBe(22);
+    router.handleController({ kind: "button", timestamp: 3, slot: 1, instance: 22, button: 0, down: false });
+    expect(retained.button("attack").active).toBe(false);
+    router.handleController({ kind: "assignment", timestamp: 4, slot: 0, previous: null, instance: 33 });
+    expect(router.controllerFor(secondSeat.id)).toBe(22);
+    const replacement = session.createClient(0);
+    expect(() => commands.append("mark stale\n", firstContext)).toThrow("disconnected");
+    commands.append("mark replacement\n", { session: session.session, origin: { kind: "remote-client", client: replacement.id } });
+    commands.execute(); expect(calls).toEqual(["survivor", "replacement"]);
+  } finally { release.mockRestore(); router.close(); session.close(); }
+});

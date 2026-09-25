@@ -12,6 +12,7 @@ import type { WorldViewInput } from "../../../render/scene/world.ts";
 import type { ProviderSceneAssets } from "../assets.ts";
 import type { ApplicationQ3Assets } from "./assets.ts";
 import { q3WeaponCamera } from "./view.ts";
+import { currentRemap } from "../../../render/scene/material-registrations.ts";
 
 export interface Q3SceneRenderOptions {
   readonly noWorldModel: boolean;
@@ -33,8 +34,6 @@ export class ApplicationQ3SceneRenderer {
       await this.renderer(provider).preload(models.map(model => model.entity), entity => models.find(model => model.entity === entity)?.options ?? {});
       this.assertCurrent();
     }
-    await Promise.all([...this.renderers.values()].map(renderer => renderer.refreshShaderRemaps()));
-    this.assertCurrent();
   }
   private renderer(provider: ProviderSceneAssets): SceneModelRenderer { this.assertCurrent(); let renderer = this.renderers.get(provider); if (renderer === undefined) { renderer = new SceneModelRenderer(provider, this.media.assets.world); this.renderers.set(provider, renderer); } return renderer; }
   private models(scene: Q3SceneContent): ReadonlyMap<ProviderSceneAssets, readonly PresentedModel[]> {
@@ -56,8 +55,9 @@ export class ApplicationQ3SceneRenderer {
     const weaponInput = { ...input, camera: q3WeaponCamera(input.camera, options.splitScreen && !noWorldModel) };
     for (const [index, poly] of scene.admission.polygons.entries()) {
       const compiled = this.media.assets.materialRegistrations.requireMaterial(this.resources.picture(poly.shader).material.compiled);
+      const remap = currentRemap(compiled), context = world.materialContext(input, undefined, poly.fog?.volume ?? null);
       operations.push(sourceDrawGroup(compiled, { view: source.view, entity: { kind: "world" }, surface: index, fog: poly.fog === null ? 0 : poly.fog.index + 1, dlight: 0 },
-        prepareMaterialBatches(compiled, polyGeometry(poly), world.materialContext(input, undefined, poly.fog?.volume ?? null))));
+        prepareMaterialBatches(remap?.material ?? compiled, polyGeometry(poly), { ...context, timeOffset: context.timeOffset + (remap?.timeOffset ?? 0) })));
     }
     const polygon = (operation: SceneOperation): boolean => operation.kind === "scene-group" && operation.order.kind === "source" && operation.order.source.entity.kind === "world";
     operations.push(...additions.filter(polygon));
@@ -94,14 +94,15 @@ export class ApplicationQ3SceneRenderer {
       if (input.camera.clip.kind === "none" && (entity.renderFlags & 2) !== 0) continue;
       const compiled = entity.customShader === null ? this.media.provider.shaders.sourceMaterials.default
         : this.media.assets.materialRegistrations.requireMaterial(this.resources.picture(entity.customShader).material.compiled);
+      const remap = currentRemap(compiled);
       const fog = noWorldModel ? null : q3ProceduralFog(entity.origin, entity.radius, world.fogSelections);
       const order = { view: source.view, entity: entityOrder, surface: 0, fog: fog === null ? 0 : fog.index + 1, dlight: 0 };
       if (entity.kind === "beam") operations.push(sourceDrawGroup(compiled, order, [beamBatch(entity, project, state, white)]));
       else {
         const geometry = entity.kind === "sprite" ? spriteGeometry(entity, input.camera.axis, input.camera.clip.kind === "portal" && input.camera.clip.mirror)
           : railGeometry(entity, input.camera.origin, DEFAULT_RAIL_SETTINGS);
-        operations.push(sourceDrawGroup(compiled, order, prepareMaterialBatches(compiled, geometry,
-          { ...world.materialContext(input, undefined, fog?.volume ?? null), entityRGBA: entity.shaderRGBA, shaderTexCoord: entity.shaderTexCoord, timeOffset: entity.shaderTime })));
+        operations.push(sourceDrawGroup(compiled, order, prepareMaterialBatches(remap?.material ?? compiled, geometry,
+          { ...world.materialContext(input, undefined, fog?.volume ?? null), entityRGBA: entity.shaderRGBA, shaderTexCoord: entity.shaderTexCoord, timeOffset: entity.shaderTime + (remap?.timeOffset ?? 0) })));
       }
     }
     operations.push(...additions.filter(operation => !polygon(operation)));

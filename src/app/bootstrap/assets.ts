@@ -240,6 +240,7 @@ export class ApplicationAssets {
     const models: (() => void)[] = [];
     let fonts: Awaited<ReturnType<typeof loadMenuFont>> | null = null;
     let typography: Awaited<ReturnType<typeof loadMenuTypography>> | null = null;
+    let preparedRemaps: Awaited<ReturnType<SceneMaterialRegistrations["prepareRemapRefresh"]>> | null = null;
     try {
       for (const content of this.providers.keys()) await stagedProvider(content);
       if (modelPolicy.q1Enhanced !== this.modelPolicyValue.q1Enhanced || modelPolicy.q2Load !== this.modelPolicyValue.q2Load) {
@@ -252,8 +253,13 @@ export class ApplicationAssets {
       for (const current of [...(this.currentWorld === null ? [] : [this.currentWorld]), ...this.brushScenes]) {
         const provider = [...replacements.values()].find(replacement => replacement.provider.shaders === current.shaders);
         if (provider === undefined) throw new Error("World image provider is absent");
-        worlds.push({ current, replacement: await current.prepareImages(provider.shaders) });
+        worlds.push({ current, replacement: await current.prepareImages(provider.shaders, source => {
+          const selected = [...replacements.values()].find(value => value.provider.shaders === source);
+          if (selected === undefined) throw new Error("Remap image provider is absent");
+          return selected.shaders;
+        }) });
       }
+      preparedRemaps = await this.materialRegistrations.prepareRemapRefresh(new Map([...replacements.values()].map(value => [value.provider.shaders, value.shaders])));
       {
         const content = this.content.recipe.presentation.assets, provider = await this.provider(content);
         fonts = await loadMenuFont({ catalog: this.content.catalog, mounts: provider.mounts, family: provider.family,
@@ -267,9 +273,12 @@ export class ApplicationAssets {
       throw error;
     }
     const preparedFonts = fonts, preparedTypography = typography;
-    if (preparedFonts === null || preparedTypography === null) throw new Error("Image refresh fonts were not prepared");
+    const remaps = preparedRemaps;
+    if (preparedFonts === null || preparedTypography === null || remaps === null) throw new Error("Image refresh resources were not prepared");
     return { provider: stagedProvider, font: preparedFonts.font, typography: preparedTypography, policy,
       commit: () => {
+        remaps.validate();
+        for (const world of worlds) world.current.validateImages(world.replacement);
         for (const replacement of replacements.values()) replacement.provider.shaders.validateReplacement(replacement.shaders);
         for (const commit of models) commit();
         for (const replacement of replacements.values()) {
@@ -279,6 +288,7 @@ export class ApplicationAssets {
           this.retiredImages.push(() => { previous.disposeImages(); this.activeTextures.delete(previous); });
         }
         for (const world of worlds) world.current.commitImages(world.replacement);
+        remaps.commit();
         const previousFonts = this.fonts, previousTypography = this.loadedTypography;
         this.retiredImages.push(() => previousFonts?.close(), () => previousTypography?.close());
         this.fonts = preparedFonts; this.font = Promise.resolve(preparedFonts.font);

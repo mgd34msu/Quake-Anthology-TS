@@ -184,12 +184,21 @@ export class ApplicationSelectedQ3Presentations {
   private closed = false;
   private busy = false;
   constructor(private readonly options: SelectedQ3PresentationOptions) {}
+  retainPresentations(presentations: readonly WorldSeatPresentation[]): void {
+    if (this.closed) throw new Error("Selected Q3 presentation collection is closed");
+    const failures: unknown[] = [];
+    for (const [seat, consumer] of this.seats) if (!presentations.includes(seat)) {
+      this.seats.delete(seat); try { consumer.close(); } catch (error) { failures.push(error); }
+    }
+    if (failures.length !== 0) throw new AggregateError(failures, "Selected Q3 seat retirement failed");
+  }
   async prepare(presentations: readonly WorldSeatPresentation[], source: SelectedQ3Presentation | null,
     events: readonly SimulationPresentationEvent[], frame: number): Promise<void> {
     if (this.closed || this.busy) throw new Error("Selected Q3 presentation collection is closed or already preparing");
     this.busy = true;
     try {
-      for (const [seat, consumer] of this.seats) if (!presentations.includes(seat) || source === null || !consumer.owns(source, seat)) {
+      this.retainPresentations(presentations);
+      for (const [seat, consumer] of this.seats) if (source === null || !consumer.owns(source, seat)) {
         this.seats.delete(seat); consumer.close();
       }
       if (source === null) return;

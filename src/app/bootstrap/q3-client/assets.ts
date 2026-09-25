@@ -33,6 +33,7 @@ export async function registerQ3ShaderRequest<T>(path: string, load: (path: stri
 
 /** Synchronous source script/sound calls read bytes resolved through the actual mount plan. */
 export class ApplicationQ3Assets implements SoundAssetReader {
+  private closed = false;
   private readonly retained = new Map<string, OpenedResource>();
   private readonly sounds = new Map<string, SoundAsset>();
   private readonly names = new Set<string>();
@@ -134,11 +135,10 @@ export class ApplicationQ3Assets implements SoundAssetReader {
       world: async () => ({ map: { models: this.assets.world.map.models } }),
       remapShader: async (original, replacement, offset) => {
         const value = Number.parseFloat(offset), timeOffset = Number.isNaN(value) ? 0 : value;
-        this.provider.shaders.remap(original, replacement, timeOffset);
-        await this.provider.shaders.register(replacement);
-        await this.assets.world.remapShader(original, replacement, timeOffset);
+        if (await this.assets.world.remapShader(original, replacement, timeOffset, { source: this.provider.shaders, current: () => !this.closed }) === "stale")
+          throw new Error("Shader remap belongs to a retired source request");
       },
     };
   }
-  close(): void { this.fonts.close(); this.fontReader.close(); this.retained.clear(); this.sounds.clear(); this.modelProviders.clear(); }
+  close(): void { this.closed = true; this.fonts.close(); this.fontReader.close(); this.retained.clear(); this.sounds.clear(); this.modelProviders.clear(); }
 }

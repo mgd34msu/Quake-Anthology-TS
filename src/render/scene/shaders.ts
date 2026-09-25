@@ -22,6 +22,14 @@ export interface SourceSceneMaterials {
   readonly sun: RegisteredSceneMaterial;
 }
 interface PreparedSceneMaterial { readonly compiled: CompiledMaterial; readonly defaulted: boolean; }
+interface ShaderCompileEffects { sun(value: RegisteredSun): void; sky(height: number): void; warning(message: string): void; }
+export interface PreparedSceneRemap {
+  readonly materials: readonly RegisteredSceneMaterial[];
+  readonly accepted: boolean;
+  current(): boolean;
+  commit(): void;
+  discard(): void;
+}
 interface SourceMaterialRecord {
   readonly logical: ShaderLogicalKey;
   readonly order: number;
@@ -38,7 +46,8 @@ export class SceneShaderRegistry {
   private readonly cinematicPrograms = new Set<string>();
   private readonly compiled = new Map<string, Promise<RegisteredSceneMaterial>>();
   private readonly defaulted = new Set<string>();
-  private readonly remaps = new Map<string, { readonly name: string; readonly timeOffset: number }>();
+  private readonly bindings = new Map<ShaderRegistration, { readonly material: RegisteredSceneMaterial; readonly binding: SceneShaderBinding }>();
+  private readonly bindingPreparations = new Map<ShaderRegistration, Promise<void>>();
   private readonly pictureOrders = new Map<ShaderRegistration, number>();
   private readonly generatedPictures = new Map<string, RenderImage>();
   private readonly generatedTextures = new Map<string, SceneTexture>();
@@ -64,6 +73,7 @@ export class SceneShaderRegistry {
     if (this.sourceMaterialsValue === null) throw new Error("Source materials have not finished initialization");
     return this.sourceMaterialsValue;
   }
+  get preparingReplacement(): boolean { return this.stage !== null; }
   sourceWorldMaterial(material: RegisteredSceneMaterial): RegisteredSceneMaterial {
     const record = this.sourceRecords.find(value => value.material.registration === material.registration);
     return record?.defaulted === true ? this.sourceMaterials.default : material;
@@ -104,17 +114,56 @@ export class SceneShaderRegistry {
   hasAuthored(name: string): boolean { return this.programs.has(this.key(name)); }
   hasCinematic(name: string): boolean { return this.cinematicPrograms.has(this.key(name)); }
 
-  remap(original: string, replacement: string, timeOffset = 0): void {
-    const key = this.key(original);
-    if (key === this.key(replacement)) this.remaps.delete(key);
-    else this.remaps.set(key, { name: replacement, timeOffset });
+  materialBindings(): readonly { readonly material: RegisteredSceneMaterial; readonly binding: SceneShaderBinding }[] { return [...this.bindings.values()]; }
+
+  async prepareRemapMaterials(name: string, bindings: readonly SceneShaderBinding[]): Promise<PreparedSceneRemap> {
+    const parent = this.stage, stage = parent ?? this.registrations.beginReplacement(), textures = this.textures;
+    const materials: RegisteredSceneMaterial[] = [], effects: (() => void)[] = [];
+    let finished = false, accepted = true;
+    const current = (): boolean => !finished && this.textures === textures && this.stage === parent;
+    try {
+      for (const binding of bindings) {
+        const lightmap = binding.kind === "world" ? binding.lightmap : null, base = binding.kind === "world" ? binding.baseTexture : null;
+        const logical: ShaderLogicalKey = { name: this.key(name), binding: binding.kind === "unlit"
+          ? { kind: "unlit", lightmapIndex: binding.lightmapIndex }
+          : { kind: "world", world: binding.world, lightmapIndex: binding.lightmapIndex, baseTextureName: base?.name ?? null } };
+        const compiled = await this.compile(name, lightmap, binding.lightmapIndex, base,
+          binding.kind === "unlit" ? binding.mipmap : binding.lightmapIndex !== -4,
+          { sun: value => { effects.push(() => { this.sun = value; }); }, sky: height => {
+            if (!Number.isFinite(Math.fround(height))) throw new RangeError("Sky cloud height must be finite float32");
+            effects.push(() => { this.sky.initializeCloudCoordinates(height); }); },
+            warning: message => { effects.push(() => { this.warnings.push(message); }); } });
+        accepted &&= !compiled.defaulted;
+        materials.push(stage.publish(stage.reserve(logical), compiled.compiled));
+      }
+    } catch (error) { if (parent === null) stage.discard(); throw error; }
+    return { materials, accepted, current, commit: () => {
+      if (!current()) throw new Error("Prepared shader remap belongs to retired images");
+      if (parent === null) stage.commit();
+      for (const effect of effects) effect();
+      finished = true;
+    }, discard: () => { if (finished) return; if (parent === null) stage.discard(); finished = true; } };
   }
 
-  resolveRemap(name: string): { readonly name: string; readonly timeOffset: number } {
-    return this.remaps.get(this.key(name)) ?? { name, timeOffset: 0 };
+  async register(name: string, binding: SceneShaderBinding = { kind: "unlit", lightmapIndex: -1, mipmap: true }): Promise<RegisteredSceneMaterial> {
+    const material = await this.registerMaterial(name, binding);
+    const previous = this.bindings.get(material.registration);
+    if (previous === undefined) {
+      this.bindings.set(material.registration, { material, binding });
+      if (this.stage === null) {
+        const prepared = this.registrations.owner.bindMaterial(this, material, binding);
+        this.bindingPreparations.set(material.registration, prepared);
+        try { await prepared; } catch (error) { this.bindings.delete(material.registration); throw error; }
+        finally { this.bindingPreparations.delete(material.registration); }
+      }
+    } else {
+      const pending = this.bindingPreparations.get(material.registration);
+      if (pending !== undefined) await pending;
+    }
+    return material;
   }
 
-  register(name: string, binding: SceneShaderBinding = { kind: "unlit", lightmapIndex: -1, mipmap: true }): Promise<RegisteredSceneMaterial> {
+  private registerMaterial(name: string, binding: SceneShaderBinding): Promise<RegisteredSceneMaterial> {
     if ((name.length === 0 || name[0] === "\0") && this.sourceDefault !== null) return Promise.resolve(this.sourceDefault);
     if (this.sourceDefault !== null) return this.registerSource(name, binding);
     const lightmap = binding.kind === "world" ? binding.lightmap : null, baseTexture = binding.kind === "world" ? binding.baseTexture : null;
@@ -197,7 +246,6 @@ export class SceneShaderRegistry {
     for (const [key, image] of this.generatedPictures) result.generatedPictures.set(key, image);
     for (const [key, program] of this.programs) result.programs.set(key, program);
     for (const key of this.cinematicPrograms) result.cinematicPrograms.add(key);
-    for (const [key, remap] of this.remaps) result.remaps.set(key, remap);
     return result;
   }
 
@@ -214,6 +262,7 @@ export class SceneShaderRegistry {
           : { compiled: replacement.compileInternal(record.kind), defaulted: false };
         const material = publisher.publish(registration, prepared.compiled);
         replacement.sourceRecords.push({ ...record, material, defaulted: prepared.defaulted });
+        replacement.bindings.set(material.registration, { material, binding: record.binding });
       }
       const rebound = (material: RegisteredSceneMaterial): RegisteredSceneMaterial => {
         const record = replacement.sourceRecords.find(value => value.material.registration === material.registration);
@@ -265,6 +314,8 @@ export class SceneShaderRegistry {
     this.imageRequests.clear();
     for (const [key, request] of replacement.imageRequests) this.imageRequests.set(key, request);
     this.sun = replacement.sun;
+    this.bindings.clear();
+    for (const [registration, value] of replacement.bindings) this.bindings.set(registration, { ...value, material: this.registrations.owner.retained(registration) });
   }
 
   discardReplacement(): void {
@@ -303,7 +354,8 @@ export class SceneShaderRegistry {
 
   private key(name: string): string { return normalizeShaderName(stripShaderExtension(name)); }
 
-  private async compile(name: string, lightmap: RendererImage | null, lightmapIndex: number, baseTexture: SceneTexture | null, mipmap: boolean): Promise<PreparedSceneMaterial> {
+  private async compile(name: string, lightmap: RendererImage | null, lightmapIndex: number, baseTexture: SceneTexture | null, mipmap: boolean,
+    effects: ShaderCompileEffects = { sun: value => { this.sun = value; }, sky: height => { this.sky.initializeCloudCoordinates(height); }, warning: message => { this.warnings.push(message); } }): Promise<PreparedSceneMaterial> {
     const registered = (image: RendererImage, tmu: 0 | 1 = 0): RegisteredImage => ({ frame: { image }, tmu });
     const generated = this.generatedPictures.get(this.key(name));
     if (generated !== undefined) {
@@ -320,18 +372,20 @@ export class SceneShaderRegistry {
       const result = await program.register({ whiteImage: registered(this.textures.white.image), defaultImage: registered(this.textures.missing.image),
         lightmapImage: registered(lightmap ?? this.textures.white.image, 1),
         findImage: async request => {
-          if (baseTexture !== null && this.key(request.name) === this.key(name)) return registered((await this.textures.sampleSurface(baseTexture, request)).image);
+          if (baseTexture !== null && (this.key(request.name) === this.key(baseTexture.name)
+            || this.key(request.name) === this.key(`textures/${baseTexture.name}`)))
+            return registered((await this.textures.sampleSurface(baseTexture, request)).image);
           const texture = await this.textures.load(request.name, { mipmap: request.mipmap, wrap: request.wrap, family: this.family, usage: lightmapIndex === -4 ? "picture" : "wall" });
           return texture === null ? null : registered(texture.image);
-        }, playShaderCinematic: this.playCinematic, applySun: sun => { this.sun = sun; },
-        initializeSkyTexCoords: height => { this.sky.initializeCloudCoordinates(height); }, printWarning: message => { this.warnings.push(message); } });
+        }, playShaderCinematic: this.playCinematic, applySun: effects.sun,
+        initializeSkyTexCoords: effects.sky, printWarning: effects.warning });
       return { defaulted: result.kind === "defaulted", compiled: { registered: result, material: shaderRenderMaterial(result.definition), finished: finishShader({ definition: result.definition,
         images: result.stages, lightmapIndex, profile: this.profile }) } };
     }
     const loaded = await this.textures.load(name, { mipmap, wrap: mipmap ? "repeat" : "clamp", family: this.family, usage: lightmapIndex === -4 ? "picture" : "wall" }), texture = loaded ?? this.textures.missing;
     const implicitImage = { kind: "loaded", tmu: 0, binding: { kind: "images", playback: { kind: "single", image: { image: texture.image } } } } satisfies Parameters<typeof compileImplicitMaterial>[0]["baseImage"];
     if (loaded === null) {
-      this.warnings.push(`${name}: missing shader image, using the source default material`);
+      effects.warning(`${name}: missing shader image, using the source default material`);
       return { defaulted: true, compiled: compileImplicitMaterial({ kind: "default", name, baseImage: implicitImage, profile: this.profile }) };
     }
     if (lightmap !== null) return { defaulted: false, compiled: compileImplicitMaterial({ kind: "lightmap", name, baseImage: implicitImage, lightmapIndex, profile: this.profile,

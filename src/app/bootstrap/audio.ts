@@ -363,7 +363,7 @@ export class ApplicationAudio {
       alternate === null ? null : async path => (await this.bank(alternate)).openMusic(path, alternate), { shuffle: this.musicPreferences.musicShuffle, tracks });
   }
 
-  async playComponentMedia(source: LocalPresentationMedia, active: () => boolean): Promise<void> {
+  async playComponentMedia(source: Omit<LocalPresentationMedia, "event"> & { readonly event: Exclude<LocalPresentationMedia["event"], { readonly kind: "shader-remap" }> }, active: () => boolean): Promise<void> {
     const key = presentationOwnerKey(source.owner);
     if (this.closed || this.retiredOwners.has(key) || !active()) return;
     const request = ++this.musicRequest; this.musicOwner = source.owner; this.music.invalidatePending();

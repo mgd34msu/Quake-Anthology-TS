@@ -1,4 +1,4 @@
-import { componentMediaControl, preparePresentationAudio, presentationAudioControl } from "./component-media.ts";
+import { componentMediaControl, preparePresentationAudio, preparePresentationShaders, primaryShaderControl, presentationAudioControl } from "./component-media.ts";
 import type { ComponentClientCommandRequest } from "./mod-presentations.ts";
 import { ApplicationModPresentations } from "./mod-presentations.ts";
 import { ApplicationSelectedQ3Presentations } from "./selected-q3-presentation.ts";
@@ -1051,6 +1051,8 @@ export class Application {
       if (this.graphical === null) return false;
       this.deferredInput.push(event); return true;
     }
+    const player = this.localPlayers.find(player => player.seat.id.equals(event.seat));
+    if (player !== undefined && !this.simulation.actors.isLive(player.actor)) return false;
     return this.graphical?.input.input(event) ?? false;
   }
 
@@ -2003,7 +2005,7 @@ export class Application {
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
           clock: { now: () => this.elapsed, frameNumber: () => this.frames }, hardware: () => q3Hardware(native.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
         modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.push(request); }, renderer: native, queries: this.simulation.scene,
-          presentationMedia: componentMediaControl(this.simulation.events, audio),
+          presentationMedia: componentMediaControl(this.simulation.events, audio, assets),
           print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
           clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
       this.refreshApplicationTools();
@@ -2500,6 +2502,8 @@ export class Application {
           return player === null ? null : { primaryWeapon: guest.records.player(player.sourceEntity).weapon };
         },
         systemCinematics: this.systemCinematics(simulation, assets.content, assets, audio, renderer, local.player.seat.id, input),
+        remapShader: primaryShaderControl(simulation.events, assets, () => simulation.q3Guest() === guest && !guest.isRetired
+          && !local.player.seat.client.isClosed && simulation.actors.isLive(local.player.actor)),
         assets, queries: simulation.scene, local, audio, renderer, browser: browser.view, commandBuffer: input.guestCommands, guestCvars: input.guestCvars(local.player.seat.id), guestInput: input.guestInput(local.player.seat.id),
         commandRegistration: input.clientCommandRegistration(local.player.seat.id),
         get splitScreen() { return input.locals.length > 1; },
@@ -2521,6 +2525,8 @@ export class Application {
     const initial = source.sourceState(); prediction.captureSource(initial);
     const client = await ApplicationQ3Client.create({ saveFontData: () => (input.sharedCvars?.variableValue("r_saveFontData") ?? 0) !== 0, weaponHud: () => { const ui = simulation.playerUi(local.player.actor); return { status: ui.weaponStatus, warning: ui.arsenalWarning }; }, assets, renderer, queries: simulation.scene, initial, local, audio, movement: prediction,
       systemCinematics: this.systemCinematics(simulation, assets.content, assets, audio, renderer, local.player.seat.id, input),
+        remapShader: primaryShaderControl(simulation.events, assets, () => simulation.q3Source() === source
+          && !local.player.seat.client.isClosed && simulation.actors.isLive(local.player.actor)),
       commandRegistration: input.clientCommandRegistration(local.player.seat.id),
       get splitScreen() { return input.locals.length > 1; },
       timeCvars: source.host.cvars,
@@ -2984,7 +2990,7 @@ export class Application {
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
             clock: { now: () => this.elapsed, frameNumber: () => this.frames }, hardware: () => q3Hardware(previous.renderer.driver?.renderer ?? "") === "ragepro" ? "ragepro" : "generic" }),
           modPresentations: new ApplicationModPresentations({ assets, audio, input, queueCommand: request => { this.requestedCommands.push(request); }, renderer: previous.renderer, queries: current.scene,
-            presentationMedia: componentMediaControl(current.events, audio),
+            presentationMedia: componentMediaControl(current.events, audio, assets),
             print: text => this.host.print(text), nextFrame: this.host.loading?.nextFrame ?? setImmediate,
             clock: { now: () => this.elapsed, frameNumber: () => this.frames } }) };
       }
@@ -3638,6 +3644,48 @@ export class Application {
     return seatViewport(index,seats.length,width,height);
   }
 
+  private async retireRemovedLocalPlayers(): Promise<void> {
+    const graphical = this.graphical;
+    if (graphical === null) return;
+    const removed = graphical.input.locals.filter(local => !this.simulation.actors.isLive(local.player.actor));
+    if (removed.length === 0) return;
+    const seats = removed.map(local => local.player.seat), clients = [...new Set(seats.map(seat => seat.client))];
+    const presentations = graphical.presentations.filter(presentation => !seats.includes(presentation.local.player.seat));
+    const failures: unknown[] = [], dispose = (run: () => void): void => { try { run(); } catch (error) { failures.push(error); } };
+    // Publish the reduced readers before resource disposal can invoke another host callback.
+    this.graphical = { ...graphical, presentations };
+    dispose(() => graphical.modPresentations.retainPresentations(presentations));
+    dispose(() => graphical.selectedQ3Presentations.retainPresentations(presentations));
+    for (const seat of seats) {
+      const source = graphical.q3.get(seat.id); graphical.q3.delete(seat.id); graphical.nativeQ2.delete(seat.id);
+      try { await source?.client.shutdown(); } catch (error) { failures.push(error); }
+      const guest = this.localGuest?.seats.get(seat.id); this.localGuest?.seats.delete(seat.id);
+      dispose(() => guest?.state.retire());
+      this.clientCvars.delete(seat.id); this.rankingMenuRequests.delete(seat.id);
+    }
+    if (seats.some(seat => this.recordingSeat?.equals(seat.id) === true)) {
+      try {
+        if (this.ownership.kind === "borrowed") await this.ownership.client.stopRecording(this); else await this.ownedRecording?.stop();
+      } catch (error) { failures.push(error); }
+      this.recordingSeat = null; this.localRecordingActive = false;
+    }
+    dispose(() => graphical.input.retireLocalSeats(seats, this.ownership.kind === "borrowed" ? this.ownership.client : undefined));
+    for (const client of clients) {
+      this.localSeats.delete(client.id); this.sourceConnections.delete(client);
+      for (const buffer of new Set([this.sourceCommands, this.dedicatedCommands])) if (buffer !== null) dispose(() => buffer.discardClient(client.id));
+      try { await this.disconnectRankings(this.simulation, client.id); } catch (error) { failures.push(error); }
+      dispose(() => this.session.closeClient(client.id));
+    }
+    this.requestedCommands = this.requestedCommands.filter(command => !seats.some(seat => command.seat?.equals(seat.id) === true));
+    this.clientInputs = this.clientInputs.filter(event => !seats.some(seat => seat.id.equals(event.seat)));
+    this.deferredInput = this.deferredInput.filter(event => !seats.some(seat => seat.id.equals(event.seat)));
+    dispose(() => graphical.rerelease.publishSeats(graphical.input.locals.map(local => ({ seat: local.player.seat.id, actor: local.player.actor }))));
+    for (const [index, presentation] of presentations.entries()) dispose(() => presentation.publishLayout(index, presentations.length));
+    if (presentations.length === 0) this.requestQuit();
+    else this.launchOptions = { ...this.options, seats: presentations.length };
+    if (failures.length !== 0) throw new AggregateError(failures, "Retired local player cleanup failed");
+  }
+
   private async changeLocalPlayers(kind: "join" | "drop", args: readonly string[], invokingSeat: SeatId | null): Promise<void> {
     const graphical = this.graphical;
     if (graphical === null || this.worldOperation !== "idle") throw new Error("Local player changes require an active graphical world");
@@ -3762,6 +3810,7 @@ export class Application {
   }
 
   private async afterCommandDispatch(): Promise<void> {
+    await this.retireRemovedLocalPlayers();
     await this.tools?.drain();
     if (this.closed || this.fatalWorldFailure || this.clientCommandsBlocked || this.pendingShellPublication) return;
     do {
@@ -3819,6 +3868,10 @@ export class Application {
     const pending = direct ?? this.requestedCommands;
     if (direct === undefined) this.requestedCommands = [];
     for (const [index, request] of pending.entries()) {
+      await this.retireRemovedLocalPlayers();
+      let origin = request.source?.origin; while (origin?.kind === "script") origin = origin.caller;
+      if ((origin?.kind === "local-seat" || origin?.kind === "remote-client") && this.session.clientAt(origin.client.slot)?.id.equals(origin.client) !== true) continue;
+      if (this.graphical !== null && request.seat !== null && !this.localPlayers.some(player => request.seat?.equals(player.seat.id) === true)) continue;
       if (request.source?.producer?.kind === "game-module" && request.source.producer.instance !== undefined && this.simulation.options.modCommands?.active(request.source) !== true) continue;
       if (this.stepping && (this.pendingShellPublication || this.videoRestart?.pending)) { this.requestedCommands.unshift(...pending.slice(index)); return; }
       if (request.source?.producer?.kind === "game-module" && (request.name === "map" || request.name === "gamemap")) {
@@ -4172,6 +4225,8 @@ export class Application {
     const completion = Promise.withResolvers<void>(); this.stepCompletion = completion.promise;
     const frameStartedAt = performance.now();
     try {
+      await this.retireRemovedLocalPlayers();
+      if (this.stopping && this.localPlayers.length === 0) return this.lastOutput?.output ?? this.simulation.currentOutput();
       const operation = this.saveOperation; this.saveOperation = null;
       if (operation !== null) {
         try { await operation.run(); operation.resolve(); } catch (error) {
@@ -4222,6 +4277,8 @@ export class Application {
         await this.commands();
         if (this.simulation === retained.simulation) return retained.output;
       }
+      await this.retireRemovedLocalPlayers();
+      if (this.stopping && this.localPlayers.length === 0) return this.lastOutput?.output ?? this.simulation.currentOutput();
       await this.dispatchClientInputs();
       const q1 = this.simulation.q1Source() ?? this.simulation.quakecSource();
       const beforeFrameEvents = q1 === null ? [] : this.simulation.drainPresentationEvents();
@@ -4317,6 +4374,7 @@ export class Application {
       const advanceSimulation = () => this.session.stepAsync({ elapsedMilliseconds: frameMilliseconds, commands: [...localCommands, ...remote] });
       const output = paused ? retained !== null && retained.simulation === this.simulation ? { snapshot: retained.output.snapshot, events: [] } : this.simulation.currentOutput() : this.tools === null ? await advanceSimulation()
         : await this.tools.measureAsync("simulation", advanceSimulation);
+      await this.retireRemovedLocalPlayers();
       const completedLobbySimulation = this.host.lobby !== undefined && q2MatchCompleted(this.simulation) ? this.simulation : null;
       this.queueRankingFrame();
       this.lastOutput = { simulation: this.simulation, output };
@@ -4420,6 +4478,7 @@ export class Application {
           }
         }
         await preparePresentationAudio(this.simulation.events, graphical.audio, commonEvents, seatAudio);
+        await preparePresentationShaders(this.simulation.events, graphical.assets);
         for (const presentation of graphical.presentations) {
           presentation.sourceEvents([...eventsFor(presentation.local.player.actor, presentationEvents), ...(nativeEvents.get(presentation.local.player.seat.id) ?? [])]);
           if (this.tools === null) await presentation.prepare(output.snapshot, presentations, characters);

@@ -16,12 +16,13 @@ import { namespaced, SaveReader } from "../../../persistence/value.ts";
 import { readContentId } from "../../../persistence/recipe.ts";
 import { readVector } from "../../../persistence/shared.ts";
 import type { SavedActorId } from "../../../contracts/session.ts";
+import { normalizeShaderName, stripShaderExtension } from "../../../materials/material.ts";
 
 const zero: Vec3 = { x: 0, y: 0, z: 0 };
 export interface LocalPresentationMedia {
   readonly kind: "local-media";
   readonly event: ComponentPresentationMediaRequest;
-  readonly owner: PresentationOwner;
+  readonly owner?: PresentationOwner;
   readonly content: ContentId;
   readonly sequence: number;
   readonly seconds: number;
@@ -46,10 +47,12 @@ export class SimulationEvents {
   private readonly styles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
   private readonly legacyStyles = new Map<number, { readonly family: "q1" | "q2"; readonly pattern: string }>();
   private readonly persistent = new Map<string, RetainedPresentation>();
-  private readonly localMediaOutput = new Map<number, RetainedPresentation>();
+  private readonly localMediaOutput = new Map<number, { readonly request: RetainedPresentation; readonly retain: boolean; readonly shaderReplay?: true; readonly current?: () => boolean }>();
   private localMediaEnabled = false;
   private mediaSequence = -1;
+  private readonly shaderSequences = new Map<string, number>();
   private restoredThrough = -1;
+  private restoredOwnerGeneration = 0;
 
   private readonly fog: SimulationQ1Fog | null;
 
@@ -101,14 +104,20 @@ export class SimulationEvents {
   }
 
   private retireOwner(owner: PresentationOwner, content: ContentId): void {
-    const affected = new Set<string>(); let localMusic = false;
+    const affected = new Set<string>(), localShaders = new Map<string, LocalPresentationMedia>(); let localMusic = false;
     for (const [key, event] of this.persistent) if (samePresentationOwner(event.owner, owner)) {
       const domain = persistentDomain(event);
-      if (event.kind === "local-media") localMusic = true;
+      if (event.kind === "local-media") {
+        if (event.event.kind === "shader-remap") localShaders.set(shaderDomain(event.event.original), event);
+        else localMusic = true;
+      }
       else if (domain !== null) affected.add(domain);
       this.persistent.delete(key);
     }
-    for (const [sequence, event] of this.localMediaOutput) if (samePresentationOwner(event.owner, owner)) this.localMediaOutput.delete(sequence);
+    for (const [sequence, { request: event }] of this.localMediaOutput) if (samePresentationOwner(event.owner, owner)) {
+      if (event.kind === "local-media" && event.event.kind === "shader-remap") localShaders.set(shaderDomain(event.event.original), event);
+      this.localMediaOutput.delete(sequence);
+    }
     this.emit(content, { kind: "presentation-owner", event: { kind: "retired", owner } });
     const replacements = new Map<string, SimulationPresentationEvent>();
     for (const event of this.persistent.values()) {
@@ -118,11 +127,22 @@ export class SimulationEvents {
     }
     for (const event of [...replacements.values()].sort((a, b) => a.sequence - b.sequence))
       this.source.push({ ...event, sequence: this.presentationSequence++ });
-    if (this.localMediaEnabled && (localMusic || affected.has("music:track") && [...this.persistent.values()].some(event => event.kind === "local-media"))) {
+    if (this.localMediaEnabled && (localMusic || affected.has("music:track") && [...this.persistent.values()].some(event => event.kind === "local-media" && event.event.kind !== "shader-remap"))) {
       const replacement = [...this.persistent.values()].filter(event => persistentDomain(event) === "music:track").sort((a, b) => b.sequence - a.sequence)[0];
       if (replacement !== undefined) {
         const replay = { ...replacement, sequence: this.presentationSequence++ };
-        this.localMediaOutput.set(replay.sequence, replay);
+        this.localMediaOutput.set(replay.sequence, { request: replay, retain: false });
+      }
+    }
+    if (this.localMediaEnabled) for (const [domain, removed] of localShaders) {
+      const replacement = [...this.persistent.values()].filter(event => persistentDomain(event) === domain).sort((a, b) => b.sequence - a.sequence)[0];
+      if (replacement !== undefined) {
+        const request = { ...replacement, sequence: this.presentationSequence++ };
+        this.localMediaOutput.set(request.sequence, { request, retain: false, shaderReplay: true });
+      } else if (removed.event.kind === "shader-remap") {
+        const request: LocalPresentationMedia = { kind: "local-media", content: removed.content, seconds: removed.seconds, sequence: this.presentationSequence++,
+          event: { kind: "shader-remap", original: removed.event.original, replacement: removed.event.original, timeOffset: 0 } };
+        this.localMediaOutput.set(request.sequence, { request, retain: false, shaderReplay: true });
       }
     }
     const fog = [...(this.fog?.presentation() ?? []), ...[...this.owners.values()].flatMap(entry =>
@@ -148,34 +168,62 @@ export class SimulationEvents {
   resource(id: ResourceId): ResolvedResourceReference | null { return this.resourcesById.get(id) ?? null; }
   persistentPresentation(): readonly SimulationPresentationEvent[] { return [...this.persistent.values()].filter(event => event.kind !== "local-media").sort((a, b) => a.sequence - b.sequence); }
 
-  publishLocalMedia(owner: PresentationOwner, content: ContentId, event: ComponentPresentationMediaRequest, initializing: boolean): void {
-    const active = this.owners.get(owner.provider);
-    if (active?.status !== "active" || !samePresentationOwner(active.token, owner) || active.content !== content)
-      throw new Error("Local media requires its active presentation owner and content");
+  publishLocalMedia(owner: PresentationOwner | undefined, content: ContentId, event: ComponentPresentationMediaRequest, initializing: boolean, current?: () => boolean): void {
+    if (owner !== undefined) {
+      const active = this.owners.get(owner.provider);
+      if (active?.status !== "active" || !samePresentationOwner(active.token, owner) || active.content !== content)
+        throw new Error("Local media requires its active presentation owner and content");
+    }
     this.enableLocalMedia();
-    if (initializing && [...this.persistent.values()].some(value => value.sequence < this.restoredThrough && persistentDomain(value) === "music:track")) return;
+    const domain = event.kind === "shader-remap" ? shaderDomain(event.original) : "music:track";
+    if (initializing && (owner === undefined || owner.generation < this.restoredOwnerGeneration)
+      && [...this.persistent.values()].some(value => value.sequence < this.restoredThrough && persistentDomain(value) === domain)) return;
     const time = this.now();
-    const request: LocalPresentationMedia = { kind: "local-media", owner, content, event,
+    const request: LocalPresentationMedia = { kind: "local-media", ...(owner === undefined ? {} : { owner }), content, event,
       sequence: this.presentationSequence++, seconds: time.kind === "seconds" ? time.value : time.value / 1000 };
-    this.persistent.set(`local:${presentationOwnerKey(owner)}:${persistentSlot(request)}`, request);
-    this.localMediaOutput.set(request.sequence, request);
+    if (event.kind !== "shader-remap") this.persistent.set(`local:${presentationOwnerKey(owner)}:${persistentSlot(request)}`, request);
+    this.localMediaOutput.set(request.sequence, { request, retain: event.kind === "shader-remap", ...(current === undefined ? {} : { current }) });
   }
 
   enableLocalMedia(): void {
     if (this.localMediaEnabled) return;
     this.localMediaEnabled = true;
-    for (const event of this.persistent.values()) if (event.kind === "local-media") this.localMediaOutput.set(event.sequence, event);
+    for (const event of this.persistent.values()) if (event.kind === "local-media") this.localMediaOutput.set(event.sequence, { request: event, retain: false });
   }
 
-  pendingLocalMedia(): readonly RetainedPresentation[] { return [...this.localMediaOutput.values()].sort((a, b) => a.sequence - b.sequence); }
+  pendingLocalMedia(): readonly RetainedPresentation[] { return [...this.localMediaOutput.values()].map(value => value.request).sort((a, b) => a.sequence - b.sequence); }
   get appliedMediaSequence(): number { return this.mediaSequence; }
   appliedMedia(sequence: number): void { this.mediaSequence = Math.max(this.mediaSequence, sequence); }
-  localMediaCurrent(request: RetainedPresentation): boolean {
-    return this.localMediaOutput.get(request.sequence) === request
-      && (request.owner === undefined || samePresentationOwner(this.owners.get(request.owner.provider)?.token, request.owner));
+  appliedShader(original: string, sequence: number): void {
+    const domain = shaderDomain(original); this.shaderSequences.set(domain, Math.max(this.shaderSequences.get(domain) ?? -1, sequence));
   }
-  acknowledgeLocalMedia(request: RetainedPresentation): void {
-    if (this.localMediaOutput.get(request.sequence) === request) this.localMediaOutput.delete(request.sequence);
+  resolveShaderReplay(request: LocalPresentationMedia): LocalPresentationMedia | null {
+    const delivery = this.localMediaOutput.get(request.sequence);
+    if (delivery?.request !== request) return null;
+    if (delivery.shaderReplay !== true || request.event.kind !== "shader-remap") return request;
+    const domain = shaderDomain(request.event.original);
+    const winner = [...this.persistent.values()].filter(event => persistentDomain(event) === domain).sort((a, b) => b.sequence - a.sequence)[0];
+    if (winner !== undefined && winner.kind !== "local-media") throw new Error("Shader replay requires a local material cue");
+    const resolved: LocalPresentationMedia = winner === undefined
+      ? { kind: "local-media", content: request.content, sequence: request.sequence, seconds: request.seconds,
+        event: { kind: "shader-remap", original: request.event.original, replacement: request.event.original, timeOffset: 0 } }
+      : { ...winner, sequence: request.sequence };
+    this.localMediaOutput.set(resolved.sequence, { request: resolved, retain: false });
+    return resolved;
+  }
+  localMediaCurrent(request: RetainedPresentation): boolean {
+    const delivery = this.localMediaOutput.get(request.sequence);
+    if (delivery?.request !== request || delivery.current?.() === false
+      || request.owner !== undefined && !samePresentationOwner(this.owners.get(request.owner.provider)?.token, request.owner)) return false;
+    if (request.kind !== "local-media" || request.event.kind !== "shader-remap") return true;
+    const domain = shaderDomain(request.event.original);
+    return request.sequence >= (this.shaderSequences.get(domain) ?? -1);
+  }
+  acknowledgeLocalMedia(request: RetainedPresentation, committed = true): void {
+    const delivery = this.localMediaOutput.get(request.sequence);
+    if (delivery?.request !== request) return;
+    if (committed && delivery.retain) this.persistent.set(`local:${presentationOwnerKey(request.owner)}:${persistentSlot(request)}`, request);
+    this.localMediaOutput.delete(request.sequence);
   }
   assertLocalMediaConsumed(): void {
     if (this.localMediaOutput.size !== 0) throw new Error("Save requires completed local presentation media");
@@ -260,12 +308,13 @@ export class SimulationEvents {
   }
   restore(reader: SaveReader, reference: (actor: SavedActorId) => ActorId): undefined {
     this.sequence = reader.field("sequence").integer(0); this.presentationSequence = reader.field("presentationSequence").integer(0);
-    this.restoredThrough = this.presentationSequence; this.localMediaOutput.clear(); this.localMediaEnabled = false; this.mediaSequence = -1;
+    this.restoredThrough = this.presentationSequence; this.localMediaOutput.clear(); this.localMediaEnabled = false; this.mediaSequence = -1; this.shaderSequences.clear();
     this.source.length = 0; this.emitted.length = 0; this.styles.clear(); this.legacyStyles.clear(); this.persistent.clear();
     this.owners.clear();
     const ownership = reader.field("ownership"); this.legacyPersistence = ownership.value === undefined;
     this.nextOwnerGeneration = ownership.value === undefined ? 1 : ownership.field("nextGeneration").integer(1);
     if (!Number.isSafeInteger(this.nextOwnerGeneration)) return ownership.fail("Invalid presentation generation counter");
+    this.restoredOwnerGeneration = this.nextOwnerGeneration;
     if (ownership.value !== undefined) ownership.field("owners").list(value => {
       const token = readPresentationOwner(value), content = readContentId(value.field("content"));
       if (token.generation >= this.nextOwnerGeneration || this.owners.has(token.provider)) return value.fail("Invalid saved presentation owner");
@@ -286,16 +335,18 @@ export class SimulationEvents {
       this.legacyStyles.set(value.field("style").integer(0), { family: value.field("family").choice("q1", "q2"), pattern: value.field("pattern").string() }));
     if (this.legacyPersistence) for (const [style, value] of this.styles) this.legacyStyles.set(style, value);
     reader.field("persistent").list(value => {
-      const event = value.field("event"), family = value.field("kind").choice("q1", "q2", "music", "q1-sky", "q1-client", "q1-level", "local-media"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model", "finale", "cd-track", "pause", "lightstyle", "skybox", "name", "social", "player-info", "colors", "frags", "ping", "music-stop");
+      const event = value.field("event"), family = value.field("kind").choice("q1", "q2", "music", "q1-sky", "q1-client", "q1-level", "local-media"), kind = event.field("kind").choice("ambient", "music", "sound", "static-model", "finale", "cd-track", "pause", "lightstyle", "skybox", "name", "social", "player-info", "colors", "frags", "ping", "music-stop", "shader-remap");
       const recipient = value.field("recipient");
       const owner = value.field("owner").value === undefined ? undefined : readPresentationOwner(value.field("owner"));
       if (owner !== undefined && !samePresentationOwner(this.owners.get(owner.provider)?.token, owner)) return value.fail("Persistent event has no saved presentation owner");
       const base = { ...(owner === undefined ? {} : { owner }), ...(recipient.value === undefined ? {} : {recipient:reference(readSavedActor(recipient))}), sequence: value.field("sequence").integer(0), content: readContentId(value.field("content")), seconds: value.field("seconds").number(), sourceEntity: family === "local-media" ? null : value.field("sourceEntity").nullable(v => v.integer(0)) };
       if (family === "local-media") {
-        if (owner === undefined || recipient.value !== undefined || kind !== "music" && kind !== "music-stop") return value.fail("Invalid local presentation media owner or request");
-        const restored: LocalPresentationMedia = { kind: "local-media", owner, content: base.content, sequence: base.sequence, seconds: base.seconds,
-          event: kind === "music-stop" ? { kind } : { kind, intro: event.field("intro").string(), loop: event.field("loop").string() } };
-        if (this.owners.get(owner.provider)?.content !== base.content || restored.sequence >= this.presentationSequence) return value.fail("Invalid local presentation media content or sequence");
+        if (recipient.value !== undefined || kind !== "music" && kind !== "music-stop" && kind !== "shader-remap") return value.fail("Invalid local presentation media request");
+        const restored: LocalPresentationMedia = { kind: "local-media", ...(owner === undefined ? {} : { owner }), content: base.content, sequence: base.sequence, seconds: base.seconds,
+          event: kind === "music-stop" ? { kind } : kind === "shader-remap"
+            ? { kind, original: event.field("original").string(), replacement: event.field("replacement").string(), timeOffset: event.field("timeOffset").number() }
+            : { kind, intro: event.field("intro").string(), loop: event.field("loop").string() } };
+        if (owner !== undefined && this.owners.get(owner.provider)?.content !== base.content || restored.sequence >= this.presentationSequence) return value.fail("Invalid local presentation media content or sequence");
         this.persistent.set(`local:${presentationOwnerKey(owner)}:${persistentSlot(restored)}`, restored);
         return;
       }
@@ -384,7 +435,7 @@ function persistentSlot(source: RetainedPresentation): string | null {
 }
 
 function persistentDomain(source: RetainedPresentation): string | null {
-  if (source.kind === "local-media") return "music:track";
+  if (source.kind === "local-media") return source.event.kind === "shader-remap" ? shaderDomain(source.event.original) : "music:track";
   if (source.kind === "q1-sky") return "sky";
   if (source.kind === "q1-client") return `client:${source.content}:${source.event.slot}:${source.event.kind}`;
   if ((source.kind === "q1" || source.kind === "q2") && source.event.kind === "lightstyle") return `style:${source.event.style}`;
@@ -393,3 +444,5 @@ function persistentDomain(source: RetainedPresentation): string | null {
   if (source.kind === "q2" && source.event.kind === "music") return "music:track";
   return null;
 }
+
+function shaderDomain(original: string): string { return `shader:${normalizeShaderName(stripShaderExtension(original))}`; }

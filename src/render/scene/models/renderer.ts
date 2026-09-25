@@ -7,6 +7,7 @@ import type { SceneEntity, TimedFrames } from "../../../contracts/scene.ts";
 import { add3, dot3, normalize3, radiusFromBounds, scale3, sub3 } from "../../../core/math.ts";
 import { q1PlayerTranslation } from "../../../formats/images/index.ts";
 import { ALIAS_NORMALS, sampleTimedFrame } from "../../../formats/q12-model/index.ts";
+import { currentRemap } from "../material-registrations.ts";
 import type { RegisteredSceneMaterial } from "../material-registrations.ts";
 import { diffuseColor } from "../../../materials/color.ts";
 import type { EntityLighting } from "../../../materials/q3-lighting.ts";
@@ -40,7 +41,7 @@ export interface ModelRenderProvider {
 }
 type SourceOptions = (entity: SceneEntity) => ModelSourceOptions;
 type ModelResource = Pick<SceneEntity, "resource" | "model">;
-type Material = { readonly kind: "q3"; readonly name: string; readonly original: RegisteredSceneMaterial; readonly compiled: RegisteredSceneMaterial; readonly timeOffset: number }
+type Material = { readonly kind: "q3"; readonly name: string; readonly original: RegisteredSceneMaterial }
   | { readonly kind: "legacy"; readonly texture: SceneTexture };
 const unit: Vec3 = { x: 1, y: 1, z: 1 };
 const normalIndices = new Map<number, Map<number, Map<number, number>>>();
@@ -69,14 +70,6 @@ export class SceneModelRenderer {
   constructor(readonly provider: ModelRenderProvider, readonly world: WorldScene) {
     this.textures = provider.textures;
     this.lighting = new ModelLightSampler(world);
-  }
-
-  async refreshShaderRemaps(): Promise<void> {
-    await Promise.all([...this.materials].map(async ([key, material]) => {
-      if (material.kind !== "q3") return;
-      const remap = this.provider.shaders.resolveRemap(material.name);
-      this.materials.set(key, { ...material, compiled: await this.provider.shaders.register(remap.name), timeOffset: remap.timeOffset });
-    }));
   }
 
   async preload(entities: readonly SceneEntity[], options: SourceOptions = () => ({})): Promise<void> {
@@ -156,8 +149,8 @@ export class SceneModelRenderer {
 
   private load(entity: ModelResource, selection: ModelImageSelection, options: ModelSourceOptions, allowCinematics = true): Promise<void> | null {
     if (!allowCinematics && this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
-      const name = selection.kind === "external" ? selection.name : "*default", remap = this.provider.shaders.resolveRemap(name);
-      if (this.provider.shaders.hasCinematic(remap.name)) return Promise.reject(new Error(`Model cinematic deferred until use: ${remap.name}`));
+      const name = selection.kind === "external" ? selection.name : "*default", remap = this.world.shaders.registrations.owner.remapDefinition(name);
+      if ((remap?.source ?? this.provider.shaders).hasCinematic(remap?.replacement ?? name)) return Promise.reject(new Error(`Model cinematic deferred until use: ${remap?.replacement ?? name}`));
     }
     const key = materialKey(entity, selection, options);
     if (this.materials.has(key)) return null;
@@ -165,9 +158,9 @@ export class SceneModelRenderer {
     if (old !== undefined) return old;
     const pending = (async (): Promise<void> => {
       if (this.provider.family === "q3" && (selection.kind === "external" || selection.kind === "default")) {
-        const name = selection.kind === "external" ? selection.name : "*default", remap = this.provider.shaders.resolveRemap(name);
+        const name = selection.kind === "external" ? selection.name : "*default";
         const original = await this.provider.shaders.register(name);
-        this.materials.set(key, { kind: "q3", name, original, compiled: remap.name === name ? original : await this.provider.shaders.register(remap.name), timeOffset: remap.timeOffset }); return;
+        this.materials.set(key, { kind: "q3", name, original }); return;
       }
       const texture = selection.kind === "white" ? this.provider.textures.white : selection.kind === "default" ? this.provider.textures.missing
         : selection.kind === "indexed" ? this.indexedTexture(entity, selection, options) : await this.externalTexture(entity, selection.name, options);
@@ -312,7 +305,7 @@ export class SceneModelRenderer {
         ...(retainBody === undefined ? {} : { retainShadowBody: (selected: SceneEntity, sphere: ShadowSphere, images: readonly ModelImageSelection[], selectedOptions: ModelSourceOptions): boolean => {
           if (images.some(image => {
             const material = this.materials.get(materialKey(selected, image, selectedOptions));
-            return material === undefined || material.kind === "q3" && material.compiled.registered.definition.deforms.length !== 0;
+            return material === undefined || material.kind === "q3" && (currentRemap(material.original)?.material ?? material.original).registered.definition.deforms.length !== 0;
           })) return true;
           return retainBody(sphere);
         } }),
@@ -328,9 +321,10 @@ export class SceneModelRenderer {
         const base = this.world.materialContext(input, transform);
         const context = { ...base, entityRGBA: byteColor(entity.color),
           localViewOrigin: q3ModelViewOrigin(transform, input.camera.origin, source.nonNormalizedAxes === true),
-          timeOffset: (entity.shaderTime.kind === "seconds" ? entity.shaderTime.value : entity.shaderTime.value / 1000) + material.timeOffset,
+          timeOffset: (entity.shaderTime.kind === "seconds" ? entity.shaderTime.value : entity.shaderTime.value / 1000),
           deformView: { ...base.deformView, nonNormalizedAxis: source.nonNormalizedAxes === true ? transform.axis[0] : null } };
-        const geometry = shadowMaterialGeometry(material.compiled, surface.localGeometry, context);
+        const remap = currentRemap(material.original);
+        const geometry = shadowMaterialGeometry(remap?.material ?? material.original, surface.localGeometry, { ...context, timeOffset: context.timeOffset + (remap?.timeOffset ?? 0) });
         if (geometry !== null) meshes.push({ positions: geometry.vertices.map(vertex => modelWorldPoint(surface.transform, vertex.position)), indices: geometry.indices });
       }
       if (meshes.length !== 0) result.push(shadowCaster(entity.transform.origin, meshes));
@@ -386,6 +380,7 @@ export class SceneModelRenderer {
     const receivesCone = coneLights !== null && shadows !== undefined && !surface.unlit && options.viewModel !== true
       && (flags & (Q2_SHELL_MASK | 8 | 4 | 16)) === 0 && !(options.infrared === true && (flags & 32768) !== 0);
     if (material.kind === "q3") {
+      const remap = currentRemap(material.original), compiled = remap?.material ?? material.original;
       const axis = surface.transform.axis;
       const transform = { origin: surface.transform.origin, axis: [scale3(axis[0], surface.transform.scale.x), scale3(axis[1], surface.transform.scale.y), scale3(axis[2], surface.transform.scale.z)] } satisfies Parameters<WorldScene["materialContext"]>[1];
       const fog = this.fogFor(surface);
@@ -399,12 +394,12 @@ export class SceneModelRenderer {
       const context = { ...base, ...(modelLighting === undefined ? {} : { modelLighting }), entityRGBA: byteColor(surface.entity.color), lighting: this.lighting.entityLighting(surface.entity, input, options.noWorldModel),
         shaderTexCoord: options.shaderTexCoord ?? base.shaderTexCoord,
         localViewOrigin: q3ModelViewOrigin(transform, input.camera.origin, options.nonNormalizedAxes === true), depthRange: surface.depthRange,
-        timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + material.timeOffset,
+        timeOffset: (surface.entity.shaderTime.kind === "seconds" ? surface.entity.shaderTime.value : surface.entity.shaderTime.value / 1000) + (remap?.timeOffset ?? 0),
         deformView: { ...base.deformView, nonNormalizedAxis: options.nonNormalizedAxes === true ? transform.axis[0] : null },
         project: (point: Vec3) => project(modelWorldPoint(surface.transform, point)) };
-      const batches = prepareMaterialBatches(material.compiled, surface.localGeometry, context);
+      const batches = prepareMaterialBatches(compiled, surface.localGeometry, context);
       // R_AddMD3Surfaces and R_AddAnimSurfaces submit no frontend dlight bits.
-      return [options.source === undefined ? compiledDrawGroup(material.compiled, batches)
+      return [options.source === undefined ? compiledDrawGroup(compiled, batches)
         : sourceDrawGroup(material.original, { ...options.source, surface: surface.surfaceIndex, fog: fog === null ? 0 : fog.index + 1, dlight: 0 }, batches)];
     }
     const texture = material.texture, alpha = surface.translucent ? surface.entity.color.w : 1;

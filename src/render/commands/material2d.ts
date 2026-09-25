@@ -4,6 +4,7 @@ import { prepareMaterialBatches } from "../../materials/evaluate.ts";
 import type { MaterialGeometry } from "../../materials/geometry.ts";
 import type { MaterialTextDraw } from "../../text/draw2d.ts";
 import { clipPicture } from "./frame.ts";
+import { currentRemap } from "../scene/material-registrations.ts";
 
 /** Material fonts and menu pictures use their registered stages within one seat. */
 export function prepareMaterialText(draw: MaterialTextDraw, viewport: Rect, context: MaterialDrawContext): readonly DrawBatch[] {
@@ -16,7 +17,8 @@ export function prepareMaterialText(draw: MaterialTextDraw, viewport: Rect, cont
     { x: right, y: bottom, s: uv.s2, t: uv.t2 }, { x: rect.x, y: bottom, s: uv.s1, t: uv.t2 },
   ].map(vertex => ({ position: { x: vertex.x, y: vertex.y, z: 0 }, normal: { x: 0, y: 0, z: 1 },
     texCoord: { x: vertex.s, y: vertex.t }, lightmapCoord: { x: 0, y: 0 }, color })) };
-  return prepareMaterialBatches(draw.picture.material.compiled, geometry, { ...context, fog: null, entityRGBA: color,
+  const original = draw.picture.material.compiled, remap = currentRemap(original);
+  return prepareMaterialBatches(remap?.material ?? original, geometry, { ...context, timeOffset: context.timeOffset + (remap?.timeOffset ?? 0), fog: null, entityRGBA: color,
     project: position => ({ x: 2 * (position.x - viewport.x) / viewport.width - 1,
       y: 1 - 2 * (position.y - viewport.y) / viewport.height, z: 0, w: 1 }) })
     .map(batch => ({ ...batch, state: { ...batch.state, depthTest: "always", depthWrite: false, cull: "none" } }));

@@ -312,6 +312,41 @@ export class ApplicationInput {
     return { saved, routing, archives };
   }
 
+  /** Retire already removed source actors without admitting replacements or loading profiles. */
+  retireLocalSeats(seats: readonly SessionSeat[], client?: ClientBootstrap): void {
+    const removed = this.locals.filter(local => seats.includes(local.player.seat));
+    if (removed.length !== seats.length) throw new Error("Retired local seats differ from their active input owners");
+    if (removed.length === 0) return;
+    const next = this.locals.filter(local => !removed.includes(local)), keyboard = this.router.keyboardSeat();
+    const failures: unknown[] = [], dispose = (run: () => void): void => { try { run(); } catch (error) { failures.push(error); } };
+    dispose(() => this.retireCommands());
+    for (const local of removed) {
+      const id = local.player.seat.id;
+      this.uiCallbacks.delete(local.input); this.seatUi.delete(id); this.mouseSettings.delete(id);
+      this.q3Selections.delete(id); this.arsenalSelections.delete(id); this.offhandButtons.delete(id);
+      dispose(() => local.haptics.close());
+    }
+    this.localInputs.splice(0, this.localInputs.length, ...next);
+    dispose(() => this.clientCommands.publishSeats(next.map(local => local.player.seat.id)));
+    dispose(() => this.router.retainSeats(next.map(local => local.player.seat.id), keyboard !== null && next.some(local => local.player.seat.id.equals(keyboard)) ? keyboard : next[0]?.player.seat.id ?? null));
+    dispose(() => this.controllerSettings.publishSeats(next.map(local => local.player.seat.id)));
+    for (const local of removed) {
+      const id = local.player.seat.client.id;
+      dispose(() => this.commands.discardClient(id));
+      const retired = (source: CommandContext): boolean => { let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+        return (origin.kind === "local-seat" || origin.kind === "remote-client") && origin.client.equals(id); };
+      for (let index = this.stagedCommands.length - 1; index >= 0; index--) { const command = this.stagedCommands[index]; if (command !== undefined && retired(command.source)) this.stagedCommands.splice(index, 1); }
+    }
+    const active = next.map(local => local.player.seat.id);
+    if (client !== undefined) {
+      client.locals.splice(0, client.locals.length, ...client.locals.filter(local => !seats.includes(local.seat)));
+      for (const seat of seats) client.consoles.delete(seat);
+      dispose(() => client.prepared.setActiveSeats(active));
+    } else dispose(() => this.startup?.setActiveSeats(active));
+    dispose(() => this.activateCommands(true));
+    if (failures.length !== 0) throw new AggregateError(failures, "Local input retirement failed");
+  }
+
   /** Load fallible profile resources before a live source admits a new player. No actor or device is touched. */
   async prepareLocalSeats(seats: readonly SessionSeat[]): Promise<{
     publish(players: readonly LocalPlayer[], client?: ClientBootstrap, source?: Pick<SimulationPresentationAccess, "playerView">, retention?: "replace" | "retain"): void;

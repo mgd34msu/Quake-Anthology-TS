@@ -84,6 +84,7 @@ export interface ApplicationQ3ClientSource extends SnapshotSource {
 }
 interface ApplicationQ3ClientCommonOptions {
   readonly systemCinematics?: SystemCinematicHost;
+  remapShader?(original: string, replacement: string, offset: string, initializing: boolean, current: () => boolean): Promise<void>;
   saveFontData(): boolean;
   readonly cvars?: CvarRegistry;
   readonly timeCvars?: CvarRegistry;
@@ -160,6 +161,7 @@ export class ApplicationQ3Client {
   private latestCamera: SceneCamera;
   private frameNumber = 0;
   private closed = false;
+  private initializing = true;
   private timeMirror: SharedCvarMirror | null = null;
   private appliedTimeSystemInfo: string | undefined;
   private keyCatcher = 0;
@@ -259,7 +261,7 @@ export class ApplicationQ3Client {
     options.assertCurrent?.();
     const media = await ApplicationQ3Assets.create(options.assets, options.assets.content.recipe.engineBehavior.content, options.commands.print, options.saveFontData, options.kind === "qvm" ? "guest-async" : "source-sync");
     const client = new ApplicationQ3Client(options, media, artifacts);
-    try { options.assertCurrent?.(); await client.initialize(); options.assertCurrent?.(); client.bindFrameTime(); return client; } catch (error) { client.close(); throw error; }
+    try { options.assertCurrent?.(); await client.initialize(); options.assertCurrent?.(); client.initializing = false; client.bindFrameTime(); return client; } catch (error) { client.close(); throw error; }
   }
   captureVideoReopen(): (overrides: QvmVideoReopenOptions) => Promise<ApplicationQ3Client> {
     const options = this.options, backend = this.requireBackend();
@@ -297,12 +299,18 @@ export class ApplicationQ3Client {
   private requireGame(): Q3ClientPresentation { const backend = this.requireBackend(); if (backend.kind !== "typescript") throw new Error("This seat runs native guest cgame"); return backend.game; }
   private async initialize(): Promise<void> {
     const o = this.options, seat = o.local.player.seat.id, source = this.source, media = this.media;
+    const remapShader = o.remapShader;
     const collisionSettings = new CollisionMapSettings({
       register: (...args) => (o.timeCvars ?? this.cvars).register(...args),
       get: name => (o.timeCvars ?? this.cvars).get(name),
     });
     collisionSettings.registerMap();
     const services = await createApplicationQ3Services({ collisionSettings, media, audio: o.audio, seat, viewport: this.viewportValue, queries: o.queries,
+      ...(remapShader === undefined ? {} : { remapShader: async (original: string, replacement: string, offset: string) => {
+        o.assertCurrent?.();
+        await remapShader(original, replacement, offset, this.initializing, () => !this.closed);
+        o.assertCurrent?.();
+      } }),
       ...(o.systemCinematics === undefined ? {} : { systemCinematics: o.systemCinematics }),
       actorAt: number => source.actorAt(number), clock: { now: o.now, frameNumber: () => this.frameNumber }, output: {
         scene: scene => { this.submissions.push({ kind: "scene", scene }); if ((scene.source.renderFlags & RDF_NOWORLDMODEL) === 0) this.latestCamera = scene.camera; },

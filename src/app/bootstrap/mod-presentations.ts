@@ -37,7 +37,7 @@ export interface ComponentClientCommandRequest {
 export type ApplicationModPresentationsOptions = Pick<ApplicationModPresentationOptions,
   "assets" | "audio" | "queries" | "print" | "nextFrame" | "clock" | "renderer"> & {
     readonly input?: Pick<ApplicationInput, "commands" | "clientCommandRegistration">;
-    presentationMedia?(source: ActiveModPresentation, request: ComponentPresentationMediaRequest, initializing: boolean, assertCurrent: () => void): Promise<void>;
+    presentationMedia?(source: ActiveModPresentation, request: ComponentPresentationMediaRequest, initializing: boolean, current: () => boolean): Promise<void>;
     queueCommand?(request: ComponentClientCommandRequest): void;
   };
 interface Entry {
@@ -103,8 +103,9 @@ export class ApplicationModPresentations {
       consumer = await ApplicationModPresentation.create({ ...consumerOptions, source, viewer: target.viewer,
         seat: target.seat, viewport: presentation.viewport, viewOrigin: () => presentation.camera().origin,
         viewAxis: () => presentation.camera().axis,
-        ...(presentationMedia === undefined ? {} : { presentationMedia: async (request: ComponentPresentationMediaRequest, initializing: boolean) => {
-          current(); await presentationMedia(source, request, initializing, current); current();
+        ...(presentationMedia === undefined ? {} : { presentationMedia: async (request: ComponentPresentationMediaRequest, initializing: boolean, consumerCurrent: () => boolean) => {
+          current(); await presentationMedia(source, request, initializing, () => !this.closed && !commandsClosed
+            && presentation.local.player.actor.equals(target.viewer) && consumerCurrent()); current();
         } }),
         commands: {
           register: name => { const host = input(); registration ??= host.clientCommandRegistration(target.seat,
@@ -187,17 +188,27 @@ export class ApplicationModPresentations {
       receive(request.consumer.viewer, arguments_); return "handled";
     } finally { entry.commandSource = previous; }
   }
+  retainPresentations(presentations: readonly WorldSeatPresentation[]): void {
+    this.assertOpen();
+    const failures: unknown[] = [];
+    for (const [presentation, entries] of this.entries) if (!presentations.includes(presentation)) {
+      for (const [id, entry] of entries) { try { this.remove(entries, id, entry); } catch (error) { failures.push(error); } }
+      this.entries.delete(presentation);
+    }
+    if (failures.length !== 0) throw new AggregateError(failures, "Component seat retirement failed");
+  }
   async prepare(presentations: readonly WorldSeatPresentation[], sources: readonly ActiveModPresentation[],
     events: readonly SimulationPresentationEvent[], frameSequence: number): Promise<void> {
     this.assertOpen(); if (this.busy) throw new Error("Component presentation preparation is already running");
     this.busy = true;
     try {
+      this.retainPresentations(presentations);
       const available = new Map(sources.map(source => [source.prepared.source.id, source]));
       if (available.size !== sources.length) throw new Error("Duplicate component presentation source identity");
       for (const [presentation, entries] of this.entries) {
         for (const [id, entry] of entries) {
           const source = available.get(id);
-          if (!presentations.includes(presentation) || source === undefined || !entry.consumer.owns(source, presentation.local.player.actor))
+          if (source === undefined || !entry.consumer.owns(source, presentation.local.player.actor))
             this.remove(entries, id, entry);
         }
         if (entries.size === 0) this.entries.delete(presentation);

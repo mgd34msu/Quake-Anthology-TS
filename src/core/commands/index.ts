@@ -1,3 +1,4 @@
+import type { ClientId } from "../../contracts/identity.ts";
 /* Shared command storage and dispatch adapted from quake-3-ts/core/commands.ts.
  * Family rules follow Quake/QW cmd.c and Quake II qcommon/cmd.c.
  * Extended cvar commands follow q2repro src/common/cvar.c.
@@ -139,6 +140,7 @@ export class CommandBuffer {
   private waitDialect: CommandDialect | undefined;
   private waitSource: CommandContext | undefined;
   private retiredProducers = new Set<symbol>();
+  private retiredClients = new Set<ClientId>();
   private fallbackCvars: CvarRegistry | undefined;
   private readonly builtinHandlers = new Map<string, CommandHandler>();
   private readonly outputBindings = new Set<{ readonly print: (text: string, source?: CommandContext) => void }>();
@@ -273,6 +275,7 @@ export class CommandBuffer {
     this.waitFrames = previous.waitFrames; this.waitDialect = previous.waitDialect;
     this.waitSource = previous.waitSource;
     this.retiredProducers = previous.retiredProducers;
+    this.retiredClients = previous.retiredClients;
     this.aliasCount = previous.aliasCount; this.tokens = previous.tokens;
     this.startupCommandText = previous.startupCommandText; this.scriptRead = previous.scriptRead;
     this.aliases.splice(0, this.aliases.length, ...previous.aliases.map(alias => ({ ...alias })));
@@ -288,28 +291,48 @@ export class CommandBuffer {
     this.copyProgramState(previous); this.programRevision++;
   }
 
-  /** Release only this component instance, including suspended preparation and script work. */
-  discardProducer(instance: symbol): void {
-    this.retiredProducers.add(instance);
-    const retained = (chunk: CommandChunk): boolean => (chunk.kind === "text" ? chunk.source : chunk.event.source).producer?.instance !== instance;
+  private sourceClient(source: CommandContext): ClientId | null {
+    let origin = source.origin; while (origin.kind === "script") origin = origin.caller;
+    return origin.kind === "local-seat" || origin.kind === "remote-client" ? origin.client : null;
+  }
+  private retiredClient(source: CommandContext): boolean {
+    if (this.retiredClients.size === 0) return false;
+    const client = this.sourceClient(source);
+    if (client === null) return false;
+    for (const retired of this.retiredClients) if (retired.equals(client)) return true;
+    return false;
+  }
+  private discardSources(retired: (source: CommandContext) => boolean): void {
+    const retained = (chunk: CommandChunk): boolean => !retired(chunk.kind === "text" ? chunk.source : chunk.event.source);
     const discardRead = (read: ScriptRead | undefined): ScriptRead | undefined => {
-      if (read?.source.producer?.instance !== instance) return read;
+      if (read === undefined || !retired(read.source)) return read;
       read.cancel(); return undefined;
     };
     const discardTail = (tail: ProgramTail | undefined): ProgramTail | undefined => tail === undefined ? undefined : {
       ...tail, chunks: tail.chunks.filter(retained), deferred: tail.deferred.filter(retained), scriptRead: discardRead(tail.scriptRead),
-      ...(tail.waitSource?.producer?.instance === instance ? { waitFrames: 0, waitDialect: undefined, waitSource: undefined } : {}),
+      ...(tail.waitSource !== undefined && retired(tail.waitSource) ? { waitFrames: 0, waitDialect: undefined, waitSource: undefined } : {}),
       preparationTail: discardTail(tail.preparationTail),
     };
     this.chunks = this.chunks.filter(retained); this.deferred = this.deferred.filter(retained);
     this.scriptRead = discardRead(this.scriptRead); this.preparationTail = discardTail(this.preparationTail);
-    if (this.waitSource?.producer?.instance === instance) { this.waitFrames = 0; this.waitDialect = undefined; this.waitSource = undefined; }
-    for (let index = this.aliases.length - 1; index >= 0; index--) if (this.aliases[index]?.instance === instance) this.aliases.splice(index, 1);
+    if (this.waitSource !== undefined && retired(this.waitSource)) { this.waitFrames = 0; this.waitDialect = undefined; this.waitSource = undefined; }
     this.programRevision++;
   }
+  /** Release only this component instance, including suspended preparation and script work. */
+  discardProducer(instance: symbol): void {
+    this.retiredProducers.add(instance);
+    this.discardSources(source => source.producer?.instance === instance);
+    for (let index = this.aliases.length - 1; index >= 0; index--) if (this.aliases[index]?.instance === instance) this.aliases.splice(index, 1);
+  }
+  /** A disconnected client cannot transfer queued work to another occupant of its seat. */
+  discardClient(client: ClientId): void {
+    this.retiredClients.add(client);
+    this.discardSources(source => this.sourceClient(source)?.equals(client) === true);
+  }
   private discardRetiredWork(): void {
-    const retired = new Set<symbol>();
+    const retired = new Set<symbol>(), clients = new Set<ClientId>();
     const remember = (source: CommandContext | undefined): void => {
+      if (source !== undefined && this.retiredClient(source)) { const client = this.sourceClient(source); if (client !== null) clients.add(client); }
       const instance = source?.producer?.instance;
       if (instance !== undefined && this.retiredProducers.has(instance)) retired.add(instance);
     };
@@ -320,6 +343,7 @@ export class CommandBuffer {
     }
     for (const alias of this.aliases) if (alias.instance !== undefined && this.retiredProducers.has(alias.instance)) retired.add(alias.instance);
     for (const instance of retired) this.discardProducer(instance);
+    for (const client of clients) this.discardClient(client);
   }
 
   get hasPendingCommands(): boolean { return this.preparationTail !== undefined || this.chunks.length > 0 || this.scriptRead !== undefined; }
@@ -462,6 +486,7 @@ export class CommandBuffer {
   private inputContext(source: CommandContext | undefined): CommandContext {
     const context = source ?? this.frame?.source ?? this.context;
     if (context.session !== this.context.session) throw new RangeError("Command input belongs to another session");
+    if (this.retiredClient(context)) throw new Error("Command client is disconnected");
     const instance = context.producer?.instance;
     if (instance !== undefined && this.retiredProducers.has(instance)) throw new Error("Command producer is closed");
     return source === undefined ? context : copyContext(context);
@@ -690,7 +715,7 @@ export class CommandBuffer {
     const frame: ExecutionFrame = { dialect, source, direct: direct && (source.origin.kind === "local-console" || source.origin.kind === "local-seat"), textMode, parent: this.frame, active: true };
     this.frame = frame;
     this.selectBuiltins(dialect);
-    const requireActive = (): void => { if (!frame.active || this.frame !== frame) throw new Error("Command invocation is no longer active"); };
+    const requireActive = (): void => { if (this.retiredClient(source)) throw new Error("Command client is disconnected"); if (!frame.active || this.frame !== frame) throw new Error("Command invocation is no longer active"); };
     const command: CommandInvocation = Object.freeze({ source, direct: frame.direct, dialect: this.executionDialect, argv: tokens.argv,
       args: Object.freeze(tokens.argv.slice(1)), argsText: tokens.argsText, raw,
       append: (text: string): void => { requireActive(); this.appendFor(text, source); },
