@@ -86,6 +86,35 @@ The second run has a different random world evolution and additional instrumenta
 
 Local reproducible drivers/results: `.artifacts/resume-20260925/q1-pusher-translation/stage-profile.ts`, `stage-costs.json`, `stage-result.json`, `query-profile.ts`, `query-costs.json` and `query-result.json`. They load the exact archived `72794d58` source and the installed original `game_x64.dll`; no source replacement or entity reduction is used.
 
+## Cost of the 16 user-facing steps
+
+A further local profile split the original frame at inspected retail DLL instruction boundaries and timed the actual think/touch/use/pain/death pointers held by live entities. Host wrappers measure the surrounding work. It used the same archived `72794d58`, complete `base1`, Q2 movement/model, Q3 weapons and idle connected player, measuring 50 ticks after 50 warm-up ticks. All 495 entity records remained present.
+
+These are approximate per-tick means in milliseconds. Nested callbacks are charged separately from their callers. AI callbacks retain any movement/collision work they call directly; row 8 is physics outside those callbacks. This gives an additive runtime attribution, not independent subsystems with universally separate execution.
+
+| Step | Work | Mean ms/tick |
+|---|---|---:|
+| 1 | Advance clocks | 0.005 |
+| 2 | Recoil, equipment and selected provider frame entry | 0.009 |
+| 3 | Refresh cvars, clear transient events and reconcile before the frame | 1.67 |
+| 4 | Refresh frame cvars and synchronize foreign actors | 0.23 |
+| 5 | Original frame entry, intermission/restart/cooperative rules and call overhead | 0.11 |
+| 6 | Traverse entities, previous positions, ground checks and state updates | 12.48 |
+| 7 | Player frame start and think/AI/animation callbacks | 39.59 |
+| 8 | Remaining physics, movement and collision work | 18.59 |
+| 9 | Touch/use/damage/death callbacks | 1.38 |
+| 10 | Match rules and cooperative bookkeeping | 0.03 |
+| 11 | Player end-of-frame view, feedback, stats and HUD state | 2.07 |
+| 12 | Campaign/deferred-pain traversal and frame-end work | 1.46 |
+| 13 | Entity lifetime reconciliation and publication | 2.60 |
+| 14 | Selected equipment/projectile frame completion and slot reconciliation | 0.19 |
+| 15 | Frame-exit phase and extra mod callbacks | <0.01 estimated; no extra mods active |
+| 16 | Snapshot construction/publication data | 2.45 |
+
+The measured rows total 82.87 ms; native rows 5–12 total 75.72 ms. The complete application step averaged 84.96 ms, including remaining application work and diagnostic hook discovery outside the timed native frame. These values are profiling results, not an optimization comparison or rendered FPS. Active combat and different maps/mods can change the distribution. Steps 7, 8 and 6 account for about 85% of the listed work.
+
+Reproduction and raw values are local: `.artifacts/resume-20260925/tick-sixteen/profile.ts`, `result.json`, `profile.log` and `runframe.asm`. The profiler qualifies the retail artifact digest, preserves original instruction bytes, and accounts for nested interpreter returns. No production profiling framework was added.
+
 ## Optimization targets
 
 The measured order is native instruction execution first, then repeated nested DLL calls, then spatial candidate/body/address work and unchanged entity publication. Reconciliation and cvar refresh are smaller costs. Compare each candidate on a matched complete workload; retain it only when the result improves without changing source behavior.
