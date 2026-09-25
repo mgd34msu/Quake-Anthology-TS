@@ -7,7 +7,7 @@ import { infoValueForKey } from "../../../core/info-string.ts";
 import { classicSignature, q2Int, q2Pointer } from "./layout.ts";
 import { readClassicString, readClassicVector, writeClassicVector } from "./records.ts";
 import type { ClassicQ2GuestHost } from "./host.ts";
-import { classicCombatProfile, type ClassicCombatProfile } from "./combat-profile.ts";
+import { classicCombatProfile, validateClassicCombatProfile, type ClassicCombatProfile } from "./combat-profile.ts";
 import { RemovedNativeDamage, q2NativeArmorFlags, q2NativeDamageArguments } from "../native-damage.ts";
 import { captureAbiProcessorState, restoreAbiProcessorState } from "../../../guest/abi/runner.ts";
 import { classicNumber, classicRequiredPointer } from "./host.ts";
@@ -29,29 +29,35 @@ export class ClassicCombatBindings {
   private readonly armorHooks: (() => void)[] = [];
   private armorBypass: { readonly channel: ProtectionChannel; stack: bigint | "pending" } | null = null;
   private constructor(private readonly host: ClassicQ2GuestHost, private readonly image: GuestAddress, private readonly profile: ClassicCombatProfile) {}
-  static create(host: ClassicQ2GuestHost, image: GuestAddress): ClassicCombatBindings | null {
-    const profile = classicCombatProfile(host.memory.module.digest);
+  static create(host: ClassicQ2GuestHost, image: GuestAddress, declared?: ClassicCombatProfile | null): ClassicCombatBindings | null {
+    const profile = declared === undefined ? classicCombatProfile(host.memory.module.digest) : declared;
     if (profile === null) return null;
+    if (profile.digest !== host.memory.module.digest) throw new Error("Classic combat profile belongs to another original artifact");
+    validateClassicCombatProfile(profile);
     for (const entry of Object.values(profile.entries)) host.memory.check(host.memory.offset(image, BigInt(entry)), 1, "execute");
     return new ClassicCombatBindings(host, image, profile);
   }
   private at(view: RawEntityView, offset: number): GuestAddress { return this.host.memory.offset(view.address, BigInt(offset)); }
   private entry(offset: number): GuestAddress { return this.host.memory.offset(this.image, BigInt(offset)); }
-  notarget(view: RawEntityView): boolean { return (this.host.memory.readUint32(this.at(view, this.profile.fields.flags)) & 32) !== 0; }
+  notarget(view: RawEntityView): boolean { return (this.host.memory.readUint32(this.at(view, this.profile.fields.flags)) & this.profile.flags.notarget) !== 0; }
   private client(view: RawEntityView): GuestAddress | null { return this.host.memory.readPointer(this.at(view, 84)); }
   private count(client: GuestAddress, index: number): number { return this.host.memory.readInt32(this.host.memory.offset(client, BigInt(this.profile.client.inventory + index * 4))); }
+  private armorDefinition(index: number): { readonly item: ItemId; readonly normalProtection: number; readonly energyProtection: number } {
+    const { memory } = this.host, { globals, itemFields, armorInfo } = this.profile, record = this.entry(globals.itemList + index * globals.itemBytes);
+    const name = readClassicString(memory, memory.readPointer(memory.offset(record, BigInt(itemFields.className))));
+    const info = memory.readPointer(memory.offset(record, BigInt(itemFields.armorInfo)));
+    if (name.length === 0 || info === null) throw new Error("Original native armor item lacks its name or protection information");
+    return { item: `q2:${name}`, normalProtection: memory.readFloat32(memory.offset(info, BigInt(armorInfo.normalProtection))),
+      energyProtection: memory.readFloat32(memory.offset(info, BigInt(armorInfo.energyProtection))) };
+  }
   private armor(view: RawEntityView): ArmorState {
-    const { memory } = this.host, client = this.client(view), { items, globals } = this.profile;
+    const { memory } = this.host, client = this.client(view), { items } = this.profile;
     if (client === null) return { regular: { kind: "none" }, powered: { kind: "none" } };
-    const index = [items.jacket, items.combat, items.body].find(index => this.count(client, index) > 0);
-    const powered = (memory.readInt32(this.at(view, this.profile.fields.flags)) & 4096) !== 0;
+    const index = this.profile.armor.regular.find(index => this.count(client, index) > 0);
+    const powered = (memory.readInt32(this.at(view, this.profile.fields.flags)) & this.profile.flags.powerArmor) !== 0;
     const power = !powered ? null : this.count(client, items.shield) > 0 ? "shield" : this.count(client, items.screen) > 0 ? "screen" : null;
     if (index === undefined && power === null) return { regular: { kind: "none" }, powered: { kind: "none" } };
-    const item = index === undefined ? null : this.entry(globals.itemList + index * globals.itemBytes);
-    const classname = item === null ? "none" : readClassicString(memory, memory.readPointer(item));
-    const info = item === null ? null : memory.readPointer(memory.offset(item, 64n));
-    return { regular: index === undefined ? { kind: "none" } : { kind: "q2", item: `q2:${classname}`, points: this.count(client, index),
-      normalProtection: info === null ? 0 : memory.readFloat32(memory.offset(info, 8n)), energyProtection: info === null ? 0 : memory.readFloat32(memory.offset(info, 12n)) },
+    return { regular: index === undefined ? { kind: "none" } : { kind: "q2", ...this.armorDefinition(index), points: this.count(client, index) },
       powered: power === null ? { kind: "none" } : { kind: power, cells: this.count(client, items.cells) } };
   }
   bind(view: RawEntityView, actor: OwnedActor): undefined {
@@ -59,31 +65,31 @@ export class ClassicCombatBindings {
     if (view.strideBytes !== profile.entityBytes) throw new Error("Native combat declaration differs from the source edict stride");
     const validateArmor = (armor: ArmorState): undefined => {
       if (armor.regular.kind !== "none" && armor.regular.kind !== "q2") throw new Error("Source armor requires Q2 armor values");
+      if (armor.regular.kind === "q2") {
+        const item = armor.regular.item;
+        if (!profile.armor.regular.some(index => this.armorDefinition(index).item === item)) throw new Error("Source armor item is outside its declared native inventory");
+      }
       if (armor.powered.kind !== this.armor(view).powered.kind) throw new Error("Native power activation requires its original source equipment operation");
       return undefined;
     };
-    const binding: CombatStateBinding = { validateArmor, emptyRegularArmor: points => {
-      const item = this.entry(profile.globals.itemList + profile.items.body * profile.globals.itemBytes);
-      const classname = readClassicString(memory, memory.readPointer(item)), info = memory.readPointer(memory.offset(item, 64n));
-      if (info === null) throw new Error("Original native Body Armor has no armor information");
-      return { kind: "q2", item: `q2:${classname}`, points, normalProtection: memory.readFloat32(memory.offset(info, 8n)), energyProtection: memory.readFloat32(memory.offset(info, 12n)) };
-    }, protection: {
+    const binding: CombatStateBinding = { validateArmor, emptyRegularArmor: points => ({ kind: "q2", ...this.armorDefinition(profile.armor.empty), points }), protection: {
       regular: { owner: memory.module.id, ...(host.options.services.damageProvenance === undefined ? {} : { stage: this.armorStage(actor, "regular") }) },
       powered: { owner: memory.module.id, ...(host.options.services.damageProvenance === undefined ? {} : { stage: this.armorStage(actor, "powered") }) },
     },
       normalizeLegacyArmor: armor => normalizeLegacyPowerOnlyArmor(armor, this.armor(view), "q2:none"), sourceDamage: request => this.damage(request, view), read: () => {
       const client = this.client(view), flags = memory.readInt32(this.at(view, profile.fields.flags)), cvars = host.options.services.cvars;
-      const skin = client === null ? "" : infoValueForKey(readClassicString(memory, memory.offset(client, BigInt(profile.client.userinfo)), 512), "skin"), rules = cvars.variableValue("dmflags") | 0;
-      const team = client === null ? null : cvars.variableValue("coop") !== 0 ? "q2:coop" : (rules & 64) !== 0 ? `q2:model:${skin.split("/")[0] ?? ""}` : (rules & 128) !== 0 ? `q2:skin:${skin.split("/")[1] ?? ""}` : null;
+      const skin = client === null ? "" : infoValueForKey(readClassicString(memory, memory.offset(client, BigInt(profile.client.userinfo)), profile.client.userinfoBytes), "skin"), rules = cvars.variableValue("dmflags") | 0;
+      const team = client === null ? null : cvars.variableValue("coop") !== 0 ? "q2:coop" : (rules & profile.teams.model) !== 0 ? `q2:model:${skin.split("/")[0] ?? ""}` : (rules & profile.teams.skin) !== 0 ? `q2:skin:${skin.split("/")[1] ?? ""}` : null;
       return { health: memory.readInt32(this.at(view, profile.fields.health)), canTakeDamage: memory.readInt32(this.at(view, profile.fields.damageable)) !== 0,
-        mass: memory.readInt32(this.at(view, profile.fields.mass)), armor: this.armor(view), team, noKnockback: (flags & 2048) !== 0,
-        invulnerable: (flags & 16) !== 0 || client !== null && memory.readFloat32(memory.offset(client, BigInt(profile.client.invincibleFrame))) > memory.readInt32(this.entry(profile.globals.levelFrame)) };
+        mass: memory.readInt32(this.at(view, profile.fields.mass)), armor: this.armor(view), team, noKnockback: (flags & profile.flags.noKnockback) !== 0,
+        invulnerable: (flags & profile.flags.invulnerable) !== 0 || client !== null && memory.readFloat32(memory.offset(client, BigInt(profile.client.invincibleFrame))) > memory.readInt32(this.entry(profile.globals.levelFrame)) };
     }, writeHealth: health => memory.writeInt32(this.at(view, profile.fields.health), health), writeArmor: armor => {
       validateArmor(armor);
       const client = this.client(view); if (client === null) { if (armor.regular.kind !== "none" || armor.powered.kind !== "none") throw new Error("Source non-client has no inventory armor"); return undefined; }
       if (armor.regular.kind !== "none" && armor.regular.kind !== "q2") throw new Error("Source armor requires Q2 armor values");
       const current = this.armor(view).regular;
-      for (const [name, index] of [["q2:item_armor_jacket", profile.items.jacket], ["q2:item_armor_combat", profile.items.combat], ["q2:item_armor_body", profile.items.body]] satisfies readonly (readonly [ItemId, number])[]) {
+      for (const index of profile.armor.regular) {
+        const name = this.armorDefinition(index).item;
         if (armor.regular.kind === "q2" && current.kind === "q2" && armor.regular.item === current.item && name !== current.item) continue;
         const address = memory.offset(client, BigInt(profile.client.inventory + index * 4)), count = armor.regular.kind === "q2" && armor.regular.item === name ? armor.regular.points : 0;
         if (memory.readInt32(address) !== count) memory.writeInt32(address, count);

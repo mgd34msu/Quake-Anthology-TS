@@ -1,3 +1,7 @@
+import { validateNativePrimary } from "../../../compat/q2/native-primary-validation.ts";
+import { readNativeCompatibility } from "../../../compat/q2/compatibility.ts";
+import type { NativePrimaryDeclaration, NativePrimaryProfile } from "../../../compat/q2/native-primary.ts";
+import { nativeModuleIdentity } from "./q2-native-world.ts";
 import type { ResolvedExecutionModule } from '../../../contracts/content.ts';
 import type { GuestCallContext, ModuleIdentity } from '../../../contracts/execution.ts';
 import type { MountedContent } from '../../../content/mounts/index.ts';
@@ -14,13 +18,17 @@ import type { WindowsCapabilities, WindowsFile } from '../../../guest/runtime/wi
 import { I386Cpu } from '../../../guest/x86/index.ts';
 
 type NativeExecution = Extract<ResolvedExecutionModule, { readonly kind: 'native' }>;
-export interface PreparedClassicGuest { readonly edition: "classic"; readonly execution: NativeExecution; readonly bytes: Uint8Array; }
+export interface PreparedClassicGuest { readonly edition: "classic"; readonly primary?: NativePrimaryDeclaration<Extract<NativePrimaryProfile, { readonly edition: "classic" }>>; readonly execution: NativeExecution; readonly bytes: Uint8Array; }
 export async function prepareClassicGuest(execution: NativeExecution, mounts: MountedContent): Promise<PreparedClassicGuest> {
   if (execution.role !== 'server-game' || execution.api.kind !== 'q2-classic-game' || execution.api.version !== 3
     || execution.profile.kind !== 'windows-i386') throw new Error('Classic Q2 guest requires Windows i386 game API 3');
   const bytes = await mounts.read(execution.artifact);
-  if (parsePe(bytes).abi.kind !== execution.profile.kind) throw new Error('Classic native artifact ABI differs from the selected profile');
-  return { edition: "classic", execution, bytes };
+  const pe = parsePe(bytes);
+    if (pe.abi.kind !== execution.profile.kind) throw new Error('Classic native artifact ABI differs from the selected profile');
+  const primary = await readNativeCompatibility(mounts, execution);
+    if (primary !== null) validateNativePrimary(primary.profile, pe);
+    if (primary !== null && primary.profile.edition !== "classic") throw new Error("Native declaration edition differs from selected API");
+    return { edition: "classic", execution, bytes, ...(primary === null || primary.profile.edition !== "classic" ? {} : { primary: { declaration: primary.declaration, profile: primary.profile } }) };
 }
 export interface ClassicGuestSourceOptions {
   readonly importBoundary?: ClassicQ2GuestHostOptions['importBoundary'];
@@ -41,8 +49,7 @@ export class ClassicGuestSource {
   static create(prepared: PreparedClassicGuest, options: ClassicGuestSourceOptions): ClassicGuestSource {
     if (prepared.execution.role !== 'server-game' || prepared.execution.api.kind !== 'q2-classic-game' || prepared.execution.api.version !== 3 || prepared.execution.profile.kind !== 'windows-i386')
       throw new Error('Classic guest source requires selected Windows i386 API 3');
-    const module: ModuleIdentity = { id: prepared.execution.owner.provider, artifactPath: prepared.execution.artifact.requestedPath,
-      digest: prepared.execution.artifact.digest, revision: prepared.execution.artifact.digest };
+    const module: ModuleIdentity = nativeModuleIdentity(prepared);
     const memory = new SparseGuestMemory({ module, pointerBytes: 4 });
     let source: ClassicGuestSource | null = null;
     const files = new Set<WindowsFile>();

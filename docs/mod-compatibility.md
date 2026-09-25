@@ -69,6 +69,8 @@ A matching `role: "cgame"` entry can declare `equipmentPresentation`. It describ
 
 An external primary's compatibility-document digest is retained in saves. Loading rejects changed or removed interfaces, including changed client presentation declarations in that document. Built-in profiles retain their existing save compatibility. This interface covers the modern public Q3 records and the declared original call conventions; it does not qualify undocumented private record formats, arbitrary bytecode regions or a new weapon's cross-game supply semantics automatically.
 
+Native Q2 primary modules use [native-compatibility.json](native-primary-declarations.md) for their complete weapon, player, inventory, pickup and private world interfaces. Classic and rerelease layouts are declared separately and retain their original game rules.
+
 ## Independent components
 
 **Custom game → Mods** lists installed independent components with individual enable/disable controls. Multiple components can be selected; their source game does not restrict the destination world. The list reports missing dependencies, declared conflicts, and unavailable components. From the command line, repeat `--mod PRODUCT/COMPONENT_ID` for each selection.

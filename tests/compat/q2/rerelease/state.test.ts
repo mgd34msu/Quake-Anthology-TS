@@ -1,3 +1,4 @@
+import { rereleasePrimaryWorldProfile } from "../../../../src/compat/q2/rerelease/world-profile.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import { expect, test } from "bun:test";
 import type { TraceHit } from "../../../../src/contracts/scene.ts";
@@ -35,7 +36,10 @@ function stateFixture(budgets: { readonly instructionBudget?: number; readonly l
   const combat = new GameplayAuthority(actors, actorCallbacks, { impulse: unavailable, beforeReaction: unavailable, confirmed: unavailable });
   const inventory = new SharedInventoryTable(actors);
   const cvars = new CvarRegistry({ dialect: "q2-rerelease", context: { session: actors.session, origin: { kind: "server-console" } } });
-  const host = new RereleaseQ2GuestHost({ ...budgets, runner, getGameApi: getter(game), getCgameApi: getter(cgame),
+  const authored = rereleasePrimaryWorldProfile("sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd");
+  if (authored === null) throw new Error("Missing authored fixture layout");
+  const host = new RereleaseQ2GuestHost({ ...budgets, worldProfile: { ...authored, digest: module.digest,
+    client: { ...authored.client, authority: { kind: "artifact", digest: module.digest } } }, runner, getGameApi: getter(game), getCgameApi: getter(cgame),
     engine: { actors, callbacks: actorCallbacks, bodies, combat, inventory, trace: unavailable, pointContents: unavailable, setAreaPortal: unavailable, setSolid: () => undefined, inlineModelBounds: unavailable, worldActor: unavailable },
     services: { cvars, print: unavailable, getConfigstring: unavailable, setConfigstring: unavailable, resourceIndex: unavailable, serverFrame: () => 17, commandArguments: () => [], commandTail: () => "", addCommand: unavailable, extension: () => null },
     spatial: { areasConnected: unavailable, visibility: unavailable, surfaceId: unavailable, boxEdicts: () => actors.ownedBy(module.id).map(value => value.id), inlineModel: unavailable, linkMetadata: () => ({ area: 0, area2: 0, networkSolid: 0 }) },

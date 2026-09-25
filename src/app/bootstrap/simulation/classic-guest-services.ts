@@ -1,3 +1,5 @@
+import type { ClassicPrimaryWorldProfile } from "../../../compat/q2/classic/world-profile.ts";
+import type { NativePickupProfile } from "../../../compat/q2/native-pickups.ts";
 import type { EquipmentMovement } from "../../../contracts/movement.ts";
 import type { NativeInputMotion } from "../../../compat/q2/native-input.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
@@ -22,6 +24,8 @@ import type { ActorCollision, SharedSceneQueries } from "../../../world/collisio
 export type ClassicGuestAudience = { readonly kind: "unicast"; readonly slot: number } | { readonly kind: "multicast"; readonly origin: Vec3; readonly scope: "all" | "phs" | "pvs" };
 export interface ClassicGuestMessage { readonly audience: ClassicGuestAudience; readonly reliable: boolean; readonly bytes: Uint8Array }
 export interface ClassicGuestServicesOptions {
+  readonly primaryWorld?: ClassicPrimaryWorldProfile | null;
+  readonly pickupProfile?: NativePickupProfile;
   readonly pickups?: ClassicQ2EngineServices["pickups"];
   readonly damageProvenance?: ClassicQ2EngineServices["damageProvenance"];
   readonly engine: ClassicQ2EngineServices["engine"] & Pick<Q2FoundationHost, "emit">;
@@ -113,9 +117,9 @@ export class ClassicGuestServices {
   bindHost(host: ClassicQ2GuestHost, imageBase?: GuestAddress): void {
     if (this.#host !== null || host.memory !== this.memory) throw new Error("API 3 services already bound or guest memory mismatch");
     this.#host = host;
-    this.#combat = imageBase === undefined ? null : ClassicCombatBindings.create(host, imageBase);
-    this.#inventory = imageBase === undefined ? null : ClassicSourceInventory.create(host, imageBase);
-    if (imageBase !== undefined) host.bindPickups(imageBase);
+    this.#combat = imageBase === undefined ? null : ClassicCombatBindings.create(host, imageBase, this.options.primaryWorld);
+    this.#inventory = imageBase === undefined ? null : ClassicSourceInventory.create(host, imageBase, this.options.primaryWorld);
+    if (imageBase !== undefined) host.bindPickups(imageBase, this.options.pickupProfile);
   }
   get host(): ClassicQ2GuestHost { if (this.#host === null) throw new Error("API 3 services have no guest host"); return this.#host; }
   notarget(slot: number): boolean | null { return this.#combat?.notarget(this.host.edicts.at(slot)) ?? null; }
@@ -140,7 +144,7 @@ export class ClassicGuestServices {
     return { viewOffset: vector(client, 40), crouched: (client.getUint8(16) & 1) !== 0 };
   }
   setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
-    const profile = classicCombatProfile(this.memory.module.digest), record = this.host.edicts.at(slot);
+    const profile = this.options.primaryWorld === undefined ? classicCombatProfile(this.memory.module.digest) : this.options.primaryWorld, record = this.host.edicts.at(slot);
     if (profile === null) throw new Error("API3 source view writes require a declared private client layout");
     if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
       throw new Error("API3 source view requires the current client actor");

@@ -3,6 +3,7 @@ import type { NativePrimaryInventoryProfile } from "./native-primary-inventory.t
 
 const classic: NativePrimaryInventoryProfile = {
   digest: "sha256:8187df3fd5b4d435d8227434d3351aad2b47e546236403e52adcd4d275810c45",
+  prototypes: { weapon: "q2:weapon_blaster", ammunition: "q2:ammo_shells", usable: "q2:item_quad", passive: "q2:key_data_cd", droppable: "q2:item_quad", undroppable: "q2:weapon_blaster" },
   abi: { kind: "windows-i386", image: "pe32", pointerBytes: 4, call: "cdecl" },
   client: 0x54, inventory: 0x2e4, count: 256, cursor: 0x2e0, empty: -1, selectionWrites: [{ offset: 0x2e0, bytes: 4 }],
   next: { entry: 0x2fe0, scan: 0x3003, join: 0x306a, menuArgument: false },
@@ -12,6 +13,7 @@ const classic: NativePrimaryInventoryProfile = {
 };
 const retail: NativePrimaryInventoryProfile = {
   digest: "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd",
+  prototypes: { weapon: "q2:weapon_blaster", ammunition: "q2:ammo_shells", usable: "q2:item_quad", passive: "q2:key_data_cd", droppable: "q2:item_quad", undroppable: "q2:weapon_blaster" },
   abi: { kind: "windows-x86-64", image: "pe32+", pointerBytes: 8, call: "microsoft-x64" },
   client: 0x78, inventory: 0xa80, count: 84, cursor: 0xa70, empty: 0,
   selectionWrites: [{ offset: 0xa70, bytes: 4 }, { offset: 0xa78, bytes: 8 }, { offset: 0x10c, bytes: 2 }],

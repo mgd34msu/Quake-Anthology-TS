@@ -14,6 +14,8 @@ import { bindNativeModEntry, type NativeModEntryBinding } from "../native-mod-en
 import { prepareRereleaseEquipmentMovement, withRereleaseEquipmentMovement } from "./equipment-movement.ts";
 import { writeRereleaseUserCommand } from "./player-state.ts";
 
+import { rereleasePrimaryWorldProfile, validateRereleasePrimaryWorldProfile, type RereleasePrimaryWorldProfile } from "./world-profile.ts";
+
 export type RereleaseImportName = GameImportName | CgameImportName;
 export interface RereleaseImportCall {
   readonly api: "game" | "cgame";
@@ -22,6 +24,7 @@ export interface RereleaseImportCall {
   readonly arguments: readonly GuestCallValue[];
 }
 export interface RereleaseModuleOptions {
+  readonly worldProfile?: RereleasePrimaryWorldProfile;
   readonly runner: GuestCallRunner;
   readonly getGameApi: GuestAddress;
   readonly getCgameApi: GuestAddress;
@@ -49,6 +52,7 @@ export function resultPointer(result: GuestCallResult): GuestAddress | null {
 /** One interpreter, memory and synchronous runner serve both API tables. */
 export class RereleaseGuestModule {
   readonly memory;
+  readonly worldProfile: RereleasePrimaryWorldProfile | null;
   readonly gameImportAddress: GuestAddress;
   readonly cgameImportAddress: GuestAddress;
   #game: GuestAddress | null = null;
@@ -58,9 +62,15 @@ export class RereleaseGuestModule {
   readonly #equipment: { readonly client: RawEntityView; readonly value: EquipmentMovement; applied: boolean }[] = [];
   constructor(readonly options: RereleaseModuleOptions) {
     this.memory = options.runner.options.cpu.memory;
+    this.worldProfile = options.worldProfile ?? rereleasePrimaryWorldProfile(this.memory.module.digest);
+    if (this.worldProfile !== null) validateRereleasePrimaryWorldProfile(this.worldProfile, this.memory.module.digest);
     if (this.memory.pointerBytes !== 8) throw new TypeError("Rerelease Windows ABI requires 64-bit guest memory");
     this.gameImportAddress = this.#imports("game", gameImports, gameImportLayout);
     this.cgameImportAddress = this.#imports("cgame", cgameImports, cgameImportLayout);
+  }
+  requireWorldProfile(): RereleasePrimaryWorldProfile {
+    if (this.worldProfile === null) throw new Error("Original API2023 world requires an artifact-qualified source profile");
+    return this.worldProfile;
   }
   #imports(api: "game" | "cgame", entries: readonly { readonly name: RereleaseImportName; readonly signature: GuestCallSignature }[], layout: GuestLayout): GuestAddress {
     const address = this.memory.allocate({ byteLength: layout.byteLength, alignment: 8n, label: `Q2 ${api} imports` });

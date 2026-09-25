@@ -1,3 +1,4 @@
+import { classicPrimaryWorldProfile } from "../../../compat/q2/classic/world-profile.ts";
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { ActorId } from "../../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../../contracts/execution.ts";
@@ -59,7 +60,8 @@ export class ClassicGuestWorld {
     const source = ClassicGuestSource.create(options.prepared, { capabilities: options.capabilities,
       ...(options.instructionBudget === undefined ? {} : { instructionBudget: options.instructionBudget }),
       services: memory => {
-        adapter = new ClassicGuestServices(memory, { ...options.services, command: () => commandContext.value ?? options.services.command() });
+        adapter = new ClassicGuestServices(memory, { ...options.services, primaryWorld: options.prepared.primary?.profile.world ?? classicPrimaryWorldProfile(options.prepared.execution.artifact.digest),
+          ...(options.prepared.primary === undefined ? {} : { pickupProfile: options.prepared.primary.profile.pickups }), command: () => commandContext.value ?? options.services.command() });
         return adapter.services;
       } });
     try { const services = getAdapter(); services.bindHost(source.host, source.imageBase); return new ClassicGuestWorld(source, services, commandContext); }

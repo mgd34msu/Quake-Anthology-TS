@@ -15,7 +15,7 @@ export interface NativePrimaryCommandProfile {
     readonly ammoGrants: readonly { readonly entry: number; readonly join: number; readonly descriptor: GuestRegister; readonly kind: "set" | "add" }[]; readonly argc: number; readonly argv: number };
   readonly drop: { readonly entry: number; readonly eligibility: { readonly entry: number; readonly join: number } };
   readonly client: { readonly pointer: number; readonly weapon: number; readonly ammoIndex: number | null; readonly inventory: number };
-  readonly items: { readonly table: number; readonly stride: number; readonly count: number; readonly classname: number; readonly flags: number; readonly icon: number;
+  readonly items: { readonly table: number; readonly stride: number; readonly count: number; readonly classname: number; readonly flags: number; readonly weaponFlag: number; readonly ammunitionFlag: number; readonly icon: number;
     readonly ammo: { readonly kind: "name"; readonly offset: number; readonly label: number } | { readonly kind: "index"; readonly offset: number } };
 }
 export interface NativePrimaryCommandHooks {
@@ -98,7 +98,7 @@ export class NativePrimaryCommands {
     const source = Array.from({ length: table.count }, (_, index) => {
       const address = this.at(table.table + index * table.stride), classname = readClassicString(memory, memory.readPointer(memory.offset(address, BigInt(table.classname))));
       const item: ItemId | null = /^[a-z][a-z0-9_]*$/.test(classname) ? `q2:${classname}` : null;
-      return { item, index, address, icon: readClassicString(memory, memory.readPointer(memory.offset(address, BigInt(table.icon)))), ammunition: (memory.readUint32(memory.offset(address, BigInt(table.flags))) & 2) !== 0, weapon: (memory.readUint32(memory.offset(address, BigInt(table.flags))) & 1) !== 0,
+      return { item, index, address, icon: readClassicString(memory, memory.readPointer(memory.offset(address, BigInt(table.icon)))), ammunition: (memory.readUint32(memory.offset(address, BigInt(table.flags))) & table.ammunitionFlag) !== 0, weapon: (memory.readUint32(memory.offset(address, BigInt(table.flags))) & table.weaponFlag) !== 0,
         label: table.ammo.kind === "name" ? readClassicString(memory, memory.readPointer(memory.offset(address, BigInt(table.ammo.label)))) : "" };
     });
     const result: Item[] = [], names = new Set<ItemId>();

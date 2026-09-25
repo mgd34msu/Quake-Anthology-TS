@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import type { GuestAddress, GuestLayout, GuestValueLayout } from "../../../contracts/execution.ts";
 import type { RereleaseGuestModule } from "./module.ts";
-import { retailRereleaseClientProfile } from "./client-profile.ts";
+import { validateRereleasePrimaryWorldProfile, type RereleasePrimaryWorldProfile } from "./world-profile.ts";
 import { signature } from "./api.ts";
 
 const P: GuestValueLayout = { kind: "scalar", storage: "pointer" };
@@ -14,23 +14,14 @@ export const rereleaseFreeSignature = signature([P]);
 // Win64 passes the three-byte by-value mod_t indirectly; the shared ABI planner owns that rule.
 export const rereleaseDamageSignature = signature([P, P, P, P, P, P, I, I, I, { kind: "aggregate", layout: rereleaseModLayout }]);
 export const rereleasePowerArmorSignature = signature([P, P, P, I, I], I);
-export interface RereleaseNativeEntries { readonly spawn: GuestAddress; readonly free: GuestAddress; readonly damage: GuestAddress; readonly powerArmor: GuestAddress; readonly regularArmor: { readonly entry: GuestAddress; readonly join: GuestAddress }; readonly armorInfoTable: GuestAddress; readonly processPain: GuestAddress; }
-/** Retail entry boundaries verified through native give/pickup/trigger_hurt and monster-frame execution plus PE unwind records. */
-export function retailRereleaseEntries(module: Pick<RereleaseGuestModule, "memory">, imageBase: GuestAddress): RereleaseNativeEntries {
-  const authority = retailRereleaseClientProfile.authority;
-  if (authority.kind !== "artifact" || module.memory.module.digest !== authority.digest) throw new Error("Native entry profile requires the verified retail DLL");
-  const entry = (rva: bigint): GuestAddress => { const address = module.memory.offset(imageBase, rva); module.memory.check(address, 1, "execute"); return address; };
-  return { spawn: entry(0x964b0n), free: entry(0x96600n), damage: entry(0x5cae0n), powerArmor: entry(0x5c100n), regularArmor: { entry: entry(0x5d022n), join: entry(0x5d154n) }, armorInfoTable: module.memory.offset(imageBase, 0x1953a8n), processPain: entry(0x76e20n) };
+export interface RereleaseNativeEntries { readonly spawn: GuestAddress; readonly free: GuestAddress; readonly damage: GuestAddress; readonly powerArmor: GuestAddress; readonly regularArmor: { readonly entry: GuestAddress; readonly join: GuestAddress }; readonly armorInfoTable: GuestAddress; readonly processPain: GuestAddress; readonly time: GuestAddress; }
+/** Resolve artifact-qualified source functions and data within the loaded module. */
+export function rereleaseEntries(module: Pick<RereleaseGuestModule, "memory">, imageBase: GuestAddress, profile: RereleasePrimaryWorldProfile): RereleaseNativeEntries {
+  validateRereleasePrimaryWorldProfile(profile, module.memory.module.digest);
+  const entry = (rva: number): GuestAddress => { const address = module.memory.offset(imageBase, BigInt(rva)); module.memory.check(address, 1, "execute"); return address; };
+  const data = (rva: number, bytes: number): GuestAddress => { const address = module.memory.offset(imageBase, BigInt(rva)); module.memory.check(address, bytes, "read"); return address; };
+  const source = profile.entries;
+  return { spawn: entry(source.spawn), free: entry(source.free), damage: entry(source.damage), powerArmor: entry(source.powerArmor),
+    regularArmor: { entry: entry(source.regularArmor.entry), join: entry(source.regularArmor.join) },
+    armorInfoTable: data(profile.armor.table, (profile.client.inventoryCount - 1) * profile.armor.stride + 8), processPain: entry(source.processPain), time: data(source.time, 8) };
 }
-
-/** T_Damage compares client+0x1a10 and monster+0xb88 against this saved level.time global. */
-export function retailRereleaseTime(module: Pick<RereleaseGuestModule, "memory">, entries: RereleaseNativeEntries): bigint {
-  const authority = retailRereleaseClientProfile.authority;
-  if (authority.kind !== "artifact" || module.memory.module.digest !== authority.digest) throw new Error("Native clock profile requires the verified retail DLL");
-  return module.memory.readInt64(module.memory.offset(entries.damage, 0x241b28n - 0x5cae0n));
-}
-
-/** Retail monster accumulator offsets measured at both T_Damage store sites and M_ProcessPain reset. */
-export const rereleaseMonsterDamage = {
-  attacker: 3120, inflictor: 3128, blood: 3136, knockback: 3140, point: 3144, mod: 3156,
-};

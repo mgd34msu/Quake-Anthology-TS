@@ -2,7 +2,6 @@ import type { RawEntityView } from "../../../contracts/execution.ts";
 import type { ProtectionChannel } from "../../../contracts/gameplay.ts";
 import type { RereleaseQ2GuestHost } from "./host.ts";
 import { RereleaseSourceClient, RereleaseSourceEdict } from "./source-state.ts";
-import { retailRereleaseClientProfile } from "./client-profile.ts";
 
 /** Publish original primary protection stores while a selected grant or debit is held. */
 export function withRereleasePrimaryProtection<T>(host: RereleaseQ2GuestHost, recipient: RawEntityView, channel: ProtectionChannel,
@@ -29,8 +28,8 @@ export function withRereleasePrimaryProtection<T>(host: RereleaseQ2GuestHost, re
   };
   const remove = [memory.observeWrites(source.at("flags"), 8, publish)];
   if (source.client !== null) {
-    const client = new RereleaseSourceClient(source.client, host.module, retailRereleaseClientProfile);
-    remove.push(memory.observeWrites(client.at("pers.inventory"), retailRereleaseClientProfile.inventoryCount * 4, publish));
+    const client = new RereleaseSourceClient(source.client, host.module, host.module.requireWorldProfile().client);
+    remove.push(memory.observeWrites(client.at("pers.inventory"), host.module.requireWorldProfile().client.inventoryCount * 4, publish));
   }
   const run = (): T => {
     const result = operation(execute => { primaryCurrent(); execute(); primaryCurrent(); });

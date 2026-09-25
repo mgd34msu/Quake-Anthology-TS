@@ -19,7 +19,6 @@ import { traceActorBody } from "../../../world/collision/body.ts";
 import type { ClassicGuestAudience } from "./classic-guest-services.ts";
 import type { RereleaseGuestMapServices, RereleaseGuestMessage, RereleaseGuestServicesOptions, RereleaseGuestServicesPort } from "./rerelease-guest-services-contract.ts";
 import { RereleaseCombatBindings } from "../../../compat/q2/rerelease/combat-binding.ts";
-import { retailRereleaseClientProfile } from "../../../compat/q2/rerelease/client-profile.ts";
 import { RereleaseSourceClient } from "../../../compat/q2/rerelease/source-state.ts";
 import { rereleaseInventoryItems } from "../../../compat/q2/rerelease/semantics.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
@@ -126,9 +125,7 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     return { viewOffset: { ...state.viewOffset, z: state.viewOffset.z + state.movement.viewHeight }, crouched: (state.movement.flags & 1) !== 0 };
   }
   setPlayerViewRoll(slot: number, actor: ActorId, roll: number): void {
-    const profile = retailRereleaseClientProfile, host = this.host, record = host.module.entities().atSlot(slot);
-    if (profile.authority.kind !== "artifact" || this.memory.module.digest !== profile.authority.digest)
-      throw new Error("API2023 source view writes require a declared private client layout");
+    const host = this.host, profile = host.module.requireWorldProfile().client, record = host.module.entities().atSlot(slot);
     if (slot < 1 || slot > this.options.maxClients || !this.options.engine.actors.isLive(actor) || record.currentActor()?.equals(actor) !== true)
       throw new Error("API2023 source view requires the current client actor");
     const client = this.view(slot).pointer("client");
@@ -137,12 +134,12 @@ export class RereleaseGuestServices implements RereleaseGuestServicesPort {
     this.memory.writeFloat32(this.memory.offset(field, 8n), roll);
   }
   get hasSourceInventory(): boolean {
-    const profile = retailRereleaseClientProfile;
-    return profile.authority.kind === "artifact" && this.host.module.memory.module.digest === profile.authority.digest;
+    return this.host.module.worldProfile !== null;
   }
   sourceInventory(slot: number): InventoryStateBinding | null {
-    const profile = retailRereleaseClientProfile, host = this.host;
-    if (!this.hasSourceInventory) return null;
+    const host = this.host, world = host.module.worldProfile;
+    if (world === null) return null;
+    const profile = world.client;
     const items = this.inventoryItems ??= rereleaseInventoryItems(host.module, text => host.core.string(text));
     const actor = this.view(slot).record.currentActor();
     if (actor === null) throw new Error("Native inventory requires a live source actor");

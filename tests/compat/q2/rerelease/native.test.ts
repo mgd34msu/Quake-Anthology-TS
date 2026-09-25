@@ -1,3 +1,6 @@
+import { SaveReader } from "../../../../src/persistence/value.ts";
+import { readRereleasePrimaryWorldProfile, rereleasePrimaryWorldProfile } from "../../../../src/compat/q2/rerelease/world-profile.ts";
+import { builtinNativePrimary } from "../../../../src/compat/q2/native-primary.ts";
 import type { RereleaseDebugShapesEvent } from "../../../../src/compat/q2/rerelease/debug-shapes.ts";
 import { WorldTextStore } from "../../../../src/text/world.ts";
 import type { RereleaseWorldTextEvent } from "../../../../src/compat/q2/rerelease/world-text.ts";
@@ -34,7 +37,7 @@ const dll = new URL("../../../../../qfiles/q2/rerelease/baseq2/game_x64.dll", im
 export const available = await Bun.file(dll).exists();
 const activeSources: RereleaseGuestSource[] = [];
 afterEach(() => { for (const source of activeSources.splice(0)) source.close(); });
-export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => [], foreignDamage?: RereleaseForeignDamageServices, debugShapes?: (event: RereleaseDebugShapesEvent) => void, debugDrawing?: "headless") {
+export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent) => void, nativeBindings = false, commandArguments: () => readonly string[] = () => [], foreignDamage?: RereleaseForeignDamageServices, debugShapes?: (event: RereleaseDebugShapesEvent) => void, debugDrawing?: "headless", declaredWorld = false) {
   const catalog = await discoverInstalledContent({ corpusRoot: new URL("../../../../../qfiles", import.meta.url).pathname, discoverMods: false });
   const product = catalog.require("q2-rerelease-baseq2");
   using mounts = await openMountPlan(await catalog.createMountPlan({ id: createMountPlanId("test", "native-rerelease"), assets: product.id, geometry: product.id }));
@@ -103,7 +106,11 @@ export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent)
       inventory: client === null || inventoryItems === null ? null : client.inventory(inventoryItems),
       callbacks: edict.callbacks({ address: id => owner().addressForActor(id), actor: address => owner().actor(module.entities().fromPointer(address))?.id ?? null }, trace => owner().encodeTrace(trace)) };
   } };
-  const source = RereleaseGuestSource.create(prepared, { services,
+  const profile = declaredWorld ? builtinNativePrimary(artifact.digest, "rerelease") : null;
+  if (declaredWorld && profile?.edition !== "rerelease") throw new Error("Missing original primary fixture profile");
+  const selected = profile?.edition !== "rerelease" ? prepared : { ...prepared,
+    primary: { declaration: artifact, profile: { ...profile, world: readRereleasePrimaryWorldProfile(new SaveReader(profile.world), artifact.digest) } } };
+  const source = RereleaseGuestSource.create(selected, { services,
     ...(foreignDamage === undefined ? {} : { foreignDamage }),
     clock: { nowMilliseconds: () => 1_700_000_000_000, performanceCounter: () => 12345678n, performanceFrequency: 10000000n },
     ...(worldText === undefined ? {} : { worldText }),
@@ -120,6 +127,16 @@ export async function nativeFixture(worldText?: (event: RereleaseWorldTextEvent)
   const guest = host.module, core = host.core;
   return { source, prepared, services, releaseListeners, guest, core, host, world, memory, runtime, cvars, prints, reached, resources, configstrings, localized, unicasts, multicasts, sounds };
 }
+
+test("source world declaration binds artifact identity and rejects invalid private storage", () => {
+  const digest = "sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd", profile = rereleasePrimaryWorldProfile(digest);
+  if (profile === null) throw new Error("Missing retail fixture world profile");
+  expect(readRereleasePrimaryWorldProfile(new SaveReader(profile), digest)).toEqual(profile);
+  expect(rereleasePrimaryWorldProfile("sha256:unknown")).toBeNull();
+  expect(() => readRereleasePrimaryWorldProfile(new SaveReader({ ...profile, monster: { ...profile.monster, blood: profile.edict.byteLength } }), digest)).toThrow("exceeds its edict");
+  expect(() => readRereleasePrimaryWorldProfile(new SaveReader({ ...profile, client: { ...profile.client, inventoryCount: 85 } }), digest)).toThrow("pers.inventory");
+  expect(() => readRereleasePrimaryWorldProfile(new SaveReader({ ...profile, regularArmor: { ...profile.regularArmor, target: { kind: "register", register: "rsp", storage: "pointer" } } }), digest)).toThrow();
+});
 
 test("source x64 public layouts retain padded bools, float movement and full trace fields", () => {
   expect([gameImportLayout.byteLength, gameExportLayout.byteLength, cgameImportLayout.byteLength, cgameExportLayout.byteLength]).toEqual([576, 272, 296, 152]);
@@ -212,7 +229,7 @@ test.skipIf(!available)("rerelease message callbacks encode floats and preserve 
 });
 
 test.skipIf(!available)("retail external player velocity enters source Pmove and remains source owned", async () => {
-  const { source, guest, host, world } = await nativeFixture();
+  const { source, guest, host, world } = await nativeFixture(undefined, false, () => [], undefined, undefined, undefined, true);
   host.preInit(); source.init();
   host.spawnEntities("base1", `{ "classname" "worldspawn" } { "classname" "info_player_start" "origin" "${world.origin}" }`, "");
   host.runFrame(false);

@@ -34,6 +34,7 @@ export interface NativePrimaryInventoryProfile {
   readonly count: number;
   readonly cursor: number;
   readonly empty: number;
+  readonly prototypes: { readonly weapon: ItemId; readonly ammunition: ItemId; readonly usable: ItemId; readonly passive: ItemId; readonly droppable: ItemId; readonly undroppable: ItemId };
   readonly selectionWrites: readonly { readonly offset: number; readonly bytes: number }[];
   readonly next: { readonly entry: number; readonly scan: number; readonly join: number; readonly menuArgument: boolean };
   readonly previous: { readonly entry: number; readonly scan: number; readonly join: number };

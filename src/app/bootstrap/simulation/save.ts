@@ -1,3 +1,5 @@
+import type { ModuleIdentity } from "../../../contracts/execution.ts";
+import { readModule } from "../../../persistence/execution.ts";
 import { decodeQ2RereleaseNativeSave } from "./native-q2-rerelease-save.ts";
 import { decodeQ2ClassicOriginalSave } from "../../../persistence/q2-classic-guest.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -67,7 +69,7 @@ export function simulationGuestCheckpoint(image: SaveImage): QuakeCCheckpoint | 
   return checkpoint;
 }
 
-export function nativeQ2OriginalSave(image: SaveImage) {
+export function nativeQ2OriginalSave(image: SaveImage, expected?: ModuleIdentity) {
   const execution = image.recipe.execution.find(module => module.role === "server-game");
   if (execution?.kind !== "native") {
     if (image.providers.some(record => record.schema === "q2:classic-native-original")) throw new Error("Original API 3 save has no matching native execution");
@@ -81,12 +83,12 @@ export function nativeQ2OriginalSave(image: SaveImage) {
     throw new Error("Unsupported native original-save execution");
   if (image.providers.some(record => record.schema === "q2:rerelease-native-original")) throw new Error("Rerelease native save has a classic execution");
   return decodeQ2ClassicOriginalSave(simulationProviderCheckpoint(image, "q2:classic-native-original"), {
-    module: { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest, revision: execution.artifact.digest },
+    module: expected ?? savedNativeModule(image, "q2:classic-native-original"),
     map: image.recipe.map.geometry.requestedPath,
   });
 }
 
-export function nativeQ2RereleaseSave(image: SaveImage) {
+export function nativeQ2RereleaseSave(image: SaveImage, expected?: ModuleIdentity) {
   const execution = image.recipe.execution.find(module => module.role === "server-game");
   if (execution?.kind !== "native" || execution.api.kind !== "q2-rerelease-game") {
     if (image.providers.some(record => record.schema === "q2:rerelease-native-original")) throw new Error("Rerelease native save has no matching execution");
@@ -95,7 +97,7 @@ export function nativeQ2RereleaseSave(image: SaveImage) {
   if (execution.api.version !== 2023 || execution.profile.kind !== "windows-x86-64") throw new Error("Unsupported rerelease native save execution");
   if (image.providers.some(record => record.schema === "q2:classic-native-original")) throw new Error("Classic native save has a rerelease execution");
   return decodeQ2RereleaseNativeSave(simulationProviderCheckpoint(image, "q2:rerelease-native-original"), {
-    module: { id: execution.owner.provider, artifactPath: execution.artifact.requestedPath, digest: execution.artifact.digest, revision: execution.artifact.digest },
+    module: expected ?? savedNativeModule(image, "q2:rerelease-native-original"),
     map: image.recipe.map.geometry.requestedPath,
   });
 }
@@ -201,4 +203,15 @@ export function savedSimulationSettings(image: SaveImage) {
     hostMilliseconds: reader.field("hostMilliseconds").finite(),
     clientSlots: nativeQ2OriginalSave(image) !== null || nativeQ2RereleaseSave(image) !== null ? nativeQ2SavedClients(image).map(client => client.clientSlot) : guest === null ? reader.field("players").list(value => value.field("clientSlot").integer(0))
       : savedQ3GuestClients(guest).map(player => player.client.slot) };
+}
+
+function savedNativeModule(image: SaveImage, schema: "q2:classic-native-original" | "q2:rerelease-native-original"): ModuleIdentity {
+  const execution = image.recipe.execution.find(module => module.role === "server-game");
+  if (execution?.kind !== "native") throw new Error("Native saved identity has no source execution");
+  const record = simulationProviderCheckpoint(image, schema), reader = new SaveReader(decodeCheckpointValue(record.bytes), schema);
+  const module = readModule(reader.field("module")), prefix = `${execution.artifact.digest}/native-compatibility.json/`;
+  const declared = module.revision.startsWith(prefix) && /^sha256:[0-9a-f]{64}$/.test(module.revision.slice(prefix.length));
+  if (module.id !== execution.owner.provider || module.artifactPath !== execution.artifact.requestedPath || module.digest !== execution.artifact.digest
+    || module.revision !== execution.artifact.digest && !declared) throw new Error("Native saved identity differs from the selected artifact");
+  return module;
 }

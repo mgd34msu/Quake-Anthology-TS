@@ -1,10 +1,15 @@
+import { validateNativePrimary } from "../../../compat/q2/native-primary-validation.ts";
+import { readNativeCompatibility } from "../../../compat/q2/compatibility.ts";
+import type { NativePrimaryDeclaration, NativePrimaryProfile } from "../../../compat/q2/native-primary.ts";
+import { nativeModuleIdentity } from "./q2-native-world.ts";
 import type { ResolvedExecutionModule } from '../../../contracts/content.ts';
 import type { GuestAddress, GuestCallContext, ModuleIdentity } from '../../../contracts/execution.ts';
 import type { MountedContent } from '../../../content/mounts/index.ts';
 import { RereleaseQ2GuestHost } from '../../../compat/q2/rerelease/host.ts';
 import type { RereleaseQ2HostOptions } from '../../../compat/q2/rerelease/host.ts';
 import type { RereleaseCoreServices } from '../../../compat/q2/rerelease/imports.ts';
-import { retailRereleaseEntries } from '../../../compat/q2/rerelease/native-entries.ts';
+import { rereleaseEntries } from '../../../compat/q2/rerelease/native-entries.ts';
+import { rereleasePrimaryWorldProfile } from "../../../compat/q2/rerelease/world-profile.ts";
 import { rereleaseAbi } from '../../../compat/q2/rerelease/api.ts';
 import { GuestCallRunner } from '../../../guest/abi/index.ts';
 import { createGuestProcessorState, GuestCallbackTable, SparseGuestMemory } from '../../../guest/core/index.ts';
@@ -17,15 +22,19 @@ import { X64Cpu } from '../../../guest/x64/index.ts';
 import type { OriginalPickupAdmission } from '../../../contracts/original-pickups.ts';
 
 type NativeExecution = Extract<ResolvedExecutionModule, { readonly kind: 'native' }>;
-export interface PreparedRereleaseGuest { readonly edition: "rerelease"; readonly execution: NativeExecution; readonly bytes: Uint8Array; }
+export interface PreparedRereleaseGuest { readonly edition: "rerelease"; readonly primary?: NativePrimaryDeclaration<Extract<NativePrimaryProfile, { readonly edition: "rerelease" }>>; readonly execution: NativeExecution; readonly bytes: Uint8Array; }
 export async function prepareRereleaseGuest(execution: NativeExecution, mounts: MountedContent): Promise<PreparedRereleaseGuest> {
     if (execution.role !== 'server-game' || execution.api.kind !== 'q2-rerelease-game' || execution.profile.kind !== 'windows-x86-64')
         throw new Error('Rerelease guest requires the native Windows x64 game API 2023');
     const bytes = await mounts.read(execution.artifact);
-    if (parsePe(bytes).abi.kind !== execution.profile.kind) throw new Error('Native artifact ABI differs from the selected profile');
-    return { edition: "rerelease", execution, bytes };
+    const pe = parsePe(bytes);
+    if (pe.abi.kind !== execution.profile.kind) throw new Error('Native artifact ABI differs from the selected profile');
+    const primary = await readNativeCompatibility(mounts, execution);
+    if (primary !== null) validateNativePrimary(primary.profile, pe);
+    if (primary !== null && primary.profile.edition !== "rerelease") throw new Error("Native declaration edition differs from selected API");
+    return { edition: "rerelease", execution, bytes, ...(primary === null || primary.profile.edition !== "rerelease" ? {} : { primary: { declaration: primary.declaration, profile: primary.profile } }) };
 }
-export interface RereleaseGuestSourceOptions extends Omit<RereleaseQ2HostOptions, 'runner' | 'getGameApi' | 'getCgameApi' | 'services' | 'pickups'> {
+export interface RereleaseGuestSourceOptions extends Omit<RereleaseQ2HostOptions, 'runner' | 'getGameApi' | 'getCgameApi' | 'services' | 'pickups' | 'worldProfile'> {
     readonly pickups?: OriginalPickupAdmission;
     services(memory: MappedGuestMemory): RereleaseCoreServices;
     readonly clock: Required<Pick<WindowsCapabilities, 'nowMilliseconds' | 'performanceCounter' | 'performanceFrequency'>>;
@@ -38,8 +47,7 @@ export class RereleaseGuestSource {
     private constructor(readonly host: RereleaseQ2GuestHost, readonly runtime: WindowsGuestRuntime,
         readonly memory: SparseGuestMemory, private readonly image: PeImage, private readonly context: GuestCallContext, private readonly budget: number) {}
     static create(prepared: PreparedRereleaseGuest, options: RereleaseGuestSourceOptions): RereleaseGuestSource {
-        const module: ModuleIdentity = { id: prepared.execution.owner.provider, artifactPath: prepared.execution.artifact.requestedPath,
-            digest: prepared.execution.artifact.digest, revision: prepared.execution.artifact.digest };
+        const module: ModuleIdentity = nativeModuleIdentity(prepared);
         const memory = new SparseGuestMemory({ module, pointerBytes: 8 });
         let source: RereleaseGuestSource | null = null, host: RereleaseQ2GuestHost | null = null;
         try {
@@ -56,9 +64,12 @@ export class RereleaseGuestSource {
             const cgame = resolvePeExport(image, { kind: 'name', name: 'GetCGameAPI', version: null }, () => null).address;
             const context: GuestCallContext = { module, callback: { kind: 'native-guest', module, address: game, abi: rereleaseAbi }, parent: null, self: null, other: null };
             const budget = options.instructionBudget ?? 5_000_000;
-            const nativeEntries = options.foreignDamage === undefined ? undefined : retailRereleaseEntries({ memory }, image.base);
+            const worldProfile = prepared.primary === undefined ? rereleasePrimaryWorldProfile(module.digest) : prepared.primary.profile.world;
+            if (options.foreignDamage !== undefined && worldProfile === null) throw new Error("Original native damage requires a declared source world profile");
+            const nativeEntries = options.foreignDamage === undefined || worldProfile === null ? undefined : rereleaseEntries({ memory }, image.base, worldProfile);
             const { pickups, ...hostOptions } = options;
-            host = new RereleaseQ2GuestHost({ ...hostOptions, ...(pickups === undefined ? {} : { pickups: { admission: pickups, imageBase: image.base } }),
+            host = new RereleaseQ2GuestHost({ ...hostOptions, ...(worldProfile === null ? {} : { worldProfile }),
+                ...(pickups === undefined ? {} : { pickups: { admission: pickups, imageBase: image.base, ...(prepared.primary === undefined ? {} : { profile: prepared.primary.profile.pickups }) } }),
                 ...(nativeEntries === undefined ? {} : { nativeEntries }), runner, getGameApi: game, getCgameApi: cgame, services: options.services(memory) });
             source = new RereleaseGuestSource(host, runtime, memory, image, context, budget);
             runtime.initialize(image, { context, instructionBudget: budget });

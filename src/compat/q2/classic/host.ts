@@ -15,7 +15,7 @@ import { classicPrintf, classicPrintfLayouts } from "./printf.ts";
 import { ClassicQ2Edicts, allocateClassicString, classicStringAllocationBytes, readClassicString, readClassicVector, writeClassicString, writeClassicVector } from "./records.ts";
 import type { ClassicQ2ActorProjection } from "./records.ts";
 import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../contracts/original-pickups.ts";
-import { NativePrimaryPickups, type NativePickupSupply, type NativePickupSupplyEvaluation } from "../native-pickups.ts";
+import { NativePrimaryPickups, type NativePickupProfile, type NativePickupSupply, type NativePickupSupplyEvaluation } from "../native-pickups.ts";
 import { classicPickupProfile } from "./pickup-profile.ts";
 
 export interface ClassicQ2WorldLink {
@@ -94,9 +94,9 @@ export class ClassicQ2GuestHost {
     if (this.#pickups === null) throw new Error("This original game has no admitted pickup supply interface");
     return this.#pickups.supply(offer);
   }
-  bindPickups(image: GuestAddress): void {
+  bindPickups(image: GuestAddress, declared?: NativePickupProfile): void {
     if (this.#pickups !== null) throw new Error("API3 primary pickups already bound");
-    const profile = classicPickupProfile(this.memory.module.digest);
+    const profile = declared ?? classicPickupProfile(this.memory.module.digest);
     if (profile === null || this.options.services.pickups === undefined) return;
     if (this.options.services.projection !== undefined) throw new Error("Primary pickup callers cannot bind a component projection");
     this.#pickups = new NativePrimaryPickups({ memory: this.memory, runner: this.options.runner,

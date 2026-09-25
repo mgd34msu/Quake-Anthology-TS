@@ -1,18 +1,18 @@
 import { sourceItemNamed } from "../../../contracts/source-items.ts";
 import { namespaced } from "../../../persistence/value.ts";
 import { NativePrimaryInventory, type NativeInventoryRow } from "../../../compat/q2/native-primary-inventory.ts";
-import { nativePrimaryInventoryProfile } from "../../../compat/q2/native-primary-inventory-profile.ts";
+
 import { NativePrimaryDrop } from "../../../compat/q2/native-primary-drop.ts";
 import { withRereleasePrimaryProtection } from "../../../compat/q2/rerelease/pickup-protection.ts";
-import { nativePrimaryDropProfile } from "../../../compat/q2/native-primary-drop-profile.ts";
+
 import { selectedAmmoLabel } from "./arsenal/inventory-labels.ts";
 import { NativePrimaryPlayer } from "../../../compat/q2/native-primary-player.ts";
-import { nativePrimaryPlayerProfile } from "../../../compat/q2/native-primary-player-profile.ts";
+import { nativeModuleIdentity, preparedNativePrimary } from "./q2-native-world.ts";
 import { NativePrimaryWeapons } from "../../../compat/q2/native-primary-weapons.ts";
 import { SourcePickupCargo } from "./dropped-pickups.ts";
-import { nativePrimaryWeaponProfile } from "../../../compat/q2/native-primary-weapon-profile.ts";
+
 import { NativePrimaryCommands } from "../../../compat/q2/native-primary-commands.ts";
-import { nativePrimaryCommandProfile } from "../../../compat/q2/native-primary-command-profile.ts";
+
 import { bindNativePrimaryWeapons, nativePrimaryWeaponHost } from "./native-primary-weapons.ts";
 import { Q3MappedAmmoRegeneration } from "./arsenal/q3-ammo-regen.ts";
 import { readLegacyQ3Source, migrateLegacyQ3Arsenal } from "./arsenal/q3-source-legacy.ts";
@@ -103,8 +103,6 @@ import { selectedWeaponSources } from "../../../world/gameplay/pickups.ts";
 import { QvmPrimaryPickups } from "../../../compat/qvm/game-pickups.ts";
 import { qvmInventoryBinding, type QvmInventoryProfile } from "../../../compat/qvm/game-inventory.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
-import { classicCombatProfile } from "../../../compat/q2/classic/combat-profile.ts";
-import { retailRereleaseClientProfile } from "../../../compat/q2/rerelease/client-profile.ts";
 import { q3GrappleProfile } from "../../../content/q3/equipment/grapple-profiles.ts";
 import { SelectedMonsters } from "./monster-runtime.ts";
 import { isQ1TeleportStaging, nearbyMonsterPlacement, preservesAuthoredQ1Placement, preservesAuthoredQ2Placement } from "./monster-placement.ts";
@@ -478,8 +476,7 @@ export class SharedSimulation implements Simulation {
     if (options.recipe.equipment.grapple.kind === "enabled" || options.recipe.equipment.handGrenades.kind === "enabled") {
       const native = options.q2Guest, qvm = options.q3Guest;
       const supported = native === undefined ? qvm === undefined || qvm.prepared.primary.combat !== null
-        : native.edition === "classic" ? classicCombatProfile(native.prepared.execution.artifact.digest) !== null
-          : retailRereleaseClientProfile.authority.kind === "artifact" && native.prepared.execution.artifact.digest === retailRereleaseClientProfile.authority.digest;
+        : preparedNativePrimary(native.prepared) !== null;
       if (!supported) throw new Error(`${options.recipe.map.entities.content} lacks a supported shared combat interface. Disable Hook and Offhand grenades or choose a supported game module.`);
     }
     this.startItems = options.restore === undefined ? options.startItems ?? "" : savedSimulationSettings(options.restore).startItems;
@@ -708,7 +705,7 @@ export class SharedSimulation implements Simulation {
       } else throw new Error("Selected foreign arsenal is not implemented for this provider");
     }
     if (this.source.kind === "q2-native" && this.selectedArsenal !== null) {
-      if (nativePrimaryWeaponProfile(this.source.game.module.digest) === null) throw new Error("Selected native arsenal requires a qualified original weapon profile");
+      if (this.nativePrimary() === null) throw new Error("Selected native arsenal requires a qualified original weapon profile");
       this.modClientApplications.subscribe(event => {
         if (event.application.scope !== "client-command") return undefined;
         if (event.phase === "before") {
@@ -1681,9 +1678,11 @@ export class SharedSimulation implements Simulation {
       this.inventory.bindPickup(actor, { owner: this.weaponProvider.provider, rules: this.selectedOriginalPickups }));
   }
 
+  private nativePrimary() { const prepared = this.options.q2Guest?.prepared; return prepared === undefined ? null : preparedNativePrimary(prepared); }
+
   private selectedNativePlayer(): NativePrimaryPlayer {
     if (this.source.kind !== "q2-native") throw new Error("Selected native equipment requires its source player");
-    const weapon = nativePrimaryWeaponProfile(this.source.game.module.digest), player = nativePrimaryPlayerProfile(this.source.game.module.digest);
+    const profile = this.nativePrimary(), weapon = profile?.weapons ?? null, player = profile?.player ?? null;
     if (weapon === null || player === null) throw new Error("Selected equipment requires qualified original native player services");
     return new NativePrimaryPlayer(nativePrimaryWeaponHost(this.source.game, this.actors), weapon, player);
   }
@@ -2504,7 +2503,7 @@ export class SharedSimulation implements Simulation {
     const native = this.options.q2Guest;
     if (native !== undefined) {
       const retained = this.options.nativeQ2Travel;
-      if (retained !== undefined && (retained.edition !== native.edition || this.options.restore !== undefined || !isDeepStrictEqual(retained.world.module, { id: native.prepared.execution.owner.provider, artifactPath: native.prepared.execution.artifact.requestedPath, digest: native.prepared.execution.artifact.digest, revision: native.prepared.execution.artifact.digest }) || retained.world.services.options.maxClients !== this.options.maxClients)) throw new Error("Native travel requires the same source module and client capacity");
+      if (retained !== undefined && (retained.edition !== native.edition || this.options.restore !== undefined || !isDeepStrictEqual(retained.world.module, nativeModuleIdentity(native.prepared)) || retained.world.services.options.maxClients !== this.options.maxClients)) throw new Error("Native travel requires the same source module and client capacity");
       const cvars = retained?.world.services.options.cvars ?? (this.options.restore === undefined ? this.options.sourceRegistry : undefined) ?? new CvarRegistry({ dialect: native.edition === "classic" ? "q2-classic" : "q2-rerelease", context: { session: this.session, origin: { kind: "server-console" } }, print: native.print });
       if (retained === undefined && this.options.sourceRegistry === undefined) cvars.applyArchive(this.options.sourceArchive ?? []);
       if (retained === undefined) for (const [name, value] of Object.entries({ maxclients: String(this.options.maxClients), skill: String(this.options.skill), deathmatch: this.options.mode === "deathmatch" ? "1" : "0", coop: this.options.mode === "coop" ? "1" : "0", sv_gravity: "800", sv_airaccelerate: "0" })) {
@@ -2532,7 +2531,7 @@ export class SharedSimulation implements Simulation {
       if (native.edition === "rerelease") {
         if (retained !== undefined && retained.edition !== "rerelease") throw new Error("Native travel edition changed");
         const rrServices: RereleaseGuestServicesOptions = { ...services, engine: this.q2ActorHost(recipe.map.entities, runtime, () => undefined, "primary-world"),
-          ...(retailRereleaseClientProfile.authority.kind === "artifact" && native.prepared.execution.artifact.digest === retailRereleaseClientProfile.authority.digest && native.semanticBindings === undefined
+          ...(preparedNativePrimary(native.prepared) !== null && native.semanticBindings === undefined
             ? { foreignDamage: { provenance: () => ({ sequence: this.attackSequence++, time: { kind: "seconds", value: this.timeSeconds }, weapon: null,
               weaponProvider: recipe.map.entities.provider, combatProvider: recipe.combat.provider, inventoryProvider: recipe.inventory.provider, movementProvider: recipe.movement.provider }) } } : {}),
           frameMilliseconds: 25, localize: native.localize, clipboard: native.clipboard,
@@ -4740,15 +4739,17 @@ export class SharedSimulation implements Simulation {
   }
   private nativeDropProjection(actor: ActorId, item: ItemId): { readonly source: ItemId; readonly current: ItemId | null; readonly pending: ItemId | null } {
     const selected = this.selectedArsenal, supply = this.selectedOriginalSupply, sources = this.selectedOriginalWeapons;
+    const prototypes = this.nativePrimary()?.inventory.prototypes;
+    if (prototypes === undefined) throw new Error("Native drop has no declared original item prototypes");
     const component = this.inventory.itemDefinitions(actor).find(definition => definition.item === item);
     const owner = this.actors.resolveOwned(actor), equipment = owner === null ? undefined : this.selectedQ3Source?.inventory(owner).find(entry => entry.item === item);
-    if (component !== undefined || equipment !== undefined) return { source: component?.actions?.includes("drop") === true ? "q2:item_quad" : "q2:weapon_blaster", current: null, pending: null };
+    if (component !== undefined || equipment !== undefined) return { source: component?.actions?.includes("drop") === true ? prototypes.droppable : prototypes.undroppable, current: null, pending: null };
     if (selected?.has(actor) !== true || supply === null || sources === null) throw new Error("Selected drop has no admitted supply policy");
     const weapon = selected.catalog().find(weapon => weapon.item === item), sourceWeapon = sources.get(item);
     let source: ItemId;
     if (weapon !== undefined) {
       if (sourceWeapon === undefined) throw new Error("Selected dropped weapon has no original supply owner");
-      source = sourceWeapon ?? "q2:weapon_blaster";
+      source = sourceWeapon ?? prototypes.undroppable;
     } else {
       source = this.nativeDropAmmoSource(item);
     }
@@ -4768,7 +4769,9 @@ export class SharedSimulation implements Simulation {
     const slots = commands.inventorySlots(), sourceLabels = source.game.configstrings(), labelBase = source.edition === "classic" ? 1056 : 11326;
     const native = slots.filter(slot => selected === null || !slot.weapon && !slot.ammunition).map(slot => ({ item: slot.item,
       label: sourceLabels.get(labelBase + slot.index) ?? "", count: this.inventory.count(actor, slot.item), sourceIndex: slot.index, selected: false }));
-    const weaponPrototype = slots.find(slot => slot.item === "q2:weapon_blaster"), ammoPrototype = slots.find(slot => slot.item === "q2:ammo_shells");
+    const prototypes = this.nativePrimary()?.inventory.prototypes;
+    if (prototypes === undefined) throw new Error("Native inventory has no declared original item prototypes");
+    const weaponPrototype = slots.find(slot => slot.item === prototypes.weapon), ammoPrototype = slots.find(slot => slot.item === prototypes.ammunition);
     if (weaponPrototype === undefined || ammoPrototype === undefined) throw new Error("Original inventory lacks its declared weapon/ammo prototypes");
     const ui = selected?.ui(actor, this.weaponProvider), weapons = (ui?.items ?? []).filter(item => item.kind === "weapon").map(item => ({
       item: item.id, label: item.label, count: this.inventory.count(actor, item.id), sourceIndex: weaponPrototype.index, selected: true,
@@ -4786,7 +4789,7 @@ export class SharedSimulation implements Simulation {
         presentation: { source: this.recipe.map.entities, kind: "item", icon: slot.icon === "" ? null : { kind: "image", resource: {
           content: this.recipe.map.entities.content, path: slot.icon.startsWith("/") || slot.icon.startsWith("\\") ? slot.icon.slice(1) : `pics/${slot.icon}.pcx`,
         } } } satisfies NonNullable<NativeInventoryRow["presentation"]> }));
-    const usablePrototype = slots.find(slot => slot.item === "q2:item_quad"), passivePrototype = slots.find(slot => slot.item === "q2:key_data_cd");
+    const usablePrototype = slots.find(slot => slot.item === prototypes.usable), passivePrototype = slots.find(slot => slot.item === prototypes.passive);
     if (usablePrototype === undefined || passivePrototype === undefined) throw new Error("Original inventory lacks usable and passive item prototypes");
     const owner = this.actors.resolveOwned(actor);
     const equipment: readonly NativeInventoryRow[] = owner === null ? [] : (this.selectedQ3Source?.inventory(owner) ?? []).map(item => ({
@@ -5291,14 +5294,13 @@ export class SharedSimulation implements Simulation {
     if (retainedDrops !== undefined) this.droppedPickups.revisit(retainedDrops, this.recipe.map.geometry.requestedPath);
     if (this.selectedArsenal !== null) {
       this.nativePrimaryWeapons?.close();
-      const profile = nativePrimaryWeaponProfile(source.game.module.digest);
+      const profile = this.nativePrimary()?.weapons ?? null;
       if (profile === null) throw new Error("Native primary weapon source is unqualified");
       this.nativePrimaryWeapons = bindNativePrimaryWeapons(source.game, this.actors, profile, {
         selected: () => false, completed: (actor, reached) => this.nativeWeaponStep(actor, reached), spawned: actor => this.nativeClientSpawned(actor),
       });
     }
-    const commandProfile = nativePrimaryCommandProfile(source.game.module.digest), inventoryProfile = nativePrimaryInventoryProfile(source.game.module.digest),
-      dropProfile = nativePrimaryDropProfile(source.game.module.digest);
+    const profile = this.nativePrimary(), commandProfile = profile?.commands ?? null, inventoryProfile = profile?.inventory ?? null, dropProfile = profile?.drop ?? null;
     if (commandProfile !== null && inventoryProfile !== null && dropProfile !== null) {
       this.nativePrimaryCommands?.close();
       this.nativePrimaryCommands = new NativePrimaryCommands(nativePrimaryWeaponHost(source.game, this.actors), commandProfile, {
@@ -5312,6 +5314,8 @@ export class SharedSimulation implements Simulation {
           return { item, ammo: ui.ammo?.count ?? 0 };
         },
       });
+      for (const item of Object.values(inventoryProfile.prototypes)) if (this.nativePrimaryCommands.sourceItem(item) === null)
+        throw new Error(`Native inventory prototype ${item} is absent from its declared original item table`);
       if (this.selectedArsenal !== null) {
         const supply = this.selectedOriginalSupply;
         if (supply === null) throw new Error("Native selected weapons require original supply");
@@ -6162,7 +6166,7 @@ export class SharedSimulation implements Simulation {
     const source = this.source;
     if (source.kind !== "q2-native") throw new Error("Native original loading requires its source provider");
     if (source.edition === "rerelease") {
-      const original = nativeQ2RereleaseSave(save);
+      const original = nativeQ2RereleaseSave(save, source.game.module);
       if (original === null || this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Native rerelease save requires a matching non-deathmatch source");
       for (const level of original.visitedLevels) source.visited.set(level.map, level);
       await source.game.initLoading(nextFrame);
@@ -6173,7 +6177,7 @@ export class SharedSimulation implements Simulation {
       }, nextFrame);
       return;
     }
-      const original = nativeQ2OriginalSave(save);
+      const original = nativeQ2OriginalSave(save, source.game.module);
       if (original === null || this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Native original save requires a matching non-deathmatch source");
       for (const level of original.visitedLevels) source.visited.set(level.map, level);
       await source.game.initLoading(nextFrame);
@@ -6192,7 +6196,7 @@ export class SharedSimulation implements Simulation {
     if (source.kind === "loading") throw new Error("The selected source world does not expose a complete saved-game restore");
     if (source.kind === "q2-native") {
       if (!nativeRestored && source.edition === "rerelease") {
-      const original = nativeQ2RereleaseSave(save);
+      const original = nativeQ2RereleaseSave(save, source.game.module);
       if (original === null || this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Native rerelease save requires a matching non-deathmatch source");
       for (const level of original.visitedLevels) source.visited.set(level.map, level);
       source.game.init();
@@ -6203,7 +6207,7 @@ export class SharedSimulation implements Simulation {
       });
       }
       if (!nativeRestored && source.edition === "classic") {
-      const original = nativeQ2OriginalSave(save);
+      const original = nativeQ2OriginalSave(save, source.game.module);
       if (original === null || this.q2ServerRegistry === null || this.q2ServerRegistry.variableValue("deathmatch") !== 0) throw new Error("Native original save requires a matching non-deathmatch source");
       for (const level of original.visitedLevels) source.visited.set(level.map, level);
       source.game.init();

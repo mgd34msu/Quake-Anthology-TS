@@ -317,6 +317,7 @@ export class Q3SelectedSource {
       Object.assign(client, fresh, { pers, sess, ps, accuracyHits, accuracyShots }); ps.copyFrom(fresh.ps, "preserve-authority");
       for (const [index, value] of persistant.entries()) ps.persistant.set(index, value);
       ps.eventSequence = eventSequence; ps.ping = ping; ps.clientNum = entity.slot;
+      this.clientEffects.delete(entity.actor);
       this.refresh(entity);
     });
     return undefined;

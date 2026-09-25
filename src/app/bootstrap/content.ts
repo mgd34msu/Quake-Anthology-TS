@@ -1,4 +1,4 @@
-import { nativePrimaryWeaponProfile } from "../../compat/q2/native-primary-weapon-profile.ts";
+import { preparedNativePrimary } from "./simulation/q2-native-world.ts";
 import { prepareNativeQ2Map } from "./simulation/native-q2-map.ts";
 import { prepareApplicationMods } from "./mod-selection.ts";
 import { prepareApplicationQvmGrapple, type PreparedQvmGrapple } from "./qvm-grapple-selection.ts";
@@ -446,8 +446,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       const product = catalog.product(recipe.map.entities.content);
       if (product.expectation.family !== "q2" || (module.api.kind === "q2-rerelease-game" ? product.expectation.edition !== "rerelease" : product.expectation.edition !== "classic") || recipe.execution.length !== 1
         || module.owner.provider !== recipe.map.entities.provider || module.owner.content !== recipe.map.entities.content
-        || recipe.movement.provider !== "q2:movement" || recipe.character.definition.provider !== "q2:character" || recipe.enemies.kind !== "map-defined"
-        || recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content) && nativePrimaryWeaponProfile(module.artifact.digest) === null)
+        || recipe.movement.provider !== "q2:movement" || recipe.character.definition.provider !== "q2:character" || recipe.enemies.kind !== "map-defined")
         throw new Error("Native Quake II requires edition-matching actors, movement, character and arsenal");
       continue;
     }
@@ -504,6 +503,7 @@ export async function loadApplicationContent(options: ApplicationOptions, restor
       throw new Error("Selected QVM arsenal requires complete artifact-qualified primary player, weapon, inventory, pickup and combat interfaces");
     const q2Execution = recipe.execution.find(module => module.kind === "native" && module.role === "server-game");
     const q2Prepared = presentationSource?.kind !== "unified" && q2Execution?.kind === "native" ? q2Execution.api.kind === "q2-rerelease-game" ? await prepareRereleaseGuest(q2Execution, mounts) : await prepareClassicGuest(q2Execution, mounts) : null;
+    if (q2Prepared !== null && recipe.weapons.some(weapon => weapon.provider !== recipe.map.entities.provider || weapon.content !== recipe.map.entities.content) && preparedNativePrimary(q2Prepared) === null) throw new Error("Selected native arsenal requires a complete original primary declaration");
     if (q2Prepared !== null) prepareNativeQ2Map(world, q2Prepared.execution.api.kind === "q2-rerelease-game" ? "rerelease" : "classic", options.mode);
     const loaded = new LoadedApplicationContent(catalog, recipe, world, mounts, prepared, pure, q3Prepared, q2Prepared, product.q3Product, mapSidecars.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     try { if (presentationSource === undefined) { await loaded.prepareWeaponBehaviors(); await loaded.prepareMods(); await loaded.prepareQvmGrapple(); } else if (presentationSource.kind === "unified") await loaded.prepareMods("presentation"); return loaded; }

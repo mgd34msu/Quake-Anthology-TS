@@ -11,7 +11,7 @@ import { captureRequest } from "../../../world/gameplay/authority.ts";
 import { X86AbiAdapter } from "../../../guest/abi/adapter.ts";
 import { integer, requiredPointer } from "../../../guest/runtime/common/memory.ts";
 import { rereleaseAbi } from "./api.ts";
-import { rereleaseDamageSignature, rereleaseMonsterDamage as offsets } from "./native-entries.ts";
+import { rereleaseDamageSignature } from "./native-entries.ts";
 import { RereleaseSourceEdict } from "./source-state.ts";
 import type { RereleaseQ2GuestHost } from "./host.ts";
 import type { RereleaseForeignDamageServices } from "./foreign-actors.ts";
@@ -41,7 +41,7 @@ export class RereleaseDeferredDamage {
   constructor(readonly host: RereleaseQ2GuestHost, readonly services: RereleaseForeignDamageServices,
     readonly currentRequest: (actor: ActorId) => DamageRequest | null, readonly intercepted: () => boolean) {
     const { callbacks, cpu } = host.module.options.runner.options, adapter = new X86AbiAdapter(rereleaseAbi);
-    const entries = host.options.nativeEntries; if (entries === undefined) throw new Error("Missing retail native entries");
+    const entries = host.options.nativeEntries; if (entries === undefined) throw new Error("Missing declared native entries");
     this.#removeEntry = callbacks.observeEntry(entries.damage, () => {
       if (intercepted()) return;
       const args = adapter.arguments(cpu, rereleaseDamageSignature), stack = cpu.state.registers.read("rsp", 64);
@@ -60,10 +60,10 @@ export class RereleaseDeferredDamage {
       const view = host.module.entities().fromPointer(address), actor = host.actor(view);
       const entry = actor === null ? undefined : this.#tracked.get(actor.id);
       if (entry === undefined || !this.#valid(entry) || entry.pending === null) return;
-      const memory = host.module.memory, blood = memory.readInt32(this.#at(view, offsets.blood));
+      const memory = host.module.memory, blood = memory.readInt32(this.#at(view, this.host.module.requireWorldProfile().monster.blood));
       if (blood === 0) return;
       const pending = entry.pending; entry.pending = null;
-      host.options.engine.combat.sourceReaction({ ...pending, knockback: memory.readInt32(this.#at(view, offsets.knockback)), point: this.#point(view) },
+      host.options.engine.combat.sourceReaction({ ...pending, knockback: memory.readInt32(this.#at(view, this.host.module.requireWorldProfile().monster.knockback)), point: this.#point(view) },
         { reaction: new RereleaseSourceEdict(view, host.module).health <= 0 ? "death" : "pain", appliedDamage: blood });
     });
   }
@@ -80,20 +80,20 @@ export class RereleaseDeferredDamage {
     const entry: Tracked = { actor, view, generation: source.generation(), remove: [], pending: null };
     this.#tracked.set(actor.id, entry);
     const { memory } = this.host.module;
-    entry.remove.push(memory.observeWrites(this.#at(view, offsets.mod + 2), 1, () => {
+    entry.remove.push(memory.observeWrites(this.#at(view, this.host.module.requireWorldProfile().monster.mod + 2), 1, () => {
       if (!this.#valid(entry)) { this.release(actor); return; }
       const stack = this.host.module.options.runner.options.cpu.state.registers.read("rsp", 64);
       const call = [...this.#calls].reverse().find(value => value.stack >= stack && value.request.target === actor.id);
       if (call === undefined) throw new Error("Native monster accumulation has no damage call provenance");
       entry.pending = call.request;
     }));
-    entry.remove.push(memory.observeWrites(this.#at(view, offsets.blood), 4, () => {
-      if (memory.readInt32(this.#at(view, offsets.blood)) === 0) entry.pending = null;
+    entry.remove.push(memory.observeWrites(this.#at(view, this.host.module.requireWorldProfile().monster.blood), 4, () => {
+      if (memory.readInt32(this.#at(view, this.host.module.requireWorldProfile().monster.blood)) === 0) entry.pending = null;
     }));
   }
   #point(view: RawEntityView): Vec3 {
     const memory = this.host.module.memory;
-    return { x: memory.readFloat32(this.#at(view, offsets.point)), y: memory.readFloat32(this.#at(view, offsets.point + 4)), z: memory.readFloat32(this.#at(view, offsets.point + 8)) };
+    return { x: memory.readFloat32(this.#at(view, this.host.module.requireWorldProfile().monster.point)), y: memory.readFloat32(this.#at(view, this.host.module.requireWorldProfile().monster.point + 4)), z: memory.readFloat32(this.#at(view, this.host.module.requireWorldProfile().monster.point + 8)) };
   }
   #pointerSlot(view: RawEntityView, offset: number): number {
     const address = this.host.module.memory.readPointer(this.#at(view, offset));
@@ -152,8 +152,8 @@ export class RereleaseDeferredDamage {
         if (actor != null) references.push({ actor: { slot: actor.slot, generation: actor.generation }, reference: this.saveActor(actor) });
       }
       saved.push({ target: this.saveActor(target), attack: saveQ2Attack(attack), references, request: values,
-        blood: memory.readInt32(this.#at(entry.view, offsets.blood)), knockback: memory.readInt32(this.#at(entry.view, offsets.knockback)), point: this.#point(entry.view),
-        mod: [...memory.copy(this.#at(entry.view, offsets.mod), 3)], attackerSlot: this.#pointerSlot(entry.view, offsets.attacker), inflictorSlot: this.#pointerSlot(entry.view, offsets.inflictor) });
+        blood: memory.readInt32(this.#at(entry.view, this.host.module.requireWorldProfile().monster.blood)), knockback: memory.readInt32(this.#at(entry.view, this.host.module.requireWorldProfile().monster.knockback)), point: this.#point(entry.view),
+        mod: [...memory.copy(this.#at(entry.view, this.host.module.requireWorldProfile().monster.mod), 3)], attackerSlot: this.#pointerSlot(entry.view, this.host.module.requireWorldProfile().monster.attacker), inflictorSlot: this.#pointerSlot(entry.view, this.host.module.requireWorldProfile().monster.inflictor) });
     }
     return saved;
   }
@@ -163,12 +163,12 @@ export class RereleaseDeferredDamage {
       const target = this.restoreActor(state.target, domain), source = this.host.options.engine.actors.sourceOf(target);
       if (source === null) throw new Error("Saved monster has no native source slot");
       const view = this.host.module.entities().atSlot(source.slot);
-      memory.writePointer(this.#at(view, offsets.attacker), this.host.module.entities().atSlot(state.attackerSlot).address);
-      memory.writePointer(this.#at(view, offsets.inflictor), this.host.module.entities().atSlot(state.inflictorSlot).address);
-      memory.writeInt32(this.#at(view, offsets.blood), state.blood); memory.writeInt32(this.#at(view, offsets.knockback), state.knockback);
-      [state.point.x, state.point.y, state.point.z].forEach((value, index) => memory.writeFloat32(this.#at(view, offsets.point + index * 4), value));
+      memory.writePointer(this.#at(view, this.host.module.requireWorldProfile().monster.attacker), this.host.module.entities().atSlot(state.attackerSlot).address);
+      memory.writePointer(this.#at(view, this.host.module.requireWorldProfile().monster.inflictor), this.host.module.entities().atSlot(state.inflictorSlot).address);
+      memory.writeInt32(this.#at(view, this.host.module.requireWorldProfile().monster.blood), state.blood); memory.writeInt32(this.#at(view, this.host.module.requireWorldProfile().monster.knockback), state.knockback);
+      [state.point.x, state.point.y, state.point.z].forEach((value, index) => memory.writeFloat32(this.#at(view, this.host.module.requireWorldProfile().monster.point + index * 4), value));
       if (state.mod.length !== 3) throw new Error("Invalid saved native monster mod_t");
-      memory.write(this.#at(view, offsets.mod), new Uint8Array(state.mod));
+      memory.write(this.#at(view, this.host.module.requireWorldProfile().monster.mod), new Uint8Array(state.mod));
       this.track(view); const entry = this.#tracked.get(target); if (entry === undefined) throw new Error("Saved pending damage target is not a monster");
       const attack = restoreQ2Attack(state.attack, actor => {
         const reference = state.references.find(value => value.actor.slot === actor.slot && value.actor.generation === actor.generation);

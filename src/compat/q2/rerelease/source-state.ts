@@ -10,7 +10,7 @@ import { nativeCauseFromCanonical } from "../../../content/q2/missionpacks/damag
 import type { BodyStateBinding } from "../../../world/actors/body.ts";
 import type { InventoryStateBinding } from "../../../world/gameplay/inventory.ts";
 import type { CombatStateBinding, PowerArmorCellBinding } from "../../../world/gameplay/authority.ts";
-import { fieldOffset, privateEdictPrefixLayout } from "./layouts.ts";
+import { fieldOffset } from "./layouts.ts";
 import type { RereleaseClientProfile } from "./client-profile.ts";
 import { signature } from "./api.ts";
 import { guestBool, guestInt, guestPointer } from "./module.ts";
@@ -70,20 +70,21 @@ export class RereleaseSourceClient {
       },
     };
   }
-  /** IT_AMMO_CELLS=30: armor and ammunition bind this same native int32. */
+  /** Armor and ammunition bind the same declared native counter. */
   powerArmorCells(): PowerArmorCellBinding {
-    return { read: () => this.module.memory.readInt32(this.#item(30)), write: count => {
+    const index = this.module.requireWorldProfile().armor.cellsIndex;
+    return { read: () => this.module.memory.readInt32(this.#item(index)), write: count => {
       if (!Number.isSafeInteger(count) || count < -0x80000000 || count > 0x7fffffff) throw new RangeError("Native power armor cell count exceeds int32");
-      this.module.memory.writeInt32(this.#item(30), count); return undefined;
+      this.module.memory.writeInt32(this.#item(index), count); return undefined;
     } };
   }
 }
 /** Explicitly selected source layout; no inference from the public server mirrors. */
 export class RereleaseSourceEdict {
   constructor(readonly raw: RawEntityView, readonly module: RereleaseGuestModule) {
-    if (raw.strideBytes < privateEdictPrefixLayout.byteLength) throw new Error("Rerelease edict does not contain the selected source-private prefix");
+    if (raw.strideBytes < module.requireWorldProfile().edict.byteLength) throw new Error("Rerelease edict does not contain the selected source-private prefix");
   }
-  at(name: string): GuestAddress { return this.module.memory.offset(this.raw.address, BigInt(fieldOffset(privateEdictPrefixLayout, name))); }
+  at(name: string): GuestAddress { return this.module.memory.offset(this.raw.address, BigInt(fieldOffset(this.module.requireWorldProfile().edict, name))); }
   generation(): number { return this.module.memory.readInt32(this.at("spawn_count")); }
   get health(): number { return this.module.memory.readInt32(this.at("health")); }
   set health(value: number) { this.module.memory.writeInt32(this.at("health"), value); }

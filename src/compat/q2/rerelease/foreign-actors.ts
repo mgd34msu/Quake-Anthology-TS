@@ -10,7 +10,7 @@ import type { SourceDamageResult, SourceArmorStage } from "../../../world/gamepl
 import { isDeepStrictEqual } from "node:util";
 import { RereleaseSourceEdict } from "./source-state.ts";
 import { RereleaseSourceClient } from "./source-state.ts";
-import { retailRereleaseClientProfile } from "./client-profile.ts";
+import type { RereleaseWorldLocation } from "./world-profile.ts";
 import { guestInt, guestPointer, resultPointer } from "./module.ts";
 import { rereleaseDamageSignature, rereleasePowerArmorSignature, rereleaseFreeSignature, rereleaseModLayout, rereleaseSpawnSignature } from "./native-entries.ts";
 import type { RereleaseNativeEntries } from "./native-entries.ts";
@@ -137,29 +137,47 @@ export class RereleaseForeignActors {
       const actor = this.host.actor(module.entities().fromPointer(address)); return actor !== null && this.#armorBindings.get(actor)?.stages.powered !== undefined;
     }));
     this.#armorHooks.push(module.options.runner.bindInlineRegion(this.entries.regularArmor.entry, this.entries.regularArmor.join, rereleaseDamageSignature.abi, continuation => {
-      const address = memory.pointer(cpu.state.registers.read("rdi", 64));
+      const profile = module.requireWorldProfile().regularArmor, sourceStack = memory.pointer(stack());
+      if (sourceStack === null) throw new Error("Native regular stage has no source stack");
+      const read = (location: RereleaseWorldLocation): bigint => {
+        if (location.kind === "register") {
+          const value = cpu.state.registers.read(location.register, location.storage === "pointer" ? 64 : 32);
+          return location.storage === "int32" ? BigInt.asIntN(32, value) : value;
+        }
+        const address = memory.offset(sourceStack, BigInt(location.offset));
+        return location.storage === "pointer" ? memory.readUint64(address) : BigInt(location.storage === "int32" ? memory.readInt32(address) : memory.readUint32(address));
+      };
+      const write = (location: RereleaseWorldLocation, value: bigint): void => {
+        if (location.kind === "register") { cpu.state.registers.write(location.register, location.storage === "pointer" ? 64 : 32, value); return; }
+        const address = memory.offset(sourceStack, BigInt(location.offset));
+        if (location.storage === "pointer") memory.writeUint64(address, value);
+        else if (location.storage === "int32") memory.writeInt32(address, Number(BigInt.asIntN(32, value)));
+        else memory.writeUint32(address, Number(BigInt.asUintN(32, value)));
+      };
+      const address = memory.pointer(read(profile.target));
       const actor = address === null ? null : this.host.actor(module.entities().fromPointer(address));
       const intercept = actor === null ? undefined : this.#armorBindings.get(actor)?.stages.regular;
       if (intercept === undefined) return continuation.execute();
       const frame = this.#damageFrames.at(-1);
       if (actor === null || frame === undefined || !frame.request.target.equals(actor.id)) throw new Error("Native regular stage has no active source damage request");
-      const sourceStack = memory.pointer(stack()), point = memory.pointer(cpu.state.registers.read("r13", 64));
-      if (sourceStack === null || point === null) throw new Error("Native regular stage has no source arguments");
-      const normal = memory.readPointer(memory.offset(sourceStack, 0x108n));
+      const point = memory.pointer(read(profile.point));
+      if (point === null) throw new Error("Native regular stage has no source arguments");
+      const normal = memory.pointer(read(profile.normal));
       if (normal === null) throw new Error("Native regular stage has no source normal");
+      const repair = profile.repair.map(value => ({ target: value.target, value: read(value.source) }));
       let executed = false;
-      const saved = intercept({ request: frame.request, amount: Number(BigInt.asIntN(32, cpu.state.registers.read("r14", 32))),
+      const saved = intercept({ request: frame.request, amount: Number(read(profile.amount)),
         geometry: { direction: frame.request.direction, point: this.#vector(point), normal: this.#vector(normal) },
-        flags: q2NativeArmorFlags(memory.readInt32(memory.offset(sourceStack, 0x120n))) }, () => {
+        flags: q2NativeArmorFlags(Number(read(profile.flags))) }, () => {
         continuation.execute(); executed = true;
-        return Number(BigInt.asIntN(32, cpu.state.registers.read("r12", 32)));
+        return Number(read(profile.result));
       });
       if (!this.host.options.engine.actors.isLive(actor.id)) throw new RemovedNativeDamage(frame.request);
       if (!executed) {
         continuation.skip();
-        cpu.state.registers.write("rbx", 32, BigInt(memory.readUint32(memory.offset(sourceStack, 0xe0n))));
+        for (const value of repair) write(value.target, value.value);
       }
-      cpu.state.registers.write("r12", 32, BigInt(Math.trunc(saved)));
+      write(profile.result, BigInt(Math.trunc(saved)));
       return undefined;
     }));
   }
@@ -240,7 +258,7 @@ export class RereleaseForeignActors {
   #incoming(args: readonly GuestCallValue[]): void {
     const target = this.#actor(requiredPointer(args, 0)), inflictor = this.#actor(requiredPointer(args, 1)), attacker = this.#actor(requiredPointer(args, 2));
     const mod = args[9];
-    if (mod?.kind !== "aggregate" || mod.bytes.length !== 3) throw new Error("Native damage requires the retail mod_t ABI");
+    if (mod?.kind !== "aggregate" || mod.bytes.length !== 3) throw new Error("Native damage requires the API2023 mod_t ABI");
     const id = mod.bytes[0]; if (id === undefined) throw new Error("Missing native damage ID");
     const native: Q2NativeCause = { edition: "rerelease", id, friendlyFire: mod.bytes[1] !== 0, noPointLoss: mod.bytes[2] !== 0 };
     const canonical = canonicalCauseFromNative(native); if (canonical === null) throw new Error("Unclassified native damage cause");
@@ -290,8 +308,8 @@ export class RereleaseForeignActors {
           observer.stored({ kind: "source-velocity", before, after, movementProvider: request.attack.movementProvider });
         }));
         if (source.client !== null) {
-          const client = new RereleaseSourceClient(source.client, module, retailRereleaseClientProfile);
-          removeWrites.push(memory.observeWrites(client.at("pers.inventory"), retailRereleaseClientProfile.inventoryCount * 4, () => {
+          const client = new RereleaseSourceClient(source.client, module, module.requireWorldProfile().client);
+          removeWrites.push(memory.observeWrites(client.at("pers.inventory"), module.requireWorldProfile().client.inventoryCount * 4, () => {
             if (!this.#publishesInventory(frame)) return;
             const after = readArmor();
             const before = armor; armor = after;

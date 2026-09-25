@@ -31,6 +31,7 @@ import type { RereleaseForeignDamageServices, RereleaseProjectionSave } from "./
 import type { RereleaseDeferredDamageSave } from "./deferred-damage.ts";
 import type { RereleaseNativeEntries } from "./native-entries.ts";
 import type { OriginalPickupAdmission, OriginalPickupOffer } from "../../../contracts/original-pickups.ts";
+import type { NativePickupProfile } from "../native-pickups.ts";
 import { NativePrimaryPickups, type NativePickupSupply, type NativePickupSupplyEvaluation } from "../native-pickups.ts";
 import { rereleasePickupProfile } from "./pickup-profile.ts";
 
@@ -66,7 +67,7 @@ export interface RereleaseSpatialServices {
   linkMetadata(actor: OwnedActor, view: RawEntityView): { readonly area: number; readonly area2: number; readonly networkSolid: number };
 }
 export interface RereleaseQ2HostOptions extends Omit<RereleaseModuleOptions, "invokeImport" | "actorAtSlot"> {
-  readonly pickups?: { readonly admission: OriginalPickupAdmission; readonly imageBase: GuestAddress };
+  readonly pickups?: { readonly admission: OriginalPickupAdmission; readonly imageBase: GuestAddress; readonly profile?: NativePickupProfile };
   readonly importBoundary?: (name: string, arguments_: readonly GuestCallValue[], invoke: () => GuestCallResult) => GuestCallResult;
   readonly engine: Pick<Q2FoundationHost, "actors" | "bodies" | "callbacks" | "combat" | "inventory" | "trace" | "pointContents" | "setAreaPortal" | "setSolid" | "inlineModelBounds" | "worldActor">;
   readonly services: RereleaseCoreServices;
@@ -122,7 +123,7 @@ export class RereleaseQ2GuestHost {
     if (options.foreignDamage !== undefined && options.nativeEntries === undefined) throw new Error("Foreign native damage requires verified entry points");
     this.foreignActors = options.foreignDamage === undefined || options.nativeEntries === undefined ? null : new RereleaseForeignActors(this, options.nativeEntries, options.foreignDamage);
     this.#unsubscribe = options.engine.actors.onRelease(actor => { try { this.foreignActors?.released(actor); } finally { this.#botEntities.delete(actor.id); } return undefined; });
-    const profile = rereleasePickupProfile(this.module.memory.module.digest);
+    const profile = options.pickups?.profile ?? rereleasePickupProfile(this.module.memory.module.digest);
     this.#pickups = options.pickups === undefined || profile === null ? null : new NativePrimaryPickups({ memory: this.module.memory, runner: options.runner,
       invoke: (target, signature, values) => this.module.invoke(target, signature, values), record: address => this.module.entities().fromPointer(address),
       current: record => this.#retiredInputClients.has(record.slot) ? null : this.options.engine.actors.atSource(this.module.memory.module.id, record.slot)?.id ?? null,
