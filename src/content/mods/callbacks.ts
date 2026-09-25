@@ -90,9 +90,14 @@ export function readQuakeCModDeclaration(reader: SaveReader): ModCallbackDeclara
     ...(reader.field("protection").value === undefined ? {} : { protection: reader.field("protection").list(protection) }),
     ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(entry => readModPickupRule(entry, sourceCall)) }),
     ...(reader.field("items").value === undefined ? {} : { items: items(reader.field("items")) }),
-    ...(combat.value === undefined ? {} : { combat: { damage: sourceCall(combat.field("damage")),
-      ...(combat.field("armorStage").value === undefined ? {} : { armorStage: armorStage(combat.field("armorStage")) }),
-      ...(combat.field("emptyArmor").value === undefined ? {} : { emptyArmor: { item: combat.field("emptyArmor").field("item").choice("q1:item_armor1", "q1:item_armor2", "q1:item_armorInv"), absorption: combat.field("emptyArmor").field("absorption").finite() } }) } }) };
+    ...(combat.value === undefined ? {} : { combat: readQcCombat(combat) }) };
+
+}
+
+export function readQcCombat(reader: SaveReader): NonNullable<ModCallbackDeclaration["combat"]> {
+  return { damage: sourceCall(reader.field("damage")),
+    ...(reader.field("armorStage").value === undefined ? {} : { armorStage: armorStage(reader.field("armorStage")) }),
+    ...(reader.field("emptyArmor").value === undefined ? {} : { emptyArmor: { item: reader.field("emptyArmor").field("item").choice("q1:item_armor1", "q1:item_armor2", "q1:item_armorInv"), absorption: reader.field("emptyArmor").field("absorption").finite() } }) };
 }
 
 function items(reader: SaveReader): ModQcItems {

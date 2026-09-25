@@ -1,3 +1,6 @@
+import { qcDamageInputs, validateQcModCombat } from "../../../compat/qc/mod-combat.ts";
+import { withQcSourceCall } from "../../../compat/qc/source-call.ts";
+import type { ModCallbackDeclaration } from "../../../contracts/mod-callbacks.ts";
 import type { QcPrimaryWeaponStageDeclaration } from "../../../contracts/qc-weapon-stage.ts";
 import { isDeepStrictEqual } from "node:util";
 import { qcDeclaredPickupStages } from "../../../content/q1/quakec/pickup-callers.ts";
@@ -97,6 +100,7 @@ function nativeWeapons(program: QcProgram): readonly NativeWeapon[] {
     { item: weaponItem("hipnotic:proximity"), label: q1WeaponDisplayName("hipnotic:proximity"), bit: 65536, impulse: 6, via: 16 }];
 }
 export interface PreparedQuakeCSource {
+  readonly combatDeclaration?: NonNullable<ModCallbackDeclaration["combat"]>;
   readonly messageDialect?: RereleaseMessages;
   readonly weaponDeclaration?: QcPrimaryWeaponStageDeclaration;
   readonly weaponStage?: QcWeaponStage | null;
@@ -117,10 +121,11 @@ export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: Mo
   if (execution.api.kind !== program.api.kind || execution.api.programVersion !== program.api.programVersion || execution.api.systemCrc !== program.api.systemCrc)
     throw new Error("Shared QuakeC artifact API differs from the selected execution");
   const compatibility = await mounts.open("quakec-compatibility.json");
-  const { messageDialect, pickupCallers, weaponStage: weaponDeclaration } = readQuakeCCompatibility(compatibility?.bytes ?? null, program.digest);
+  const { messageDialect, pickupCallers, weaponStage: weaponDeclaration, combat: combatDeclaration } = readQuakeCCompatibility(compatibility?.bytes ?? null, program.digest);
+  if (combatDeclaration !== undefined) validateQcModCombat(program, combatDeclaration);
   const declaredPickups = qcDeclaredPickupStages(program, pickupCallers), weaponStage = qcWeaponStage(program, weaponDeclaration);
   if (program.api.kind === "q1-quakeworld" && messageDialect !== "known-retail") throw new Error("Private NetQuake messages cannot be selected for QuakeWorld");
-  return { execution, program, messageDialect, declaredPickups, weaponStage, ...(weaponDeclaration === undefined ? {} : { weaponDeclaration }), resources: await prepareQuakeCResources(program, resourceMounts, entityText) };
+  return { execution, program, messageDialect, declaredPickups, weaponStage, ...(combatDeclaration === undefined ? {} : { combatDeclaration }), ...(weaponDeclaration === undefined ? {} : { weaponDeclaration }), resources: await prepareQuakeCResources(program, resourceMounts, entityText) };
 }
 
 export async function prepareQuakeCResources(program: QcProgram, mounts: MountedContent, entityText = ""): Promise<PreparedQuakeCSource["resources"]> {
@@ -343,6 +348,7 @@ export class QuakeCSource {
     this.attacks = new Id1SynchronousAttacks(this.worldHost.options, () => this.machine);
     this.projectiles = new Id1ProjectileAttacks(this.worldHost.options, () => this.machine);
     this.environment = new Id1Environment(this.worldHost.options, () => this.machine);
+    if (prepared.combatDeclaration !== undefined) validateQcModCombat(prepared.program, prepared.combatDeclaration);
     const damage = new Id1DamageBinding(this.worldHost.options, options.combat, () => this.machine, call => {
       const incoming = this.incomingDamage.at(-1);
       if (incoming !== undefined && !incoming.entered) { incoming.entered = true; return incoming.request; }
@@ -352,7 +358,7 @@ export class QuakeCSource {
         actor: reference => { const slot = this.entities.slot(reference), actor = this.borrowed.actor(slot) ?? this.slots.at(slot); if (actor === null || !options.actors.isLive(actor.id)) throw new Error("QC damage references a free source actor"); return actor.id; },
         reference: actor => actor === null ? this.entities.reference(0) : this.reference(actor),
         completed: (request, outcome) => { const incoming = this.incomingDamage.at(-1); if (incoming?.request === request) incoming.outcome = outcome; return undefined; },
-      });
+      }, prepared.combatDeclaration?.armorStage);
     this.damage = damage;
     const pickups = new Id1PickupBinding(this.worldHost.options, options.pickups, () => this.machine, actor => options.primaryWeaponSelected?.(actor.id) ?? true,
       options.ownsWeapon === undefined ? undefined : (actor, item) => options.ownsWeapon?.(actor.id, item) ?? false, options.pickupPolicy, prepared.declaredPickups);
@@ -447,7 +453,7 @@ export class QuakeCSource {
   }
   private checkpointHost(): QcExecutorHost {
     return { checkpoint: () => ({ state: { module: this.module, format: "quakec:source-v1", bytes: encodeCheckpointValue({
-      kind: this.kind, messageDialect: this.prepared.messageDialect ?? "known-retail", pickupCallers: this.prepared.declaredPickups ?? [], weaponStage: this.prepared.weaponDeclaration ?? null, maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
+      kind: this.kind, messageDialect: this.prepared.messageDialect ?? "known-retail", pickupCallers: this.prepared.declaredPickups ?? [], weaponStage: this.prepared.weaponDeclaration ?? null, combat: this.prepared.combatDeclaration ?? null, maxClients: this.options.maxClients, reservedClientSlots: this.reservedClientSlots, currentTime: this.currentTime,
       changeLevelIssued: this.changeLevelIssued, spawning: this.spawning, activeClients: [...this.activeClients].map(savedQcActor),
       borrowedActors: this.borrowed.checkpoint(),
       pendingWeapons: [...this.pendingWeapons].map(([actor, pending]) => ({ actor: savedQcActor(actor), weapon: pending.weapon.item, following: pending.following })),
@@ -478,6 +484,8 @@ export class QuakeCSource {
     if (restore === undefined) return reader.fail("missing restore clients");
     const dialect = reader.field("messageDialect");
     if ((dialect.value === undefined ? "known-retail" : dialect.choice("known-retail", "quake-1-re-ts-private")) !== (this.prepared.messageDialect ?? "known-retail")) return dialect.fail("QuakeC message dialect changed");
+    const combat = reader.field("combat");
+    if (!isDeepStrictEqual(combat.value ?? null, this.prepared.combatDeclaration ?? null)) return combat.fail("QuakeC combat declaration changed");
     const weaponStage = reader.field("weaponStage");
     if (!isDeepStrictEqual(weaponStage.value ?? null, this.prepared.weaponDeclaration ?? null)) return weaponStage.fail("QuakeC weapon stage declaration changed");
     const pickups = reader.field("pickupCallers");
@@ -1252,7 +1260,7 @@ export class QuakeCSource {
   }
   private applySourceDamage(request: DamageRequest): DamageOutcome {
     const damage = id1ProgramBinding(this.prepared.program).damage;
-    if (damage.kind === "calls" && damage.parameters.length !== 4) throw new Error("QC incoming damage requires its qualified four-argument source ABI");
+    if (this.prepared.combatDeclaration === undefined && damage.kind === "calls" && damage.parameters.length !== 4) throw new Error("QC incoming damage requires its qualified four-argument source ABI");
     const vm = this.machine;
     if (!Number.isFinite(Math.fround(request.amount))) throw new RangeError("Incoming QC damage must fit its source binary32 ABI");
     const target = this.reference(request.target), attacker = request.attack.attacker === null ? 0 : this.reference(request.attack.attacker),
@@ -1263,8 +1271,13 @@ export class QuakeCSource {
     this.incomingDamage.push(entry);
     try {
       vm.globals.setInt(self, inflictor); vm.globals.setInt(other, target); vm.globals.setFloat(time, this.currentTime);
-      vm.globals.setInt(4, target); vm.globals.setInt(7, inflictor); vm.globals.setInt(10, attacker); vm.globals.setFloat(13, request.amount);
-      vm.execute(damage.index, 4);
+      const declaration = this.prepared.combatDeclaration;
+      if (declaration === undefined) {
+        vm.globals.setInt(4, target); vm.globals.setInt(7, inflictor); vm.globals.setInt(10, attacker); vm.globals.setFloat(13, request.amount);
+        vm.execute(damage.index, 4);
+      } else withQcSourceCall(vm, declaration.damage, qcDamageInputs(request, this.currentTime), actor => actor === null ? 0 : this.reference(actor), count => {
+        vm.execute(damage.index, count); return vm.globals.float(1);
+      });
       if (entry.outcome === null) throw new Error("Incoming original QC damage did not complete its authority boundary");
       return entry.outcome;
     } finally {
@@ -1274,7 +1287,7 @@ export class QuakeCSource {
   }
   private admit(actor: OwnedActor, slot: number): undefined {
     const words = this.entities.at(slot), poweredStage = this.damage.protectionStage(actor, "powered"), regularStage = this.damage.protectionStage(actor, "regular"), binding = id1ProgramBinding(this.prepared.program);
-    const emptyRegularArmor = qcEmptyArmor(this.prepared.program);
+    const emptyRegularArmor = qcEmptyArmor(this.prepared.program, this.prepared.combatDeclaration?.emptyArmor);
     this.options.combat.bind(actor, {
       ...(emptyRegularArmor === undefined ? {} : { emptyRegularArmor }),
       sourceDamage: request => this.applySourceDamage(request),

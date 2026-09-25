@@ -411,3 +411,60 @@ test("standalone QC regions reject a caller local read through nested helpers", 
   expect(stage?.region.replaceable).toBe(true);
   expect(stage?.region.standalone).toBeUndefined();
 });
+
+
+test("primary Copper declaration preserves five-argument damage, borrowed armor and saved identity", async () => {
+  const { Application } = await import("../../../src/app/bootstrap/application.ts");
+  const { parseApplicationCommand } = await import("../../../src/app/bootstrap/options.ts");
+  const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
+  const { validateQcModCombat } = await import("../../../src/compat/qc/mod-combat.ts");
+  const { mkdtemp, cp, mkdir, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "qc-primary-combat-")), user = join(root, "content"), mod = join(user, "q1/rerelease/copper");
+  let app: import("../../../src/app/bootstrap/application.ts").Application | null = null;
+  try {
+    await mkdir(mod, { recursive: true });
+    await cp("/home/buzzkill/.local/share/quake-typescript/content/q1/rerelease/copper", mod, { recursive: true });
+    const program = loadQcProgram(await Bun.file(copper).bytes()), raw = { version: 1, artifactDigest: program.digest, combat: {
+      damage: { function: "T_Damage", arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" },
+        { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }, { kind: "float", value: 0 }], globals: [{ name: "time", value: { kind: "input", name: "time" } }] },
+      armorStage: copperStage(program), emptyArmor: { item: "q1:item_armorInv", absorption: 0.8 },
+    } };
+    const compatibility = join(mod, "quakec-compatibility.json"); await Bun.write(compatibility, JSON.stringify(raw));
+    const declaration = readQuakeCCompatibility(await Bun.file(compatibility).bytes(), program.digest).combat;
+    if (declaration === undefined) throw new Error("Missing primary combat declaration");
+    validateQcModCombat(program, declaration);
+    expect(() => validateQcModCombat(program, { ...declaration, damage: { ...declaration.damage, arguments: declaration.damage.arguments.slice(0, 4) } })).toThrow("signature");
+    expect(() => validateQcModCombat(program, { ...declaration, damage: { ...declaration.damage, arguments: [...declaration.damage.arguments.slice(0, 4), { kind: "string", value: "untyped" }] } })).toThrow("parameter types");
+    const launch = parseApplicationCommand(["--game", "q1-rerelease-copper", "--map", "start", "--movement", "q1", "--character", "q1", "--renderer", "cpu", "--hidden", "--width", "320", "--height", "240", "--user-content-root", user]);
+    if (launch.kind !== "run") throw new Error("Missing primary Copper launch");
+    app = await Application.open(launch.options, { saveDirectory: root, print: () => undefined });
+    const source = app.simulation.quakecSource(), player = app.localPlayers[0];
+    if (source === null || player === undefined) throw new Error("Missing primary source player");
+    expect(source.prepared.combatDeclaration).toEqual(declaration);
+    const owner = app.simulation.actors.resolveOwned(player.actor), slot = source.sourceSlot(player.actor);
+    if (owner === null || slot === null) throw new Error("Missing primary source slot");
+    const words = source.entities.at(slot), field = (name: string) => source.machine.fieldOffset(name);
+    words.setFloat(field("health"), 100); words.setFloat(field("takedamage"), 2); words.setFloat(field("invincible_finished"), 0);
+    words.setFloat(field("armorvalue"), 40); words.setFloat(field("armortype"), 0.3); words.setFloat(field("items"), 8192);
+    const powered: ArmorStageInput[] = [];
+    const unbind = app.simulation.combat.bindProtection(owner, { channel: "powered", owner: "test:power", rule: "test:power", admission: { kind: "claim" }, inventoryItems: [],
+      read: () => ({ kind: "shield", cells: 40 }), validateWrite: () => undefined, write: () => undefined,
+      absorb: input => { powered.push(input); return { saved: 20 }; } });
+    const beforeArguments = source.machine.globals.bytes.slice(4, 112), request = {
+      target: player.actor, amount: 40, knockback: 0, direction: { x: 0, y: 0, z: 0 }, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, delivery: "direct",
+      attack: { sequence: 1, time: { kind: "seconds", value: source.timeSeconds }, attacker: null, inflictor: null,
+        weapon: null, weaponProvider: "q2:weapon", combatProvider: "q2:combat", inventoryProvider: "q2:inventory", movementProvider: "q1:movement", cause: { kind: "q2", meansOfDeath: 1, damageFlags: 0 } },
+    } satisfies import("../../../src/contracts/gameplay.ts").DamageRequest;
+    try {
+      expect(app.simulation.combat.apply(request).kind).toBe("committed");
+      expect(powered).toHaveLength(1); expect(words.float(field("health"))).toBe(86); expect(words.float(field("armorvalue"))).toBe(34);
+      expect(source.machine.globals.bytes.slice(4, 112)).toEqual(beforeArguments);
+    } finally { unbind(); }
+    const save = join(root, "declared.sav"); await app.saveGame(save); await app.loadGame(save);
+    expect(app.simulation.quakecSource()?.prepared.combatDeclaration).toEqual(declaration);
+    raw.combat.damage.arguments[4] = { kind: "float", value: 4 }; await Bun.write(compatibility, JSON.stringify(raw));
+    await expect(app.loadGame(save)).rejects.toThrow("QuakeC combat declaration changed");
+  } finally { await app?.close(); await rm(root, { recursive: true, force: true }); }
+}, 30000);

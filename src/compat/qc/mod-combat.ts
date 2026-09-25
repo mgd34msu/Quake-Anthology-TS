@@ -1,3 +1,4 @@
+import { validateQcSourceCall, qcSourceValueType } from "./source-call.ts";
 import { qcEmptyArmor } from "../../content/q1/quakec/armor-points.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
@@ -22,11 +23,23 @@ export function validateQcModCombat(program: QcProgram, declaration: Declaration
     const value = call.arguments[index];
     if (value?.kind !== "input" || value.name !== name) throw new Error(`QC damage argument ${index} must lower ${name}`);
   }
-  id1ProgramBinding(program);
+  const damage = id1ProgramBinding(program).damage;
+  validateQcSourceCall(program, call, new Set<ModCallbackInput>(["self", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "time"]), "combat damage");
+  if (damage.kind === "calls" && call.arguments.some((value, index) => qcSourceValueType(value) !== damage.parameters[index])) throw new Error("QC damage arguments differ from original source parameter types");
   qcEmptyArmor(program, declaration.emptyArmor);
   qcArmorStage(program, declaration.armorStage);
   for (const name of ["health", "takedamage", "flags", "invincible_finished", "armorvalue", "armortype"])
     if (program.fieldsByName.get(name)?.type !== "float") throw new Error(`QC combat requires float field ${name}`);
+}
+
+export function qcDamageInputs(request: DamageRequest, seconds: number): ReadonlyMap<ModCallbackInput, ModRuntimeValue> {
+  return new Map<ModCallbackInput, ModRuntimeValue>([
+    ["self", { kind: "actor", value: request.target }], ["attacker", { kind: "actor", value: request.attack.attacker }],
+    ["inflictor", { kind: "actor", value: request.attack.inflictor }], ["amount", { kind: "float", value: request.amount }],
+    ["knockback", { kind: "float", value: request.knockback }], ["point", { kind: "vector", value: request.point }],
+    ["direction", { kind: "vector", value: request.direction }], ["normal", { kind: "vector", value: request.normal }],
+    ["time", { kind: "float", value: seconds }],
+  ]);
 }
 
 interface QcModCombatOptions {
@@ -86,13 +99,7 @@ export class QcModCombat {
   private apply(request: DamageRequest): DamageOutcome {
     const entry: IncomingDamage = { request, entered: false, outcome: null }; this.incoming.push(entry);
     try {
-      this.options.invoke(this.options.declaration.damage, new Map<ModCallbackInput, ModRuntimeValue>([
-        ["self", { kind: "actor", value: request.target }], ["attacker", { kind: "actor", value: request.attack.attacker }],
-        ["inflictor", { kind: "actor", value: request.attack.inflictor }], ["amount", { kind: "float", value: request.amount }],
-        ["knockback", { kind: "float", value: request.knockback }], ["point", { kind: "vector", value: request.point }],
-        ["direction", { kind: "vector", value: request.direction }], ["normal", { kind: "vector", value: request.normal }],
-        ["time", { kind: "float", value: this.seconds() }],
-      ]));
+      this.options.invoke(this.options.declaration.damage, qcDamageInputs(request, this.seconds()));
       if (entry.outcome === null) throw new Error("QC damage did not complete its shared authority boundary");
       return entry.outcome;
     } finally { this.incoming.pop(); }

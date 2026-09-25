@@ -1,3 +1,4 @@
+import { validateQcSourceCall as validateCall, withQcSourceCall, writeQcSourceValue } from "./source-call.ts";
 import type { ModClientPresentationSource, ModClientPresentationFrame } from "../../world/session/mod-client-presentation.ts";
 import { quakeCLocalView } from "../../app/bootstrap/simulation/quakec-local-messages.ts";
 import type { OriginalPickupExecution } from "../../contracts/original-pickups.ts";
@@ -5,7 +6,7 @@ import type { ModuleIdentity, QuakeCCheckpoint } from "../../contracts/execution
 import type { ContentId, ResolvedResourceReference } from "../../contracts/content.ts";
 import type { Bounds } from "../../contracts/math.ts";
 import type { ActorId } from "../../contracts/identity.ts";
-import type { ModActorField, ModCallbackDeclaration, ModCallbackInput, ModCallbackValue, ModRuntimeValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
+import type { ModActorField, ModCallbackDeclaration, ModCallbackInput, ModRuntimeValue, ModSourceCall } from "../../contracts/mod-callbacks.ts";
 import type { RandomSource, RandomState } from "../../contracts/numeric.ts";
 import type { ModHostServices } from "../../world/session/mods.ts";
 import { createNumericOperations, nativeAtoi, Q1_DONOR_PROFILE } from "../../core/numeric.ts";
@@ -45,9 +46,9 @@ import { captureQcCheckpoint, restoreQcCheckpoint } from "./executor.ts";
 import type { QcExecutorHost } from "./executor.ts";
 import { QcMachine } from "./machine.ts";
 import type { QcBuiltin, QcEntityStoreObservation, QcFunctionExecution, QcInlineBoundary } from "./machine.ts";
-import { QcEntityMemory, QcWords } from "./memory.ts";
+import { QcEntityMemory } from "./memory.ts";
 import { classicQcEntityLayout } from "./profile.ts";
-import type { QcProgram, QcValueType } from "./program.ts";
+import type { QcProgram } from "./program.ts";
 
 export type QcModValue = ModRuntimeValue;
 export type QcModInputs = ReadonlyMap<ModCallbackInput, QcModValue>;
@@ -57,29 +58,6 @@ export interface QcModMedia {
   readonly resources: ReadonlyMap<string, { readonly resource: ResolvedResourceReference; readonly modelBounds: Bounds | null }>;
 }
 interface FieldBinding { readonly declaration: ModActorField; readonly offset: number; readonly words: 1 | 3; }
-function inputType(value: ModCallbackValue): QcValueType {
-  if (value.kind !== "input") return value.kind;
-  switch (value.name) {
-    case "self": case "other": case "activator": case "attacker": case "inflictor": return "entity";
-    case "point": case "direction": case "normal": case "view-angles": return "vector";
-    case "item": return "string";
-    default: return "float";
-  }
-}
-function validateCall(program: QcProgram, call: ModSourceCall, available: ReadonlySet<ModCallbackInput>, label: string): void {
-  for (const value of [...call.arguments, ...call.globals.map(global => global.value)]) if (value.kind === "input" && !available.has(value.name))
-    throw new Error(`Mod ${label} cannot read ${value.name}`);
-  const fn = program.functionNamed(call.function);
-  if (fn.index === 0 || fn.firstStatement <= 0 || fn.parameterSizes.length !== call.arguments.length
-    || fn.parameterSizes.some((size, index) => { const value = call.arguments[index]; return value === undefined || size !== (inputType(value) === "vector" ? 3 : 1); }))
-    throw new Error(`Mod callback ${call.function} has an incompatible source signature`);
-  const globals = new Set<string>();
-  for (const global of call.globals) {
-    if (globals.has(global.name) || program.globalsByName.get(global.name)?.type !== inputType(global.value))
-      throw new Error(`Mod callback global ${global.name} is duplicated or has an incompatible type`);
-    globals.add(global.name);
-  }
-}
 export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclaration): void {
   if (program.digest !== declaration.program.digest) throw new Error("Gameplay mod program differs from its declared artifact digest");
   qcProtectionRegions(program, declaration);
@@ -190,7 +168,6 @@ export function validateQcMod(program: QcProgram, declaration: ModCallbackDeclar
   }
   if (declaration.combat !== undefined) {
     validateQcModCombat(program, declaration.combat);
-    validateCall(program, declaration.combat.damage, new Set<ModCallbackInput>(["self", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "time"]), "combat damage");
   }
 }
 
@@ -560,7 +537,7 @@ export class QcModProvider {
     if (clientSlot === null) this.machine.entities.setCount(slot + 1);
     else this.machine.entities.at(slot).bytes.fill(0);
     this.projections.set(current, slot); this.actorsBySlot.set(slot, current);
-    for (const field of this.fields) if (field.declaration.binding === "constant") this.write(this.machine.entities.at(slot), field.offset, field.declaration.value);
+    for (const field of this.fields) if (field.declaration.binding === "constant") writeQcSourceValue(this.machine, this.machine.entities.at(slot), field.offset, field.declaration.value, actor => this.reference(actor));
     return this.machine.entities.reference(slot);
   }
   private releaseClientProjection(actor: ActorId): "released" | "deferred" {
@@ -720,16 +697,6 @@ export class QcModProvider {
     }
     return undefined;
   }
-  private write(words: QcWords, offset: number, value: QcModValue): void {
-    switch (value.kind) {
-      case "float": if (!Number.isFinite(Math.fround(value.value))) throw new Error("Mod callback number exceeds binary32 range"); words.setFloat(offset, value.value); break;
-      case "vector":
-        if (![value.value.x, value.value.y, value.value.z].every(component => Number.isFinite(Math.fround(component)))) throw new Error("Mod callback vector exceeds binary32 range");
-        words.setVector(offset, value.value); break;
-      case "string": words.setInt(offset, this.machine.strings.setEngine(`mod-value:${value.value}`, value.value, Math.max(128, value.value.length + 1))); break;
-      case "actor": words.setInt(offset, this.reference(value.value)); break;
-    }
-  }
   get cvars() { return this.environment.cvars; }
   bindCommands(commands: ModCommandPort): void {
     if (this.commands !== null) throw new Error("Mod commands are already bound");
@@ -745,29 +712,16 @@ export class QcModProvider {
   invoke(call: ModSourceCall, inputs: QcModInputs, region?: QcArmorStage): number {
     if (this.closed) throw new Error("Gameplay mod is closed");
     if (this.depth >= 64) throw new Error("Gameplay mod callback recursion exceeded 64 calls");
-    const resolve = (value: ModCallbackValue): QcModValue => {
-      if (value.kind !== "input") return value;
-      const input = inputs.get(value.name);
-      if (input === undefined) throw new Error(`Gameplay callback ${call.function} has no ${value.name} input`);
-      return input;
-    };
-    const args = call.arguments.map(resolve), globals = call.globals.map(global => ({ definition: this.program.globalsByName.get(global.name), value: resolve(global.value) }));
-    const staging = this.machine.globals.bytes.slice(4, 112), savedGlobals = globals.map(({ definition }) => {
-      if (definition === undefined) throw new Error("Missing validated callback global");
-      return { offset: definition.offset * 4, bytes: this.machine.globals.bytes.slice(definition.offset * 4, (definition.offset + (definition.type === "vector" ? 3 : 1)) * 4) };
-    });
     this.depth++;
     try {
-      for (const [index, value] of args.entries()) this.write(this.machine.globals, 4 + index * 3, value);
-      for (const { definition, value } of globals) if (definition !== undefined) this.write(this.machine.globals, definition.offset, value);
-      let result: number;
-      if (region === undefined) { this.machine.execute(this.program.functionNamed(call.function).index, args.length); result = this.machine.globals.float(1); }
-      else result = this.machine.executeRegion(region.region, args.length);
-      if (this.depth === 1) this.messages?.messages.flush();
-      return result;
+      return withQcSourceCall(this.machine, call, inputs, actor => this.reference(actor), count => {
+        let result: number;
+        if (region === undefined) { this.machine.execute(this.program.functionNamed(call.function).index, count); result = this.machine.globals.float(1); }
+        else result = this.machine.executeRegion(region.region, count);
+        if (this.depth === 1) this.messages?.messages.flush();
+        return result;
+      });
     } finally {
-      this.machine.globals.bytes.set(staging, 4);
-      for (const global of savedGlobals) this.machine.globals.bytes.set(global.bytes, global.offset);
       this.depth--;
       this.drainRetiredProjections();
     }
