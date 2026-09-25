@@ -84,7 +84,7 @@ export interface QvmFunctionCall extends Pick<QvmSyscall, "invoke" | "invokeAsyn
   proceedAsync(): Promise<number>;
 }
 export type QvmFunctionHook = (call: QvmFunctionCall) => QvmSystemCallResult;
-export type QvmFunctionResolver = (instructionIndex: number, firstArgument: number) => QvmFunctionHook | undefined;
+export type QvmFunctionResolver = (instructionIndex: number, firstArgument: number, words: DataView) => QvmFunctionHook | undefined;
 export interface QvmFunctionObservation extends Pick<QvmSyscall, "invoke" | "invokeAsync" | "cancelFunction"> {
   readonly instructionIndex: number;
   argument(index: number): number;
@@ -1013,7 +1013,7 @@ export class QvmInterpreter {
             if (target >= 0) {
               if (counter !== null && !counter.functions.has(target)) throw new Error("QVM counter evaluation called an undeclared source function");
               const binding = counter === null ? this.functionHooks?.get(target) : undefined, observers = counter === null ? this.functionObservers?.get(target) : undefined;
-              const hook = counter === null ? binding?.hook ?? this.functionResolver?.resolve(target, this.readWord(sp + 8)) : undefined;
+              const hook = counter === null ? binding?.hook ?? this.functionResolver?.resolve(target, this.readWord(sp + 8), this.addressSpace.dataView(sp + 8, this.sourceArgumentBytes(this.sourceInstruction(returnPC - 1)))) : undefined;
               if (binding === undefined && hook !== undefined && this.codeWord(this.targetPC(target)) !== QvmOpcode.OP_ENTER)
                 throw new Error("QVM resolver requires a function entry instruction");
               if (hook === undefined && observers === undefined) { returns?.push(sp, returnPC); pc = this.targetPC(target); }

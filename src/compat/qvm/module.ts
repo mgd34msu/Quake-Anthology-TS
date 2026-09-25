@@ -140,8 +140,8 @@ export class QvmModule implements GuestExecutor {
   bindFunctionResolver(resolve: QvmFunctionResolver): () => void {
     this.live();
     const wrappers = new WeakMap<QvmFunctionHook, QvmFunctionHook>();
-    return this.interpreter.bindFunctionResolver((entry, firstArgument) => {
-      const hook = resolve(entry, firstArgument); if (hook === undefined) return undefined;
+    return this.interpreter.bindFunctionResolver((entry, firstArgument, words) => {
+      const hook = resolve(entry, firstArgument, words); if (hook === undefined) return undefined;
       let wrapped = wrappers.get(hook);
       if (wrapped === undefined) {
         wrapped = call => {

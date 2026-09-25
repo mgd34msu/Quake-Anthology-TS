@@ -1,3 +1,6 @@
+import { QvmModActors, validateQvmModActors } from "../../../src/compat/qvm/mod-actors.ts";
+import { readQvmModDeclaration } from "../../../src/content/mods/qvm-callbacks.ts";
+import { SharedInventoryTable } from "../../../src/world/gameplay/inventory.ts";
 import { float32ToBits } from "../../../src/core/numeric.ts";
 import { QvmGame } from "../../../src/compat/qvm/game.ts";
 import { QvmCombatBindings } from "../../../src/compat/qvm/game-combat-binding.ts";
@@ -839,3 +842,84 @@ for (const semantics of ["interpreted", "compiled"] satisfies readonly import(".
     expect(small.invoke(qvmArguments([]))).toBe(1);
   });
 }
+
+test("declared component combat retains private damage and reaction words through shared composition", () => {
+  const operations: Operation[] = [[QvmOpcode.OP_ENTER, 8], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 8]];
+  const sourceEntry = operations.length; operations.push([QvmOpcode.OP_ENTER, 64]);
+  for (let index = 0; index < 12; index++) operations.push([QvmOpcode.OP_LOCAL, 72 + index * 4], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 8 + index * 4]);
+  const damageEntryWord = operations.length; operations.push([QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_CALL], [QvmOpcode.OP_LEAVE, 64]);
+  const pain = operations.length;
+  operations.push([QvmOpcode.OP_ENTER, 16]);
+  for (const [argument, address] of [[0, 1200], [1, 1204], [2, 1208], [3, 1212]]) {
+    if (argument === undefined || address === undefined) throw new Error("Missing source probe");
+    operations.push([QvmOpcode.OP_CONST, address], [QvmOpcode.OP_LOCAL, 24 + argument * 4], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4]);
+  }
+  operations.push([QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 16]);
+  const damage = operations.length; operations[damageEntryWord] = [QvmOpcode.OP_CONST, damage];
+  operations.push([QvmOpcode.OP_ENTER, 48]);
+  for (const [argument, address] of [[0, 1220], [1, 1224], [2, 1228], [7, 1232], [9, 1236], [10, 1240], [11, 1244]]) {
+    if (argument === undefined || address === undefined) throw new Error("Missing source probe");
+    operations.push([QvmOpcode.OP_CONST, address], [QvmOpcode.OP_LOCAL, 56 + argument * 4], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4]);
+  }
+  operations.push([QvmOpcode.OP_LOCAL, 72], [QvmOpcode.OP_LOAD4],
+    [QvmOpcode.OP_LOCAL, 72], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_LOCAL, 88], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_SUB], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_LOCAL, 88], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 8],
+    [QvmOpcode.OP_CONST, float32ToBits(9.5) | 0], [QvmOpcode.OP_ARG, 12],
+    [QvmOpcode.OP_LOCAL, 76], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 16],
+    [QvmOpcode.OP_LOCAL, 72], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_ARG, 20],
+    [QvmOpcode.OP_CONST, pain], [QvmOpcode.OP_CALL], [QvmOpcode.OP_POP], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 48]);
+  const bytes = bytecode(operations, 131073), digest = createContentDigest(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"));
+  const moduleId = { id: "test:component", artifactPath: "vm/qagame.qvm", revision: "test", digest } satisfies import("../../../src/contracts/execution.ts").ModuleIdentity;
+  const artifact = resolveQvmArtifact({ module: moduleId, role: "qagame", bytes }); if (artifact.kind !== "bytecode") throw new Error("Missing original component bytecode");
+  const definition = { abi: "declared", entry: damage, health: 0, takedamage: 4, flags: 8, godmode: 256, noKnockback: 512, globals: [],
+    client: { pointer: 12, record: "client", health: 0, armor: 4, protection: 0.5, team: 8 }, mass: { kind: "entity", offset: 24, storage: "float32" }, teams: [{ value: 7, team: "shared:blue" }],
+    damageFlags: { radius: 32, noArmor: 64, noKnockback: 128, noProtection: 256, noTeamProtection: 512 }, calls: {
+      damage: { roles: { flags: 0, direction: 1, point: 2, inflictor: 3, target: 4, attacker: 5, method: 6, amount: 8 }, extras: [
+        { index: 7, kind: "float32", value: 1.25 }, { index: 9, kind: "address", value: 1300 }, { index: 10, kind: "int32", value: 11 }, { index: 11, kind: "int32", value: 12 }] },
+      pain: { roles: { amount: 0, attacker: 2, target: 3 }, extras: [{ index: 1, kind: "float32", value: 2.25 }] },
+      die: { roles: { attacker: 0, amount: 1, method: 2, inflictor: 3, target: 4 }, extras: [] },
+      touch: { roles: { trace: 0, other: 1, target: 2 }, extras: [] }, use: { roles: { activator: 0, other: 1, target: 2 }, extras: [] },
+    } } satisfies NonNullable<import("../../../src/contracts/qvm-mod-callbacks.ts").QvmModCallbackDeclaration["combat"]>;
+  const declaration = readQvmModDeclaration(new SaveReader({ version: 1, runtime: "qvm", program: { path: moduleId.artifactPath, digest }, abiProfile: "q3-modern",
+    actorRecords: [{ id: "entity", address: 4096, stride: 128, capacity: 2, fields: [] }, { id: "client", address: 8192, stride: 64, capacity: 2, fields: [] }],
+    entityRecord: "entity", sourceActors: { allocate: 0, release: { entry: 0, argument: 0 }, inuse: 28, eventEntityType: 3, update: null, callbacks: { pain: 16, die: null, touch: null, use: null } },
+    combat: definition, initialize: [], callbacks: [] }));
+  validateQvmModActors(artifact, declaration);
+  expect(() => validateQvmModActors(artifact, { ...declaration, combat: { ...definition, calls: { ...definition.calls, damage: { ...definition.calls.damage, roles: { ...definition.calls.damage.roles, amount: 0 } } } } })).toThrow("exactly once");
+  const legacy = readQvmModDeclaration(new SaveReader({ ...declaration, combat: { ...definition, abi: "q3-g-damage" } }));
+  expect(legacy.combat?.abi).toBe("q3-g-damage"); expect(legacy.combat).not.toHaveProperty("calls");
+  const module = new QvmModule({ artifact, host: rejectQvmSyscall }), actors = new SessionActorRegistry(createIdentityOwner("component-combat"));
+  const owner = actors.allocate(moduleId.id, "test:player"), other = actors.allocate(moduleId.id, "test:other"), owned = new Map([[owner.id, owner], [other.id, other]]);
+  const pointers = new Map([[owner.id, 4096], [other.id, 4224]]), callbacks = new ActorCallbackTable(actors);
+  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+  const outcomes: DamageOutcome[] = [], combat = new GameplayAuthority(actors, callbacks, { impulse: () => undefined, beforeReaction: () => undefined,
+    confirmed: outcome => { outcomes.push(outcome); return undefined; } });
+  const provenance = { sequence: 1, weaponProvider: moduleId.id, combatProvider: moduleId.id, inventoryProvider: moduleId.id, movementProvider: moduleId.id };
+  const semantics = new QvmModActors({ module, declaration, owned, pointer: actor => actor === null ? 0 : pointers.get(actor) ?? 0,
+    actor: pointer => pointer === 4096 ? owner.id : pointer === 4224 ? other.id : null,
+    services: { actors, bodies, combat, callbacks, inventory: new SharedInventoryTable(actors), seed: 1, time: () => ({ kind: "seconds", value: 1 }), damageContext: () => provenance },
+    invoke: call => module.call(call.arguments.map(argument => { if (argument.kind !== "int32" || argument.value.kind !== "float") throw new Error("Unexpected lowered word"); return argument.value.value; }), call.entry),
+    scratch: (_size, execute) => execute(1400) });
+  const write = (address: number, value: number) => module.memory.view(address, 4).setInt32(0, value, true), word = (address: number) => module.memory.view(address, 4).getInt32(0, true);
+  for (const [pointer, client] of [[4096, 8192], [4224, 8256]]) {
+    if (pointer === undefined || client === undefined) throw new Error("Missing source client");
+    write(pointer, 100); write(pointer + 4, 1); write(pointer + 12, client); write(pointer + 16, pain); write(client + 8, 7); module.memory.view(pointer + 24, 4).setFloat32(0, 275.5, true);
+  }
+  try {
+    semantics.admit(owner); semantics.admit(other);
+    expect(combat.read(owner.id)).toMatchObject({ mass: 275.5, team: "shared:blue" });
+    combat.damageOperation.register({ provider: "test:half", id: "test:half", kind: "transform", order: 0, transform: request => ({ ...request, amount: request.amount / 2 }) });
+    const sourceWords = [32 | 8192, 1320, 0, 4224, 4096, 4224, 23, float32ToBits(7.5) | 0, 20, 1336, 55, 66];
+    module.call(sourceWords, sourceEntry);
+    expect(word(4096)).toBe(90); expect([word(1220), word(1224), word(1228), word(1232), word(1236), word(1240), word(1244)]).toEqual([32 | 8192, 1320, 0, float32ToBits(7.5) | 0, 1336, 55, 66]);
+    expect([word(1200), word(1204), word(1208), word(1212)]).toEqual([10, float32ToBits(9.5) | 0, 4224, 4096]);
+    const outcome = outcomes.at(-1); if (outcome?.kind !== "committed") throw new Error("Original component damage did not commit");
+    expect(outcome.decision.request.attack.cause).toEqual({ kind: "q3", meansOfDeath: 23, damageFlags: 1 });
+    expect(outcome.decision.reaction).toBe("pain"); expect(outcome.decision.appliedDamage).toBe(10);
+    combat.apply({ ...outcome.decision.request, amount: 20 });
+    expect(word(4096)).toBe(80); expect([word(1220), word(1232), word(1236), word(1240), word(1244)]).toEqual([32, float32ToBits(1.25) | 0, 1300, 11, 12]);
+    combat.damageOperation.register({ provider: "test:retarget", id: "test:retarget", kind: "transform", order: 1, transform: request => ({ ...request, target: other.id }) });
+    module.call(sourceWords, sourceEntry);
+    expect(word(4096)).toBe(80); expect(word(4224)).toBe(90); expect([word(1220), word(1232), word(1236)]).toEqual([32, float32ToBits(1.25) | 0, 1300]);
+  } finally { semantics.close(); module.retire(); }
+});

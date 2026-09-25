@@ -68,9 +68,10 @@ These parts describe the remaining implementation; they do not replace the T01â€
 |---|---|---|
 | T10 | Mod-controlled player view and movement | A declared component can change normal player eye height, stance and movement mode through the selected movement/presentation owner. Ownership conflicts, disable, save and travel must preserve the correct player state. In progress. |
 | T10 | Teams, scores and objectives | Original component rules can read and update authoritative shared team membership, scoring and objective state, with explicit ownership and conflict handling. Displaying a private source scoreboard alone does not complete this. |
-| T10 | Private QVM component combat calls | Component-owned actors can use declared original damage/reaction argument roles, flags, mass and team values instead of requiring the stock `q3-g-damage` layout. In progress. |
 | T10 | Runtime-generated primary QVM item catalogs | A primary mod whose item records are constructed by original initialization needs a live source-backed catalog declaration. The existing static primary catalog and independent component item declarations cover different cases. |
 | T10 | Native execution performance | The actual retained-map workflow currently spends about 83 seconds per original rerelease level write and 51 seconds reading it. Improve execution without dropping entities, changing source behavior or bypassing original save callbacks. |
+
+Private QVM component combat is integrated: declarations map original argument roles and extra words, damage flags, mass and team values. Transformed original calls preserve private arguments and exact target ownership; legacy stock declarations remain compatible. Combined strict/policy and 40 existing checks with 470 assertions pass.
 
 T12 closure: offhand modifiers/cadence pass focused source checks (original Threewave 56 assertions; original Xatrix Application 8 assertions). Combined strict/policy and 26 existing checks with 368 assertions pass. Original modifiers are applied once and do not shorten the grenade fuse. Native component graphs are also implemented under T10, with per-source palette, transport and activation lifetime checks.
 

@@ -1,3 +1,4 @@
+import type { QvmCombatCall, QvmCombatMass, QvmCombatTeam, QvmDamageFlags, QvmDamageRole } from "./qvm-combat.ts";
 import type { QvmModActorFrame } from "./qvm-mod-actor-frame.ts";
 import type { QvmModItems } from "./qvm-mod-items.ts";
 import type { ContentDigest } from "./content.ts";
@@ -59,8 +60,7 @@ export interface QvmModSourceActors {
   readonly callbacks?: { readonly touch: number | null; readonly use: number | null; readonly pain: number | null; readonly die: number | null };
 }
 /** Private layout and entry are admitted by the enclosing executable digest. */
-export interface QvmModCombat {
-  readonly abi: "q3-g-damage";
+interface QvmModCombatFields {
   readonly entry: number;
   readonly health: number;
   readonly takedamage: number;
@@ -70,6 +70,18 @@ export interface QvmModCombat {
   readonly globals: QvmModSourceCall["globals"];
   readonly client: { readonly pointer: number; readonly record: string; readonly health: number; readonly armor: number; readonly protection: number; readonly team: number } | null;
 }
+export interface QvmModCombatCalls {
+  readonly damage: QvmCombatCall<QvmDamageRole>;
+  readonly touch: QvmCombatCall<"target" | "other" | "trace">;
+  readonly use: QvmCombatCall<"target" | "other" | "activator">;
+  readonly pain: QvmCombatCall<"target" | "attacker" | "amount">;
+  readonly die: QvmCombatCall<"target" | "inflictor" | "attacker" | "amount" | "method">;
+}
+export type QvmModCombat = QvmModCombatFields & (
+  | { readonly abi: "q3-g-damage" }
+  | { readonly abi: "declared"; readonly calls: QvmModCombatCalls; readonly damageFlags: QvmDamageFlags;
+      readonly mass: QvmCombatMass; readonly teams: readonly QvmCombatTeam[] }
+);
 export interface QvmModProtectionScalar { readonly record: string; readonly offset: number; readonly encoding: QvmModScalar; }
 export interface QvmModProtectionSelection<Value> {
   readonly field: QvmModProtectionScalar;

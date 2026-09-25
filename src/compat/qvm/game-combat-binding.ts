@@ -1,3 +1,4 @@
+import type { QvmCombatMass, QvmCombatTeam, QvmDamageFlags } from "../../contracts/qvm-combat.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
 import type { ArmorState, AttackProvenance, DamageRequest, ProtectionChannel } from "../../contracts/gameplay.ts";
 import type { Vec3 } from "../../contracts/math.ts";
@@ -7,7 +8,7 @@ import type { SharedBodyTable } from "../../world/actors/body.ts";
 import type { GameplayAuthority, SourceDamageObserver, SourceDamageResult, SourceArmorStage } from "../../world/gameplay/authority.ts";
 import type { SessionActorRegistry } from "../../world/actors/registry.ts";
 import { attackDamageFlags } from "../../world/gameplay/armor.ts";
-import { QvmGameCombat, validateQvmCombatCall, validateQvmCombatPositions, type QvmReactionCall, type QvmGameArmorDefinition, type QvmGameCombatDefinition, type QvmGameDamage } from "./game-combat.ts";
+import { QvmGameCombat, qvmCanonicalDamageFlags, qvmSourceDamageFlags, validateQvmCombatCall, validateQvmCombatPositions, type QvmReactionCall, type QvmGameArmorDefinition, type QvmGameCombatDefinition, type QvmGameDamage } from "./game-combat.ts";
 import type { QvmFunctionCall } from "./interpreter.ts";
 import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
 import { QvmOpcode } from "./image.ts";
@@ -21,11 +22,11 @@ export interface QvmPrimaryCombatProfile extends QvmGameCombatDefinition {
   readonly grappleDamageMethod: number;
   readonly state: {
     readonly healthStat: number;
-    readonly team: { readonly persistentStat: number; readonly values: readonly { readonly value: number; readonly team: `${string}:${string}` }[] };
+    readonly team: { readonly persistentStat: number; readonly values: readonly QvmCombatTeam[] };
     readonly flags: { readonly notarget: number; readonly invulnerable: number; readonly noKnockback: number };
-    readonly mass: { readonly kind: "constant"; readonly value: number } | { readonly kind: "entity"; readonly offset: number; readonly storage: "int32" | "float32" };
+    readonly mass: QvmCombatMass;
   };
-  readonly damageFlags: { readonly radius: number; readonly noArmor: number; readonly noKnockback: number; readonly noProtection: number; readonly noTeamProtection: number };
+  readonly damageFlags: QvmDamageFlags;
 }
 interface NativeCombatOptions {
   readonly game: QvmGame;
@@ -327,17 +328,12 @@ export class QvmCombatBindings {
     return 0;
   }
   private canonicalFlags(source: number): number {
-    const flags = this.options.definition.damageFlags;
-    return ((source & flags.radius) !== 0 ? 1 : 0) | ((source & flags.noArmor) !== 0 ? 2 : 0) | ((source & flags.noKnockback) !== 0 ? 4 : 0)
-      | ((source & flags.noProtection) !== 0 ? 8 : 0) | ((source & flags.noTeamProtection) !== 0 ? 16 : 0);
+    return qvmCanonicalDamageFlags(this.options.definition.damageFlags, source);
   }
   private lower(request: DamageRequest, slot: number, originalFlags = 0): QvmGameDamage {
-    const { bodies, definition } = this.options, cause = request.attack.cause, flags = attackDamageFlags(request), inflictor = request.attack.inflictor;
+    const { bodies, definition } = this.options, cause = request.attack.cause, inflictor = request.attack.inflictor;
     const sourceInflictor = inflictor === null ? null : this.options.slot(inflictor), inflictorBody = inflictor === null ? null : bodies.read(inflictor);
-    const masks = definition.damageFlags, declared = masks.radius | masks.noArmor | masks.noKnockback | masks.noProtection | masks.noTeamProtection;
-    // Undeclared private flags remain attached to their current original invocation.
-    const lowered = (originalFlags & ~declared) | (request.delivery === "radius" ? masks.radius : 0) | (flags.noArmor ? masks.noArmor : 0)
-      | (flags.noKnockback ? masks.noKnockback : 0) | (flags.noProtection ? masks.noProtection : 0) | (flags.noTeamProtection ? masks.noTeamProtection : 0);
+    const lowered = qvmSourceDamageFlags(definition.damageFlags, request, originalFlags);
     return { target: slot, attacker: request.attack.attacker === null ? null : this.options.slot(request.attack.attacker),
       inflictor: sourceInflictor !== null ? { kind: "entity", slot: sourceInflictor } : inflictorBody === null ? null : { kind: "foreign", body: inflictorBody },
       direction: request.direction, point: request.point, amount: Math.trunc(request.amount),

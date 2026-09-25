@@ -1,13 +1,42 @@
 import { QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "../../compat/qvm/image.ts";
 import { readQvmModItems } from "./qvm-items.ts";
 import type { ModCallbackBinding, ModCallbackValue } from "../../contracts/mod-callbacks.ts";
-import type { QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue, QvmModProtection, QvmModProtectionScalar, QvmModProtectionSelection, QvmModInputOutput, QvmModInputPointer } from "../../contracts/qvm-mod-callbacks.ts";
+import type { QvmModCombat, QvmModActorField, QvmModCallbackDeclaration, QvmModSourceCall, QvmModValue, QvmModProtection, QvmModProtectionScalar, QvmModProtectionSelection, QvmModInputOutput, QvmModInputPointer } from "../../contracts/qvm-mod-callbacks.ts";
 import { readDigest, readVector } from "../../persistence/shared.ts";
 import { namespaced, SaveReader } from "../../persistence/value.ts";
 import { normalizeResourcePath } from "../mounts/paths.ts";
 import { readModClientInput } from "./client-input.ts";
 import { readQvmModPresentationDeclaration } from "./qvm-presentation.ts";
 import { readModPickupRule } from "./pickups.ts";
+
+function combatCall<Role extends string>(reader: SaveReader, roles: Readonly<Record<Role, number>>) {
+  return { roles, extras: reader.field("extras").list(extra => ({ index: extra.field("index").integer(0),
+    kind: extra.field("kind").choice("int32", "float32", "address"), value: extra.field("value").number() })) };
+}
+function combatDefinition(combat: SaveReader): QvmModCombat {
+  const fields = { entry: combat.field("entry").integer(0), health: combat.field("health").integer(0),
+    takedamage: combat.field("takedamage").integer(0), flags: combat.field("flags").integer(0),
+    godmode: combat.field("godmode").integer(1), noKnockback: combat.field("noKnockback").integer(1),
+    globals: combat.field("globals").list(global => ({ address: global.field("address").integer(0), value: argument(global.field("value")) })),
+    client: combat.field("client").nullable(client => ({ pointer: client.field("pointer").integer(0), record: client.field("record").string(),
+      health: client.field("health").integer(0), armor: client.field("armor").integer(0), protection: client.field("protection").number(), team: client.field("team").integer(0) })) };
+  if (combat.field("abi").choice("q3-g-damage", "declared") === "q3-g-damage") return { abi: "q3-g-damage", ...fields };
+  const calls = combat.field("calls"), damage = calls.field("damage"), touch = calls.field("touch"), use = calls.field("use"), pain = calls.field("pain"), die = calls.field("die");
+  const role = (call: SaveReader, name: string) => call.field("roles").field(name).integer(0);
+  const flags = combat.field("damageFlags"), mass = combat.field("mass");
+  return { abi: "declared", ...fields, calls: {
+    damage: combatCall(damage, { target: role(damage, "target"), inflictor: role(damage, "inflictor"), attacker: role(damage, "attacker"),
+      direction: role(damage, "direction"), point: role(damage, "point"), amount: role(damage, "amount"), flags: role(damage, "flags"), method: role(damage, "method") }),
+    touch: combatCall(touch, { target: role(touch, "target"), other: role(touch, "other"), trace: role(touch, "trace") }),
+    use: combatCall(use, { target: role(use, "target"), other: role(use, "other"), activator: role(use, "activator") }),
+    pain: combatCall(pain, { target: role(pain, "target"), attacker: role(pain, "attacker"), amount: role(pain, "amount") }),
+    die: combatCall(die, { target: role(die, "target"), inflictor: role(die, "inflictor"), attacker: role(die, "attacker"), amount: role(die, "amount"), method: role(die, "method") }),
+  }, damageFlags: { radius: flags.field("radius").integer(1), noArmor: flags.field("noArmor").integer(1), noKnockback: flags.field("noKnockback").integer(1),
+    noProtection: flags.field("noProtection").integer(1), noTeamProtection: flags.field("noTeamProtection").integer(1) },
+    mass: mass.field("kind").choice("constant", "entity") === "constant" ? { kind: "constant", value: mass.field("value").number() }
+      : { kind: "entity", offset: mass.field("offset").integer(0), storage: mass.field("storage").choice("int32", "float32") },
+    teams: combat.field("teams").list(team => ({ value: team.field("value").integer(), team: namespaced(team.field("team")) })) };
+}
 
 function value(reader: SaveReader): ModCallbackValue {
   switch (reader.field("kind").choice("input", "float", "vector", "string")) {
@@ -138,12 +167,7 @@ export function readQvmModDeclaration(reader: SaveReader): QvmModCallbackDeclara
         touch: actors.field("callbacks").field("touch").nullable(field => field.integer(0)), use: actors.field("callbacks").field("use").nullable(field => field.integer(0)),
         pain: actors.field("callbacks").field("pain").nullable(field => field.integer(0)), die: actors.field("callbacks").field("die").nullable(field => field.integer(0)),
       } }) } }),
-    ...(combat.value === undefined ? {} : { combat: { abi: combat.field("abi").literal("q3-g-damage"), entry: combat.field("entry").integer(0),
-      health: combat.field("health").integer(0), takedamage: combat.field("takedamage").integer(0), flags: combat.field("flags").integer(0),
-      godmode: combat.field("godmode").integer(1), noKnockback: combat.field("noKnockback").integer(1),
-      globals: combat.field("globals").list(global => ({ address: global.field("address").integer(0), value: argument(global.field("value")) })),
-      client: combat.field("client").nullable(client => ({ pointer: client.field("pointer").integer(0), record: client.field("record").string(),
-        health: client.field("health").integer(0), armor: client.field("armor").integer(0), protection: client.field("protection").number(), team: client.field("team").integer(0) })) } }),
+    ...(combat.value === undefined ? {} : { combat: combatDefinition(combat) }),
     ...(reader.field("protection").value === undefined ? {} : { protection: reader.field("protection").list(protection) }),
     ...(reader.field("items").value === undefined ? {} : { items: readQvmModItems(reader.field("items"), sourceCall) }),
     ...(reader.field("pickups").value === undefined ? {} : { pickups: reader.field("pickups").list(rule => ({ ...readModPickupRule(rule, sourceCall),

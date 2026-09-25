@@ -7,16 +7,25 @@ import type { QvmModuleOptions } from "./module.ts";
 import { QvmOpcode, QVM_MAX_PRIVATE_ARGUMENT_WORDS } from "./image.ts";
 import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
 
-export type QvmDamageRole = "target" | "inflictor" | "attacker" | "direction" | "point" | "amount" | "flags" | "method";
-export type QvmArmorRole = "target" | "amount" | "flags";
-export interface QvmCombatCall<Role extends string> {
-  readonly roles: Readonly<Record<Role, number>>;
-  readonly extras: readonly { readonly index: number; readonly kind: "int32" | "float32" | "address"; readonly value: number }[];
-}
+export type { QvmDamageRole, QvmArmorRole, QvmCombatCall, QvmReactionCall } from "../../contracts/qvm-combat.ts";
+import type { QvmDamageRole, QvmArmorRole, QvmCombatCall, QvmDamageFlags } from "../../contracts/qvm-combat.ts";
+import type { DamageRequest } from "../../contracts/gameplay.ts";
+import { attackDamageFlags } from "../../world/gameplay/armor.ts";
 
-export interface QvmReactionCall {
-  readonly arguments: number;
-  readonly roles: { readonly target: number; readonly amount: number };
+export function qvmCombatWords<Role extends string>(call: QvmCombatCall<Role>, values: Readonly<Record<Role, number>>): number[] {
+  const words: number[] = Array.from({ length: Object.keys(call.roles).length + call.extras.length }, () => 0);
+  for (const extra of call.extras) words[extra.index] = extra.kind === "float32" ? float32ToBits(extra.value) | 0 : extra.value;
+  for (const role in values) words[call.roles[role]] = values[role];
+  return words;
+}
+export function qvmCanonicalDamageFlags(masks: QvmDamageFlags, flags: number): number {
+  return ((flags & masks.radius) !== 0 ? 1 : 0) | ((flags & masks.noArmor) !== 0 ? 2 : 0) | ((flags & masks.noKnockback) !== 0 ? 4 : 0)
+    | ((flags & masks.noProtection) !== 0 ? 8 : 0) | ((flags & masks.noTeamProtection) !== 0 ? 16 : 0);
+}
+export function qvmSourceDamageFlags(masks: QvmDamageFlags, request: DamageRequest, original = 0): number {
+  const flags = attackDamageFlags(request), declared = masks.radius | masks.noArmor | masks.noKnockback | masks.noProtection | masks.noTeamProtection;
+  return (original & ~declared) | (request.delivery === "radius" ? masks.radius : 0) | (flags.noArmor ? masks.noArmor : 0)
+    | (flags.noKnockback ? masks.noKnockback : 0) | (flags.noProtection ? masks.noProtection : 0) | (flags.noTeamProtection ? masks.noTeamProtection : 0);
 }
 
 export function validateQvmCombatPositions(positions: readonly number[], words: number): void {
@@ -89,9 +98,7 @@ export class QvmGameCombat {
     const image = artifact.image;
     const call = definition.damageCall;
     validateQvmCombatCall(call, image.dataLength + image.literalLength + image.bssLength);
-    const words: number[] = Array.from({ length: Object.keys(call.roles).length + call.extras.length }, () => 0);
-    for (const extra of call.extras) words[extra.index] = extra.kind === "float32" ? float32ToBits(extra.value) | 0 : extra.value;
-    this.arguments_ = words;
+    this.arguments_ = qvmCombatWords(call, { target: 0, inflictor: 0, attacker: 0, direction: 0, point: 0, amount: 0, flags: 0, method: 0 });
     this.scratch = Math.ceil((image.dataLength + image.literalLength + image.bssLength) / 16) * 16;
     if (this.scratch + 24 > image.allocatedDataLength - 65536) throw new Error("Source combat requires scratch outside source data and stack");
   }
