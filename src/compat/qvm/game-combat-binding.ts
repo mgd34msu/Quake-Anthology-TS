@@ -9,6 +9,7 @@ import type { SessionActorRegistry } from "../../world/actors/registry.ts";
 import { attackDamageFlags } from "../../world/gameplay/armor.ts";
 import { QvmGameCombat, type QvmGameArmorDefinition, type QvmGameCombatDefinition, type QvmGameDamage } from "./game-combat.ts";
 import type { QvmFunctionCall } from "./interpreter.ts";
+import { qvmSharedEntityBytes } from "./shared-entity-record.ts";
 import { QvmOpcode } from "./image.ts";
 import { QvmDamageScopes } from "./game-combat-scope.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -18,6 +19,14 @@ export interface QvmPrimaryCombatProfile extends QvmGameCombatDefinition {
   readonly armor: QvmGameArmorDefinition;
   readonly reactions: { readonly flags: number; readonly pain: number; readonly die: number };
   readonly grappleDamageMethod: number;
+  readonly damageCall: "q3-g-damage-8-check-armor-3";
+  readonly state: {
+    readonly healthStat: number;
+    readonly team: { readonly persistentStat: number; readonly values: readonly { readonly value: number; readonly team: `${string}:${string}` }[] };
+    readonly flags: { readonly notarget: number; readonly invulnerable: number; readonly noKnockback: number };
+    readonly mass: { readonly kind: "constant"; readonly value: number } | { readonly kind: "entity"; readonly offset: number; readonly storage: "int32" | "float32" };
+  };
+  readonly damageFlags: { readonly radius: number; readonly noArmor: number; readonly noKnockback: number; readonly noProtection: number; readonly noTeamProtection: number };
 }
 interface NativeCombatOptions {
   readonly game: QvmGame;
@@ -52,14 +61,34 @@ export class QvmCombatBindings {
       throw new Error("Source combat reaction field is outside its entity record");
     const { armor } = options.definition, image = options.artifact.image;
     if (image.instructions[armor.checkArmor]?.opcode !== QvmOpcode.OP_ENTER) throw new Error("Source CheckArmor declaration is not a function entry");
-    if (options.definition.fields.client !== 516 || options.definition.abiProfile !== "q3-modern") throw new Error("Source combat requires its declared modern Q3 client layout");
+    const definition = options.definition, client = definition.fields.client;
+    if (definition.abiProfile !== "q3-modern" || !Number.isInteger(client) || client % 4 !== 0 || client < qvmSharedEntityBytes(definition.abiProfile)
+      || client + 4 > definition.entityStride) throw new Error("Source combat requires its declared modern Q3 client pointer");
+    if (definition.damageCall !== "q3-g-damage-8-check-armor-3") throw new Error("Source combat requires its declared eight-word damage and three-word armor ABI");
     const stat = (index: number): void => {
       if (!Number.isInteger(index) || index < 0 || index >= 16) throw new Error("Source armor stat is outside the public player record");
     };
     const protection = (value: number): void => {
       if (!Number.isFinite(value) || value < 0 || value > 1 || Math.fround(value) !== value) throw new Error("Source armor protection must be a binary32 fraction");
     };
-    stat(armor.pointsStat); protection(armor.protection);
+    stat(armor.pointsStat); protection(armor.protection); stat(definition.state.healthStat); stat(definition.state.team.persistentStat);
+    const mask = (value: number): void => {
+      if (!Number.isInteger(value) || value <= 0 || value > 0xffffffff || (value & (value - 1)) !== 0) throw new Error("Source combat flags require individual 32-bit masks");
+    };
+    for (const values of [Object.values(definition.state.flags), Object.values(definition.damageFlags)]) {
+      for (const value of values) mask(value);
+      if (new Set(values).size !== values.length) throw new Error("Source combat flags overlap");
+    }
+    const teams = new Set<number>();
+    for (const value of definition.state.team.values) {
+      if (!Number.isInteger(value.value) || value.value < -0x80000000 || value.value > 0x7fffffff || teams.has(value.value)
+        || !/^[^:]+:.+$/.test(value.team)) throw new Error("Source team mappings require unique values and explicit identities");
+      teams.add(value.value);
+    }
+    const mass = definition.state.mass;
+    if (mass.kind === "constant") { if (!Number.isFinite(mass.value) || mass.value < 0) throw new Error("Source mass must be finite and nonnegative"); }
+    else if (!Number.isInteger(mass.offset) || mass.offset % 4 !== 0 || mass.offset < qvmSharedEntityBytes(definition.abiProfile)
+      || mass.offset + 4 > definition.entityStride) throw new Error("Source mass field is outside its entity record");
     const tiers = armor.tiers;
     if (tiers !== null) {
       stat(tiers.stat); protection(tiers.fallback);
@@ -117,11 +146,12 @@ export class QvmCombatBindings {
   }
   notarget(actor: ActorId): boolean | null {
     const slot = this.options.slot(actor);
-    return slot === null ? null : (this.options.game.data.entityBytes(slot).getInt32(this.options.definition.reactions.flags, true) & 32) !== 0;
+    return slot === null ? null : (this.options.game.data.entityBytes(slot).getInt32(this.options.definition.reactions.flags, true) & this.options.definition.state.flags.notarget) !== 0;
   }
   normalizeLegacyArmor(actor: ActorId, saved: ArmorState): ArmorState {
     const slot = this.options.slot(actor);
     if (slot === null || slot >= 1022) throw new Error("Legacy QVM armor has no source actor");
+    // The pre-profile save schema stored stat 3 and the JavaScript 0.66 literal.
     const matches = slot < this.options.game.data.numClients
       ? saved.regular.kind === "q3" && saved.regular.points === (this.options.game.data.copyPlayerState(slot).stats[3] ?? 0) && saved.regular.protection === 0.66
       : saved.regular.kind === "none";
@@ -165,9 +195,13 @@ export class QvmCombatBindings {
     const view = (): DataView => game.data.entityBytes(slot);
     const read = () => {
       const state = this.source.state(slot), flags = view().getInt32(definition.reactions.flags, true);
-      const team = slot < game.data.numClients ? game.data.copyPlayerState(slot).persistent[3] ?? 0 : 0;
-      return { health: state?.health ?? 0, canTakeDamage: state?.damageable ?? false, mass: 200, armor: this.armor(slot),
-        team: team === 1 || team === 2 ? `q3:${team}` : null, invulnerable: (flags & 16) !== 0, noKnockback: (flags & 2048) !== 0 };
+      const team = slot < game.data.numClients ? game.data.copyPlayerState(slot).persistent[definition.state.team.persistentStat] : undefined;
+      const declared = definition.state.mass, mass = declared.kind === "constant" ? declared.value
+        : declared.storage === "float32" ? view().getFloat32(declared.offset, true) : view().getInt32(declared.offset, true);
+      if (!Number.isFinite(mass) || mass < 0) throw new Error("Source mass is not representable by shared combat");
+      return { health: state?.health ?? 0, canTakeDamage: state?.damageable ?? false, mass, armor: this.armor(slot),
+        team: definition.state.team.values.find(value => value.value === team)?.team ?? null,
+        invulnerable: (flags & definition.state.flags.invulnerable) !== 0, noKnockback: (flags & definition.state.flags.noKnockback) !== 0 };
     };
     const binding = { read, sourceDamage: (request: DamageRequest) => this.damage(request),
       protection: {
@@ -180,7 +214,7 @@ export class QvmCombatBindings {
       },
       writeHealth: (health: number): undefined => {
         view().setInt32(definition.fields.health, health, true);
-        if (slot < game.data.numClients) { const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[0] = health; game.data.writePlayerState(slot, { ...state, stats }); }
+        if (slot < game.data.numClients) { const state = game.data.copyPlayerState(slot), stats = [...state.stats]; stats[definition.state.healthStat] = health; game.data.writePlayerState(slot, { ...state, stats }); }
         return undefined;
       }, writeArmor: (armor: ArmorState): undefined => {
         const write = this.armorWrite(slot, armor); if (write === null) return undefined;
@@ -226,7 +260,7 @@ export class QvmCombatBindings {
     const geometry = () => ({ direction: this.vector(frame.call.words.getInt32(12, true)), point: this.vector(frame.call.words.getInt32(16, true)), normal: frame.request.normal });
     const saved = power?.({ request: frame.request, amount, geometry: geometry(),
       // Q3 owns its live armor flag; foreign power-only flags have no Q3 argument encoding.
-      flags: { stage: "power", noArmor: (flags & 2) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: false, energy: originating.energy } }, () => 0) ?? 0;
+      flags: { stage: "power", noArmor: (flags & this.options.definition.damageFlags.noArmor) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: false, energy: originating.energy } }, () => 0) ?? 0;
     if (!this.live(frame.actor)) return this.scopes.cancel(frame, call);
     if (!Number.isFinite(saved) || saved < 0 || saved > Math.max(0, amount)) throw new Error("QVM powered armor savings exceed the current source damage");
     const powerSaved = Math.trunc(saved), remaining = amount - powerSaved;
@@ -234,7 +268,7 @@ export class QvmCombatBindings {
     try {
       const regular = this.protection.regular.get(frame.actor);
       const regularSaved = regular === undefined ? call.proceed() : regular({ request: frame.request, amount: remaining, geometry: geometry(),
-        flags: { stage: "regular", noArmor: (call.words.getInt32(8, true) & 2) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: originating.noRegularArmor,
+        flags: { stage: "regular", noArmor: (call.words.getInt32(8, true) & this.options.definition.damageFlags.noArmor) !== 0, noPowerArmor: originating.noPowerArmor, noRegularArmor: originating.noRegularArmor,
           energy: originating.energy, regularProtectionScale: originating.regularProtectionScale ?? 1 } }, () => call.proceed());
       if (!this.live(frame.actor)) return this.scopes.cancel(frame, call);
       if (!Number.isFinite(regularSaved) || regularSaved < 0 || regularSaved > Math.max(0, remaining)) throw new Error("QVM regular armor savings exceed the current source damage");
@@ -263,16 +297,16 @@ export class QvmCombatBindings {
     const inflictor = this.sourceActor(call.words.getInt32(4, true))?.id ?? null;
     const attacker = this.sourceActor(call.words.getInt32(8, true))?.id ?? null;
     const flags = call.words.getInt32(24, true), amount = call.words.getInt32(20, true);
-    const request: DamageRequest = { target: target.id, amount, knockback: (flags & 4) !== 0 || call.words.getInt32(12, true) === 0 ? 0 : amount,
+    const request: DamageRequest = { target: target.id, amount, knockback: (flags & this.options.definition.damageFlags.noKnockback) !== 0 || call.words.getInt32(12, true) === 0 ? 0 : amount,
       direction: this.vector(call.words.getInt32(12, true)), point: this.vector(call.words.getInt32(16, true)), normal: { x: 0, y: 0, z: 0 },
-      delivery: (flags & 1) !== 0 ? "radius" : "direct", attack: { ...joined.provenance(attacker, inflictor, target.id), attacker, inflictor,
-        cause: { kind: "q3", meansOfDeath: call.words.getInt32(28, true), damageFlags: flags } } };
+      delivery: (flags & this.options.definition.damageFlags.radius) !== 0 ? "radius" : "direct", attack: { ...joined.provenance(attacker, inflictor, target.id), attacker, inflictor,
+        cause: { kind: "q3", meansOfDeath: call.words.getInt32(28, true), damageFlags: this.canonicalFlags(flags) } } };
     this.options.combat.runSourceDamage(request, (observer, effective) => {
       const actor = this.owned(effective.target), slot = this.options.slot(effective.target);
       if (actor === null || slot === null) return { appliedDamage: 0, reaction: "none" };
       if (isDeepStrictEqual(effective, request)) return this.scopes.run(call, actor, slot, effective, observer);
       let result: SourceDamageResult = { appliedDamage: 0, reaction: "none" };
-      this.source.damage(this.lower(effective, slot), words => {
+      this.source.damage(this.lower(effective, slot, flags), words => {
         const saved = Array.from({ length: 8 }, (_, index) => call.words.getInt32(index * 4, true));
         try {
           words.forEach((word, index) => {
@@ -286,13 +320,22 @@ export class QvmCombatBindings {
     });
     return 0;
   }
-  private lower(request: DamageRequest, slot: number): QvmGameDamage {
+  private canonicalFlags(source: number): number {
+    const flags = this.options.definition.damageFlags;
+    return ((source & flags.radius) !== 0 ? 1 : 0) | ((source & flags.noArmor) !== 0 ? 2 : 0) | ((source & flags.noKnockback) !== 0 ? 4 : 0)
+      | ((source & flags.noProtection) !== 0 ? 8 : 0) | ((source & flags.noTeamProtection) !== 0 ? 16 : 0);
+  }
+  private lower(request: DamageRequest, slot: number, originalFlags = 0): QvmGameDamage {
     const { bodies, definition } = this.options, cause = request.attack.cause, flags = attackDamageFlags(request), inflictor = request.attack.inflictor;
     const sourceInflictor = inflictor === null ? null : this.options.slot(inflictor), inflictorBody = inflictor === null ? null : bodies.read(inflictor);
+    const masks = definition.damageFlags, declared = masks.radius | masks.noArmor | masks.noKnockback | masks.noProtection | masks.noTeamProtection;
+    // Undeclared private flags remain attached to their current original invocation.
+    const lowered = (originalFlags & ~declared) | (request.delivery === "radius" ? masks.radius : 0) | (flags.noArmor ? masks.noArmor : 0)
+      | (flags.noKnockback ? masks.noKnockback : 0) | (flags.noProtection ? masks.noProtection : 0) | (flags.noTeamProtection ? masks.noTeamProtection : 0);
     return { target: slot, attacker: request.attack.attacker === null ? null : this.options.slot(request.attack.attacker),
       inflictor: sourceInflictor !== null ? { kind: "entity", slot: sourceInflictor } : inflictorBody === null ? null : { kind: "foreign", body: inflictorBody },
       direction: request.direction, point: request.point, amount: Math.trunc(request.amount),
-      flags: cause.kind === "q3" ? cause.damageFlags : (request.delivery === "radius" ? 1 : 0) | (flags.noArmor ? 2 : 0) | (flags.noKnockback ? 4 : 0) | (flags.noProtection ? 8 : 0),
+      flags: lowered,
       method: request.attack.weapon !== null && ["q3:weapon_grapplinghook", "q2:weapon_grapple", "q2:weapon_hook", "ctf:grapple"].includes(request.attack.weapon)
         ? definition.grappleDamageMethod : cause.kind === "q3" ? cause.meansOfDeath : cause.kind === "q2" && cause.meansOfDeath === 56 ? definition.grappleDamageMethod : 0 };
   }

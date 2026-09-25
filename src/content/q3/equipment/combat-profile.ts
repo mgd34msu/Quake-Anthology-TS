@@ -1,4 +1,5 @@
 import type { QvmModuleOptions } from "../../../compat/qvm/module.ts";
+import type { QvmPrimaryCombatProfile } from "../../../compat/qvm/game-combat-binding.ts";
 import type { QvmGameArmorDefinition } from "../../../compat/qvm/game-combat.ts";
 import { q3GrappleProfile } from "./grapple-profiles.ts";
 import { LRCTF_GRAPPLE_DIGEST } from "./lrctf-grapple-profile.ts";
@@ -12,12 +13,16 @@ const threewaveArmor: QvmGameArmorDefinition = { checkArmor: 161690, pointsStat:
 } };
 
 /** G_Damage's actual flags, pain and die fields in each admitted qagame. */
-export function q3NativeCombatProfile(artifact: QvmModuleOptions["artifact"]) {
+export function q3NativeCombatProfile(artifact: QvmModuleOptions["artifact"]): QvmPrimaryCombatProfile | null {
   const source = q3GrappleProfile(artifact);
   if (source === null) return null;
+  const semantics = { damageCall: "q3-g-damage-8-check-armor-3", state: { healthStat: 0,
+    team: { persistentStat: 3, values: [{ value: 1, team: "q3:1" }, { value: 2, team: "q3:2" }] },
+    flags: { notarget: 32, invulnerable: 16, noKnockback: 2048 }, mass: { kind: "constant", value: 200 } },
+    damageFlags: { radius: 1, noArmor: 2, noKnockback: 4, noProtection: 8, noTeamProtection: 16 } } satisfies Pick<QvmPrimaryCombatProfile, "damageCall" | "state" | "damageFlags">;
   switch (artifact.module.digest) {
-    case LRCTF_GRAPPLE_DIGEST: return { ...source, armor: lrctfArmor, reactions: { flags: 536, pain: 728, die: 732 } };
-    case THREEWAVE_GRAPPLE_DIGEST: return { ...source, armor: threewaveArmor, reactions: { flags: 536, pain: 712, die: 716 } };
+    case LRCTF_GRAPPLE_DIGEST: return { ...source, ...semantics, armor: lrctfArmor, reactions: { flags: 536, pain: 728, die: 732 } };
+    case THREEWAVE_GRAPPLE_DIGEST: return { ...source, ...semantics, armor: threewaveArmor, reactions: { flags: 536, pain: 712, die: 716 } };
     default: return null;
   }
 }

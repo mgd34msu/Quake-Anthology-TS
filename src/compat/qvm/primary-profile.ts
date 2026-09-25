@@ -40,7 +40,7 @@ export function readQvmPrimaryProfile(reader: SaveReader, artifact: QvmModuleOpt
   const combat = readQvmPrimaryCombat(reader.field("combat"), artifact);
   if (input.entityStride !== weapons.entityStride || input.clientStride !== weapons.clientStride || input.clientPointer !== weapons.clientPointer
     || input.entityStride !== pickups.entityStride || input.clientStride !== pickups.clientStride || input.clientPointer !== pickups.fields.client
-    || input.entityStride !== combat.entityStride || input.clientPointer !== combat.fields.client
+    || input.entityStride !== combat.entityStride || input.clientStride !== combat.clientStride || input.clientPointer !== combat.fields.client
     || input.entries.move !== weapons.equipmentMovement.move || input.entries.slice !== weapons.equipmentMovement.slice)
     return reader.fail("primary interfaces disagree about their original player records or movement entries");
   if (!isDeepStrictEqual(items, pickups.items)) return reader.field("items").fail("primary catalog and pickup interfaces name different item tables");

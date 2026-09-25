@@ -110,12 +110,25 @@ export function readQvmPrimaryCombat(reader: SaveReader, artifact: Artifact): Qv
   };
   const fraction = (value: SaveReader): number => { const result = value.finite(); if (result < 0 || result > 1 || Math.fround(result) !== result) return value.fail("expected an original binary32 armor fraction"); return result; };
   const tiers = armor.field("tiers"), dataBytes = artifact.image.dataLength + artifact.image.literalLength + artifact.image.bssLength;
-  const result: QvmPrimaryCombatProfile = { ...common, fields: { inuse: privateField(fields.field("inuse")), health: privateField(fields.field("health")), takedamage: privateField(fields.field("takedamage")), parent: privateField(fields.field("parent")), client: fields.field("client").literal(516) },
+  const state = reader.field("state"), team = state.field("team"), flags = state.field("flags"), mass = state.field("mass"), damageFlags = reader.field("damageFlags");
+  const mask = (value: SaveReader): number => { const result = integer(value, 1, 0xffffffff); if ((result & (result - 1)) !== 0) return value.fail("expected an individual source flag"); return result; };
+  const result: QvmPrimaryCombatProfile = { ...common,
+    damageCall: reader.field("damageCall").literal("q3-g-damage-8-check-armor-3"),
+    state: { healthStat: integer(state.field("healthStat"), 0, 15), team: { persistentStat: integer(team.field("persistentStat"), 0, 15),
+      values: team.field("values").list(value => ({ value: integer(value.field("value"), -0x80000000, 0x7fffffff), team: namespaced(value.field("team")) })) },
+      flags: { notarget: mask(flags.field("notarget")), invulnerable: mask(flags.field("invulnerable")), noKnockback: mask(flags.field("noKnockback")) },
+      mass: mass.field("kind").choice("constant", "entity") === "constant" ? { kind: "constant", value: mass.field("value").finite() }
+        : { kind: "entity", offset: privateField(mass.field("offset")), storage: mass.field("storage").choice("int32", "float32") } },
+    damageFlags: { radius: mask(damageFlags.field("radius")), noArmor: mask(damageFlags.field("noArmor")), noKnockback: mask(damageFlags.field("noKnockback")),
+      noProtection: mask(damageFlags.field("noProtection")), noTeamProtection: mask(damageFlags.field("noTeamProtection")) }, fields: { inuse: privateField(fields.field("inuse")), health: privateField(fields.field("health")), takedamage: privateField(fields.field("takedamage")), parent: privateField(fields.field("parent")), client: privateField(fields.field("client")) },
     callbacks: { allocate: entry(callbacks.field("allocate"), artifact), free: entry(callbacks.field("free"), artifact), damage: entry(callbacks.field("damage"), artifact) },
     reactions: { flags: privateField(reactions.field("flags")), pain: privateField(reactions.field("pain")), die: privateField(reactions.field("die")) }, grappleDamageMethod: reader.field("grappleDamageMethod").integer(0),
     armor: { checkArmor: entry(armor.field("checkArmor"), artifact), pointsStat: integer(armor.field("pointsStat"), 0, 15), protection: fraction(armor.field("protection")), tiers: tiers.value === null ? null : {
       stat: integer(tiers.field("stat"), 0, 15), whenAny: tiers.field("whenAny").list(value => ({ offset: aligned(value.field("offset"), dataBytes), comparison: value.field("comparison").choice("equal", "not-equal"), value: integer(value.field("value"), -0x80000000, 0x7fffffff) })),
       values: tiers.field("values").list(value => ({ tier: integer(value.field("tier"), -0x80000000, 0x7fffffff), protection: fraction(value.field("protection")) })), fallback: fraction(tiers.field("fallback")) } } };
+  if (result.state.mass.kind === "constant" && result.state.mass.value < 0) return mass.fail("source mass must be nonnegative");
+  if (new Set(result.state.team.values.map(value => value.value)).size !== result.state.team.values.length) return team.fail("source team values must be unique");
+  for (const values of [Object.values(result.state.flags), Object.values(result.damageFlags)]) if (new Set(values).size !== values.length) return reader.fail("source combat flags overlap");
   const tier = result.armor.tiers;
   if (tier !== null && (tier.stat === result.armor.pointsStat || tier.whenAny.length === 0 || tier.values.length === 0 || new Set(tier.values.map(value => value.tier)).size !== tier.values.length)) return tiers.fail("armor tier declaration is empty or ambiguous");
   return result;

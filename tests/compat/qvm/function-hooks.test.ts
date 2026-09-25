@@ -1,3 +1,11 @@
+import { QvmGame } from "../../../src/compat/qvm/game.ts";
+import { QvmCombatBindings } from "../../../src/compat/qvm/game-combat-binding.ts";
+import { readQvmPrimaryCombat } from "../../../src/compat/qvm/primary-player-profile.ts";
+import { SaveReader } from "../../../src/persistence/value.ts";
+import { createIdentityOwner } from "../../../src/contracts/identity.ts";
+import { SessionActorRegistry, ActorCallbackTable, SharedBodyTable, translatedBodyBounds } from "../../../src/world/actors/index.ts";
+import { GameplayAuthority } from "../../../src/world/gameplay/authority.ts";
+import type { DamageOutcome } from "../../../src/contracts/gameplay.ts";
 import { expect, test } from "bun:test";
 import { BinaryWriter } from "../../../src/core/binary/index.ts";
 import { createContentDigest } from "../../../src/contracts/content.ts";
@@ -684,4 +692,58 @@ test("source evaluations reject frames entering data and accept an explicitly de
   expect(vm.memory).toEqual(before);
   expect(vm.evaluateCounter(64, 0, [0], () => vm.invoke(qvmArguments([])), { start: 2048, end: 4096 })).toBe(9);
   expect(vm.memory[64]).toBe(0);
+});
+
+
+test("declared primary combat maps private traits and preserves opaque source flags through damage continuation", () => {
+  const operations: Operation[] = [[QvmOpcode.OP_ENTER, 16], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 16]];
+  const damage = operations.length;
+  operations.push([QvmOpcode.OP_ENTER, 32],
+    [QvmOpcode.OP_CONST, 1024], [QvmOpcode.OP_LOCAL, 64], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_STORE4],
+    [QvmOpcode.OP_LOCAL, 40], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 604], [QvmOpcode.OP_ADD],
+    [QvmOpcode.OP_LOCAL, 40], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_CONST, 604], [QvmOpcode.OP_ADD], [QvmOpcode.OP_LOAD4],
+    [QvmOpcode.OP_LOCAL, 60], [QvmOpcode.OP_LOAD4], [QvmOpcode.OP_SUB], [QvmOpcode.OP_STORE4], [QvmOpcode.OP_CONST, 0], [QvmOpcode.OP_LEAVE, 32]);
+  const source = bytecode(operations, 131073);
+  const identity = { id: "test:combat", artifactPath: "vm/qagame.qvm", revision: "test",
+    digest: createContentDigest(new Bun.CryptoHasher("sha256").update(source).digest("hex")) } satisfies import("../../../src/contracts/execution.ts").ModuleIdentity;
+  const artifact = resolveQvmArtifact({ module: identity, role: "qagame", bytes: source });
+  if (artifact.kind !== "bytecode") throw new Error("Missing authored original combat bytecode");
+  const declared = { entityStride: 1024, clientStride: 1024, fields: { inuse: 600, health: 604, takedamage: 608, parent: 612, client: 616 },
+    callbacks: { allocate: 0, free: 0, damage }, reactions: { flags: 620, pain: 624, die: 628 }, grappleDamageMethod: 23,
+    damageCall: "q3-g-damage-8-check-armor-3", state: { healthStat: 9, team: { persistentStat: 7, values: [{ value: 8, team: "shared:blue" }] },
+      flags: { notarget: 256, invulnerable: 512, noKnockback: 1024 }, mass: { kind: "entity", offset: 632, storage: "float32" } },
+    damageFlags: { radius: 32, noArmor: 64, noKnockback: 128, noProtection: 256, noTeamProtection: 512 },
+    armor: { checkArmor: 0, pointsStat: 8, protection: Math.fround(0.66), tiers: null } };
+  const definition = readQvmPrimaryCombat(new SaveReader(declared), artifact);
+  expect(definition.fields.client).toBe(616);
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, fields: { ...declared.fields, client: 512 } }), artifact)).toThrow("overlaps");
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageCall: "other" }), artifact)).toThrow();
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, damageFlags: { ...declared.damageFlags, radius: 64 } }), artifact)).toThrow("overlap");
+  expect(() => readQvmPrimaryCombat(new SaveReader({ ...declared, state: { ...declared.state, team: { ...declared.state.team, values: [{ value: 8, team: "blue" }] } } }), artifact)).toThrow();
+  const game = new QvmGame({ artifact, host: rejectQvmSyscall }); game.data.setClientCount(1); game.data.locate(4096, 1, 1024, 8192, 1024);
+  const actors = new SessionActorRegistry(createIdentityOwner("declared-combat")), actor = actors.allocate(identity.id, "test:player");
+  const bodies = new SharedBodyTable(actors, { absoluteBounds: translatedBodyBounds, onLink: () => undefined, onUnlink: () => undefined });
+  const outcomes: DamageOutcome[] = [];
+  const combat = new GameplayAuthority(actors, new ActorCallbackTable(actors), { impulse: () => undefined, beforeReaction: () => undefined,
+    confirmed: result => { outcomes.push(result); return undefined; } });
+  const view = game.data.entityBytes(0); view.setInt32(600, 1, true); view.setInt32(604, 100, true); view.setInt32(608, 1, true); view.setFloat32(632, 275.5, true);
+  view.setInt32(620, 256 | 512 | 1024, true);
+  const player = game.data.copyPlayerState(0), persistent = [...player.persistent], stats = [...player.stats]; persistent[7] = 8; persistent[3] = 2; stats[0] = 123;
+  game.data.writePlayerState(0, { ...player, persistent, stats });
+  const binding = new QvmCombatBindings({ game, artifact, definition, bodies, combat, slot: id => id.equals(actor.id) ? 0 : null,
+    source: { actors, actor: slot => slot === 0 ? actor : null, provenance: () => ({ sequence: 1, time: { kind: "milliseconds", value: 0 }, weapon: null,
+      weaponProvider: identity.id, combatProvider: identity.id, inventoryProvider: identity.id, movementProvider: identity.id }) } });
+  try {
+    binding.admit(actor); expect(binding.notarget(actor.id)).toBe(true);
+    expect(combat.read(actor.id)).toMatchObject({ mass: 275.5, team: "shared:blue", invulnerable: true, noKnockback: true });
+    view.setInt32(620, 32 | 16 | 2048, true); expect(binding.notarget(actor.id)).toBe(false);
+    expect(combat.read(actor.id)).toMatchObject({ invulnerable: false, noKnockback: false });
+    combat.setHealth(actor, 75); expect(game.data.copyPlayerState(0).stats[9]).toBe(75); expect(game.data.copyPlayerState(0).stats[0]).toBe(123);
+    combat.damageOperation.register({ provider: "test:mod", id: "test:half", kind: "transform", order: 0, transform: request => ({ ...request, amount: request.amount / 2 }) });
+    game.module.call([4096, 0, 0, 0, 0, 20, 64 | 8192, 0], damage);
+    expect(view.getInt32(604, true)).toBe(65); expect(game.module.memory.view(1024, 4).getInt32(0, true)).toBe(64 | 8192);
+    const result = outcomes.at(-1); if (result?.kind !== "committed") throw new Error("Original source damage did not commit");
+    expect(result.decision.request.attack.cause).toEqual({ kind: "q3", meansOfDeath: 0, damageFlags: 2 });
+    expect(result.decision.appliedDamage).toBe(10);
+  } finally { binding.close(); game.retire(); }
 });
