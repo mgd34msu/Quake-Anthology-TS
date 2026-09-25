@@ -111,6 +111,23 @@ function targetGame(selected: Q2GameOptions = options) {
 
 describe("Q2 permanent gameplay foundation", () => {
   for (const edition of ["classic", "rerelease"] satisfies readonly Q2GameOptions["edition"][]) {
+    test(`target_poi follows the ${edition} entity source with foreign movement and character`, () => {
+      const { game, host, player, events } = targetGame({ ...options, edition });
+      try {
+        const report = game.load('{ "classname" "target_poi" "origin" "48 0 16" "message" "Find the generator" }');
+        const poi = report.spawned[0];
+        if (poi === undefined) throw new Error("Missing target_poi entity");
+        expect(report.unsupported).toEqual(edition === "classic" ? [poi] : []);
+        expect(poi.use === null).toBe(edition === "classic");
+        host.callbacks.use(poi.actor, player.id, player.id);
+        expect(events).toEqual(edition === "classic" ? [] : [
+          { kind: "poi", origin: { x: 48, y: 0, z: 16 }, message: "Find the generator", fields: poi.spawn.values },
+        ]);
+      } finally { host.actors.close(); }
+    });
+  }
+
+  for (const edition of ["classic", "rerelease"] satisfies readonly Q2GameOptions["edition"][]) {
     for (const authored of [
       { field: "", once: 1, rereleaseLoop: 1 },
       { field: '"attenuation" "0"', once: 1, rereleaseLoop: 1 },

@@ -143,6 +143,7 @@ export function createQ2TargetModule(): Q2SpawnModule {
         entity.use = use_target_splash;
         return true;
       case "target_poi":
+        if (game.options.edition !== "rerelease") return false;
         entity.use = use_target_poi;
         return true;
       case "func_areaportal": {
