@@ -2,6 +2,7 @@
 import type { GuestRegister } from "../core/contracts.ts";
 import type { NumericExecutionContext, NumericExecutionResult, NumericOperand } from "./contracts.ts";
 import { NumericFault } from "./contracts.ts";
+import { executeRawSse, prepareRawSse } from "./raw-sse.ts";
 import {
   arithmetic, compareBinary, convertBinary, decodeBinary, denormalOperand, encodeBinary, formatFor, fromInteger,
   integerConversion, invalid, precision, readBits, rounding, squareRoot, underflow, writeBits, zero,
@@ -27,10 +28,6 @@ function load(context: NumericExecutionContext, byteLength: number, requireAlign
   const source = operand(context);
   if (requireAlignment && byteLength === 16) aligned(context);
   return source.kind === "register" ? xmm(context, source.index).slice(0, byteLength) : context.memory.copy(source.address, byteLength);
-}
-function store(context: NumericExecutionContext, bytes: Uint8Array): void {
-  const destination = operand(context);
-  if (destination.kind === "register") xmm(context, destination.index).set(bytes); else context.memory.write(destination.address, bytes);
 }
 function aligned(context: NumericExecutionContext): void {
   const source = operand(context);
@@ -181,9 +178,6 @@ function packedInteger(context: NumericExecutionContext, opcode: number): void {
   if (addWidth !== 0 || subtractWidth !== 0) {
     const width = addWidth || subtractWidth;
     for (let index = 0; index < 128 / width; index++) setLane(output, index, width, addWidth ? lane(a, index, width) + lane(b, index, width) : lane(a, index, width) - lane(b, index, width));
-  } else if (opcode === 0xdb || opcode === 0xdf || opcode === 0xeb || opcode === 0xef) {
-    const left = readBits(a), right = readBits(b);
-    output.set(writeBits(opcode === 0xdb ? left & right : opcode === 0xdf ? ~left & right : opcode === 0xeb ? left | right : left ^ right, 16));
   } else if ((opcode >= 0x64 && opcode <= 0x66) || (opcode >= 0x74 && opcode <= 0x76)) {
     const width = opcode % 16 === 4 ? 8 : opcode % 16 === 5 ? 16 : 32;
     for (let index = 0; index < 128 / width; index++) {
@@ -249,20 +243,15 @@ function execute(context: NumericExecutionContext): void {
     return;
   }
   if (opcode === 0x2a || opcode === 0x2c || opcode === 0x2d || opcode === 0x5a || opcode === 0x5b || opcode === 0xe6) { conversions(context, opcode); return; }
-  const destination = xmm(context, instruction.registerIndex);
-  if (opcode === 0x10 || opcode === 0x11 || opcode === 0x28 || opcode === 0x29 || opcode === 0x6f || opcode === 0x7f) {
-    const scalar = (opcode === 0x10 || opcode === 0x11) && (instruction.prefix === "f2" || instruction.prefix === "f3");
-    if ((opcode === 0x6f || opcode === 0x7f) && instruction.prefix !== "66" && instruction.prefix !== "f3") throw new UnsupportedSse("MMX move is unsupported");
-    if (opcode === 0x28 || opcode === 0x29 || ((opcode === 0x6f || opcode === 0x7f) && instruction.prefix === "66")) aligned(context);
-    const size = scalar ? instruction.prefix === "f2" ? 8 : 4 : 16;
-    if (opcode === 0x11 || opcode === 0x29 || opcode === 0x7f) store(context, destination.slice(0, size));
-    else {
-      const bytes = load(context, size, opcode === 0x28 || (opcode === 0x6f && instruction.prefix === "66"));
-      if (scalar && operand(context).kind === "memory") destination.fill(0);
-      destination.set(bytes);
-    }
+  const raw = prepareRawSse(opcode, instruction.prefix, instruction.registerIndex);
+  if (raw !== null) {
+    const result = executeRawSse(raw, operand(context), context.state, context.memory);
+    if (result.kind === "unsupported") throw new UnsupportedSse(result.detail);
+    if (result.kind === "exception") throw new NumericFault(result.vector, result.detail);
     return;
   }
+  const destination = xmm(context, instruction.registerIndex);
+  if (opcode === 0x6f || opcode === 0x7f) throw new UnsupportedSse("MMX move is unsupported");
   if (opcode === 0x6e || opcode === 0x7e) {
     if (opcode === 0x7e && instruction.prefix === "f3") { const bytes = load(context, 8); destination.fill(0); destination.set(bytes); return; }
     if (instruction.prefix !== "66") throw new UnsupportedSse("MMX MOVD/MOVQ is unsupported");
@@ -324,10 +313,6 @@ function execute(context: NumericExecutionContext): void {
     let mask = 0n;
     for (let index = 0; index < 128 / width; index++) mask |= ((lane(source, index, width) >> BigInt(width - 1)) & 1n) << BigInt(index);
     context.state.registers.write(generalRegister(instruction.registerIndex), 32, mask); return;
-  }
-  if (opcode >= 0x54 && opcode <= 0x57) {
-    const left = readBits(destination); const right = readBits(load(context, 16));
-    destination.set(writeBits(opcode === 0x54 ? left & right : opcode === 0x55 ? ~left & right : opcode === 0x56 ? left | right : left ^ right, 16)); return;
   }
   if (opcode === 0x2e || opcode === 0x2f) {
     const width = instruction.prefix === "66" ? 64 : 32;

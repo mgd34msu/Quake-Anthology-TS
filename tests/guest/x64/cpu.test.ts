@@ -430,3 +430,56 @@ test("retained semantic blocks requalify registered entries before the next inst
   expect(run().kind).toBe("return"); expect(returns).toBe(1);
   restoreReturn(); expect(run().kind).toBe("return"); expect(returns).toBe(1);
 });
+
+test("prepared raw SIMD preserves scalar lanes, overlapping registers and committed store entry changes", () => {
+  const f = fixture([
+    0xf3, 0x0f, 0x10, 0xc1, 0xf2, 0x0f, 0x10, 0x03,
+    0x66, 0x0f, 0x28, 0xd0, 0x66, 0x0f, 0x6f, 0xda,
+    0xf3, 0x0f, 0x7f, 0x5b, 17, 0x0f, 0x57, 0xdb,
+    0x66, 0x0f, 0xeb, 0xd8, 0x66, 0x0f, 0xdb, 0xda,
+    0x0f, 0x55, 0xd8, 0x0f, 0x29, 0x5b, 32, 0xc3,
+  ]);
+  const data = f.memory.map({ base: 0x50000n, byteLength: 64, permissions: "read-write" });
+  const input = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+  f.memory.write(data, input);
+  const callbacks = new GuestCallbackTable(f.memory), cpu = new X64Cpu({ state: f.state, memory: f.memory, callbacks });
+  const expected = new Uint8Array(16); expected.set(input.subarray(0, 8));
+  let entries = 0, removeEntry = (): void => {};
+  const removeStore = f.memory.observeWrites(f.memory.offset(data, 17n), 16, () => {
+    removeEntry(); removeEntry = callbacks.observeEntry(pointer(f.memory, base + 21n), () => { entries++; });
+    f.state.simd.xmm.fill(0xcc, 48, 64);
+  });
+  const step = (budget = 1) => cpu.run({ instructionBudget: budget, returnAddress: pointer(f.memory, returned) });
+  try {
+    for (let pass = 0; pass < 2; pass++) {
+      f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack); f.state.registers.write("rbx", 64, data.byteOffset);
+      f.state.simd.xmm.fill(0xaa, 0, 16); f.state.simd.xmm.fill(0xbb, 16, 32); f.state.flags.value = 0x8d7n; f.state.simd.mxcsr = 0x5fa0;
+      expect(step().kind).toBe("budget");
+      expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array([0xbb, 0xbb, 0xbb, 0xbb, ...new Array<number>(12).fill(0xaa)]));
+      expect(step().kind).toBe("budget"); expect(f.state.simd.xmm.slice(0, 16)).toEqual(expected);
+      expect(step(3).kind).toBe("budget"); expect(f.memory.copy(f.memory.offset(data, 17n), 16)).toEqual(expected);
+      expect(step(6).kind).toBe("return"); expect(f.memory.copy(f.memory.offset(data, 32n), 16)).toEqual(new Uint8Array(16));
+      expect(entries).toBe(pass + 1); expect(f.state.flags.value).toBe(0x8d7n); expect(f.state.simd.mxcsr).toBe(0x5fa0);
+    }
+  } finally { removeStore(); removeEntry(); }
+});
+
+test("prepared SIMD retains alignment, fault-before-write and live instruction bytes", () => {
+  const f = fixture([0x0f, 0x28, 0x03, 0xc3]);
+  const data = f.memory.map({ base: 0x50000n, byteLength: 32, permissions: "read-write", bytes: new Uint8Array(32).fill(0x5a) });
+  const run = (offset: bigint) => {
+    f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack); f.state.registers.write("rbx", 64, data.byteOffset + offset);
+    return f.run();
+  };
+  expect(run(0n).kind).toBe("return");
+  f.state.simd.xmm.fill(0xab, 0, 16);
+  const misaligned = run(1n); expect(misaligned.kind).toBe("exception");
+  if (misaligned.kind === "exception" && misaligned.exception.kind === "processor") expect(misaligned.exception.vector).toBe(13);
+  expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array(16).fill(0xab));
+  const alias = f.memory.mapAlias({ base: 0x60000n, byteLength: 4, permissions: "read-write", source: pointer(f.memory, base) });
+  f.memory.borrow(alias, 4).setUint8(1, 0x10);
+  expect(run(1n).kind).toBe("return"); expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array(16).fill(0x5a));
+  f.state.simd.xmm.fill(0xcd, 0, 16);
+  const missing = run(24n); expect(missing.kind).toBe("exception");
+  expect(f.state.simd.xmm.slice(0, 16)).toEqual(new Uint8Array(16).fill(0xcd));
+});

@@ -279,7 +279,7 @@ export function effectiveOperandOffset(state: GuestProcessorState, operand: X64M
   const index = operand.index === null ? 0n : state.registers.read(operand.index, operand.addressBits) * operand.scale;
   return BigInt.asUintN(operand.addressBits, base + index + operand.displacement);
 }
-function operandAddress(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64MemoryOperand, nextIP: bigint, access: "read" | "write" = "read"): GuestAddress {
+export function operandAddress(memory: MappedGuestMemory, state: GuestProcessorState, operand: X64MemoryOperand, nextIP: bigint, access: "read" | "write" = "read"): GuestAddress {
   const segmentBase = operand.segment === null ? 0n : state.segments[operand.segment].base;
   return guestAddress(memory, effectiveOperandOffset(state, operand, nextIP) + segmentBase, access);
 }

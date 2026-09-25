@@ -2,6 +2,7 @@
 import type { GuestAddress } from "../../contracts/execution.ts";
 import type { GuestCpu, GuestExecutionStop, GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
 import { GuestMemoryFault } from "../core/memory.ts";
+import { prepareRawSse } from "../floating-point/raw-sse.ts";
 import { executeNumericInstruction } from "../floating-point/index.ts";
 import { alu, condition, resultFlags, shift, signedMultiply } from "../x86/arithmetic.ts";
 import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
@@ -636,6 +637,13 @@ export class X64Cpu implements GuestCpu {
   #numeric(cursor: X64DecodeCursor, secondaryOpcode: number | null): undefined {
     this.#lock(cursor, null, false);
     const decoded = cursor.opcode === 0x9b ? null : cursor.decodeModRM(cursor.width);
+    if (secondaryOpcode !== null && decoded !== null) {
+      const operation = prepareRawSse(secondaryOpcode, cursor.numericPrefix, decoded.registerIndex);
+      if (operation !== null) {
+        this.#planned(cursor, { kind: "raw-sse", operation, operand: decoded.rm.kind === "memory" ? decoded.rm : { kind: "register", index: decoded.rmIndex } });
+        return undefined;
+      }
+    }
     const immediate = secondaryOpcode === 0x70 || secondaryOpcode === 0x71 || secondaryOpcode === 0x72 || secondaryOpcode === 0x73 || secondaryOpcode === 0xc2 || secondaryOpcode === 0xc4 || secondaryOpcode === 0xc5 || secondaryOpcode === 0xc6 ? cursor.readByte() : null;
     const result = executeNumericInstruction({ state: this.state, memory: this.memory, instruction: {
       opcode: cursor.opcode, secondaryOpcode, modrm: decoded?.byte ?? null,

@@ -2,8 +2,11 @@
 import type { GuestProcessorState, MappedGuestMemory } from "../core/contracts.ts";
 import { alu, condition } from "../x86/arithmetic.ts";
 import type { AluOperation } from "../x86/arithmetic.ts";
-import { canonicalAddress, effectiveOperandOffset, readOperand, writeOperand, writableOperand, X64ProcessorFault } from "./decoder.ts";
+import { canonicalAddress, effectiveOperandOffset, operandAddress, readOperand, writeOperand, writableOperand, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
 import type { X64MemoryOperand, X64Operand, X64RegisterOperand } from "./decoder.ts";
+import { executeRawSse } from "../floating-point/raw-sse.ts";
+import type { RawSseOperation } from "../floating-point/raw-sse.ts";
+import type { NumericOperand } from "../floating-point/contracts.ts";
 
 export type X64Flow = { readonly kind: "advance" } | { readonly kind: "branch"; readonly target: bigint }
   | { readonly kind: "halt" } | { readonly kind: "trap"; readonly vector: number };
@@ -13,7 +16,8 @@ export type X64PlanOperation =
   | { readonly kind: "move"; readonly destination: X64Operand; readonly source: X64PlanSource }
   | { readonly kind: "lea"; readonly destination: X64RegisterOperand; readonly source: X64MemoryOperand }
   | { readonly kind: "alu"; readonly operation: AluOperation; readonly destination: X64Operand; readonly source: X64PlanSource }
-  | { readonly kind: "branch"; readonly condition: number | null; readonly displacement: bigint };
+  | { readonly kind: "branch"; readonly condition: number | null; readonly displacement: bigint }
+  | { readonly kind: "raw-sse"; readonly operation: RawSseOperation; readonly operand: X64MemoryOperand | Extract<NumericOperand, { kind: "register" }> };
 export interface X64SemanticPlan {
   readonly operation: X64PlanOperation;
   readonly nextIP: bigint;
@@ -24,13 +28,24 @@ export function x64Lock(lock: boolean, destination: X64Operand | null, permitted
   if (lock && (!permitted || destination?.kind !== "memory")) throw new X64ProcessorFault(6, "LOCK requires a supported memory read-modify-write operand");
 }
 export function makeX64Plan(operation: X64PlanOperation, nextIP: bigint, lock: boolean): X64SemanticPlan {
-  const endsBlock = operation.kind === "branch" || (operation.kind === "move" || operation.kind === "alu")
+  const endsBlock = operation.kind === "branch"
+    || operation.kind === "raw-sse" && operation.operation.kind === "move" && operation.operation.store && operation.operand.kind === "memory"
+    || (operation.kind === "move" || operation.kind === "alu")
     && operation.destination.kind === "memory" && (operation.kind !== "alu" || operation.operation !== "cmp" && operation.operation !== "test");
   return Object.freeze({ operation: Object.freeze(operation), nextIP, lock, endsBlock });
 }
 export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory, state: GuestProcessorState): X64Flow {
   const operation = plan.operation;
   switch (operation.kind) {
+    case "raw-sse": {
+      x64Lock(plan.lock, null, false);
+      const operand = operation.operand.kind === "register" ? operation.operand
+        : { kind: "memory", address: operandAddress(memory, state, operation.operand, plan.nextIP) } satisfies NumericOperand;
+      const result = executeRawSse(operation.operation, operand, state, memory);
+      if (result.kind === "unsupported") throw new X64Unsupported(result.detail);
+      if (result.kind === "exception") throw new X64ProcessorFault(result.vector, result.detail);
+      return x64Advance;
+    }
     case "move": {
       x64Lock(plan.lock, null, false);
       const value = typeof operation.source === "bigint" ? operation.source : readOperand(memory, state, operation.source, plan.nextIP);
