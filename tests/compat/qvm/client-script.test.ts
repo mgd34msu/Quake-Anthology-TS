@@ -1,3 +1,4 @@
+import { encodeCheckpointValue, decodeCheckpointValue } from "../../../src/persistence/value.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -24,7 +25,7 @@ async function fixture() {
     const words = new DataView(new ArrayBuffer((args.length + 1) * 4));
     words.setInt32(0, code, true); args.forEach((value, index) => words.setInt32(4 + index * 4, value, true));
     return { kind: "engine", role: "ui", code, words, guest, memory: guest.bytes, commandArguments: null,
-      invoke: () => { throw new Error("Unexpected reentry"); }, invokeAsync: async () => { throw new Error("Unexpected reentry"); } };
+      cancelFunction: () => { throw new Error("Unexpected cancellation"); }, invoke: () => { throw new Error("Unexpected reentry"); }, invokeAsync: async () => { throw new Error("Unexpected reentry"); } };
   };
   const close = async (): Promise<void> => { scripts.closeAll(); globals.clear(); mounts.close(); await rm(root, { recursive: true, force: true }); };
   return { root, mounts, globals, printed, guest, scripts, call, close };
@@ -100,4 +101,22 @@ test("sync parser rejects promised includes while the shared async path preserve
   } finally { reader.dispose(); }
   const synchronous = ScriptSourceReader.open({ path: "root", text: '#include "child"' }, { resolve: () => Promise.resolve(undefined) });
   try { expect(() => synchronous.next()).toThrow("synchronous includes"); } finally { synchronous.dispose(); }
+});
+
+test("client parser checkpoint retains macro expansion, lookahead and original source slot", async () => {
+  const f = await fixture(), globals = new ScriptGlobalDefines();
+  const restored = new QvmClientScripts({ mounts: f.mounts, globals, assertCurrent: () => {}, print: text => f.printed.push(text) });
+  try {
+    f.scripts.addDefine("VALUE 7");
+    const discarded = await f.scripts.load("root.menu"), handle = await f.scripts.load("root.menu");
+    f.scripts.free(discarded);
+    expect(handle).toBe(2);
+    expect(await f.scripts.read(handle, () => {})).toBe(1);
+    const checkpoint = decodeCheckpointValue(encodeCheckpointValue(f.scripts.captureCheckpoint()));
+    restored.restoreCheckpoint(checkpoint);
+    const read = async (owner: QvmClientScripts) => { const result: string[] = []; let next = ""; while (await owner.read(handle, reader => { next = reader.rawToken.string; })) result.push(next); return result; };
+    const next = await read(restored); expect(next).toEqual(await read(f.scripts));
+    expect(next).toEqual(["7", "(", "(", "3", ")", "+", "(", "3", ")", ")"]);
+    expect(await restored.load("error.menu")).toBe(1);
+  } finally { restored.closeAll(); globals.clear(); await f.close(); }
 });

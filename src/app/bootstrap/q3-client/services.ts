@@ -20,6 +20,7 @@ import { SharedSceneQueries } from '../../../world/collision/index.ts';
 
 export interface ApplicationQ3ServiceOptions {
   readonly owner?: ProviderId;
+  readonly resourceHandles?: "renderer" | "client";
   remapShader?(original: string, replacement: string, offset: string): Promise<void>;
   readonly systemCinematics?: SystemCinematicHost;
   readonly collisionSettings: CollisionMapSettings;
@@ -46,7 +47,7 @@ export async function createApplicationQ3Services(options: ApplicationQ3ServiceO
   const map = media.assets.content.world;
   const clip = options.queries instanceof SharedSceneQueries ? options.queries.nativeQ3ClipModels() : null;
   const resources = new Q3RendererResources({ ...await media.resourceHost(scene), ...(options.remapShader === undefined ? {} : { remapShader: options.remapShader }) }, map.kind === 'q3-bsp' && clip !== null
-    ? { map, clusterPVS: cluster => clip.world.clusterPVS(cluster) } : undefined);
+    ? { map, clusterPVS: cluster => clip.world.clusterPVS(cluster) } : undefined, options.resourceHandles);
   const target = new Q3PresentationAudio({ seat, sounds: media.bank, actor: number => options.actorAt(number), frameNumber: options.clock.frameNumber,
     play: sound => output.audio({ kind: 'play', sound: options.owner === undefined ? sound : { ...sound, owner: options.owner } }),
     loop: sound => output.audio({ kind: 'loop', sound: options.owner === undefined ? sound : { ...sound, owner: options.owner } }),

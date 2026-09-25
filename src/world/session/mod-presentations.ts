@@ -31,6 +31,7 @@ export interface ModQvmPresentationSource {
   scene?(): { readonly current: QvmModScenePublication; readonly baseline: QvmModScenePublication | null };
   files?(): { readonly mounts: MountedContent; readonly writable: UserFileStore | null } | null;
   clientCommand?(viewer: ActorId, arguments_: readonly string[]): void;
+  bindings(): readonly { readonly actor: ActorId; readonly slot: number; readonly owned: boolean }[];
   actor(slot: number): ActorId | null;
   live(actor: ActorId): boolean;
   assertCurrent(): void;

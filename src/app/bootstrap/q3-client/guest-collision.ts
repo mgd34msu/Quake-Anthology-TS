@@ -1,3 +1,5 @@
+import { SaveReader } from "../../../persistence/value.ts";
+import { readBounds } from "../../../persistence/shared.ts";
 import type { QvmClientClipModels } from '../../../compat/qvm/client-collision-syscalls.ts';
 import type { QvmCvarServices } from '../../../compat/qvm/cvar-syscalls.ts';
 import type { Vec3 } from '../../../contracts/math.ts';
@@ -18,6 +20,11 @@ export class SharedQvmClientClipModels implements QvmClientClipModels {
   readonly world: { readonly hasNodes: boolean };
   constructor(private readonly scene: SharedSceneQueries, private readonly cvars: QvmCvarServices) {
     this.world = { hasNodes: scene.geometry.nodes.length !== 0 };
+  }
+  captureTemporaryCheckpoint() { return { bounds: { min: { ...this.bounds.min }, max: { ...this.bounds.max } }, box: this.box.bounds }; }
+  restoreTemporaryCheckpoint(value: unknown): void {
+    const r = new SaveReader(value, "cgame-temporary-collision"), box = readBounds(r.field("box")), bounds = readBounds(r.field("bounds"));
+    this.tempBoxModel(box.min, box.max, false); this.tempBoxModel(bounds.min, bounds.max, true);
   }
   get modelCount(): number { return this.scene.geometry.models.length; }
   inlineModel(index: number): number {

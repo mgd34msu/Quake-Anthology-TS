@@ -40,9 +40,7 @@ function executable() {
   trap(QvmCgameImport.CG_S_STARTSOUND); add(QvmOpcode.OP_POP);
   constantArgument(8, 82000); trap(QvmCgameImport.CG_R_ADDREFENTITYTOSCENE); add(QvmOpcode.OP_POP); add(QvmOpcode.OP_CONST, 0); add(QvmOpcode.OP_LEAVE, 32);
   const unsupported = [QvmCgameImport.CG_GETSNAPSHOT, QvmCgameImport.CG_S_STARTBACKGROUNDTRACK,
-    QvmCgameImport.CG_S_STOPBACKGROUNDTRACK, QvmCgameImport.CG_R_REMAP_SHADER,
-    QvmCgameImport.CG_CIN_PLAYCINEMATIC, QvmCgameImport.CG_CIN_STOPCINEMATIC, QvmCgameImport.CG_CIN_RUNCINEMATIC,
-    QvmCgameImport.CG_CIN_DRAWCINEMATIC, QvmCgameImport.CG_CIN_SETEXTENTS].map(code => {
+    QvmCgameImport.CG_S_STOPBACKGROUNDTRACK, QvmCgameImport.CG_R_REMAP_SHADER].map(code => {
       const entry = operations.length;
       add(QvmOpcode.OP_ENTER, 32); trap(code); add(QvmOpcode.OP_POP); add(QvmOpcode.OP_CONST, 0); add(QvmOpcode.OP_LEAVE, 32);
       return { entry, code };
@@ -104,6 +102,7 @@ test("component cgame uses source media and actor mapping, preserves baseline de
       const source: ActiveModPresentation = { owner: { provider: module.id, generation: 1 }, identity: { selection: { product: "source", id: "component" }, source: { provider: "q3:source", content: sourceContent },
         declarationDigest: digest, modules: [module], providers: [] }, prepared: { kind: "qvm", source: module, artifact, declaration },
         source: { module, abiProfile: "q3-modern", get generation() { return generation; }, assertCurrent: () => {},
+          bindings: () => [{ actor: viewer, slot: 0, owned: false }, { actor: target, slot: 1, owned: false }],
           live: actor => actor.equals(viewer) || actor.equals(target), actor: slot => slot === 0 ? viewer : slot === 1 ? target : null,
           context: () => ({ gameState: state.copySourceRecord(), gameStateRevision: 0, snapshot: { serverTime: time, playerState } }) } };
       const options = { assets, audio, queries: createSceneQueries(content.world), seat, viewer, viewport: { x: 0, y: 0, width: 320, height: 240 }, source,
@@ -115,8 +114,18 @@ test("component cgame uses source media and actor mapping, preserves baseline de
         },
         output: { scene: () => {}, command: () => {}, text: () => {}, listener: () => {} } };
       owner = await ApplicationModPresentation.create(options, 4);
-      const retiringRenderer = new ApplicationQ3SceneRenderer(owner.media, owner.services.resources), pendingPreload = retiringRenderer.preload([]);
-      retiringRenderer.close(); await expect(pendingPreload).rejects.toThrow("closed");
+      const nativeCollision = options.queries.nativeQ3ClipModels();
+      if (nativeCollision === null) throw new Error("Q3 fixture requires native clip models");
+      const beforeCollision = nativeCollision.captureTemporaryCheckpoint(), beforeAudio = frames.length;
+      const checkpoint = owner.captureCheckpoint();
+      const prepared = await ApplicationModPresentation.restore(options, { ...checkpoint, collision: {
+        bounds: { min: { x: -3, y: -4, z: -5 }, max: { x: 3, y: 4, z: 5 } },
+        box: { min: { x: -6, y: -7, z: -8 }, max: { x: 6, y: 7, z: 8 } } } }, () => viewer);
+      expect(nativeCollision.captureTemporaryCheckpoint()).toEqual(beforeCollision);
+      await expect(prepared.frame(1)).rejects.toThrow("not been published");
+      prepared.close(); expect(frames.length).toBe(beforeAudio);
+      const retiringRenderer = new ApplicationQ3SceneRenderer(owner.media, owner.services.resources);
+      retiringRenderer.close(); await expect(retiringRenderer.preload([])).rejects.toThrow("closed");
       expect(yields).toBe(1); expect(owner.media.bank.registrations()[0]?.sound?.name).toBe("sound/items/regen.wav");
       const event: Q3SourcePlayerEvent = { kind: "player-event", actor: target, source: { module, abiProfile: "q3-modern" },
         playerState: { ...playerState, clientNumber: 1 }, event: 349, parameter: 0, origin: { x: 10, y: 20, z: 30 }, sequence: { kind: "external", time: 1000 }, time: 1 };

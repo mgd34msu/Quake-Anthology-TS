@@ -1,3 +1,8 @@
+import { SaveReader, encodeCheckpointValue, decodeCheckpointValue } from "../../persistence/value.ts";
+import { savedActorId, readSavedActor } from "../../persistence/save-image.ts";
+import { readGuest } from "../../persistence/execution.ts";
+import type { SavedActorId } from "../../contracts/session.ts";
+import { capturePresentationGameState, readPresentationGameState, capturePresentationSnapshot, readPresentationSnapshot } from "./mod-presentation-checkpoint.ts";
 import type { ActorId } from "../../contracts/identity.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { Q3PlayerState } from "../../contracts/protocol.ts";
@@ -117,6 +122,7 @@ export function validateQvmModPresentation(options: Pick<QvmModPresentationOptio
 /** Executes artifact-qualified original presentation with its private media and caller state. */
 export class QvmModPresentation {
   readonly module: QvmModule;
+  private restoreActor: ((saved: SavedActorId) => ActorId) | null = null;
   private phase: "created" | "initialized" | "failed" | "closed" = "created";
   private busy = false;
   private sequence = -1;
@@ -140,9 +146,67 @@ export class QvmModPresentation {
   private meshScope: { readonly player: NonNullable<QvmModPresentation["playerScope"]>; readonly pointer: number; readonly shader: number } | null = null;
   constructor(private readonly options: QvmModPresentationOptions) {
     validateQvmModPresentation(options);
-    this.module = new QvmModule({ artifact: options.artifact, host: call => { this.current(this.activeEvent); return this.sceneSyscall(call) ?? options.host(call); } });
+    this.module = new QvmModule({ artifact: options.artifact, host: call => { this.current(this.activeEvent); return this.sceneSyscall(call) ?? options.host(call); },
+      hostState: { checkpoint: () => ({ state: { module: options.artifact.module, format: "qvm:component-client-v1", bytes: encodeCheckpointValue(this.captureHost()) }, random: [], callbacks: [] }),
+        restore: state => { if (state.state.format !== "qvm:component-client-v1" || state.random.length !== 0 || state.callbacks.length !== 0) throw new Error("Invalid component client host checkpoint");
+          this.restoreHost(decodeCheckpointValue(state.state.bytes)); return undefined; } } });
     if (options.declaration.runtime === "qvm-scene") this.bindBody(options.declaration);
   }
+  captureCheckpoint() {
+    this.current();
+    if (this.phase !== "initialized" || this.busy) throw new Error("Component checkpoint requires an idle initialized cgame");
+    return this.module.checkpoint();
+  }
+  restoreCheckpoint(value: unknown, resolveActor: (saved: SavedActorId) => ActorId): void {
+    this.current();
+    if (this.phase !== "created" || this.busy) throw new Error("Component restore requires an uninitialized cgame");
+    const checkpoint = readGuest(new SaveReader(value, "component-client"));
+    if (checkpoint.kind !== "qvm") throw new Error("Component client checkpoint is not QVM state");
+    this.restoreActor = resolveActor;
+    try { this.module.restore(checkpoint); this.phase = "initialized"; }
+    catch (error) { this.fail(error); }
+    finally { this.restoreActor = null; }
+  }
+  private captureHost() {
+    if (this.phase !== "initialized" || this.busy || this.commandArguments !== null || this.activeEvent !== undefined
+      || this.playerScope !== null || this.meshScope !== null || this.restoringScene) throw new Error("Cannot checkpoint an active component call");
+    return { version: 1, sequence: this.sequence, revision: this.revision, frame: this.frame, hudFrame: this.hudFrame,
+      players: [...this.players].map(([slot, actor]) => ({ slot, actor: savedActorId(actor) })), defaults: this.defaults?.slice() ?? null,
+      snapshots: [...this.snapshots.values()].map(snapshot => capturePresentationSnapshot(snapshot, this.options.declaration.cgame.abiProfile)),
+      snapshotNumber: this.snapshotNumber, sceneRevision: this.sceneRevision,
+      commands: [...this.commands].map(([sequence, arguments_]) => ({ sequence, arguments: [...arguments_] })), arguments: [...this.arguments_],
+      sceneActors: [...this.sceneActors.values()].map(row => ({ slot: row.slot, owned: row.owned, actor: savedActorId(row.actor) })),
+      currentGameState: this.currentGameState === null ? null : capturePresentationGameState(this.currentGameState) };
+  }
+  private restoreHost(value: unknown): void {
+    const resolve = this.restoreActor;
+    if (resolve === null) throw new Error("Component host restore has no saved-actor resolver");
+    const r = new SaveReader(value, "component-host"); r.field("version").literal(1);
+    this.sequence = r.field("sequence").integer(-1); this.revision = r.field("revision").integer(-1);
+    this.frame = r.field("frame").integer(-1); this.hudFrame = r.field("hudFrame").integer(-1);
+    this.defaults = r.field("defaults").nullable(v => v.bytes().slice());
+    const layout = this.options.declaration.storage.centities;
+    if (this.defaults === null || this.defaults.length !== layout.stride * layout.capacity) r.fail("invalid default centity bytes");
+    for (const row of r.field("players").list(v => ({ slot: v.field("slot").integer(0), actor: readSavedActor(v.field("actor")) }))) {
+      if (row.slot >= layout.capacity || this.players.has(row.slot)) r.fail("invalid saved centity owner");
+      this.players.set(row.slot, resolve(row.actor));
+    }
+    this.snapshotNumber = r.field("snapshotNumber").integer(0); this.sceneRevision = r.field("sceneRevision").integer(-1);
+    for (const snapshot of r.field("snapshots").list(v => readPresentationSnapshot(v, this.options.declaration.cgame.abiProfile))) {
+      if (this.snapshots.has(snapshot.number) || snapshot.number > this.snapshotNumber || snapshot.number <= this.snapshotNumber - 32) r.fail("invalid snapshot ring");
+      this.snapshots.set(snapshot.number, snapshot);
+    }
+    for (const command of r.field("commands").list(v => ({ sequence: v.field("sequence").integer(0), arguments: v.field("arguments").list(a => a.string()) }))) {
+      if (this.commands.has(command.sequence)) r.fail("duplicate saved server command"); this.commands.set(command.sequence, command.arguments);
+    }
+    this.arguments_ = r.field("arguments").list(a => a.string());
+    for (const row of r.field("sceneActors").list(v => ({ slot: v.field("slot").integer(0), actor: readSavedActor(v.field("actor")), owned: v.field("owned").boolean() }))) {
+      if (row.slot >= layout.capacity || this.sceneActors.has(row.slot)) r.fail("invalid saved scene owner");
+      this.sceneActors.set(row.slot, { ...row, actor: resolve(row.actor) });
+    }
+    this.currentGameState = r.field("currentGameState").nullable(readPresentationGameState);
+  }
+
   get arguments(): readonly string[] { return this.commandArguments ?? this.arguments_; }
   private async scoped(call: QvmFunctionCall, enter: () => () => void): Promise<number> {
     const leave = enter();

@@ -1,3 +1,4 @@
+import { SaveReader } from "../../../persistence/value.ts";
 import type { ActorId, SeatId } from "../../../contracts/identity.ts";
 import type { Vec3 } from "../../../contracts/math.ts";
 import type { SoundAsset, SoundOrigin, PlaySound, LoopSound } from "../../../audio/types.ts";
@@ -9,14 +10,31 @@ export interface SoundRegistration { readonly path: string; readonly compressed:
 /** Source handles refer to shared decoded PCM and preserve compressed-registration intent. */
 export class Q3PresentationSoundBank implements ClientSoundBank {
   private readonly registered: SoundAsset[] = [];
+  private operations = 0;
   private readonly requests = new Map<string, SoundRegistration>();
   constructor(readonly bank: SoundBank, readonly zeroSound: SoundAsset | null, private readonly loadSync: (path: string, compressed: boolean) => SoundAsset | null) {}
+  captureCheckpoint() {
+    if (this.operations !== 0) throw new Error("Cannot checkpoint pending sound registration");
+    return [...this.requests.values()].map(row => ({ path: row.path, compressed: row.compressed,
+      handle: this.indexForSound(row.sound?.pcm ?? null), resource: row.sound?.resource ?? null }));
+  }
+  async restoreCheckpoint(value: unknown): Promise<void> {
+    if (this.operations !== 0 || this.requests.size !== 0) throw new Error("Sound restore requires an empty owner");
+    const r = new SaveReader(value, "client-sounds");
+    for (const row of r.list(item => ({ path: item.field("path").string(), compressed: item.field("compressed").boolean(),
+      handle: item.field("handle").integer(0), resource: item.field("resource").nullable(v => v.string()) }))) {
+      const sound = await this.registerSound(row.path, row.compressed), entry = this.requests.get(row.path);
+      if (this.indexForSound(sound) !== row.handle || (entry?.sound?.resource ?? null) !== row.resource) r.fail("sound resource binding changed");
+    }
+  }
   async registerSound(path: string | null, compressed: boolean): Promise<PcmSound | null> {
     if (path === null) throw new Error("S_RegisterSound dereferences NULL name at strlen");
     if (path.length === 0 || path.startsWith("*")) return null;
     const prior = this.requests.get(path);
     if (prior !== undefined) return prior.sound === null || prior.sound.pcm === this.zeroSound?.pcm ? null : prior.sound.pcm;
-    const sound = await this.bank.register(path, "q3");
+    this.operations++;
+    let sound: SoundAsset | null;
+    try { sound = await this.bank.register(path, "q3"); } finally { this.operations--; }
     this.requests.set(path, { path, compressed, sound });
     if (sound !== null && sound.pcm !== this.zeroSound?.pcm && !this.registered.includes(sound)) this.registered.push(sound);
     return sound === null || sound.pcm === this.zeroSound?.pcm ? null : sound.pcm;

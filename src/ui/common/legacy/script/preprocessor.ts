@@ -1,3 +1,4 @@
+import type { ScriptMemoryAllocation } from "./memory.ts";
 import { SaveReader } from "../../../../persistence/value.ts";
 import { readScriptDiagnostic } from "./lexer.ts";
 import type { ScriptMemoryCapture, ScriptMemoryRestore } from "./memory.ts";
@@ -1755,6 +1756,26 @@ export class ScriptGlobalDefines {
 
   constructor(private readonly report?: (diagnostic: ScriptDiagnostic) => void, private readonly memory?: ScriptMemory) {
     this.heap = new PrecompMemory(memory);
+  }
+
+  captureOwnedSaveState() {
+    const allocations: Uint8Array[] = [], references = new Map<ScriptMemoryAllocation, number>();
+    const state = this.captureSaveState({ reference: allocation => {
+      const prior = references.get(allocation); if (prior !== undefined) return prior;
+      const index = allocations.length; references.set(allocation, index); allocations.push(allocation.bytes.slice()); return index;
+    } });
+    return { allocations, state };
+  }
+  restoreOwnedSaveState(value: unknown): void {
+    if (this.first !== 0) throw new Error("Global define restore requires an empty owner");
+    const r = new SaveReader(value, "script.globalOwner"), bytes = r.field("allocations").list(v => v.bytes());
+    const allocations = new Map<number, ScriptMemoryAllocation>();
+    this.restoreSaveState(r.field("state").value, { allocation: id => {
+      const prior = allocations.get(id); if (prior !== undefined) return prior;
+      const saved = bytes[id]; if (saved === undefined) throw new Error("Invalid global define allocation");
+      const allocation = this.memory?.allocate(saved.length, "heap", false) ?? { bytes: new Uint8Array(saved.length) };
+      allocation.bytes.set(saved); allocations.set(id, allocation); return allocation;
+    } });
   }
 
   captureSaveState(capture: ScriptMemoryCapture) { return { first: this.first, heap: this.heap.captureSaveState(capture), reported: this.reported.map(value => ({ ...value, location: { ...value.location } })) }; }

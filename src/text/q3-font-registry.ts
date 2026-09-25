@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Ported from quake-3-ts/src/render/font-registry.ts.
+import { SaveReader } from "../persistence/value.ts";
 import type { FontFileReader, RetainedFontFile } from "./draw2d.ts";
 import type { MaterialPicture } from "./draw2d.ts";
 import { readFontData } from "./q3-font.ts";
@@ -16,17 +17,63 @@ export class RendererFontRegistry {
         readonly font: RegisteredFont;
         readonly record: Uint8Array;
     }[] = [];
+    private pending = 0;
+    private readonly generated = new Map<string, Uint8Array>();
     private registration: Promise<void> = Promise.resolve();
     private freeType: FreeTypeInitialization | undefined;
     private readonly retained = new Set<RetainedFontFile>();
     private closed = false;
     constructor(private readonly reader: FontFileReader, private readonly registerPicture: (path: string) => Promise<MaterialPicture>, private readonly syncRenderThread: () => void, private readonly generation: FontGenerationServices | null = null) { }
+    captureCheckpoint() {
+        this.requireOpen();
+        if (this.pending !== 0) throw new Error("Cannot checkpoint pending font registration");
+        return { freeType: this.freeType?.kind ?? null,
+            generated: [...this.generated].map(([name, rgba]) => ({ name, rgba: rgba.slice() })),
+            fonts: this.fonts.map(entry => ({ record: entry.record.slice(), pictures: entry.font.glyphs.map(glyph => glyph.picture?.name ?? null) })) };
+    }
+    async restoreCheckpoint(value: unknown): Promise<void> {
+        this.requireOpen();
+        if (this.pending !== 0 || this.fonts.length !== 0 || this.freeType !== undefined) throw new Error("Font restore requires an empty owner");
+        const r = new SaveReader(value, "client-fonts");
+        const freeType = r.field("freeType").nullable(v => v.choice("unavailable", "failed", "ready"));
+        this.pending++;
+        try {
+            if (freeType !== null) {
+                this.freeType = FreeTypeFontLibrary.open();
+                if (this.freeType.kind !== freeType) r.fail("font generator availability changed");
+            }
+            const generated = new Map<string, MaterialPicture>();
+            for (const row of r.field("generated").list(item => ({ name: item.field("name").string(), rgba: item.field("rgba").bytes().slice() }))) {
+                if (this.generation === null || row.rgba.length !== 256 * 256 * 4 || generated.has(row.name)) r.fail("invalid generated font atlas");
+                const generation = this.generation;
+                if (generation === null) throw new Error("Generated font restore requires its atlas owner");
+                const picture = await generation.registerImage(row.name, row.rgba);
+                this.requireOpen(); generated.set(row.name, picture); this.generated.set(row.name, row.rgba);
+            }
+            const rows = r.field("fonts").list(item => ({ record: item.field("record").bytes().slice(), pictures: item.field("pictures").list(v => v.nullable(name => name.string())) }));
+            if (rows.length > 6) r.fail("too many cached fonts");
+            for (const row of rows) {
+                if (row.record.length !== 20548 || row.pictures.length !== 256) r.fail("invalid font record");
+                const data = readFontData(row.record), glyphs: RegisteredGlyph[] = [], view = new DataView(row.record.buffer);
+                for (const [index, glyph] of data.glyphs.entries()) {
+                    const name = row.pictures[index];
+                    if (name === undefined) throw new Error("Missing cached glyph");
+                    const picture = name === null ? null : generated.get(name) ?? await this.registerPicture(name);
+                    this.requireOpen();
+                    if (picture !== null) view.setInt32(index * 80 + 44, picture.material.order, true);
+                    glyphs.push({ ...glyph, picture });
+                }
+                this.fonts.push({ font: { name: data.name, glyphScale: data.glyphScale, glyphs }, record: row.record });
+            }
+        } finally { this.pending--; }
+    }
     async registerFont(path: string | null, pointSize: number, print: (text: string) => void, destination?: () => Uint8Array): Promise<RegisteredFont | null> {
         if (!Number.isFinite(pointSize))
             throw new RangeError("Invalid font point size");
         const integerSize = Math.trunc(pointSize), size = integerSize <= 0 ? 12 : integerSize;
+        this.pending++;
         const result = this.registration.then(() => this.loadFont(`fonts/fontImage_${size}.dat`, path, size, print, destination));
-        this.registration = result.then(() => undefined, () => undefined);
+        this.registration = result.then(() => { this.pending--; }, () => { this.pending--; });
         return result;
     }
     close(): void {
@@ -37,6 +84,7 @@ export class RendererFontRegistry {
             this.freeType.library.close();
         this.freeType = undefined;
         this.fonts.length = 0;
+        this.generated.clear();
         for (const file of this.retained) this.reader.freeFile(file);
         this.retained.clear();
     }
@@ -169,6 +217,7 @@ export class RendererFontRegistry {
                     await generation.writeFile(name, this.tga(rgba));
                 this.requireOpen();
                 const picture = await generation.registerImage(name, rgba);
+                this.generated.set(name, rgba.slice());
                 this.requireOpen();
                 for (let index = lastStart; index < code; index++) {
                     view.setInt32(index * 80 + 44, picture.material.order, true);

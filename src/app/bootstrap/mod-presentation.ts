@@ -1,3 +1,8 @@
+import { SaveReader, encodeCheckpointValue } from "../../persistence/value.ts";
+import type { SavedActorId } from "../../contracts/session.ts";
+import { captureSceneContext, readSceneContext } from "../../compat/qvm/mod-presentation-checkpoint.ts";
+import { qvmClientCinematicSyscall } from "../../compat/qvm/client-cinematic-syscalls.ts";
+import { SourceClipModels } from "../../world/collision/q3/clip-models.ts";
 export type { ComponentPresentationMediaRequest } from "../../contracts/presentation.ts";
 import type { ComponentPresentationMediaRequest } from "../../contracts/presentation.ts";
 import { samePresentationOwner } from "../../contracts/presentation.ts";
@@ -16,7 +21,6 @@ import { QvmFiles, qvmFileSyscall } from "../../compat/qvm/file-syscalls.ts";
 import { qvmClientAudioSyscall } from "../../compat/qvm/client-audio-syscalls.ts";
 import { qvmClientRenderSyscall } from "../../compat/qvm/client-render-syscalls.ts";
 import { qvmClientCollisionSyscall } from "../../compat/qvm/client-collision-syscalls.ts";
-import type { QvmClientClipModels } from "../../compat/qvm/client-collision-syscalls.ts";
 import { qvmClientMarkSyscall } from "../../compat/qvm/client-mark-syscalls.ts";
 import { QvmClientScripts, qvmClientScriptSyscall } from "../../compat/qvm/client-script-syscalls.ts";
 import { QVM_GAME_STATE_BYTES, writeSourceQvmGameState } from "../../compat/qvm/client-state-record.ts";
@@ -52,6 +56,7 @@ export interface ApplicationModPresentationOptions {
   readonly source: ActiveModPresentation;
   readonly clock: ApplicationQ3ServiceOptions["clock"];
   readonly output: Omit<ApplicationQ3ServiceOptions["output"], "audio">;
+  readonly systemCinematics?: ApplicationQ3ServiceOptions["systemCinematics"];
   readonly commands?: Extract<QvmCommonServices, { readonly role: "cgame" }>["commands"];
   presentationMedia?(request: ComponentPresentationMediaRequest, initializing: boolean, current: () => boolean): Promise<void>;
   print(text: string): void;
@@ -76,11 +81,17 @@ export class ApplicationModPresentation {
   private hudColor = { x: 1, y: 1, z: 1, w: 1 };
   private capturedHud: readonly Q3OverlaySubmission[] = [];
   get hud(): readonly Q3OverlaySubmission[] { this.assertCurrent(); return this.capturedHud; }
+  private published = true;
+  private operations = 0;
+  private commandsPublished = true;
   private frameSequence = -1;
+  private frameOffset = 0;
+  private millisecondsOffset = 0;
+  private readonly registeredCommands = new Set<string>();
   private previousFrameTime: number | null = null;
   private files: QvmFiles | null = null;
   private scripts: QvmClientScripts | null = null;
-  private collision: QvmClientClipModels | null = null;
+  private collision: SourceClipModels | SharedQvmClientClipModels | null = null;
   private marks: ReturnType<typeof worldMarkProjector> | null = null;
   private closed = false;
   private initializing = true;
@@ -155,23 +166,47 @@ export class ApplicationModPresentation {
       commands: source.commands.map(command => ({ sequence: command.sequence,
         arguments: command.recipient === null || command.recipient.equals(this.options.viewer) ? tokenizeCommand(command.text, "q3").argv : [] })) };
   }
-  static async create(options: ApplicationModPresentationOptions, baselineSequence = -1): Promise<ApplicationModPresentation> {
+  captureCheckpoint() {
+    this.assertCurrent();
+    if (this.initializing || this.operations !== 0 || this.core === null || this.files === null || this.scripts === null || this.collision === null
+      || this.audioOperations.length !== 0 || this.pendingHud.length !== 0) throw new Error("Component checkpoint requires an idle completed frame");
+    const profile = this.options.source.prepared.declaration.cgame.abiProfile;
+    return { version: 1, declaration: this.options.source.prepared.declaration, core: this.core.captureCheckpoint(),
+      cvars: this.cvars.captureSaveState(), files: this.files.captureCheckpoint(), scripts: this.scripts.captureCheckpoint(),
+      resources: this.services.resources.captureCheckpoint(), sounds: this.media.bank.captureCheckpoint(), fonts: this.media.fonts.captureCheckpoint(),
+      collision: this.collision.captureTemporaryCheckpoint(), cinematics: this.services.cinematics.captureCheckpoint(),
+      commands: [...this.registeredCommands], frameSequence: this.frameSequence, previousFrameTime: this.previousFrameTime,
+      milliseconds: this.options.clock.now() + this.millisecondsOffset, sceneTime: this.sceneTimeOffset === null ? null : this.options.clock.now() + this.sceneTimeOffset,
+      hudColor: { ...this.hudColor }, sceneContext: this.sceneContext === null ? null : captureSceneContext(this.sceneContext, profile),
+      sceneBaseline: this.sceneBaseline === undefined ? null : captureSceneContext(this.sceneBaseline, profile) };
+  }
+  static restore(options: ApplicationModPresentationOptions, value: unknown, resolveActor: (saved: SavedActorId) => ActorId): Promise<ApplicationModPresentation> {
+    return ApplicationModPresentation.createOwner(options, -1, { value, resolveActor });
+  }
+  static create(options: ApplicationModPresentationOptions, baselineSequence = -1): Promise<ApplicationModPresentation> {
+    return ApplicationModPresentation.createOwner(options, baselineSequence);
+  }
+  private static async createOwner(options: ApplicationModPresentationOptions, baselineSequence: number,
+    checkpoint?: { readonly value: unknown; resolveActor(saved: SavedActorId): ActorId }): Promise<ApplicationModPresentation> {
     const owner = new ApplicationModPresentation(options);
+    if (checkpoint !== undefined) owner.published = false;
     try {
       if (options.source.prepared.declaration.runtime === "qvm-scene") for (const variable of options.source.prepared.declaration.cvars)
         owner.cvars.set(variable.name, variable.value);
       owner.mediaValue = await ApplicationQ3Assets.create(options.assets, options.source.identity.source.content, options.print, () => false, "guest-async", "source");
       owner.assertCurrent();
       const collisionSettings = new CollisionMapSettings(owner.cvars); collisionSettings.registerMap();
-      owner.collision = options.queries.nativeQ3ClipModels() ?? new SharedQvmClientClipModels(options.queries, owner.cvars);
+      const nativeCollision = options.queries.nativeQ3ClipModels();
+      owner.collision = nativeCollision === null ? new SharedQvmClientClipModels(options.queries, owner.cvars) : new SourceClipModels(nativeCollision.world, "private");
       owner.marks = worldMarkProjector(options.assets.world);
       owner.servicesValue = await createApplicationQ3Services({ collisionSettings, media: owner.media, audio: options.audio,
-        owner: options.source.prepared.source.id, seat: options.seat, viewport: options.viewport, queries: options.queries,
+        owner: options.source.prepared.source.id, resourceHandles: "client",
+        ...(options.systemCinematics === undefined ? {} : { systemCinematics: options.systemCinematics }), seat: options.seat, viewport: options.viewport, queries: options.queries,
         actorAt: slot => {
           owner.assertCurrent(); const actor = options.source.source.actor(slot);
           if (actor === null) throw new Error(`Component sound source slot ${slot} has no live actor`);
           return actor;
-        }, clock: options.clock, output: {
+        }, clock: { now: () => options.clock.now() + owner.millisecondsOffset, frameNumber: options.clock.frameNumber }, output: {
           scene: scene => {
             owner.assertCurrent();
             if (options.source.prepared.declaration.hud === undefined) { options.output.scene(scene); return; }
@@ -203,12 +238,51 @@ export class ApplicationModPresentation {
       owner.scripts = new QvmClientScripts({ ...fileOptions, globals: owner.globals });
       owner.core = new QvmModPresentation({ ...options.source.prepared, host: call => owner.host(call), context: () => owner.context(),
         actor: slot => options.source.source.actor(slot), live: actor => options.source.source.live(actor), assertCurrent: () => owner.assertCurrent() });
-      await owner.core.initialize(baselineSequence);
+      if (checkpoint === undefined) await owner.core.initialize(baselineSequence);
+      else await owner.restoreOwned(checkpoint.value, checkpoint.resolveActor);
       owner.assertCurrent(); owner.initializing = false; owner.services.scene.clearScene(); owner.pendingHud = []; owner.flushAudio(); return owner;
     } catch (error) {
       try { owner.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation initialization and cleanup failed"); }
       throw error;
     }
+  }
+  private async restoreOwned(value: unknown, resolveActor: (saved: SavedActorId) => ActorId): Promise<void> {
+    if (this.core === null || this.files === null || this.scripts === null || this.collision === null) throw new Error("Component host is not allocated");
+    this.commandsPublished = false;
+    const r = new SaveReader(value, "component-presentation"); r.field("version").literal(1);
+    if (!Buffer.from(encodeCheckpointValue(r.field("declaration").value)).equals(Buffer.from(encodeCheckpointValue(this.options.source.prepared.declaration))))
+      r.fail("component declaration changed");
+    const profile = this.options.source.prepared.declaration.cgame.abiProfile;
+    this.frameSequence = r.field("frameSequence").integer(-1);
+    this.frameOffset = this.frameSequence + 1 - this.options.clock.frameNumber();
+    this.previousFrameTime = r.field("previousFrameTime").nullable(v => v.integer(0));
+    this.millisecondsOffset = r.field("milliseconds").finite() - this.options.clock.now();
+    this.sceneTimeOffset = r.field("sceneTime").nullable(v => v.finite() - this.options.clock.now());
+    const color = r.field("hudColor");
+    this.hudColor = { x: color.field("x").number(), y: color.field("y").number(), z: color.field("z").number(), w: color.field("w").number() };
+    this.sceneContext = r.field("sceneContext").nullable(v => readSceneContext(v, profile, resolveActor));
+    this.sceneBaseline = r.field("sceneBaseline").nullable(v => readSceneContext(v, profile, resolveActor)) ?? undefined;
+    this.cvars.restoreSaveState(r.field("cvars").value);
+    await this.media.fonts.restoreCheckpoint(r.field("fonts").value); this.assertCurrent();
+    await this.services.resources.restoreCheckpoint(r.field("resources").value); this.assertCurrent();
+    await this.media.bank.restoreCheckpoint(r.field("sounds").value); this.assertCurrent();
+    this.files.restoreCheckpoint(r.field("files").value);
+    this.scripts.restoreCheckpoint(r.field("scripts").value);
+    this.collision.restoreTemporaryCheckpoint(r.field("collision").value);
+    await this.services.cinematics.restoreCheckpoint(r.field("cinematics").value); this.assertCurrent();
+    this.core.restoreCheckpoint(r.field("core").value, resolveActor);
+    const commands = r.field("commands").list(v => v.string());
+    if (commands.length !== new Set(commands).size) r.fail("duplicate component command registration");
+    for (const name of commands) this.registeredCommands.add(name);
+  }
+  /** Bind saved command registrations only when the prepared consumer is published. */
+  publishCommands(): void {
+    this.assertCurrent();
+    if (this.initializing) throw new Error("Cannot publish an initializing component");
+    if (this.commandsPublished) return;
+    if (this.options.commands === undefined && this.registeredCommands.size !== 0) throw new Error("Restored component commands have no destination registry");
+    for (const name of this.registeredCommands) this.options.commands?.register(name);
+    this.commandsPublished = true; this.published = true;
   }
   private host(call: QvmHostCall): QvmHostResult {
     this.assertCurrent();
@@ -231,25 +305,24 @@ export class ApplicationModPresentation {
         return deliver({ kind: "shader-remap", original: read(4), replacement: read(8), timeOffset: Number.isNaN(offset) ? 0 : offset }, this.initializing, () => this.owns(this.options.source, this.options.viewer))
           .then(() => { this.assertCurrent(); return 0; });
       }
-      case QvmCgameImport.CG_CIN_PLAYCINEMATIC:
-      case QvmCgameImport.CG_CIN_STOPCINEMATIC:
-      case QvmCgameImport.CG_CIN_RUNCINEMATIC:
-      case QvmCgameImport.CG_CIN_DRAWCINEMATIC:
-      case QvmCgameImport.CG_CIN_SETEXTENTS:
-        return rejectQvmSyscall(call);
     }
     const options = this.options, services = this.services;
-    const commands = options.commands ?? {
+    const commandHost = options.commands ?? {
       append: () => rejectQvmSyscall(call), register: () => rejectQvmSyscall(call), remove: () => rejectQvmSyscall(call), reliable: () => rejectQvmSyscall(call),
     };
+    const commands = { append: commandHost.append, reliable: commandHost.reliable,
+      register: (name: string) => { commandHost.register(name); this.registeredCommands.add(name); },
+      remove: (name: string) => { commandHost.remove(name); this.registeredCommands.delete(name); } };
     if (call.kind === "engine" && call.code === QvmCgameImport.CG_UPDATESCREEN)
       return options.nextFrame().then(() => { this.assertCurrent(); return 0; });
     if (call.kind === "engine" && call.code === QvmCgameImport.CG_GETGAMESTATE) {
       writeSourceQvmGameState(call.guest, call.guest.view(call.words.getInt32(4, true), QVM_GAME_STATE_BYTES), this.context().gameState); return 0;
     }
-    return qvmCommonSyscall(call, { role: "cgame", cvars: this.cvars, print: options.print, milliseconds: options.clock.now, arguments: () => this.core?.arguments ?? [], commands })
+    return qvmCommonSyscall(call, { role: "cgame", cvars: this.cvars, print: options.print, milliseconds: () => options.clock.now() + this.millisecondsOffset, arguments: () => this.core?.arguments ?? [], commands })
       ?? (options.renderer === undefined ? null : qvmDisplaySyscall(call, { renderer: options.renderer, media: this.media, services,
         viewport: () => options.viewport, assertCurrent: () => this.assertCurrent() }))
+      ?? qvmClientCinematicSyscall(call, { cinematics: services.cinematics, draw: services.draw,
+        developerPrint: text => { if ((this.cvars.get("developer")?.integerValue ?? 0) !== 0) options.print(text); } })
       ?? qvmFileSyscall(call, this.files)
       ?? qvmClientScriptSyscall(call, this.scripts)
       ?? qvmClientRenderSyscall(call, services.resources, services.draw)
@@ -270,18 +343,22 @@ export class ApplicationModPresentation {
       owner: this.options.source.prepared.source.id, operations: this.audioOperations.splice(0) });
   }
   async command(arguments_: readonly string[]): Promise<boolean> {
+    if (!this.published) throw new Error("Component presentation has not been published");
     this.assertCurrent();
     if (this.core === null) throw new Error("Component presentation has not initialized");
+    this.operations++;
     try {
       const result = await this.core.consoleCommand(arguments_);
       this.assertCurrent(); this.flushAudio(); return result;
     } catch (error) {
       try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component command and cleanup failed"); }
       throw error;
-    }
+    } finally { this.operations--; }
   }
   async consume(event: Q3SourcePlayerEvent, sequence: number): Promise<void> {
+    if (!this.published) throw new Error("Component presentation has not been published");
     this.assertCurrent(); if (this.core === null) throw new Error("Component presentation has not initialized");
+    this.operations++;
     try {
       await this.core.consume(event, sequence);
       this.assertCurrent();
@@ -290,13 +367,16 @@ export class ApplicationModPresentation {
       this.audioOperations.length = 0;
       try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation execution and cleanup failed"); }
       throw error;
-    }
+    } finally { this.operations--; }
   }
   async frame(sequence: number): Promise<Q3SceneContent> {
+    if (!this.published) throw new Error("Component presentation has not been published");
     this.assertCurrent();
     if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error("Invalid component presentation frame sequence");
+    sequence += this.frameOffset;
     if (sequence <= this.frameSequence && this.captured !== null) return this.captured;
     if (this.core === null) throw new Error("Component presentation has not initialized");
+    this.operations++;
     try {
       const context = this.context(), time = context.timeMilliseconds ?? context.snapshot.serverTime;
       await this.core.advance(sequence);
@@ -314,7 +394,7 @@ export class ApplicationModPresentation {
     } catch (error) {
       try { this.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Component presentation frame and cleanup failed"); }
       throw error;
-    }
+    } finally { this.operations--; }
   }
   close(): void {
     if (this.closed) return;
@@ -322,8 +402,8 @@ export class ApplicationModPresentation {
     const failures: unknown[] = [];
     for (const cleanup of [() => this.core?.close(), () => this.files?.closeAll(), () => this.scripts?.closeAll(), () => this.globals.clear(),
       () => this.servicesValue?.cinematics.close(), () => this.rendererValue?.close(), () => this.mediaValue?.bank.bank.clear(), () => this.mediaValue?.close(),
-      () => this.options.audio.receiveCgameFrame({ content: this.options.source.identity.source.content, seat: this.options.seat,
-        owner: this.options.source.prepared.source.id, operations: [{ kind: "release-owner" }] })]) {
+      () => { if (this.published) this.options.audio.receiveCgameFrame({ content: this.options.source.identity.source.content, seat: this.options.seat,
+        owner: this.options.source.prepared.source.id, operations: [{ kind: "release-owner" }] }); }]) {
       try { cleanup(); } catch (error) { failures.push(error); }
     }
     this.core = null; this.files = null; this.scripts = null; this.servicesValue = null; this.mediaValue = null; this.collision = null; this.marks = null;

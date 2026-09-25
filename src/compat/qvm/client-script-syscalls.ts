@@ -1,4 +1,5 @@
 /* Q3 client PC traps over the shared botlib source parser. GPL-2.0-or-later. */
+import { SaveReader } from "../../persistence/value.ts";
 import type { MountedContent } from "../../content/mounts/index.ts";
 import { BotMemory } from "../../bots/behavior/library/memory.ts";
 import { allocateScriptSource } from "../../ui/common/legacy/script/lexer.ts";
@@ -24,6 +25,28 @@ export class QvmClientScripts {
   private closed = false;
   private operations = 0;
   constructor(readonly services: QvmClientScriptServices) {}
+
+  captureCheckpoint() {
+    this.assertCurrent();
+    if (this.operations !== 0 || this.pending.size !== 0) throw new Error("Cannot checkpoint an active client script operation");
+    const memory = this.memory.checkpoint();
+    return { memory: memory.image, globals: this.services.globals.captureOwnedSaveState(),
+      readers: [...this.readers].map(([handle, reader]) => ({ handle, state: reader.captureSaveState(memory) })) };
+  }
+  restoreCheckpoint(value: unknown): void {
+    this.assertCurrent();
+    if (this.readers.size !== 0 || this.operations !== 0 || this.pending.size !== 0) throw new Error("Client script restore requires an empty idle owner");
+    const r = new SaveReader(value, "client-scripts"), memory = this.memory.restore(r.field("memory").value);
+    this.services.globals.restoreOwnedSaveState(r.field("globals").value);
+    for (const row of r.field("readers").list(item => ({ handle: item.field("handle").integer(1), state: item.field("state").value }))) {
+      if (row.handle >= 64 || this.readers.has(row.handle)) r.fail("invalid client script slot");
+      const reader = ScriptSourceReader.restoreSaveState(row.state, { resolve: request => this.include(request) }, {
+        memory: this.memory, globals: this.services.globals,
+        report: diagnostic => { this.assertCurrent(); this.services.print(`file ${diagnostic.location.path}, line ${diagnostic.location.line}: ${diagnostic.message}\n`); this.assertCurrent(); },
+      }, memory);
+      this.readers.set(row.handle, reader);
+    }
+  }
 
   assertCurrent(): void {
     if (this.closed) throw new Error("QVM client scripts have been closed");

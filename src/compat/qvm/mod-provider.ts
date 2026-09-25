@@ -1,3 +1,5 @@
+import type { SavedActorId } from "../../contracts/session.ts";
+import { captureModScenePublication, readModScenePublication, capturePresentationGameState, readPresentationGameState } from "./mod-presentation-checkpoint.ts";
 import { QvmModActorFrame, qvmActorBootstrap, validateQvmModActorFrame } from "./mod-actor-frame.ts";
 import { QvmModItems, validateQvmModItems } from "./mod-items.ts";
 import type { ContentId } from "../../contracts/content.ts";
@@ -333,7 +335,12 @@ export class QvmModProvider {
         defaults: [...this.defaults].map(([id, bytes]) => ({ id, bytes })),
         configstrings: [...this.configstrings].map(([index, value]) => ({ index, value })),
         cvars: this.cvars.captureSaveState(), files: this.files?.captureCheckpoint() ?? null, portals: this.portals?.capturePortalCheckpoint() ?? null,
-        entityTokens: this.entityTokens.captureSaveState() }) }, random: [], callbacks: [] }),
+        entityTokens: this.entityTokens.captureSaveState(),
+        presentation: { revision: this.presentationRevision, state: this.presentationState === null ? null : capturePresentationGameState(this.presentationState),
+          sceneRevision: this.sceneRevision, dirty: this.sceneDirty, commandSequence: this.sceneCommandSequence,
+          commands: this.sceneCommands.map(command => ({ ...command, recipient: command.recipient === null ? null : savedActorId(command.recipient) })),
+          current: this.sceneState === null ? null : captureModScenePublication(this.sceneState, this.declaration.abiProfile),
+          baseline: this.sceneBaseline === null ? null : captureModScenePublication(this.sceneBaseline, this.declaration.abiProfile) } }) }, random: [], callbacks: [] }),
       restore: state => {
         const decoded = new SaveReader(decodeCheckpointValue(state.state.bytes));
         this.savedItems = decoded.field("items").value;
@@ -354,9 +361,28 @@ export class QvmModProvider {
         this.configstrings.clear();
         for (const entry of decoded.field("configstrings").list(entry => ({ index: entry.field("index").integer(), value: entry.field("value").string() }))) this.configstrings.set(entry.index, entry.value);
         this.bindServerVariables(this.cvars);
-        this.presentationRevision++; this.presentationGeneration++; this.presentationState = null;
-        this.sceneState = null; this.sceneBaseline = null; this.sceneDirty = true; this.sceneRevision = 0;
-        this.sceneCommandSequence = 0; this.sceneCommands.length = 0;
+        this.presentationGeneration++;
+        const presentation = decoded.field("presentation");
+        if (presentation.value === undefined) {
+          this.presentationRevision++; this.presentationState = null;
+          this.sceneState = null; this.sceneBaseline = null; this.sceneDirty = true; this.sceneRevision = 0;
+          this.sceneCommandSequence = 0; this.sceneCommands.length = 0;
+        } else {
+          const resolve = (saved: SavedActorId) => this.services.referenceSaved?.(saved) ?? this.services.actors.referenceSaved(saved, "current");
+          this.presentationRevision = presentation.field("revision").integer(0);
+          this.presentationState = presentation.field("state").nullable(readPresentationGameState);
+          this.sceneRevision = presentation.field("sceneRevision").integer(0); this.sceneDirty = presentation.field("dirty").boolean();
+          this.sceneCommandSequence = presentation.field("commandSequence").integer(0); this.sceneCommands.length = 0;
+          for (const command of presentation.field("commands").list(row => ({ sequence: row.field("sequence").integer(1), text: row.field("text").string(),
+            recipient: row.field("recipient").nullable(v => resolve(readSavedActor(v))) }))) {
+            if (command.sequence > this.sceneCommandSequence || command.sequence <= this.sceneCommandSequence - 64
+              || command.sequence <= (this.sceneCommands.at(-1)?.sequence ?? 0)) presentation.fail("invalid saved source command ring");
+            this.sceneCommands.push(command);
+          }
+          this.sceneState = presentation.field("current").nullable(v => readModScenePublication(v, this.declaration.abiProfile, resolve));
+          this.sceneBaseline = presentation.field("baseline").nullable(v => readModScenePublication(v, this.declaration.abiProfile, resolve));
+          if (this.sceneState !== null && this.sceneState.revision !== this.sceneRevision) presentation.fail("invalid saved source publication revision");
+        }
         for (const entry of decoded.field("projections").list(entry => ({ actor: readSavedActor(entry.field("actor")), slot: entry.field("slot").integer(0), owned: entry.field("owned").boolean(), event: entry.field("event").nullable(value => value.string()) }))) {
           const actor = this.services.referenceSaved?.(entry.actor) ?? this.services.actors.referenceSaved(entry.actor, "current");
           this.projections.set(actor, entry.slot);
@@ -563,6 +589,11 @@ export class QvmModProvider {
     },
     files: () => { this.current(); return this.mounts === undefined ? null : { mounts: this.mounts, writable: this.writable }; },
     clientCommand: (viewer, arguments_) => this.presentationClientCommand(viewer, arguments_),
+    bindings: () => {
+      this.current();
+      return [...this.projections].filter(([actor]) => this.services.actors.isLive(actor) && !this.retiredProjections.has(actor))
+        .map(([actor, slot]) => ({ actor, slot, owned: this.owned.has(actor) }));
+    },
     actor: slot => { this.current(); const actor = this.actorAt(slot); return actor !== null && this.services.actors.isLive(actor) ? actor : null; },
     scene: () => {
       if (this.declaration.presentation?.runtime !== "qvm-scene") throw new Error("Event-only component has no source scene publication");

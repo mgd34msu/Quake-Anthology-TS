@@ -1,3 +1,6 @@
+import type { CollisionBoxStorage } from "./map-resource.ts";
+import { SaveReader } from "../../../persistence/value.ts";
+import { readBounds } from "../../../persistence/shared.ts";
 /* Clip handles and shared temporary hull state from id Software's cm_load.c,
  * cm_test.c and cm_trace.c. Copyright (C) 1999-2005 Id Software, Inc.
  * SPDX-License-Identifier: GPL-2.0-or-later */
@@ -19,9 +22,20 @@ type ClipModel = { readonly kind: "inline"; readonly index: number }
 export class SourceClipModels {
   #bounds: Bounds = { min: vec3(0, 0, 0), max: vec3(0, 0, 0) };
   #box: TemporaryCollisionModel;
+  private readonly boxStorage: CollisionBoxStorage | null;
 
-  constructor(readonly world: CollisionWorld) {
-    this.#box = createBoxModel(this.#bounds, world.counters, world.boxStorage);
+  constructor(readonly world: CollisionWorld, temporaryStorage: "world" | "private" = "world") {
+    this.boxStorage = temporaryStorage === "world" ? world.boxStorage : null;
+    this.#box = createBoxModel(this.#bounds, world.counters, this.boxStorage);
+  }
+
+  captureTemporaryCheckpoint() {
+    const bounds = this.boxStorage?.bounds ?? this.#bounds;
+    return { bounds: { min: { ...bounds.min }, max: { ...bounds.max } }, box: this.#box.bounds };
+  }
+  restoreTemporaryCheckpoint(value: unknown): void {
+    const r = new SaveReader(value, "cgame-temporary-collision"), box = readBounds(r.field("box")), bounds = readBounds(r.field("bounds"));
+    this.tempBoxModel(box.min, box.max, false); this.tempBoxModel(bounds.min, bounds.max, true);
   }
 
   get modelCount(): number { return this.world.modelCount; }
@@ -36,8 +50,8 @@ export class SourceClipModels {
 
   tempBoxModel(mins: Vec3, maxs: Vec3, capsule: boolean): number {
     this.#bounds = { min: vec3(mins.x, mins.y, mins.z), max: vec3(maxs.x, maxs.y, maxs.z) };
-    if (this.world.boxStorage !== null) {
-      this.world.boxStorage.setBounds(mins, maxs, capsule);
+    if (this.boxStorage !== null) {
+      this.boxStorage.setBounds(mins, maxs, capsule);
       return capsule ? SOURCE_CAPSULE_MODEL_HANDLE : SOURCE_BOX_MODEL_HANDLE;
     }
     // The capsule call changes box_model bounds but leaves box_brush planes intact.
@@ -49,7 +63,7 @@ export class SourceClipModels {
   modelBounds(handle: number): Bounds {
     const model = this.#resolve(handle);
     if (model.kind === "inline") return this.world.modelBounds(model.index);
-    const bounds = this.world.boxStorage === null ? this.#bounds : this.world.boxStorage.bounds;
+    const bounds = this.boxStorage === null ? this.#bounds : this.boxStorage.bounds;
     return { min: vec3(bounds.min.x, bounds.min.y, bounds.min.z), max: vec3(bounds.max.x, bounds.max.y, bounds.max.z) };
   }
 
@@ -118,7 +132,7 @@ export class SourceClipModels {
 
   #capsule(query: TemporaryTraceQuery, handle: number, transformed: boolean): TemporaryCollisionModel {
     // In the pinned source 254 succeeds only when it names an actual submodel.
-    const capsule = createCapsuleModel(this.modelBounds(handle), this.world.counters, this.world.boxStorage);
+    const capsule = createCapsuleModel(this.modelBounds(handle), this.world.counters, this.boxStorage);
     if (query.shape.kind !== "capsule") {
       // Both box-versus-capsule branches replace the retained temporary box.
       const mins = query.shape.kind === "point" ? vec3(0, 0, 0) : query.shape.mins;
