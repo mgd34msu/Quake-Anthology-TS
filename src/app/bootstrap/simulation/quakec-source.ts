@@ -117,12 +117,12 @@ export function preparedQuakeCWeaponStage(prepared: PreparedQuakeCSource): QcWea
 /** Decode the selected artifact and genuine assets before synchronous source precaching. */
 export async function prepareQuakeCSource(execution: QuakeCExecution, mounts: MountedContent, entityText = "", resourceMounts: MountedContent = mounts): Promise<PreparedQuakeCSource> {
   const program = loadQcProgram(await mounts.read(execution.artifact));
-  id1ProgramBinding(program);
   if (execution.api.kind !== program.api.kind || execution.api.programVersion !== program.api.programVersion || execution.api.systemCrc !== program.api.systemCrc)
     throw new Error("Shared QuakeC artifact API differs from the selected execution");
   const compatibility = await mounts.open("quakec-compatibility.json");
   const { messageDialect, pickupCallers, weaponStage: weaponDeclaration, combat: combatDeclaration } = readQuakeCCompatibility(compatibility?.bytes ?? null, program.digest);
   if (combatDeclaration !== undefined) validateQcModCombat(program, combatDeclaration);
+  else id1ProgramBinding(program);
   const declaredPickups = qcDeclaredPickupStages(program, pickupCallers), weaponStage = qcWeaponStage(program, weaponDeclaration);
   if (program.api.kind === "q1-quakeworld" && messageDialect !== "known-retail") throw new Error("Private NetQuake messages cannot be selected for QuakeWorld");
   return { execution, program, messageDialect, declaredPickups, weaponStage, ...(combatDeclaration === undefined ? {} : { combatDeclaration }), ...(weaponDeclaration === undefined ? {} : { weaponDeclaration }), resources: await prepareQuakeCResources(program, resourceMounts, entityText) };

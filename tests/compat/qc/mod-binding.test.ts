@@ -46,7 +46,7 @@ function run(program: QcProgram, observed: boolean, variant: "normal" | "death" 
     return request;
   });
   const vm: QcMachine = new QcMachine({ program, entities, numeric: createNumericOperations(Q1_DONOR_PROFILE),
-    builtins: createQcBuiltins({ kind: "netquake" }), serverActive: () => true,
+    builtins: createQcBuiltins({ kind: program.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake" }), serverActive: () => true,
     ...(observed ? { functionBoundary: binding.functionBoundary, observeCall: call => binding.observeCall(call), observeEntityStore: store => binding.observeEntityStore(store) } : {}),
   });
   const field = (name: string) => vm.fieldOffset(name);
@@ -211,4 +211,32 @@ test("native arithmetic is observed without imposing an id1 subtraction template
   const outcome = observed.outcomes[0];
   if (outcome?.kind !== "committed") throw new Error("No committed source mutation");
   expect(outcome.decision.appliedDamage).toBe(100 - observed.health);
+});
+
+
+test("declared original Threewave QuakeWorld combat retains source stores and rejects unqualified admission", async () => {
+  const { validateQcModCombat } = await import("../../../src/compat/qc/mod-combat.ts");
+  const { readQuakeCCompatibility } = await import("../../../src/compat/qc/compatibility.ts");
+  const bytes = await Bun.file("/home/buzzkill/Projects/qfiles/q1/ctf/qwprogs.dat").bytes(), program = loadQcProgram(bytes);
+  const raw = { version: 1, artifactDigest: program.digest, combat: { damage: { function: "T_Damage",
+    arguments: [{ kind: "input", name: "self" }, { kind: "input", name: "inflictor" }, { kind: "input", name: "attacker" }, { kind: "input", name: "amount" }],
+    globals: [{ name: "time", value: { kind: "input", name: "time" } }] } } };
+  const encoded = new TextEncoder().encode(JSON.stringify(raw)), declaration = readQuakeCCompatibility(encoded, program.digest).combat;
+  if (declaration === undefined) throw new Error("Missing declared source combat");
+  expect(program.api.kind).toBe("q1-quakeworld");
+  expect(() => id1ProgramBinding(program)).toThrow("artifact-qualified combat declaration");
+  expect(() => validateQcModCombat(program, { ...declaration, damage: { ...declaration.damage, arguments: declaration.damage.arguments.slice(0, 3) } })).toThrow();
+  expect(() => id1ProgramBinding(program)).toThrow("artifact-qualified combat declaration");
+  expect(() => readQuakeCCompatibility(encoded, "sha256:" + "0".repeat(64))).toThrow();
+  validateQcModCombat(program, declaration);
+  const binding = id1ProgramBinding(program);
+  expect(binding.kind).toBe("quakeworld"); expect(binding.attribution).toBe("native");
+  expect(binding.damage.index).toBe(program.functionNamed("T_Damage").index);
+  for (const variant of ["normal", "death"] satisfies readonly ("normal" | "death")[]) {
+    const plain = run(program, false, variant), observed = run(program, true, variant);
+    expect(observed.bytes).toEqual(plain.bytes); expect(observed.outcomes).toHaveLength(1);
+    const outcome = observed.outcomes[0]; if (outcome?.kind !== "committed") throw new Error("Missing original damage outcome");
+    expect(outcome.decision.reaction).toBe(variant === "death" ? "death" : "pain");
+  }
+  expect(id1ProgramBinding(loadQcProgram(await Bun.file("/home/buzzkill/Projects/qfiles/q1/qw/qwprogs.dat").bytes())).attribution).toBe("pinned");
 });

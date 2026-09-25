@@ -1,3 +1,5 @@
+import { validateQcSourceCall, qcSourceValueType } from "../../../compat/qc/source-call.ts";
+import type { ModCallbackInput, ModSourceCall } from "../../../contracts/mod-callbacks.ts";
 import { QcOpcode, QcProgramError } from "../../../compat/qc/program.ts";
 import type { QcProgram } from "../../../compat/qc/program.ts";
 import type { QcMachine } from "../../../compat/qc/machine.ts";
@@ -75,10 +77,25 @@ const quakeworld: Id1ProgramBinding = {
   ],
 };
 
-/** Pinned annotations remain artifact-specific; other NetQuake layouts require operation proofs. */
-export function id1ProgramBinding(program: QcProgram): Id1ProgramBinding {
+/** Pinned annotations remain artifact-specific; other layouts require original operation proofs. */
+export function id1ProgramBinding(program: QcProgram, declaredDamage?: ModSourceCall): Id1ProgramBinding {
+  if (declaredDamage !== undefined) {
+    if (declaredDamage.function !== "T_Damage") throw new QcProgramError("QC combat requires the verified source T_Damage ABI");
+    for (const [index, name] of ["self", "inflictor", "attacker", "amount"].entries()) {
+      const value = declaredDamage.arguments[index];
+      if (value?.kind !== "input" || value.name !== name) throw new QcProgramError(`QC damage argument ${index} must lower ${name}`);
+    }
+    validateQcSourceCall(program, declaredDamage, new Set<ModCallbackInput>(["self", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "time"]), "combat damage");
+  }
   const binding = program.digest === netquake.digest ? netquake : program.digest === quakeworld.digest ? quakeworld : null;
-  if (binding === null) return deriveNativeProgramBinding(program);
+  if (binding === null) {
+    const derived = deriveNativeBinding(program, declaredDamage);
+    const damage = derived.damage;
+    if (declaredDamage !== undefined && damage.kind === "calls"
+      && declaredDamage.arguments.some((value, index) => qcSourceValueType(value) !== damage.parameters[index]))
+      throw new QcProgramError("QC damage arguments differ from original source parameter types");
+    return derived;
+  }
   if ((program.api.kind === "q1-quakeworld") !== (binding.kind === "quakeworld"))
     throw new QcProgramError("QuakeC source requires a verified classic id1 or native QuakeWorld artifact");
   return binding;
@@ -101,11 +118,13 @@ export function id1DamageMultiplier(vm: QcMachine, attacker: number, inflictor: 
 const derivedBindings = new WeakMap<QcProgram, Id1ProgramBinding>();
 
 /** Source calls supply every argument; these types do not imply defaults for host calls. */
-export function deriveNativeProgramBinding(program: QcProgram): Id1ProgramBinding {
+export function deriveNativeProgramBinding(program: QcProgram): Id1ProgramBinding { return deriveNativeBinding(program); }
+
+function deriveNativeBinding(program: QcProgram, declaredDamage?: ModSourceCall): Id1ProgramBinding {
   const cached = derivedBindings.get(program);
   if (cached !== undefined) return cached;
   const reject = (reason: string): never => { throw new QcProgramError(`Unsupported native damage semantics: ${reason}`, program.source); };
-  if (program.api.kind !== "q1-netquake") reject("unverified QuakeWorld program");
+  if (program.api.kind === "q1-quakeworld" && declaredDamage === undefined) reject("QuakeWorld requires an artifact-qualified combat declaration");
   const damage = program.functionNamed("T_Damage");
   if (damage.firstStatement <= 0 || damage.parameterSizes.length < 4) reject("T_Damage parameters");
   const parameters: ("entity" | "float" | "vector" | "string" | "function")[] = [];
@@ -117,6 +136,8 @@ export function deriveNativeProgramBinding(program: QcProgram): Id1ProgramBindin
     if (size !== (type === "vector" ? 3 : 1) || index < 3 && type !== "entity" || index === 3 && type !== "float") return reject("damage argument types");
     parameters.push(type); offset += size;
   }
+  if (declaredDamage !== undefined && declaredDamage.arguments.some((value, index) => qcSourceValueType(value) !== parameters[index]))
+    reject("QC damage arguments differ from original source parameter types");
   const initial = new DataView(program.initialGlobals.buffer, program.initialGlobals.byteOffset, program.initialGlobals.byteLength);
   const mutable = new Set<number>();
   for (const statement of program.statements) {
@@ -179,7 +200,7 @@ export function deriveNativeProgramBinding(program: QcProgram): Id1ProgramBindin
     }
   }
   if (reactions.size === 0) reject("no typed damage reaction calls");
-  const binding: Id1ProgramBinding = { kind: "netquake", attribution: "native", digest: program.digest, armorField, armorMasks,
+  const binding: Id1ProgramBinding = { kind: program.api.kind === "q1-quakeworld" ? "quakeworld" : "netquake", attribution: "native", digest: program.digest, armorField, armorMasks,
     damage: { index: damage.index, firstStatement: damage.firstStatement, parameterStart: damage.parameterStart, localWords: damage.localWords,
       global: global.offset, kind: "calls", parameters, reactions }, attacks: null, environment: [] };
   derivedBindings.set(program, binding);

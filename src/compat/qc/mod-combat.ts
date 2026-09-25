@@ -1,4 +1,3 @@
-import { validateQcSourceCall, qcSourceValueType } from "./source-call.ts";
 import { qcEmptyArmor } from "../../content/q1/quakec/armor-points.ts";
 import type { ModuleIdentity } from "../../contracts/execution.ts";
 import type { ActorId, OwnedActor } from "../../contracts/identity.ts";
@@ -17,19 +16,11 @@ import type { QcProgram } from "./program.ts";
 
 type Declaration = NonNullable<ModCallbackDeclaration["combat"]>;
 export function validateQcModCombat(program: QcProgram, declaration: Declaration): void {
-  const call = declaration.damage;
-  if (call.function !== "T_Damage") throw new Error("QC combat requires the verified source T_Damage ABI");
-  for (const [index, name] of ["self", "inflictor", "attacker", "amount"].entries()) {
-    const value = call.arguments[index];
-    if (value?.kind !== "input" || value.name !== name) throw new Error(`QC damage argument ${index} must lower ${name}`);
-  }
-  const damage = id1ProgramBinding(program).damage;
-  validateQcSourceCall(program, call, new Set<ModCallbackInput>(["self", "attacker", "inflictor", "amount", "knockback", "point", "direction", "normal", "time"]), "combat damage");
-  if (damage.kind === "calls" && call.arguments.some((value, index) => qcSourceValueType(value) !== damage.parameters[index])) throw new Error("QC damage arguments differ from original source parameter types");
-  qcEmptyArmor(program, declaration.emptyArmor);
+  if (declaration.emptyArmor !== undefined) qcEmptyArmor(program, declaration.emptyArmor);
   qcArmorStage(program, declaration.armorStage);
   for (const name of ["health", "takedamage", "flags", "invincible_finished", "armorvalue", "armortype"])
     if (program.fieldsByName.get(name)?.type !== "float") throw new Error(`QC combat requires float field ${name}`);
+  id1ProgramBinding(program, declaration.damage);
 }
 
 export function qcDamageInputs(request: DamageRequest, seconds: number): ReadonlyMap<ModCallbackInput, ModRuntimeValue> {
