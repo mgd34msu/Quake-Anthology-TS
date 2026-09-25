@@ -115,6 +115,71 @@ The measured rows total 82.87 ms; native rows 5–12 total 75.72 ms. The complet
 
 Reproduction and raw values are local: `.artifacts/resume-20260925/tick-sixteen/profile.ts`, `result.json`, `profile.log` and `runframe.asm`. The profiler qualifies the retail artifact digest, preserves original instruction bytes, and accounts for nested interpreter returns. No production profiling framework was added.
 
+## Inside steps 7, 8 and 6
+
+Further profiling used the same complete retail `base1` workload and archived `72794d58` source. The final pass measured 50 ticks after 50 warm-up ticks, kept all 495 entity records, and timed original function entries, returns and engine imports. The retail DLL digest is `sha256:045d49c53722d9b922caf14f168dd28a97d4c514a6e443a3140560f8668baccd`.
+
+These deeper observers add overhead and the original world evolves differently between runs. The final instrumented totals were 45.78 ms for step 7, 21.76 ms for step 8 and 15.85 ms for step 6. They identify costs; they are not an optimization comparison with the earlier 39.59/18.59/12.48 ms measurements.
+
+The following rows are exclusive except where stated. Nested functions/imports are subtracted so the rows within each step can be added.
+
+| Step | Specific work | Mean ms/tick |
+|---|---|---:|
+| 7 | Execute original monster dodge filter instructions | 6.09 |
+| 7 | Enter/leave those filter calls, outside CPU execution | 5.96 |
+| 7 | Remaining box-query work, including other filters and candidate/address handling | 4.87 |
+| 7 | FindTarget target-selection logic | 4.46 |
+| 7 | SV_movestep step handling | 4.05 |
+| 7 | M_CheckBottom floor-support checks | 2.83 |
+| 7 | Engine collision trace imports | 2.11 |
+| 7 | M_MoveToGoal movement decisions | 1.75 |
+| 7 | SV_StepDirection direction/step handling | 1.63 |
+| 7 | M_MoveFrame animation bookkeeping | 1.09 |
+| 7 | Remaining think, ground/water/effect work, imports and observer overhead | 10.93 |
+| 8 | Dispatch entities with MOVETYPE_NONE | 6.11 |
+| 8 | SV_Push moving-brush logic | 5.88 |
+| 8 | SV_Physics_Step handling outside nested functions | 2.44 |
+| 8 | SV_RunThink scheduling checks outside actual think callbacks | 2.06 |
+| 8 | Remaining physics dispatch, contents, toss, relinking and observer overhead | 5.26 |
+| 6 | Entity_UpdateState excluding its angle-vector calculation | 7.83 |
+| 6 | AngleVectors called by monster state updates, including its helpers | 2.12 |
+| 6 | Remaining frame traversal, field upkeep and observer overhead | 5.90 |
+
+### What drives those costs
+
+- **Dodge filters:** about 503 nested calls per tick, each executing only 30 original instructions in this idle workload. Their 12.05 ms total divides almost equally between execution and call entry/exit. Most candidates immediately fail the original projectile/flags check. This is repeated callback overhead, not hundreds of expensive path searches. BoxEdicts totals 16.92 ms including these calls and other query work.
+- **Monster walking:** nine `ai_walk` calls and six `ai_stand` calls per tick. Walking reaches `M_MoveToGoal`, `SV_StepDirection`, `SV_movestep` and `M_CheckBottom`. Target selection also runs from both walking and standing. The cost previously labeled animation includes this movement and decision-making; updating animation frames alone costs about 1.1 ms.
+- **Moving brushes:** `SV_Push` runs about 3.94 times per tick, principally for three Strogg ships and one rotating brush. It costs 6.39 ms including its nested work. The original routine scans the edict array for each pusher, rejecting inactive, immobile, unlinked and non-overlapping candidates before detailed collision checks. With 495 records, that is roughly 1,950 candidate visits per tick when each scan completes. The source loop and the measured function cost identify a hot path; that visit count is an estimate, not a separate loop counter.
+- **Entities without movement:** 405 active entities use MOVETYPE_NONE, including 89 speakers, 57 path corners, 54 info markers, 37 dynamic lights and 33 timers. Their dispatch costs accumulate even when no think callback is due. `SV_RunThink` performs about 470 checks per tick across the physics types. Its 2.06 ms is separate from actual callbacks and the dispatch row.
+- **State upkeep:** about 492 `Entity_UpdateState` calls per tick cost 9.95 ms including angle calculations. The original DLL updates flags, health, mover state, endpoints and other exposed state. Monster state updates perform 32 `AngleVectors` calls per tick. This state remains observable even without bot players; it cannot simply be disabled.
+
+### Shared runtime costs
+
+An independent CPU sampling run used the same source/workload without the detailed native function observers. Its measured window was 50 ticks, about 4.44 seconds and 4,289 samples. About 67.5% of sampled time was inside the CPU execution loop, including its children.
+
+Largest individual exclusive samples included:
+
+| Runtime work | Share of sampled time |
+|---|---:|
+| Managed CPU loop itself | 11.5% |
+| Guest memory mapping/access lookup | 7.2% |
+| Typed-array buffer access | 4.2% |
+| BigInt width normalization | 4.0% |
+| Managed integer block execution itself | 3.7% |
+| Object freezing | 3.5% |
+| Canonical address checks | 3.4% |
+| 64-bit memory reads | 3.4% |
+| Effective operand address calculation | 3.0% |
+| Typed-array set/slice/subarray combined | 7.2% |
+
+These sample percentages cover the complete measured application workload. They are distinct from the per-function timers and are not percentages of only steps 7, 8 or 6. Inclusive sample percentages overlap their children and must not be added to exclusive percentages.
+
+The implementation explains the repeated costs. `GuestCallRunner.invokeSteps` captures processor state and creates an ABI adapter for every nested call. Argument/call layouts are planned in both the adapter and runner; entry, return and engine callbacks perform further encoding and planning. Managed CPU execution repeatedly calculates guest addresses and validates memory access. Instructions outside eligible integer blocks also pass through the individual-instruction path and register checkpointing. Floating-point/vector instructions and copies contribute there.
+
+The first concrete optimization should remove repeated fixed-signature ABI planning and unnecessary temporary allocation across calls. Then reduce operand/memory-access and instruction-dispatch overhead in the shared executor, including the exact vector operations used by movement and state copies. Preserve nested-call restoration, faults, memory permissions, original writes, instruction budgets and source ordering. These changes can benefit arbitrary native mods; replacing named game functions or skipping AI/physics work would not meet that requirement. No speedup is claimed from this diagnosis.
+
+Local evidence is under `.artifacts/resume-20260925/tick-hotspots/`: `walking.ts`, `walking-details.json`, `walking-result.json`, `attribution.json`, `cpu-profile.ts`, `engine.cpuprofile` and `cpu-summary.json`. Earlier `profile`, `subfunctions` and `animation` drivers/results retain the intermediate splits. Original indirect animation targets were observed at the DLL call sites and checked against their active saved move names and the retained original source. These diagnostic scripts remain local; no production profiling framework was added.
+
 ## Optimization targets
 
 The measured order is native instruction execution first, then repeated nested DLL calls, then spatial candidate/body/address work and unchanged entity publication. Reconciliation and cvar refresh are smaller costs. Compare each candidate on a matched complete workload; retain it only when the result improves without changing source behavior.
