@@ -12,6 +12,7 @@ export function guestPointer(memory: MappedGuestMemory, raw: bigint): GuestAddre
 }
 function registerWidth(cpu: GuestCpu): 32 | 64 { return cpu.state.architecture === "i386" ? 32 : 64; }
 function stackPointer(cpu: GuestCpu): bigint { return cpu.state.registers.read("rsp", registerWidth(cpu)); }
+const simdViews = new WeakMap<Uint8Array, DataView>();
 
 function readLocations(cpu: GuestCpu, locations: readonly AbiLocation[], size: number): Uint8Array {
   const output = new Uint8Array(size);
@@ -59,11 +60,26 @@ function writeLocations(cpu: GuestCpu, locations: readonly AbiLocation[], bytes:
     } else cpu.memory.write(guestPointer(cpu.memory, stackPointer(cpu) + BigInt(location.stackOffset)), part);
   }
 }
-function readInteger(cpu: GuestCpu, layout: GuestValueLayout, locations: readonly AbiLocation[]): GuestCallValue | null {
-  if (layout.kind !== "scalar" || layout.storage === "float32" || layout.storage === "float64") return null;
+function readScalar(cpu: GuestCpu, layout: GuestValueLayout, locations: readonly AbiLocation[]): GuestCallValue | null {
+  if (layout.kind !== "scalar") return null;
   const location = locations.length === 1 ? locations[0] : undefined;
-  if (location === undefined || location.offset !== 0 || location.kind === "sse"
-    || (location.bytes !== 8 && location.bytes !== 4 && location.bytes !== 2 && location.bytes !== 1)) return null;
+  if (location === undefined || location.offset !== 0) return null;
+  if (layout.storage === "float32" || layout.storage === "float64") {
+    if (location.bytes !== (layout.storage === "float32" ? 4 : 8)) return null;
+    let value: number;
+    if (location.kind === "stack") {
+      const address = guestPointer(cpu.memory, stackPointer(cpu) + BigInt(location.stackOffset));
+      value = layout.storage === "float32" ? cpu.memory.readFloat32(address) : cpu.memory.readFloat64(address);
+    } else if (location.kind === "sse") {
+      const registers = cpu.state.simd.xmm, start = location.register * 16;
+      if (start + location.bytes > registers.length) throw new RangeError("ABI XMM register is unavailable");
+      let view = simdViews.get(registers);
+      if (view === undefined) { view = new DataView(registers.buffer, registers.byteOffset, registers.byteLength); simdViews.set(registers, view); }
+      value = layout.storage === "float32" ? view.getFloat32(start, true) : view.getFloat64(start, true);
+    } else return null;
+    return { kind: layout.storage, value };
+  }
+  if (location.kind === "sse" || (location.bytes !== 8 && location.bytes !== 4 && location.bytes !== 2 && location.bytes !== 1)) return null;
   let raw: bigint;
   if (location.kind === "integer") raw = cpu.state.registers.read(location.register, registerWidth(cpu));
   else {
@@ -84,11 +100,20 @@ function readInteger(cpu: GuestCpu, layout: GuestValueLayout, locations: readonl
   }
 }
 function readArgument(cpu: GuestCpu, argument: AbiArgument): GuestCallValue {
-  if (!argument.indirect) { const value = readInteger(cpu, argument.layout, argument.locations); if (value !== null) return value; }
-  if (!argument.indirect) return decodeValue(argument.layout, readLocations(cpu, argument.locations, argumentBytes(argument.layout, cpu.memory.pointerBytes)).subarray(0, valueBytes(argument.layout, cpu.memory.pointerBytes)), cpu.memory);
-  const pointer = decodeValue({ kind: "scalar", storage: "pointer" }, readLocations(cpu, argument.locations, cpu.memory.pointerBytes), cpu.memory);
+  if (!argument.indirect) {
+    const value = readScalar(cpu, argument.layout, argument.locations);
+    if (value !== null) return value;
+    const bytes = readLocations(cpu, argument.locations, argumentBytes(argument.layout, cpu.memory.pointerBytes));
+    if (argument.layout.kind === "aggregate") return { kind: "aggregate", layout: argument.layout.layout, bytes };
+    return decodeValue(argument.layout, bytes.subarray(0, valueBytes(argument.layout, cpu.memory.pointerBytes)), cpu.memory);
+  }
+  const pointerLayout: GuestValueLayout = { kind: "scalar", storage: "pointer" };
+  const pointer = readScalar(cpu, pointerLayout, argument.locations)
+    ?? decodeValue(pointerLayout, readLocations(cpu, argument.locations, cpu.memory.pointerBytes), cpu.memory);
   if (pointer.kind !== "pointer" || pointer.value === null) throw new RangeError("Indirect aggregate has a null guest address");
-  return decodeValue(argument.layout, cpu.memory.copy(pointer.value, valueBytes(argument.layout, cpu.memory.pointerBytes)), cpu.memory);
+  const bytes = cpu.memory.copy(pointer.value, valueBytes(argument.layout, cpu.memory.pointerBytes));
+  return argument.layout.kind === "aggregate" ? { kind: "aggregate", layout: argument.layout.layout, bytes }
+    : decodeValue(argument.layout, bytes, cpu.memory);
 }
 function returnBuffer(cpu: GuestCpu, plan: AbiCallPlan): GuestAddress {
   if (plan.result.kind !== "memory") throw new TypeError("Call does not return an aggregate in memory");
@@ -182,11 +207,18 @@ export class X86AbiAdapter implements GuestAbiAdapter {
     const plan = planGuestCall(signature);
     switch (plan.result.kind) {
       case "void": return { kind: "void" };
-      case "registers": return readInteger(cpu, plan.result.layout, plan.result.locations)
-        ?? decodeValue(plan.result.layout, readLocations(cpu, plan.result.locations, valueBytes(plan.result.layout, this.abi.pointerBytes)), cpu.memory);
+      case "registers": {
+        const value = readScalar(cpu, plan.result.layout, plan.result.locations);
+        if (value !== null) return value;
+        const bytes = readLocations(cpu, plan.result.locations, valueBytes(plan.result.layout, this.abi.pointerBytes));
+        return plan.result.layout.kind === "aggregate" ? { kind: "aggregate", layout: plan.result.layout.layout, bytes }
+          : decodeValue(plan.result.layout, bytes, cpu.memory);
+      }
       case "memory": {
         const address = guestPointer(cpu.memory, cpu.state.registers.read("rax", registerWidth(cpu)));
-        return decodeValue(plan.result.layout, cpu.memory.copy(address, valueBytes(plan.result.layout, this.abi.pointerBytes)), cpu.memory);
+        const bytes = cpu.memory.copy(address, valueBytes(plan.result.layout, this.abi.pointerBytes));
+        return plan.result.layout.kind === "aggregate" ? { kind: "aggregate", layout: plan.result.layout.layout, bytes }
+          : decodeValue(plan.result.layout, bytes, cpu.memory);
       }
       case "x87": {
         const value = readX87Return(cpu.state.x87, plan.result.storage);
