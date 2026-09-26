@@ -6,7 +6,7 @@ import { prepareRawSse } from "../floating-point/raw-sse.ts";
 import type { NumericInstruction } from "../floating-point/contracts.ts";
 import { alu, condition, resultFlags, shift, signedMultiply } from "../x86/arithmetic.ts";
 import type { AluOperation, ShiftOperation } from "../x86/arithmetic.ts";
-import { canonicalAddress, guestAddress, readMemory, registerName, writeMemory, X64DecodeCursor, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
+import { canonicalAddress, guestAddress, readMemory, writeMemory, X64DecodeCursor, X64ProcessorFault, X64Unsupported } from "./decoder.ts";
 import type { X64DecodedInstruction, X64Operand } from "./decoder.ts";
 import { executeX64Plan, makeX64Plan, x64Advance as advance, x64Lock } from "./plan.ts";
 import type { X64Flow as Flow, X64PlanOperation, X64SemanticPlan } from "./plan.ts";
@@ -354,6 +354,7 @@ export class X64Cpu implements GuestCpu {
     if (op >= 0x90 && op <= 0x97) {
       this.#lock(cursor, null, false);
       const index = op - 0x90 + cursor.rexB;
+      if (index === 0) return this.#planned(cursor, { kind: "nop" });
       if (index !== 0) {
         const other = cursor.register(index, width);
         const value = cursor.read(other);
@@ -374,9 +375,7 @@ export class X64Cpu implements GuestCpu {
       case 0x63: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM(width === 16 ? 16 : 32);
-        const value = BigInt.asIntN(decoded.rm.width, cursor.read(decoded.rm));
-        cursor.write(cursor.register(decoded.registerIndex, width), value);
-        return advance;
+        return this.#planned(cursor, { kind: "extend", destination: cursor.register(decoded.registerIndex, width), source: decoded.rm, signed: true });
       }
       case 0x68: case 0x6a: {
         this.#lock(cursor, null, false);
@@ -529,12 +528,7 @@ export class X64Cpu implements GuestCpu {
   #group5(cursor: X64DecodeCursor): Flow {
     const decoded = cursor.decodeModRM(cursor.opcode === 0xfe ? 8 : cursor.width);
     if (decoded.extension < 2) {
-      this.#lock(cursor, decoded.rm, true);
-      cursor.writable(decoded.rm);
-      const carry = this.state.flags.get("carry");
-      cursor.write(decoded.rm, alu(decoded.extension === 0 ? "add" : "sub", decoded.rm.width, cursor.read(decoded.rm), 1n, this.state.flags));
-      this.state.flags.set("carry", carry);
-      return advance;
+      return this.#planned(cursor, { kind: "increment", destination: decoded.rm, subtract: decoded.extension === 1 });
     }
     this.#lock(cursor, null, false);
     if (cursor.opcode === 0xfe) throw new X64ProcessorFault(6, "Invalid byte INC/DEC group");
@@ -679,7 +673,7 @@ export class X64Cpu implements GuestCpu {
         if (cursor.repeat !== "f3" || byte !== 0xfa) throw new X64Unsupported("Unsupported 0F 1E encoding");
         return advance;
       }
-      case 0x1f: this.#lock(cursor, null, false); cursor.decodeModRM(cursor.width); return advance;
+      case 0x1f: this.#lock(cursor, null, false); cursor.decodeModRM(cursor.width); return this.#planned(cursor, { kind: "nop" });
       case 0xaf: {
         this.#lock(cursor, null, false);
         const decoded = cursor.decodeModRM(cursor.width);
@@ -690,9 +684,7 @@ export class X64Cpu implements GuestCpu {
         this.#lock(cursor, null, false);
         const sourceWidth = (op & 1) === 0 ? 8 : 16;
         const decoded = cursor.decodeModRM(sourceWidth);
-        const source = cursor.read(decoded.rm);
-        cursor.write(cursor.register(decoded.registerIndex, cursor.width), op >= 0xbe ? BigInt.asIntN(sourceWidth, source) : source);
-        return advance;
+        return this.#planned(cursor, { kind: "extend", destination: cursor.register(decoded.registerIndex, cursor.width), source: decoded.rm, signed: op >= 0xbe });
       }
       case 0xb0: case 0xb1: {
         const decoded = cursor.decodeModRM(op === 0xb0 ? 8 : cursor.width);

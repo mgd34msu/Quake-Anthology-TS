@@ -15,7 +15,10 @@ export type X64Flow = { readonly kind: "advance" } | { readonly kind: "branch"; 
 export const x64Advance: X64Flow = { kind: "advance" };
 export type X64PlanSource = X64Operand | bigint;
 export type X64PlanOperation =
+  | { readonly kind: "nop" }
   | { readonly kind: "move"; readonly destination: X64Operand; readonly source: X64PlanSource }
+  | { readonly kind: "extend"; readonly destination: X64RegisterOperand; readonly source: X64Operand; readonly signed: boolean }
+  | { readonly kind: "increment"; readonly destination: X64Operand; readonly subtract: boolean }
   | { readonly kind: "lea"; readonly destination: X64RegisterOperand; readonly source: X64MemoryOperand }
   | { readonly kind: "alu"; readonly operation: AluOperation; readonly destination: X64Operand; readonly source: X64PlanSource }
   | { readonly kind: "branch"; readonly condition: number | null; readonly displacement: bigint }
@@ -39,6 +42,7 @@ export function makeX64Plan(operation: X64PlanOperation, nextIP: bigint, lock: b
   const endsBlock = operation.kind === "branch" || operation.kind === "return" || operation.kind === "numeric-memory"
     || operation.kind === "call" || operation.kind === "jump" || operation.kind === "push"
     || operation.kind === "pop" && operation.destination.kind === "memory"
+    || operation.kind === "increment" && operation.destination.kind === "memory"
     || operation.kind === "raw-sse" && operation.operation.kind === "move" && operation.operation.store && operation.operand.kind === "memory"
     || (operation.kind === "move" || operation.kind === "alu")
     && operation.destination.kind === "memory" && (operation.kind !== "alu" || operation.operation !== "cmp" && operation.operation !== "test");
@@ -47,6 +51,23 @@ export function makeX64Plan(operation: X64PlanOperation, nextIP: bigint, lock: b
 export function executeX64Plan(plan: X64SemanticPlan, memory: MappedGuestMemory, state: GuestProcessorState): X64Flow {
   const operation = plan.operation;
   switch (operation.kind) {
+    case "nop": x64Lock(plan.lock, null, false); return x64Advance;
+    case "extend": {
+      x64Lock(plan.lock, null, false);
+      const value = readOperand(memory, state, operation.source, plan.nextIP);
+      writeOperand(memory, state, operation.destination, plan.nextIP, operation.signed ? BigInt.asIntN(operation.source.width, value) : value);
+      return x64Advance;
+    }
+    case "increment": {
+      x64Lock(plan.lock, operation.destination, true);
+      writableOperand(memory, state, operation.destination, plan.nextIP);
+      const carry = state.flags.get("carry");
+      const value = alu(operation.subtract ? "sub" : "add", operation.destination.width,
+        readOperand(memory, state, operation.destination, plan.nextIP), 1n, state.flags);
+      writeOperand(memory, state, operation.destination, plan.nextIP, value);
+      state.flags.set("carry", carry);
+      return x64Advance;
+    }
     case "numeric": case "numeric-memory": {
       x64Lock(plan.lock, null, false);
       const instruction: NumericInstruction = operation.kind === "numeric" ? operation.instruction

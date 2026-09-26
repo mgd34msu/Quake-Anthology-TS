@@ -35,7 +35,10 @@ interface EffectiveAddress {
   readonly addressBits: 32 | 64;
 }
 type Operation =
+  | { readonly kind: 'nop' }
   | { readonly kind: 'move'; readonly destination: Operand; readonly source: Source }
+  | { readonly kind: 'extend'; readonly destination: RegisterOperand; readonly source: Operand; readonly signed: boolean }
+  | { readonly kind: 'increment'; readonly destination: Operand; readonly subtract: boolean }
   | { readonly kind: 'lea'; readonly destination: RegisterOperand; readonly source: EffectiveAddress }
   | { readonly kind: 'alu'; readonly operation: AluOperation; readonly destination: Operand; readonly source: Source }
   | { readonly kind: 'branch'; readonly condition: number | null; readonly target: bigint }
@@ -52,6 +55,8 @@ export type X64IntegerBlockResult =
 export function x64IntegerBlockSafe(plan: X64IntegerPlan): boolean {
   const operation = plan.operation;
   switch (operation.kind) {
+    case 'nop': case 'extend': return true;
+    case 'increment': return operation.destination.kind === 'register';
     case 'move': return operation.destination.kind === 'register';
     case 'lea': case 'branch': case 'return': return true;
     case 'jump': return true;
@@ -76,6 +81,13 @@ function source(value: X64Operand | bigint): Source {
 export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | null {
   const op = plan.operation;
   switch (op.kind) {
+    case 'nop': return { original: plan, operation: op };
+    case 'extend': {
+      const destination = operand(op.destination);
+      if (destination.kind !== 'register') return null;
+      return { original: plan, operation: { kind: 'extend', destination, source: operand(op.source), signed: op.signed } };
+    }
+    case 'increment': return { original: plan, operation: { kind: 'increment', destination: operand(op.destination), subtract: op.subtract } };
     case 'move': return { original: plan, operation: { kind: 'move', destination: operand(op.destination), source: source(op.source) } };
     case 'alu': return { original: plan, operation: { kind: 'alu', operation: op.operation, destination: operand(op.destination), source: source(op.source) } };
     case 'branch': return { original: plan, operation: { kind: 'branch', condition: op.condition, target: plan.nextIP + op.displacement } };
@@ -150,6 +162,20 @@ export class X64IntegerKernel {
           break;
         }
         switch (op.kind) {
+          case 'nop': x64Lock(original.lock, null, false); break;
+          case 'extend':
+            x64Lock(original.lock, null, false);
+            this.#extend(op, original.nextIP);
+            break;
+          case 'increment': {
+            x64Lock(original.lock, null, true);
+            const carry = this.flags.lowWord & 1;
+            this.#read(op.destination, original.nextIP);
+            this.#alu(op.subtract ? 'sub' : 'add', op.destination.width, 1, 0);
+            this.#write(op.destination, original.nextIP);
+            this.flags.writeLowWord((this.flags.lowWord & ~1) | carry);
+            break;
+          }
           case 'move':
             x64Lock(original.lock, null, false);
             this.#read(op.source, original.nextIP);
@@ -204,6 +230,25 @@ export class X64IntegerKernel {
   execute(plan: X64IntegerPlan): X64Flow {
     const op = plan.operation, original = plan.original;
     switch (op.kind) {
+      case 'nop': x64Lock(original.lock, null, false); return x64Advance;
+      case 'extend':
+        x64Lock(original.lock, null, false);
+        this.#extend(op, original.nextIP);
+        return x64Advance;
+      case 'increment': {
+        x64Lock(original.lock, op.destination.kind === 'memory' ? op.destination.source : null, true);
+        const address = op.destination.kind === 'memory'
+          ? operandAddress(this.memory, this.state, op.destination.source, original.nextIP, 'write') : null;
+        if (address !== null) this.memory.check(address, op.destination.width / 8, 'write');
+        const carry = this.flags.lowWord & 1;
+        if (address !== null) this.#readMemory(address, op.destination.width);
+        else this.#read(op.destination, original.nextIP);
+        this.#alu(op.subtract ? 'sub' : 'add', op.destination.width, 1, 0);
+        if (address !== null) this.#writeMemory(address, op.destination.width);
+        else this.#write(op.destination, original.nextIP);
+        this.flags.writeLowWord((this.flags.lowWord & ~1) | carry);
+        return x64Advance;
+      }
       case 'move':
         x64Lock(original.lock, null, false);
         this.#read(op.source, original.nextIP);
@@ -275,6 +320,17 @@ export class X64IntegerKernel {
   }
 
   #value(): bigint { return (BigInt(this.#high) << 32n) | BigInt(this.#low); }
+
+  #extend(operation: Extract<Operation, { kind: 'extend' }>, nextIP: bigint): void {
+    this.#read(operation.source, nextIP);
+    if (operation.signed) {
+      const width = operation.source.width;
+      if (width === 8) this.#low = ((this.#low << 24) >> 24) >>> 0;
+      else if (width === 16) this.#low = ((this.#low << 16) >> 16) >>> 0;
+      if (width !== 64) this.#high = this.#low >= 0x80000000 ? 0xffffffff : 0;
+    }
+    this.#write(operation.destination, nextIP);
+  }
 
   #pop(width: 16 | 64): void {
     const stack = this.words.getBigUint64(offsets.rsp, true);
