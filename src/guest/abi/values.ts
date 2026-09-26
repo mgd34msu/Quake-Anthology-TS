@@ -34,6 +34,15 @@ export function inferredLayout(value: GuestCallValue, promote: boolean): GuestVa
   if (value.kind === "aggregate") return { kind: "aggregate", layout: value.layout };
   return { kind: "scalar", storage: promote && value.kind === "float32" ? "float64" : value.kind };
 }
+export function encodeIntegerValue(storage: Exclude<GuestStorage, "float32" | "float64">, value: GuestCallValue, memory: GuestMemory): bigint {
+  if (storage === "pointer") {
+    if (value.kind !== "pointer") throw new TypeError("Pointer ABI argument requires a guest pointer");
+    return value.value === null ? 0n : memory.offset(value.value, 0n).byteOffset;
+  }
+  if (value.kind !== "int32" && value.kind !== "uint32" && value.kind !== "int64" && value.kind !== "uint64") throw new TypeError("Integer ABI argument requires an integer value");
+  if (typeof value.value === "number" && !Number.isSafeInteger(value.value)) throw new RangeError("Integer ABI argument is not an exact integer");
+  return BigInt.asUintN(storageBytes(storage, memory.pointerBytes) * 8, BigInt(value.value));
+}
 export function encodeValue(layout: GuestValueLayout, value: GuestCallValue, memory: GuestMemory): Uint8Array {
   validateValueLayout(layout, memory.pointerBytes);
   if (layout.kind === "aggregate") {
@@ -43,8 +52,7 @@ export function encodeValue(layout: GuestValueLayout, value: GuestCallValue, mem
   }
   const bytes = new Uint8Array(storageBytes(layout.storage, memory.pointerBytes)), view = new DataView(bytes.buffer);
   if (layout.storage === "pointer") {
-    if (value.kind !== "pointer") throw new TypeError("Pointer ABI argument requires a guest pointer");
-    const raw = value.value === null ? 0n : memory.offset(value.value, 0n).byteOffset;
+    const raw = encodeIntegerValue(layout.storage, value, memory);
     if (memory.pointerBytes === 4) view.setUint32(0, Number(raw), true); else view.setBigUint64(0, raw, true);
     return bytes;
   }
@@ -53,13 +61,11 @@ export function encodeValue(layout: GuestValueLayout, value: GuestCallValue, mem
     if (layout.storage === "float32") view.setFloat32(0, value.value, true); else view.setFloat64(0, value.value, true);
     return bytes;
   }
-  if (value.kind !== "int32" && value.kind !== "uint32" && value.kind !== "int64" && value.kind !== "uint64") throw new TypeError("Integer ABI argument requires an integer value");
-  if (typeof value.value === "number" && !Number.isSafeInteger(value.value)) throw new RangeError("Integer ABI argument is not an exact integer");
-  const raw = BigInt(value.value);
+  const raw = encodeIntegerValue(layout.storage, value, memory);
   switch (layout.storage) {
-    case "int8": case "uint8": view.setUint8(0, Number(BigInt.asUintN(8, raw))); break;
-    case "int16": case "uint16": view.setUint16(0, Number(BigInt.asUintN(16, raw)), true); break;
-    case "int32": case "uint32": view.setUint32(0, Number(BigInt.asUintN(32, raw)), true); break;
+    case "int8": case "uint8": view.setUint8(0, Number(raw)); break;
+    case "int16": case "uint16": view.setUint16(0, Number(raw), true); break;
+    case "int32": case "uint32": view.setUint32(0, Number(raw), true); break;
     case "int64": case "uint64": view.setBigUint64(0, raw, true); break;
   }
   return bytes;

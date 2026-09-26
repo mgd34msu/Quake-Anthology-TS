@@ -3,7 +3,7 @@ import type { GuestAddress, GuestCallResult, GuestCallValue, GuestValueLayout, N
 import type { GuestAbiAdapter, GuestCallSignature, GuestCpu, MappedGuestMemory } from "../core/contracts.ts";
 import { readX87Return, writeX87Return } from "../floating-point/index.ts";
 import { planGuestCall, type AbiArgument, type AbiCallPlan, type AbiLocation } from "./classify.ts";
-import { alignDown, argumentBytes, decodeValue, encodeArgumentValue, encodeValue, inferredLayout, valueAlignment, valueBytes } from "./values.ts";
+import { alignDown, argumentBytes, decodeValue, encodeArgumentValue, encodeIntegerValue, encodeValue, inferredLayout, valueAlignment, valueBytes } from "./values.ts";
 
 export function guestPointer(memory: MappedGuestMemory, raw: bigint): GuestAddress {
   const address = memory.pointer(raw);
@@ -112,9 +112,16 @@ export class X86AbiAdapter implements GuestAbiAdapter {
     const layouts = arguments_.length === signature.parameters.length ? signature.parameters
       : arguments_.map((value, index) => signature.parameters[index] ?? inferredLayout(value, signature.variadic));
     const plan = planGuestCall(signature, layouts), word = this.abi.pointerBytes;
-    const encoded = arguments_.map((value, index) => {
+    const encoded = arguments_.map((value, index): bigint | Uint8Array => {
       const layout = layouts[index];
       if (layout === undefined) throw new RangeError("Argument layout missing");
+      const argument = plan.arguments[index], location = argument?.locations.length === 1 ? argument.locations[0] : undefined;
+      if (argument?.indirect === false && location?.kind === "integer" && location.offset === 0 && layout.kind === "scalar"
+        && layout.storage !== "float32" && layout.storage !== "float64") {
+        const raw = encodeIntegerValue(layout.storage, value, cpu.memory);
+        return layout.storage === "int8" || layout.storage === "int16"
+          ? BigInt.asUintN(32, BigInt.asIntN(layout.storage === "int8" ? 8 : 16, raw)) : raw;
+      }
       return encodeArgumentValue(layout, value, cpu.memory);
     });
     const callerStack = stackPointer(cpu);
@@ -129,7 +136,7 @@ export class X86AbiAdapter implements GuestAbiAdapter {
     const frameSize = Number(callerStack - entryStack);
     if (!Number.isSafeInteger(frameSize) || frameSize < 0) throw new RangeError("Guest call frame exceeds safe bounds");
     cpu.memory.check(guestPointer(cpu.memory, entryStack), frameSize, "write");
-    cpu.memory.write(guestPointer(cpu.memory, entryStack), encodeValue({ kind: "scalar", storage: "pointer" }, { kind: "pointer", value: returnAddress }, cpu.memory));
+    cpu.memory.writePointer(guestPointer(cpu.memory, entryStack), returnAddress);
     cpu.state.registers.write("rsp", registerWidth(cpu), entryStack);
     if (output !== null && plan.result.kind === "memory") {
       cpu.memory.write(output, new Uint8Array(valueBytes(plan.result.layout, word)));
@@ -138,7 +145,11 @@ export class X86AbiAdapter implements GuestAbiAdapter {
     for (const [index, argument] of plan.arguments.entries()) {
       const bytes = encoded[index], temporary = indirect[index];
       if (bytes === undefined || temporary === undefined) throw new RangeError("Argument allocation missing");
-      if (temporary === null) writeLocations(cpu, argument.locations, bytes);
+      if (typeof bytes === "bigint") {
+        const location = argument.locations[0];
+        if (location?.kind !== "integer") throw new Error("Integer argument has no assigned register");
+        cpu.state.registers.write(location.register, registerWidth(cpu), bytes);
+      } else if (temporary === null) writeLocations(cpu, argument.locations, bytes);
       else {
         cpu.memory.write(temporary, bytes);
         writeLocations(cpu, argument.locations, encodeValue({ kind: "scalar", storage: "pointer" }, { kind: "pointer", value: temporary }, cpu.memory));
@@ -191,8 +202,9 @@ export class X86AbiAdapter implements GuestAbiAdapter {
   leave(cpu: GuestCpu, signature: GuestCallSignature, result: GuestCallResult): undefined {
     this.#check(cpu, signature);
     const plan = planGuestCall(signature), word = this.abi.pointerBytes, entryStack = stackPointer(cpu);
-    const address = decodeValue({ kind: "scalar", storage: "pointer" }, cpu.memory.copy(guestPointer(cpu.memory, entryStack), word), cpu.memory);
-    if (address.kind !== "pointer" || address.value === null) throw new RangeError("Guest return address is null");
+    const stackAddress = guestPointer(cpu.memory, entryStack);
+    const address = word === 8 ? cpu.memory.readUint64(stackAddress) : BigInt(cpu.memory.readUint32(stackAddress));
+    if (address === 0n) throw new RangeError("Guest return address is null");
     if (plan.result.kind === "void") {
       if (result.kind !== "void") throw new TypeError("Void callback returned a value");
     } else {
@@ -201,17 +213,23 @@ export class X86AbiAdapter implements GuestAbiAdapter {
         if (result.kind !== "float32" && result.kind !== "float64") throw new TypeError("x87 callback result must be floating point");
         writeX87Return(cpu.state.x87, result.value, plan.result.storage);
       } else {
-        const bytes = encodeValue(plan.result.layout, result, cpu.memory);
-        if (plan.result.kind === "registers") writeLocations(cpu, plan.result.locations, bytes);
-        else {
-          const destination = returnBuffer(cpu, plan);
-          cpu.memory.write(destination, bytes);
-          cpu.state.registers.write("rax", registerWidth(cpu), destination.byteOffset);
+        const layout = plan.result.layout;
+        const location = plan.result.kind === "registers" && plan.result.locations.length === 1 ? plan.result.locations[0] : undefined;
+        if (location?.kind === "integer" && location.offset === 0 && layout.kind === "scalar" && layout.storage !== "float32" && layout.storage !== "float64") {
+          cpu.state.registers.write(location.register, registerWidth(cpu), encodeIntegerValue(layout.storage, result, cpu.memory));
+        } else {
+          const bytes = encodeValue(layout, result, cpu.memory);
+          if (plan.result.kind === "registers") writeLocations(cpu, plan.result.locations, bytes);
+          else {
+            const destination = returnBuffer(cpu, plan);
+            cpu.memory.write(destination, bytes);
+            cpu.state.registers.write("rax", registerWidth(cpu), destination.byteOffset);
+          }
         }
       }
     }
     cpu.state.registers.write("rsp", registerWidth(cpu), entryStack + BigInt(word + plan.calleePopBytes));
-    cpu.state.instructionPointer = address.value.byteOffset;
+    cpu.state.instructionPointer = address;
     return undefined;
   }
 }
