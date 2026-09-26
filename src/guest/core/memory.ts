@@ -111,6 +111,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       move: { value: memory.move },
       fill: { value: memory.fill },
       observeWrites: { value: memory.observeWrites },
+      hasWriteObservers: { get: () => memory.#writeObservers.size !== 0 },
       readUint8: { value: memory.readUint8 },
       readInt8: { value: memory.readInt8 },
       readUint16: { value: memory.readUint16 },
@@ -143,6 +144,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
     return memory;
   }
   static managed(memory: MappedGuestMemory): memory is SparseGuestMemory { return SparseGuestMemory.#managed.has(memory); }
+  get hasWriteObservers(): boolean { return this.#writeObservers.size !== 0; }
 
   constructor(options: SparseGuestMemoryOptions) {
     this.module = options.module;

@@ -28,6 +28,8 @@ interface Immediate { readonly kind: 'immediate'; readonly low: number; readonly
 type Source = Operand | Immediate;
 interface ConstantTarget { readonly kind: 'constant'; readonly value: bigint; readonly canonical: boolean; }
 type ControlTarget = Operand | ConstantTarget;
+interface WordSource { readonly index: number | null; readonly low: number; readonly high: number; }
+interface WordDestination { readonly index: number; readonly width: 32 | 64; }
 interface EffectiveAddress {
   readonly base: number | null;
   readonly index: number | null;
@@ -39,6 +41,8 @@ interface EffectiveAddress {
 type Operation =
   | { readonly kind: 'nop' }
   | { readonly kind: 'move'; readonly destination: Operand; readonly source: Source }
+  | { readonly kind: 'register-move'; readonly destination: WordDestination; readonly source: WordSource }
+  | { readonly kind: 'register-alu'; readonly destination: WordDestination; readonly source: WordSource; readonly operation: AluOperation }
   | { readonly kind: 'extend'; readonly destination: RegisterOperand; readonly source: Operand; readonly signed: boolean }
   | { readonly kind: 'increment'; readonly destination: Operand; readonly subtract: boolean }
   | { readonly kind: 'lea'; readonly destination: RegisterOperand; readonly source: EffectiveAddress }
@@ -58,7 +62,7 @@ export type X64IntegerBlockResult =
 export function x64IntegerBlockSafe(plan: X64IntegerPlan): boolean {
   const operation = plan.operation;
   switch (operation.kind) {
-    case 'nop': case 'extend': return true;
+    case 'nop': case 'extend': case 'register-move': case 'register-alu': return true;
     case 'increment': return operation.destination.kind === 'register';
     case 'raw-sse': return operation.operation.kind !== 'move' || !operation.operation.store || operation.operand.kind !== 'memory';
     case 'move': return operation.destination.kind === 'register';
@@ -84,6 +88,12 @@ function constantTarget(value: bigint): ConstantTarget {
   const raw = BigInt.asUintN(64, value);
   return { kind: 'constant', value: raw, canonical: raw <= 0x7fffffffffffn || raw >= 0xffff800000000000n };
 }
+function registerOperation(destination: Operand, source: Source): { readonly destination: WordDestination; readonly source: WordSource } | null {
+  if (destination.kind !== 'register' || destination.width !== 32 && destination.width !== 64) return null;
+  if (source.kind === 'memory' || source.kind === 'register' && source.width !== destination.width) return null;
+  return { destination: { index: destination.offset >>> 2, width: destination.width }, source: source.kind === 'immediate'
+    ? { index: null, low: source.low, high: source.high } : { index: source.offset >>> 2, low: 0, high: 0 } };
+}
 
 /** Preparation only reduces static instruction fields; no guest data or source functions execute here. */
 export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | null {
@@ -96,8 +106,15 @@ export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | n
       return { original: plan, operation: { kind: 'extend', destination, source: operand(op.source), signed: op.signed } };
     }
     case 'increment': return { original: plan, operation: { kind: 'increment', destination: operand(op.destination), subtract: op.subtract } };
-    case 'move': return { original: plan, operation: { kind: 'move', destination: operand(op.destination), source: source(op.source) } };
-    case 'alu': return { original: plan, operation: { kind: 'alu', operation: op.operation, destination: operand(op.destination), source: source(op.source) } };
+    case 'move': {
+      const destination = operand(op.destination), input = source(op.source), registers = registerOperation(destination, input);
+      return { original: plan, operation: registers === null ? { kind: 'move', destination, source: input } : { kind: 'register-move', ...registers } };
+    }
+    case 'alu': {
+      const destination = operand(op.destination), input = source(op.source), registers = registerOperation(destination, input);
+      return { original: plan, operation: registers === null ? { kind: 'alu', operation: op.operation, destination, source: input }
+        : { kind: 'register-alu', operation: op.operation, ...registers } };
+    }
     case 'branch': return { original: plan, operation: { kind: 'branch', condition: op.condition, target: constantTarget(plan.nextIP + op.displacement) } };
     case 'jump': case 'call': return { original: plan, operation: { kind: op.kind, target: typeof op.target === 'bigint' ? constantTarget(op.target) : operand(op.target) } };
     case 'push': return { original: plan, operation: { kind: 'push', source: source(op.source), width: op.width } };
@@ -126,18 +143,21 @@ export class X64IntegerKernel {
   #checkpoint: Uint8Array | undefined;
   readonly #memoryWords = { low: 0, high: 0 };
   private constructor(readonly flags: ProcessorFlags, private readonly registers: IntegerRegisterFile, private readonly words: DataView,
+    private readonly wordValues: Uint32Array,
     private readonly state: GuestProcessorState, private readonly memory: SparseGuestMemory) {}
 
   static create(state: GuestProcessorState, memory: MappedGuestMemory): X64IntegerKernel | null {
     const managed = managedGuestProcessor(state);
     if (managed !== null && state.architecture === 'x86-64' && SparseGuestMemory.managed(memory)) {
-      return new X64IntegerKernel(managed.flags, managed.registers, managed.registers.integerView, state, memory);
+      const words = managed.registers.integerWords;
+      return words === null ? null : new X64IntegerKernel(managed.flags, managed.registers, managed.registers.integerView, words, state, memory);
     }
     if (state.architecture !== 'x86-64' || !(state.registers instanceof IntegerRegisterFile) || state.registers.architecture !== 'x86-64'
       || !originalInstance(state.registers, IntegerRegisterFile.prototype, registerMembers)
       || !(state.flags instanceof ProcessorFlags) || !originalInstance(state.flags, ProcessorFlags.prototype, flagMembers)
       || !(memory instanceof SparseGuestMemory) || !originalInstance(memory, SparseGuestMemory.prototype, memoryMembers)) return null;
-    return new X64IntegerKernel(state.flags, state.registers, state.registers.integerView, state, memory);
+    const words = state.registers.integerWords;
+    return words === null ? null : new X64IntegerKernel(state.flags, state.registers, state.registers.integerView, words, state, memory);
   }
 
   /** Admit code once; a store ends the block and retains its own rollback boundary. */
@@ -155,6 +175,12 @@ export class X64IntegerKernel {
         next = original.nextIP;
         if (!x64IntegerBlockSafe(step.integer)) {
           this.state.instructionPointer = current;
+          if (!this.memory.hasWriteObservers && op.kind !== 'pop') {
+            const flow = this.execute(step.integer);
+            if (flow.kind === 'branch') next = flow.target;
+            instructions++;
+            break;
+          }
           const registers = this.registers.checkpoint(this.#checkpoint);
           this.#checkpoint = registers;
           const lowFlags = this.flags.lowWord, highFlags = this.flags.highWord;
@@ -170,6 +196,13 @@ export class X64IntegerKernel {
           break;
         }
         switch (op.kind) {
+          case 'register-move':
+            x64Lock(original.lock, null, false);
+            this.#registerMove(op.destination, op.source);
+            break;
+          case 'register-alu':
+            this.#registerAlu(op.operation, op.destination, op.source, original.lock);
+            break;
           case 'raw-sse': executeX64Plan(original, this.memory, this.state); break;
           case 'nop': x64Lock(original.lock, null, false); break;
           case 'extend':
@@ -238,6 +271,13 @@ export class X64IntegerKernel {
   execute(plan: X64IntegerPlan): X64Flow {
     const op = plan.operation, original = plan.original;
     switch (op.kind) {
+      case 'register-move':
+        x64Lock(original.lock, null, false);
+        this.#registerMove(op.destination, op.source);
+        return x64Advance;
+      case 'register-alu':
+        this.#registerAlu(op.operation, op.destination, op.source, original.lock);
+        return x64Advance;
       case 'raw-sse': return executeX64Plan(original, this.memory, this.state);
       case 'nop': x64Lock(original.lock, null, false); return x64Advance;
       case 'extend':
@@ -359,9 +399,9 @@ export class X64IntegerKernel {
       this.#readMemory(address, value.width);
       return;
     }
-    const low = this.words.getUint32(value.offset, true);
+    const low = this.#word(value.offset >>> 2);
     this.#low = value.width === 8 ? (low >>> (value.highByte ? 8 : 0)) & 255 : value.width === 16 ? low & 65535 : low;
-    this.#high = value.width === 64 ? this.words.getUint32(value.offset + 4, true) : 0;
+    this.#high = value.width === 64 ? this.#word((value.offset >>> 2) + 1) : 0;
   }
 
   #write(destination: Operand, nextIP: bigint): void {
@@ -370,10 +410,34 @@ export class X64IntegerKernel {
       this.#writeMemory(address, destination.width);
       return;
     }
-    const offset = destination.offset;
-    if (destination.width === 8) this.words.setUint8(offset + (destination.highByte ? 1 : 0), this.#low);
-    else if (destination.width === 16) this.words.setUint16(offset, this.#low, true);
-    else { this.words.setUint32(offset, this.#low, true); this.words.setUint32(offset + 4, destination.width === 64 ? this.#high : 0, true); }
+    const index = destination.offset >>> 2, words = this.wordValues;
+    const previous = this.#word(index);
+    if (destination.width === 8) words[index] = destination.highByte ? (previous & ~0xff00) | (this.#low & 255) << 8 : (previous & ~255) | (this.#low & 255);
+    else if (destination.width === 16) words[index] = (previous & 0xffff0000) | (this.#low & 65535);
+    else { words[index] = this.#low; words[index + 1] = destination.width === 64 ? this.#high : 0; }
+  }
+
+  #word(index: number): number { return this.wordValues[index] ?? this.words.getUint32(index * 4, true); }
+
+  #registerMove(destination: WordDestination, source: WordSource): void {
+    const low = source.index === null ? source.low : this.#word(source.index);
+    const high = destination.width === 32 ? 0 : source.index === null ? source.high : this.#word(source.index + 1);
+    if (source.index === null) this.#word(destination.index);
+    this.wordValues[destination.index] = low;
+    this.wordValues[destination.index + 1] = high;
+  }
+
+  #registerAlu(operation: AluOperation, destination: WordDestination, source: WordSource, lock: boolean): void {
+    const rightLow = source.index === null ? source.low : this.#word(source.index);
+    const rightHigh = destination.width === 32 ? 0 : source.index === null ? source.high : this.#word(source.index + 1);
+    x64Lock(lock, null, false);
+    this.#low = this.#word(destination.index);
+    this.#high = destination.width === 64 ? this.#word(destination.index + 1) : 0;
+    this.#alu(operation, destination.width, rightLow, rightHigh);
+    if (operation !== 'cmp' && operation !== 'test') {
+      this.wordValues[destination.index] = this.#low;
+      this.wordValues[destination.index + 1] = this.#high;
+    }
   }
 
   #readMemory(address: GuestAddress, width: GuestIntegerWidth): void {
@@ -395,10 +459,10 @@ export class X64IntegerKernel {
   }
 
   #address(value: EffectiveAddress): void {
-    const a = value.base === null ? 0 : this.words.getUint32(value.base, true);
-    const ah = value.base === null || value.addressBits === 32 ? 0 : this.words.getUint32(value.base + 4, true);
-    const b = value.index === null ? 0 : this.words.getUint32(value.index, true);
-    const bh = value.index === null || value.addressBits === 32 ? 0 : this.words.getUint32(value.index + 4, true);
+    const a = value.base === null ? 0 : this.#word(value.base >>> 2);
+    const ah = value.base === null || value.addressBits === 32 ? 0 : this.#word((value.base >>> 2) + 1);
+    const b = value.index === null ? 0 : this.#word(value.index >>> 2);
+    const bh = value.index === null || value.addressBits === 32 ? 0 : this.#word((value.index >>> 2) + 1);
     const lowIndex = value.shift === 0 ? b : (b << value.shift) >>> 0;
     const highIndex = value.shift === 0 ? bh : ((bh << value.shift) | (b >>> (32 - value.shift))) >>> 0;
     const low = a + lowIndex + value.low;

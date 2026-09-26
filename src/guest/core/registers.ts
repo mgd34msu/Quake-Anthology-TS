@@ -13,14 +13,17 @@ const flagMask: Readonly<Record<GuestFlag, number>> = {
   interrupt: 0x200, direction: 0x400, overflow: 0x800, resume: 0x10000, "virtual-8086": 0x20000,
   "alignment-check": 0x40000, "virtual-interrupt": 0x80000, "virtual-interrupt-pending": 0x100000, identification: 0x200000,
 };
+const littleEndianWords = new Uint8Array(Uint32Array.of(1).buffer)[0] === 1;
 
 /** Physical 64-bit register slots, including the legacy low/high byte aliases. */
 export class IntegerRegisterFile implements GuestIntegerRegisters {
   readonly #bytes: Uint8Array;
   readonly #view: DataView;
+  readonly #words: Uint32Array | null;
   constructor(readonly architecture: GuestArchitecture) {
     this.#bytes = new Uint8Array(architecture === "i386" ? 64 : 128);
     this.#view = new DataView(this.#bytes.buffer);
+    this.#words = littleEndianWords ? new Uint32Array(this.#bytes.buffer) : null;
   }
   static createManaged(architecture: GuestArchitecture): IntegerRegisterFile {
     const registers = new IntegerRegisterFile(architecture), view = registers.#view;
@@ -31,7 +34,7 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
     });
     Object.freeze(view);
     Object.defineProperties(registers, {
-      integerView: { get: () => view }, read: { value: registers.read }, write: { value: registers.write },
+      integerView: { get: () => view }, integerWords: { get: () => registers.#words }, read: { value: registers.read }, write: { value: registers.write },
       checkpoint: { value: registers.checkpoint }, restore: { value: registers.restore },
       attached: { value: registers.attached },
     });
@@ -40,6 +43,7 @@ export class IntegerRegisterFile implements GuestIntegerRegisters {
   }
   attached(): boolean { return this.#bytes.byteLength === (this.architecture === "i386" ? 64 : 128); }
   get integerView(): DataView { return this.#view; }
+  get integerWords(): Uint32Array | null { return this.#words; }
   read(register: GuestRegister, width: GuestIntegerWidth, highByte = false): bigint {
     const offset = this.#offset(register, width, highByte);
     if (width === 64) return this.#view.getBigUint64(offset, true);
