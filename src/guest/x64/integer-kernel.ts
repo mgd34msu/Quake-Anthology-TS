@@ -3,7 +3,7 @@ import type { GuestIntegerWidth, GuestProcessorState, GuestRegister, MappedGuest
 import { SparseGuestMemory } from '../core/memory.ts';
 import { IntegerRegisterFile, managedGuestProcessor, ProcessorFlags } from '../core/registers.ts';
 import type { AluOperation } from '../x86/arithmetic.ts';
-import { canonicalAddress, operandAddress, writableOperand } from './decoder.ts';
+import { canonicalAddress, guestAddress, operandAddress, writableOperand } from './decoder.ts';
 import type { X64MemoryOperand, X64Operand } from './decoder.ts';
 import { x64Advance, x64Lock } from './plan.ts';
 import type { X64Flow, X64SemanticPlan } from './plan.ts';
@@ -37,7 +37,8 @@ type Operation =
   | { readonly kind: 'move'; readonly destination: Operand; readonly source: Source }
   | { readonly kind: 'lea'; readonly destination: RegisterOperand; readonly source: EffectiveAddress }
   | { readonly kind: 'alu'; readonly operation: AluOperation; readonly destination: Operand; readonly source: Source }
-  | { readonly kind: 'branch'; readonly condition: number | null; readonly target: bigint };
+  | { readonly kind: 'branch'; readonly condition: number | null; readonly target: bigint }
+  | { readonly kind: 'return'; readonly discard: bigint };
 export interface X64IntegerPlan { readonly operation: Operation; readonly original: X64SemanticPlan; }
 export interface X64IntegerStep { readonly start: bigint; readonly integer: X64IntegerPlan; }
 export type X64IntegerBlockResult =
@@ -48,7 +49,7 @@ export function x64IntegerBlockSafe(plan: X64IntegerPlan): boolean {
   const operation = plan.operation;
   switch (operation.kind) {
     case 'move': return operation.destination.kind === 'register';
-    case 'lea': case 'branch': return true;
+    case 'lea': case 'branch': case 'return': return true;
     case 'alu': return operation.destination.kind === 'register' || operation.operation === 'cmp' || operation.operation === 'test';
   }
 }
@@ -71,6 +72,7 @@ export function prepareX64IntegerPlan(plan: X64SemanticPlan): X64IntegerPlan | n
     case 'move': return { original: plan, operation: { kind: 'move', destination: operand(op.destination), source: source(op.source) } };
     case 'alu': return { original: plan, operation: { kind: 'alu', operation: op.operation, destination: operand(op.destination), source: source(op.source) } };
     case 'branch': return { original: plan, operation: { kind: 'branch', condition: op.condition, target: plan.nextIP + op.displacement } };
+    case 'return': return { original: plan, operation: op };
     case 'lea': {
       const destination = operand(op.destination);
       if (destination.kind !== 'register') return null;
@@ -145,6 +147,10 @@ export class X64IntegerKernel {
             x64Lock(original.lock, null, false);
             if (op.condition === null || this.#condition(op.condition)) next = canonicalAddress(op.target);
             break;
+          case 'return':
+            x64Lock(original.lock, null, false);
+            next = this.#return(op.discard);
+            break;
         }
         instructions++;
       }
@@ -185,7 +191,17 @@ export class X64IntegerKernel {
         x64Lock(original.lock, null, false);
         return op.condition === null || this.#condition(op.condition)
           ? { kind: 'branch', target: canonicalAddress(op.target) } : x64Advance;
+      case 'return':
+        x64Lock(original.lock, null, false);
+        return { kind: 'branch', target: this.#return(op.discard) };
     }
+  }
+
+  #return(discard: bigint): bigint {
+    const stack = this.words.getBigUint64(offsets.rsp, true);
+    const target = canonicalAddress(this.memory.readUint64(guestAddress(this.memory, stack)));
+    this.words.setBigUint64(offsets.rsp, stack + 8n + discard, true);
+    return target;
   }
 
   #read(value: Source, nextIP: bigint): void {

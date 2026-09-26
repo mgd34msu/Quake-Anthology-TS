@@ -564,6 +564,26 @@ test("a warmed single conditional branch preserves a noncanonical target fault",
   expect(managed.state.flags.value).toBe(generic.state.flags.value);
 });
 
+test("prepared returns preserve stack adjustment and precise target and stack faults", () => {
+  for (const managed of [false, true]) for (const discard of [0, 32]) {
+    const f = fixture(discard === 0 ? [0xc3] : [0xc2, discard, 0], base, managed);
+    for (let pass = 0; pass < 2; pass++) {
+      f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
+      expect(f.run(1).kind).toBe("return");
+      expect(f.state.registers.read("rsp", 64)).toBe(stack + 8n + BigInt(discard));
+    }
+    f.state.instructionPointer = base; f.state.registers.write("rsp", 64, stack);
+    f.memory.writeUint64(pointer(f.memory, stack), 0x800000000000n);
+    const targetFault = f.run();
+    expect(targetFault.kind).toBe("exception"); expect(targetFault.instructions).toBe(0);
+    expect(f.state.instructionPointer).toBe(base); expect(f.state.registers.read("rsp", 64)).toBe(stack);
+    f.memory.unmap(pointer(f.memory, stack + 4n), 4);
+    const stackFault = f.run();
+    expect(stackFault.kind).toBe("exception"); expect(stackFault.instructions).toBe(0);
+    expect(f.state.instructionPointer).toBe(base); expect(f.state.registers.read("rsp", 64)).toBe(stack);
+  }
+});
+
 test("managed blocks preserve warm instruction budgets, live registers and precise read faults", () => {
   // MOV EAX,7; ADD EAX,5; MOV ECX,[RBX]; ADC EAX,ECX; RET.
   const bytes = [0xb8, 7, 0, 0, 0, 0x83, 0xc0, 5, 0x8b, 0x0b, 0x11, 0xc8, 0xc3];

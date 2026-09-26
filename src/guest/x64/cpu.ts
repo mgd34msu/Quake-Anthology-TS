@@ -485,10 +485,7 @@ export class X64Cpu implements GuestCpu {
       case 0xc2: case 0xc3: {
         this.#lock(cursor, null, false);
         const discard = op === 0xc2 ? cursor.readUnsigned(2) : 0n;
-        const target = this.#pop(64);
-        const flow = this.#branch(target);
-        this.state.registers.write("rsp", 64, this.state.registers.read("rsp", 64) + discard);
-        return flow;
+        return this.#planned(cursor, { kind: "return", discard });
       }
       case 0xc6: case 0xc7: {
         this.#lock(cursor, null, false);

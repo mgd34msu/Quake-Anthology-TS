@@ -55,6 +55,8 @@ The `4e82c5a` compiled mixed-game run completed 29.467 seconds of active input. 
 
 The shared native runtime now tracks writes to cached code pages, reads integer registers at their stored widths, packs integer ABI values without bytewise BigInt loops, and reads integer arguments/results without temporary byte arrays. Safe single instructions, including branches, use the existing managed block executor. Original instructions, source callbacks, entity counts, memory permissions and fault boundaries remain intact. Writable borrowed buffers and cross-page code ranges retain byte checks.
 
+Newer source also retains decoded `RET` instructions and runs them through prepared blocks. Return targets remain live stack reads; stack adjustment and target/read faults preserve the original instruction boundary. Matched original base1 pairs measured native medians of 68.97 → 68.07 ms and 67.28 → 66.45 ms; application medians were 78.72 → 77.79 ms and 75.75 → 75.44 ms. Instruction series and final native entity bytes match in all four runs. The 86 focused checks pass with 1,750 assertions; four-root strict/policy checks pass. Evidence remains local in `.artifacts/resume-20260925/prepared-returns/`. Two other experiments, precomputed memory addresses and an extra mapping cache, failed to show repeatable gains and were removed.
+
 The latest local comparisons use a fixed host wall-clock capability for the original DLL's random seed. Performance timers remain real. Every original frame executes the same instruction count in control and candidate, and the complete final native entity bytes match. Each run keeps all 495 records, executes 100 ticks and measures the last 50 on CPU 8.
 
 | Change | Native median, before → after | Application median, before → after |
