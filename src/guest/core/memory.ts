@@ -77,7 +77,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   readonly #backingChanges = new WeakMap<ArrayBufferLike, BackingChanges>();
   #mappingGeneration = 0;
   readonly #allocationHints = new Map<bigint, { readonly base: bigint; readonly byteLength: number }>();
-  readonly #recentMappings = new Map<GuestAccess | null, Mapping>();
+  readonly #recentMappings: Record<GuestAccess | "any", Mapping | undefined> = { read: undefined, write: undefined, execute: undefined, any: undefined };
   readonly #workingSet: Mapping[] = [];
   #nextWorkingMapping = 0;
   // Checked scalar callers capture this offset before any write observer can reenter.
@@ -244,7 +244,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
 
   fetchByte(byteOffset: bigint): number {
-    const recent = this.#recentMappings.get("execute");
+    const recent = this.#recentMappings.execute;
     let mapping: Mapping | undefined;
     if (recent?.active === true && byteOffset >= recent.base && byteOffset < recent.end) mapping = recent;
     else {
@@ -271,7 +271,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
       if (generation !== this.#mappingGeneration || mapping === undefined || offset >= mapping.byteLength) {
         const address = byteOffset + BigInt(consumed);
         const byte = this.fetchByte(address);
-        mapping = this.#recentMappings.get("execute");
+        mapping = this.#recentMappings.execute;
         if (mapping === undefined) throw new Error("Guest execute mapping is missing");
         offset = Number(address - mapping.base) + 1;
         generation = this.#mappingGeneration;
@@ -498,7 +498,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
   }
   #chunks(address: GuestAddress, byteLength: number, access: GuestAccess | null): Chunk[] {
     this.#owned(address, byteLength, access ?? "map");
-    const recent = this.#recentMappings.get(access);
+    const recent = this.#recentMappings[access ?? "any"];
     if (byteLength > 0 && recent?.active === true && address.byteOffset >= recent.base && address.byteOffset + BigInt(byteLength) <= recent.end) {
       if (access !== null && !allows(recent.permissions, access)) this.#fault("permission", address.byteOffset, byteLength, access, `mapping '${recent.label}' permits ${recent.permissions}`);
       return [{ mapping: recent, offset: Number(address.byteOffset - recent.base), byteLength }];
@@ -585,12 +585,12 @@ export class SparseGuestMemory implements MappedGuestMemory {
     return undefined;
   }
   #remember(access: GuestAccess | null, mapping: Mapping): void {
-    this.#recentMappings.set(access, mapping);
+    this.#recentMappings[access ?? "any"] = mapping;
     this.#workingSet[this.#nextWorkingMapping] = mapping;
     this.#nextWorkingMapping = (this.#nextWorkingMapping + 1) & 7;
   }
   #singleMapping(address: GuestAddress, byteLength: number, access: GuestAccess): Mapping | null {
-    const recent = this.#recentMappings.get(access);
+    const recent = this.#recentMappings[access];
     // A contained range inherits the mapping's checked address-space bounds.
     if (address.addressSpace === this.addressSpace && Number.isSafeInteger(byteLength) && byteLength > 0) {
       const raw = address.byteOffset, numeric = Number(raw), safe = Number.isSafeInteger(numeric);
@@ -609,7 +609,7 @@ export class SparseGuestMemory implements MappedGuestMemory {
           : raw >= candidate.base && raw < candidate.end ? Number(raw - candidate.base) : -1;
         if (offset < 0 || offset + byteLength > candidate.byteLength) continue;
         if (!allows(candidate.permissions, access)) this.#fault("permission", raw, byteLength, access, `mapping '${candidate.label}' permits ${candidate.permissions}`);
-        this.#recentMappings.set(access, candidate);
+        this.#recentMappings[access] = candidate;
         this.#lookupOffset = offset;
         return candidate;
       }

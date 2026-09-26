@@ -25,6 +25,20 @@ export function copyBounds(bounds: Bounds): Bounds { return Object.freeze({ min:
 export function copyBody(state: BodyState): BodyState {
   return Object.freeze({ origin: copyVector(state.origin), angles: copyVector(state.angles), velocity: copyVector(state.velocity), bounds: copyBounds(state.bounds), ground: state.ground });
 }
+function sameVector(left: Vec3, right: Vec3): boolean {
+  return Object.is(left.x, right.x) && Object.is(left.y, right.y) && Object.is(left.z, right.z);
+}
+function updateBodySnapshot(previous: BodyState | null, current: BodyState): BodyState {
+  if (previous === null) return copyBody(current);
+  const origin = sameVector(previous.origin, current.origin) ? previous.origin : copyVector(current.origin);
+  const angles = sameVector(previous.angles, current.angles) ? previous.angles : copyVector(current.angles);
+  const velocity = sameVector(previous.velocity, current.velocity) ? previous.velocity : copyVector(current.velocity);
+  const min = sameVector(previous.bounds.min, current.bounds.min) ? previous.bounds.min : copyVector(current.bounds.min);
+  const max = sameVector(previous.bounds.max, current.bounds.max) ? previous.bounds.max : copyVector(current.bounds.max);
+  const bounds = min === previous.bounds.min && max === previous.bounds.max ? previous.bounds : Object.freeze({ min, max });
+  if (origin === previous.origin && angles === previous.angles && velocity === previous.velocity && bounds === previous.bounds && current.ground === previous.ground) return previous;
+  return Object.freeze({ origin, angles, velocity, bounds, ground: current.ground });
+}
 
 /** This is only an untranslated box policy. BSP rotation and family link padding are supplied by the provider. */
 export function translatedBodyBounds(_actor: OwnedActor, state: BodyState): Bounds {
@@ -32,7 +46,8 @@ export function translatedBodyBounds(_actor: OwnedActor, state: BodyState): Boun
     max: { x: state.origin.x + state.bounds.max.x, y: state.origin.y + state.bounds.max.y, z: state.origin.z + state.bounds.max.z } };
 }
 
-type BodyStorage = { readonly kind: "local"; state: BodyState } | { readonly kind: "external"; readonly binding: BodyStateBinding };
+type BodyStorage = { readonly kind: "local"; state: BodyState }
+  | { readonly kind: "external"; readonly binding: BodyStateBinding; snapshot: BodyState | null };
 interface BodyRecord { readonly actor: OwnedActor; readonly storage: BodyStorage; linked: LinkedBody | null; linkCount: number; }
 
 export class SharedBodyTable implements BodyTable {
@@ -64,14 +79,14 @@ export class SharedBodyTable implements BodyTable {
   bind(actor: OwnedActor, binding: BodyStateBinding): undefined {
     this.actors.assertOwned(actor);
     if (this.records.has(actor.id.slot)) throw new Error("Actor already has a body binding");
-    this.records.set(actor.id.slot, { actor, storage: { kind: "external", binding }, linked: null, linkCount: 0 });
+    this.records.set(actor.id.slot, { actor, storage: { kind: "external", binding, snapshot: null }, linked: null, linkCount: 0 });
     return undefined;
   }
   rebind(actor: OwnedActor, binding: BodyStateBinding): undefined {
     this.actors.assertOwned(actor);
     const previous = this.record(actor.id);
     if (previous === null) return this.bind(actor, binding);
-    this.records.set(actor.id.slot, { ...previous, storage: { kind: "external", binding } });
+    this.records.set(actor.id.slot, { ...previous, storage: { kind: "external", binding, snapshot: null } });
     return undefined;
   }
 
@@ -85,7 +100,12 @@ export class SharedBodyTable implements BodyTable {
 
   read(actor: ActorId): BodyState | null {
     const record = this.record(actor);
-    return record === null ? null : record.storage.kind === "local" ? record.storage.state : copyBody(record.storage.binding.read());
+    if (record === null) return null;
+    const storage = record.storage;
+    if (storage.kind === "local") return storage.state;
+    const current = storage.binding.read();
+    storage.snapshot = updateBodySnapshot(storage.snapshot, current);
+    return storage.snapshot;
   }
 
   write(actor: OwnedActor, state: BodyState): undefined {
@@ -93,7 +113,7 @@ export class SharedBodyTable implements BodyTable {
     const record = this.record(actor.id);
     if (record === null) return this.create(actor, state);
     if (record.storage.kind === "external") return record.storage.binding.write(copyBody(state));
-    record.storage.state = copyBody(state);
+    record.storage.state = updateBodySnapshot(record.storage.state, state);
     return undefined;
   }
 
